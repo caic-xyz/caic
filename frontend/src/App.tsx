@@ -1,6 +1,7 @@
 // Main application component for wmao web UI.
 import { createSignal, For, Show, onMount } from "solid-js";
-import type { RepoJSON, TaskJSON } from "./api.gen";
+import type { RepoJSON, TaskJSON } from "@sdk/types.gen";
+import { listRepos, listTasks, createTask } from "@sdk/api.gen";
 import TaskView from "./TaskView";
 
 export default function App() {
@@ -12,13 +13,10 @@ export default function App() {
   const [selectedRepo, setSelectedRepo] = createSignal("");
 
   onMount(async () => {
-    const res = await fetch("/api/v1/repos");
-    if (res.ok) {
-      const data = (await res.json()) as RepoJSON[];
-      setRepos(data);
-      if (data.length > 0) {
-        setSelectedRepo(data[0].path);
-      }
+    const data = await listRepos();
+    setRepos(data);
+    if (data.length > 0) {
+      setSelectedRepo(data[0].path);
     }
   });
 
@@ -28,16 +26,7 @@ export default function App() {
     if (!p || !repo) return;
     setSubmitting(true);
     try {
-      const res = await fetch("/api/v1/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: p, repo }),
-      });
-      if (!res.ok) {
-        const body = await res.json() as { error?: { message?: string } };
-        throw new Error(body.error?.message ?? "request failed");
-      }
-      const data = await res.json() as { id: number };
+      const data = await createTask({ prompt: p, repo });
       setPrompt("");
       await refreshTasks();
       setSelectedId(data.id);
@@ -47,10 +36,7 @@ export default function App() {
   }
 
   async function refreshTasks() {
-    const res = await fetch("/api/v1/tasks");
-    if (res.ok) {
-      setTasks(await res.json() as TaskJSON[]);
-    }
+    setTasks(await listTasks());
   }
 
   // Poll for updates.

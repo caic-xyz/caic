@@ -8,7 +8,11 @@
     "strict": true,
     "noEmit": true,
     "isolatedModules": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@sdk/*": ["../sdk/*"]
+    }
   },
-  "include": ["src"]
+  "include": ["src", "../sdk"]
 }

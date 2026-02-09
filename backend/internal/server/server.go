@@ -191,7 +191,7 @@ func (s *Server) handleCreateTask(ctx context.Context) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "accepted", "id": id})
+		_ = json.NewEncoder(w).Encode(dto.CreateTaskResp{Status: "accepted", ID: id})
 	}
 }
 

@@ -1,6 +1,9 @@
 // Exported request and response types for the wmao API.
 package dto
 
+//go:generate go tool tygo generate --config ../../../../backend/tygo.yaml
+//go:generate go run github.com/maruel/wmao/backend/internal/cmd/gen-api-client
+
 // RepoJSON is the JSON representation of a discovered repo.
 type RepoJSON struct {
 	Path       string `json:"path"`
@@ -26,6 +29,12 @@ type TaskJSON struct {
 // StatusResp is a common response for mutation endpoints.
 type StatusResp struct {
 	Status string `json:"status"`
+}
+
+// CreateTaskResp is the response for POST /api/v1/tasks.
+type CreateTaskResp struct {
+	Status string `json:"status"`
+	ID     int    `json:"id"`
 }
 
 // CreateTaskReq is the request body for POST /api/v1/tasks.

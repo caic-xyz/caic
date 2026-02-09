@@ -22,7 +22,7 @@ $(FRONTEND_STAMP): pnpm-lock.yaml
 	@touch $@
 
 types:
-	@cd backend && go tool tygo generate
+	@go generate ./...
 
 build: $(FRONTEND_STAMP) types docs
 	@cd frontend && NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm build

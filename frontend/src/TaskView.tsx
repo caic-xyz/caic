@@ -1,5 +1,6 @@
 // TaskView renders the real-time agent output stream for a single task.
 import { createSignal, For, Show, onCleanup, createEffect, Switch, Match } from "solid-js";
+import { taskEvents, sendInput as apiSendInput, finishTask as apiFinishTask, endTask as apiEndTask } from "@sdk/api.gen";
 
 interface ContentBlock {
   type: string;
@@ -41,7 +42,7 @@ export default function TaskView(props: Props) {
     const id = props.taskId;
     setMessages([]);
 
-    const es = new EventSource(`/api/v1/tasks/${id}/events`);
+    const es = taskEvents(id);
 
     es.addEventListener("message", (e) => {
       try {
@@ -60,11 +61,7 @@ export default function TaskView(props: Props) {
     if (!text) return;
     setSending(true);
     try {
-      await fetch(`/api/v1/tasks/${props.taskId}/input`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text }),
-      });
+      await apiSendInput(props.taskId, { prompt: text });
       setInput("");
     } finally {
       setSending(false);
@@ -79,11 +76,11 @@ export default function TaskView(props: Props) {
   const isWaiting = () => props.taskState === "waiting";
 
   async function finishTask() {
-    await fetch(`/api/v1/tasks/${props.taskId}/finish`, { method: "POST" });
+    await apiFinishTask(props.taskId);
   }
 
   async function endTask() {
-    await fetch(`/api/v1/tasks/${props.taskId}/end`, { method: "POST" });
+    await apiEndTask(props.taskId);
   }
 
   return (
