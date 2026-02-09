@@ -30,7 +30,7 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['src/**/*.{ts,tsx}'],
+    files: ['frontend/src/**/*.{ts,tsx}'],
     ...solid,
     languageOptions: {
       globals: { ...globals.browser },
@@ -57,5 +57,5 @@ export default tseslint.config(
       'solid/style-prop': 'error',
     },
   },
-  { ignores: ['dist/**', '../sdk/**'] },
+  { ignores: ['backend/**', 'sdk/**', 'frontend/dist/**'] },
 );

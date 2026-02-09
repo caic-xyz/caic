@@ -3,10 +3,11 @@ import { defineConfig } from "vite";
 import solidPlugin from "vite-plugin-solid";
 
 export default defineConfig({
+  root: "frontend",
   plugins: [solidPlugin()],
   resolve: {
     alias: {
-      "@sdk": resolve(__dirname, "../sdk"),
+      "@sdk": resolve(__dirname, "sdk"),
     },
   },
   build: {

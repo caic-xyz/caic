@@ -25,7 +25,7 @@ types:
 	@go generate ./...
 
 build: $(FRONTEND_STAMP) types docs
-	@cd frontend && NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm build
+	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm build
 	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
 
 docs:
@@ -59,7 +59,7 @@ git-hooks:
 	@echo "Git hooks installed"
 
 frontend-dev: $(FRONTEND_STAMP)
-	@cd frontend && NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm dev
+	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm dev
 
 upgrade:
 	@go get -u ./... && go mod tidy

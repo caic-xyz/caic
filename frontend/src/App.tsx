@@ -56,6 +56,15 @@ export default function App() {
   setInterval(refreshTasks, 5000);
   refreshTasks();
 
+  // Most recent first; adopted tasks last.
+  const sortedTasks = () =>
+    [...tasks()].sort((a, b) => {
+      const aAdopted = a.task.startsWith("(adopted)") ? 1 : 0;
+      const bAdopted = b.task.startsWith("(adopted)") ? 1 : 0;
+      if (aAdopted !== bAdopted) return aAdopted - bAdopted;
+      return b.id - a.id;
+    });
+
   const selectedTask = () => {
     const id = selectedId();
     if (id === null) return null;
@@ -97,7 +106,7 @@ export default function App() {
           <Show when={tasks().length === 0}>
             <p class={styles.placeholder}>No tasks yet.</p>
           </Show>
-          <For each={tasks()}>
+          <For each={sortedTasks()}>
             {(t) => (
               <div
                 onClick={() => setSelectedId(t.id)}

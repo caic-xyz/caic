@@ -11,8 +11,8 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@sdk/*": ["../sdk/*"]
+      "@sdk/*": ["sdk/*"]
     }
   },
-  "include": ["src", "../sdk"]
+  "include": ["frontend/src", "sdk"]
 }
