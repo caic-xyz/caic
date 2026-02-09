@@ -107,8 +107,7 @@ func (r *Runner) Run(ctx context.Context, t *Task) Result {
 	t.State = StateStarting
 
 	// 1. Create branch + start container (serialized).
-	slug := slugify(t.Prompt)
-	t.Branch = fmt.Sprintf("wmao/%s-%s", time.Now().Format("20060102-150405"), slug)
+	t.Branch = branchName(t.Prompt)
 
 	r.setupMu.Lock()
 	name, err := r.setup(ctx, t)
@@ -210,12 +209,19 @@ func (r *Runner) setup(ctx context.Context, t *Task) (string, error) {
 
 var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
 
+// branchName generates a short, Docker-safe branch name from a prompt.
+// Docker container names only allow [a-zA-Z0-9_.-], so no slashes.
+func branchName(prompt string) string {
+	return "wmao/" + slugify(prompt)
+}
+
 func slugify(s string) string {
 	s = strings.ToLower(s)
 	s = nonAlphaNum.ReplaceAllString(s, "-")
 	s = strings.Trim(s, "-")
-	if len(s) > 40 {
-		s = s[:40]
+	if len(s) > 20 {
+		s = s[:20]
+		s = strings.TrimRight(s, "-")
 	}
 	return s
 }
