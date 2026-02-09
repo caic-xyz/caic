@@ -124,6 +124,23 @@
   cursor: pointer;
 }
 
+.toolGroup {
+  margin-bottom: 0.25rem;
+  background: #e8e8e8;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+}
+
+.toolGroup summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.toolGroupInner {
+  margin-top: 0.25rem;
+}
+
 .toolBlock {
   margin-bottom: 0.25rem;
   background: #f0f0f0;

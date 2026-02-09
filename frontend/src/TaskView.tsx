@@ -168,12 +168,14 @@ function MessageItem(props: { msg: AgentMessage }) {
       </Match>
       <Match when={props.msg.type === "assistant"}>
         <div class={styles.assistantMsg}>
-          <For each={props.msg.message?.content ?? []}>
-            {(block) => (
-              <Show when={block.type === "text"} fallback={
-                <ToolUseBlock name={block.name ?? "tool"} input={block.input} />
+          <For each={groupContentBlocks(props.msg.message?.content ?? [])}>
+            {(group) => (
+              <Show when={group.type === "text"} fallback={
+                <ToolUseGroup tools={group.blocks} />
               }>
-                <div class={styles.textBlock}>{block.text}</div>
+                <For each={group.blocks}>
+                  {(block) => <div class={styles.textBlock}>{block.text}</div>}
+                </For>
               </Show>
             )}
           </For>
@@ -198,6 +200,49 @@ function MessageItem(props: { msg: AgentMessage }) {
         </details>
       </Match>
     </Switch>
+  );
+}
+
+interface BlockGroup {
+  type: "text" | "tool_use";
+  blocks: ContentBlock[];
+}
+
+function groupContentBlocks(blocks: ContentBlock[]): BlockGroup[] {
+  const groups: BlockGroup[] = [];
+  for (const block of blocks) {
+    const t = block.type === "text" ? "text" as const : "tool_use" as const;
+    const last = groups[groups.length - 1];
+    if (last && last.type === t) {
+      last.blocks.push(block);
+    } else {
+      groups.push({ type: t, blocks: [block] });
+    }
+  }
+  return groups;
+}
+
+function ToolUseGroup(props: { tools: ContentBlock[] }) {
+  const names = () => props.tools.map((b) => b.name ?? "tool");
+  const count = () => props.tools.length;
+
+  return (
+    <Show when={count() > 1} fallback={
+      <ToolUseBlock name={props.tools[0].name ?? "tool"} input={props.tools[0].input} />
+    }>
+      <details class={styles.toolGroup}>
+        <summary>
+          {count()} tool calls: {names().join(", ")}
+        </summary>
+        <div class={styles.toolGroupInner}>
+          <For each={props.tools}>
+            {(block) => (
+              <ToolUseBlock name={block.name ?? "tool"} input={block.input} />
+            )}
+          </For>
+        </div>
+      </details>
+    </Show>
   );
 }
 
