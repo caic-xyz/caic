@@ -96,6 +96,18 @@ func Pull(ctx context.Context, dir string) error {
 	return nil
 }
 
+// Push pushes local changes into the container.
+func Push(ctx context.Context, dir string) error {
+	cmd := exec.CommandContext(ctx, "md", "push")
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("md push: %w: %s", err, stderr.String())
+	}
+	return nil
+}
+
 // Kill stops and removes the container.
 func Kill(ctx context.Context, dir string) error {
 	cmd := exec.CommandContext(ctx, "md", "kill")

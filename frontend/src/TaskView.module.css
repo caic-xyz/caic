@@ -1,0 +1,144 @@
+/* Styles for the TaskView component. */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.header h3 {
+  margin: 0;
+}
+
+.closeBtn {
+  cursor: pointer;
+}
+
+.messageArea {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 0.75rem;
+  background: #fafafa;
+  font-size: 0.85rem;
+  min-height: 200px;
+}
+
+.placeholder {
+  color: #888;
+}
+
+.inputForm {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.textInput {
+  flex: 1;
+  padding: 0.4rem;
+}
+
+.btn {
+  border: none;
+  border-radius: 4px;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  color: white;
+}
+
+.btnGray {
+  background: #6c757d;
+}
+
+.btnGreen {
+  background: #28a745;
+}
+
+.btnRed {
+  background: #dc3545;
+}
+
+.systemInit {
+  color: #888;
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+}
+
+.systemMsg {
+  color: #888;
+  font-size: 0.8rem;
+  margin-bottom: 0.25rem;
+}
+
+.assistantMsg {
+  margin-bottom: 0.5rem;
+}
+
+.textBlock {
+  white-space: pre-wrap;
+  margin-bottom: 0.25rem;
+}
+
+.result {
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.resultSuccess {
+  background: #d4edda;
+}
+
+.resultError {
+  background: #f8d7da;
+}
+
+.resultMeta {
+  font-size: 0.8rem;
+  color: #555;
+  margin-top: 0.25rem;
+}
+
+.resultText {
+  white-space: pre-wrap;
+  margin-top: 0.25rem;
+}
+
+.toolResult {
+  margin-bottom: 0.25rem;
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.toolResult summary {
+  cursor: pointer;
+}
+
+.toolBlock {
+  margin-bottom: 0.25rem;
+  background: #f0f0f0;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+}
+
+.toolBlock summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.toolBlockPre {
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow: auto;
+}

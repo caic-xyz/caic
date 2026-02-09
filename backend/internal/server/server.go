@@ -106,6 +106,8 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	mux.HandleFunc("POST /api/v1/tasks/{id}/input", handleWithTask(s, s.sendInput))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/finish", handleWithTask(s, s.finishTask))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/end", handleWithTask(s, s.endTask))
+	mux.HandleFunc("POST /api/v1/tasks/{id}/pull", handleWithTask(s, s.pullTask))
+	mux.HandleFunc("POST /api/v1/tasks/{id}/push", handleWithTask(s, s.pushTask))
 
 	// Serve embedded frontend.
 	dist, err := fs.Sub(frontend.Files, "dist")
@@ -254,6 +256,39 @@ func (s *Server) endTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (
 	}
 	entry.task.End()
 	return &dto.StatusResp{Status: "ending"}, nil
+}
+
+func (s *Server) pullTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq) (*dto.PullResp, error) {
+	t := entry.task
+	switch t.State {
+	case task.StatePending:
+		return nil, dto.Conflict("task has no container yet")
+	case task.StateDone, task.StateFailed, task.StateEnded:
+		return nil, dto.Conflict("task is in a terminal state")
+	case task.StateStarting, task.StateRunning, task.StateWaiting, task.StatePulling, task.StatePushing:
+	}
+	runner := s.runners[t.Repo]
+	diffStat, err := runner.PullChanges(ctx, t.Branch)
+	if err != nil {
+		return nil, dto.InternalError(err.Error())
+	}
+	return &dto.PullResp{Status: "pulled", DiffStat: diffStat}, nil
+}
+
+func (s *Server) pushTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq) (*dto.StatusResp, error) {
+	t := entry.task
+	switch t.State {
+	case task.StatePending:
+		return nil, dto.Conflict("task has no container yet")
+	case task.StateDone, task.StateFailed, task.StateEnded:
+		return nil, dto.Conflict("task is in a terminal state")
+	case task.StateStarting, task.StateRunning, task.StateWaiting, task.StatePulling, task.StatePushing:
+	}
+	runner := s.runners[t.Repo]
+	if err := runner.PushChanges(ctx, t.Branch); err != nil {
+		return nil, dto.InternalError(err.Error())
+	}
+	return &dto.StatusResp{Status: "pushed"}, nil
 }
 
 // adoptContainers discovers preexisting md containers and creates task entries

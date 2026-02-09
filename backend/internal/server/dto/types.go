@@ -48,5 +48,11 @@ type InputReq struct {
 	Prompt string `json:"prompt"`
 }
 
+// PullResp is the response for POST /api/v1/tasks/{id}/pull.
+type PullResp struct {
+	Status   string `json:"status"`
+	DiffStat string `json:"diffStat"`
+}
+
 // EmptyReq is used for endpoints that take no request body.
 type EmptyReq struct{}

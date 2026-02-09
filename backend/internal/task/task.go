@@ -347,7 +347,7 @@ func (r *Runner) Finish(ctx context.Context, t *Task) Result {
 
 	// 3. Diff + pull (requires task branch checked out).
 	t.State = StatePulling
-	diffStat, pullErr := r.pullChanges(ctx, t)
+	diffStat, pullErr := r.PullChanges(ctx, t.Branch)
 
 	if pullErr != nil {
 		t.State = StateFailed
@@ -426,13 +426,13 @@ func (r *Runner) setup(ctx context.Context, t *Task) (string, error) {
 	return name, nil
 }
 
-// pullChanges checks out the task branch, runs md diff + md pull, then
-// switches back. Returns the diff stat and the first error encountered.
-func (r *Runner) pullChanges(ctx context.Context, t *Task) (diffStat string, err error) {
+// PullChanges checks out the branch, runs md diff + md pull, then switches
+// back. Returns the diff stat and the first error encountered.
+func (r *Runner) PullChanges(ctx context.Context, branch string) (diffStat string, err error) {
 	r.branchMu.Lock()
 	defer r.branchMu.Unlock()
 
-	if err := gitutil.CheckoutBranch(ctx, r.Dir, t.Branch); err != nil {
+	if err := gitutil.CheckoutBranch(ctx, r.Dir, branch); err != nil {
 		return "", fmt.Errorf("checkout for pull: %w", err)
 	}
 	defer func() {
@@ -443,11 +443,29 @@ func (r *Runner) pullChanges(ctx context.Context, t *Task) (diffStat string, err
 
 	diffStat, _ = container.Diff(ctx, r.Dir, "--stat")
 
-	slog.Info("pulling changes", "container", t.Container)
+	slog.Info("pulling changes", "branch", branch)
 	if err := container.Pull(ctx, r.Dir); err != nil {
 		return diffStat, err
 	}
 	return diffStat, nil
+}
+
+// PushChanges checks out the branch, runs md push, then switches back.
+func (r *Runner) PushChanges(ctx context.Context, branch string) (err error) {
+	r.branchMu.Lock()
+	defer r.branchMu.Unlock()
+
+	if err := gitutil.CheckoutBranch(ctx, r.Dir, branch); err != nil {
+		return fmt.Errorf("checkout for push: %w", err)
+	}
+	defer func() {
+		if e := gitutil.CheckoutBranch(ctx, r.Dir, r.BaseBranch); e != nil {
+			err = errors.Join(err, fmt.Errorf("checkout base after push: %w", e))
+		}
+	}()
+
+	slog.Info("pushing changes to container", "branch", branch)
+	return container.Push(ctx, r.Dir)
 }
 
 // KillContainer checks out the branch, kills the md container, then switches

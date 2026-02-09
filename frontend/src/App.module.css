@@ -1,0 +1,85 @@
+/* Styles for the App component. */
+
+.app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+  font-family: system-ui;
+}
+
+.submitForm {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 2rem;
+  align-items: center;
+}
+
+.repoSelect {
+  padding: 0.5rem;
+}
+
+.promptInput {
+  flex: 1;
+  padding: 0.5rem;
+}
+
+.layout {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.placeholder {
+  color: #888;
+}
+
+.taskCard {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+}
+
+.taskCardSelected {
+  border: 2px solid #007bff;
+}
+
+.taskHeader {
+  display: flex;
+  justify-content: space-between;
+}
+
+.taskTitle {
+  font-size: 0.9rem;
+}
+
+.stateBadge {
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.repoLabel {
+  font-size: 0.75rem;
+  color: #777;
+}
+
+.branchLabel {
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.costLabel {
+  font-size: 0.75rem;
+  color: #888;
+}
+
+.errorLabel {
+  color: red;
+  font-size: 0.8rem;
+}
+
+.detailPane {
+  flex: 1;
+  min-width: 0;
+}

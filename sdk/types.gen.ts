@@ -110,6 +110,13 @@ export interface InputReq {
   prompt: string;
 }
 /**
+ * PullResp is the response for POST /api/v1/tasks/{id}/pull.
+ */
+export interface PullResp {
+  status: string;
+  diffStat: string;
+}
+/**
  * EmptyReq is used for endpoints that take no request body.
  */
 export interface EmptyReq {
