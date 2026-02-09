@@ -29,7 +29,7 @@ export default function App() {
   const [selectedRepo, setSelectedRepo] = createSignal("");
 
   onMount(async () => {
-    const res = await fetch("/api/repos");
+    const res = await fetch("/api/v1/repos");
     if (res.ok) {
       const data = (await res.json()) as RepoInfo[];
       setRepos(data);
@@ -45,12 +45,15 @@ export default function App() {
     if (!p || !repo) return;
     setSubmitting(true);
     try {
-      const res = await fetch("/api/tasks", {
+      const res = await fetch("/api/v1/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: p, repo }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const body = await res.json() as { error?: { message?: string } };
+        throw new Error(body.error?.message ?? "request failed");
+      }
       const data = await res.json() as { id: number };
       setPrompt("");
       await refreshTasks();
@@ -61,7 +64,7 @@ export default function App() {
   }
 
   async function refreshTasks() {
-    const res = await fetch("/api/tasks");
+    const res = await fetch("/api/v1/tasks");
     if (res.ok) {
       setTasks(await res.json() as TaskResult[]);
     }

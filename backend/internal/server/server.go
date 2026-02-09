@@ -120,13 +120,13 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string) (*Ser
 // ListenAndServe starts the HTTP server.
 func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/repos", s.handleListRepos)
-	mux.HandleFunc("GET /api/tasks", s.handleListTasks)
-	mux.HandleFunc("POST /api/tasks", s.handleCreateTask(ctx))
-	mux.HandleFunc("GET /api/tasks/{id}/events", s.handleTaskEvents)
-	mux.HandleFunc("POST /api/tasks/{id}/input", s.handleTaskInput)
-	mux.HandleFunc("POST /api/tasks/{id}/finish", s.handleTaskFinish)
-	mux.HandleFunc("POST /api/tasks/{id}/end", s.handleTaskEnd)
+	mux.HandleFunc("GET /api/v1/repos", handle(s.listRepos))
+	mux.HandleFunc("GET /api/v1/tasks", handle(s.listTasks))
+	mux.HandleFunc("POST /api/v1/tasks", s.handleCreateTask(ctx))
+	mux.HandleFunc("GET /api/v1/tasks/{id}/events", s.handleTaskEvents)
+	mux.HandleFunc("POST /api/v1/tasks/{id}/input", handleWithTask(s, s.sendInput))
+	mux.HandleFunc("POST /api/v1/tasks/{id}/finish", handleWithTask(s, s.finishTask))
+	mux.HandleFunc("POST /api/v1/tasks/{id}/end", handleWithTask(s, s.endTask))
 
 	// Serve embedded frontend.
 	dist, err := fs.Sub(frontend.Files, "dist")
@@ -151,49 +151,39 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	return srv.ListenAndServe()
 }
 
-func (s *Server) handleListRepos(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) listRepos(_ context.Context, _ *emptyReq) (*[]repoJSON, error) {
 	out := make([]repoJSON, len(s.repos))
 	for i, r := range s.repos {
 		out[i] = repoJSON{Path: r.RelPath, BaseBranch: r.BaseBranch}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
+	return &out, nil
 }
 
-func (s *Server) handleListTasks(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) listTasks(_ context.Context, _ *emptyReq) (*[]taskJSON, error) {
 	s.mu.Lock()
 	out := make([]taskJSON, len(s.tasks))
 	for i, e := range s.tasks {
 		out[i] = toJSON(i, e)
 	}
 	s.mu.Unlock()
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
+	return &out, nil
 }
 
 func (s *Server) handleCreateTask(ctx context.Context) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Prompt string `json:"prompt"`
-			Repo   string `json:"repo"`
-		}
+		var req createTaskReq
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeError(w, badRequest(err.Error()))
 			return
 		}
-		if req.Prompt == "" {
-			http.Error(w, "prompt is required", http.StatusBadRequest)
-			return
-		}
-		if req.Repo == "" {
-			http.Error(w, "repo is required", http.StatusBadRequest)
+		if err := req.validate(); err != nil {
+			writeError(w, err)
 			return
 		}
 
 		runner, ok := s.runners[req.Repo]
 		if !ok {
-			http.Error(w, "unknown repo: "+req.Repo, http.StatusBadRequest)
+			writeError(w, badRequest("unknown repo: "+req.Repo))
 			return
 		}
 
@@ -229,14 +219,15 @@ func (s *Server) handleCreateTask(ctx context.Context) http.HandlerFunc {
 
 // handleTaskEvents streams agent messages as SSE.
 func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
-	entry, ok := s.getTask(w, r)
-	if !ok {
+	entry, err := s.getTask(r)
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming not supported", http.StatusInternalServerError)
+		writeError(w, internalError("streaming not supported"))
 		return
 	}
 
@@ -261,70 +252,30 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleTaskInput accepts user input for a running task.
-func (s *Server) handleTaskInput(w http.ResponseWriter, r *http.Request) {
-	entry, ok := s.getTask(w, r)
-	if !ok {
-		return
-	}
-
-	var req struct {
-		Prompt string `json:"prompt"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if req.Prompt == "" {
-		http.Error(w, "prompt is required", http.StatusBadRequest)
-		return
-	}
-
+func (s *Server) sendInput(_ context.Context, entry *taskEntry, req *inputReq) (*statusResp, error) {
 	if err := entry.task.SendInput(req.Prompt); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
-		return
+		return nil, conflict(err.Error())
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "sent"})
+	return &statusResp{Status: "sent"}, nil
 }
 
-// handleTaskFinish signals a task to finish its session and proceed to
-// pull/push/kill.
-func (s *Server) handleTaskFinish(w http.ResponseWriter, r *http.Request) {
-	entry, ok := s.getTask(w, r)
-	if !ok {
-		return
-	}
-
+func (s *Server) finishTask(_ context.Context, entry *taskEntry, _ *emptyReq) (*statusResp, error) {
 	state := entry.task.State
 	if state != task.StateWaiting && state != task.StateRunning {
-		http.Error(w, "task is not running or waiting", http.StatusConflict)
-		return
+		return nil, conflict("task is not running or waiting")
 	}
-
 	entry.task.Finish()
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "finishing"})
+	return &statusResp{Status: "finishing"}, nil
 }
 
-// handleTaskEnd force-kills a task, skipping pull/push.
-func (s *Server) handleTaskEnd(w http.ResponseWriter, r *http.Request) {
-	entry, ok := s.getTask(w, r)
-	if !ok {
-		return
-	}
-
+func (s *Server) endTask(_ context.Context, entry *taskEntry, _ *emptyReq) (*statusResp, error) {
 	switch entry.task.State {
 	case task.StateDone, task.StateFailed, task.StateEnded:
-		http.Error(w, "task is already in a terminal state", http.StatusConflict)
-		return
+		return nil, conflict("task is already in a terminal state")
 	case task.StatePending, task.StateStarting, task.StateRunning, task.StateWaiting, task.StatePulling, task.StatePushing:
 	}
-
 	entry.task.End()
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ending"})
+	return &statusResp{Status: "ending"}, nil
 }
 
 // adoptContainers discovers preexisting md containers and creates task entries
@@ -383,21 +334,19 @@ func (s *Server) adoptContainers(ctx context.Context) {
 }
 
 // getTask looks up a task by the {id} path parameter.
-func (s *Server) getTask(w http.ResponseWriter, r *http.Request) (*taskEntry, bool) {
+func (s *Server) getTask(r *http.Request) (*taskEntry, error) {
 	idStr := r.PathValue("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, "invalid task id", http.StatusBadRequest)
-		return nil, false
+		return nil, badRequest("invalid task id")
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if id < 0 || id >= len(s.tasks) {
-		http.Error(w, "task not found", http.StatusNotFound)
-		return nil, false
+		return nil, notFound("task")
 	}
-	return s.tasks[id], true
+	return s.tasks[id], nil
 }
 
 func toJSON(id int, e *taskEntry) taskJSON {

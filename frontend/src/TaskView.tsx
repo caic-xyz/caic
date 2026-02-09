@@ -41,7 +41,7 @@ export default function TaskView(props: Props) {
     const id = props.taskId;
     setMessages([]);
 
-    const es = new EventSource(`/api/tasks/${id}/events`);
+    const es = new EventSource(`/api/v1/tasks/${id}/events`);
 
     es.addEventListener("message", (e) => {
       try {
@@ -60,7 +60,7 @@ export default function TaskView(props: Props) {
     if (!text) return;
     setSending(true);
     try {
-      await fetch(`/api/tasks/${props.taskId}/input`, {
+      await fetch(`/api/v1/tasks/${props.taskId}/input`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: text }),
@@ -79,11 +79,11 @@ export default function TaskView(props: Props) {
   const isWaiting = () => props.taskState === "waiting";
 
   async function finishTask() {
-    await fetch(`/api/tasks/${props.taskId}/finish`, { method: "POST" });
+    await fetch(`/api/v1/tasks/${props.taskId}/finish`, { method: "POST" });
   }
 
   async function endTask() {
-    await fetch(`/api/tasks/${props.taskId}/end`, { method: "POST" });
+    await fetch(`/api/v1/tasks/${props.taskId}/end`, { method: "POST" });
   }
 
   return (

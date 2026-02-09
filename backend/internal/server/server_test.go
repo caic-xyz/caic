@@ -10,25 +10,42 @@ import (
 	"github.com/maruel/wmao/backend/internal/task"
 )
 
+func decodeError(t *testing.T, w *httptest.ResponseRecorder) errorBody {
+	t.Helper()
+	var resp errorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	return resp.Error
+}
+
 func TestHandleTaskEventsNotFound(t *testing.T) {
 	s := &Server{runners: map[string]*task.Runner{}}
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/99/events", http.NoBody)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/99/events", http.NoBody)
 	req.SetPathValue("id", "99")
 	w := httptest.NewRecorder()
 	s.handleTaskEvents(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 	}
+	e := decodeError(t, w)
+	if e.Code != codeNotFound {
+		t.Errorf("code = %q, want %q", e.Code, codeNotFound)
+	}
 }
 
 func TestHandleTaskEventsInvalidID(t *testing.T) {
 	s := &Server{runners: map[string]*task.Runner{}}
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/abc/events", http.NoBody)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/abc/events", http.NoBody)
 	req.SetPathValue("id", "abc")
 	w := httptest.NewRecorder()
 	s.handleTaskEvents(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	e := decodeError(t, w)
+	if e.Code != codeBadRequest {
+		t.Errorf("code = %q, want %q", e.Code, codeBadRequest)
 	}
 }
 
@@ -40,12 +57,16 @@ func TestHandleTaskInputNotRunning(t *testing.T) {
 	})
 
 	body := strings.NewReader(`{"prompt":"hello"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/tasks/0/input", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/0/input", body)
 	req.SetPathValue("id", "0")
 	w := httptest.NewRecorder()
-	s.handleTaskInput(w, req)
+	handleWithTask(s, s.sendInput)(w, req)
 	if w.Code != http.StatusConflict {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
+	}
+	e := decodeError(t, w)
+	if e.Code != codeConflict {
+		t.Errorf("code = %q, want %q", e.Code, codeConflict)
 	}
 }
 
@@ -57,12 +78,16 @@ func TestHandleTaskInputEmptyPrompt(t *testing.T) {
 	})
 
 	body := strings.NewReader(`{"prompt":""}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/tasks/0/input", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/0/input", body)
 	req.SetPathValue("id", "0")
 	w := httptest.NewRecorder()
-	s.handleTaskInput(w, req)
+	handleWithTask(s, s.sendInput)(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	e := decodeError(t, w)
+	if e.Code != codeBadRequest {
+		t.Errorf("code = %q, want %q", e.Code, codeBadRequest)
 	}
 }
 
@@ -73,12 +98,16 @@ func TestHandleFinishNotWaiting(t *testing.T) {
 		done: make(chan struct{}),
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/tasks/0/finish", http.NoBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/0/finish", http.NoBody)
 	req.SetPathValue("id", "0")
 	w := httptest.NewRecorder()
-	s.handleTaskFinish(w, req)
+	handleWithTask(s, s.finishTask)(w, req)
 	if w.Code != http.StatusConflict {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
+	}
+	e := decodeError(t, w)
+	if e.Code != codeConflict {
+		t.Errorf("code = %q, want %q", e.Code, codeConflict)
 	}
 }
 
@@ -91,10 +120,10 @@ func TestHandleFinishWaiting(t *testing.T) {
 		done: make(chan struct{}),
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/tasks/0/finish", http.NoBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/0/finish", http.NoBody)
 	req.SetPathValue("id", "0")
 	w := httptest.NewRecorder()
-	s.handleTaskFinish(w, req)
+	handleWithTask(s, s.finishTask)(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
@@ -116,7 +145,7 @@ func TestHandleCreateTaskReturnsID(t *testing.T) {
 	handler := s.handleCreateTask(t.Context())
 
 	body := strings.NewReader(`{"prompt":"test task","repo":"myrepo"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/tasks", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
 	w := httptest.NewRecorder()
 	handler(w, req)
 
@@ -137,12 +166,16 @@ func TestHandleCreateTaskMissingRepo(t *testing.T) {
 	handler := s.handleCreateTask(t.Context())
 
 	body := strings.NewReader(`{"prompt":"test task"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/tasks", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
 	w := httptest.NewRecorder()
 	handler(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	e := decodeError(t, w)
+	if e.Code != codeBadRequest {
+		t.Errorf("code = %q, want %q", e.Code, codeBadRequest)
 	}
 }
 
@@ -151,12 +184,16 @@ func TestHandleCreateTaskUnknownRepo(t *testing.T) {
 	handler := s.handleCreateTask(t.Context())
 
 	body := strings.NewReader(`{"prompt":"test","repo":"nonexistent"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/tasks", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
 	w := httptest.NewRecorder()
 	handler(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+	e := decodeError(t, w)
+	if e.Code != codeBadRequest {
+		t.Errorf("code = %q, want %q", e.Code, codeBadRequest)
 	}
 }
 
@@ -169,9 +206,9 @@ func TestHandleListRepos(t *testing.T) {
 		runners: map[string]*task.Runner{},
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/repos", http.NoBody)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/repos", http.NoBody)
 	w := httptest.NewRecorder()
-	s.handleListRepos(w, req)
+	handle(s.listRepos)(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
