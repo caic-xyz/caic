@@ -160,8 +160,8 @@ type Runner struct {
 	MaxTurns   int
 	LogDir     string // If set, raw JSONL session logs are written here.
 
-	setupMu sync.Mutex // Serializes branch creation + md start.
-	pushMu  sync.Mutex // Serializes git push to origin.
+	branchMu sync.Mutex // Serializes operations that need a specific branch checked out (md commands).
+	pushMu   sync.Mutex // Serializes git push to origin.
 }
 
 // Run executes the full task lifecycle. It is meant to be called in a
@@ -173,9 +173,9 @@ func (r *Runner) Run(ctx context.Context, t *Task) Result {
 	// 1. Create branch + start container (serialized).
 	t.Branch = branchName(t.Prompt)
 
-	r.setupMu.Lock()
+	r.branchMu.Lock()
 	name, err := r.setup(ctx, t)
-	r.setupMu.Unlock()
+	r.branchMu.Unlock()
 	if err != nil {
 		t.State = StateFailed
 		return Result{Task: t.Prompt, Branch: t.Branch, State: StateFailed, Err: err}
@@ -230,21 +230,19 @@ func (r *Runner) Run(ctx context.Context, t *Task) Result {
 		return Result{Task: t.Prompt, Branch: t.Branch, Container: name, State: StateFailed, Err: err}
 	}
 
-	// 3. Get diff summary.
+	// 3. Diff + pull (requires task branch checked out).
 	t.State = StatePulling
-	diffStat, _ := container.Diff(ctx, "--stat")
+	diffStat, pullErr := r.pullChanges(ctx, t)
 
-	// 4. Pull changes.
-	slog.Info("pulling changes", "container", name)
-	if err := container.Pull(ctx); err != nil {
+	if pullErr != nil {
 		t.State = StateFailed
 		return Result{
 			Task: t.Prompt, Branch: t.Branch, Container: name,
-			State: StateFailed, DiffStat: diffStat, Err: err,
+			State: StateFailed, DiffStat: diffStat, Err: pullErr,
 		}
 	}
 
-	// 5. Push to origin (serialized).
+	// 4. Push to origin (serialized; does not need checkout).
 	t.State = StatePushing
 	slog.Info("pushing to origin", "branch", t.Branch)
 	r.pushMu.Lock()
@@ -258,10 +256,10 @@ func (r *Runner) Run(ctx context.Context, t *Task) Result {
 		}
 	}
 
-	// 6. Cleanup.
+	// 5. Kill container (requires task branch checked out).
 	t.State = StateDone
 	slog.Info("task done, killing container", "container", name)
-	if err := container.Kill(ctx); err != nil {
+	if err := r.killContainer(ctx, t.Branch); err != nil {
 		slog.Warn("failed to kill container", "container", name, "err", err)
 	}
 
@@ -279,7 +277,7 @@ func (r *Runner) Run(ctx context.Context, t *Task) Result {
 }
 
 // setup creates the branch and starts the container. Must be called under
-// setupMu.
+// branchMu.
 func (r *Runner) setup(ctx context.Context, t *Task) (string, error) {
 	slog.Info("creating branch", "branch", t.Branch)
 	if err := gitutil.CreateBranch(ctx, t.Branch); err != nil {
@@ -297,6 +295,48 @@ func (r *Runner) setup(ctx context.Context, t *Task) (string, error) {
 		return "", fmt.Errorf("checkout base: %w", err)
 	}
 	return name, nil
+}
+
+// pullChanges checks out the task branch, runs md diff + md pull, then
+// switches back. Returns the diff stat and the first error encountered.
+func (r *Runner) pullChanges(ctx context.Context, t *Task) (diffStat string, err error) {
+	r.branchMu.Lock()
+	defer r.branchMu.Unlock()
+
+	if err := gitutil.CheckoutBranch(ctx, t.Branch); err != nil {
+		return "", fmt.Errorf("checkout for pull: %w", err)
+	}
+	defer func() {
+		if e := gitutil.CheckoutBranch(ctx, r.BaseBranch); e != nil {
+			err = errors.Join(err, fmt.Errorf("checkout base after pull: %w", e))
+		}
+	}()
+
+	diffStat, _ = container.Diff(ctx, "--stat")
+
+	slog.Info("pulling changes", "container", t.Container)
+	if err := container.Pull(ctx); err != nil {
+		return diffStat, err
+	}
+	return diffStat, nil
+}
+
+// killContainer checks out the branch, kills the md container, then switches
+// back.
+func (r *Runner) killContainer(ctx context.Context, branch string) (err error) {
+	r.branchMu.Lock()
+	defer r.branchMu.Unlock()
+
+	if err := gitutil.CheckoutBranch(ctx, branch); err != nil {
+		return fmt.Errorf("checkout for kill: %w", err)
+	}
+	defer func() {
+		if e := gitutil.CheckoutBranch(ctx, r.BaseBranch); e != nil {
+			err = errors.Join(err, fmt.Errorf("checkout base after kill: %w", e))
+		}
+	}()
+
+	return container.Kill(ctx)
 }
 
 var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)

@@ -19,6 +19,12 @@ Code communicating via streaming JSON over SSH.
   the code's purpose changes. This comment is used to generate the file index
   in `AGENTS.md`.
 
+### md Containers
+
+`md start`, `md diff`, `md pull`, and `md kill` operate on the **current git
+branch**. The working tree must be checked out to the task's branch before
+calling any `md` command for that task.
+
 ### Professionalism
 
 After making changes, run:
