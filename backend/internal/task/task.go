@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -219,6 +218,7 @@ type Runner struct {
 	LogDir     string // If set, raw JSONL session logs are written here.
 
 	branchMu sync.Mutex // Serializes operations that need a specific branch checked out (md commands).
+	nextID   int        // Next branch sequence number (protected by branchMu).
 	pushMu   sync.Mutex // Serializes git push to origin.
 }
 
@@ -243,8 +243,6 @@ func (r *Runner) Start(ctx context.Context, t *Task) error {
 	t.InitDoneCh()
 
 	// 1. Create branch + start container (serialized).
-	t.Branch = branchName(t.Prompt)
-
 	r.branchMu.Lock()
 	name, err := r.setup(ctx, t)
 	r.branchMu.Unlock()
@@ -267,7 +265,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) error {
 	if maxTurns == 0 {
 		maxTurns = r.MaxTurns
 	}
-	logW, closeLog := r.openLog(t.Prompt)
+	logW, closeLog := r.openLog(t.Branch)
 
 	session, err := agent.Start(ctx, name, maxTurns, msgCh, logW)
 	if err != nil {
@@ -397,8 +395,21 @@ func (r *Runner) Finish(ctx context.Context, t *Task) Result {
 // setup creates the branch and starts the container. Must be called under
 // branchMu.
 func (r *Runner) setup(ctx context.Context, t *Task) (string, error) {
-	slog.Info("creating branch", "branch", t.Branch)
-	if err := gitutil.CreateBranch(ctx, r.Dir, t.Branch); err != nil {
+	// Assign a sequential branch name, skipping existing ones.
+	var err error
+	for range 100 {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		t.Branch = fmt.Sprintf("wmao/w%d", r.nextID)
+		r.nextID++
+		slog.Info("creating branch", "branch", t.Branch)
+		err = gitutil.CreateBranch(ctx, r.Dir, t.Branch)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
 		return "", fmt.Errorf("create branch: %w", err)
 	}
 
@@ -457,28 +468,9 @@ func (r *Runner) KillContainer(ctx context.Context, branch string) (err error) {
 	return container.Kill(ctx, r.Dir)
 }
 
-var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
-
-// branchName generates a short, Docker-safe branch name from a prompt.
-// Docker container names only allow [a-zA-Z0-9_.-], so no slashes.
-func branchName(prompt string) string {
-	return "wmao/" + slugify(prompt)
-}
-
-func slugify(s string) string {
-	s = strings.ToLower(s)
-	s = nonAlphaNum.ReplaceAllString(s, "-")
-	s = strings.Trim(s, "-")
-	if len(s) > 20 {
-		s = s[:20]
-		s = strings.TrimRight(s, "-")
-	}
-	return s
-}
-
 // openLog creates a JSONL log file in LogDir. Returns a nil writer and a no-op
 // closer if LogDir is empty or the file cannot be created.
-func (r *Runner) openLog(prompt string) (w io.Writer, closeFn func()) {
+func (r *Runner) openLog(branch string) (w io.Writer, closeFn func()) {
 	if r.LogDir == "" {
 		return nil, func() {}
 	}
@@ -486,8 +478,9 @@ func (r *Runner) openLog(prompt string) (w io.Writer, closeFn func()) {
 		slog.Warn("failed to create log dir", "dir", r.LogDir, "err", err)
 		return nil, func() {}
 	}
-	name := time.Now().Format("20060102T150405") + "-" + slugify(prompt) + ".jsonl"
-	f, err := os.Create(filepath.Join(r.LogDir, name)) //nolint:gosec // name is derived from slugify, not arbitrary user input.
+	safe := strings.ReplaceAll(branch, "/", "-")
+	name := time.Now().Format("20060102T150405") + "-" + safe + ".jsonl"
+	f, err := os.Create(filepath.Join(r.LogDir, name)) //nolint:gosec // name is derived from branch name, not arbitrary user input.
 	if err != nil {
 		slog.Warn("failed to create log file", "err", err)
 		return nil, func() {}
