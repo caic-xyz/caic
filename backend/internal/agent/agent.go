@@ -240,6 +240,57 @@ func parseMessage(line []byte) (Message, error) {
 	}
 }
 
+// FindRunningSession checks whether a claude process is running in the
+// container. If one is found and was started with --resume, the session ID
+// is returned. Returns ("", false, nil) when no process is running.
+func FindRunningSession(ctx context.Context, container string) (sessionID string, running bool, err error) {
+	cmd := exec.CommandContext(ctx, "ssh", container, "pgrep", "-a", "claude")
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			// Exit code 1 means no process matched.
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("pgrep: %w", err)
+	}
+	sid, _ := parsePgrepOutput(string(out))
+	return sid, true, nil
+}
+
+// KillRunning kills any running claude process in the container.
+func KillRunning(ctx context.Context, container string) error {
+	cmd := exec.CommandContext(ctx, "ssh", container, "pkill", "-x", "claude")
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			// Exit code 1 means no process matched — not an error.
+			return nil
+		}
+		return fmt.Errorf("pkill: %w", err)
+	}
+	return nil
+}
+
+// parsePgrepOutput extracts the --resume session ID from pgrep -a output. If
+// no --resume flag is found, sessionID is empty. Returns found=true if the
+// output is non-empty (i.e. at least one process matched).
+func parsePgrepOutput(output string) (sessionID string, found bool) {
+	for line := range strings.SplitSeq(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		found = true
+		// Look for "--resume <id>" in the command line.
+		if _, rest, ok := strings.Cut(line, "--resume "); ok {
+			sessionID, _, _ = strings.Cut(rest, " ")
+			return sessionID, true
+		}
+	}
+	return "", found
+}
+
 // TextFromAssistant extracts all text blocks from an assistant message's content.
 func TextFromAssistant(m *AssistantMessage) string {
 	var parts []string

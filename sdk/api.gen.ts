@@ -62,3 +62,7 @@ export function reconnectTask(id: number): Promise<StatusResp> {
   return request<StatusResp>("POST", `/api/v1/tasks/${id}/reconnect`);
 }
 
+export function takeoverTask(id: number): Promise<StatusResp> {
+  return request<StatusResp>("POST", `/api/v1/tasks/${id}/takeover`);
+}
+

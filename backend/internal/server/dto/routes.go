@@ -25,4 +25,5 @@ var Routes = []Route{
 	{Name: "pullTask", Method: "POST", Path: "/api/v1/tasks/{id}/pull", RespType: "PullResp"},
 	{Name: "pushTask", Method: "POST", Path: "/api/v1/tasks/{id}/push", RespType: "StatusResp"},
 	{Name: "reconnectTask", Method: "POST", Path: "/api/v1/tasks/{id}/reconnect", RespType: "StatusResp"},
+	{Name: "takeoverTask", Method: "POST", Path: "/api/v1/tasks/{id}/takeover", RespType: "StatusResp"},
 }

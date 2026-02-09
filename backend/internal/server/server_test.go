@@ -216,6 +216,26 @@ func TestHandleCreateTaskUnknownField(t *testing.T) {
 	}
 }
 
+func TestHandleTakeoverNotWaiting(t *testing.T) {
+	s := &Server{runners: map[string]*task.Runner{}}
+	s.tasks = append(s.tasks, &taskEntry{
+		task: &task.Task{Prompt: "test", State: task.StateRunning},
+		done: make(chan struct{}),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/0/takeover", http.NoBody)
+	req.SetPathValue("id", "0")
+	w := httptest.NewRecorder()
+	handleWithTask(s, s.takeoverTask)(w, req)
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
+	}
+	e := decodeError(t, w)
+	if e.Code != dto.CodeConflict {
+		t.Errorf("code = %q, want %q", e.Code, dto.CodeConflict)
+	}
+}
+
 func TestHandleListRepos(t *testing.T) {
 	s := &Server{
 		repos: []repoInfo{

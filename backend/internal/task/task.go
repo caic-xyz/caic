@@ -289,6 +289,72 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) error {
 	return nil
 }
 
+// Takeover kills any running claude process in the container and starts a
+// fresh session, optionally resuming the previous conversation. Use this when
+// a container may still have a stale claude process (e.g. after wmao restart).
+func (r *Runner) Takeover(ctx context.Context, t *Task) error {
+	t.mu.Lock()
+	if t.session != nil {
+		t.mu.Unlock()
+		return errors.New("session already active")
+	}
+	if t.Container == "" {
+		t.mu.Unlock()
+		return errors.New("no container to take over")
+	}
+	t.mu.Unlock()
+
+	// Discover session ID from the running process, if any.
+	sid, running, err := agent.FindRunningSession(ctx, t.Container)
+	if err != nil {
+		return fmt.Errorf("find running session: %w", err)
+	}
+	if running {
+		// Preserve discovered session ID when we had none.
+		if sid != "" && t.SessionID == "" {
+			t.SessionID = sid
+		}
+		if err := agent.KillRunning(ctx, t.Container); err != nil {
+			return fmt.Errorf("kill running: %w", err)
+		}
+	}
+
+	// From here, same as Reconnect.
+	t.mu.Lock()
+	t.State = StateRunning
+	t.mu.Unlock()
+
+	msgCh := make(chan agent.Message, 256)
+	go func() {
+		for m := range msgCh {
+			t.addMessage(m)
+		}
+	}()
+
+	maxTurns := t.MaxTurns
+	if maxTurns == 0 {
+		maxTurns = r.MaxTurns
+	}
+	logW, closeLog := r.openLog(t.Branch)
+
+	session, err := agent.Start(ctx, t.Container, maxTurns, msgCh, logW, t.SessionID)
+	if err != nil {
+		closeLog()
+		close(msgCh)
+		t.mu.Lock()
+		t.State = StateWaiting
+		t.mu.Unlock()
+		return fmt.Errorf("takeover: %w", err)
+	}
+
+	t.mu.Lock()
+	t.session = session
+	t.msgCh = msgCh
+	t.closeLog = closeLog
+	t.mu.Unlock()
+	return nil
+}
+
 // Run executes the full task lifecycle (single-shot). It is meant to be
 // called in a goroutine. The result is returned; the task is self-contained.
 func (r *Runner) Run(ctx context.Context, t *Task) Result {

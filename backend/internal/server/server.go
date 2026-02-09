@@ -113,6 +113,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	mux.HandleFunc("POST /api/v1/tasks/{id}/pull", handleWithTask(s, s.pullTask))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/push", handleWithTask(s, s.pushTask))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/reconnect", handleWithTask(s, s.reconnectTask))
+	mux.HandleFunc("POST /api/v1/tasks/{id}/takeover", handleWithTask(s, s.takeoverTask))
 
 	// Serve embedded frontend.
 	dist, err := fs.Sub(frontend.Files, "dist")
@@ -290,6 +291,18 @@ func (s *Server) reconnectTask(ctx context.Context, entry *taskEntry, _ *dto.Emp
 		return nil, dto.InternalError(err.Error())
 	}
 	return &dto.StatusResp{Status: "reconnected"}, nil
+}
+
+func (s *Server) takeoverTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq) (*dto.StatusResp, error) {
+	t := entry.task
+	if t.State != task.StateWaiting {
+		return nil, dto.Conflict("task is not in waiting state")
+	}
+	runner := s.runners[t.Repo]
+	if err := runner.Takeover(ctx, t); err != nil {
+		return nil, dto.InternalError(err.Error())
+	}
+	return &dto.StatusResp{Status: "taken_over"}, nil
 }
 
 func (s *Server) pushTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq) (*dto.StatusResp, error) {

@@ -195,6 +195,69 @@ func TestParseMessage(t *testing.T) {
 	})
 }
 
+func TestParsePgrepOutput(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantSID   string
+		wantFound bool
+	}{
+		{
+			name:      "Empty",
+			input:     "",
+			wantSID:   "",
+			wantFound: false,
+		},
+		{
+			name:      "NoResume",
+			input:     "12345 claude -p --input-format stream-json\n",
+			wantSID:   "",
+			wantFound: true,
+		},
+		{
+			name:      "WithResume",
+			input:     "12345 claude -p --resume abc-123 --input-format stream-json\n",
+			wantSID:   "abc-123",
+			wantFound: true,
+		},
+		{
+			name:      "ResumeAtEnd",
+			input:     "12345 claude -p --resume sess-99\n",
+			wantSID:   "sess-99",
+			wantFound: true,
+		},
+		{
+			name:      "MultipleLines",
+			input:     "111 something\n222 claude -p --resume my-id --verbose\n",
+			wantSID:   "my-id",
+			wantFound: true,
+		},
+		{
+			name:      "MultipleLinesNoResume",
+			input:     "111 something\n222 claude -p --verbose\n",
+			wantSID:   "",
+			wantFound: true,
+		},
+		{
+			name:      "WhitespaceOnly",
+			input:     "   \n  \n",
+			wantSID:   "",
+			wantFound: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sid, found := parsePgrepOutput(tc.input)
+			if sid != tc.wantSID {
+				t.Errorf("sessionID = %q, want %q", sid, tc.wantSID)
+			}
+			if found != tc.wantFound {
+				t.Errorf("found = %v, want %v", found, tc.wantFound)
+			}
+		})
+	}
+}
+
 func TestReadMessages(t *testing.T) {
 	t.Run("FullStream", func(t *testing.T) {
 		lines := []string{
