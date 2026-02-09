@@ -10,6 +10,50 @@ import (
 	"strings"
 )
 
+// Entry represents a container returned by md list.
+type Entry struct {
+	Name   string
+	Status string
+}
+
+// List returns all md containers.
+func List(ctx context.Context) ([]Entry, error) {
+	cmd := exec.CommandContext(ctx, "md", "list")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("md list: %w", err)
+	}
+	return parseList(string(out)), nil
+}
+
+// parseList parses md list output into entries.
+func parseList(raw string) []Entry {
+	var entries []Entry
+	for line := range strings.SplitSeq(strings.TrimSpace(raw), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && strings.HasPrefix(fields[0], "md-") {
+			entries = append(entries, Entry{Name: fields[0], Status: fields[1]})
+		}
+	}
+	return entries
+}
+
+// BranchFromContainer derives the git branch name from a container name by
+// stripping the "md-<repo>-" prefix and restoring the "wmao/" prefix that was
+// flattened to "wmao-" by md.
+func BranchFromContainer(containerName, repoName string) (string, bool) {
+	prefix := "md-" + repoName + "-"
+	if !strings.HasPrefix(containerName, prefix) {
+		return "", false
+	}
+	slug := containerName[len(prefix):]
+	// md replaces "/" with "-", so "wmao/foo" becomes "wmao-foo".
+	if strings.HasPrefix(slug, "wmao-") {
+		return "wmao/" + slug[len("wmao-"):], true
+	}
+	return slug, true
+}
+
 // Start creates and starts an md container for the given branch.
 // It does not SSH into it (--no-ssh).
 func Start(ctx context.Context, branch string) (string, error) {
@@ -65,20 +109,13 @@ func Kill(ctx context.Context) error {
 
 // containerName returns the md container name for the current repo+branch.
 func containerName(ctx context.Context) (string, error) {
-	// List containers and find the one for this repo.
-	cmd := exec.CommandContext(ctx, "md", "list")
-	out, err := cmd.Output()
+	entries, err := List(ctx)
 	if err != nil {
-		return "", fmt.Errorf("md list: %w", err)
+		return "", err
 	}
-	// md list outputs lines like: "md-<repo>-<branch>   running   5 minutes ago"
-	// Take the most recently created one.
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		fields := strings.Fields(lines[i])
-		if len(fields) > 0 && strings.HasPrefix(fields[0], "md-") {
-			return fields[0], nil
-		}
+	if len(entries) == 0 {
+		return "", errors.New("no md container found in md list output")
 	}
-	return "", errors.New("no md container found in md list output")
+	// Take the most recently created one (last in the list).
+	return entries[len(entries)-1].Name, nil
 }

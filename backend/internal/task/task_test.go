@@ -177,3 +177,41 @@ func TestAddMessageTransitionsToWaiting(t *testing.T) {
 		t.Errorf("state = %v, want %v", tk.State, StateWaiting)
 	}
 }
+
+func TestStateEndedString(t *testing.T) {
+	if got := StateEnded.String(); got != "ended" {
+		t.Errorf("StateEnded.String() = %q, want %q", got, "ended")
+	}
+}
+
+func TestTaskEnd(t *testing.T) {
+	tk := &Task{Prompt: "test"}
+	tk.InitDoneCh()
+
+	// Not ended yet.
+	if tk.IsEnded() {
+		t.Fatal("IsEnded() true before End()")
+	}
+
+	tk.End()
+
+	// Flag set and channel closed.
+	if !tk.IsEnded() {
+		t.Fatal("IsEnded() false after End()")
+	}
+	select {
+	case <-tk.Done():
+	default:
+		t.Fatal("doneCh not closed after End()")
+	}
+}
+
+func TestTaskEndIdempotent(t *testing.T) {
+	tk := &Task{Prompt: "test"}
+	tk.InitDoneCh()
+	tk.End()
+	tk.End() // must not panic
+	if !tk.IsEnded() {
+		t.Fatal("IsEnded() false after double End()")
+	}
+}

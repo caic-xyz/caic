@@ -82,6 +82,10 @@ export default function TaskView(props: Props) {
     await fetch(`/api/tasks/${props.taskId}/finish`, { method: "POST" });
   }
 
+  async function endTask() {
+    await fetch(`/api/tasks/${props.taskId}/end`, { method: "POST" });
+  }
+
   return (
     <div style={{ display: "flex", "flex-direction": "column", height: "100%" }}>
       <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "margin-bottom": "0.5rem" }}>
@@ -120,6 +124,10 @@ export default function TaskView(props: Props) {
               Finish
             </button>
           </Show>
+          <button type="button" onClick={() => endTask()}
+            style={{ background: "#dc3545", color: "white", border: "none", "border-radius": "4px", padding: "0.4rem 0.75rem", cursor: "pointer" }}>
+            End
+          </button>
         </form>
       </Show>
     </div>

@@ -33,6 +33,7 @@ const (
 	StatePushing        // Pushing to origin.
 	StateDone           // Successfully completed.
 	StateFailed         // Failed at some stage.
+	StateEnded          // Force-killed, skipping pull/push.
 )
 
 func (s State) String() string {
@@ -53,6 +54,8 @@ func (s State) String() string {
 		return "done"
 	case StateFailed:
 		return "failed"
+	case StateEnded:
+		return "ended"
 	default:
 		return "unknown"
 	}
@@ -87,8 +90,9 @@ type Task struct {
 	session  *agent.Session
 	msgCh    chan agent.Message // message dispatch channel; closed by Finish
 	closeLog func()             // closes the session log file
-	doneCh   chan struct{}      // closed when user calls Finish
+	doneCh   chan struct{}      // closed when user calls Finish or End
 	doneOnce sync.Once
+	ended    bool // true when End() was called (skip pull/push)
 }
 
 // Messages returns a copy of all received agent messages.
@@ -182,7 +186,25 @@ func (t *Task) Finish() {
 	})
 }
 
-// Done returns a channel that is closed when the user calls Finish.
+// End signals a force-kill: the session will be closed and the container
+// killed without pulling or pushing changes.
+func (t *Task) End() {
+	t.mu.Lock()
+	t.ended = true
+	t.mu.Unlock()
+	t.doneOnce.Do(func() {
+		close(t.doneCh)
+	})
+}
+
+// IsEnded reports whether End was called.
+func (t *Task) IsEnded() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.ended
+}
+
+// Done returns a channel that is closed when the user calls Finish or End.
 func (t *Task) Done() <-chan struct{} {
 	return t.doneCh
 }
@@ -270,8 +292,9 @@ func (r *Runner) Start(ctx context.Context, t *Task) error {
 
 // Finish closes the agent session, waits for the result, and performs
 // pull/push/kill. It blocks until t.Done() is signaled, then proceeds.
+// If End() was called, it skips pull/push and only kills the container.
 func (r *Runner) Finish(ctx context.Context, t *Task) Result {
-	// Wait for user to signal finish.
+	// Wait for user to signal finish or end.
 	select {
 	case <-t.Done():
 	case <-ctx.Done():
@@ -286,20 +309,39 @@ func (r *Runner) Finish(ctx context.Context, t *Task) Result {
 	closeLog := t.closeLog
 	t.mu.Unlock()
 
+	name := t.Container
+
+	// Close session if one exists.
+	var result *agent.ResultMessage
+	var waitErr error
+	if session != nil {
+		session.Close()
+		result, waitErr = session.Wait()
+	}
+	if msgCh != nil {
+		close(msgCh)
+	}
+	if closeLog != nil {
+		closeLog()
+	}
+
+	// If ended, skip pull/push — just kill the container.
+	if t.IsEnded() {
+		t.State = StateEnded
+		slog.Info("task ended, killing container", "container", name)
+		if err := r.KillContainer(ctx, t.Branch); err != nil {
+			slog.Warn("failed to kill container", "container", name, "err", err)
+		}
+		return Result{Task: t.Prompt, Branch: t.Branch, Container: name, State: StateEnded}
+	}
+
 	if session == nil {
 		t.State = StateFailed
 		return Result{Task: t.Prompt, Branch: t.Branch, Container: t.Container, State: StateFailed, Err: errors.New("no active session")}
 	}
-
-	session.Close()
-	result, err := session.Wait()
-	close(msgCh)
-	closeLog()
-
-	name := t.Container
-	if err != nil {
+	if waitErr != nil {
 		t.State = StateFailed
-		return Result{Task: t.Prompt, Branch: t.Branch, Container: name, State: StateFailed, Err: err}
+		return Result{Task: t.Prompt, Branch: t.Branch, Container: name, State: StateFailed, Err: waitErr}
 	}
 
 	// 3. Diff + pull (requires task branch checked out).
@@ -331,7 +373,7 @@ func (r *Runner) Finish(ctx context.Context, t *Task) Result {
 	// 5. Kill container (requires task branch checked out).
 	t.State = StateDone
 	slog.Info("task done, killing container", "container", name)
-	if err := r.killContainer(ctx, t.Branch); err != nil {
+	if err := r.KillContainer(ctx, t.Branch); err != nil {
 		slog.Warn("failed to kill container", "container", name, "err", err)
 	}
 
@@ -393,9 +435,9 @@ func (r *Runner) pullChanges(ctx context.Context, t *Task) (diffStat string, err
 	return diffStat, nil
 }
 
-// killContainer checks out the branch, kills the md container, then switches
+// KillContainer checks out the branch, kills the md container, then switches
 // back.
-func (r *Runner) killContainer(ctx context.Context, branch string) (err error) {
+func (r *Runner) KillContainer(ctx context.Context, branch string) (err error) {
 	r.branchMu.Lock()
 	defer r.branchMu.Unlock()
 

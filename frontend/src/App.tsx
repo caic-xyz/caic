@@ -135,6 +135,7 @@ function stateColor(state: string): string {
   switch (state) {
     case "done": return "#d4edda";
     case "failed": return "#f8d7da";
+    case "ended": return "#e2e3e5";
     default: return "#fff3cd";
   }
 }

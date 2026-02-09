@@ -16,6 +16,7 @@ import (
 
 	"github.com/maruel/wmao/backend/frontend"
 	"github.com/maruel/wmao/backend/internal/agent"
+	"github.com/maruel/wmao/backend/internal/container"
 	"github.com/maruel/wmao/backend/internal/gitutil"
 	"github.com/maruel/wmao/backend/internal/task"
 )
@@ -48,15 +49,18 @@ type taskJSON struct {
 	Result     string  `json:"result,omitempty"`
 }
 
-// New creates a new Server.
+// New creates a new Server. It discovers preexisting containers and adopts
+// them as tasks.
 func New(ctx context.Context, maxTurns int, logDir string) (*Server, error) {
 	branch, err := gitutil.CurrentBranch(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &Server{
+	s := &Server{
 		runner: &task.Runner{BaseBranch: branch, MaxTurns: maxTurns, LogDir: logDir},
-	}, nil
+	}
+	s.adoptContainers(ctx)
+	return s, nil
 }
 
 // ListenAndServe starts the HTTP server.
@@ -67,6 +71,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	mux.HandleFunc("GET /api/tasks/{id}/events", s.handleTaskEvents)
 	mux.HandleFunc("POST /api/tasks/{id}/input", s.handleTaskInput)
 	mux.HandleFunc("POST /api/tasks/{id}/finish", s.handleTaskFinish)
+	mux.HandleFunc("POST /api/tasks/{id}/end", s.handleTaskEnd)
 
 	// Serve embedded frontend.
 	dist, err := fs.Sub(frontend.Files, "dist")
@@ -226,6 +231,79 @@ func (s *Server) handleTaskFinish(w http.ResponseWriter, r *http.Request) {
 	entry.task.Finish()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "finishing"})
+}
+
+// handleTaskEnd force-kills a task, skipping pull/push.
+func (s *Server) handleTaskEnd(w http.ResponseWriter, r *http.Request) {
+	entry, ok := s.getTask(w, r)
+	if !ok {
+		return
+	}
+
+	switch entry.task.State {
+	case task.StateDone, task.StateFailed, task.StateEnded:
+		http.Error(w, "task is already in a terminal state", http.StatusConflict)
+		return
+	case task.StatePending, task.StateStarting, task.StateRunning, task.StateWaiting, task.StatePulling, task.StatePushing:
+	}
+
+	entry.task.End()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ending"})
+}
+
+// adoptContainers discovers preexisting md containers and creates task entries
+// for them so they appear in the UI and can be ended.
+func (s *Server) adoptContainers(ctx context.Context) {
+	entries, err := container.List(ctx)
+	if err != nil {
+		slog.Warn("failed to list containers on startup", "err", err)
+		return
+	}
+	repo, err := gitutil.RepoName(ctx)
+	if err != nil {
+		slog.Warn("failed to get repo name for container adoption", "err", err)
+		return
+	}
+	for _, e := range entries {
+		branch, ok := container.BranchFromContainer(e.Name, repo)
+		if !ok {
+			continue
+		}
+		t := &task.Task{
+			Prompt:    "(adopted) " + branch,
+			Branch:    branch,
+			Container: e.Name,
+			State:     task.StateWaiting,
+		}
+		t.InitDoneCh()
+		entry := &taskEntry{task: t, done: make(chan struct{})}
+
+		s.mu.Lock()
+		s.tasks = append(s.tasks, entry)
+		s.mu.Unlock()
+
+		slog.Info("adopted preexisting container", "container", e.Name, "branch", branch)
+
+		// Goroutine waits for End, then kills the container.
+		go func() {
+			defer close(entry.done)
+			select {
+			case <-t.Done():
+			case <-ctx.Done():
+				return
+			}
+			t.State = task.StateEnded
+			slog.Info("ending adopted container", "container", t.Container)
+			if err := s.runner.KillContainer(ctx, t.Branch); err != nil {
+				slog.Warn("failed to kill adopted container", "container", t.Container, "err", err)
+			}
+			result := task.Result{Task: t.Prompt, Branch: t.Branch, Container: t.Container, State: task.StateEnded}
+			s.mu.Lock()
+			entry.result = &result
+			s.mu.Unlock()
+		}()
+	}
 }
 
 // getTask looks up a task by the {id} path parameter.
