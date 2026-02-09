@@ -222,11 +222,24 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	flusher.Flush()
 
-	ch, unsub := entry.task.Subscribe(r.Context())
+	history, live, unsub := entry.task.Subscribe(r.Context())
 	defer unsub()
 
+	// Phase 1: replay full history.
 	idx := 0
-	for msg := range ch {
+	for _, msg := range history {
+		data, err := agent.MarshalMessage(msg)
+		if err != nil {
+			slog.Warn("marshal SSE message", "err", err)
+			continue
+		}
+		_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
+		idx++
+	}
+	flusher.Flush()
+
+	// Phase 2: stream live messages.
+	for msg := range live {
 		data, err := agent.MarshalMessage(msg)
 		if err != nil {
 			slog.Warn("marshal SSE message", "err", err)

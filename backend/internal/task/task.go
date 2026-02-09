@@ -129,16 +129,17 @@ func (t *Task) addMessage(m agent.Message) {
 	}
 }
 
-// Subscribe returns a channel that receives replayed history followed by live
-// messages. The returned function unsubscribes and must be called exactly once.
-func (t *Task) Subscribe(ctx context.Context) (msgCh <-chan agent.Message, unsubFn func()) {
+// Subscribe returns a snapshot of the message history and a channel that
+// receives only live messages arriving after the snapshot. The caller must
+// write the history to the client first, then range over the channel.
+// The returned function unsubscribes and must be called exactly once.
+func (t *Task) Subscribe(ctx context.Context) (history []agent.Message, live <-chan agent.Message, unsubFn func()) {
 	c := make(chan agent.Message, 256)
 
 	t.mu.Lock()
-	// Replay history.
-	for _, m := range t.msgs {
-		c <- m
-	}
+	// Snapshot history under lock — no channel writes, so no deadlock risk
+	// regardless of history size.
+	history = append([]agent.Message(nil), t.msgs...)
 	t.subs = append(t.subs, c)
 	t.mu.Unlock()
 
@@ -160,7 +161,7 @@ func (t *Task) Subscribe(ctx context.Context) (msgCh <-chan agent.Message, unsub
 		close(c)
 	}()
 
-	return c, unsub
+	return history, c, unsub
 }
 
 // SendInput sends a user message to the running agent. Returns an error if
