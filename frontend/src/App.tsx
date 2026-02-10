@@ -2,7 +2,7 @@
 import { createSignal, createEffect, For, Index, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { RepoJSON, TaskJSON } from "@sdk/types.gen";
-import { listRepos, createTask } from "@sdk/api.gen";
+import { listRepos, listTasks, createTask } from "@sdk/api.gen";
 import TaskView from "./TaskView";
 import { requestNotificationPermission, notifyWaiting } from "./notifications";
 import styles from "./App.module.css";
@@ -64,6 +64,7 @@ export default function App() {
       es.addEventListener("open", () => {
         setConnected(true);
         delay = 500;
+        listTasks().then(setTasks).catch(() => {});
       });
       es.addEventListener("tasks", (e) => {
         try {
