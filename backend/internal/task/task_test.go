@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maruel/ksid"
 	"github.com/maruel/wmao/backend/internal/agent"
 )
 
@@ -24,7 +25,8 @@ func TestOpenLog(t *testing.T) {
 		dir := t.TempDir()
 		logDir := filepath.Join(dir, "logs")
 		r := &Runner{LogDir: logDir}
-		w, closeFn := r.openLog(&Task{Prompt: "test", Branch: "wmao/w0"})
+		tk := &Task{ID: ksid.NewID(), Prompt: "test", Repo: "org/repo", Branch: "wmao/w0"}
+		w, closeFn := r.openLog(tk)
 		defer closeFn()
 		if w == nil {
 			t.Fatal("expected non-nil writer")
@@ -41,11 +43,9 @@ func TestOpenLog(t *testing.T) {
 			t.Fatalf("expected 1 file, got %d", len(entries))
 		}
 		name := entries[0].Name()
-		if filepath.Ext(name) != ".jsonl" {
-			t.Errorf("expected .jsonl extension, got %q", name)
-		}
-		if len(name) < len("20060102T150405-x.jsonl") {
-			t.Errorf("filename too short: %q", name)
+		want := tk.ID.String() + "-org-repo-wmao-w0.jsonl"
+		if name != want {
+			t.Errorf("filename = %q, want %q", name, want)
 		}
 	})
 }

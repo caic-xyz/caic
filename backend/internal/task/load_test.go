@@ -41,8 +41,8 @@ func TestLoadBranchLogs(t *testing.T) {
 	})
 	t.Run("NoMatch", func(t *testing.T) {
 		dir := t.TempDir()
-		meta := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "other", Branch: "wmao/w9"})
-		writeLogFile(t, dir, "20260101T000000-wmao-w9.jsonl", meta)
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Version: 1, Prompt: "other", Branch: "wmao/w9"})
+		writeLogFile(t, dir, "a.jsonl", meta)
 
 		if lt := LoadBranchLogs(dir, "wmao/w0"); lt != nil {
 			t.Error("expected nil when no files match branch")
@@ -50,11 +50,11 @@ func TestLoadBranchLogs(t *testing.T) {
 	})
 	t.Run("SingleFile", func(t *testing.T) {
 		dir := t.TempDir()
-		meta := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "fix bug", Repo: "test", Branch: "wmao/w0"})
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Version: 1, Prompt: "fix bug", Repo: "test", Branch: "wmao/w0"})
 		init := mustJSON(t, agent.SystemInitMessage{MessageType: "system", Subtype: "init", SessionID: "sid-1"})
 		asst := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
 		result := mustJSON(t, agent.ResultMessage{MessageType: "result", Result: "done"})
-		writeLogFile(t, dir, "20260101T000000-wmao-w0.jsonl", meta, init, asst, result)
+		writeLogFile(t, dir, "a.jsonl", meta, init, asst, result)
 
 		lt := LoadBranchLogs(dir, "wmao/w0")
 		if lt == nil {
@@ -74,15 +74,15 @@ func TestLoadBranchLogs(t *testing.T) {
 		dir := t.TempDir()
 
 		// First session.
-		meta1 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "fix bug", Repo: "test", Branch: "wmao/w0"})
+		meta1 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Version: 1, Prompt: "fix bug", Repo: "test", Branch: "wmao/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
 		asst1 := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
-		writeLogFile(t, dir, "20260101T000000-wmao-w0.jsonl", meta1, asst1)
+		writeLogFile(t, dir, "a.jsonl", meta1, asst1)
 
-		// Second session.
-		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "fix bug", Repo: "test", Branch: "wmao/w0"})
+		// Second session (later StartedAt so it sorts after).
+		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Version: 1, Prompt: "fix bug", Repo: "test", Branch: "wmao/w0", StartedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)})
 		init2 := mustJSON(t, agent.SystemInitMessage{MessageType: "system", Subtype: "init", SessionID: "sid-2"})
 		asst2 := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
-		writeLogFile(t, dir, "20260101T010000-wmao-w0.jsonl", meta2, init2, asst2)
+		writeLogFile(t, dir, "b.jsonl", meta2, init2, asst2)
 
 		lt := LoadBranchLogs(dir, "wmao/w0")
 		if lt == nil {
@@ -99,14 +99,14 @@ func TestLoadBranchLogs(t *testing.T) {
 		dir := t.TempDir()
 
 		// First session with original prompt.
-		meta1 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "old stale prompt", Repo: "test", Branch: "wmao/w0"})
+		meta1 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Version: 1, Prompt: "old stale prompt", Repo: "test", Branch: "wmao/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
 		asst1 := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
-		writeLogFile(t, dir, "20260101T000000-wmao-w0.jsonl", meta1, asst1)
+		writeLogFile(t, dir, "a.jsonl", meta1, asst1)
 
 		// Second session reuses same branch with a new prompt.
-		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "new current prompt", Repo: "test", Branch: "wmao/w0"})
+		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Version: 1, Prompt: "new current prompt", Repo: "test", Branch: "wmao/w0", StartedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)})
 		asst2 := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
-		writeLogFile(t, dir, "20260101T010000-wmao-w0.jsonl", meta2, asst2)
+		writeLogFile(t, dir, "b.jsonl", meta2, asst2)
 
 		lt := LoadBranchLogs(dir, "wmao/w0")
 		if lt == nil {
@@ -124,9 +124,9 @@ func TestLoadBranchLogs(t *testing.T) {
 	t.Run("NoFalseMatch", func(t *testing.T) {
 		dir := t.TempDir()
 		// Log file for wmao/w10 should NOT match wmao/w1.
-		meta := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "task", Branch: "wmao/w10"})
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Version: 1, Prompt: "task", Branch: "wmao/w10"})
 		asst := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
-		writeLogFile(t, dir, "20260101T000000-wmao-w10.jsonl", meta, asst)
+		writeLogFile(t, dir, "a.jsonl", meta, asst)
 
 		if lt := LoadBranchLogs(dir, "wmao/w1"); lt != nil {
 			t.Error("wmao/w10 log should not match wmao/w1")
@@ -137,10 +137,10 @@ func TestLoadBranchLogs(t *testing.T) {
 func TestLoadLogs(t *testing.T) {
 	t.Run("Valid", func(t *testing.T) {
 		dir := t.TempDir()
-		meta := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "task1", Repo: "r", Branch: "wmao/w0"})
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Version: 1, Prompt: "task1", Repo: "r", Branch: "wmao/w0"})
 		asst := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: "terminated"})
-		writeLogFile(t, dir, "20260101T000000-wmao-w0.jsonl", meta, asst, trailer)
+		writeLogFile(t, dir, "a.jsonl", meta, asst, trailer)
 
 		// Non-jsonl file should be ignored.
 		if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("hello"), 0o600); err != nil {
@@ -193,18 +193,18 @@ func TestLoadTerminated(t *testing.T) {
 	t.Run("FiltersTerminalOnly", func(t *testing.T) {
 		dir := t.TempDir()
 		// Task with done trailer.
-		meta0 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "t0", Repo: "r", Branch: "wmao/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
+		meta0 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Version: 1, Prompt: "t0", Repo: "r", Branch: "wmao/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
 		trailer0 := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: "terminated"})
-		writeLogFile(t, dir, "20260101T000000-wmao-w0.jsonl", meta0, trailer0)
+		writeLogFile(t, dir, "a.jsonl", meta0, trailer0)
 
 		// Task without trailer (still running — must NOT be loaded).
-		meta1 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "t1", Repo: "r", Branch: "wmao/w1", StartedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)})
-		writeLogFile(t, dir, "20260101T010000-wmao-w1.jsonl", meta1)
+		meta1 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Version: 1, Prompt: "t1", Repo: "r", Branch: "wmao/w1", StartedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)})
+		writeLogFile(t, dir, "b.jsonl", meta1)
 
 		// Task with terminated trailer.
-		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "t2", Repo: "r", Branch: "wmao/w2", StartedAt: time.Date(2026, 1, 1, 2, 0, 0, 0, time.UTC)})
+		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Version: 1, Prompt: "t2", Repo: "r", Branch: "wmao/w2", StartedAt: time.Date(2026, 1, 1, 2, 0, 0, 0, time.UTC)})
 		trailer2 := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: "terminated"})
-		writeLogFile(t, dir, "20260101T020000-wmao-w2.jsonl", meta2, trailer2)
+		writeLogFile(t, dir, "c.jsonl", meta2, trailer2)
 
 		got := LoadTerminated(dir, 10)
 		if len(got) != 2 {
@@ -222,11 +222,11 @@ func TestLoadTerminated(t *testing.T) {
 		dir := t.TempDir()
 		for i := range 5 {
 			meta := mustJSON(t, agent.MetaMessage{
-				MessageType: "wmao_meta", Prompt: fmt.Sprintf("t%d", i), Repo: "r",
+				MessageType: "wmao_meta", Version: 1, Prompt: fmt.Sprintf("t%d", i), Repo: "r",
 				Branch: fmt.Sprintf("wmao/w%d", i), StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
 			})
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: "terminated"})
-			writeLogFile(t, dir, fmt.Sprintf("20260101T0%d0000-wmao-w%d.jsonl", i, i), meta, trailer)
+			writeLogFile(t, dir, fmt.Sprintf("%d.jsonl", i), meta, trailer)
 		}
 
 		got := LoadTerminated(dir, 3)

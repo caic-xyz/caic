@@ -612,9 +612,10 @@ func (r *Runner) openLog(t *Task) (w io.Writer, closeFn func()) {
 		slog.Warn("failed to create log dir", "dir", r.LogDir, "err", err)
 		return nil, func() {}
 	}
-	safe := strings.ReplaceAll(t.Branch, "/", "-")
-	name := time.Now().Format("20060102T150405") + "-" + safe + ".jsonl"
-	f, err := os.Create(filepath.Join(r.LogDir, name)) //nolint:gosec // name is derived from branch name, not arbitrary user input.
+	safeRepo := strings.ReplaceAll(t.Repo, "/", "-")
+	safeBranch := strings.ReplaceAll(t.Branch, "/", "-")
+	name := t.ID.String() + "-" + safeRepo + "-" + safeBranch + ".jsonl"
+	f, err := os.OpenFile(filepath.Join(r.LogDir, name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // name is derived from ksid, not arbitrary user input.
 	if err != nil {
 		slog.Warn("failed to create log file", "err", err)
 		return nil, func() {}
@@ -622,6 +623,7 @@ func (r *Runner) openLog(t *Task) (w io.Writer, closeFn func()) {
 	// Write metadata header as the first line.
 	meta := agent.MetaMessage{
 		MessageType: "wmao_meta",
+		Version:     1,
 		Prompt:      t.Prompt,
 		Repo:        t.Repo,
 		Branch:      t.Branch,

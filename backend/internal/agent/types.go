@@ -2,6 +2,8 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 )
 
@@ -124,6 +126,7 @@ func (m *RawMessage) Type() string { return m.MessageType }
 // task-level metadata so logs can be reloaded on restart.
 type MetaMessage struct {
 	MessageType string    `json:"type"`
+	Version     int       `json:"version"`
 	Prompt      string    `json:"prompt"`
 	Repo        string    `json:"repo"`
 	Branch      string    `json:"branch"`
@@ -132,6 +135,26 @@ type MetaMessage struct {
 
 // Type implements Message.
 func (m *MetaMessage) Type() string { return "wmao_meta" }
+
+// Validate checks that all required fields are present and the version is supported.
+func (m *MetaMessage) Validate() error {
+	if m.MessageType != "wmao_meta" {
+		return fmt.Errorf("unexpected type %q", m.MessageType)
+	}
+	if m.Version != 1 {
+		return fmt.Errorf("unsupported version %d", m.Version)
+	}
+	if m.Prompt == "" {
+		return errors.New("missing prompt")
+	}
+	if m.Repo == "" {
+		return errors.New("missing repo")
+	}
+	if m.Branch == "" {
+		return errors.New("missing branch")
+	}
+	return nil
+}
 
 // MetaResultMessage is appended as the last line of a JSONL log file when a
 // task reaches a terminal state.

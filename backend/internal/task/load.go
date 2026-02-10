@@ -2,13 +2,13 @@ package task
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/maruel/wmao/backend/internal/agent"
@@ -111,21 +111,14 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 	if !scanner.Scan() {
 		return nil, errNotLogFile
 	}
-	line := scanner.Bytes()
-
-	var envelope struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(line, &envelope); err != nil {
-		return nil, errNotLogFile
-	}
-	if envelope.Type != "wmao_meta" {
-		return nil, errNotLogFile
-	}
-
 	var meta agent.MetaMessage
-	if err := json.Unmarshal(line, &meta); err != nil {
+	d := json.NewDecoder(bytes.NewReader(scanner.Bytes()))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&meta); err != nil {
 		return nil, errNotLogFile
+	}
+	if err := meta.Validate(); err != nil {
+		return nil, err
 	}
 
 	// Use the file modification time as a best-effort approximation of the
@@ -145,6 +138,9 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 	}
 
 	// Parse remaining lines as agent messages or the result trailer.
+	var envelope struct {
+		Type string `json:"type"`
+	}
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -196,32 +192,14 @@ func LoadBranchLogs(logDir, branch string) *LoadedTask {
 	if logDir == "" {
 		return nil
 	}
-	entries, err := os.ReadDir(logDir)
+	all, err := LoadLogs(logDir)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			slog.Warn("failed to read log dir", "dir", logDir, "err", err)
-		}
 		return nil
 	}
-
-	suffix := "-" + strings.ReplaceAll(branch, "/", "-") + ".jsonl"
-	var matches []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), suffix) {
-			matches = append(matches, filepath.Join(logDir, e.Name()))
-		}
-	}
-	if len(matches) == 0 {
-		return nil
-	}
-
-	// Sort by name — timestamp prefix ensures chronological order.
-	slices.Sort(matches)
 
 	var merged *LoadedTask
-	for _, path := range matches {
-		lt, err := loadLogFile(path)
-		if err != nil {
+	for _, lt := range all {
+		if lt.Branch != branch {
 			continue
 		}
 		if merged == nil {

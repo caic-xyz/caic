@@ -292,11 +292,11 @@ func TestLoadTerminatedTasksOnStartup(t *testing.T) {
 	// Write 3 terminal task logs.
 	for i, state := range []string{"terminated", "failed", "terminated"} {
 		meta := mustJSON(t, agent.MetaMessage{
-			MessageType: "wmao_meta", Prompt: fmt.Sprintf("task %d", i), Repo: "r",
+			MessageType: "wmao_meta", Version: 1, Prompt: fmt.Sprintf("task %d", i), Repo: "r",
 			Branch: "wmao/w" + strings.Repeat("0", i+1), StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
 		})
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: state, CostUSD: float64(i + 1)})
-		writeLogFile(t, logDir, "20260101T0"+strings.Repeat("0", i+1)+"0000-wmao-w"+strings.Repeat("0", i+1)+".jsonl", meta, trailer)
+		writeLogFile(t, logDir, fmt.Sprintf("%d.jsonl", i), meta, trailer)
 	}
 
 	s := &Server{
