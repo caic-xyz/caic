@@ -176,7 +176,7 @@ func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer) (*ResultMes
 			_, _ = logW.Write(line)
 			_, _ = logW.Write([]byte{'\n'})
 		}
-		msg, err := parseMessage(line)
+		msg, err := ParseMessage(line)
 		if err != nil {
 			slog.Warn("skipping unparseable message", "err", err, "line", string(line))
 			continue
@@ -191,8 +191,8 @@ func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer) (*ResultMes
 	return result, scanner.Err()
 }
 
-// parseMessage decodes a single NDJSON line into a typed Message.
-func parseMessage(line []byte) (Message, error) {
+// ParseMessage decodes a single NDJSON line into a typed Message.
+func ParseMessage(line []byte) (Message, error) {
 	var envelope struct {
 		Type    string `json:"type"`
 		Subtype string `json:"subtype"`

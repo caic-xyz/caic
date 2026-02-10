@@ -80,9 +80,13 @@
 }
 
 .stateBadge {
-  padding: 0.1rem 0.4rem;
-  border-radius: 4px;
-  font-size: 0.8rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+  align-self: flex-start;
+  flex-shrink: 0;
+  line-height: 1.4;
 }
 
 .repoLabel {

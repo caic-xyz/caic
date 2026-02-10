@@ -25,9 +25,10 @@ func mainImpl() error {
 
 	maxTurns := flag.Int("max-turns", 0, "max agentic turns per task (0=unlimited)")
 	addr := flag.String("http", "", "start web UI on this address (e.g. :8080)")
-	logDir := flag.String("logs", "logs", "directory for session JSONL logs (empty to disable)")
 	root := flag.String("root", "", "parent directory containing git repos")
 	flag.Parse()
+
+	logDir := cacheDir()
 
 	// Exit when executable is rebuilt (systemd restarts the service).
 	if err := watchExecutable(ctx, cancel); err != nil {
@@ -39,15 +40,15 @@ func mainImpl() error {
 		if *root == "" {
 			return errors.New("-root is required in HTTP mode")
 		}
-		return serveHTTP(ctx, *addr, *root, *maxTurns, *logDir)
+		return serveHTTP(ctx, *addr, *root, *maxTurns, logDir)
 	}
 
 	// CLI mode.
 	args := flag.Args()
 	if len(args) == 0 {
-		return errors.New("usage: wmao [-max-turns N] [-http :8080] [-logs dir] [-root dir] <task> [task...]")
+		return errors.New("usage: wmao [-max-turns N] [-http :8080] [-root dir] <task> [task...]")
 	}
-	return runCLI(ctx, args, *root, *maxTurns, *logDir)
+	return runCLI(ctx, args, *root, *maxTurns, logDir)
 }
 
 func serveHTTP(ctx context.Context, addr, rootDir string, maxTurns int, logDir string) error {
@@ -169,6 +170,20 @@ func main() {
 		fmt.Fprintf(os.Stderr, "wmao: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// cacheDir returns the wmao log/cache directory, using $XDG_CACHE_HOME/wmao/
+// with a fallback to ~/.cache/wmao/.
+func cacheDir() string {
+	base := os.Getenv("XDG_CACHE_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = "."
+		}
+		base = filepath.Join(home, ".cache")
+	}
+	return filepath.Join(base, "wmao")
 }
 
 // watchExecutable watches the current executable for modifications and calls

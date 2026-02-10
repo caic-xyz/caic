@@ -1,6 +1,9 @@
 package agent
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Message is the interface for all Claude Code streaming JSON messages.
 type Message interface {
@@ -116,6 +119,35 @@ type RawMessage struct {
 
 // Type implements Message.
 func (m *RawMessage) Type() string { return m.MessageType }
+
+// MetaMessage is written as the first line of a JSONL log file. It captures
+// task-level metadata so logs can be reloaded on restart.
+type MetaMessage struct {
+	MessageType string    `json:"type"`
+	Prompt      string    `json:"prompt"`
+	Repo        string    `json:"repo"`
+	Branch      string    `json:"branch"`
+	StartedAt   time.Time `json:"started_at"`
+}
+
+// Type implements Message.
+func (m *MetaMessage) Type() string { return "wmao_meta" }
+
+// MetaResultMessage is appended as the last line of a JSONL log file when a
+// task reaches a terminal state.
+type MetaResultMessage struct {
+	MessageType string  `json:"type"`
+	State       string  `json:"state"`
+	CostUSD     float64 `json:"cost_usd,omitempty"`
+	DurationMs  int64   `json:"duration_ms,omitempty"`
+	NumTurns    int     `json:"num_turns,omitempty"`
+	DiffStat    string  `json:"diff_stat,omitempty"`
+	Error       string  `json:"error,omitempty"`
+	AgentResult string  `json:"agent_result,omitempty"`
+}
+
+// Type implements Message.
+func (m *MetaResultMessage) Type() string { return "wmao_result" }
 
 // MarshalMessage serializes a Message to JSON. For RawMessage, returns the
 // original bytes to preserve unknown fields. For typed messages, uses

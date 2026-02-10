@@ -159,6 +159,7 @@ export default function App() {
 
 function stateColor(state: string): string {
   switch (state) {
+    case "running": return "#d4edda";
     case "done": return "#d4edda";
     case "failed": return "#f8d7da";
     case "ended": return "#e2e3e5";
