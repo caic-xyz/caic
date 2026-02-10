@@ -114,8 +114,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	mux.HandleFunc("POST /api/v1/tasks", s.handleCreateTask(ctx))
 	mux.HandleFunc("GET /api/v1/tasks/{id}/events", s.handleTaskEvents)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/input", handleWithTask(s, s.sendInput))
-	mux.HandleFunc("POST /api/v1/tasks/{id}/finish", handleWithTask(s, s.finishTask))
-	mux.HandleFunc("POST /api/v1/tasks/{id}/end", handleWithTask(s, s.endTask))
+	mux.HandleFunc("POST /api/v1/tasks/{id}/terminate", handleWithTask(s, s.terminateTask))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/pull", handleWithTask(s, s.pullTask))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/push", handleWithTask(s, s.pushTask))
 	mux.HandleFunc("GET /api/v1/events", s.handleEvents)
@@ -235,7 +234,7 @@ func (s *Server) handleCreateTask(ctx context.Context) http.HandlerFunc {
 				s.mu.Unlock()
 				return
 			}
-			result := runner.Finish(ctx, t)
+			result := runner.Kill(ctx, t)
 			s.mu.Lock()
 			entry.result = &result
 			s.taskChanged()
@@ -351,23 +350,13 @@ func (s *Server) sendInput(_ context.Context, entry *taskEntry, req *dto.InputRe
 	return &dto.StatusResp{Status: "sent"}, nil
 }
 
-func (s *Server) finishTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*dto.StatusResp, error) {
+func (s *Server) terminateTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*dto.StatusResp, error) {
 	state := entry.task.State
 	if state != task.StateWaiting && state != task.StateAsking && state != task.StateRunning {
 		return nil, dto.Conflict("task is not running or waiting")
 	}
-	entry.task.Finish()
-	return &dto.StatusResp{Status: "finishing"}, nil
-}
-
-func (s *Server) endTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*dto.StatusResp, error) {
-	switch entry.task.State {
-	case task.StateDone, task.StateFailed, task.StateEnded:
-		return nil, dto.Conflict("task is already in a terminal state")
-	case task.StatePending, task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StatePulling, task.StatePushing:
-	}
-	entry.task.End()
-	return &dto.StatusResp{Status: "ending"}, nil
+	entry.task.Terminate()
+	return &dto.StatusResp{Status: "terminating"}, nil
 }
 
 func (s *Server) pullTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq) (*dto.PullResp, error) {
@@ -375,7 +364,7 @@ func (s *Server) pullTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq
 	switch t.State {
 	case task.StatePending:
 		return nil, dto.Conflict("task has no container yet")
-	case task.StateDone, task.StateFailed, task.StateEnded:
+	case task.StateFailed, task.StateTerminated:
 		return nil, dto.Conflict("task is in a terminal state")
 	case task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StatePulling, task.StatePushing:
 	}
@@ -392,7 +381,7 @@ func (s *Server) pushTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq
 	switch t.State {
 	case task.StatePending:
 		return nil, dto.Conflict("task has no container yet")
-	case task.StateDone, task.StateFailed, task.StateEnded:
+	case task.StateFailed, task.StateTerminated:
 		return nil, dto.Conflict("task is in a terminal state")
 	case task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StatePulling, task.StatePushing:
 	}
@@ -453,7 +442,7 @@ func (s *Server) loadTerminatedTasks() {
 }
 
 // adoptContainers discovers preexisting md containers and creates task entries
-// for them so they appear in the UI and can be ended.
+// for them so they appear in the UI.
 func (s *Server) adoptContainers(ctx context.Context) {
 	entries, err := container.List(ctx)
 	if err != nil {
@@ -570,11 +559,11 @@ func (s *Server) adoptContainers(ctx context.Context) {
 				}()
 			}
 
-			// Reuse the standard Finish path: waits for Finish/End, then
-			// does pull→push→kill (or just kill if End).
+			// Reuse the standard Kill path: terminates the agent,
+			// then kills the container.
 			go func() {
 				defer close(entry.done)
-				result := runner.Finish(ctx, t)
+				result := runner.Kill(ctx, t)
 				s.mu.Lock()
 				entry.result = &result
 				s.taskChanged()

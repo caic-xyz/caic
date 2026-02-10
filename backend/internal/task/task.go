@@ -30,13 +30,12 @@ const (
 	StateProvisioning       // Starting docker container.
 	StateStarting           // Launching agent session.
 	StateRunning            // Agent is executing.
-	StateWaiting            // Agent completed a turn, awaiting user input or finish.
+	StateWaiting            // Agent completed a turn, awaiting user input or terminate.
 	StateAsking             // Agent asked a question (AskUserQuestion), needs answer.
 	StatePulling            // Pulling changes from container.
 	StatePushing            // Pushing to origin.
-	StateDone               // Successfully completed.
 	StateFailed             // Failed at some stage.
-	StateEnded              // Force-killed, skipping pull/push.
+	StateTerminated         // Terminated by user.
 )
 
 func (s State) String() string {
@@ -59,12 +58,10 @@ func (s State) String() string {
 		return "pulling"
 	case StatePushing:
 		return "pushing"
-	case StateDone:
-		return "done"
 	case StateFailed:
 		return "failed"
-	case StateEnded:
-		return "ended"
+	case StateTerminated:
+		return "terminated"
 	default:
 		return "unknown"
 	}
@@ -102,12 +99,11 @@ type Task struct {
 	msgs     []agent.Message
 	subs     []chan agent.Message // active SSE subscribers
 	session  *agent.Session
-	msgCh    chan agent.Message // message dispatch channel; closed by Finish
+	msgCh    chan agent.Message // message dispatch channel; closed by Terminate
 	logW     io.Writer          // current log file writer (for writing trailer)
 	closeLog func()             // closes the session log file
-	doneCh   chan struct{}      // closed when user calls Finish or End
+	doneCh   chan struct{}      // closed when user calls Terminate
 	doneOnce sync.Once
-	ended    bool // true when End() was called (skip pull/push)
 }
 
 // setState updates the state and records the transition time. The caller must
@@ -241,33 +237,15 @@ func (t *Task) InitDoneCh() {
 	t.doneCh = make(chan struct{})
 }
 
-// Finish signals that the user is done interacting with this task. The
-// session will be closed and the pull/push/kill cycle will proceed.
-func (t *Task) Finish() {
+// Terminate signals that the user is done interacting with this task. The
+// session will be closed and the container killed.
+func (t *Task) Terminate() {
 	t.doneOnce.Do(func() {
 		close(t.doneCh)
 	})
 }
 
-// End signals a force-kill: the session will be closed and the container
-// killed without pulling or pushing changes.
-func (t *Task) End() {
-	t.mu.Lock()
-	t.ended = true
-	t.mu.Unlock()
-	t.doneOnce.Do(func() {
-		close(t.doneCh)
-	})
-}
-
-// IsEnded reports whether End was called.
-func (t *Task) IsEnded() bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.ended
-}
-
-// Done returns a channel that is closed when the user calls Finish or End.
+// Done returns a channel that is closed when the user calls Terminate.
 func (t *Task) Done() <-chan struct{} {
 	return t.doneCh
 }
@@ -287,7 +265,6 @@ type Runner struct {
 	initOnce sync.Once
 	branchMu sync.Mutex // Serializes operations that need a specific branch checked out (md commands).
 	nextID   int        // Next branch sequence number (protected by branchMu).
-	pushMu   sync.Mutex // Serializes git push to origin.
 }
 
 func (r *Runner) initDefaults() {
@@ -383,9 +360,11 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) error {
 }
 
 // Start performs branch/container setup, starts the agent session, and sends
-// the initial prompt. The session is left open for follow-up messages via
-// SendInput. Call Finish (or t.Finish + r.Finish) to close the session and
-// proceed to pull/push/kill.
+// the initial prompt.
+//
+// The session is left open for follow-up messages via SendInput.
+//
+// Call Kill to close the session.
 func (r *Runner) Start(ctx context.Context, t *Task) error {
 	r.initDefaults()
 	t.StartedAt = time.Now().UTC()
@@ -447,11 +426,10 @@ func (r *Runner) Start(ctx context.Context, t *Task) error {
 	return nil
 }
 
-// Finish closes the agent session, waits for the result, and performs
-// pull/push/kill. It blocks until t.Done() is signaled, then proceeds.
-// If End() was called, it skips pull/push and only kills the container.
-func (r *Runner) Finish(ctx context.Context, t *Task) Result {
-	// Wait for user to signal finish or end.
+// Kill terminates the agent session and kills the container. It blocks until
+// t.Done() is signaled, then proceeds. Pull/push must be done separately.
+func (r *Runner) Kill(ctx context.Context, t *Task) Result {
+	// Wait for user to signal terminate.
 	select {
 	case <-t.Done():
 	case <-ctx.Done():
@@ -470,7 +448,7 @@ func (r *Runner) Finish(ctx context.Context, t *Task) Result {
 
 	name := t.Container
 
-	// Close session if one exists.
+	// Terminate agent session if one exists.
 	var result *agent.ResultMessage
 	var waitErr error
 	if session != nil {
@@ -489,67 +467,13 @@ func (r *Runner) Finish(ctx context.Context, t *Task) Result {
 		}
 	}
 
-	// If ended, skip pull/push — just kill the container.
-	if t.IsEnded() {
-		t.setState(StateEnded)
-		slog.Info("task ended, killing container", "repo", t.Repo, "branch", t.Branch, "container", name)
+	// Kill container.
+	t.setState(StateTerminated)
+	slog.Info("killing container", "repo", t.Repo, "branch", t.Branch, "container", name)
+	if name != "" {
 		if err := r.KillContainer(ctx, t.Branch); err != nil {
 			slog.Warn("failed to kill container", "repo", t.Repo, "branch", t.Branch, "container", name, "err", err)
 		}
-		res := Result{Task: t.Prompt, Repo: t.Repo, Branch: t.Branch, Container: name, State: StateEnded}
-		finishLog(&res)
-		return res
-	}
-
-	// No session and no container means nothing to do.
-	if session == nil && name == "" {
-		t.setState(StateFailed)
-		res := Result{Task: t.Prompt, Repo: t.Repo, Branch: t.Branch, Container: t.Container, State: StateFailed, Err: errors.New("no active session")}
-		finishLog(&res)
-		return res
-	}
-	if session != nil && waitErr != nil {
-		t.setState(StateFailed)
-		res := Result{Task: t.Prompt, Repo: t.Repo, Branch: t.Branch, Container: name, State: StateFailed, Err: waitErr}
-		finishLog(&res)
-		return res
-	}
-
-	// 3. Diff + pull (requires task branch checked out).
-	t.setState(StatePulling)
-	diffStat, pullErr := r.PullChanges(ctx, t.Branch)
-
-	if pullErr != nil {
-		t.setState(StateFailed)
-		res := Result{
-			Task: t.Prompt, Repo: t.Repo, Branch: t.Branch, Container: name,
-			State: StateFailed, DiffStat: diffStat, Err: pullErr,
-		}
-		finishLog(&res)
-		return res
-	}
-
-	// 4. Push to origin (serialized; does not need checkout).
-	t.setState(StatePushing)
-	slog.Info("pushing to origin", "repo", t.Repo, "branch", t.Branch)
-	r.pushMu.Lock()
-	pushErr := gitutil.Push(ctx, r.Dir, t.Branch)
-	r.pushMu.Unlock()
-	if pushErr != nil {
-		t.setState(StateFailed)
-		res := Result{
-			Task: t.Prompt, Repo: t.Repo, Branch: t.Branch, Container: name,
-			State: StateFailed, DiffStat: diffStat, Err: pushErr,
-		}
-		finishLog(&res)
-		return res
-	}
-
-	// 5. Kill container (requires task branch checked out).
-	t.setState(StateDone)
-	slog.Info("task done, killing container", "repo", t.Repo, "branch", t.Branch, "container", name)
-	if err := r.KillContainer(ctx, t.Branch); err != nil {
-		slog.Warn("failed to kill container", "repo", t.Repo, "branch", t.Branch, "container", name, "err", err)
 	}
 
 	res := Result{
@@ -557,14 +481,16 @@ func (r *Runner) Finish(ctx context.Context, t *Task) Result {
 		Repo:      t.Repo,
 		Branch:    t.Branch,
 		Container: name,
-		State:     StateDone,
-		DiffStat:  diffStat,
+		State:     StateTerminated,
 	}
 	if result != nil {
 		res.CostUSD = result.TotalCostUSD
 		res.DurationMs = result.DurationMs
 		res.NumTurns = result.NumTurns
 		res.AgentResult = result.Result
+	}
+	if waitErr != nil {
+		res.Err = waitErr
 	}
 	finishLog(&res)
 	return res

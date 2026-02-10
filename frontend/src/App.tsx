@@ -135,7 +135,7 @@ export default function App() {
   }
 
   // Most recent first; terminal tasks last.
-  const isTerminal = (s: string) => s === "done" || s === "failed" || s === "ended";
+  const isTerminal = (s: string) => s === "failed" || s === "terminated";
   const sortedTasks = () =>
     [...tasks()].sort((a, b) => {
       const aT = isTerminal(a.state) ? 1 : 0;
@@ -271,13 +271,12 @@ function StateDuration(props: { stateUpdatedAtMs: number; now: Accessor<number> 
 function stateColor(state: string): string {
   switch (state) {
     case "running":
-    case "done":
       return "#d4edda";
     case "asking":
       return "#cce5ff";
     case "failed":
       return "#f8d7da";
-    case "ended":
+    case "terminated":
       return "#e2e3e5";
     default:
       return "#fff3cd";

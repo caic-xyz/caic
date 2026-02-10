@@ -1,19 +1,14 @@
 package task
 
 import (
-	"context"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/maruel/wmao/backend/internal/agent"
-	"github.com/maruel/wmao/backend/internal/container"
-	"github.com/maruel/wmao/backend/internal/gitutil"
 )
 
 func TestOpenLog(t *testing.T) {
@@ -155,7 +150,7 @@ func TestSendInputNotRunning(t *testing.T) {
 	}
 }
 
-func TestTaskFinish(t *testing.T) {
+func TestTaskTerminate(t *testing.T) {
 	tk := &Task{Prompt: "test"}
 	tk.InitDoneCh()
 
@@ -166,17 +161,17 @@ func TestTaskFinish(t *testing.T) {
 	default:
 	}
 
-	tk.Finish()
+	tk.Terminate()
 
 	// Done should be closed now.
 	select {
 	case <-tk.Done():
 	default:
-		t.Fatal("doneCh not closed after Finish")
+		t.Fatal("doneCh not closed after Terminate")
 	}
 
 	// Idempotent.
-	tk.Finish()
+	tk.Terminate()
 }
 
 func TestAddMessageTransitionsToWaiting(t *testing.T) {
@@ -220,45 +215,12 @@ func TestStateStrings(t *testing.T) {
 		{StateAsking, "asking"},
 		{StatePulling, "pulling"},
 		{StatePushing, "pushing"},
-		{StateDone, "done"},
 		{StateFailed, "failed"},
-		{StateEnded, "ended"},
+		{StateTerminated, "terminated"},
 	} {
 		if got := tt.state.String(); got != tt.want {
 			t.Errorf("State(%d).String() = %q, want %q", tt.state, got, tt.want)
 		}
-	}
-}
-
-func TestTaskEnd(t *testing.T) {
-	tk := &Task{Prompt: "test"}
-	tk.InitDoneCh()
-
-	// Not ended yet.
-	if tk.IsEnded() {
-		t.Fatal("IsEnded() true before End()")
-	}
-
-	tk.End()
-
-	// Flag set and channel closed.
-	if !tk.IsEnded() {
-		t.Fatal("IsEnded() false after End()")
-	}
-	select {
-	case <-tk.Done():
-	default:
-		t.Fatal("doneCh not closed after End()")
-	}
-}
-
-func TestTaskEndIdempotent(t *testing.T) {
-	tk := &Task{Prompt: "test"}
-	tk.InitDoneCh()
-	tk.End()
-	tk.End() // must not panic
-	if !tk.IsEnded() {
-		t.Fatal("IsEnded() false after double End()")
 	}
 }
 
@@ -301,70 +263,6 @@ func runGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// fakeContainer implements container.Ops with no-op operations.
-type fakeContainer struct {
-	mu      sync.Mutex
-	started []string // container names returned by Start
-	killed  bool
-	pulled  bool
-}
-
-var _ container.Ops = (*fakeContainer)(nil)
-
-func (f *fakeContainer) Start(ctx context.Context, dir string) (string, error) {
-	branch, err := gitutil.CurrentBranch(ctx, dir)
-	if err != nil {
-		return "", err
-	}
-	name := "md-test-" + strings.ReplaceAll(branch, "/", "-")
-	f.mu.Lock()
-	f.started = append(f.started, name)
-	f.mu.Unlock()
-	return name, nil
-}
-
-func (f *fakeContainer) Diff(_ context.Context, _ string, _ ...string) (string, error) {
-	return "", nil
-}
-
-func (f *fakeContainer) Pull(_ context.Context, _ string) error {
-	f.mu.Lock()
-	f.pulled = true
-	f.mu.Unlock()
-	return nil
-}
-
-func (f *fakeContainer) Push(_ context.Context, _ string) error {
-	return nil
-}
-
-func (f *fakeContainer) Kill(_ context.Context, _ string) error {
-	f.mu.Lock()
-	f.killed = true
-	f.mu.Unlock()
-	return nil
-}
-
-// fakeAgentStart creates a Session backed by a shell process that reads one
-// line from stdin then emits a result JSON line on stdout.
-func fakeAgentStart(_ context.Context, _ string, _ int, msgCh chan<- agent.Message, logW io.Writer, _ string) (*agent.Session, error) {
-	const resultJSON = `{"type":"result","subtype":"success","result":"done","num_turns":1,"total_cost_usd":0.01,"duration_ms":100}`
-	cmd := exec.Command("sh", "-c", `read line; echo '`+resultJSON+`'`)
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	cmd.Stderr = nil
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	return agent.NewSession(cmd, stdin, stdout, msgCh, logW), nil
-}
-
 func TestRunnerInit(t *testing.T) {
 	clone := initTestRepo(t, "main")
 	r := &Runner{
@@ -394,42 +292,6 @@ func TestRunnerInitSkipsExisting(t *testing.T) {
 	}
 	if r.nextID != 4 {
 		t.Errorf("nextID = %d, want 4", r.nextID)
-	}
-}
-
-func TestRunnerEnd(t *testing.T) {
-	clone := initTestRepo(t, "main")
-	fc := &fakeContainer{}
-	r := &Runner{
-		BaseBranch:   "main",
-		Dir:          clone,
-		MaxTurns:     1,
-		Container:    fc,
-		AgentStartFn: fakeAgentStart,
-	}
-	if err := r.Init(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-
-	tk := &Task{Prompt: "test task", Repo: "test"}
-	if err := r.Start(t.Context(), tk); err != nil {
-		t.Fatal(err)
-	}
-
-	tk.End()
-	result := r.Finish(t.Context(), tk)
-
-	if result.State != StateEnded {
-		t.Errorf("state = %v, want %v", result.State, StateEnded)
-	}
-
-	fc.mu.Lock()
-	defer fc.mu.Unlock()
-	if !fc.killed {
-		t.Error("container Kill was not called after End")
-	}
-	if fc.pulled {
-		t.Error("container Pull should not be called after End")
 	}
 }
 

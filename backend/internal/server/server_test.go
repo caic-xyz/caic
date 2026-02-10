@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -96,17 +97,17 @@ func TestHandleTaskInputEmptyPrompt(t *testing.T) {
 	}
 }
 
-func TestHandleFinishNotWaiting(t *testing.T) {
+func TestHandleTerminateNotWaiting(t *testing.T) {
 	s := &Server{runners: map[string]*task.Runner{}, changed: make(chan struct{})}
 	s.tasks = append(s.tasks, &taskEntry{
 		task: &task.Task{Prompt: "test", State: task.StatePending},
 		done: make(chan struct{}),
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/0/finish", http.NoBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/0/terminate", http.NoBody)
 	req.SetPathValue("id", "0")
 	w := httptest.NewRecorder()
-	handleWithTask(s, s.finishTask)(w, req)
+	handleWithTask(s, s.terminateTask)(w, req)
 	if w.Code != http.StatusConflict {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
 	}
@@ -116,7 +117,7 @@ func TestHandleFinishNotWaiting(t *testing.T) {
 	}
 }
 
-func TestHandleFinishWaiting(t *testing.T) {
+func TestHandleTerminateWaiting(t *testing.T) {
 	tk := &task.Task{Prompt: "test", State: task.StateWaiting}
 	tk.InitDoneCh()
 	s := &Server{runners: map[string]*task.Runner{}, changed: make(chan struct{})}
@@ -125,10 +126,10 @@ func TestHandleFinishWaiting(t *testing.T) {
 		done: make(chan struct{}),
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/0/finish", http.NoBody)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/0/terminate", http.NoBody)
 	req.SetPathValue("id", "0")
 	w := httptest.NewRecorder()
-	handleWithTask(s, s.finishTask)(w, req)
+	handleWithTask(s, s.terminateTask)(w, req)
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 	}
@@ -137,7 +138,7 @@ func TestHandleFinishWaiting(t *testing.T) {
 	select {
 	case <-tk.Done():
 	default:
-		t.Error("doneCh not closed after finish")
+		t.Error("doneCh not closed after terminate")
 	}
 }
 
@@ -277,10 +278,10 @@ func mustJSON(t *testing.T, v any) string {
 func TestLoadTerminatedTasksOnStartup(t *testing.T) {
 	logDir := t.TempDir()
 
-	// Write 3 terminated task logs.
-	for i, state := range []string{"done", "failed", "ended"} {
+	// Write 3 terminal task logs.
+	for i, state := range []string{"terminated", "failed", "terminated"} {
 		meta := mustJSON(t, agent.MetaMessage{
-			MessageType: "wmao_meta", Prompt: state + " task", Repo: "r",
+			MessageType: "wmao_meta", Prompt: fmt.Sprintf("task %d", i), Repo: "r",
 			Branch: "wmao/w" + strings.Repeat("0", i+1), StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
 		})
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: state, CostUSD: float64(i + 1)})
@@ -301,11 +302,11 @@ func TestLoadTerminatedTasksOnStartup(t *testing.T) {
 	}
 
 	// Verify tasks are in ascending StartedAt order (oldest first).
-	if s.tasks[0].task.Prompt != "done task" {
-		t.Errorf("tasks[0].Prompt = %q, want %q", s.tasks[0].task.Prompt, "done task")
+	if s.tasks[0].task.Prompt != "task 0" {
+		t.Errorf("tasks[0].Prompt = %q, want %q", s.tasks[0].task.Prompt, "task 0")
 	}
-	if s.tasks[2].task.Prompt != "ended task" {
-		t.Errorf("tasks[2].Prompt = %q, want %q", s.tasks[2].task.Prompt, "ended task")
+	if s.tasks[2].task.Prompt != "task 2" {
+		t.Errorf("tasks[2].Prompt = %q, want %q", s.tasks[2].task.Prompt, "task 2")
 	}
 
 	// Verify result is populated.

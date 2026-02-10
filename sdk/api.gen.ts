@@ -42,12 +42,8 @@ export function sendInput(id: number, req: InputReq): Promise<StatusResp> {
   return request<StatusResp>("POST", `/api/v1/tasks/${id}/input`, req);
 }
 
-export function finishTask(id: number): Promise<StatusResp> {
-  return request<StatusResp>("POST", `/api/v1/tasks/${id}/finish`);
-}
-
-export function endTask(id: number): Promise<StatusResp> {
-  return request<StatusResp>("POST", `/api/v1/tasks/${id}/end`);
+export function terminateTask(id: number): Promise<StatusResp> {
+  return request<StatusResp>("POST", `/api/v1/tasks/${id}/terminate`);
 }
 
 export function pullTask(id: number): Promise<PullResp> {

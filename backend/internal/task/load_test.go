@@ -139,7 +139,7 @@ func TestLoadLogs(t *testing.T) {
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "task1", Repo: "r", Branch: "wmao/w0"})
 		asst := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
-		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: "done"})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: "terminated"})
 		writeLogFile(t, dir, "20260101T000000-wmao-w0.jsonl", meta, asst, trailer)
 
 		// Non-jsonl file should be ignored.
@@ -157,8 +157,8 @@ func TestLoadLogs(t *testing.T) {
 		if tasks[0].Prompt != "task1" {
 			t.Errorf("Prompt = %q, want %q", tasks[0].Prompt, "task1")
 		}
-		if tasks[0].State != StateDone {
-			t.Errorf("State = %v, want %v", tasks[0].State, StateDone)
+		if tasks[0].State != StateTerminated {
+			t.Errorf("State = %v, want %v", tasks[0].State, StateTerminated)
 		}
 	})
 	t.Run("NotExist", func(t *testing.T) {
@@ -194,16 +194,16 @@ func TestLoadTerminated(t *testing.T) {
 		dir := t.TempDir()
 		// Task with done trailer.
 		meta0 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "t0", Repo: "r", Branch: "wmao/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
-		trailer0 := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: "done"})
+		trailer0 := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: "terminated"})
 		writeLogFile(t, dir, "20260101T000000-wmao-w0.jsonl", meta0, trailer0)
 
 		// Task without trailer (still running — must NOT be loaded).
 		meta1 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "t1", Repo: "r", Branch: "wmao/w1", StartedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)})
 		writeLogFile(t, dir, "20260101T010000-wmao-w1.jsonl", meta1)
 
-		// Task with ended trailer.
+		// Task with terminated trailer.
 		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "wmao_meta", Prompt: "t2", Repo: "r", Branch: "wmao/w2", StartedAt: time.Date(2026, 1, 1, 2, 0, 0, 0, time.UTC)})
-		trailer2 := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: "ended"})
+		trailer2 := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: "terminated"})
 		writeLogFile(t, dir, "20260101T020000-wmao-w2.jsonl", meta2, trailer2)
 
 		got := LoadTerminated(dir, 10)
@@ -225,7 +225,7 @@ func TestLoadTerminated(t *testing.T) {
 				MessageType: "wmao_meta", Prompt: fmt.Sprintf("t%d", i), Repo: "r",
 				Branch: fmt.Sprintf("wmao/w%d", i), StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
 			})
-			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: "done"})
+			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: "terminated"})
 			writeLogFile(t, dir, fmt.Sprintf("20260101T0%d0000-wmao-w%d.jsonl", i, i), meta, trailer)
 		}
 
@@ -248,9 +248,8 @@ func TestParseState(t *testing.T) {
 		in   string
 		want State
 	}{
-		{"done", StateDone},
 		{"failed", StateFailed},
-		{"ended", StateEnded},
+		{"terminated", StateTerminated},
 		{"unknown", StateFailed},
 	} {
 		t.Run(tt.in, func(t *testing.T) {

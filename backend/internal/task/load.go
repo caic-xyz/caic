@@ -62,8 +62,8 @@ func LoadLogs(logDir string) ([]*LoadedTask, error) {
 	return tasks, nil
 }
 
-// LoadTerminated returns the last n tasks in a terminal state (done, failed,
-// ended) from logDir, sorted by StartedAt descending (most recent first).
+// LoadTerminated returns the last n tasks in a terminal state (failed, terminated)
+// from logDir, sorted by StartedAt descending (most recent first).
 // Returns nil when logDir is empty or no terminated tasks exist.
 func LoadTerminated(logDir string, n int) []*LoadedTask {
 	if logDir == "" || n <= 0 {
@@ -250,12 +250,10 @@ func LoadBranchLogs(logDir, branch string) *LoadedTask {
 // parseState converts a state string back to a State value.
 func parseState(s string) State {
 	switch s {
-	case "done":
-		return StateDone
 	case "failed":
 		return StateFailed
-	case "ended":
-		return StateEnded
+	case "terminated":
+		return StateTerminated
 	default:
 		return StateFailed
 	}

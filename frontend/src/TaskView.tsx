@@ -1,6 +1,6 @@
 // TaskView renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, For, Index, Show, onCleanup, createEffect, Switch, Match, type Accessor } from "solid-js";
-import { sendInput as apiSendInput, finishTask as apiFinishTask, endTask as apiEndTask, pullTask as apiPullTask, pushTask as apiPushTask } from "@sdk/api.gen";
+import { sendInput as apiSendInput, terminateTask as apiTerminateTask, pullTask as apiPullTask, pushTask as apiPushTask } from "@sdk/api.gen";
 import { Marked } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import styles from "./TaskView.module.css";
@@ -120,8 +120,8 @@ export default function TaskView(props: Props) {
 
   const isWaiting = () => props.taskState === "waiting" || props.taskState === "asking";
 
-  async function finishTask() {
-    await apiFinishTask(props.taskId);
+  async function terminateTask() {
+    await apiTerminateTask(props.taskId);
   }
 
   async function pullTask() {
@@ -130,10 +130,6 @@ export default function TaskView(props: Props) {
 
   async function pushTask() {
     await apiPushTask(props.taskId);
-  }
-
-  async function endTask() {
-    await apiEndTask(props.taskId);
   }
 
   return (
@@ -225,13 +221,8 @@ export default function TaskView(props: Props) {
           <button type="button" class={`${styles.btn} ${styles.btnGray}`} onClick={() => pushTask()}>
             Push
           </button>
-          <Show when={isWaiting()}>
-            <button type="button" class={`${styles.btn} ${styles.btnGreen}`} onClick={() => finishTask()}>
-              Finish
-            </button>
-          </Show>
-          <button type="button" class={`${styles.btn} ${styles.btnRed}`} onClick={() => endTask()}>
-            End
+          <button type="button" class={`${styles.btn} ${styles.btnRed}`} onClick={() => terminateTask()}>
+            Terminate
           </button>
         </form>
       </Show>
