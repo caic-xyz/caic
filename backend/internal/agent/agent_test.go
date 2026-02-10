@@ -129,7 +129,7 @@ func TestSessionClose(t *testing.T) {
 func TestParseMessage(t *testing.T) {
 	t.Run("SystemInit", func(t *testing.T) {
 		line := `{"type":"system","subtype":"init","cwd":"/home/user","session_id":"abc-123","tools":["Bash","Read"],"model":"claude-opus-4-6","claude_code_version":"2.1.34","uuid":"uuid-1"}`
-		msg, err := parseMessage([]byte(line))
+		msg, err := ParseMessage([]byte(line))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -146,7 +146,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("Assistant", func(t *testing.T) {
 		line := `{"type":"assistant","message":{"model":"claude-opus-4-6","id":"msg_01","role":"assistant","content":[{"type":"text","text":"hello world"}],"usage":{"input_tokens":10,"output_tokens":5}},"session_id":"abc","uuid":"u1"}`
-		msg, err := parseMessage([]byte(line))
+		msg, err := ParseMessage([]byte(line))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -161,7 +161,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("Result", func(t *testing.T) {
 		line := `{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"duration_api_ms":1200,"num_turns":3,"result":"done","session_id":"abc","total_cost_usd":0.05,"usage":{"input_tokens":100,"output_tokens":50},"uuid":"u2"}`
-		msg, err := parseMessage([]byte(line))
+		msg, err := ParseMessage([]byte(line))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -181,7 +181,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("RawFallback", func(t *testing.T) {
 		line := `{"type":"stream_event","event":{"type":"message_start"}}`
-		msg, err := parseMessage([]byte(line))
+		msg, err := ParseMessage([]byte(line))
 		if err != nil {
 			t.Fatal(err)
 		}

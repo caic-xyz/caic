@@ -12,7 +12,7 @@ import (
 func TestOpenLog(t *testing.T) {
 	t.Run("EmptyDir", func(t *testing.T) {
 		r := &Runner{}
-		w, closeFn := r.openLog("test")
+		w, closeFn := r.openLog(&Task{Prompt: "test"})
 		defer closeFn()
 		if w != nil {
 			t.Error("expected nil writer when LogDir is empty")
@@ -22,7 +22,7 @@ func TestOpenLog(t *testing.T) {
 		dir := t.TempDir()
 		logDir := filepath.Join(dir, "logs")
 		r := &Runner{LogDir: logDir}
-		w, closeFn := r.openLog("wmao/w0")
+		w, closeFn := r.openLog(&Task{Prompt: "test", Branch: "wmao/w0"})
 		defer closeFn()
 		if w == nil {
 			t.Fatal("expected non-nil writer")

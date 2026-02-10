@@ -565,7 +565,7 @@ func (r *Runner) setup(ctx context.Context, t *Task) (string, error) {
 		t.Branch = fmt.Sprintf("wmao/w%d", r.nextID)
 		r.nextID++
 		slog.Info("creating branch", "branch", t.Branch)
-		err = gitutil.CreateBranch(ctx, r.Dir, t.Branch)
+		err = gitutil.CreateBranch(ctx, r.Dir, t.Branch, "origin/"+r.BaseBranch)
 		if err == nil {
 			break
 		}

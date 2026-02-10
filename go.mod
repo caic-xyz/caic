@@ -2,9 +2,10 @@ module github.com/maruel/wmao
 
 go 1.25.5
 
+require github.com/fsnotify/fsnotify v1.9.0
+
 require (
 	github.com/fatih/structtag v1.2.0 // indirect
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/gzuidhof/tygo v0.2.21 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/spf13/cobra v1.3.0 // indirect

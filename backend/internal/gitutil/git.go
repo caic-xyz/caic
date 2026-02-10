@@ -23,9 +23,9 @@ func CurrentBranch(ctx context.Context, dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// CreateBranch creates a new branch from the current HEAD and checks it out.
-func CreateBranch(ctx context.Context, dir, name string) error {
-	cmd := exec.CommandContext(ctx, "git", "checkout", "-b", name)
+// CreateBranch creates a new branch from startPoint and checks it out.
+func CreateBranch(ctx context.Context, dir, name, startPoint string) error {
+	cmd := exec.CommandContext(ctx, "git", "checkout", "-b", name, startPoint)
 	cmd.Dir = dir
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
