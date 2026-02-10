@@ -305,6 +305,7 @@ const marked = new Marked({
 
 function Markdown(props: { text: string }) {
   const html = createMemo(() => marked.parse(props.text) as string);
+  // eslint-disable-next-line solid/no-innerhtml -- rendering trusted marked output
   return <div class={styles.markdown} innerHTML={html()} />;
 }
 

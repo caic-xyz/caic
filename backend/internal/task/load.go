@@ -3,6 +3,7 @@ package task
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,6 +12,9 @@ import (
 
 	"github.com/maruel/wmao/backend/internal/agent"
 )
+
+// errNotLogFile is returned when a file doesn't contain a valid wmao_meta header.
+var errNotLogFile = errors.New("not a wmao log file")
 
 // LoadedTask holds the data reconstructed from a single JSONL log file.
 type LoadedTask struct {
@@ -42,10 +46,9 @@ func LoadLogs(logDir string) ([]*LoadedTask, error) {
 		}
 		lt, err := loadLogFile(filepath.Join(logDir, e.Name()))
 		if err != nil {
-			slog.Warn("skipping log file", "file", e.Name(), "err", err)
-			continue
-		}
-		if lt == nil {
+			if !errors.Is(err, errNotLogFile) {
+				slog.Warn("skipping log file", "file", e.Name(), "err", err)
+			}
 			continue
 		}
 		tasks = append(tasks, lt)
@@ -59,19 +62,23 @@ func LoadLogs(logDir string) ([]*LoadedTask, error) {
 
 // loadLogFile parses a single JSONL log file. Returns nil if the file has no
 // valid wmao_meta header.
-func loadLogFile(path string) (*LoadedTask, error) {
-	f, err := os.Open(path)
+func loadLogFile(path string) (_ *LoadedTask, retErr error) {
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		if err2 := f.Close(); retErr == nil {
+			retErr = err2
+		}
+	}()
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 1<<20), 1<<20)
 
 	// First line must be the metadata header.
 	if !scanner.Scan() {
-		return nil, nil
+		return nil, errNotLogFile
 	}
 	line := scanner.Bytes()
 
@@ -79,15 +86,15 @@ func loadLogFile(path string) (*LoadedTask, error) {
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal(line, &envelope); err != nil {
-		return nil, nil
+		return nil, errNotLogFile
 	}
 	if envelope.Type != "wmao_meta" {
-		return nil, nil
+		return nil, errNotLogFile
 	}
 
 	var meta agent.MetaMessage
 	if err := json.Unmarshal(line, &meta); err != nil {
-		return nil, nil
+		return nil, errNotLogFile
 	}
 
 	lt := &LoadedTask{
@@ -127,7 +134,7 @@ func loadLogFile(path string) (*LoadedTask, error) {
 				AgentResult: mr.AgentResult,
 			}
 			if mr.Error != "" {
-				lt.Result.Err = errString(mr.Error)
+				lt.Result.Err = stringError(mr.Error)
 			}
 			continue
 		}
@@ -157,7 +164,7 @@ func parseState(s string) State {
 	}
 }
 
-// errString is a simple error type that holds a string.
-type errString string
+// stringError is a simple error type that holds a string.
+type stringError string
 
-func (e errString) Error() string { return string(e) }
+func (e stringError) Error() string { return string(e) }
