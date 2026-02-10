@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -153,8 +154,10 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 
 		if envelope.Type == "wmao_result" {
 			var mr agent.MetaResultMessage
-			if err := json.Unmarshal(line, &mr); err != nil {
-				continue
+			rd := json.NewDecoder(bytes.NewReader(line))
+			rd.DisallowUnknownFields()
+			if err := rd.Decode(&mr); err != nil {
+				return nil, fmt.Errorf("invalid wmao_result: %w", err)
 			}
 			lt.State = parseState(mr.State)
 			lt.Result = &Result{
@@ -169,7 +172,7 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 				AgentResult: mr.AgentResult,
 			}
 			if mr.Error != "" {
-				lt.Result.Err = stringError(mr.Error)
+				lt.Result.Err = errors.New(mr.Error)
 			}
 			continue
 		}
@@ -236,8 +239,3 @@ func parseState(s string) State {
 		return StateFailed
 	}
 }
-
-// stringError is a simple error type that holds a string.
-type stringError string
-
-func (e stringError) Error() string { return string(e) }

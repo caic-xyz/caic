@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -257,12 +256,5 @@ func TestParseState(t *testing.T) {
 				t.Errorf("parseState(%q) = %v, want %v", tt.in, got, tt.want)
 			}
 		})
-	}
-}
-
-func TestStringError(t *testing.T) {
-	e := stringError("boom")
-	if !strings.Contains(e.Error(), "boom") {
-		t.Errorf("Error() = %q, want containing %q", e.Error(), "boom")
 	}
 }
