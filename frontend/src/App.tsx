@@ -144,6 +144,7 @@ export default function App() {
             <TaskView
               taskId={selectedId() ?? 0}
               taskState={selectedTask()?.state ?? "pending"}
+              taskQuery={selectedTask()?.task ?? ""}
               onClose={() => setSelectedId(null)}
             />
           </div>

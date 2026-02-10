@@ -31,6 +31,7 @@ interface AgentMessage {
 interface Props {
   taskId: number;
   taskState: string;
+  taskQuery: string;
   onClose: () => void;
 }
 
@@ -106,6 +107,7 @@ export default function TaskView(props: Props) {
         <h3>Task #{props.taskId}</h3>
         <button class={styles.closeBtn} onClick={() => props.onClose()}>Close</button>
       </div>
+      <div class={styles.query}>{props.taskQuery}</div>
 
       <div class={styles.messageArea}>
         <For each={messages()}>
