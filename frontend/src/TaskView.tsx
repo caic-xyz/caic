@@ -44,6 +44,14 @@ interface MessageGroup {
   toolBlocks: ContentBlock[];
 }
 
+// A turn is a sequence of message groups between user interactions.
+// Turns are separated by "result" messages (end of a Claude Code query).
+interface Turn {
+  groups: MessageGroup[];
+  toolCount: number;
+  textCount: number;
+}
+
 interface Props {
   taskId: number;
   taskState: string;
@@ -138,6 +146,9 @@ export default function TaskView(props: Props) {
       <div class={styles.messageArea}>
         {(() => {
           const grouped = createMemo(() => groupMessages(messages()));
+          const turns = createMemo(() => groupTurns(grouped()));
+
+          // Find the index of the last "ask" group across all turns for interactivity.
           const lastAskIdx = createMemo(() => {
             const g = grouped();
             for (let i = g.length - 1; i >= 0; i--) {
@@ -156,26 +167,38 @@ export default function TaskView(props: Props) {
           }
 
           return (
-            <Index each={grouped()}>
-              {(group, index) => (
-                <Switch>
-                  <Match when={group().kind === "ask"}>
-                    <AskQuestionGroup
-                      block={group().toolBlocks[0]}
-                      interactive={isWaiting() && index === lastAskIdx()}
-                      onSubmit={sendAskAnswer}
-                    />
-                  </Match>
-                  <Match when={group().kind === "tool"}>
-                    <ToolMessageGroup toolBlocks={group().toolBlocks} />
-                  </Match>
-                  <Match when={group().kind === "text" || group().kind === "other"}>
-                    <For each={group().messages}>
-                      {(msg) => <MessageItem msg={msg} />}
+            <Index each={turns()}>
+              {(turn, turnIdx) => {
+                const isLastTurn = () => turnIdx === turns().length - 1;
+
+                return (
+                  <Show when={isLastTurn()} fallback={
+                    <ElidedTurn turn={turn()} />
+                  }>
+                    <For each={turn().groups}>
+                      {(group) => (
+                        <Switch>
+                          <Match when={group.kind === "ask"}>
+                            <AskQuestionGroup
+                              block={group.toolBlocks[0]}
+                              interactive={isWaiting() && group === grouped()[lastAskIdx()]}
+                              onSubmit={sendAskAnswer}
+                            />
+                          </Match>
+                          <Match when={group.kind === "tool"}>
+                            <ToolMessageGroup toolBlocks={group.toolBlocks} />
+                          </Match>
+                          <Match when={group.kind === "text" || group.kind === "other"}>
+                            <For each={group.messages}>
+                              {(msg) => <MessageItem msg={msg} />}
+                            </For>
+                          </Match>
+                        </Switch>
+                      )}
                     </For>
-                  </Match>
-                </Switch>
-              )}
+                  </Show>
+                );
+              }}
             </Index>
           );
         })()}
@@ -306,6 +329,39 @@ function groupMessages(msgs: AgentMessage[]): MessageGroup[] {
   return groups;
 }
 
+// Splits message groups into turns separated by "result" messages.
+// Each turn represents a segment of agent work between user interactions.
+function groupTurns(groups: MessageGroup[]): Turn[] {
+  const turns: Turn[] = [];
+  let current: MessageGroup[] = [];
+  let toolCount = 0;
+  let textCount = 0;
+
+  function flush() {
+    if (current.length > 0) {
+      turns.push({ groups: current, toolCount, textCount });
+      current = [];
+      toolCount = 0;
+      textCount = 0;
+    }
+  }
+
+  for (const g of groups) {
+    current.push(g);
+    if (g.kind === "tool") {
+      toolCount += g.toolBlocks.length;
+    } else if (g.kind === "text") {
+      textCount++;
+    }
+    // A result message ends the current turn.
+    if (g.kind === "other" && g.messages.some((m) => m.type === "result")) {
+      flush();
+    }
+  }
+  flush();
+  return turns;
+}
+
 function toolCountSummary(tools: ContentBlock[]): string {
   const counts = new Map<string, number>();
   for (const t of tools) {
@@ -340,6 +396,48 @@ function ToolMessageGroup(props: { toolBlocks: ContentBlock[] }) {
         </details>
       </Show>
     </Show>
+  );
+}
+
+function turnSummary(turn: Turn): string {
+  const parts: string[] = [];
+  if (turn.textCount > 0) {
+    parts.push(turn.textCount === 1 ? "1 message" : `${turn.textCount} messages`);
+  }
+  if (turn.toolCount > 0) {
+    parts.push(turn.toolCount === 1 ? "1 tool call" : `${turn.toolCount} tool calls`);
+  }
+  return parts.length > 0 ? parts.join(", ") : "empty turn";
+}
+
+function ElidedTurn(props: { turn: Turn }) {
+  return (
+    <details class={styles.elidedTurn}>
+      <summary>{turnSummary(props.turn)}</summary>
+      <div class={styles.elidedTurnInner}>
+        <For each={props.turn.groups}>
+          {(group) => (
+            <Switch>
+              <Match when={group.kind === "ask"}>
+                <div class={styles.askGroup}>
+                  <div class={styles.askText}>
+                    {(parseAskInput(group.toolBlocks[0]?.input))?.questions[0]?.question ?? "Question"}
+                  </div>
+                </div>
+              </Match>
+              <Match when={group.kind === "tool"}>
+                <ToolMessageGroup toolBlocks={group.toolBlocks} />
+              </Match>
+              <Match when={group.kind === "text" || group.kind === "other"}>
+                <For each={group.messages}>
+                  {(msg) => <MessageItem msg={msg} />}
+                </For>
+              </Match>
+            </Switch>
+          )}
+        </For>
+      </div>
+    </details>
   );
 }
 
