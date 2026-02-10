@@ -40,7 +40,7 @@ test:
 coverage:
 	@go test -coverprofile=coverage.out ./...
 
-lint: lint-go lint-frontend
+lint: lint-go lint-frontend lint-python
 
 lint-go:
 	@which golangci-lint > /dev/null || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
@@ -49,9 +49,15 @@ lint-go:
 lint-frontend: $(FRONTEND_STAMP)
 	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm lint
 
+lint-python:
+	@ruff check .
+	@ruff format --check .
+
 lint-fix: $(FRONTEND_STAMP)
 	@golangci-lint run ./... --fix || true
 	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm lint:fix
+	@ruff check --fix .
+	@ruff format .
 
 git-hooks:
 	@mkdir -p .git/hooks
