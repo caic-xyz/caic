@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/maruel/ksid"
 	"github.com/maruel/wmao/backend/internal/agent"
 	"github.com/maruel/wmao/backend/internal/container"
 	"github.com/maruel/wmao/backend/internal/gitutil"
@@ -84,6 +85,7 @@ type Result struct {
 
 // Task represents a single unit of work.
 type Task struct {
+	ID             ksid.ID
 	Prompt         string
 	Repo           string // Relative repo path (for display/API).
 	MaxTurns       int

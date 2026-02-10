@@ -89,7 +89,7 @@ func writeJSONFunc(b *strings.Builder, r *dto.Route, params []string) {
 	// Build function signature.
 	args := make([]string, 0, len(params)+1)
 	for _, p := range params {
-		args = append(args, p+": number")
+		args = append(args, p+": string")
 	}
 	if r.ReqType != "" {
 		args = append(args, "req: "+r.ReqType)
@@ -109,7 +109,7 @@ func writeJSONFunc(b *strings.Builder, r *dto.Route, params []string) {
 func writeSSEFunc(b *strings.Builder, r *dto.Route, params []string) {
 	args := make([]string, 0, len(params))
 	for _, p := range params {
-		args = append(args, p+": number")
+		args = append(args, p+": string")
 	}
 	tsPath := buildTSPath(r.Path, params)
 	fmt.Fprintf(b, "export function %s(%s): EventSource {\n", r.Name, strings.Join(args, ", "))

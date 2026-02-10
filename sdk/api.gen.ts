@@ -34,23 +34,23 @@ export function createTask(req: CreateTaskReq): Promise<CreateTaskResp> {
   return request<CreateTaskResp>("POST", "/api/v1/tasks", req);
 }
 
-export function taskEvents(id: number): EventSource {
+export function taskEvents(id: string): EventSource {
   return new EventSource(`/api/v1/tasks/${id}/events`);
 }
 
-export function sendInput(id: number, req: InputReq): Promise<StatusResp> {
+export function sendInput(id: string, req: InputReq): Promise<StatusResp> {
   return request<StatusResp>("POST", `/api/v1/tasks/${id}/input`, req);
 }
 
-export function terminateTask(id: number): Promise<StatusResp> {
+export function terminateTask(id: string): Promise<StatusResp> {
   return request<StatusResp>("POST", `/api/v1/tasks/${id}/terminate`);
 }
 
-export function pullTask(id: number): Promise<PullResp> {
+export function pullTask(id: string): Promise<PullResp> {
   return request<PullResp>("POST", `/api/v1/tasks/${id}/pull`);
 }
 
-export function pushTask(id: number): Promise<StatusResp> {
+export function pushTask(id: string): Promise<StatusResp> {
   return request<StatusResp>("POST", `/api/v1/tasks/${id}/push`);
 }
 

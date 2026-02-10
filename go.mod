@@ -2,15 +2,18 @@ module github.com/maruel/wmao
 
 go 1.25.5
 
-require github.com/fsnotify/fsnotify v1.9.0
+require (
+	github.com/fsnotify/fsnotify v1.9.0
+	github.com/lmittmann/tint v1.1.3
+	github.com/maruel/ksid v0.1.1
+	github.com/mattn/go-colorable v0.1.14
+	github.com/mattn/go-isatty v0.0.20
+)
 
 require (
 	github.com/fatih/structtag v1.2.0 // indirect
 	github.com/gzuidhof/tygo v0.2.21 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
-	github.com/lmittmann/tint v1.1.3 // indirect
-	github.com/mattn/go-colorable v0.1.14 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/spf13/cobra v1.3.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	golang.org/x/mod v0.5.1 // indirect

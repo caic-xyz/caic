@@ -1,6 +1,8 @@
 // Exported request and response types for the wmao API.
 package dto
 
+import "github.com/maruel/ksid"
+
 //go:generate go tool tygo generate --config ../../../../backend/tygo.yaml
 //go:generate go run github.com/maruel/wmao/backend/internal/cmd/gen-api-client
 
@@ -12,7 +14,7 @@ type RepoJSON struct {
 
 // TaskJSON is the JSON representation sent to the frontend.
 type TaskJSON struct {
-	ID               int     `json:"id"`
+	ID               ksid.ID `json:"id"`
 	Task             string  `json:"task"`
 	Repo             string  `json:"repo"`
 	Branch           string  `json:"branch"`
@@ -34,8 +36,8 @@ type StatusResp struct {
 
 // CreateTaskResp is the response for POST /api/v1/tasks.
 type CreateTaskResp struct {
-	Status string `json:"status"`
-	ID     int    `json:"id"`
+	Status string  `json:"status"`
+	ID     ksid.ID `json:"id"`
 }
 
 // CreateTaskReq is the request body for POST /api/v1/tasks.

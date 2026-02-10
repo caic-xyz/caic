@@ -34,10 +34,10 @@ export default function App() {
 
   // After creating a task, it may not have a branch yet. Store the task ID to
   // navigate once the branch appears.
-  const [pendingNavId, setPendingNavId] = createSignal<number | null>(null);
+  const [pendingNavId, setPendingNavId] = createSignal<string | null>(null);
 
   // Track previous task states to detect transitions to "waiting".
-  let prevStates = new Map<number, string>();
+  let prevStates = new Map<string, string>();
 
   // Tick every second for live elapsed-time display.
   const [now, setNow] = createSignal(Date.now());
@@ -47,7 +47,7 @@ export default function App() {
   }
 
   const selectedTask = (): TaskJSON | null => findTaskByPath(tasks(), location.pathname);
-  const selectedId = (): number | null => selectedTask()?.id ?? null;
+  const selectedId = (): string | null => selectedTask()?.id ?? null;
 
   onMount(async () => {
     requestNotificationPermission();
@@ -141,7 +141,7 @@ export default function App() {
       const aT = isTerminal(a.state) ? 1 : 0;
       const bT = isTerminal(b.state) ? 1 : 0;
       if (aT !== bT) return aT - bT;
-      return b.id - a.id;
+      return b.id > a.id ? -1 : b.id < a.id ? 1 : 0;
     });
 
   return (
@@ -241,7 +241,7 @@ export default function App() {
             <div class={styles.detailPane}>
               <button class={styles.backBtn} onClick={() => navigate("/")}>&larr; Back</button>
               <TaskView
-                taskId={selectedId() ?? 0}
+                taskId={selectedId() ?? ""}
                 taskState={selectedTask()?.state ?? "pending"}
                 taskQuery={selectedTask()?.task ?? ""}
                 onClose={() => navigate("/")}

@@ -54,7 +54,7 @@ interface Turn {
 }
 
 interface Props {
-  taskId: number;
+  taskId: string;
   taskState: string;
   taskQuery: string;
   onClose: () => void;

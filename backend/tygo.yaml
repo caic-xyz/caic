@@ -4,3 +4,5 @@ packages:
     exclude_files:
       - validate.go
       - routes.go
+    type_mappings:
+      ksid.ID: "string"

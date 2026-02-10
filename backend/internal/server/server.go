@@ -14,10 +14,11 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
-	"strconv"
+	"sort"
 	"sync"
 	"time"
 
+	"github.com/maruel/ksid"
 	"github.com/maruel/wmao/backend/frontend"
 	"github.com/maruel/wmao/backend/internal/agent"
 	"github.com/maruel/wmao/backend/internal/container"
@@ -37,7 +38,7 @@ type Server struct {
 	repos    []repoInfo
 	runners  map[string]*task.Runner // keyed by RelPath
 	mu       sync.Mutex
-	tasks    []*taskEntry
+	tasks    map[string]*taskEntry
 	changed  chan struct{} // closed on task mutation; replaced under mu
 	maxTurns int
 	logDir   string
@@ -67,6 +68,7 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string) (*Ser
 
 	s := &Server{
 		runners:  make(map[string]*task.Runner, len(absPaths)),
+		tasks:    make(map[string]*taskEntry),
 		changed:  make(chan struct{}),
 		maxTurns: maxTurns,
 		logDir:   logDir,
@@ -189,11 +191,12 @@ func (s *Server) listRepos(_ context.Context, _ *dto.EmptyReq) (*[]dto.RepoJSON,
 
 func (s *Server) listTasks(_ context.Context, _ *dto.EmptyReq) (*[]dto.TaskJSON, error) {
 	s.mu.Lock()
-	out := make([]dto.TaskJSON, len(s.tasks))
-	for i, e := range s.tasks {
-		out[i] = toJSON(i, e)
+	out := make([]dto.TaskJSON, 0, len(s.tasks))
+	for _, e := range s.tasks {
+		out = append(out, toJSON(e))
 	}
 	s.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return &out, nil
 }
 
@@ -214,12 +217,11 @@ func (s *Server) handleCreateTask(ctx context.Context) http.HandlerFunc {
 			return
 		}
 
-		t := &task.Task{Prompt: req.Prompt, Repo: req.Repo}
+		t := &task.Task{ID: ksid.NewID(), Prompt: req.Prompt, Repo: req.Repo}
 		entry := &taskEntry{task: t, done: make(chan struct{})}
 
 		s.mu.Lock()
-		id := len(s.tasks)
-		s.tasks = append(s.tasks, entry)
+		s.tasks[t.ID.String()] = entry
 		s.taskChanged()
 		s.mu.Unlock()
 
@@ -243,7 +245,7 @@ func (s *Server) handleCreateTask(ctx context.Context) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(dto.CreateTaskResp{Status: "accepted", ID: id})
+		_ = json.NewEncoder(w).Encode(dto.CreateTaskResp{Status: "accepted", ID: t.ID})
 	}
 }
 
@@ -316,12 +318,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	var prev []byte
 	for {
 		s.mu.Lock()
-		out := make([]dto.TaskJSON, len(s.tasks))
-		for i, e := range s.tasks {
-			out[i] = toJSON(i, e)
+		out := make([]dto.TaskJSON, 0, len(s.tasks))
+		for _, e := range s.tasks {
+			out = append(out, toJSON(e))
 		}
 		ch := s.changed
 		s.mu.Unlock()
+		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 
 		data, err := json.Marshal(out)
 		if err != nil {
@@ -414,15 +417,11 @@ func (s *Server) loadTerminatedTasks() {
 	if len(loaded) == 0 {
 		return
 	}
-	// LoadTerminated returns most-recent-first; reverse so IDs are ascending by
-	// start time and the UI sorts them naturally.
-	for i, j := 0, len(loaded)-1; i < j; i, j = i+1, j-1 {
-		loaded[i], loaded[j] = loaded[j], loaded[i]
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, lt := range loaded {
 		t := &task.Task{
+			ID:        ksid.NewID(),
 			Prompt:    lt.Prompt,
 			Repo:      lt.Repo,
 			Branch:    lt.Branch,
@@ -435,7 +434,7 @@ func (s *Server) loadTerminatedTasks() {
 		done := make(chan struct{})
 		close(done)
 		entry := &taskEntry{task: t, result: lt.Result, done: done}
-		s.tasks = append(s.tasks, entry)
+		s.tasks[t.ID.String()] = entry
 	}
 	s.taskChanged()
 	slog.Info("loaded terminated tasks from logs", "count", len(loaded))
@@ -450,13 +449,13 @@ func (s *Server) adoptContainers(ctx context.Context) {
 		return
 	}
 
-	// Map branches loaded from terminated task logs to their index in
+	// Map branches loaded from terminated task logs to their ID in
 	// s.tasks so we can replace stale entries with live containers.
 	s.mu.Lock()
-	branchIdx := make(map[string]int, len(s.tasks))
-	for i, e := range s.tasks {
+	branchID := make(map[string]string, len(s.tasks))
+	for id, e := range s.tasks {
 		if e.task.Branch != "" {
-			branchIdx[e.task.Branch] = i
+			branchID[e.task.Branch] = id
 		}
 	}
 	s.mu.Unlock()
@@ -534,16 +533,16 @@ func (s *Server) adoptContainers(ctx context.Context) {
 				t.RestoreMessages(lt.Msgs)
 				slog.Info("restored conversation from logs", "repo", ri.RelPath, "branch", branch, "container", e.Name, "messages", len(lt.Msgs))
 			}
+			t.ID = ksid.NewID()
 			t.InitDoneCh()
 			entry := &taskEntry{task: t, done: make(chan struct{})}
 
 			s.mu.Lock()
-			if idx, ok := branchIdx[branch]; ok {
+			if oldID, ok := branchID[branch]; ok {
 				// Replace the stale terminated entry with the live container.
-				s.tasks[idx] = entry
-			} else {
-				s.tasks = append(s.tasks, entry)
+				delete(s.tasks, oldID)
 			}
+			s.tasks[t.ID.String()] = entry
 			s.taskChanged()
 			s.mu.Unlock()
 
@@ -575,18 +574,14 @@ func (s *Server) adoptContainers(ctx context.Context) {
 
 // getTask looks up a task by the {id} path parameter.
 func (s *Server) getTask(r *http.Request) (*taskEntry, error) {
-	idStr := r.PathValue("id")
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
-		return nil, dto.BadRequest("invalid task id")
-	}
-
+	id := r.PathValue("id")
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if id < 0 || id >= len(s.tasks) {
+	entry, ok := s.tasks[id]
+	if !ok {
 		return nil, dto.NotFound("task")
 	}
-	return s.tasks[id], nil
+	return entry, nil
 }
 
 // taskChanged closes the current changed channel and replaces it. Must be
@@ -603,9 +598,9 @@ func (s *Server) notifyTaskChange() {
 	s.mu.Unlock()
 }
 
-func toJSON(id int, e *taskEntry) dto.TaskJSON {
+func toJSON(e *taskEntry) dto.TaskJSON {
 	j := dto.TaskJSON{
-		ID:               id,
+		ID:               e.task.ID,
 		Task:             e.task.Prompt,
 		Repo:             e.task.Repo,
 		Branch:           e.task.Branch,

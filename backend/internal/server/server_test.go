@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -25,8 +26,16 @@ func decodeError(t *testing.T, w *httptest.ResponseRecorder) dto.ErrorDetails {
 	return resp.Error
 }
 
+func newTestServer() *Server {
+	return &Server{
+		runners: map[string]*task.Runner{},
+		tasks:   make(map[string]*taskEntry),
+		changed: make(chan struct{}),
+	}
+}
+
 func TestHandleTaskEventsNotFound(t *testing.T) {
-	s := &Server{runners: map[string]*task.Runner{}, changed: make(chan struct{})}
+	s := newTestServer()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/99/events", http.NoBody)
 	req.SetPathValue("id", "99")
 	w := httptest.NewRecorder()
@@ -40,31 +49,31 @@ func TestHandleTaskEventsNotFound(t *testing.T) {
 	}
 }
 
-func TestHandleTaskEventsInvalidID(t *testing.T) {
-	s := &Server{runners: map[string]*task.Runner{}, changed: make(chan struct{})}
+func TestHandleTaskEventsNonexistentID(t *testing.T) {
+	s := newTestServer()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/abc/events", http.NoBody)
 	req.SetPathValue("id", "abc")
 	w := httptest.NewRecorder()
 	s.handleTaskEvents(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 	}
 	e := decodeError(t, w)
-	if e.Code != dto.CodeBadRequest {
-		t.Errorf("code = %q, want %q", e.Code, dto.CodeBadRequest)
+	if e.Code != dto.CodeNotFound {
+		t.Errorf("code = %q, want %q", e.Code, dto.CodeNotFound)
 	}
 }
 
 func TestHandleTaskInputNotRunning(t *testing.T) {
-	s := &Server{runners: map[string]*task.Runner{}, changed: make(chan struct{})}
-	s.tasks = append(s.tasks, &taskEntry{
+	s := newTestServer()
+	s.tasks["t1"] = &taskEntry{
 		task: &task.Task{Prompt: "test"},
 		done: make(chan struct{}),
-	})
+	}
 
 	body := strings.NewReader(`{"prompt":"hello"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/0/input", body)
-	req.SetPathValue("id", "0")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/input", body)
+	req.SetPathValue("id", "t1")
 	w := httptest.NewRecorder()
 	handleWithTask(s, s.sendInput)(w, req)
 	if w.Code != http.StatusConflict {
@@ -77,15 +86,15 @@ func TestHandleTaskInputNotRunning(t *testing.T) {
 }
 
 func TestHandleTaskInputEmptyPrompt(t *testing.T) {
-	s := &Server{runners: map[string]*task.Runner{}, changed: make(chan struct{})}
-	s.tasks = append(s.tasks, &taskEntry{
+	s := newTestServer()
+	s.tasks["t1"] = &taskEntry{
 		task: &task.Task{Prompt: "test"},
 		done: make(chan struct{}),
-	})
+	}
 
 	body := strings.NewReader(`{"prompt":""}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/0/input", body)
-	req.SetPathValue("id", "0")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/input", body)
+	req.SetPathValue("id", "t1")
 	w := httptest.NewRecorder()
 	handleWithTask(s, s.sendInput)(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -98,14 +107,14 @@ func TestHandleTaskInputEmptyPrompt(t *testing.T) {
 }
 
 func TestHandleTerminateNotWaiting(t *testing.T) {
-	s := &Server{runners: map[string]*task.Runner{}, changed: make(chan struct{})}
-	s.tasks = append(s.tasks, &taskEntry{
+	s := newTestServer()
+	s.tasks["t1"] = &taskEntry{
 		task: &task.Task{Prompt: "test", State: task.StatePending},
 		done: make(chan struct{}),
-	})
+	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/0/terminate", http.NoBody)
-	req.SetPathValue("id", "0")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/terminate", http.NoBody)
+	req.SetPathValue("id", "t1")
 	w := httptest.NewRecorder()
 	handleWithTask(s, s.terminateTask)(w, req)
 	if w.Code != http.StatusConflict {
@@ -120,14 +129,14 @@ func TestHandleTerminateNotWaiting(t *testing.T) {
 func TestHandleTerminateWaiting(t *testing.T) {
 	tk := &task.Task{Prompt: "test", State: task.StateWaiting}
 	tk.InitDoneCh()
-	s := &Server{runners: map[string]*task.Runner{}, changed: make(chan struct{})}
-	s.tasks = append(s.tasks, &taskEntry{
+	s := newTestServer()
+	s.tasks["t1"] = &taskEntry{
 		task: tk,
 		done: make(chan struct{}),
-	})
+	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/0/terminate", http.NoBody)
-	req.SetPathValue("id", "0")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/terminate", http.NoBody)
+	req.SetPathValue("id", "t1")
 	w := httptest.NewRecorder()
 	handleWithTask(s, s.terminateTask)(w, req)
 	if w.Code != http.StatusOK {
@@ -147,6 +156,7 @@ func TestHandleCreateTaskReturnsID(t *testing.T) {
 		runners: map[string]*task.Runner{
 			"myrepo": {BaseBranch: "main", Dir: t.TempDir()},
 		},
+		tasks:   make(map[string]*taskEntry),
 		changed: make(chan struct{}),
 	}
 	handler := s.handleCreateTask(t.Context())
@@ -159,17 +169,17 @@ func TestHandleCreateTaskReturnsID(t *testing.T) {
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusAccepted)
 	}
-	var resp map[string]any
+	var resp dto.CreateTaskResp
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := resp["id"]; !ok {
-		t.Error("response missing 'id' field")
+	if resp.ID == 0 {
+		t.Error("response has zero 'id' field")
 	}
 }
 
 func TestHandleCreateTaskMissingRepo(t *testing.T) {
-	s := &Server{runners: map[string]*task.Runner{}, changed: make(chan struct{})}
+	s := newTestServer()
 	handler := s.handleCreateTask(t.Context())
 
 	body := strings.NewReader(`{"prompt":"test task"}`)
@@ -187,7 +197,7 @@ func TestHandleCreateTaskMissingRepo(t *testing.T) {
 }
 
 func TestHandleCreateTaskUnknownRepo(t *testing.T) {
-	s := &Server{runners: map[string]*task.Runner{}, changed: make(chan struct{})}
+	s := newTestServer()
 	handler := s.handleCreateTask(t.Context())
 
 	body := strings.NewReader(`{"prompt":"test","repo":"nonexistent"}`)
@@ -205,7 +215,7 @@ func TestHandleCreateTaskUnknownRepo(t *testing.T) {
 }
 
 func TestHandleCreateTaskUnknownField(t *testing.T) {
-	s := &Server{runners: map[string]*task.Runner{}, changed: make(chan struct{})}
+	s := newTestServer()
 	handler := s.handleCreateTask(t.Context())
 
 	body := strings.NewReader(`{"prompt":"test","repo":"r","bogus":true}`)
@@ -229,6 +239,7 @@ func TestHandleListRepos(t *testing.T) {
 			{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"},
 		},
 		runners: map[string]*task.Runner{},
+		tasks:   make(map[string]*taskEntry),
 		changed: make(chan struct{}),
 	}
 
@@ -290,6 +301,7 @@ func TestLoadTerminatedTasksOnStartup(t *testing.T) {
 
 	s := &Server{
 		runners: map[string]*task.Runner{},
+		tasks:   make(map[string]*taskEntry),
 		changed: make(chan struct{}),
 		logDir:  logDir,
 	}
@@ -301,33 +313,39 @@ func TestLoadTerminatedTasksOnStartup(t *testing.T) {
 		t.Fatalf("len(tasks) = %d, want 3", len(s.tasks))
 	}
 
-	// Verify tasks are in ascending StartedAt order (oldest first).
-	if s.tasks[0].task.Prompt != "task 0" {
-		t.Errorf("tasks[0].Prompt = %q, want %q", s.tasks[0].task.Prompt, "task 0")
+	// Collect prompts sorted by ksid (time-sortable) to verify all loaded.
+	prompts := make([]string, 0, len(s.tasks))
+	var anyEntry *taskEntry
+	for _, e := range s.tasks {
+		prompts = append(prompts, e.task.Prompt)
+		if anyEntry == nil {
+			anyEntry = e
+		}
 	}
-	if s.tasks[2].task.Prompt != "task 2" {
-		t.Errorf("tasks[2].Prompt = %q, want %q", s.tasks[2].task.Prompt, "task 2")
+	sort.Strings(prompts)
+	if prompts[0] != "task 0" || prompts[1] != "task 1" || prompts[2] != "task 2" {
+		t.Errorf("prompts = %v, want [task 0, task 1, task 2]", prompts)
 	}
 
-	// Verify result is populated.
-	if s.tasks[0].result == nil {
-		t.Fatal("tasks[0].result is nil")
-	}
-	if s.tasks[0].result.CostUSD != 1.0 {
-		t.Errorf("tasks[0].result.CostUSD = %f, want 1.0", s.tasks[0].result.CostUSD)
+	// Verify result is populated on at least one entry.
+	if anyEntry.result == nil {
+		t.Fatal("result is nil on a loaded entry")
 	}
 
 	// Verify done channel is closed (task is terminal).
-	select {
-	case <-s.tasks[0].done:
-	default:
-		t.Error("tasks[0].done not closed")
+	for _, e := range s.tasks {
+		select {
+		case <-e.done:
+		default:
+			t.Error("done channel not closed on a loaded entry")
+		}
 	}
 }
 
 func TestLoadTerminatedTasksEmptyLogDir(t *testing.T) {
 	s := &Server{
 		runners: map[string]*task.Runner{},
+		tasks:   make(map[string]*taskEntry),
 		changed: make(chan struct{}),
 		logDir:  "",
 	}

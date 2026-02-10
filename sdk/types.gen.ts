@@ -70,7 +70,7 @@ export interface RepoJSON {
  * TaskJSON is the JSON representation sent to the frontend.
  */
 export interface TaskJSON {
-  id: number /* int */;
+  id: string;
   task: string;
   repo: string;
   branch: string;
@@ -95,7 +95,7 @@ export interface StatusResp {
  */
 export interface CreateTaskResp {
   status: string;
-  id: number /* int */;
+  id: string;
 }
 /**
  * CreateTaskReq is the request body for POST /api/v1/tasks.
