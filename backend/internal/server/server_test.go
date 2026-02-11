@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -347,6 +348,108 @@ func TestLoadTerminatedTasksOnStartup(t *testing.T) {
 		default:
 			t.Error("done channel not closed on a loaded entry")
 		}
+	}
+}
+
+func TestTerminatedTaskEventsAfterRestart(t *testing.T) {
+	logDir := t.TempDir()
+
+	// Write a terminated task log with real agent messages.
+	meta := mustJSON(t, agent.MetaMessage{
+		MessageType: "wmao_meta", Version: 1, Prompt: "fix the bug",
+		Repo: "r", Branch: "wmao/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	initMsg := mustJSON(t, agent.SystemInitMessage{
+		MessageType: "system", Subtype: "init", Model: "claude-opus-4-6", Version: "2.0", SessionID: "s1",
+	})
+	assistant := mustJSON(t, agent.AssistantMessage{
+		MessageType: "assistant",
+		Message: agent.APIMessage{
+			Model:   "claude-opus-4-6",
+			Content: []agent.ContentBlock{{Type: "text", Text: "I found the bug"}},
+			Usage:   agent.Usage{InputTokens: 100, OutputTokens: 50},
+		},
+	})
+	result := mustJSON(t, agent.ResultMessage{
+		MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.05, DurationMs: 1000, NumTurns: 1,
+	})
+	trailer := mustJSON(t, agent.MetaResultMessage{
+		MessageType: "wmao_result", State: "terminated", CostUSD: 0.05, DurationMs: 1000,
+	})
+	writeLogFile(t, logDir, "task.jsonl", meta, initMsg, assistant, result, trailer)
+
+	// Simulate server restart: load terminated tasks from logs.
+	s := &Server{
+		runners: map[string]*task.Runner{},
+		tasks:   make(map[string]*taskEntry),
+		changed: make(chan struct{}),
+		logDir:  logDir,
+	}
+	s.loadTerminatedTasks()
+
+	// Find the task ID.
+	s.mu.Lock()
+	if len(s.tasks) != 1 {
+		t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
+	}
+	var taskID string
+	for id := range s.tasks {
+		taskID = id
+	}
+	s.mu.Unlock()
+
+	// Subscribe to events via SSE. The handler should return immediately for
+	// terminated tasks instead of blocking until context deadline.
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/events", http.NoBody).WithContext(ctx)
+	req.SetPathValue("id", taskID)
+	w := httptest.NewRecorder()
+	start := time.Now()
+	s.handleTaskEvents(w, req)
+	elapsed := time.Since(start)
+	if elapsed > 200*time.Millisecond {
+		t.Errorf("handleTaskEvents blocked for %v; terminated tasks should return immediately after history replay", elapsed)
+	}
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	// Parse SSE events from the response body.
+	body := w.Body.String()
+	var events []dto.EventMessage
+	for _, line := range strings.Split(body, "\n") {
+		after, ok := strings.CutPrefix(line, "data: ")
+		if !ok {
+			continue
+		}
+		var ev dto.EventMessage
+		if err := json.Unmarshal([]byte(after), &ev); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
+		events = append(events, ev)
+	}
+	if len(events) == 0 {
+		t.Fatal("no SSE events received for terminated task with messages")
+	}
+
+	// Verify we got the expected event kinds.
+	kinds := make([]string, len(events))
+	for i, ev := range events {
+		kinds[i] = ev.Kind
+	}
+	wantKinds := []string{"init", "text", "usage", "result"}
+	if len(kinds) != len(wantKinds) {
+		t.Fatalf("event kinds = %v, want %v", kinds, wantKinds)
+	}
+	for i := range wantKinds {
+		if kinds[i] != wantKinds[i] {
+			t.Errorf("kinds[%d] = %q, want %q", i, kinds[i], wantKinds[i])
+		}
+	}
+	// Verify text content.
+	if events[1].Text == nil || events[1].Text.Text != "I found the bug" {
+		t.Errorf("text event = %+v, want text 'I found the bug'", events[1].Text)
 	}
 }
 

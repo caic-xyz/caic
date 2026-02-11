@@ -73,6 +73,11 @@ export default function TaskView(props: Props) {
       es.onerror = () => {
         es?.close();
         es = null;
+        // For terminal tasks the server closes the stream after sending
+        // history. If we already received data, don't reconnect.
+        if (live && messages().length > 0) {
+          return;
+        }
         timer = setTimeout(connect, delay);
         delay = Math.min(delay * 1.5, 4000);
       };

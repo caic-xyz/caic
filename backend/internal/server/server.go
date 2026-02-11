@@ -296,6 +296,13 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher.Flush()
 
+	// Terminal tasks (terminated, failed) will never produce new messages.
+	// Return immediately so the client receives history without blocking.
+	state := entry.task.State
+	if state == task.StateTerminated || state == task.StateFailed {
+		return
+	}
+
 	// Phase 2: stream live messages with accurate timestamps.
 	for msg := range live {
 		writeEvents(tracker.convertMessage(msg, time.Now()))
