@@ -128,7 +128,9 @@ func (t *Task) Messages() []agent.Message {
 }
 
 // RestoreMessages sets the initial message history from previously saved logs.
-// It also extracts metadata from the last SystemInitMessage, if any.
+// It also extracts metadata from the last SystemInitMessage, if any, and
+// infers the task state from the trailing messages: a trailing ResultMessage
+// means the agent completed its turn (StateWaiting or StateAsking).
 func (t *Task) RestoreMessages(msgs []agent.Message) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -139,6 +141,19 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 			t.Model = init.Model
 			t.ClaudeCodeVersion = init.Version
 			break
+		}
+	}
+	// Infer state: if the last message is a ResultMessage, the agent finished
+	// its turn and is waiting for user input (or asking a question). Only
+	// override non-terminal states — terminated/failed tasks loaded from logs
+	// must keep their recorded state.
+	if len(msgs) > 0 && t.State != StateTerminated && t.State != StateFailed && t.State != StateTerminating {
+		if _, ok := msgs[len(msgs)-1].(*agent.ResultMessage); ok {
+			if lastAssistantHasAsk(msgs) {
+				t.setState(StateAsking)
+			} else {
+				t.setState(StateWaiting)
+			}
 		}
 	}
 }
@@ -320,7 +335,9 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) error {
 		t.mu.Unlock()
 		return errors.New("no container to reconnect to")
 	}
-	t.setState(StateRunning)
+	// Remember the state inferred from restored messages so we don't
+	// blindly override it to StateRunning for an idle relay.
+	prevState := t.State
 	t.mu.Unlock()
 
 	msgCh := make(chan agent.Message, 256)
@@ -340,6 +357,15 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) error {
 
 	var session *agent.Session
 	if relayAlive {
+		// Only transition to StateRunning if the restored messages indicate
+		// the agent was still producing output (no trailing ResultMessage).
+		// If the agent had already completed its turn, keep the inferred
+		// StateWaiting/StateAsking so the UI shows the correct status.
+		if prevState != StateWaiting && prevState != StateAsking {
+			t.mu.Lock()
+			t.setState(StateRunning)
+			t.mu.Unlock()
+		}
 		session, err = agent.AttachRelay(ctx, t.Container, t.RelayOffset, msgCh, logW)
 		if err != nil {
 			slog.Warn("attach relay failed, falling back to --resume", "repo", t.Repo, "branch", t.Branch, "container", t.Container, "err", err)
@@ -347,6 +373,10 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) error {
 		}
 	}
 	if !relayAlive {
+		// Starting a new session via --resume always re-engages the agent.
+		t.mu.Lock()
+		t.setState(StateRunning)
+		t.mu.Unlock()
 		maxTurns := t.MaxTurns
 		if maxTurns == 0 {
 			maxTurns = r.MaxTurns

@@ -298,7 +298,7 @@ func TestRunnerInitSkipsExisting(t *testing.T) {
 
 func TestRestoreMessages(t *testing.T) {
 	t.Run("Basic", func(t *testing.T) {
-		tk := &Task{Prompt: "test"}
+		tk := &Task{Prompt: "test", State: StateRunning}
 		msgs := []agent.Message{
 			&agent.SystemInitMessage{MessageType: "system", Subtype: "init", SessionID: "sess-123"},
 			&agent.AssistantMessage{MessageType: "assistant"},
@@ -311,6 +311,53 @@ func TestRestoreMessages(t *testing.T) {
 		}
 		if tk.SessionID != "sess-123" {
 			t.Errorf("SessionID = %q, want %q", tk.SessionID, "sess-123")
+		}
+		if tk.State != StateWaiting {
+			t.Errorf("state = %v, want %v (should infer waiting from trailing ResultMessage)", tk.State, StateWaiting)
+		}
+	})
+	t.Run("InfersAsking", func(t *testing.T) {
+		tk := &Task{Prompt: "test", State: StateRunning}
+		msgs := []agent.Message{
+			&agent.SystemInitMessage{MessageType: "system", Subtype: "init", SessionID: "s1"},
+			&agent.AssistantMessage{
+				MessageType: "assistant",
+				Message: agent.APIMessage{
+					Content: []agent.ContentBlock{
+						{Type: "tool_use", Name: "AskUserQuestion"},
+					},
+				},
+			},
+			&agent.ResultMessage{MessageType: "result"},
+		}
+		tk.RestoreMessages(msgs)
+		if tk.State != StateAsking {
+			t.Errorf("state = %v, want %v (should infer asking from AskUserQuestion + ResultMessage)", tk.State, StateAsking)
+		}
+	})
+	t.Run("NoResultKeepsState", func(t *testing.T) {
+		tk := &Task{Prompt: "test", State: StateRunning}
+		msgs := []agent.Message{
+			&agent.SystemInitMessage{MessageType: "system", Subtype: "init", SessionID: "s1"},
+			&agent.AssistantMessage{MessageType: "assistant"},
+		}
+		tk.RestoreMessages(msgs)
+		// No trailing ResultMessage → agent was still producing output.
+		if tk.State != StateRunning {
+			t.Errorf("state = %v, want %v (no ResultMessage → still running)", tk.State, StateRunning)
+		}
+	})
+	t.Run("TerminalStatePreserved", func(t *testing.T) {
+		for _, state := range []State{StateTerminated, StateFailed, StateTerminating} {
+			tk := &Task{Prompt: "test", State: state}
+			msgs := []agent.Message{
+				&agent.AssistantMessage{MessageType: "assistant"},
+				&agent.ResultMessage{MessageType: "result"},
+			}
+			tk.RestoreMessages(msgs)
+			if tk.State != state {
+				t.Errorf("state = %v, want %v (terminal state must not be overridden)", tk.State, state)
+			}
 		}
 	})
 	t.Run("UsesLastSessionID", func(t *testing.T) {

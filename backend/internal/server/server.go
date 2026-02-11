@@ -559,7 +559,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		Repo:           ri.RelPath,
 		Branch:         branch,
 		Container:      e.Name,
-		State:          task.StateWaiting,
+		State:          task.StateRunning,
 		StateUpdatedAt: stateUpdatedAt,
 		StartedAt:      startedAt,
 	}
