@@ -53,17 +53,29 @@ export default function App() {
 
   // Subscribe to task list updates via SSE with automatic reconnection.
   // Backoff: 500ms × 1.5 each failure, capped at 4s, reset on success.
+  // On reconnect, check if the frontend was rebuilt and reload if so.
   const [connected, setConnected] = createSignal(true);
   {
     let es: EventSource | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let delay = 500;
+    const initialScriptSrc = document.querySelector<HTMLScriptElement>("script[src^='/assets/']")?.src ?? "";
 
     function connect() {
       es = new EventSource("/api/v1/events");
       es.addEventListener("open", () => {
         setConnected(true);
         delay = 500;
+        // Check if frontend was rebuilt while disconnected.
+        fetch("/index.html")
+          .then((r) => r.text())
+          .then((html) => {
+            const m = html.match(/<script[^>]+src="([^"]*\/assets\/[^"]+)"/);
+            if (m && initialScriptSrc && !initialScriptSrc.endsWith(m[1])) {
+              window.location.reload();
+            }
+          })
+          .catch(() => {});
         listTasks().then(setTasks).catch(() => {});
       });
       es.addEventListener("tasks", (e) => {

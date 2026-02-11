@@ -141,7 +141,9 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 				return
 			}
 		}
-		// SPA fallback: serve index.html.
+		// SPA fallback: serve index.html with no-cache so the frontend
+		// can detect rebuilds on reconnect.
+		w.Header().Set("Cache-Control", "no-cache")
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
 	})
