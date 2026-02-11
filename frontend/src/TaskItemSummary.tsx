@@ -51,7 +51,7 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
         <div class={styles.meta}>
           {props.claudeCodeVersion}{props.claudeCodeVersion && props.model ? " · " : ""}{props.model}
           <Show when={props.costUSD > 0}>
-            {" · "}${props.costUSD.toFixed(4)}
+            {" · "}${props.costUSD.toFixed(2)}
           </Show>
           <Show when={(props.containerUptimeMs ?? 0) > 0}>
             {" · "}{formatUptime(props.containerUptimeMs ?? 0)}

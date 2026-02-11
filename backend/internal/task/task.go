@@ -111,6 +111,11 @@ type Task struct {
 	closeLog func()             // closes the session log file
 	doneCh   chan struct{}      // closed when user calls Terminate
 	doneOnce sync.Once
+
+	// Live stats accumulated from ResultMessages during execution.
+	liveCostUSD    float64
+	liveNumTurns   int
+	liveDurationMs int64
 }
 
 // setState updates the state and records the transition time. The caller must
@@ -118,6 +123,14 @@ type Task struct {
 func (t *Task) setState(s State) {
 	t.State = s
 	t.StateUpdatedAt = time.Now().UTC()
+}
+
+// LiveStats returns the latest cost, turn count, and duration accumulated
+// from ResultMessages received during execution.
+func (t *Task) LiveStats() (costUSD float64, numTurns int, durationMs int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.liveCostUSD, t.liveNumTurns, t.liveDurationMs
 }
 
 // Messages returns a copy of all received agent messages.
@@ -140,6 +153,15 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 			t.SessionID = init.SessionID
 			t.Model = init.Model
 			t.ClaudeCodeVersion = init.Version
+			break
+		}
+	}
+	// Restore live stats from the last ResultMessage.
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if rm, ok := msgs[i].(*agent.ResultMessage); ok {
+			t.liveCostUSD = rm.TotalCostUSD
+			t.liveNumTurns = rm.NumTurns
+			t.liveDurationMs = rm.DurationMs
 			break
 		}
 	}
@@ -169,11 +191,16 @@ func (t *Task) addMessage(m agent.Message) {
 		t.ClaudeCodeVersion = init.Version
 	}
 	// Transition to waiting/asking when a result arrives while running.
-	if _, ok := m.(*agent.ResultMessage); ok && t.State == StateRunning {
-		if lastAssistantHasAsk(t.msgs) {
-			t.setState(StateAsking)
-		} else {
-			t.setState(StateWaiting)
+	if rm, ok := m.(*agent.ResultMessage); ok {
+		t.liveCostUSD = rm.TotalCostUSD
+		t.liveNumTurns = rm.NumTurns
+		t.liveDurationMs = rm.DurationMs
+		if t.State == StateRunning {
+			if lastAssistantHasAsk(t.msgs) {
+				t.setState(StateAsking)
+			} else {
+				t.setState(StateWaiting)
+			}
 		}
 	}
 	// Fan out to subscribers (non-blocking).
