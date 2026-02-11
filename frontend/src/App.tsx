@@ -225,16 +225,18 @@ export default function App() {
               <p class={styles.placeholder}>Task not found.</p>
             </div>
           </Match>
-          <Match when={selectedId() !== null}>
-            <div class={styles.detailPane}>
-              <button class={styles.backBtn} onClick={() => navigate("/")}>&larr; Back</button>
-              <TaskView
-                taskId={selectedId() ?? ""}
-                taskState={selectedTask()?.state ?? "pending"}
-                taskQuery={selectedTask()?.task ?? ""}
-                onClose={() => navigate("/")}
-              />
-            </div>
+          <Match when={selectedId()} keyed>
+            {(id) => (
+              <div class={styles.detailPane}>
+                <button class={styles.backBtn} onClick={() => navigate("/")}>&larr; Back</button>
+                <TaskView
+                  taskId={id}
+                  taskState={selectedTask()?.state ?? "pending"}
+                  taskQuery={selectedTask()?.task ?? ""}
+                  onClose={() => navigate("/")}
+                />
+              </div>
+            )}
           </Match>
         </Switch>
       </div>
