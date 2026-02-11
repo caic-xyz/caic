@@ -1,5 +1,5 @@
 // Main application component for wmao web UI.
-import { createSignal, createEffect, For, Index, Show, Switch, Match, onMount, onCleanup } from "solid-js";
+import { createSignal, For, Index, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { RepoJSON, TaskJSON } from "@sdk/types.gen";
@@ -11,15 +11,7 @@ import { requestNotificationPermission, notifyWaiting } from "./notifications";
 import styles from "./App.module.css";
 
 function taskUrl(t: TaskJSON): string {
-  return `/${t.repo}/${t.branch}`;
-}
-
-function findTaskByPath(tasks: TaskJSON[], pathname: string): TaskJSON | null {
-  if (pathname === "/") return null;
-  for (const t of tasks) {
-    if (t.repo && t.branch && taskUrl(t) === pathname) return t;
-  }
-  return null;
+  return `/task/${t.id}`;
 }
 
 export default function App() {
@@ -33,10 +25,6 @@ export default function App() {
   const [selectedRepo, setSelectedRepo] = createSignal("");
   const [sidebarOpen, setSidebarOpen] = createSignal(true);
 
-  // After creating a task, it may not have a branch yet. Store the task ID to
-  // navigate once the branch appears.
-  const [pendingNavId, setPendingNavId] = createSignal<string | null>(null);
-
   // Track previous task states to detect transitions to "waiting".
   let prevStates = new Map<string, string>();
 
@@ -47,8 +35,14 @@ export default function App() {
     onCleanup(() => clearInterval(timer));
   }
 
-  const selectedTask = (): TaskJSON | null => findTaskByPath(tasks(), location.pathname);
-  const selectedId = (): string | null => selectedTask()?.id ?? null;
+  const selectedId = (): string | null => {
+    const prefix = "/task/";
+    return location.pathname.startsWith(prefix) ? location.pathname.slice(prefix.length) : null;
+  };
+  const selectedTask = (): TaskJSON | null => {
+    const id = selectedId();
+    return id !== null ? (tasks().find((t) => t.id === id) ?? null) : null;
+  };
 
   onMount(async () => {
     requestNotificationPermission();
@@ -109,17 +103,6 @@ export default function App() {
     });
   }
 
-  // Navigate to a newly created task once its branch becomes available.
-  createEffect(() => {
-    const id = pendingNavId();
-    if (id === null) return;
-    const found = tasks().find((item) => item.id === id);
-    if (found && found.branch) {
-      setPendingNavId(null);
-      navigate(taskUrl(found));
-    }
-  });
-
   async function submitTask() {
     const p = prompt().trim();
     const repo = selectedRepo();
@@ -129,7 +112,7 @@ export default function App() {
     try {
       const data = await createTask({ prompt: p, repo });
       setPrompt("");
-      setPendingNavId(data.id);
+      navigate(`/task/${data.id}`);
     } finally {
       setSubmitting(false);
     }
@@ -192,11 +175,7 @@ export default function App() {
           <Index each={sortedTasks()}>
             {(t) => (
               <div
-                onClick={() => {
-                  if (t().branch) {
-                    navigate(taskUrl(t()));
-                  }
-                }}
+                onClick={() => navigate(taskUrl(t()))}
                 class={`${styles.taskCard} ${selectedId() === t().id ? styles.taskCardSelected : ""}`}>
                 <div class={styles.taskHeader}>
                   <strong class={styles.taskTitle}>{t().task}</strong>
