@@ -215,6 +215,7 @@ func TestStateStrings(t *testing.T) {
 		{StateAsking, "asking"},
 		{StatePulling, "pulling"},
 		{StatePushing, "pushing"},
+		{StateTerminating, "terminating"},
 		{StateFailed, "failed"},
 		{StateTerminated, "terminated"},
 	} {

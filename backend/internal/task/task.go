@@ -35,6 +35,7 @@ const (
 	StateAsking             // Agent asked a question (AskUserQuestion), needs answer.
 	StatePulling            // Pulling changes from container.
 	StatePushing            // Pushing to origin.
+	StateTerminating        // User requested termination; cleanup in progress.
 	StateFailed             // Failed at some stage.
 	StateTerminated         // Terminated by user.
 )
@@ -59,6 +60,8 @@ func (s State) String() string {
 		return "pulling"
 	case StatePushing:
 		return "pushing"
+	case StateTerminating:
+		return "terminating"
 	case StateFailed:
 		return "failed"
 	case StateTerminated:
@@ -249,6 +252,7 @@ func (t *Task) InitDoneCh() {
 // session will be closed and the container killed.
 func (t *Task) Terminate() {
 	t.doneOnce.Do(func() {
+		t.setState(StateTerminating)
 		close(t.doneCh)
 	})
 }

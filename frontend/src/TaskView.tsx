@@ -100,7 +100,7 @@ export default function TaskView(props: Props) {
 
   const isActive = () => {
     const s = props.taskState;
-    return s === "running" || s === "branching" || s === "provisioning" || s === "starting" || s === "waiting" || s === "asking";
+    return s === "running" || s === "branching" || s === "provisioning" || s === "starting" || s === "waiting" || s === "asking" || s === "terminating";
   };
 
   const isWaiting = () => props.taskState === "waiting" || props.taskState === "asking";

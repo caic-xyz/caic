@@ -135,6 +135,14 @@ func TestHandleTerminateWaiting(t *testing.T) {
 		done: make(chan struct{}),
 	}
 
+	// Simulate the Kill goroutine that runs in production.
+	runner := &task.Runner{Dir: t.TempDir(), BaseBranch: "main"}
+	done := s.tasks["t1"].done
+	go func() {
+		defer close(done)
+		runner.Kill(t.Context(), tk)
+	}()
+
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/terminate", http.NoBody)
 	req.SetPathValue("id", "t1")
 	w := httptest.NewRecorder()

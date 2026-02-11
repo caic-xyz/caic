@@ -273,6 +273,8 @@ function stateColor(state: string): string {
       return "#cce5ff";
     case "failed":
       return "#f8d7da";
+    case "terminating":
+      return "#fde2c8";
     case "terminated":
       return "#e2e3e5";
     default:

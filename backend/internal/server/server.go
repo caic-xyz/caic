@@ -359,13 +359,21 @@ func (s *Server) sendInput(_ context.Context, entry *taskEntry, req *dto.InputRe
 	return &dto.StatusResp{Status: "sent"}, nil
 }
 
-func (s *Server) terminateTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*dto.StatusResp, error) {
+func (s *Server) terminateTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq) (*dto.StatusResp, error) {
 	state := entry.task.State
 	if state != task.StateWaiting && state != task.StateAsking && state != task.StateRunning {
 		return nil, dto.Conflict("task is not running or waiting")
 	}
 	entry.task.Terminate()
-	return &dto.StatusResp{Status: "terminating"}, nil
+	s.mu.Lock()
+	s.taskChanged()
+	s.mu.Unlock()
+	select {
+	case <-entry.done:
+	case <-ctx.Done():
+		return nil, dto.InternalError("timeout waiting for termination")
+	}
+	return &dto.StatusResp{Status: "terminated"}, nil
 }
 
 func (s *Server) pullTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq) (*dto.PullResp, error) {
@@ -373,7 +381,7 @@ func (s *Server) pullTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq
 	switch t.State {
 	case task.StatePending:
 		return nil, dto.Conflict("task has no container yet")
-	case task.StateFailed, task.StateTerminated:
+	case task.StateTerminating, task.StateFailed, task.StateTerminated:
 		return nil, dto.Conflict("task is in a terminal state")
 	case task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StatePulling, task.StatePushing:
 	}
@@ -390,7 +398,7 @@ func (s *Server) pushTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq
 	switch t.State {
 	case task.StatePending:
 		return nil, dto.Conflict("task has no container yet")
-	case task.StateFailed, task.StateTerminated:
+	case task.StateTerminating, task.StateFailed, task.StateTerminated:
 		return nil, dto.Conflict("task is in a terminal state")
 	case task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StatePulling, task.StatePushing:
 	}
