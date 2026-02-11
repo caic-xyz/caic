@@ -60,131 +60,8 @@
   gap: 1.5rem;
 }
 
-.taskList {
-  flex: 1;
-  overflow: hidden;
-}
-
-.taskListNarrow {
-  flex: 0 0 340px;
-}
-
-.taskListHidden {
-  display: none;
-}
-
-.taskListHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.taskListHeader h2 {
-  margin: 0;
-}
-
-.collapseBtn {
-  border: 1px solid #ddd;
-  background: none;
-  cursor: pointer;
-  font-size: 1.2rem;
-  color: #555;
-  border-radius: 4px;
-  padding: 0 0.5rem;
-  line-height: 1.6;
-}
-
-.collapseBtn:hover {
-  background: #eee;
-}
-
-.expandBtn {
-  border: 1px solid #ddd;
-  background: none;
-  cursor: pointer;
-  font-size: 1.2rem;
-  color: #555;
-  border-radius: 4px;
-  padding: 0.25rem 0.5rem;
-  line-height: 1.6;
-  align-self: flex-start;
-}
-
-.expandBtn:hover {
-  background: #eee;
-}
-
 .placeholder {
   color: #888;
-}
-
-.taskCard {
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 0.75rem;
-  margin-bottom: 0.5rem;
-  cursor: pointer;
-}
-
-.taskCardSelected {
-  border: 2px solid #007bff;
-}
-
-.taskHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.taskTitle {
-  font-size: 0.9rem;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stateGroup {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  flex-shrink: 0;
-}
-
-.stateBadge {
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  white-space: nowrap;
-  flex-shrink: 0;
-  line-height: 1.4;
-}
-
-.durationLabel {
-  font-size: 0.7rem;
-  color: #888;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.repoLabel {
-  font-size: 0.75rem;
-  color: #777;
-}
-
-.branchLabel {
-  font-size: 0.8rem;
-  color: #555;
-}
-
-.costLabel {
-  font-size: 0.75rem;
-  color: #888;
-}
-
-.errorLabel {
-  color: red;
-  font-size: 0.8rem;
 }
 
 .detailPane {
@@ -229,26 +106,8 @@
     gap: 0;
   }
 
-  .taskList {
-    flex: none;
-    width: 100%;
-  }
-
-  .taskListNarrow {
-    display: none;
-  }
-
   .detailPane {
     width: 100%;
-  }
-
-  .taskListHidden {
-    display: revert;
-  }
-
-  .collapseBtn,
-  .expandBtn {
-    display: none;
   }
 
   .backBtn {

@@ -1,18 +1,14 @@
 // Main application component for wmao web UI.
-import { createSignal, For, Index, Show, Switch, Match, onMount, onCleanup } from "solid-js";
-import type { Accessor } from "solid-js";
+import { createSignal, For, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { RepoJSON, TaskJSON } from "@sdk/types.gen";
 import { listRepos, listTasks, createTask } from "@sdk/api.gen";
 import TaskView from "./TaskView";
+import TaskList from "./TaskList";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
 import { requestNotificationPermission, notifyWaiting } from "./notifications";
 import styles from "./App.module.css";
-
-function taskUrl(t: TaskJSON): string {
-  return `/task/${t.id}`;
-}
 
 export default function App() {
   const navigate = useNavigate();
@@ -118,16 +114,6 @@ export default function App() {
     }
   }
 
-  // Most recent first; terminal tasks last.
-  const isTerminal = (s: string) => s === "failed" || s === "terminated";
-  const sortedTasks = () =>
-    [...tasks()].sort((a, b) => {
-      const aT = isTerminal(a.state) ? 1 : 0;
-      const bT = isTerminal(b.state) ? 1 : 0;
-      if (aT !== bT) return aT - bT;
-      return b.id > a.id ? -1 : b.id < a.id ? 1 : 0;
-    });
-
   return (
     <div class={styles.app}>
       <div class={styles.titleRow}>
@@ -164,59 +150,14 @@ export default function App() {
       </form>
 
       <div class={styles.layout}>
-        <div class={`${styles.taskList} ${selectedId() !== null ? styles.taskListNarrow : ""} ${sidebarOpen() ? "" : styles.taskListHidden}`}>
-          <div class={styles.taskListHeader}>
-            <h2>Tasks</h2>
-            <button class={styles.collapseBtn} onClick={() => setSidebarOpen(false)} title="Collapse sidebar">&lsaquo;</button>
-          </div>
-          <Show when={tasks().length === 0}>
-            <p class={styles.placeholder}>No tasks yet.</p>
-          </Show>
-          <Index each={sortedTasks()}>
-            {(t) => (
-              <div
-                onClick={() => navigate(taskUrl(t()))}
-                class={`${styles.taskCard} ${selectedId() === t().id ? styles.taskCardSelected : ""}`}>
-                <div class={styles.taskHeader}>
-                  <strong class={styles.taskTitle}>{t().task}</strong>
-                  <span class={styles.stateGroup}>
-                    <span class={styles.stateBadge} style={{ background: stateColor(t().state) }}>
-                      {t().state}
-                    </span>
-                    <Show when={t().stateUpdatedAt > 0 && t().state !== "terminated"}>
-                      <StateDuration stateUpdatedAt={t().stateUpdatedAt} now={now} />
-                    </Show>
-                  </span>
-                </div>
-                <Show when={t().repo}>
-                  <div class={styles.repoLabel}>{t().repo}</div>
-                </Show>
-                <Show when={t().branch}>
-                  <div class={styles.branchLabel}>{t().branch}</div>
-                </Show>
-                <Show when={t().model}>
-                  <div class={styles.repoLabel}>{t().model}{t().claudeCodeVersion ? ` · ${t().claudeCodeVersion}` : ""}</div>
-                </Show>
-                <Show when={t().costUSD > 0}>
-                  <span class={styles.costLabel}>
-                    ${t().costUSD.toFixed(4)} &middot; {(t().durationMs / 1000).toFixed(1)}s &middot; {t().numTurns} turns
-                  </span>
-                </Show>
-                <Show when={(t().containerUptimeMs ?? 0) > 0}>
-                  <span class={styles.costLabel}>
-                    container {formatUptime(t().containerUptimeMs ?? 0)}
-                  </span>
-                </Show>
-                <Show when={t().error}>
-                  <div class={styles.errorLabel}>{t().error}</div>
-                </Show>
-              </div>
-            )}
-          </Index>
-        </div>
-        <Show when={!sidebarOpen()}>
-          <button class={styles.expandBtn} onClick={() => setSidebarOpen(true)} title="Expand sidebar">&rsaquo;</button>
-        </Show>
+        <TaskList
+          tasks={tasks}
+          selectedId={selectedId()}
+          sidebarOpen={sidebarOpen}
+          setSidebarOpen={setSidebarOpen}
+          now={now}
+          onSelect={(id) => navigate(`/task/${id}`)}
+        />
 
         <Switch>
           <Match when={location.pathname !== "/" && selectedTask() === null && tasks().length > 0}>
@@ -242,44 +183,4 @@ export default function App() {
       </div>
     </div>
   );
-}
-
-function formatElapsed(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
-}
-
-function StateDuration(props: { stateUpdatedAt: number; now: Accessor<number> }) {
-  const elapsed = () => Math.max(0, props.now() - props.stateUpdatedAt * 1000);
-  return <span class={styles.durationLabel}>{formatElapsed(elapsed())}</span>;
-}
-
-function formatUptime(ms: number): string {
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) return `${sec}s`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ${sec % 60}s`;
-  const hr = Math.floor(min / 60);
-  return `${hr}h ${min % 60}m`;
-}
-
-function stateColor(state: string): string {
-  switch (state) {
-    case "running":
-      return "#d4edda";
-    case "asking":
-      return "#cce5ff";
-    case "failed":
-      return "#f8d7da";
-    case "terminating":
-      return "#fde2c8";
-    case "terminated":
-      return "#e2e3e5";
-    default:
-      return "#fff3cd";
-  }
 }
