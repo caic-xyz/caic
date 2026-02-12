@@ -233,6 +233,9 @@ export default function App() {
                 <TaskView
                   taskId={id}
                   taskState={selectedTask()?.state ?? "pending"}
+                  repo={selectedTask()?.repo ?? ""}
+                  repoURL={selectedTask()?.repoURL}
+                  branch={selectedTask()?.branch ?? ""}
                   onClose={() => navigate("/")}
                   inputDraft={inputDrafts().get(id) ?? ""}
                   onInputDraft={(v) => setInputDrafts((prev) => { const next = new Map(prev); next.set(id, v); return next; })}

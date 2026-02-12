@@ -4,6 +4,7 @@ import { sendInput as apiSendInput, terminateTask as apiTerminateTask, pullTask 
 import { Marked } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
+import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import styles from "./TaskView.module.css";
 
 // A group of consecutive events that should be rendered together.
@@ -33,6 +34,9 @@ interface Turn {
 interface Props {
   taskId: string;
   taskState: string;
+  repo: string;
+  repoURL?: string;
+  branch: string;
   onClose: () => void;
   inputDraft: string;
   onInputDraft: (value: string) => void;
@@ -133,8 +137,13 @@ export default function TaskView(props: Props) {
   return (
     <div class={styles.container}>
       <div class={styles.header}>
-        <Button variant="gray" class={styles.closeBtn} onClick={() => props.onClose()}>Close</Button>
-        <h3>@{props.taskId}</h3>
+        <button class={styles.closeBtn} onClick={() => props.onClose()} title="Close"><CloseIcon width={20} height={20} /></button>
+        <span class={styles.headerMeta}>
+          <Show when={props.repoURL} fallback={<span class={styles.headerRepo}>{props.repo}</span>}>
+            <a class={styles.headerRepo} href={props.repoURL} target="_blank" rel="noopener">{props.repo}</a>
+          </Show>
+          <span class={styles.headerBranch}>{props.branch}</span>
+        </span>
         {props.children}
       </div>
       <div class={styles.messageArea}>

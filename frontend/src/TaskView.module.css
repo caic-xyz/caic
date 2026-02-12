@@ -18,6 +18,49 @@
   margin: 0;
 }
 
+.closeBtn {
+  border: 1px solid #ddd;
+  background: none;
+  cursor: pointer;
+  color: #555;
+  border-radius: 4px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.closeBtn:hover {
+  background: #eee;
+}
+
+.headerMeta {
+  font-size: 0.8rem;
+  color: #555;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headerRepo {
+  color: #0366d6;
+  text-decoration: none;
+}
+
+a.headerRepo:hover {
+  text-decoration: underline;
+}
+
+.headerBranch {
+  margin-left: 0.4em;
+  color: #666;
+}
+
+.headerBranch::before {
+  content: "·";
+  margin-right: 0.4em;
+}
+
 .messageArea {
   flex: 1;
   overflow: auto;
