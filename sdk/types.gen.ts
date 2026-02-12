@@ -195,6 +195,7 @@ export interface EventResult {
   subtype: string;
   isError: boolean;
   result: string;
+  diffStat?: DiffStat;
   totalCostUSD: number /* float64 */;
   durationMs: number /* int64 */;
   durationAPIMs: number /* int64 */;
@@ -255,7 +256,7 @@ export interface TaskJSON {
   container: string;
   state: string;
   stateUpdatedAt: number /* float64 */; // Unix epoch seconds (ms precision) of last state change.
-  diffStat: string;
+  diffStat?: DiffStat;
   costUSD: number /* float64 */;
   durationMs: number /* int64 */;
   numTurns: number /* int */;
@@ -297,11 +298,24 @@ export interface InputReq {
   prompt: string;
 }
 /**
+ * DiffFileStat describes changes to a single file.
+ */
+export interface DiffFileStat {
+  path: string;
+  added: number /* int */;
+  deleted: number /* int */;
+  binary?: boolean;
+}
+/**
+ * DiffStat summarises the changes in a branch relative to its base.
+ */
+export type DiffStat = DiffFileStat[];
+/**
  * PullResp is the response for POST /api/v1/tasks/{id}/pull.
  */
 export interface PullResp {
   status: string;
-  diffStat: string;
+  diffStat?: DiffStat;
 }
 /**
  * UsageWindow represents a single quota window (5-hour or 7-day).

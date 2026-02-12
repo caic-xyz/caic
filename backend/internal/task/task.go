@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/maruel/caic/backend/internal/agent"
+	"github.com/maruel/caic/backend/internal/server/dto"
 	"github.com/maruel/ksid"
 )
 
@@ -93,6 +94,10 @@ type Task struct {
 	liveCostUSD    float64
 	liveNumTurns   int
 	liveDurationMs int64
+
+	// onResult is called when a ResultMessage arrives, before fan-out to
+	// subscribers. It returns the parsed diff stat. May be nil.
+	onResult func() dto.DiffStat
 }
 
 // setState updates the state and records the transition time. The caller must
@@ -100,6 +105,14 @@ type Task struct {
 func (t *Task) setState(s State) {
 	t.State = s
 	t.StateUpdatedAt = time.Now().UTC()
+}
+
+// SetOnResult registers a callback invoked when a ResultMessage arrives.
+// The callback returns the parsed diff stat to attach to the message.
+func (t *Task) SetOnResult(fn func() dto.DiffStat) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.onResult = fn
 }
 
 // LiveStats returns the latest cost, turn count, and duration accumulated
@@ -158,6 +171,16 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 }
 
 func (t *Task) addMessage(m agent.Message) {
+	// Run the onResult callback outside the lock to avoid holding it during I/O.
+	if rm, ok := m.(*agent.ResultMessage); ok {
+		t.mu.Lock()
+		fn := t.onResult
+		t.mu.Unlock()
+		if fn != nil {
+			rm.DiffStat = fn()
+		}
+	}
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.msgs = append(t.msgs, m)

@@ -256,6 +256,49 @@ a.headerRepo:hover {
   margin-top: 0.25rem;
 }
 
+.resultDiffStat {
+  margin: 0.25rem 0 0;
+  padding: 0.4rem 0.6rem;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 3px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.diffFile {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.diffPath {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.diffCounts {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.diffAdded {
+  color: #22863a;
+  margin-right: 0.3em;
+}
+
+.diffDeleted {
+  color: #cb2431;
+}
+
+.diffBinary {
+  color: #6a737d;
+  font-style: italic;
+  flex-shrink: 0;
+}
+
 .toolResult {
   margin-bottom: 0.25rem;
   font-size: 0.8rem;

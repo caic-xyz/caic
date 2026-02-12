@@ -284,6 +284,27 @@ function MessageItem(props: { ev: EventMessage }) {
             <Show when={result.result}>
               <div class={styles.resultText}><Markdown text={result.result} /></div>
             </Show>
+            <Show when={result.diffStat} keyed>
+              {(files) => (
+                <div class={styles.resultDiffStat}>
+                  <For each={files}>
+                    {(f) => (
+                      <div class={styles.diffFile}>
+                        <span class={styles.diffPath}>{f.path}</span>
+                        <Show when={f.binary} fallback={
+                          <span class={styles.diffCounts}>
+                            <Show when={f.added > 0}><span class={styles.diffAdded}>+{f.added}</span></Show>
+                            <Show when={f.deleted > 0}><span class={styles.diffDeleted}>&minus;{f.deleted}</span></Show>
+                          </span>
+                        }>
+                          <span class={styles.diffBinary}>binary</span>
+                        </Show>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              )}
+            </Show>
             <div class={styles.resultMeta}>
               ${result.totalCostUSD.toFixed(4)} &middot; {(result.durationMs / 1000).toFixed(1)}s &middot; {result.numTurns} turns
               &middot; {result.usage.inputTokens + result.usage.outputTokens} tokens

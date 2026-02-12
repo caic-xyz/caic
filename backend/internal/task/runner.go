@@ -15,6 +15,7 @@ import (
 
 	"github.com/maruel/caic/backend/internal/agent"
 	"github.com/maruel/caic/backend/internal/gitutil"
+	"github.com/maruel/caic/backend/internal/server/dto"
 )
 
 // ContainerBackend abstracts md container lifecycle operations for testability.
@@ -33,7 +34,7 @@ type Result struct {
 	Branch      string
 	Container   string
 	State       State
-	DiffStat    string
+	DiffStat    dto.DiffStat
 	CostUSD     float64
 	DurationMs  int64
 	NumTurns    int
@@ -178,6 +179,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) error {
 	t.msgCh = msgCh
 	t.logW = logW
 	t.mu.Unlock()
+	t.SetOnResult(r.makeDiffStatFn(ctx, t))
 	return nil
 }
 
@@ -248,6 +250,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) error {
 	t.logW = logW
 	t.mu.Unlock()
 
+	t.SetOnResult(r.makeDiffStatFn(ctx, t))
 	t.addMessage(syntheticUserInput(t.Prompt))
 	if err := session.Send(t.Prompt); err != nil {
 		_ = logW.Close()
@@ -392,18 +395,18 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (string, e
 
 // PullChanges runs md diff + md pull for the given branch. Returns the diff
 // stat and the first error encountered.
-func (r *Runner) PullChanges(ctx context.Context, branch string) (string, error) {
+func (r *Runner) PullChanges(ctx context.Context, branch string) (dto.DiffStat, error) {
 	r.initDefaults()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 	defer cancel()
 	r.branchMu.Lock()
 	defer r.branchMu.Unlock()
-	diffStat, _ := r.Container.Diff(ctx, r.Dir, branch, "--stat")
+	ds := r.diffStat(ctx, branch)
 	slog.Info("pulling changes", "repo", filepath.Base(r.Dir), "branch", branch)
 	if err := r.Container.Pull(ctx, r.Dir, branch); err != nil {
-		return diffStat, err
+		return ds, err
 	}
-	return diffStat, nil
+	return ds, nil
 }
 
 // PushChanges pushes local changes into the container.
@@ -421,6 +424,29 @@ func (r *Runner) KillContainer(ctx context.Context, branch string) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 	defer cancel()
 	return r.Container.Kill(ctx, r.Dir, branch)
+}
+
+// makeDiffStatFn returns a callback that runs Diff("--numstat") for the task's
+// branch. The returned function is safe to call from addMessage.
+func (r *Runner) makeDiffStatFn(ctx context.Context, t *Task) func() dto.DiffStat {
+	return func() dto.DiffStat {
+		if r.Container == nil {
+			return nil
+		}
+		diffCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		return r.diffStat(diffCtx, t.Branch)
+	}
+}
+
+// diffStat runs Diff("--numstat") and parses the output.
+func (r *Runner) diffStat(ctx context.Context, branch string) dto.DiffStat {
+	numstat, err := r.Container.Diff(ctx, r.Dir, branch, "--numstat")
+	if err != nil {
+		slog.Warn("diff numstat failed", "branch", branch, "err", err)
+		return nil
+	}
+	return ParseDiffNumstat(numstat)
 }
 
 // openLog creates a JSONL log file in LogDir and writes a metadata header as

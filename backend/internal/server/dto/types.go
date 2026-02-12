@@ -15,20 +15,20 @@ type RepoJSON struct {
 
 // TaskJSON is the JSON representation sent to the frontend.
 type TaskJSON struct {
-	ID             ksid.ID `json:"id"`
-	Task           string  `json:"task"`
-	Repo           string  `json:"repo"`
-	RepoURL        string  `json:"repoURL,omitempty"`
-	Branch         string  `json:"branch"`
-	Container      string  `json:"container"`
-	State          string  `json:"state"`
-	StateUpdatedAt float64 `json:"stateUpdatedAt"` // Unix epoch seconds (ms precision) of last state change.
-	DiffStat       string  `json:"diffStat"`
-	CostUSD        float64 `json:"costUSD"`
-	DurationMs     int64   `json:"durationMs"`
-	NumTurns       int     `json:"numTurns"`
-	Error          string  `json:"error,omitempty"`
-	Result         string  `json:"result,omitempty"`
+	ID             ksid.ID  `json:"id"`
+	Task           string   `json:"task"`
+	Repo           string   `json:"repo"`
+	RepoURL        string   `json:"repoURL,omitempty"`
+	Branch         string   `json:"branch"`
+	Container      string   `json:"container"`
+	State          string   `json:"state"`
+	StateUpdatedAt float64  `json:"stateUpdatedAt"` // Unix epoch seconds (ms precision) of last state change.
+	DiffStat       DiffStat `json:"diffStat,omitzero"`
+	CostUSD        float64  `json:"costUSD"`
+	DurationMs     int64    `json:"durationMs"`
+	NumTurns       int      `json:"numTurns"`
+	Error          string   `json:"error,omitempty"`
+	Result         string   `json:"result,omitempty"`
 	// Per-task agent/container metadata.
 	Model             string `json:"model,omitempty"`
 	ClaudeCodeVersion string `json:"claudeCodeVersion,omitempty"`
@@ -59,10 +59,21 @@ type InputReq struct {
 	Prompt string `json:"prompt"`
 }
 
+// DiffFileStat describes changes to a single file.
+type DiffFileStat struct {
+	Path    string `json:"path"`
+	Added   int    `json:"added"`
+	Deleted int    `json:"deleted"`
+	Binary  bool   `json:"binary,omitempty"`
+}
+
+// DiffStat summarises the changes in a branch relative to its base.
+type DiffStat []DiffFileStat
+
 // PullResp is the response for POST /api/v1/tasks/{id}/pull.
 type PullResp struct {
-	Status   string `json:"status"`
-	DiffStat string `json:"diffStat"`
+	Status   string   `json:"status"`
+	DiffStat DiffStat `json:"diffStat,omitzero"`
 }
 
 // UsageWindow represents a single quota window (5-hour or 7-day).

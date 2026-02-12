@@ -101,6 +101,7 @@ type EventResult struct {
 	Subtype       string     `json:"subtype"`
 	IsError       bool       `json:"isError"`
 	Result        string     `json:"result"`
+	DiffStat      DiffStat   `json:"diffStat,omitzero"`
 	TotalCostUSD  float64    `json:"totalCostUSD"`
 	DurationMs    int64      `json:"durationMs"`
 	DurationAPIMs int64      `json:"durationAPIMs"`

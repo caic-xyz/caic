@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/maruel/caic/backend/internal/server/dto"
 )
 
 // Message is the interface for all Claude Code streaming JSON messages.
@@ -107,6 +109,7 @@ type ResultMessage struct {
 	Usage         Usage           `json:"usage"`
 	ModelUsage    json.RawMessage `json:"modelUsage"`
 	UUID          string          `json:"uuid"`
+	DiffStat      dto.DiffStat    `json:"diff_stat,omitzero"` // Set by caic after running container diff.
 }
 
 // Type implements Message.
@@ -160,14 +163,14 @@ func (m *MetaMessage) Validate() error {
 // MetaResultMessage is appended as the last line of a JSONL log file when a
 // task reaches a terminal state.
 type MetaResultMessage struct {
-	MessageType string  `json:"type"`
-	State       string  `json:"state"`
-	CostUSD     float64 `json:"cost_usd,omitempty"`
-	DurationMs  int64   `json:"duration_ms,omitempty"`
-	NumTurns    int     `json:"num_turns,omitempty"`
-	DiffStat    string  `json:"diff_stat,omitempty"`
-	Error       string  `json:"error,omitempty"`
-	AgentResult string  `json:"agent_result,omitempty"`
+	MessageType string       `json:"type"`
+	State       string       `json:"state"`
+	CostUSD     float64      `json:"cost_usd,omitempty"`
+	DurationMs  int64        `json:"duration_ms,omitempty"`
+	NumTurns    int          `json:"num_turns,omitempty"`
+	DiffStat    dto.DiffStat `json:"diff_stat,omitzero"`
+	Error       string       `json:"error,omitempty"`
+	AgentResult string       `json:"agent_result,omitempty"`
 }
 
 // Type implements Message.

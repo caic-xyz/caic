@@ -255,6 +255,7 @@ func TestConvertResult(t *testing.T) {
 		Subtype:       "success",
 		IsError:       false,
 		Result:        "done",
+		DiffStat:      dto.DiffStat{{Path: "a.go", Added: 10, Deleted: 3}},
 		TotalCostUSD:  0.05,
 		DurationMs:    1234,
 		DurationAPIMs: 1200,
@@ -270,6 +271,9 @@ func TestConvertResult(t *testing.T) {
 		t.Errorf("kind = %q, want %q", ev.Kind, dto.EventKindResult)
 	}
 	r := ev.Result
+	if len(r.DiffStat) != 1 || r.DiffStat[0].Path != "a.go" {
+		t.Errorf("diffStat = %+v, want file a.go", r.DiffStat)
+	}
 	if r.TotalCostUSD != 0.05 {
 		t.Errorf("cost = %f, want 0.05", r.TotalCostUSD)
 	}

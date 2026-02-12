@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/maruel/caic/backend/internal/agent"
+	"github.com/maruel/caic/backend/internal/server/dto"
 )
 
 func TestTask(t *testing.T) {
@@ -142,6 +143,40 @@ func TestTask(t *testing.T) {
 			tk.addMessage(result)
 			if tk.State != StateWaiting {
 				t.Errorf("state = %v, want %v", tk.State, StateWaiting)
+			}
+		})
+		t.Run("OnResultCallback", func(t *testing.T) {
+			wantDS := dto.DiffStat{{Path: "main.go", Added: 5, Deleted: 1}}
+			tk := &Task{Prompt: "test", State: StateRunning}
+			tk.SetOnResult(func() dto.DiffStat { return wantDS })
+
+			rm := &agent.ResultMessage{MessageType: "result"}
+			tk.addMessage(rm)
+			if len(rm.DiffStat) != 1 || rm.DiffStat[0].Path != "main.go" {
+				t.Errorf("DiffStat = %+v, want %+v", rm.DiffStat, wantDS)
+			}
+
+			// Verify subscriber receives the message with DiffStat set.
+			tk2 := &Task{Prompt: "test2", State: StateRunning}
+			tk2.SetOnResult(func() dto.DiffStat { return wantDS })
+			_, ch, unsub := tk2.Subscribe(t.Context())
+			defer unsub()
+
+			rm2 := &agent.ResultMessage{MessageType: "result"}
+			tk2.addMessage(rm2)
+
+			timeout := time.After(time.Second)
+			select {
+			case got := <-ch:
+				if r, ok := got.(*agent.ResultMessage); ok {
+					if len(r.DiffStat) != 1 || r.DiffStat[0].Path != "main.go" {
+						t.Errorf("subscriber DiffStat = %+v, want %+v", r.DiffStat, wantDS)
+					}
+				} else {
+					t.Errorf("expected *agent.ResultMessage, got %T", got)
+				}
+			case <-timeout:
+				t.Fatal("timed out waiting for live message")
 			}
 		})
 		t.Run("TransitionsToAsking", func(t *testing.T) {

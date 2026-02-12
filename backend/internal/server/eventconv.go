@@ -64,6 +64,7 @@ func (tt *toolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 				Subtype:       m.Subtype,
 				IsError:       m.IsError,
 				Result:        m.Result,
+				DiffStat:      m.DiffStat,
 				TotalCostUSD:  m.TotalCostUSD,
 				DurationMs:    m.DurationMs,
 				DurationAPIMs: m.DurationAPIMs,
