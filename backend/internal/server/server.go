@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -89,6 +90,9 @@ type taskEntry struct {
 // New creates a new Server. It discovers repos under rootDir, creates a Runner
 // per repo, and adopts preexisting containers.
 func New(ctx context.Context, rootDir string, maxTurns int, logDir string) (*Server, error) {
+	if logDir == "" {
+		return nil, errors.New("logDir is required")
+	}
 	absPaths, err := gitutil.DiscoverRepos(rootDir, 3)
 	if err != nil {
 		return nil, fmt.Errorf("discover repos: %w", err)
@@ -149,7 +153,9 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string) (*Ser
 		return nil, fmt.Errorf("no usable git repos found under %s", rootDir)
 	}
 
-	s.loadTerminatedTasks()
+	if err := s.loadTerminatedTasks(); err != nil {
+		return nil, fmt.Errorf("load terminated tasks: %w", err)
+	}
 	if err := s.adoptContainers(ctx); err != nil {
 		return nil, fmt.Errorf("adopt containers: %w", err)
 	}
@@ -512,14 +518,30 @@ func (s *Server) SetRunnerOps(c task.ContainerBackend, agentStart func(ctx conte
 
 // loadTerminatedTasks loads the last 10 terminated tasks from JSONL logs so
 // they appear in the UI immediately after a server restart.
-func (s *Server) loadTerminatedTasks() {
-	loaded := task.LoadTerminated(s.logDir, 10)
-	if len(loaded) == 0 {
-		return
+func (s *Server) loadTerminatedTasks() error {
+	all, err := task.LoadLogs(s.logDir)
+	if err != nil {
+		return err
+	}
+	// Filter to tasks with an explicit caic_result trailer.
+	// Log files without a trailer may belong to still-running tasks.
+	var terminated []*task.LoadedTask
+	for _, lt := range all {
+		if lt.Result != nil {
+			terminated = append(terminated, lt)
+		}
+	}
+	// LoadLogs returns ascending; reverse for most-recent-first, keep last 10.
+	slices.Reverse(terminated)
+	if len(terminated) > 10 {
+		terminated = terminated[:10]
+	}
+	if len(terminated) == 0 {
+		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, lt := range loaded {
+	for _, lt := range terminated {
 		t := &task.Task{
 			ID:        ksid.NewID(),
 			Prompt:    lt.Prompt,
@@ -542,7 +564,8 @@ func (s *Server) loadTerminatedTasks() {
 		s.tasks[t.ID.String()] = entry
 	}
 	s.taskChanged()
-	slog.Info("loaded terminated tasks from logs", "count", len(loaded))
+	slog.Info("loaded terminated tasks from logs", "count", len(terminated))
+	return nil
 }
 
 // adoptContainers discovers preexisting md containers and creates task entries
@@ -608,7 +631,18 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		return fmt.Errorf("parse caic label %q on %s: %w", labelVal, c.Name, err)
 	}
 
-	lt := task.LoadBranchLogs(s.logDir, branch)
+	// Find the most recent log file for this branch.
+	allLogs, err := task.LoadLogs(s.logDir)
+	if err != nil {
+		return fmt.Errorf("load branch logs for %s: %w", branch, err)
+	}
+	var lt *task.LoadedTask
+	for i := len(allLogs) - 1; i >= 0; i-- {
+		if allLogs[i].Branch == branch {
+			lt = allLogs[i]
+			break
+		}
+	}
 
 	prompt := branch
 	var startedAt time.Time

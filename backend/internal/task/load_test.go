@@ -2,7 +2,6 @@ package task
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,107 +31,6 @@ func mustJSON(t *testing.T, v any) string {
 	return string(b)
 }
 
-func TestLoadBranchLogs(t *testing.T) {
-	t.Run("EmptyDir", func(t *testing.T) {
-		if lt := LoadBranchLogs("", "caic/w0"); lt != nil {
-			t.Error("expected nil for empty logDir")
-		}
-	})
-	t.Run("NoMatch", func(t *testing.T) {
-		dir := t.TempDir()
-		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "other", Branch: "caic/w9"})
-		writeLogFile(t, dir, "a.jsonl", meta)
-
-		if lt := LoadBranchLogs(dir, "caic/w0"); lt != nil {
-			t.Error("expected nil when no files match branch")
-		}
-	})
-	t.Run("SingleFile", func(t *testing.T) {
-		dir := t.TempDir()
-		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "fix bug", Repo: "test", Branch: "caic/w0"})
-		init := mustJSON(t, agent.SystemInitMessage{MessageType: "system", Subtype: "init", SessionID: "sid-1"})
-		asst := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
-		result := mustJSON(t, agent.ResultMessage{MessageType: "result", Result: "done"})
-		writeLogFile(t, dir, "a.jsonl", meta, init, asst, result)
-
-		lt := LoadBranchLogs(dir, "caic/w0")
-		if lt == nil {
-			t.Fatal("expected non-nil LoadedTask")
-		}
-		if lt.Prompt != "fix bug" {
-			t.Errorf("Prompt = %q, want %q", lt.Prompt, "fix bug")
-		}
-		if len(lt.Msgs) != 3 {
-			t.Fatalf("Msgs len = %d, want 3", len(lt.Msgs))
-		}
-		if lt.Msgs[0].Type() != "system" {
-			t.Errorf("Msgs[0].Type() = %q, want %q", lt.Msgs[0].Type(), "system")
-		}
-	})
-	t.Run("MultipleFiles", func(t *testing.T) {
-		dir := t.TempDir()
-
-		// First session.
-		meta1 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "fix bug", Repo: "test", Branch: "caic/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
-		asst1 := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
-		writeLogFile(t, dir, "a.jsonl", meta1, asst1)
-
-		// Second session (later StartedAt so it sorts after).
-		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "fix bug", Repo: "test", Branch: "caic/w0", StartedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)})
-		init2 := mustJSON(t, agent.SystemInitMessage{MessageType: "system", Subtype: "init", SessionID: "sid-2"})
-		asst2 := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
-		writeLogFile(t, dir, "b.jsonl", meta2, init2, asst2)
-
-		lt := LoadBranchLogs(dir, "caic/w0")
-		if lt == nil {
-			t.Fatal("expected non-nil LoadedTask")
-		}
-		if len(lt.Msgs) != 3 {
-			t.Fatalf("Msgs len = %d, want 3", len(lt.Msgs))
-		}
-		if lt.Prompt != "fix bug" {
-			t.Errorf("Prompt = %q, want %q", lt.Prompt, "fix bug")
-		}
-	})
-	t.Run("BranchReusedPromptUpdated", func(t *testing.T) {
-		dir := t.TempDir()
-
-		// First session with original prompt.
-		meta1 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "old stale prompt", Repo: "test", Branch: "caic/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
-		asst1 := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
-		writeLogFile(t, dir, "a.jsonl", meta1, asst1)
-
-		// Second session reuses same branch with a new prompt.
-		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "new current prompt", Repo: "test", Branch: "caic/w0", StartedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)})
-		asst2 := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
-		writeLogFile(t, dir, "b.jsonl", meta2, asst2)
-
-		lt := LoadBranchLogs(dir, "caic/w0")
-		if lt == nil {
-			t.Fatal("expected non-nil LoadedTask")
-		}
-		if lt.Prompt != "new current prompt" {
-			t.Errorf("Prompt = %q, want %q (got stale prompt from earlier session)", lt.Prompt, "new current prompt")
-		}
-	})
-	t.Run("NonexistentDir", func(t *testing.T) {
-		if lt := LoadBranchLogs("/nonexistent/path", "caic/w0"); lt != nil {
-			t.Error("expected nil for nonexistent dir")
-		}
-	})
-	t.Run("NoFalseMatch", func(t *testing.T) {
-		dir := t.TempDir()
-		// Log file for caic/w10 should NOT match caic/w1.
-		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task", Branch: "caic/w10"})
-		asst := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
-		writeLogFile(t, dir, "a.jsonl", meta, asst)
-
-		if lt := LoadBranchLogs(dir, "caic/w1"); lt != nil {
-			t.Error("caic/w10 log should not match caic/w1")
-		}
-	})
-}
-
 func TestLoadLogs(t *testing.T) {
 	t.Run("Valid", func(t *testing.T) {
 		dir := t.TempDir()
@@ -146,7 +44,7 @@ func TestLoadLogs(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		tasks, err := loadLogs(dir)
+		tasks, err := LoadLogs(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -161,7 +59,7 @@ func TestLoadLogs(t *testing.T) {
 		}
 	})
 	t.Run("NotExist", func(t *testing.T) {
-		tasks, err := loadLogs(filepath.Join(t.TempDir(), "nope"))
+		tasks, err := LoadLogs(filepath.Join(t.TempDir(), "nope"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -173,7 +71,7 @@ func TestLoadLogs(t *testing.T) {
 		dir := t.TempDir()
 		writeLogFile(t, dir, "bad.jsonl", `{"type":"not_meta"}`)
 
-		tasks, err := loadLogs(dir)
+		tasks, err := LoadLogs(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -181,63 +79,38 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("len = %d, want 0", len(tasks))
 		}
 	})
-}
-
-func TestLoadTerminated(t *testing.T) {
-	t.Run("EmptyDir", func(t *testing.T) {
-		if got := LoadTerminated("", 10); got != nil {
-			t.Errorf("expected nil, got %d tasks", len(got))
-		}
-	})
-	t.Run("FiltersTerminalOnly", func(t *testing.T) {
+	t.Run("MultipleFiles", func(t *testing.T) {
 		dir := t.TempDir()
-		// Task with done trailer.
-		meta0 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "t0", Repo: "r", Branch: "caic/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
-		trailer0 := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "terminated"})
-		writeLogFile(t, dir, "a.jsonl", meta0, trailer0)
 
-		// Task without trailer (still running — must NOT be loaded).
-		meta1 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "t1", Repo: "r", Branch: "caic/w1", StartedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)})
-		writeLogFile(t, dir, "b.jsonl", meta1)
+		meta1 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "first", Repo: "r", Branch: "caic/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
+		asst1 := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
+		writeLogFile(t, dir, "a.jsonl", meta1, asst1)
 
-		// Task with terminated trailer.
-		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "t2", Repo: "r", Branch: "caic/w2", StartedAt: time.Date(2026, 1, 1, 2, 0, 0, 0, time.UTC)})
-		trailer2 := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "terminated"})
-		writeLogFile(t, dir, "c.jsonl", meta2, trailer2)
+		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "second", Repo: "r", Branch: "caic/w0", StartedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)})
+		init2 := mustJSON(t, agent.SystemInitMessage{MessageType: "system", Subtype: "init", SessionID: "sid-2"})
+		asst2 := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
+		writeLogFile(t, dir, "b.jsonl", meta2, init2, asst2)
 
-		got := LoadTerminated(dir, 10)
-		if len(got) != 2 {
-			t.Fatalf("len = %d, want 2", len(got))
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
 		}
-		// Most recent first.
-		if got[0].Prompt != "t2" {
-			t.Errorf("got[0].Prompt = %q, want %q", got[0].Prompt, "t2")
+		if len(tasks) != 2 {
+			t.Fatalf("len = %d, want 2", len(tasks))
 		}
-		if got[1].Prompt != "t0" {
-			t.Errorf("got[1].Prompt = %q, want %q", got[1].Prompt, "t0")
+		// Sorted by StartedAt ascending.
+		if tasks[0].Prompt != "first" {
+			t.Errorf("tasks[0].Prompt = %q, want %q", tasks[0].Prompt, "first")
 		}
-	})
-	t.Run("LimitsToN", func(t *testing.T) {
-		dir := t.TempDir()
-		for i := range 5 {
-			meta := mustJSON(t, agent.MetaMessage{
-				MessageType: "caic_meta", Version: 1, Prompt: fmt.Sprintf("t%d", i), Repo: "r",
-				Branch: fmt.Sprintf("caic/w%d", i), StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
-			})
-			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "terminated"})
-			writeLogFile(t, dir, fmt.Sprintf("%d.jsonl", i), meta, trailer)
+		if tasks[1].Prompt != "second" {
+			t.Errorf("tasks[1].Prompt = %q, want %q", tasks[1].Prompt, "second")
 		}
-
-		got := LoadTerminated(dir, 3)
-		if len(got) != 3 {
-			t.Fatalf("len = %d, want 3", len(got))
+		// Each task has its own messages, not merged.
+		if len(tasks[0].Msgs) != 1 {
+			t.Errorf("tasks[0].Msgs len = %d, want 1", len(tasks[0].Msgs))
 		}
-		// Most recent first: t4, t3, t2.
-		if got[0].Prompt != "t4" {
-			t.Errorf("got[0].Prompt = %q, want %q", got[0].Prompt, "t4")
-		}
-		if got[2].Prompt != "t2" {
-			t.Errorf("got[2].Prompt = %q, want %q", got[2].Prompt, "t2")
+		if len(tasks[1].Msgs) != 2 {
+			t.Errorf("tasks[1].Msgs len = %d, want 2", len(tasks[1].Msgs))
 		}
 	})
 }

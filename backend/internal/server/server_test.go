@@ -314,7 +314,9 @@ func TestLoadTerminatedTasksOnStartup(t *testing.T) {
 		changed: make(chan struct{}),
 		logDir:  logDir,
 	}
-	s.loadTerminatedTasks()
+	if err := s.loadTerminatedTasks(); err != nil {
+		t.Fatal(err)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -385,7 +387,9 @@ func TestTerminatedTaskEventsAfterRestart(t *testing.T) {
 		changed: make(chan struct{}),
 		logDir:  logDir,
 	}
-	s.loadTerminatedTasks()
+	if err := s.loadTerminatedTasks(); err != nil {
+		t.Fatal(err)
+	}
 
 	// Find the task ID.
 	s.mu.Lock()
@@ -479,7 +483,9 @@ func TestLoadTerminatedTasksCostInJSON(t *testing.T) {
 		changed: make(chan struct{}),
 		logDir:  logDir,
 	}
-	s.loadTerminatedTasks()
+	if err := s.loadTerminatedTasks(); err != nil {
+		t.Fatal(err)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -534,7 +540,9 @@ func TestLoadTerminatedTasksBackfillsCostFromMessages(t *testing.T) {
 		changed: make(chan struct{}),
 		logDir:  logDir,
 	}
-	s.loadTerminatedTasks()
+	if err := s.loadTerminatedTasks(); err != nil {
+		t.Fatal(err)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -562,7 +570,9 @@ func TestLoadTerminatedTasksEmptyDir(t *testing.T) {
 		changed: make(chan struct{}),
 		logDir:  t.TempDir(),
 	}
-	s.loadTerminatedTasks()
+	if err := s.loadTerminatedTasks(); err != nil {
+		t.Fatal(err)
+	}
 	if len(s.tasks) != 0 {
 		t.Errorf("len(tasks) = %d, want 0", len(s.tasks))
 	}

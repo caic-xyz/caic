@@ -30,10 +30,10 @@ type LoadedTask struct {
 	Result            *Result
 }
 
-// loadLogs scans logDir for *.jsonl files and reconstructs completed tasks.
-// Files without a valid caic_meta header line are skipped. Returns tasks
-// sorted by StartedAt ascending.
-func loadLogs(logDir string) ([]*LoadedTask, error) {
+// LoadLogs scans logDir for *.jsonl files and reconstructs tasks.
+// Files without a valid caic_meta header line are skipped. Returns one
+// LoadedTask per file, sorted by StartedAt ascending.
+func LoadLogs(logDir string) ([]*LoadedTask, error) {
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -61,35 +61,6 @@ func loadLogs(logDir string) ([]*LoadedTask, error) {
 		return a.StartedAt.Compare(b.StartedAt)
 	})
 	return tasks, nil
-}
-
-// LoadTerminated returns the last n tasks in a terminal state (failed, terminated)
-// from logDir, sorted by StartedAt descending (most recent first).
-// Returns nil when logDir is empty or no terminated tasks exist.
-func LoadTerminated(logDir string, n int) []*LoadedTask {
-	if logDir == "" || n <= 0 {
-		return nil
-	}
-	all, err := loadLogs(logDir)
-	if err != nil {
-		slog.Warn("failed to load logs for terminated tasks", "err", err)
-		return nil
-	}
-	var terminated []*LoadedTask
-	for _, lt := range all {
-		// Only include tasks with an explicit caic_result trailer.
-		// Log files without a trailer may belong to still-running tasks
-		// whose default state is StateFailed.
-		if lt.Result != nil {
-			terminated = append(terminated, lt)
-		}
-	}
-	// LoadLogs returns ascending; reverse for most-recent-first.
-	slices.Reverse(terminated)
-	if len(terminated) > n {
-		terminated = terminated[:n]
-	}
-	return terminated
 }
 
 // loadLogFile parses a single JSONL log file. Returns nil if the file has no
@@ -186,46 +157,6 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 	}
 
 	return lt, scanner.Err()
-}
-
-// LoadBranchLogs loads all JSONL log files for the given branch from logDir,
-// returning messages from all sessions concatenated chronologically. Returns
-// nil when logDir is empty, no matching files exist, or on read errors.
-func LoadBranchLogs(logDir, branch string) *LoadedTask {
-	if logDir == "" {
-		return nil
-	}
-	all, err := loadLogs(logDir)
-	if err != nil {
-		return nil
-	}
-
-	var merged *LoadedTask
-	for _, lt := range all {
-		if lt.Branch != branch {
-			continue
-		}
-		if merged == nil {
-			merged = lt
-		} else {
-			merged.Msgs = append(merged.Msgs, lt.Msgs...)
-			// Later sessions are authoritative for prompt and metadata.
-			if lt.Prompt != "" {
-				merged.Prompt = lt.Prompt
-			}
-			if !lt.StartedAt.IsZero() {
-				merged.StartedAt = lt.StartedAt
-			}
-			if !lt.LastStateUpdateAt.IsZero() {
-				merged.LastStateUpdateAt = lt.LastStateUpdateAt
-			}
-			if lt.Result != nil {
-				merged.Result = lt.Result
-				merged.State = lt.State
-			}
-		}
-	}
-	return merged
 }
 
 // parseState converts a state string back to a State value.
