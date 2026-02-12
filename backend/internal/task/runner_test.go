@@ -1,11 +1,14 @@
 package task
 
 import (
+	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/maruel/caic/backend/internal/agent"
 	"github.com/maruel/ksid"
@@ -123,6 +126,69 @@ func TestRunner(t *testing.T) {
 			}
 		})
 	})
+}
+
+func TestRestartSession(t *testing.T) {
+	logDir := t.TempDir()
+	// fakeAgentStart returns a session backed by "cat" that blocks until stdin
+	// is closed. It records the context it was called with so we can assert it
+	// is still alive after RestartSession returns.
+	var capturedCtx context.Context
+	fakeAgentStart := func(ctx context.Context, _ agent.Options, msgCh chan<- agent.Message, _ io.Writer) (*agent.Session, error) {
+		capturedCtx = ctx
+		cmd := exec.CommandContext(ctx, "cat")
+		stdin, _ := cmd.StdinPipe()
+		stdout, _ := cmd.StdoutPipe()
+		if err := cmd.Start(); err != nil {
+			return nil, err
+		}
+		return agent.NewSession(cmd, stdin, stdout, msgCh, nil), nil
+	}
+
+	r := &Runner{
+		LogDir:       logDir,
+		AgentStartFn: fakeAgentStart,
+	}
+
+	tk := &Task{
+		ID:        ksid.NewID(),
+		Prompt:    "old prompt",
+		Repo:      "org/repo",
+		Branch:    "caic/w0",
+		Container: "fake-container",
+		State:     StateWaiting,
+	}
+
+	err := r.RestartSession(t.Context(), tk, "new plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tk.State != StateRunning {
+		t.Errorf("state = %v, want %v", tk.State, StateRunning)
+	}
+	if tk.Prompt != "new plan" {
+		t.Errorf("prompt = %q, want %q", tk.Prompt, "new plan")
+	}
+
+	// The context passed to AgentStartFn must still be valid after
+	// RestartSession returns (it must not be a request-scoped context).
+	select {
+	case <-capturedCtx.Done():
+		t.Error("context passed to AgentStartFn was canceled; must use a long-lived context")
+	default:
+	}
+
+	// Verify the session is functional: wait briefly and check the context
+	// is still alive (not canceled by a short-lived HTTP request context).
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-capturedCtx.Done():
+		t.Error("context was canceled shortly after RestartSession returned")
+	default:
+	}
+
+	// Clean up: close the session.
+	tk.CloseSession()
 }
 
 // initTestRepo creates a bare "remote" and a local clone with one commit on

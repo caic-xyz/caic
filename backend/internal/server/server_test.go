@@ -27,8 +27,10 @@ func decodeError(t *testing.T, w *httptest.ResponseRecorder) dto.ErrorDetails {
 	return resp.Error
 }
 
-func newTestServer() *Server {
+func newTestServer(t *testing.T) *Server {
+	t.Helper()
 	return &Server{
+		ctx:     t.Context(),
 		runners: map[string]*task.Runner{},
 		tasks:   make(map[string]*taskEntry),
 		changed: make(chan struct{}),
@@ -36,7 +38,7 @@ func newTestServer() *Server {
 }
 
 func TestHandleTaskEventsNotFound(t *testing.T) {
-	s := newTestServer()
+	s := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/99/events", http.NoBody)
 	req.SetPathValue("id", "99")
 	w := httptest.NewRecorder()
@@ -51,7 +53,7 @@ func TestHandleTaskEventsNotFound(t *testing.T) {
 }
 
 func TestHandleTaskEventsNonexistentID(t *testing.T) {
-	s := newTestServer()
+	s := newTestServer(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/abc/events", http.NoBody)
 	req.SetPathValue("id", "abc")
 	w := httptest.NewRecorder()
@@ -66,7 +68,7 @@ func TestHandleTaskEventsNonexistentID(t *testing.T) {
 }
 
 func TestHandleTaskInputNotRunning(t *testing.T) {
-	s := newTestServer()
+	s := newTestServer(t)
 	s.tasks["t1"] = &taskEntry{
 		task: &task.Task{Prompt: "test"},
 		done: make(chan struct{}),
@@ -87,7 +89,7 @@ func TestHandleTaskInputNotRunning(t *testing.T) {
 }
 
 func TestHandleTaskInputEmptyPrompt(t *testing.T) {
-	s := newTestServer()
+	s := newTestServer(t)
 	s.tasks["t1"] = &taskEntry{
 		task: &task.Task{Prompt: "test"},
 		done: make(chan struct{}),
@@ -109,7 +111,7 @@ func TestHandleTaskInputEmptyPrompt(t *testing.T) {
 
 func TestHandleRestart(t *testing.T) {
 	t.Run("NotWaiting", func(t *testing.T) {
-		s := newTestServer()
+		s := newTestServer(t)
 		s.tasks["t1"] = &taskEntry{
 			task: &task.Task{Prompt: "test", State: task.StateRunning},
 			done: make(chan struct{}),
@@ -130,7 +132,7 @@ func TestHandleRestart(t *testing.T) {
 	})
 
 	t.Run("EmptyPrompt", func(t *testing.T) {
-		s := newTestServer()
+		s := newTestServer(t)
 		s.tasks["t1"] = &taskEntry{
 			task: &task.Task{Prompt: "test", State: task.StateWaiting},
 			done: make(chan struct{}),
@@ -152,7 +154,7 @@ func TestHandleRestart(t *testing.T) {
 }
 
 func TestHandleTerminateNotWaiting(t *testing.T) {
-	s := newTestServer()
+	s := newTestServer(t)
 	s.tasks["t1"] = &taskEntry{
 		task: &task.Task{Prompt: "test", State: task.StatePending},
 		done: make(chan struct{}),
@@ -174,7 +176,7 @@ func TestHandleTerminateNotWaiting(t *testing.T) {
 func TestHandleTerminateWaiting(t *testing.T) {
 	tk := &task.Task{Prompt: "test", State: task.StateWaiting}
 	tk.InitDoneCh()
-	s := newTestServer()
+	s := newTestServer(t)
 	s.tasks["t1"] = &taskEntry{
 		task: tk,
 		done: make(chan struct{}),
@@ -206,21 +208,22 @@ func TestHandleTerminateWaiting(t *testing.T) {
 
 func TestHandleCreateTaskReturnsID(t *testing.T) {
 	s := &Server{
+		ctx: t.Context(),
 		runners: map[string]*task.Runner{
 			"myrepo": {BaseBranch: "main", Dir: t.TempDir()},
 		},
 		tasks:   make(map[string]*taskEntry),
 		changed: make(chan struct{}),
 	}
-	handler := s.handleCreateTask(t.Context())
+	handler := handle(s.createTask)
 
 	body := strings.NewReader(`{"prompt":"test task","repo":"myrepo"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
 	w := httptest.NewRecorder()
 	handler(w, req)
 
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusAccepted)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 	var resp dto.CreateTaskResp
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -232,8 +235,8 @@ func TestHandleCreateTaskReturnsID(t *testing.T) {
 }
 
 func TestHandleCreateTaskMissingRepo(t *testing.T) {
-	s := newTestServer()
-	handler := s.handleCreateTask(t.Context())
+	s := newTestServer(t)
+	handler := handle(s.createTask)
 
 	body := strings.NewReader(`{"prompt":"test task"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
@@ -250,8 +253,8 @@ func TestHandleCreateTaskMissingRepo(t *testing.T) {
 }
 
 func TestHandleCreateTaskUnknownRepo(t *testing.T) {
-	s := newTestServer()
-	handler := s.handleCreateTask(t.Context())
+	s := newTestServer(t)
+	handler := handle(s.createTask)
 
 	body := strings.NewReader(`{"prompt":"test","repo":"nonexistent"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
@@ -268,8 +271,8 @@ func TestHandleCreateTaskUnknownRepo(t *testing.T) {
 }
 
 func TestHandleCreateTaskUnknownField(t *testing.T) {
-	s := newTestServer()
-	handler := s.handleCreateTask(t.Context())
+	s := newTestServer(t)
+	handler := handle(s.createTask)
 
 	body := strings.NewReader(`{"prompt":"test","repo":"r","bogus":true}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)

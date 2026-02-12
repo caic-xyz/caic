@@ -39,6 +39,7 @@ type repoInfo struct {
 
 // Server is the HTTP server for the caic web UI.
 type Server struct {
+	ctx      context.Context // server-lifetime context; outlives individual HTTP requests
 	repos    []repoInfo
 	runners  map[string]*task.Runner // keyed by RelPath
 	mdClient *md.Client
@@ -107,6 +108,7 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string) (*Ser
 	}
 
 	s := &Server{
+		ctx:      ctx,
 		runners:  make(map[string]*task.Runner, len(absPaths)),
 		tasks:    make(map[string]*taskEntry),
 		changed:  make(chan struct{}),
@@ -167,7 +169,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/repos", handle(s.listRepos))
 	mux.HandleFunc("GET /api/v1/tasks", handle(s.listTasks))
-	mux.HandleFunc("POST /api/v1/tasks", s.handleCreateTask(ctx))
+	mux.HandleFunc("POST /api/v1/tasks", handle(s.createTask))
 	mux.HandleFunc("GET /api/v1/tasks/{id}/events", s.handleTaskEvents)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/input", handleWithTask(s, s.sendInput))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/restart", handleWithTask(s, s.restartTask))
@@ -248,53 +250,39 @@ func (s *Server) listTasks(_ context.Context, _ *dto.EmptyReq) (*[]dto.TaskJSON,
 	return &out, nil
 }
 
-func (s *Server) handleCreateTask(ctx context.Context) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req dto.CreateTaskReq
-		if !readAndDecodeBody(w, r, &req) {
-			return
-		}
-		if err := req.Validate(); err != nil {
-			writeError(w, err)
-			return
-		}
+func (s *Server) createTask(_ context.Context, req *dto.CreateTaskReq) (*dto.CreateTaskResp, error) {
+	runner, ok := s.runners[req.Repo]
+	if !ok {
+		return nil, dto.BadRequest("unknown repo: " + req.Repo)
+	}
 
-		runner, ok := s.runners[req.Repo]
-		if !ok {
-			writeError(w, dto.BadRequest("unknown repo: "+req.Repo))
-			return
-		}
+	t := &task.Task{ID: ksid.NewID(), Prompt: req.Prompt, Repo: req.Repo, Model: req.Model}
+	entry := &taskEntry{task: t, done: make(chan struct{})}
 
-		t := &task.Task{ID: ksid.NewID(), Prompt: req.Prompt, Repo: req.Repo, Model: req.Model}
-		entry := &taskEntry{task: t, done: make(chan struct{})}
+	s.mu.Lock()
+	s.tasks[t.ID.String()] = entry
+	s.taskChanged()
+	s.mu.Unlock()
 
-		s.mu.Lock()
-		s.tasks[t.ID.String()] = entry
-		s.taskChanged()
-		s.mu.Unlock()
-
-		// Run in background using the server context, not the request context.
-		go func() {
-			defer close(entry.done)
-			if err := runner.Start(ctx, t); err != nil {
-				result := task.Result{Task: t.Prompt, Repo: t.Repo, Branch: t.Branch, Container: t.Container, State: task.StateFailed, Err: err}
-				s.mu.Lock()
-				entry.result = &result
-				s.taskChanged()
-				s.mu.Unlock()
-				return
-			}
-			result := runner.Kill(ctx, t)
+	// Run in background using the server context, not the request context.
+	go func() {
+		defer close(entry.done)
+		if err := runner.Start(s.ctx, t); err != nil {
+			result := task.Result{Task: t.Prompt, Repo: t.Repo, Branch: t.Branch, Container: t.Container, State: task.StateFailed, Err: err}
 			s.mu.Lock()
 			entry.result = &result
 			s.taskChanged()
 			s.mu.Unlock()
-		}()
+			return
+		}
+		result := runner.Kill(s.ctx, t)
+		s.mu.Lock()
+		entry.result = &result
+		s.taskChanged()
+		s.mu.Unlock()
+	}()
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(dto.CreateTaskResp{Status: "accepted", ID: t.ID})
-	}
+	return &dto.CreateTaskResp{Status: "accepted", ID: t.ID}, nil
 }
 
 // handleTaskEvents streams agent messages as SSE using typed EventMessage DTOs.
@@ -444,13 +432,15 @@ func (s *Server) sendInput(_ context.Context, entry *taskEntry, req *dto.InputRe
 	return &dto.StatusResp{Status: "sent"}, nil
 }
 
-func (s *Server) restartTask(ctx context.Context, entry *taskEntry, req *dto.RestartReq) (*dto.StatusResp, error) {
+func (s *Server) restartTask(_ context.Context, entry *taskEntry, req *dto.RestartReq) (*dto.StatusResp, error) {
 	t := entry.task
 	if t.State != task.StateWaiting && t.State != task.StateAsking {
 		return nil, dto.Conflict("task is not waiting or asking")
 	}
 	runner := s.runners[t.Repo]
-	if err := runner.RestartSession(ctx, t, req.Prompt); err != nil {
+	// Use the server-lifetime context, not the HTTP request context.
+	// The new agent session must outlive this request.
+	if err := runner.RestartSession(s.ctx, t, req.Prompt); err != nil { //nolint:contextcheck // intentionally using server context
 		return nil, dto.InternalError(err.Error())
 	}
 	s.mu.Lock()
