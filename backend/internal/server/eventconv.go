@@ -97,7 +97,8 @@ func (tt *toolTimingTracker) convertAssistant(m *agent.AssistantMessage, ts int6
 			}
 		case "tool_use":
 			tt.pending[block.ID] = now
-			if block.Name == "AskUserQuestion" {
+			switch block.Name {
+			case "AskUserQuestion":
 				events = append(events, dto.EventMessage{
 					Kind: dto.EventKindAsk,
 					Ts:   ts,
@@ -106,7 +107,15 @@ func (tt *toolTimingTracker) convertAssistant(m *agent.AssistantMessage, ts int6
 						Questions: parseAskInput(block.Input),
 					},
 				})
-			} else {
+			case "TodoWrite":
+				if todo := parseTodoInput(block.ID, block.Input); todo != nil {
+					events = append(events, dto.EventMessage{
+						Kind: dto.EventKindTodo,
+						Ts:   ts,
+						Todo: todo,
+					})
+				}
+			default:
 				events = append(events, dto.EventMessage{
 					Kind: dto.EventKindToolUse,
 					Ts:   ts,
@@ -167,6 +176,17 @@ func (tt *toolTimingTracker) convertUser(m *agent.UserMessage, ts int64, now tim
 			Error:      errText,
 		},
 	}}
+}
+
+// parseTodoInput extracts typed TodoItem data from a TodoWrite tool input.
+func parseTodoInput(toolUseID string, raw json.RawMessage) *dto.EventTodo {
+	var input struct {
+		Todos []dto.TodoItem `json:"todos"`
+	}
+	if json.Unmarshal(raw, &input) != nil || len(input.Todos) == 0 {
+		return nil
+	}
+	return &dto.EventTodo{ToolUseID: toolUseID, Todos: input.Todos}
 }
 
 // parseAskInput extracts typed AskQuestion data from the opaque tool input.

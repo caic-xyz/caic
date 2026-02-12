@@ -101,6 +101,10 @@ export const EventKindSystem: EventKind = "system";
  */
 export const EventKindUserInput: EventKind = "userInput";
 /**
+ * Event kind constants.
+ */
+export const EventKindTodo: EventKind = "todo";
+/**
  * EventMessage is a single SSE event sent to the frontend. The Kind field
  * determines which payload field is non-nil.
  */
@@ -116,6 +120,7 @@ export interface EventMessage {
   result?: EventResult; // Kind "result".
   system?: EventSystem; // Kind "system".
   userInput?: EventUserInput; // Kind "userInput".
+  todo?: EventTodo; // Kind "todo".
 }
 /**
  * EventInit is emitted once at the start of a session.
@@ -208,6 +213,21 @@ export interface EventSystem {
 export interface EventUserInput {
   text: string;
 }
+/**
+ * TodoItem is a single todo entry from a TodoWrite tool call.
+ */
+export interface TodoItem {
+  content: string;
+  status: string; // "pending", "in_progress", "completed".
+  activeForm?: string;
+}
+/**
+ * EventTodo is emitted when the agent writes/updates its todo list.
+ */
+export interface EventTodo {
+  toolUseID: string;
+  todos: TodoItem[];
+}
 
 //////////
 // source: types.go
@@ -268,6 +288,7 @@ export interface CreateTaskResp {
 export interface CreateTaskReq {
   prompt: string;
   repo: string;
+  model?: string;
 }
 /**
  * InputReq is the request body for POST /api/v1/tasks/{id}/input.

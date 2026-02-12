@@ -51,6 +51,7 @@ type CreateTaskResp struct {
 type CreateTaskReq struct {
 	Prompt string `json:"prompt"`
 	Repo   string `json:"repo"`
+	Model  string `json:"model,omitempty"`
 }
 
 // InputReq is the request body for POST /api/v1/tasks/{id}/input.

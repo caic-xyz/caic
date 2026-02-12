@@ -130,6 +130,7 @@ type MetaMessage struct {
 	Prompt      string    `json:"prompt"`
 	Repo        string    `json:"repo"`
 	Branch      string    `json:"branch"`
+	Model       string    `json:"model,omitempty"`
 	StartedAt   time.Time `json:"started_at"`
 }
 

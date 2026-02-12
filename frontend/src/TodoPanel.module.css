@@ -1,0 +1,39 @@
+/* Styles for the TodoPanel component. */
+
+.panel {
+  border-top: 1px solid #e0e0e0;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.heading {
+  margin: 0 0 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.15rem 0;
+  line-height: 1.3;
+}
+
+.icon {
+  flex-shrink: 0;
+  width: 1.1em;
+  text-align: center;
+}
+
+.completed {
+  color: #888;
+  text-decoration: line-through;
+}
+
+.inProgress {
+  font-weight: 500;
+}

@@ -209,6 +209,45 @@ func TestConvertRawMessageFiltered(t *testing.T) {
 	}
 }
 
+func TestConvertTodoWrite(t *testing.T) {
+	tt := newToolTimingTracker()
+	todoInput := `{"todos":[{"content":"Fix bug","status":"in_progress","activeForm":"Fixing bug"},{"content":"Write tests","status":"pending","activeForm":"Writing tests"}]}`
+	msg := &agent.AssistantMessage{
+		MessageType: "assistant",
+		Message: agent.APIMessage{
+			Content: []agent.ContentBlock{
+				{Type: "tool_use", ID: "todo_1", Name: "TodoWrite", Input: json.RawMessage(todoInput)},
+			},
+		},
+	}
+	events := tt.convertMessage(msg, time.Now())
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	ev := events[0]
+	if ev.Kind != dto.EventKindTodo {
+		t.Errorf("kind = %q, want %q", ev.Kind, dto.EventKindTodo)
+	}
+	if ev.Todo == nil {
+		t.Fatal("todo payload is nil")
+	}
+	if ev.Todo.ToolUseID != "todo_1" {
+		t.Errorf("toolUseID = %q, want %q", ev.Todo.ToolUseID, "todo_1")
+	}
+	if len(ev.Todo.Todos) != 2 {
+		t.Fatalf("todos = %d, want 2", len(ev.Todo.Todos))
+	}
+	if ev.Todo.Todos[0].Content != "Fix bug" {
+		t.Errorf("todos[0].content = %q, want %q", ev.Todo.Todos[0].Content, "Fix bug")
+	}
+	if ev.Todo.Todos[0].Status != "in_progress" {
+		t.Errorf("todos[0].status = %q, want %q", ev.Todo.Todos[0].Status, "in_progress")
+	}
+	if ev.Todo.Todos[1].Status != "pending" {
+		t.Errorf("todos[1].status = %q, want %q", ev.Todo.Todos[1].Status, "pending")
+	}
+}
+
 func TestConvertResult(t *testing.T) {
 	tt := newToolTimingTracker()
 	msg := &agent.ResultMessage{

@@ -18,6 +18,14 @@ import (
 	"github.com/maruel/caic/backend/internal/agent/relay"
 )
 
+// Options configures an agent session launch.
+type Options struct {
+	Container       string
+	MaxTurns        int
+	Model           string // Claude Code model alias ("opus", "sonnet", "haiku") or full ID. Empty = default.
+	ResumeSessionID string
+}
+
 // Session manages a running Claude Code process. Use Start to create one.
 type Session struct {
 	cmd       *exec.Cmd
@@ -32,22 +40,24 @@ type Session struct {
 
 // Start launches a Claude Code process in the given container. Messages are
 // sent to msgCh as they arrive. The caller must call Send to provide the
-// initial prompt, then Wait for the result. If resumeSessionID is non-empty,
-// the session is resumed via --resume.
-func Start(ctx context.Context, container string, maxTurns int, msgCh chan<- Message, logW io.Writer, resumeSessionID string) (*Session, error) {
+// initial prompt, then Wait for the result.
+func Start(ctx context.Context, opts Options, msgCh chan<- Message, logW io.Writer) (*Session, error) {
 	args := []string{
-		container,
+		opts.Container,
 		"claude", "-p",
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
 		"--verbose",
 		"--dangerously-skip-permissions",
 	}
-	if maxTurns > 0 {
-		args = append(args, "--max-turns", strconv.Itoa(maxTurns))
+	if opts.MaxTurns > 0 {
+		args = append(args, "--max-turns", strconv.Itoa(opts.MaxTurns))
 	}
-	if resumeSessionID != "" {
-		args = append(args, "--resume", resumeSessionID)
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
+	}
+	if opts.ResumeSessionID != "" {
+		args = append(args, "--resume", opts.ResumeSessionID)
 	}
 
 	cmd := exec.CommandContext(ctx, "ssh", args...) //nolint:gosec // args are not user-controlled.
@@ -129,8 +139,8 @@ func (s *Session) Wait() (*ResultMessage, error) {
 //
 // All intermediate messages are sent to msgCh for logging/observability.
 // If logW is non-nil, every raw NDJSON line (input and output) is written to it.
-func Run(ctx context.Context, container, task string, maxTurns int, msgCh chan<- Message, logW io.Writer) (*ResultMessage, error) {
-	s, err := Start(ctx, container, maxTurns, msgCh, logW, "")
+func Run(ctx context.Context, opts Options, task string, msgCh chan<- Message, logW io.Writer) (*ResultMessage, error) {
+	s, err := Start(ctx, opts, msgCh, logW)
 	if err != nil {
 		return nil, err
 	}
@@ -289,8 +299,8 @@ func DeployRelay(ctx context.Context, container string) error {
 // StartWithRelay deploys the relay script and starts claude via serve-attach.
 // The relay daemon survives SSH disconnects; the returned Session talks to the
 // attach half (bridging the socket to stdio over SSH).
-func StartWithRelay(ctx context.Context, container string, maxTurns int, msgCh chan<- Message, logW io.Writer, resumeSessionID string) (*Session, error) {
-	if err := DeployRelay(ctx, container); err != nil {
+func StartWithRelay(ctx context.Context, opts Options, msgCh chan<- Message, logW io.Writer) (*Session, error) {
+	if err := DeployRelay(ctx, opts.Container); err != nil {
 		return nil, err
 	}
 
@@ -301,16 +311,19 @@ func StartWithRelay(ctx context.Context, container string, maxTurns int, msgCh c
 		"--verbose",
 		"--dangerously-skip-permissions",
 	}
-	if maxTurns > 0 {
-		claudeArgs = append(claudeArgs, "--max-turns", strconv.Itoa(maxTurns))
+	if opts.MaxTurns > 0 {
+		claudeArgs = append(claudeArgs, "--max-turns", strconv.Itoa(opts.MaxTurns))
 	}
-	if resumeSessionID != "" {
-		claudeArgs = append(claudeArgs, "--resume", resumeSessionID)
+	if opts.Model != "" {
+		claudeArgs = append(claudeArgs, "--model", opts.Model)
+	}
+	if opts.ResumeSessionID != "" {
+		claudeArgs = append(claudeArgs, "--resume", opts.ResumeSessionID)
 	}
 
 	// Build the ssh command: ssh <container> python3 relay.py serve-attach -- claude ...
 	sshArgs := make([]string, 0, 5+len(claudeArgs))
-	sshArgs = append(sshArgs, container, "python3", relayScriptPath, "serve-attach", "--")
+	sshArgs = append(sshArgs, opts.Container, "python3", relayScriptPath, "serve-attach", "--")
 	sshArgs = append(sshArgs, claudeArgs...)
 
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
@@ -322,7 +335,7 @@ func StartWithRelay(ctx context.Context, container string, maxTurns int, msgCh c
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = &slogWriter{prefix: "relay serve-attach", container: container}
+	cmd.Stderr = &slogWriter{prefix: "relay serve-attach", container: opts.Container}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start relay: %w", err)
 	}

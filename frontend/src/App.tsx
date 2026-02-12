@@ -48,6 +48,7 @@ export default function App() {
   const [submitting, setSubmitting] = createSignal(false);
   const [repos, setRepos] = createSignal<RepoJSON[]>([]);
   const [selectedRepo, setSelectedRepo] = createSignal("");
+  const [selectedModel, setSelectedModel] = createSignal("");
   const [sidebarOpen, setSidebarOpen] = createSignal(true);
   const [usage, setUsage] = createSignal<UsageResp | null>(null);
 
@@ -169,7 +170,8 @@ export default function App() {
     setSubmitting(true);
     localStorage.setItem("caic:lastRepo", repo);
     try {
-      const data = await createTask({ prompt: p, repo });
+      const model = selectedModel();
+      const data = await createTask({ prompt: p, repo, ...(model ? { model } : {}) });
       setPrompt("");
       navigate(taskPath(data.id, repo, "", p));
     } finally {
@@ -199,6 +201,17 @@ export default function App() {
           <For each={repos()}>
             {(r) => <option value={r.path}>{r.path}</option>}
           </For>
+        </select>
+        <select
+          value={selectedModel()}
+          onChange={(e) => setSelectedModel(e.currentTarget.value)}
+          disabled={submitting()}
+          class={styles.modelSelect}
+        >
+          <option value="">Default model</option>
+          <option value="opus">Opus</option>
+          <option value="sonnet">Sonnet</option>
+          <option value="haiku">Haiku</option>
         </select>
         <AutoResizeTextarea
           value={prompt()}

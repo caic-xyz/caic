@@ -53,8 +53,8 @@ type Runner struct {
 	// Container provides md container lifecycle operations. Must be set before
 	// calling Start.
 	Container ContainerBackend
-	// AgentStartFn launches an agent session. Defaults to agent.Start.
-	AgentStartFn func(ctx context.Context, container string, maxTurns int, msgCh chan<- agent.Message, logW io.Writer, resumeSessionID string) (*agent.Session, error)
+	// AgentStartFn launches an agent session. Defaults to agent.StartWithRelay.
+	AgentStartFn func(ctx context.Context, opts agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error)
 
 	initOnce sync.Once
 	branchMu sync.Mutex // Serializes operations that need a specific branch checked out (md commands).
@@ -157,7 +157,12 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) error {
 		if maxTurns == 0 {
 			maxTurns = r.MaxTurns
 		}
-		session, err = r.AgentStartFn(ctx, t.Container, maxTurns, msgCh, logW, t.SessionID)
+		session, err = r.AgentStartFn(ctx, agent.Options{
+			Container:       t.Container,
+			MaxTurns:        maxTurns,
+			Model:           t.Model,
+			ResumeSessionID: t.SessionID,
+		}, msgCh, logW)
 	}
 	if err != nil {
 		_ = logW.Close()
@@ -223,7 +228,11 @@ func (r *Runner) Start(ctx context.Context, t *Task) error {
 	}
 
 	slog.Info("starting agent session", "repo", t.Repo, "branch", t.Branch, "container", name, "maxTurns", maxTurns)
-	session, err := r.AgentStartFn(ctx, name, maxTurns, msgCh, logW, "")
+	session, err := r.AgentStartFn(ctx, agent.Options{
+		Container: name,
+		MaxTurns:  maxTurns,
+		Model:     t.Model,
+	}, msgCh, logW)
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)
@@ -434,6 +443,7 @@ func (r *Runner) openLog(t *Task) (io.WriteCloser, error) {
 		Prompt:      t.Prompt,
 		Repo:        t.Repo,
 		Branch:      t.Branch,
+		Model:       t.Model,
 		StartedAt:   t.StartedAt,
 	}
 	if data, err := json.Marshal(meta); err == nil {

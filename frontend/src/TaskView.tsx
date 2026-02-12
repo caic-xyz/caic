@@ -4,6 +4,7 @@ import { sendInput as apiSendInput, terminateTask as apiTerminateTask, pullTask 
 import { Marked } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
+import TodoPanel from "./TodoPanel";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import styles from "./TaskView.module.css";
 
@@ -216,6 +217,8 @@ export default function TaskView(props: Props) {
           <p class={styles.placeholder}>Waiting for agent output...</p>
         </Show>
       </div>
+
+      <TodoPanel messages={messages()} />
 
       <Show when={isActive() || !!pendingAction()}>
         <form onSubmit={(e) => { e.preventDefault(); sendInput(); }} class={styles.inputForm}>

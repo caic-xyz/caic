@@ -264,7 +264,7 @@ func (s *Server) handleCreateTask(ctx context.Context) http.HandlerFunc {
 			return
 		}
 
-		t := &task.Task{ID: ksid.NewID(), Prompt: req.Prompt, Repo: req.Repo}
+		t := &task.Task{ID: ksid.NewID(), Prompt: req.Prompt, Repo: req.Repo, Model: req.Model}
 		entry := &taskEntry{task: t, done: make(chan struct{})}
 
 		s.mu.Lock()
@@ -508,7 +508,7 @@ func (s *Server) handleGetUsage(w http.ResponseWriter, _ *http.Request) {
 }
 
 // SetRunnerOps overrides container and agent operations on all runners.
-func (s *Server) SetRunnerOps(c task.ContainerBackend, agentStart func(ctx context.Context, ctr string, maxTurns int, msgCh chan<- agent.Message, logW io.Writer, resumeSessionID string) (*agent.Session, error)) {
+func (s *Server) SetRunnerOps(c task.ContainerBackend, agentStart func(ctx context.Context, opts agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error)) {
 	for _, r := range s.runners {
 		if c != nil {
 			r.Container = c

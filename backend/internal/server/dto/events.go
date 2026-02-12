@@ -18,6 +18,7 @@ const (
 	EventKindResult     EventKind = "result"
 	EventKindSystem     EventKind = "system"
 	EventKindUserInput  EventKind = "userInput"
+	EventKindTodo       EventKind = "todo"
 )
 
 // EventMessage is a single SSE event sent to the frontend. The Kind field
@@ -34,6 +35,7 @@ type EventMessage struct {
 	Result     *EventResult     `json:"result,omitempty"`     // Kind "result".
 	System     *EventSystem     `json:"system,omitempty"`     // Kind "system".
 	UserInput  *EventUserInput  `json:"userInput,omitempty"`  // Kind "userInput".
+	Todo       *EventTodo       `json:"todo,omitempty"`       // Kind "todo".
 }
 
 // EventInit is emitted once at the start of a session.
@@ -114,4 +116,17 @@ type EventSystem struct {
 // EventUserInput is emitted when a user sends a text message to the agent.
 type EventUserInput struct {
 	Text string `json:"text"`
+}
+
+// TodoItem is a single todo entry from a TodoWrite tool call.
+type TodoItem struct {
+	Content    string `json:"content"`
+	Status     string `json:"status"` // "pending", "in_progress", "completed".
+	ActiveForm string `json:"activeForm,omitempty"`
+}
+
+// EventTodo is emitted when the agent writes/updates its todo list.
+type EventTodo struct {
+	ToolUseID string     `json:"toolUseID"`
+	Todos     []TodoItem `json:"todos"`
 }

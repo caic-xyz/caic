@@ -224,7 +224,7 @@ func (*fakeContainer) Kill(_ context.Context, _, _ string) error { return nil }
 
 // fakeAgentStart creates a Session backed by a shell process that emits three
 // JSON messages (init, assistant, result) then exits.
-func fakeAgentStart(_ context.Context, _ string, _ int, msgCh chan<- agent.Message, logW io.Writer, _ string) (*agent.Session, error) {
+func fakeAgentStart(_ context.Context, _ agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
 	script := `read line
 echo '{"type":"system","subtype":"init","session_id":"test-session","cwd":"/workspace","model":"fake-model","claude_code_version":"0.0.0-test"}'
 echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I completed the requested task."}]}}'

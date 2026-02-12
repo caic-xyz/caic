@@ -54,7 +54,8 @@
   transition: max-height 150ms ease-out, opacity 150ms ease-out, margin-bottom 150ms ease-out;
 }
 
-.repoSelect {
+.repoSelect,
+.modelSelect {
   padding: 0.5rem;
 }
 
@@ -107,6 +108,7 @@
   }
 
   .repoSelect,
+  .modelSelect,
   .promptInput {
     width: 100%;
     box-sizing: border-box;
