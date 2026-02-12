@@ -3,7 +3,8 @@
 .container {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .header {
@@ -25,7 +26,7 @@
   padding: 0.75rem;
   background: #fafafa;
   font-size: 0.85rem;
-  min-height: 200px;
+  min-height: 0;
 }
 
 .placeholder {
@@ -429,7 +430,7 @@
   }
 
   .messageArea {
-    min-height: 150px;
+    min-height: 0;
   }
 
   .toolBlockPre {

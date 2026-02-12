@@ -5,6 +5,11 @@
   margin: 0 auto;
   padding: 0.5rem 1rem 1rem;
   font-family: system-ui;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .titleRow {
@@ -88,6 +93,8 @@
 .layout {
   display: flex;
   gap: 1.5rem;
+  flex: 1;
+  min-height: 0;
 }
 
 .placeholder {
@@ -97,6 +104,9 @@
 .detailPane {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .backBtn {
@@ -138,9 +148,14 @@
 
   .detailPane {
     width: 100%;
+    flex: 1;
   }
 
   .backBtn {
     display: block;
+  }
+
+  .hideOnMobile {
+    display: none;
   }
 }

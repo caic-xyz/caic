@@ -165,7 +165,7 @@ export default function App() {
 
   return (
     <div class={styles.app}>
-      <div class={styles.titleRow}>
+      <div class={`${styles.titleRow} ${selectedId() ? styles.hideOnMobile : ""}`}>
         <h1 class={styles.title}>wmao</h1>
         <span class={styles.subtitle}>Work my ass off. Manage coding agents.</span>
         <Show when={usage()} keyed>
@@ -186,7 +186,7 @@ export default function App() {
         <div class={styles.reconnecting}>Reconnecting to server...</div>
       </Show>
 
-      <form onSubmit={(e) => { e.preventDefault(); submitTask(); }} class={styles.submitForm}>
+      <form onSubmit={(e) => { e.preventDefault(); submitTask(); }} class={`${styles.submitForm} ${selectedId() ? styles.hideOnMobile : ""}`}>
         <select
           value={selectedRepo()}
           onChange={(e) => setSelectedRepo(e.currentTarget.value)}
