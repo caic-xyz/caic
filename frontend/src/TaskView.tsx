@@ -1,5 +1,5 @@
 // TaskView renders the real-time agent output stream for a single task.
-import { createSignal, createMemo, For, Index, Show, onCleanup, createEffect, Switch, Match, type Accessor } from "solid-js";
+import { createSignal, createMemo, For, Index, Show, onCleanup, createEffect, Switch, Match, type Accessor, type JSX } from "solid-js";
 import { sendInput as apiSendInput, terminateTask as apiTerminateTask, pullTask as apiPullTask, pushTask as apiPushTask, taskEvents } from "@sdk/api.gen";
 import { Marked } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
@@ -36,6 +36,7 @@ interface Props {
   onClose: () => void;
   inputDraft: string;
   onInputDraft: (value: string) => void;
+  children?: JSX.Element;
 }
 
 export default function TaskView(props: Props) {
@@ -128,8 +129,9 @@ export default function TaskView(props: Props) {
   return (
     <div class={styles.container}>
       <div class={styles.header}>
-        <h3>Task #{props.taskId}</h3>
         <Button variant="gray" class={styles.closeBtn} onClick={() => props.onClose()}>Close</Button>
+        <h3>@{props.taskId}</h3>
+        {props.children}
       </div>
       <div class={styles.messageArea}>
         {(() => {

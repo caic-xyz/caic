@@ -17,6 +17,10 @@
   align-items: baseline;
   gap: 0.75rem;
   margin-bottom: 0.75rem;
+  max-height: 3rem;
+  opacity: 1;
+  overflow: hidden;
+  transition: max-height 150ms ease-out, opacity 150ms ease-out, margin-bottom 150ms ease-out;
 }
 
 .title {
@@ -28,36 +32,6 @@
 .subtitle {
   font-size: 0.85rem;
   color: #888;
-}
-
-.usageRow {
-  display: inline-flex;
-  gap: 0.4rem;
-  margin-left: auto;
-}
-
-.usageBadge {
-  font-size: 0.75rem;
-  padding: 0.15rem 0.45rem;
-  border-radius: 3px;
-  font-weight: 500;
-  white-space: nowrap;
-  cursor: default;
-}
-
-.usageGreen {
-  background: #d4edda;
-  color: #155724;
-}
-
-.usageYellow {
-  background: #fff3cd;
-  color: #856404;
-}
-
-.usageRed {
-  background: #f8d7da;
-  color: #721c24;
 }
 
 .reconnecting {
@@ -74,6 +48,10 @@
   gap: 0.5rem;
   margin-bottom: 1rem;
   align-items: flex-start;
+  max-height: 15rem;
+  opacity: 1;
+  overflow: hidden;
+  transition: max-height 150ms ease-out, opacity 150ms ease-out, margin-bottom 150ms ease-out;
 }
 
 .repoSelect {
@@ -109,15 +87,12 @@
   min-height: 0;
 }
 
-.backBtn {
-  display: none;
-  border: none;
-  background: none;
-  color: #007bff;
-  cursor: pointer;
-  padding: 0.25rem 0;
-  margin-bottom: 0.5rem;
-  font-size: 0.9rem;
+.hidden {
+  max-height: 0;
+  opacity: 0;
+  margin-bottom: 0;
+  pointer-events: none;
+  transition: none;
 }
 
 /* Mobile: <=768px */
@@ -149,13 +124,5 @@
   .detailPane {
     width: 100%;
     flex: 1;
-  }
-
-  .backBtn {
-    display: block;
-  }
-
-  .hideOnMobile {
-    display: none;
   }
 }

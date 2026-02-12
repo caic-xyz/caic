@@ -1,0 +1,31 @@
+/* Usage badge styles. */
+
+.usageRow {
+  display: inline-flex;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.badge {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.green {
+  background: #d4edda;
+  color: #155724;
+}
+
+.yellow {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.red {
+  background: #f8d7da;
+  color: #721c24;
+}

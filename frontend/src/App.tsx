@@ -8,6 +8,7 @@ import TaskList from "./TaskList";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
 import { requestNotificationPermission, notifyWaiting } from "./notifications";
+import UsageBadges from "./UsageBadges";
 import styles from "./App.module.css";
 
 /** Max slug length in the URL (characters after the "+"). */
@@ -36,31 +37,6 @@ function taskIdFromPath(pathname: string): string | null {
   const rest = pathname.slice(prefix.length);
   const plus = rest.indexOf("+");
   return plus === -1 ? rest : rest.slice(0, plus);
-}
-
-function formatReset(iso: string): string {
-  const d = new Date(iso);
-  const now = Date.now();
-  const diffMs = d.getTime() - now;
-  if (diffMs <= 0) return "now";
-  const hours = Math.floor(diffMs / 3_600_000);
-  const mins = Math.floor((diffMs % 3_600_000) / 60_000);
-  if (hours >= 24) {
-    const days = Math.floor(hours / 24);
-    return `in ${days}d ${hours % 24}h`;
-  }
-  if (hours > 0) return `in ${hours}h ${mins}m`;
-  return `in ${mins}m`;
-}
-
-function UsageBadge(props: { label: string; utilization: number; resetsAt: string }) {
-  const pct = () => Math.round(props.utilization);
-  const cls = () => (pct() >= 80 ? styles.usageRed : pct() >= 50 ? styles.usageYellow : styles.usageGreen);
-  return (
-    <span class={`${styles.usageBadge} ${cls()}`} title={`Resets ${formatReset(props.resetsAt)}`}>
-      {props.label}: {pct()}%
-    </span>
-  );
 }
 
 export default function App() {
@@ -203,28 +179,17 @@ export default function App() {
 
   return (
     <div class={styles.app}>
-      <div class={`${styles.titleRow} ${selectedId() ? styles.hideOnMobile : ""}`}>
+      <div class={`${styles.titleRow} ${selectedId() ? styles.hidden : ""}`}>
         <h1 class={styles.title}>caic</h1>
         <span class={styles.subtitle}>Coding Agents in Containers</span>
-        <Show when={usage()} keyed>
-          {(u) => (
-            <span class={styles.usageRow}>
-              <Show when={u.fiveHour} keyed>
-                {(w) => <UsageBadge label="5h" utilization={w.utilization} resetsAt={w.resetsAt} />}
-              </Show>
-              <Show when={u.sevenDay} keyed>
-                {(w) => <UsageBadge label="Weekly" utilization={w.utilization} resetsAt={w.resetsAt} />}
-              </Show>
-            </span>
-          )}
-        </Show>
+        <UsageBadges usage={usage} />
       </div>
 
       <Show when={!connected()}>
         <div class={styles.reconnecting}>Reconnecting to server...</div>
       </Show>
 
-      <form onSubmit={(e) => { e.preventDefault(); submitTask(); }} class={`${styles.submitForm} ${selectedId() ? styles.hideOnMobile : ""}`}>
+      <form onSubmit={(e) => { e.preventDefault(); submitTask(); }} class={`${styles.submitForm} ${selectedId() ? styles.hidden : ""}`}>
         <select
           value={selectedRepo()}
           onChange={(e) => setSelectedRepo(e.currentTarget.value)}
@@ -265,14 +230,15 @@ export default function App() {
           <Match when={selectedId()} keyed>
             {(id) => (
               <div class={styles.detailPane}>
-                <button class={styles.backBtn} onClick={() => navigate("/")}>&larr; Back</button>
                 <TaskView
                   taskId={id}
                   taskState={selectedTask()?.state ?? "pending"}
                   onClose={() => navigate("/")}
                   inputDraft={inputDrafts().get(id) ?? ""}
                   onInputDraft={(v) => setInputDrafts((prev) => { const next = new Map(prev); next.set(id, v); return next; })}
-                />
+                >
+                  <UsageBadges usage={usage} />
+                </TaskView>
               </div>
             )}
           </Match>
