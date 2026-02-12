@@ -147,17 +147,20 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 			break
 		}
 	}
-	// Restore live stats from the last ResultMessage.
-	for i := len(msgs) - 1; i >= 0; i-- {
-		rm, ok := msgs[i].(*agent.ResultMessage)
+	// Restore live stats: cost/turns/duration are cumulative in the last
+	// ResultMessage, but usage (tokens) is per-query and must be summed.
+	for _, m := range msgs {
+		rm, ok := m.(*agent.ResultMessage)
 		if !ok {
 			continue
 		}
 		t.liveCostUSD = rm.TotalCostUSD
 		t.liveNumTurns = rm.NumTurns
 		t.liveDurationMs = rm.DurationMs
-		t.liveUsage = rm.Usage
-		break
+		t.liveUsage.InputTokens += rm.Usage.InputTokens
+		t.liveUsage.OutputTokens += rm.Usage.OutputTokens
+		t.liveUsage.CacheCreationInputTokens += rm.Usage.CacheCreationInputTokens
+		t.liveUsage.CacheReadInputTokens += rm.Usage.CacheReadInputTokens
 	}
 	// Infer state: if the last message is a ResultMessage, the agent finished
 	// its turn and is waiting for user input (or asking a question). Only
@@ -199,7 +202,10 @@ func (t *Task) addMessage(m agent.Message) {
 		t.liveCostUSD = rm.TotalCostUSD
 		t.liveNumTurns = rm.NumTurns
 		t.liveDurationMs = rm.DurationMs
-		t.liveUsage = rm.Usage
+		t.liveUsage.InputTokens += rm.Usage.InputTokens
+		t.liveUsage.OutputTokens += rm.Usage.OutputTokens
+		t.liveUsage.CacheCreationInputTokens += rm.Usage.CacheCreationInputTokens
+		t.liveUsage.CacheReadInputTokens += rm.Usage.CacheReadInputTokens
 		if t.State == StateRunning {
 			if lastAssistantHasAsk(t.msgs) {
 				t.setState(StateAsking)

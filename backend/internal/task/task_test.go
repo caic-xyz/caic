@@ -198,6 +198,53 @@ func TestTask(t *testing.T) {
 		})
 	})
 
+	t.Run("LiveUsageCumulative", func(t *testing.T) {
+		tk := &Task{Prompt: "test", State: StateRunning}
+		tk.addMessage(&agent.ResultMessage{
+			MessageType: "result",
+			Usage:       agent.Usage{InputTokens: 100, OutputTokens: 50, CacheReadInputTokens: 10},
+		})
+		tk.addMessage(&agent.ResultMessage{
+			MessageType: "result",
+			Usage:       agent.Usage{InputTokens: 200, OutputTokens: 80, CacheCreationInputTokens: 30},
+		})
+		_, _, _, usage := tk.LiveStats()
+		if usage.InputTokens != 300 {
+			t.Errorf("InputTokens = %d, want 300", usage.InputTokens)
+		}
+		if usage.OutputTokens != 130 {
+			t.Errorf("OutputTokens = %d, want 130", usage.OutputTokens)
+		}
+		if usage.CacheReadInputTokens != 10 {
+			t.Errorf("CacheReadInputTokens = %d, want 10", usage.CacheReadInputTokens)
+		}
+		if usage.CacheCreationInputTokens != 30 {
+			t.Errorf("CacheCreationInputTokens = %d, want 30", usage.CacheCreationInputTokens)
+		}
+	})
+
+	t.Run("RestoreMessagesUsageCumulative", func(t *testing.T) {
+		tk := &Task{Prompt: "test", State: StateTerminated}
+		tk.RestoreMessages([]agent.Message{
+			&agent.ResultMessage{
+				MessageType: "result",
+				Usage:       agent.Usage{InputTokens: 100, OutputTokens: 50},
+			},
+			&agent.AssistantMessage{MessageType: "assistant"},
+			&agent.ResultMessage{
+				MessageType: "result",
+				Usage:       agent.Usage{InputTokens: 200, OutputTokens: 80},
+			},
+		})
+		_, _, _, usage := tk.LiveStats()
+		if usage.InputTokens != 300 {
+			t.Errorf("InputTokens = %d, want 300", usage.InputTokens)
+		}
+		if usage.OutputTokens != 130 {
+			t.Errorf("OutputTokens = %d, want 130", usage.OutputTokens)
+		}
+	})
+
 	t.Run("RestoreMessages", func(t *testing.T) {
 		t.Run("Basic", func(t *testing.T) {
 			tk := &Task{Prompt: "test", State: StateRunning}
