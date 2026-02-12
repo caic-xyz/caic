@@ -31,6 +31,20 @@ After making changes, run:
 make lint build test
 ```
 
+### Make Targets
+
+```
+make build          # Build Go server + frontend (runs types, docs, pnpm build, go install)
+make dev            # Build and run server on :8080
+make frontend-dev   # Run Vite frontend dev server on :5173
+make types          # Generate types (go generate → tygo + gen-api-client)
+make docs           # Update AGENTS.md file indexes
+make test           # Go unit tests with coverage
+make e2e            # Playwright end-to-end tests
+make lint           # Run all linters (Go + frontend + Python)
+make lint-fix       # Auto-fix all linters
+```
+
 <!-- BEGIN FILE INDEX -->
 ## File Index
 

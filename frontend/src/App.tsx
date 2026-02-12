@@ -99,6 +99,14 @@ export default function App() {
     if (selectedId() === null) setSidebarOpen(true);
   });
 
+  // Redirect to home when a task URL points to a non-existent task.
+  // Guard on connected() to avoid spurious redirects during reconnection.
+  createEffect(() => {
+    if (connected() && selectedId() !== null && tasks().length > 0 && selectedTask() === null) {
+      navigate("/", { replace: true });
+    }
+  });
+
   onMount(async () => {
     requestNotificationPermission();
     const data = await listRepos();
@@ -254,12 +262,6 @@ export default function App() {
         />
 
         <Switch>
-          <Match when={location.pathname !== "/" && selectedTask() === null && tasks().length > 0}>
-            <div class={styles.detailPane}>
-              <button class={styles.backBtn} onClick={() => navigate("/")}>&larr; Back</button>
-              <p class={styles.placeholder}>Task not found.</p>
-            </div>
-          </Match>
           <Match when={selectedId()} keyed>
             {(id) => (
               <div class={styles.detailPane}>
