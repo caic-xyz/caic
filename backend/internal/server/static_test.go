@@ -1,35 +1,77 @@
 package server
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"testing/fstest"
+
+	"github.com/andybalholm/brotli"
+	kgzip "github.com/klauspost/compress/gzip"
+	"github.com/klauspost/compress/zstd"
 )
 
-func testFS() fstest.MapFS {
+// brCompress returns data brotli-compressed at max quality.
+func brCompress(t *testing.T, data []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := brotli.NewWriterLevel(&buf, brotli.BestCompression)
+	if _, err := w.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+var (
+	indexContent = []byte("<html>hello</html>")
+	appContent   = []byte("console.log('hi')")
+	cssContent   = []byte("body{}")
+	iconContent  = []byte("icon")
+)
+
+// testFS returns a brotli-only FS matching what compress_dist.py produces.
+func testFS(t *testing.T) fstest.MapFS {
+	t.Helper()
 	return fstest.MapFS{
-		"index.html":          {Data: []byte("<html>hello</html>")},
-		"index.html.br":       {Data: []byte("br-index")},
-		"index.html.zst":      {Data: []byte("zst-index")},
-		"index.html.gz":       {Data: []byte("gz-index")},
-		"favicon.ico":         {Data: []byte("icon")},
-		"assets/app.js":       {Data: []byte("console.log('hi')")},
-		"assets/app.js.br":    {Data: []byte("br-app")},
-		"assets/app.js.zst":   {Data: []byte("zst-app")},
-		"assets/app.js.gz":    {Data: []byte("gz-app")},
-		"assets/style.css":    {Data: []byte("body{}")},
-		"assets/style.css.br": {Data: []byte("br-css")},
+		"index.html.br":       {Data: brCompress(t, indexContent)},
+		"favicon.ico.br":      {Data: brCompress(t, iconContent)},
+		"assets/app.js.br":    {Data: brCompress(t, appContent)},
+		"assets/style.css.br": {Data: brCompress(t, cssContent)},
 	}
 }
 
 func TestStaticHandler(t *testing.T) {
-	h := newStaticHandler(testFS())
+	h := newStaticHandler(testFS(t))
 
-	t.Run("PrecompressedZstd", func(t *testing.T) {
+	t.Run("BrotliDirect", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", http.NoBody)
-		req.Header.Set("Accept-Encoding", "zstd, br, gzip")
+		req.Header.Set("Accept-Encoding", "br, gzip")
+		w := httptest.NewRecorder()
+		h(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		if got := w.Header().Get("Content-Encoding"); got != "br" {
+			t.Errorf("Content-Encoding = %q, want %q", got, "br")
+		}
+		if got := w.Header().Get("Content-Type"); got != "text/javascript; charset=utf-8" {
+			t.Errorf("Content-Type = %q, want %q", got, "text/javascript; charset=utf-8")
+		}
+		body := decompressBrotli(t, w.Body.Bytes())
+		if !bytes.Equal(body, appContent) {
+			t.Errorf("body = %q, want %q", body, appContent)
+		}
+	})
+
+	t.Run("TranscodeZstd", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", http.NoBody)
+		req.Header.Set("Accept-Encoding", "zstd")
 		w := httptest.NewRecorder()
 		h(w, req)
 
@@ -39,43 +81,31 @@ func TestStaticHandler(t *testing.T) {
 		if got := w.Header().Get("Content-Encoding"); got != "zstd" {
 			t.Errorf("Content-Encoding = %q, want %q", got, "zstd")
 		}
-		if got := w.Header().Get("Content-Type"); got != "text/javascript; charset=utf-8" {
-			t.Errorf("Content-Type = %q, want %q", got, "text/javascript; charset=utf-8")
-		}
-		if got := w.Body.String(); got != "zst-app" {
-			t.Errorf("body = %q, want %q", got, "zst-app")
+		body := decompressZstd(t, w.Body.Bytes())
+		if !bytes.Equal(body, appContent) {
+			t.Errorf("body = %q, want %q", body, appContent)
 		}
 	})
 
-	t.Run("PrecompressedBrotli", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", http.NoBody)
-		req.Header.Set("Accept-Encoding", "br")
-		w := httptest.NewRecorder()
-		h(w, req)
-
-		if got := w.Header().Get("Content-Encoding"); got != "br" {
-			t.Errorf("Content-Encoding = %q, want %q", got, "br")
-		}
-		if got := w.Body.String(); got != "br-app" {
-			t.Errorf("body = %q, want %q", got, "br-app")
-		}
-	})
-
-	t.Run("PrecompressedGzip", func(t *testing.T) {
+	t.Run("TranscodeGzip", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", http.NoBody)
 		req.Header.Set("Accept-Encoding", "gzip")
 		w := httptest.NewRecorder()
 		h(w, req)
 
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
 		if got := w.Header().Get("Content-Encoding"); got != "gzip" {
 			t.Errorf("Content-Encoding = %q, want %q", got, "gzip")
 		}
-		if got := w.Body.String(); got != "gz-app" {
-			t.Errorf("body = %q, want %q", got, "gz-app")
+		body := decompressGzip(t, w.Body.Bytes())
+		if !bytes.Equal(body, appContent) {
+			t.Errorf("body = %q, want %q", body, appContent)
 		}
 	})
 
-	t.Run("FallbackOriginal", func(t *testing.T) {
+	t.Run("FallbackIdentity", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/favicon.ico", http.NoBody)
 		w := httptest.NewRecorder()
 		h(w, req)
@@ -86,8 +116,8 @@ func TestStaticHandler(t *testing.T) {
 		if got := w.Header().Get("Content-Encoding"); got != "" {
 			t.Errorf("Content-Encoding = %q, want empty", got)
 		}
-		if got := w.Body.String(); got != "icon" {
-			t.Errorf("body = %q, want %q", got, "icon")
+		if !bytes.Equal(w.Body.Bytes(), iconContent) {
+			t.Errorf("body = %q, want %q", w.Body.Bytes(), iconContent)
 		}
 	})
 
@@ -103,8 +133,9 @@ func TestStaticHandler(t *testing.T) {
 		if got := w.Header().Get("Content-Encoding"); got != "br" {
 			t.Errorf("Content-Encoding = %q, want %q", got, "br")
 		}
-		if got := w.Body.String(); got != "br-index" {
-			t.Errorf("body = %q, want %q", got, "br-index")
+		body := decompressBrotli(t, w.Body.Bytes())
+		if !bytes.Equal(body, indexContent) {
+			t.Errorf("body = %q, want %q", body, indexContent)
 		}
 	})
 
@@ -138,21 +169,6 @@ func TestStaticHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("PreferenceOrder", func(t *testing.T) {
-		// Only br variant for style.css (no zst or gz).
-		req := httptest.NewRequest(http.MethodGet, "/assets/style.css", http.NoBody)
-		req.Header.Set("Accept-Encoding", "zstd, br, gzip")
-		w := httptest.NewRecorder()
-		h(w, req)
-
-		if got := w.Header().Get("Content-Encoding"); got != "br" {
-			t.Errorf("Content-Encoding = %q, want %q", got, "br")
-		}
-		if got := w.Body.String(); got != "br-css" {
-			t.Errorf("body = %q, want %q", got, "br-css")
-		}
-	})
-
 	t.Run("RootServesIndex", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 		w := httptest.NewRecorder()
@@ -161,9 +177,21 @@ func TestStaticHandler(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200", w.Code)
 		}
-		body, _ := io.ReadAll(w.Body)
-		if string(body) != "<html>hello</html>" {
-			t.Errorf("body = %q, want index.html content", string(body))
+		// No Accept-Encoding → identity transcoding.
+		if !bytes.Equal(w.Body.Bytes(), indexContent) {
+			t.Errorf("body = %q, want index.html content", w.Body.Bytes())
+		}
+	})
+
+	t.Run("BrotliPreferredOverZstd", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", http.NoBody)
+		req.Header.Set("Accept-Encoding", "zstd, br, gzip")
+		w := httptest.NewRecorder()
+		h(w, req)
+
+		// Brotli is always preferred since it's the native format.
+		if got := w.Header().Get("Content-Encoding"); got != "br" {
+			t.Errorf("Content-Encoding = %q, want %q", got, "br")
 		}
 	})
 }
@@ -191,4 +219,43 @@ func TestParseAcceptEncoding(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Decompression helpers for roundtrip verification.
+
+func decompressBrotli(t *testing.T, data []byte) []byte {
+	t.Helper()
+	out, err := io.ReadAll(brotli.NewReader(bytes.NewReader(data)))
+	if err != nil {
+		t.Fatalf("brotli decompress: %v", err)
+	}
+	return out
+}
+
+func decompressZstd(t *testing.T, data []byte) []byte {
+	t.Helper()
+	r, err := zstd.NewReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("zstd reader: %v", err)
+	}
+	defer r.Close()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("zstd decompress: %v", err)
+	}
+	return out
+}
+
+func decompressGzip(t *testing.T, data []byte) []byte {
+	t.Helper()
+	r, err := kgzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	defer func() { _ = r.Close() }()
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("gzip decompress: %v", err)
+	}
+	return out
 }

@@ -1,32 +1,23 @@
 #!/usr/bin/env python3
-"""Precompress frontend assets at maximum compression for embedding.
+"""Precompress frontend assets with brotli and delete originals.
 
-Produces .br, .zst, and .gz siblings for each file in the dist directory.
+Produces a .br file for each asset in the dist directory at maximum
+compression. The original file is removed afterward so only .br files
+are embedded into the Go binary, minimizing binary size. The server
+lazily transcodes to other encodings at runtime.
+
 Called as a postbuild step by the frontend build script.
 """
 
-import gzip
 import subprocess
 import sys
 from pathlib import Path
 
 
 def compress_file(path: Path) -> None:
-    data = path.read_bytes()
     s = str(path)
-
-    # Brotli (quality 11 = max).
     subprocess.run(["brotli", "--best", "--keep", s, "-o", s + ".br"], check=True)
-
-    # Zstd (level 19).
-    subprocess.run(
-        ["zstd", "-19", "--quiet", "--force", "--keep", s, "-o", s + ".zst"],
-        check=True,
-    )
-
-    # Gzip (level 9 = max).
-    with gzip.open(s + ".gz", "wb", compresslevel=9) as f:
-        f.write(data)
+    path.unlink()
 
 
 def main() -> None:
@@ -35,9 +26,8 @@ def main() -> None:
         print(f"dist directory not found: {dist}", file=sys.stderr)
         sys.exit(1)
 
-    skip = {".br", ".zst", ".gz"}
     for path in sorted(dist.rglob("*")):
-        if path.is_file() and path.suffix not in skip:
+        if path.is_file() and path.suffix != ".br":
             compress_file(path)
 
 
