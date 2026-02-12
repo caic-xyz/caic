@@ -8,6 +8,12 @@ import TodoPanel from "./TodoPanel";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import styles from "./TaskView.module.css";
 
+// Module-level store for <details> open/closed state so it survives
+// component remounts (task switching, memo re-evaluation).
+// Keys: toolUseID (tool calls), "group:<firstToolUseID>" (tool groups),
+// "turn:<firstEventTs>" (elided turns).
+const detailsOpenState = new Map<string, boolean>();
+
 // A group of consecutive events that should be rendered together.
 interface MessageGroup {
   kind: "text" | "tool" | "ask" | "userInput" | "other";
@@ -433,32 +439,26 @@ function toolCountSummary(calls: ToolCall[]): string {
 
 function ToolMessageGroup(props: { toolCalls: ToolCall[] }) {
   const calls = () => props.toolCalls;
-  // Track whether the user has manually toggled the group open/closed.
-  // undefined = user hasn't interacted; default to open so expanding
-  // groups stay visible as new tool calls arrive.
-  const [userOpen, setUserOpen] = createSignal<boolean | undefined>(undefined);
-  const isOpen = () => userOpen() ?? true;
-  // Preserve individual tool call open/closed state across re-renders.
-  // The parent memo recreates ToolCall objects, so <For> remounts children
-  // and unmanaged <details> state would be lost.
-  const callOpen = new Map<string, boolean>();
+  const groupKey = () => "group:" + calls()[0]?.use.toolUseID;
+  // Default to open so expanding groups stay visible as new tool calls arrive.
+  const isOpen = () => detailsOpenState.get(groupKey()) ?? true;
   return (
     <Show when={calls().length > 0}>
       <Show when={calls().length > 1} fallback={
         <ToolCallBlock call={calls()[0]}
-          open={callOpen.get(calls()[0].use.toolUseID) ?? false}
-          onToggle={(v) => callOpen.set(calls()[0].use.toolUseID, v)} />
+          open={detailsOpenState.get(calls()[0].use.toolUseID) ?? false}
+          onToggle={(v) => detailsOpenState.set(calls()[0].use.toolUseID, v)} />
       }>
         <details class={styles.toolGroup} open={isOpen()}
-          onToggle={(e) => setUserOpen(e.currentTarget.open)}>
+          onToggle={(e) => detailsOpenState.set(groupKey(), e.currentTarget.open)}>
           <summary>
             {calls().length} tools: {toolCountSummary(calls())}
           </summary>
           <div class={styles.toolGroupInner}>
             <For each={calls()}>
               {(call) => <ToolCallBlock call={call}
-                open={callOpen.get(call.use.toolUseID) ?? false}
-                onToggle={(v) => callOpen.set(call.use.toolUseID, v)} />}
+                open={detailsOpenState.get(call.use.toolUseID) ?? false}
+                onToggle={(v) => detailsOpenState.set(call.use.toolUseID, v)} />}
             </For>
           </div>
         </details>
@@ -479,8 +479,11 @@ function turnSummary(turn: Turn): string {
 }
 
 function ElidedTurn(props: { turn: Turn }) {
+  const turnKey = () => "turn:" + (props.turn.groups[0]?.events[0]?.ts ?? 0);
+  const isOpen = () => detailsOpenState.get(turnKey()) ?? false;
   return (
-    <details class={styles.elidedTurn}>
+    <details class={styles.elidedTurn} open={isOpen()}
+      onToggle={(e) => detailsOpenState.set(turnKey(), e.currentTarget.open)}>
       <summary>{turnSummary(props.turn)}</summary>
       <div class={styles.elidedTurnInner}>
         <For each={props.turn.groups}>
