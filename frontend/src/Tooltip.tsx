@@ -1,7 +1,7 @@
 // Tooltip: hover on desktop, tap-to-toggle on mobile.
-// Automatically flips below the element when there isn't room above,
-// and clamps horizontally to stay within the viewport.
+// Uses a Portal so the popup is never clipped by overflow: hidden ancestors.
 import { createSignal, createEffect, Show, onCleanup, type JSX } from "solid-js";
+import { Portal } from "solid-js/web";
 import styles from "./Tooltip.module.css";
 
 interface Props {
@@ -22,41 +22,41 @@ export default function Tooltip(props: Props) {
     }
   }
 
+  function dismiss() { setShow(false); }
+
   createEffect(() => {
     if (show()) {
       document.addEventListener("click", onDocClick, true);
+      document.addEventListener("scroll", dismiss, true);
     } else {
       document.removeEventListener("click", onDocClick, true);
+      document.removeEventListener("scroll", dismiss, true);
     }
   });
 
-  // Position the popup after it mounts.
+  // Position the popup in fixed coordinates relative to the wrapper.
   createEffect(() => {
     if (!show() || !popupRef || !wrapperRef) return;
     const wr = wrapperRef.getBoundingClientRect();
     const pr = popupRef.getBoundingClientRect();
+    const margin = 4;
 
     // Vertical: prefer above, fall back to below.
     if (wr.top - GAP - pr.height < 0) {
-      popupRef.style.bottom = "auto";
-      popupRef.style.top = `calc(100% + ${GAP}px)`;
+      popupRef.style.top = `${wr.bottom + GAP}px`;
+    } else {
+      popupRef.style.top = `${wr.top - GAP - pr.height}px`;
     }
 
-    // Horizontal: clamp so the popup stays within the viewport.
-    const idealLeft = wr.left + wr.width / 2 - pr.width / 2;
-    const margin = 4;
-    if (idealLeft < margin) {
-      popupRef.style.left = "0";
-      popupRef.style.transform = `translateX(${margin - wr.left}px)`;
-    } else if (idealLeft + pr.width > window.innerWidth - margin) {
-      popupRef.style.left = "auto";
-      popupRef.style.right = "0";
-      popupRef.style.transform = `translateX(${window.innerWidth - margin - wr.right}px)`;
-    }
+    // Horizontal: center on wrapper, clamp to viewport.
+    let left = wr.left + wr.width / 2 - pr.width / 2;
+    left = Math.max(margin, Math.min(left, window.innerWidth - pr.width - margin));
+    popupRef.style.left = `${left}px`;
   });
 
   onCleanup(() => {
     document.removeEventListener("click", onDocClick, true);
+    document.removeEventListener("scroll", dismiss, true);
   });
 
   return (
@@ -69,7 +69,9 @@ export default function Tooltip(props: Props) {
     >
       {props.children}
       <Show when={show()}>
-        <span ref={popupRef} class={styles.popup}>{props.text}</span>
+        <Portal>
+          <span ref={popupRef} class={styles.popup}>{props.text}</span>
+        </Portal>
       </Show>
     </span>
   );

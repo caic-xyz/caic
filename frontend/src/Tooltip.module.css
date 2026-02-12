@@ -1,15 +1,11 @@
 /* Tooltip shown on hover (desktop) and tap (mobile). */
 
 .wrapper {
-  position: relative;
   display: inline-flex;
 }
 
 .popup {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
+  position: fixed;
   background: #333;
   color: #fff;
   font-size: 0.75rem;
