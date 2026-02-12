@@ -10,6 +10,34 @@ import Button from "./Button";
 import { requestNotificationPermission, notifyWaiting } from "./notifications";
 import styles from "./App.module.css";
 
+/** Max slug length in the URL (characters after the "+"). */
+const MAX_SLUG = 80;
+
+/** Build a URL-safe slug from arbitrary text: lowercase, non-alnum replaced with "-", collapsed. */
+function slugify(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+/** Build the path portion for a task URL: /task/@{id}+{slug}. */
+function taskPath(id: string, repo: string, branch: string, query: string): string {
+  const repoName = repo.split("/").pop() ?? repo;
+  const parts = [repoName, branch, query].filter(Boolean).map(slugify).join("-");
+  const slug = parts.slice(0, MAX_SLUG).replace(/-$/, "");
+  return `/task/@${id}+${slug}`;
+}
+
+/** Extract the task ID from a /task/@{id}+{slug} pathname, or null. */
+function taskIdFromPath(pathname: string): string | null {
+  const prefix = "/task/@";
+  if (!pathname.startsWith(prefix)) return null;
+  const rest = pathname.slice(prefix.length);
+  const plus = rest.indexOf("+");
+  return plus === -1 ? rest : rest.slice(0, plus);
+}
+
 function formatReset(iso: string): string {
   const d = new Date(iso);
   const now = Date.now();
@@ -60,10 +88,7 @@ export default function App() {
     onCleanup(() => clearInterval(timer));
   }
 
-  const selectedId = (): string | null => {
-    const prefix = "/task/";
-    return location.pathname.startsWith(prefix) ? location.pathname.slice(prefix.length) : null;
-  };
+  const selectedId = (): string | null => taskIdFromPath(location.pathname);
   const selectedTask = (): TaskJSON | null => {
     const id = selectedId();
     return id !== null ? (tasks().find((t) => t.id === id) ?? null) : null;
@@ -162,7 +187,7 @@ export default function App() {
     try {
       const data = await createTask({ prompt: p, repo });
       setPrompt("");
-      navigate(`/task/${data.id}`);
+      navigate(taskPath(data.id, repo, "", p));
     } finally {
       setSubmitting(false);
     }
@@ -222,7 +247,10 @@ export default function App() {
           sidebarOpen={sidebarOpen}
           setSidebarOpen={setSidebarOpen}
           now={now}
-          onSelect={(id) => navigate(`/task/${id}`)}
+          onSelect={(id) => {
+            const found = tasks().find((t) => t.id === id);
+            navigate(found ? taskPath(found.id, found.repo, found.branch, found.task) : `/task/@${id}`);
+          }}
         />
 
         <Switch>
