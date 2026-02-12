@@ -8,7 +8,7 @@ require (
 	github.com/klauspost/compress v1.18.4
 	github.com/lmittmann/tint v1.1.3
 	github.com/maruel/ksid v0.1.1
-	github.com/maruel/md v0.4.4-0.20260212142030-041d47d433c0
+	github.com/maruel/md v0.4.4-0.20260212170904-319c58f93f18
 	github.com/mattn/go-colorable v0.1.14
 	github.com/mattn/go-isatty v0.0.20
 )
