@@ -290,11 +290,21 @@ export interface UsageWindow {
   resetsAt: string;
 }
 /**
+ * ExtraUsage represents the extra (pay-as-you-go) usage state.
+ */
+export interface ExtraUsage {
+  isEnabled: boolean;
+  monthlyLimit: number /* float64 */;
+  usedCredits: number /* float64 */;
+  utilization: number /* float64 */;
+}
+/**
  * UsageResp is the response for GET /api/v1/usage.
  */
 export interface UsageResp {
-  fiveHour?: UsageWindow;
-  sevenDay?: UsageWindow;
+  fiveHour: UsageWindow;
+  sevenDay: UsageWindow;
+  extraUsage: ExtraUsage;
 }
 /**
  * EmptyReq is used for endpoints that take no request body.

@@ -210,6 +210,12 @@ func (f *usageFetcher) fetch() (*dto.UsageResp, error) {
 			Utilization float64 `json:"utilization"`
 			ResetsAt    string  `json:"resets_at"`
 		} `json:"seven_day"`
+		ExtraUsage *struct {
+			IsEnabled    bool    `json:"is_enabled"`
+			MonthlyLimit float64 `json:"monthly_limit"`
+			UsedCredits  float64 `json:"used_credits"`
+			Utilization  float64 `json:"utilization"`
+		} `json:"extra_usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, fmt.Errorf("decode usage: %w", err)
@@ -217,15 +223,23 @@ func (f *usageFetcher) fetch() (*dto.UsageResp, error) {
 
 	out := &dto.UsageResp{}
 	if raw.FiveHour != nil {
-		out.FiveHour = &dto.UsageWindow{
+		out.FiveHour = dto.UsageWindow{
 			Utilization: raw.FiveHour.Utilization,
 			ResetsAt:    raw.FiveHour.ResetsAt,
 		}
 	}
 	if raw.SevenDay != nil {
-		out.SevenDay = &dto.UsageWindow{
+		out.SevenDay = dto.UsageWindow{
 			Utilization: raw.SevenDay.Utilization,
 			ResetsAt:    raw.SevenDay.ResetsAt,
+		}
+	}
+	if raw.ExtraUsage != nil {
+		out.ExtraUsage = dto.ExtraUsage{
+			IsEnabled:    raw.ExtraUsage.IsEnabled,
+			MonthlyLimit: raw.ExtraUsage.MonthlyLimit,
+			UsedCredits:  raw.ExtraUsage.UsedCredits,
+			Utilization:  raw.ExtraUsage.Utilization,
 		}
 	}
 	return out, nil

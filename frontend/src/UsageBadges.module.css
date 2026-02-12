@@ -29,3 +29,9 @@
   background: #f8d7da;
   color: #721c24;
 }
+
+.disabled {
+  background: #e2e3e5;
+  color: #6c757d;
+  text-decoration: line-through;
+}

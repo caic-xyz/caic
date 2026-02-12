@@ -70,10 +70,19 @@ type UsageWindow struct {
 	ResetsAt    string  `json:"resetsAt"`
 }
 
+// ExtraUsage represents the extra (pay-as-you-go) usage state.
+type ExtraUsage struct {
+	IsEnabled    bool    `json:"isEnabled"`
+	MonthlyLimit float64 `json:"monthlyLimit"`
+	UsedCredits  float64 `json:"usedCredits"`
+	Utilization  float64 `json:"utilization"`
+}
+
 // UsageResp is the response for GET /api/v1/usage.
 type UsageResp struct {
-	FiveHour *UsageWindow `json:"fiveHour,omitempty"`
-	SevenDay *UsageWindow `json:"sevenDay,omitempty"`
+	FiveHour   UsageWindow `json:"fiveHour"`
+	SevenDay   UsageWindow `json:"sevenDay"`
+	ExtraUsage ExtraUsage  `json:"extraUsage"`
 }
 
 // EmptyReq is used for endpoints that take no request body.
