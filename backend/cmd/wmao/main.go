@@ -19,7 +19,6 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/maruel/wmao/backend/internal/agent"
 	"github.com/maruel/wmao/backend/internal/container"
-	"github.com/maruel/wmao/backend/internal/gitutil"
 	"github.com/maruel/wmao/backend/internal/server"
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
@@ -210,21 +209,17 @@ type fakeContainer struct{}
 
 var _ container.Ops = (*fakeContainer)(nil)
 
-func (*fakeContainer) Start(ctx context.Context, dir string, _ []string) (string, error) {
-	branch, err := gitutil.CurrentBranch(ctx, dir)
-	if err != nil {
-		return "", err
-	}
+func (*fakeContainer) Start(_ context.Context, _, branch string, _ []string) (string, error) {
 	return "md-test-" + strings.ReplaceAll(branch, "/", "-"), nil
 }
 
-func (*fakeContainer) Diff(_ context.Context, _ string, _ ...string) (string, error) {
+func (*fakeContainer) Diff(_ context.Context, _, _ string, _ ...string) (string, error) {
 	return "", nil
 }
 
-func (*fakeContainer) Pull(_ context.Context, _ string) error            { return nil }
-func (*fakeContainer) Push(_ context.Context, _ string) error            { return nil }
-func (*fakeContainer) Kill(_ context.Context, _ string) error            { return nil }
+func (*fakeContainer) Pull(_ context.Context, _, _ string) error         { return nil }
+func (*fakeContainer) Push(_ context.Context, _, _ string) error         { return nil }
+func (*fakeContainer) Kill(_ context.Context, _, _ string) error         { return nil }
 func (*fakeContainer) List(_ context.Context) ([]container.Entry, error) { return nil, nil }
 
 // fakeAgentStart creates a Session backed by a shell process that emits three

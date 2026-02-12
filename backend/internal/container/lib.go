@@ -29,14 +29,8 @@ func (l *Lib) container(dir, branch string) *md.Container {
 	return l.Client.Container(dir, branch)
 }
 
-// Start creates and starts an md container for the current branch.
-func (l *Lib) Start(ctx context.Context, dir string, labels []string) (string, error) {
-	// The branch is determined by the checked-out branch in dir, same as the
-	// CLI implementation. We read it the same way md does internally.
-	branch, err := md.GitCurrentBranch(ctx, dir)
-	if err != nil {
-		return "", err
-	}
+// Start creates and starts an md container for the given branch.
+func (l *Lib) Start(ctx context.Context, dir, branch string, labels []string) (string, error) {
 	c := l.container(dir, branch)
 	if err := c.Start(ctx, &md.StartOpts{NoSSH: true, Labels: labels}); err != nil {
 		return "", err
@@ -45,11 +39,7 @@ func (l *Lib) Start(ctx context.Context, dir string, labels []string) (string, e
 }
 
 // Diff returns the diff output from the container.
-func (l *Lib) Diff(ctx context.Context, dir string, args ...string) (string, error) {
-	branch, err := md.GitCurrentBranch(ctx, dir)
-	if err != nil {
-		return "", err
-	}
+func (l *Lib) Diff(ctx context.Context, dir, branch string, args ...string) (string, error) {
 	var stdout bytes.Buffer
 	if err := l.container(dir, branch).Diff(ctx, &stdout, io.Discard, args); err != nil {
 		return "", err
@@ -58,29 +48,17 @@ func (l *Lib) Diff(ctx context.Context, dir string, args ...string) (string, err
 }
 
 // Pull pulls changes from the container to the local branch.
-func (l *Lib) Pull(ctx context.Context, dir string) error {
-	branch, err := md.GitCurrentBranch(ctx, dir)
-	if err != nil {
-		return err
-	}
+func (l *Lib) Pull(ctx context.Context, dir, branch string) error {
 	return l.container(dir, branch).Pull(ctx)
 }
 
 // Push pushes local changes into the container.
-func (l *Lib) Push(ctx context.Context, dir string) error {
-	branch, err := md.GitCurrentBranch(ctx, dir)
-	if err != nil {
-		return err
-	}
+func (l *Lib) Push(ctx context.Context, dir, branch string) error {
 	return l.container(dir, branch).Push(ctx)
 }
 
 // Kill stops and removes the container.
-func (l *Lib) Kill(ctx context.Context, dir string) error {
-	branch, err := md.GitCurrentBranch(ctx, dir)
-	if err != nil {
-		return err
-	}
+func (l *Lib) Kill(ctx context.Context, dir, branch string) error {
 	return l.container(dir, branch).Kill(ctx)
 }
 

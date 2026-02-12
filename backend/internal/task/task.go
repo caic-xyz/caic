@@ -615,7 +615,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (string, e
 
 	t.setState(StateProvisioning)
 	slog.Info("starting container", "repo", t.Repo, "branch", t.Branch)
-	name, err := r.Container.Start(ctx, r.Dir, labels)
+	name, err := r.Container.Start(ctx, r.Dir, t.Branch, labels)
 	if err != nil {
 		return "", fmt.Errorf("start container: %w", err)
 	}
@@ -628,67 +628,31 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (string, e
 	return name, nil
 }
 
-// PullChanges checks out the branch, runs md diff + md pull, then switches
-// back. Returns the diff stat and the first error encountered.
-func (r *Runner) PullChanges(ctx context.Context, branch string) (diffStat string, err error) {
+// PullChanges runs md diff + md pull for the given branch. Returns the diff
+// stat and the first error encountered.
+func (r *Runner) PullChanges(ctx context.Context, branch string) (string, error) {
 	r.initDefaults()
 	r.branchMu.Lock()
 	defer r.branchMu.Unlock()
-
-	if err := gitutil.CheckoutBranch(ctx, r.Dir, branch); err != nil {
-		return "", fmt.Errorf("checkout for pull: %w", err)
-	}
-	defer func() {
-		if e := gitutil.CheckoutBranch(ctx, r.Dir, r.BaseBranch); e != nil {
-			err = errors.Join(err, fmt.Errorf("checkout base after pull: %w", e))
-		}
-	}()
-
-	diffStat, _ = r.Container.Diff(ctx, r.Dir, "--stat")
-
+	diffStat, _ := r.Container.Diff(ctx, r.Dir, branch, "--stat")
 	slog.Info("pulling changes", "repo", filepath.Base(r.Dir), "branch", branch)
-	if err := r.Container.Pull(ctx, r.Dir); err != nil {
+	if err := r.Container.Pull(ctx, r.Dir, branch); err != nil {
 		return diffStat, err
 	}
 	return diffStat, nil
 }
 
-// PushChanges checks out the branch, runs md push, then switches back.
-func (r *Runner) PushChanges(ctx context.Context, branch string) (err error) {
+// PushChanges pushes local changes into the container.
+func (r *Runner) PushChanges(ctx context.Context, branch string) error {
 	r.initDefaults()
-	r.branchMu.Lock()
-	defer r.branchMu.Unlock()
-
-	if err := gitutil.CheckoutBranch(ctx, r.Dir, branch); err != nil {
-		return fmt.Errorf("checkout for push: %w", err)
-	}
-	defer func() {
-		if e := gitutil.CheckoutBranch(ctx, r.Dir, r.BaseBranch); e != nil {
-			err = errors.Join(err, fmt.Errorf("checkout base after push: %w", e))
-		}
-	}()
-
 	slog.Info("pushing changes to container", "repo", filepath.Base(r.Dir), "branch", branch)
-	return r.Container.Push(ctx, r.Dir)
+	return r.Container.Push(ctx, r.Dir, branch)
 }
 
-// KillContainer checks out the branch, kills the md container, then switches
-// back.
-func (r *Runner) KillContainer(ctx context.Context, branch string) (err error) {
+// KillContainer kills the md container for the given branch.
+func (r *Runner) KillContainer(ctx context.Context, branch string) error {
 	r.initDefaults()
-	r.branchMu.Lock()
-	defer r.branchMu.Unlock()
-
-	if err := gitutil.CheckoutBranch(ctx, r.Dir, branch); err != nil {
-		return fmt.Errorf("checkout for kill: %w", err)
-	}
-	defer func() {
-		if e := gitutil.CheckoutBranch(ctx, r.Dir, r.BaseBranch); e != nil {
-			err = errors.Join(err, fmt.Errorf("checkout base after kill: %w", e))
-		}
-	}()
-
-	return r.Container.Kill(ctx, r.Dir)
+	return r.Container.Kill(ctx, r.Dir, branch)
 }
 
 // openLog creates a JSONL log file in LogDir and writes a metadata header as

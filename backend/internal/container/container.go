@@ -16,11 +16,11 @@ type Entry struct {
 
 // Ops abstracts md container lifecycle operations.
 type Ops interface {
-	Start(ctx context.Context, dir string, labels []string) (name string, err error)
-	Diff(ctx context.Context, dir string, args ...string) (string, error)
-	Pull(ctx context.Context, dir string) error
-	Push(ctx context.Context, dir string) error
-	Kill(ctx context.Context, dir string) error
+	Start(ctx context.Context, dir, branch string, labels []string) (name string, err error)
+	Diff(ctx context.Context, dir, branch string, args ...string) (string, error)
+	Pull(ctx context.Context, dir, branch string) error
+	Push(ctx context.Context, dir, branch string) error
+	Kill(ctx context.Context, dir, branch string) error
 	List(ctx context.Context) ([]Entry, error)
 }
 
