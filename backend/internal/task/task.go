@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"github.com/maruel/ksid"
-	"github.com/maruel/wmao/backend/internal/agent"
-	"github.com/maruel/wmao/backend/internal/container"
-	"github.com/maruel/wmao/backend/internal/gitutil"
+	"github.com/maruel/caic/backend/internal/agent"
+	"github.com/maruel/caic/backend/internal/container"
+	"github.com/maruel/caic/backend/internal/gitutil"
 )
 
 // State represents the lifecycle state of a task.
@@ -345,7 +345,7 @@ func (r *Runner) initDefaults() {
 	})
 }
 
-// Init sets nextID past any existing wmao/w* branches so that restarts don't
+// Init sets nextID past any existing caic/w* branches so that restarts don't
 // waste attempts on branches that already exist.
 func (r *Runner) Init(ctx context.Context) error {
 	r.initDefaults()
@@ -459,7 +459,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) error {
 	// 1. Create branch + start container (serialized).
 	slog.Info("setting up task", "repo", t.Repo)
 	r.branchMu.Lock()
-	name, err := r.setup(ctx, t, []string{"wmao=" + t.ID.String()})
+	name, err := r.setup(ctx, t, []string{"caic=" + t.ID.String()})
 	r.branchMu.Unlock()
 	if err != nil {
 		t.setState(StateFailed)
@@ -601,7 +601,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (string, e
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		t.Branch = fmt.Sprintf("wmao/w%d", r.nextID)
+		t.Branch = fmt.Sprintf("caic/w%d", r.nextID)
 		r.nextID++
 		slog.Info("creating branch", "repo", t.Repo, "branch", t.Branch)
 		err = gitutil.CreateBranch(ctx, r.Dir, t.Branch, "origin/"+r.BaseBranch)
@@ -676,7 +676,7 @@ func (r *Runner) openLog(t *Task) (w io.Writer, closeFn func()) {
 	}
 	// Write metadata header as the first line.
 	meta := agent.MetaMessage{
-		MessageType: "wmao_meta",
+		MessageType: "caic_meta",
 		Version:     1,
 		Prompt:      t.Prompt,
 		Repo:        t.Repo,
@@ -696,7 +696,7 @@ func writeLogTrailer(w io.Writer, res *Result) {
 		return
 	}
 	mr := agent.MetaResultMessage{
-		MessageType: "wmao_result",
+		MessageType: "caic_result",
 		State:       res.State.String(),
 		CostUSD:     res.CostUSD,
 		DurationMs:  res.DurationMs,

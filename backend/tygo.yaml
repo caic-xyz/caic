@@ -1,5 +1,5 @@
 packages:
-  - path: "github.com/maruel/wmao/backend/internal/server/dto"
+  - path: "github.com/maruel/caic/backend/internal/server/dto"
     output_path: "../../../../sdk/types.gen.ts"
     exclude_files:
       - validate.go

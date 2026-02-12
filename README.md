@@ -1,6 +1,6 @@
-# wmao
+# caic
 
-Work my ass off. Manage multiple coding agents.
+Coding Agents in Containers. Manage multiple coding agents.
 
 - Backend is in Go, frontend in SolidJS.
 - Expects [md](https://github.com/maruel/md) to be in `$PATH`.
@@ -14,7 +14,7 @@ the container owns Claude's stdin/stdout and persists across SSH disconnects,
 so the server can restart without killing the agent or losing messages.
 
 ```
-HOST (wmao server)              CONTAINER (md)
+HOST (caic server)              CONTAINER (md)
 ──────────────────              ───────────────────────────────
                                 relay.py (setsid, survives SSH)
 ┌─────────┐   SSH stdin/stdout  ┌────────┐     ┌──────────────┐
@@ -46,7 +46,7 @@ independent of the SSH session). On restart the server:
 ## Installation
 
 ```bash
-go install github.com/maruel/wmao/backend/cmd/wmao@latest
+go install github.com/maruel/caic/backend/cmd/caic@latest
 ```
 
 ### systemd user service
@@ -55,26 +55,26 @@ Install the unit file and enable it:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp contrib/wmao.service ~/.config/systemd/user/
+cp contrib/caic.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now wmao
+systemctl --user enable --now caic
 ```
 
-Edit `~/.config/systemd/user/wmao.service` to adjust `-root` and `-http`
+Edit `~/.config/systemd/user/caic.service` to adjust `-root` and `-http`
 
 View logs:
 
 ```bash
-journalctl --user -u wmao -f
+journalctl --user -u caic -f
 ```
 
 ## Serving over Tailscale
 
-Safely expose wmao on your [Tailscale](https://tailscale.com/) network using `tailscale serve`. This provides
+Safely expose caic on your [Tailscale](https://tailscale.com/) network using `tailscale serve`. This provides
 secure access from any device on your tailnet without opening ports or configuring firewalls.
 
 ```bash
-# Expose wmao on your tailnet at https://<hostname>.<tailnet>.ts.net
+# Expose caic on your tailnet at https://<hostname>.<tailnet>.ts.net
 tailscale serve --bg 8080
 ```
 

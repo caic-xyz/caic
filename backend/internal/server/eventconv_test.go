@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/wmao/backend/internal/agent"
-	"github.com/maruel/wmao/backend/internal/server/dto"
+	"github.com/maruel/caic/backend/internal/agent"
+	"github.com/maruel/caic/backend/internal/server/dto"
 )
 
 func TestConvertSystemInit(t *testing.T) {

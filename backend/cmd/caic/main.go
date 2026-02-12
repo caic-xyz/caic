@@ -17,9 +17,9 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/lmittmann/tint"
-	"github.com/maruel/wmao/backend/internal/agent"
-	"github.com/maruel/wmao/backend/internal/container"
-	"github.com/maruel/wmao/backend/internal/server"
+	"github.com/maruel/caic/backend/internal/agent"
+	"github.com/maruel/caic/backend/internal/container"
+	"github.com/maruel/caic/backend/internal/server"
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
 )
@@ -126,7 +126,7 @@ func serveHTTP(ctx context.Context, addr, rootDir string, maxTurns int, logDir s
 
 func main() {
 	if err := mainImpl(); err != nil && !errors.Is(err, context.Canceled) {
-		fmt.Fprintf(os.Stderr, "wmao: %v\n", err)
+		fmt.Fprintf(os.Stderr, "caic: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -140,7 +140,7 @@ func serveFake(ctx context.Context, addr, rootDir string) error {
 
 	// When -root is not provided, create a temp git repo.
 	if rootDir == "" {
-		tmpDir, err := os.MkdirTemp("", "wmao-e2e-*")
+		tmpDir, err := os.MkdirTemp("", "caic-e2e-*")
 		if err != nil {
 			return err
 		}
@@ -246,8 +246,8 @@ echo '{"type":"result","subtype":"success","result":"All done.","num_turns":1,"t
 	return agent.NewSession(cmd, stdin, stdout, msgCh, logW), nil
 }
 
-// cacheDir returns the wmao log/cache directory, using $XDG_CACHE_HOME/wmao/
-// with a fallback to ~/.cache/wmao/.
+// cacheDir returns the caic log/cache directory, using $XDG_CACHE_HOME/caic/
+// with a fallback to ~/.cache/caic/.
 func cacheDir() string {
 	base := os.Getenv("XDG_CACHE_HOME")
 	if base == "" {
@@ -257,7 +257,7 @@ func cacheDir() string {
 		}
 		base = filepath.Join(home, ".cache")
 	}
-	return filepath.Join(base, "wmao")
+	return filepath.Join(base, "caic")
 }
 
 // watchExecutable watches the current executable for modifications and calls

@@ -4,7 +4,7 @@ FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:8080
 
 help:
-	@echo "wmao - Manage multiple coding agents"
+	@echo "caic - Manage multiple coding agents"
 	@echo ""
 	@echo "Available targets:"
 	@echo "  make build          - Build Go server (auto-generates frontend)"
@@ -32,7 +32,7 @@ docs:
 	@./scripts/update_agents_file_index.py
 
 dev: build
-	@wmao -http $(HTTP)
+	@caic -http $(HTTP)
 
 test:
 	@go test -cover ./...

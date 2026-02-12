@@ -114,9 +114,9 @@ func RepoName(ctx context.Context, dir string) (string, error) {
 }
 
 // MaxBranchSeqNum finds the highest sequence number N among branches matching
-// "wmao/wN". Returns -1 if no matching branches exist.
+// "caic/wN". Returns -1 if no matching branches exist.
 func MaxBranchSeqNum(ctx context.Context, dir string) (int, error) {
-	cmd := exec.CommandContext(ctx, "git", "branch", "--list", "wmao/w*", "--format=%(refname:short)")
+	cmd := exec.CommandContext(ctx, "git", "branch", "--list", "caic/w*", "--format=%(refname:short)")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -125,10 +125,10 @@ func MaxBranchSeqNum(ctx context.Context, dir string) (int, error) {
 	highest := -1
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "wmao/w") {
+		if !strings.HasPrefix(line, "caic/w") {
 			continue
 		}
-		numStr := line[len("wmao/w"):]
+		numStr := line[len("caic/w"):]
 		n, err := strconv.Atoi(numStr)
 		if err != nil {
 			continue

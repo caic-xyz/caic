@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/maruel/ksid"
-	"github.com/maruel/wmao/backend/internal/agent"
+	"github.com/maruel/caic/backend/internal/agent"
 )
 
 func TestOpenLog(t *testing.T) {
@@ -25,7 +25,7 @@ func TestOpenLog(t *testing.T) {
 		dir := t.TempDir()
 		logDir := filepath.Join(dir, "logs")
 		r := &Runner{LogDir: logDir}
-		tk := &Task{ID: ksid.NewID(), Prompt: "test", Repo: "org/repo", Branch: "wmao/w0"}
+		tk := &Task{ID: ksid.NewID(), Prompt: "test", Repo: "org/repo", Branch: "caic/w0"}
 		w, closeFn := r.openLog(tk)
 		defer closeFn()
 		if w == nil {
@@ -43,7 +43,7 @@ func TestOpenLog(t *testing.T) {
 			t.Fatalf("expected 1 file, got %d", len(entries))
 		}
 		name := entries[0].Name()
-		want := tk.ID.String() + "-org-repo-wmao-w0.jsonl"
+		want := tk.ID.String() + "-org-repo-caic-w0.jsonl"
 		if name != want {
 			t.Errorf("filename = %q, want %q", name, want)
 		}
@@ -281,8 +281,8 @@ func TestRunnerInit(t *testing.T) {
 func TestRunnerInitSkipsExisting(t *testing.T) {
 	clone := initTestRepo(t, "main")
 	// Pre-create branches.
-	runGit(t, clone, "branch", "wmao/w0")
-	runGit(t, clone, "branch", "wmao/w3")
+	runGit(t, clone, "branch", "caic/w0")
+	runGit(t, clone, "branch", "caic/w3")
 
 	r := &Runner{
 		BaseBranch: "main",

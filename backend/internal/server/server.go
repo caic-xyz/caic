@@ -19,22 +19,22 @@ import (
 	"time"
 
 	"github.com/maruel/ksid"
-	"github.com/maruel/wmao/backend/frontend"
-	"github.com/maruel/wmao/backend/internal/agent"
-	"github.com/maruel/wmao/backend/internal/container"
-	"github.com/maruel/wmao/backend/internal/gitutil"
-	"github.com/maruel/wmao/backend/internal/server/dto"
-	"github.com/maruel/wmao/backend/internal/task"
+	"github.com/maruel/caic/backend/frontend"
+	"github.com/maruel/caic/backend/internal/agent"
+	"github.com/maruel/caic/backend/internal/container"
+	"github.com/maruel/caic/backend/internal/gitutil"
+	"github.com/maruel/caic/backend/internal/server/dto"
+	"github.com/maruel/caic/backend/internal/task"
 )
 
 type repoInfo struct {
-	RelPath    string // e.g. "github/wmao" — used as API ID.
+	RelPath    string // e.g. "github/caic" — used as API ID.
 	AbsPath    string
 	BaseBranch string
 	RepoURL    string // HTTPS browse URL derived from origin remote.
 }
 
-// Server is the HTTP server for the wmao web UI.
+// Server is the HTTP server for the caic web UI.
 type Server struct {
 	repos    []repoInfo
 	runners  map[string]*task.Runner // keyed by RelPath
@@ -567,19 +567,19 @@ func (s *Server) adoptContainers(ctx context.Context) error {
 
 // adoptOne investigates a single container and registers it as a task.
 func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner, e container.Entry, branch string, branchID map[string]string) error {
-	// Only adopt containers that wmao started. The wmao label is set at
+	// Only adopt containers that caic started. The caic label is set at
 	// container creation and is the authoritative proof of ownership.
-	labelVal, err := container.LabelValue(ctx, e.Name, "wmao")
+	labelVal, err := container.LabelValue(ctx, e.Name, "caic")
 	if err != nil {
 		return fmt.Errorf("label check for %s: %w", e.Name, err)
 	}
 	if labelVal == "" {
-		slog.Info("skipping non-wmao container", "repo", ri.RelPath, "container", e.Name, "branch", branch)
+		slog.Info("skipping non-caic container", "repo", ri.RelPath, "container", e.Name, "branch", branch)
 		return nil
 	}
 	taskID, err := ksid.Parse(labelVal)
 	if err != nil {
-		return fmt.Errorf("parse wmao label %q on %s: %w", labelVal, e.Name, err)
+		return fmt.Errorf("parse caic label %q on %s: %w", labelVal, e.Name, err)
 	}
 
 	lt := task.LoadBranchLogs(s.logDir, branch)

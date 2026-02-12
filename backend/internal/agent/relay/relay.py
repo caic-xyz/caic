@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Persistent relay for claude processes inside wmao containers.
+# Persistent relay for claude processes inside caic containers.
 #
 # Two modes:
 #   serve-attach -- <cmd...>   Start relay server + attach as first client.
@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 
-RELAY_DIR = "/tmp/wmao-relay"
+RELAY_DIR = "/tmp/caic-relay"
 SOCK_PATH = os.path.join(RELAY_DIR, "relay.sock")
 OUTPUT_PATH = os.path.join(RELAY_DIR, "output.jsonl")
 PID_PATH = os.path.join(RELAY_DIR, "pid")

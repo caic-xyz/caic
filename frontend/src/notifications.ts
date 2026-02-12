@@ -20,7 +20,7 @@ export function notifyWaiting(taskId: string, taskName: string): void {
   if (!canNotify() || document.visibilityState === "visible") return;
   const n = new Notification("Agent waiting for input", {
     body: `Task #${taskId}: ${taskName}`,
-    tag: `wmao-waiting-${taskId}`,
+    tag: `caic-waiting-${taskId}`,
   });
   n.onclick = () => {
     window.focus();

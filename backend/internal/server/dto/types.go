@@ -1,10 +1,10 @@
-// Exported request and response types for the wmao API.
+// Exported request and response types for the caic API.
 package dto
 
 import "github.com/maruel/ksid"
 
 //go:generate go tool tygo generate --config ../../../../backend/tygo.yaml
-//go:generate go run github.com/maruel/wmao/backend/internal/cmd/gen-api-client
+//go:generate go run github.com/maruel/caic/backend/internal/cmd/gen-api-client
 
 // RepoJSON is the JSON representation of a discovered repo.
 type RepoJSON struct {

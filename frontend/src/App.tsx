@@ -1,4 +1,4 @@
-// Main application component for wmao web UI.
+// Main application component for caic web UI.
 import { createEffect, createSignal, For, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { RepoJSON, TaskJSON, UsageResp } from "@sdk/types.gen";
@@ -79,7 +79,7 @@ export default function App() {
     const data = await listRepos();
     setRepos(data);
     if (data.length > 0) {
-      const last = localStorage.getItem("wmao:lastRepo");
+      const last = localStorage.getItem("caic:lastRepo");
       const match = last && data.find((r) => r.path === last);
       setSelectedRepo(match ? match.path : data[0].path);
     }
@@ -158,7 +158,7 @@ export default function App() {
     const repo = selectedRepo();
     if (!p || !repo) return;
     setSubmitting(true);
-    localStorage.setItem("wmao:lastRepo", repo);
+    localStorage.setItem("caic:lastRepo", repo);
     try {
       const data = await createTask({ prompt: p, repo });
       setPrompt("");
@@ -171,8 +171,8 @@ export default function App() {
   return (
     <div class={styles.app}>
       <div class={`${styles.titleRow} ${selectedId() ? styles.hideOnMobile : ""}`}>
-        <h1 class={styles.title}>wmao</h1>
-        <span class={styles.subtitle}>Work my ass off. Manage coding agents.</span>
+        <h1 class={styles.title}>caic</h1>
+        <span class={styles.subtitle}>Coding Agents in Containers</span>
         <Show when={usage()} keyed>
           {(u) => (
             <span class={styles.usageRow}>

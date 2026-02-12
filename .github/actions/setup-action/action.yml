@@ -1,5 +1,5 @@
-name: 'wmao Setup Action'
-description: 'Shared setup steps for wmao'
+name: 'caic Setup Action'
+description: 'Shared setup steps for caic'
 runs:
   using: "composite"
   steps:

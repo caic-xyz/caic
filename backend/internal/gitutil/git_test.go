@@ -84,7 +84,7 @@ func TestMaxBranchSeqNum(t *testing.T) {
 		}
 	}
 
-	// No wmao branches → -1.
+	// No caic branches → -1.
 	n, err := MaxBranchSeqNum(ctx, dir)
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +94,7 @@ func TestMaxBranchSeqNum(t *testing.T) {
 	}
 
 	// Create some branches.
-	for _, b := range []string{"wmao/w0", "wmao/w3", "wmao/w7", "other/branch"} {
+	for _, b := range []string{"caic/w0", "caic/w3", "caic/w7", "other/branch"} {
 		cmd := exec.CommandContext(ctx, "git", "branch", b) //nolint:gosec // test helper, args are constant.
 		cmd.Dir = dir
 		if out, err := cmd.CombinedOutput(); err != nil {

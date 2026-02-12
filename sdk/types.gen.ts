@@ -212,7 +212,7 @@ export interface EventUserInput {
 //////////
 // source: types.go
 /*
-Exported request and response types for the wmao API.
+Exported request and response types for the caic API.
 */
 
 /**

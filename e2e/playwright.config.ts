@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: "./tests",
   timeout: 60_000,
   webServer: {
-    command: "go run ../backend/cmd/wmao -fake",
+    command: "go run ../backend/cmd/caic -fake",
     url: "http://localhost:8090/api/v1/repos",
     reuseExistingServer: false,
     timeout: 30_000,

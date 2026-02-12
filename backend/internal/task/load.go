@@ -12,11 +12,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/maruel/wmao/backend/internal/agent"
+	"github.com/maruel/caic/backend/internal/agent"
 )
 
-// errNotLogFile is returned when a file doesn't contain a valid wmao_meta header.
-var errNotLogFile = errors.New("not a wmao log file")
+// errNotLogFile is returned when a file doesn't contain a valid caic_meta header.
+var errNotLogFile = errors.New("not a caic log file")
 
 // LoadedTask holds the data reconstructed from a single JSONL log file.
 type LoadedTask struct {
@@ -31,7 +31,7 @@ type LoadedTask struct {
 }
 
 // LoadLogs scans logDir for *.jsonl files and reconstructs completed tasks.
-// Files without a valid wmao_meta header line are skipped. Returns tasks
+// Files without a valid caic_meta header line are skipped. Returns tasks
 // sorted by StartedAt ascending.
 func LoadLogs(logDir string) ([]*LoadedTask, error) {
 	entries, err := os.ReadDir(logDir)
@@ -77,7 +77,7 @@ func LoadTerminated(logDir string, n int) []*LoadedTask {
 	}
 	var terminated []*LoadedTask
 	for _, lt := range all {
-		// Only include tasks with an explicit wmao_result trailer.
+		// Only include tasks with an explicit caic_result trailer.
 		// Log files without a trailer may belong to still-running tasks
 		// whose default state is StateFailed.
 		if lt.Result != nil {
@@ -93,7 +93,7 @@ func LoadTerminated(logDir string, n int) []*LoadedTask {
 }
 
 // loadLogFile parses a single JSONL log file. Returns nil if the file has no
-// valid wmao_meta header.
+// valid caic_meta header.
 func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
@@ -152,12 +152,12 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 			continue
 		}
 
-		if envelope.Type == "wmao_result" {
+		if envelope.Type == "caic_result" {
 			var mr agent.MetaResultMessage
 			rd := json.NewDecoder(bytes.NewReader(line))
 			rd.DisallowUnknownFields()
 			if err := rd.Decode(&mr); err != nil {
-				return nil, fmt.Errorf("invalid wmao_result: %w", err)
+				return nil, fmt.Errorf("invalid caic_result: %w", err)
 			}
 			lt.State = parseState(mr.State)
 			lt.Result = &Result{

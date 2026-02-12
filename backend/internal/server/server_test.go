@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/wmao/backend/internal/agent"
-	"github.com/maruel/wmao/backend/internal/server/dto"
-	"github.com/maruel/wmao/backend/internal/task"
+	"github.com/maruel/caic/backend/internal/agent"
+	"github.com/maruel/caic/backend/internal/server/dto"
+	"github.com/maruel/caic/backend/internal/task"
 )
 
 func decodeError(t *testing.T, w *httptest.ResponseRecorder) dto.ErrorDetails {
@@ -301,10 +301,10 @@ func TestLoadTerminatedTasksOnStartup(t *testing.T) {
 	// Write 3 terminal task logs.
 	for i, state := range []string{"terminated", "failed", "terminated"} {
 		meta := mustJSON(t, agent.MetaMessage{
-			MessageType: "wmao_meta", Version: 1, Prompt: fmt.Sprintf("task %d", i), Repo: "r",
-			Branch: "wmao/w" + strings.Repeat("0", i+1), StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
+			MessageType: "caic_meta", Version: 1, Prompt: fmt.Sprintf("task %d", i), Repo: "r",
+			Branch: "caic/w" + strings.Repeat("0", i+1), StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
 		})
-		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "wmao_result", State: state, CostUSD: float64(i + 1)})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: state, CostUSD: float64(i + 1)})
 		writeLogFile(t, logDir, fmt.Sprintf("%d.jsonl", i), meta, trailer)
 	}
 
@@ -356,8 +356,8 @@ func TestTerminatedTaskEventsAfterRestart(t *testing.T) {
 
 	// Write a terminated task log with real agent messages.
 	meta := mustJSON(t, agent.MetaMessage{
-		MessageType: "wmao_meta", Version: 1, Prompt: "fix the bug",
-		Repo: "r", Branch: "wmao/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
+		Repo: "r", Branch: "caic/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	})
 	initMsg := mustJSON(t, agent.SystemInitMessage{
 		MessageType: "system", Subtype: "init", Model: "claude-opus-4-6", Version: "2.0", SessionID: "s1",
@@ -374,7 +374,7 @@ func TestTerminatedTaskEventsAfterRestart(t *testing.T) {
 		MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.05, DurationMs: 1000, NumTurns: 1,
 	})
 	trailer := mustJSON(t, agent.MetaResultMessage{
-		MessageType: "wmao_result", State: "terminated", CostUSD: 0.05, DurationMs: 1000,
+		MessageType: "caic_result", State: "terminated", CostUSD: 0.05, DurationMs: 1000,
 	})
 	writeLogFile(t, logDir, "task.jsonl", meta, initMsg, assistant, result, trailer)
 
@@ -457,8 +457,8 @@ func TestLoadTerminatedTasksCostInJSON(t *testing.T) {
 	logDir := t.TempDir()
 
 	meta := mustJSON(t, agent.MetaMessage{
-		MessageType: "wmao_meta", Version: 1, Prompt: "fix bug",
-		Repo: "r", Branch: "wmao/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		MessageType: "caic_meta", Version: 1, Prompt: "fix bug",
+		Repo: "r", Branch: "caic/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	})
 	initMsg := mustJSON(t, agent.SystemInitMessage{
 		MessageType: "system", Subtype: "init", Model: "claude-opus-4-6", Version: "2.0", SessionID: "s1",
@@ -468,7 +468,7 @@ func TestLoadTerminatedTasksCostInJSON(t *testing.T) {
 		TotalCostUSD: 1.23, DurationMs: 5000, NumTurns: 3,
 	})
 	trailer := mustJSON(t, agent.MetaResultMessage{
-		MessageType: "wmao_result", State: "terminated",
+		MessageType: "caic_result", State: "terminated",
 		CostUSD: 1.23, DurationMs: 5000, NumTurns: 3,
 	})
 	writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
@@ -512,8 +512,8 @@ func TestLoadTerminatedTasksBackfillsCostFromMessages(t *testing.T) {
 	// Trailer has zero cost (e.g. session exited without final ResultMessage),
 	// but the messages contain a ResultMessage with cost.
 	meta := mustJSON(t, agent.MetaMessage{
-		MessageType: "wmao_meta", Version: 1, Prompt: "fix bug",
-		Repo: "r", Branch: "wmao/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		MessageType: "caic_meta", Version: 1, Prompt: "fix bug",
+		Repo: "r", Branch: "caic/w0", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	})
 	initMsg := mustJSON(t, agent.SystemInitMessage{
 		MessageType: "system", Subtype: "init", Model: "claude-opus-4-6", Version: "2.0", SessionID: "s1",
@@ -523,7 +523,7 @@ func TestLoadTerminatedTasksBackfillsCostFromMessages(t *testing.T) {
 		TotalCostUSD: 0.42, DurationMs: 3000, NumTurns: 2,
 	})
 	trailer := mustJSON(t, agent.MetaResultMessage{
-		MessageType: "wmao_result", State: "terminated",
+		MessageType: "caic_result", State: "terminated",
 		// CostUSD intentionally zero.
 	})
 	writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)

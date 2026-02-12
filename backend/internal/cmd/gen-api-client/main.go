@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/maruel/wmao/backend/internal/server/dto"
+	"github.com/maruel/caic/backend/internal/server/dto"
 )
 
 var pathParamRe = regexp.MustCompile(`\{(\w+)\}`)

@@ -1,5 +1,5 @@
-name: 'wmao Test Action'
-description: 'Shared test steps for wmao'
+name: 'caic Test Action'
+description: 'Shared test steps for caic'
 inputs:
   codecov-token:
     description: 'Token for Codecov'

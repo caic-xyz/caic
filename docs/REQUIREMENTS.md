@@ -1,10 +1,10 @@
-# wmao - Requirements
+# caic - Requirements
 
-Work My Ass Off: manage multiple coding agents in parallel.
+Coding Agents in Containers: manage multiple coding agents in parallel.
 
 ## Overview
 
-wmao orchestrates multiple Claude Code agents running in isolated
+caic orchestrates multiple Claude Code agents running in isolated
 [md](https://github.com/maruel/md) containers. Each task gets its own
 container+branch, Claude runs inside via SSH with streaming JSON, and results
 are pulled back and serialized into the upstream repository.
@@ -22,13 +22,13 @@ are pulled back and serialized into the upstream repository.
 ### FR-1: Task Submission
 
 - User provides a task description via CLI.
-- wmao creates a new git branch from the current HEAD (e.g.,
-  `wmao/<timestamp>-<slug>`).
-- wmao starts an md container for that branch (`md start --no-ssh`).
+- caic creates a new git branch from the current HEAD (e.g.,
+  `caic/<timestamp>-<slug>`).
+- caic starts an md container for that branch (`md start --no-ssh`).
 
 ### FR-2: Agent Execution
 
-- wmao runs Claude Code inside the container over SSH:
+- caic runs Claude Code inside the container over SSH:
   ```
   ssh <container> claude -p \
     --output-format stream-json --verbose \
@@ -46,30 +46,30 @@ are pulled back and serialized into the upstream repository.
 
 ### FR-3: Result Reporting
 
-- On completion, wmao runs `md diff --stat` to summarize what changed.
+- On completion, caic runs `md diff --stat` to summarize what changed.
 - Optionally runs `md diff` for the full patch.
 - Reports to the user: task status (success/error), cost, files changed, diff
   summary.
 
 ### FR-4: Git Integration
 
-- After the agent finishes, wmao runs `md pull` to bring changes into the local
+- After the agent finishes, caic runs `md pull` to bring changes into the local
   branch.
 - Multiple agents may finish concurrently; their pulls must be serialized
   (mutex) to avoid conflicts.
-- After a successful pull, wmao pushes the branch to `origin`.
-- If a push fails due to a race, wmao rebases and retries.
+- After a successful pull, caic pushes the branch to `origin`.
+- If a push fails due to a race, caic rebases and retries.
 
 ### FR-5: Parallel Execution
 
-- wmao can run multiple tasks concurrently, each in its own container.
+- caic can run multiple tasks concurrently, each in its own container.
 - Each task is independent: separate branch, separate container, separate
   agent.
 - A status display shows all running tasks and their state.
 
 ### FR-6: Cleanup
 
-- After successfully pushing, wmao kills the container (`md kill`).
+- After successfully pushing, caic kills the container (`md kill`).
 - On failure, the container is left running for manual inspection.
 
 ## Non-Functional Requirements
@@ -99,7 +99,7 @@ are pulled back and serialized into the upstream repository.
                          │ task descriptions
                          ▼
                   ┌──────────────┐
-                  │    wmao      │
+                  │    caic      │
                   │  (Go binary) │
                   └──┬───┬───┬──┘
                      │   │   │        one goroutine per task
@@ -142,33 +142,33 @@ Output (stdout NDJSON) — key types:
 
 ### Git Flow
 
-1. Create branch `wmao/<slug>` from current HEAD.
+1. Create branch `caic/<slug>` from current HEAD.
 2. `md start --no-ssh` on that branch.
 3. Agent runs inside container, makes commits.
 4. `md pull` rebases container commits onto local branch.
-5. `git push origin wmao/<slug>` (serialized across tasks).
+5. `git push origin caic/<slug>` (serialized across tasks).
 6. `md kill` on success.
 
 ## CLI Interface
 
 ```
-wmao run "fix the auth bug in login.go"
-wmao run "add pagination to /api/users" "refactor database layer"
-wmao status
-wmao logs <task-id>
+caic run "fix the auth bug in login.go"
+caic run "add pagination to /api/users" "refactor database layer"
+caic status
+caic logs <task-id>
 ```
 
-### `wmao run <task>...`
+### `caic run <task>...`
 
 - Accepts one or more task descriptions.
 - Runs all tasks in parallel.
 - Blocks until all complete.
 - Prints summary on completion.
 
-### `wmao status`
+### `caic status`
 
 - Shows running tasks: branch, container, elapsed time, state.
 
-### `wmao logs <task-id>`
+### `caic logs <task-id>`
 
 - Tails the streaming JSON log for a task.

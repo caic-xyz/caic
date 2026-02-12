@@ -134,11 +134,11 @@ type MetaMessage struct {
 }
 
 // Type implements Message.
-func (m *MetaMessage) Type() string { return "wmao_meta" }
+func (m *MetaMessage) Type() string { return "caic_meta" }
 
 // Validate checks that all required fields are present and the version is supported.
 func (m *MetaMessage) Validate() error {
-	if m.MessageType != "wmao_meta" {
+	if m.MessageType != "caic_meta" {
 		return fmt.Errorf("unexpected type %q", m.MessageType)
 	}
 	if m.Version != 1 {
@@ -170,7 +170,7 @@ type MetaResultMessage struct {
 }
 
 // Type implements Message.
-func (m *MetaResultMessage) Type() string { return "wmao_result" }
+func (m *MetaResultMessage) Type() string { return "caic_result" }
 
 // MarshalMessage serializes a Message to JSON. For RawMessage, returns the
 // original bytes to preserve unknown fields. For typed messages, uses

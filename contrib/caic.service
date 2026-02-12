@@ -1,19 +1,20 @@
-# wmao systemd user service
-# Install: mkdir -p ~/.config/systemd/user && cp contrib/wmao.service ~/.config/systemd/user/
-# Enable:  systemctl --user daemon-reload && systemctl --user enable --now wmao
-# Logs:    journalctl --user -u wmao -f
+# caic systemd user service
+# Install: mkdir -p ~/.config/systemd/user && cp contrib/caic.service ~/.config/systemd/user/
+# Enable:  systemctl --user daemon-reload && systemctl --user enable --now caic
+# Logs:    journalctl --user -u caic -f
 
 [Unit]
-Description=wmao - Parallel coding agent orchestrator
-Documentation=https://github.com/maruel/wmao
+Description=Coding Agents in Containers
+Documentation=https://github.com/maruel/caic
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
+EnvironmentFile=-%h/.config/caic/caic.env
 Environment=PATH=%h/go/bin:%h/src/md:/usr/local/bin:/usr/bin:/bin
-ExecStart=%h/go/bin/wmao -http :8080 -root %h/wmao
-WorkingDirectory=%h/wmao
+ExecStart=%h/go/bin/caic -http :8005 -root %h/src
+WorkingDirectory=%h/src
 Restart=always
 RestartSec=1s
 
@@ -22,11 +23,10 @@ RestartSec=1s
 # Filesystem isolation
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/wmao
+ReadWritePaths=%h/src
 PrivateTmp=true
 ProtectControlGroups=true
 ProtectKernelTunables=true
-ProtectHostname=true
 ProtectProc=invisible
 ProcSubset=pid
 
@@ -37,7 +37,7 @@ AmbientCapabilities=
 # Network restrictions (allow only IPv4/IPv6/Unix sockets)
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 SocketBindDeny=any
-SocketBindAllow=tcp:8080
+SocketBindAllow=tcp:8005
 
 # System call filtering
 SystemCallArchitectures=native

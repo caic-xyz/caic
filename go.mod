@@ -1,4 +1,4 @@
-module github.com/maruel/wmao
+module github.com/maruel/caic
 
 go 1.25.7
 

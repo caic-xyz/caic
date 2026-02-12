@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/maruel/wmao/backend/internal/agent/relay"
+	"github.com/maruel/caic/backend/internal/agent/relay"
 )
 
 // Session manages a running Claude Code process. Use Start to create one.
@@ -262,7 +262,7 @@ func TextFromAssistant(m *AssistantMessage) string {
 
 // Relay paths inside the container.
 const (
-	relayDir        = "/tmp/wmao-relay"
+	relayDir        = "/tmp/caic-relay"
 	relayScriptPath = relayDir + "/relay.py"
 	relaySockPath   = relayDir + "/relay.sock"
 	relayOutputPath = relayDir + "/output.jsonl"
@@ -373,8 +373,8 @@ func (w *slogWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// HasRelayDir checks whether the wmao relay directory exists in the container.
-// Its presence proves wmao deployed the relay at some point.
+// HasRelayDir checks whether the caic relay directory exists in the container.
+// Its presence proves caic deployed the relay at some point.
 func HasRelayDir(ctx context.Context, container string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "ssh", container, "test", "-d", relayDir)
 	if err := cmd.Run(); err != nil {
