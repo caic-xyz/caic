@@ -2,6 +2,7 @@
 import { Show } from "solid-js";
 import type { Accessor } from "solid-js";
 import type { ExtraUsage, UsageResp } from "@sdk/types.gen";
+import Tooltip from "./Tooltip";
 import styles from "./UsageBadges.module.css";
 
 function formatReset(iso: string): string {
@@ -23,9 +24,11 @@ function Badge(props: { label: string; utilization: number; resetsAt: string }) 
   const pct = () => Math.round(props.utilization);
   const cls = () => (pct() >= 80 ? styles.red : pct() >= 50 ? styles.yellow : styles.green);
   return (
-    <span class={`${styles.badge} ${cls()}`} title={`Resets ${formatReset(props.resetsAt)}`}>
-      {props.label}: {pct()}%
-    </span>
+    <Tooltip text={`Resets ${formatReset(props.resetsAt)}`}>
+      <span class={`${styles.badge} ${cls()}`}>
+        {props.label}: {pct()}%
+      </span>
+    </Tooltip>
   );
 }
 
@@ -39,12 +42,11 @@ function ExtraBadge(props: { extra: ExtraUsage }) {
   const hasData = () => props.extra.usedCredits !== 0 || props.extra.monthlyLimit !== 0;
   return (
     <Show when={hasData()}>
-      <span
-        class={`${styles.badge} ${props.extra.isEnabled ? cls() : styles.disabled}`}
-        title={props.extra.isEnabled ? title() : `Disabled — ${title()}`}
-      >
-        Extra: ${used().toFixed(0)} / ${limit().toFixed(0)}
-      </span>
+      <Tooltip text={props.extra.isEnabled ? title() : `Disabled — ${title()}`}>
+        <span class={`${styles.badge} ${props.extra.isEnabled ? cls() : styles.disabled}`}>
+          Extra: ${used().toFixed(0)} / ${limit().toFixed(0)}
+        </span>
+      </Tooltip>
     </Show>
   );
 }
