@@ -22,6 +22,8 @@ interface MessageGroup {
   toolCalls: ToolCall[];
   // For "ask" groups: the ask payload.
   ask?: EventAsk;
+  // For "ask" groups: the user's submitted answer (from the following userInput).
+  answerText?: string;
 }
 
 // A tool_use event paired with its optional tool_result.
@@ -206,6 +208,7 @@ export default function TaskView(props: Props) {
                               <AskQuestionGroup
                                 ask={ask}
                                 interactive={isWaiting() && group() === grouped()[lastAskIdx()]}
+                                answerText={group().answerText}
                                 onSubmit={sendAskAnswer}
                               />
                             )}
@@ -396,9 +399,16 @@ function groupMessages(msgs: EventMessage[]): MessageGroup[] {
           groups.push({ kind: "ask", events: [ev], toolCalls: [], ask: ev.ask });
         }
         break;
-      case "userInput":
-        groups.push({ kind: "userInput", events: [ev], toolCalls: [] });
+      case "userInput": {
+        const prev = lastGroup();
+        if (prev && prev.kind === "ask" && !prev.answerText) {
+          prev.answerText = ev.userInput?.text;
+          prev.events.push(ev);
+        } else {
+          groups.push({ kind: "userInput", events: [ev], toolCalls: [] });
+        }
         break;
+      }
       case "usage":
         {
           const last = lastGroup();
@@ -528,6 +538,9 @@ function ElidedTurn(props: { turn: Turn }) {
                     <div class={styles.askText}>
                       {ask.questions[0]?.question ?? "Question"}
                     </div>
+                    <Show when={group.answerText}>
+                      <div class={styles.askSubmitted}>{group.answerText}</div>
+                    </Show>
                   </div>
                 )}
               </Match>
@@ -663,11 +676,12 @@ function Markdown(props: { text: string }) {
   return <div class={styles.markdown} innerHTML={html()} />;
 }
 
-function AskQuestionGroup(props: { ask: EventAsk; interactive: boolean; onSubmit: (text: string) => void }) {
+function AskQuestionGroup(props: { ask: EventAsk; interactive: boolean; answerText?: string; onSubmit: (text: string) => void }) {
   const questions = () => props.ask.questions;
   const [selections, setSelections] = createSignal<Map<number, Set<string>>>(new Map());
   const [otherTexts, setOtherTexts] = createSignal<Map<number, string>>(new Map());
   const [submitted, setSubmitted] = createSignal(false);
+  const answered = () => props.answerText !== undefined || submitted();
 
   function toggleOption(qIdx: number, label: string, multiSelect: boolean) {
     setSelections((prev) => {
@@ -730,7 +744,7 @@ function AskQuestionGroup(props: { ask: EventAsk; interactive: boolean; onSubmit
     props.onSubmit(answer);
   }
 
-  const canInteract = (): boolean => props.interactive && !submitted();
+  const canInteract = (): boolean => props.interactive && !answered();
 
   return (
     <div class={canInteract() ? `${styles.askGroup} ${styles.askGroupActive}` : styles.askGroup}>
@@ -783,8 +797,10 @@ function AskQuestionGroup(props: { ask: EventAsk; interactive: boolean; onSubmit
       <Show when={canInteract()}>
         <button class={styles.askSubmit} onClick={() => handleSubmit()}>Submit</button>
       </Show>
-      <Show when={submitted()}>
-        <div class={styles.askSubmitted}>Answer submitted</div>
+      <Show when={answered()}>
+        <div class={styles.askSubmitted}>
+          {props.answerText ?? formatAnswer()}
+        </div>
       </Show>
     </div>
   );
