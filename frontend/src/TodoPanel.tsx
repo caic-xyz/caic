@@ -1,5 +1,5 @@
 // TodoPanel renders the agent's current todo list from TodoWrite events.
-import { For, Show, createMemo } from "solid-js";
+import { For, Show, createEffect, createMemo } from "solid-js";
 import type { EventMessage } from "@sdk/types.gen";
 import { detailsOpenState } from "./TaskView";
 import styles from "./TodoPanel.module.css";
@@ -36,6 +36,16 @@ export default function TodoPanel(props: { messages: EventMessage[] }) {
       if (todo) return todo.todos;
     }
     return [];
+  });
+
+  const allDone = createMemo(() => {
+    const t = todos();
+    return t.length > 0 && t.every((item) => item.status === "completed");
+  });
+
+  // Auto-collapse when all todos are completed.
+  createEffect(() => {
+    if (allDone()) detailsOpenState.set(DETAILS_KEY, false);
   });
 
   const isOpen = () => detailsOpenState.get(DETAILS_KEY) ?? true;
