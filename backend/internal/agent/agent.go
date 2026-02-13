@@ -246,6 +246,9 @@ func IsRelayRunning(ctx context.Context, container string) (bool, error) {
 // over SSH. If planFile is non-empty, that specific file is read; otherwise the
 // most recently modified .md file in ~/.claude/plans/ is used.
 func ReadPlan(ctx context.Context, container, planFile string) (string, error) {
+	if container == "" {
+		return "", errors.New("read plan: container is required")
+	}
 	args := []string{container, "python3", RelayScriptPath, "read-plan"}
 	if planFile != "" {
 		args = append(args, planFile)
