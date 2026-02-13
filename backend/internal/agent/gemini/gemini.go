@@ -21,7 +21,7 @@ type Backend struct{}
 var _ agent.Backend = (*Backend)(nil)
 
 // Wire is the wire format for Gemini CLI (stream-json over stdin/stdout).
-var Wire = agent.WireFormat{Write: WritePrompt, Parse: ParseMessage}
+var Wire agent.WireFormat = &Backend{}
 
 // Harness returns the harness identifier.
 func (b *Backend) Harness() agent.Harness { return agent.Gemini }
@@ -112,8 +112,7 @@ func (b *Backend) ParseMessage(line []byte) (agent.Message, error) {
 
 // WritePrompt writes a single user message to Gemini CLI's stdin.
 // Gemini CLI in -p mode reads plain text lines from stdin.
-// It implements agent.WriteFn.
-func WritePrompt(w io.Writer, prompt string, logW io.Writer) error {
+func (*Backend) WritePrompt(w io.Writer, prompt string, logW io.Writer) error {
 	data := []byte(prompt + "\n")
 	if _, err := w.Write(data); err != nil {
 		return err

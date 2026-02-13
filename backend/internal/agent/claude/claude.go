@@ -21,7 +21,7 @@ type Backend struct{}
 var _ agent.Backend = (*Backend)(nil)
 
 // Wire is the wire format for Claude Code (stream-json over stdin/stdout).
-var Wire = agent.WireFormat{Write: WritePrompt, Parse: agent.ParseMessage}
+var Wire agent.WireFormat = &Backend{}
 
 // Harness returns the harness identifier.
 func (b *Backend) Harness() agent.Harness { return agent.Claude }
@@ -123,8 +123,7 @@ type userInputContent struct {
 }
 
 // WritePrompt writes a single user message in Claude Code's stdin format.
-// It implements agent.WriteFn.
-func WritePrompt(w io.Writer, prompt string, logW io.Writer) error {
+func (*Backend) WritePrompt(w io.Writer, prompt string, logW io.Writer) error {
 	msg := userInputMessage{
 		Type:    "user",
 		Message: userInputContent{Role: "user", Content: prompt},

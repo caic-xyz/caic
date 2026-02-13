@@ -16,8 +16,42 @@ import (
 	"github.com/maruel/ksid"
 )
 
-// testWriteFn is a simple WriteFn for testing.
-func testWriteFn(w io.Writer, prompt string, logW io.Writer) error {
+// testBackend implements agent.Backend for tests. It launches a "cat" process
+// that blocks until stdin is closed. capturedCtx records the context passed
+// to Start so tests can assert context lifetime.
+type testBackend struct {
+	capturedCtx context.Context
+}
+
+func (b *testBackend) Harness() agent.Harness { return "test" }
+
+func (b *testBackend) Start(ctx context.Context, _ agent.Options, msgCh chan<- agent.Message, _ io.Writer) (*agent.Session, error) {
+	b.capturedCtx = ctx
+	cmd := exec.CommandContext(ctx, "cat")
+	stdin, _ := cmd.StdinPipe()
+	stdout, _ := cmd.StdoutPipe()
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return agent.NewSession(cmd, stdin, stdout, msgCh, nil, &testWire{}), nil
+}
+
+func (b *testBackend) AttachRelay(context.Context, string, int64, chan<- agent.Message, io.Writer) (*agent.Session, error) {
+	return nil, errors.New("test backend does not support relay")
+}
+
+func (b *testBackend) ReadRelayOutput(context.Context, string) ([]agent.Message, int64, error) {
+	return nil, 0, errors.New("test backend does not support relay")
+}
+
+func (b *testBackend) ParseMessage(line []byte) (agent.Message, error) {
+	return agent.ParseMessage(line)
+}
+
+// testWire implements agent.WireFormat for testing.
+type testWire struct{}
+
+func (*testWire) WritePrompt(w io.Writer, prompt string, logW io.Writer) error {
 	msg := struct {
 		Type    string `json:"type"`
 		Message struct {
@@ -41,35 +75,7 @@ func testWriteFn(w io.Writer, prompt string, logW io.Writer) error {
 	return nil
 }
 
-// testBackend implements agent.Backend for tests. It launches a "cat" process
-// that blocks until stdin is closed. capturedCtx records the context passed
-// to Start so tests can assert context lifetime.
-type testBackend struct {
-	capturedCtx context.Context
-}
-
-func (b *testBackend) Harness() agent.Harness { return "test" }
-
-func (b *testBackend) Start(ctx context.Context, _ agent.Options, msgCh chan<- agent.Message, _ io.Writer) (*agent.Session, error) {
-	b.capturedCtx = ctx
-	cmd := exec.CommandContext(ctx, "cat")
-	stdin, _ := cmd.StdinPipe()
-	stdout, _ := cmd.StdoutPipe()
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	return agent.NewSession(cmd, stdin, stdout, msgCh, nil, agent.WireFormat{Write: testWriteFn, Parse: agent.ParseMessage}), nil
-}
-
-func (b *testBackend) AttachRelay(context.Context, string, int64, chan<- agent.Message, io.Writer) (*agent.Session, error) {
-	return nil, errors.New("test backend does not support relay")
-}
-
-func (b *testBackend) ReadRelayOutput(context.Context, string) ([]agent.Message, int64, error) {
-	return nil, 0, errors.New("test backend does not support relay")
-}
-
-func (b *testBackend) ParseMessage(line []byte) (agent.Message, error) {
+func (*testWire) ParseMessage(line []byte) (agent.Message, error) {
 	return agent.ParseMessage(line)
 }
 

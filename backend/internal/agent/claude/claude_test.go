@@ -9,7 +9,8 @@ import (
 func TestWritePrompt(t *testing.T) {
 	var buf bytes.Buffer
 	var logBuf bytes.Buffer
-	if err := WritePrompt(&buf, "hello", &logBuf); err != nil {
+	var b Backend
+	if err := b.WritePrompt(&buf, "hello", &logBuf); err != nil {
 		t.Fatal(err)
 	}
 	if buf.String() != logBuf.String() {

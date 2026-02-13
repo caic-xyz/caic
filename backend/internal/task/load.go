@@ -171,7 +171,7 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 }
 
 // parseFnForHarness returns the message parser for the given harness.
-func parseFnForHarness(h agent.Harness) agent.ParseFn {
+func parseFnForHarness(h agent.Harness) func([]byte) (agent.Message, error) {
 	switch h {
 	case agent.Gemini:
 		return agentgemini.ParseMessage

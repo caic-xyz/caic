@@ -9,8 +9,10 @@ import (
 	"time"
 )
 
-// testWriteFn is a simple WriteFn for testing that writes JSON user messages.
-func testWriteFn(w io.Writer, prompt string, logW io.Writer) error {
+// testWire implements WireFormat for testing.
+type testWire struct{}
+
+func (testWire) WritePrompt(w io.Writer, prompt string, logW io.Writer) error {
 	msg := struct {
 		Type    string `json:"type"`
 		Message struct {
@@ -34,16 +36,19 @@ func testWriteFn(w io.Writer, prompt string, logW io.Writer) error {
 	return nil
 }
 
+func (testWire) ParseMessage(line []byte) (Message, error) {
+	return ParseMessage(line)
+}
+
 func TestSessionLifecycle(t *testing.T) {
 	// Simulate a session using pipes instead of a real process.
 	stdinR, stdinW := io.Pipe()
 	stdoutR, stdoutW := io.Pipe()
 
 	s := &Session{
-		stdin:   stdinW,
-		logW:    nil,
-		writeFn: testWriteFn,
-		done:    make(chan struct{}),
+		stdin: stdinW,
+		wire:  testWire{},
+		done:  make(chan struct{}),
 	}
 
 	msgCh := make(chan Message, 16)
@@ -131,9 +136,9 @@ func TestSessionLifecycle(t *testing.T) {
 func TestSessionClose(t *testing.T) {
 	_, stdinW := io.Pipe()
 	s := &Session{
-		stdin:   stdinW,
-		writeFn: testWriteFn,
-		done:    make(chan struct{}),
+		stdin: stdinW,
+		wire:  testWire{},
+		done:  make(chan struct{}),
 	}
 	// Close should be idempotent.
 	s.Close()
