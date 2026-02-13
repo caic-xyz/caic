@@ -90,7 +90,16 @@ type ContentBlock struct {
 	Input json.RawMessage `json:"input,omitempty"`
 }
 
-// Usage tracks token consumption.
+// Usage tracks per-API-call token consumption as reported by the Anthropic API.
+//
+// The three input token fields are disjoint; total input context for one call
+// equals InputTokens + CacheCreationInputTokens + CacheReadInputTokens.
+// InputTokens is only the small non-cached, non-cache-creation portion
+// (typically single-digit). The bulk of the input context lands in cache
+// fields.
+//
+// In ResultMessage these values are per-query (one API round-trip).
+// Task.liveUsage sums them across all queries for cumulative totals.
 type Usage struct {
 	InputTokens              int    `json:"input_tokens"`
 	OutputTokens             int    `json:"output_tokens"`

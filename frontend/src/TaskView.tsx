@@ -338,9 +338,9 @@ function MessageItem(props: { ev: EventMessage }) {
       <Match when={props.ev.usage} keyed>
         {(usage) => (
           <div class={styles.usageMeta}>
-            {usage.model} &middot; {usage.inputTokens}in + {usage.outputTokens}out
+            {usage.model} &middot; {formatTokens(usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens)} in + {formatTokens(usage.outputTokens)} out
             <Show when={usage.cacheReadInputTokens > 0}>
-              {" "}&middot; {usage.cacheReadInputTokens} cache
+              {" "}&middot; {formatTokens(usage.cacheReadInputTokens)} cached
             </Show>
           </div>
         )}
@@ -375,7 +375,6 @@ function MessageItem(props: { ev: EventMessage }) {
             </Show>
             <div class={styles.resultMeta}>
               ${result.totalCostUSD.toFixed(4)} &middot; {(result.durationMs / 1000).toFixed(1)}s &middot; {result.numTurns} turns
-              &middot; {result.usage.inputTokens + result.usage.outputTokens} tokens
             </div>
           </div>
         )}
@@ -493,6 +492,12 @@ function groupTurns(groups: MessageGroup[]): Turn[] {
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}Mt`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}kt`;
+  return `${n}t`;
 }
 
 function toolCountSummary(calls: ToolCall[]): string {

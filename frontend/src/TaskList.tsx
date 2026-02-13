@@ -54,6 +54,9 @@ export default function TaskList(props: TaskListProps) {
               durationMs={t().durationMs}
               numTurns={t().numTurns}
               inputTokens={t().inputTokens}
+              outputTokens={t().outputTokens}
+              cacheCreationInputTokens={t().cacheCreationInputTokens}
+              cacheReadInputTokens={t().cacheReadInputTokens}
               containerUptimeMs={t().containerUptimeMs}
               error={t().error}
               inPlanMode={t().inPlanMode}

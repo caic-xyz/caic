@@ -806,26 +806,20 @@ func (s *Server) toJSON(e *taskEntry) dto.TaskJSON {
 	if !e.task.StartedAt.IsZero() {
 		j.ContainerUptimeMs = time.Since(e.task.StartedAt).Milliseconds()
 	}
+	// Token usage is per-query in ResultMessage but cumulative in LiveStats.
+	// Always use LiveStats for token totals.
+	var usage agent.Usage
+	j.CostUSD, j.NumTurns, j.DurationMs, usage = e.task.LiveStats()
+	j.InputTokens = usage.InputTokens
+	j.OutputTokens = usage.OutputTokens
+	j.CacheCreationInputTokens = usage.CacheCreationInputTokens
+	j.CacheReadInputTokens = usage.CacheReadInputTokens
 	if e.result != nil {
 		j.DiffStat = toDTODiffStat(e.result.DiffStat)
-		j.CostUSD = e.result.CostUSD
-		j.DurationMs = e.result.DurationMs
-		j.NumTurns = e.result.NumTurns
-		j.InputTokens = e.result.Usage.InputTokens
-		j.OutputTokens = e.result.Usage.OutputTokens
-		j.CacheCreationInputTokens = e.result.Usage.CacheCreationInputTokens
-		j.CacheReadInputTokens = e.result.Usage.CacheReadInputTokens
 		j.Result = e.result.AgentResult
 		if e.result.Err != nil {
 			j.Error = e.result.Err.Error()
 		}
-	} else {
-		var usage agent.Usage
-		j.CostUSD, j.NumTurns, j.DurationMs, usage = e.task.LiveStats()
-		j.InputTokens = usage.InputTokens
-		j.OutputTokens = usage.OutputTokens
-		j.CacheCreationInputTokens = usage.CacheCreationInputTokens
-		j.CacheReadInputTokens = usage.CacheReadInputTokens
 	}
 	return j
 }

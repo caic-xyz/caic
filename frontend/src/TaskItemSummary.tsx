@@ -1,6 +1,7 @@
 // Compact summary card for a single task, used in the sidebar task list.
 import { Show } from "solid-js";
 import type { Accessor } from "solid-js";
+import Tooltip from "./Tooltip";
 import styles from "./TaskItemSummary.module.css";
 
 export interface TaskItemSummaryProps {
@@ -17,6 +18,9 @@ export interface TaskItemSummaryProps {
   durationMs: number;
   numTurns: number;
   inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
   containerUptimeMs?: number;
   error?: string;
   inPlanMode?: boolean;
@@ -59,8 +63,11 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
         <div class={styles.metaRow}>
           <span class={styles.meta}>
             {props.harness && props.harness !== "claude" ? props.harness + " · " : ""}{props.claudeCodeVersion}{props.claudeCodeVersion && props.model ? " · " : ""}{props.model}
-            <Show when={props.inputTokens > 0}>
-              {" · "}{formatTokens(props.inputTokens)}
+            <Show when={props.inputTokens + props.cacheCreationInputTokens + props.cacheReadInputTokens > 0}>
+              {" · "}
+              <Tooltip text={`${formatTokens(props.inputTokens)} in, ${formatTokens(props.outputTokens)} out, ${formatTokens(props.cacheCreationInputTokens)} cache write, ${formatTokens(props.cacheReadInputTokens)} cache read`}>
+                <span>{formatTokens(props.inputTokens + props.cacheCreationInputTokens + props.cacheReadInputTokens)}</span>
+              </Tooltip>
             </Show>
             <Show when={props.costUSD > 0}>
               {" · "}${props.costUSD.toFixed(2)}
