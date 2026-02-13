@@ -58,7 +58,7 @@ func (b *testBackend) Start(ctx context.Context, _ agent.Options, msgCh chan<- a
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, stdin, stdout, msgCh, nil, testWriteFn), nil
+	return agent.NewSession(cmd, stdin, stdout, msgCh, nil, testWriteFn, agent.ParseMessage), nil
 }
 
 func (b *testBackend) AttachRelay(context.Context, string, int64, chan<- agent.Message, io.Writer) (*agent.Session, error) {

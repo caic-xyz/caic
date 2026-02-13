@@ -335,7 +335,7 @@ func TestReadRecords(t *testing.T) {
 			t.Skip("no JSONL files found")
 		}
 		for _, path := range files {
-			f, err := os.Open(path) //nolint:gosec // path from controlled WalkDir
+			f, err := os.Open(filepath.Clean(path))
 			if err != nil {
 				t.Errorf("open %s: %v", path, err)
 				continue

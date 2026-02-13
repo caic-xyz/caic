@@ -13,6 +13,7 @@ type Harness string
 // Supported agent harnesses.
 const (
 	HarnessClaude Harness = "claude"
+	HarnessGemini Harness = "gemini"
 )
 
 // RepoJSON is the JSON representation of a discovered repo.

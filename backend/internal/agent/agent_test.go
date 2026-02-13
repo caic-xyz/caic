@@ -51,7 +51,7 @@ func TestSessionLifecycle(t *testing.T) {
 	// Simulate the readMessages goroutine.
 	go func() {
 		defer close(s.done)
-		result, parseErr := readMessages(stdoutR, msgCh, nil)
+		result, parseErr := readMessages(stdoutR, msgCh, nil, ParseMessage)
 		s.result = result
 		if parseErr != nil {
 			s.err = parseErr
@@ -219,7 +219,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n")
 
 		ch := make(chan Message, 16)
-		result, err := readMessages(strings.NewReader(input), ch, nil)
+		result, err := readMessages(strings.NewReader(input), ch, nil, ParseMessage)
 		close(ch)
 		if err != nil {
 			t.Fatal(err)
@@ -247,7 +247,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n")
 
 		var buf bytes.Buffer
-		result, err := readMessages(strings.NewReader(input), nil, &buf)
+		result, err := readMessages(strings.NewReader(input), nil, &buf, ParseMessage)
 		if err != nil {
 			t.Fatal(err)
 		}

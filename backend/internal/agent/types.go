@@ -13,6 +13,7 @@ type Harness string
 // Supported agent harnesses.
 const (
 	Claude Harness = "claude"
+	Gemini Harness = "gemini"
 )
 
 // DiffFileStat describes changes to a single file.

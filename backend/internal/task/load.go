@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/maruel/caic/backend/internal/agent"
+	agentgemini "github.com/maruel/caic/backend/internal/agent/gemini"
 )
 
 // errNotLogFile is returned when a file doesn't contain a valid caic_meta header.
@@ -111,6 +112,8 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 		State:             StateFailed, // default if no trailer
 	}
 
+	parseFn := parseFnForHarness(meta.Harness)
+
 	// Parse remaining lines as agent messages or the result trailer.
 	var envelope struct {
 		Type string `json:"type"`
@@ -156,8 +159,8 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 			continue
 		}
 
-		// Parse as a regular agent message.
-		msg, err := agent.ParseMessage(line)
+		// Parse as a regular agent message using the harness-specific parser.
+		msg, err := parseFn(line)
 		if err != nil {
 			continue
 		}
@@ -165,6 +168,16 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 	}
 
 	return lt, scanner.Err()
+}
+
+// parseFnForHarness returns the message parser for the given harness.
+func parseFnForHarness(h agent.Harness) agent.ParseFn {
+	switch h {
+	case agent.Gemini:
+		return agentgemini.ParseMessage
+	default:
+		return agent.ParseMessage
+	}
 }
 
 // parseState converts a state string back to a State value.

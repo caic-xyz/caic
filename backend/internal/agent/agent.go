@@ -30,12 +30,16 @@ type Options struct {
 // format. logW receives a copy of the written bytes (may be nil).
 type WriteFn func(w io.Writer, prompt string, logW io.Writer) error
 
+// ParseFn decodes a single NDJSON line into a typed Message.
+type ParseFn func(line []byte) (Message, error)
+
 // Session manages a running agent process.
 type Session struct {
 	cmd       *exec.Cmd
 	stdin     io.WriteCloser
 	logW      io.Writer
 	writeFn   WriteFn
+	parseFn   ParseFn
 	mu        sync.Mutex // serializes stdin writes
 	closeOnce sync.Once
 	done      chan struct{} // closed when readMessages goroutine exits
@@ -45,19 +49,21 @@ type Session struct {
 
 // NewSession creates a Session from an already-started command. Messages read
 // from stdout are parsed and sent to msgCh. logW receives raw NDJSON lines
-// (may be nil). writeFn defines the wire format for sending prompts.
-func NewSession(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, msgCh chan<- Message, logW io.Writer, writeFn WriteFn) *Session {
+// (may be nil). writeFn defines the wire format for sending prompts. parseFn
+// decodes each NDJSON line into a typed Message.
+func NewSession(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, msgCh chan<- Message, logW io.Writer, writeFn WriteFn, parseFn ParseFn) *Session {
 	s := &Session{
 		cmd:     cmd,
 		stdin:   stdin,
 		logW:    logW,
 		writeFn: writeFn,
+		parseFn: parseFn,
 		done:    make(chan struct{}),
 	}
 
 	go func() {
 		defer close(s.done)
-		result, parseErr := readMessages(stdout, msgCh, logW)
+		result, parseErr := readMessages(stdout, msgCh, logW, parseFn)
 		waitErr := cmd.Wait()
 		// Store the result and first non-nil error.
 		s.result = result
@@ -104,7 +110,7 @@ func (s *Session) Wait() (*ResultMessage, error) {
 
 // readMessages reads NDJSON lines from r, dispatches to msgCh, and returns
 // the terminal ResultMessage. If logW is non-nil, each raw line is written to it.
-func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer) (*ResultMessage, error) {
+func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer, parseFn ParseFn) (*ResultMessage, error) {
 	scanner := bufio.NewScanner(r)
 	// Agents can produce long lines (e.g., base64 images in tool results).
 	scanner.Buffer(make([]byte, 0, 1<<20), 1<<20)
@@ -119,7 +125,7 @@ func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer) (*ResultMes
 			_, _ = logW.Write(line)
 			_, _ = logW.Write([]byte{'\n'})
 		}
-		msg, err := ParseMessage(line)
+		msg, err := parseFn(line)
 		if err != nil {
 			slog.Warn("skipping unparseable message", "err", err, "line", string(line))
 			continue

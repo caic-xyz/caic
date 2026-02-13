@@ -246,6 +246,10 @@ export type Harness = string;
  */
 export const HarnessClaude: Harness = "claude";
 /**
+ * Supported agent harnesses.
+ */
+export const HarnessGemini: Harness = "gemini";
+/**
  * RepoJSON is the JSON representation of a discovered repo.
  */
 export interface RepoJSON {

@@ -250,7 +250,7 @@ echo '{"type":"result","subtype":"success","result":"All done.","num_turns":1,"t
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, stdin, stdout, msgCh, logW, claude.WritePrompt), nil
+	return agent.NewSession(cmd, stdin, stdout, msgCh, logW, claude.WritePrompt, agent.ParseMessage), nil
 }
 
 func (*fakeBackend) AttachRelay(context.Context, string, int64, chan<- agent.Message, io.Writer) (*agent.Session, error) {
