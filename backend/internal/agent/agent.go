@@ -21,6 +21,7 @@ import (
 // Options configures an agent session launch.
 type Options struct {
 	Container       string
+	Dir             string // Working directory inside the container.
 	MaxTurns        int
 	Model           string // Model alias ("opus", "sonnet", "haiku") or full ID. Empty = default.
 	ResumeSessionID string

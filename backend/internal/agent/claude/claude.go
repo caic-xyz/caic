@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -32,15 +33,18 @@ func (b *Backend) Models() []string { return []string{"opus", "sonnet", "haiku"}
 // Start launches a Claude Code process via the relay daemon in the given
 // container. It deploys the relay script and starts claude via serve-attach.
 func (b *Backend) Start(ctx context.Context, opts agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
+	if opts.Dir == "" {
+		return nil, errors.New("opts.Dir is required")
+	}
 	if err := agent.DeployRelay(ctx, opts.Container); err != nil {
 		return nil, err
 	}
 
 	claudeArgs := buildArgs(opts)
 
-	// Build the ssh command: ssh <container> python3 relay.py serve-attach -- claude ...
-	sshArgs := make([]string, 0, 5+len(claudeArgs))
-	sshArgs = append(sshArgs, opts.Container, "python3", agent.RelayScriptPath, "serve-attach", "--")
+	// Build the ssh command: ssh <container> python3 relay.py serve-attach --dir <dir> -- claude ...
+	sshArgs := make([]string, 0, 7+len(claudeArgs))
+	sshArgs = append(sshArgs, opts.Container, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--")
 	sshArgs = append(sshArgs, claudeArgs...)
 
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.

@@ -165,6 +165,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) error {
 		}
 		session, err = r.backend(t.Harness).Start(ctx, agent.Options{
 			Container:       t.Container,
+			Dir:             r.Dir,
 			MaxTurns:        maxTurns,
 			Model:           t.Model,
 			ResumeSessionID: t.SessionID,
@@ -231,6 +232,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) error {
 	slog.Info("starting agent session", "repo", t.Repo, "branch", t.Branch, "container", name, "agent", t.Harness, "maxTurns", maxTurns)
 	session, err := r.backend(t.Harness).Start(ctx, agent.Options{
 		Container: name,
+		Dir:       r.Dir,
 		MaxTurns:  maxTurns,
 		Model:     t.Model,
 	}, msgCh, logW)
@@ -471,6 +473,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt string) err
 	slog.Info("restarting agent session", "repo", t.Repo, "branch", t.Branch, "container", t.Container, "agent", t.Harness, "maxTurns", maxTurns)
 	session, err := r.backend(t.Harness).Start(ctx, agent.Options{
 		Container: t.Container,
+		Dir:       r.Dir,
 		MaxTurns:  maxTurns,
 		Model:     t.Model,
 	}, msgCh, logW)

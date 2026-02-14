@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -32,14 +33,17 @@ func (b *Backend) Models() []string { return []string{"gemini-2.5-pro", "gemini-
 // Start launches a Gemini CLI process via the relay daemon in the given
 // container.
 func (b *Backend) Start(ctx context.Context, opts agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
+	if opts.Dir == "" {
+		return nil, errors.New("opts.Dir is required")
+	}
 	if err := agent.DeployRelay(ctx, opts.Container); err != nil {
 		return nil, err
 	}
 
 	geminiArgs := buildArgs(opts)
 
-	sshArgs := make([]string, 0, 5+len(geminiArgs))
-	sshArgs = append(sshArgs, opts.Container, "python3", agent.RelayScriptPath, "serve-attach", "--")
+	sshArgs := make([]string, 0, 7+len(geminiArgs))
+	sshArgs = append(sshArgs, opts.Container, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--")
 	sshArgs = append(sshArgs, geminiArgs...)
 
 	slog.Info("gemini: launching via relay", "container", opts.Container, "args", geminiArgs)

@@ -26,7 +26,7 @@ PID_PATH = os.path.join(RELAY_DIR, "pid")
 BUF_SIZE = 65536
 
 
-def serve(cmd_args):
+def serve(cmd_args, work_dir):
     """Start the relay server as a daemon, then attach as the first client."""
     os.makedirs(RELAY_DIR, exist_ok=True)
 
@@ -40,7 +40,7 @@ def serve(cmd_args):
     pid = os.fork()
     if pid > 0:
         # Parent: wait for socket to appear, then attach.
-        _wait_for_socket()
+        _wait_for_socket(30)
         attach_client(offset=0)
         return
 
@@ -59,6 +59,9 @@ def serve(cmd_args):
     # Write PID file.
     with open(PID_PATH, "w") as f:
         f.write(str(os.getpid()))
+
+    # Change to the working directory before starting the subprocess.
+    os.chdir(work_dir)
 
     # Start the subprocess.
     proc = subprocess.Popen(
@@ -188,7 +191,7 @@ def serve(cmd_args):
         pass
 
 
-def attach_client(offset=0):
+def attach_client(offset):
     """Connect to relay via Unix socket and bridge to stdio."""
     conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     conn.connect(SOCK_PATH)
@@ -232,7 +235,7 @@ def attach_client(offset=0):
         t.join(timeout=5)
 
 
-def _wait_for_socket(timeout=30):
+def _wait_for_socket(timeout):
     """Block until the relay socket appears."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -261,7 +264,7 @@ def _read_line(conn):
     return buf.decode()
 
 
-def read_plan(path=None):
+def read_plan(path):
     """Print the content of a plan file.
 
     If path is given, read that file directly. Otherwise find the most recently
@@ -284,7 +287,7 @@ def read_plan(path=None):
 
 def main():
     if len(sys.argv) < 2:
-        print("usage: relay.py serve-attach -- <cmd...>", file=sys.stderr)
+        print("usage: relay.py serve-attach --dir <path> -- <cmd...>", file=sys.stderr)
         print("       relay.py attach [--offset N]", file=sys.stderr)
         print("       relay.py read-plan [path]", file=sys.stderr)
         sys.exit(1)
@@ -292,17 +295,24 @@ def main():
     mode = sys.argv[1]
 
     if mode == "serve-attach":
+        # Parse required --dir flag.
+        rest = sys.argv[2:]
+        if len(rest) < 2 or rest[0] != "--dir":
+            print("relay.py serve-attach: --dir <path> is required", file=sys.stderr)
+            sys.exit(1)
+        work_dir = rest[1]
+        rest = rest[2:]
         # Find "--" separator.
         try:
-            sep = sys.argv.index("--")
+            sep = rest.index("--")
         except ValueError:
             print("relay.py serve-attach: missing '--' separator", file=sys.stderr)
             sys.exit(1)
-        cmd_args = sys.argv[sep + 1 :]
+        cmd_args = rest[sep + 1 :]
         if not cmd_args:
             print("relay.py serve-attach: no command after '--'", file=sys.stderr)
             sys.exit(1)
-        serve(cmd_args)
+        serve(cmd_args, work_dir)
 
     elif mode == "attach":
         offset = 0
@@ -310,7 +320,7 @@ def main():
             idx = sys.argv.index("--offset")
             if idx + 1 < len(sys.argv):
                 offset = int(sys.argv[idx + 1])
-        attach_client(offset=offset)
+        attach_client(offset)
 
     elif mode == "read-plan":
         read_plan(sys.argv[2] if len(sys.argv) > 2 else None)
