@@ -17,7 +17,7 @@ import sys
 import threading
 import time
 
-RELAY_DIR = "/tmp/caic-relay"
+RELAY_DIR = os.environ.get("CAIC_RELAY_DIR", "/tmp/caic-relay")
 SOCK_PATH = os.path.join(RELAY_DIR, "relay.sock")
 OUTPUT_PATH = os.path.join(RELAY_DIR, "output.jsonl")
 PID_PATH = os.path.join(RELAY_DIR, "pid")
@@ -157,10 +157,22 @@ def serve(cmd_args, work_dir):
 
             # Thread: read client stdin → subprocess stdin + log.
             def client_reader(c):
+                close_stdin = False
                 try:
                     while True:
                         data = c.recv(BUF_SIZE)
                         if not data:
+                            break
+                        # A null byte signals the client wants proc.stdin closed
+                        # (graceful termination). Strip it and set the flag.
+                        if b"\x00" in data:
+                            data = data.replace(b"\x00", b"")
+                            close_stdin = True
+                            if data:
+                                proc.stdin.write(data)
+                                proc.stdin.flush()
+                                output_file.write(data)
+                                output_file.flush()
                             break
                         proc.stdin.write(data)
                         proc.stdin.flush()
@@ -168,6 +180,11 @@ def serve(cmd_args, work_dir):
                         output_file.flush()
                 except (OSError, BrokenPipeError, ValueError):
                     pass
+                if close_stdin:
+                    try:
+                        proc.stdin.close()
+                    except OSError:
+                        pass
 
             ct = threading.Thread(target=client_reader, args=(conn,), daemon=True)
             ct.start()
@@ -226,6 +243,12 @@ def attach_client(offset):
         while True:
             data = sys.stdin.buffer.read1(BUF_SIZE)
             if not data:
+                # Stdin closed — send null byte to tell the relay daemon to
+                # close proc.stdin (graceful termination).
+                try:
+                    conn.sendall(b"\x00")
+                except OSError:
+                    pass
                 break
             conn.sendall(data)
     except (OSError, BrokenPipeError, ValueError, KeyboardInterrupt):

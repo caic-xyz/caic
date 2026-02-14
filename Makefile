@@ -36,6 +36,7 @@ dev: build
 
 test:
 	@go test -cover ./...
+	@find . -name 'test_*.py' -exec python3 {} \;
 
 coverage:
 	@go test -coverprofile=coverage.out ./...
