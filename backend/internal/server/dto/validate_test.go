@@ -5,72 +5,68 @@ import (
 	"testing"
 )
 
-func TestEmptyReq_Validate(t *testing.T) {
-	var r EmptyReq
-	if err := r.Validate(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestInputReq_Validate(t *testing.T) {
-	t.Run("Empty", func(t *testing.T) {
-		r := &InputReq{}
-		err := r.Validate()
-		assertBadRequest(t, err, "prompt is required")
-	})
-	t.Run("Valid", func(t *testing.T) {
-		r := &InputReq{Prompt: "hello"}
+func TestValidate(t *testing.T) {
+	t.Run("EmptyReq", func(t *testing.T) {
+		var r EmptyReq
 		if err := r.Validate(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
-}
 
-func TestRestartReq_Validate(t *testing.T) {
-	t.Run("Empty", func(t *testing.T) {
-		r := &RestartReq{}
-		if err := r.Validate(); err != nil {
+	t.Run("InputReq", func(t *testing.T) {
+		t.Run("MissingPrompt", func(t *testing.T) {
+			assertBadRequest(t, (&InputReq{}).Validate(), "prompt is required")
+		})
+		t.Run("Valid", func(t *testing.T) {
+			if err := (&InputReq{Prompt: "hello"}).Validate(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	})
+
+	t.Run("RestartReq", func(t *testing.T) {
+		t.Run("Empty", func(t *testing.T) {
+			if err := (&RestartReq{}).Validate(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+		t.Run("WithPrompt", func(t *testing.T) {
+			if err := (&RestartReq{Prompt: "continue"}).Validate(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	})
+
+	t.Run("SyncReq", func(t *testing.T) {
+		if err := (SyncReq{}).Validate(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
-	t.Run("WithPrompt", func(t *testing.T) {
-		r := &RestartReq{Prompt: "continue"}
-		if err := r.Validate(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-}
 
-func TestSyncReq_Validate(t *testing.T) {
-	var r SyncReq
-	if err := r.Validate(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
+	t.Run("CreateTaskReq", func(t *testing.T) {
+		valid := CreateTaskReq{Prompt: "do stuff", Repo: "/repo", Harness: HarnessClaude}
 
-func TestCreateTaskReq_Validate(t *testing.T) {
-	valid := CreateTaskReq{Prompt: "do stuff", Repo: "/repo", Harness: HarnessClaude}
-
-	t.Run("Valid", func(t *testing.T) {
-		r := valid
-		if err := r.Validate(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-	t.Run("MissingPrompt", func(t *testing.T) {
-		r := valid
-		r.Prompt = ""
-		assertBadRequest(t, r.Validate(), "prompt is required")
-	})
-	t.Run("MissingRepo", func(t *testing.T) {
-		r := valid
-		r.Repo = ""
-		assertBadRequest(t, r.Validate(), "repo is required")
-	})
-	t.Run("MissingHarness", func(t *testing.T) {
-		r := valid
-		r.Harness = ""
-		assertBadRequest(t, r.Validate(), "harness is required")
+		t.Run("Valid", func(t *testing.T) {
+			r := valid
+			if err := r.Validate(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+		t.Run("MissingPrompt", func(t *testing.T) {
+			r := valid
+			r.Prompt = ""
+			assertBadRequest(t, r.Validate(), "prompt is required")
+		})
+		t.Run("MissingRepo", func(t *testing.T) {
+			r := valid
+			r.Repo = ""
+			assertBadRequest(t, r.Validate(), "repo is required")
+		})
+		t.Run("MissingHarness", func(t *testing.T) {
+			r := valid
+			r.Harness = ""
+			assertBadRequest(t, r.Validate(), "harness is required")
+		})
 	})
 }
 
