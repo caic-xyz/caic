@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"errors"
 	"net/http"
 	"testing"
 )
@@ -76,8 +77,8 @@ func assertBadRequest(t *testing.T, err error, wantMsg string) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	apiErr, ok := err.(*APIError)
-	if !ok {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
 		t.Fatalf("expected *APIError, got %T", err)
 	}
 	if apiErr.StatusCode() != http.StatusBadRequest {
