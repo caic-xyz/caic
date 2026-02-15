@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.detekt)
 }
 
 android {
@@ -35,6 +36,19 @@ android {
     kotlinOptions {
         jvmTarget = "11"
     }
+    lint {
+        warningsAsErrors = true
+        abortOnError = true
+        xmlReport = true
+        // Dependency version checks are noisy in CI; upgrades should be intentional.
+        disable += setOf("GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion")
+    }
+}
+
+detekt {
+    buildUponDefaultConfig = true
+    config.setFrom(files("$rootDir/detekt.yml"))
+    parallel = true
 }
 
 dependencies {

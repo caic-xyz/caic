@@ -1,4 +1,4 @@
-.PHONY: help build dev test coverage lint lint-go lint-frontend lint-python lint-fix docs types git-hooks frontend-dev upgrade e2e
+.PHONY: help build dev test coverage lint lint-go lint-frontend lint-python lint-android lint-fix docs types git-hooks frontend-dev upgrade e2e android-build android-test
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:8080
@@ -15,6 +15,9 @@ help:
 	@echo "  make lint-fix       - Fix linting issues automatically"
 	@echo "  make git-hooks      - Install git pre-commit hooks"
 	@echo "  make frontend-dev   - Run frontend dev server (http://localhost:5173)"
+	@echo "  make android-build  - Build Android app (debug APK)"
+	@echo "  make android-test   - Run Android unit tests"
+	@echo "  make lint-android   - Run Android linters (detekt + lint)"
 	@echo "  make upgrade        - Upgrade Go and pnpm dependencies"
 
 $(FRONTEND_STAMP): pnpm-lock.yaml
@@ -41,7 +44,7 @@ test:
 coverage:
 	@go test -coverprofile=coverage.out ./...
 
-lint: lint-go lint-frontend lint-python
+lint: lint-go lint-frontend lint-python lint-android
 
 lint-go:
 	@which golangci-lint > /dev/null || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
@@ -53,6 +56,15 @@ lint-frontend: $(FRONTEND_STAMP)
 lint-python:
 	@ruff check .
 	@ruff format --check .
+
+lint-android:
+	@cd android && ./gradlew detekt lint
+
+android-build:
+	@cd android && ./gradlew assembleDebug
+
+android-test:
+	@cd android && ./gradlew test
 
 lint-fix: $(FRONTEND_STAMP)
 	@golangci-lint run ./... --fix || true
@@ -77,3 +89,4 @@ e2e: $(FRONTEND_STAMP) types
 upgrade:
 	@go get -u ./... && go mod tidy
 	@pnpm update --latest
+	@cd android && ./gradlew dependencyUpdates -Drevision=release

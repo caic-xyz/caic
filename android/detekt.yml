@@ -1,0 +1,24 @@
+# Detekt configuration for caic Android project.
+build:
+  maxIssues: 0
+
+complexity:
+  active: false
+
+naming:
+  FunctionNaming:
+    functionPattern: '[a-zA-Z][a-zA-Z0-9]*'
+  TopLevelPropertyNaming:
+    constantPattern: '[A-Z][A-Za-z0-9_]*'
+
+style:
+  MagicNumber:
+    active: false
+  MaxLineLength:
+    maxLineLength: 120
+  WildcardImport:
+    active: true
+  ReturnCount:
+    max: 4
+  UnusedPrivateMember:
+    active: true

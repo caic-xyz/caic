@@ -1,0 +1,46 @@
+name: Android
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+  pull_request:
+    paths:
+      - 'android/**'
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-android-action
+      - name: Lint (detekt)
+        working-directory: android
+        run: ./gradlew detekt
+      - name: Lint (Android)
+        working-directory: android
+        run: ./gradlew lint
+      - name: Build
+        working-directory: android
+        run: ./gradlew assembleDebug
+      - name: Test
+        working-directory: android
+        run: ./gradlew test
+      - name: Upload lint results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-results
+          path: |
+            android/app/build/reports/lint-results-debug.xml
+            android/app/build/reports/detekt/
+          retention-days: 14
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: android/app/build/reports/tests/
+          retention-days: 14

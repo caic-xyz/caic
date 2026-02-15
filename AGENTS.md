@@ -41,8 +41,11 @@ make types          # Generate types (go generate → tygo + gen-api-client)
 make docs           # Update AGENTS.md file indexes
 make test           # Go unit tests with coverage
 make e2e            # Playwright end-to-end tests
-make lint           # Run all linters (Go + frontend + Python)
+make lint           # Run all linters (Go + frontend + Python + Android)
 make lint-fix       # Auto-fix all linters
+make android-build  # Build Android app (debug APK)
+make android-test   # Run Android unit tests
+make lint-android   # Run Android linters (detekt + Android lint)
 ```
 
 <!-- BEGIN FILE INDEX -->
