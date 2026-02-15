@@ -20,7 +20,7 @@ configure the server and verify voice actions. Full screen mode comes later.
 | UI | Jetpack Compose + Material 3 |
 | Architecture | MVVM (ViewModel + StateFlow) |
 | Networking | caic Kotlin SDK (OkHttp + kotlinx.serialization) |
-| Voice | Gemini Live API via Google AI Client SDK + ephemeral tokens |
+| Voice | Gemini Live API via OkHttp WebSocket + ephemeral tokens |
 | DI | Hilt |
 | Navigation | Compose Navigation (type-safe) |
 | Background | Foreground Service + coroutines |
@@ -161,28 +161,49 @@ See `sdk-design.md` for the backend endpoint spec.
 
 ### Gemini Live Session
 
-Single session via Google AI Client SDK (`com.google.ai.client.generativeai`).
-No Firebase dependency. Configured with:
+Direct WebSocket connection to the Gemini Live API using OkHttp. No Firebase
+dependency, no Google SDK dependency. The protocol is JSON over WebSocket.
+
+Configured with:
 - Ephemeral token from caic backend (not a raw API key)
 - Native audio I/O (PCM 16kHz in, 24kHz out)
 - System instruction (caic domain + tools)
 - Function declarations for all caic operations
 
-```kotlin
-// Fetch ephemeral token from caic backend
-val tokenResp = apiClient.getVoiceToken()
+#### WebSocket endpoint
 
-val client = GoogleGenAI(apiKey = tokenResp.token)
-val session = client.live.connect(
-    model = "gemini-2.5-flash-native-audio-preview-12-2025",
-    config = LiveConnectConfig(
-        responseModalities = listOf(Modality.AUDIO),
-        speechConfig = SpeechConfig(voice = Voice("ORUS")),
-        systemInstruction = Content(parts = listOf(Part.text(SYSTEM_INSTRUCTION))),
-        tools = listOf(Tool.functionDeclarations(caicFunctionDeclarations)),
-    ),
-)
 ```
+wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?access_token={ephemeralToken}
+```
+
+Note: use `v1alpha` (required for ephemeral tokens), not `v1beta`.
+
+#### Protocol
+
+All messages are JSON with exactly one top-level field. The first client message
+must be `setup`:
+
+```json
+{
+  "setup": {
+    "model": "models/gemini-2.5-flash-native-audio-preview-12-2025",
+    "generationConfig": {
+      "responseModalities": ["AUDIO"],
+      "speechConfig": { "voiceConfig": { "prebuiltVoiceConfig": { "voiceName": "ORUS" } } }
+    },
+    "systemInstruction": { "parts": [{ "text": "..." }] },
+    "tools": [{ "functionDeclarations": [...] }]
+  }
+}
+```
+
+Server responds with `setupComplete`, then bidirectional streaming begins.
+
+Client sends audio as `realtimeInput` with base64 PCM chunks. Server sends
+`serverContent` (audio/text) and `toolCall` messages. Client responds to tool
+calls with `toolResponse`.
+
+See the WebSocket API reference for full message schemas.
 
 ### System Instruction
 
@@ -568,6 +589,27 @@ implementation("androidx.datastore:datastore-preferences:1.1.2")
 implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.28.0")
 implementation("com.mikepenz:multiplatform-markdown-renderer-coil3:0.28.0")
 
-// Google AI Client SDK (Phase 1 — voice mode, no Firebase needed)
-implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
+// Voice mode uses OkHttp WebSocket directly — no extra SDK dependency.
+// OkHttp is already pulled in via the SDK module.
 ```
+
+## References
+
+### Gemini Live API
+- [Live API overview](https://ai.google.dev/gemini-api/docs/live) — getting started, audio config, function calling
+- [WebSocket API reference](https://ai.google.dev/api/live) — full message schemas for `BidiGenerateContent`
+- [Ephemeral tokens](https://ai.google.dev/gemini-api/docs/ephemeral-tokens) — creating and using short-lived tokens
+- [Live API on Android](https://developer.android.com/ai/gemini/live) — Android-specific guide (Firebase-based, for reference only)
+
+### Sample code
+- [gemini-live-todo](https://github.com/android/ai-samples/tree/main/samples/gemini-live-todo) — Google's reference app for Live API + function calling on Android (Firebase-based)
+- [Firebase AI quickstart — live](https://github.com/firebase/quickstart-android/tree/master/firebase-ai/app/src/main/java/com/google/firebase/quickstart/ai/feature/live) — Firebase Live API sample
+
+### SDKs (for reference, not used directly)
+- [google-genai Python SDK — tokens.py](https://github.com/googleapis/python-genai/blob/main/google/genai/tokens.py) — ephemeral token creation implementation
+- [google-genai Go SDK](https://github.com/googleapis/go-genai) — Go SDK (no Live API yet, but useful for understanding the Gemini API surface)
+
+### caic web frontend (behavior reference)
+- `frontend/src/App.tsx` — SSE connection, global state, reconnection logic
+- `frontend/src/TaskView.tsx` — per-task SSE, buffer-and-swap, message grouping, tool call display
+- `frontend/src/TaskItemSummary.tsx` — task card rendering, state colors, token formatting

@@ -206,3 +206,17 @@ JVM unit tests using `MockWebServer` (OkHttp):
 3. **Error handling**: non-200 → `ApiException` with correct code
 4. **SSE**: `taskEvents()` emits `EventMessage` from SSE stream
 5. **Round-trip**: every data class serializes/deserializes correctly
+
+## References
+
+### caic source (canonical)
+- `backend/internal/server/dto/routes.go` — route declarations (source of truth for code generation)
+- `backend/internal/server/dto/types.go` — Go request/response types
+- `backend/internal/server/dto/events.go` — SSE event types
+- `backend/internal/cmd/gen-api-client/main.go` — TypeScript code generator (extend for Kotlin)
+- `sdk/types.gen.ts` — generated TypeScript types (reference for Kotlin output)
+- `sdk/api.gen.ts` — generated TypeScript API client (reference for Kotlin output)
+
+### Ephemeral tokens
+- [Ephemeral tokens docs](https://ai.google.dev/gemini-api/docs/ephemeral-tokens) — token creation API, expiration, constraints
+- [python-genai tokens.py](https://github.com/googleapis/python-genai/blob/main/google/genai/tokens.py) — reference implementation of `auth_tokens.create()`
