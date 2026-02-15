@@ -250,6 +250,15 @@ func TestParseRelayExit(t *testing.T) {
 	})
 }
 
+func TestIsRelayExit(t *testing.T) {
+	if !IsRelayExit([]byte(`{"type":"relay_exit","code":0,"signal":null}`)) {
+		t.Error("expected true for relay_exit line")
+	}
+	if IsRelayExit([]byte(`{"type":"assistant","message":{}}`)) {
+		t.Error("expected false for non-relay_exit line")
+	}
+}
+
 func TestRelayExitError(t *testing.T) {
 	t.Run("ExitCode", func(t *testing.T) {
 		re := &RelayExitMessage{Code: 1}
@@ -351,6 +360,41 @@ func TestReadMessages(t *testing.T) {
 			if !strings.Contains(logged, line+"\n") {
 				t.Errorf("log missing line: %s", line)
 			}
+		}
+	})
+	t.Run("RelayExitNotLogged", func(t *testing.T) {
+		lines := []string{
+			`{"type":"system","subtype":"init","cwd":"/","session_id":"s","tools":[],"model":"m","claude_code_version":"1","uuid":"u"}`,
+			`{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"ok","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}`,
+			`{"type":"relay_exit","code":0,"signal":null}`,
+		}
+		input := strings.Join(lines, "\n")
+
+		var buf bytes.Buffer
+		ch := make(chan Message, 16)
+		rr := readMessages(strings.NewReader(input), ch, &buf, ParseMessage)
+		close(ch)
+		if rr.err != nil {
+			t.Fatal(rr.err)
+		}
+		if rr.result == nil {
+			t.Fatal("expected result")
+		}
+		if rr.relayExit == nil {
+			t.Fatal("expected relayExit")
+		}
+
+		// relay_exit must NOT appear in the log writer output.
+		logged := buf.String()
+		if strings.Contains(logged, "relay_exit") {
+			t.Errorf("relay_exit was written to logW: %s", logged)
+		}
+		// Other lines must still be logged.
+		if !strings.Contains(logged, `"type":"system"`) {
+			t.Error("system init not logged")
+		}
+		if !strings.Contains(logged, `"type":"result"`) {
+			t.Error("result not logged")
 		}
 	})
 }

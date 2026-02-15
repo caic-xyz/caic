@@ -161,10 +161,15 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) error {
 		}
 	}
 	if !relayAlive {
-		// Starting a new session via --resume always re-engages the agent.
-		t.mu.Lock()
-		t.setState(StateRunning)
-		t.mu.Unlock()
+		// Only transition to StateRunning when the agent was actively
+		// producing output. If the last turn completed (StateWaiting /
+		// StateAsking), the --resume session just idles until the user
+		// provides input via SendInput, so keep the inferred state.
+		if prevState != StateWaiting && prevState != StateAsking {
+			t.mu.Lock()
+			t.setState(StateRunning)
+			t.mu.Unlock()
+		}
 		maxTurns := t.MaxTurns
 		if maxTurns == 0 {
 			maxTurns = r.MaxTurns

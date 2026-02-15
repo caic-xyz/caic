@@ -79,6 +79,8 @@ func NewSession(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, msgCh cha
 		case rr.relayExit != nil && rr.relayExit.Code != 0:
 			s.err = relayExitError(rr.relayExit)
 			slog.Error("harness exited", "code", rr.relayExit.Code, "signal", rr.relayExit.Signal)
+		case rr.relayExit != nil && rr.relayExit.Code == 0:
+			slog.Info("relay subprocess exited cleanly (result in historical data)")
 		case waitErr != nil:
 			s.err = fmt.Errorf("agent exited: %w", waitErr)
 			slog.Error("agent session exited with error", "err", waitErr)
@@ -140,14 +142,14 @@ func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer, parseFn fun
 			continue
 		}
 		n++
-		if logW != nil {
-			_, _ = logW.Write(line)
-			_, _ = logW.Write([]byte{'\n'})
-		}
-		// Intercept relay_exit before backend-specific parsing.
+		// Intercept relay_exit before logging or backend-specific parsing.
 		if re, ok := parseRelayExit(line); ok {
 			out.relayExit = re
 			continue
+		}
+		if logW != nil {
+			_, _ = logW.Write(line)
+			_, _ = logW.Write([]byte{'\n'})
 		}
 		msg, err := parseFn(line)
 		if err != nil {
@@ -183,6 +185,12 @@ func parseRelayExit(line []byte) (*RelayExitMessage, bool) {
 		return nil, false
 	}
 	return &m, true
+}
+
+// IsRelayExit reports whether the NDJSON line is a relay_exit message.
+func IsRelayExit(line []byte) bool {
+	_, ok := parseRelayExit(line)
+	return ok
 }
 
 // relayExitError returns a descriptive error from a RelayExitMessage.

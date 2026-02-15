@@ -2,6 +2,7 @@ package task
 
 import (
 	"encoding/json"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -106,6 +107,40 @@ func TestTask(t *testing.T) {
 			err := tk.SendInput("hello")
 			if err == nil {
 				t.Error("expected error when no session is active")
+			}
+		})
+		t.Run("DeadSessionCleared", func(t *testing.T) {
+			// Simulate a session that has already finished (e.g. relay
+			// subprocess exited). SendInput should detect it and return
+			// "no active session" without changing state.
+			tk := &Task{Prompt: "test", State: StateWaiting}
+			cmd := exec.Command("true")
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			s := agent.NewSession(cmd, stdin, stdout, nil, nil, &testWire{})
+			<-s.Done()
+			tk.session = s
+			err = tk.SendInput("hello")
+			if err == nil {
+				t.Error("expected error for dead session")
+			}
+			if tk.State != StateWaiting {
+				t.Errorf("state = %v, want %v", tk.State, StateWaiting)
+			}
+			tk.mu.Lock()
+			cleared := tk.session == nil
+			tk.mu.Unlock()
+			if !cleared {
+				t.Error("dead session was not cleared")
 			}
 		})
 	})

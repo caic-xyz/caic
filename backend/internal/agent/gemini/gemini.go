@@ -103,6 +103,9 @@ func (b *Backend) ReadRelayOutput(ctx context.Context, container string) (msgs [
 		if len(line) == 0 {
 			continue
 		}
+		if agent.IsRelayExit(line) {
+			continue
+		}
 		msg, parseErr := b.ParseMessage(line)
 		if parseErr != nil {
 			slog.Warn("skipping unparseable relay output line", "container", container, "err", parseErr)

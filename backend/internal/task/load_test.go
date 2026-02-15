@@ -79,6 +79,30 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("len = %d, want 0", len(tasks))
 		}
 	})
+	t.Run("RelayExitFiltered", func(t *testing.T) {
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task1", Repo: "r", Branch: "caic/w0", Harness: "claude"})
+		result := `{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"ok","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}`
+		relayExit := `{"type":"relay_exit","code":0,"signal":null}`
+		writeLogFile(t, dir, "a.jsonl", meta, result, relayExit)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("len = %d, want 1", len(tasks))
+		}
+		// relay_exit must be filtered out; only the result message should remain.
+		if len(tasks[0].Msgs) != 1 {
+			t.Errorf("Msgs len = %d, want 1", len(tasks[0].Msgs))
+		}
+		for _, m := range tasks[0].Msgs {
+			if m.Type() == "relay_exit" {
+				t.Error("relay_exit message should have been filtered")
+			}
+		}
+	})
 	t.Run("MultipleFiles", func(t *testing.T) {
 		dir := t.TempDir()
 

@@ -373,6 +373,16 @@ func (t *Task) Subscribe(ctx context.Context) (history []agent.Message, live <-c
 func (t *Task) SendInput(prompt string) error {
 	t.mu.Lock()
 	s := t.session
+	// Detect sessions that finished (e.g. relay_exit after subprocess
+	// exited). Clear the stale session so the caller gets a clear signal.
+	if s != nil {
+		select {
+		case <-s.Done():
+			t.session = nil
+			s = nil
+		default:
+		}
+	}
 	if s != nil {
 		t.setState(StateRunning)
 	}

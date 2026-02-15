@@ -759,12 +759,13 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 
 	slog.Info("adopted preexisting container", "repo", ri.RelPath, "container", c.Name, "branch", branch, "relay", relayAlive)
 
-	// If relay is alive, auto-attach in background so messages
-	// resume streaming immediately.
-	if relayAlive {
+	// Reconnect in background when the relay is alive OR the restored
+	// state indicates the agent finished its turn and needs a live session
+	// for further user input (--resume fallback).
+	if relayAlive || t.State == task.StateWaiting || t.State == task.StateAsking {
 		go func() {
 			if err := runner.Reconnect(ctx, t); err != nil {
-				slog.Warn("auto-attach to relay failed", "repo", t.Repo, "branch", t.Branch, "container", t.Container, "err", err)
+				slog.Warn("auto-reconnect failed", "repo", t.Repo, "branch", t.Branch, "container", t.Container, "err", err)
 			}
 		}()
 	}
