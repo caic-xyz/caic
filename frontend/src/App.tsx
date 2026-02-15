@@ -60,13 +60,44 @@ export default function App() {
   // Ref to the main prompt textarea for focusing after Escape.
   let promptRef: HTMLTextAreaElement | undefined;
 
-  // Escape key dismisses task detail view and focuses the prompt textarea.
+  // Sort tasks the same way TaskList does: active first, then by ID descending.
+  const isTerminal = (s: string) => s === "failed" || s === "terminated";
+  const sortedTasks = () =>
+    [...tasks()].sort((a, b) => {
+      const aT = isTerminal(a.state) ? 1 : 0;
+      const bT = isTerminal(b.state) ? 1 : 0;
+      if (aT !== bT) return aT - bT;
+      return b.id > a.id ? -1 : b.id < a.id ? 1 : 0;
+    });
+
+  // Global keyboard shortcuts:
+  // - Escape: dismiss task view, focus prompt
+  // - ArrowUp/ArrowDown: switch to previous/next task in sidebar order
   {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && selectedId() !== null) {
         navigate("/");
         promptRef?.focus();
+        return;
       }
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      // Don't intercept when typing in an input/textarea.
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const list = sortedTasks();
+      if (list.length === 0) return;
+      const curIdx = list.findIndex((task) => task.id === selectedId());
+      let nextIdx: number;
+      if (e.key === "ArrowUp") {
+        nextIdx = curIdx <= 0 ? list.length - 1 : curIdx - 1;
+      } else {
+        nextIdx = curIdx === -1 || curIdx >= list.length - 1 ? 0 : curIdx + 1;
+      }
+      const next = list[nextIdx];
+      navigate(taskPath(next.id, next.repo, next.branch, next.task));
+      const card = document.querySelector<HTMLElement>(`[data-task-id="${next.id}"]`);
+      card?.focus();
+      e.preventDefault();
     };
     document.addEventListener("keydown", onKey);
     onCleanup(() => document.removeEventListener("keydown", onKey));

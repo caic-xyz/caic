@@ -298,6 +298,7 @@ export default function TaskView(props: Props) {
             placeholder="Send message to agent..."
             disabled={sending()}
             class={styles.textInput}
+            tabIndex={1}
           />
           <Button type="submit" disabled={sending() || !props.inputDraft.trim()}>Send</Button>
           <Button type="button" variant="gray" loading={pendingAction() === "sync"} disabled={!!pendingAction() || props.taskState === "terminating"} onClick={() => doSync(false)}>Sync</Button>

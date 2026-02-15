@@ -41,6 +41,7 @@ export default function TaskList(props: TaskListProps) {
         <Index each={sorted()}>
           {(t) => (
             <TaskItemSummary
+              id={t().id}
               task={t().task}
               state={t().state}
               stateUpdatedAt={t().stateUpdatedAt}

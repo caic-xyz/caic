@@ -5,6 +5,7 @@ import Tooltip from "./Tooltip";
 import styles from "./TaskItemSummary.module.css";
 
 export interface TaskItemSummaryProps {
+  id: string;
   task: string;
   state: string;
   stateUpdatedAt: number;
@@ -32,6 +33,8 @@ export interface TaskItemSummaryProps {
 export default function TaskItemSummary(props: TaskItemSummaryProps) {
   return (
     <div
+      data-task-id={props.id}
+      tabIndex={0}
       onClick={() => props.onClick()}
       class={`${styles.card} ${props.selected ? styles.selected : ""}`}
     >
