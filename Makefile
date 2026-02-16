@@ -39,8 +39,9 @@ docs:
 dev: build
 	@caic -http $(HTTP)
 
-test:
+test: $(FRONTEND_STAMP)
 	@go test -cover ./...
+	@pnpm test
 	@find . -name 'test_*.py' -exec python3 {} \;
 
 coverage:

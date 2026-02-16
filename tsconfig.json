@@ -9,6 +9,7 @@
     "noEmit": true,
     "isolatedModules": true,
     "skipLibCheck": true,
+    "types": ["vite/client", "@testing-library/jest-dom"],
     "baseUrl": ".",
     "paths": {
       "@sdk/*": ["sdk/*"]
