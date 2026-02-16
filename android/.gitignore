@@ -1,6 +1,8 @@
 .externalNativeBuild
+/.idea/appInsightsSettings.xml
 /.idea/assetWizardSettings.xml
 /.idea/caches/
+/.idea/deviceManager.xml
 /.idea/libraries/
 /.idea/modules.xml
 /.idea/navEditor.xml

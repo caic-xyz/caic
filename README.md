@@ -72,6 +72,30 @@ View logs:
 journalctl --user -u caic -f
 ```
 
+## Android App
+
+Voice-first companion app to manage coding agents from your phone.
+
+### Prerequisites
+
+1. [Android SDK](https://developer.android.com/studio) with build-tools and platform for API 36.
+2. USB debugging enabled on your phone: **Settings > Developer options > USB debugging**.
+3. Phone connected via USB and authorized (`adb devices` shows your device).
+
+### Build and deploy
+
+```bash
+make android-push
+```
+
+This builds the debug APK and installs it on the connected device.
+
+To build without installing:
+
+```bash
+make android-build
+```
+
 ## Serving over Tailscale
 
 Safely expose caic on your [Tailscale](https://tailscale.com/) network using `tailscale serve`. This provides

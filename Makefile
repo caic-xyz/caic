@@ -1,4 +1,4 @@
-.PHONY: help build dev test coverage lint lint-all lint-go lint-frontend lint-python lint-android lint-fix docs types git-hooks frontend-dev upgrade e2e android-build android-test
+.PHONY: help build dev test coverage lint lint-all lint-go lint-frontend lint-python lint-android lint-fix docs types git-hooks frontend-dev upgrade e2e android-build android-push android-test
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:8080
@@ -16,6 +16,7 @@ help:
 	@echo "  make git-hooks      - Install git pre-commit hooks"
 	@echo "  make frontend-dev   - Run frontend dev server (http://localhost:5173)"
 	@echo "  make android-build  - Build Android app (debug APK)"
+	@echo "  make android-push   - Build and install APK on connected device"
 	@echo "  make android-test   - Run Android unit tests"
 	@echo "  make lint-android   - Run Android linters (detekt + lint)"
 	@echo "  make upgrade        - Upgrade Go and pnpm dependencies"
@@ -64,6 +65,9 @@ lint-android:
 
 android-build:
 	@cd android && ./gradlew assembleDebug
+
+android-push: android-build
+	@adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 
 android-test:
 	@cd android && ./gradlew test

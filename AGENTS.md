@@ -49,6 +49,7 @@ make lint           # Run linters (Go + frontend + Python)
 make lint-all       # Run all linters including Android
 make lint-fix       # Auto-fix all linters
 make android-build  # Build Android app (debug APK)
+make android-push   # Build and install APK on connected device
 make android-test   # Run Android unit tests
 make lint-android   # Run Android linters (detekt + Android lint)
 ```
