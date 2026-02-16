@@ -2,14 +2,18 @@
 package com.fghbuild.caic.voice
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.util.Base64
 import com.caic.sdk.ApiClient
 import com.fghbuild.caic.data.SettingsRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -46,8 +50,10 @@ private const val MODEL_NAME = "models/gemini-2.5-flash-native-audio-preview-12-
 
 @Singleton
 class VoiceSessionManager @Inject constructor(
+    @ApplicationContext context: Context,
     private val settingsRepository: SettingsRepository,
 ) {
+    private val audioManager = context.getSystemService(AudioManager::class.java)
     private val json = Json { ignoreUnknownKeys = true }
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
@@ -89,6 +95,7 @@ class VoiceSessionManager @Inject constructor(
     }
 
     fun startAudio() {
+        routeToBluetoothScoIfAvailable()
         setupAudioRecord()
         setupAudioTrack()
         startRecording()
@@ -104,6 +111,7 @@ class VoiceSessionManager @Inject constructor(
         audioTrack?.stop()
         audioTrack?.release()
         audioTrack = null
+        clearCommunicationDevice()
         _state.update { it.copy(listening = false, speaking = false) }
     }
 
@@ -344,10 +352,15 @@ class VoiceSessionManager @Inject constructor(
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
         )
+        val usage = if (audioManager.communicationDevice != null) {
+            AudioAttributes.USAGE_VOICE_COMMUNICATION
+        } else {
+            AudioAttributes.USAGE_ASSISTANT
+        }
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setUsage(usage)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
@@ -362,6 +375,20 @@ class VoiceSessionManager @Inject constructor(
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         audioTrack?.play()
+    }
+
+    /** Route audio to car hands-free (BT SCO) if connected. */
+    private fun routeToBluetoothScoIfAvailable() {
+        val scoDevice = audioManager.availableCommunicationDevices
+            .firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+            ?: return
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        audioManager.setCommunicationDevice(scoDevice)
+    }
+
+    private fun clearCommunicationDevice() {
+        audioManager.clearCommunicationDevice()
+        audioManager.mode = AudioManager.MODE_NORMAL
     }
 
     private fun startRecording() {

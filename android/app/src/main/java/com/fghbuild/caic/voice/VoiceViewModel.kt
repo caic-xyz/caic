@@ -9,6 +9,7 @@ import com.fghbuild.caic.data.TaskRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.io.IOException
 import javax.inject.Inject
 
 @HiltViewModel
@@ -37,8 +38,10 @@ class VoiceViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 voiceSessionManager.connect()
-            } catch (e: Exception) {
+            } catch (e: IOException) {
                 voiceSessionManager.setError(e.message ?: "Connection failed")
+            } catch (e: IllegalArgumentException) {
+                voiceSessionManager.setError(e.message ?: "Invalid configuration")
             }
         }
     }
