@@ -39,18 +39,17 @@ type repoInfo struct {
 	RepoURL    string // HTTPS browse URL derived from origin remote.
 }
 
-// Gemini ephemeral token API (POST /v1alpha/auth_tokens).
-type geminiAuthTokenReq struct {
-	AuthToken geminiAuthToken `json:"authToken"`
-}
-
-type geminiAuthToken struct {
+// CreateAuthTokenConfig is the request for POST /v1alpha/auth_tokens.
+// See https://github.com/googleapis/go-genai/blob/main/types.go
+type CreateAuthTokenConfig struct {
 	Uses                 int    `json:"uses"`
 	ExpireTime           string `json:"expireTime"`
 	NewSessionExpireTime string `json:"newSessionExpireTime"`
 }
 
-type geminiAuthTokenResp struct {
+// AuthToken is the response from POST /v1alpha/auth_tokens.
+// See https://github.com/googleapis/go-genai/blob/main/types.go
+type AuthToken struct {
 	Name string `json:"name"`
 }
 
@@ -570,12 +569,10 @@ func (s *Server) getVoiceToken(ctx context.Context, _ *dto.EmptyReq) (*dto.Voice
 	expireTime := now.Add(30 * time.Minute).Format(time.RFC3339)
 	newSessionExpire := now.Add(2 * time.Minute).Format(time.RFC3339)
 
-	reqBody := geminiAuthTokenReq{
-		AuthToken: geminiAuthToken{
-			Uses:                 1,
-			ExpireTime:           expireTime,
-			NewSessionExpireTime: newSessionExpire,
-		},
+	reqBody := CreateAuthTokenConfig{
+		Uses:                 1,
+		ExpireTime:           expireTime,
+		NewSessionExpireTime: newSessionExpire,
 	}
 	bodyBytes, err := json.Marshal(&reqBody)
 	if err != nil {
@@ -602,7 +599,7 @@ func (s *Server) getVoiceToken(ctx context.Context, _ *dto.EmptyReq) (*dto.Voice
 		return nil, dto.InternalError(fmt.Sprintf("Gemini auth_tokens returned %d: %s", resp.StatusCode, string(body)))
 	}
 
-	var tokenResp geminiAuthTokenResp
+	var tokenResp AuthToken
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
 		return nil, dto.InternalError("failed to decode token response").Wrap(err)
 	}

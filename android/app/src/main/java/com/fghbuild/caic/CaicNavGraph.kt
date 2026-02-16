@@ -59,6 +59,11 @@ fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
         }
     }
 
+    LaunchedEffect(voiceState.error) {
+        val error = voiceState.error ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(error)
+    }
+
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         Box(
             modifier = Modifier
