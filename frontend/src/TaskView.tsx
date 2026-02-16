@@ -1,6 +1,6 @@
 // TaskView renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, For, Index, Show, onCleanup, createEffect, Switch, Match, type Accessor, type JSX } from "solid-js";
-import { sendInput as apiSendInput, restartTask as apiRestartTask, terminateTask as apiTerminateTask, syncTask as apiSyncTask, taskEvents } from "@sdk/api.gen";
+import { sendInput as apiSendInput, restartTask as apiRestartTask, terminateTask as apiTerminateTask, syncTask as apiSyncTask, taskRawEvents } from "@sdk/api.gen";
 import type { EventMessage, EventTextDelta, SafetyIssue } from "@sdk/types.gen";
 import { Marked } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
@@ -75,7 +75,7 @@ export default function TaskView(props: Props) {
     function connect() {
       buf = [];
       live = false;
-      es = taskEvents(id, (ev) => {
+      es = taskRawEvents(id, (ev) => {
         if (live) {
           setMessages((prev) => [...prev, ev]);
         } else {

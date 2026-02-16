@@ -65,10 +65,10 @@ func newTestServer(t *testing.T) *Server {
 func TestHandleTaskEvents(t *testing.T) {
 	t.Run("NotFound", func(t *testing.T) {
 		s := newTestServer(t)
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/99/events", http.NoBody)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/99/raw_events", http.NoBody)
 		req.SetPathValue("id", "99")
 		w := httptest.NewRecorder()
-		s.handleTaskEvents(w, req)
+		s.handleTaskRawEvents(w, req)
 		if w.Code != http.StatusNotFound {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 		}
@@ -80,10 +80,10 @@ func TestHandleTaskEvents(t *testing.T) {
 
 	t.Run("NonexistentID", func(t *testing.T) {
 		s := newTestServer(t)
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/abc/events", http.NoBody)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/abc/raw_events", http.NoBody)
 		req.SetPathValue("id", "abc")
 		w := httptest.NewRecorder()
-		s.handleTaskEvents(w, req)
+		s.handleTaskRawEvents(w, req)
 		if w.Code != http.StatusNotFound {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 		}
@@ -763,14 +763,14 @@ func TestTerminatedTaskEventsAfterRestart(t *testing.T) {
 	// terminated tasks instead of blocking until context deadline.
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/events", http.NoBody).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
 	req.SetPathValue("id", taskID)
 	w := httptest.NewRecorder()
 	start := time.Now()
-	s.handleTaskEvents(w, req)
+	s.handleTaskRawEvents(w, req)
 	elapsed := time.Since(start)
 	if elapsed > 200*time.Millisecond {
-		t.Errorf("handleTaskEvents blocked for %v; terminated tasks should return immediately after history replay", elapsed)
+		t.Errorf("handleTaskRawEvents blocked for %v; terminated tasks should return immediately after history replay", elapsed)
 	}
 
 	if w.Code != http.StatusOK {
@@ -895,10 +895,10 @@ func TestStreamEventTextDeltaInSSE(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/events", http.NoBody).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
 	req.SetPathValue("id", taskID)
 	w := httptest.NewRecorder()
-	s.handleTaskEvents(w, req)
+	s.handleTaskRawEvents(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)

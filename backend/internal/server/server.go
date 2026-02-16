@@ -190,7 +190,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	mux.HandleFunc("GET /api/v1/repos", handle(s.listRepos))
 	mux.HandleFunc("GET /api/v1/tasks", handle(s.listTasks))
 	mux.HandleFunc("POST /api/v1/tasks", handle(s.createTask))
-	mux.HandleFunc("GET /api/v1/tasks/{id}/events", s.handleTaskEvents)
+	mux.HandleFunc("GET /api/v1/tasks/{id}/raw_events", s.handleTaskRawEvents)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/input", handleWithTask(s, s.sendInput))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/restart", handleWithTask(s, s.restartTask))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/terminate", handleWithTask(s, s.terminateTask))
@@ -333,8 +333,8 @@ func (s *Server) createTask(_ context.Context, req *dto.CreateTaskReq) (*dto.Cre
 	return &dto.CreateTaskResp{Status: "accepted", ID: t.ID}, nil
 }
 
-// handleTaskEvents streams agent messages as SSE using typed EventMessage DTOs.
-func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
+// handleTaskRawEvents streams agent messages as SSE using typed EventMessage DTOs.
+func (s *Server) handleTaskRawEvents(w http.ResponseWriter, r *http.Request) {
 	entry, err := s.getTask(r)
 	if err != nil {
 		writeError(w, err)

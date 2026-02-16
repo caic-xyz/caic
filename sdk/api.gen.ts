@@ -38,8 +38,8 @@ export function createTask(req: CreateTaskReq): Promise<CreateTaskResp> {
   return request<CreateTaskResp>("POST", "/api/v1/tasks", req);
 }
 
-export function taskEvents(id: string, onMessage: (event: EventMessage) => void): EventSource {
-  const es = new EventSource(`/api/v1/tasks/${id}/events`);
+export function taskRawEvents(id: string, onMessage: (event: EventMessage) => void): EventSource {
+  const es = new EventSource(`/api/v1/tasks/${id}/raw_events`);
   es.addEventListener("message", (e) => {
     onMessage(JSON.parse(e.data) as EventMessage);
   });
