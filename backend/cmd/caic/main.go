@@ -223,8 +223,9 @@ func (*fakeContainer) Diff(_ context.Context, _, _ string, _ ...string) (string,
 func (*fakeContainer) Fetch(_ context.Context, _, _ string) error { return nil }
 func (*fakeContainer) Kill(_ context.Context, _, _ string) error  { return nil }
 
-// fakeBackend implements agent.Backend with a shell process that emits three
-// JSON messages (init, assistant, result) then exits.
+// fakeBackend implements agent.Backend with a shell process that emits
+// streaming text deltas followed by complete messages, simulating
+// --include-partial-messages output.
 type fakeBackend struct{}
 
 var _ agent.Backend = (*fakeBackend)(nil)
@@ -234,6 +235,9 @@ func (*fakeBackend) Harness() agent.Harness { return "fake" }
 func (*fakeBackend) Start(_ context.Context, _ agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
 	script := `read line
 echo '{"type":"system","subtype":"init","session_id":"test-session","cwd":"/workspace","model":"fake-model","claude_code_version":"0.0.0-test"}'
+echo '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I completed "}}}'
+sleep 0.05
+echo '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"the requested task."}}}'
 echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I completed the requested task."}]}}'
 echo '{"type":"result","subtype":"success","result":"All done.","num_turns":1,"total_cost_usd":0.01,"duration_ms":500}'
 `

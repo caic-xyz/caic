@@ -200,12 +200,95 @@ func TestToolTimingUnknownID(t *testing.T) {
 func TestConvertRawMessageFiltered(t *testing.T) {
 	tt := newToolTimingTracker()
 	msg := &agent.RawMessage{
-		MessageType: "stream_event",
-		Raw:         []byte(`{"type":"stream_event","event":{"type":"message_start"}}`),
+		MessageType: "tool_progress",
+		Raw:         []byte(`{"type":"tool_progress","data":"progress"}`),
 	}
 	events := tt.convertMessage(msg, time.Now())
 	if events != nil {
 		t.Errorf("got %d events for RawMessage, want nil", len(events))
+	}
+}
+
+func TestConvertStreamEvent(t *testing.T) {
+	t.Run("TextDelta", func(t *testing.T) {
+		tt := newToolTimingTracker()
+		now := time.Now()
+		msg := &agent.StreamEvent{
+			MessageType: "stream_event",
+			Event: agent.StreamEventData{
+				Type:  "content_block_delta",
+				Index: 0,
+				Delta: &agent.StreamDelta{Type: "text_delta", Text: "Hello"},
+			},
+		}
+		events := tt.convertMessage(msg, now)
+		if len(events) != 1 {
+			t.Fatalf("got %d events, want 1", len(events))
+		}
+		ev := events[0]
+		if ev.Kind != dto.EventKindTextDelta {
+			t.Errorf("kind = %q, want %q", ev.Kind, dto.EventKindTextDelta)
+		}
+		if ev.TextDelta == nil {
+			t.Fatal("textDelta payload is nil")
+		}
+		if ev.TextDelta.Text != "Hello" {
+			t.Errorf("text = %q, want %q", ev.TextDelta.Text, "Hello")
+		}
+		if ev.Ts != now.UnixMilli() {
+			t.Errorf("ts = %d, want %d", ev.Ts, now.UnixMilli())
+		}
+	})
+
+	filtered := []struct {
+		name string
+		msg  *agent.StreamEvent
+	}{
+		{
+			name: "MessageStart",
+			msg: &agent.StreamEvent{
+				MessageType: "stream_event",
+				Event:       agent.StreamEventData{Type: "message_start"},
+			},
+		},
+		{
+			name: "ContentBlockStart",
+			msg: &agent.StreamEvent{
+				MessageType: "stream_event",
+				Event:       agent.StreamEventData{Type: "content_block_start", Index: 0},
+			},
+		},
+		{
+			name: "InputJsonDelta",
+			msg: &agent.StreamEvent{
+				MessageType: "stream_event",
+				Event: agent.StreamEventData{
+					Type:  "content_block_delta",
+					Index: 1,
+					Delta: &agent.StreamDelta{Type: "input_json_delta"},
+				},
+			},
+		},
+		{
+			name: "EmptyTextDelta",
+			msg: &agent.StreamEvent{
+				MessageType: "stream_event",
+				Event: agent.StreamEventData{
+					Type:  "content_block_delta",
+					Index: 0,
+					Delta: &agent.StreamDelta{Type: "text_delta", Text: ""},
+				},
+			},
+		},
+	}
+	for _, tc := range filtered {
+		t.Run(tc.name, func(t *testing.T) {
+			tt := newToolTimingTracker()
+			events := tt.convertMessage(tc.msg, time.Now())
+			if events != nil {
+				t.Errorf("got %d events, want nil", len(events))
+			}
+		})
 	}
 }
 

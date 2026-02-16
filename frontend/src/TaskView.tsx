@@ -1,7 +1,7 @@
 // TaskView renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, For, Index, Show, onCleanup, createEffect, Switch, Match, type Accessor, type JSX } from "solid-js";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, terminateTask as apiTerminateTask, syncTask as apiSyncTask, taskEvents } from "@sdk/api.gen";
-import type { SafetyIssue } from "@sdk/types.gen";
+import type { EventMessage, EventTextDelta, SafetyIssue } from "@sdk/types.gen";
 import { Marked } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
@@ -257,7 +257,10 @@ export default function TaskView(props: Props) {
                           <Match when={group().kind === "tool"}>
                             <ToolMessageGroup toolCalls={group().toolCalls} />
                           </Match>
-                          <Match when={group().kind === "text" || group().kind === "other"}>
+                          <Match when={group().kind === "text"}>
+                            <TextMessageGroup events={group().events} />
+                          </Match>
+                          <Match when={group().kind === "other"}>
                             <For each={group().events}>
                               {(ev) => (
                                 <>
@@ -408,9 +411,25 @@ function groupMessages(msgs: EventMessage[]): MessageGroup[] {
 
   for (const ev of msgs) {
     switch (ev.kind) {
-      case "text":
-        groups.push({ kind: "text", events: [ev], toolCalls: [] });
+      case "text": {
+        // A final text event replaces any preceding textDelta group.
+        const last = lastGroup();
+        if (last && last.kind === "text" && last.events.some((e) => e.kind === "textDelta")) {
+          last.events.push(ev);
+        } else {
+          groups.push({ kind: "text", events: [ev], toolCalls: [] });
+        }
         break;
+      }
+      case "textDelta": {
+        const last = lastGroup();
+        if (last && last.kind === "text") {
+          last.events.push(ev);
+        } else {
+          groups.push({ kind: "text", events: [ev], toolCalls: [] });
+        }
+        break;
+      }
       case "toolUse": {
         if (ev.toolUse) {
           const last = lastGroup();
@@ -555,6 +574,28 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[] }) {
   );
 }
 
+// Renders a text group, combining textDelta fragments into a single view.
+// When a final "text" event arrives, it replaces the accumulated deltas.
+function TextMessageGroup(props: { events: EventMessage[] }) {
+  const text = createMemo(() => {
+    // If a final text event exists, use it (it has the complete content).
+    const finalEv = props.events.findLast((e) => e.kind === "text");
+    if (finalEv?.text) return finalEv.text.text;
+    // Otherwise, accumulate textDelta fragments.
+    return props.events
+      .filter((e): e is EventMessage & { textDelta: EventTextDelta } => e.kind === "textDelta" && !!e.textDelta)
+      .map((e) => e.textDelta.text)
+      .join("");
+  });
+  return (
+    <Show when={text()}>
+      <div class={styles.assistantMsg}>
+        <Markdown text={text()} />
+      </div>
+    </Show>
+  );
+}
+
 function turnHasExitPlanMode(turn: Turn): boolean {
   return turn.groups.some((g) =>
     g.kind === "tool" && g.toolCalls.some((tc) => tc.use.name === "ExitPlanMode"),
@@ -604,7 +645,10 @@ function ElidedTurn(props: { turn: Turn }) {
               <Match when={group.kind === "tool"}>
                 <ToolMessageGroup toolCalls={group.toolCalls} />
               </Match>
-              <Match when={group.kind === "text" || group.kind === "other"}>
+              <Match when={group.kind === "text"}>
+                <TextMessageGroup events={group.events} />
+              </Match>
+              <Match when={group.kind === "other"}>
                 <For each={group.events}>
                   {(ev) => <MessageItem ev={ev} />}
                 </For>

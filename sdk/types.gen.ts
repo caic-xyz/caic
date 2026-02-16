@@ -75,6 +75,10 @@ export const EventKindText: EventKind = "text";
 /**
  * Event kind constants.
  */
+export const EventKindTextDelta: EventKind = "textDelta";
+/**
+ * Event kind constants.
+ */
 export const EventKindToolUse: EventKind = "toolUse";
 /**
  * Event kind constants.
@@ -113,6 +117,7 @@ export interface EventMessage {
   ts: number /* int64 */; // Unix milliseconds when the backend received this message.
   init?: EventInit; // Kind "init".
   text?: EventText; // Kind "text".
+  textDelta?: EventTextDelta; // Kind "textDelta".
   toolUse?: EventToolUse; // Kind "toolUse".
   toolResult?: EventToolResult; // Kind "toolResult".
   ask?: EventAsk; // Kind "ask".
@@ -136,6 +141,12 @@ export interface EventInit {
  * EventText is an assistant text block.
  */
 export interface EventText {
+  text: string;
+}
+/**
+ * EventTextDelta is a streaming text fragment from --include-partial-messages.
+ */
+export interface EventTextDelta {
   text: string;
 }
 /**

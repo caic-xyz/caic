@@ -79,8 +79,17 @@ func (tt *toolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 				},
 			},
 		}}
+	case *agent.StreamEvent:
+		if m.Event.Type == "content_block_delta" && m.Event.Delta != nil && m.Event.Delta.Type == "text_delta" && m.Event.Delta.Text != "" {
+			return []dto.EventMessage{{
+				Kind:      dto.EventKindTextDelta,
+				Ts:        ts,
+				TextDelta: &dto.EventTextDelta{Text: m.Event.Delta.Text},
+			}}
+		}
+		return nil
 	default:
-		// RawMessage (stream_event, tool_progress), MetaMessage, etc. — filtered.
+		// RawMessage (tool_progress), MetaMessage, etc. — filtered.
 		return nil
 	}
 }

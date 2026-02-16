@@ -196,8 +196,14 @@ func ParseMessage(line []byte) (Message, error) {
 			return nil, err
 		}
 		return &m, nil
+	case "stream_event":
+		var m StreamEvent
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, err
+		}
+		return &m, nil
 	default:
-		// stream_event, tool_progress, etc. — pass through as raw.
+		// tool_progress, etc. — pass through as raw.
 		return &RawMessage{MessageType: envelope.Type, Raw: append([]byte(nil), line...)}, nil
 	}
 }

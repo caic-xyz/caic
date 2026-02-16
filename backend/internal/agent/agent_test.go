@@ -198,8 +198,54 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("turns = %d, want 3", m.NumTurns)
 		}
 	})
-	t.Run("RawFallback", func(t *testing.T) {
+	t.Run("StreamEventTextDelta", func(t *testing.T) {
+		line := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}`
+		msg, err := ParseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, ok := msg.(*StreamEvent)
+		if !ok {
+			t.Fatalf("got %T, want *StreamEvent", msg)
+		}
+		if m.Type() != "stream_event" {
+			t.Errorf("type = %q, want %q", m.Type(), "stream_event")
+		}
+		if m.Event.Type != "content_block_delta" {
+			t.Errorf("event.type = %q, want %q", m.Event.Type, "content_block_delta")
+		}
+		if m.Event.Index != 0 {
+			t.Errorf("event.index = %d, want 0", m.Event.Index)
+		}
+		if m.Event.Delta == nil {
+			t.Fatal("event.delta is nil")
+		}
+		if m.Event.Delta.Type != "text_delta" {
+			t.Errorf("delta.type = %q, want %q", m.Event.Delta.Type, "text_delta")
+		}
+		if m.Event.Delta.Text != "Hello" {
+			t.Errorf("delta.text = %q, want %q", m.Event.Delta.Text, "Hello")
+		}
+	})
+	t.Run("StreamEventMessageStart", func(t *testing.T) {
 		line := `{"type":"stream_event","event":{"type":"message_start"}}`
+		msg, err := ParseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, ok := msg.(*StreamEvent)
+		if !ok {
+			t.Fatalf("got %T, want *StreamEvent", msg)
+		}
+		if m.Event.Type != "message_start" {
+			t.Errorf("event.type = %q, want %q", m.Event.Type, "message_start")
+		}
+		if m.Event.Delta != nil {
+			t.Errorf("delta should be nil for message_start")
+		}
+	})
+	t.Run("RawFallback", func(t *testing.T) {
+		line := `{"type":"tool_progress","data":"some progress"}`
 		msg, err := ParseMessage([]byte(line))
 		if err != nil {
 			t.Fatal(err)
@@ -208,8 +254,8 @@ func TestParseMessage(t *testing.T) {
 		if !ok {
 			t.Fatalf("got %T, want *RawMessage", msg)
 		}
-		if m.Type() != "stream_event" {
-			t.Errorf("type = %q, want %q", m.Type(), "stream_event")
+		if m.Type() != "tool_progress" {
+			t.Errorf("type = %q, want %q", m.Type(), "tool_progress")
 		}
 	})
 }
@@ -242,6 +288,42 @@ func TestReadMessages(t *testing.T) {
 		}
 		if count != 3 {
 			t.Errorf("message count = %d, want 3", count)
+		}
+	})
+	t.Run("StreamWithPartialMessages", func(t *testing.T) {
+		lines := []string{
+			`{"type":"system","subtype":"init","cwd":"/","session_id":"s","tools":[],"model":"m","claude_code_version":"1","uuid":"u"}`,
+			`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hel"}}}`,
+			`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}}`,
+			`{"type":"assistant","message":{"model":"m","id":"i","role":"assistant","content":[{"type":"text","text":"hello"}],"usage":{}},"session_id":"s","uuid":"u"}`,
+			`{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"hello","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}`,
+		}
+		input := strings.Join(lines, "\n")
+
+		ch := make(chan Message, 16)
+		result, err := readMessages(strings.NewReader(input), ch, nil, ParseMessage)
+		close(ch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result == nil {
+			t.Fatal("expected result, got nil")
+		}
+
+		var msgs []Message
+		for m := range ch {
+			msgs = append(msgs, m)
+		}
+		// init + 2 stream_event + assistant + result = 5
+		if len(msgs) != 5 {
+			t.Errorf("message count = %d, want 5", len(msgs))
+		}
+		// Verify stream events are parsed as StreamEvent.
+		if _, ok := msgs[1].(*StreamEvent); !ok {
+			t.Errorf("msgs[1] is %T, want *StreamEvent", msgs[1])
+		}
+		if _, ok := msgs[2].(*StreamEvent); !ok {
+			t.Errorf("msgs[2] is %T, want *StreamEvent", msgs[2])
 		}
 	})
 	t.Run("LogWriter", func(t *testing.T) {

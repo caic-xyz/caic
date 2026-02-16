@@ -1,7 +1,7 @@
 // End-to-end tests for the task lifecycle using a fake backend.
 import { test, expect } from "@playwright/test";
 
-test("create task, wait for result, and terminate", async ({ page }) => {
+test("create task, verify streaming text and result, then terminate", async ({ page }) => {
   await page.goto("/");
 
   // Wait for repos to load (select gets an option).
@@ -14,7 +14,9 @@ test("create task, wait for result, and terminate", async ({ page }) => {
   // Click the task card to open TaskView.
   await page.getByText("e2e test task").first().click();
 
-  // Wait for the assistant message from the fake agent.
+  // Wait for the assistant message from the fake agent. The fake backend emits
+  // streaming text deltas ("I completed " + "the requested task.") followed by
+  // the final assistant message. The frontend should display the final text.
   await expect(page.getByText("I completed the requested task.")).toBeVisible({
     timeout: 15_000,
   });
@@ -23,6 +25,15 @@ test("create task, wait for result, and terminate", async ({ page }) => {
   await expect(page.locator("strong", { hasText: "Done" })).toBeVisible({
     timeout: 10_000,
   });
+
+  // Verify the SSE event stream contains textDelta events by inspecting the
+  // raw API response.
+  const resp = await page.request.get("/api/v1/tasks");
+  const tasks = await resp.json();
+  const taskId = tasks[0].id;
+  const eventsResp = await page.request.get(`/api/v1/tasks/${taskId}/events`);
+  const eventsBody = await eventsResp.text();
+  expect(eventsBody).toContain('"textDelta"');
 
   // The Terminate button should appear once the task is in waiting state.
   const terminateBtn = page.getByRole("button", { name: "Terminate" });

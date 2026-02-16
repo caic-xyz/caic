@@ -157,6 +157,7 @@ func buildArgs(opts agent.Options) []string {
 		"--output-format", "stream-json",
 		"--verbose",
 		"--dangerously-skip-permissions",
+		"--include-partial-messages",
 	}
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", strconv.Itoa(opts.MaxTurns))

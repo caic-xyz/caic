@@ -142,8 +142,32 @@ type ResultMessage struct {
 // Type implements Message.
 func (m *ResultMessage) Type() string { return "result" }
 
+// StreamEvent wraps a Claude Code stream_event NDJSON line, emitted when
+// --include-partial-messages is enabled. It contains streaming deltas
+// (text_delta, input_json_delta, etc.) from the Anthropic API.
+type StreamEvent struct {
+	MessageType string          `json:"type"`
+	Event       StreamEventData `json:"event"`
+}
+
+// StreamEventData is the inner event payload of a stream_event.
+type StreamEventData struct {
+	Type  string       `json:"type"`
+	Index int          `json:"index"`
+	Delta *StreamDelta `json:"delta,omitempty"`
+}
+
+// StreamDelta is a single streaming delta within a content_block_delta event.
+type StreamDelta struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+// Type implements Message.
+func (m *StreamEvent) Type() string { return "stream_event" }
+
 // RawMessage is a pass-through for message types we don't need to inspect
-// (stream_event, tool_progress, etc.).
+// (tool_progress, etc.).
 type RawMessage struct {
 	MessageType string
 	Raw         []byte

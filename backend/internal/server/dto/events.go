@@ -11,6 +11,7 @@ type EventKind = string
 const (
 	EventKindInit       EventKind = "init"
 	EventKindText       EventKind = "text"
+	EventKindTextDelta  EventKind = "textDelta"
 	EventKindToolUse    EventKind = "toolUse"
 	EventKindToolResult EventKind = "toolResult"
 	EventKindAsk        EventKind = "ask"
@@ -28,6 +29,7 @@ type EventMessage struct {
 	Ts         int64            `json:"ts"`                   // Unix milliseconds when the backend received this message.
 	Init       *EventInit       `json:"init,omitempty"`       // Kind "init".
 	Text       *EventText       `json:"text,omitempty"`       // Kind "text".
+	TextDelta  *EventTextDelta  `json:"textDelta,omitempty"`  // Kind "textDelta".
 	ToolUse    *EventToolUse    `json:"toolUse,omitempty"`    // Kind "toolUse".
 	ToolResult *EventToolResult `json:"toolResult,omitempty"` // Kind "toolResult".
 	Ask        *EventAsk        `json:"ask,omitempty"`        // Kind "ask".
@@ -49,6 +51,11 @@ type EventInit struct {
 
 // EventText is an assistant text block.
 type EventText struct {
+	Text string `json:"text"`
+}
+
+// EventTextDelta is a streaming text fragment from --include-partial-messages.
+type EventTextDelta struct {
 	Text string `json:"text"`
 }
 

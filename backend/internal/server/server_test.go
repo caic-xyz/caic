@@ -825,3 +825,134 @@ func TestTerminatedTaskEventsAfterRestart(t *testing.T) {
 		t.Errorf("text event = %+v, want text 'I found the bug'", events[1].Text)
 	}
 }
+
+func TestStreamEventTextDeltaInSSE(t *testing.T) {
+	logDir := t.TempDir()
+
+	// Write a terminated task log with stream events (text deltas) followed
+	// by the final assistant message, simulating --include-partial-messages output.
+	meta := mustJSON(t, agent.MetaMessage{
+		MessageType: "caic_meta", Version: 1, Prompt: "explain streaming",
+		Repo: "r", Branch: "caic/w0", Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	})
+	initMsg := mustJSON(t, agent.SystemInitMessage{
+		MessageType: "system", Subtype: "init", Model: "claude-opus-4-6", Version: "2.0", SessionID: "s1",
+	})
+	delta1 := mustJSON(t, agent.StreamEvent{
+		MessageType: "stream_event",
+		Event: agent.StreamEventData{
+			Type: "content_block_delta", Index: 0,
+			Delta: &agent.StreamDelta{Type: "text_delta", Text: "Hello "},
+		},
+	})
+	delta2 := mustJSON(t, agent.StreamEvent{
+		MessageType: "stream_event",
+		Event: agent.StreamEventData{
+			Type: "content_block_delta", Index: 0,
+			Delta: &agent.StreamDelta{Type: "text_delta", Text: "world"},
+		},
+	})
+	// Non-text stream events (message_start, input_json_delta) should be filtered.
+	msgStart := mustJSON(t, agent.StreamEvent{
+		MessageType: "stream_event",
+		Event:       agent.StreamEventData{Type: "message_start"},
+	})
+	assistant := mustJSON(t, agent.AssistantMessage{
+		MessageType: "assistant",
+		Message: agent.APIMessage{
+			Model:   "claude-opus-4-6",
+			Content: []agent.ContentBlock{{Type: "text", Text: "Hello world"}},
+			Usage:   agent.Usage{InputTokens: 50, OutputTokens: 20},
+		},
+	})
+	result := mustJSON(t, agent.ResultMessage{
+		MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.02, DurationMs: 200, NumTurns: 1,
+	})
+	trailer := mustJSON(t, agent.MetaResultMessage{
+		MessageType: "caic_result", State: "terminated", CostUSD: 0.02, DurationMs: 200,
+	})
+	writeLogFile(t, logDir, "task.jsonl", meta, initMsg, msgStart, delta1, delta2, assistant, result, trailer)
+
+	s := &Server{
+		runners: map[string]*task.Runner{},
+		tasks:   make(map[string]*taskEntry),
+		changed: make(chan struct{}),
+		logDir:  logDir,
+	}
+	if err := s.loadTerminatedTasks(); err != nil {
+		t.Fatal(err)
+	}
+
+	s.mu.Lock()
+	if len(s.tasks) != 1 {
+		t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
+	}
+	var taskID string
+	for id := range s.tasks {
+		taskID = id
+	}
+	s.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/events", http.NoBody).WithContext(ctx)
+	req.SetPathValue("id", taskID)
+	w := httptest.NewRecorder()
+	s.handleTaskEvents(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	body := w.Body.String()
+	var events []dto.EventMessage
+	eventType := "message"
+	for _, line := range strings.Split(body, "\n") {
+		if after, ok := strings.CutPrefix(line, "event: "); ok {
+			eventType = after
+			continue
+		}
+		after, ok := strings.CutPrefix(line, "data: ")
+		if !ok {
+			if line == "" {
+				eventType = "message"
+			}
+			continue
+		}
+		if eventType != "message" {
+			continue
+		}
+		var ev dto.EventMessage
+		if err := json.Unmarshal([]byte(after), &ev); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
+		events = append(events, ev)
+	}
+
+	kinds := make([]string, len(events))
+	for i, ev := range events {
+		kinds[i] = ev.Kind
+	}
+	// Expect: init + 2 textDelta (message_start filtered) + text + usage + result
+	wantKinds := []string{"init", "textDelta", "textDelta", "text", "usage", "result"}
+	if len(kinds) != len(wantKinds) {
+		t.Fatalf("event kinds = %v, want %v", kinds, wantKinds)
+	}
+	for i := range wantKinds {
+		if kinds[i] != wantKinds[i] {
+			t.Errorf("kinds[%d] = %q, want %q", i, kinds[i], wantKinds[i])
+		}
+	}
+
+	// Verify textDelta payloads.
+	if events[1].TextDelta == nil || events[1].TextDelta.Text != "Hello " {
+		t.Errorf("textDelta[0] = %+v, want text 'Hello '", events[1].TextDelta)
+	}
+	if events[2].TextDelta == nil || events[2].TextDelta.Text != "world" {
+		t.Errorf("textDelta[1] = %+v, want text 'world'", events[2].TextDelta)
+	}
+	// Final text event should have the complete text.
+	if events[3].Text == nil || events[3].Text.Text != "Hello world" {
+		t.Errorf("text event = %+v, want text 'Hello world'", events[3].Text)
+	}
+}
