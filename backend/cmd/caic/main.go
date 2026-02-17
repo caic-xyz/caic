@@ -42,6 +42,16 @@ func mainImpl() error {
 
 	initLogging(*logLevel)
 
+	if key := os.Getenv("GEMINI_API_KEY"); key != "" {
+		suffix := key
+		if len(suffix) > 4 {
+			suffix = suffix[len(suffix)-4:]
+		}
+		slog.Info("GEMINI_API_KEY configured", "suffix", suffix)
+	} else {
+		slog.Warn("GEMINI_API_KEY not set")
+	}
+
 	if *fakeMode {
 		return serveFake(ctx, *addr, *root)
 	}
