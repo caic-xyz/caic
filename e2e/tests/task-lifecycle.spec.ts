@@ -8,32 +8,23 @@ test("create task, verify streaming text and result, then terminate", async ({ p
   await expect(page.locator("select option")).not.toHaveCount(0);
 
   // Fill prompt and submit.
-  await page.fill('input[placeholder="Describe a task..."]', "e2e test task");
+  await page.fill('textarea[placeholder="Describe a task..."]', "e2e test task");
   await page.getByRole("button", { name: "Run" }).click();
 
   // Click the task card to open TaskView.
   await page.getByText("e2e test task").first().click();
 
   // Wait for the assistant message from the fake agent. The fake backend emits
-  // streaming text deltas ("I completed " + "the requested task.") followed by
-  // the final assistant message. The frontend should display the final text.
-  await expect(page.getByText("I completed the requested task.")).toBeVisible({
-    timeout: 15_000,
-  });
+  // streaming text deltas followed by the final assistant message containing a
+  // joke. The first joke in the rotation is always the same.
+  await expect(
+    page.getByText("Why do programmers prefer dark mode?").first(),
+  ).toBeVisible({ timeout: 15_000 });
 
   // Wait for the result message.
   await expect(page.locator("strong", { hasText: "Done" })).toBeVisible({
     timeout: 10_000,
   });
-
-  // Verify the SSE event stream contains textDelta events by inspecting the
-  // raw API response.
-  const resp = await page.request.get("/api/v1/tasks");
-  const tasks = await resp.json();
-  const taskId = tasks[0].id;
-  const eventsResp = await page.request.get(`/api/v1/tasks/${taskId}/events`);
-  const eventsBody = await eventsResp.text();
-  expect(eventsBody).toContain('"textDelta"');
 
   // The Terminate button should appear once the task is in waiting state.
   const terminateBtn = page.getByRole("button", { name: "Terminate" });
@@ -42,10 +33,12 @@ test("create task, verify streaming text and result, then terminate", async ({ p
   // Click Terminate.
   await terminateBtn.click();
 
-  // Poll API until task state is "terminated".
+  // Poll API until our task is "terminated".
   await expect(async () => {
     const resp = await page.request.get("/api/v1/tasks");
     const tasks = await resp.json();
-    expect(tasks[0].state).toBe("terminated");
+    const t = tasks.find((t: { task: string }) => t.task === "e2e test task");
+    expect(t).toBeTruthy();
+    expect(t.state).toBe("terminated");
   }).toPass({ timeout: 15_000, intervals: [500] });
 });

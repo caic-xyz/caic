@@ -142,7 +142,16 @@ export default function App() {
       const match = last && data.find((r) => r.path === last);
       setSelectedRepo(match ? match.path : data[0].path);
     }
-    listHarnesses().then(setHarnesses).catch(() => {});
+    {
+      const current = selectedHarness();
+      listHarnesses().then((h) => {
+        setHarnesses(h);
+        // If the default harness isn't in the list (e.g. fake mode), select the first.
+        if (h.length > 0 && !h.find((x) => x.name === current)) {
+          setSelectedHarness(h[0].name);
+        }
+      }).catch(() => {});
+    }
     getUsage().then(setUsage).catch(() => {});
   });
 

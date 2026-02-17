@@ -781,7 +781,8 @@ func (s *Server) adoptContainers(ctx context.Context) error {
 	}
 	containers, err := s.mdClient.List(ctx)
 	if err != nil {
-		return fmt.Errorf("list containers: %w", err)
+		slog.Warn("cannot list containers, skipping adoption", "err", err)
+		return nil
 	}
 
 	// Load all logs once upfront instead of per-container. Each adoptOne

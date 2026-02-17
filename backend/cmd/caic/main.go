@@ -19,6 +19,7 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/maruel/caic/backend/internal/agent"
 	"github.com/maruel/caic/backend/internal/agent/claude"
+	"github.com/maruel/caic/backend/internal/agent/fake"
 	"github.com/maruel/caic/backend/internal/server"
 	"github.com/maruel/caic/backend/internal/task"
 	"github.com/mattn/go-colorable"
@@ -33,7 +34,7 @@ func mainImpl() error {
 	addr := flag.String("http", "", "start web UI on this address (e.g. :8080)")
 	root := flag.String("root", "", "parent directory containing git repos")
 	logLevel := flag.String("log-level", "info", "log level (debug, info, warn, error)")
-	fake := flag.Bool("fake", false, "use fake container/agent ops (for e2e tests); creates a temp repo when -root is omitted")
+	fakeMode := flag.Bool("fake", false, "use fake container/agent ops (for e2e tests); creates a temp repo when -root is omitted")
 	flag.Parse()
 	if args := flag.Args(); len(args) > 0 {
 		return fmt.Errorf("unexpected arguments: %v", args)
@@ -41,7 +42,7 @@ func mainImpl() error {
 
 	initLogging(*logLevel)
 
-	if *fake {
+	if *fakeMode {
 		return serveFake(ctx, *addr, *root)
 	}
 	if *addr == "" {
@@ -225,7 +226,9 @@ func (*fakeContainer) Kill(_ context.Context, _, _ string) error  { return nil }
 
 // fakeBackend implements agent.Backend with a shell process that emits
 // streaming text deltas followed by complete messages, simulating
-// --include-partial-messages output.
+// --include-partial-messages output. It supports multiple turns: each
+// line read from stdin triggers the next joke response, cycling through
+// a fixed list.
 type fakeBackend struct{}
 
 var _ agent.Backend = (*fakeBackend)(nil)
@@ -233,15 +236,7 @@ var _ agent.Backend = (*fakeBackend)(nil)
 func (*fakeBackend) Harness() agent.Harness { return "fake" }
 
 func (*fakeBackend) Start(_ context.Context, _ agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
-	script := `read line
-echo '{"type":"system","subtype":"init","session_id":"test-session","cwd":"/workspace","model":"fake-model","claude_code_version":"0.0.0-test"}'
-echo '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I completed "}}}'
-sleep 0.05
-echo '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"the requested task."}}}'
-echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"I completed the requested task."}]}}'
-echo '{"type":"result","subtype":"success","result":"All done.","num_turns":1,"total_cost_usd":0.01,"duration_ms":500}'
-`
-	cmd := exec.Command("sh", "-c", script)
+	cmd := exec.Command("python3", "-u", "-c", string(fake.Script)) //nolint:gosec // fake.Script is an embedded constant
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
