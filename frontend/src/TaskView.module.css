@@ -361,6 +361,9 @@ a.headerRepo:hover {
 .toolBlock summary {
   cursor: pointer;
   font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .toolBlockPre {
