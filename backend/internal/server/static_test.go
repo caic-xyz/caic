@@ -39,7 +39,7 @@ func testFS(t *testing.T) fstest.MapFS {
 	t.Helper()
 	return fstest.MapFS{
 		"index.html.br":       {Data: brCompress(t, indexContent)},
-		"favicon.ico.br":      {Data: brCompress(t, iconContent)},
+		"favicon.svg.br":      {Data: brCompress(t, iconContent)},
 		"assets/app.js.br":    {Data: brCompress(t, appContent)},
 		"assets/style.css.br": {Data: brCompress(t, cssContent)},
 	}
@@ -106,7 +106,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("FallbackIdentity", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/favicon.ico", http.NoBody)
+		req := httptest.NewRequest(http.MethodGet, "/favicon.svg", http.NoBody)
 		w := httptest.NewRecorder()
 		h(w, req)
 
@@ -140,7 +140,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("VaryHeader", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/favicon.ico", http.NoBody)
+		req := httptest.NewRequest(http.MethodGet, "/favicon.svg", http.NoBody)
 		w := httptest.NewRecorder()
 		h(w, req)
 
