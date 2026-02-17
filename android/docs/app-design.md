@@ -150,11 +150,14 @@ The Gemini API key lives on the caic backend server, never on the Android device
 The app obtains short-lived ephemeral tokens from the backend:
 
 1. App calls `GET /api/v1/voice/token` on the caic backend
-2. Backend calls Gemini's `POST /v1beta/auth_tokens` with its API key
+2. Backend calls Gemini's `POST /v1alpha/auth_tokens` with its API key
 3. Backend returns the ephemeral token to the app
 4. App passes the token as `access_token` query param on the WebSocket URL
 
-Token defaults: 1 min to start a session (`newSessionExpireTime`), 30 min for the
+Ephemeral tokens are **v1alpha only** — using `v1beta` for `auth_tokens` returns
+404. See https://ai.google.dev/gemini-api/docs/ephemeral-tokens.
+
+Token defaults: 2 min to start a session (`newSessionExpireTime`), 30 min for the
 session itself (`expireTime`), single use. The app refreshes before expiry.
 
 See `sdk-design.md` for the backend endpoint spec.
@@ -208,10 +211,13 @@ auth, at the cost of implementing the audio plumbing ourselves.
 #### WebSocket endpoint
 
 ```
-wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?access_token={ephemeralToken}
+wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token={ephemeralToken}
 ```
 
-Note: `v1beta` supports ephemeral tokens. See https://ai.google.dev/api/live.
+Ephemeral tokens require `v1alpha` + `BidiGenerateContentConstrained`. The
+non-ephemeral path (`v1beta` + `BidiGenerateContent`) uses a raw API key
+directly, which we avoid for security.
+See https://ai.google.dev/gemini-api/docs/ephemeral-tokens.
 
 #### Protocol
 

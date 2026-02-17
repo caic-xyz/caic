@@ -49,13 +49,37 @@ Lint is strict: `warningsAsErrors = true`, `maxIssues: 0`.
 
 ## Gemini Live API
 
-Official docs: https://ai.google.dev/api/live
+Official docs:
+- https://ai.google.dev/api/live — WebSocket reference
+- https://ai.google.dev/gemini-api/docs/ephemeral-tokens — token provisioning
 
-- WebSocket URL must use **`v1beta`** (not `v1alpha`):
-  `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent`
-- Auth: ephemeral token via `?access_token=` query param or `Authorization: Token <token>` header.
-  Backend creates tokens via `POST /v1beta/auth_tokens` with `x-goog-api-key`.
-  Tokens expire in 30 min max, `uses: 1` by default (session resume doesn't count).
+### Ephemeral token flow
+
+The app never holds a long-lived API key. Instead:
+
+1. Android calls `GET /api/v1/voice/token` on the caic backend.
+2. Backend creates a short-lived ephemeral token via
+   `POST https://generativelanguage.googleapis.com/v1alpha/auth_tokens`
+   (header `x-goog-api-key`). Tokens: `uses: 1`, 30 min expiry, 2 min
+   new-session window.
+3. Android opens a WebSocket with the token as a query parameter.
+
+### API versioning (v1alpha)
+
+Ephemeral tokens are **v1alpha only** — both token creation and the
+WebSocket endpoint must use `v1alpha`. Using `v1beta` for `auth_tokens`
+returns 404. See https://ai.google.dev/gemini-api/docs/ephemeral-tokens.
+
+- Token endpoint: `POST /v1alpha/auth_tokens`
+- WebSocket URL (with ephemeral token):
+  `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained`
+- Auth: `?access_token=<token>` query param or `Authorization: Token <token>` header.
+
+The **non-ephemeral** Live API (direct API key) uses `v1beta` +
+`BidiGenerateContent`, but we don't use that path.
+
+### Protocol notes
+
 - Client must wait for `BidiGenerateContentSetupComplete` before sending other messages.
 - `mediaChunks` in `realtimeInput` is **deprecated** — use `audio`, `video`, or `text` fields instead.
 

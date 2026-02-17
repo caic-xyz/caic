@@ -693,6 +693,10 @@ func (s *Server) handleGetUsage(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// getVoiceToken creates a short-lived Gemini ephemeral token for the Android
+// voice client. The token is created via POST /v1alpha/auth_tokens — ephemeral
+// tokens are v1alpha only; v1beta returns 404.
+// See https://ai.google.dev/gemini-api/docs/ephemeral-tokens
 func (s *Server) getVoiceToken(ctx context.Context, _ *dto.EmptyReq) (*dto.VoiceTokenResp, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
@@ -714,7 +718,7 @@ func (s *Server) getVoiceToken(ctx context.Context, _ *dto.EmptyReq) (*dto.Voice
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://generativelanguage.googleapis.com/v1beta/auth_tokens",
+		"https://generativelanguage.googleapis.com/v1alpha/auth_tokens",
 		bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, dto.InternalError("failed to create token request").Wrap(err)

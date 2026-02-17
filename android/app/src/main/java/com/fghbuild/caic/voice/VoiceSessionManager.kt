@@ -106,7 +106,7 @@ class VoiceSessionManager @Inject constructor(
                 val wsUrl = Uri.Builder()
                     .scheme("wss")
                     .authority("generativelanguage.googleapis.com")
-                    .path("/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent")
+                    .path("/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained")
                     .appendQueryParameter("access_token", tokenResp.token)
                     .build()
                     .toString()
