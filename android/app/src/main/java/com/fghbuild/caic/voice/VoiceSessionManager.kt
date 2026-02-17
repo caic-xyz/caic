@@ -41,6 +41,7 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okio.ByteString
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -118,11 +119,14 @@ class VoiceSessionManager @Inject constructor(
 
                 val tokenResp = apiClient.getVoiceToken()
                 setStatus("Connecting…")
+                // TODO(security): Switch back to v1alpha + BidiGenerateContentConstrained
+                // with ephemeral tokens (access_token param). Raw API keys require
+                // v1beta + BidiGenerateContent.
                 val wsUrl = Uri.Builder()
                     .scheme("wss")
                     .authority("generativelanguage.googleapis.com")
-                    .path("/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent")
-                    .appendQueryParameter("access_token", tokenResp.token)
+                    .path("/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent")
+                    .appendQueryParameter("key", tokenResp.token)
                     .build()
                     .toString()
 
@@ -316,6 +320,11 @@ class VoiceSessionManager @Inject constructor(
         override fun onMessage(webSocket: WebSocket, text: String) {
             if (isStale(webSocket)) return
             scope.launch { handleServerMessage(text) }
+        }
+
+        override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+            if (isStale(webSocket)) return
+            scope.launch { handleServerMessage(bytes.utf8()) }
         }
 
         override fun onFailure(
