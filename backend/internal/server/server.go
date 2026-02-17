@@ -70,13 +70,14 @@ type Server struct {
 // mdBackend adapts *md.Client to task.ContainerBackend.
 type mdBackend struct{ client *md.Client }
 
-func (b *mdBackend) Start(ctx context.Context, dir, branch string, labels []string, image string) (string, error) {
-	slog.Info("md start", "dir", dir, "branch", branch)
+func (b *mdBackend) Start(ctx context.Context, dir, branch string, labels []string, opts task.StartOptions) (string, error) {
+	slog.Info("md start", "dir", dir, "branch", branch, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display)
+	image := opts.Image
 	if image == "" {
 		image = md.DefaultBaseImage + ":latest"
 	}
 	c := b.client.Container(dir, branch)
-	if err := c.Start(ctx, &md.StartOpts{NoSSH: true, Quiet: true, BaseImage: image, Labels: labels, USB: runtime.GOOS == "linux"}); err != nil {
+	if err := c.Start(ctx, &md.StartOpts{NoSSH: true, Quiet: true, BaseImage: image, Labels: labels, USB: opts.USB, Tailscale: opts.Tailscale, Display: opts.Display}); err != nil {
 		return "", err
 	}
 	return c.Name, nil
@@ -215,6 +216,7 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string) (*Ser
 // ListenAndServe starts the HTTP server.
 func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/config", handle(s.getConfig))
 	mux.HandleFunc("GET /api/v1/harnesses", handle(s.listHarnesses))
 	mux.HandleFunc("GET /api/v1/repos", handle(s.listRepos))
 	mux.HandleFunc("GET /api/v1/tasks", handle(s.listTasks))
@@ -281,6 +283,14 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	return err
 }
 
+func (s *Server) getConfig(_ context.Context, _ *dto.EmptyReq) (*dto.ConfigJSON, error) {
+	return &dto.ConfigJSON{
+		TailscaleAvailable: s.mdClient != nil && s.mdClient.TailscaleAPIKey != "",
+		USBAvailable:       runtime.GOOS == "linux",
+		DisplayAvailable:   true,
+	}, nil
+}
+
 func (s *Server) listHarnesses(_ context.Context, _ *dto.EmptyReq) (*[]dto.HarnessJSON, error) {
 	// Collect unique harness backends from all runners.
 	seen := make(map[agent.Harness]agent.Backend)
@@ -334,7 +344,7 @@ func (s *Server) createTask(_ context.Context, req *dto.CreateTaskReq) (*dto.Cre
 		return nil, dto.BadRequest("unsupported model for " + string(req.Harness) + ": " + req.Model)
 	}
 
-	t := &task.Task{ID: ksid.NewID(), Prompt: req.Prompt, Repo: req.Repo, Harness: harness, Model: req.Model, Image: req.Image}
+	t := &task.Task{ID: ksid.NewID(), Prompt: req.Prompt, Repo: req.Repo, Harness: harness, Model: req.Model, Image: req.Image, Tailscale: req.Tailscale, USB: req.USB, Display: req.Display}
 	entry := &taskEntry{task: t, done: make(chan struct{})}
 
 	s.mu.Lock()

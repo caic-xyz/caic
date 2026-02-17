@@ -2,13 +2,14 @@
 import { createEffect, createSignal, For, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { HarnessJSON, RepoJSON, TaskJSON, UsageResp } from "@sdk/types.gen";
-import { listHarnesses, listRepos, listTasks, createTask, getUsage } from "@sdk/api.gen";
+import { getConfig, listHarnesses, listRepos, listTasks, createTask, getUsage } from "@sdk/api.gen";
 import TaskView from "./TaskView";
 import TaskList from "./TaskList";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
 import { requestNotificationPermission, notifyWaiting } from "./notifications";
 import UsageBadges from "./UsageBadges";
+import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import styles from "./App.module.css";
 
 /** Max slug length in the URL (characters after the "+"). */
@@ -54,6 +55,12 @@ export default function App() {
   const [selectedHarness, setSelectedHarness] = createSignal("claude");
   const [sidebarOpen, setSidebarOpen] = createSignal(true);
   const [usage, setUsage] = createSignal<UsageResp | null>(null);
+  const [tailscaleAvailable, setTailscaleAvailable] = createSignal(false);
+  const [tailscaleEnabled, setTailscaleEnabled] = createSignal(false);
+  const [usbAvailable, setUSBAvailable] = createSignal(false);
+  const [usbEnabled, setUSBEnabled] = createSignal(false);
+  const [displayAvailable, setDisplayAvailable] = createSignal(false);
+  const [displayEnabled, setDisplayEnabled] = createSignal(false);
 
   // Per-task input drafts survive task switching.
   const [inputDrafts, setInputDrafts] = createSignal<Map<string, string>>(new Map());
@@ -152,6 +159,11 @@ export default function App() {
         }
       }).catch(() => {});
     }
+    getConfig().then((c) => {
+      setTailscaleAvailable(c.tailscaleAvailable);
+      setUSBAvailable(c.usbAvailable);
+      setDisplayAvailable(c.displayAvailable);
+    }).catch(() => {});
     getUsage().then(setUsage).catch(() => {});
   });
 
@@ -237,7 +249,10 @@ export default function App() {
     try {
       const model = selectedModel();
       const image = selectedImage().trim();
-      const data = await createTask({ prompt: p, repo, harness: selectedHarness(), ...(model ? { model } : {}), ...(image ? { image } : {}) });
+      const ts = tailscaleEnabled();
+      const usb = usbEnabled();
+      const disp = displayEnabled();
+      const data = await createTask({ prompt: p, repo, harness: selectedHarness(), ...(model ? { model } : {}), ...(image ? { image } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}) });
       setPrompt("");
       navigate(taskPath(data.id, repo, "", p));
     } finally {
@@ -306,18 +321,53 @@ export default function App() {
           disabled={submitting()}
           class={styles.imageInput}
         />
-        <AutoResizeTextarea
-          ref={(el) => { promptRef = el; }}
-          value={prompt()}
-          onInput={setPrompt}
-          onSubmit={submitTask}
-          placeholder="Describe a task..."
-          disabled={submitting()}
-          class={styles.promptInput}
-        />
-        <Button type="submit" disabled={submitting() || !prompt().trim() || !selectedRepo()}>
-          {submitting() ? "Submitting..." : "Run"}
-        </Button>
+        <Show when={tailscaleAvailable()}>
+          <label class={styles.checkboxLabel}>
+            <input
+              type="checkbox"
+              checked={tailscaleEnabled()}
+              onChange={(e) => setTailscaleEnabled(e.currentTarget.checked)}
+              disabled={submitting()}
+            />
+            Tailscale
+          </label>
+        </Show>
+        <Show when={usbAvailable()}>
+          <label class={styles.checkboxLabel}>
+            <input
+              type="checkbox"
+              checked={usbEnabled()}
+              onChange={(e) => setUSBEnabled(e.currentTarget.checked)}
+              disabled={submitting()}
+            />
+            USB
+          </label>
+        </Show>
+        <Show when={displayAvailable()}>
+          <label class={styles.checkboxLabel}>
+            <input
+              type="checkbox"
+              checked={displayEnabled()}
+              onChange={(e) => setDisplayEnabled(e.currentTarget.checked)}
+              disabled={submitting()}
+            />
+            Display
+          </label>
+        </Show>
+        <div class={styles.promptRow}>
+          <AutoResizeTextarea
+            ref={(el) => { promptRef = el; }}
+            value={prompt()}
+            onInput={setPrompt}
+            onSubmit={submitTask}
+            placeholder="Describe a task..."
+            disabled={submitting()}
+            class={styles.promptInput}
+          />
+          <Button type="submit" disabled={submitting() || !prompt().trim() || !selectedRepo()} loading={submitting()} title="Start a new container with this prompt">
+            <SendIcon width="1.2em" height="1.2em" />
+          </Button>
+        </div>
       </form>
 
       <div class={styles.layout}>

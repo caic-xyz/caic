@@ -305,7 +305,7 @@ type stubContainer struct {
 	fetched bool
 }
 
-func (s *stubContainer) Start(_ context.Context, _, _ string, _ []string, _ string) (string, error) {
+func (s *stubContainer) Start(_ context.Context, _, _ string, _ []string, _ StartOptions) (string, error) {
 	return "stub", nil
 }
 

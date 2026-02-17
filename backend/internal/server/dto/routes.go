@@ -15,6 +15,7 @@ type Route struct {
 // Routes is the authoritative list of API endpoints. The gen-api-client
 // tool reads this slice to generate the typed TypeScript client.
 var Routes = []Route{
+	{Name: "getConfig", Method: "GET", Path: "/api/v1/config", RespType: "ConfigJSON"},
 	{Name: "listHarnesses", Method: "GET", Path: "/api/v1/harnesses", RespType: "HarnessJSON", IsArray: true},
 	{Name: "listRepos", Method: "GET", Path: "/api/v1/repos", RespType: "RepoJSON", IsArray: true},
 	{Name: "listTasks", Method: "GET", Path: "/api/v1/tasks", RespType: "TaskJSON", IsArray: true},

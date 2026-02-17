@@ -51,6 +51,15 @@ func mainImpl() error {
 	} else {
 		slog.Warn("GEMINI_API_KEY not set")
 	}
+	if key := os.Getenv("TAILSCALE_API_KEY"); key != "" {
+		suffix := key
+		if len(suffix) > 4 {
+			suffix = suffix[len(suffix)-4:]
+		}
+		slog.Info("TAILSCALE_API_KEY configured", "suffix", suffix) //nolint:gosec // G706: suffix is at most 4 chars, structured log attribute
+	} else {
+		slog.Warn("TAILSCALE_API_KEY not set")
+	}
 
 	if *fakeMode {
 		return serveFake(ctx, *addr, *root)
@@ -223,7 +232,7 @@ type fakeContainer struct{}
 
 var _ task.ContainerBackend = (*fakeContainer)(nil)
 
-func (*fakeContainer) Start(_ context.Context, _, branch string, _ []string, _ string) (string, error) {
+func (*fakeContainer) Start(_ context.Context, _, branch string, _ []string, _ task.StartOptions) (string, error) {
 	return "md-test-" + strings.ReplaceAll(branch, "/", "-"), nil
 }
 

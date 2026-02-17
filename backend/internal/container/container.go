@@ -20,6 +20,7 @@ func New() (*md.Client, error) {
 		return nil, err
 	}
 	c.W = os.Stderr
+	c.TailscaleAPIKey = os.Getenv("TAILSCALE_API_KEY")
 	return c, nil
 }
 

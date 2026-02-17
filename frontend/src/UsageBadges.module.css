@@ -35,3 +35,10 @@
   color: #6c757d;
   text-decoration: line-through;
 }
+
+@media (max-width: 768px) {
+  .badge {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.35rem;
+  }
+}

@@ -22,6 +22,13 @@ type HarnessJSON struct {
 	Models []string `json:"models"`
 }
 
+// ConfigJSON reports server capabilities to the frontend.
+type ConfigJSON struct {
+	TailscaleAvailable bool `json:"tailscaleAvailable"`
+	USBAvailable       bool `json:"usbAvailable"`
+	DisplayAvailable   bool `json:"displayAvailable"`
+}
+
 // RepoJSON is the JSON representation of a discovered repo.
 type RepoJSON struct {
 	Path       string `json:"path"`
@@ -71,11 +78,14 @@ type CreateTaskResp struct {
 
 // CreateTaskReq is the request body for POST /api/v1/tasks.
 type CreateTaskReq struct {
-	Prompt  string  `json:"prompt"`
-	Repo    string  `json:"repo"`
-	Model   string  `json:"model,omitempty"`
-	Harness Harness `json:"harness"`
-	Image   string  `json:"image,omitempty"`
+	Prompt    string  `json:"prompt"`
+	Repo      string  `json:"repo"`
+	Model     string  `json:"model,omitempty"`
+	Harness   Harness `json:"harness"`
+	Image     string  `json:"image,omitempty"`
+	Tailscale bool    `json:"tailscale,omitempty"`
+	USB       bool    `json:"usb,omitempty"`
+	Display   bool    `json:"display,omitempty"`
 }
 
 // InputReq is the request body for POST /api/v1/tasks/{id}/input.

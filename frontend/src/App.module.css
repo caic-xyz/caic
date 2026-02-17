@@ -69,6 +69,10 @@
   min-width: 0;
 }
 
+.imageInput {
+  width: 10rem;
+}
+
 .repoSelect:hover:not(:disabled),
 .modelSelect:hover:not(:disabled),
 .imageInput:hover:not(:disabled) {
@@ -87,6 +91,32 @@
 .imageInput:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.checkboxLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: #555;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.checkboxLabel:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.promptRow {
+  display: flex;
+  flex: 1;
+  gap: 0.5rem;
+  align-items: center;
+  min-width: 0;
 }
 
 .promptInput {
@@ -141,16 +171,34 @@
     overflow-y: auto;
   }
 
+  .titleRow {
+    gap: 0.4rem;
+  }
+
+  .title {
+    font-size: 1.2rem;
+  }
+
+  .subtitle {
+    font-size: 0.7rem;
+  }
+
   .submitForm {
-    flex-direction: column;
-    align-items: stretch;
+    flex-wrap: wrap;
+    max-height: none;
+    overflow: visible;
   }
 
   .repoSelect,
   .modelSelect,
-  .imageInput,
-  .promptInput {
-    width: 100%;
+  .imageInput {
+    box-sizing: border-box;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .promptRow {
+    flex-basis: 100%;
     box-sizing: border-box;
   }
 

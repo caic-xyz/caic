@@ -497,6 +497,14 @@ export interface HarnessJSON {
   models: string[];
 }
 /**
+ * ConfigJSON reports server capabilities to the frontend.
+ */
+export interface ConfigJSON {
+  tailscaleAvailable: boolean;
+  usbAvailable: boolean;
+  displayAvailable: boolean;
+}
+/**
  * RepoJSON is the JSON representation of a discovered repo.
  */
 export interface RepoJSON {
@@ -558,6 +566,9 @@ export interface CreateTaskReq {
   model?: string;
   harness: Harness;
   image?: string;
+  tailscale?: boolean;
+  usb?: boolean;
+  display?: boolean;
 }
 /**
  * InputReq is the request body for POST /api/v1/tasks/{id}/input.

@@ -82,6 +82,7 @@ class ApiClient(baseURL: String) {
     }
 
     // JSON endpoints
+    suspend fun getConfig(): ConfigJSON = request("GET", "/api/v1/config")
     suspend fun listHarnesses(): List<HarnessJSON> = request("GET", "/api/v1/harnesses")
     suspend fun listRepos(): List<RepoJSON> = request("GET", "/api/v1/repos")
     suspend fun listTasks(): List<TaskJSON> = request("GET", "/api/v1/tasks")
