@@ -200,7 +200,7 @@ func initFakeRepo(tmpDir string) (string, error) {
 }
 
 func runGit(args ...string) error {
-	out, err := exec.Command("git", args...).CombinedOutput()
+	out, err := exec.Command("git", args...).CombinedOutput() //nolint:gosec // args are hardcoded git subcommands
 	if err != nil {
 		return fmt.Errorf("git %v: %w\n%s", args, err, out)
 	}

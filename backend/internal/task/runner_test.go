@@ -346,7 +346,7 @@ func initTestRepo(t *testing.T, baseBranch string) string { //nolint:unparam // 
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("git", args...) //nolint:gosec // test helper with controlled args
 	if dir != "" {
 		cmd.Dir = dir
 	}

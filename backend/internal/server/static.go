@@ -87,7 +87,7 @@ func newStaticHandler(dist fs.FS) http.HandlerFunc {
 		w.Header().Set("Vary", "Accept-Encoding")
 		setStaticCacheControl(w, clean)
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(data)
+		_, _ = w.Write(data) //nolint:gosec // data from embedded FS, not user input
 	}
 }
 

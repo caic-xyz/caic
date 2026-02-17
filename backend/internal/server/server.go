@@ -365,7 +365,7 @@ func (s *Server) handleTaskRawEvents(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("marshal SSE event", "err", err)
 				continue
 			}
-			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
+			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx) //nolint:gosec // SSE stream, data is json.Marshal output
 			idx++
 		}
 	}
@@ -565,7 +565,7 @@ func (s *Server) getVoiceToken(ctx context.Context, _ *dto.EmptyReq) (*dto.Voice
 	if apiKey == "" {
 		return nil, dto.InternalError("GEMINI_API_KEY not configured")
 	}
-	slog.Info("voice token", "api_key_len", len(apiKey))
+	slog.Info("voice token", "api_key_len", len(apiKey)) //nolint:gosec // structured logging, no injection
 	now := time.Now().UTC()
 	expireTime := now.Add(30 * time.Minute).Format(time.RFC3339)
 	newSessionExpire := now.Add(2 * time.Minute).Format(time.RFC3339)
@@ -589,7 +589,7 @@ func (s *Server) getVoiceToken(ctx context.Context, _ *dto.EmptyReq) (*dto.Voice
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-goog-api-key", apiKey)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is a hardcoded constant
 	if err != nil {
 		return nil, dto.InternalError("failed to fetch ephemeral token").Wrap(err)
 	}

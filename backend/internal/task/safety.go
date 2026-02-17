@@ -125,7 +125,7 @@ func scanDiffForSecrets(ctx context.Context, dir, branch, baseBranch string) ([]
 				continue
 			}
 			seen[key] = true
-			slog.Warn("secret pattern matched", "file", currentFile, "pattern", sp.desc, "line", added)
+			slog.Warn("secret pattern matched", "file", currentFile, "pattern", sp.desc, "line", added) //nolint:gosec // structured logging, no injection
 			issues = append(issues, SafetyIssue{
 				File:   currentFile,
 				Kind:   "secret",

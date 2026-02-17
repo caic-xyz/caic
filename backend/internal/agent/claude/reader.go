@@ -55,7 +55,7 @@ func DecodeRecord(r *Record) (any, error) {
 	case TypeFileHistorySnapshot:
 		return r.AsFileHistorySnapshot()
 	default:
-		slog.Warn("unknown record type", "type", r.Type)
+		slog.Warn("unknown record type", "type", r.Type) //nolint:gosec // structured logging, no injection
 		return r, nil
 	}
 }

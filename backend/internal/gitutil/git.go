@@ -57,7 +57,7 @@ func Fetch(ctx context.Context, dir string) error {
 // CreateBranch creates a new branch from startPoint and checks it out.
 func CreateBranch(ctx context.Context, dir, name, startPoint string) error {
 	slog.Info("git create branch", "branch", name, "startPoint", startPoint)
-	cmd := exec.CommandContext(ctx, "git", "checkout", "-b", name, startPoint)
+	cmd := exec.CommandContext(ctx, "git", "checkout", "-b", name, startPoint) //nolint:gosec // args are server-controlled branch names
 	cmd.Dir = dir
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -70,7 +70,7 @@ func CreateBranch(ctx context.Context, dir, name, startPoint string) error {
 // CheckoutBranch switches to an existing branch.
 func CheckoutBranch(ctx context.Context, dir, name string) error {
 	slog.Info("git checkout", "branch", name)
-	cmd := exec.CommandContext(ctx, "git", "checkout", name)
+	cmd := exec.CommandContext(ctx, "git", "checkout", name) //nolint:gosec // args are server-controlled branch names
 	cmd.Dir = dir
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

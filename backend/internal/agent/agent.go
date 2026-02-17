@@ -136,7 +136,7 @@ func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer, parseFn fun
 		}
 		msg, err := parseFn(line)
 		if err != nil {
-			slog.Warn("skipping unparseable message", "err", err, "line", string(line))
+			slog.Warn("skipping unparseable message", "err", err, "line", string(line)) //nolint:gosec // structured logging, no injection
 			continue
 		}
 		if n <= 3 {
@@ -149,7 +149,7 @@ func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer, parseFn fun
 			result = rm
 		}
 	}
-	slog.Debug("readMessages: loop exited", "linesRead", n, "hasResult", result != nil, "scanErr", scanner.Err())
+	slog.Debug("readMessages: loop exited", "linesRead", n, "hasResult", result != nil, "scanErr", scanner.Err()) //nolint:gosec // structured logging, no injection
 	return result, scanner.Err()
 }
 
@@ -231,7 +231,7 @@ const (
 func DeployRelay(ctx context.Context, container string) error {
 	// SSH concatenates remote args with spaces and passes them to the login
 	// shell, so a single string works correctly as a shell command.
-	cmd := exec.CommandContext(ctx, "ssh", container,
+	cmd := exec.CommandContext(ctx, "ssh", container, //nolint:gosec // container is not user-controlled
 		"mkdir -p "+RelayDir+" && cat > "+RelayScriptPath)
 	cmd.Stdin = bytes.NewReader(relay.Script)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -243,7 +243,7 @@ func DeployRelay(ctx context.Context, container string) error {
 // HasRelayDir checks whether the caic relay directory exists in the container.
 // Its presence proves caic deployed the relay at some point.
 func HasRelayDir(ctx context.Context, container string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "ssh", container, "test", "-d", RelayDir)
+	cmd := exec.CommandContext(ctx, "ssh", container, "test", "-d", RelayDir) //nolint:gosec // container is not user-controlled
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
@@ -256,7 +256,7 @@ func HasRelayDir(ctx context.Context, container string) (bool, error) {
 
 // IsRelayRunning checks whether the relay socket exists in the container.
 func IsRelayRunning(ctx context.Context, container string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "ssh", container, "test", "-S", RelaySockPath)
+	cmd := exec.CommandContext(ctx, "ssh", container, "test", "-S", RelaySockPath) //nolint:gosec // container is not user-controlled
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
