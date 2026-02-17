@@ -1106,11 +1106,14 @@ func (s *Server) watchSession(entry *taskEntry, runner *task.Runner, h *task.Ses
 			}
 			if sessionErr != nil {
 				attrs = append(attrs, "err", sessionErr)
-				slog.Warn("session exited with error, task is waiting", attrs...)
+				slog.Warn("session exited with error", attrs...)
 			} else {
-				slog.Info("session exited, task is waiting", attrs...)
+				slog.Info("session exited", attrs...)
 			}
-			t.SetState(task.StateWaiting)
+			// Only transition Running→Waiting. If addMessage() already set
+			// Asking (agent asked a question) or the task is Terminating,
+			// don't clobber that state.
+			t.SetStateIf(task.StateRunning, task.StateWaiting)
 			s.notifyTaskChange()
 		case <-entry.done:
 		}

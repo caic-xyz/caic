@@ -510,4 +510,24 @@ func TestState(t *testing.T) {
 			}
 		}
 	})
+	t.Run("SetStateIf", func(t *testing.T) {
+		t.Run("Match", func(t *testing.T) {
+			tk := &Task{State: StateRunning}
+			if !tk.SetStateIf(StateRunning, StateWaiting) {
+				t.Fatal("SetStateIf returned false when state matched")
+			}
+			if tk.State != StateWaiting {
+				t.Errorf("state = %v, want %v", tk.State, StateWaiting)
+			}
+		})
+		t.Run("Mismatch", func(t *testing.T) {
+			tk := &Task{State: StateAsking}
+			if tk.SetStateIf(StateRunning, StateWaiting) {
+				t.Fatal("SetStateIf returned true when state did not match")
+			}
+			if tk.State != StateAsking {
+				t.Errorf("state = %v, want %v (should be unchanged)", tk.State, StateAsking)
+			}
+		})
+	})
 }

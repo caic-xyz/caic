@@ -120,6 +120,18 @@ func (t *Task) SetState(s State) {
 	t.mu.Unlock()
 }
 
+// SetStateIf atomically transitions the state to next only if the current
+// state equals expected. Returns true if the transition occurred.
+func (t *Task) SetStateIf(expected, next State) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.State != expected {
+		return false
+	}
+	t.setState(next)
+	return true
+}
+
 // LiveStats returns the latest cost, turn count, duration, and token usage
 // accumulated from ResultMessages received during execution.
 func (t *Task) LiveStats() (costUSD float64, numTurns int, durationMs int64, usage agent.Usage) {
@@ -477,10 +489,10 @@ func (t *Task) SendInput(prompt string) error {
 		default:
 		}
 	}
-	if h != nil {
+	state := t.State
+	if h != nil && (state == StateWaiting || state == StateAsking) {
 		t.setState(StateRunning)
 	}
-	state := t.State
 	t.mu.Unlock()
 	if h == nil {
 		return fmt.Errorf("no active session (state=%s session=%s)", state, sessionStatus)
