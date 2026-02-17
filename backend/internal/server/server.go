@@ -429,7 +429,7 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("marshal SSE event", "err", err)
 				continue
 			}
-			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
+			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx) //nolint:gosec // SSE stream, data is json.Marshal output
 			idx++
 		}
 	}
