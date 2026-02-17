@@ -11,12 +11,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -26,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,7 +58,8 @@ private const val BarAnimDurationMs = 400
 private const val BarCount = 3
 private const val BarMinHeight = 4
 private const val BarMaxHeight = 20
-private const val IndicatorSize = 12
+private const val MicLevelMinSize = 10
+private const val MicLevelMaxSize = 18
 private val TranscriptHeight = 220.dp
 
 @Composable
@@ -61,6 +68,7 @@ fun VoicePanel(
     voiceEnabled: Boolean,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
+    onSelectDevice: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (!voiceEnabled) return
@@ -68,9 +76,8 @@ fun VoicePanel(
     Surface(
         modifier = modifier,
         tonalElevation = 4.dp,
-        shadowElevation = 4.dp,
     ) {
-        Column {
+        Column(modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)) {
             HorizontalDivider()
             when {
                 voiceState.error != null -> ErrorPanel(onConnect)
@@ -78,6 +85,7 @@ fun VoicePanel(
                 voiceState.listening || voiceState.speaking -> ActivePanel(
                     voiceState = voiceState,
                     onDisconnect = onDisconnect,
+                    onSelectDevice = onSelectDevice,
                 )
                 !voiceState.connected -> IdlePanel(onConnect)
                 else -> ConnectingPanel("Starting audio…")
@@ -141,6 +149,7 @@ private fun ConnectingPanel(status: String) {
 private fun ActivePanel(
     voiceState: VoiceState,
     onDisconnect: () -> Unit,
+    onSelectDevice: (Int) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -155,7 +164,7 @@ private fun ActivePanel(
             if (voiceState.speaking) {
                 SpeakingIndicator()
             } else {
-                ListeningIndicator()
+                ListeningIndicator(micLevel = voiceState.micLevel)
             }
 
             val statusText = when {
@@ -177,6 +186,14 @@ private fun ActivePanel(
             IconButton(onClick = onDisconnect) {
                 Icon(Icons.Default.Stop, contentDescription = "End voice")
             }
+        }
+
+        if (voiceState.availableDevices.size > 1) {
+            AudioDevicePicker(
+                devices = voiceState.availableDevices,
+                selectedDeviceId = voiceState.selectedDeviceId,
+                onSelect = onSelectDevice,
+            )
         }
 
         TranscriptLog(
@@ -226,16 +243,12 @@ private fun TranscriptLog(
         }
     }
     if (entries.isEmpty()) {
-        Box(
-            modifier = modifier.height(TranscriptHeight),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = "Transcript will appear here…",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-            )
-        }
+        Text(
+            text = "Transcript will appear here…",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            modifier = modifier.padding(vertical = 8.dp),
+        )
     } else {
         LazyColumn(
             state = listState,
@@ -267,24 +280,35 @@ private fun TranscriptLog(
 }
 
 @Composable
-private fun ListeningIndicator() {
-    val infiniteTransition = rememberInfiniteTransition(label = "listening")
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = PulseMinAlpha,
-        targetValue = PulseMaxAlpha,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = PulseDurationMs),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "listeningPulse",
-    )
+private fun ListeningIndicator(micLevel: Float = 0f) {
+    val sizeDp = MicLevelMinSize + micLevel * (MicLevelMaxSize - MicLevelMinSize)
+    val size by animateFloatAsState(targetValue = sizeDp, label = "micSize")
     Box(
         modifier = Modifier
-            .size(IndicatorSize.dp)
-            .alpha(alpha)
+            .size(size.dp)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.primary),
     )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AudioDevicePicker(
+    devices: List<AudioDevice>,
+    selectedDeviceId: Int?,
+    onSelect: (Int) -> Unit,
+) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        devices.forEach { device ->
+            FilterChip(
+                selected = device.id == selectedDeviceId,
+                onClick = { onSelect(device.id) },
+                label = { Text(device.name, style = MaterialTheme.typography.labelSmall) },
+            )
+        }
+    }
 }
 
 @Composable

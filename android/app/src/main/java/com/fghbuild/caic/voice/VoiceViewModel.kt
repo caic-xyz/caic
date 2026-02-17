@@ -60,6 +60,10 @@ class VoiceViewModel @Inject constructor(
         voiceSessionManager.disconnect()
     }
 
+    fun selectAudioDevice(deviceId: Int) {
+        voiceSessionManager.selectAudioDevice(deviceId)
+    }
+
     fun setActiveTaskCallback(callback: (String) -> Unit) {
         voiceSessionManager.onSetActiveTask = callback
     }

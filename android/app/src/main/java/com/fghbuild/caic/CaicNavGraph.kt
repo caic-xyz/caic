@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -85,17 +86,20 @@ fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
         snackbarHostState.showSnackbar(error)
     }
 
-    Scaffold(snackbarHost = {
-        SnackbarHost(snackbarHostState) { data ->
-            Snackbar {
-                Text(
-                    text = data.visuals.message,
-                    maxLines = 5,
-                    overflow = TextOverflow.Ellipsis,
-                )
+    Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = {
+            SnackbarHost(snackbarHostState) { data ->
+                Snackbar {
+                    Text(
+                        text = data.visuals.message,
+                        maxLines = 5,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-        }
-    }) { padding ->
+        },
+    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -134,6 +138,7 @@ fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
                     }
                 },
                 onDisconnect = { voiceViewModel.disconnect() },
+                onSelectDevice = { voiceViewModel.selectAudioDevice(it) },
                 modifier = Modifier.fillMaxWidth(),
             )
         }

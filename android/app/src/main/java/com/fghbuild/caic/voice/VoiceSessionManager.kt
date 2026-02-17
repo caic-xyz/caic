@@ -5,12 +5,15 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
 import android.media.AudioAttributes
+import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.os.Handler
+import android.os.Looper
 import android.net.Uri
 import android.util.Base64
 import com.caic.sdk.ApiClient
@@ -54,6 +57,8 @@ private const val PLAYBACK_SAMPLE_RATE = 24000
 private const val AUDIO_BUFFER_SIZE = 4096
 private const val WS_CLOSE_NORMAL = 1000
 private const val MODEL_NAME = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+/** Internal AudioRecord buffer = 4x minimum to absorb scheduling jitter. */
+private const val RECORD_BUFFER_MULTIPLIER = 4
 
 @Singleton
 class VoiceSessionManager @Inject constructor(
@@ -71,6 +76,7 @@ class VoiceSessionManager @Inject constructor(
     private var audioTrack: AudioTrack? = null
     private var recordingJob: Job? = null
     private var functionHandlers: FunctionHandlers? = null
+    private var deviceCallback: AudioDeviceCallback? = null
 
     private val _state = MutableStateFlow(VoiceState())
     val state: StateFlow<VoiceState> = _state.asStateFlow()
@@ -157,7 +163,8 @@ class VoiceSessionManager @Inject constructor(
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all failures to UI.
     private fun startAudio() {
         try {
-            routeToBluetoothScoIfAvailable()
+            refreshAvailableDevices()
+            registerDeviceCallback()
             setupAudioRecord()
             check(audioRecord?.state == AudioRecord.STATE_INITIALIZED) {
                 "Microphone initialization failed"
@@ -175,6 +182,7 @@ class VoiceSessionManager @Inject constructor(
     private fun releaseAudio() {
         recordingJob?.cancel()
         recordingJob = null
+        unregisterDeviceCallback()
         try {
             audioRecord?.stop()
         } catch (e: Exception) {
@@ -425,26 +433,34 @@ class VoiceSessionManager @Inject constructor(
 
     @SuppressLint("MissingPermission")
     private fun setupAudioRecord() {
-        val bufferSize = AudioRecord.getMinBufferSize(
+        val minBuf = AudioRecord.getMinBufferSize(
             RECORD_SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
         )
-        audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            RECORD_SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize.coerceAtLeast(AUDIO_BUFFER_SIZE),
-        )
+        // Use 4x minimum to absorb scheduling jitter and prevent overruns.
+        val bufferSize = (minBuf * RECORD_BUFFER_MULTIPLIER).coerceAtLeast(AUDIO_BUFFER_SIZE)
+        Log.i(TAG, "AudioRecord buffer: min=$minBuf actual=$bufferSize")
+        audioRecord = AudioRecord.Builder()
+            .setAudioSource(MediaRecorder.AudioSource.MIC)
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setSampleRate(RECORD_SAMPLE_RATE)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                    .build()
+            )
+            .setBufferSizeInBytes(bufferSize)
+            .build()
     }
 
     private fun setupAudioTrack() {
-        val bufferSize = AudioTrack.getMinBufferSize(
+        val minBuf = AudioTrack.getMinBufferSize(
             PLAYBACK_SAMPLE_RATE,
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
         )
+        val bufferSize = (minBuf * RECORD_BUFFER_MULTIPLIER).coerceAtLeast(AUDIO_BUFFER_SIZE)
         val usage = if (audioManager.communicationDevice != null) {
             AudioAttributes.USAGE_VOICE_COMMUNICATION
         } else {
@@ -464,21 +480,60 @@ class VoiceSessionManager @Inject constructor(
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build()
             )
-            .setBufferSizeInBytes(bufferSize.coerceAtLeast(AUDIO_BUFFER_SIZE))
+            .setBufferSizeInBytes(bufferSize)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         audioTrack?.play()
     }
 
-    /** Route audio to BT SCO headset if connected; skip if only built-in devices available. */
-    private fun routeToBluetoothScoIfAvailable() {
-        val scoDevice = audioManager.availableCommunicationDevices
-            .firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+    /** Populate available devices list and auto-select BT SCO if present. */
+    private fun refreshAvailableDevices() {
+        val devices = audioManager.availableCommunicationDevices.map { info ->
+            AudioDevice(id = info.id, type = info.type, name = audioDeviceTypeName(info.type))
+        }
+        val currentSelected = _state.value.selectedDeviceId
+        val autoSelect = if (currentSelected != null && devices.any { it.id == currentSelected }) {
+            currentSelected
+        } else {
+            // Auto-select BT SCO if available, preserving legacy behavior.
+            devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }?.id
+        }
+        _state.update { it.copy(availableDevices = devices, selectedDeviceId = autoSelect) }
+        if (autoSelect != null) {
+            applyCommunicationDevice(autoSelect)
+        }
+    }
+
+    fun selectAudioDevice(deviceId: Int) {
+        _state.update { it.copy(selectedDeviceId = deviceId) }
+        applyCommunicationDevice(deviceId)
+    }
+
+    private fun applyCommunicationDevice(deviceId: Int) {
+        val info = audioManager.availableCommunicationDevices.firstOrNull { it.id == deviceId }
             ?: return
-        // MODE_IN_COMMUNICATION is required for BT SCO but forces narrowband DSP — only
-        // set it when actually routing to BT, not for built-in mic use.
-        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        audioManager.setCommunicationDevice(scoDevice)
+        if (info.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        }
+        audioManager.setCommunicationDevice(info)
+    }
+
+    private fun registerDeviceCallback() {
+        val cb = object : AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+                refreshAvailableDevices()
+            }
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+                refreshAvailableDevices()
+            }
+        }
+        deviceCallback = cb
+        audioManager.registerAudioDeviceCallback(cb, Handler(Looper.getMainLooper()))
+    }
+
+    private fun unregisterDeviceCallback() {
+        deviceCallback?.let { audioManager.unregisterAudioDeviceCallback(it) }
+        deviceCallback = null
     }
 
     private fun clearCommunicationDevice() {
@@ -503,6 +558,18 @@ class VoiceSessionManager @Inject constructor(
                 }
                 if (bytesRead > 0) {
                     sendAudioChunk(buffer.copyOf(bytesRead))
+                    // RMS of PCM samples (16-bit LE mono), normalized to 0..1.
+                    val samples = bytesRead / 2
+                    var sumSq = 0.0
+                    for (i in 0 until samples) {
+                        val lo = buffer[i * 2].toInt() and 0xFF
+                        val hi = buffer[i * 2 + 1].toInt()
+                        val sample = (hi shl 8) or lo
+                        sumSq += sample.toDouble() * sample
+                    }
+                    val rms = (Math.sqrt(sumSq / samples) / Short.MAX_VALUE).toFloat()
+                        .coerceIn(0f, 1f)
+                    _state.update { it.copy(micLevel = rms) }
                 }
             }
         }
@@ -523,7 +590,12 @@ class VoiceSessionManager @Inject constructor(
     }
 
     private fun playAudio(pcmBytes: ByteArray) {
-        audioTrack?.write(pcmBytes, 0, pcmBytes.size)
+        // AudioTrack.write() blocks until the buffer is consumed; run off-main to avoid
+        // back-pressuring the WebSocket message handler.
+        val track = audioTrack ?: return
+        scope.launch(Dispatchers.IO) {
+            track.write(pcmBytes, 0, pcmBytes.size)
+        }
     }
 
     companion object {
@@ -565,6 +637,8 @@ enum class TranscriptSpeaker { USER, ASSISTANT }
 
 data class TranscriptEntry(val speaker: TranscriptSpeaker, val text: String, val final: Boolean = false)
 
+data class AudioDevice(val id: Int, val type: Int, val name: String)
+
 data class VoiceState(
     val connectStatus: String? = null,
     val connected: Boolean = false,
@@ -575,6 +649,12 @@ data class VoiceState(
     val errorId: Long = 0,
     /** Conversation transcript log; each entry is one speaker turn. */
     val transcript: List<TranscriptEntry> = emptyList(),
+    /** RMS mic input level, normalized 0..1. */
+    val micLevel: Float = 0f,
+    /** Available audio input devices. */
+    val availableDevices: List<AudioDevice> = emptyList(),
+    /** Currently selected audio device ID, or null for system default. */
+    val selectedDeviceId: Int? = null,
 )
 
 /**
@@ -595,3 +675,17 @@ private fun errorJson(message: String): JsonElement =
 
 /** Wraps a serialized JSON object as a top-level discriminated message: {"key": {...}}. */
 private fun String.wrapTopLevel(key: String): String = """{"$key":$this}"""
+
+@Suppress("CyclomaticComplexMethod") // Simple exhaustive mapping, no logic.
+private fun audioDeviceTypeName(type: Int): String = when (type) {
+    AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth"
+    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "BT A2DP"
+    AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Earpiece"
+    AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Speaker"
+    AudioDeviceInfo.TYPE_BUILTIN_MIC -> "Built-in Mic"
+    AudioDeviceInfo.TYPE_USB_DEVICE -> "USB"
+    AudioDeviceInfo.TYPE_USB_HEADSET -> "USB Headset"
+    AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired Headset"
+    AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired Headphones"
+    else -> "Device $type"
+}
