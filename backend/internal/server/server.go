@@ -191,6 +191,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	mux.HandleFunc("GET /api/v1/tasks", handle(s.listTasks))
 	mux.HandleFunc("POST /api/v1/tasks", handle(s.createTask))
 	mux.HandleFunc("GET /api/v1/tasks/{id}/raw_events", s.handleTaskRawEvents)
+	mux.HandleFunc("GET /api/v1/tasks/{id}/events", s.handleTaskEvents)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/input", handleWithTask(s, s.sendInput))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/restart", handleWithTask(s, s.restartTask))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/terminate", handleWithTask(s, s.terminateTask))
@@ -358,7 +359,7 @@ func (s *Server) handleTaskRawEvents(w http.ResponseWriter, r *http.Request) {
 	tracker := newToolTimingTracker()
 	idx := 0
 
-	writeEvents := func(events []dto.EventMessage) {
+	writeEvents := func(events []dto.ClaudeEventMessage) {
 		for _, ev := range events {
 			data, err := json.Marshal(ev)
 			if err != nil {
@@ -389,6 +390,62 @@ func (s *Server) handleTaskRawEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Phase 2: stream live messages with accurate timestamps.
+	for msg := range live {
+		writeEvents(tracker.convertMessage(msg, time.Now()))
+		flusher.Flush()
+	}
+}
+
+// handleTaskEvents streams agent messages as SSE using backend-neutral
+// EventMessage DTOs. All tool invocations are emitted as toolUse events.
+func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
+	entry, err := s.getTask(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, dto.InternalError("streaming not supported"))
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher.Flush()
+
+	history, live, unsub := entry.task.Subscribe(r.Context())
+	defer unsub()
+
+	tracker := newGenericToolTimingTracker(entry.task.Harness)
+	idx := 0
+
+	writeEvents := func(events []dto.EventMessage) {
+		for i := range events {
+			data, err := marshalEvent(&events[i])
+			if err != nil {
+				slog.Warn("marshal SSE event", "err", err)
+				continue
+			}
+			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
+			idx++
+		}
+	}
+
+	now := time.Now()
+	for _, msg := range history {
+		writeEvents(tracker.convertMessage(msg, now))
+	}
+	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
+	flusher.Flush()
+
+	state := entry.task.State
+	if state == task.StateTerminated || state == task.StateFailed {
+		return
+	}
+
 	for msg := range live {
 		writeEvents(tracker.convertMessage(msg, time.Now()))
 		flusher.Flush()

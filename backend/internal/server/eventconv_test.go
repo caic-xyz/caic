@@ -26,8 +26,8 @@ func TestConvertSystemInit(t *testing.T) {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
 	ev := events[0]
-	if ev.Kind != dto.EventKindInit {
-		t.Errorf("kind = %q, want %q", ev.Kind, dto.EventKindInit)
+	if ev.Kind != dto.ClaudeEventKindInit {
+		t.Errorf("kind = %q, want %q", ev.Kind, dto.ClaudeEventKindInit)
 	}
 	if ev.Ts != now.UnixMilli() {
 		t.Errorf("ts = %d, want %d", ev.Ts, now.UnixMilli())
@@ -56,8 +56,8 @@ func TestConvertSystemMessage(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
-	if events[0].Kind != dto.EventKindSystem {
-		t.Errorf("kind = %q, want %q", events[0].Kind, dto.EventKindSystem)
+	if events[0].Kind != dto.ClaudeEventKindSystem {
+		t.Errorf("kind = %q, want %q", events[0].Kind, dto.ClaudeEventKindSystem)
 	}
 	if events[0].System.Subtype != "status" {
 		t.Errorf("subtype = %q, want %q", events[0].System.Subtype, "status")
@@ -82,14 +82,14 @@ func TestConvertAssistantTextAndToolUse(t *testing.T) {
 	if len(events) != 3 {
 		t.Fatalf("got %d events, want 3", len(events))
 	}
-	if events[0].Kind != dto.EventKindText {
-		t.Errorf("event[0].kind = %q, want %q", events[0].Kind, dto.EventKindText)
+	if events[0].Kind != dto.ClaudeEventKindText {
+		t.Errorf("event[0].kind = %q, want %q", events[0].Kind, dto.ClaudeEventKindText)
 	}
 	if events[0].Text.Text != "hello world" {
 		t.Errorf("text = %q, want %q", events[0].Text.Text, "hello world")
 	}
-	if events[1].Kind != dto.EventKindToolUse {
-		t.Errorf("event[1].kind = %q, want %q", events[1].Kind, dto.EventKindToolUse)
+	if events[1].Kind != dto.ClaudeEventKindToolUse {
+		t.Errorf("event[1].kind = %q, want %q", events[1].Kind, dto.ClaudeEventKindToolUse)
 	}
 	if events[1].ToolUse.Name != "Bash" {
 		t.Errorf("tool name = %q, want %q", events[1].ToolUse.Name, "Bash")
@@ -97,8 +97,8 @@ func TestConvertAssistantTextAndToolUse(t *testing.T) {
 	if events[1].ToolUse.ToolUseID != "tool_1" {
 		t.Errorf("toolUseID = %q, want %q", events[1].ToolUse.ToolUseID, "tool_1")
 	}
-	if events[2].Kind != dto.EventKindUsage {
-		t.Errorf("event[2].kind = %q, want %q", events[2].Kind, dto.EventKindUsage)
+	if events[2].Kind != dto.ClaudeEventKindUsage {
+		t.Errorf("event[2].kind = %q, want %q", events[2].Kind, dto.ClaudeEventKindUsage)
 	}
 	if events[2].Usage.InputTokens != 100 {
 		t.Errorf("inputTokens = %d, want 100", events[2].Usage.InputTokens)
@@ -124,8 +124,8 @@ func TestConvertAskUserQuestion(t *testing.T) {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
 	ev := events[0]
-	if ev.Kind != dto.EventKindAsk {
-		t.Errorf("kind = %q, want %q", ev.Kind, dto.EventKindAsk)
+	if ev.Kind != dto.ClaudeEventKindAsk {
+		t.Errorf("kind = %q, want %q", ev.Kind, dto.ClaudeEventKindAsk)
 	}
 	if ev.Ask == nil {
 		t.Fatal("ask payload is nil")
@@ -226,8 +226,8 @@ func TestConvertStreamEvent(t *testing.T) {
 			t.Fatalf("got %d events, want 1", len(events))
 		}
 		ev := events[0]
-		if ev.Kind != dto.EventKindTextDelta {
-			t.Errorf("kind = %q, want %q", ev.Kind, dto.EventKindTextDelta)
+		if ev.Kind != dto.ClaudeEventKindTextDelta {
+			t.Errorf("kind = %q, want %q", ev.Kind, dto.ClaudeEventKindTextDelta)
 		}
 		if ev.TextDelta == nil {
 			t.Fatal("textDelta payload is nil")
@@ -308,8 +308,8 @@ func TestConvertTodoWrite(t *testing.T) {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
 	ev := events[0]
-	if ev.Kind != dto.EventKindTodo {
-		t.Errorf("kind = %q, want %q", ev.Kind, dto.EventKindTodo)
+	if ev.Kind != dto.ClaudeEventKindTodo {
+		t.Errorf("kind = %q, want %q", ev.Kind, dto.ClaudeEventKindTodo)
 	}
 	if ev.Todo == nil {
 		t.Fatal("todo payload is nil")
@@ -350,8 +350,8 @@ func TestConvertResult(t *testing.T) {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
 	ev := events[0]
-	if ev.Kind != dto.EventKindResult {
-		t.Errorf("kind = %q, want %q", ev.Kind, dto.EventKindResult)
+	if ev.Kind != dto.ClaudeEventKindResult {
+		t.Errorf("kind = %q, want %q", ev.Kind, dto.ClaudeEventKindResult)
 	}
 	r := ev.Result
 	if len(r.DiffStat) != 1 || r.DiffStat[0].Path != "a.go" {
@@ -405,8 +405,8 @@ func TestConvertUserInput(t *testing.T) {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
 	ev := events[0]
-	if ev.Kind != dto.EventKindUserInput {
-		t.Errorf("kind = %q, want %q", ev.Kind, dto.EventKindUserInput)
+	if ev.Kind != dto.ClaudeEventKindUserInput {
+		t.Errorf("kind = %q, want %q", ev.Kind, dto.ClaudeEventKindUserInput)
 	}
 	if ev.UserInput == nil {
 		t.Fatal("userInput payload is nil")

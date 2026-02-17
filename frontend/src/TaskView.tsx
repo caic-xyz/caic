@@ -1,7 +1,7 @@
 // TaskView renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, For, Index, Show, onCleanup, createEffect, Switch, Match, type Accessor, type JSX } from "solid-js";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, terminateTask as apiTerminateTask, syncTask as apiSyncTask, taskRawEvents } from "@sdk/api.gen";
-import type { EventMessage, EventTextDelta, SafetyIssue } from "@sdk/types.gen";
+import type { ClaudeEventMessage, ClaudeEventAsk, ClaudeAskQuestion, ClaudeEventTextDelta, ClaudeEventToolUse, ClaudeEventToolResult, SafetyIssue } from "@sdk/types.gen";
 import { Marked } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
@@ -19,19 +19,19 @@ export const detailsOpenState = new Map<string, boolean>();
 // A group of consecutive events that should be rendered together.
 interface MessageGroup {
   kind: "text" | "tool" | "ask" | "userInput" | "other";
-  events: EventMessage[];
+  events: ClaudeEventMessage[];
   // For "tool" groups: paired tool_use and tool_result events.
   toolCalls: ToolCall[];
   // For "ask" groups: the ask payload.
-  ask?: EventAsk;
+  ask?: ClaudeEventAsk;
   // For "ask" groups: the user's submitted answer (from the following userInput).
   answerText?: string;
 }
 
 // A tool_use event paired with its optional tool_result.
 interface ToolCall {
-  use: EventToolUse;
-  result?: EventToolResult;
+  use: ClaudeEventToolUse;
+  result?: ClaudeEventToolResult;
 }
 
 // A turn is a sequence of message groups between user interactions.
@@ -56,7 +56,7 @@ interface Props {
 }
 
 export default function TaskView(props: Props) {
-  const [messages, setMessages] = createSignal<EventMessage[]>([]);
+  const [messages, setMessages] = createSignal<ClaudeEventMessage[]>([]);
   const [sending, setSending] = createSignal(false);
   const [pendingAction, setPendingAction] = createSignal<"sync" | "terminate" | "restart" | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
@@ -69,7 +69,7 @@ export default function TaskView(props: Props) {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let delay = 500;
     // Buffer accumulates replayed history; swapped into signal on "ready" event.
-    let buf: EventMessage[] = [];
+    let buf: ClaudeEventMessage[] = [];
     let live = false;
 
     function connect() {
@@ -326,7 +326,7 @@ export default function TaskView(props: Props) {
   );
 }
 
-function MessageItem(props: { ev: EventMessage }) {
+function MessageItem(props: { ev: ClaudeEventMessage }) {
   return (
     <Switch>
       <Match when={props.ev.init} keyed>
@@ -402,7 +402,7 @@ function MessageItem(props: { ev: EventMessage }) {
 }
 
 // Groups consecutive events for cohesive rendering.
-function groupMessages(msgs: EventMessage[]): MessageGroup[] {
+function groupMessages(msgs: ClaudeEventMessage[]): MessageGroup[] {
   const groups: MessageGroup[] = [];
 
   function lastGroup(): MessageGroup | undefined {
@@ -576,14 +576,14 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[] }) {
 
 // Renders a text group, combining textDelta fragments into a single view.
 // When a final "text" event arrives, it replaces the accumulated deltas.
-function TextMessageGroup(props: { events: EventMessage[] }) {
+function TextMessageGroup(props: { events: ClaudeEventMessage[] }) {
   const text = createMemo(() => {
     // If a final text event exists, use it (it has the complete content).
     const finalEv = props.events.findLast((e) => e.kind === "text");
     if (finalEv?.text) return finalEv.text.text;
     // Otherwise, accumulate textDelta fragments.
     return props.events
-      .filter((e): e is EventMessage & { textDelta: EventTextDelta } => e.kind === "textDelta" && !!e.textDelta)
+      .filter((e): e is ClaudeEventMessage & { textDelta: ClaudeEventTextDelta } => e.kind === "textDelta" && !!e.textDelta)
       .map((e) => e.textDelta.text)
       .join("");
   });
@@ -772,7 +772,7 @@ function Markdown(props: { text: string }) {
   return <div class={styles.markdown} innerHTML={html()} />;
 }
 
-function AskQuestionGroup(props: { ask: EventAsk; interactive: boolean; answerText?: string; onSubmit: (text: string) => void }) {
+function AskQuestionGroup(props: { ask: ClaudeEventAsk; interactive: boolean; answerText?: string; onSubmit: (text: string) => void }) {
   const questions = () => props.ask.questions;
   const [selections, setSelections] = createSignal<Map<number, Set<string>>>(new Map());
   const [otherTexts, setOtherTexts] = createSignal<Map<number, string>>(new Map());
@@ -845,7 +845,7 @@ function AskQuestionGroup(props: { ask: EventAsk; interactive: boolean; answerTe
   return (
     <div class={canInteract() ? `${styles.askGroup} ${styles.askGroupActive}` : styles.askGroup}>
       <For each={questions()}>
-        {(q: AskQuestion, qIdx: Accessor<number>) => (
+        {(q: ClaudeAskQuestion, qIdx: Accessor<number>) => (
           <div class={styles.askQuestion}>
             <Show when={q.header}>
               <div class={styles.askHeader}>{q.header}</div>

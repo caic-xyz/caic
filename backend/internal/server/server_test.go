@@ -779,7 +779,7 @@ func TestTerminatedTaskEventsAfterRestart(t *testing.T) {
 	// Parse SSE events from the response body. Only collect "message"
 	// events; skip control events like "ready".
 	body := w.Body.String()
-	var events []dto.EventMessage
+	var events []dto.ClaudeEventMessage
 	eventType := "message" // SSE default
 	for _, line := range strings.Split(body, "\n") {
 		if after, ok := strings.CutPrefix(line, "event: "); ok {
@@ -796,7 +796,7 @@ func TestTerminatedTaskEventsAfterRestart(t *testing.T) {
 		if eventType != "message" {
 			continue
 		}
-		var ev dto.EventMessage
+		var ev dto.ClaudeEventMessage
 		if err := json.Unmarshal([]byte(after), &ev); err != nil {
 			t.Fatalf("unmarshal event: %v", err)
 		}
@@ -807,11 +807,11 @@ func TestTerminatedTaskEventsAfterRestart(t *testing.T) {
 	}
 
 	// Verify we got the expected event kinds.
-	kinds := make([]string, len(events))
+	kinds := make([]dto.ClaudeEventKind, len(events))
 	for i, ev := range events {
 		kinds[i] = ev.Kind
 	}
-	wantKinds := []string{"init", "text", "usage", "result"}
+	wantKinds := []dto.ClaudeEventKind{dto.ClaudeEventKindInit, dto.ClaudeEventKindText, dto.ClaudeEventKindUsage, dto.ClaudeEventKindResult}
 	if len(kinds) != len(wantKinds) {
 		t.Fatalf("event kinds = %v, want %v", kinds, wantKinds)
 	}
@@ -905,7 +905,7 @@ func TestStreamEventTextDeltaInSSE(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	var events []dto.EventMessage
+	var events []dto.ClaudeEventMessage
 	eventType := "message"
 	for _, line := range strings.Split(body, "\n") {
 		if after, ok := strings.CutPrefix(line, "event: "); ok {
@@ -922,19 +922,19 @@ func TestStreamEventTextDeltaInSSE(t *testing.T) {
 		if eventType != "message" {
 			continue
 		}
-		var ev dto.EventMessage
+		var ev dto.ClaudeEventMessage
 		if err := json.Unmarshal([]byte(after), &ev); err != nil {
 			t.Fatalf("unmarshal event: %v", err)
 		}
 		events = append(events, ev)
 	}
 
-	kinds := make([]string, len(events))
+	kinds := make([]dto.ClaudeEventKind, len(events))
 	for i, ev := range events {
 		kinds[i] = ev.Kind
 	}
 	// Expect: init + 2 textDelta (message_start filtered) + text + usage + result
-	wantKinds := []string{"init", "textDelta", "textDelta", "text", "usage", "result"}
+	wantKinds := []dto.ClaudeEventKind{dto.ClaudeEventKindInit, dto.ClaudeEventKindTextDelta, dto.ClaudeEventKindTextDelta, dto.ClaudeEventKindText, dto.ClaudeEventKindUsage, dto.ClaudeEventKindResult}
 	if len(kinds) != len(wantKinds) {
 		t.Fatalf("event kinds = %v, want %v", kinds, wantKinds)
 	}

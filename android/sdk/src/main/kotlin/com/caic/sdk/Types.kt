@@ -17,6 +17,7 @@ typealias EventKind = String
 object EventKinds {
     const val Init: EventKind = "init"
     const val Text: EventKind = "text"
+    const val TextDelta: EventKind = "textDelta"
     const val ToolUse: EventKind = "toolUse"
     const val ToolResult: EventKind = "toolResult"
     const val Ask: EventKind = "ask"
@@ -26,6 +27,8 @@ object EventKinds {
     const val UserInput: EventKind = "userInput"
     const val Todo: EventKind = "todo"
 }
+
+typealias ClaudeEventKind = EventKind
 
 object ErrorCodes {
     const val BadRequest = "BAD_REQUEST"
@@ -148,7 +151,7 @@ data class VoiceTokenResp(
     val expiresAt: String,
 )
 
-// Event types
+// Backend-neutral event types
 
 @Serializable
 data class EventMessage(
@@ -156,6 +159,7 @@ data class EventMessage(
     val ts: Long,
     val init: EventInit? = null,
     val text: EventText? = null,
+    val textDelta: EventTextDelta? = null,
     val toolUse: EventToolUse? = null,
     val toolResult: EventToolResult? = null,
     val ask: EventAsk? = null,
@@ -173,10 +177,124 @@ data class EventInit(
     @SerialName("sessionID") val sessionID: String,
     val tools: List<String>,
     val cwd: String,
+    val harness: String,
+)
+
+// Claude-specific event types
+
+@Serializable
+data class ClaudeEventMessage(
+    val kind: ClaudeEventKind,
+    val ts: Long,
+    val init: ClaudeEventInit? = null,
+    val text: ClaudeEventText? = null,
+    val textDelta: ClaudeEventTextDelta? = null,
+    val toolUse: ClaudeEventToolUse? = null,
+    val toolResult: ClaudeEventToolResult? = null,
+    val ask: ClaudeEventAsk? = null,
+    val usage: ClaudeEventUsage? = null,
+    val result: ClaudeEventResult? = null,
+    val system: ClaudeEventSystem? = null,
+    val userInput: ClaudeEventUserInput? = null,
+    val todo: ClaudeEventTodo? = null,
+)
+
+@Serializable
+data class ClaudeEventInit(
+    val model: String,
+    val agentVersion: String,
+    @SerialName("sessionID") val sessionID: String,
+    val tools: List<String>,
+    val cwd: String,
+)
+
+@Serializable
+data class ClaudeEventText(val text: String)
+
+@Serializable
+data class ClaudeEventTextDelta(val text: String)
+
+@Serializable
+data class ClaudeEventToolUse(
+    @SerialName("toolUseID") val toolUseID: String,
+    val name: String,
+    val input: JsonElement,
+)
+
+@Serializable
+data class ClaudeEventToolResult(
+    @SerialName("toolUseID") val toolUseID: String,
+    val durationMs: Long,
+    val error: String? = null,
+)
+
+@Serializable
+data class ClaudeAskOption(
+    val label: String,
+    val description: String? = null,
+)
+
+@Serializable
+data class ClaudeAskQuestion(
+    val question: String,
+    val header: String? = null,
+    val options: List<ClaudeAskOption>,
+    val multiSelect: Boolean? = null,
+)
+
+@Serializable
+data class ClaudeEventAsk(
+    @SerialName("toolUseID") val toolUseID: String,
+    val questions: List<ClaudeAskQuestion>,
+)
+
+@Serializable
+data class ClaudeEventUsage(
+    val inputTokens: Int,
+    val outputTokens: Int,
+    val cacheCreationInputTokens: Int,
+    val cacheReadInputTokens: Int,
+    val serviceTier: String? = null,
+    val model: String,
+)
+
+@Serializable
+data class ClaudeEventResult(
+    val subtype: String,
+    val isError: Boolean,
+    val result: String,
+    val diffStat: List<DiffFileStat>? = null,
+    @SerialName("totalCostUSD") val totalCostUSD: Double,
+    val durationMs: Long,
+    @SerialName("durationAPIMs") val durationAPIMs: Long,
+    val numTurns: Int,
+    val usage: ClaudeEventUsage,
+)
+
+@Serializable
+data class ClaudeEventSystem(val subtype: String)
+
+@Serializable
+data class ClaudeEventUserInput(val text: String)
+
+@Serializable
+data class ClaudeTodoItem(
+    val content: String,
+    val status: String,
+    val activeForm: String? = null,
+)
+
+@Serializable
+data class ClaudeEventTodo(
+    @SerialName("toolUseID") val toolUseID: String,
+    val todos: List<ClaudeTodoItem>,
 )
 
 @Serializable
 data class EventText(val text: String)
+
+@Serializable
+data class EventTextDelta(val text: String)
 
 @Serializable
 data class EventToolUse(

@@ -1,6 +1,6 @@
 // TodoPanel renders the agent's current todo list from TodoWrite events.
 import { For, Show, createEffect, createMemo } from "solid-js";
-import type { EventMessage } from "@sdk/types.gen";
+import type { ClaudeEventMessage } from "@sdk/types.gen";
 import { detailsOpenState } from "./TaskView";
 import styles from "./TodoPanel.module.css";
 
@@ -28,7 +28,7 @@ function statusClass(status: string): string {
 
 const DETAILS_KEY = "todos";
 
-export default function TodoPanel(props: { messages: EventMessage[] }) {
+export default function TodoPanel(props: { messages: ClaudeEventMessage[] }) {
   const todos = createMemo(() => {
     // Find the last "todo" event.
     for (let i = props.messages.length - 1; i >= 0; i--) {

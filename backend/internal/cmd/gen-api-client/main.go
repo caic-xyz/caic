@@ -186,6 +186,7 @@ typealias EventKind = String
 object EventKinds {
     const val Init: EventKind = "init"
     const val Text: EventKind = "text"
+    const val TextDelta: EventKind = "textDelta"
     const val ToolUse: EventKind = "toolUse"
     const val ToolResult: EventKind = "toolResult"
     const val Ask: EventKind = "ask"
@@ -195,6 +196,8 @@ object EventKinds {
     const val UserInput: EventKind = "userInput"
     const val Todo: EventKind = "todo"
 }
+
+typealias ClaudeEventKind = EventKind
 
 object ErrorCodes {
     const val BadRequest = "BAD_REQUEST"
@@ -317,7 +320,7 @@ data class VoiceTokenResp(
     val expiresAt: String,
 )
 
-// Event types
+// Backend-neutral event types
 
 @Serializable
 data class EventMessage(
@@ -325,6 +328,7 @@ data class EventMessage(
     val ts: Long,
     val init: EventInit? = null,
     val text: EventText? = null,
+    val textDelta: EventTextDelta? = null,
     val toolUse: EventToolUse? = null,
     val toolResult: EventToolResult? = null,
     val ask: EventAsk? = null,
@@ -342,10 +346,124 @@ data class EventInit(
     @SerialName("sessionID") val sessionID: String,
     val tools: List<String>,
     val cwd: String,
+    val harness: String,
+)
+
+// Claude-specific event types
+
+@Serializable
+data class ClaudeEventMessage(
+    val kind: ClaudeEventKind,
+    val ts: Long,
+    val init: ClaudeEventInit? = null,
+    val text: ClaudeEventText? = null,
+    val textDelta: ClaudeEventTextDelta? = null,
+    val toolUse: ClaudeEventToolUse? = null,
+    val toolResult: ClaudeEventToolResult? = null,
+    val ask: ClaudeEventAsk? = null,
+    val usage: ClaudeEventUsage? = null,
+    val result: ClaudeEventResult? = null,
+    val system: ClaudeEventSystem? = null,
+    val userInput: ClaudeEventUserInput? = null,
+    val todo: ClaudeEventTodo? = null,
+)
+
+@Serializable
+data class ClaudeEventInit(
+    val model: String,
+    val agentVersion: String,
+    @SerialName("sessionID") val sessionID: String,
+    val tools: List<String>,
+    val cwd: String,
+)
+
+@Serializable
+data class ClaudeEventText(val text: String)
+
+@Serializable
+data class ClaudeEventTextDelta(val text: String)
+
+@Serializable
+data class ClaudeEventToolUse(
+    @SerialName("toolUseID") val toolUseID: String,
+    val name: String,
+    val input: JsonElement,
+)
+
+@Serializable
+data class ClaudeEventToolResult(
+    @SerialName("toolUseID") val toolUseID: String,
+    val durationMs: Long,
+    val error: String? = null,
+)
+
+@Serializable
+data class ClaudeAskOption(
+    val label: String,
+    val description: String? = null,
+)
+
+@Serializable
+data class ClaudeAskQuestion(
+    val question: String,
+    val header: String? = null,
+    val options: List<ClaudeAskOption>,
+    val multiSelect: Boolean? = null,
+)
+
+@Serializable
+data class ClaudeEventAsk(
+    @SerialName("toolUseID") val toolUseID: String,
+    val questions: List<ClaudeAskQuestion>,
+)
+
+@Serializable
+data class ClaudeEventUsage(
+    val inputTokens: Int,
+    val outputTokens: Int,
+    val cacheCreationInputTokens: Int,
+    val cacheReadInputTokens: Int,
+    val serviceTier: String? = null,
+    val model: String,
+)
+
+@Serializable
+data class ClaudeEventResult(
+    val subtype: String,
+    val isError: Boolean,
+    val result: String,
+    val diffStat: List<DiffFileStat>? = null,
+    @SerialName("totalCostUSD") val totalCostUSD: Double,
+    val durationMs: Long,
+    @SerialName("durationAPIMs") val durationAPIMs: Long,
+    val numTurns: Int,
+    val usage: ClaudeEventUsage,
+)
+
+@Serializable
+data class ClaudeEventSystem(val subtype: String)
+
+@Serializable
+data class ClaudeEventUserInput(val text: String)
+
+@Serializable
+data class ClaudeTodoItem(
+    val content: String,
+    val status: String,
+    val activeForm: String? = null,
+)
+
+@Serializable
+data class ClaudeEventTodo(
+    @SerialName("toolUseID") val toolUseID: String,
+    val todos: List<ClaudeTodoItem>,
 )
 
 @Serializable
 data class EventText(val text: String)
+
+@Serializable
+data class EventTextDelta(val text: String)
 
 @Serializable
 data class EventToolUse(
@@ -549,11 +667,11 @@ class ApiClient(private val baseURL: String) {
 		writeKotlinSSEFunc(&b, r, params)
 	}
 	// Static globalEvents (not in routes but part of the API surface).
-	b.WriteString("    fun globalEvents(): Flow<EventMessage> = sseFlow(\"/api/v1/events\")\n")
+	b.WriteString("    fun globalEvents(): Flow<EventMessage> = sseFlow<EventMessage>(\"/api/v1/events\")\n")
 	b.WriteString("\n")
 
 	// sseFlow helper and reconnecting wrappers.
-	b.WriteString(`    private fun sseFlow(path: String): Flow<EventMessage> = callbackFlow {
+	b.WriteString(`    private inline fun <reified T> sseFlow(path: String): Flow<T> = callbackFlow {
         val request = Request.Builder()
             .url("$baseURL$path")
             .header("Accept", "text/event-stream")
@@ -562,7 +680,7 @@ class ApiClient(private val baseURL: String) {
         val source = factory.newEventSource(request, object : EventSourceListener() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 try {
-                    val event = json.decodeFromString<EventMessage>(data)
+                    val event = json.decodeFromString<T>(data)
                     trySend(event)
                 } catch (_: Exception) {
                     // Skip malformed events.
@@ -594,7 +712,7 @@ class ApiClient(private val baseURL: String) {
 	b.WriteString("    fun globalEventsReconnecting(): Flow<EventMessage> = reconnectingFlow { globalEvents() }\n")
 	b.WriteString("\n")
 
-	b.WriteString(`    private fun reconnectingFlow(connect: () -> Flow<EventMessage>): Flow<EventMessage> = flow {
+	b.WriteString(`    private fun <T> reconnectingFlow(connect: () -> Flow<T>): Flow<T> = flow {
         var delayMs = 500L
         while (true) {
             try {
@@ -644,7 +762,7 @@ func writeKotlinSSEFunc(b *strings.Builder, r *dto.Route, params []string) {
 		args = append(args, p+": String")
 	}
 	ktPath := buildKotlinPath(r.Path, params)
-	fmt.Fprintf(b, "    fun %s(%s): Flow<EventMessage> = sseFlow(%s)\n", r.Name, strings.Join(args, ", "), ktPath)
+	fmt.Fprintf(b, "    fun %s(%s): Flow<%s> = sseFlow<%s>(%s)\n", r.Name, strings.Join(args, ", "), r.RespType, r.RespType, ktPath)
 }
 
 func writeKotlinReconnectingFunc(b *strings.Builder, r *dto.Route, params []string) {
@@ -658,8 +776,8 @@ func writeKotlinReconnectingFunc(b *strings.Builder, r *dto.Route, params []stri
 		callArgs = append(callArgs, p)
 	}
 
-	fmt.Fprintf(b, "    fun %s(%s): Flow<EventMessage> = reconnectingFlow { %s(%s) }\n",
-		reconnectName, strings.Join(args, ", "), r.Name, strings.Join(callArgs, ", "))
+	fmt.Fprintf(b, "    fun %s(%s): Flow<%s> = reconnectingFlow { %s(%s) }\n",
+		reconnectName, strings.Join(args, ", "), r.RespType, r.Name, strings.Join(callArgs, ", "))
 }
 
 // buildKotlinPath returns a Kotlin string expression for the path. Uses string

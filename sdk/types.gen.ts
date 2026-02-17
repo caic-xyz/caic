@@ -58,6 +58,24 @@ export interface ErrorDetails {
 /*
 SSE event types sent to the frontend for task event streams.
 These structs are generated into TypeScript via tygo.
+
+Two separate event hierarchies exist:
+
+  - EventMessage (backend-neutral): the stable API contract consumed by the
+    frontend via /api/v1/tasks/{id}/events. Every backend (Claude, Gemini,
+    Codex, …) produces these events through its own converter. EventInit
+    includes a Harness field so the client knows which backend produced the
+    stream.
+
+  - ClaudeEventMessage (Claude-specific): the raw stream exposed on
+    /api/v1/tasks/{id}/raw_events for the Claude Code backend. When new
+    backends are added, each will get its own *EventMessage type for its raw
+    stream (e.g. GeminiEventMessage) while the generic EventMessage remains
+    the shared frontend contract.
+
+Each hierarchy has its own complete set of sub-event types (e.g. EventText
+vs ClaudeEventText). They are structurally identical today but kept separate
+so they can diverge as backends evolve independently.
 */
 
 /**
@@ -109,26 +127,27 @@ export const EventKindUserInput: EventKind = "userInput";
  */
 export const EventKindTodo: EventKind = "todo";
 /**
- * EventMessage is a single SSE event sent to the frontend. The Kind field
- * determines which payload field is non-nil.
+ * EventMessage is a single SSE event in the backend-neutral stream
+ * (/api/v1/tasks/{id}/events). All backends produce these events.
  */
 export interface EventMessage {
   kind: EventKind;
-  ts: number /* int64 */; // Unix milliseconds when the backend received this message.
-  init?: EventInit; // Kind "init".
-  text?: EventText; // Kind "text".
-  textDelta?: EventTextDelta; // Kind "textDelta".
-  toolUse?: EventToolUse; // Kind "toolUse".
-  toolResult?: EventToolResult; // Kind "toolResult".
-  ask?: EventAsk; // Kind "ask".
-  usage?: EventUsage; // Kind "usage".
-  result?: EventResult; // Kind "result".
-  system?: EventSystem; // Kind "system".
-  userInput?: EventUserInput; // Kind "userInput".
-  todo?: EventTodo; // Kind "todo".
+  ts: number /* int64 */;
+  init?: EventInit;
+  text?: EventText;
+  textDelta?: EventTextDelta;
+  toolUse?: EventToolUse;
+  toolResult?: EventToolResult;
+  ask?: EventAsk;
+  usage?: EventUsage;
+  result?: EventResult;
+  system?: EventSystem;
+  userInput?: EventUserInput;
+  todo?: EventTodo;
 }
 /**
- * EventInit is emitted once at the start of a session.
+ * EventInit is emitted once at the start of a session. It includes a Harness
+ * field so the client knows which backend produced the stream.
  */
 export interface EventInit {
   model: string;
@@ -136,6 +155,7 @@ export interface EventInit {
   sessionID: string;
   tools: string[];
   cwd: string;
+  harness: string;
 }
 /**
  * EventText is an assistant text block.
@@ -214,7 +234,7 @@ export interface EventResult {
   usage: EventUsage;
 }
 /**
- * EventSystem is a generic system event (status, compact_boundary, etc.).
+ * EventSystem is a system event (status, compact_boundary, etc.).
  */
 export interface EventSystem {
   subtype: string;
@@ -239,6 +259,193 @@ export interface TodoItem {
 export interface EventTodo {
   toolUseID: string;
   todos: TodoItem[];
+}
+/**
+ * ClaudeEventKind identifies the type of SSE event in the Claude-specific raw
+ * stream. Values are identical to EventKind; a separate type alias is used so
+ * that future backends can diverge if needed.
+ */
+export type ClaudeEventKind = string;
+/**
+ * Claude-specific event kind constants.
+ */
+export const ClaudeEventKindInit: ClaudeEventKind = "init";
+/**
+ * Claude-specific event kind constants.
+ */
+export const ClaudeEventKindText: ClaudeEventKind = "text";
+/**
+ * Claude-specific event kind constants.
+ */
+export const ClaudeEventKindTextDelta: ClaudeEventKind = "textDelta";
+/**
+ * Claude-specific event kind constants.
+ */
+export const ClaudeEventKindToolUse: ClaudeEventKind = "toolUse";
+/**
+ * Claude-specific event kind constants.
+ */
+export const ClaudeEventKindToolResult: ClaudeEventKind = "toolResult";
+/**
+ * Claude-specific event kind constants.
+ */
+export const ClaudeEventKindAsk: ClaudeEventKind = "ask";
+/**
+ * Claude-specific event kind constants.
+ */
+export const ClaudeEventKindUsage: ClaudeEventKind = "usage";
+/**
+ * Claude-specific event kind constants.
+ */
+export const ClaudeEventKindResult: ClaudeEventKind = "result";
+/**
+ * Claude-specific event kind constants.
+ */
+export const ClaudeEventKindSystem: ClaudeEventKind = "system";
+/**
+ * Claude-specific event kind constants.
+ */
+export const ClaudeEventKindUserInput: ClaudeEventKind = "userInput";
+/**
+ * Claude-specific event kind constants.
+ */
+export const ClaudeEventKindTodo: ClaudeEventKind = "todo";
+/**
+ * ClaudeEventMessage is a single SSE event in the Claude Code raw stream
+ * (/api/v1/tasks/{id}/raw_events). When additional backends are added, each
+ * will define its own *EventMessage (e.g. GeminiEventMessage) for its raw
+ * stream. The Kind field determines which payload field is non-nil.
+ * All sub-event types are Claude-specific duplicates of the generic types.
+ * They are structurally identical today but will diverge as backends evolve.
+ */
+export interface ClaudeEventMessage {
+  kind: ClaudeEventKind;
+  ts: number /* int64 */; // Unix milliseconds when the backend received this message.
+  init?: ClaudeEventInit; // Kind "init".
+  text?: ClaudeEventText; // Kind "text".
+  textDelta?: ClaudeEventTextDelta; // Kind "textDelta".
+  toolUse?: ClaudeEventToolUse; // Kind "toolUse".
+  toolResult?: ClaudeEventToolResult; // Kind "toolResult".
+  ask?: ClaudeEventAsk; // Kind "ask".
+  usage?: ClaudeEventUsage; // Kind "usage".
+  result?: ClaudeEventResult; // Kind "result".
+  system?: ClaudeEventSystem; // Kind "system".
+  userInput?: ClaudeEventUserInput; // Kind "userInput".
+  todo?: ClaudeEventTodo; // Kind "todo".
+}
+/**
+ * ClaudeEventInit is emitted once at the start of a Claude session. Unlike the
+ * generic EventInit it omits the Harness field (always "claude" for this stream).
+ */
+export interface ClaudeEventInit {
+  model: string;
+  agentVersion: string;
+  sessionID: string;
+  tools: string[];
+  cwd: string;
+}
+/**
+ * ClaudeEventText is an assistant text block in the Claude raw stream.
+ */
+export interface ClaudeEventText {
+  text: string;
+}
+/**
+ * ClaudeEventTextDelta is a streaming text fragment in the Claude raw stream.
+ */
+export interface ClaudeEventTextDelta {
+  text: string;
+}
+/**
+ * ClaudeEventToolUse is emitted when Claude invokes a tool.
+ */
+export interface ClaudeEventToolUse {
+  toolUseID: string;
+  name: string;
+  input: any /* json.RawMessage */;
+}
+/**
+ * ClaudeEventToolResult is emitted when a Claude tool call completes.
+ */
+export interface ClaudeEventToolResult {
+  toolUseID: string;
+  durationMs: number /* int64 */;
+  error?: string;
+}
+/**
+ * ClaudeAskOption is a single option in a Claude AskUserQuestion.
+ */
+export interface ClaudeAskOption {
+  label: string;
+  description?: string;
+}
+/**
+ * ClaudeAskQuestion is a single question from Claude's AskUserQuestion.
+ */
+export interface ClaudeAskQuestion {
+  question: string;
+  header?: string;
+  options: ClaudeAskOption[];
+  multiSelect?: boolean;
+}
+/**
+ * ClaudeEventAsk is emitted when Claude asks the user a question.
+ */
+export interface ClaudeEventAsk {
+  toolUseID: string;
+  questions: ClaudeAskQuestion[];
+}
+/**
+ * ClaudeEventUsage reports per-turn token usage in the Claude raw stream.
+ */
+export interface ClaudeEventUsage {
+  inputTokens: number /* int */;
+  outputTokens: number /* int */;
+  cacheCreationInputTokens: number /* int */;
+  cacheReadInputTokens: number /* int */;
+  serviceTier?: string;
+  model: string;
+}
+/**
+ * ClaudeEventResult is emitted when a Claude task reaches a terminal state.
+ */
+export interface ClaudeEventResult {
+  subtype: string;
+  isError: boolean;
+  result: string;
+  diffStat?: DiffStat;
+  totalCostUSD: number /* float64 */;
+  durationMs: number /* int64 */;
+  durationAPIMs: number /* int64 */;
+  numTurns: number /* int */;
+  usage: ClaudeEventUsage;
+}
+/**
+ * ClaudeEventSystem is a system event in the Claude raw stream.
+ */
+export interface ClaudeEventSystem {
+  subtype: string;
+}
+/**
+ * ClaudeEventUserInput is emitted when a user sends a text message to Claude.
+ */
+export interface ClaudeEventUserInput {
+  text: string;
+}
+/**
+ * ClaudeTodoItem is a single todo entry from a Claude TodoWrite tool call.
+ */
+export interface ClaudeTodoItem {
+  content: string;
+  status: string;
+  activeForm?: string;
+}
+/**
+ * ClaudeEventTodo is emitted when Claude writes/updates its todo list.
+ */
+export interface ClaudeEventTodo {
+  toolUseID: string;
+  todos: ClaudeTodoItem[];
 }
 
 //////////

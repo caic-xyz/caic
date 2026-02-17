@@ -93,10 +93,11 @@ class ApiClient(private val baseURL: String) {
     suspend fun getVoiceToken(): VoiceTokenResp = request("GET", "/api/v1/voice/token")
 
     // SSE endpoints
-    fun taskRawEvents(id: String): Flow<EventMessage> = sseFlow("/api/v1/tasks/$id/raw_events")
-    fun globalEvents(): Flow<EventMessage> = sseFlow("/api/v1/events")
+    fun taskRawEvents(id: String): Flow<ClaudeEventMessage> = sseFlow<ClaudeEventMessage>("/api/v1/tasks/$id/raw_events")
+    fun taskEvents(id: String): Flow<EventMessage> = sseFlow<EventMessage>("/api/v1/tasks/$id/events")
+    fun globalEvents(): Flow<EventMessage> = sseFlow<EventMessage>("/api/v1/events")
 
-    private fun sseFlow(path: String): Flow<EventMessage> = callbackFlow {
+    private inline fun <reified T> sseFlow(path: String): Flow<T> = callbackFlow {
         val request = Request.Builder()
             .url("$baseURL$path")
             .header("Accept", "text/event-stream")
@@ -105,7 +106,7 @@ class ApiClient(private val baseURL: String) {
         val source = factory.newEventSource(request, object : EventSourceListener() {
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 try {
-                    val event = json.decodeFromString<EventMessage>(data)
+                    val event = json.decodeFromString<T>(data)
                     trySend(event)
                 } catch (_: Exception) {
                     // Skip malformed events.
@@ -122,10 +123,11 @@ class ApiClient(private val baseURL: String) {
     }
 
     // Reconnecting SSE wrappers with exponential backoff.
-    fun taskRawEventsReconnecting(id: String): Flow<EventMessage> = reconnectingFlow { taskRawEvents(id) }
+    fun taskRawEventsReconnecting(id: String): Flow<ClaudeEventMessage> = reconnectingFlow { taskRawEvents(id) }
+    fun taskEventsReconnecting(id: String): Flow<EventMessage> = reconnectingFlow { taskEvents(id) }
     fun globalEventsReconnecting(): Flow<EventMessage> = reconnectingFlow { globalEvents() }
 
-    private fun reconnectingFlow(connect: () -> Flow<EventMessage>): Flow<EventMessage> = flow {
+    private fun <T> reconnectingFlow(connect: () -> Flow<T>): Flow<T> = flow {
         var delayMs = 500L
         while (true) {
             try {

@@ -48,6 +48,10 @@ agent/
   claude/
     claude.go       — Backend impl (Harness() → agent.Claude)
     claude_test.go
+  gemini/
+    gemini.go       — Backend impl (Harness() → agent.Gemini)
+    record.go       — Gemini stream-json record types
+    parse.go        — ParseMessage: Gemini records → agent.Message
   relay/
     embed.go     — relay.py embed
     relay.py
@@ -59,13 +63,14 @@ task/
   load.go        — LoadedTask (Harness agent.Harness), loadLogFile
 
 server/
-  server.go      — agent.Harness↔dto.Harness + toDTODiffStat() boundary conversions
-  eventconv.go   — agent.Message → dto.EventMessage + toDTODiffStat()
+  server.go      — agent.Harness↔dto.Harness boundary conversions, SSE handlers
+  eventconv.go   — agent.Message → dto.ClaudeEventMessage (Claude raw stream)
+  genericconv.go — agent.Message → dto.EventMessage (backend-neutral stream)
 
 server/dto/
   types.go       — type Harness string, HarnessClaude, DiffFileStat/DiffStat (duplicated)
   validate.go    — CreateTaskReq.Validate() (harness required)
-  events.go      — EventInit (still has ClaudeCodeVersion — rename is step 5)
+  events.go      — EventMessage (generic) + ClaudeEventMessage (Claude raw) + shared sub-types
 ```
 
 ## Feasibility: Gemini CLI
