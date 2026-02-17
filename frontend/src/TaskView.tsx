@@ -120,6 +120,10 @@ export default function TaskView(props: Props) {
     try {
       await apiSendInput(props.taskId, { prompt: text });
       props.onInputDraft("");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setActionError(`send failed: ${msg}`);
+      setTimeout(() => setActionError(null), 5000);
     } finally {
       setSending(false);
     }
@@ -213,6 +217,10 @@ export default function TaskView(props: Props) {
             setSending(true);
             try {
               await apiSendInput(props.taskId, { prompt: text });
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : "Unknown error";
+              setActionError(`send failed: ${msg}`);
+              setTimeout(() => setActionError(null), 5000);
             } finally {
               setSending(false);
             }

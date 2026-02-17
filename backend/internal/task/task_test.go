@@ -3,6 +3,7 @@ package task
 import (
 	"encoding/json"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -103,13 +104,20 @@ func TestTask(t *testing.T) {
 
 	t.Run("SendInput", func(t *testing.T) {
 		t.Run("NoSession", func(t *testing.T) {
-			tk := &Task{Prompt: "test"}
+			tk := &Task{Prompt: "test", State: StateWaiting}
 			err := tk.SendInput("hello")
 			if err == nil {
-				t.Error("expected error when no session is active")
+				t.Fatal("expected error when no session is active")
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "session="+string(SessionNone)) {
+				t.Errorf("error = %q, want session=%s", msg, SessionNone)
+			}
+			if !strings.Contains(msg, "state=waiting") {
+				t.Errorf("error = %q, want state=waiting", msg)
 			}
 		})
-		t.Run("DeadSessionCleared", func(t *testing.T) {
+		t.Run("DeadSessionDetected", func(t *testing.T) {
 			// Simulate a session that has already finished (e.g. relay
 			// subprocess exited). SendInput should detect it and return
 			// "no active session" without changing state.
@@ -128,47 +136,55 @@ func TestTask(t *testing.T) {
 			}
 			s := agent.NewSession(cmd, stdin, stdout, nil, nil, &testWire{})
 			<-s.Done()
-			tk.session = s
+			tk.AttachSession(&SessionHandle{Session: s})
 			err = tk.SendInput("hello")
 			if err == nil {
-				t.Error("expected error for dead session")
+				t.Fatal("expected error for dead session")
 			}
-			if tk.State != StateWaiting {
-				t.Errorf("state = %v, want %v", tk.State, StateWaiting)
+			msg := err.Error()
+			if !strings.Contains(msg, "session="+string(SessionExited)) {
+				t.Errorf("error = %q, want session=%s", msg, SessionExited)
 			}
-			tk.mu.Lock()
-			cleared := tk.session == nil
-			tk.mu.Unlock()
-			if !cleared {
-				t.Error("dead session was not cleared")
+			if !strings.Contains(msg, "state=waiting") {
+				t.Errorf("error = %q, want state=waiting", msg)
 			}
 		})
 	})
 
-	t.Run("Terminate", func(t *testing.T) {
-		t.Run("ClosesAndIdempotent", func(t *testing.T) {
-			tk := &Task{Prompt: "test"}
-			tk.InitDoneCh()
+	t.Run("AttachDetachSession", func(t *testing.T) {
+		tk := &Task{Prompt: "test"}
+		if tk.SessionDone() != nil {
+			t.Error("SessionDone() should be nil when no session attached")
+		}
+		if tk.DetachSession() != nil {
+			t.Error("DetachSession() should return nil when no session attached")
+		}
 
-			// Done should not be closed yet.
-			select {
-			case <-tk.Done():
-				t.Fatal("doneCh closed prematurely")
-			default:
-			}
+		cmd := exec.Command("cat")
+		stdin, _ := cmd.StdinPipe()
+		stdout, _ := cmd.StdoutPipe()
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		s := agent.NewSession(cmd, stdin, stdout, nil, nil, &testWire{})
+		h := &SessionHandle{Session: s}
+		tk.AttachSession(h)
 
-			tk.Terminate()
+		if tk.SessionDone() == nil {
+			t.Error("SessionDone() should not be nil after AttachSession")
+		}
 
-			// Done should be closed now.
-			select {
-			case <-tk.Done():
-			default:
-				t.Fatal("doneCh not closed after Terminate")
-			}
+		got := tk.DetachSession()
+		if got != h {
+			t.Error("DetachSession() returned wrong handle")
+		}
+		if tk.SessionDone() != nil {
+			t.Error("SessionDone() should be nil after DetachSession")
+		}
 
-			// Idempotent.
-			tk.Terminate()
-		})
+		// Cleanup.
+		_ = stdin.Close()
+		_ = cmd.Wait()
 	})
 
 	t.Run("addMessage", func(t *testing.T) {

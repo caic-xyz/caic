@@ -115,10 +115,10 @@ func TestRunner(t *testing.T) {
 		})
 	})
 
-	t.Run("Kill", func(t *testing.T) {
+	t.Run("Cleanup", func(t *testing.T) {
 		t.Run("NoSessionUsesLiveStats", func(t *testing.T) {
 			// Simulate an adopted task after server restart: no active session, but
-			// live stats were restored from log messages. Kill should fall back to
+			// live stats were restored from log messages. Cleanup should fall back to
 			// LiveStats for the result cost.
 			clone := initTestRepo(t, "main")
 			r := &Runner{
@@ -133,7 +133,6 @@ func TestRunner(t *testing.T) {
 				Branch: "main",
 				State:  StateRunning,
 			}
-			tk.InitDoneCh()
 
 			// Restore messages with cost info (simulates RestoreMessages from logs).
 			tk.RestoreMessages([]agent.Message{
@@ -145,10 +144,7 @@ func TestRunner(t *testing.T) {
 				},
 			})
 
-			// Signal termination immediately.
-			tk.Terminate()
-
-			result := r.Kill(t.Context(), tk)
+			result := r.Cleanup(t.Context(), tk, StateTerminated)
 			if result.State != StateTerminated {
 				t.Errorf("state = %v, want %v", result.State, StateTerminated)
 			}
@@ -211,6 +207,94 @@ func TestRunner(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("StartMessageDispatch", func(t *testing.T) {
+		stub := &stubContainer{}
+		r := &Runner{Container: stub}
+		r.initDefaults()
+
+		tk := &Task{Prompt: "test", State: StateRunning, Branch: "caic/w0"}
+		_, ch, unsub := tk.Subscribe(t.Context())
+		defer unsub()
+
+		msgCh := r.startMessageDispatch(t.Context(), tk)
+
+		rm := &agent.ResultMessage{MessageType: "result"}
+		msgCh <- rm
+		close(msgCh)
+
+		// Wait for the dispatched message.
+		timeout := time.After(time.Second)
+		select {
+		case got := <-ch:
+			rr, ok := got.(*agent.ResultMessage)
+			if !ok {
+				t.Fatalf("expected *agent.ResultMessage, got %T", got)
+			}
+			if len(rr.DiffStat) != 1 || rr.DiffStat[0].Path != "main.go" {
+				t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", rr.DiffStat)
+			}
+		case <-timeout:
+			t.Fatal("timed out waiting for message")
+		}
+		if !stub.fetched {
+			t.Error("Fetch was not called on result message")
+		}
+	})
+
+	t.Run("RestartSession", func(t *testing.T) {
+		logDir := t.TempDir()
+		backend := &testBackend{}
+
+		r := &Runner{
+			LogDir:   logDir,
+			Backends: map[agent.Harness]agent.Backend{"test": backend},
+		}
+
+		tk := &Task{
+			ID:        ksid.NewID(),
+			Prompt:    "old prompt",
+			Repo:      "org/repo",
+			Harness:   "test",
+			Branch:    "caic/w0",
+			Container: "fake-container",
+			State:     StateWaiting,
+		}
+
+		h, err := r.RestartSession(t.Context(), tk, "new plan")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if h == nil {
+			t.Fatal("RestartSession returned nil handle")
+		}
+		if tk.State != StateRunning {
+			t.Errorf("state = %v, want %v", tk.State, StateRunning)
+		}
+		if tk.Prompt != "new plan" {
+			t.Errorf("prompt = %q, want %q", tk.Prompt, "new plan")
+		}
+
+		// The context passed to AgentBackend.Start must still be valid after
+		// RestartSession returns (it must not be a request-scoped context).
+		select {
+		case <-backend.capturedCtx.Done():
+			t.Error("context passed to AgentBackend was canceled; must use a long-lived context")
+		default:
+		}
+
+		// Verify the session is functional: wait briefly and check the context
+		// is still alive (not canceled by a short-lived HTTP request context).
+		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-backend.capturedCtx.Done():
+			t.Error("context was canceled shortly after RestartSession returned")
+		default:
+		}
+
+		// Clean up: close the session.
+		tk.CloseAndDetachSession()
+	})
 }
 
 // stubContainer implements ContainerBackend for testing. Diff returns a fixed
@@ -233,91 +317,6 @@ func (s *stubContainer) Fetch(context.Context, string, string) error {
 }
 
 func (s *stubContainer) Kill(context.Context, string, string) error { return nil }
-
-func TestStartMessageDispatch(t *testing.T) {
-	stub := &stubContainer{}
-	r := &Runner{Container: stub}
-	r.initDefaults()
-
-	tk := &Task{Prompt: "test", State: StateRunning, Branch: "caic/w0"}
-	_, ch, unsub := tk.Subscribe(t.Context())
-	defer unsub()
-
-	msgCh := r.startMessageDispatch(t.Context(), tk)
-
-	rm := &agent.ResultMessage{MessageType: "result"}
-	msgCh <- rm
-	close(msgCh)
-
-	// Wait for the dispatched message.
-	timeout := time.After(time.Second)
-	select {
-	case got := <-ch:
-		rr, ok := got.(*agent.ResultMessage)
-		if !ok {
-			t.Fatalf("expected *agent.ResultMessage, got %T", got)
-		}
-		if len(rr.DiffStat) != 1 || rr.DiffStat[0].Path != "main.go" {
-			t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", rr.DiffStat)
-		}
-	case <-timeout:
-		t.Fatal("timed out waiting for message")
-	}
-	if !stub.fetched {
-		t.Error("Fetch was not called on result message")
-	}
-}
-
-func TestRestartSession(t *testing.T) {
-	logDir := t.TempDir()
-	backend := &testBackend{}
-
-	r := &Runner{
-		LogDir:   logDir,
-		Backends: map[agent.Harness]agent.Backend{"test": backend},
-	}
-
-	tk := &Task{
-		ID:        ksid.NewID(),
-		Prompt:    "old prompt",
-		Repo:      "org/repo",
-		Harness:   "test",
-		Branch:    "caic/w0",
-		Container: "fake-container",
-		State:     StateWaiting,
-	}
-
-	err := r.RestartSession(t.Context(), tk, "new plan")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tk.State != StateRunning {
-		t.Errorf("state = %v, want %v", tk.State, StateRunning)
-	}
-	if tk.Prompt != "new plan" {
-		t.Errorf("prompt = %q, want %q", tk.Prompt, "new plan")
-	}
-
-	// The context passed to AgentBackend.Start must still be valid after
-	// RestartSession returns (it must not be a request-scoped context).
-	select {
-	case <-backend.capturedCtx.Done():
-		t.Error("context passed to AgentBackend was canceled; must use a long-lived context")
-	default:
-	}
-
-	// Verify the session is functional: wait briefly and check the context
-	// is still alive (not canceled by a short-lived HTTP request context).
-	time.Sleep(50 * time.Millisecond)
-	select {
-	case <-backend.capturedCtx.Done():
-		t.Error("context was canceled shortly after RestartSession returned")
-	default:
-	}
-
-	// Clean up: close the session.
-	tk.CloseSession()
-}
 
 // initTestRepo creates a bare "remote" and a local clone with one commit on
 // baseBranch. Returns the clone directory. origin points to the bare repo so

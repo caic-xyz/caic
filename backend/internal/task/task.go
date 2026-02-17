@@ -5,7 +5,7 @@ package task
 import (
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -65,6 +65,14 @@ func (s State) String() string {
 	}
 }
 
+// SessionHandle bundles the three resources associated with an active agent
+// session: the SSH session, the message dispatch channel, and the log writer.
+type SessionHandle struct {
+	Session *agent.Session
+	MsgCh   chan agent.Message
+	LogW    io.WriteCloser
+}
+
 // Task represents a single unit of work.
 type Task struct {
 	ID             ksid.ID
@@ -85,14 +93,10 @@ type Task struct {
 	StartedAt      time.Time
 	RelayOffset    int64 // Bytes received from relay output.jsonl, for reconnect.
 
-	mu       sync.Mutex
-	msgs     []agent.Message
-	subs     []chan agent.Message // active SSE subscribers
-	session  *agent.Session
-	msgCh    chan agent.Message // message dispatch channel; closed by Terminate
-	logW     io.WriteCloser     // session log file; nil when no log dir is configured
-	doneCh   chan struct{}      // closed when user calls Terminate
-	doneOnce sync.Once
+	mu     sync.Mutex
+	msgs   []agent.Message
+	subs   []chan agent.Message // active SSE subscribers
+	handle *SessionHandle       // current active session; nil when no session is attached
 
 	// Live stats accumulated from ResultMessages during execution.
 	liveCostUSD    float64
@@ -262,39 +266,55 @@ func syntheticContextCleared() *agent.SystemMessage {
 	}
 }
 
-// CloseSession gracefully shuts down the current agent session without
-// signaling doneCh (i.e., without triggering Kill). The caller must hold no
-// locks.
-func (t *Task) CloseSession() {
+// AttachSession stores a SessionHandle on the task. The caller must not hold
+// t.mu.
+func (t *Task) AttachSession(h *SessionHandle) {
 	t.mu.Lock()
-	session := t.session
-	t.session = nil
-	msgCh := t.msgCh
-	t.msgCh = nil
-	logW := t.logW
-	t.logW = nil
+	t.handle = h
 	t.mu.Unlock()
+}
 
-	if session == nil {
-		return
+// DetachSession atomically removes and returns the current SessionHandle,
+// or nil if no session is attached. The caller must not hold t.mu.
+func (t *Task) DetachSession() *SessionHandle {
+	t.mu.Lock()
+	h := t.handle
+	t.handle = nil
+	t.mu.Unlock()
+	return h
+}
+
+// SessionDone returns the Done channel for the current session, or nil if no
+// session is attached. The caller must not hold t.mu.
+func (t *Task) SessionDone() <-chan struct{} {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.handle == nil {
+		return nil
+	}
+	return t.handle.Session.Done()
+}
+
+// CloseAndDetachSession gracefully shuts down the current agent session
+// (close stdin, wait up to 10s for exit) and returns the detached handle.
+// Returns nil if no session was attached. Used by RestartSession which needs
+// the graceful drain before starting a new session.
+func (t *Task) CloseAndDetachSession() *SessionHandle {
+	h := t.DetachSession()
+	if h == nil {
+		return nil
 	}
 
 	// Graceful: close stdin, wait for exit with timeout.
-	session.Close()
+	h.Session.Close()
 	timer := time.NewTimer(10 * time.Second)
 	select {
-	case <-session.Done():
+	case <-h.Session.Done():
 		timer.Stop()
-		_, _ = session.Wait()
+		_, _ = h.Session.Wait()
 	case <-timer.C:
 	}
-
-	if msgCh != nil {
-		close(msgCh)
-	}
-	if logW != nil {
-		_ = logW.Close()
-	}
+	return h
 }
 
 // ClearMessages injects a context_cleared boundary marker into the message
@@ -378,50 +398,55 @@ func (t *Task) Subscribe(ctx context.Context) (history []agent.Message, live <-c
 	return history, c, unsub
 }
 
-// SendInput sends a user message to the running agent. Returns an error if
-// no session is active. If the session has already finished (e.g. relay
-// subprocess exited), it is cleared so the caller gets a clear signal.
+// SessionStatus describes why SendInput could not deliver a message.
+//
+// Session lifecycle:
+//   - A session wraps an SSH process bridging the server to the in-container
+//     relay daemon. It is set by Runner.Start, Runner.Reconnect, or
+//     Runner.RestartSession.
+//   - The session is cleared by CloseSession (during restart), Kill (during
+//     termination), or lazily by SendInput when it detects the SSH process
+//     already exited (Done channel closed).
+//   - "none" means no session was ever attached for this task — either the task
+//     hasn't started, or the relay died and reconnect failed.
+//   - "exited" means a session existed but the underlying SSH process terminated
+//     (relay or agent crashed, SSH dropped) before the user sent input.
+type SessionStatus string
+
+const (
+	// SessionNone indicates no session was set on the task.
+	SessionNone SessionStatus = "none"
+	// SessionExited indicates the session's SSH process had already exited.
+	SessionExited SessionStatus = "exited"
+)
+
+// SendInput sends a user message to the running agent.
+//
+// Returns an error if no session is active. The error includes the task state
+// and a SessionStatus so the caller can diagnose why the session is missing
+// (e.g. relay died vs. never connected). The session watcher now handles
+// dead-session detection proactively, so SendInput no longer does lazy
+// cleanup.
 func (t *Task) SendInput(prompt string) error {
 	t.mu.Lock()
-	s := t.session
-	// Detect sessions that finished (e.g. agent process exited while we
-	// were waiting for user input). Clear the stale session so the caller
-	// gets a clear "no active session" error instead of a broken-pipe write.
-	if s != nil {
+	h := t.handle
+	sessionStatus := SessionNone
+	if h != nil {
 		select {
-		case <-s.Done():
-			t.session = nil
-			s = nil
+		case <-h.Session.Done():
+			sessionStatus = SessionExited
+			h = nil
 		default:
 		}
 	}
-	if s != nil {
+	if h != nil {
 		t.setState(StateRunning)
 	}
+	state := t.State
 	t.mu.Unlock()
-	if s == nil {
-		return errors.New("no active session")
+	if h == nil {
+		return fmt.Errorf("no active session (state=%s session=%s)", state, sessionStatus)
 	}
 	t.addMessage(syntheticUserInput(prompt))
-	return s.Send(prompt)
-}
-
-// InitDoneCh initializes the done channel. Called by Runner.Start; exposed
-// for tests that construct a Task directly.
-func (t *Task) InitDoneCh() {
-	t.doneCh = make(chan struct{})
-}
-
-// Terminate signals that the user is done interacting with this task. The
-// session will be closed and the container killed.
-func (t *Task) Terminate() {
-	t.doneOnce.Do(func() {
-		t.setState(StateTerminating)
-		close(t.doneCh)
-	})
-}
-
-// Done returns a channel that is closed when the user calls Terminate.
-func (t *Task) Done() <-chan struct{} {
-	return t.doneCh
+	return h.Session.Send(prompt)
 }

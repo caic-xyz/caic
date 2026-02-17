@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -40,109 +42,153 @@ func (testWire) ParseMessage(line []byte) (Message, error) {
 	return ParseMessage(line)
 }
 
-func TestSessionLifecycle(t *testing.T) {
-	// Simulate a session using pipes instead of a real process.
-	stdinR, stdinW := io.Pipe()
-	stdoutR, stdoutW := io.Pipe()
+func TestSession(t *testing.T) {
+	t.Run("Lifecycle", func(t *testing.T) {
+		// Simulate a session using pipes instead of a real process.
+		stdinR, stdinW := io.Pipe()
+		stdoutR, stdoutW := io.Pipe()
 
-	s := &Session{
-		stdin: stdinW,
-		wire:  testWire{},
-		done:  make(chan struct{}),
-	}
-
-	msgCh := make(chan Message, 16)
-
-	// Simulate the readMessages goroutine.
-	go func() {
-		defer close(s.done)
-		result, parseErr := readMessages(stdoutR, msgCh, nil, ParseMessage)
-		s.result = result
-		if parseErr != nil {
-			s.err = parseErr
-		} else if result == nil {
-			s.err = io.ErrUnexpectedEOF
+		s := &Session{
+			stdin: stdinW,
+			wire:  testWire{},
+			done:  make(chan struct{}),
 		}
-	}()
 
-	// Drain stdin in background (io.Pipe is synchronous).
-	stdinBuf := make(chan string, 1)
-	go func() {
-		data, _ := io.ReadAll(stdinR)
-		stdinBuf <- string(data)
-	}()
+		msgCh := make(chan Message, 16)
 
-	// Send a prompt.
-	if err := s.Send("test prompt"); err != nil {
-		t.Fatal(err)
-	}
+		// Simulate the readMessages goroutine.
+		go func() {
+			defer close(s.done)
+			result, parseErr := readMessages(stdoutR, msgCh, nil, ParseMessage)
+			s.result = result
+			if parseErr != nil {
+				s.err = parseErr
+			} else if result == nil {
+				s.err = io.ErrUnexpectedEOF
+			}
+		}()
 
-	// Write a result message to stdout.
-	resultLine := `{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"ok","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}` + "\n"
-	if _, err := stdoutW.Write([]byte(resultLine)); err != nil {
-		t.Fatal(err)
-	}
+		// Drain stdin in background (io.Pipe is synchronous).
+		stdinBuf := make(chan string, 1)
+		go func() {
+			data, _ := io.ReadAll(stdinR)
+			stdinBuf <- string(data)
+		}()
 
-	// Session should NOT be done yet — stdin is still open.
-	select {
-	case <-s.done:
-		t.Fatal("session closed prematurely after result")
-	case <-time.After(50 * time.Millisecond):
-		// Expected: session stays alive.
-	}
+		// Send a prompt.
+		if err := s.Send("test prompt"); err != nil {
+			t.Fatal(err)
+		}
 
-	// Send a second message (multi-turn).
-	if err := s.Send("follow-up"); err != nil {
-		t.Fatal(err)
-	}
+		// Write a result message to stdout.
+		resultLine := `{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"ok","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}` + "\n"
+		if _, err := stdoutW.Write([]byte(resultLine)); err != nil {
+			t.Fatal(err)
+		}
 
-	// Now close stdin so the process can exit.
-	s.Close()
+		// Session should NOT be done yet — stdin is still open.
+		select {
+		case <-s.done:
+			t.Fatal("session closed prematurely after result")
+		case <-time.After(50 * time.Millisecond):
+			// Expected: session stays alive.
+		}
 
-	got := <-stdinBuf
-	if !strings.Contains(got, `"content":"test prompt"`) {
-		t.Errorf("missing first prompt in stdin: %s", got)
-	}
-	if !strings.Contains(got, `"content":"follow-up"`) {
-		t.Errorf("missing follow-up in stdin: %s", got)
-	}
+		// Send a second message (multi-turn).
+		if err := s.Send("follow-up"); err != nil {
+			t.Fatal(err)
+		}
 
-	// Close stdout to simulate process exit.
-	_ = stdoutW.Close()
+		// Now close stdin so the process can exit.
+		s.Close()
 
-	// Wait for session to finish.
-	rm, err := s.Wait()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rm == nil {
-		t.Fatal("expected result, got nil")
-	}
-	if rm.Result != "ok" {
-		t.Errorf("result = %q, want %q", rm.Result, "ok")
-	}
+		got := <-stdinBuf
+		if !strings.Contains(got, `"content":"test prompt"`) {
+			t.Errorf("missing first prompt in stdin: %s", got)
+		}
+		if !strings.Contains(got, `"content":"follow-up"`) {
+			t.Errorf("missing follow-up in stdin: %s", got)
+		}
 
-	// Verify messages were dispatched.
-	close(msgCh)
-	var count int
-	for range msgCh {
-		count++
-	}
-	if count != 1 {
-		t.Errorf("message count = %d, want 1", count)
-	}
-}
+		// Close stdout to simulate process exit.
+		_ = stdoutW.Close()
 
-func TestSessionClose(t *testing.T) {
-	_, stdinW := io.Pipe()
-	s := &Session{
-		stdin: stdinW,
-		wire:  testWire{},
-		done:  make(chan struct{}),
-	}
-	// Close should be idempotent.
-	s.Close()
-	s.Close()
+		// Wait for session to finish.
+		rm, err := s.Wait()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rm == nil {
+			t.Fatal("expected result, got nil")
+		}
+		if rm.Result != "ok" {
+			t.Errorf("result = %q, want %q", rm.Result, "ok")
+		}
+
+		// Verify messages were dispatched.
+		close(msgCh)
+		var count int
+		for range msgCh {
+			count++
+		}
+		if count != 1 {
+			t.Errorf("message count = %d, want 1", count)
+		}
+	})
+	t.Run("CloseIdempotent", func(t *testing.T) {
+		_, stdinW := io.Pipe()
+		s := &Session{
+			stdin: stdinW,
+			wire:  testWire{},
+			done:  make(chan struct{}),
+		}
+		s.Close()
+		s.Close()
+	})
+	t.Run("SignalKillNotError", func(t *testing.T) {
+		// A killed process (e.g. container termination) must not produce
+		// ERROR-level logs — it's expected behavior.
+		cmd := exec.Command("sleep", "60")
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+
+		// Capture log output to verify log level.
+		var logBuf bytes.Buffer
+		oldDefault := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
+		defer slog.SetDefault(oldDefault)
+
+		msgCh := make(chan Message, 16)
+		s := NewSession(cmd, stdin, stdout, msgCh, nil, testWire{})
+
+		// Kill the process (simulates container termination via SIGKILL).
+		if err := cmd.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err = s.Wait()
+		if err == nil {
+			t.Fatal("expected error from killed process")
+		}
+		if !strings.Contains(err.Error(), "signal: killed") {
+			t.Fatalf("expected 'signal: killed' in error, got: %v", err)
+		}
+
+		// Signal-killed sessions must NOT produce ERROR-level logs.
+		logOutput := logBuf.String()
+		if strings.Contains(logOutput, "level=ERROR") {
+			t.Errorf("killed process should not produce ERROR log:\n%s", logOutput)
+		}
+	})
 }
 
 func TestParseMessage(t *testing.T) {

@@ -111,7 +111,8 @@ func (r *Runner) Init(ctx context.Context) error {
 }
 
 // Reconnect reattaches to a running relay, or starts a new agent session
-// resuming the previous conversation if no relay is available.
+// resuming the previous conversation if no relay is available. Returns the
+// SessionHandle so the caller can start a session watcher.
 //
 // Strategy:
 //  1. Check if the relay daemon is alive (Unix socket exists in container).
@@ -127,16 +128,16 @@ func (r *Runner) Init(ctx context.Context) error {
 //   - --resume fallback: always transitions to StateRunning since a new agent
 //     process is started.
 //   - All-fail: reverts to StateWaiting.
-func (r *Runner) Reconnect(ctx context.Context, t *Task) error {
+func (r *Runner) Reconnect(ctx context.Context, t *Task) (*SessionHandle, error) {
 	r.initDefaults()
 	t.mu.Lock()
-	if t.session != nil {
+	if t.handle != nil {
 		t.mu.Unlock()
-		return errors.New("session already active")
+		return nil, errors.New("session already active")
 	}
 	if t.Container == "" {
 		t.mu.Unlock()
-		return errors.New("no container to reconnect to")
+		return nil, errors.New("no container to reconnect to")
 	}
 	// Remember the state inferred from restored messages so we don't
 	// blindly override it to StateRunning for an idle relay.
@@ -148,7 +149,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) error {
 	logW, err := r.openLog(t)
 	if err != nil {
 		close(msgCh)
-		return err
+		return nil, err
 	}
 
 	// Prefer attaching to a live relay (agent process still running).
@@ -201,19 +202,17 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) error {
 		t.mu.Lock()
 		t.setState(StateWaiting)
 		t.mu.Unlock()
-		return fmt.Errorf("reconnect: %w", err)
+		return nil, fmt.Errorf("reconnect: %w", err)
 	}
 
-	t.mu.Lock()
-	t.session = session
-	t.msgCh = msgCh
-	t.logW = logW
-	t.mu.Unlock()
-	return nil
+	h := &SessionHandle{Session: session, MsgCh: msgCh, LogW: logW}
+	t.AttachSession(h)
+	return h, nil
 }
 
 // Start performs branch/container setup, starts the agent session, and sends
-// the initial prompt.
+// the initial prompt. Returns the SessionHandle so the caller can start a
+// session watcher.
 //
 // Sequence:
 //  1. Create a new git branch from origin/<BaseBranch>.
@@ -224,15 +223,13 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) error {
 //  4. Send the initial prompt to the agent.
 //
 // The session is left open for follow-up messages via SendInput.
-// Call Kill to close the session and destroy the container.
-func (r *Runner) Start(ctx context.Context, t *Task) error {
+func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	r.initDefaults()
 	if r.Container == nil {
-		return errors.New("runner has no container backend configured")
+		return nil, errors.New("runner has no container backend configured")
 	}
 	t.StartedAt = time.Now().UTC()
 	t.setState(StateBranching)
-	t.InitDoneCh()
 
 	// 1. Create branch + start container (serialized).
 	slog.Info("setting up task", "repo", t.Repo)
@@ -241,7 +238,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) error {
 	r.branchMu.Unlock()
 	if err != nil {
 		t.setState(StateFailed)
-		return err
+		return nil, err
 	}
 	t.Container = name
 	slog.Info("container ready", "repo", t.Repo, "branch", t.Branch, "container", name)
@@ -257,7 +254,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) error {
 	if err != nil {
 		close(msgCh)
 		t.setState(StateFailed)
-		return err
+		return nil, err
 	}
 
 	slog.Info("starting agent session", "repo", t.Repo, "branch", t.Branch, "container", name, "agent", t.Harness, "maxTurns", maxTurns)
@@ -272,76 +269,59 @@ func (r *Runner) Start(ctx context.Context, t *Task) error {
 		close(msgCh)
 		t.setState(StateFailed)
 		slog.Warn("agent session failed to start", "repo", t.Repo, "branch", t.Branch, "container", name, "err", err)
-		return err
+		return nil, err
 	}
 
-	// Store session so SendInput can reach it.
-	t.mu.Lock()
-	t.session = session
-	t.msgCh = msgCh
-	t.logW = logW
-	t.mu.Unlock()
+	// Store handle so SendInput can reach it.
+	h := &SessionHandle{Session: session, MsgCh: msgCh, LogW: logW}
+	t.AttachSession(h)
 
 	t.addMessage(syntheticUserInput(t.Prompt))
 	if err := session.Send(t.Prompt); err != nil {
 		_ = logW.Close()
 		close(msgCh)
 		t.setState(StateFailed)
-		return fmt.Errorf("write prompt: %w", err)
+		return nil, fmt.Errorf("write prompt: %w", err)
 	}
 	t.setState(StateRunning)
 	slog.Info("agent running", "repo", t.Repo, "branch", t.Branch, "container", name)
-	return nil
+	return h, nil
 }
 
-// Kill terminates the agent session and kills the container. It blocks until
-// t.Done() is signaled (by user calling Terminate), then proceeds with
-// graceful shutdown:
-//  1. Close the agent's stdin so it can emit a final ResultMessage with stats.
-//  2. Wait up to 10s for the agent to exit gracefully.
-//  3. Kill the container to ensure cleanup.
-//  4. If the graceful wait timed out, wait for the session to drain now that
-//     the container is dead and the SSH connection is severed.
-//  5. Write the result trailer to the JSONL log.
+// Cleanup is the single shutdown path for a task. It detaches the session,
+// performs graceful shutdown, kills the container, and returns the result.
 //
-// Pull/push must be done separately before calling Kill.
-func (r *Runner) Kill(ctx context.Context, t *Task) Result {
-	// Wait for user to signal terminate (or context cancellation during shutdown).
-	select {
-	case <-t.Done():
-	case <-ctx.Done():
-		t.setState(StateFailed)
-		return Result{Task: t.Prompt, Repo: t.Repo, Branch: t.Branch, Container: t.Container, State: StateFailed, Err: ctx.Err()}
-	}
-
-	t.mu.Lock()
-	session := t.session
-	t.session = nil
-	msgCh := t.msgCh
-	logW := t.logW
-	t.logW = nil
-	t.mu.Unlock()
+// Steps:
+//  1. Detach the session handle from the task.
+//  2. If a session exists: close stdin, wait up to 10s for graceful exit.
+//  3. Set task state to reason (StateTerminated or StateFailed).
+//  4. Kill the container.
+//  5. If graceful wait timed out, drain session now (container dead, SSH severed).
+//  6. Close msgCh and logW, write log trailer.
+//  7. Build and return Result.
+func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
+	h := t.DetachSession()
 
 	name := t.Container
 
 	// Graceful shutdown: close stdin so the agent can emit a final
 	// ResultMessage with accurate cost/turns stats, then force-kill.
 	var result *agent.ResultMessage
-	if session != nil {
-		session.Close()
+	if h != nil {
+		h.Session.Close()
 		timer := time.NewTimer(10 * time.Second)
 		select {
-		case <-session.Done():
+		case <-h.Session.Done():
 			timer.Stop()
-			result, _ = session.Wait()
+			result, _ = h.Session.Wait()
 		case <-timer.C:
 			slog.Warn("agent session did not exit after stdin close, killing container", "repo", t.Repo, "branch", t.Branch)
 		}
 	}
 
-	t.setState(StateTerminated)
+	t.setState(reason)
 	slog.Info("killing container", "repo", t.Repo, "branch", t.Branch, "container", name)
-	if name != "" {
+	if name != "" && r.Container != nil {
 		if err := r.KillContainer(ctx, t.Branch); err != nil {
 			slog.Warn("failed to kill container", "repo", t.Repo, "branch", t.Branch, "container", name, "err", err)
 		}
@@ -349,11 +329,11 @@ func (r *Runner) Kill(ctx context.Context, t *Task) Result {
 
 	// If the graceful wait timed out, wait for the session to drain now
 	// that the container is dead and the SSH connection is severed.
-	if session != nil && result == nil {
-		result, _ = session.Wait()
+	if h != nil && result == nil {
+		result, _ = h.Session.Wait()
 	}
-	if msgCh != nil {
-		close(msgCh)
+	if h != nil {
+		close(h.MsgCh)
 	}
 
 	res := Result{
@@ -361,7 +341,7 @@ func (r *Runner) Kill(ctx context.Context, t *Task) Result {
 		Repo:      t.Repo,
 		Branch:    t.Branch,
 		Container: name,
-		State:     StateTerminated,
+		State:     reason,
 	}
 	if result != nil {
 		res.CostUSD = result.TotalCostUSD
@@ -378,6 +358,10 @@ func (r *Runner) Kill(ctx context.Context, t *Task) Result {
 		res.NumTurns = liveTurns
 		res.DurationMs = liveDur
 		res.Usage = liveUsage
+	}
+	var logW io.WriteCloser
+	if h != nil {
+		logW = h.LogW
 	}
 	writeLogTrailer(logW, &res)
 	if logW != nil {
@@ -471,20 +455,26 @@ func (r *Runner) SyncToOrigin(ctx context.Context, branch, container string, for
 }
 
 // RestartSession closes the current agent session and starts a fresh one in
-// the same container with a new prompt. The container is NOT killed and the
-// Kill goroutine remains blocked on doneCh.
-func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt string) error {
+// the same container with a new prompt. Returns the new SessionHandle so the
+// caller can start a session watcher.
+func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt string) (*SessionHandle, error) {
 	r.initDefaults()
 
 	t.mu.Lock()
 	state := t.State
 	t.mu.Unlock()
 	if state != StateWaiting && state != StateAsking {
-		return fmt.Errorf("cannot restart in state %s", state)
+		return nil, fmt.Errorf("cannot restart in state %s", state)
 	}
 
-	// 1. Close current session without signaling doneCh.
-	t.CloseSession()
+	// 1. Close current session gracefully.
+	oldH := t.CloseAndDetachSession()
+	if oldH != nil {
+		close(oldH.MsgCh)
+		if oldH.LogW != nil {
+			_ = oldH.LogW.Close()
+		}
+	}
 
 	// 2. Clear in-memory messages (sends context_cleared to subscribers).
 	t.ClearMessages()
@@ -496,7 +486,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt string) err
 		t.mu.Lock()
 		t.setState(StateFailed)
 		t.mu.Unlock()
-		return fmt.Errorf("open log: %w", err)
+		return nil, fmt.Errorf("open log: %w", err)
 	}
 
 	// 4. Start new session.
@@ -523,15 +513,12 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt string) err
 		t.mu.Lock()
 		t.setState(StateFailed)
 		t.mu.Unlock()
-		return fmt.Errorf("start session: %w", err)
+		return nil, fmt.Errorf("start session: %w", err)
 	}
 
-	// 5. Store new session, send prompt.
-	t.mu.Lock()
-	t.session = session
-	t.msgCh = msgCh
-	t.logW = logW
-	t.mu.Unlock()
+	// 5. Store new handle, send prompt.
+	h := &SessionHandle{Session: session, MsgCh: msgCh, LogW: logW}
+	t.AttachSession(h)
 
 	t.addMessage(syntheticUserInput(prompt))
 	if err := session.Send(prompt); err != nil {
@@ -540,14 +527,14 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt string) err
 		t.mu.Lock()
 		t.setState(StateFailed)
 		t.mu.Unlock()
-		return fmt.Errorf("send prompt: %w", err)
+		return nil, fmt.Errorf("send prompt: %w", err)
 	}
 
 	t.mu.Lock()
 	t.setState(StateRunning)
 	t.mu.Unlock()
 	slog.Info("agent restarted", "repo", t.Repo, "branch", t.Branch, "container", t.Container)
-	return nil
+	return h, nil
 }
 
 // ReadRelayOutput reads the relay output.jsonl from the container using the

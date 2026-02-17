@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -87,7 +88,13 @@ func NewSession(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, msgCh cha
 			slog.Error("agent session parse error", "err", parseErr)
 		case waitErr != nil:
 			s.err = fmt.Errorf("agent exited: %w", waitErr)
-			slog.Error("agent session exited with error", "err", waitErr)
+			// Signal-based exits (SIGKILL, SIGTERM) are expected when
+			// containers are terminated. Log at Info, not Error.
+			if isSignalExit(waitErr) {
+				slog.Info("agent session killed by signal", "err", waitErr)
+			} else {
+				slog.Warn("agent session exited with error", "err", waitErr)
+			}
 		default:
 			s.err = errors.New("agent exited without a result message")
 			slog.Error("agent session exited without result message")
@@ -293,4 +300,25 @@ func ReadPlan(ctx context.Context, container, planFile string) (string, error) {
 		return "", fmt.Errorf("read plan: %w", err)
 	}
 	return string(out), nil
+}
+
+// isSignalExit reports whether err indicates the process was killed by a
+// signal (e.g. SIGKILL from container termination).
+func isSignalExit(err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	// On Unix, ExitCode() returns -1 when the process was killed by a signal.
+	// ProcessState.Sys() returns syscall.WaitStatus with signal details.
+	if exitErr.ExitCode() == -1 {
+		return true
+	}
+	// Also check for specific signals via os.ProcessState.
+	if ps := exitErr.ProcessState; ps != nil {
+		if ws, ok := ps.Sys().(interface{ Signal() os.Signal }); ok {
+			return ws.Signal() != nil
+		}
+	}
+	return false
 }

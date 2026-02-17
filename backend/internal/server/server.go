@@ -102,9 +102,10 @@ func (b *mdBackend) Kill(ctx context.Context, dir, branch string) error {
 }
 
 type taskEntry struct {
-	task   *task.Task
-	result *task.Result
-	done   chan struct{}
+	task        *task.Task
+	result      *task.Result
+	done        chan struct{}
+	cleanupOnce sync.Once // ensures exactly one cleanup runs per task
 }
 
 // New creates a new Server. It discovers repos under rootDir, creates a Runner
@@ -207,6 +208,7 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string) (*Ser
 	if err := s.adoptContainers(ctx); err != nil {
 		return nil, fmt.Errorf("adopt containers: %w", err)
 	}
+	s.watchContainerEvents(ctx)
 	return s, nil
 }
 
@@ -342,20 +344,17 @@ func (s *Server) createTask(_ context.Context, req *dto.CreateTaskReq) (*dto.Cre
 
 	// Run in background using the server context, not the request context.
 	go func() {
-		defer close(entry.done)
-		if err := runner.Start(s.ctx, t); err != nil {
+		h, err := runner.Start(s.ctx, t)
+		if err != nil {
 			result := task.Result{Task: t.Prompt, Repo: t.Repo, Branch: t.Branch, Container: t.Container, State: task.StateFailed, Err: err}
 			s.mu.Lock()
 			entry.result = &result
 			s.taskChanged()
 			s.mu.Unlock()
+			close(entry.done)
 			return
 		}
-		result := runner.Kill(s.ctx, t)
-		s.mu.Lock()
-		entry.result = &result
-		s.taskChanged()
-		s.mu.Unlock()
+		s.watchSession(entry, runner, h)
 	}()
 
 	return &dto.CreateTaskResp{Status: "accepted", ID: t.ID}, nil
@@ -557,9 +556,60 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// relayStatus describes the state of the in-container relay daemon, probed
+// over SSH when SendInput fails. Combined with the task state and session
+// status (from task.SendInput's error), the three values pinpoint why input
+// delivery failed:
+//
+//   - state=waiting session=none  relay=dead → relay died, reconnect failed.
+//   - state=waiting session=exited relay=alive → SSH attach exited but relay
+//     is still running; reconnect should recover.
+//   - state=running session=none  relay=alive → state-machine bug: state says
+//     running but no Go-side session object exists.
+//   - state=pending session=none  relay=no-container → task never started.
+type relayStatus string
+
+const (
+	relayAlive       relayStatus = "alive"        // Relay socket exists; daemon is running.
+	relayDead        relayStatus = "dead"         // No socket; daemon exited or was never started.
+	relayCheckFailed relayStatus = "check-failed" // SSH probe failed (container unreachable).
+	relayNoContainer relayStatus = "no-container" // Task has no container yet.
+)
+
+// sendInput forwards user input to the agent session. On failure, it probes
+// the relay daemon's liveness over SSH and returns diagnostic details in the
+// 409 response so the frontend can show the user what went wrong.
+//
+// The relay probe uses the server context (not the request context) because the
+// SSH round-trip may outlive a cancelled HTTP request, and we want the log line
+// regardless.
 func (s *Server) sendInput(_ context.Context, entry *taskEntry, req *dto.InputReq) (*dto.StatusResp, error) {
 	if err := entry.task.SendInput(req.Prompt); err != nil {
-		return nil, dto.Conflict(err.Error())
+		t := entry.task
+		rs := relayNoContainer
+		if t.Container != "" {
+			ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+			alive, relayErr := agent.IsRelayRunning(ctx, t.Container) //nolint:contextcheck // diagnostic probe; must outlive request
+			cancel()
+			switch {
+			case relayErr != nil:
+				rs = relayCheckFailed
+			case alive:
+				rs = relayAlive
+			default:
+				rs = relayDead
+			}
+		}
+		slog.Warn("sendInput: no active session",
+			"task", t.ID,
+			"branch", t.Branch,
+			"container", t.Container,
+			"state", t.State,
+			"relay", rs,
+		)
+		return nil, dto.Conflict(err.Error()).
+			WithDetail("state", t.State.String()).
+			WithDetail("relay", string(rs))
 	}
 	return &dto.StatusResp{Status: "sent"}, nil
 }
@@ -581,9 +631,11 @@ func (s *Server) restartTask(_ context.Context, entry *taskEntry, req *dto.Resta
 	runner := s.runners[t.Repo]
 	// Use the server-lifetime context, not the HTTP request context.
 	// The new agent session must outlive this request.
-	if err := runner.RestartSession(s.ctx, t, prompt); err != nil { //nolint:contextcheck // intentionally using server context
+	h, err := runner.RestartSession(s.ctx, t, prompt) //nolint:contextcheck // intentionally using server context
+	if err != nil {
 		return nil, dto.InternalError(err.Error())
 	}
+	s.watchSession(entry, runner, h)
 	s.mu.Lock()
 	s.taskChanged()
 	s.mu.Unlock()
@@ -595,15 +647,12 @@ func (s *Server) terminateTask(_ context.Context, entry *taskEntry, _ *dto.Empty
 	if state != task.StateWaiting && state != task.StateAsking && state != task.StateRunning {
 		return nil, dto.Conflict("task is not running or waiting")
 	}
-	entry.task.Terminate()
+	entry.task.State = task.StateTerminating
 	s.mu.Lock()
 	s.taskChanged()
 	s.mu.Unlock()
-	// Don't block on entry.done: the Kill goroutine may take 10+ seconds
-	// (agent graceful shutdown + container kill). The request context is
-	// derived from the server's BaseContext, which is already cancelled
-	// during graceful shutdown—making the wait always fail. The client
-	// observes the final state transition via SSE.
+	runner := s.runners[entry.task.Repo]
+	go s.cleanupTask(entry, runner, task.StateTerminated)
 	return &dto.StatusResp{Status: "terminating"}, nil
 }
 
@@ -935,7 +984,6 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		slog.Info("adopted container with dead relay, marking as waiting", "repo", ri.RelPath, "branch", branch, "container", c.Name)
 	}
 
-	t.InitDoneCh()
 	entry := &taskEntry{task: t, done: make(chan struct{})}
 
 	s.mu.Lock()
@@ -955,25 +1003,109 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	// if all reconnection strategies fail.
 	if relayAlive {
 		go func() {
-			if err := runner.Reconnect(ctx, t); err != nil {
+			h, err := runner.Reconnect(ctx, t)
+			if err != nil {
 				slog.Warn("auto-reconnect failed, task is waiting", "repo", t.Repo, "branch", t.Branch, "container", t.Container, "err", err)
-				// Notify SSE listeners of the state change so the UI updates.
 				s.notifyTaskChange()
+				return
 			}
+			s.watchSession(entry, runner, h)
 		}()
 	}
+	return nil
+}
 
-	// Reuse the standard Kill path: terminates the agent,
-	// then kills the container.
-	go func() {
-		defer close(entry.done)
-		result := runner.Kill(ctx, t)
+// cleanupTask runs runner.Cleanup exactly once per task (guarded by
+// entry.cleanupOnce), stores the result, notifies SSE, and closes entry.done.
+func (s *Server) cleanupTask(entry *taskEntry, runner *task.Runner, reason task.State) {
+	entry.cleanupOnce.Do(func() {
+		result := runner.Cleanup(s.ctx, entry.task, reason)
 		s.mu.Lock()
 		entry.result = &result
 		s.taskChanged()
 		s.mu.Unlock()
+		close(entry.done)
+	})
+}
+
+// watchSession monitors a single active session. When the session's SSH
+// process exits, it transitions the task to StateWaiting (the container may
+// still be alive). If entry.done fires first, the goroutine exits silently.
+func (s *Server) watchSession(entry *taskEntry, runner *task.Runner, h *task.SessionHandle) {
+	_ = runner // kept for interface consistency; may be used for future auto-reconnect
+	go func() {
+		done := h.Session.Done()
+		select {
+		case <-done:
+			// Session died. Check if this handle is still the task's current
+			// handle (restart may have replaced it). If stale, exit silently.
+			current := entry.task.SessionDone()
+			if current != done {
+				return
+			}
+			t := entry.task
+			t.DetachSession()
+			slog.Info("session exited, task is waiting", "repo", t.Repo, "branch", t.Branch, "container", t.Container)
+			t.State = task.StateWaiting
+			s.notifyTaskChange()
+		case <-entry.done:
+		}
 	}()
-	return nil
+}
+
+// watchContainerEvents starts a single goroutine that listens for Docker
+// container die events and triggers cleanup for the corresponding task.
+func (s *Server) watchContainerEvents(ctx context.Context) {
+	go func() {
+		for {
+			ch, err := container.WatchEvents(ctx, "caic")
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				slog.Warn("docker events failed, retrying in 5s", "err", err)
+				select {
+				case <-time.After(5 * time.Second):
+					continue
+				case <-ctx.Done():
+					return
+				}
+			}
+			for ev := range ch {
+				s.handleContainerDeath(ev.Name)
+			}
+			// Stream ended. Reconnect unless context cancelled.
+			if ctx.Err() != nil {
+				return
+			}
+			slog.Warn("docker events stream ended, reconnecting in 5s")
+			select {
+			case <-time.After(5 * time.Second):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
+// handleContainerDeath looks up a task by container name and triggers cleanup.
+func (s *Server) handleContainerDeath(containerName string) {
+	s.mu.Lock()
+	var found *taskEntry
+	var runner *task.Runner
+	for _, e := range s.tasks {
+		if e.task.Container == containerName {
+			found = e
+			runner = s.runners[e.task.Repo]
+			break
+		}
+	}
+	s.mu.Unlock()
+	if found == nil || runner == nil {
+		return
+	}
+	slog.Info("container died, cleaning up task", "container", containerName, "task", found.task.ID, "branch", found.task.Branch)
+	go s.cleanupTask(found, runner, task.StateFailed)
 }
 
 // getTask looks up a task by the {id} path parameter.

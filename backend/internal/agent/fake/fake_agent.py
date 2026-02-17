@@ -14,7 +14,8 @@ JOKES = [
     "Why do Java developers wear glasses? Because they can not C#.",
     "How many programmers does it take to change a light bulb? None, that is a hardware problem.",
     "There are only 10 types of people: those who understand binary and those who do not.",
-    "A programmer puts two glasses on his bedside table before going to sleep. A full one, in case he gets thirsty, and an empty one, in case he does not.",
+    "A programmer puts two glasses on his bedside table before going to sleep."
+    " A full one, in case he gets thirsty, and an empty one, in case he does not.",
 ]
 
 

@@ -204,9 +204,9 @@ func TestHandleTerminate(t *testing.T) {
 	})
 
 	t.Run("Waiting", func(t *testing.T) {
-		tk := &task.Task{Prompt: "test", State: task.StateWaiting}
-		tk.InitDoneCh()
+		tk := &task.Task{Prompt: "test", State: task.StateWaiting, Repo: "r"}
 		s := newTestServer(t)
+		s.runners["r"] = &task.Runner{BaseBranch: "main", Dir: t.TempDir()}
 		s.tasks["t1"] = &taskEntry{
 			task: tk,
 			done: make(chan struct{}),
@@ -220,18 +220,16 @@ func TestHandleTerminate(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 		}
 
-		// Verify doneCh is closed.
-		select {
-		case <-tk.Done():
-		default:
-			t.Error("doneCh not closed after terminate")
+		// Verify state is set to terminating.
+		if tk.State != task.StateTerminating {
+			t.Errorf("state = %v, want %v", tk.State, task.StateTerminating)
 		}
 	})
 
 	t.Run("CancelledContext", func(t *testing.T) {
-		tk := &task.Task{Prompt: "test", State: task.StateRunning}
-		tk.InitDoneCh()
+		tk := &task.Task{Prompt: "test", State: task.StateRunning, Repo: "r"}
 		s := newTestServer(t)
+		s.runners["r"] = &task.Runner{BaseBranch: "main", Dir: t.TempDir()}
 		s.tasks["t1"] = &taskEntry{
 			task: tk,
 			done: make(chan struct{}),
@@ -249,6 +247,47 @@ func TestHandleTerminate(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 		}
+	})
+}
+
+func TestHandleContainerDeath(t *testing.T) {
+	t.Run("TriggersCleanup", func(t *testing.T) {
+		s := newTestServer(t)
+		tk := &task.Task{
+			Prompt:    "test",
+			State:     task.StateRunning,
+			Repo:      "r",
+			Container: "md-repo-caic-w0",
+		}
+		s.runners["r"] = &task.Runner{BaseBranch: "main", Dir: t.TempDir()}
+		entry := &taskEntry{task: tk, done: make(chan struct{})}
+		s.tasks["t1"] = entry
+
+		s.handleContainerDeath("md-repo-caic-w0")
+
+		// Wait for the async cleanup goroutine to complete.
+		select {
+		case <-entry.done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("cleanup did not complete in time")
+		}
+
+		if tk.State != task.StateFailed {
+			t.Errorf("state = %v, want %v", tk.State, task.StateFailed)
+		}
+
+		s.mu.Lock()
+		result := entry.result
+		s.mu.Unlock()
+		if result == nil {
+			t.Fatal("result is nil after container death cleanup")
+		}
+	})
+
+	t.Run("UnknownContainer", func(t *testing.T) {
+		s := newTestServer(t)
+		// Should not panic or cause errors.
+		s.handleContainerDeath("unknown-container")
 	})
 }
 
@@ -710,201 +749,8 @@ func TestLoadTerminatedTasks(t *testing.T) {
 	})
 }
 
-func TestTerminatedTaskEventsAfterRestart(t *testing.T) {
-	logDir := t.TempDir()
-
-	// Write a terminated task log with real agent messages.
-	meta := mustJSON(t, agent.MetaMessage{
-		MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
-		Repo: "r", Branch: "caic/w0", Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-	})
-	initMsg := mustJSON(t, agent.SystemInitMessage{
-		MessageType: "system", Subtype: "init", Model: "claude-opus-4-6", Version: "2.0", SessionID: "s1",
-	})
-	assistant := mustJSON(t, agent.AssistantMessage{
-		MessageType: "assistant",
-		Message: agent.APIMessage{
-			Model:   "claude-opus-4-6",
-			Content: []agent.ContentBlock{{Type: "text", Text: "I found the bug"}},
-			Usage:   agent.Usage{InputTokens: 100, OutputTokens: 50},
-		},
-	})
-	result := mustJSON(t, agent.ResultMessage{
-		MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.05, DurationMs: 1000, NumTurns: 1,
-	})
-	trailer := mustJSON(t, agent.MetaResultMessage{
-		MessageType: "caic_result", State: "terminated", CostUSD: 0.05, DurationMs: 1000,
-	})
-	writeLogFile(t, logDir, "task.jsonl", meta, initMsg, assistant, result, trailer)
-
-	// Simulate server restart: load terminated tasks from logs.
-	s := &Server{
-		runners: map[string]*task.Runner{},
-		tasks:   make(map[string]*taskEntry),
-		changed: make(chan struct{}),
-		logDir:  logDir,
-	}
-	if err := s.loadTerminatedTasks(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Find the task ID.
-	s.mu.Lock()
-	if len(s.tasks) != 1 {
-		t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
-	}
-	var taskID string
-	for id := range s.tasks {
-		taskID = id
-	}
-	s.mu.Unlock()
-
-	// Subscribe to events via SSE. The handler should return immediately for
-	// terminated tasks instead of blocking until context deadline.
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
-	req.SetPathValue("id", taskID)
-	w := httptest.NewRecorder()
-	start := time.Now()
-	s.handleTaskRawEvents(w, req)
-	elapsed := time.Since(start)
-	if elapsed > 200*time.Millisecond {
-		t.Errorf("handleTaskRawEvents blocked for %v; terminated tasks should return immediately after history replay", elapsed)
-	}
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-	}
-	// Parse SSE events from the response body. Only collect "message"
-	// events; skip control events like "ready".
-	body := w.Body.String()
-	var events []dto.ClaudeEventMessage
-	eventType := "message" // SSE default
-	for _, line := range strings.Split(body, "\n") {
-		if after, ok := strings.CutPrefix(line, "event: "); ok {
-			eventType = after
-			continue
-		}
-		after, ok := strings.CutPrefix(line, "data: ")
-		if !ok {
-			if line == "" {
-				eventType = "message" // reset after blank line
-			}
-			continue
-		}
-		if eventType != "message" {
-			continue
-		}
-		var ev dto.ClaudeEventMessage
-		if err := json.Unmarshal([]byte(after), &ev); err != nil {
-			t.Fatalf("unmarshal event: %v", err)
-		}
-		events = append(events, ev)
-	}
-	if len(events) == 0 {
-		t.Fatal("no SSE events received for terminated task with messages")
-	}
-
-	// Verify we got the expected event kinds.
-	kinds := make([]dto.ClaudeEventKind, len(events))
-	for i, ev := range events {
-		kinds[i] = ev.Kind
-	}
-	wantKinds := []dto.ClaudeEventKind{dto.ClaudeEventKindInit, dto.ClaudeEventKindText, dto.ClaudeEventKindUsage, dto.ClaudeEventKindResult}
-	if len(kinds) != len(wantKinds) {
-		t.Fatalf("event kinds = %v, want %v", kinds, wantKinds)
-	}
-	for i := range wantKinds {
-		if kinds[i] != wantKinds[i] {
-			t.Errorf("kinds[%d] = %q, want %q", i, kinds[i], wantKinds[i])
-		}
-	}
-	// Verify text content.
-	if events[1].Text == nil || events[1].Text.Text != "I found the bug" {
-		t.Errorf("text event = %+v, want text 'I found the bug'", events[1].Text)
-	}
-}
-
-func TestStreamEventTextDeltaInSSE(t *testing.T) {
-	logDir := t.TempDir()
-
-	// Write a terminated task log with stream events (text deltas) followed
-	// by the final assistant message, simulating --include-partial-messages output.
-	meta := mustJSON(t, agent.MetaMessage{
-		MessageType: "caic_meta", Version: 1, Prompt: "explain streaming",
-		Repo: "r", Branch: "caic/w0", Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-	})
-	initMsg := mustJSON(t, agent.SystemInitMessage{
-		MessageType: "system", Subtype: "init", Model: "claude-opus-4-6", Version: "2.0", SessionID: "s1",
-	})
-	delta1 := mustJSON(t, agent.StreamEvent{
-		MessageType: "stream_event",
-		Event: agent.StreamEventData{
-			Type: "content_block_delta", Index: 0,
-			Delta: &agent.StreamDelta{Type: "text_delta", Text: "Hello "},
-		},
-	})
-	delta2 := mustJSON(t, agent.StreamEvent{
-		MessageType: "stream_event",
-		Event: agent.StreamEventData{
-			Type: "content_block_delta", Index: 0,
-			Delta: &agent.StreamDelta{Type: "text_delta", Text: "world"},
-		},
-	})
-	// Non-text stream events (message_start, input_json_delta) should be filtered.
-	msgStart := mustJSON(t, agent.StreamEvent{
-		MessageType: "stream_event",
-		Event:       agent.StreamEventData{Type: "message_start"},
-	})
-	assistant := mustJSON(t, agent.AssistantMessage{
-		MessageType: "assistant",
-		Message: agent.APIMessage{
-			Model:   "claude-opus-4-6",
-			Content: []agent.ContentBlock{{Type: "text", Text: "Hello world"}},
-			Usage:   agent.Usage{InputTokens: 50, OutputTokens: 20},
-		},
-	})
-	result := mustJSON(t, agent.ResultMessage{
-		MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.02, DurationMs: 200, NumTurns: 1,
-	})
-	trailer := mustJSON(t, agent.MetaResultMessage{
-		MessageType: "caic_result", State: "terminated", CostUSD: 0.02, DurationMs: 200,
-	})
-	writeLogFile(t, logDir, "task.jsonl", meta, initMsg, msgStart, delta1, delta2, assistant, result, trailer)
-
-	s := &Server{
-		runners: map[string]*task.Runner{},
-		tasks:   make(map[string]*taskEntry),
-		changed: make(chan struct{}),
-		logDir:  logDir,
-	}
-	if err := s.loadTerminatedTasks(); err != nil {
-		t.Fatal(err)
-	}
-
-	s.mu.Lock()
-	if len(s.tasks) != 1 {
-		t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
-	}
-	var taskID string
-	for id := range s.tasks {
-		taskID = id
-	}
-	s.mu.Unlock()
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
-	req.SetPathValue("id", taskID)
-	w := httptest.NewRecorder()
-	s.handleTaskRawEvents(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-	}
-
-	body := w.Body.String()
+// parseSSEEvents extracts message-type SSE events from a response body.
+func parseSSEEvents(t *testing.T, body string) []dto.ClaudeEventMessage {
 	var events []dto.ClaudeEventMessage
 	eventType := "message"
 	for _, line := range strings.Split(body, "\n") {
@@ -928,31 +774,198 @@ func TestStreamEventTextDeltaInSSE(t *testing.T) {
 		}
 		events = append(events, ev)
 	}
+	return events
+}
 
-	kinds := make([]dto.ClaudeEventKind, len(events))
-	for i, ev := range events {
-		kinds[i] = ev.Kind
-	}
-	// Expect: init + 2 textDelta (message_start filtered) + text + usage + result
-	wantKinds := []dto.ClaudeEventKind{dto.ClaudeEventKindInit, dto.ClaudeEventKindTextDelta, dto.ClaudeEventKindTextDelta, dto.ClaudeEventKindText, dto.ClaudeEventKindUsage, dto.ClaudeEventKindResult}
-	if len(kinds) != len(wantKinds) {
-		t.Fatalf("event kinds = %v, want %v", kinds, wantKinds)
-	}
-	for i := range wantKinds {
-		if kinds[i] != wantKinds[i] {
-			t.Errorf("kinds[%d] = %q, want %q", i, kinds[i], wantKinds[i])
+func TestHandleTaskRawEvents(t *testing.T) {
+	t.Run("TerminatedTaskEvents", func(t *testing.T) {
+		logDir := t.TempDir()
+
+		// Write a terminated task log with real agent messages.
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
+			Repo: "r", Branch: "caic/w0", Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		})
+		initMsg := mustJSON(t, agent.SystemInitMessage{
+			MessageType: "system", Subtype: "init", Model: "claude-opus-4-6", Version: "2.0", SessionID: "s1",
+		})
+		assistant := mustJSON(t, agent.AssistantMessage{
+			MessageType: "assistant",
+			Message: agent.APIMessage{
+				Model:   "claude-opus-4-6",
+				Content: []agent.ContentBlock{{Type: "text", Text: "I found the bug"}},
+				Usage:   agent.Usage{InputTokens: 100, OutputTokens: 50},
+			},
+		})
+		result := mustJSON(t, agent.ResultMessage{
+			MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.05, DurationMs: 1000, NumTurns: 1,
+		})
+		trailer := mustJSON(t, agent.MetaResultMessage{
+			MessageType: "caic_result", State: "terminated", CostUSD: 0.05, DurationMs: 1000,
+		})
+		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, assistant, result, trailer)
+
+		s := &Server{
+			runners: map[string]*task.Runner{},
+			tasks:   make(map[string]*taskEntry),
+			changed: make(chan struct{}),
+			logDir:  logDir,
 		}
-	}
+		if err := s.loadTerminatedTasks(); err != nil {
+			t.Fatal(err)
+		}
 
-	// Verify textDelta payloads.
-	if events[1].TextDelta == nil || events[1].TextDelta.Text != "Hello " {
-		t.Errorf("textDelta[0] = %+v, want text 'Hello '", events[1].TextDelta)
-	}
-	if events[2].TextDelta == nil || events[2].TextDelta.Text != "world" {
-		t.Errorf("textDelta[1] = %+v, want text 'world'", events[2].TextDelta)
-	}
-	// Final text event should have the complete text.
-	if events[3].Text == nil || events[3].Text.Text != "Hello world" {
-		t.Errorf("text event = %+v, want text 'Hello world'", events[3].Text)
-	}
+		s.mu.Lock()
+		if len(s.tasks) != 1 {
+			t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
+		}
+		var taskID string
+		for id := range s.tasks {
+			taskID = id
+		}
+		s.mu.Unlock()
+
+		// Subscribe to events via SSE. The handler should return immediately for
+		// terminated tasks instead of blocking until context deadline.
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
+		req.SetPathValue("id", taskID)
+		w := httptest.NewRecorder()
+		start := time.Now()
+		s.handleTaskRawEvents(w, req)
+		elapsed := time.Since(start)
+		if elapsed > 200*time.Millisecond {
+			t.Errorf("handleTaskRawEvents blocked for %v; terminated tasks should return immediately after history replay", elapsed)
+		}
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		events := parseSSEEvents(t, w.Body.String())
+		if len(events) == 0 {
+			t.Fatal("no SSE events received for terminated task with messages")
+		}
+
+		kinds := make([]dto.ClaudeEventKind, len(events))
+		for i, ev := range events {
+			kinds[i] = ev.Kind
+		}
+		wantKinds := []dto.ClaudeEventKind{dto.ClaudeEventKindInit, dto.ClaudeEventKindText, dto.ClaudeEventKindUsage, dto.ClaudeEventKindResult}
+		if len(kinds) != len(wantKinds) {
+			t.Fatalf("event kinds = %v, want %v", kinds, wantKinds)
+		}
+		for i := range wantKinds {
+			if kinds[i] != wantKinds[i] {
+				t.Errorf("kinds[%d] = %q, want %q", i, kinds[i], wantKinds[i])
+			}
+		}
+		if events[1].Text == nil || events[1].Text.Text != "I found the bug" {
+			t.Errorf("text event = %+v, want text 'I found the bug'", events[1].Text)
+		}
+	})
+
+	t.Run("StreamEventTextDelta", func(t *testing.T) {
+		logDir := t.TempDir()
+
+		// Write a terminated task log with stream events (text deltas) followed
+		// by the final assistant message, simulating --include-partial-messages output.
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "explain streaming",
+			Repo: "r", Branch: "caic/w0", Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		})
+		initMsg := mustJSON(t, agent.SystemInitMessage{
+			MessageType: "system", Subtype: "init", Model: "claude-opus-4-6", Version: "2.0", SessionID: "s1",
+		})
+		delta1 := mustJSON(t, agent.StreamEvent{
+			MessageType: "stream_event",
+			Event: agent.StreamEventData{
+				Type: "content_block_delta", Index: 0,
+				Delta: &agent.StreamDelta{Type: "text_delta", Text: "Hello "},
+			},
+		})
+		delta2 := mustJSON(t, agent.StreamEvent{
+			MessageType: "stream_event",
+			Event: agent.StreamEventData{
+				Type: "content_block_delta", Index: 0,
+				Delta: &agent.StreamDelta{Type: "text_delta", Text: "world"},
+			},
+		})
+		msgStart := mustJSON(t, agent.StreamEvent{
+			MessageType: "stream_event",
+			Event:       agent.StreamEventData{Type: "message_start"},
+		})
+		assistant := mustJSON(t, agent.AssistantMessage{
+			MessageType: "assistant",
+			Message: agent.APIMessage{
+				Model:   "claude-opus-4-6",
+				Content: []agent.ContentBlock{{Type: "text", Text: "Hello world"}},
+				Usage:   agent.Usage{InputTokens: 50, OutputTokens: 20},
+			},
+		})
+		result := mustJSON(t, agent.ResultMessage{
+			MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.02, DurationMs: 200, NumTurns: 1,
+		})
+		trailer := mustJSON(t, agent.MetaResultMessage{
+			MessageType: "caic_result", State: "terminated", CostUSD: 0.02, DurationMs: 200,
+		})
+		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, msgStart, delta1, delta2, assistant, result, trailer)
+
+		s := &Server{
+			runners: map[string]*task.Runner{},
+			tasks:   make(map[string]*taskEntry),
+			changed: make(chan struct{}),
+			logDir:  logDir,
+		}
+		if err := s.loadTerminatedTasks(); err != nil {
+			t.Fatal(err)
+		}
+
+		s.mu.Lock()
+		if len(s.tasks) != 1 {
+			t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
+		}
+		var taskID string
+		for id := range s.tasks {
+			taskID = id
+		}
+		s.mu.Unlock()
+
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
+		req.SetPathValue("id", taskID)
+		w := httptest.NewRecorder()
+		s.handleTaskRawEvents(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+
+		events := parseSSEEvents(t, w.Body.String())
+		kinds := make([]dto.ClaudeEventKind, len(events))
+		for i, ev := range events {
+			kinds[i] = ev.Kind
+		}
+		// Expect: init + 2 textDelta (message_start filtered) + text + usage + result
+		wantKinds := []dto.ClaudeEventKind{dto.ClaudeEventKindInit, dto.ClaudeEventKindTextDelta, dto.ClaudeEventKindTextDelta, dto.ClaudeEventKindText, dto.ClaudeEventKindUsage, dto.ClaudeEventKindResult}
+		if len(kinds) != len(wantKinds) {
+			t.Fatalf("event kinds = %v, want %v", kinds, wantKinds)
+		}
+		for i := range wantKinds {
+			if kinds[i] != wantKinds[i] {
+				t.Errorf("kinds[%d] = %q, want %q", i, kinds[i], wantKinds[i])
+			}
+		}
+
+		if events[1].TextDelta == nil || events[1].TextDelta.Text != "Hello " {
+			t.Errorf("textDelta[0] = %+v, want text 'Hello '", events[1].TextDelta)
+		}
+		if events[2].TextDelta == nil || events[2].TextDelta.Text != "world" {
+			t.Errorf("textDelta[1] = %+v, want text 'world'", events[2].TextDelta)
+		}
+		if events[3].Text == nil || events[3].Text.Text != "Hello world" {
+			t.Errorf("text event = %+v, want text 'Hello world'", events[3].Text)
+		}
+	})
 }

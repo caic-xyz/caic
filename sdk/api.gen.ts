@@ -17,7 +17,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const res = await fetch(path, init);
   if (!res.ok) {
     const err = (await res.json()) as ErrorResponse;
-    throw new APIError(res.status, err.error.code, err.details);
+    const e = new APIError(res.status, err.error.code, err.details);
+    e.message = err.error.message;
+    throw e;
   }
   return res.json() as Promise<T>;
 }
