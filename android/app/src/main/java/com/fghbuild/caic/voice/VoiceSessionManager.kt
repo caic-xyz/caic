@@ -3,6 +3,7 @@ package com.fghbuild.caic.voice
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 import android.media.AudioAttributes
 import android.media.AudioDeviceCallback
@@ -13,10 +14,13 @@ import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
 import android.net.Uri
 import android.util.Base64
+import android.view.KeyEvent
 import com.caic.sdk.ApiClient
 import com.fghbuild.caic.data.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -80,6 +84,7 @@ class VoiceSessionManager @Inject constructor(
     private var recordingJob: Job? = null
     private var functionHandlers: FunctionHandlers? = null
     private var deviceCallback: AudioDeviceCallback? = null
+    private var mediaSession: MediaSession? = null
 
     private val _state = MutableStateFlow(VoiceState())
     val state: StateFlow<VoiceState> = _state.asStateFlow()
@@ -170,6 +175,7 @@ class VoiceSessionManager @Inject constructor(
         try {
             refreshAvailableDevices()
             registerDeviceCallback()
+            setupMediaSession()
             setupAudioRecord()
             check(audioRecord?.state == AudioRecord.STATE_INITIALIZED) {
                 "Microphone initialization failed"
@@ -187,6 +193,7 @@ class VoiceSessionManager @Inject constructor(
     private fun releaseAudio() {
         recordingJob?.cancel()
         recordingJob = null
+        releaseMediaSession()
         unregisterDeviceCallback()
         try {
             audioRecord?.stop()
@@ -557,6 +564,43 @@ class VoiceSessionManager @Inject constructor(
 
     private fun clearCommunicationDevice() {
         audioManager.clearCommunicationDevice()
+    }
+
+    /** Create a MediaSession so Bluetooth HFP hang-up events reach us. */
+    private fun setupMediaSession() {
+        val session = MediaSession(appContext, TAG)
+        session.setCallback(object : MediaSession.Callback() {
+            override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+                val event = mediaButtonIntent.getParcelableExtra(
+                    Intent.EXTRA_KEY_EVENT, KeyEvent::class.java,
+                ) ?: return false
+                if (event.action != KeyEvent.ACTION_DOWN) return false
+                if (event.keyCode == KeyEvent.KEYCODE_HEADSETHOOK ||
+                    event.keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE ||
+                    event.keyCode == KeyEvent.KEYCODE_MEDIA_STOP
+                ) {
+                    Log.i(TAG, "Bluetooth hang-up: keyCode=${event.keyCode}")
+                    disconnect()
+                    return true
+                }
+                return false
+            }
+        }, Handler(Looper.getMainLooper()))
+        session.isActive = true
+        // Publish a "playing" playback state so the system considers us the active media
+        // session and routes Bluetooth media/call buttons to our callback.
+        session.setPlaybackState(
+            PlaybackState.Builder()
+                .setState(PlaybackState.STATE_PLAYING, 0, 1f)
+                .build()
+        )
+        mediaSession = session
+    }
+
+    private fun releaseMediaSession() {
+        mediaSession?.isActive = false
+        mediaSession?.release()
+        mediaSession = null
     }
 
     @Suppress("TooGenericExceptionCaught") // Error boundary: recording failures must not crash.
