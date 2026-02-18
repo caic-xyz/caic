@@ -94,7 +94,7 @@ func (b *mdBackend) Start(ctx context.Context, dir, branch string, labels []stri
 		image = md.DefaultBaseImage + ":latest"
 	}
 	c := b.client.Container(dir, branch)
-	if err := c.Start(ctx, &md.StartOpts{NoSSH: true, Quiet: true, BaseImage: image, Labels: labels, USB: opts.USB, Tailscale: opts.Tailscale, Display: opts.Display}); err != nil {
+	if _, err := c.Start(ctx, &md.StartOpts{Quiet: true, BaseImage: image, Labels: labels, USB: opts.USB, Tailscale: opts.Tailscale, Display: opts.Display}); err != nil {
 		return "", err
 	}
 	return c.Name, nil

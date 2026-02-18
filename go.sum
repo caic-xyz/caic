@@ -279,8 +279,8 @@ github.com/maruel/huggingface v0.1.0 h1:+xhVTNrTxDjAvS+8UYp5Swd9bY63UfYRXXKk/DO5
 github.com/maruel/huggingface v0.1.0/go.mod h1:FuW/+wdj7eREzgyAAI0TxnFyAIKc8a6TW1YDmwexrds=
 github.com/maruel/ksid v0.1.1 h1:87CbaGtU9z5Rv+soZge4Fqyb2wSBagI9TiU+nAr2eac=
 github.com/maruel/ksid v0.1.1/go.mod h1:2YHjQlYgJts/NuUEBpGA8ojsc7a07pDwVCBDIPOLiGo=
-github.com/maruel/md v0.5.1 h1:P+4PisicjBj3qEDxv1XmmJkJNKZdvfwMsJS6ud/OBx8=
-github.com/maruel/md v0.5.1/go.mod h1:E8OtQo14JygdCaJqFei6Cp2VFFtgNS/7UXhVfENkDlM=
+github.com/maruel/md v0.6.0 h1:OCq2HJAii/9NtcwiLw52VzAvZMr7Pn6T9VkhMu+N8NA=
+github.com/maruel/md v0.6.0/go.mod h1:E8OtQo14JygdCaJqFei6Cp2VFFtgNS/7UXhVfENkDlM=
 github.com/maruel/roundtrippers v0.5.0 h1:0ot2VEWg2KbrHMh67/ysw5P9HQBhMdST4QZfR7QKFBo=
 github.com/maruel/roundtrippers v0.5.0/go.mod h1:By9wgqtmfQEs7hQmz7m8N2jr2m8VDPXNIRxOtK/042U=
 github.com/maruel/safetensors v1.2.0 h1:6XFN1cXOaJwt7jBepgO7zxiLDtTorAm3EQj6sHkhpdI=
