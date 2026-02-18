@@ -1,6 +1,7 @@
-// Singleton repository managing the global SSE connection and task list state.
+// Singleton repository managing the global SSE connection, task list, and per-task event streams.
 package com.fghbuild.caic.data
 
+import com.caic.sdk.ClaudeEventMessage
 import com.caic.sdk.TaskJSON
 import com.caic.sdk.UsageResp
 import kotlinx.coroutines.CancellationException
@@ -33,6 +34,12 @@ sealed class GlobalEvent {
     data class Usage(val usage: UsageResp) : GlobalEvent()
 }
 
+/** Per-task SSE event wrapper distinguishing the "ready" sentinel from data events. */
+sealed class TaskSSEEvent {
+    data object Ready : TaskSSEEvent()
+    data class Event(val msg: ClaudeEventMessage) : TaskSSEEvent()
+}
+
 @Singleton
 class TaskRepository @Inject constructor(
     private val settingsRepository: SettingsRepository,
@@ -42,6 +49,9 @@ class TaskRepository @Inject constructor(
 
     private val _connected = MutableStateFlow(false)
     val connected: StateFlow<Boolean> = _connected.asStateFlow()
+
+    private val _usage = MutableStateFlow<UsageResp?>(null)
+    val usage: StateFlow<UsageResp?> = _usage.asStateFlow()
 
     private val client = OkHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
@@ -56,6 +66,7 @@ class TaskRepository @Inject constructor(
                 if (settings.serverURL.isBlank()) {
                     _connected.value = false
                     _tasks.value = emptyList()
+                    _usage.value = null
                     return@collectLatest
                 }
                 try {
@@ -63,7 +74,7 @@ class TaskRepository @Inject constructor(
                         _connected.value = true
                         when (event) {
                             is GlobalEvent.Tasks -> _tasks.value = event.tasks
-                            is GlobalEvent.Usage -> { /* Usage updates not displayed yet. */ }
+                            is GlobalEvent.Usage -> _usage.value = event.usage
                         }
                     }
                 } catch (e: CancellationException) {
@@ -73,6 +84,45 @@ class TaskRepository @Inject constructor(
                 }
             }
         }
+    }
+
+    /** Returns the current server URL, or empty if not configured. */
+    fun serverURL(): String = settingsRepository.settings.value.serverURL
+
+    /**
+     * Per-task raw SSE flow that emits [TaskSSEEvent.Event] for message events and
+     * [TaskSSEEvent.Ready] when the server signals history replay is complete.
+     * The SSE "type" field is "ready" for the sentinel, absent for data events.
+     */
+    fun taskRawEventsWithReady(baseURL: String, taskId: String): Flow<TaskSSEEvent> = callbackFlow {
+        val request = Request.Builder()
+            .url("$baseURL/api/v1/tasks/$taskId/raw_events")
+            .header("Accept", "text/event-stream")
+            .build()
+        val factory = EventSources.createFactory(client)
+        val source = factory.newEventSource(request, object : EventSourceListener() {
+            override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
+                if (type == "ready") {
+                    trySend(TaskSSEEvent.Ready)
+                    return
+                }
+                try {
+                    val msg = json.decodeFromString<ClaudeEventMessage>(data)
+                    trySend(TaskSSEEvent.Event(msg))
+                } catch (_: Exception) {
+                    // Skip malformed events.
+                }
+            }
+
+            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                close(t?.let { IOException("SSE connection failed", it) })
+            }
+
+            override fun onClosed(eventSource: EventSource) {
+                close()
+            }
+        })
+        awaitClose { source.cancel() }
     }
 
     /** Raw SSE flow for the global events endpoint. Emits one [GlobalEvent] per SSE message. */

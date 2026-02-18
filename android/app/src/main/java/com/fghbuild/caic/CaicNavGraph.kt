@@ -33,6 +33,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.fghbuild.caic.navigation.Screen
 import com.fghbuild.caic.ui.settings.SettingsScreen
+import com.fghbuild.caic.ui.taskdetail.TaskDetailScreen
 import com.fghbuild.caic.ui.tasklist.TaskListScreen
 import com.fghbuild.caic.voice.VoicePanel
 import com.fghbuild.caic.voice.VoiceViewModel
@@ -110,10 +111,21 @@ fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
                 composable(Screen.TaskList.route) {
                     TaskListScreen(
                         onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
+                        onNavigateToTask = { taskId ->
+                            navController.navigate(Screen.TaskDetail(taskId).route)
+                        },
                     )
                 }
                 composable(Screen.Settings.route) {
                     SettingsScreen(
+                        onNavigateBack = { navController.popBackStack() },
+                    )
+                }
+                composable(Screen.TaskDetail.ROUTE) { backStackEntry ->
+                    val taskId = backStackEntry.arguments?.getString(Screen.TaskDetail.ARG_TASK_ID)
+                        ?: return@composable
+                    TaskDetailScreen(
+                        taskId = taskId,
                         onNavigateBack = { navController.popBackStack() },
                     )
                 }
