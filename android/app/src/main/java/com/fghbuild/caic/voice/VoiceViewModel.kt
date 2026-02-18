@@ -31,6 +31,9 @@ class VoiceViewModel @Inject constructor(
 
     private var previousTaskStates: Map<String, String> = emptyMap()
 
+    /** Task IDs that were already terminated/failed when the voice session connected. */
+    private var preTerminatedIds: Set<String> = emptySet()
+
     init {
         // Inject snapshot when the session transitions to connected.
         viewModelScope.launch {
@@ -40,8 +43,13 @@ class VoiceViewModel @Inject constructor(
                 .collect { connected ->
                     if (connected) {
                         val tasks = taskRepository.tasks.value
-                        taskNumberMap.update(tasks)
-                        voiceSessionManager.injectText(buildSnapshot(tasks))
+                        preTerminatedIds = tasks
+                            .filter { it.state == "terminated" || it.state == "failed" }
+                            .map { it.id }
+                            .toSet()
+                        val active = tasks.filter { it.id !in preTerminatedIds }
+                        taskNumberMap.update(active)
+                        voiceSessionManager.injectText(buildSnapshot(active))
                         previousTaskStates = tasks.associate { it.id to it.state }
                     }
                 }
@@ -49,7 +57,7 @@ class VoiceViewModel @Inject constructor(
         // Track state changes for diff-based notifications while connected.
         viewModelScope.launch {
             taskRepository.tasks.collect { tasks ->
-                taskNumberMap.update(tasks)
+                taskNumberMap.update(tasks.filter { it.id !in preTerminatedIds })
                 if (voiceSessionManager.state.value.connected) {
                     notifyTaskChanges(tasks)
                 }
@@ -91,12 +99,7 @@ class VoiceViewModel @Inject constructor(
             val shortName = task.task.lines().firstOrNull()?.take(SHORT_NAME_MAX) ?: task.id
             val base = "- Task #$num: $shortName (${task.state}, ${formatElapsed(task.durationMs)}" +
                 ", ${formatCost(task.costUSD)}, ${task.harness})"
-            when {
-                task.state == "asking" -> "$base — needs input"
-                task.state == "terminated" && task.result != null ->
-                    "$base — Completed: ${task.result!!.take(RESULT_SNIPPET_MAX)}"
-                else -> base
-            }
+            if (task.state == "asking") "$base — needs input" else base
         }
         return "[Current tasks at session start]\n$lines"
     }
@@ -124,6 +127,5 @@ class VoiceViewModel @Inject constructor(
 
     companion object {
         private const val SHORT_NAME_MAX = 30
-        private const val RESULT_SNIPPET_MAX = 80
     }
 }
