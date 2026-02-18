@@ -592,7 +592,9 @@ class ApiClient(baseURL: String) {
 
     private suspend inline fun <reified T> request(method: String, path: String, body: String? = null): T {
         val url = "$baseURL$path"
+        val needsBody = method in listOf("POST", "PUT", "PATCH")
         val requestBody = body?.toRequestBody(jsonMediaType)
+            ?: if (needsBody) "".toRequestBody(jsonMediaType) else null
         val request = Request.Builder()
             .url(url)
             .method(method, requestBody)
