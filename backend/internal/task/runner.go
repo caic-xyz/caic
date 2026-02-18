@@ -411,7 +411,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (string, e
 	}
 
 	t.setState(StateProvisioning)
-	slog.Info("starting container", "repo", t.Repo, "branch", t.Branch)
+	slog.Info("starting container", "repo", t.Repo, "branch", t.Branch, "image", t.Image, "harness", t.Harness, "tailscale", t.Tailscale, "usb", t.USB, "display", t.Display)
 	startCtx, startCancel := context.WithTimeout(detached, r.ContainerStartTimeout)
 	defer startCancel()
 	name, err := r.Container.Start(startCtx, r.Dir, t.Branch, labels, StartOptions{
