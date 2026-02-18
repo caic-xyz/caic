@@ -4,8 +4,49 @@ Coding Agents in Containers. Manage multiple coding agents.
 
 Some people use IDEs. Some people use git-worktrees. Some people use Claude Code Web or Jules, or Cursor
 Cloud Agents. What if you want to develop safely in YOLO mode but you need a local high performance machine to
-run the tests? Enters ciac: manages local docker containers to run your agents locally. Access them from your
+run the tests?
+
+Enters **ciac**: manages local docker containers to run your agents locally. Access them from your
 phone with Tailscale. All private.
+
+## Installation
+
+```bash
+go install github.com/maruel/caic/backend/cmd/caic@latest
+```
+
+### systemd user service
+
+Install the unit file and env file, then enable the service:
+
+```bash
+mkdir -p ~/.config/systemd/user ~/.config/caic
+cp contrib/caic.service ~/.config/systemd/user/
+cp contrib/caic.env ~/.config/caic/caic.env
+# Edit ~/.config/caic/caic.env to set CAIC_HTTP, CAIC_ROOT, and API keys.
+systemctl --user daemon-reload
+systemctl --user enable --now caic
+```
+
+View logs:
+
+```bash
+journalctl --user -u caic -f
+```
+
+## Serving over Tailscale
+
+Safely expose `caic` on your [Tailscale](https://tailscale.com/) network using `tailscale serve`. This
+provides secure access from any device on your tailnet without opening ports or configuring firewalls.
+
+```bash
+# Expose caic on your tailnet at https://<hostname>.<tailnet>.ts.net
+tailscale serve --bg 8080
+```
+
+**HTTPS**: Tailscale serve provides HTTPS automatically via Let's Encrypt TLS certificates.
+
+Do not use tailscale funnel.
 
 ## Architecture
 
@@ -47,31 +88,6 @@ independent of the SSH session). On restart the server:
 **Relay dead (Claude crashed):** Falls back to host-side JSONL logs and
 `claude --resume` to start a new session continuing the conversation.
 
-## Installation
-
-```bash
-go install github.com/maruel/caic/backend/cmd/caic@latest
-```
-
-### systemd user service
-
-Install the unit file and env file, then enable the service:
-
-```bash
-mkdir -p ~/.config/systemd/user ~/.config/caic
-cp contrib/caic.service ~/.config/systemd/user/
-cp contrib/caic.env ~/.config/caic/caic.env
-# Edit ~/.config/caic/caic.env to set CAIC_HTTP, CAIC_ROOT, and API keys.
-systemctl --user daemon-reload
-systemctl --user enable --now caic
-```
-
-View logs:
-
-```bash
-journalctl --user -u caic -f
-```
-
 ## Android App
 
 Voice-first companion app to manage coding agents from your phone.
@@ -95,17 +111,3 @@ To build without installing:
 ```bash
 make android-build
 ```
-
-## Serving over Tailscale
-
-Safely expose caic on your [Tailscale](https://tailscale.com/) network using `tailscale serve`. This provides
-secure access from any device on your tailnet without opening ports or configuring firewalls.
-
-```bash
-# Expose caic on your tailnet at https://<hostname>.<tailnet>.ts.net
-tailscale serve --bg 8080
-```
-
-**HTTPS**: Tailscale serve provides HTTPS automatically via Let's Encrypt TLS certificates.
-
-Do not use tailscale funnel.
