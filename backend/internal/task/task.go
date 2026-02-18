@@ -107,7 +107,7 @@ type Task struct {
 	liveNumTurns   int
 	liveDurationMs int64
 	liveUsage      agent.Usage
-	lastUsage      agent.Usage // Most recent ResultMessage usage (active context).
+	lastUsage      agent.Usage    // Most recent ResultMessage usage (active context).
 	liveDiffStat   agent.DiffStat // Updated by DiffStatMessage from relay.
 }
 
@@ -139,7 +139,7 @@ func (t *Task) SetStateIf(expected, next State) bool {
 
 // LiveStats returns the latest cost, turn count, duration, cumulative token
 // usage, and the most recent turn's usage (active context).
-func (t *Task) LiveStats() (costUSD float64, numTurns int, durationMs int64, cumulativeUsage agent.Usage, lastTurnUsage agent.Usage) {
+func (t *Task) LiveStats() (costUSD float64, numTurns int, durationMs int64, cumulativeUsage, lastTurnUsage agent.Usage) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.liveCostUSD, t.liveNumTurns, t.liveDurationMs, t.liveUsage, t.lastUsage
