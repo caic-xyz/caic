@@ -321,7 +321,7 @@ export default function App() {
           type="text"
           value={selectedImage()}
           onInput={(e) => setSelectedImage(e.currentTarget.value)}
-          placeholder="ghcr.io/maruel/md:latest"
+          placeholder="ghcr.io/maruel/md:latest (Docker image)"
           disabled={submitting()}
           class={styles.imageInput}
         />
