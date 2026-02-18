@@ -53,11 +53,7 @@ func newUsageFetcher(ctx context.Context) *usageFetcher {
 		return nil
 	}
 	credPath := filepath.Join(home, ".claude", ".credentials.json")
-
-	token := os.Getenv("CLAUDE_OAUTH_TOKEN")
-	if token == "" {
-		token = readCredentialsToken()
-	}
+	token := readCredentialsToken(credPath)
 	if token == "" {
 		slog.Warn("no Claude OAuth token found; usage endpoint disabled (will watch for credentials)")
 	}
@@ -121,7 +117,7 @@ func (f *usageFetcher) watchLoop(ctx context.Context) {
 }
 
 func (f *usageFetcher) onCredentialsChanged() {
-	token := readCredentialsToken()
+	token := readCredentialsToken(f.credPath)
 	if token == "" {
 		return
 	}
@@ -246,22 +242,18 @@ func (f *usageFetcher) fetch() (*dto.UsageResp, error) {
 }
 
 // readCredentialsToken reads the OAuth token from ~/.claude/.credentials.json.
-func readCredentialsToken() string {
-	home, err := os.UserHomeDir()
+func readCredentialsToken(credPath string) string {
+	var creds claudeCreds
+	data, err := os.ReadFile(credPath) //nolint:gosec // credPath is derived from os.UserHomeDir, not user input
 	if err != nil {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".claude", ".credentials.json")) //nolint:gosec // fixed well-known path
-	if err != nil {
-		return ""
-	}
-	var creds struct {
-		ClaudeAiOauth struct {
-			AccessToken string `json:"accessToken"` //nolint:gosec // struct field for JSON unmarshaling, not an exposed secret
-		} `json:"claudeAiOauth"`
-	}
-	if json.Unmarshal(data, &creds) != nil {
-		return ""
-	}
+	_ = json.Unmarshal(data, &creds)
 	return creds.ClaudeAiOauth.AccessToken
+}
+
+type claudeCreds struct {
+	ClaudeAiOauth struct {
+		AccessToken string `json:"accessToken"` //nolint:gosec // struct field for JSON unmarshaling, not an exposed secret
+	} `json:"claudeAiOauth"`
 }

@@ -42,27 +42,34 @@ func mainImpl() error {
 
 	initLogging(*logLevel)
 
-	if key := os.Getenv("GEMINI_API_KEY"); key != "" {
+	cfg := &server.Config{
+		GeminiAPIKey:          os.Getenv("GEMINI_API_KEY"),
+		TailscaleAPIKey:       os.Getenv("TAILSCALE_API_KEY"),
+		CommitDescGenProvider: os.Getenv("ASK_PROVIDER"),
+		CommitDescGenModel:    os.Getenv("ASK_MODEL"),
+	}
+
+	if key := cfg.GeminiAPIKey; key != "" {
 		suffix := key
 		if len(suffix) > 4 {
 			suffix = suffix[len(suffix)-4:]
 		}
-		slog.Info("GEMINI_API_KEY configured", "suffix", suffix) //nolint:gosec // G706: suffix is at most 4 chars, structured log attribute
+		slog.Info("GEMINI_API_KEY configured", "suffix", suffix)
 	} else {
 		slog.Warn("GEMINI_API_KEY not set")
 	}
-	if key := os.Getenv("TAILSCALE_API_KEY"); key != "" {
+	if key := cfg.TailscaleAPIKey; key != "" {
 		suffix := key
 		if len(suffix) > 4 {
 			suffix = suffix[len(suffix)-4:]
 		}
-		slog.Info("TAILSCALE_API_KEY configured", "suffix", suffix) //nolint:gosec // G706: suffix is at most 4 chars, structured log attribute
+		slog.Info("TAILSCALE_API_KEY configured", "suffix", suffix)
 	} else {
 		slog.Warn("TAILSCALE_API_KEY not set")
 	}
 
 	if *fakeMode {
-		return serveFake(ctx, *addr, *root)
+		return serveFake(ctx, *addr, *root, cfg)
 	}
 	if *addr == "" {
 		return errors.New("-http is required")
@@ -77,7 +84,7 @@ func mainImpl() error {
 	if err := watchExecutable(ctx, cancel); err != nil {
 		slog.Warn("failed to watch executable", "err", err)
 	}
-	return serveHTTP(ctx, *addr, *root, *maxTurns, logDir)
+	return serveHTTP(ctx, *addr, *root, *maxTurns, logDir, cfg)
 }
 
 // initLogging configures slog with tint for colored, concise output.
@@ -133,8 +140,8 @@ func initLogging(level string) {
 	})))
 }
 
-func serveHTTP(ctx context.Context, addr, rootDir string, maxTurns int, logDir string) error {
-	srv, err := server.New(ctx, rootDir, maxTurns, logDir)
+func serveHTTP(ctx context.Context, addr, rootDir string, maxTurns int, logDir string, cfg *server.Config) error {
+	srv, err := server.New(ctx, rootDir, maxTurns, logDir, cfg)
 	if err != nil {
 		return err
 	}
@@ -154,7 +161,7 @@ func main() {
 
 // serveFake starts the HTTP server with fake container/agent ops and a temp
 // git repo. Used for e2e testing without md CLI or SSH.
-func serveFake(ctx context.Context, addr, rootDir string) error {
+func serveFake(ctx context.Context, addr, rootDir string, cfg *server.Config) error {
 	if addr == "" {
 		addr = ":8090"
 	}
@@ -174,7 +181,7 @@ func serveFake(ctx context.Context, addr, rootDir string) error {
 	}
 
 	logDir := filepath.Join(os.TempDir(), "caic-e2e-logs")
-	srv, err := server.New(ctx, rootDir, 1, logDir)
+	srv, err := server.New(ctx, rootDir, 1, logDir, cfg)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}

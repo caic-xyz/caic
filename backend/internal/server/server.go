@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -53,22 +52,40 @@ type AuthToken struct {
 	Name string `json:"name"`
 }
 
+// Config bundles environment-derived values read once at startup and threaded
+// into the server instead of calling os.Getenv at runtime.
+type Config struct {
+	// GeminiAPIKey is necessary to support Gemini Live audio.
+	GeminiAPIKey string
+	// CommitDescGenProvider is the genai provider to implement git commit automatic description.
+	CommitDescGenProvider string
+	// CommitDescGenModel is the model to implement git commit automatic description.
+	CommitDescGenModel string
+	// TailscaleAPIKey is necessary to support Tailscale networking inside the container.
+	TailscaleAPIKey string
+}
+
 // Server is the HTTP server for the caic web UI.
 type Server struct {
-	ctx      context.Context // server-lifetime context; outlives individual HTTP requests
-	repos    []repoInfo
-	runners  map[string]*task.Runner // keyed by RelPath
-	mdClient *md.Client
-	mu       sync.Mutex
-	tasks    map[string]*taskEntry
-	changed  chan struct{} // closed on task mutation; replaced under mu
-	maxTurns int
-	logDir   string
-	usage    *usageFetcher // nil if no OAuth token available
+	ctx          context.Context // server-lifetime context; outlives individual HTTP requests
+	repos        []repoInfo
+	runners      map[string]*task.Runner // keyed by RelPath
+	mdClient     *md.Client
+	mu           sync.Mutex
+	tasks        map[string]*taskEntry
+	changed      chan struct{} // closed on task mutation; replaced under mu
+	maxTurns     int
+	logDir       string
+	usage        *usageFetcher // nil if no OAuth token available
+	geminiAPIKey string
 }
 
 // mdBackend adapts *md.Client to task.ContainerBackend.
-type mdBackend struct{ client *md.Client }
+type mdBackend struct {
+	client      *md.Client
+	askProvider string
+	askModel    string
+}
 
 func (b *mdBackend) Start(ctx context.Context, dir, branch string, labels []string, opts task.StartOptions) (string, error) {
 	slog.Info("md start", "dir", dir, "branch", branch, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display)
@@ -94,7 +111,7 @@ func (b *mdBackend) Diff(ctx context.Context, dir, branch string, args ...string
 
 func (b *mdBackend) Fetch(ctx context.Context, dir, branch string) error {
 	slog.Info("md fetch", "dir", dir, "branch", branch)
-	return b.client.Container(dir, branch).Fetch(ctx, os.Getenv("ASK_PROVIDER"), os.Getenv("ASK_MODEL"))
+	return b.client.Container(dir, branch).Fetch(ctx, b.askProvider, b.askModel)
 }
 
 func (b *mdBackend) Kill(ctx context.Context, dir, branch string) error {
@@ -121,7 +138,7 @@ type taskEntry struct {
 //     entries for them. If a container's relay is alive, auto-attach to
 //     resume streaming. Stale terminated entries (from step 3) that match a
 //     live container are replaced.
-func New(ctx context.Context, rootDir string, maxTurns int, logDir string) (*Server, error) {
+func New(ctx context.Context, rootDir string, maxTurns int, logDir string, cfg *Config) (*Server, error) {
 	if logDir == "" {
 		return nil, errors.New("logDir is required")
 	}
@@ -139,21 +156,22 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string) (*Ser
 	}
 
 	s := &Server{
-		ctx:      ctx,
-		runners:  make(map[string]*task.Runner, len(absPaths)),
-		tasks:    make(map[string]*taskEntry),
-		changed:  make(chan struct{}),
-		maxTurns: maxTurns,
-		logDir:   logDir,
-		usage:    newUsageFetcher(ctx),
+		ctx:          ctx,
+		runners:      make(map[string]*task.Runner, len(absPaths)),
+		tasks:        make(map[string]*taskEntry),
+		changed:      make(chan struct{}),
+		maxTurns:     maxTurns,
+		logDir:       logDir,
+		usage:        newUsageFetcher(ctx),
+		geminiAPIKey: cfg.GeminiAPIKey,
 	}
 
-	mdClient, err := container.New()
+	mdClient, err := container.New(cfg.TailscaleAPIKey)
 	if err != nil {
 		return nil, fmt.Errorf("init container library: %w", err)
 	}
 	s.mdClient = mdClient
-	backend := &mdBackend{client: mdClient}
+	backend := &mdBackend{client: mdClient, askProvider: cfg.CommitDescGenProvider, askModel: cfg.CommitDescGenModel}
 
 	type repoResult struct {
 		info   repoInfo
@@ -285,7 +303,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 
 func (s *Server) getConfig(_ context.Context, _ *dto.EmptyReq) (*dto.ConfigJSON, error) {
 	return &dto.ConfigJSON{
-		TailscaleAvailable: s.mdClient != nil && s.mdClient.TailscaleAPIKey != "",
+		TailscaleAvailable: s.mdClient.TailscaleAPIKey != "",
 		USBAvailable:       runtime.GOOS == "linux",
 		DisplayAvailable:   true,
 	}, nil
@@ -712,11 +730,11 @@ func (s *Server) handleGetUsage(w http.ResponseWriter, _ *http.Request) {
 // TODO(security): Switch back to ephemeral tokens once v1beta supports
 // auth_tokens or v1alpha quality improves. See getVoiceTokenEphemeral.
 func (s *Server) getVoiceToken(_ context.Context, _ *dto.EmptyReq) (*dto.VoiceTokenResp, error) {
-	apiKey := os.Getenv("GEMINI_API_KEY")
+	apiKey := s.geminiAPIKey
 	if apiKey == "" {
 		return nil, dto.InternalError("GEMINI_API_KEY not configured")
 	}
-	slog.Info("voice token", "api_key_len", len(apiKey), "mode", "raw_key") //nolint:gosec // structured logging, no injection
+	slog.Info("voice token", "api_key_len", len(apiKey), "mode", "raw_key")
 	expireTime := time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339)
 	return &dto.VoiceTokenResp{
 		Token:     apiKey,
@@ -735,11 +753,11 @@ func (s *Server) getVoiceToken(_ context.Context, _ *dto.EmptyReq) (*dto.VoiceTo
 //
 // See https://ai.google.dev/gemini-api/docs/ephemeral-tokens
 func (s *Server) getVoiceTokenEphemeral(ctx context.Context, _ *dto.EmptyReq) (*dto.VoiceTokenResp, error) { //nolint:unused // kept for future use
-	apiKey := os.Getenv("GEMINI_API_KEY")
+	apiKey := s.geminiAPIKey
 	if apiKey == "" {
 		return nil, dto.InternalError("GEMINI_API_KEY not configured")
 	}
-	slog.Info("voice token", "api_key_len", len(apiKey), "mode", "ephemeral") //nolint:gosec // structured logging, no injection
+	slog.Info("voice token", "api_key_len", len(apiKey), "mode", "ephemeral")
 	now := time.Now().UTC()
 	expireTime := now.Add(30 * time.Minute).Format(time.RFC3339)
 	newSessionExpire := now.Add(2 * time.Minute).Format(time.RFC3339)
@@ -867,9 +885,6 @@ func (s *Server) loadTerminatedTasks() error {
 //     can replace stale entries.
 //  4. For each container matching a caic repo, call adoptOne concurrently.
 func (s *Server) adoptContainers(ctx context.Context) error {
-	if s.mdClient == nil {
-		return nil
-	}
 	containers, err := s.mdClient.List(ctx)
 	if err != nil {
 		slog.Warn("cannot list containers, skipping adoption", "err", err)

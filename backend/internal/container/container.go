@@ -14,13 +14,13 @@ import (
 )
 
 // New creates an md.Client for container operations.
-func New() (*md.Client, error) {
+func New(tailscaleAPIKey string) (*md.Client, error) {
 	c, err := md.New()
 	if err != nil {
 		return nil, err
 	}
 	c.W = os.Stderr
-	c.TailscaleAPIKey = os.Getenv("TAILSCALE_API_KEY")
+	c.TailscaleAPIKey = tailscaleAPIKey
 	return c, nil
 }
 

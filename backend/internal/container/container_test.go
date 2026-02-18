@@ -3,7 +3,7 @@ package container
 import "testing"
 
 func TestNew(t *testing.T) {
-	c, err := New()
+	c, err := New("")
 	if err != nil {
 		t.Fatal(err)
 	}
