@@ -104,3 +104,10 @@
   color: red;
   font-size: 0.8rem;
 }
+
+@media (max-width: 768px) {
+  .metaRow {
+    justify-content: center;
+    text-align: center;
+  }
+}
