@@ -3,7 +3,6 @@ package com.fghbuild.caic.voice
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.Intent
 import android.util.Log
 import android.media.AudioAttributes
 import android.media.AudioDeviceCallback
@@ -15,13 +14,10 @@ import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
 import android.media.audiofx.AcousticEchoCanceler
-import android.media.session.MediaSession
-import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
 import android.net.Uri
 import android.util.Base64
-import android.view.KeyEvent
 import com.caic.sdk.ApiClient
 import com.fghbuild.caic.data.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -85,7 +81,6 @@ class VoiceSessionManager @Inject constructor(
     private var recordingJob: Job? = null
     private var functionHandlers: FunctionHandlers? = null
     private var deviceCallback: AudioDeviceCallback? = null
-    private var mediaSession: MediaSession? = null
     private var audioFocusRequest: AudioFocusRequest? = null
 
     private val _state = MutableStateFlow(VoiceState())
@@ -179,7 +174,6 @@ class VoiceSessionManager @Inject constructor(
             VoiceService.start(appContext)
             refreshAvailableDevices()
             registerDeviceCallback()
-            setupMediaSession()
             setupAudioRecord()
             check(audioRecord?.state == AudioRecord.STATE_INITIALIZED) {
                 "Microphone initialization failed"
@@ -199,7 +193,6 @@ class VoiceSessionManager @Inject constructor(
         VoiceService.stop(appContext)
         recordingJob?.cancel()
         recordingJob = null
-        releaseMediaSession()
         unregisterDeviceCallback()
         try {
             audioRecord?.stop()
@@ -500,11 +493,11 @@ class VoiceSessionManager @Inject constructor(
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
         )
-        // Match Firebase AI SDK: USAGE_MEDIA (not VOICE_COMMUNICATION).
+        // USAGE_VOICE_COMMUNICATION so the car's HFP profile shows call UI / hang-up button.
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
@@ -556,7 +549,16 @@ class VoiceSessionManager @Inject constructor(
                 refreshAvailableDevices()
             }
             override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
-                refreshAvailableDevices()
+                val selectedId = _state.value.selectedDeviceId
+                val lostBt = selectedId != null && removedDevices?.any {
+                    it.id == selectedId && it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                } == true
+                if (lostBt) {
+                    Log.i(TAG, "Selected Bluetooth device removed, disconnecting")
+                    disconnect()
+                } else {
+                    refreshAvailableDevices()
+                }
             }
         }
         deviceCallback = cb
@@ -577,13 +579,15 @@ class VoiceSessionManager @Inject constructor(
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
             .setOnAudioFocusChangeListener { focusChange ->
-                if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
-                    Log.i(TAG, "Audio focus lost, disconnecting")
+                if (focusChange == AudioManager.AUDIOFOCUS_LOSS ||
+                    focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
+                ) {
+                    Log.i(TAG, "Audio focus lost (change=$focusChange), disconnecting")
                     disconnect()
                 }
             }
@@ -595,43 +599,6 @@ class VoiceSessionManager @Inject constructor(
     private fun abandonAudioFocus() {
         audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
         audioFocusRequest = null
-    }
-
-    /** Create a MediaSession so Bluetooth HFP hang-up events reach us. */
-    private fun setupMediaSession() {
-        val session = MediaSession(appContext, TAG)
-        session.setCallback(object : MediaSession.Callback() {
-            override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
-                val event = mediaButtonIntent.getParcelableExtra(
-                    Intent.EXTRA_KEY_EVENT, KeyEvent::class.java,
-                ) ?: return false
-                if (event.action != KeyEvent.ACTION_DOWN) return false
-                if (event.keyCode == KeyEvent.KEYCODE_HEADSETHOOK ||
-                    event.keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE ||
-                    event.keyCode == KeyEvent.KEYCODE_MEDIA_STOP
-                ) {
-                    Log.i(TAG, "Bluetooth hang-up: keyCode=${event.keyCode}")
-                    disconnect()
-                    return true
-                }
-                return false
-            }
-        }, Handler(Looper.getMainLooper()))
-        session.isActive = true
-        // Publish a "playing" playback state so the system considers us the active media
-        // session and routes Bluetooth media/call buttons to our callback.
-        session.setPlaybackState(
-            PlaybackState.Builder()
-                .setState(PlaybackState.STATE_PLAYING, 0, 1f)
-                .build()
-        )
-        mediaSession = session
-    }
-
-    private fun releaseMediaSession() {
-        mediaSession?.isActive = false
-        mediaSession?.release()
-        mediaSession = null
     }
 
     @Suppress("TooGenericExceptionCaught") // Error boundary: recording failures must not crash.
