@@ -65,7 +65,7 @@ private const val PAUSE_POLL_MS = 20L
 
 @Singleton
 class VoiceSessionManager @Inject constructor(
-    @ApplicationContext private val appContext: Context,
+    @param:ApplicationContext private val appContext: Context,
     private val settingsRepository: SettingsRepository,
 ) {
     private val audioManager = appContext.getSystemService(AudioManager::class.java)
