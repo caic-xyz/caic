@@ -413,6 +413,29 @@ a.headerRepo:hover {
   margin-top: 0.25rem;
 }
 
+@keyframes toolSpin {
+  to { transform: rotate(360deg); }
+}
+
+.toolPending {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-right: 0.4em;
+  border: 2px solid #ccc;
+  border-top-color: #666;
+  border-radius: 50%;
+  animation: toolSpin 0.8s linear infinite;
+  vertical-align: middle;
+}
+
+.toolDone {
+  margin-right: 0.3em;
+  color: #4a4;
+  font-weight: bold;
+  font-size: 0.85em;
+}
+
 .toolDetail {
   margin-left: 0.5em;
   font-size: 0.75rem;

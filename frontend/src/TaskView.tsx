@@ -31,9 +31,12 @@ interface MessageGroup {
 }
 
 // A tool_use event paired with its optional tool_result.
+// done is true when the tool has completed — either via an explicit result
+// event or implicitly because a later event arrived (the agent moved on).
 interface ToolCall {
   use: ClaudeEventToolUse;
   result?: ClaudeEventToolResult;
+  done: boolean;
 }
 
 // A turn is a sequence of message groups between user interactions.
@@ -470,7 +473,7 @@ function groupMessages(msgs: ClaudeEventMessage[]): MessageGroup[] {
       case "toolUse": {
         if (ev.toolUse) {
           const last = lastGroup();
-          const call: ToolCall = { use: ev.toolUse };
+          const call: ToolCall = { use: ev.toolUse, done: false };
           if (last && last.kind === "tool") {
             last.events.push(ev);
             last.toolCalls.push(call);
@@ -482,15 +485,23 @@ function groupMessages(msgs: ClaudeEventMessage[]): MessageGroup[] {
       }
       case "toolResult": {
         if (ev.toolResult) {
-          const last = lastGroup();
-          if (last && last.kind === "tool") {
-            last.events.push(ev);
-            const tr = ev.toolResult;
-            const match = last.toolCalls.find((tc) => tc.use.toolUseID === tr.toolUseID && !tc.result);
-            if (match) {
-              match.result = ev.toolResult;
+          const tr = ev.toolResult;
+          // Search all tool groups for the matching toolUseID — results may
+          // arrive after intervening text/other groups, not just the last group.
+          let matched = false;
+          for (let i = groups.length - 1; i >= 0; i--) {
+            const g = groups[i];
+            if (g.kind !== "tool") continue;
+            const tc = g.toolCalls.find((c) => c.use.toolUseID === tr.toolUseID && !c.result);
+            if (tc) {
+              tc.result = tr;
+              tc.done = true;
+              g.events.push(ev);
+              matched = true;
+              break;
             }
-          } else {
+          }
+          if (!matched) {
             groups.push({ kind: "tool", events: [ev], toolCalls: [] });
           }
         }
@@ -527,6 +538,19 @@ function groupMessages(msgs: ClaudeEventMessage[]): MessageGroup[] {
       default:
         groups.push({ kind: "other", events: [ev], toolCalls: [] });
         break;
+    }
+  }
+  // Mark tool calls as implicitly done when later events exist.
+  // Claude Code doesn't emit explicit toolResult events for synchronous
+  // tools (Read, Edit, Grep, etc.), so any tool call followed by a later
+  // group is implicitly complete — only the very last tool group may have
+  // genuinely pending calls.
+  const lastToolGroupIdx = groups.findLastIndex((g) => g.kind === "tool");
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i];
+    if (g.kind !== "tool") continue;
+    if (i < lastToolGroupIdx || i < groups.length - 1) {
+      for (const tc of g.toolCalls) tc.done = true;
     }
   }
   return groups;
@@ -599,7 +623,7 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[] }) {
         <details class={styles.toolGroup} open={isOpen()}
           onToggle={(e) => detailsOpenState.set(groupKey(), e.currentTarget.open)}>
           <summary>
-            {calls().length} tools: {toolCountSummary(calls())}
+            {calls().filter((c) => c.done).length}/{calls().length} tools: {toolCountSummary(calls())}
           </summary>
           <div class={styles.toolGroupInner}>
             <For each={calls()}>
@@ -782,6 +806,9 @@ function ToolCallBlock(props: { call: ToolCall; open: boolean; onToggle: (open: 
     <details class={styles.toolBlock} open={props.open}
       onToggle={(e) => props.onToggle(e.currentTarget.open)}>
       <summary>
+        <Show when={!props.call.done} fallback={<span class={styles.toolDone}>&#10003;</span>}>
+          <span class={styles.toolPending} />
+        </Show>
         {props.call.use.name}
         <Show when={detail()}>
           <span class={styles.toolDetail}>{detail()}</span>

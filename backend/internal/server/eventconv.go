@@ -169,6 +169,13 @@ func (tt *toolTimingTracker) convertAssistant(m *agent.AssistantMessage, ts int6
 
 func (tt *toolTimingTracker) convertUser(m *agent.UserMessage, ts int64, now time.Time) []dto.ClaudeEventMessage {
 	// User text input (no parent tool) vs tool result.
+	//
+	// NOTE: Claude Code only emits UserMessage with ParentToolUseID for
+	// background/async tools (e.g. Task subagent). Synchronous built-in tools
+	// (Read, Edit, Grep, Glob, Bash, Write, etc.) execute internally and their
+	// results are fed back to the API without emitting a "user" message on the
+	// stream-json output. The frontend must infer completion for these tools
+	// from subsequent events rather than waiting for an explicit toolResult.
 	if m.ParentToolUseID == nil {
 		text := extractUserInputText(m.Message)
 		if text == "" {
