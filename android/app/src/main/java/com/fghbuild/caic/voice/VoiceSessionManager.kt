@@ -683,6 +683,9 @@ class VoiceSessionManager @Inject constructor(
                 "At session start you receive a snapshot of all current tasks. Use it to " +
                 "answer questions about task status without calling list_tasks first. Call " +
                 "get_task_detail when the user asks for specifics (recent events, diffs).\n\n" +
+                "## On connection\n" +
+                "When the session starts, say only \"Ready\" and nothing else. Wait for " +
+                "the user to speak first.\n\n" +
                 "## Tools available\n" +
                 "create_task, list_tasks, get_task_detail, send_message, answer_question, " +
                 "sync_task, terminate_task, restart_task, set_active_task.\n\n" +
