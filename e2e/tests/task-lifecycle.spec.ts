@@ -12,7 +12,7 @@ test("create task, verify streaming text and result, then terminate", async ({ p
 
   // Fill prompt and submit.
   await page.fill('textarea[placeholder="Describe a task..."]', prompt);
-  await page.getByRole("button", { name: "Run" }).click();
+  await page.getByRole("button", { name: "Start a new container with this prompt" }).click();
 
   // Click the task card to open TaskView.
   await page.getByText(prompt).first().click();
