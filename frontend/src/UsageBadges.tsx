@@ -70,7 +70,7 @@ export default function UsageBadges(props: { usage: Accessor<UsageResp | null>; 
             <Badge label="5h" window={u.fiveHour} now={props.now} yellowAt={80} redAt={90} />
           </Show>
           <Show when={u.sevenDay.resetsAt}>
-            <Badge label="Weekly" window={u.sevenDay} now={props.now} yellowAt={90} redAt={95} />
+            <Badge label="7d" window={u.sevenDay} now={props.now} yellowAt={90} redAt={95} />
           </Show>
           <ExtraBadge extra={u.extraUsage} />
         </span>

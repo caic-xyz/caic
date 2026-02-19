@@ -146,9 +146,11 @@ class FunctionHandlers(
             append("7-day window: ${pct(usage.sevenDay.utilization)} used, resets ${usage.sevenDay.resetsAt}")
             if (usage.extraUsage.isEnabled) {
                 appendLine()
+                val usedDollars = usage.extraUsage.usedCredits / 100
+                val limitDollars = usage.extraUsage.monthlyLimit / 100
                 append(
-                    "Extra usage: ${pct(usage.extraUsage.utilization)} of " +
-                        "\$${usage.extraUsage.monthlyLimit.toInt()} monthly limit used",
+                    "Extra usage: \$${usedDollars.toInt()} of " +
+                        "\$${limitDollars.toInt()} monthly limit used",
                 )
             }
         }
