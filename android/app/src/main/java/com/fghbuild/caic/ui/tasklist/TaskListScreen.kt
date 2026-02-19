@@ -5,6 +5,9 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -69,6 +72,7 @@ import androidx.compose.ui.unit.dp
 import com.caic.sdk.ImageData
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fghbuild.caic.util.createCameraPhotoUri
 import com.fghbuild.caic.util.imageDataToBitmap
 import com.fghbuild.caic.util.uriToImageData
 
@@ -201,6 +205,17 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
         val images = uris.mapNotNull { uriToImageData(contentResolver, it) }
         if (images.isNotEmpty()) viewModel.addImages(images)
     }
+    var cameraUri by remember { mutableStateOf<Uri?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture(),
+    ) { success: Boolean ->
+        val uri = cameraUri
+        if (success && uri != null) {
+            val img = uriToImageData(contentResolver, uri)
+            if (img != null) viewModel.addImages(listOf(img))
+        }
+        cameraUri = null
+    }
     val hasContent = state.prompt.isNotBlank() || state.pendingImages.isNotEmpty()
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -246,15 +261,39 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (state.supportsImages) {
-                IconButton(
-                    onClick = {
-                        photoPicker.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                var attachExpanded by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(
+                        onClick = { attachExpanded = true },
+                        enabled = !state.submitting,
+                    ) {
+                        Icon(Icons.Default.AttachFile, contentDescription = "Attach image")
+                    }
+                    DropdownMenu(
+                        expanded = attachExpanded,
+                        onDismissRequest = { attachExpanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Take photo") },
+                            onClick = {
+                                attachExpanded = false
+                                val uri = createCameraPhotoUri(context)
+                                cameraUri = uri
+                                cameraLauncher.launch(uri)
+                            },
+                            leadingIcon = { Icon(Icons.Default.CameraAlt, contentDescription = null) },
                         )
-                    },
-                    enabled = !state.submitting,
-                ) {
-                    Icon(Icons.Default.AttachFile, contentDescription = "Attach image")
+                        DropdownMenuItem(
+                            text = { Text("Choose from gallery") },
+                            onClick = {
+                                attachExpanded = false
+                                photoPicker.launch(
+                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                )
+                            },
+                            leadingIcon = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
+                        )
+                    }
                 }
             }
             OutlinedTextField(

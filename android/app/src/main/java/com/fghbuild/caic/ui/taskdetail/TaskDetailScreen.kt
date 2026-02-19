@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.caic.ui.theme.stateColor
+import com.fghbuild.caic.util.createCameraPhotoUri
 import com.fghbuild.caic.util.uriToImageData
 
 private val PlanBadgeBg = Color(0xFFEDE9FE)
@@ -71,6 +73,17 @@ fun TaskDetailScreen(
     ) { uris: List<Uri> ->
         val images = uris.mapNotNull { uriToImageData(contentResolver, it) }
         if (images.isNotEmpty()) viewModel.addImages(images)
+    }
+    var cameraUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.TakePicture(),
+    ) { success: Boolean ->
+        val uri = cameraUri
+        if (success && uri != null) {
+            val img = uriToImageData(contentResolver, uri)
+            if (img != null) viewModel.addImages(listOf(img))
+        }
+        cameraUri = null
     }
 
     // Safety dialog
@@ -169,10 +182,15 @@ fun TaskDetailScreen(
                     pendingAction = state.pendingAction,
                     pendingImages = state.pendingImages,
                     supportsImages = state.supportsImages,
-                    onAttach = {
+                    onAttachGallery = {
                         photoPicker.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                         )
+                    },
+                    onAttachCamera = {
+                        val uri = createCameraPhotoUri(context)
+                        cameraUri = uri
+                        cameraLauncher.launch(uri)
                     },
                     onRemoveImage = viewModel::removeImage,
                 )

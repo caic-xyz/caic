@@ -1,17 +1,30 @@
 // Utilities for converting content URIs to base64 ImageData for the API.
 package com.fghbuild.caic.util
 
+import android.content.Context
 import android.content.ContentResolver
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
+import androidx.core.content.FileProvider
 import androidx.core.graphics.scale
 import com.caic.sdk.ImageData
 import java.io.ByteArrayOutputStream
+import java.io.File
 
 private const val MAX_DIMENSION = 1568
 private const val JPEG_QUALITY = 85
+
+/**
+ * Creates a temp file in cacheDir/camera_photos/ and returns a FileProvider URI
+ * suitable for [ActivityResultContracts.TakePicture].
+ */
+fun createCameraPhotoUri(context: Context): Uri {
+    val dir = File(context.cacheDir, "camera_photos").apply { mkdirs() }
+    val file = File.createTempFile("photo_", ".jpg", dir)
+    return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+}
 
 /**
  * Reads an image from [uri], down-scales it if larger than [MAX_DIMENSION],
