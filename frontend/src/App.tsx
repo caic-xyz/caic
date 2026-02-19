@@ -15,6 +15,25 @@ import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?
 import TailscaleIcon from "./tailscale.svg?solid";
 import styles from "./App.module.css";
 
+const RECENT_REPOS_KEY = "caic:recentRepos";
+const MAX_RECENT_REPOS = 5;
+
+function getRecentRepos(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_REPOS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function addRecentRepo(path: string): void {
+  const list = [path, ...getRecentRepos().filter((r) => r !== path)].slice(0, MAX_RECENT_REPOS);
+  localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(list));
+}
+
 /** Max slug length in the URL (characters after the "+"). */
 const MAX_SLUG = 80;
 
@@ -64,6 +83,7 @@ export default function App() {
   const [usbEnabled, setUSBEnabled] = createSignal(false);
   const [displayAvailable, setDisplayAvailable] = createSignal(false);
   const [displayEnabled, setDisplayEnabled] = createSignal(false);
+  const [recentCount, setRecentCount] = createSignal(0);
 
   // Per-task input drafts survive task switching.
   const [inputDrafts, setInputDrafts] = createSignal<Map<string, string>>(new Map());
@@ -146,11 +166,21 @@ export default function App() {
   onMount(async () => {
     requestNotificationPermission();
     const data = await listRepos();
-    setRepos(data);
-    if (data.length > 0) {
+    const recentPaths = getRecentRepos();
+    const recentSet = new Set(recentPaths);
+    const recentRepos = recentPaths.reduce<RepoJSON[]>((acc, r) => {
+      const repo = data.find((d) => d.path === r);
+      if (repo) acc.push(repo);
+      return acc;
+    }, []);
+    const rest = data.filter((d) => !recentSet.has(d.path));
+    const ordered = [...recentRepos, ...rest];
+    setRepos(ordered);
+    setRecentCount(recentRepos.length);
+    if (ordered.length > 0) {
       const last = localStorage.getItem("caic:lastRepo");
-      const match = last && data.find((r) => r.path === last);
-      setSelectedRepo(match ? match.path : data[0].path);
+      const match = last && ordered.find((r) => r.path === last);
+      setSelectedRepo(match ? match.path : ordered[0].path);
     }
     {
       const current = selectedHarness();
@@ -249,6 +279,20 @@ export default function App() {
     if (!p || !repo) return;
     setSubmitting(true);
     localStorage.setItem("caic:lastRepo", repo);
+    addRecentRepo(repo);
+    {
+      const recent = getRecentRepos();
+      const recentSet = new Set(recent);
+      const current = repos();
+      const recentRepos = recent.reduce<RepoJSON[]>((acc, r) => {
+        const found = current.find((d) => d.path === r);
+        if (found) acc.push(found);
+        return acc;
+      }, []);
+      const rest = current.filter((d) => !recentSet.has(d.path));
+      setRepos([...recentRepos, ...rest]);
+      setRecentCount(recentRepos.length);
+    }
     try {
       const model = selectedModel();
       const image = selectedImage().trim();
@@ -283,9 +327,22 @@ export default function App() {
           class={styles.repoSelect}
           data-testid="repo-select"
         >
-          <For each={repos()}>
-            {(r) => <option value={r.path}>{r.path}</option>}
-          </For>
+          <Show when={recentCount() > 0} fallback={
+            <For each={repos()}>
+              {(r) => <option value={r.path}>{r.path}</option>}
+            </For>
+          }>
+            <optgroup label="Recent">
+              <For each={repos().slice(0, recentCount())}>
+                {(r) => <option value={r.path}>{r.path}</option>}
+              </For>
+            </optgroup>
+            <optgroup label="All repositories">
+              <For each={repos().slice(recentCount())}>
+                {(r) => <option value={r.path}>{r.path}</option>}
+              </For>
+            </optgroup>
+          </Show>
         </select>
         <Show when={harnesses().length > 1}>
           <select

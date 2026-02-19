@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Send
@@ -162,6 +163,7 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
                 selected = state.selectedRepo,
                 options = state.repos.map { it.path },
                 onSelect = viewModel::selectRepo,
+                dividerAfter = state.recentRepoCount,
             )
         }
 
@@ -217,6 +219,7 @@ private fun DropdownField(
     selected: String,
     options: List<String>,
     onSelect: (String) -> Unit,
+    dividerAfter: Int = 0,
 ) {
     var expanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
@@ -231,7 +234,7 @@ private fun DropdownField(
                 .menuAnchor(MenuAnchorType.PrimaryNotEditable),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { option ->
+            options.forEachIndexed { index, option ->
                 DropdownMenuItem(
                     text = { Text(option) },
                     onClick = {
@@ -239,6 +242,9 @@ private fun DropdownField(
                         expanded = false
                     },
                 )
+                if (index == dividerAfter - 1 && dividerAfter in 1..<options.size) {
+                    HorizontalDivider()
+                }
             }
         }
     }

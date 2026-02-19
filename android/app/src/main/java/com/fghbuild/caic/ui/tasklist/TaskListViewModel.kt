@@ -34,6 +34,7 @@ data class TaskListState(
     val selectedHarness: String = "claude",
     val selectedModel: String = "",
     val prompt: String = "",
+    val recentRepoCount: Int = 0,
     val submitting: Boolean = false,
     val error: String? = null,
 )
@@ -65,6 +66,7 @@ class TaskListViewModel @Inject constructor(
             harnesses = form.harnesses,
             config = form.config,
             usage = usage,
+            recentRepoCount = form.recentRepoCount,
             selectedRepo = form.selectedRepo,
             selectedHarness = form.selectedHarness,
             selectedModel = form.selectedModel,
@@ -88,11 +90,17 @@ class TaskListViewModel @Inject constructor(
                 val repos = client.listRepos()
                 val harnesses = client.listHarnesses()
                 val config = client.getConfig()
+                val recent = settingsRepository.settings.value.recentRepos
+                val recentSet = recent.toSet()
+                val recentRepos = recent.mapNotNull { r -> repos.find { it.path == r } }
+                val restRepos = repos.filter { it.path !in recentSet }
+                val ordered = recentRepos + restRepos
                 _formState.value = _formState.value.copy(
-                    repos = repos,
+                    repos = ordered,
                     harnesses = harnesses,
                     config = config,
-                    selectedRepo = repos.firstOrNull()?.path ?: "",
+                    recentRepoCount = recentRepos.size,
+                    selectedRepo = ordered.firstOrNull()?.path ?: "",
                 )
             } catch (_: Exception) {
                 // Form data will remain empty; user can still see tasks.
@@ -134,7 +142,18 @@ class TaskListViewModel @Inject constructor(
                         model = form.selectedModel.ifBlank { null },
                     )
                 )
-                _formState.value = _formState.value.copy(prompt = "", submitting = false)
+                settingsRepository.addRecentRepo(form.selectedRepo)
+                val current = _formState.value
+                val recent = settingsRepository.settings.value.recentRepos
+                val recentSet = recent.toSet()
+                val recentRepos = recent.mapNotNull { r -> current.repos.find { it.path == r } }
+                val restRepos = current.repos.filter { it.path !in recentSet }
+                _formState.value = current.copy(
+                    prompt = "",
+                    submitting = false,
+                    repos = recentRepos + restRepos,
+                    recentRepoCount = recentRepos.size,
+                )
             } catch (e: Exception) {
                 _formState.value = _formState.value.copy(
                     submitting = false,
@@ -148,6 +167,7 @@ class TaskListViewModel @Inject constructor(
         val repos: List<RepoJSON> = emptyList(),
         val harnesses: List<HarnessJSON> = emptyList(),
         val config: ConfigJSON? = null,
+        val recentRepoCount: Int = 0,
         val selectedRepo: String = "",
         val selectedHarness: String = "claude",
         val selectedModel: String = "",
