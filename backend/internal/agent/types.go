@@ -193,6 +193,7 @@ type MetaMessage struct {
 	MessageType string    `json:"type"`
 	Version     int       `json:"version"`
 	Prompt      string    `json:"prompt"`
+	Title       string    `json:"title,omitempty"`
 	Repo        string    `json:"repo"`
 	Branch      string    `json:"branch"`
 	Harness     Harness   `json:"harness"`
@@ -231,6 +232,7 @@ func (m *MetaMessage) Validate() error {
 type MetaResultMessage struct {
 	MessageType              string   `json:"type"`
 	State                    string   `json:"state"`
+	Title                    string   `json:"title,omitempty"`
 	CostUSD                  float64  `json:"cost_usd,omitempty"`
 	DurationMs               int64    `json:"duration_ms,omitempty"`
 	NumTurns                 int      `json:"num_turns,omitempty"`

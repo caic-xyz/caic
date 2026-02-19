@@ -7,6 +7,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/klauspost/compress v1.18.4
 	github.com/lmittmann/tint v1.1.3
+	github.com/maruel/genai v0.2.0
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/md v0.6.0
 	github.com/mattn/go-colorable v0.1.14
@@ -21,7 +22,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/mailru/easyjson v0.9.1 // indirect
-	github.com/maruel/genai v0.2.0 // indirect
 	github.com/maruel/httpjson v0.5.0 // indirect
 	github.com/maruel/roundtrippers v0.5.0 // indirect
 	github.com/spf13/cobra v1.3.0 // indirect

@@ -37,6 +37,7 @@ type ContainerBackend interface {
 // Result holds the outcome of a completed task.
 type Result struct {
 	Task        string
+	Title       string
 	Repo        string
 	Branch      string
 	Container   string
@@ -345,6 +346,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 
 	res := Result{
 		Task:      t.Prompt,
+		Title:     t.Title(),
 		Repo:      t.Repo,
 		Branch:    t.Branch,
 		Container: name,
@@ -609,6 +611,7 @@ func (r *Runner) openLog(t *Task) (io.WriteCloser, error) {
 		MessageType: "caic_meta",
 		Version:     1,
 		Prompt:      t.Prompt,
+		Title:       t.Title(),
 		Repo:        t.Repo,
 		Branch:      t.Branch,
 		Harness:     t.Harness,
@@ -629,6 +632,7 @@ func writeLogTrailer(w io.Writer, res *Result) {
 	mr := agent.MetaResultMessage{
 		MessageType:              "caic_result",
 		State:                    res.State.String(),
+		Title:                    res.Title,
 		CostUSD:                  res.CostUSD,
 		DurationMs:               res.DurationMs,
 		NumTurns:                 res.NumTurns,

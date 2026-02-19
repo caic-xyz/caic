@@ -23,6 +23,7 @@ var errNotLogFile = errors.New("not a caic log file")
 // LoadedTask holds the data reconstructed from a single JSONL log file.
 type LoadedTask struct {
 	Prompt            string
+	Title             string
 	Repo              string
 	Branch            string
 	Harness           agent.Harness
@@ -106,6 +107,7 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 
 	lt := &LoadedTask{
 		Prompt:            meta.Prompt,
+		Title:             meta.Title,
 		Repo:              meta.Repo,
 		Branch:            meta.Branch,
 		Harness:           meta.Harness,
@@ -138,8 +140,12 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 				return nil, fmt.Errorf("invalid caic_result: %w", err)
 			}
 			lt.State = parseState(mr.State)
+			if mr.Title != "" {
+				lt.Title = mr.Title
+			}
 			lt.Result = &Result{
 				Task:       lt.Prompt,
+				Title:      lt.Title,
 				Repo:       lt.Repo,
 				Branch:     lt.Branch,
 				State:      lt.State,

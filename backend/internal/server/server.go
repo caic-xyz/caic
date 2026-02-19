@@ -57,10 +57,10 @@ type AuthToken struct {
 type Config struct {
 	// GeminiAPIKey is necessary to support Gemini Live audio.
 	GeminiAPIKey string
-	// CommitDescGenProvider is the genai provider to implement git commit automatic description.
-	CommitDescGenProvider string
-	// CommitDescGenModel is the model to implement git commit automatic description.
-	CommitDescGenModel string
+	// LLMProvider is the genai provider for LLM features (title generation, commit descriptions).
+	LLMProvider string
+	// LLMModel is the model for LLM features.
+	LLMModel string
 	// TailscaleAPIKey is necessary to support Tailscale networking inside the container.
 	TailscaleAPIKey string
 }
@@ -78,13 +78,14 @@ type Server struct {
 	logDir       string
 	usage        *usageFetcher // nil if no OAuth token available
 	geminiAPIKey string
+	titleGen     *titleGenerator
 }
 
 // mdBackend adapts *md.Client to task.ContainerBackend.
 type mdBackend struct {
 	client      *md.Client
-	askProvider string
-	askModel    string
+	llmProvider string
+	llmModel    string
 }
 
 func (b *mdBackend) Start(ctx context.Context, dir, branch string, labels []string, opts task.StartOptions) (name, tailscaleFQDN string, err error) {
@@ -112,7 +113,7 @@ func (b *mdBackend) Diff(ctx context.Context, dir, branch string, args ...string
 
 func (b *mdBackend) Fetch(ctx context.Context, dir, branch string) error {
 	slog.Info("md fetch", "dir", dir, "branch", branch)
-	return b.client.Container(dir, branch).Fetch(ctx, b.askProvider, b.askModel)
+	return b.client.Container(dir, branch).Fetch(ctx, b.llmProvider, b.llmModel)
 }
 
 func (b *mdBackend) Kill(ctx context.Context, dir, branch string) error {
@@ -206,10 +207,11 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string, cfg *
 		logDir:       logDir,
 		usage:        newUsageFetcher(ctx),
 		geminiAPIKey: cfg.GeminiAPIKey,
+		titleGen:     newTitleGenerator(ctx, cfg.LLMProvider, cfg.LLMModel),
 	}
 
 	s.mdClient = mdClient
-	backend := &mdBackend{client: mdClient, askProvider: cfg.CommitDescGenProvider, askModel: cfg.CommitDescGenModel}
+	backend := &mdBackend{client: mdClient, llmProvider: cfg.LLMProvider, llmModel: cfg.LLMModel}
 
 	// Phase 2: Runner init (parallel per-repo).
 	type repoResult struct {
@@ -419,6 +421,7 @@ func (s *Server) createTask(_ context.Context, req *dto.CreateTaskReq) (*dto.Cre
 	}
 
 	t := &task.Task{ID: ksid.NewID(), Prompt: req.Prompt, Repo: req.Repo, Harness: harness, Model: req.Model, Images: toAgentImages(req.Images), Image: req.Image, Tailscale: req.Tailscale, USB: req.USB, Display: req.Display}
+	t.SetTitle(req.Prompt)
 	entry := &taskEntry{task: t, done: make(chan struct{})}
 
 	s.mu.Lock()
@@ -441,6 +444,7 @@ func (s *Server) createTask(_ context.Context, req *dto.CreateTaskReq) (*dto.Cre
 		s.watchSession(entry, runner, h)
 	}()
 
+	s.watchTitleGen(entry)
 	return &dto.CreateTaskResp{Status: "accepted", ID: t.ID}, nil
 }
 
@@ -947,6 +951,11 @@ func (s *Server) loadTerminatedTasksFrom(all []*task.LoadedTask) error {
 			State:     lt.State,
 			StartedAt: lt.StartedAt,
 		}
+		if lt.Title != "" {
+			t.SetTitle(lt.Title)
+		} else {
+			t.SetTitle(lt.Prompt)
+		}
 		if lt.Msgs != nil {
 			t.RestoreMessages(lt.Msgs)
 		}
@@ -1103,6 +1112,11 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		USB:            c.USB,
 		Display:        c.Display,
 	}
+	if lt != nil && lt.Title != "" {
+		t.SetTitle(lt.Title)
+	} else {
+		t.SetTitle(prompt)
+	}
 
 	if relayAlive && len(relayMsgs) > 0 {
 		// Relay output is authoritative — zero loss. It contains both
@@ -1147,6 +1161,8 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	slog.Info("adopted preexisting container",
 		"repo", ri.RelPath, "container", c.Name, "branch", branch,
 		"relay", relayAlive, "state", t.State, "sessionID", t.SessionID)
+
+	s.watchTitleGen(entry)
 
 	// Auto-reconnect in background: relay alive → attach; relay dead
 	// but SessionID present → --resume. Reconnect handles both paths
@@ -1225,6 +1241,51 @@ func (s *Server) watchSession(entry *taskEntry, runner *task.Runner, h *task.Ses
 			t.SetStateIf(task.StateRunning, task.StateWaiting)
 			s.notifyTaskChange()
 		case <-entry.done:
+		}
+	}()
+}
+
+// watchTitleGen starts a goroutine that generates and updates the task's title
+// each time a ResultMessage arrives (signaled via ResultNotify). The goroutine
+// exits when the task is done. No-op if the title generator is unconfigured.
+//
+// Rate limiting: the first ResultMessage always triggers generation. Subsequent
+// results are throttled to at most once per 60 seconds to avoid hammering the
+// LLM during rapid multi-turn conversations.
+func (s *Server) watchTitleGen(entry *taskEntry) {
+	if s.titleGen == nil || s.titleGen.provider == nil {
+		return
+	}
+	t := entry.task
+	resultCh := t.ResultNotify()
+	go func() {
+		// Debounce: wait 5s after the last result before generating a title.
+		// This coalesces rapid bursts while still updating after each pause.
+		const debounce = 5 * time.Second
+		timer := time.NewTimer(debounce)
+		if t.Title() != "" {
+			// Already have a title (e.g. adopted from log); wait for new results.
+			timer.Stop()
+		}
+		defer timer.Stop()
+		for {
+			select {
+			case _, ok := <-resultCh:
+				if !ok {
+					return
+				}
+				timer.Reset(debounce)
+			case <-timer.C:
+				old := t.Title()
+				title := s.titleGen.generate(s.ctx, t)
+				if title != "" {
+					slog.Info("title generation completed", "task", t.ID, "old", old, "new", title)
+					t.SetTitle(title)
+					s.notifyTaskChange()
+				}
+			case <-entry.done:
+				return
+			}
 		}
 	}()
 }
@@ -1338,6 +1399,7 @@ func (s *Server) toJSON(e *taskEntry) dto.Task {
 	j := dto.Task{
 		ID:             e.task.ID,
 		Task:           e.task.Prompt,
+		Title:          snap.Title,
 		Repo:           e.task.Repo,
 		RepoURL:        s.repoURL(e.task.Repo),
 		Branch:         e.task.Branch,

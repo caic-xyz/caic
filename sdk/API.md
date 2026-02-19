@@ -98,6 +98,7 @@ All errors return:
 |-------|------|----------|
 | `id` | `string` | yes |
 | `task` | `string` | yes |
+| `title` | `string` | yes |
 | `repo` | `string` | yes |
 | `repoURL` | `string` |  |
 | `branch` | `string` | yes |

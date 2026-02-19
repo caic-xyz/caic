@@ -71,6 +71,7 @@ data class DiffFileStat(
 data class Task(
     val id: String,
     val task: String,
+    val title: String,
     val repo: String,
     @SerialName("repoURL") val repoURL: String? = null,
     val branch: String,

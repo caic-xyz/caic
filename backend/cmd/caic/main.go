@@ -68,8 +68,8 @@ Environment variables (flags take precedence when set):
   CAIC_ROOT                 Parent directory containing git repos
   CAIC_MAX_TURNS            Max agentic turns per task (0=unlimited)
   CAIC_LOG_LEVEL            Log level: debug, info, warn, error (default: info)
-  CAIC_COMMITDESC_PROVIDER  AI provider for commit description generation
-  CAIC_COMMITDESC_MODEL     Model name for commit description generation
+  CAIC_LLM_PROVIDER         AI provider for LLM features (title generation, commit descriptions)
+  CAIC_LLM_MODEL            Model name for LLM features
   GEMINI_API_KEY            Gemini API key for the Gemini agent backend
   TAILSCALE_API_KEY         Tailscale API key for Tailscale integration
 
@@ -90,10 +90,10 @@ See contrib/caic.env for a template with all variables and documentation.
 	initLogging(*logLevel)
 
 	cfg := &server.Config{
-		GeminiAPIKey:          os.Getenv("GEMINI_API_KEY"),
-		TailscaleAPIKey:       os.Getenv("TAILSCALE_API_KEY"),
-		CommitDescGenProvider: os.Getenv("CAIC_COMMITDESC_PROVIDER"),
-		CommitDescGenModel:    os.Getenv("CAIC_COMMITDESC_MODEL"),
+		GeminiAPIKey:    os.Getenv("GEMINI_API_KEY"),
+		TailscaleAPIKey: os.Getenv("TAILSCALE_API_KEY"),
+		LLMProvider:     os.Getenv("CAIC_LLM_PROVIDER"),
+		LLMModel:        os.Getenv("CAIC_LLM_MODEL"),
 	}
 
 	if key := cfg.GeminiAPIKey; key != "" {
@@ -114,7 +114,7 @@ See contrib/caic.env for a template with all variables and documentation.
 	} else {
 		slog.Warn("TAILSCALE_API_KEY not set")
 	}
-	slog.Info("commit description", "provider", cfg.CommitDescGenProvider, "model", cfg.CommitDescGenModel)
+	slog.Info("LLM", "provider", cfg.LLMProvider, "model", cfg.LLMModel)
 
 	if *fakeMode {
 		return serveFake(ctx, *addr, *root, cfg)

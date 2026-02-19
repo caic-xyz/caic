@@ -42,7 +42,7 @@ export default function TaskList(props: TaskListProps) {
           {(t) => (
             <TaskItemSummary
               id={t().id}
-              task={t().task}
+              title={t().title}
               state={t().state}
               stateUpdatedAt={t().stateUpdatedAt}
               repo={t().repo}

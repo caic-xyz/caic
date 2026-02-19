@@ -9,7 +9,7 @@ import styles from "./TaskItemSummary.module.css";
 
 export interface TaskItemSummaryProps {
   id: string;
-  task: string;
+  title: string;
   state: string;
   stateUpdatedAt: number;
   repo: string;
@@ -44,7 +44,7 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
       class={`${styles.card} ${props.selected ? styles.selected : ""}`}
     >
       <div class={styles.header}>
-        <strong class={styles.title}>{props.task}</strong>
+        <strong class={styles.title}>{props.title}</strong>
         <span class={styles.stateGroup}>
           <Show when={props.tailscale} keyed>
             {(ts) => ts.startsWith("https://")

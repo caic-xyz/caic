@@ -98,10 +98,12 @@ type Task struct {
 	StartedAt      time.Time
 	RelayOffset    int64 // Bytes received from relay output.jsonl, for reconnect.
 
-	mu     sync.Mutex
-	msgs   []agent.Message
-	subs   []*sub         // active SSE subscribers
-	handle *SessionHandle // current active session; nil when no session is attached
+	mu           sync.Mutex
+	title        string // LLM-generated short title; set via SetTitle.
+	msgs         []agent.Message
+	subs         []*sub         // active SSE subscribers
+	handle       *SessionHandle // current active session; nil when no session is attached
+	resultNotify chan struct{}  // signaled (non-blocking) when a ResultMessage arrives
 
 	// Live stats accumulated from ResultMessages during execution.
 	liveCostUSD    float64
@@ -153,12 +155,43 @@ func (t *Task) LiveDiffStat() agent.DiffStat {
 	return t.liveDiffStat
 }
 
+// Title returns the task title under the mutex.
+func (t *Task) Title() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.title
+}
+
+// SetTitle sets the LLM-generated title under the mutex. Empty strings are
+// ignored to preserve the Prompt fallback invariant.
+func (t *Task) SetTitle(title string) {
+	if title == "" {
+		return
+	}
+	t.mu.Lock()
+	t.title = title
+	t.mu.Unlock()
+}
+
+// ResultNotify returns a channel that receives a signal each time a
+// ResultMessage is processed. The channel is buffered(1) so senders
+// never block; receivers should drain in a loop.
+func (t *Task) ResultNotify() <-chan struct{} {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.resultNotify == nil {
+		t.resultNotify = make(chan struct{}, 1)
+	}
+	return t.resultNotify
+}
+
 // Snapshot holds volatile task fields read under the mutex. Used by the
 // server to build API responses without data races on fields that
 // addMessage/RestoreMessages modify concurrently.
 type Snapshot struct {
 	State          State
 	StateUpdatedAt time.Time
+	Title          string
 	SessionID      string
 	Model          string
 	AgentVersion   string
@@ -179,6 +212,7 @@ func (t *Task) Snapshot() Snapshot {
 	return Snapshot{
 		State:          t.State,
 		StateUpdatedAt: t.StateUpdatedAt,
+		Title:          t.title,
 		SessionID:      t.SessionID,
 		Model:          t.Model,
 		AgentVersion:   t.AgentVersion,
@@ -320,6 +354,13 @@ func (t *Task) addMessage(m agent.Message) {
 				t.setState(StateAsking)
 			} else {
 				t.setState(StateWaiting)
+			}
+		}
+		// Signal title generation goroutine (non-blocking).
+		if t.resultNotify != nil {
+			select {
+			case t.resultNotify <- struct{}{}:
+			default:
 			}
 		}
 	}

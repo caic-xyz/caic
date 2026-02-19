@@ -532,6 +532,7 @@ export interface Repo {
 export interface Task {
   id: string;
   task: string;
+  title: string;
   repo: string;
   repoURL?: string;
   branch: string;

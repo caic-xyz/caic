@@ -130,7 +130,7 @@ export default function App() {
         nextIdx = curIdx === -1 || curIdx >= list.length - 1 ? 0 : curIdx + 1;
       }
       const next = list[nextIdx];
-      navigate(taskPath(next.id, next.repo, next.branch, next.task));
+      navigate(taskPath(next.id, next.repo, next.branch, next.title));
       const card = document.querySelector<HTMLElement>(`[data-task-id="${next.id}"]`);
       card?.focus();
       e.preventDefault();
@@ -248,7 +248,7 @@ export default function App() {
             const needsInput = t.state === "waiting" || t.state === "asking";
             const prevNeedsInput = prevStates.get(t.id) === "waiting" || prevStates.get(t.id) === "asking";
             if (needsInput && !prevNeedsInput) {
-              notifyWaiting(t.id, t.task);
+              notifyWaiting(t.id, t.title);
             }
           }
           prevStates = new Map(updated.map((t) => [t.id, t.state]));
@@ -473,7 +473,7 @@ export default function App() {
           now={now}
           onSelect={(id) => {
             const found = tasks().find((t) => t.id === id);
-            navigate(found ? taskPath(found.id, found.repo, found.branch, found.task) : `/task/@${id}`);
+            navigate(found ? taskPath(found.id, found.repo, found.branch, found.title) : `/task/@${id}`);
           }}
         />
 

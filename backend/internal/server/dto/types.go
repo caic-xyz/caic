@@ -48,6 +48,7 @@ type Repo struct {
 type Task struct {
 	ID                                 ksid.ID  `json:"id"`
 	Task                               string   `json:"task"`
+	Title                              string   `json:"title"`
 	Repo                               string   `json:"repo"`
 	RepoURL                            string   `json:"repoURL,omitempty"`
 	Branch                             string   `json:"branch"`
