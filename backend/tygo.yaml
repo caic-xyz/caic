@@ -1,6 +1,6 @@
 packages:
   - path: "github.com/maruel/caic/backend/internal/server/dto"
-    output_path: "../../../../sdk/types.gen.ts"
+    output_path: "../../../../sdk/ts/types.gen.ts"
     exclude_files:
       - validate.go
       - routes.go

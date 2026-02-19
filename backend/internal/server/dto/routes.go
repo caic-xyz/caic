@@ -45,7 +45,7 @@ func (r *Route) CategoryName() string {
 	return strings.ToUpper(p[:1]) + p[1:]
 }
 
-// Routes is the authoritative list of API endpoints. The gen-api-client
+// Routes is the authoritative list of API endpoints. The gen-api-sdk
 // tool reads this slice to generate the typed TypeScript and Kotlin clients.
 var Routes = []Route{
 	{Name: "getConfig", Method: "GET", Path: "/api/v1/server/config", Resp: reflect.TypeFor[Config]()},

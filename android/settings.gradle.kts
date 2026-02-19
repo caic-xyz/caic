@@ -25,4 +25,4 @@ dependencyResolutionManagement {
 rootProject.name = "caic"
 include(":app")
 include(":sdk")
- 
+project(":sdk").projectDir = file("../sdk/kotlin")

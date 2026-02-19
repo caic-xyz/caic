@@ -4,7 +4,7 @@ package dto
 import "github.com/maruel/ksid"
 
 //go:generate go tool tygo generate --config ../../../../backend/tygo.yaml
-//go:generate go run github.com/maruel/caic/backend/internal/cmd/gen-api-client
+//go:generate go run github.com/maruel/caic/backend/internal/cmd/gen-api-sdk
 
 // Harness identifies the coding agent harness.
 // Values must match agent.Harness constants.
