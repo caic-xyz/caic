@@ -5,16 +5,23 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,11 +30,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -38,6 +48,8 @@ import com.fghbuild.caic.ui.tasklist.TaskListScreen
 import com.fghbuild.caic.voice.VoicePanel
 import com.fghbuild.caic.voice.VoiceViewModel
 import kotlinx.coroutines.launch
+
+private val WideBreakpoint = 840.dp
 
 @Composable
 fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
@@ -103,30 +115,17 @@ fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            NavHost(
-                navController = navController,
-                startDestination = Screen.TaskList.route,
-                modifier = Modifier.weight(1f),
-            ) {
-                composable(Screen.TaskList.route) {
-                    TaskListScreen(
-                        onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
-                        onNavigateToTask = { taskId ->
-                            navController.navigate(Screen.TaskDetail(taskId).route)
-                        },
+            BoxWithConstraints(modifier = Modifier.weight(1f)) {
+                val wide = maxWidth >= WideBreakpoint
+                if (wide) {
+                    WideLayout(
+                        navController = navController,
+                        modifier = Modifier.fillMaxSize(),
                     )
-                }
-                composable(Screen.Settings.route) {
-                    SettingsScreen(
-                        onNavigateBack = { navController.popBackStack() },
-                    )
-                }
-                composable(Screen.TaskDetail.ROUTE) { backStackEntry ->
-                    val taskId = backStackEntry.arguments?.getString(Screen.TaskDetail.ARG_TASK_ID)
-                        ?: return@composable
-                    TaskDetailScreen(
-                        taskId = taskId,
-                        onNavigateBack = { navController.popBackStack() },
+                } else {
+                    CompactLayout(
+                        navController = navController,
+                        modifier = Modifier.fillMaxSize(),
                     )
                 }
             }
@@ -150,6 +149,97 @@ fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
                 onSelectDevice = { voiceViewModel.selectAudioDevice(it) },
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+    }
+}
+
+/** Narrow layout: single-pane navigation with all three screens in the NavHost. */
+@Composable
+private fun CompactLayout(
+    navController: NavHostController,
+    modifier: Modifier = Modifier,
+) {
+    NavHost(
+        navController = navController,
+        startDestination = Screen.TaskList.route,
+        modifier = modifier,
+    ) {
+        composable(Screen.TaskList.route) {
+            TaskListScreen(
+                onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
+                onNavigateToTask = { taskId ->
+                    navController.navigate(Screen.TaskDetail(taskId).route)
+                },
+            )
+        }
+        composable(Screen.Settings.route) {
+            SettingsScreen(
+                onNavigateBack = { navController.popBackStack() },
+            )
+        }
+        composable(Screen.TaskDetail.ROUTE) { backStackEntry ->
+            val taskId = backStackEntry.arguments?.getString(Screen.TaskDetail.ARG_TASK_ID)
+                ?: return@composable
+            TaskDetailScreen(
+                taskId = taskId,
+                onNavigateBack = { navController.popBackStack() },
+            )
+        }
+    }
+}
+
+/** Wide layout: task list pinned on the left, detail/settings on the right. */
+@Composable
+private fun WideLayout(
+    navController: NavHostController,
+    modifier: Modifier = Modifier,
+) {
+    Row(modifier = modifier) {
+        TaskListScreen(
+            onNavigateToSettings = {
+                navController.navigate(Screen.Settings.route) {
+                    popUpTo(Screen.TaskList.route)
+                }
+            },
+            onNavigateToTask = { taskId ->
+                navController.navigate(Screen.TaskDetail(taskId).route) {
+                    popUpTo(Screen.TaskList.route)
+                }
+            },
+            modifier = Modifier
+                .width(360.dp)
+                .fillMaxHeight(),
+        )
+        VerticalDivider()
+        NavHost(
+            navController = navController,
+            startDestination = Screen.TaskList.route,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxHeight(),
+        ) {
+            composable(Screen.TaskList.route) {
+                // Placeholder when no task is selected in wide mode.
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("Select a task", style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+            composable(Screen.Settings.route) {
+                SettingsScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                )
+            }
+            composable(Screen.TaskDetail.ROUTE) { backStackEntry ->
+                val taskId = backStackEntry.arguments?.getString(Screen.TaskDetail.ARG_TASK_ID)
+                    ?: return@composable
+                TaskDetailScreen(
+                    taskId = taskId,
+                    onNavigateBack = { navController.popBackStack() },
+                )
+            }
         }
     }
 }

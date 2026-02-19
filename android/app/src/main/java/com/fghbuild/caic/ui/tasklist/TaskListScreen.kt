@@ -74,10 +74,12 @@ fun TaskListScreen(
     viewModel: TaskListViewModel = hiltViewModel(),
     onNavigateToSettings: () -> Unit = {},
     onNavigateToTask: (String) -> Unit = {},
+    modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     Scaffold(
+        modifier = modifier,
         topBar = {
             TopAppBar(
                 title = { Text("caic") },

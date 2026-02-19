@@ -48,7 +48,8 @@ android {
         abortOnError = true
         xmlReport = true
         // Dependency version checks are noisy in CI; upgrades should be intentional.
-        disable += setOf("GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion")
+        // InsecureBaseConfiguration: caic server runs on LAN without TLS; cleartext is intentional.
+        disable += setOf("GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion", "InsecureBaseConfiguration")
     }
 }
 

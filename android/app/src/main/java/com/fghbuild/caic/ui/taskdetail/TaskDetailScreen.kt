@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -220,20 +221,20 @@ private fun MessageList(
         }
 
         // Message turns
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            val turns = state.turns
-            itemsIndexed(turns, key = { index, _ -> index }) { index, turn ->
-                if (index < turns.size - 1) {
-                    ElidedTurn(turn = turn)
-                } else {
-                    TurnContent(turn = turn, onAnswer = onAnswer)
+        SelectionContainer(modifier = Modifier.weight(1f)) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                val turns = state.turns
+                itemsIndexed(turns, key = { index, _ -> index }) { index, turn ->
+                    if (index < turns.size - 1) {
+                        ElidedTurn(turn = turn)
+                    } else {
+                        TurnContent(turn = turn, onAnswer = onAnswer)
+                    }
                 }
             }
         }
