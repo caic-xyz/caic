@@ -19,6 +19,35 @@ export async function fileToImageData(file: File): Promise<APIImageData | null> 
   return { mediaType: file.type, data };
 }
 
+/** Capture a screenshot via getDisplayMedia and return it as JPEG base64, or null on cancel/error. */
+export async function captureScreen(): Promise<APIImageData | null> {
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+  } catch {
+    return null; // User cancelled the picker.
+  }
+  const video = document.createElement("video");
+  video.srcObject = stream;
+  video.muted = true;
+  await video.play();
+  // Wait one frame for the video to render.
+  await new Promise((r) => requestAnimationFrame(r));
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    stream.getTracks().forEach((t) => t.stop());
+    return null;
+  }
+  ctx.drawImage(video, 0, 0);
+  stream.getTracks().forEach((t) => t.stop());
+  const dataURL = canvas.toDataURL("image/jpeg", 0.9);
+  const data = dataURL.split(",")[1];
+  return { mediaType: "image/jpeg", data };
+}
+
 /** Extract image files from a paste event and convert them. */
 export async function imagesFromClipboard(e: ClipboardEvent): Promise<APIImageData[]> {
   const items = e.clipboardData?.items;

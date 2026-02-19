@@ -1,13 +1,14 @@
 // Reusable prompt input with image support: paste, drag & drop, attach button, and preview strip.
 import { createSignal, For, Show, type JSX } from "solid-js";
 import type { ImageData as APIImageData } from "@sdk/types.gen";
-import { fileToImageData, imagesFromClipboard } from "./images";
+import { captureScreen, fileToImageData, imagesFromClipboard } from "./images";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
 import CameraCapture from "./CameraCapture";
 import AttachIcon from "@material-symbols/svg-400/outlined/attach_file.svg?solid";
 import CameraIcon from "@material-symbols/svg-400/outlined/photo_camera.svg?solid";
 import ImageIcon from "@material-symbols/svg-400/outlined/image.svg?solid";
+import ScreenshotIcon from "@material-symbols/svg-400/outlined/screenshot_monitor.svg?solid";
 import styles from "./PromptInput.module.css";
 
 interface Props {
@@ -90,6 +91,12 @@ export default function PromptInput(props: Props) {
     setCameraOpen(true);
   }
 
+  async function handleScreenshot() {
+    setMenuOpen(false);
+    const img = await captureScreen();
+    if (img) props.onImagesChange([...props.images, img]);
+  }
+
   function handleCameraCapture(img: APIImageData) {
     props.onImagesChange([...props.images, img]);
   }
@@ -146,6 +153,12 @@ export default function PromptInput(props: Props) {
                   <CameraIcon width="1.1em" height="1.1em" />
                   Take photo
                 </button>
+                <Show when={!!navigator.mediaDevices?.getDisplayMedia}>
+                  <button class={styles.menuItem} role="menuitem" onClick={handleScreenshot}>
+                    <ScreenshotIcon width="1.1em" height="1.1em" />
+                    Screenshot
+                  </button>
+                </Show>
                 <button class={styles.menuItem} role="menuitem" onClick={handleChooseFile}>
                   <ImageIcon width="1.1em" height="1.1em" />
                   Choose file

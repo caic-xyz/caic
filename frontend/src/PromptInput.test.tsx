@@ -122,6 +122,7 @@ describe("PromptInput", () => {
     expect(queryByText("Take photo")).not.toBeInTheDocument();
     await user.click(getByTitle("Attach images"));
     expect(getByText("Take photo")).toBeInTheDocument();
+    // Screenshot only shown when getDisplayMedia is available (not in jsdom).
     expect(getByText("Choose file")).toBeInTheDocument();
   });
 
