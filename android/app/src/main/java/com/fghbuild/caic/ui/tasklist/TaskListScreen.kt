@@ -1,7 +1,13 @@
 // Task list screen with creation form, usage badges, and task navigation.
 package com.fghbuild.caic.ui.tasklist
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,11 +18,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,9 +52,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.caic.sdk.ImageData
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.fghbuild.caic.util.imageDataToBitmap
+import com.fghbuild.caic.util.uriToImageData
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -156,6 +173,16 @@ private fun MainContent(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel) {
+    val context = LocalContext.current
+    val contentResolver = context.contentResolver
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(),
+    ) { uris: List<Uri> ->
+        val images = uris.mapNotNull { uriToImageData(contentResolver, it) }
+        if (images.isNotEmpty()) viewModel.addImages(images)
+    }
+    val hasContent = state.prompt.isNotBlank() || state.pendingImages.isNotEmpty()
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (state.repos.isNotEmpty()) {
             DropdownField(
@@ -186,10 +213,30 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
             )
         }
 
+        if (state.pendingImages.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                itemsIndexed(state.pendingImages) { index, img ->
+                    FormImageThumbnail(img = img, onRemove = { viewModel.removeImage(index) })
+                }
+            }
+        }
+
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (state.supportsImages) {
+                IconButton(
+                    onClick = {
+                        photoPicker.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                    enabled = !state.submitting,
+                ) {
+                    Icon(Icons.Default.AttachFile, contentDescription = "Attach image")
+                }
+            }
             OutlinedTextField(
                 value = state.prompt,
                 onValueChange = viewModel::updatePrompt,
@@ -203,12 +250,34 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
             } else {
                 IconButton(
                     onClick = viewModel::createTask,
-                    enabled = state.prompt.isNotBlank() && state.selectedRepo.isNotBlank(),
+                    enabled = hasContent && state.selectedRepo.isNotBlank(),
                 ) {
-                    Icon(Icons.Default.Send, contentDescription = "Create task")
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Create task")
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FormImageThumbnail(img: ImageData, onRemove: () -> Unit) {
+    val bitmap = remember(img) { imageDataToBitmap(img)?.asImageBitmap() } ?: return
+    Row(verticalAlignment = Alignment.Top) {
+        Image(
+            bitmap = bitmap,
+            contentDescription = "Attached image",
+            modifier = Modifier
+                .size(48.dp)
+                .clip(RoundedCornerShape(4.dp)),
+            contentScale = ContentScale.Crop,
+        )
+        Icon(
+            Icons.Default.Close,
+            contentDescription = "Remove",
+            modifier = Modifier
+                .size(16.dp)
+                .clickable(onClick = onRemove),
+        )
     }
 }
 

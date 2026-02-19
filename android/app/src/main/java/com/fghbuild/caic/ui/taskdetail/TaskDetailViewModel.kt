@@ -8,6 +8,8 @@ import com.caic.sdk.ApiClient
 import com.caic.sdk.ClaudeEventMessage
 import com.caic.sdk.ClaudeTodoItem
 import com.caic.sdk.EventKinds
+import com.caic.sdk.HarnessInfo
+import com.caic.sdk.ImageData
 import com.caic.sdk.InputReq
 import com.caic.sdk.RestartReq
 import com.caic.sdk.SafetyIssue
@@ -44,6 +46,8 @@ data class TaskDetailState(
     val actionError: String? = null,
     val safetyIssues: List<SafetyIssue> = emptyList(),
     val inputDraft: String = "",
+    val pendingImages: List<ImageData> = emptyList(),
+    val supportsImages: Boolean = false,
 )
 
 private val TerminalStates = setOf("terminated", "failed")
@@ -63,6 +67,8 @@ class TaskDetailViewModel @Inject constructor(
     private val _actionError = MutableStateFlow<String?>(null)
     private val _safetyIssues = MutableStateFlow<List<SafetyIssue>>(emptyList())
     private val _inputDraft = MutableStateFlow("")
+    private val _pendingImages = MutableStateFlow<List<ImageData>>(emptyList())
+    private val _harnesses = MutableStateFlow<List<HarnessInfo>>(emptyList())
 
     private var sseJob: Job? = null
 
@@ -71,6 +77,7 @@ class TaskDetailViewModel @Inject constructor(
         listOf(
             taskRepository.tasks, _messages, _isReady, _sending,
             _pendingAction, _actionError, _safetyIssues, _inputDraft,
+            _pendingImages, _harnesses,
         )
     ) { values ->
         val tasks = values[0] as List<Task>
@@ -81,10 +88,14 @@ class TaskDetailViewModel @Inject constructor(
         val error = values[5] as String?
         val safety = values[6] as List<SafetyIssue>
         val draft = values[7] as String
+        val images = values[8] as List<ImageData>
+        val harnesses = values[9] as List<HarnessInfo>
         val task = tasks.firstOrNull { it.id == taskId }
         val groups = groupMessages(msgs)
         val turns = groupTurns(groups)
         val lastTodo = msgs.lastOrNull { it.kind == EventKinds.Todo }?.todo?.todos.orEmpty()
+        val imgSupport = task != null &&
+            harnesses.any { it.name == task.harness && it.supportsImages }
         TaskDetailState(
             task = task,
             messages = msgs,
@@ -97,11 +108,26 @@ class TaskDetailViewModel @Inject constructor(
             actionError = error,
             safetyIssues = safety,
             inputDraft = draft,
+            pendingImages = images,
+            supportsImages = imgSupport,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskDetailState())
 
     init {
         connectSSE()
+        loadHarnesses()
+    }
+
+    private fun loadHarnesses() {
+        viewModelScope.launch {
+            val url = taskRepository.serverURL()
+            if (url.isBlank()) return@launch
+            try {
+                _harnesses.value = ApiClient(url).listHarnesses()
+            } catch (_: Exception) {
+                // Non-critical; attach button will just stay hidden.
+            }
+        }
     }
 
     private fun connectSSE() {
@@ -156,16 +182,32 @@ class TaskDetailViewModel @Inject constructor(
         _inputDraft.value = text
     }
 
+    fun addImages(images: List<ImageData>) {
+        _pendingImages.value = _pendingImages.value + images
+    }
+
+    fun removeImage(index: Int) {
+        _pendingImages.value = _pendingImages.value.filterIndexed { i, _ -> i != index }
+    }
+
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
     fun sendInput() {
         val text = _inputDraft.value.trim()
-        if (text.isBlank()) return
+        val images = _pendingImages.value
+        if (text.isBlank() && images.isEmpty()) return
         _sending.value = true
         viewModelScope.launch {
             try {
                 val client = ApiClient(taskRepository.serverURL())
-                client.sendInput(taskId, InputReq(prompt = text))
+                client.sendInput(
+                    taskId,
+                    InputReq(
+                        prompt = text,
+                        images = images.ifEmpty { null },
+                    ),
+                )
                 _inputDraft.value = ""
+                _pendingImages.value = emptyList()
             } catch (e: Exception) {
                 showActionError("send failed: ${e.message}")
             } finally {

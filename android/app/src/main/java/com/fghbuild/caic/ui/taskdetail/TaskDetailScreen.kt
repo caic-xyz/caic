@@ -1,6 +1,10 @@
 // Full-screen task detail view with live SSE message stream, grouping, and actions.
 package com.fghbuild.caic.ui.taskdetail
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,12 +37,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.caic.ui.theme.stateColor
+import com.fghbuild.caic.util.uriToImageData
 
 private val PlanBadgeBg = Color(0xFFEDE9FE)
 private val PlanBadgeFg = Color(0xFF7C3AED)
@@ -52,6 +58,14 @@ fun TaskDetailScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val task = state.task
+    val context = LocalContext.current
+    val contentResolver = context.contentResolver
+    val photoPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickMultipleVisualMedia(),
+    ) { uris: List<Uri> ->
+        val images = uris.mapNotNull { uriToImageData(contentResolver, it) }
+        if (images.isNotEmpty()) viewModel.addImages(images)
+    }
 
     // Safety dialog
     if (state.safetyIssues.isNotEmpty()) {
@@ -140,6 +154,14 @@ fun TaskDetailScreen(
                     onTerminate = viewModel::terminateTask,
                     sending = state.sending,
                     pendingAction = state.pendingAction,
+                    pendingImages = state.pendingImages,
+                    supportsImages = state.supportsImages,
+                    onAttach = {
+                        photoPicker.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                    onRemoveImage = viewModel::removeImage,
                 )
             }
         },

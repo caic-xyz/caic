@@ -7,6 +7,7 @@ import com.caic.sdk.ApiClient
 import com.caic.sdk.Config
 import com.caic.sdk.CreateTaskReq
 import com.caic.sdk.HarnessInfo
+import com.caic.sdk.ImageData
 import com.caic.sdk.Repo
 import com.caic.sdk.Task
 import com.caic.sdk.UsageResp
@@ -37,6 +38,8 @@ data class TaskListState(
     val recentRepoCount: Int = 0,
     val submitting: Boolean = false,
     val error: String? = null,
+    val pendingImages: List<ImageData> = emptyList(),
+    val supportsImages: Boolean = false,
 )
 
 @HiltViewModel
@@ -58,6 +61,8 @@ class TaskListViewModel @Inject constructor(
             compareByDescending<Task> { it.state in activeStates }
                 .thenByDescending { it.id }
         )
+        val imgSupport = form.harnesses
+            .any { it.name == form.selectedHarness && it.supportsImages }
         TaskListState(
             tasks = sorted,
             connected = connected,
@@ -73,6 +78,8 @@ class TaskListViewModel @Inject constructor(
             prompt = form.prompt,
             submitting = form.submitting,
             error = form.error,
+            pendingImages = form.pendingImages,
+            supportsImages = imgSupport,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskListState())
 
@@ -124,6 +131,18 @@ class TaskListViewModel @Inject constructor(
         _formState.value = _formState.value.copy(selectedModel = model)
     }
 
+    fun addImages(images: List<ImageData>) {
+        _formState.value = _formState.value.copy(
+            pendingImages = _formState.value.pendingImages + images,
+        )
+    }
+
+    fun removeImage(index: Int) {
+        _formState.value = _formState.value.copy(
+            pendingImages = _formState.value.pendingImages.filterIndexed { i, _ -> i != index },
+        )
+    }
+
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
     fun createTask() {
         val form = _formState.value
@@ -140,6 +159,7 @@ class TaskListViewModel @Inject constructor(
                         repo = form.selectedRepo,
                         harness = form.selectedHarness,
                         model = form.selectedModel.ifBlank { null },
+                        images = form.pendingImages.ifEmpty { null },
                     )
                 )
                 settingsRepository.addRecentRepo(form.selectedRepo)
@@ -153,6 +173,7 @@ class TaskListViewModel @Inject constructor(
                     submitting = false,
                     repos = recentRepos + restRepos,
                     recentRepoCount = recentRepos.size,
+                    pendingImages = emptyList(),
                 )
             } catch (e: Exception) {
                 _formState.value = _formState.value.copy(
@@ -174,5 +195,6 @@ class TaskListViewModel @Inject constructor(
         val prompt: String = "",
         val submitting: Boolean = false,
         val error: String? = null,
+        val pendingImages: List<ImageData> = emptyList(),
     )
 }
