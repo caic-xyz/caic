@@ -101,7 +101,8 @@ func (b *Backend) ReadRelayOutput(ctx context.Context, container string) (msgs [
 	}
 	size = int64(len(out))
 	scanner := bufio.NewScanner(bytes.NewReader(out))
-	scanner.Buffer(make([]byte, 0, 1<<20), 1<<20)
+	// 32 MiB max line: user input with base64 images can produce very long NDJSON lines.
+	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {

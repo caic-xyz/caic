@@ -185,8 +185,8 @@ func (s *Session) Wait() (*ResultMessage, error) {
 // the terminal ResultMessage. If logW is non-nil, each raw line is written to it.
 func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer, parseFn func([]byte) (Message, error)) (*ResultMessage, error) {
 	scanner := bufio.NewScanner(r)
-	// Agents can produce long lines (e.g., base64 images in tool results).
-	scanner.Buffer(make([]byte, 0, 1<<20), 1<<20)
+	// 32 MiB max line: user input with base64 images can produce very long NDJSON lines.
+	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
 
 	slog.Debug("readMessages: started reading agent stdout")
 	var n int

@@ -80,7 +80,8 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 	}()
 
 	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 1<<20), 1<<20)
+	// 32 MiB max line: user input with base64 images can produce very long NDJSON lines.
+	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
 
 	// First line must be the metadata header.
 	if !scanner.Scan() {

@@ -162,6 +162,13 @@ def serve(cmd_args, work_dir):
     # Open output log (append-only).
     output_file = open(OUTPUT_PATH, "ab", buffering=0)
 
+    # Lock protecting all output_file writes.  Three threads write to
+    # output_file (reader_thread, client_reader, diff_watcher_thread).
+    # Without the lock, large writes from client_reader (e.g. base64
+    # image data spanning multiple recv chunks) can be interleaved with
+    # subprocess stdout, corrupting NDJSON lines in the replay log.
+    output_lock = threading.Lock()
+
     # Track connected client (at most one at a time).
     client_lock = threading.Lock()
     client_conn = [None]  # mutable ref in list
@@ -201,8 +208,9 @@ def serve(cmd_args, work_dir):
                 data = proc.stdout.read1(BUF_SIZE)
                 if not data:
                     break
-                output_file.write(data)
-                output_file.flush()
+                with output_lock:
+                    output_file.write(data)
+                    output_file.flush()
                 send_to_client(data)
                 diff_activity.set()
         except (OSError, ValueError) as e:
@@ -288,8 +296,9 @@ def serve(cmd_args, work_dir):
             line = json.dumps({"type": "caic_diff_stat", "diff_stat": diff_stat}) + "\n"
             data = line.encode()
             try:
-                output_file.write(data)
-                output_file.flush()
+                with output_lock:
+                    output_file.write(data)
+                    output_file.flush()
             except (OSError, ValueError):
                 pass
             send_to_client(data)
@@ -344,8 +353,17 @@ def serve(cmd_args, work_dir):
             )
 
             # Thread: read client stdin → subprocess stdin + log.
+            #
+            # User input is NDJSON: each message is a single JSON line ending
+            # with \n.  Large messages (e.g. base64 images) may span multiple
+            # recv() calls.  We buffer incoming data and only write complete
+            # lines to output_file (under output_lock) so that concurrent
+            # subprocess stdout writes can't interleave mid-line and corrupt
+            # the replay log.  Data is forwarded to proc.stdin immediately
+            # (the subprocess handles its own framing).
             def client_reader(c, cid=cid):
                 close_stdin = False
+                line_buf = b""
                 try:
                     while True:
                         data = c.recv(BUF_SIZE)
@@ -360,15 +378,25 @@ def serve(cmd_args, work_dir):
                             if data:
                                 proc.stdin.write(data)
                                 proc.stdin.flush()
-                                output_file.write(data)
-                                output_file.flush()
+                                line_buf += data
                             break
                         proc.stdin.write(data)
                         proc.stdin.flush()
-                        output_file.write(data)
-                        output_file.flush()
+                        # Buffer data and write complete lines to output_file.
+                        line_buf += data
+                        while b"\n" in line_buf:
+                            line, line_buf = line_buf.split(b"\n", 1)
+                            line += b"\n"
+                            with output_lock:
+                                output_file.write(line)
+                                output_file.flush()
                 except (OSError, BrokenPipeError, ValueError) as e:
                     logging.info("client #%d reader error: %s", cid, e)
+                # Flush any remaining buffered data (incomplete line).
+                if line_buf:
+                    with output_lock:
+                        output_file.write(line_buf)
+                        output_file.flush()
                 if close_stdin:
                     if stdin_closed[0]:
                         logging.warning("client #%d requested stdin close but stdin already closed", cid)
