@@ -5,23 +5,24 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os/exec"
 	"strconv"
+	"sync"
+	"sync/atomic"
 
 	"github.com/maruel/caic/backend/internal/agent"
 )
 
-// Backend implements agent.Backend for Codex CLI.
+// Backend implements agent.Backend for Codex CLI using the app-server
+// JSON-RPC 2.0 protocol.
 type Backend struct{}
 
 var _ agent.Backend = (*Backend)(nil)
-
-// Wire is the wire format for Codex CLI (exec --json over stdout).
-var Wire agent.WireFormat = &Backend{}
 
 // Harness returns the harness identifier.
 func (b *Backend) Harness() agent.Harness { return agent.Codex }
@@ -32,8 +33,9 @@ func (b *Backend) Models() []string { return []string{"o4-mini", "codex-mini-lat
 // SupportsImages reports that Codex CLI does not accept image input.
 func (b *Backend) SupportsImages() bool { return false }
 
-// Start launches a Codex CLI process via the relay daemon in the given
-// container.
+// Start launches a Codex CLI app-server process via the relay daemon in the
+// given container. It performs the JSON-RPC handshake (initialize →
+// initialized → thread/start) before returning a Session.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
 	if opts.Dir == "" {
 		return nil, errors.New("opts.Dir is required")
@@ -44,8 +46,8 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 
 	codexArgs := buildArgs(opts)
 
-	sshArgs := make([]string, 0, 7+len(codexArgs))
-	sshArgs = append(sshArgs, opts.Container, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--")
+	sshArgs := make([]string, 0, 8+len(codexArgs))
+	sshArgs = append(sshArgs, opts.Container, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin", "--")
 	sshArgs = append(sshArgs, codexArgs...)
 
 	slog.Info("codex: launching via relay", "container", opts.Container, "args", codexArgs)
@@ -63,8 +65,27 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 		return nil, fmt.Errorf("start relay: %w", err)
 	}
 
+	// Wrap stdout in a bufio.Reader so the handshake can read line-by-line
+	// without losing buffered bytes for the session's readMessages goroutine.
+	br := bufio.NewReaderSize(stdout, 1<<16)
+
+	wire, err := handshake(stdin, br, opts)
+	if err != nil {
+		// Kill the process on handshake failure.
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, fmt.Errorf("codex handshake: %w", err)
+	}
+
 	log := slog.With("container", opts.Container)
-	return agent.NewSession(cmd, stdin, stdout, msgCh, logW, Wire, log), nil
+	s := agent.NewSession(cmd, stdin, br, msgCh, logW, wire, log)
+	if opts.Prompt != "" {
+		if err := s.Send(opts.Prompt, nil); err != nil {
+			s.Close()
+			return nil, fmt.Errorf("write prompt: %w", err)
+		}
+	}
+	return s, nil
 }
 
 // AttachRelay connects to an already-running relay in the container.
@@ -87,8 +108,12 @@ func (b *Backend) AttachRelay(ctx context.Context, container string, offset int6
 		return nil, fmt.Errorf("attach relay: %w", err)
 	}
 
+	// On reconnect, thread ID is unknown until we see thread/started in the
+	// replayed output. wireFormat.ParseMessage captures it.
+	wire := &wireFormat{}
+
 	log := slog.With("container", container)
-	return agent.NewSession(cmd, stdin, stdout, msgCh, logW, Wire, log), nil
+	return agent.NewSession(cmd, stdin, stdout, msgCh, logW, wire, log), nil
 }
 
 // ReadRelayOutput reads the complete output.jsonl from the container's relay
@@ -118,30 +143,194 @@ func (b *Backend) ReadRelayOutput(ctx context.Context, container string) (msgs [
 	return msgs, size, scanner.Err()
 }
 
-// ParseMessage decodes a single Codex CLI exec --json line into a typed Message.
+// ParseMessage decodes a single Codex CLI app-server line into a typed Message.
 func (b *Backend) ParseMessage(line []byte) (agent.Message, error) {
 	return ParseMessage(line)
 }
 
-// WritePrompt returns an error because Codex exec mode is non-interactive.
-// It does not read follow-up prompts from stdin.
-func (*Backend) WritePrompt(_ io.Writer, _ string, _ []agent.ImageData, _ io.Writer) error {
-	return errors.New("codex exec mode does not support follow-up prompts")
+// wireFormat implements agent.WireFormat for the codex app-server JSON-RPC
+// protocol. It holds per-session state: the thread ID and a request ID counter.
+type wireFormat struct {
+	threadID string
+	nextID   atomic.Int64
+	mu       sync.Mutex
 }
 
-// buildArgs constructs the Codex CLI arguments.
-func buildArgs(opts *agent.Options) []string {
-	args := []string{
-		"codex", "exec", "--json",
-		"--full-auto",
+// WritePrompt sends a turn/start JSON-RPC request to begin a new turn with
+// the given user message. Images are ignored (Codex does not support them).
+func (w *wireFormat) WritePrompt(wr io.Writer, prompt string, _ []agent.ImageData, logW io.Writer) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.threadID == "" {
+		return errors.New("codex: no thread ID (handshake not completed)")
 	}
-	if opts.Model != "" {
-		args = append(args, "-m", opts.Model)
+	id := w.nextID.Add(1)
+	req := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"method":  "turn/start",
+		"params": map[string]any{
+			"thread_id": w.threadID,
+			"input":     prompt,
+		},
 	}
-	if opts.Prompt != "" {
-		args = append(args, opts.Prompt)
+	data, err := json.Marshal(req)
+	if err != nil {
+		return err
 	}
-	return args
+	data = append(data, '\n')
+	if _, err := wr.Write(data); err != nil {
+		return err
+	}
+	// Don't log to logW — stdin is not logged with --no-log-stdin.
+	return nil
+}
+
+// ParseMessage wraps the package-level ParseMessage and captures the thread ID
+// from thread/started notifications during replay.
+func (w *wireFormat) ParseMessage(line []byte) (agent.Message, error) {
+	msg, err := ParseMessage(line)
+	if err != nil {
+		return nil, err
+	}
+	// Capture thread ID from SystemInitMessage (produced by thread/started).
+	if init, ok := msg.(*agent.SystemInitMessage); ok && init.SessionID != "" {
+		w.mu.Lock()
+		w.threadID = init.SessionID
+		w.mu.Unlock()
+	}
+	return msg, nil
+}
+
+// handshake performs the JSON-RPC initialize → initialized → thread/start
+// (or thread/resume) sequence and returns a wireFormat with the thread ID set.
+func handshake(stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*wireFormat, error) {
+	w := &wireFormat{}
+
+	// 1. Send initialize request.
+	initID := w.nextID.Add(1)
+	initReq := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      initID,
+		"method":  "initialize",
+		"params": map[string]any{
+			"client_info": map[string]string{
+				"name":    "caic",
+				"version": "1.0.0",
+			},
+			"capabilities": map[string]any{},
+		},
+	}
+	if err := writeJSON(stdin, initReq); err != nil {
+		return nil, fmt.Errorf("write initialize: %w", err)
+	}
+
+	// Read initialize response.
+	if _, err := readJSONRPCResponse(stdout); err != nil {
+		return nil, fmt.Errorf("read initialize response: %w", err)
+	}
+
+	// 2. Send initialized notification.
+	initdNotif := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  "initialized",
+	}
+	if err := writeJSON(stdin, initdNotif); err != nil {
+		return nil, fmt.Errorf("write initialized: %w", err)
+	}
+
+	// 3. Send thread/start or thread/resume.
+	threadID := w.nextID.Add(1)
+	var threadReq map[string]any
+	if opts.ResumeSessionID != "" {
+		threadReq = map[string]any{
+			"jsonrpc": "2.0",
+			"id":      threadID,
+			"method":  "thread/resume",
+			"params": map[string]any{
+				"thread_id": opts.ResumeSessionID,
+			},
+		}
+	} else {
+		params := map[string]any{}
+		if opts.Model != "" {
+			params["model"] = opts.Model
+		}
+		threadReq = map[string]any{
+			"jsonrpc": "2.0",
+			"id":      threadID,
+			"method":  "thread/start",
+			"params":  params,
+		}
+	}
+	if err := writeJSON(stdin, threadReq); err != nil {
+		return nil, fmt.Errorf("write thread/start: %w", err)
+	}
+
+	// Read thread/start response — contains the thread info.
+	resp, err := readJSONRPCResponse(stdout)
+	if err != nil {
+		return nil, fmt.Errorf("read thread/start response: %w", err)
+	}
+
+	// Extract thread ID from the response result.
+	var result struct {
+		Thread struct {
+			ID string `json:"id"`
+		} `json:"thread"`
+	}
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return nil, fmt.Errorf("parse thread/start result: %w", err)
+	}
+	if result.Thread.ID == "" {
+		return nil, errors.New("thread/start response missing thread.id")
+	}
+	w.threadID = result.Thread.ID
+	return w, nil
+}
+
+// writeJSON marshals v as JSON and writes it followed by a newline.
+func writeJSON(w io.Writer, v any) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	_, err = w.Write(data)
+	return err
+}
+
+// readJSONRPCResponse reads lines from r until it finds a JSON-RPC response
+// (has "id" field). Notifications encountered during the handshake are logged
+// and skipped.
+func readJSONRPCResponse(r *bufio.Reader) (*JSONRPCMessage, error) {
+	for {
+		line, err := r.ReadBytes('\n')
+		if err != nil {
+			return nil, fmt.Errorf("read response: %w", err)
+		}
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var msg JSONRPCMessage
+		if err := json.Unmarshal(line, &msg); err != nil {
+			return nil, fmt.Errorf("unmarshal response: %w", err)
+		}
+		if msg.IsResponse() {
+			if msg.Error != nil {
+				return nil, fmt.Errorf("JSON-RPC error %d: %s", msg.Error.Code, msg.Error.Message)
+			}
+			return &msg, nil
+		}
+		// Skip notifications during handshake.
+		slog.Debug("codex handshake: skipping notification", "method", msg.Method)
+	}
+}
+
+// buildArgs constructs the Codex CLI app-server arguments.
+func buildArgs(_ *agent.Options) []string {
+	return []string{"codex", "app-server"}
 }
 
 // slogWriter is an io.Writer that logs each line via slog.Warn.

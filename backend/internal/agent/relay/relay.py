@@ -85,7 +85,7 @@ def _parse_numstat(numstat):
     return result
 
 
-def serve(cmd_args, work_dir):
+def serve(cmd_args, work_dir, log_stdin=True):
     """Start the relay server as a daemon, then attach as the first client.
 
     Architecture:
@@ -95,10 +95,15 @@ def serve(cmd_args, work_dir):
         2. reader_thread: subprocess stdout → output.jsonl + connected client.
         3. accept_thread: accepts client connections on Unix socket.
            - On connect: replays output.jsonl from offset, then forwards live.
-           - client_reader: client stdin → subprocess stdin.
+           - client_reader: client stdin → subprocess stdin + optionally log.
         4. When subprocess exits:
            - reader_thread closes output file and disconnects client.
            - Socket and PID file are cleaned up.
+
+    Args:
+      log_stdin: When False, client_reader forwards stdin to the subprocess
+        but does NOT write it to output.jsonl. This keeps the log clean for
+        protocols like JSON-RPC where stdin contains handshake/request noise.
 
     Failure modes handled:
       - SSH drops: client disconnects, subprocess keeps running. Next
@@ -378,22 +383,24 @@ def serve(cmd_args, work_dir):
                             if data:
                                 proc.stdin.write(data)
                                 proc.stdin.flush()
-                                line_buf += data
+                                if log_stdin:
+                                    line_buf += data
                             break
                         proc.stdin.write(data)
                         proc.stdin.flush()
                         # Buffer data and write complete lines to output_file.
-                        line_buf += data
-                        while b"\n" in line_buf:
-                            line, line_buf = line_buf.split(b"\n", 1)
-                            line += b"\n"
-                            with output_lock:
-                                output_file.write(line)
-                                output_file.flush()
+                        if log_stdin:
+                            line_buf += data
+                            while b"\n" in line_buf:
+                                line, line_buf = line_buf.split(b"\n", 1)
+                                line += b"\n"
+                                with output_lock:
+                                    output_file.write(line)
+                                    output_file.flush()
                 except (OSError, BrokenPipeError, ValueError) as e:
                     logging.info("client #%d reader error: %s", cid, e)
                 # Flush any remaining buffered data (incomplete line).
-                if line_buf:
+                if log_stdin and line_buf:
                     with output_lock:
                         output_file.write(line_buf)
                         output_file.flush()
@@ -541,13 +548,17 @@ def main():
     mode = sys.argv[1]
 
     if mode == "serve-attach":
-        # Parse required --dir flag.
+        # Parse required --dir flag and optional --no-log-stdin.
         rest = sys.argv[2:]
         if len(rest) < 2 or rest[0] != "--dir":
             print("relay.py serve-attach: --dir <path> is required", file=sys.stderr)
             sys.exit(1)
         work_dir = rest[1]
         rest = rest[2:]
+        log_stdin = True
+        if rest and rest[0] == "--no-log-stdin":
+            log_stdin = False
+            rest = rest[1:]
         # Find "--" separator.
         try:
             sep = rest.index("--")
@@ -558,7 +569,7 @@ def main():
         if not cmd_args:
             print("relay.py serve-attach: no command after '--'", file=sys.stderr)
             sys.exit(1)
-        serve(cmd_args, work_dir)
+        serve(cmd_args, work_dir, log_stdin=log_stdin)
 
     elif mode == "attach":
         offset = 0

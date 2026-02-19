@@ -5,16 +5,15 @@ import (
 	"fmt"
 )
 
-// Event type constants for the outer envelope.
+// JSON-RPC notification method constants for codex app-server.
 const (
-	TypeThreadStarted = "thread.started"
-	TypeTurnStarted   = "turn.started"
-	TypeTurnCompleted = "turn.completed"
-	TypeTurnFailed    = "turn.failed"
-	TypeItemStarted   = "item.started"
-	TypeItemUpdated   = "item.updated"
-	TypeItemCompleted = "item.completed"
-	TypeError         = "error"
+	MethodThreadStarted = "thread/started"
+	MethodTurnStarted   = "turn/started"
+	MethodTurnCompleted = "turn/completed"
+	MethodItemStarted   = "item/started"
+	MethodItemCompleted = "item/completed"
+	MethodItemUpdated   = "item/updated"
+	MethodItemDelta     = "item/agentMessage/delta"
 )
 
 // Item type constants for the inner item object.
@@ -29,122 +28,121 @@ const (
 	ItemTypeError            = "error"
 )
 
-// Record is a single line from a Codex CLI exec --json session.
-// Use the typed accessor methods to get the concrete record after checking Type.
-type Record struct {
-	// Type discriminates the record kind.
-	Type string `json:"type"`
-
-	raw json.RawMessage
+// JSONRPCMessage is the JSON-RPC 2.0 envelope for codex app-server messages.
+// Notifications have Method set and ID nil. Responses have ID set.
+type JSONRPCMessage struct {
+	JSONRPC string           `json:"jsonrpc"`
+	Method  string           `json:"method,omitempty"`
+	ID      *json.RawMessage `json:"id,omitempty"`
+	Params  json.RawMessage  `json:"params,omitempty"`
+	Result  json.RawMessage  `json:"result,omitempty"`
+	Error   *JSONRPCError    `json:"error,omitempty"`
 }
 
-// UnmarshalJSON implements json.Unmarshaler.
-func (r *Record) UnmarshalJSON(data []byte) error {
-	var probe struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal(data, &probe); err != nil {
-		return fmt.Errorf("Record: %w", err)
-	}
-	r.Type = probe.Type
-	r.raw = append(r.raw[:0], data...)
-	return nil
+// IsResponse returns true if this is a response (has an ID).
+func (m *JSONRPCMessage) IsResponse() bool { return m.ID != nil }
+
+// JSONRPCError is a JSON-RPC 2.0 error object.
+type JSONRPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
 }
 
-// Raw returns the original JSON bytes for this record.
-func (r *Record) Raw() json.RawMessage { return r.raw }
-
-// AsThreadStarted decodes the record as a ThreadStartedRecord.
-func (r *Record) AsThreadStarted() (*ThreadStartedRecord, error) {
-	var v ThreadStartedRecord
-	if err := json.Unmarshal(r.raw, &v); err != nil {
-		return nil, err
-	}
-	return &v, nil
-}
-
-// AsTurnCompleted decodes the record as a TurnCompletedRecord.
-func (r *Record) AsTurnCompleted() (*TurnCompletedRecord, error) {
-	var v TurnCompletedRecord
-	if err := json.Unmarshal(r.raw, &v); err != nil {
-		return nil, err
-	}
-	return &v, nil
-}
-
-// AsTurnFailed decodes the record as a TurnFailedRecord.
-func (r *Record) AsTurnFailed() (*TurnFailedRecord, error) {
-	var v TurnFailedRecord
-	if err := json.Unmarshal(r.raw, &v); err != nil {
-		return nil, err
-	}
-	return &v, nil
-}
-
-// AsItem decodes the record as an ItemRecord.
-func (r *Record) AsItem() (*ItemRecord, error) {
-	var v ItemRecord
-	if err := json.Unmarshal(r.raw, &v); err != nil {
-		return nil, err
-	}
-	return &v, nil
-}
-
-// ThreadStartedRecord is emitted at session start.
-//
-// Example:
-//
-//	{"type":"thread.started","thread_id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}
-type ThreadStartedRecord struct {
-	Type     string `json:"type"`
-	ThreadID string `json:"thread_id"`
+// ThreadStartedParams holds the params for thread/started notifications.
+type ThreadStartedParams struct {
+	Thread ThreadInfo `json:"thread"`
 
 	Overflow
 }
 
-var threadStartedKnown = makeSet("type", "thread_id")
+var threadStartedParamsKnown = makeSet("thread")
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (r *ThreadStartedRecord) UnmarshalJSON(data []byte) error {
-	type Alias ThreadStartedRecord
+func (p *ThreadStartedParams) UnmarshalJSON(data []byte) error {
+	type Alias ThreadStartedParams
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return fmt.Errorf("ThreadStartedRecord: %w", err)
+		return fmt.Errorf("ThreadStartedParams: %w", err)
 	}
-	if err := json.Unmarshal(data, (*Alias)(r)); err != nil {
-		return fmt.Errorf("ThreadStartedRecord: %w", err)
+	if err := json.Unmarshal(data, (*Alias)(p)); err != nil {
+		return fmt.Errorf("ThreadStartedParams: %w", err)
 	}
-	r.Extra = collectUnknown(raw, threadStartedKnown)
-	warnUnknown("ThreadStartedRecord", r.Extra)
+	p.Extra = collectUnknown(raw, threadStartedParamsKnown)
+	warnUnknown("ThreadStartedParams", p.Extra)
 	return nil
 }
 
-// TurnCompletedRecord is emitted when a turn ends successfully.
-//
-// Example:
-//
-//	{"type":"turn.completed","usage":{"input_tokens":24763,"cached_input_tokens":24448,"output_tokens":122}}
-type TurnCompletedRecord struct {
-	Type  string    `json:"type"`
-	Usage TurnUsage `json:"usage"`
+// ThreadInfo describes a thread in thread/started params.
+type ThreadInfo struct {
+	ID string `json:"id"`
 
 	Overflow
 }
 
-var turnCompletedKnown = makeSet("type", "usage")
+var threadInfoKnown = makeSet("id")
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (r *TurnCompletedRecord) UnmarshalJSON(data []byte) error {
-	type Alias TurnCompletedRecord
+func (t *ThreadInfo) UnmarshalJSON(data []byte) error {
+	type Alias ThreadInfo
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return fmt.Errorf("TurnCompletedRecord: %w", err)
+		return fmt.Errorf("ThreadInfo: %w", err)
 	}
-	if err := json.Unmarshal(data, (*Alias)(r)); err != nil {
-		return fmt.Errorf("TurnCompletedRecord: %w", err)
+	if err := json.Unmarshal(data, (*Alias)(t)); err != nil {
+		return fmt.Errorf("ThreadInfo: %w", err)
 	}
-	r.Extra = collectUnknown(raw, turnCompletedKnown)
-	warnUnknown("TurnCompletedRecord", r.Extra)
+	t.Extra = collectUnknown(raw, threadInfoKnown)
+	warnUnknown("ThreadInfo", t.Extra)
+	return nil
+}
+
+// TurnCompletedParams holds the params for turn/completed notifications.
+type TurnCompletedParams struct {
+	Turn TurnCompletedInfo `json:"turn"`
+
+	Overflow
+}
+
+var turnCompletedParamsKnown = makeSet("turn")
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (p *TurnCompletedParams) UnmarshalJSON(data []byte) error {
+	type Alias TurnCompletedParams
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("TurnCompletedParams: %w", err)
+	}
+	if err := json.Unmarshal(data, (*Alias)(p)); err != nil {
+		return fmt.Errorf("TurnCompletedParams: %w", err)
+	}
+	p.Extra = collectUnknown(raw, turnCompletedParamsKnown)
+	warnUnknown("TurnCompletedParams", p.Extra)
+	return nil
+}
+
+// TurnCompletedInfo describes a completed turn.
+type TurnCompletedInfo struct {
+	Status string    `json:"status"` // "completed" or "failed"
+	Usage  TurnUsage `json:"usage"`
+	Error  string    `json:"error,omitempty"`
+
+	Overflow
+}
+
+var turnCompletedInfoKnown = makeSet("status", "usage", "error")
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (t *TurnCompletedInfo) UnmarshalJSON(data []byte) error {
+	type Alias TurnCompletedInfo
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("TurnCompletedInfo: %w", err)
+	}
+	if err := json.Unmarshal(data, (*Alias)(t)); err != nil {
+		return fmt.Errorf("TurnCompletedInfo: %w", err)
+	}
+	t.Extra = collectUnknown(raw, turnCompletedInfoKnown)
+	warnUnknown("TurnCompletedInfo", t.Extra)
 	return nil
 }
 
@@ -174,66 +172,56 @@ func (u *TurnUsage) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// TurnFailedRecord is emitted when a turn errors.
-//
-// Example:
-//
-//	{"type":"turn.failed","error":"something went wrong"}
-type TurnFailedRecord struct {
-	Type  string `json:"type"`
-	Error string `json:"error"`
-
-	Overflow
-}
-
-var turnFailedKnown = makeSet("type", "error")
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (r *TurnFailedRecord) UnmarshalJSON(data []byte) error {
-	type Alias TurnFailedRecord
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return fmt.Errorf("TurnFailedRecord: %w", err)
-	}
-	if err := json.Unmarshal(data, (*Alias)(r)); err != nil {
-		return fmt.Errorf("TurnFailedRecord: %w", err)
-	}
-	r.Extra = collectUnknown(raw, turnFailedKnown)
-	warnUnknown("TurnFailedRecord", r.Extra)
-	return nil
-}
-
-// ItemRecord is emitted for item.started, item.updated, and item.completed
-// events. The Item field contains the inner item data.
-//
-// Example:
-//
-//	{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"bash -lc ls","aggregated_output":"docs\nsrc\n","exit_code":0,"status":"completed"}}
-type ItemRecord struct {
-	Type string   `json:"type"`
+// ItemParams holds the params for item/* notifications.
+type ItemParams struct {
 	Item ItemData `json:"item"`
 
 	Overflow
 }
 
-var itemRecordKnown = makeSet("type", "item")
+var itemParamsKnown = makeSet("item")
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (r *ItemRecord) UnmarshalJSON(data []byte) error {
-	type Alias ItemRecord
+func (p *ItemParams) UnmarshalJSON(data []byte) error {
+	type Alias ItemParams
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return fmt.Errorf("ItemRecord: %w", err)
+		return fmt.Errorf("ItemParams: %w", err)
 	}
-	if err := json.Unmarshal(data, (*Alias)(r)); err != nil {
-		return fmt.Errorf("ItemRecord: %w", err)
+	if err := json.Unmarshal(data, (*Alias)(p)); err != nil {
+		return fmt.Errorf("ItemParams: %w", err)
 	}
-	r.Extra = collectUnknown(raw, itemRecordKnown)
-	warnUnknown("ItemRecord", r.Extra)
+	p.Extra = collectUnknown(raw, itemParamsKnown)
+	warnUnknown("ItemParams", p.Extra)
 	return nil
 }
 
-// ItemData is the inner item object within item events.
+// ItemDeltaParams holds the params for item/agentMessage/delta notifications.
+type ItemDeltaParams struct {
+	ItemID string `json:"item_id"`
+	Delta  string `json:"delta"`
+
+	Overflow
+}
+
+var itemDeltaParamsKnown = makeSet("item_id", "delta")
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (p *ItemDeltaParams) UnmarshalJSON(data []byte) error {
+	type Alias ItemDeltaParams
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("ItemDeltaParams: %w", err)
+	}
+	if err := json.Unmarshal(data, (*Alias)(p)); err != nil {
+		return fmt.Errorf("ItemDeltaParams: %w", err)
+	}
+	p.Extra = collectUnknown(raw, itemDeltaParamsKnown)
+	warnUnknown("ItemDeltaParams", p.Extra)
+	return nil
+}
+
+// ItemData is the inner item object within item event params.
 type ItemData struct {
 	ID     string `json:"id"`
 	Type   string `json:"type"`   // agent_message, reasoning, command_execution, file_change, mcp_tool_call, web_search, todo_list, error

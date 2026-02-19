@@ -1,6 +1,7 @@
-// Package codex provides Go types for Codex CLI exec --json session logs.
+// Package codex provides Go types for Codex CLI app-server JSON-RPC session logs.
 //
-// Codex CLI writes NDJSON when invoked with exec --json.
+// Codex CLI app-server uses JSON-RPC 2.0 over stdio, emitting notifications
+// for thread, turn, and item lifecycle events.
 // New fields may appear at any version, so all types preserve unknown fields
 // in an Overflow map and log a warning when they are encountered.
 package codex
