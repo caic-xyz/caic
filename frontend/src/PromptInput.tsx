@@ -4,7 +4,10 @@ import type { ImageData as APIImageData } from "@sdk/types.gen";
 import { fileToImageData, imagesFromClipboard } from "./images";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
+import CameraCapture from "./CameraCapture";
 import AttachIcon from "@material-symbols/svg-400/outlined/attach_file.svg?solid";
+import CameraIcon from "@material-symbols/svg-400/outlined/photo_camera.svg?solid";
+import ImageIcon from "@material-symbols/svg-400/outlined/image.svg?solid";
 import styles from "./PromptInput.module.css";
 
 interface Props {
@@ -26,6 +29,8 @@ interface Props {
 
 export default function PromptInput(props: Props) {
   const [dragging, setDragging] = createSignal(false);
+  const [menuOpen, setMenuOpen] = createSignal(false);
+  const [cameraOpen, setCameraOpen] = createSignal(false);
 
   function handlePaste(e: ClipboardEvent) {
     if (!props.supportsImages) return;
@@ -71,12 +76,41 @@ export default function PromptInput(props: Props) {
     props.onImagesChange(props.images.filter((_, i) => i !== idx));
   }
 
+  function handleAttachClick() {
+    setMenuOpen(!menuOpen());
+  }
+
+  function handleChooseFile() {
+    setMenuOpen(false);
+    fileInputRef.click();
+  }
+
+  function handleTakePhoto() {
+    setMenuOpen(false);
+    setCameraOpen(true);
+  }
+
+  function handleCameraCapture(img: APIImageData) {
+    props.onImagesChange([...props.images, img]);
+  }
+
+  // Close menu when clicking outside.
+  function handleContainerClick(e: MouseEvent) {
+    if (menuOpen()) {
+      const target = e.target as HTMLElement;
+      if (!target.closest(`.${styles.attachWrap}`)) {
+        setMenuOpen(false);
+      }
+    }
+  }
+
   return (
     <div
       class={`${styles.container}${dragging() ? ` ${styles.dragOver}` : ""}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      onClick={handleContainerClick}
     >
       <div class={styles.row}>
         <AutoResizeTextarea
@@ -102,9 +136,23 @@ export default function PromptInput(props: Props) {
             class={styles.hiddenFileInput}
             onChange={handleFileChange}
           />
-          <Button type="button" variant="gray" disabled={props.disabled} title="Attach images" onClick={() => fileInputRef.click()}>
-            <AttachIcon width="1.2em" height="1.2em" />
-          </Button>
+          <div class={styles.attachWrap}>
+            <Button type="button" variant="gray" disabled={props.disabled} title="Attach images" onClick={handleAttachClick}>
+              <AttachIcon width="1.2em" height="1.2em" />
+            </Button>
+            <Show when={menuOpen()}>
+              <div class={styles.attachMenu} role="menu">
+                <button class={styles.menuItem} role="menuitem" onClick={handleTakePhoto}>
+                  <CameraIcon width="1.1em" height="1.1em" />
+                  Take photo
+                </button>
+                <button class={styles.menuItem} role="menuitem" onClick={handleChooseFile}>
+                  <ImageIcon width="1.1em" height="1.1em" />
+                  Choose file
+                </button>
+              </div>
+            </Show>
+          </div>
         </Show>
         {props.children}
       </div>
@@ -119,6 +167,9 @@ export default function PromptInput(props: Props) {
             )}
           </For>
         </div>
+      </Show>
+      <Show when={cameraOpen()}>
+        <CameraCapture onCapture={handleCameraCapture} onClose={() => setCameraOpen(false)} />
       </Show>
     </div>
   );

@@ -113,4 +113,40 @@ describe("PromptInput", () => {
     expect(imgs).toHaveLength(1);
     expect(imgs[0].mediaType).toBe("image/png");
   });
+
+  it("opens attach menu on attach button click", async () => {
+    const user = userEvent.setup();
+    const { getByTitle, getByText, queryByText } = render(() => (
+      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
+    ));
+    expect(queryByText("Take photo")).not.toBeInTheDocument();
+    await user.click(getByTitle("Attach images"));
+    expect(getByText("Take photo")).toBeInTheDocument();
+    expect(getByText("Choose file")).toBeInTheDocument();
+  });
+
+  it("closes attach menu and opens file picker on Choose file", async () => {
+    const user = userEvent.setup();
+    const { getByTitle, getByText, queryByText } = render(() => (
+      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
+    ));
+    await user.click(getByTitle("Attach images"));
+    const fileInput = document.querySelector("input[type=file]") as HTMLInputElement;
+    const clickSpy = vi.spyOn(fileInput, "click").mockImplementation(() => {});
+    await user.click(getByText("Choose file"));
+    expect(queryByText("Choose file")).not.toBeInTheDocument();
+    expect(clickSpy).toHaveBeenCalled();
+    clickSpy.mockRestore();
+  });
+
+  it("toggles attach menu closed on second click", async () => {
+    const user = userEvent.setup();
+    const { getByTitle, getByText, queryByText } = render(() => (
+      <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
+    ));
+    await user.click(getByTitle("Attach images"));
+    expect(getByText("Take photo")).toBeInTheDocument();
+    await user.click(getByTitle("Attach images"));
+    expect(queryByText("Take photo")).not.toBeInTheDocument();
+  });
 });
