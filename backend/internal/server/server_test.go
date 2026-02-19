@@ -222,9 +222,15 @@ func TestHandleTerminate(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 		}
 
-		// Verify state is set to terminating.
-		if tk.State != task.StateTerminating {
-			t.Errorf("state = %v, want %v", tk.State, task.StateTerminating)
+		// Verify the response reports terminating. Don't check tk.State
+		// directly: cleanupTask runs in a goroutine and may have already
+		// transitioned the state to StateTerminated by now.
+		var resp dto.StatusResp
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("failed to decode response: %v", err)
+		}
+		if resp.Status != "terminating" {
+			t.Errorf("status = %q, want %q", resp.Status, "terminating")
 		}
 	})
 
