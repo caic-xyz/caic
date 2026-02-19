@@ -509,16 +509,16 @@ function groupMessages(msgs: ClaudeEventMessage[]): MessageGroup[] {
           } else if (!usageSinceLastTool) {
             // Same AssistantMessage but intervening text; find the most
             // recent tool group to coalesce into.
-            let merged = false;
+            let coalesced = false;
             for (let i = groups.length - 1; i >= 0; i--) {
               if (groups[i].kind === "tool") {
                 groups[i].events.push(ev);
                 groups[i].toolCalls.push(call);
-                merged = true;
+                coalesced = true;
                 break;
               }
             }
-            if (!merged) {
+            if (!coalesced) {
               groups.push({ kind: "tool", events: [ev], toolCalls: [call] });
             }
           } else {
@@ -591,20 +591,48 @@ function groupMessages(msgs: ClaudeEventMessage[]): MessageGroup[] {
         break;
     }
   }
+
+  // Merge tool groups separated only by text/usage groups.  The agent often
+  // emits short commentary between tool turns ("Let me read...", "Now let me
+  // edit...").  Without merging, each turn shows as a separate 1-tool block.
+  // ask, userInput, and other groups act as hard boundaries that prevent
+  // merging.  Text groups between tool groups are kept for display; tool
+  // calls are consolidated into the first tool group of each run.
+  const merged: MessageGroup[] = [];
+  for (const g of groups) {
+    if (g.kind === "tool") {
+      // Find the nearest non-text group in merged to check for a tool anchor.
+      let anchor: MessageGroup | undefined;
+      for (let i = merged.length - 1; i >= 0; i--) {
+        if (merged[i].kind !== "text") {
+          anchor = merged[i];
+          break;
+        }
+      }
+      if (anchor && anchor.kind === "tool") {
+        // Merge tool calls into the earlier tool group.
+        anchor.events.push(...g.events);
+        anchor.toolCalls.push(...g.toolCalls);
+        continue;
+      }
+    }
+    merged.push(g);
+  }
+
   // Mark tool calls as implicitly done when later events exist.
   // Claude Code doesn't emit explicit toolResult events for synchronous
   // tools (Read, Edit, Grep, etc.), so any tool call followed by a later
   // group is implicitly complete — only the very last tool group may have
   // genuinely pending calls.
-  const lastToolGroupIdx = groups.findLastIndex((g) => g.kind === "tool");
-  for (let i = 0; i < groups.length; i++) {
-    const g = groups[i];
+  const lastToolGroupIdx = merged.findLastIndex((g) => g.kind === "tool");
+  for (let i = 0; i < merged.length; i++) {
+    const g = merged[i];
     if (g.kind !== "tool") continue;
-    if (i < lastToolGroupIdx || i < groups.length - 1) {
+    if (i < lastToolGroupIdx || i < merged.length - 1) {
       for (const tc of g.toolCalls) tc.done = true;
     }
   }
-  return groups;
+  return merged;
 }
 
 // Splits message groups into turns separated by "result" events.
