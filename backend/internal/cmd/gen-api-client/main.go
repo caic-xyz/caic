@@ -246,60 +246,88 @@ var kotlinErrorCodes = []kotlinConstant{
 	{"InternalError", string(dto.CodeInternalError)},
 }
 
-// Ordered list of structs to generate. Adding a new Go struct requires adding
-// one line here; field definitions are derived automatically via reflect.
-var kotlinStructs = []kotlinStruct{
-	{t: reflect.TypeFor[dto.HarnessJSON]()},
-	{t: reflect.TypeFor[dto.ConfigJSON]()},
-	{t: reflect.TypeFor[dto.RepoJSON]()},
-	{t: reflect.TypeFor[dto.TaskJSON]()},
-	{t: reflect.TypeFor[dto.StatusResp]()},
-	{t: reflect.TypeFor[dto.CreateTaskResp]()},
-	{t: reflect.TypeFor[dto.CreateTaskReq]()},
-	{t: reflect.TypeFor[dto.InputReq]()},
-	{t: reflect.TypeFor[dto.RestartReq]()},
-	{t: reflect.TypeFor[dto.DiffFileStat]()},
-	{t: reflect.TypeFor[dto.SafetyIssue]()},
-	{t: reflect.TypeFor[dto.SyncReq]()},
-	{t: reflect.TypeFor[dto.SyncResp]()},
-	{t: reflect.TypeFor[dto.UsageWindow]()},
-	{t: reflect.TypeFor[dto.ExtraUsage]()},
-	{t: reflect.TypeFor[dto.UsageResp]()},
-	{t: reflect.TypeFor[dto.VoiceTokenResp]()},
-	{t: reflect.TypeFor[dto.EventMessage](), comment: "Backend-neutral event types"},
-	{t: reflect.TypeFor[dto.EventInit]()},
-	{t: reflect.TypeFor[dto.EventText]()},
-	{t: reflect.TypeFor[dto.EventTextDelta]()},
-	{t: reflect.TypeFor[dto.EventToolUse]()},
-	{t: reflect.TypeFor[dto.EventToolResult]()},
-	{t: reflect.TypeFor[dto.AskOption]()},
-	{t: reflect.TypeFor[dto.AskQuestion]()},
-	{t: reflect.TypeFor[dto.EventAsk]()},
-	{t: reflect.TypeFor[dto.EventUsage]()},
-	{t: reflect.TypeFor[dto.EventResult]()},
-	{t: reflect.TypeFor[dto.EventSystem]()},
-	{t: reflect.TypeFor[dto.EventUserInput]()},
-	{t: reflect.TypeFor[dto.TodoItem]()},
-	{t: reflect.TypeFor[dto.EventTodo]()},
-	{t: reflect.TypeFor[dto.EventDiffStat]()},
-	{t: reflect.TypeFor[dto.ClaudeEventMessage](), comment: "Claude-specific event types"},
-	{t: reflect.TypeFor[dto.ClaudeEventInit]()},
-	{t: reflect.TypeFor[dto.ClaudeEventText]()},
-	{t: reflect.TypeFor[dto.ClaudeEventTextDelta]()},
-	{t: reflect.TypeFor[dto.ClaudeEventToolUse]()},
-	{t: reflect.TypeFor[dto.ClaudeEventToolResult]()},
-	{t: reflect.TypeFor[dto.ClaudeAskOption]()},
-	{t: reflect.TypeFor[dto.ClaudeAskQuestion]()},
-	{t: reflect.TypeFor[dto.ClaudeEventAsk]()},
-	{t: reflect.TypeFor[dto.ClaudeEventUsage]()},
-	{t: reflect.TypeFor[dto.ClaudeEventResult]()},
-	{t: reflect.TypeFor[dto.ClaudeEventSystem]()},
-	{t: reflect.TypeFor[dto.ClaudeEventUserInput]()},
-	{t: reflect.TypeFor[dto.ClaudeTodoItem]()},
-	{t: reflect.TypeFor[dto.ClaudeEventTodo]()},
-	{t: reflect.TypeFor[dto.ClaudeEventDiffStat]()},
-	{t: reflect.TypeFor[dto.ErrorResponse]()},
-	{t: reflect.TypeFor[dto.ErrorDetails]()},
+// kotlinRouteTypes maps route ReqType/RespType names to their reflect.Type.
+// New dto structs referenced by routes are picked up automatically; structs
+// reachable transitively through fields are discovered by discoverKotlinStructs.
+var kotlinRouteTypes = map[string]reflect.Type{
+	"HarnessJSON":        reflect.TypeFor[dto.HarnessJSON](),
+	"ConfigJSON":         reflect.TypeFor[dto.ConfigJSON](),
+	"RepoJSON":           reflect.TypeFor[dto.RepoJSON](),
+	"TaskJSON":           reflect.TypeFor[dto.TaskJSON](),
+	"StatusResp":         reflect.TypeFor[dto.StatusResp](),
+	"CreateTaskResp":     reflect.TypeFor[dto.CreateTaskResp](),
+	"CreateTaskReq":      reflect.TypeFor[dto.CreateTaskReq](),
+	"InputReq":           reflect.TypeFor[dto.InputReq](),
+	"RestartReq":         reflect.TypeFor[dto.RestartReq](),
+	"SyncReq":            reflect.TypeFor[dto.SyncReq](),
+	"SyncResp":           reflect.TypeFor[dto.SyncResp](),
+	"UsageResp":          reflect.TypeFor[dto.UsageResp](),
+	"VoiceTokenResp":     reflect.TypeFor[dto.VoiceTokenResp](),
+	"EventMessage":       reflect.TypeFor[dto.EventMessage](),
+	"ClaudeEventMessage": reflect.TypeFor[dto.ClaudeEventMessage](),
+	"ErrorResponse":      reflect.TypeFor[dto.ErrorResponse](),
+}
+
+// kotlinSectionComments maps type names to section comments emitted before
+// the struct in the generated output.
+var kotlinSectionComments = map[string]string{
+	"EventMessage":       "Backend-neutral event types",
+	"ClaudeEventMessage": "Claude-specific event types",
+}
+
+// discoverKotlinStructs walks the dto struct types reachable from
+// kotlinRouteTypes and returns them in dependency order (leaves first).
+func discoverKotlinStructs() []kotlinStruct {
+	dtoPkgPath := reflect.TypeFor[dto.StatusResp]().PkgPath()
+	seen := map[reflect.Type]bool{}
+	var order []reflect.Type
+
+	// walk recursively collects dto struct types in post-order so that
+	// referenced types appear before the types that reference them.
+	var walk func(t reflect.Type)
+	walk = func(t reflect.Type) {
+		if t.Kind() == reflect.Ptr {
+			t = t.Elem()
+		}
+		if t.Kind() == reflect.Slice {
+			walk(t.Elem())
+			return
+		}
+		if t.Kind() != reflect.Struct || t.PkgPath() != dtoPkgPath {
+			return
+		}
+		if seen[t] {
+			return
+		}
+		seen[t] = true
+		for i := range t.NumField() {
+			walk(t.Field(i).Type)
+		}
+		order = append(order, t)
+	}
+
+	// Seed from routes.
+	for i := range dto.Routes {
+		r := &dto.Routes[i]
+		if r.ReqType != "" {
+			if t, ok := kotlinRouteTypes[r.ReqType]; ok {
+				walk(t)
+			}
+		}
+		if r.RespType != "" {
+			if t, ok := kotlinRouteTypes[r.RespType]; ok {
+				walk(t)
+			}
+		}
+	}
+	// Always include error types.
+	walk(kotlinRouteTypes["ErrorResponse"])
+
+	result := make([]kotlinStruct, len(order))
+	for i, t := range order {
+		result[i] = kotlinStruct{t: t, comment: kotlinSectionComments[t.Name()]}
+	}
+	return result
 }
 
 // Type identity values for special-case mapping in goTypeToKotlin.
@@ -537,8 +565,8 @@ func writeKotlinTypes(outDir string) error {
 	}
 	b.WriteString("}\n\n")
 
-	// Structs.
-	for _, ks := range kotlinStructs {
+	// Structs: auto-discovered from route types and their transitive fields.
+	for _, ks := range discoverKotlinStructs() {
 		if ks.comment != "" {
 			fmt.Fprintf(&b, "// %s\n\n", ks.comment)
 		}
