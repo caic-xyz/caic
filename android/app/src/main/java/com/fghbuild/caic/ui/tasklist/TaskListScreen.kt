@@ -257,7 +257,7 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
         }
 
         Row(
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (state.supportsImages) {
@@ -309,7 +309,7 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
                             viewModel.createTask(); true
                         } else false
                     },
-                singleLine = true,
+                maxLines = 6,
                 enabled = !state.submitting,
             )
             if (state.submitting) {

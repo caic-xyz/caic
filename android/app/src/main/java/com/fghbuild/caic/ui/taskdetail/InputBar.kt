@@ -86,7 +86,7 @@ fun InputBar(
             }
         }
         Row(
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             if (supportsImages) {
@@ -107,7 +107,7 @@ fun InputBar(
                         } else false
                     },
                 placeholder = { Text("Message...") },
-                singleLine = true,
+                maxLines = 6,
                 enabled = !busy,
             )
             if (sending) {
