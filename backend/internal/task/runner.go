@@ -137,19 +137,15 @@ func (r *Runner) Init(ctx context.Context) error {
 //   - All-fail: reverts to StateWaiting.
 func (r *Runner) Reconnect(ctx context.Context, t *Task) (*SessionHandle, error) {
 	r.initDefaults()
-	t.mu.Lock()
-	if t.handle != nil {
-		t.mu.Unlock()
+	if t.HasSession() {
 		return nil, errors.New("session already active")
 	}
 	if t.Container == "" {
-		t.mu.Unlock()
 		return nil, errors.New("no container to reconnect to")
 	}
 	// Remember the state inferred from restored messages so we don't
 	// blindly override it to StateRunning for an idle relay.
-	prevState := t.State
-	t.mu.Unlock()
+	prevState := t.GetState()
 
 	msgCh := r.startMessageDispatch(ctx, t)
 
@@ -172,9 +168,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) (*SessionHandle, error)
 		// If the agent had already completed its turn, keep the inferred
 		// StateWaiting/StateAsking so the UI shows the correct status.
 		if prevState != StateWaiting && prevState != StateAsking {
-			t.mu.Lock()
-			t.setState(StateRunning)
-			t.mu.Unlock()
+			t.SetState(StateRunning)
 		}
 		session, err = r.backend(t.Harness).AttachRelay(ctx, t.Container, t.RelayOffset, msgCh, logW)
 		if err != nil {
@@ -186,9 +180,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) (*SessionHandle, error)
 	}
 	if !relayAlive {
 		// Starting a new session via --resume always re-engages the agent.
-		t.mu.Lock()
-		t.setState(StateRunning)
-		t.mu.Unlock()
+		t.SetState(StateRunning)
 		maxTurns := t.MaxTurns
 		if maxTurns == 0 {
 			maxTurns = r.MaxTurns
@@ -198,7 +190,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) (*SessionHandle, error)
 			Dir:             r.containerDir(),
 			MaxTurns:        maxTurns,
 			Model:           t.Model,
-			ResumeSessionID: t.SessionID,
+			ResumeSessionID: t.GetSessionID(),
 		}, msgCh, logW)
 	}
 	if err != nil {
@@ -206,9 +198,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) (*SessionHandle, error)
 		close(msgCh)
 		// Both attach and --resume failed. Revert to StateWaiting so the
 		// user can try again (restart) or terminate.
-		t.mu.Lock()
-		t.setState(StateWaiting)
-		t.mu.Unlock()
+		t.SetState(StateWaiting)
 		return nil, fmt.Errorf("reconnect: %w", err)
 	}
 
@@ -235,7 +225,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	if r.Container == nil {
 		return nil, errors.New("runner has no container backend configured")
 	}
-	t.setState(StateBranching)
+	t.SetState(StateBranching)
 
 	// 1. Create branch + start container (serialized).
 	slog.Info("setting up task", "repo", t.Repo)
@@ -243,7 +233,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	sr, err := r.setup(ctx, t, []string{"caic=" + t.ID.String(), "harness=" + string(t.Harness)})
 	r.branchMu.Unlock()
 	if err != nil {
-		t.setState(StateFailed)
+		t.SetState(StateFailed)
 		return nil, err
 	}
 	t.Branch = sr.Branch
@@ -252,7 +242,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	slog.Info("container ready", "repo", t.Repo, "branch", t.Branch, "container", t.Container)
 
 	// 2. Start the agent session.
-	t.setState(StateStarting)
+	t.SetState(StateStarting)
 	msgCh := r.startMessageDispatch(ctx, t)
 	maxTurns := t.MaxTurns
 	if maxTurns == 0 {
@@ -261,7 +251,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	logW, err := r.openLog(t)
 	if err != nil {
 		close(msgCh)
-		t.setState(StateFailed)
+		t.SetState(StateFailed)
 		return nil, err
 	}
 
@@ -276,7 +266,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)
-		t.setState(StateFailed)
+		t.SetState(StateFailed)
 		slog.Warn("agent session failed to start", "repo", t.Repo, "branch", t.Branch, "container", t.Container, "err", err)
 		return nil, err
 	}
@@ -286,7 +276,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	t.AttachSession(h)
 
 	t.addMessage(syntheticUserInput(t.InitialPrompt))
-	t.setState(StateRunning)
+	t.SetState(StateRunning)
 	slog.Info("agent running", "repo", t.Repo, "branch", t.Branch, "container", t.Container)
 	return h, nil
 }
@@ -327,7 +317,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 		}
 	}
 
-	t.setState(reason)
+	t.SetState(reason)
 	slog.Info("killing container", "repo", t.Repo, "branch", t.Branch, "container", name)
 	if name != "" && r.Container != nil {
 		if err := r.KillContainer(ctx, t.Branch); err != nil {
@@ -423,7 +413,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResu
 		return setupResult{}, fmt.Errorf("create branch: %w", err)
 	}
 
-	t.setState(StateProvisioning)
+	t.SetState(StateProvisioning)
 	slog.Info("starting container", "repo", t.Repo, "branch", branch, "image", t.Image, "harness", t.Harness, "tailscale", t.Tailscale, "usb", t.USB, "display", t.Display)
 	startCtx, startCancel := context.WithTimeout(detached, r.ContainerStartTimeout)
 	defer startCancel()
@@ -521,9 +511,7 @@ func (r *Runner) SyncToDefault(ctx context.Context, branch, container, message s
 func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
 	r.initDefaults()
 
-	t.mu.Lock()
-	state := t.State
-	t.mu.Unlock()
+	state := t.GetState()
 	if state != StateWaiting && state != StateAsking {
 		return nil, fmt.Errorf("cannot restart in state %s", state)
 	}
@@ -543,16 +531,12 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	// 3. Open new log segment.
 	logW, err := r.openLog(t)
 	if err != nil {
-		t.mu.Lock()
-		t.setState(StateFailed)
-		t.mu.Unlock()
+		t.SetState(StateFailed)
 		return nil, fmt.Errorf("open log: %w", err)
 	}
 
 	// 4. Start new session.
-	t.mu.Lock()
-	t.setState(StateStarting)
-	t.mu.Unlock()
+	t.SetState(StateStarting)
 
 	msgCh := r.startMessageDispatch(ctx, t)
 
@@ -572,9 +556,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)
-		t.mu.Lock()
-		t.setState(StateFailed)
-		t.mu.Unlock()
+		t.SetState(StateFailed)
 		return nil, fmt.Errorf("start session: %w", err)
 	}
 
@@ -584,9 +566,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 
 	t.addMessage(syntheticUserInput(prompt))
 
-	t.mu.Lock()
-	t.setState(StateRunning)
-	t.mu.Unlock()
+	t.SetState(StateRunning)
 	slog.Info("agent restarted", "repo", t.Repo, "branch", t.Branch, "container", t.Container)
 	return h, nil
 }

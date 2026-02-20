@@ -498,7 +498,7 @@ func (s *Server) handleTaskRawEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Terminal tasks (terminated, failed) will never produce new messages.
 	// Return immediately so the client receives history without blocking.
-	state := entry.task.State
+	state := entry.task.GetState()
 	if state == task.StateTerminated || state == task.StateFailed {
 		return
 	}
@@ -555,7 +555,7 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
 	flusher.Flush()
 
-	state := entry.task.State
+	state := entry.task.GetState()
 	if state == task.StateTerminated || state == task.StateFailed {
 		return
 	}
@@ -716,15 +716,16 @@ func (s *Server) sendInput(_ context.Context, entry *taskEntry, req *dto.InputRe
 				rs = relayDead
 			}
 		}
+		taskState := t.GetState()
 		slog.Warn("sendInput: no active session",
 			"task", t.ID,
 			"branch", t.Branch,
 			"container", t.Container,
-			"state", t.State,
+			"state", taskState,
 			"relay", rs,
 		)
 		return nil, dto.Conflict(err.Error()).
-			WithDetail("state", t.State.String()).
+			WithDetail("state", taskState.String()).
 			WithDetail("relay", string(rs))
 	}
 	return &dto.StatusResp{Status: "sent"}, nil
@@ -732,13 +733,13 @@ func (s *Server) sendInput(_ context.Context, entry *taskEntry, req *dto.InputRe
 
 func (s *Server) restartTask(_ context.Context, entry *taskEntry, req *dto.RestartReq) (*dto.StatusResp, error) {
 	t := entry.task
-	if t.State != task.StateWaiting && t.State != task.StateAsking {
+	if state := t.GetState(); state != task.StateWaiting && state != task.StateAsking {
 		return nil, dto.Conflict("task is not waiting or asking")
 	}
 	prompt := dtoPromptToAgent(req.Prompt)
 	if prompt.Text == "" {
 		// Read the plan file from the container.
-		plan, err := agent.ReadPlan(s.ctx, t.Container, t.PlanFile) //nolint:contextcheck // intentionally using server context
+		plan, err := agent.ReadPlan(s.ctx, t.Container, t.GetPlanFile()) //nolint:contextcheck // intentionally using server context
 		if err != nil {
 			return nil, dto.BadRequest("no prompt provided and failed to read plan from container: " + err.Error())
 		}
@@ -759,7 +760,7 @@ func (s *Server) restartTask(_ context.Context, entry *taskEntry, req *dto.Resta
 }
 
 func (s *Server) terminateTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*dto.StatusResp, error) {
-	state := entry.task.State
+	state := entry.task.GetState()
 	if state != task.StateWaiting && state != task.StateAsking && state != task.StateRunning {
 		return nil, dto.Conflict("task is not running or waiting")
 	}
@@ -774,7 +775,7 @@ func (s *Server) terminateTask(_ context.Context, entry *taskEntry, _ *dto.Empty
 
 func (s *Server) syncTask(ctx context.Context, entry *taskEntry, req *dto.SyncReq) (*dto.SyncResp, error) {
 	t := entry.task
-	switch t.State {
+	switch t.GetState() {
 	case task.StatePending:
 		return nil, dto.Conflict("task has no container yet")
 	case task.StateTerminating, task.StateFailed, task.StateTerminated:
@@ -974,9 +975,9 @@ func (s *Server) loadTerminatedTasksFrom(all []*task.LoadedTask) error {
 			Repo:          lt.Repo,
 			Harness:       lt.Harness,
 			Branch:        lt.Branch,
-			State:         lt.State,
 			StartedAt:     lt.StartedAt,
 		}
+		t.SetState(lt.State)
 		if lt.Title != "" {
 			t.SetTitle(lt.Title)
 		} else {
@@ -1124,20 +1125,19 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		stateUpdatedAt = time.Now().UTC()
 	}
 	t := &task.Task{
-		ID:             taskID,
-		InitialPrompt:  agent.Prompt{Text: prompt},
-		Repo:           ri.RelPath,
-		Harness:        harnessName,
-		Branch:         branch,
-		Container:      c.Name,
-		State:          task.StateRunning,
-		StateUpdatedAt: stateUpdatedAt,
-		StartedAt:      startedAt,
-		Tailscale:      c.Tailscale,
-		TailscaleFQDN:  c.TailscaleFQDN(ctx),
-		USB:            c.USB,
-		Display:        c.Display,
+		ID:            taskID,
+		InitialPrompt: agent.Prompt{Text: prompt},
+		Repo:          ri.RelPath,
+		Harness:       harnessName,
+		Branch:        branch,
+		Container:     c.Name,
+		StartedAt:     startedAt,
+		Tailscale:     c.Tailscale,
+		TailscaleFQDN: c.TailscaleFQDN(ctx),
+		USB:           c.USB,
+		Display:       c.Display,
 	}
+	t.SetStateAt(task.StateRunning, stateUpdatedAt)
 	if lt != nil && lt.Title != "" {
 		t.SetTitle(lt.Title)
 	} else {
@@ -1165,11 +1165,11 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		if relayLog != "" {
 			slog.Warn("relay log from dead relay", "container", c.Name, "branch", branch, "log", relayLog)
 		}
-		if t.State == task.StateRunning {
+		if t.GetState() == task.StateRunning {
 			t.SetState(task.StateWaiting)
 			slog.Warn("adopted container with dead relay, marking as waiting",
 				"repo", ri.RelPath, "branch", branch, "container", c.Name,
-				"sessionID", t.SessionID, "messages", len(t.Messages()))
+				"sessionID", t.GetSessionID(), "messages", len(t.Messages()))
 		}
 	}
 
@@ -1186,14 +1186,14 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 
 	slog.Info("adopted preexisting container",
 		"repo", ri.RelPath, "container", c.Name, "branch", branch,
-		"relay", relayAlive, "state", t.State, "sessionID", t.SessionID)
+		"relay", relayAlive, "state", t.GetState(), "sessionID", t.GetSessionID())
 
 	s.watchTitleGen(entry)
 
 	// Auto-reconnect in background: relay alive → attach; relay dead
 	// but SessionID present → --resume. Reconnect handles both paths
 	// and reverts to StateWaiting if all strategies fail.
-	if relayAlive || t.SessionID != "" {
+	if relayAlive || t.GetSessionID() != "" {
 		strategy := "attach"
 		if !relayAlive {
 			strategy = "resume"
@@ -1214,7 +1214,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	} else if !relayAlive {
 		slog.Warn("adopted orphaned task: relay dead and no session ID to resume",
 			"repo", ri.RelPath, "branch", branch, "container", c.Name,
-			"state", t.State)
+			"state", t.GetState())
 	}
 	return nil
 }

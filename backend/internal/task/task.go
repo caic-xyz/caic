@@ -80,6 +80,7 @@ type Task struct {
 	InitialPrompt agent.Prompt  // Initial prompt text and optional images.
 	Repo          string        // Relative repo path (for display/API).
 	Harness       agent.Harness // Agent harness ("claude", "gemini", etc.).
+	Model         string        // User-requested model; passed to agent CLI.
 	Image         string        // Custom Docker base image; empty means use the default.
 	Tailscale     bool          // Enable Tailscale networking in the container.
 	USB           bool          // Enable USB passthrough in the container.
@@ -93,23 +94,20 @@ type Task struct {
 	TailscaleFQDN string // Tailscale FQDN assigned to the container (empty if not available).
 	RelayOffset   int64  // Bytes received from relay output.jsonl, for reconnect.
 
-	// Mutable fields — written during the task lifecycle by the runner.
-	State          State
-	StateUpdatedAt time.Time // UTC timestamp of the last state transition.
-	SessionID      string    // Claude Code session ID, captured from SystemInitMessage.
-	Model          string    // Model name, captured from SystemInitMessage.
-	AgentVersion   string    // Agent version, captured from SystemInitMessage.
-	PlanFile       string    // Path to plan file inside container, captured from Write tool_use.
-	InPlanMode     bool      // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
-
-	mu           sync.Mutex
-	title        string // LLM-generated short title; set via SetTitle.
-	msgs         []agent.Message
-	subs         []*sub         // active SSE subscribers
-	handle       *SessionHandle // current active session; nil when no session is attached
-	resultNotify chan struct{}  // signaled (non-blocking) when a ResultMessage arrives
-
-	// Live stats accumulated from ResultMessages during execution.
+	// mu protects all fields below.
+	mu             sync.Mutex
+	state          State
+	stateUpdatedAt time.Time // UTC timestamp of the last state transition.
+	sessionID      string    // Agent session ID, captured from SystemInitMessage.
+	reportedModel  string    // Model reported by SystemInitMessage (may differ from Model).
+	agentVersion   string    // Agent version, captured from SystemInitMessage.
+	planFile       string    // Path to plan file inside container, captured from Write tool_use.
+	inPlanMode     bool      // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
+	title          string    // LLM-generated short title; set via SetTitle.
+	msgs           []agent.Message
+	subs           []*sub         // active SSE subscribers
+	handle         *SessionHandle // current active session; nil when no session is attached
+	resultNotify   chan struct{}  // signaled (non-blocking) when a ResultMessage arrives
 	liveCostUSD  float64
 	liveNumTurns int
 	liveDuration time.Duration
@@ -121,8 +119,8 @@ type Task struct {
 // setState updates the state and records the transition time. The caller must
 // hold t.mu when called from a locked context, or ensure exclusive access.
 func (t *Task) setState(s State) {
-	t.State = s
-	t.StateUpdatedAt = time.Now().UTC()
+	t.state = s
+	t.stateUpdatedAt = time.Now().UTC()
 }
 
 // SetState updates the state under the mutex and records the transition time.
@@ -132,16 +130,64 @@ func (t *Task) SetState(s State) {
 	t.mu.Unlock()
 }
 
+// SetStateAt updates the state under the mutex with an explicit timestamp.
+// Used during adoption to preserve the original transition time.
+func (t *Task) SetStateAt(s State, at time.Time) {
+	t.mu.Lock()
+	t.state = s
+	t.stateUpdatedAt = at
+	t.mu.Unlock()
+}
+
 // SetStateIf atomically transitions the state to next only if the current
 // state equals expected. Returns true if the transition occurred.
 func (t *Task) SetStateIf(expected, next State) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.State != expected {
+	if t.state != expected {
 		return false
 	}
 	t.setState(next)
 	return true
+}
+
+// GetState returns the current state under the mutex.
+func (t *Task) GetState() State {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.state
+}
+
+// GetSessionID returns the agent session ID under the mutex.
+func (t *Task) GetSessionID() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.sessionID
+}
+
+// GetModel returns the agent-reported model if available, otherwise the
+// user-requested model. Read under the mutex.
+func (t *Task) GetModel() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.reportedModel != "" {
+		return t.reportedModel
+	}
+	return t.Model
+}
+
+// GetPlanFile returns the plan file path under the mutex.
+func (t *Task) GetPlanFile() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.planFile
+}
+
+// HasSession reports whether a session handle is attached.
+func (t *Task) HasSession() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.handle != nil
 }
 
 // LiveStats returns the latest cost, turn count, duration, cumulative token
@@ -213,15 +259,19 @@ type Snapshot struct {
 func (t *Task) Snapshot() Snapshot {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	model := t.reportedModel
+	if model == "" {
+		model = t.Model
+	}
 	return Snapshot{
-		State:          t.State,
-		StateUpdatedAt: t.StateUpdatedAt,
+		State:          t.state,
+		StateUpdatedAt: t.stateUpdatedAt,
 		Title:          t.title,
-		SessionID:      t.SessionID,
-		Model:          t.Model,
-		AgentVersion:   t.AgentVersion,
-		InPlanMode:     t.InPlanMode,
-		PlanFile:       t.PlanFile,
+		SessionID:      t.sessionID,
+		Model:          model,
+		AgentVersion:   t.agentVersion,
+		InPlanMode:     t.inPlanMode,
+		PlanFile:       t.planFile,
 		CostUSD:        t.liveCostUSD,
 		NumTurns:       t.liveNumTurns,
 		Duration:       t.liveDuration,
@@ -259,9 +309,9 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	t.msgs = msgs
 	for i := len(msgs) - 1; i >= 0; i-- {
 		if init, ok := msgs[i].(*agent.SystemInitMessage); ok && init.SessionID != "" {
-			t.SessionID = init.SessionID
-			t.Model = init.Model
-			t.AgentVersion = init.Version
+			t.sessionID = init.SessionID
+			t.reportedModel = init.Model
+			t.agentVersion = init.Version
 			break
 		}
 	}
@@ -300,7 +350,7 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	// diff stats that can appear after the ResultMessage.
 	// Only override non-terminal states — terminated/failed tasks loaded from
 	// logs must keep their recorded state.
-	if len(msgs) > 0 && t.State != StateTerminated && t.State != StateFailed && t.State != StateTerminating {
+	if len(msgs) > 0 && t.state != StateTerminated && t.state != StateFailed && t.state != StateTerminating {
 		if lastAgentMessage(msgs) != nil {
 			if lastAssistantHasAsk(msgs) {
 				t.setState(StateAsking)
@@ -317,9 +367,9 @@ func (t *Task) addMessage(m agent.Message) {
 	t.msgs = append(t.msgs, m)
 	// Capture metadata from the init message.
 	if init, ok := m.(*agent.SystemInitMessage); ok && init.SessionID != "" {
-		t.SessionID = init.SessionID
-		t.Model = init.Model
-		t.AgentVersion = init.Version
+		t.sessionID = init.SessionID
+		t.reportedModel = init.Model
+		t.agentVersion = init.Version
 	}
 	// Track plan mode and plan file from tool_use events.
 	// Capture plan file path from Write tool_use targeting .claude/plans/.
@@ -330,7 +380,7 @@ func (t *Task) addMessage(m agent.Message) {
 		// the server restarts and RestoreMessages inferred StateWaiting
 		// from a trailing ResultMessage, but the agent already started a
 		// new turn on the relay before we reattached.
-		if t.State == StateWaiting || t.State == StateAsking {
+		if t.state == StateWaiting || t.state == StateAsking {
 			t.setState(StateRunning)
 		}
 	}
@@ -353,7 +403,7 @@ func (t *Task) addMessage(m agent.Message) {
 		// dispatch goroutine processed this ResultMessage (it does a
 		// blocking Fetch first). In that case we still need to
 		// distinguish Waiting from Asking.
-		if t.State == StateRunning || t.State == StateWaiting {
+		if t.state == StateRunning || t.state == StateWaiting {
 			if lastAssistantHasAsk(t.msgs) {
 				t.setState(StateAsking)
 			} else {
@@ -390,15 +440,15 @@ func (t *Task) trackPlanState(am *agent.AssistantMessage) {
 		}
 		switch b.Name {
 		case "EnterPlanMode":
-			t.InPlanMode = true
+			t.inPlanMode = true
 		case "ExitPlanMode":
-			t.InPlanMode = false
+			t.inPlanMode = false
 		case "Write":
 			var input struct {
 				FilePath string `json:"file_path"`
 			}
 			if json.Unmarshal(b.Input, &input) == nil && strings.Contains(input.FilePath, ".claude/plans/") {
-				t.PlanFile = input.FilePath
+				t.planFile = input.FilePath
 			}
 		}
 	}
@@ -473,7 +523,7 @@ func (t *Task) ClearMessages() {
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.SessionID = ""
+	t.sessionID = ""
 	t.liveCostUSD = 0
 	t.liveNumTurns = 0
 	t.liveDuration = 0
@@ -668,7 +718,7 @@ func (t *Task) SendInput(p agent.Prompt) error {
 		default:
 		}
 	}
-	state := t.State
+	state := t.state
 	if h != nil && (state == StateWaiting || state == StateAsking) {
 		t.setState(StateRunning)
 	}

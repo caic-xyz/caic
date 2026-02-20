@@ -143,8 +143,10 @@ func TestHandleTaskInput(t *testing.T) {
 func TestHandleRestart(t *testing.T) {
 	t.Run("NotWaiting", func(t *testing.T) {
 		s := newTestServer(t)
+		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetState(task.StateRunning)
 		s.tasks["t1"] = &taskEntry{
-			task: &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, State: task.StateRunning},
+			task: tk,
 			done: make(chan struct{}),
 		}
 
@@ -164,8 +166,10 @@ func TestHandleRestart(t *testing.T) {
 
 	t.Run("EmptyPrompt", func(t *testing.T) {
 		s := newTestServer(t)
+		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetState(task.StateWaiting)
 		s.tasks["t1"] = &taskEntry{
-			task: &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, State: task.StateWaiting},
+			task: tk,
 			done: make(chan struct{}),
 		}
 
@@ -187,8 +191,10 @@ func TestHandleRestart(t *testing.T) {
 func TestHandleTerminate(t *testing.T) {
 	t.Run("NotWaiting", func(t *testing.T) {
 		s := newTestServer(t)
+		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		// StatePending is the zero value, but set explicitly for clarity.
 		s.tasks["t1"] = &taskEntry{
-			task: &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, State: task.StatePending},
+			task: tk,
 			done: make(chan struct{}),
 		}
 
@@ -206,7 +212,8 @@ func TestHandleTerminate(t *testing.T) {
 	})
 
 	t.Run("Waiting", func(t *testing.T) {
-		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, State: task.StateWaiting, Repo: "r"}
+		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repo: "r"}
+		tk.SetState(task.StateWaiting)
 		s := newTestServer(t)
 		s.runners["r"] = &task.Runner{BaseBranch: "main", Dir: t.TempDir()}
 		s.tasks["t1"] = &taskEntry{
@@ -235,7 +242,8 @@ func TestHandleTerminate(t *testing.T) {
 	})
 
 	t.Run("CancelledContext", func(t *testing.T) {
-		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, State: task.StateRunning, Repo: "r"}
+		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repo: "r"}
+		tk.SetState(task.StateRunning)
 		s := newTestServer(t)
 		s.runners["r"] = &task.Runner{BaseBranch: "main", Dir: t.TempDir()}
 		s.tasks["t1"] = &taskEntry{
@@ -263,10 +271,10 @@ func TestHandleContainerDeath(t *testing.T) {
 		s := newTestServer(t)
 		tk := &task.Task{
 			InitialPrompt: agent.Prompt{Text: "test"},
-			State:         task.StateRunning,
 			Repo:          "r",
 			Container:     "md-repo-caic-w0",
 		}
+		tk.SetState(task.StateRunning)
 		s.runners["r"] = &task.Runner{BaseBranch: "main", Dir: t.TempDir()}
 		entry := &taskEntry{task: tk, done: make(chan struct{})}
 		s.tasks["t1"] = entry
@@ -280,8 +288,8 @@ func TestHandleContainerDeath(t *testing.T) {
 			t.Fatal("cleanup did not complete in time")
 		}
 
-		if tk.State != task.StateFailed {
-			t.Errorf("state = %v, want %v", tk.State, task.StateFailed)
+		if tk.GetState() != task.StateFailed {
+			t.Errorf("state = %v, want %v", tk.GetState(), task.StateFailed)
 		}
 
 		s.mu.Lock()

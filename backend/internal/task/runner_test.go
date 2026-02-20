@@ -136,7 +136,7 @@ func TestRunner(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Repo:          "org/repo",
 				Branch:        "main",
-				State:         StateRunning,
+				state:         StateRunning,
 			}
 
 			// Restore messages with cost info (simulates RestoreMessages from logs).
@@ -253,7 +253,7 @@ func TestRunner(t *testing.T) {
 		r := &Runner{Container: stub}
 		r.initDefaults()
 
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, State: StateRunning, Branch: "caic/w0"}
+		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning, Branch: "caic/w0"}
 		_, ch, unsub := tk.Subscribe(t.Context())
 		defer unsub()
 
@@ -298,7 +298,7 @@ func TestRunner(t *testing.T) {
 			Harness:       "test",
 			Branch:        "caic/w0",
 			Container:     "fake-container",
-			State:         StateWaiting,
+			state:         StateWaiting,
 		}
 
 		h, err := r.RestartSession(t.Context(), tk, agent.Prompt{Text: "new plan"})
@@ -308,8 +308,8 @@ func TestRunner(t *testing.T) {
 		if h == nil {
 			t.Fatal("RestartSession returned nil handle")
 		}
-		if tk.State != StateRunning {
-			t.Errorf("state = %v, want %v", tk.State, StateRunning)
+		if tk.GetState() != StateRunning {
+			t.Errorf("state = %v, want %v", tk.GetState(), StateRunning)
 		}
 		if tk.InitialPrompt.Text != "old prompt" {
 			t.Errorf("Prompt.Text = %q, want %q (must not be mutated by RestartSession)", tk.InitialPrompt.Text, "old prompt")
