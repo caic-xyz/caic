@@ -75,17 +75,20 @@ type SessionHandle struct {
 
 // Task represents a single unit of work.
 type Task struct {
-	ID             ksid.ID
-	Prompt         string
-	Repo           string            // Relative repo path (for display/API).
-	Harness        agent.Harness     // Agent harness ("claude", "gemini", etc.).
-	Images         []agent.ImageData // Base64-encoded images attached to the initial prompt.
-	Image          string            // Custom Docker base image; empty means use the default.
-	Tailscale      bool              // Enable Tailscale networking in the container.
-	TailscaleFQDN  string            // Tailscale FQDN assigned to the container (empty if not available).
-	USB            bool              // Enable USB passthrough in the container.
-	Display        bool              // Enable Xvfb display in the container.
-	MaxTurns       int
+	// Immutable fields — set at creation, never modified.
+	ID        ksid.ID
+	Prompt    string
+	Repo      string            // Relative repo path (for display/API).
+	Harness   agent.Harness     // Agent harness ("claude", "gemini", etc.).
+	Images    []agent.ImageData // Base64-encoded images attached to the initial prompt.
+	Image     string            // Custom Docker base image; empty means use the default.
+	Tailscale bool              // Enable Tailscale networking in the container.
+	USB       bool              // Enable USB passthrough in the container.
+	Display   bool              // Enable Xvfb display in the container.
+	MaxTurns  int
+
+	// Mutable fields — written during the task lifecycle by the runner.
+	TailscaleFQDN  string // Tailscale FQDN assigned to the container (empty if not available).
 	Branch         string
 	Container      string
 	State          State
