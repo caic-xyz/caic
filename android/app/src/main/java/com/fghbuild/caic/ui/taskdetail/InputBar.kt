@@ -85,8 +85,30 @@ fun InputBar(
                 }
             }
         }
+        OutlinedTextField(
+            value = draft,
+            onValueChange = onDraftChange,
+            modifier = Modifier
+                .fillMaxWidth()
+                .onKeyEvent {
+                    if (it.key == Key.Enter && it.type == KeyEventType.KeyUp && hasContent && !busy) {
+                        onSend(); true
+                    } else false
+                },
+            placeholder = { Text("Message...") },
+            maxLines = 6,
+            enabled = !busy,
+            trailingIcon = {
+                if (sending) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                } else {
+                    IconButton(onClick = onSend, enabled = hasContent && !busy) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                    }
+                }
+            },
+        )
         Row(
-            verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             if (supportsImages) {
@@ -96,31 +118,8 @@ fun InputBar(
                     onCamera = onAttachCamera,
                 )
             }
-            OutlinedTextField(
-                value = draft,
-                onValueChange = onDraftChange,
-                modifier = Modifier
-                    .weight(1f)
-                    .onKeyEvent {
-                        if (it.key == Key.Enter && it.type == KeyEventType.KeyUp && hasContent && !busy) {
-                            onSend(); true
-                        } else false
-                    },
-                placeholder = { Text("Message...") },
-                maxLines = 6,
-                enabled = !busy,
-            )
-            if (sending) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
-            } else {
-                Tip("Send") {
-                    IconButton(onClick = onSend, enabled = hasContent && !busy) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
-                    }
-                }
-            }
             if (pendingAction == "sync") {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(8.dp))
             } else {
                 Tip("Sync") {
                     IconButton(onClick = onSync, enabled = !busy) {
@@ -129,7 +128,7 @@ fun InputBar(
                 }
             }
             if (pendingAction == "terminate") {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(8.dp))
             } else {
                 Tip("Terminate") {
                     IconButton(onClick = onTerminate, enabled = !busy) {

@@ -256,11 +256,36 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
             }
         }
 
-        Row(
-            verticalAlignment = Alignment.Bottom,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (state.supportsImages) {
+        OutlinedTextField(
+            value = state.prompt,
+            onValueChange = viewModel::updatePrompt,
+            label = { Text("Prompt") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .onKeyEvent {
+                    if (it.key == Key.Enter && it.type == KeyEventType.KeyUp &&
+                        hasContent && state.selectedRepo.isNotBlank() && !state.submitting
+                    ) {
+                        viewModel.createTask(); true
+                    } else false
+                },
+            maxLines = 6,
+            enabled = !state.submitting,
+            trailingIcon = {
+                if (state.submitting) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                } else {
+                    IconButton(
+                        onClick = viewModel::createTask,
+                        enabled = hasContent && state.selectedRepo.isNotBlank(),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Create task")
+                    }
+                }
+            },
+        )
+        if (state.supportsImages) {
+            Row {
                 var attachExpanded by remember { mutableStateOf(false) }
                 Box {
                     IconButton(
@@ -294,32 +319,6 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
                             leadingIcon = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
                         )
                     }
-                }
-            }
-            OutlinedTextField(
-                value = state.prompt,
-                onValueChange = viewModel::updatePrompt,
-                label = { Text("Prompt") },
-                modifier = Modifier
-                    .weight(1f)
-                    .onKeyEvent {
-                        if (it.key == Key.Enter && it.type == KeyEventType.KeyUp &&
-                            hasContent && state.selectedRepo.isNotBlank() && !state.submitting
-                        ) {
-                            viewModel.createTask(); true
-                        } else false
-                    },
-                maxLines = 6,
-                enabled = !state.submitting,
-            )
-            if (state.submitting) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp))
-            } else {
-                IconButton(
-                    onClick = viewModel::createTask,
-                    enabled = hasContent && state.selectedRepo.isNotBlank(),
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Create task")
                 }
             }
         }
