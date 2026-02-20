@@ -186,7 +186,7 @@ func SquashOnto(ctx context.Context, dir, sourceRef, targetBranch, message strin
 
 	// 2. Create the squash commit: sourceRef's tree, parented on origin/<targetBranch>.
 	target := "origin/" + targetBranch
-	commitTreeArgs := []string{"-c", "user.name=caic", "-c", "user.email=noreply", "commit-tree", "-p", target, "-m", message, sourceRef + "^{tree}"}
+	commitTreeArgs := []string{"commit-tree", "-p", target, "-m", message, sourceRef + "^{tree}"}
 	cmd := exec.CommandContext(ctx, "git", commitTreeArgs...) //nolint:gosec // args are server-controlled refs
 	cmd.Dir = dir
 	var stderr bytes.Buffer

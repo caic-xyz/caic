@@ -321,7 +321,9 @@ func TestSquashOnto(t *testing.T) {
 		for _, c := range []gitCmd{
 			{"", []string{"init", "--bare", "--initial-branch=main", bare}},
 			{"", []string{"clone", bare, clone}},
-			{clone, []string{"-c", "user.name=Test", "-c", "user.email=test@test", "commit", "--allow-empty", "-m", "init"}},
+			{clone, []string{"config", "user.name", "Test"}},
+			{clone, []string{"config", "user.email", "test@test"}},
+			{clone, []string{"commit", "--allow-empty", "-m", "init"}},
 			{clone, []string{"push", "origin", "main"}},
 		} {
 			cmd := exec.CommandContext(ctx, "git", c.args...) //nolint:gosec // test helper
@@ -357,12 +359,12 @@ func TestSquashOnto(t *testing.T) {
 			t.Fatal(err)
 		}
 		run(t, clone, "add", ".")
-		run(t, clone, "-c", "user.name=Test", "-c", "user.email=test@test", "commit", "-m", "add a")
+		run(t, clone, "commit", "-m", "add a")
 		if err := os.WriteFile(filepath.Join(clone, "b.txt"), []byte("b\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		run(t, clone, "add", ".")
-		run(t, clone, "-c", "user.name=Test", "-c", "user.email=test@test", "commit", "-m", "add b")
+		run(t, clone, "commit", "-m", "add b")
 
 		// Squash onto main.
 		if err := SquashOnto(ctx, clone, "feature", "main", "squash: add a + b"); err != nil {
@@ -399,7 +401,7 @@ func TestSquashOnto(t *testing.T) {
 			t.Fatal(err)
 		}
 		run(t, clone, "add", ".")
-		run(t, clone, "-c", "user.name=Test", "-c", "user.email=test@test", "commit", "-m", "add f")
+		run(t, clone, "commit", "-m", "add f")
 
 		// Advance origin/main by pushing a new commit directly.
 		run(t, clone, "checkout", "main")
@@ -407,7 +409,7 @@ func TestSquashOnto(t *testing.T) {
 			t.Fatal(err)
 		}
 		run(t, clone, "add", ".")
-		run(t, clone, "-c", "user.name=Test", "-c", "user.email=test@test", "commit", "-m", "advance main")
+		run(t, clone, "commit", "-m", "advance main")
 		run(t, clone, "push", "origin", "main")
 
 		// SquashOnto will fetch (getting latest main), create a squash commit
