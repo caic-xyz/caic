@@ -306,6 +306,119 @@ func TestRemoteToHTTPS(t *testing.T) {
 	}
 }
 
+func TestSquashOnto(t *testing.T) {
+	// Helper: set up a bare remote + clone with an initial commit on main.
+	setup := func(t *testing.T) (bare, clone string) {
+		t.Helper()
+		ctx := t.Context()
+		dir := t.TempDir()
+		bare = filepath.Join(dir, "remote.git")
+		clone = filepath.Join(dir, "clone")
+		type gitCmd struct {
+			dir  string
+			args []string
+		}
+		for _, c := range []gitCmd{
+			{"", []string{"init", "--bare", "--initial-branch=main", bare}},
+			{"", []string{"clone", bare, clone}},
+			{clone, []string{"-c", "user.name=Test", "-c", "user.email=test@test", "commit", "--allow-empty", "-m", "init"}},
+			{clone, []string{"push", "origin", "main"}},
+		} {
+			cmd := exec.CommandContext(ctx, "git", c.args...) //nolint:gosec // test helper
+			if c.dir != "" {
+				cmd.Dir = c.dir
+			}
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v\n%s", c.args, err, out)
+			}
+		}
+		return bare, clone
+	}
+
+	// Helper: run a git command in dir.
+	run := func(t *testing.T, dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // test helper
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	t.Run("Basic", func(t *testing.T) {
+		bare, clone := setup(t)
+		ctx := t.Context()
+
+		// Make two commits on a feature branch.
+		run(t, clone, "checkout", "-b", "feature")
+		if err := os.WriteFile(filepath.Join(clone, "a.txt"), []byte("a\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		run(t, clone, "add", ".")
+		run(t, clone, "-c", "user.name=Test", "-c", "user.email=test@test", "commit", "-m", "add a")
+		if err := os.WriteFile(filepath.Join(clone, "b.txt"), []byte("b\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		run(t, clone, "add", ".")
+		run(t, clone, "-c", "user.name=Test", "-c", "user.email=test@test", "commit", "-m", "add b")
+
+		// Squash onto main.
+		if err := SquashOnto(ctx, clone, "feature", "main", "squash: add a + b"); err != nil {
+			t.Fatal(err)
+		}
+
+		// Verify: origin/main should have exactly 2 commits (init + squash).
+		log := run(t, bare, "log", "--oneline", "main")
+		lines := strings.Split(log, "\n")
+		if len(lines) != 2 {
+			t.Fatalf("expected 2 commits on main, got %d:\n%s", len(lines), log)
+		}
+		if !strings.Contains(lines[0], "squash: add a + b") {
+			t.Errorf("expected squash commit message, got: %s", lines[0])
+		}
+
+		// Both files should be present.
+		for _, name := range []string{"a.txt", "b.txt"} {
+			cmd := exec.CommandContext(ctx, "git", "cat-file", "-e", "main:"+name) //nolint:gosec // test
+			cmd.Dir = bare
+			if err := cmd.Run(); err != nil {
+				t.Errorf("file %s missing on main after squash", name)
+			}
+		}
+	})
+
+	t.Run("NonFastForward", func(t *testing.T) {
+		_, clone := setup(t)
+		ctx := t.Context()
+
+		// Make a commit on a feature branch.
+		run(t, clone, "checkout", "-b", "feature2")
+		if err := os.WriteFile(filepath.Join(clone, "f.txt"), []byte("f\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		run(t, clone, "add", ".")
+		run(t, clone, "-c", "user.name=Test", "-c", "user.email=test@test", "commit", "-m", "add f")
+
+		// Advance origin/main by pushing a new commit directly.
+		run(t, clone, "checkout", "main")
+		if err := os.WriteFile(filepath.Join(clone, "other.txt"), []byte("other\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		run(t, clone, "add", ".")
+		run(t, clone, "-c", "user.name=Test", "-c", "user.email=test@test", "commit", "-m", "advance main")
+		run(t, clone, "push", "origin", "main")
+
+		// SquashOnto will fetch (getting latest main), create a squash commit
+		// parented on the fetched main, and push. This should succeed because
+		// origin/main was refreshed by the Fetch inside SquashOnto.
+		if err := SquashOnto(ctx, clone, "feature2", "main", "squash f"); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 func TestDiscoverReposEmpty(t *testing.T) {
 	root := t.TempDir()
 	repos, err := DiscoverRepos(root, 3)

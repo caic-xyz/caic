@@ -618,6 +618,69 @@ a.headerRepo:hover {
   margin-bottom: 0.15rem;
 }
 
+.syncButtonGroup {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.syncDropdownToggle {
+  border: 1px solid #ccc;
+  border-left: none;
+  background: #f0f0f0;
+  cursor: pointer;
+  font-size: 0.6rem;
+  padding: 0 0.3rem;
+  border-radius: 0 4px 4px 0;
+  color: #555;
+}
+
+.syncDropdownToggle:hover:not(:disabled) {
+  background: #e0e0e0;
+}
+
+.syncDropdownToggle:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.syncDropdown {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 2px;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+  min-width: 10rem;
+}
+
+.syncDropdownItem {
+  display: block;
+  width: 100%;
+  padding: 0.4rem 0.75rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.8rem;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.syncDropdownItem:hover {
+  background: #f0f0f0;
+}
+
+.syncDropdownItem:first-child {
+  border-radius: 4px 4px 0 0;
+}
+
+.syncDropdownItem:last-child {
+  border-radius: 0 0 4px 4px;
+}
+
 /* Mobile: <=768px */
 @media (max-width: 768px) {
   .container {

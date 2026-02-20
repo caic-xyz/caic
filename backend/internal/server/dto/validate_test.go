@@ -57,9 +57,24 @@ func TestValidate(t *testing.T) {
 	})
 
 	t.Run("SyncReq", func(t *testing.T) {
-		if err := (SyncReq{}).Validate(); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		t.Run("Empty", func(t *testing.T) {
+			if err := (SyncReq{}).Validate(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+		t.Run("Branch", func(t *testing.T) {
+			if err := (SyncReq{Target: SyncTargetBranch}).Validate(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+		t.Run("Default", func(t *testing.T) {
+			if err := (SyncReq{Target: SyncTargetDefault}).Validate(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+		t.Run("Invalid", func(t *testing.T) {
+			assertBadRequest(t, (SyncReq{Target: "bogus"}).Validate(), "invalid sync target: bogus")
+		})
 	})
 
 	t.Run("CreateTaskReq", func(t *testing.T) {

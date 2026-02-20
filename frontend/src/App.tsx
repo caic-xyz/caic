@@ -488,6 +488,7 @@ export default function App() {
                   repo={selectedTask()?.repo ?? ""}
                   repoURL={selectedTask()?.repoURL}
                   branch={selectedTask()?.branch ?? ""}
+                  baseBranch={repos().find((r) => r.path === selectedTask()?.repo)?.baseBranch ?? "main"}
                   supportsImages={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsImages}
                   onClose={() => navigate("/")}
                   inputDraft={inputDrafts().get(id) ?? ""}

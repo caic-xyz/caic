@@ -631,16 +631,30 @@ export interface SafetyIssue {
   detail: string; // Human-readable description.
 }
 /**
+ * SyncTarget selects where to push changes.
+ */
+export type SyncTarget = string;
+/**
+ * Supported sync targets.
+ */
+export const SyncTargetBranch: SyncTarget = "branch"; // Push to the task's own branch (default).
+/**
+ * Supported sync targets.
+ */
+export const SyncTargetDefault: SyncTarget = "default"; // Squash-push to the repo's default branch.
+/**
  * SyncReq is the request body for POST /api/v1/tasks/{id}/sync.
  */
 export interface SyncReq {
   force?: boolean;
+  target?: SyncTarget;
 }
 /**
  * SyncResp is the response for POST /api/v1/tasks/{id}/sync.
  */
 export interface SyncResp {
   status: string; // "synced", "blocked", or "empty"
+  branch?: string;
   diffStat?: DiffStat;
   safetyIssues?: SafetyIssue[];
 }

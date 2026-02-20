@@ -1,7 +1,8 @@
 // TaskView renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, For, Index, Show, onCleanup, createEffect, Switch, Match, type Accessor, type JSX } from "solid-js";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, terminateTask as apiTerminateTask, syncTask as apiSyncTask, taskRawEvents } from "@sdk/api.gen";
-import type { ClaudeEventMessage, ClaudeEventAsk, ClaudeAskQuestion, ClaudeEventTextDelta, ClaudeEventToolUse, ClaudeEventToolResult, SafetyIssue, ImageData as APIImageData } from "@sdk/types.gen";
+import type { ClaudeEventMessage, ClaudeEventAsk, ClaudeAskQuestion, ClaudeEventTextDelta, ClaudeEventToolUse, ClaudeEventToolResult, SafetyIssue, ImageData as APIImageData, SyncTarget } from "@sdk/types.gen";
+import { SyncTargetDefault } from "@sdk/types.gen";
 import { Marked } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import PromptInput from "./PromptInput";
@@ -56,6 +57,7 @@ interface Props {
   repo: string;
   repoURL?: string;
   branch: string;
+  baseBranch: string;
   supportsImages?: boolean;
   onClose: () => void;
   inputDraft: string;
@@ -70,6 +72,7 @@ export default function TaskView(props: Props) {
   const [pendingAction, setPendingAction] = createSignal<"sync" | "terminate" | "restart" | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
+  const [syncMenuOpen, setSyncMenuOpen] = createSignal(false);
 
   // Auto-scroll: keep scrolled to bottom unless the user scrolled up.
   let messageAreaRef: HTMLDivElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
@@ -88,6 +91,18 @@ export default function TaskView(props: Props) {
     if (messageAreaRef && !userScrolledUp) {
       messageAreaRef.scrollTop = messageAreaRef.scrollHeight;
     }
+  }
+
+  // Close sync dropdown on outside click.
+  {
+    const onOutsideClick = (e: MouseEvent) => {
+      if (!syncMenuOpen()) return;
+      const target = e.target as HTMLElement;
+      if (target.closest(`.${styles.syncButtonGroup}`)) return;
+      setSyncMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onOutsideClick);
+    onCleanup(() => document.removeEventListener("mousedown", onOutsideClick));
   }
 
   // Scroll to bottom whenever messages change, if the user hasn't scrolled up.
@@ -175,13 +190,14 @@ export default function TaskView(props: Props) {
   const isWaiting = () => props.taskState === "waiting" || props.taskState === "asking";
   const isGitHub = () => !!props.repoURL?.includes("github.com");
 
-  async function doSync(force: boolean) {
+  async function doSync(force: boolean, target?: SyncTarget) {
     if (pendingAction()) return;
     setPendingAction("sync");
     setActionError(null);
     setSafetyIssues([]);
+    setSyncMenuOpen(false);
     try {
-      const resp = await apiSyncTask(props.taskId, { force });
+      const resp = await apiSyncTask(props.taskId, { force, ...(target ? { target } : {}) });
       if (resp.status === "blocked" && resp.safetyIssues?.length) {
         setSafetyIssues(resp.safetyIssues);
       }
@@ -365,11 +381,20 @@ export default function TaskView(props: Props) {
             onImagesChange={setPendingImages}
           >
             <Button type="submit" disabled={sending() || (!props.inputDraft.trim() && pendingImages().length === 0)} title="Send"><SendIcon width="1.1em" height="1.1em" /></Button>
-            <Button type="button" variant="gray" loading={pendingAction() === "sync"} disabled={!!pendingAction() || props.taskState === "terminating"} onClick={() => doSync(false)} title={isGitHub() ? "Push to GitHub" : "Push to origin"}>
-              <Show when={isGitHub()} fallback={<SyncIcon width="1.1em" height="1.1em" />}>
-                <GitHubIcon width="1.1em" height="1.1em" style={{ color: "black" }} />
+            <div class={styles.syncButtonGroup}>
+              <Button type="button" variant="gray" loading={pendingAction() === "sync"} disabled={!!pendingAction() || props.taskState === "terminating"} onClick={() => doSync(false)} title={`Push to ${props.branch}`}>
+                <Show when={isGitHub()} fallback={<SyncIcon width="1.1em" height="1.1em" />}>
+                  <GitHubIcon width="1.1em" height="1.1em" style={{ color: "black" }} />
+                </Show>
+              </Button>
+              <button type="button" class={styles.syncDropdownToggle} disabled={!!pendingAction() || props.taskState === "terminating"} onClick={() => setSyncMenuOpen((v) => !v)} aria-label="Sync options">&#9660;</button>
+              <Show when={syncMenuOpen()}>
+                <div class={styles.syncDropdown}>
+                  <button type="button" class={styles.syncDropdownItem} onClick={() => doSync(false)}>Push to {props.branch}</button>
+                  <button type="button" class={styles.syncDropdownItem} onClick={() => doSync(false, SyncTargetDefault)}>Push to {props.baseBranch}</button>
+                </div>
               </Show>
-            </Button>
+            </div>
             <Button type="button" variant="red" loading={pendingAction() === "terminate" || props.taskState === "terminating"} disabled={!!pendingAction() || props.taskState === "terminating"} onClick={() => { const id = props.taskId; runAction("terminate", () => apiTerminateTask(id)); }} title="Terminate" data-testid="terminate-task"><DeleteIcon width="1.1em" height="1.1em" /></Button>
           </PromptInput>
         </form>
@@ -381,7 +406,7 @@ export default function TaskView(props: Props) {
                 {(issue) => <li><strong>{issue.file}</strong>: {issue.detail} ({issue.kind})</li>}
               </For>
             </ul>
-            <Button type="button" variant="red" loading={pendingAction() === "sync"} disabled={!!pendingAction()} onClick={() => { setSafetyIssues([]); doSync(true); }}>{isGitHub() ? "Force Push to GitHub" : "Force Push to origin"}</Button>
+            <Button type="button" variant="red" loading={pendingAction() === "sync"} disabled={!!pendingAction()} onClick={() => { setSafetyIssues([]); doSync(true); }}>Force Push to {props.branch}</Button>
           </div>
         </Show>
         <Show when={actionError()}>

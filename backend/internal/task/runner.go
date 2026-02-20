@@ -467,6 +467,41 @@ func (r *Runner) SyncToOrigin(ctx context.Context, branch, container string, for
 	return ds, issues, nil
 }
 
+// SyncToDefault fetches changes from the container, runs safety checks, and
+// squash-pushes onto the repo's default branch. Safety issues always block
+// (no force override). The commit message is built from the task title.
+func (r *Runner) SyncToDefault(ctx context.Context, branch, container, message string) (agent.DiffStat, []SafetyIssue, error) {
+	r.initDefaults()
+	fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
+	defer fetchCancel()
+	r.branchMu.Lock()
+	ds := r.diffStat(fetchCtx, branch)
+	slog.Info("fetching changes for default-branch sync", "repo", filepath.Base(r.Dir), "branch", branch)
+	if err := r.Container.Fetch(fetchCtx, r.Dir, branch); err != nil {
+		r.branchMu.Unlock()
+		return ds, nil, err
+	}
+	r.branchMu.Unlock()
+
+	safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
+	defer safetyCancel()
+	issues, err := CheckSafety(safetyCtx, r.Dir, branch, r.BaseBranch, ds)
+	if err != nil {
+		return ds, issues, fmt.Errorf("safety check: %w", err)
+	}
+	if len(issues) > 0 {
+		return ds, issues, nil
+	}
+
+	ref := "refs/remotes/" + container + "/" + branch
+	squashCtx, squashCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
+	defer squashCancel()
+	if err := gitutil.SquashOnto(squashCtx, r.Dir, ref, r.BaseBranch, message); err != nil {
+		return ds, issues, fmt.Errorf("squash onto %s: %w", r.BaseBranch, err)
+	}
+	return ds, issues, nil
+}
+
 // RestartSession closes the current agent session and starts a fresh one in
 // the same container with a new prompt. Returns the new SessionHandle so the
 // caller can start a session watcher.

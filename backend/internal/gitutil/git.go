@@ -172,6 +172,35 @@ func PushRef(ctx context.Context, dir, ref, branch string, force bool) error {
 	return nil
 }
 
+// SquashOnto creates a single squash commit of sourceRef's tree on top of
+// origin/<targetBranch> and pushes it. Uses plumbing commands only — no
+// working-tree checkout needed. The push is non-force so it fails with a
+// non-fast-forward error if origin/<targetBranch> has advanced since fetch.
+func SquashOnto(ctx context.Context, dir, sourceRef, targetBranch, message string) error {
+	slog.Info("squash onto", "sourceRef", sourceRef, "targetBranch", targetBranch)
+
+	// 1. Fetch so origin/<targetBranch> is up to date.
+	if err := Fetch(ctx, dir); err != nil {
+		return err
+	}
+
+	// 2. Create the squash commit: sourceRef's tree, parented on origin/<targetBranch>.
+	target := "origin/" + targetBranch
+	commitTreeArgs := []string{"commit-tree", "-p", target, "-m", message, sourceRef + "^{tree}"}
+	cmd := exec.CommandContext(ctx, "git", commitTreeArgs...) //nolint:gosec // args are server-controlled refs
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("git commit-tree: %w: %s", err, stderr.String())
+	}
+	newCommit := strings.TrimSpace(string(out))
+
+	// 3. Push the new commit to origin/<targetBranch> (non-force).
+	return PushRef(ctx, dir, newCommit, targetBranch, false)
+}
+
 // DiscoverRepos recursively walks root up to maxDepth levels, returning
 // absolute paths of directories containing a .git subdirectory. Hidden
 // directories (prefix ".") are skipped. Recursion stops once .git is found.

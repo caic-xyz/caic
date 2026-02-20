@@ -463,6 +463,7 @@ All errors return:
 | Field | Type | Required |
 |-------|------|----------|
 | `force` | `boolean` |  |
+| `target` | `string` |  |
 
 ### SafetyIssue
 
@@ -477,6 +478,7 @@ All errors return:
 | Field | Type | Required |
 |-------|------|----------|
 | `status` | `string` | yes |
+| `branch` | `string` |  |
 | `diffStat` | `DiffFileStat[]` |  |
 | `safetyIssues` | `SafetyIssue[]` |  |
 

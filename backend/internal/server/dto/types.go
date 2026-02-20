@@ -136,14 +136,25 @@ type SafetyIssue struct {
 	Detail string `json:"detail"` // Human-readable description.
 }
 
+// SyncTarget selects where to push changes.
+type SyncTarget string
+
+// Supported sync targets.
+const (
+	SyncTargetBranch  SyncTarget = "branch"  // Push to the task's own branch (default).
+	SyncTargetDefault SyncTarget = "default" // Squash-push to the repo's default branch.
+)
+
 // SyncReq is the request body for POST /api/v1/tasks/{id}/sync.
 type SyncReq struct {
-	Force bool `json:"force,omitempty"`
+	Force  bool       `json:"force,omitempty"`
+	Target SyncTarget `json:"target,omitempty"`
 }
 
 // SyncResp is the response for POST /api/v1/tasks/{id}/sync.
 type SyncResp struct {
 	Status       string        `json:"status"` // "synced", "blocked", or "empty"
+	Branch       string        `json:"branch,omitempty"`
 	DiffStat     DiffStat      `json:"diffStat,omitzero"`
 	SafetyIssues []SafetyIssue `json:"safetyIssues,omitempty"`
 }

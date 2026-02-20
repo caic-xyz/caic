@@ -355,7 +355,7 @@ data class StatusResp(val status: String)
 data class RestartReq(val prompt: Prompt)
 
 @Serializable
-data class SyncReq(val force: Boolean? = null)
+data class SyncReq(val force: Boolean? = null, val target: String? = null)
 
 @Serializable
 data class SafetyIssue(
@@ -367,6 +367,7 @@ data class SafetyIssue(
 @Serializable
 data class SyncResp(
     val status: String,
+    val branch: String? = null,
     val diffStat: List<DiffFileStat>? = null,
     val safetyIssues: List<SafetyIssue>? = null,
 )

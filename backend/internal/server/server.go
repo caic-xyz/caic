@@ -782,6 +782,32 @@ func (s *Server) syncTask(ctx context.Context, entry *taskEntry, req *dto.SyncRe
 	case task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StatePulling, task.StatePushing:
 	}
 	runner := s.runners[t.Repo]
+
+	if req.Target == dto.SyncTargetDefault {
+		if req.Force {
+			return nil, dto.BadRequest("force is not supported for default-branch sync")
+		}
+		// Look up the base branch for the response.
+		baseBranch := runner.BaseBranch
+		// Build commit message from task title, falling back to prompt.
+		message := t.Title()
+		if message == "" {
+			message = t.InitialPrompt.Text
+		}
+		ds, issues, err := runner.SyncToDefault(ctx, t.Branch, t.Container, message)
+		if err != nil {
+			return nil, dto.InternalError(err.Error())
+		}
+		status := "synced"
+		if len(ds) == 0 {
+			status = "empty"
+		} else if len(issues) > 0 {
+			status = "blocked"
+		}
+		return &dto.SyncResp{Status: status, Branch: baseBranch, DiffStat: toDTODiffStat(ds), SafetyIssues: toDTOSafetyIssues(issues)}, nil
+	}
+
+	// Default: push to the task's own branch.
 	ds, issues, err := runner.SyncToOrigin(ctx, t.Branch, t.Container, req.Force)
 	if err != nil {
 		return nil, dto.InternalError(err.Error())
@@ -792,7 +818,7 @@ func (s *Server) syncTask(ctx context.Context, entry *taskEntry, req *dto.SyncRe
 	} else if len(issues) > 0 && !req.Force {
 		status = "blocked"
 	}
-	return &dto.SyncResp{Status: status, DiffStat: toDTODiffStat(ds), SafetyIssues: toDTOSafetyIssues(issues)}, nil
+	return &dto.SyncResp{Status: status, Branch: t.Branch, DiffStat: toDTODiffStat(ds), SafetyIssues: toDTOSafetyIssues(issues)}, nil
 }
 
 func (s *Server) handleGetUsage(w http.ResponseWriter, _ *http.Request) {
