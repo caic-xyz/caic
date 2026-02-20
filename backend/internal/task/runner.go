@@ -240,14 +240,16 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	// 1. Create branch + start container (serialized).
 	slog.Info("setting up task", "repo", t.Repo)
 	r.branchMu.Lock()
-	name, err := r.setup(ctx, t, []string{"caic=" + t.ID.String(), "harness=" + string(t.Harness)})
+	sr, err := r.setup(ctx, t, []string{"caic=" + t.ID.String(), "harness=" + string(t.Harness)})
 	r.branchMu.Unlock()
 	if err != nil {
 		t.setState(StateFailed)
 		return nil, err
 	}
-	t.Container = name
-	slog.Info("container ready", "repo", t.Repo, "branch", t.Branch, "container", name)
+	t.Branch = sr.Branch
+	t.Container = sr.Container
+	t.TailscaleFQDN = sr.TailscaleFQDN
+	slog.Info("container ready", "repo", t.Repo, "branch", t.Branch, "container", t.Container)
 
 	// 2. Start the agent session.
 	t.setState(StateStarting)
@@ -263,9 +265,9 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 		return nil, err
 	}
 
-	slog.Info("starting agent session", "repo", t.Repo, "branch", t.Branch, "container", name, "agent", t.Harness, "maxTurns", maxTurns)
+	slog.Info("starting agent session", "repo", t.Repo, "branch", t.Branch, "container", t.Container, "agent", t.Harness, "maxTurns", maxTurns)
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container:     name,
+		Container:     t.Container,
 		Dir:           r.containerDir(),
 		MaxTurns:      maxTurns,
 		Model:         t.Model,
@@ -275,7 +277,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 		_ = logW.Close()
 		close(msgCh)
 		t.setState(StateFailed)
-		slog.Warn("agent session failed to start", "repo", t.Repo, "branch", t.Branch, "container", name, "err", err)
+		slog.Warn("agent session failed to start", "repo", t.Repo, "branch", t.Branch, "container", t.Container, "err", err)
 		return nil, err
 	}
 
@@ -285,7 +287,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 
 	t.addMessage(syntheticUserInput(t.InitialPrompt))
 	t.setState(StateRunning)
-	slog.Info("agent running", "repo", t.Repo, "branch", t.Branch, "container", name)
+	slog.Info("agent running", "repo", t.Repo, "branch", t.Branch, "container", t.Container)
 	return h, nil
 }
 
@@ -377,58 +379,64 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	return res
 }
 
+// setupResult holds the outputs of setup: the branch name, container name,
+// and optional Tailscale FQDN.
+type setupResult struct {
+	Branch        string
+	Container     string
+	TailscaleFQDN string
+}
+
 // setup creates the branch and starts the container. Must be called under
 // branchMu.
-func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (string, error) {
+func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResult, error) {
 	detached := context.WithoutCancel(ctx)
 
 	gitCtx, gitCancel := context.WithTimeout(detached, r.GitTimeout)
 	defer gitCancel()
 	// Fetch so that origin/<BaseBranch> is up to date.
 	if err := gitutil.Fetch(gitCtx, r.Dir); err != nil {
-		return "", fmt.Errorf("fetch: %w", err)
+		return setupResult{}, fmt.Errorf("fetch: %w", err)
 	}
 	// Assign a sequential branch name, skipping existing ones.
+	var branch string
 	var err error
 	for range 100 {
 		if gitCtx.Err() != nil {
-			return "", gitCtx.Err()
+			return setupResult{}, gitCtx.Err()
 		}
-		t.Branch = fmt.Sprintf("caic/w%d", r.nextID)
+		branch = fmt.Sprintf("caic/w%d", r.nextID)
 		r.nextID++
-		slog.Info("creating branch", "repo", t.Repo, "branch", t.Branch)
-		err = gitutil.CreateBranch(gitCtx, r.Dir, t.Branch, "origin/"+r.BaseBranch)
+		slog.Info("creating branch", "repo", t.Repo, "branch", branch)
+		err = gitutil.CreateBranch(gitCtx, r.Dir, branch, "origin/"+r.BaseBranch)
 		if err == nil {
 			break
 		}
 	}
 	if err != nil {
-		return "", fmt.Errorf("create branch: %w", err)
+		return setupResult{}, fmt.Errorf("create branch: %w", err)
 	}
 
 	t.setState(StateProvisioning)
-	slog.Info("starting container", "repo", t.Repo, "branch", t.Branch, "image", t.Image, "harness", t.Harness, "tailscale", t.Tailscale, "usb", t.USB, "display", t.Display)
+	slog.Info("starting container", "repo", t.Repo, "branch", branch, "image", t.Image, "harness", t.Harness, "tailscale", t.Tailscale, "usb", t.USB, "display", t.Display)
 	startCtx, startCancel := context.WithTimeout(detached, r.ContainerStartTimeout)
 	defer startCancel()
-	name, tailscaleFQDN, err := r.Container.Start(startCtx, r.Dir, t.Branch, labels, StartOptions{
+	name, tailscaleFQDN, err := r.Container.Start(startCtx, r.Dir, branch, labels, StartOptions{
 		Image: t.Image, Tailscale: t.Tailscale, USB: t.USB, Display: t.Display,
 	})
 	if err != nil {
-		return "", fmt.Errorf("start container: %w", err)
+		return setupResult{}, fmt.Errorf("start container: %w", err)
 	}
-	if tailscaleFQDN != "" {
-		t.TailscaleFQDN = tailscaleFQDN
-	}
-	slog.Info("container started", "repo", t.Repo, "branch", t.Branch)
+	slog.Info("container started", "repo", t.Repo, "branch", branch)
 
 	// Switch back to the base branch so the next task can create its branch.
 	// Fresh timeout since the previous gitCtx likely expired during container start.
 	gitCtx, gitCancel = context.WithTimeout(detached, r.GitTimeout)
 	defer gitCancel()
 	if err := gitutil.CheckoutBranch(gitCtx, r.Dir, r.BaseBranch); err != nil {
-		return "", fmt.Errorf("checkout base: %w", err)
+		return setupResult{}, fmt.Errorf("checkout base: %w", err)
 	}
-	return name, nil
+	return setupResult{Branch: branch, Container: name, TailscaleFQDN: tailscaleFQDN}, nil
 }
 
 // SyncToOrigin fetches changes from the container, runs safety checks, and
