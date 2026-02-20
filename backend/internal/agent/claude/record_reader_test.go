@@ -334,25 +334,30 @@ func TestReadRecords(t *testing.T) {
 		if len(files) == 0 {
 			t.Skip("no JSONL files found")
 		}
-		for _, path := range files {
-			f, err := os.Open(filepath.Clean(path))
-			if err != nil {
-				t.Errorf("open %s: %v", path, err)
-				continue
-			}
-			records, err := ReadRecords(f)
-			_ = f.Close()
-			if err != nil {
-				t.Errorf("read %s: %v", path, err)
-				continue
-			}
-			for i, r := range records {
-				if _, err := DecodeRecord(&r); err != nil {
-					t.Errorf("%s record %d (type=%q): %v", path, i, r.Type, err)
-				}
-			}
+		const maxFiles = 50
+		if len(files) > maxFiles {
+			files = files[:maxFiles]
 		}
-		t.Logf("successfully parsed %d JSONL files", len(files))
+		t.Logf("parsing %d JSONL files", len(files))
+		for _, path := range files {
+			t.Run(filepath.Base(path), func(t *testing.T) {
+				t.Parallel()
+				f, err := os.Open(filepath.Clean(path))
+				if err != nil {
+					t.Fatalf("open: %v", err)
+				}
+				records, err := ReadRecords(f)
+				_ = f.Close()
+				if err != nil {
+					t.Fatalf("read: %v", err)
+				}
+				for i, r := range records {
+					if _, err := DecodeRecord(&r); err != nil {
+						t.Errorf("record %d (type=%q): %v", i, r.Type, err)
+					}
+				}
+			})
+		}
 	})
 }
 

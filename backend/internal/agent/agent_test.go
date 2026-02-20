@@ -136,7 +136,8 @@ func TestSession(t *testing.T) {
 		}
 	})
 	t.Run("CloseIdempotent", func(t *testing.T) {
-		_, stdinW := io.Pipe()
+		stdinR, stdinW := io.Pipe()
+		go func() { _, _ = io.Copy(io.Discard, stdinR) }()
 		s := &Session{
 			stdin: stdinW,
 			wire:  testWire{},
