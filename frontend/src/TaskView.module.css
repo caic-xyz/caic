@@ -241,6 +241,12 @@ a.headerRepo:hover {
   text-decoration: underline;
 }
 
+.markdown img {
+  max-width: min(100%, 720px);
+  height: auto;
+  border-radius: 4px;
+}
+
 .result {
   margin-top: 0.5rem;
   padding: 0.5rem;
@@ -633,14 +639,14 @@ a.headerRepo:hover {
 
 .userInputImages {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
+  flex-direction: column;
+  gap: 0.5rem;
   margin-top: 0.3rem;
 }
 
 .userInputImage {
-  max-height: 120px;
-  max-width: 200px;
+  max-width: min(100%, 720px);
+  height: auto;
   border-radius: 4px;
   border: 1px solid #b8d0ea;
 }
