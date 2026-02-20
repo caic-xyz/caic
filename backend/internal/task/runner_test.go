@@ -136,8 +136,8 @@ func TestRunner(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Repo:          "org/repo",
 				Branch:        "main",
-				state:         StateRunning,
 			}
+			tk.SetState(StateRunning)
 
 			// Restore messages with cost info (simulates RestoreMessages from logs).
 			tk.RestoreMessages([]agent.Message{
@@ -176,8 +176,8 @@ func TestRunner(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Repo:          "org/repo",
 				Branch:        "main",
-				State:         StateRunning,
 			}
+			tk.SetState(StateRunning)
 
 			// Restore messages including a DiffStatMessage (simulates relay output).
 			tk.RestoreMessages([]agent.Message{
@@ -253,7 +253,8 @@ func TestRunner(t *testing.T) {
 		r := &Runner{Container: stub}
 		r.initDefaults()
 
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning, Branch: "caic/w0"}
+		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Branch: "caic/w0"}
+		tk.SetState(StateRunning)
 		_, ch, unsub := tk.Subscribe(t.Context())
 		defer unsub()
 
@@ -298,8 +299,8 @@ func TestRunner(t *testing.T) {
 			Harness:       "test",
 			Branch:        "caic/w0",
 			Container:     "fake-container",
-			state:         StateWaiting,
 		}
+		tk.SetState(StateWaiting)
 
 		h, err := r.RestartSession(t.Context(), tk, agent.Prompt{Text: "new plan"})
 		if err != nil {

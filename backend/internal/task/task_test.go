@@ -130,7 +130,8 @@ func TestTask(t *testing.T) {
 
 	t.Run("SendInput", func(t *testing.T) {
 		t.Run("NoSession", func(t *testing.T) {
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateWaiting}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateWaiting)
 			err := tk.SendInput(agent.Prompt{Text: "hello"})
 			if err == nil {
 				t.Fatal("expected error when no session is active")
@@ -147,7 +148,8 @@ func TestTask(t *testing.T) {
 			// Simulate a session that has already finished (e.g. relay
 			// subprocess exited). SendInput should detect it and return
 			// "no active session" without changing state.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateWaiting}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateWaiting)
 			cmd := exec.Command("true")
 			stdin, err := cmd.StdinPipe()
 			if err != nil {
@@ -215,7 +217,8 @@ func TestTask(t *testing.T) {
 
 	t.Run("addMessage", func(t *testing.T) {
 		t.Run("TransitionsToWaiting", func(t *testing.T) {
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
 			result := &agent.ResultMessage{MessageType: "result"}
 			tk.addMessage(result)
 			if tk.GetState() != StateWaiting {
@@ -223,7 +226,8 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("TransitionsToAsking", func(t *testing.T) {
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
 			// Add an assistant message with an AskUserQuestion tool_use block.
 			tk.addMessage(&agent.AssistantMessage{
 				MessageType: "assistant",
@@ -244,7 +248,8 @@ func TestTask(t *testing.T) {
 			// assistant snapshots per turn. AskUserQuestion appears in an
 			// earlier snapshot while the final one is text-only. The state
 			// machine must scan all assistant messages in the turn.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
 			tk.addMessage(&agent.AssistantMessage{
 				MessageType: "assistant",
 				Message: agent.APIMessage{
@@ -272,14 +277,16 @@ func TestTask(t *testing.T) {
 			// When the agent starts producing output while the task is
 			// waiting (e.g. relay reconnect after server restart), the
 			// state should transition back to running.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateWaiting}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateWaiting)
 			tk.addMessage(&agent.AssistantMessage{MessageType: "assistant"})
 			if tk.GetState() != StateRunning {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateRunning)
 			}
 		})
 		t.Run("AssistantMessageTransitionsAskingToRunning", func(t *testing.T) {
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateAsking}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateAsking)
 			tk.addMessage(&agent.AssistantMessage{MessageType: "assistant"})
 			if tk.GetState() != StateRunning {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateRunning)
@@ -289,7 +296,8 @@ func TestTask(t *testing.T) {
 			// When watchSession sets Waiting before the ResultMessage is
 			// processed, the ResultMessage should still detect
 			// AskUserQuestion and correct the state to Asking.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
 			tk.addMessage(&agent.AssistantMessage{
 				MessageType: "assistant",
 				Message: agent.APIMessage{
@@ -321,7 +329,8 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("addMessageDiffStat", func(t *testing.T) {
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning}
+		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetState(StateRunning)
 		ds := agent.DiffStat{
 			{Path: "main.go", Added: 10, Deleted: 3},
 			{Path: "img.png", Binary: true},
@@ -349,7 +358,8 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("RestoreMessagesDiffStat", func(t *testing.T) {
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateTerminated}
+		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetState(StateTerminated)
 		tk.RestoreMessages([]agent.Message{
 			&agent.DiffStatMessage{
 				MessageType: "caic_diff_stat",
@@ -368,7 +378,8 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("LiveUsageCumulative", func(t *testing.T) {
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning}
+		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetState(StateRunning)
 		tk.addMessage(&agent.ResultMessage{
 			MessageType: "result",
 			Usage:       agent.Usage{InputTokens: 100, OutputTokens: 50, CacheReadInputTokens: 10},
@@ -400,7 +411,8 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("RestoreMessagesUsageCumulative", func(t *testing.T) {
-		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateTerminated}
+		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetState(StateTerminated)
 		tk.RestoreMessages([]agent.Message{
 			&agent.ResultMessage{
 				MessageType: "result",
@@ -430,7 +442,8 @@ func TestTask(t *testing.T) {
 
 	t.Run("RestoreMessages", func(t *testing.T) {
 		t.Run("Basic", func(t *testing.T) {
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
 			msgs := []agent.Message{
 				&agent.SystemInitMessage{MessageType: "system", Subtype: "init", SessionID: "sess-123"},
 				&agent.AssistantMessage{MessageType: "assistant"},
@@ -449,7 +462,8 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("InfersAsking", func(t *testing.T) {
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
 			msgs := []agent.Message{
 				&agent.SystemInitMessage{MessageType: "system", Subtype: "init", SessionID: "s1"},
 				&agent.AssistantMessage{
@@ -470,7 +484,8 @@ func TestTask(t *testing.T) {
 		t.Run("SkipsTrailingDiffStat", func(t *testing.T) {
 			// The relay emits DiffStatMessage after the ResultMessage.
 			// RestoreMessages should skip it and still infer Waiting.
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
 			msgs := []agent.Message{
 				&agent.AssistantMessage{MessageType: "assistant"},
 				&agent.ResultMessage{MessageType: "result"},
@@ -485,7 +500,8 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("NoResultKeepsState", func(t *testing.T) {
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
 			msgs := []agent.Message{
 				&agent.SystemInitMessage{MessageType: "system", Subtype: "init", SessionID: "s1"},
 				&agent.AssistantMessage{MessageType: "assistant"},
@@ -524,7 +540,8 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("RestoresPlanFile", func(t *testing.T) {
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
 			msgs := []agent.Message{
 				&agent.AssistantMessage{
 					MessageType: "assistant",
@@ -542,7 +559,8 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("RestoresInPlanMode", func(t *testing.T) {
-			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning}
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
 			msgs := []agent.Message{
 				&agent.AssistantMessage{
 					MessageType: "assistant",
@@ -572,7 +590,8 @@ func TestTask(t *testing.T) {
 			}
 
 			// Without ExitPlanMode, should stay in plan mode.
-			tk2 := &Task{InitialPrompt: agent.Prompt{Text: "test"}, state: StateRunning}
+			tk2 := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk2.SetState(StateRunning)
 			tk2.RestoreMessages(msgs[:1])
 			if !tk2.Snapshot().InPlanMode {
 				t.Error("InPlanMode = false, want true (only EnterPlanMode seen)")
@@ -623,7 +642,8 @@ func TestState(t *testing.T) {
 	})
 	t.Run("SetStateIf", func(t *testing.T) {
 		t.Run("Match", func(t *testing.T) {
-			tk := &Task{state: StateRunning}
+			tk := &Task{}
+			tk.SetState(StateRunning)
 			if !tk.SetStateIf(StateRunning, StateWaiting) {
 				t.Fatal("SetStateIf returned false when state matched")
 			}
@@ -632,7 +652,8 @@ func TestState(t *testing.T) {
 			}
 		})
 		t.Run("Mismatch", func(t *testing.T) {
-			tk := &Task{state: StateAsking}
+			tk := &Task{}
+			tk.SetState(StateAsking)
 			if tk.SetStateIf(StateRunning, StateWaiting) {
 				t.Fatal("SetStateIf returned true when state did not match")
 			}

@@ -108,12 +108,12 @@ type Task struct {
 	subs           []*sub         // active SSE subscribers
 	handle         *SessionHandle // current active session; nil when no session is attached
 	resultNotify   chan struct{}  // signaled (non-blocking) when a ResultMessage arrives
-	liveCostUSD  float64
-	liveNumTurns int
-	liveDuration time.Duration
-	liveUsage    agent.Usage
-	lastUsage    agent.Usage    // Most recent ResultMessage usage (active context).
-	liveDiffStat agent.DiffStat // Updated by DiffStatMessage from relay.
+	liveCostUSD    float64
+	liveNumTurns   int
+	liveDuration   time.Duration
+	liveUsage      agent.Usage
+	lastUsage      agent.Usage    // Most recent ResultMessage usage (active context).
+	liveDiffStat   agent.DiffStat // Updated by DiffStatMessage from relay.
 }
 
 // setState updates the state and records the transition time. The caller must
