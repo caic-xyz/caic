@@ -414,6 +414,18 @@ def serve(cmd_args, work_dir, log_stdin=True):
                             proc.stdin.close()
                         except OSError:
                             pass
+                else:
+                    # Client disconnected (SSH drop / stdin EOF) without
+                    # requesting shutdown. Release the client slot so the
+                    # attach_client's relay_to_stdout sees EOF and exits.
+                    with client_lock:
+                        if client_conn[0] is c:
+                            client_conn[0] = None
+                            logging.info("client #%d disconnected reason=client_eof", cid)
+                    try:
+                        c.close()
+                    except OSError:
+                        pass
 
             ct = threading.Thread(target=client_reader, args=(conn,), daemon=True)
             ct.start()
