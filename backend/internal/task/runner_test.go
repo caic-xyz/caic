@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -196,6 +197,159 @@ func TestRunner(t *testing.T) {
 			}
 			if result.DiffStat[0].Path != "a.go" || result.DiffStat[0].Added != 10 {
 				t.Errorf("DiffStat[0] = %+v, want {a.go 10 3}", result.DiffStat[0])
+			}
+		})
+
+		t.Run("BackupCreated", func(t *testing.T) {
+			// Container has a commit not reachable from origin. Cleanup should
+			// create a caic-backup/ branch.
+			clone := initTestRepo(t, "main")
+
+			// Set up a "container" bare repo with a commit on caic/w0.
+			containerBare := filepath.Join(filepath.Dir(clone), "container.git")
+			runGit(t, "", "init", "--bare", containerBare)
+			containerName := "md-repo-caic-w0"
+			runGit(t, clone, "remote", "add", containerName, containerBare)
+
+			// Create a commit only reachable via the container remote.
+			runGit(t, clone, "checkout", "-b", "caic/w0")
+			if err := os.WriteFile(filepath.Join(clone, "work.txt"), []byte("work\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, clone, "add", ".")
+			runGit(t, clone, "commit", "-m", "container work")
+			runGit(t, clone, "push", containerName, "caic/w0")
+			runGit(t, clone, "checkout", "main")
+			runGit(t, clone, "branch", "-D", "caic/w0")
+
+			// The fetchFn simulates md fetch by running git fetch on the container remote.
+			stub := &stubContainer{
+				fetchFn: func(_ string) error {
+					cmd := exec.Command("git", "fetch", containerName)
+					cmd.Dir = clone
+					out, err := cmd.CombinedOutput()
+					if err != nil {
+						return fmt.Errorf("git fetch %s: %w: %s", containerName, err, out)
+					}
+					return nil
+				},
+			}
+
+			r := &Runner{
+				BaseBranch: "main",
+				Dir:        clone,
+				Container:  stub,
+			}
+
+			tk := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "test"},
+				Repo:          "org/repo",
+				Branch:        "caic/w0",
+				Container:     containerName,
+			}
+			tk.SetState(StateRunning)
+
+			r.Cleanup(t.Context(), tk, StateTerminated)
+
+			// Verify the backup branch was created.
+			cmd := exec.Command("git", "rev-parse", "--verify", "caic-backup/caic/w0")
+			cmd.Dir = clone
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("backup branch not created: %v\n%s", err, out)
+			}
+		})
+
+		t.Run("BackupSkippedWhenReachable", func(t *testing.T) {
+			// Container commit was already pushed to origin. No backup needed.
+			clone := initTestRepo(t, "main")
+
+			containerBare := filepath.Join(filepath.Dir(clone), "container.git")
+			runGit(t, "", "init", "--bare", containerBare)
+			containerName := "md-repo-caic-w1"
+			runGit(t, clone, "remote", "add", containerName, containerBare)
+
+			// Create a commit and push to BOTH origin and container.
+			runGit(t, clone, "checkout", "-b", "caic/w1")
+			if err := os.WriteFile(filepath.Join(clone, "synced.txt"), []byte("synced\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, clone, "add", ".")
+			runGit(t, clone, "commit", "-m", "synced work")
+			runGit(t, clone, "push", "origin", "caic/w1")
+			runGit(t, clone, "push", containerName, "caic/w1")
+			runGit(t, clone, "checkout", "main")
+			runGit(t, clone, "branch", "-D", "caic/w1")
+
+			stub := &stubContainer{
+				fetchFn: func(_ string) error {
+					cmd := exec.Command("git", "fetch", containerName)
+					cmd.Dir = clone
+					out, err := cmd.CombinedOutput()
+					if err != nil {
+						return fmt.Errorf("git fetch %s: %w: %s", containerName, err, out)
+					}
+					return nil
+				},
+			}
+
+			r := &Runner{
+				BaseBranch: "main",
+				Dir:        clone,
+				Container:  stub,
+			}
+
+			tk := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "test"},
+				Repo:          "org/repo",
+				Branch:        "caic/w1",
+				Container:     containerName,
+			}
+			tk.SetState(StateRunning)
+
+			r.Cleanup(t.Context(), tk, StateTerminated)
+
+			// Verify no backup branch was created.
+			cmd := exec.Command("git", "rev-parse", "--verify", "caic-backup/caic/w1")
+			cmd.Dir = clone
+			if err := cmd.Run(); err == nil {
+				t.Error("backup branch should not exist when commit is reachable from origin")
+			}
+		})
+
+		t.Run("BackupFetchFails", func(t *testing.T) {
+			// Fetch fails — Cleanup must still kill the container.
+			clone := initTestRepo(t, "main")
+
+			stub := &stubContainer{
+				fetchErr: errors.New("container unreachable"),
+			}
+
+			r := &Runner{
+				BaseBranch: "main",
+				Dir:        clone,
+				Container:  stub,
+			}
+
+			tk := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "test"},
+				Repo:          "org/repo",
+				Branch:        "caic/w0",
+				Container:     "md-repo-caic-w0",
+			}
+			tk.SetState(StateRunning)
+
+			result := r.Cleanup(t.Context(), tk, StateTerminated)
+			if result.State != StateTerminated {
+				t.Errorf("state = %v, want %v", result.State, StateTerminated)
+			}
+			// No backup branch should exist (fetch failed).
+			cmd := exec.Command("git", "rev-parse", "--verify", "caic-backup/caic/w0")
+			cmd.Dir = clone
+			if err := cmd.Run(); err == nil {
+				t.Error("backup branch should not exist when fetch fails")
 			}
 		})
 	})
@@ -436,7 +590,9 @@ func TestRunner(t *testing.T) {
 // stubContainer implements ContainerBackend for testing. Diff returns a fixed
 // numstat line; Fetch records that it was called.
 type stubContainer struct {
-	fetched bool
+	fetched  bool
+	fetchErr error              // If set, Fetch returns this error.
+	fetchFn  func(string) error // If set, called with the branch during Fetch.
 }
 
 func (s *stubContainer) Start(_ context.Context, _, _ string, _ []string, _ StartOptions) (_, _ string, _ error) {
@@ -447,8 +603,14 @@ func (s *stubContainer) Diff(_ context.Context, _, _ string, _ ...string) (strin
 	return "5\t1\tmain.go\n", nil
 }
 
-func (s *stubContainer) Fetch(context.Context, string, string) error {
+func (s *stubContainer) Fetch(_ context.Context, _, branch string) error {
 	s.fetched = true
+	if s.fetchErr != nil {
+		return s.fetchErr
+	}
+	if s.fetchFn != nil {
+		return s.fetchFn(branch)
+	}
 	return nil
 }
 

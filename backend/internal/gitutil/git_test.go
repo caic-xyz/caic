@@ -421,6 +421,125 @@ func TestSquashOnto(t *testing.T) {
 	})
 }
 
+func TestIsReachable(t *testing.T) {
+	ctx := t.Context()
+	dir := t.TempDir()
+	bare := filepath.Join(dir, "remote.git")
+	clone := filepath.Join(dir, "clone")
+
+	run := func(t *testing.T, d string, args ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // test helper
+		cmd.Dir = d
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	// Set up bare remote + clone with initial commit on main.
+	run(t, "", "init", "--bare", "--initial-branch=main", bare)
+	run(t, "", "clone", bare, clone)
+	run(t, clone, "config", "user.name", "Test")
+	run(t, clone, "config", "user.email", "test@test")
+	run(t, clone, "commit", "--allow-empty", "-m", "init")
+	run(t, clone, "push", "origin", "main")
+
+	// Add a container remote with a new commit unreachable from origin.
+	containerBare := filepath.Join(dir, "container.git")
+	run(t, "", "init", "--bare", "--initial-branch=main", containerBare)
+	run(t, clone, "remote", "add", "md-caic-w0", containerBare)
+
+	// Create a commit on a feature branch and push only to the container remote.
+	run(t, clone, "checkout", "-b", "caic/w0")
+	if err := os.WriteFile(filepath.Join(clone, "work.txt"), []byte("work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run(t, clone, "add", ".")
+	run(t, clone, "commit", "-m", "container work")
+	containerCommit := run(t, clone, "rev-parse", "HEAD")
+	run(t, clone, "push", "md-caic-w0", "caic/w0")
+	run(t, clone, "checkout", "main")
+	run(t, clone, "branch", "-D", "caic/w0")
+
+	// The initial commit is on origin/main — reachable.
+	initCommit := run(t, clone, "rev-parse", "origin/main")
+
+	t.Run("Reachable", func(t *testing.T) {
+		ok, err := IsReachable(ctx, clone, initCommit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			t.Error("expected commit on origin/main to be reachable")
+		}
+	})
+
+	t.Run("Unreachable", func(t *testing.T) {
+		ok, err := IsReachable(ctx, clone, containerCommit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ok {
+			t.Error("expected commit only on container remote to be unreachable")
+		}
+	})
+
+	t.Run("ReachableViaLocalBranch", func(t *testing.T) {
+		// Create a local branch pointing at the container commit.
+		run(t, clone, "branch", "local-backup", containerCommit)
+		defer func() {
+			run(t, clone, "branch", "-D", "local-backup")
+		}()
+		ok, err := IsReachable(ctx, clone, containerCommit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			t.Error("expected commit on local branch to be reachable")
+		}
+	})
+}
+
+func TestCreateBranchAt(t *testing.T) {
+	ctx := t.Context()
+	dir := t.TempDir()
+
+	run := func(t *testing.T, d string, args ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, "git", args...) //nolint:gosec // test helper
+		cmd.Dir = d
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	run(t, "", "init", "--initial-branch=main", dir)
+	run(t, dir, "config", "user.name", "Test")
+	run(t, dir, "config", "user.email", "test@test")
+	run(t, dir, "commit", "--allow-empty", "-m", "init")
+	commit := run(t, dir, "rev-parse", "HEAD")
+
+	t.Run("Basic", func(t *testing.T) {
+		if err := CreateBranchAt(ctx, dir, "caic-backup/caic/w0", commit); err != nil {
+			t.Fatal(err)
+		}
+		got := run(t, dir, "rev-parse", "caic-backup/caic/w0")
+		if got != commit {
+			t.Errorf("branch points at %s, want %s", got, commit)
+		}
+	})
+
+	t.Run("AlreadyExists", func(t *testing.T) {
+		if err := CreateBranchAt(ctx, dir, "caic-backup/caic/w0", commit); err == nil {
+			t.Error("expected error for duplicate branch")
+		}
+	})
+}
+
 func TestDiscoverReposEmpty(t *testing.T) {
 	root := t.TempDir()
 	repos, err := DiscoverRepos(root, 3)

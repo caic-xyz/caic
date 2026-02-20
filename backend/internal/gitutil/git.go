@@ -201,6 +201,53 @@ func SquashOnto(ctx context.Context, dir, sourceRef, targetBranch, message strin
 	return PushRef(ctx, dir, newCommit, targetBranch, false)
 }
 
+// RevParse resolves a git ref to its full SHA-1 hash.
+func RevParse(ctx context.Context, dir, ref string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", ref) //nolint:gosec // ref is server-controlled
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse %s: %w: %s", ref, err, stderr.String())
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// IsReachable reports whether commit is an ancestor of (or equal to) any ref
+// in refs/heads/ or refs/remotes/origin/. Container remote-tracking refs
+// (refs/remotes/<container>/*) are excluded by construction.
+func IsReachable(ctx context.Context, dir, commit string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "for-each-ref", //nolint:gosec // commit is server-controlled
+		"--contains", commit,
+		"--format=%(refname)",
+		"refs/heads/",
+		"refs/remotes/origin/",
+	)
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("git for-each-ref --contains %s: %w: %s", commit, err, stderr.String())
+	}
+	return strings.TrimSpace(string(out)) != "", nil
+}
+
+// CreateBranchAt creates a local branch pointing at commit without checking it
+// out. This does not touch the working tree or index.
+func CreateBranchAt(ctx context.Context, dir, name, commit string) error {
+	slog.Info("git create branch at", "branch", name, "commit", commit)
+	cmd := exec.CommandContext(ctx, "git", "branch", name, commit) //nolint:gosec // args are server-controlled
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git branch %s %s: %w: %s", name, commit, err, stderr.String())
+	}
+	return nil
+}
+
 // DiscoverRepos recursively walks root up to maxDepth levels, returning
 // absolute paths of directories containing a .git subdirectory. Hidden
 // directories (prefix ".") are skipped. Recursion stops once .git is found.
