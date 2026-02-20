@@ -30,7 +30,7 @@ class FunctionHandlers(
                 "get_task_detail" -> handleGetTaskDetail(args)
                 "send_message" -> handleSendMessage(args)
                 "answer_question" -> handleAnswerQuestion(args)
-                "sync_task" -> handleSyncTask(args)
+                "sync_task", "push_task" -> handleSyncTask(args)
                 "terminate_task" -> handleTerminateTask(args)
                 "get_usage" -> handleGetUsage()
                 "list_repos" -> handleListRepos()
@@ -125,13 +125,15 @@ class FunctionHandlers(
         val taskId = resolveTaskNumber(args) ?: return errorResult("Unknown task number")
         val num = args.requireInt("task_number")
         val force = args["force"]?.jsonPrimitive?.booleanOrNull ?: false
-        val resp = apiClient.syncTask(taskId, SyncReq(force = force))
+        val target = args.optString("target").let { if (it == "main" || it == "master") "default" else it }
+        val resp = apiClient.syncTask(taskId, SyncReq(force = force, target = target))
         val issues = resp.safetyIssues
+        val verb = if (target == "default") "Pushed task #$num to main" else "Synced task #$num"
         return if (issues.isNullOrEmpty()) {
-            textResult("Synced task #$num.")
+            textResult("$verb.")
         } else {
             val issueLines = issues.joinToString("\n") { "- **${it.kind}** ${it.file}: ${it.detail}" }
-            textResult("Synced task #$num with safety issues:\n$issueLines")
+            textResult("$verb with safety issues:\n$issueLines")
         }
     }
 

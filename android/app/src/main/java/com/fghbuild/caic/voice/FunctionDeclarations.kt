@@ -34,6 +34,14 @@ private fun stringProp(description: String): JsonElement = JsonObject(
     )
 )
 
+private fun enumProp(description: String, values: List<String>): JsonElement = JsonObject(
+    mapOf(
+        "type" to JsonPrimitive("string"),
+        "description" to JsonPrimitive(description),
+        "enum" to JsonArray(values.map { JsonPrimitive(it) }),
+    )
+)
+
 private fun intProp(description: String): JsonElement = JsonObject(
     mapOf(
         "type" to JsonPrimitive("integer"),
@@ -116,10 +124,15 @@ val functionDeclarations: List<FunctionDeclaration> = listOf(
     ),
     FunctionDeclaration(
         name = "sync_task",
-        description = "Push a task's branch to GitHub by task number.",
+        description = "Sync or push a task's changes to GitHub. " +
+            "Push to task branch (default) or squash-push to main.",
         parameters = objectSchema(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
             "force" to boolProp("Force sync even with safety issues"),
+            "target" to enumProp(
+                "Where to push: branch (default) or main",
+                listOf("branch", "default", "main", "master"),
+            ),
             required = listOf("task_number"),
         ),
         behavior = "NON_BLOCKING",
