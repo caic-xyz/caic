@@ -51,7 +51,8 @@ class VoiceViewModel @Inject constructor(
                         val active = tasks.filter { it.id !in preTerminatedIds }
                         taskNumberMap.reset()
                         taskNumberMap.update(active)
-                        voiceSessionManager.injectText(buildSnapshot(active))
+                        val recentRepo = settingsRepository.settings.value.recentRepos.firstOrNull()
+                        voiceSessionManager.injectText(buildSnapshot(active, recentRepo))
                         previousTaskStates = tasks.associate { it.id to it.state }
                     }
                 }
@@ -94,16 +95,24 @@ class VoiceViewModel @Inject constructor(
             }
     }
 
-    private fun buildSnapshot(tasks: List<Task>): String {
-        if (tasks.isEmpty()) return "[No active tasks]"
-        val lines = tasks.joinToString("\n") { task ->
-            val num = taskNumberMap.toNumber(task.id) ?: 0
-            val shortName = task.initialPrompt.lines().firstOrNull()?.take(SHORT_NAME_MAX) ?: task.id
-            val base = "- Task #$num: $shortName (${task.state}, ${formatElapsed(task.duration)}" +
-                ", ${formatCost(task.costUSD)}, ${task.harness})"
-            if (task.state == "asking") "$base — needs input" else base
+    private fun buildSnapshot(tasks: List<Task>, recentRepo: String?): String {
+        val parts = mutableListOf<String>()
+        if (recentRepo != null) {
+            parts.add("[Default repo: $recentRepo]")
         }
-        return "[Current tasks at session start]\n$lines"
+        if (tasks.isNotEmpty()) {
+            val lines = tasks.joinToString("\n") { task ->
+                val num = taskNumberMap.toNumber(task.id) ?: 0
+                val shortName = task.initialPrompt.lines().firstOrNull()?.take(SHORT_NAME_MAX) ?: task.id
+                val base = "- Task #$num: $shortName (${task.state}, ${formatElapsed(task.duration)}" +
+                    ", ${formatCost(task.costUSD)}, ${task.harness})"
+                if (task.state == "asking") "$base — needs input" else base
+            }
+            parts.add("[Current tasks at session start]\n$lines")
+        } else if (recentRepo == null) {
+            return "[No active tasks]"
+        }
+        return parts.joinToString("\n")
     }
 
     private fun buildNotification(task: Task): String? {

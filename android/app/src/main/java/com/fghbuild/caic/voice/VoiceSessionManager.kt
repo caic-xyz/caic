@@ -787,7 +787,9 @@ class VoiceSessionManager @Inject constructor(
                 "- Summarize task status: state, elapsed time, cost, what the agent is doing.\n" +
                 "- When an agent is asking, read the question and options clearly, wait for " +
                 "the verbal answer, then call answer_question.\n" +
-                "- Confirm repo and prompt before creating a task.\n" +
+                "- When creating a task, use the default repo if one is provided in the " +
+                "session context and the user doesn't specify a different one. " +
+                "Confirm repo and prompt before creating.\n" +
                 "- Refer to tasks by short name (first few words of the prompt).\n" +
                 "- Proactively notify the user when tasks finish or need input.\n" +
                 "- For safety issues during sync, describe each issue and ask whether to force."
