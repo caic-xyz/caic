@@ -31,6 +31,11 @@ data class Turn(
     val textCount: Int,
 )
 
+// Tool names (lowercase) that are async and emit explicit toolResult events.
+// All other Claude Code tools complete synchronously and are done as soon as
+// their toolUse event is emitted.
+private val ASYNC_TOOLS = setOf("bash", "task")
+
 /** Groups consecutive events for cohesive rendering. */
 @Suppress("CyclomaticComplexMethod", "LoopWithTooManyJumpStatements")
 fun groupMessages(msgs: List<ClaudeEventMessage>): List<MessageGroup> {
@@ -64,7 +69,7 @@ fun groupMessages(msgs: List<ClaudeEventMessage>): List<MessageGroup> {
             }
             EventKinds.ToolUse -> {
                 val toolUse = ev.toolUse ?: continue
-                val call = ToolCall(use = toolUse)
+                val call = ToolCall(use = toolUse, done = toolUse.name.lowercase() !in ASYNC_TOOLS)
                 val last = lastGroup()
                 if (last != null && last.kind == GroupKind.TOOL && !usageSinceLastTool) {
                     // Consecutive toolUse in the same AssistantMessage — merge.
