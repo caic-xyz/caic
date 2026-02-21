@@ -55,94 +55,12 @@ wraps DataStore. `VoiceSessionManager` owns Gemini Live lifecycle + tool executi
 
 ## Navigation
 
-```kotlin
-sealed class Screen(val route: String) {
-    data object TaskList : Screen("tasks")
-    data class TaskDetail(val taskId: String) : Screen("tasks/{taskId}")
-    data object Settings : Screen("settings")
-}
-```
-
 - Deep link: `caic://task/{taskId}` (for notifications)
 - Voice `set_active_task` navigates programmatically
-
-## Module Structure
-
-```
-android/app/src/main/kotlin/com/fghbuild/caic/
-├── CaicApp.kt                       # Application class, Hilt entry point
-├── MainActivity.kt                  # Single activity, Compose host
-├── navigation/NavGraph.kt           # Routes, deep links
-├── data/
-│   ├── TaskRepository.kt            # SSE connections, API calls
-│   └── SettingsRepository.kt        # DataStore wrapper
-├── service/TaskMonitorService.kt    # Foreground service for background SSE
-├── voice/
-│   ├── VoiceSessionManager.kt       # Gemini Live session + tool dispatch
-│   ├── VoiceViewModel.kt            # Activity-scoped ViewModel
-│   ├── VoiceOverlay.kt              # Floating mic composable
-│   ├── FunctionDeclarations.kt      # Tool definitions for Gemini
-│   └── FunctionHandlers.kt          # Tool execution implementations
-├── ui/
-│   ├── theme/Theme.kt               # Material 3, state colors
-│   ├── tasklist/
-│   │   ├── TaskListScreen.kt
-│   │   ├── TaskListViewModel.kt
-│   │   ├── TaskCard.kt
-│   │   └── UsageBar.kt
-│   ├── taskdetail/
-│   │   ├── TaskDetailScreen.kt
-│   │   ├── TaskDetailViewModel.kt
-│   │   ├── MessageList.kt           # Turn/group rendering
-│   │   ├── ToolCallCard.kt
-│   │   ├── AskQuestionCard.kt
-│   │   ├── TodoPanel.kt
-│   │   ├── ResultCard.kt
-│   │   ├── InputBar.kt
-│   │   ├── SafetyDialog.kt
-│   │   └── Grouping.kt              # Message/turn grouping logic
-│   └── settings/
-│       ├── SettingsScreen.kt
-│       └── SettingsViewModel.kt
-└── util/Formatting.kt               # Token, duration, elapsed formatters
-```
 
 ---
 
 ## Phase 1: Voice Mode
-
-Voice mode is the primary deliverable. This phase produces a working app where the
-user can manage all coding agents by voice, with a minimal screen UI for setup and
-verification.
-
-### Minimal Screen UI (Phase 1 only)
-
-Just enough UI to support voice development and testing:
-
-- **Settings screen**: server URL input, test connection, voice toggle, voice selector
-- **Task list screen**: simple list of tasks (name, state dot, cost) — verifies that
-  voice create/terminate/sync actions are reflected on screen
-- No TaskDetail screen yet (voice handles all task interaction)
-
-### Settings State & DataStore
-
-```kotlin
-data class SettingsState(
-    val serverURL: String = "",
-    val notificationsEnabled: Boolean = true,
-    val voiceEnabled: Boolean = true,
-    val voiceName: String = "ORUS",
-)
-
-object PreferenceKeys {
-    val SERVER_URL = stringPreferencesKey("server_url")
-    val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
-    val LAST_REPO = stringPreferencesKey("last_repo")
-    val LAST_HARNESS = stringPreferencesKey("last_harness")
-    val VOICE_ENABLED = booleanPreferencesKey("voice_enabled")
-    val VOICE_NAME = stringPreferencesKey("voice_name")
-}
-```
 
 ### Authentication: Ephemeral Tokens
 
@@ -180,20 +98,6 @@ and critically does **not** support:
 
 Going raw gives us full access to the Live API's VAD tuning and ephemeral token
 auth, at the cost of implementing the audio plumbing ourselves.
-
-#### What we implement (that Firebase SDK would handle)
-
-1. **AudioRecord** setup: PCM 16-bit, 16kHz, mono. Recording loop on
-   `Dispatchers.IO`, reads into ~4KB buffers.
-2. **Base64 encode** PCM chunks → send as `realtimeInput.audio.data`
-   with `mimeType: "audio/pcm;rate=16000"` (`mediaChunks` is deprecated).
-3. **AudioTrack** setup: PCM 16-bit, 24kHz, mono. Playback on a dedicated thread.
-4. **Base64 decode** incoming `serverContent.modelTurn.parts[].inlineData.data`
-   → write to AudioTrack.
-5. **WebSocket lifecycle**: connect, send/receive JSON frames, handle close/error.
-   OkHttp's `WebSocketListener` covers this well.
-6. **toolCall dispatch**: parse `toolCall.functionCalls[]`, execute handler,
-   send `toolResponse.functionResponses[]` back.
 
 #### Audio gotchas
 
@@ -277,162 +181,24 @@ message schemas.
 
 ### System Instruction
 
-```
-You are a voice assistant for caic, a system that manages AI coding agents (Claude
-Code, Gemini CLI) running in containers. The user is a software engineer who controls
-multiple concurrent coding tasks by voice.
-
-You have tools to create tasks, send messages to agents, answer agent questions, check
-task status, sync changes, terminate tasks, and restart tasks.
-
-On connect, you will receive a bracketed summary of all current tasks. Use this to
-answer status questions immediately without calling list_tasks.
-
-Behavior guidelines:
-- Be concise. The user is often away from the screen.
-- Summarize task status: state, elapsed time, cost, what agent is doing.
-- When agent asks a question, read question and options clearly. Wait for verbal
-  answer, then call answer_question.
-- Confirm repo and prompt before creating a task.
-- Refer to tasks by short name (first few words of prompt).
-- Proactively notify when tasks finish or need input.
-- For safety issues during sync, describe each issue and ask whether to force.
-```
+See `VoiceSessionManager.buildSystemInstruction()`.
 
 ### Function Declarations
 
-11 tools, all `NON_BLOCKING`. The `behavior` and `scheduling` fields are set per-tool in the
-setup message's `functionDeclarations` array (see
-[Live API Tools](https://ai.google.dev/gemini-api/docs/live-tools)):
-
-| Tool | Parameters | Behavior | Scheduling | Purpose |
-|------|-----------|----------|------------|---------|
-| `list_tasks` | — | `NON_BLOCKING` | `WHEN_IDLE` | Overview of all tasks |
-| `create_task` | prompt, repo, model?, harness? | `NON_BLOCKING` | `INTERRUPT` | Start new task |
-| `get_task_detail` | task_id | `NON_BLOCKING` | `WHEN_IDLE` | Recent activity for one task |
-| `send_message` | task_id, message | `NON_BLOCKING` | `INTERRUPT` | Send input to waiting agent |
-| `answer_question` | task_id, answer | `NON_BLOCKING` | `INTERRUPT` | Answer agent's question |
-| `sync_task` | task_id, force? | `NON_BLOCKING` | `INTERRUPT` | Push changes to remote |
-| `terminate_task` | task_id | `NON_BLOCKING` | `INTERRUPT` | Stop running task |
-| `restart_task` | task_id, prompt | `NON_BLOCKING` | `INTERRUPT` | Restart terminated task |
-| `get_usage` | — | `NON_BLOCKING` | `WHEN_IDLE` | Check quota utilization |
-| `set_active_task` | task_id | `NON_BLOCKING` | `SILENT` | Switch screen to task |
-| `list_repos` | — | `NON_BLOCKING` | `WHEN_IDLE` | Available repositories |
+See `FunctionDeclarations.kt` for the full list. All tools are `NON_BLOCKING`.
 
 **Scheduling semantics** (from [Live API Tools](https://ai.google.dev/gemini-api/docs/live-tools)):
 - `INTERRUPT` — deliver result to user immediately, interrupting current output
 - `WHEN_IDLE` — deliver result after the current turn finishes
 - `SILENT` — use result without narrating it to the user
 
-**`behavior`** goes in the function declaration (setup message):
-
-```json
-{
-  "name": "list_tasks",
-  "description": "...",
-  "parameters": { ... },
-  "behavior": "NON_BLOCKING"
-}
-```
-
-**`scheduling`** goes **inside the `response` object** of each function response (not as a
-sibling to `id`/`name`):
-
-```json
-{
-  "id": "...",
-  "name": "list_tasks",
-  "response": { "tasks": [...], "scheduling": "WHEN_IDLE" }
-}
-```
-
-**`FunctionDeclaration` data class** carries both fields; `scheduling` is only used
-when building function responses, not the setup message:
-
-```kotlin
-data class FunctionDeclaration(
-    val name: String,
-    val description: String,
-    val parameters: JsonElement,
-    val behavior: String? = null,       // e.g. "NON_BLOCKING" — sent in setup
-    val scheduling: String? = null,     // e.g. "WHEN_IDLE" — sent in tool responses
-)
-```
-
-`buildSetupMessage()` in `VoiceSessionManager` includes `behavior` if non-null:
-
-```kotlin
-buildMap {
-    put("name", JsonPrimitive(fd.name))
-    put("description", JsonPrimitive(fd.description))
-    put("parameters", fd.parameters)
-    if (fd.behavior != null) put("behavior", JsonPrimitive(fd.behavior))
-}
-```
-
-`handleToolCall()` in `VoiceSessionManager` looks up `scheduling` from
-`functionScheduling` (a name→scheduling map built from `functionDeclarations`) and
-includes it in each function response if present:
-
-```kotlin
-// scheduling is injected into the response object itself
-val response = if (scheduling != null && result is JsonObject) {
-    JsonObject(result.toMutableMap().apply { put("scheduling", JsonPrimitive(scheduling)) })
-} else { result }
-JsonObject(mapOf("id" to JsonPrimitive(id), "name" to JsonPrimitive(name), "response" to response))
-```
-
-### VoiceSessionManager
-
-Owns Gemini Live session lifecycle. Bridges voice ↔ caic API.
-
-- `connect()` → fetch ephemeral token from backend → create Live session
-- `startConversation()` → bidirectional audio with `handleFunctionCall` callback
-- `handleFunctionCall(call)` → dispatch to handler by name → return `FunctionResponsePart`
-- `disconnect()` → stop session
-- Token refresh: re-fetch before `expireTime` if session is long-lived
-
-### `get_task_detail` Response Format
-
-`FunctionHandlers.handleGetTaskDetail()` currently returns the task's fields from
-`listTasks()`. The planned response shape (once `taskRawEvents()` is wired up) is:
-
-```json
-{
-  "task": {
-    "id": "abc123",
-    "state": "running",
-    "costUSD": 0.43,
-    "inputTokens": 10000,
-    "outputTokens": 2345,
-    "duration": 720,
-    "repo": "my-repo",
-    "branch": "fix-auth-bug",
-    "error": "",
-    "result": ""
-  },
-  "recentEvents": [
-    { "kind": "text", "text": "Analyzing the auth module..." },
-    { "kind": "toolUse", "name": "Read", "input": { "file_path": "auth.go" } },
-    { "kind": "ask", "question": "Use JWT or sessions?", "options": ["JWT", "Sessions"] }
-  ]
-}
-```
-
-`recentEvents` comes from the task's SSE event stream (last ~20 events). Cap at 20 to
-keep response size reasonable for the live context window.
+Key protocol note: `scheduling` goes **inside the `response` object** of each
+function response, not as a sibling to `id`/`name`.
 
 ### Task Monitoring & Proactive Notifications
 
-`VoiceViewModel.notifyTaskChanges(tasks)` compares previous/current states and injects
-bracketed text into the Gemini session via `VoiceSessionManager.injectText()`.
-
-#### Initial Context Injection
-
-On the **first call after connect** (when `previousTaskStates` is empty and
-`voiceSessionManager.state.value.connected` just transitioned to `true`), inject a
-snapshot of all current tasks so Gemini starts with full situational awareness — no need
-to call `list_tasks` cold:
+On connect, inject a snapshot of all current tasks so Gemini starts with full
+situational awareness:
 
 ```
 [Current tasks at session start]
@@ -444,43 +210,12 @@ to call `list_tasks` cold:
 Each line: `- <shortName> (<state>, <elapsed>, <cost>, <harness>)` with an optional
 suffix for `asking` (the question text) and `terminated` (the result summary).
 
-`VoiceViewModel` injects this snapshot in the `tasks.collect` block, guarded by
-`isFirstSnapshot`: set to `false` after the first injection so subsequent calls use
-diff-based notifications only.
-
-#### Subsequent Notifications (diff-based)
-
-State transition notifications for tasks already known to Gemini:
+Subsequent state transition notifications (diff-based):
 
 - `asking` → `"[Task 'shortName' needs input] Question: ... Options: ..."`
 - `waiting` → `"[Task 'shortName' is waiting for input]"`
 - `terminated` → `"[Task 'shortName' completed: ...]"`
 - `failed` → `"[Task 'shortName' failed: ...]"`
-
-Gemini uses these to proactively inform the user.
-
-### Task Resolution
-
-Users refer to tasks by natural language. Gemini resolves using `list_tasks` context
-and short names from prompt. Ambiguous → Gemini asks conversationally.
-
-### Voice State
-
-```kotlin
-data class VoiceState(
-    val connectStatus: String? = null,
-    val connected: Boolean = false,
-    val listening: Boolean = false,
-    val speaking: Boolean = false,
-    val activeTool: String? = null,
-    val error: String? = null,
-    val errorId: Long = 0,
-    val transcript: List<TranscriptEntry> = emptyList(),
-    val micLevel: Float = 0f,
-    val availableDevices: List<AudioDevice> = emptyList(),
-    val selectedDeviceId: Int? = null,
-)
-```
 
 ### Voice Overlay
 
@@ -537,95 +272,10 @@ object NotificationChannels {
 }
 ```
 
-### Permissions
-
-```xml
-<uses-permission android:name="android.permission.RECORD_AUDIO" />
-<uses-permission android:name="android.permission.INTERNET" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-```
-
-`RECORD_AUDIO` and `BLUETOOTH_CONNECT` are runtime permissions (requested on first mic tap).
-
----
-
 ## Phase 2: Screen Mode
 
 Full Compose UI with feature parity to the web frontend. Lower priority — the web
 frontend already provides this functionality. Implement after voice mode is working.
-
-### TaskListViewModel
-
-```kotlin
-data class TaskListState(
-    val tasks: List<Task> = emptyList(),
-    val usage: UsageResp? = null,
-    val connected: Boolean = false,
-    val reconnecting: Boolean = false,
-    val selectedHarness: Harness = Harnesses.Claude,
-    val selectedRepo: String = "",
-    val selectedModel: String = "",
-    val repos: List<Repo> = emptyList(),
-    val harnesses: List<HarnessInfo> = emptyList(),
-    val submitting: Boolean = false,
-    val error: String? = null,
-)
-```
-
-Subscribes to `/api/v1/server/tasks/events` and `/api/v1/server/usage/events` SSE
-on init. Reconnection uses SDK's backoff wrappers.
-
-### TaskDetailViewModel
-
-```kotlin
-data class TaskDetailState(
-    val task: Task? = null,
-    val messages: List<EventMessage> = emptyList(),
-    val turns: List<Turn> = emptyList(),
-    val todos: List<TodoItem> = emptyList(),
-    val sending: Boolean = false,
-    val pendingAction: String? = null,  // "sync" | "terminate" | "restart"
-    val actionError: String? = null,
-    val safetyIssues: List<SafetyIssue> = emptyList(),
-    val inputDraft: String = "",
-    val isReady: Boolean = false,
-)
-```
-
-#### SSE Buffer-and-Swap
-
-Match web frontend (`TaskView.tsx`): buffer events until `system` event with
-subtype `"ready"`, then swap atomically. Prevents flash of empty content during replay.
-
-#### Message Grouping
-
-Replicate web frontend grouping into `MessageGroup` and `Turn`:
-
-```kotlin
-data class ToolCall(val use: EventToolUse, val result: EventToolResult? = null)
-
-data class MessageGroup(
-    val kind: GroupKind,  // TEXT, TOOL, ASK, USER_INPUT, OTHER
-    val events: List<EventMessage>,
-    val toolCalls: List<ToolCall> = emptyList(),
-    val ask: EventAsk? = null,
-    val answerText: String? = null,
-)
-
-data class Turn(val groups: List<MessageGroup>, val toolCount: Int, val textCount: Int)
-```
-
-Grouping rules:
-1. Consecutive `text` events → one `TEXT` group
-2. `toolUse` starts `TOOL` group; `toolResult` paired by `toolUseID`
-3. `usage` events append to preceding group
-4. `ask` → `ASK` group; next `userInput` becomes answer
-5. `result` events are turn boundaries
-
-Recomputed as derived value when `messages` changes.
 
 ### TaskList Screen
 
@@ -656,6 +306,16 @@ Real-time agent output for one task. Mirrors `TaskView.tsx`.
 
 **Layout**: TopAppBar (back + task title + plan badge), subtitle (repo, branch, state),
 scrollable message list, todo panel, input bar + action buttons.
+
+**SSE Buffer-and-Swap**: buffer events until `system` event with subtype `"ready"`,
+then swap atomically. Prevents flash of empty content during replay.
+
+**Message grouping** into `MessageGroup` and `Turn` (mirrors web frontend):
+1. Consecutive `text` events → one `TEXT` group
+2. `toolUse` starts `TOOL` group; `toolResult` paired by `toolUseID`
+3. `usage` events append to preceding group
+4. `ask` → `ASK` group; next `userInput` becomes answer
+5. `result` events are turn boundaries
 
 **Message rendering by event kind**:
 
@@ -699,6 +359,9 @@ Disabled with spinner when `sending`.
 **Safety issues dialog**: list each `SafetyIssue` (file, kind icon, detail).
 "Cancel" + "Force Sync" buttons.
 
+**Markdown library**: `com.mikepenz:multiplatform-markdown-renderer-m3:0.28.0` (+coil3 variant).
+Config: GFM + line breaks (matching web frontend's `marked` with `{ breaks: true, gfm: true }`).
+
 ### Settings Screen
 
 Server URL (editable, validated), "Test Connection" button (`listHarnesses()`),
@@ -706,93 +369,7 @@ voice toggle + voice selector, notification toggle, version info.
 
 Default empty server URL → setup prompt on first launch.
 
-### Utilities
-
-#### State Colors
-
-```kotlin
-fun stateColor(state: String): Color = when (state) {
-    "running" -> Color(0xFFD4EDDA)
-    "asking" -> Color(0xFFCCE5FF)
-    "failed" -> Color(0xFFF8D7DA)
-    "terminating" -> Color(0xFFFDE2C8)
-    "terminated" -> Color(0xFFE2E3E5)
-    else -> Color(0xFFFFF3CD)
-}
-```
-
-#### State Detection
-
-```kotlin
-val activeStates = setOf("running", "branching", "provisioning",
-    "starting", "waiting", "asking", "terminating")
-val waitingStates = setOf("waiting", "asking")
-```
-
-#### Formatting
-
-```kotlin
-fun formatTokens(n: Int): String  // see above
-fun formatDuration(seconds: Double): String  // "3.1s", "120ms"
-fun formatElapsed(seconds: Double): String   // "1h 15m", "2m 30s", "15s"
-fun formatCost(usd: Double): String   // "$1.23", "<$0.01"
-```
-
-#### Tool Call Detail Extraction
-
-```kotlin
-fun toolCallDetail(name: String, input: JsonElement): String?
-// Read/Edit/Write → file_path
-// Bash → command (truncated 60 chars)
-// Grep/Glob → pattern
-// WebFetch → url
-// Task → description
-```
-
-#### Markdown
-
-Library: `com.mikepenz:multiplatform-markdown-renderer-m3:0.28.0` (+coil3 variant).
-Config: GFM + line breaks (matching web frontend's `marked` with `{ breaks: true, gfm: true }`).
-
 ---
-
-## Build Configuration
-
-```kotlin
-android {
-    compileSdk = 36
-    defaultConfig {
-        minSdk = 34
-        targetSdk = 36
-    }
-}
-```
-
-### Key Dependencies
-
-```kotlin
-// Compose
-implementation(platform("androidx.compose:compose-bom:2024.12.01"))
-implementation("androidx.compose.material3:material3")
-implementation("androidx.activity:activity-compose:1.9.3")
-implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
-implementation("androidx.navigation:navigation-compose:2.8.5")
-
-// Hilt
-implementation("com.google.dagger:hilt-android:2.53.1")
-kapt("com.google.dagger:hilt-compiler:2.53.1")
-implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
-
-// DataStore
-implementation("androidx.datastore:datastore-preferences:1.1.2")
-
-// Markdown (Phase 2)
-implementation("com.mikepenz:multiplatform-markdown-renderer-m3:0.28.0")
-implementation("com.mikepenz:multiplatform-markdown-renderer-coil3:0.28.0")
-
-// Voice mode uses OkHttp WebSocket directly — no extra SDK dependency.
-// OkHttp is already pulled in via the SDK module.
-```
 
 ## References
 

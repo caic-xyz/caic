@@ -25,13 +25,13 @@ class FunctionHandlers(
     suspend fun handle(name: String, args: JsonObject): JsonElement {
         return try {
             when (name) {
-                "list_tasks" -> handleListTasks()
-                "create_task" -> handleCreateTask(args)
-                "get_task_detail" -> handleGetTaskDetail(args)
-                "send_message" -> handleSendMessage(args)
-                "answer_question" -> handleAnswerQuestion(args)
-                "sync_task", "push_task" -> handleSyncTask(args)
-                "terminate_task" -> handleTerminateTask(args)
+                "tasks_list" -> handleListTasks()
+                "task_create" -> handleCreateTask(args)
+                "task_get_detail" -> handleGetTaskDetail(args)
+                "task_send_message" -> handleSendMessage(args)
+                "task_answer_question" -> handleAnswerQuestion(args)
+                "task_push_branch_to_remote" -> handleSyncTask(args)
+                "task_terminate" -> handleTerminateTask(args)
                 "get_usage" -> handleGetUsage()
                 "list_repos" -> handleListRepos()
                 else -> errorResult("Unknown function: $name")

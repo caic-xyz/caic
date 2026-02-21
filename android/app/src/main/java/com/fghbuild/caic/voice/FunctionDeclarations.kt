@@ -71,14 +71,14 @@ private fun objectSchema(
 
 val functionDeclarations: List<FunctionDeclaration> = listOf(
     FunctionDeclaration(
-        name = "list_tasks",
+        name = "tasks_list",
         description = "List all current coding tasks with their status, cost, and duration.",
         parameters = emptyObjectSchema,
         behavior = "NON_BLOCKING",
         scheduling = "WHEN_IDLE",
     ),
     FunctionDeclaration(
-        name = "create_task",
+        name = "task_create",
         description = "Create a new coding task. Confirm repo and prompt with the user before calling.",
         parameters = objectSchema(
             "prompt" to stringProp("The task description/prompt for the coding agent"),
@@ -91,7 +91,7 @@ val functionDeclarations: List<FunctionDeclaration> = listOf(
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
-        name = "get_task_detail",
+        name = "task_get_detail",
         description = "Get recent activity and status details for a task by its number.",
         parameters = objectSchema(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
@@ -101,7 +101,7 @@ val functionDeclarations: List<FunctionDeclaration> = listOf(
         scheduling = "WHEN_IDLE",
     ),
     FunctionDeclaration(
-        name = "send_message",
+        name = "task_send_message",
         description = "Send a text message to a waiting or asking agent by task number.",
         parameters = objectSchema(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
@@ -112,7 +112,7 @@ val functionDeclarations: List<FunctionDeclaration> = listOf(
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
-        name = "answer_question",
+        name = "task_answer_question",
         description = "Answer an agent's question by task number. The agent is in 'asking' state.",
         parameters = objectSchema(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
@@ -123,7 +123,7 @@ val functionDeclarations: List<FunctionDeclaration> = listOf(
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
-        name = "sync_task",
+        name = "task_push_branch_to_remote",
         description = "Sync or push a task's changes to GitHub. " +
             "Push to task branch (default) or squash-push to main.",
         parameters = objectSchema(
@@ -139,7 +139,7 @@ val functionDeclarations: List<FunctionDeclaration> = listOf(
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
-        name = "terminate_task",
+        name = "task_terminate",
         description = "Stop a running coding task by its number.",
         parameters = objectSchema(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),

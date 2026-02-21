@@ -797,19 +797,19 @@ class VoiceSessionManager @Inject constructor(
                 "- failed: agent crashed or was aborted; error contains the reason\n\n" +
                 "## Context you have\n" +
                 "At session start you receive a snapshot of all current tasks. Use it to " +
-                "answer questions about task status without calling list_tasks first. Call " +
-                "get_task_detail when the user asks for specifics (recent events, diffs).\n\n" +
+                "answer questions about task status without calling tasks_list first. Call " +
+                "task_get_detail when the user asks for specifics (recent events, diffs).\n\n" +
                 "## On connection\n" +
                 "When the session starts, say only \"Ready\" and nothing else. Wait for " +
                 "the user to speak first.\n\n" +
                 "## Tools available\n" +
-                "create_task, list_tasks, get_task_detail, send_message, answer_question, " +
-                "sync_task, terminate_task.\n\n" +
+                "task_create, tasks_list, task_get_detail, task_send_message, task_answer_question, " +
+                "task_push_branch_to_remote, task_terminate.\n\n" +
                 "## Behavior guidelines\n" +
                 "- Be concise. The user is often away from the screen.\n" +
                 "- Summarize task status: state, elapsed time, cost, what the agent is doing.\n" +
                 "- When an agent is asking, read the question and options clearly, wait for " +
-                "the verbal answer, then call answer_question.\n" +
+                "the verbal answer, then call task_answer_question.\n" +
                 "- When creating a task, use the default repo if one is provided in the " +
                 "session context and the user doesn't specify a different one. " +
                 "Confirm repo and prompt before creating.\n" +
