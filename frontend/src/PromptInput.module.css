@@ -105,3 +105,9 @@
 .menuItem svg {
   flex-shrink: 0;
 }
+
+@media (max-width: 768px) {
+  .row {
+    flex-wrap: wrap;
+  }
+}
