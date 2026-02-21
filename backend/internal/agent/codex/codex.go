@@ -177,8 +177,8 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 		"id":      id,
 		"method":  "turn/start",
 		"params": map[string]any{
-			"thread_id": w.threadID,
-			"input":     p.Text,
+			"threadId": w.threadID,
+			"input":    p.Text,
 		},
 	}
 	data, err := json.Marshal(req)
@@ -221,7 +221,7 @@ func handshake(stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*wir
 		"id":      initID,
 		"method":  "initialize",
 		"params": map[string]any{
-			"client_info": map[string]string{
+			"clientInfo": map[string]string{
 				"name":    "caic",
 				"version": "1.0.0",
 			},
@@ -255,7 +255,7 @@ func handshake(stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*wir
 			"id":      threadID,
 			"method":  "thread/resume",
 			"params": map[string]any{
-				"thread_id": opts.ResumeSessionID,
+				"threadId": opts.ResumeSessionID,
 			},
 		}
 	} else {

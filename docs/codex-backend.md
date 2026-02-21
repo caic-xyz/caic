@@ -33,8 +33,8 @@ The client performs a three-step handshake before sending user prompts:
    responds with `{thread: {id: "..."}}`.
 
 ```jsonl
-→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"client_info":{"name":"caic","version":"1.0.0"},"capabilities":{}}}
-← {"jsonrpc":"2.0","id":1,"result":{"server_info":{"name":"codex","version":"0.1.0"}}}
+→ {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"caic","version":"1.0.0"},"capabilities":{}}}
+← {"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"codex","version":"0.1.0"}}}
 → {"jsonrpc":"2.0","method":"initialized"}
 → {"jsonrpc":"2.0","id":2,"method":"thread/start","params":{"model":"o4-mini"}}
 ← {"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}}}
@@ -45,7 +45,7 @@ The client performs a three-step handshake before sending user prompts:
 After the handshake, send a `turn/start` request to begin a turn:
 
 ```jsonl
-→ {"jsonrpc":"2.0","id":3,"method":"turn/start","params":{"thread_id":"0199a213-...","input":"fix the bug"}}
+→ {"jsonrpc":"2.0","id":3,"method":"turn/start","params":{"threadId":"0199a213-...","input":"fix the bug"}}
 ← {"jsonrpc":"2.0","id":3,"result":{}}
 ```
 
@@ -89,7 +89,7 @@ After a turn completes, send another `turn/start` request with the same
 thread ID to continue the conversation:
 
 ```jsonl
-→ {"jsonrpc":"2.0","id":4,"method":"turn/start","params":{"thread_id":"0199a213-...","input":"now add tests"}}
+→ {"jsonrpc":"2.0","id":4,"method":"turn/start","params":{"threadId":"0199a213-...","input":"now add tests"}}
 ```
 
 ### Session Resume
@@ -98,7 +98,7 @@ To resume a previous session, use `thread/resume` instead of `thread/start`
 during the handshake:
 
 ```jsonl
-→ {"jsonrpc":"2.0","id":2,"method":"thread/resume","params":{"thread_id":"0199a213-..."}}
+→ {"jsonrpc":"2.0","id":2,"method":"thread/resume","params":{"threadId":"0199a213-..."}}
 ```
 
 ### Example Notification Stream

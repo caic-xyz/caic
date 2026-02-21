@@ -266,7 +266,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 		_ = logW.Close()
 		close(msgCh)
 		t.SetState(StateFailed)
-		slog.Warn("agent session failed to start", "repo", t.Repo, "branch", t.Branch, "container", t.Container, "err", err)
+		slog.Error("agent session failed to start", "repo", t.Repo, "branch", t.Branch, "container", t.Container, "err", err)
 		return nil, err
 	}
 
