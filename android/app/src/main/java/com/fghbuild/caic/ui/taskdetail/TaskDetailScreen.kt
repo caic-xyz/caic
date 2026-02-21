@@ -43,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -52,34 +53,88 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.caic.ui.theme.stateColor
 import com.fghbuild.caic.util.createCameraPhotoUri
+import com.fghbuild.caic.util.GroupKind
 import com.fghbuild.caic.util.MessageGroup
+import com.fghbuild.caic.util.ToolCall
 import com.fghbuild.caic.util.Turn
+import com.fghbuild.caic.util.turnSummary
 import com.fghbuild.caic.util.uriToImageData
 
 private val PlanBadgeBg = Color(0xFFEDE9FE)
 private val PlanBadgeFg = Color(0xFF7C3AED)
 private val TerminalStates = setOf("terminated", "failed")
 
-// Unified flat list item: past turns are collapsed to a single Elided item; the live turn's
-// groups are individual items. Keys are position-based (turn index / group-within-live-turn
-// index) since event timestamps are not unique — multiple events can share the same millisecond.
-// Elided keys are Long (turn index) and Group keys are String ("g:j"), so the two sets never
-// collide even when the numeric values happen to be equal.
+// Flat list items for the LazyColumn. Expansion state is owned here so collapsed items are
+// never composed — true laziness without AnimatedVisibility wrappers.
+//
+// Key namespaces (all position-based; timestamps are not unique within a millisecond):
+//   Long  turnIndex              — Elided past turn
+//   "th:N"                       — header row for an expanded past turn
+//   "g:j"  / "e{N}g{j}"         — group item (live / expanded-past)
+//   "gh:j" / "e{N}gh{j}"        — tool-group header item
+//   "g:j:k" / "e{N}g{j}:{k}"   — individual ToolCallItem within expanded tool group
+//
+// Long vs String keys in the same list never collide even if numeric values match.
 private sealed interface MsgItem {
     val key: Any
+    /** Collapsed past turn — one summary row per turn. */
     data class Elided(val turn: Turn, override val key: Long) : MsgItem
-    data class Group(val group: MessageGroup, val turn: Turn, override val key: String) : MsgItem
+    /** Header shown at the top of an expanded past turn; tap to collapse. */
+    data class ExpandedTurnHeader(val turn: Turn, val turnKey: Long, override val key: String) : MsgItem
+    /** Non-tool group (text, ask, result, user-input, other). */
+    data class Group(
+        val group: MessageGroup,
+        val turn: Turn,
+        val isLiveTurn: Boolean,
+        override val key: String,
+    ) : MsgItem
+    /** Summary header for a multi-call tool group; tap to expand/collapse its call items. */
+    data class ToolGroupHeader(
+        val toolCalls: List<ToolCall>,
+        val groupKey: String,
+        override val key: String,
+    ) : MsgItem
+    /** One tool call within an expanded multi-call tool group. */
+    data class ToolCallItem(val call: ToolCall, override val key: String) : MsgItem
 }
 
-private fun buildItems(turns: List<Turn>): List<MsgItem> {
+/**
+ * Builds the flat item list.
+ *
+ * @param expandedTurnKeys  Turn indices (Long) whose groups should be shown as individual items.
+ * @param expandedToolGroups  Tool-group keys whose call items should be shown.
+ */
+private fun buildItems(
+    turns: List<Turn>,
+    expandedTurnKeys: Set<Long>,
+    expandedToolGroups: Set<String>,
+): List<MsgItem> {
     if (turns.isEmpty()) return emptyList()
     val result = mutableListOf<MsgItem>()
     for ((i, turn) in turns.withIndex()) {
-        if (i < turns.size - 1) {
-            result.add(MsgItem.Elided(turn, i.toLong()))
-        } else {
-            turn.groups.forEachIndexed { j, g ->
-                result.add(MsgItem.Group(g, turn, "g:$j"))
+        val isLive = i == turns.size - 1
+        val turnKey = i.toLong()
+        if (!isLive && turnKey !in expandedTurnKeys) {
+            result.add(MsgItem.Elided(turn, turnKey))
+            continue
+        }
+        // Expanded past turn or live turn: emit groups as individual items.
+        if (!isLive) {
+            result.add(MsgItem.ExpandedTurnHeader(turn, turnKey, "th:$turnKey"))
+        }
+        turn.groups.forEachIndexed { j, group ->
+            val base = if (isLive) "g:$j" else "e${turnKey}g$j"
+            if (group.kind == GroupKind.TOOL && group.toolCalls.size > 1) {
+                // Multi-call tool group: header + optional per-call items.
+                val toolGroupKey = group.toolCalls.first().use.toolUseID
+                result.add(MsgItem.ToolGroupHeader(group.toolCalls, toolGroupKey, "${base}h"))
+                if (toolGroupKey in expandedToolGroups) {
+                    group.toolCalls.forEachIndexed { k, call ->
+                        result.add(MsgItem.ToolCallItem(call, "$base:$k"))
+                    }
+                }
+            } else {
+                result.add(MsgItem.Group(group, turn, isLive, base))
             }
         }
     }
@@ -264,7 +319,11 @@ private fun MessageList(
     var userScrolledUp by remember { mutableStateOf(false) }
     val turns = state.turns
     val isWaiting = state.task?.state == "waiting"
-    val items = remember(turns) { buildItems(turns) }
+    var expandedTurnKeys by remember { mutableStateOf(setOf<Long>()) }
+    var expandedToolGroups by remember { mutableStateOf(setOf<String>()) }
+    val items = remember(turns, expandedTurnKeys, expandedToolGroups) {
+        buildItems(turns, expandedTurnKeys, expandedToolGroups)
+    }
 
     // Auto-scroll to bottom when new messages arrive, unless user scrolled up.
     LaunchedEffect(turns.size, state.messageCount) {
@@ -296,10 +355,9 @@ private fun MessageList(
             )
         }
 
-        // Message turns: past turns are elided (one item each); the live turn's groups are
-        // individual items so only visible groups are composed. A single unified items() call
-        // with consistent "g:${ts}" keys ensures the slot for the first group survives the
-        // live→elided transition without a full remove/insert.
+        // Unified lazy list: past turns are Elided (one row each, groups not composed);
+        // the live turn's groups and tool-call items are individual lazy items. Expand state
+        // is owned here so collapsed content is never in the composition tree at all.
         SelectionContainer(modifier = Modifier.weight(1f)) {
             LazyColumn(
                 state = listState,
@@ -313,18 +371,51 @@ private fun MessageList(
                     contentType = { item -> item::class },
                 ) { item ->
                     when (item) {
-                        is MsgItem.Elided -> ElidedTurn(turn = item.turn)
+                        is MsgItem.Elided -> ElidedTurn(
+                            turn = item.turn,
+                            onExpand = { expandedTurnKeys = expandedTurnKeys + item.key },
+                        )
+                        is MsgItem.ExpandedTurnHeader -> ExpandedTurnHeader(
+                            turn = item.turn,
+                            onCollapse = { expandedTurnKeys = expandedTurnKeys - item.turnKey },
+                        )
                         is MsgItem.Group -> MessageGroupContent(
                             group = item.group,
                             turn = item.turn,
-                            onAnswer = onAnswer,
-                            isWaiting = isWaiting,
-                            onClearAndExecutePlan = onClearAndExecutePlan,
+                            onAnswer = if (item.isLiveTurn) onAnswer else null,
+                            isWaiting = if (item.isLiveTurn) isWaiting else false,
+                            onClearAndExecutePlan = if (item.isLiveTurn) onClearAndExecutePlan else null,
                         )
+                        is MsgItem.ToolGroupHeader -> ToolGroupHeaderItem(
+                            toolCalls = item.toolCalls,
+                            isExpanded = item.groupKey in expandedToolGroups,
+                            onToggle = {
+                                expandedToolGroups = if (item.groupKey in expandedToolGroups)
+                                    expandedToolGroups - item.groupKey
+                                else
+                                    expandedToolGroups + item.groupKey
+                            },
+                        )
+                        is MsgItem.ToolCallItem -> ToolCallCard(call = item.call)
                     }
                 }
             }
         }
     }
     }
+}
+
+/** Header row shown at the top of an expanded past turn; tap to collapse back. */
+@Composable
+private fun ExpandedTurnHeader(turn: Turn, onCollapse: () -> Unit) {
+    val summary = remember(turn) { turnSummary(turn) }
+    Text(
+        text = summary,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCollapse() }
+            .padding(vertical = 4.dp),
+    )
 }
