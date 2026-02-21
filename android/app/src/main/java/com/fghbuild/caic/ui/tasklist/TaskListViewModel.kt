@@ -103,12 +103,17 @@ class TaskListViewModel @Inject constructor(
                 val recentRepos = recent.mapNotNull { r -> repos.find { it.path == r } }
                 val restRepos = repos.filter { it.path !in recentSet }
                 val ordered = recentRepos + restRepos
+                val selectedHarness = _formState.value.selectedHarness
+                val lastModels = settingsRepository.settings.value.lastModels
+                val lastModel = lastModels[selectedHarness] ?: ""
+                val harnessModels = harnesses.find { it.name == selectedHarness }?.models.orEmpty()
                 _formState.value = _formState.value.copy(
                     repos = ordered,
                     harnesses = harnesses,
                     config = config,
                     recentRepoCount = recentRepos.size,
                     selectedRepo = ordered.firstOrNull()?.path ?: "",
+                    selectedModel = if (lastModel in harnessModels) lastModel else "",
                 )
             } catch (_: Exception) {
                 // Form data will remain empty; user can still see tasks.
@@ -125,11 +130,19 @@ class TaskListViewModel @Inject constructor(
     }
 
     fun selectHarness(harness: String) {
-        _formState.value = _formState.value.copy(selectedHarness = harness, selectedModel = "")
+        val lastModels = settingsRepository.settings.value.lastModels
+        val lastModel = lastModels[harness] ?: ""
+        val harnessModels = _formState.value.harnesses.find { it.name == harness }?.models.orEmpty()
+        val model = if (lastModel in harnessModels) lastModel else ""
+        _formState.value = _formState.value.copy(selectedHarness = harness, selectedModel = model)
     }
 
     fun selectModel(model: String) {
+        val harness = _formState.value.selectedHarness
         _formState.value = _formState.value.copy(selectedModel = model)
+        viewModelScope.launch {
+            settingsRepository.updateLastModel(harness, model)
+        }
     }
 
     fun addImages(images: List<ImageData>) {

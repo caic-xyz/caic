@@ -23,6 +23,7 @@ data class SettingsState(
     val voiceEnabled: Boolean = true,
     val voiceName: String = "Orus",
     val recentRepos: List<String> = emptyList(),
+    val lastModels: Map<String, String> = emptyMap(),
 )
 
 @Singleton
@@ -34,7 +35,15 @@ class SettingsRepository @Inject constructor(private val dataStore: DataStore<Pr
         val VOICE_ENABLED = booleanPreferencesKey("VOICE_ENABLED")
         val VOICE_NAME = stringPreferencesKey("VOICE_NAME")
         val RECENT_REPOS = stringPreferencesKey("RECENT_REPOS")
+        // Comma-separated "harness=model" pairs.
+        val LAST_MODELS = stringPreferencesKey("LAST_MODELS")
     }
+
+    private fun parseLastModels(raw: String): Map<String, String> =
+        raw.split(",").mapNotNull { entry ->
+            val eq = entry.indexOf('=')
+            if (eq < 0) null else entry.substring(0, eq) to entry.substring(eq + 1)
+        }.toMap()
 
     val settings: StateFlow<SettingsState> = dataStore.data
         .map { prefs ->
@@ -45,6 +54,7 @@ class SettingsRepository @Inject constructor(private val dataStore: DataStore<Pr
                 recentRepos = (prefs[Keys.RECENT_REPOS] ?: "")
                     .split(",")
                     .filter { it.isNotEmpty() },
+                lastModels = parseLastModels(prefs[Keys.LAST_MODELS] ?: ""),
             )
         }
         .stateIn(scope, SharingStarted.Eagerly, SettingsState())
@@ -59,6 +69,14 @@ class SettingsRepository @Inject constructor(private val dataStore: DataStore<Pr
 
     suspend fun updateVoiceName(name: String) {
         dataStore.edit { it[Keys.VOICE_NAME] = name }
+    }
+
+    suspend fun updateLastModel(harness: String, model: String) {
+        dataStore.edit { prefs ->
+            val current = parseLastModels(prefs[Keys.LAST_MODELS] ?: "").toMutableMap()
+            if (model.isBlank()) current.remove(harness) else current[harness] = model
+            prefs[Keys.LAST_MODELS] = current.entries.joinToString(",") { "${it.key}=${it.value}" }
+        }
     }
 
     suspend fun addRecentRepo(path: String) {

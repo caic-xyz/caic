@@ -17,6 +17,27 @@ import styles from "./App.module.css";
 
 const RECENT_REPOS_KEY = "caic:recentRepos";
 const MAX_RECENT_REPOS = 5;
+const LAST_MODEL_KEY = "caic:lastModel";
+
+function getLastModels(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(LAST_MODEL_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, string>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLastModel(harness: string, model: string): void {
+  const map = getLastModels();
+  if (model) map[harness] = model;
+  else delete map[harness];
+  localStorage.setItem(LAST_MODEL_KEY, JSON.stringify(map));
+}
 
 function getRecentRepos(): string[] {
   try {
@@ -192,9 +213,12 @@ export default function App() {
       listHarnesses().then((h) => {
         setHarnesses(h);
         // If the default harness isn't in the list (e.g. fake mode), select the first.
-        if (h.length > 0 && !h.find((x) => x.name === current)) {
-          setSelectedHarness(h[0].name);
-        }
+        const harness = h.length > 0 && !h.find((x) => x.name === current) ? h[0].name : current;
+        if (harness !== current) setSelectedHarness(harness);
+        // Restore the last selected model for this harness.
+        const models = h.find((x) => x.name === harness)?.models ?? [];
+        const lastModel = getLastModels()[harness];
+        if (lastModel && models.includes(lastModel)) setSelectedModel(lastModel);
       }).catch(() => {});
     }
     getConfig().then((c) => {
@@ -381,7 +405,8 @@ export default function App() {
               const h = e.currentTarget.value;
               setSelectedHarness(h);
               const models = harnesses().find((x) => x.name === h)?.models ?? [];
-              if (!models.includes(selectedModel())) setSelectedModel("");
+              const lastModel = getLastModels()[h];
+              setSelectedModel(lastModel && models.includes(lastModel) ? lastModel : "");
             }}
             disabled={submitting()}
             class={styles.modelSelect}
@@ -394,7 +419,11 @@ export default function App() {
         <Show when={(harnesses().find((h) => h.name === selectedHarness())?.models ?? []).length > 0}>
           <select
             value={selectedModel()}
-            onChange={(e) => setSelectedModel(e.currentTarget.value)}
+            onChange={(e) => {
+              const m = e.currentTarget.value;
+              setSelectedModel(m);
+              saveLastModel(selectedHarness(), m);
+            }}
             disabled={submitting()}
             class={styles.modelSelect}
           >
