@@ -57,7 +57,8 @@
 
 .repoSelect,
 .modelSelect,
-.imageInput {
+.imageInput,
+.branchInput {
   padding: 0.35rem 0.5rem;
   font: inherit;
   font-size: 0.9rem;
@@ -74,22 +75,30 @@
   width: 14rem;
 }
 
+.branchInput {
+  width: 9rem;
+  cursor: text;
+}
+
 .repoSelect:hover:not(:disabled),
 .modelSelect:hover:not(:disabled),
-.imageInput:hover:not(:disabled) {
+.imageInput:hover:not(:disabled),
+.branchInput:hover:not(:disabled) {
   background: #e4e4e4;
 }
 
 .repoSelect:focus,
 .modelSelect:focus,
-.imageInput:focus {
+.imageInput:focus,
+.branchInput:focus {
   outline: none;
   box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.3);
 }
 
 .repoSelect:disabled,
 .modelSelect:disabled,
-.imageInput:disabled {
+.imageInput:disabled,
+.branchInput:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -188,7 +197,8 @@
 
   .repoSelect,
   .modelSelect,
-  .imageInput {
+  .imageInput,
+  .branchInput {
     box-sizing: border-box;
     flex: 1 1 auto;
     min-width: 0;

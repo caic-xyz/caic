@@ -102,8 +102,11 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
+                val branchLabel = if (!task.baseBranch.isNullOrBlank())
+                    "${task.baseBranch}\u2192${task.branch}"
+                else task.branch
                 Text(
-                    text = "${task.repo} \u00b7 ${task.branch}",
+                    text = "${task.repo} \u00b7 $branchLabel",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

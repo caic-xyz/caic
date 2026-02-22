@@ -105,6 +105,7 @@ export default function App() {
   const [displayAvailable, setDisplayAvailable] = createSignal(false);
   const [displayEnabled, setDisplayEnabled] = createSignal(false);
   const [recentCount, setRecentCount] = createSignal(0);
+  const [selectedBranch, setSelectedBranch] = createSignal("");
 
   // Images attached to the new-task prompt.
   const [pendingImages, setPendingImages] = createSignal<APIImageData[]>([]);
@@ -349,12 +350,14 @@ export default function App() {
     try {
       const model = selectedModel();
       const image = selectedImage().trim();
+      const branch = selectedBranch().trim();
       const ts = tailscaleEnabled();
       const usb = usbEnabled();
       const disp = displayEnabled();
-      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repo, harness: selectedHarness(), ...(model ? { model } : {}), ...(image ? { image } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}) });
+      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repo, harness: selectedHarness(), ...(branch ? { baseBranch: branch } : {}), ...(model ? { model } : {}), ...(image ? { image } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}) });
       setPrompt("");
       setPendingImages([]);
+      setSelectedBranch("");
       navigate(taskPath(data.id, repo, "", p));
     } finally {
       setSubmitting(false);
@@ -398,6 +401,16 @@ export default function App() {
             </optgroup>
           </Show>
         </select>
+        <input
+          type="text"
+          value={selectedBranch()}
+          onInput={(e) => setSelectedBranch(e.currentTarget.value)}
+          placeholder={repos().find((r) => r.path === selectedRepo())?.baseBranch ?? "branch"}
+          disabled={submitting()}
+          class={styles.branchInput}
+          data-testid="branch-input"
+          title="Base branch to fork from (leave empty for default)"
+        />
         <Show when={harnesses().length > 1}>
           <select
             value={selectedHarness()}

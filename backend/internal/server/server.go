@@ -441,7 +441,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		return nil, dto.BadRequest(string(req.Harness) + " does not support images")
 	}
 
-	t := &task.Task{ID: ksid.NewID(), InitialPrompt: v1PromptToAgent(req.InitialPrompt), Repo: req.Repo, Harness: harness, Model: req.Model, DockerImage: req.Image, Tailscale: req.Tailscale, USB: req.USB, Display: req.Display, StartedAt: time.Now().UTC(), Provider: s.provider}
+	t := &task.Task{ID: ksid.NewID(), InitialPrompt: v1PromptToAgent(req.InitialPrompt), Repo: req.Repo, BaseBranch: req.BaseBranch, Harness: harness, Model: req.Model, DockerImage: req.Image, Tailscale: req.Tailscale, USB: req.USB, Display: req.Display, StartedAt: time.Now().UTC(), Provider: s.provider}
 	t.SetTitle(req.InitialPrompt.Text)
 	go t.GenerateTitle(s.ctx) //nolint:contextcheck // fire-and-forget; must outlive request
 	entry := &taskEntry{task: t, done: make(chan struct{})}
@@ -1431,6 +1431,18 @@ func tailscaleURL(t *task.Task) string {
 	return ""
 }
 
+// effectiveBaseBranch returns the branch the task was forked from: the task's
+// own override if set, otherwise the runner's configured default.
+func (s *Server) effectiveBaseBranch(t *task.Task) string {
+	if t.BaseBranch != "" {
+		return t.BaseBranch
+	}
+	if runner, ok := s.runners[t.Repo]; ok {
+		return runner.BaseBranch
+	}
+	return ""
+}
+
 func (s *Server) toJSON(e *taskEntry) v1.Task {
 	// Read all volatile fields in a single locked snapshot to avoid
 	// data races with addMessage/RestoreMessages.
@@ -1441,6 +1453,7 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 		Title:          snap.Title,
 		Repo:           e.task.Repo,
 		RepoURL:        s.repoURL(e.task.Repo),
+		BaseBranch:     s.effectiveBaseBranch(e.task),
 		Branch:         e.task.Branch,
 		Container:      e.task.Container,
 		State:          snap.State.String(),

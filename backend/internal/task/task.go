@@ -81,6 +81,7 @@ type Task struct {
 	ID            ksid.ID
 	InitialPrompt agent.Prompt  // Initial prompt text and optional images.
 	Repo          string        // Relative repo path (for display/API).
+	BaseBranch    string        // Branch to fork from; empty means use the runner's default.
 	Harness       agent.Harness // Agent harness ("claude", "gemini", etc.).
 	Model         string        // User-requested model; passed to agent CLI.
 	DockerImage   string        // Custom Docker base image; empty means use the default.

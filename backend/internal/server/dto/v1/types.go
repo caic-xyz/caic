@@ -60,6 +60,7 @@ type Task struct {
 	Title                              string   `json:"title"`
 	Repo                               string   `json:"repo"`
 	RepoURL                            string   `json:"repoURL,omitempty"`
+	BaseBranch                         string   `json:"baseBranch,omitempty"` // branch the task was forked from
 	Branch                             string   `json:"branch"`
 	Container                          string   `json:"container"`
 	State                              string   `json:"state"`
@@ -103,6 +104,7 @@ type CreateTaskResp struct {
 type CreateTaskReq struct {
 	InitialPrompt Prompt  `json:"initialPrompt"`
 	Repo          string  `json:"repo"`
+	BaseBranch    string  `json:"baseBranch,omitempty"` // branch to fork from; defaults to repo's default branch
 	Model         string  `json:"model,omitempty"`
 	Harness       Harness `json:"harness"`
 	Image         string  `json:"image,omitempty"`

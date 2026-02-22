@@ -102,6 +102,7 @@ All errors return:
 | `title` | `string` | yes |
 | `repo` | `string` | yes |
 | `repoURL` | `string` |  |
+| `baseBranch` | `string` |  |
 | `branch` | `string` | yes |
 | `container` | `string` | yes |
 | `state` | `string` | yes |
@@ -148,6 +149,7 @@ All errors return:
 |-------|------|----------|
 | `initialPrompt` | `Prompt` | yes |
 | `repo` | `string` | yes |
+| `baseBranch` | `string` |  |
 | `model` | `string` |  |
 | `harness` | `string` | yes |
 | `image` | `string` |  |

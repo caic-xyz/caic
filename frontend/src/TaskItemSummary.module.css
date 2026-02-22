@@ -95,6 +95,16 @@
   text-decoration: underline;
 }
 
+.baseBranch {
+  opacity: 0.65;
+}
+
+.branchArrow {
+  opacity: 0.4;
+  margin: 0 0.15em;
+  font-size: 0.7em;
+}
+
 .cost {
   font-size: 0.75rem;
   color: #888;

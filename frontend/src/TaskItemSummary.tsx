@@ -15,6 +15,7 @@ export interface TaskItemSummaryProps {
   stateUpdatedAt: number;
   repo: string;
   repoURL?: string;
+  baseBranch?: string;
   branch: string;
   harness?: string;
   model?: string;
@@ -75,6 +76,10 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
               <a class={styles.repoLink} href={props.repoURL} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}>{props.repo}</a>
             </Show>
             {props.repo && props.branch ? " · " : ""}
+            <Show when={props.baseBranch}>
+              <span class={styles.baseBranch}>{props.baseBranch}</span>
+              <span class={styles.branchArrow}>→</span>
+            </Show>
             <Show when={props.repoURL?.includes("github.com")} fallback={props.branch}>
               <a class={styles.repoLink} href={`${props.repoURL}/compare/${props.branch}?expand=1`} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}>{props.branch}</a>
             </Show>

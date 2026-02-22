@@ -35,6 +35,7 @@ data class TaskListState(
     val selectedRepo: String = "",
     val selectedHarness: String = "",
     val selectedModel: String = "",
+    val baseBranch: String = "",
     val prompt: String = "",
     val recentRepoCount: Int = 0,
     val submitting: Boolean = false,
@@ -76,6 +77,7 @@ class TaskListViewModel @Inject constructor(
             selectedRepo = form.selectedRepo,
             selectedHarness = form.selectedHarness,
             selectedModel = form.selectedModel,
+            baseBranch = form.baseBranch,
             prompt = form.prompt,
             submitting = form.submitting,
             error = form.error,
@@ -147,6 +149,10 @@ class TaskListViewModel @Inject constructor(
         }
     }
 
+    fun updateBaseBranch(branch: String) {
+        _formState.value = _formState.value.copy(baseBranch = branch)
+    }
+
     fun addImages(images: List<ImageData>) {
         _formState.value = _formState.value.copy(
             pendingImages = _formState.value.pendingImages + images,
@@ -176,6 +182,7 @@ class TaskListViewModel @Inject constructor(
                             images = form.pendingImages.ifEmpty { null },
                         ),
                         repo = form.selectedRepo,
+                        baseBranch = form.baseBranch.ifBlank { null },
                         harness = form.selectedHarness,
                         model = form.selectedModel.ifBlank { null },
                     )
@@ -188,6 +195,7 @@ class TaskListViewModel @Inject constructor(
                 val restRepos = current.repos.filter { it.path !in recentSet }
                 _formState.value = current.copy(
                     prompt = "",
+                    baseBranch = "",
                     submitting = false,
                     repos = recentRepos + restRepos,
                     recentRepoCount = recentRepos.size,
@@ -210,6 +218,7 @@ class TaskListViewModel @Inject constructor(
         val selectedRepo: String = "",
         val selectedHarness: String = "",
         val selectedModel: String = "",
+        val baseBranch: String = "",
         val prompt: String = "",
         val submitting: Boolean = false,
         val error: String? = null,

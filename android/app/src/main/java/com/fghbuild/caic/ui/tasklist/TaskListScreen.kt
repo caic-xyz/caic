@@ -229,6 +229,17 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
             )
         }
 
+        val defaultBranch = state.repos.find { it.path == state.selectedRepo }?.baseBranch ?: ""
+        OutlinedTextField(
+            value = state.baseBranch,
+            onValueChange = viewModel::updateBaseBranch,
+            label = { Text("Base branch") },
+            placeholder = { Text(defaultBranch.ifBlank { "main" }) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = !state.submitting,
+        )
+
         if (state.harnesses.size > 1) {
             DropdownField(
                 label = "Harness",

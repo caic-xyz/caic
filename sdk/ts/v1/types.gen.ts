@@ -513,6 +513,7 @@ export interface Task {
   title: string;
   repo: string;
   repoURL?: string;
+  baseBranch?: string; // branch the task was forked from
   branch: string;
   container: string;
   state: string;
@@ -561,6 +562,7 @@ export interface CreateTaskResp {
 export interface CreateTaskReq {
   initialPrompt: Prompt;
   repo: string;
+  baseBranch?: string; // branch to fork from; defaults to repo's default branch
   model?: string;
   harness: Harness;
   image?: string;

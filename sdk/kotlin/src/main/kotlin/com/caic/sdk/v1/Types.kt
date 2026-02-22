@@ -75,6 +75,7 @@ data class Task(
     val title: String,
     val repo: String,
     @SerialName("repoURL") val repoURL: String? = null,
+    val baseBranch: String? = null,
     val branch: String,
     val container: String,
     val state: String,
@@ -112,6 +113,7 @@ data class Prompt(val text: String, val images: List<ImageData>? = null)
 data class CreateTaskReq(
     val initialPrompt: Prompt,
     val repo: String,
+    val baseBranch: String? = null,
     val model: String? = null,
     val harness: Harness,
     val image: String? = null,

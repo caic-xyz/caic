@@ -388,9 +388,14 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResu
 
 	gitCtx, gitCancel := context.WithTimeout(detached, r.GitTimeout)
 	defer gitCancel()
-	// Fetch so that origin/<BaseBranch> is up to date.
+	// Fetch so that origin/<base> is up to date.
 	if err := gitutil.Fetch(gitCtx, r.Dir); err != nil {
 		return setupResult{}, fmt.Errorf("fetch: %w", err)
+	}
+	// Resolve effective base branch: use task override if provided.
+	effectiveBase := r.BaseBranch
+	if t.BaseBranch != "" {
+		effectiveBase = t.BaseBranch
 	}
 	// Assign a sequential branch name, skipping existing ones.
 	var branch string
@@ -401,8 +406,8 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResu
 		}
 		branch = fmt.Sprintf("caic-%d", r.nextID)
 		r.nextID++
-		slog.Info("creating branch", "repo", t.Repo, "branch", branch)
-		err = gitutil.CreateBranch(gitCtx, r.Dir, branch, "origin/"+r.BaseBranch)
+		slog.Info("creating branch", "repo", t.Repo, "branch", branch, "base", effectiveBase)
+		err = gitutil.CreateBranch(gitCtx, r.Dir, branch, "origin/"+effectiveBase)
 		if err == nil {
 			break
 		}

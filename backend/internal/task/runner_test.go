@@ -121,6 +121,57 @@ func TestRunner(t *testing.T) {
 		})
 	})
 
+	t.Run("Setup", func(t *testing.T) {
+		t.Run("CustomBaseBranch", func(t *testing.T) {
+			// Verify that setup creates the task branch from t.BaseBranch
+			// when it differs from the runner's default BaseBranch.
+			clone := initTestRepo(t, "main")
+			// Create a feature branch on origin with a distinct commit.
+			runGit(t, clone, "checkout", "-b", "feature")
+			if err := os.WriteFile(filepath.Join(clone, "feature.txt"), []byte("feat\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, clone, "add", ".")
+			runGit(t, clone, "commit", "-m", "feature commit")
+			runGit(t, clone, "push", "origin", "feature")
+			runGit(t, clone, "checkout", "main")
+
+			logDir := t.TempDir()
+			stub := &stubContainer{}
+			r := &Runner{
+				BaseBranch: "main",
+				Dir:        clone,
+				LogDir:     logDir,
+				Container:  stub,
+			}
+			r.initDefaults()
+
+			tk := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "test"},
+				Repo:          "org/repo",
+				BaseBranch:    "feature",
+				Harness:       agent.Claude,
+			}
+
+			r.branchMu.Lock()
+			sr, err := r.setup(t.Context(), tk, nil)
+			r.branchMu.Unlock()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// The task branch must contain the feature commit (feature.txt).
+			out, execErr := exec.Command("git", "-C", clone, "show", sr.Branch+":feature.txt").Output() //nolint:gosec // controlled test args
+			if execErr != nil {
+				t.Fatalf("feature.txt not in task branch %s: %v", sr.Branch, execErr)
+			}
+			if string(out) != "feat\n" {
+				t.Errorf("feature.txt content = %q, want %q", string(out), "feat\n")
+			}
+		})
+	})
+
 	t.Run("Cleanup", func(t *testing.T) {
 		t.Run("NoSessionUsesLiveStats", func(t *testing.T) {
 			// Simulate an adopted task after server restart: no active session, but
