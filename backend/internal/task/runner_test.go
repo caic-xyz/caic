@@ -170,6 +170,53 @@ func TestRunner(t *testing.T) {
 				t.Errorf("feature.txt content = %q, want %q", string(out), "feat\n")
 			}
 		})
+		t.Run("LocalOnlyBaseBranch", func(t *testing.T) {
+			// Verify that setup works when BaseBranch exists only locally
+			// (not pushed to origin).
+			clone := initTestRepo(t, "main")
+			runGit(t, clone, "checkout", "-b", "local-only")
+			if err := os.WriteFile(filepath.Join(clone, "local.txt"), []byte("local\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, clone, "add", ".")
+			runGit(t, clone, "commit", "-m", "local commit")
+			// Do NOT push to origin — branch exists only locally.
+			runGit(t, clone, "checkout", "main")
+
+			logDir := t.TempDir()
+			stub := &stubContainer{}
+			r := &Runner{
+				BaseBranch: "main",
+				Dir:        clone,
+				LogDir:     logDir,
+				Container:  stub,
+			}
+			r.initDefaults()
+
+			tk := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "test"},
+				Repo:          "org/repo",
+				BaseBranch:    "local-only",
+				Harness:       agent.Claude,
+			}
+
+			r.branchMu.Lock()
+			sr, err := r.setup(t.Context(), tk, nil)
+			r.branchMu.Unlock()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// The task branch must contain the local commit (local.txt).
+			out, execErr := exec.Command("git", "-C", clone, "show", sr.Branch+":local.txt").Output() //nolint:gosec // controlled test args
+			if execErr != nil {
+				t.Fatalf("local.txt not in task branch %s: %v", sr.Branch, execErr)
+			}
+			if string(out) != "local\n" {
+				t.Errorf("local.txt content = %q, want %q", string(out), "local\n")
+			}
+		})
 	})
 
 	t.Run("Cleanup", func(t *testing.T) {

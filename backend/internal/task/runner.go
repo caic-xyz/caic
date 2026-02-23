@@ -211,7 +211,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) (*SessionHandle, error)
 // session watcher.
 //
 // Sequence:
-//  1. Create a new git branch from origin/<BaseBranch>.
+//  1. Create a new git branch from origin/<BaseBranch> (or the local branch if not on origin).
 //  2. Start an md container on that branch.
 //  3. Deploy the relay script and launch the agent (claude/gemini) via the
 //     relay daemon. The relay owns the agent's stdin/stdout and persists
@@ -397,6 +397,12 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResu
 	if t.BaseBranch != "" {
 		effectiveBase = t.BaseBranch
 	}
+	// Prefer the remote tracking ref, but fall back to the local branch when
+	// the base branch only exists locally (not yet pushed to origin).
+	startPoint := "origin/" + effectiveBase
+	if _, err := gitutil.RevParse(gitCtx, r.Dir, startPoint); err != nil {
+		startPoint = effectiveBase
+	}
 	// Assign a sequential branch name, skipping existing ones.
 	var branch string
 	var err error
@@ -407,7 +413,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResu
 		branch = fmt.Sprintf("caic-%d", r.nextID)
 		r.nextID++
 		slog.Info("creating branch", "repo", t.Repo, "branch", branch, "base", effectiveBase)
-		err = gitutil.CreateBranch(gitCtx, r.Dir, branch, "origin/"+effectiveBase)
+		err = gitutil.CreateBranch(gitCtx, r.Dir, branch, startPoint)
 		if err == nil {
 			break
 		}
