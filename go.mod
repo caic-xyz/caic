@@ -4,12 +4,12 @@ go 1.25.7
 
 require (
 	github.com/andybalholm/brotli v1.2.0
+	github.com/caic-xyz/md v0.7.1
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/klauspost/compress v1.18.4
 	github.com/lmittmann/tint v1.1.3
 	github.com/maruel/genai v0.2.0
 	github.com/maruel/ksid v0.1.1
-	github.com/maruel/md v0.6.3-0.20260221012232-e2e2905a8d8a
 	github.com/mattn/go-colorable v0.1.14
 	github.com/mattn/go-isatty v0.0.20
 )

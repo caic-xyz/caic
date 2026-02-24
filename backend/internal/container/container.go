@@ -10,7 +10,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/maruel/md"
+	"github.com/caic-xyz/md"
 )
 
 // New creates an md.Client for container operations.

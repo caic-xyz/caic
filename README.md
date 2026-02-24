@@ -58,7 +58,7 @@ Do not use tailscale funnel.
 - Requires docker to be installed.
 
 Each task runs Claude Code inside an isolated
-[md](https://github.com/maruel/md) container. A Python relay process inside
+[md](https://github.com/caic-xyz/md) container. A Python relay process inside
 the container owns Claude's stdin/stdout and persists across SSH disconnects,
 so the server can restart without killing the agent or losing messages.
 

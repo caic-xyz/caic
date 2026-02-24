@@ -18,7 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claude"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
-	"github.com/maruel/md/gitutil"
+	"github.com/caic-xyz/md/gitutil"
 )
 
 // StartOptions holds optional flags for container startup.

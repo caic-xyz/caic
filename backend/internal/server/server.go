@@ -27,11 +27,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/md"
+	"github.com/caic-xyz/md/gitutil"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
 	"github.com/maruel/ksid"
-	"github.com/maruel/md"
-	"github.com/maruel/md/gitutil"
 )
 
 type repoInfo struct {

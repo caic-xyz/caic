@@ -5,7 +5,7 @@ Coding Agents in Containers: manage multiple coding agents in parallel.
 ## Overview
 
 caic orchestrates multiple Claude Code agents running in isolated
-[md](https://github.com/maruel/md) containers. Each task gets its own
+[md](https://github.com/caic-xyz/md) containers. Each task gets its own
 container+branch, Claude runs inside via SSH with streaming JSON, and results
 are pulled back and serialized into the upstream repository.
 

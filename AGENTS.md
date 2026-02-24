@@ -9,7 +9,7 @@ For specific guidelines, see:
 
 ## Project Overview
 
-caic manages multiple coding agents in parallel. Each task runs in an isolated [md](https://github.com/maruel/md) container with Claude Code communicating via streaming JSON over SSH.
+caic manages multiple coding agents in parallel. Each task runs in an isolated [md](https://github.com/caic-xyz/md) container with Claude Code communicating via streaming JSON over SSH.
 
 ### Documentation Changes
 
