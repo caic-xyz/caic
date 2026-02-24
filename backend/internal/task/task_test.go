@@ -495,6 +495,50 @@ func TestTask(t *testing.T) {
 		}
 	})
 
+	t.Run("ClearMessages", func(t *testing.T) {
+		t.Run("ResetsPlanState", func(t *testing.T) {
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			// Simulate an agent entering plan mode and writing a plan file.
+			tk.addMessage(t.Context(), &agent.AssistantMessage{
+				MessageType: "assistant",
+				Message: agent.APIMessage{
+					Content: []agent.ContentBlock{
+						{Type: "tool_use", Name: "EnterPlanMode"},
+					},
+				},
+			})
+			tk.addMessage(t.Context(), &agent.AssistantMessage{
+				MessageType: "assistant",
+				Message: agent.APIMessage{
+					Content: []agent.ContentBlock{
+						{Type: "tool_use", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`)},
+					},
+				},
+			})
+			snap := tk.Snapshot()
+			if !snap.InPlanMode {
+				t.Fatal("InPlanMode = false before ClearMessages, want true")
+			}
+			if snap.PlanContent != "the plan" {
+				t.Fatalf("PlanContent = %q before ClearMessages, want %q", snap.PlanContent, "the plan")
+			}
+
+			tk.ClearMessages(t.Context())
+
+			snap = tk.Snapshot()
+			if snap.InPlanMode {
+				t.Error("InPlanMode = true after ClearMessages, want false")
+			}
+			if snap.PlanContent != "" {
+				t.Errorf("PlanContent = %q after ClearMessages, want empty", snap.PlanContent)
+			}
+			if tk.GetPlanFile() != "" {
+				t.Errorf("PlanFile = %q after ClearMessages, want empty", tk.GetPlanFile())
+			}
+		})
+	})
+
 	t.Run("RestoreMessages", func(t *testing.T) {
 		t.Run("Basic", func(t *testing.T) {
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -650,6 +694,48 @@ func TestTask(t *testing.T) {
 			tk2.RestoreMessages(msgs[:1])
 			if !tk2.Snapshot().InPlanMode {
 				t.Error("InPlanMode = false, want true (only EnterPlanMode seen)")
+			}
+		})
+		t.Run("ContextClearedResetsPlanState", func(t *testing.T) {
+			// Simulates relay output containing a plan, then a context_cleared
+			// marker (from ClearMessages on restart), then a new session without
+			// a plan. RestoreMessages must not carry over the stale plan.
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			msgs := []agent.Message{
+				&agent.AssistantMessage{
+					MessageType: "assistant",
+					Message: agent.APIMessage{
+						Content: []agent.ContentBlock{
+							{Type: "tool_use", Name: "EnterPlanMode"},
+						},
+					},
+				},
+				&agent.AssistantMessage{
+					MessageType: "assistant",
+					Message: agent.APIMessage{
+						Content: []agent.ContentBlock{
+							{Type: "tool_use", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"old plan"}`)},
+						},
+					},
+				},
+				&agent.ResultMessage{MessageType: "result"},
+				// context_cleared injected by ClearMessages on restart.
+				&agent.SystemMessage{MessageType: "system", Subtype: "context_cleared"},
+				// New session starts — no plan tools used.
+				&agent.AssistantMessage{MessageType: "assistant"},
+				&agent.ResultMessage{MessageType: "result"},
+			}
+			tk.RestoreMessages(msgs)
+			snap := tk.Snapshot()
+			if snap.InPlanMode {
+				t.Error("InPlanMode = true, want false (context_cleared should reset)")
+			}
+			if snap.PlanContent != "" {
+				t.Errorf("PlanContent = %q, want empty (context_cleared should reset)", snap.PlanContent)
+			}
+			if tk.GetPlanFile() != "" {
+				t.Errorf("PlanFile = %q, want empty (context_cleared should reset)", tk.GetPlanFile())
 			}
 		})
 		t.Run("Subscribe", func(t *testing.T) {

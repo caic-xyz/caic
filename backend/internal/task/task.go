@@ -298,8 +298,15 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 			break
 		}
 	}
-	// Restore plan state from tool_use events.
+	// Restore plan state from tool_use events. A context_cleared marker
+	// resets plan state — it means ClearMessages was called (e.g. "Clear
+	// and execute plan"), so plan data before the marker is stale.
 	for _, m := range msgs {
+		if sm, ok := m.(*agent.SystemMessage); ok && sm.Subtype == "context_cleared" {
+			t.inPlanMode = false
+			t.planFile = ""
+			t.planContent = ""
+		}
 		if am, ok := m.(*agent.AssistantMessage); ok {
 			t.trackPlanState(am)
 		}
@@ -515,6 +522,9 @@ func (t *Task) ClearMessages(ctx context.Context) {
 	t.liveCostUSD = 0
 	t.liveNumTurns = 0
 	t.liveDuration = 0
+	t.inPlanMode = false
+	t.planFile = ""
+	t.planContent = ""
 }
 
 // syntheticUserInput creates a UserMessage representing user-provided text

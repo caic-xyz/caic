@@ -396,16 +396,18 @@ private fun MessageList(
                         is MsgItem.ToolCallItem -> ToolCallCard(call = item.call)
                     }
                 }
-            }
-        }
 
-        // Plan panel: shown below messages when task is waiting with a plan.
-        val planContent = state.task?.planContent
-        if (isWaiting && !planContent.isNullOrEmpty()) {
-            PlanApprovalSection(
-                planContent = planContent,
-                onExecute = onClearAndExecutePlan,
-            )
+                // Plan panel: shown inline below messages when task is waiting with a plan.
+                val planContent = state.task?.planContent
+                if (isWaiting && !planContent.isNullOrEmpty()) {
+                    item(key = "plan") {
+                        PlanApprovalSection(
+                            planContent = planContent,
+                            onExecute = onClearAndExecutePlan,
+                        )
+                    }
+                }
+            }
         }
     }
     }

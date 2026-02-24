@@ -331,25 +331,24 @@ export default function TaskView(props: Props) {
             </Index>
           );
         })()}
+        <Show when={isWaiting() && props.planContent} keyed>
+          {(plan) => (
+            <div class={styles.planAction}>
+              <div class={styles.planContent}>
+                <Markdown text={plan} />
+              </div>
+              <Button variant="gray" loading={pendingAction() === "restart"} disabled={!!pendingAction()} onClick={() => clearAndExecutePlan()}>
+                Clear and execute plan
+              </Button>
+            </div>
+          )}
+        </Show>
         <Show when={messages().length === 0}>
           <p class={styles.placeholder}>Waiting for agent output...</p>
         </Show>
       </div>
 
       <TodoPanel messages={messages()} />
-
-      <Show when={isWaiting() && props.planContent} keyed>
-        {(plan) => (
-          <div class={styles.planAction}>
-            <div class={styles.planContent}>
-              <Markdown text={plan} />
-            </div>
-            <Button variant="gray" loading={pendingAction() === "restart"} disabled={!!pendingAction()} onClick={() => clearAndExecutePlan()}>
-              Clear and execute plan
-            </Button>
-          </div>
-        )}
-      </Show>
 
       <Show when={isActive() || !!pendingAction()}>
         <form onSubmit={(e) => { e.preventDefault(); sendInput(); }} class={styles.inputForm}>
