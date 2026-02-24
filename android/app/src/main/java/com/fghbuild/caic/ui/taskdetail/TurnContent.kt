@@ -29,6 +29,7 @@ import com.fghbuild.caic.util.GroupKind
 import com.fghbuild.caic.util.MessageGroup
 import com.fghbuild.caic.util.Turn
 import com.fghbuild.caic.util.imageDataToBitmap
+import com.fghbuild.caic.ui.theme.markdownTypography
 import com.mikepenz.markdown.m3.Markdown
 
 private val PlanBorderColor = Color(0xFFDDD6FE)
@@ -95,6 +96,7 @@ fun PlanApprovalSection(planContent: String, onExecute: () -> Unit) {
             Markdown(
                 content = planContent,
                 modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                typography = markdownTypography(),
             )
         }
         Button(

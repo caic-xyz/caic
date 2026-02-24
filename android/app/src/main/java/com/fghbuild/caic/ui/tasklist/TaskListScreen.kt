@@ -90,7 +90,7 @@ fun TaskListScreen(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text("caic") },
+                title = { Text("caic", style = MaterialTheme.typography.titleMedium) },
                 actions = {
                     state.usage?.let { UsageBadges(it) }
                     if (state.serverConfigured) {

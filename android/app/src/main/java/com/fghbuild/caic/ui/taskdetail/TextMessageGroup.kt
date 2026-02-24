@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.ClaudeEventMessage
 import com.caic.sdk.v1.EventKinds
+import com.fghbuild.caic.ui.theme.markdownTypography
 import com.mikepenz.markdown.m3.Markdown
 
 private data class TextState(val text: String, val isStreaming: Boolean)
@@ -44,6 +45,7 @@ fun TextMessageGroup(events: List<ClaudeEventMessage>) {
         Markdown(
             content = state.text,
             modifier = modifier,
+            typography = markdownTypography(),
             colors = com.mikepenz.markdown.m3.markdownColor(
                 text = MaterialTheme.colorScheme.onSurface,
                 codeBackground = MaterialTheme.colorScheme.surfaceVariant,

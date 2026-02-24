@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.ClaudeEventResult
 import com.fghbuild.caic.util.formatCost
 import com.fghbuild.caic.util.formatDuration
+import com.fghbuild.caic.ui.theme.markdownTypography
 import com.mikepenz.markdown.m3.Markdown
 
 @Composable
@@ -33,6 +34,7 @@ fun ResultCard(result: ClaudeEventResult) {
                 Markdown(
                     content = result.result,
                     modifier = Modifier.fillMaxWidth(),
+                    typography = markdownTypography(),
                 )
             }
 

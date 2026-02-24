@@ -192,6 +192,7 @@ fun TaskDetailScreen(
                         ) {
                             Text(
                                 text = task?.repo ?: taskId,
+                                style = MaterialTheme.typography.titleMedium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
