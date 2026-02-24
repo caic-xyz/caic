@@ -13,9 +13,7 @@ import com.caic.sdk.v1.ClaudeEventUsage
 import com.caic.sdk.v1.ClaudeEventUserInput
 import com.caic.sdk.v1.EventKinds
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -275,53 +273,6 @@ class GroupingTest {
             ))
             assertEquals(1, groups.size)
             assertEquals(2, groups[0].toolCalls.size)
-        }
-    }
-
-    @Test
-    fun testPlanHelpers() {
-        t.run("turnHasExitPlanMode detects ExitPlanMode") {
-            val groups = groupMessages(listOf(
-                toolUseEvent("t1", "ExitPlanMode"),
-                resultEvent(),
-            ))
-            val turns = groupTurns(groups)
-            assertTrue(turnHasExitPlanMode(turns[0]))
-        }
-
-        t.run("turnHasExitPlanMode false when absent") {
-            val groups = groupMessages(listOf(
-                toolUseEvent("t1", "Read"),
-                resultEvent(),
-            ))
-            val turns = groupTurns(groups)
-            assertTrue(!turnHasExitPlanMode(turns[0]))
-        }
-
-        t.run("turnPlanContent extracts plan from Write tool call") {
-            val writeInput = JsonObject(mapOf(
-                "file_path" to JsonPrimitive("/home/user/.claude/plans/my-plan.md"),
-                "content" to JsonPrimitive("# My Plan\n\nDo things."),
-            ))
-            val groups = groupMessages(listOf(
-                ClaudeEventMessage(
-                    kind = EventKinds.ToolUse, ts = 0,
-                    toolUse = ClaudeEventToolUse(toolUseID = "w1", name = "Write", input = writeInput),
-                ),
-                toolUseEvent("e1", "ExitPlanMode"),
-                resultEvent(),
-            ))
-            val turns = groupTurns(groups)
-            assertEquals("# My Plan\n\nDo things.", turnPlanContent(turns[0]))
-        }
-
-        t.run("turnPlanContent returns null when no plan file") {
-            val groups = groupMessages(listOf(
-                toolUseEvent("t1", "Read"),
-                resultEvent(),
-            ))
-            val turns = groupTurns(groups)
-            assertNull(turnPlanContent(turns[0]))
         }
     }
 

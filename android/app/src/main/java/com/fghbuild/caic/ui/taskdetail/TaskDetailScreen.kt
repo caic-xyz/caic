@@ -304,6 +304,7 @@ fun TaskDetailScreen(
             viewModel.updateInputDraft("")
         },
     )
+
         }
     }
 }
@@ -318,7 +319,7 @@ private fun MessageList(
     val listState = rememberLazyListState()
     var userScrolledUp by remember { mutableStateOf(false) }
     val turns = state.turns
-    val isWaiting = state.task?.state == "waiting"
+    val isWaiting = state.task?.state == "waiting" || state.task?.state == "asking"
     var expandedTurnKeys by remember { mutableStateOf(setOf<Long>()) }
     var expandedToolGroups by remember { mutableStateOf(setOf<String>()) }
     val items = remember(turns, expandedTurnKeys, expandedToolGroups) {
@@ -383,8 +384,6 @@ private fun MessageList(
                             group = item.group,
                             turn = item.turn,
                             onAnswer = if (item.isLiveTurn) onAnswer else null,
-                            isWaiting = if (item.isLiveTurn) isWaiting else false,
-                            onClearAndExecutePlan = if (item.isLiveTurn) onClearAndExecutePlan else null,
                         )
                         is MsgItem.ToolGroupHeader -> ToolGroupHeaderItem(
                             toolCalls = item.toolCalls,
@@ -400,6 +399,15 @@ private fun MessageList(
                     }
                 }
             }
+        }
+
+        // Plan panel: shown below messages when task is waiting with a plan.
+        val planContent = state.task?.planContent
+        if (isWaiting && !planContent.isNullOrEmpty()) {
+            PlanApprovalSection(
+                planContent = planContent,
+                onExecute = onClearAndExecutePlan,
+            )
         }
     }
     }

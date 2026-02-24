@@ -8,8 +8,6 @@ import com.caic.sdk.v1.ClaudeEventToolResult
 import com.caic.sdk.v1.ClaudeEventToolUse
 import com.caic.sdk.v1.ClaudeTodoItem
 import com.caic.sdk.v1.EventKinds
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 enum class GroupKind { TEXT, TOOL, ASK, USER_INPUT, OTHER }
 
@@ -259,26 +257,6 @@ fun toolCountSummary(calls: List<ToolCall>): String {
     return counts.entries.joinToString(", ") { (name, c) ->
         if (c > 1) "$name \u00d7$c" else name
     }
-}
-
-/** True if any tool call in the turn is ExitPlanMode. */
-fun turnHasExitPlanMode(turn: Turn): Boolean =
-    turn.groups.any { g ->
-        g.kind == GroupKind.TOOL && g.toolCalls.any { it.use.name == "ExitPlanMode" }
-    }
-
-/** Extracts the plan markdown content from the Write tool call that wrote to .claude/plans/. */
-fun turnPlanContent(turn: Turn): String? {
-    val writes = turn.groups
-        .filter { it.kind == GroupKind.TOOL }
-        .flatMap { it.toolCalls }
-        .filter { it.use.name == "Write" }
-    for (tc in writes) {
-        val obj = runCatching { tc.use.input.jsonObject }.getOrNull() ?: continue
-        val fp = (obj["file_path"] ?: obj["filePath"])?.jsonPrimitive?.content ?: ""
-        if (".claude/plans/" in fp) return obj["content"]?.jsonPrimitive?.content
-    }
-    return null
 }
 
 /**
