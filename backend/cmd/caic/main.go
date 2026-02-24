@@ -16,13 +16,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
-	"github.com/lmittmann/tint"
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claude"
 	"github.com/caic-xyz/caic/backend/internal/agent/fake"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/fsnotify/fsnotify"
+	"github.com/lmittmann/tint"
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
 )

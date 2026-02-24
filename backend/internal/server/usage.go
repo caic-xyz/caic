@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
+	"github.com/fsnotify/fsnotify"
 )
 
 const (
