@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -33,11 +34,10 @@ import com.mikepenz.markdown.m3.Markdown
 private val PlanBorderColor = Color(0xFFDDD6FE)
 private val PlanBgColor = Color(0xFFF5F3FF)
 
-/** Renders a single [MessageGroup] from [turn]. Used both in [TurnContent] and the flat list. */
+/** Renders a single [MessageGroup]. Used both in [TurnContent] and the flat list. */
 @Composable
 fun MessageGroupContent(
     group: MessageGroup,
-    turn: Turn,
     onAnswer: ((String) -> Unit)?,
 ) {
     when (group.kind) {
@@ -74,7 +74,7 @@ fun TurnContent(
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         turn.groups.forEach { group ->
-            MessageGroupContent(group, turn, onAnswer)
+            MessageGroupContent(group, onAnswer)
         }
     }
 }

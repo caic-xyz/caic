@@ -84,7 +84,6 @@ private sealed interface MsgItem {
     /** Non-tool group (text, ask, result, user-input, other). */
     data class Group(
         val group: MessageGroup,
-        val turn: Turn,
         val isLiveTurn: Boolean,
         override val key: String,
     ) : MsgItem
@@ -134,7 +133,7 @@ private fun buildItems(
                     }
                 }
             } else {
-                result.add(MsgItem.Group(group, turn, isLive, base))
+                result.add(MsgItem.Group(group, isLive, base))
             }
         }
     }
@@ -382,7 +381,6 @@ private fun MessageList(
                         )
                         is MsgItem.Group -> MessageGroupContent(
                             group = item.group,
-                            turn = item.turn,
                             onAnswer = if (item.isLiveTurn) onAnswer else null,
                         )
                         is MsgItem.ToolGroupHeader -> ToolGroupHeaderItem(
