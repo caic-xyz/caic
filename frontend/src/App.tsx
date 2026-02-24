@@ -527,6 +527,7 @@ export default function App() {
                   taskId={id}
                   taskState={selectedTask()?.state ?? "pending"}
                   inPlanMode={selectedTask()?.inPlanMode}
+                  planContent={selectedTask()?.planContent}
                   repo={selectedTask()?.repo ?? ""}
                   repoURL={selectedTask()?.repoURL}
                   branch={selectedTask()?.branch ?? ""}

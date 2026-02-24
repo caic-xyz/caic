@@ -256,26 +256,3 @@ export function turnSummary(turn: Turn): string {
   return parts.length > 0 ? parts.join(", ") : "empty turn";
 }
 
-export function turnHasExitPlanMode(turn: Turn): boolean {
-  return turn.groups.some((g) =>
-    g.kind === "tool" && g.toolCalls.some((tc) => tc.use.name === "ExitPlanMode"),
-  );
-}
-
-// Extracts the plan file content from the Write tool call that wrote to
-// .claude/plans/ in this turn. Returns undefined if not found.
-export function turnPlanContent(turn: Turn): string | undefined {
-  for (const g of turn.groups) {
-    if (g.kind !== "tool") continue;
-    for (const tc of g.toolCalls) {
-      if (tc.use.name !== "Write") continue;
-      const input = tc.use.input as Record<string, unknown> | undefined;
-      if (!input) continue;
-      const fp = input.file_path ?? input.filePath;
-      if (typeof fp === "string" && fp.includes(".claude/plans/") && typeof input.content === "string") {
-        return input.content;
-      }
-    }
-  }
-  return undefined;
-}

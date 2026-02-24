@@ -1463,6 +1463,7 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 		AgentVersion:   snap.AgentVersion,
 		SessionID:      snap.SessionID,
 		InPlanMode:     snap.InPlanMode,
+		PlanContent:    snap.PlanContent,
 		Tailscale:      tailscaleURL(e.task),
 		USB:            e.task.USB,
 		Display:        e.task.Display,

@@ -539,6 +539,7 @@ export interface Task {
   sessionID?: string;
   containerUptimeMs?: number /* int64 */;
   inPlanMode?: boolean;
+  planContent?: string;
   tailscale?: string; // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
   usb?: boolean;
   display?: boolean;

@@ -125,6 +125,7 @@ All errors return:
 | `sessionID` | `string` |  |
 | `containerUptimeMs` | `number` |  |
 | `inPlanMode` | `boolean` |  |
+| `planContent` | `string` |  |
 | `tailscale` | `string` |  |
 | `usb` | `boolean` |  |
 | `display` | `boolean` |  |

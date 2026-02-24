@@ -98,6 +98,7 @@ data class Task(
     @SerialName("sessionID") val sessionID: String? = null,
     val containerUptimeMs: Long? = null,
     val inPlanMode: Boolean? = null,
+    val planContent: String? = null,
     val tailscale: String? = null,
     val usb: Boolean? = null,
     val display: Boolean? = null,

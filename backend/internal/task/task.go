@@ -106,6 +106,7 @@ type Task struct {
 	reportedModel  string    // Model reported by SystemInitMessage (may differ from Model).
 	agentVersion   string    // Agent version, captured from SystemInitMessage.
 	planFile       string    // Path to plan file inside container, captured from Write tool_use.
+	planContent    string    // Content of the plan file, captured from Write tool_use input.
 	inPlanMode     bool      // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
 	title          string    // LLM-generated short title; set via SetTitle.
 	msgs           []agent.Message
@@ -227,6 +228,7 @@ type Snapshot struct {
 	AgentVersion   string
 	InPlanMode     bool
 	PlanFile       string
+	PlanContent    string
 	CostUSD        float64
 	NumTurns       int
 	Duration       time.Duration
@@ -252,6 +254,7 @@ func (t *Task) Snapshot() Snapshot {
 		AgentVersion:   t.agentVersion,
 		InPlanMode:     t.inPlanMode,
 		PlanFile:       t.planFile,
+		PlanContent:    t.planContent,
 		CostUSD:        t.liveCostUSD,
 		NumTurns:       t.liveNumTurns,
 		Duration:       t.liveDuration,
@@ -429,9 +432,11 @@ func (t *Task) trackPlanState(am *agent.AssistantMessage) {
 		case "Write":
 			var input struct {
 				FilePath string `json:"file_path"`
+				Content  string `json:"content"`
 			}
 			if json.Unmarshal(b.Input, &input) == nil && strings.Contains(input.FilePath, ".claude/plans/") {
 				t.planFile = input.FilePath
+				t.planContent = input.Content
 			}
 		}
 	}

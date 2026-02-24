@@ -2,7 +2,7 @@
 import { createSignal, createMemo, For, Index, Show, onCleanup, createEffect, Switch, Match, type Accessor, type JSX } from "solid-js";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, terminateTask as apiTerminateTask, syncTask as apiSyncTask, taskRawEvents } from "@sdk/api.gen";
 import type { ClaudeEventMessage, ClaudeAskQuestion, ClaudeEventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, DiffResp } from "@sdk/types.gen";
-import { groupMessages, groupTurns, toolCountSummary, turnSummary, turnHasExitPlanMode, turnPlanContent } from "./grouping";
+import { groupMessages, groupTurns, toolCountSummary, turnSummary } from "./grouping";
 import type { ToolCall, Turn } from "./grouping";
 import { SyncTargetDefault } from "@sdk/types.gen";
 import { Marked } from "marked";
@@ -36,6 +36,7 @@ interface Props {
   taskId: string;
   taskState: string;
   inPlanMode?: boolean;
+  planContent?: string;
   repo: string;
   repoURL?: string;
   branch: string;
@@ -172,6 +173,15 @@ export default function TaskView(props: Props) {
   const isWaiting = () => props.taskState === "waiting" || props.taskState === "asking";
   const isGitHub = () => !!props.repoURL?.includes("github.com");
 
+  function clearAndExecutePlan() {
+    const prompt = props.inputDraft.trim();
+    // eslint-disable-next-line solid/reactivity -- only called from onClick
+    runAction("restart", async () => {
+      await apiRestartTask(props.taskId, { prompt: { text: prompt } });
+      props.onInputDraft("");
+    });
+  }
+
   async function doSync(force: boolean, target?: SyncTarget) {
     if (pendingAction()) return;
     setPendingAction("sync");
@@ -265,15 +275,6 @@ export default function TaskView(props: Props) {
             }
           }
 
-          function clearAndExecutePlan() {
-            const prompt = props.inputDraft.trim();
-            // eslint-disable-next-line solid/reactivity -- only called from onClick
-            runAction("restart", async () => {
-              await apiRestartTask(props.taskId, { prompt: { text: prompt } });
-              props.onInputDraft("");
-            });
-          }
-
           return (
             <Index each={turns()}>
               {(turn, turnIdx) => {
@@ -318,25 +319,7 @@ export default function TaskView(props: Props) {
                           </Match>
                           <Match when={group().kind === "other"}>
                             <For each={group().events}>
-                              {(ev) => (
-                                <>
-                                  <MessageItem ev={ev} taskId={props.taskId} />
-                                  <Show when={ev.result && turnHasExitPlanMode(turn()) && isWaiting()}>
-                                    <div class={styles.planAction}>
-                                      <Show when={turnPlanContent(turn())} keyed>
-                                        {(plan) => (
-                                          <div class={styles.planContent}>
-                                            <Markdown text={plan} />
-                                          </div>
-                                        )}
-                                      </Show>
-                                      <Button variant="gray" loading={pendingAction() === "restart"} disabled={!!pendingAction()} onClick={() => clearAndExecutePlan()}>
-                                        Clear and execute plan
-                                      </Button>
-                                    </div>
-                                  </Show>
-                                </>
-                              )}
+                              {(ev) => <MessageItem ev={ev} taskId={props.taskId} />}
                             </For>
                           </Match>
                         </Switch>
@@ -354,6 +337,19 @@ export default function TaskView(props: Props) {
       </div>
 
       <TodoPanel messages={messages()} />
+
+      <Show when={isWaiting() && props.planContent} keyed>
+        {(plan) => (
+          <div class={styles.planAction}>
+            <div class={styles.planContent}>
+              <Markdown text={plan} />
+            </div>
+            <Button variant="gray" loading={pendingAction() === "restart"} disabled={!!pendingAction()} onClick={() => clearAndExecutePlan()}>
+              Clear and execute plan
+            </Button>
+          </div>
+        )}
+      </Show>
 
       <Show when={isActive() || !!pendingAction()}>
         <form onSubmit={(e) => { e.preventDefault(); sendInput(); }} class={styles.inputForm}>

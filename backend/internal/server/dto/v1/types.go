@@ -84,6 +84,7 @@ type Task struct {
 	SessionID         string  `json:"sessionID,omitempty"`
 	ContainerUptimeMs int64   `json:"containerUptimeMs,omitempty"`
 	InPlanMode        bool    `json:"inPlanMode,omitempty"`
+	PlanContent       string  `json:"planContent,omitempty"`
 	Tailscale         string  `json:"tailscale,omitempty"` // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
 	USB               bool    `json:"usb,omitempty"`
 	Display           bool    `json:"display,omitempty"`
