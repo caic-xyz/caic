@@ -683,6 +683,80 @@ func TestRunner(t *testing.T) {
 		// Clean up: close the session.
 		tk.CloseAndDetachSession()
 	})
+
+	t.Run("RestartSession/LogContainsContextCleared", func(t *testing.T) {
+		logDir := t.TempDir()
+		backend := &testBackend{}
+
+		r := &Runner{
+			LogDir:   logDir,
+			Backends: map[agent.Harness]agent.Backend{"test": backend},
+		}
+
+		tk := &Task{
+			ID:            ksid.NewID(),
+			InitialPrompt: agent.Prompt{Text: "test"},
+			Repo:          "org/repo",
+			Harness:       "test",
+			Branch:        "caic-0",
+			Container:     "fake-container",
+		}
+
+		// Create an initial session with a log writer by using the backend
+		// directly (Runner.Start needs a container backend).
+		logW, err := r.openLog(tk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		msgCh := make(chan agent.Message, 16)
+		session, err := backend.Start(t.Context(), nil, msgCh, logW)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h1 := &SessionHandle{Session: session, MsgCh: msgCh, LogW: logW}
+		tk.AttachSession(h1)
+		tk.SetState(StateRunning)
+
+		// Simulate the agent writing a plan file.
+		tk.addMessage(t.Context(), &agent.AssistantMessage{
+			MessageType: "assistant",
+			Message: agent.APIMessage{Content: []agent.ContentBlock{
+				{Type: "tool_use", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`)},
+			}},
+		})
+		if snap := tk.Snapshot(); snap.PlanContent != "the plan" {
+			t.Fatalf("PlanContent = %q before restart, want %q", snap.PlanContent, "the plan")
+		}
+
+		// Gracefully end the first session so we can restart.
+		h1.Session.Close()
+		<-h1.Session.Done()
+		tk.SetState(StateWaiting)
+
+		// Restart: should write context_cleared to the log before closing it.
+		h2, err := r.RestartSession(t.Context(), tk, agent.Prompt{Text: "execute plan"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tk.CloseAndDetachSession()
+		_ = h2
+
+		// Read the raw log file and verify context_cleared is present.
+		entries, err := os.ReadDir(logDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("expected 1 log file, got %d", len(entries))
+		}
+		data, err := os.ReadFile(filepath.Join(logDir, entries[0].Name())) //nolint:gosec // test code, path is from t.TempDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), `"context_cleared"`) {
+			t.Error("log file does not contain context_cleared marker")
+		}
+	})
 }
 
 // stubContainer implements ContainerBackend for testing. Diff returns a fixed

@@ -113,6 +113,44 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("tasks[1].Msgs len = %d, want 2", len(tasks[1].Msgs))
 		}
 	})
+	t.Run("ContextClearedResetsPlanState", func(t *testing.T) {
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "plan task", Repo: "r", Branch: "caic-0", Harness: "claude"})
+		// Old session: agent enters plan mode and writes a plan file.
+		planWrite := mustJSON(t, agent.AssistantMessage{
+			MessageType: "assistant",
+			Message: agent.APIMessage{Content: []agent.ContentBlock{
+				{Type: "tool_use", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`)},
+			}},
+		})
+		// context_cleared written by RestartSession before starting new session.
+		cleared := mustJSON(t, agent.SystemMessage{MessageType: "system", Subtype: "context_cleared"})
+		// New session header + assistant message (no plan tools).
+		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "plan task", Repo: "r", Branch: "caic-0", Harness: "claude"})
+		asst2 := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "terminated"})
+		writeLogFile(t, dir, "task.jsonl", meta, planWrite, cleared, meta2, asst2, trailer)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("len = %d, want 1", len(tasks))
+		}
+		lt := tasks[0]
+		// After restore, plan state must be empty because context_cleared resets it.
+		tk := &Task{InitialPrompt: agent.Prompt{Text: lt.Prompt}}
+		tk.SetState(StateRunning)
+		tk.RestoreMessages(lt.Msgs)
+		snap := tk.Snapshot()
+		if snap.InPlanMode {
+			t.Error("InPlanMode = true, want false")
+		}
+		if snap.PlanContent != "" {
+			t.Errorf("PlanContent = %q, want empty", snap.PlanContent)
+		}
+	})
 }
 
 func TestParseState(t *testing.T) {

@@ -524,11 +524,14 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 		return nil, fmt.Errorf("cannot restart in state %s", state)
 	}
 
-	// 1. Close current session gracefully.
+	// 1. Close current session gracefully and persist a context_cleared
+	// marker to the log so that RestoreMessages can reset plan state on
+	// server restart. The marker must be written before closing the log.
 	oldH := t.CloseAndDetachSession()
 	if oldH != nil {
 		close(oldH.MsgCh)
 		if oldH.LogW != nil {
+			writeContextCleared(oldH.LogW)
 			_ = oldH.LogW.Close()
 		}
 	}
@@ -797,6 +800,16 @@ func writeLogTrailer(w io.Writer, title string, res *Result) {
 		mr.Error = res.Err.Error()
 	}
 	if data, err := json.Marshal(mr); err == nil {
+		_, _ = w.Write(append(data, '\n'))
+	}
+}
+
+// writeContextCleared appends a context_cleared system message to the log.
+// Called before closing the old log writer in RestartSession so that
+// RestoreMessages can reset plan state on server restart.
+func writeContextCleared(w io.Writer) {
+	msg := syntheticContextCleared()
+	if data, err := json.Marshal(msg); err == nil {
 		_, _ = w.Write(append(data, '\n'))
 	}
 }
