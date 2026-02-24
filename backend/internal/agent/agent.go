@@ -36,7 +36,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maruel/caic/backend/internal/agent/relay"
+	"github.com/caic-xyz/caic/backend/internal/agent/relay"
 )
 
 // ImageData carries a single base64-encoded image for multi-modal input.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/maruel/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
 // ParseMessage decodes a single line from the codex app-server output into a

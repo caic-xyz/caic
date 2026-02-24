@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/maruel/caic/backend/internal/agent"
-	v1 "github.com/maruel/caic/backend/internal/server/dto/v1"
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 )
 
 // genericToolTimingTracker mirrors toolTimingTracker but emits

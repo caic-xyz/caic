@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/maruel/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
 func TestParseMessage(t *testing.T) {

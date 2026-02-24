@@ -11,8 +11,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/maruel/caic/backend/internal/server/dto"
-	v1 "github.com/maruel/caic/backend/internal/server/dto/v1"
+	"github.com/caic-xyz/caic/backend/internal/server/dto"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/maruel/ksid"
 )
 

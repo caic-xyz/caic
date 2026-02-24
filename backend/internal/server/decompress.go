@@ -12,7 +12,7 @@ import (
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/maruel/caic/backend/internal/server/dto"
+	"github.com/caic-xyz/caic/backend/internal/server/dto"
 )
 
 // decompressMiddleware returns a handler that decompresses request bodies

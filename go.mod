@@ -1,4 +1,4 @@
-module github.com/maruel/caic
+module github.com/caic-xyz/caic
 
 go 1.25.7
 

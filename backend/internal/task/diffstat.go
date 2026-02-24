@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/maruel/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
 // ParseDiffNumstat parses git diff --numstat output into a DiffStat.

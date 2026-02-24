@@ -12,7 +12,7 @@ import (
 	"reflect"
 	"strconv"
 
-	"github.com/maruel/caic/backend/internal/server/dto"
+	"github.com/caic-xyz/caic/backend/internal/server/dto"
 )
 
 // handle wraps a typed handler function into an http.HandlerFunc. It reads the

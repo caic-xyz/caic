@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/maruel/caic/backend/internal/server/dto"
+	"github.com/caic-xyz/caic/backend/internal/server/dto"
 )
 
 // writeError writes a structured JSON error response. If err implements

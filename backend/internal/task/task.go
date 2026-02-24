@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maruel/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 )

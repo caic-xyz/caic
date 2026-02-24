@@ -12,7 +12,7 @@ phone with Tailscale. All private.
 ## Installation
 
 ```bash
-go install github.com/maruel/caic/backend/cmd/caic@latest
+go install github.com/caic-xyz/caic/backend/cmd/caic@latest
 ```
 
 When only a port is specified (e.g. `-http :8080` or `CAIC_HTTP=:8080`), the

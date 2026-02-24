@@ -15,7 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/maruel/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
 // Backend implements agent.Backend for Codex CLI using the app-server

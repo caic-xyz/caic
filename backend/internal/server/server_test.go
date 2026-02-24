@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/caic/backend/internal/agent"
-	"github.com/maruel/caic/backend/internal/server/dto"
-	v1 "github.com/maruel/caic/backend/internal/server/dto/v1"
-	"github.com/maruel/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/server/dto"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // stubBackend implements agent.Backend for test map-membership checks.

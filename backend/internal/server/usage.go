@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	v1 "github.com/maruel/caic/backend/internal/server/dto/v1"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 )
 
 const (

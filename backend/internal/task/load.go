@@ -12,9 +12,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/maruel/caic/backend/internal/agent"
-	agentcodex "github.com/maruel/caic/backend/internal/agent/codex"
-	agentgemini "github.com/maruel/caic/backend/internal/agent/gemini"
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	agentcodex "github.com/caic-xyz/caic/backend/internal/agent/codex"
+	agentgemini "github.com/caic-xyz/caic/backend/internal/agent/gemini"
 )
 
 // errNotLogFile is returned when a file doesn't contain a valid caic_meta header.

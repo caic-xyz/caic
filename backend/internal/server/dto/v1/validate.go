@@ -1,7 +1,7 @@
 // Request validation methods (excluded from tygo generation).
 package v1
 
-import "github.com/maruel/caic/backend/internal/server/dto"
+import "github.com/caic-xyz/caic/backend/internal/server/dto"
 
 // Validate checks that prompt or images are provided.
 func (r *InputReq) Validate() error {

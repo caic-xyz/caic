@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maruel/caic/backend/internal/agent"
-	"github.com/maruel/caic/backend/internal/agent/claude"
-	"github.com/maruel/caic/backend/internal/agent/codex"
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/claude"
+	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/maruel/md/gitutil"
 )
 

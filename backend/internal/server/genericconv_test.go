@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maruel/caic/backend/internal/agent"
-	v1 "github.com/maruel/caic/backend/internal/server/dto/v1"
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 )
 
 func TestGenericConvertInitHasHarness(t *testing.T) {

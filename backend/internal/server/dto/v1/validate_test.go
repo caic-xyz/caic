@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/maruel/caic/backend/internal/server/dto"
+	"github.com/caic-xyz/caic/backend/internal/server/dto"
 )
 
 func TestValidate(t *testing.T) {

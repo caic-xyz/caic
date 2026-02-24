@@ -18,11 +18,11 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/lmittmann/tint"
-	"github.com/maruel/caic/backend/internal/agent"
-	"github.com/maruel/caic/backend/internal/agent/claude"
-	"github.com/maruel/caic/backend/internal/agent/fake"
-	"github.com/maruel/caic/backend/internal/server"
-	"github.com/maruel/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/claude"
+	"github.com/caic-xyz/caic/backend/internal/agent/fake"
+	"github.com/caic-xyz/caic/backend/internal/server"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
 )

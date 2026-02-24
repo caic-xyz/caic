@@ -7,7 +7,7 @@
 
 [Unit]
 Description=Coding Agents in Containers
-Documentation=https://github.com/maruel/caic
+Documentation=https://github.com/caic-xyz/caic
 After=network-online.target
 Wants=network-online.target
 
