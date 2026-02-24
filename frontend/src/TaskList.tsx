@@ -14,6 +14,8 @@ export interface TaskListProps {
   setSidebarOpen: (open: boolean) => void;
   now: Accessor<number>;
   onSelect: (id: string) => void;
+  onTerminate: (id: string) => void;
+  terminatingId: Accessor<string | null>;
 }
 
 export default function TaskList(props: TaskListProps) {
@@ -71,6 +73,8 @@ export default function TaskList(props: TaskListProps) {
               selected={props.selectedId === t().id}
               now={props.now}
               onClick={() => props.onSelect(t().id)}
+              onTerminate={() => props.onTerminate(t().id)}
+              terminateLoading={props.terminatingId() === t().id}
             />
           )}
         </Index>

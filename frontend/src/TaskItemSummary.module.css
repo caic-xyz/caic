@@ -123,12 +123,32 @@
   color: #cb2431;
 }
 
+.terminateBtn {
+  display: inline-flex;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.terminateBtn button {
+  padding: 0.1rem 0.25rem;
+  min-height: 0;
+  line-height: 1;
+}
+
+.card:hover .terminateBtn {
+  opacity: 1;
+}
+
 .error {
   color: red;
   font-size: 0.8rem;
 }
 
 @media (max-width: 768px) {
+  .terminateBtn {
+    display: none;
+  }
+
   .metaRow {
     justify-content: center;
     text-align: center;

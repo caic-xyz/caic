@@ -1,6 +1,6 @@
 // TaskView renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, For, Index, Show, onCleanup, createEffect, Switch, Match, type Accessor, type JSX } from "solid-js";
-import { sendInput as apiSendInput, restartTask as apiRestartTask, terminateTask as apiTerminateTask, syncTask as apiSyncTask, taskRawEvents } from "@sdk/api.gen";
+import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskRawEvents } from "@sdk/api.gen";
 import type { ClaudeEventMessage, ClaudeAskQuestion, ClaudeEventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, DiffResp } from "@sdk/types.gen";
 import { groupMessages, groupTurns, toolCountSummary, turnSummary } from "./grouping";
 import type { ToolCall, Turn } from "./grouping";
@@ -11,7 +11,6 @@ import PromptInput from "./PromptInput";
 import Button from "./Button";
 import TodoPanel from "./TodoPanel";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
-import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import SyncIcon from "@material-symbols/svg-400/outlined/sync.svg?solid";
 import GitHubIcon from "./github.svg?solid";
@@ -52,7 +51,7 @@ export default function TaskView(props: Props) {
   const [messages, setMessages] = createSignal<ClaudeEventMessage[]>([]);
   const [pendingImages, setPendingImages] = createSignal<APIImageData[]>([]);
   const [sending, setSending] = createSignal(false);
-  const [pendingAction, setPendingAction] = createSignal<"sync" | "terminate" | "restart" | null>(null);
+  const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
   const [syncMenuOpen, setSyncMenuOpen] = createSignal(false);
@@ -202,34 +201,20 @@ export default function TaskView(props: Props) {
     }
   }
 
-  async function runAction(name: "sync" | "terminate" | "restart", fn: () => Promise<unknown>) {
+  async function runAction(name: "sync" | "restart", fn: () => Promise<unknown>) {
     if (pendingAction()) return;
     setPendingAction(name);
     setActionError(null);
-    let failed = false;
     try {
       await fn();
     } catch (e) {
-      failed = true;
       const msg = e instanceof Error ? e.message : "Unknown error";
       setActionError(`${name} failed: ${msg}`);
       setTimeout(() => setActionError(null), 5000);
     } finally {
-      // For terminate, keep pendingAction set until the server state catches
-      // up to "terminating" — clearing it immediately causes a spinner flicker
-      // in the gap before the SSE state update arrives.
-      if (failed || name !== "terminate") {
-        setPendingAction(null);
-      }
-    }
-  }
-
-  // Clear stale "terminate" pendingAction once the server state reflects it.
-  createEffect(() => {
-    if (pendingAction() === "terminate" && (props.taskState === "terminating" || props.taskState === "terminated" || props.taskState === "failed")) {
       setPendingAction(null);
     }
-  });
+  }
 
   return (
     <div class={styles.container}>
@@ -379,7 +364,6 @@ export default function TaskView(props: Props) {
                 </div>
               </Show>
             </div>
-            <Button type="button" variant="red" loading={pendingAction() === "terminate" || props.taskState === "terminating"} disabled={!!pendingAction() || props.taskState === "terminating"} onClick={() => { const id = props.taskId; runAction("terminate", () => apiTerminateTask(id)); }} title="Terminate" data-testid="terminate-task"><DeleteIcon width="1.1em" height="1.1em" /></Button>
           </PromptInput>
         </form>
         <Show when={safetyIssues().length > 0}>

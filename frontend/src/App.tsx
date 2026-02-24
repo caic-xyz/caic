@@ -2,7 +2,7 @@
 import { createEffect, createSignal, For, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData } from "@sdk/types.gen";
-import { getConfig, getPreferences, listHarnesses, listRepos, listTasks, createTask, cloneRepo, getUsage } from "@sdk/api.gen";
+import { getConfig, getPreferences, listHarnesses, listRepos, listTasks, createTask, cloneRepo, getUsage, terminateTask } from "@sdk/api.gen";
 import TaskView from "./TaskView";
 import TaskList from "./TaskList";
 import PromptInput from "./PromptInput";
@@ -67,6 +67,7 @@ export default function App() {
   const [displayEnabled, setDisplayEnabled] = createSignal(false);
   const [recentCount, setRecentCount] = createSignal(0);
   const [selectedBranch, setSelectedBranch] = createSignal("");
+  const [terminatingId, setTerminatingId] = createSignal<string | null>(null);
 
   // Clone repo dialog state.
   const [cloneOpen, setCloneOpen] = createSignal(false);
@@ -298,6 +299,26 @@ export default function App() {
     });
   }
 
+  // Clear stale terminatingId once the server state reflects it.
+  createEffect(() => {
+    const tid = terminatingId();
+    if (!tid) return;
+    const t = tasks().find((task) => task.id === tid);
+    if (t && (t.state === "terminating" || t.state === "terminated" || t.state === "failed")) {
+      setTerminatingId(null);
+    }
+  });
+
+  async function handleTerminate(id: string) {
+    if (terminatingId()) return;
+    setTerminatingId(id);
+    try {
+      await terminateTask(id);
+    } catch {
+      setTerminatingId(null);
+    }
+  }
+
   async function submitTask() {
     const p = prompt().trim();
     const imgs = pendingImages();
@@ -520,6 +541,8 @@ export default function App() {
             const found = tasks().find((t) => t.id === id);
             navigate(found ? taskPath(found.id, found.repo, found.branch, found.title) : `/task/@${id}`);
           }}
+          onTerminate={handleTerminate}
+          terminatingId={terminatingId}
         />
 
         <Switch>

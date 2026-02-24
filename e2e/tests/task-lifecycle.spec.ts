@@ -29,7 +29,9 @@ test("create task, verify streaming text and result, then terminate", async ({ p
     timeout: 10_000,
   });
 
-  // The Terminate button should appear once the task is in waiting state.
+  // The Terminate button appears on hover over the task card in the sidebar.
+  const taskCard = page.getByText(prompt).first();
+  await taskCard.hover();
   const terminateBtn = page.getByTestId("terminate-task");
   await expect(terminateBtn).toBeVisible({ timeout: 15_000 });
 

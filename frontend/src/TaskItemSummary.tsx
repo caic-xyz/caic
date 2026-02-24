@@ -3,9 +3,11 @@ import { Show } from "solid-js";
 import type { Accessor } from "solid-js";
 import type { DiffStat } from "@sdk/types.gen";
 import Tooltip from "./Tooltip";
+import Button from "./Button";
 import TailscaleIcon from "./tailscale.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
+import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
 import styles from "./TaskItemSummary.module.css";
 
 export interface TaskItemSummaryProps {
@@ -39,6 +41,8 @@ export interface TaskItemSummaryProps {
   selected: boolean;
   now: Accessor<number>;
   onClick: () => void;
+  onTerminate?: () => void;
+  terminateLoading?: boolean;
 }
 
 export default function TaskItemSummary(props: TaskItemSummaryProps) {
@@ -63,6 +67,13 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
           </Show>
           <Show when={props.display}>
             <span class={styles.featureIcon} title="Display"><DisplayIcon width="0.75rem" height="0.75rem" /></span>
+          </Show>
+          <Show when={props.onTerminate && props.state !== "terminated" && props.state !== "failed"}>
+            <span class={styles.terminateBtn} onClick={(e) => e.stopPropagation()}>
+              <Button variant="red" loading={props.terminateLoading} disabled={props.terminateLoading || props.state === "terminating"} onClick={() => props.onTerminate?.()} title="Terminate" data-testid="terminate-task">
+                <DeleteIcon width="0.85rem" height="0.85rem" />
+              </Button>
+            </span>
           </Show>
           <Show when={props.inPlanMode}>
             <span class={styles.planBadge} title="Plan mode">P</span>
