@@ -107,6 +107,7 @@ data class Task(
     val cumulativeCacheReadInputTokens: Int,
     val activeInputTokens: Int,
     val activeCacheReadTokens: Int,
+    val contextWindowLimit: Int,
     val error: String? = null,
     val result: String? = null,
     val harness: Harness,

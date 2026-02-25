@@ -368,6 +368,8 @@ func (*fakeBackend) Models() []string { return []string{"fake-model"} }
 
 func (*fakeBackend) SupportsImages() bool { return true }
 
+func (*fakeBackend) ContextWindowLimit(string) int { return 180_000 }
+
 // cacheDir returns the caic log/cache directory, using $XDG_CACHE_HOME/caic/
 // with a fallback to ~/.cache/caic/.
 func cacheDir() string {

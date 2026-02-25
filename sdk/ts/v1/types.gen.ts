@@ -528,6 +528,7 @@ export interface Task {
   cumulativeCacheReadInputTokens: number /* int */;
   activeInputTokens: number /* int */; // Last turn's non-cached input tokens (including cache creation).
   activeCacheReadTokens: number /* int */; // Last turn's cache-read input tokens.
+  contextWindowLimit: number /* int */; // Model context window limit (tokens).
   error?: string;
   result?: string;
   /**

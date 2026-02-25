@@ -35,6 +35,9 @@ func (b *Backend) Models() []string { return []string{"gemini-3.1-pro", "gemini-
 // SupportsImages reports that Gemini CLI does not yet accept image input.
 func (b *Backend) SupportsImages() bool { return false }
 
+// ContextWindowLimit returns the API prompt token limit for Gemini models.
+func (b *Backend) ContextWindowLimit(model string) int { return 1_000_000 }
+
 // Start launches a Gemini CLI process via the relay daemon in the given
 // container.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {

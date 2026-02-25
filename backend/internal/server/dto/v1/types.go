@@ -75,6 +75,7 @@ type Task struct {
 	CumulativeCacheReadInputTokens     int      `json:"cumulativeCacheReadInputTokens"`
 	ActiveInputTokens                  int      `json:"activeInputTokens"`     // Last turn's non-cached input tokens (including cache creation).
 	ActiveCacheReadTokens              int      `json:"activeCacheReadTokens"` // Last turn's cache-read input tokens.
+	ContextWindowLimit                 int      `json:"contextWindowLimit"`    // Model context window limit (tokens).
 	Error                              string   `json:"error,omitempty"`
 	Result                             string   `json:"result,omitempty"`
 	// Per-task harness/container metadata.

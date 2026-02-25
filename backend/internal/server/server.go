@@ -1523,6 +1523,11 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 	// Active input tokens includes ephemeral input + cache creation (anything sent over wire).
 	j.ActiveInputTokens = snap.LastUsage.InputTokens + snap.LastUsage.CacheCreationInputTokens
 	j.ActiveCacheReadTokens = snap.LastUsage.CacheReadInputTokens
+	if r := s.runners[e.task.Repo]; r != nil {
+		if b := r.Backends[e.task.Harness]; b != nil {
+			j.ContextWindowLimit = b.ContextWindowLimit(snap.Model)
+		}
+	}
 	if e.result != nil {
 		j.DiffStat = toV1DiffStat(e.result.DiffStat)
 		j.Result = e.result.AgentResult

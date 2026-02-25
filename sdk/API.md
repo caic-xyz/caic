@@ -137,6 +137,7 @@ All errors return:
 | `cumulativeCacheReadInputTokens` | `number` | yes |
 | `activeInputTokens` | `number` | yes |
 | `activeCacheReadTokens` | `number` | yes |
+| `contextWindowLimit` | `number` | yes |
 | `error` | `string` |  |
 | `result` | `string` |  |
 | `harness` | `string` | yes |

@@ -35,6 +35,9 @@ func (b *Backend) Models() []string { return []string{"opus", "sonnet", "haiku"}
 // SupportsImages reports that Claude Code accepts image content blocks.
 func (b *Backend) SupportsImages() bool { return true }
 
+// ContextWindowLimit returns the API prompt token limit for Claude models.
+func (b *Backend) ContextWindowLimit(model string) int { return 180_000 }
+
 // Start launches a Claude Code process via the relay daemon in the given
 // container. It deploys the relay script and starts claude via serve-attach.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {

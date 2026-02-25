@@ -37,4 +37,8 @@ type Backend interface {
 
 	// SupportsImages reports whether this backend accepts image content blocks.
 	SupportsImages() bool
+
+	// ContextWindowLimit returns the API prompt token limit for the given model.
+	// The model parameter is the model name reported by the agent at runtime.
+	ContextWindowLimit(model string) int
 }

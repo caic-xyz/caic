@@ -40,6 +40,9 @@ func (b *Backend) Models() []string {
 // SupportsImages reports that Codex CLI does not accept image input.
 func (b *Backend) SupportsImages() bool { return false }
 
+// ContextWindowLimit returns the API prompt token limit for Codex models.
+func (b *Backend) ContextWindowLimit(model string) int { return 200_000 }
+
 // Start launches a Codex CLI app-server process via the relay daemon in the
 // given container. It performs the JSON-RPC handshake (initialize →
 // initialized → thread/start) before returning a Session.

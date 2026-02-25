@@ -25,7 +25,11 @@ export interface TaskItemSummaryProps {
   numTurns: number;
   activeInputTokens: number;
   activeCacheReadTokens: number;
+  cumulativeInputTokens: number;
+  cumulativeCacheCreationInputTokens: number;
+  cumulativeCacheReadInputTokens: number;
   cumulativeOutputTokens: number;
+  contextWindowLimit: number;
   containerUptimeMs?: number;
   diffStat?: DiffStat;
   error?: string;
@@ -95,8 +99,10 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
             {props.harness && props.harness !== "claude" ? props.harness + " · " : ""}{props.agentVersion}{props.agentVersion && props.model ? " · " : ""}{props.model}
             <Show when={props.activeInputTokens + props.activeCacheReadTokens > 0}>
               {" · "}
-              <Tooltip text={`${formatTokens(props.activeInputTokens)} new input + ${formatTokens(props.activeCacheReadTokens)} read from cache + ${formatTokens(props.cumulativeOutputTokens)} out`}>
-                <span>{formatTokens(props.activeInputTokens + props.activeCacheReadTokens)}</span>
+              <Tooltip text={`Accumulated: ${formatTokens(props.cumulativeInputTokens + props.cumulativeCacheCreationInputTokens + props.cumulativeCacheReadInputTokens)} in + ${formatTokens(props.cumulativeOutputTokens)} out`}>
+                <span style={{ color: tokenColor(props.activeInputTokens + props.activeCacheReadTokens, props.contextWindowLimit) }}>
+                  {formatTokens(props.activeInputTokens + props.activeCacheReadTokens)}/{formatTokens(props.contextWindowLimit)}
+                </span>
               </Tooltip>
             </Show>
             <Show when={props.costUSD > 0}>
@@ -153,6 +159,14 @@ function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}Mt`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}kt`;
   return `${n}t`;
+}
+
+function tokenColor(current: number, limit: number): string {
+  if (limit <= 0) return "inherit";
+  const ratio = current / limit;
+  if (ratio >= 0.9) return "#dc3545";
+  if (ratio >= 0.75) return "#d4a017";
+  return "inherit";
 }
 
 function stateColor(state: string): string {

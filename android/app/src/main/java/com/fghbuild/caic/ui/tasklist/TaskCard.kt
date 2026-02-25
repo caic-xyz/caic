@@ -123,7 +123,11 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}
                 task.model?.let { MetaText(it) }
                 val tokenCount = task.activeInputTokens + task.activeCacheReadTokens
                 if (tokenCount > 0) {
-                    MetaText(formatTokens(tokenCount))
+                    Text(
+                        text = "${formatTokens(tokenCount)}/${formatTokens(task.contextWindowLimit)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = tokenColor(tokenCount, task.contextWindowLimit),
+                    )
                 }
                 if (task.costUSD > 0) {
                     MetaText(formatCost(task.costUSD))
@@ -174,6 +178,16 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}
                 )
             }
         }
+    }
+}
+
+private fun tokenColor(current: Int, limit: Int): Color {
+    if (limit <= 0) return Color.Unspecified
+    val ratio = current.toFloat() / limit
+    return when {
+        ratio >= 0.9f -> Color(0xFFDC3545)
+        ratio >= 0.75f -> Color(0xFFD4A017)
+        else -> Color.Unspecified
     }
 }
 
