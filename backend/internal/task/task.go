@@ -728,6 +728,10 @@ func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
 	state := t.state
 	if h != nil && (state == StateWaiting || state == StateAsking) {
 		t.setState(StateRunning)
+		// Dismiss any stale plan — the user chose to send input rather
+		// than clicking "Clear and execute plan".
+		t.planFile = ""
+		t.planContent = ""
 	}
 	t.mu.Unlock()
 	if h == nil {

@@ -129,6 +129,64 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("SendInput", func(t *testing.T) {
+		t.Run("ClearsPlanState", func(t *testing.T) {
+			// When the user sends regular input (instead of clicking
+			// "Clear and execute plan"), the stale plan must be dismissed.
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			// Simulate: agent entered plan mode, wrote a plan, exited.
+			tk.addMessage(t.Context(), &agent.AssistantMessage{
+				MessageType: "assistant",
+				Message: agent.APIMessage{
+					Content: []agent.ContentBlock{
+						{Type: "tool_use", Name: "EnterPlanMode"},
+					},
+				},
+			})
+			tk.addMessage(t.Context(), &agent.AssistantMessage{
+				MessageType: "assistant",
+				Message: agent.APIMessage{
+					Content: []agent.ContentBlock{
+						{Type: "tool_use", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`)},
+						{Type: "tool_use", Name: "ExitPlanMode"},
+					},
+				},
+			})
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+
+			snap := tk.Snapshot()
+			if snap.PlanContent != "the plan" {
+				t.Fatalf("PlanContent = %q before SendInput, want %q", snap.PlanContent, "the plan")
+			}
+
+			// Attach a live session so SendInput succeeds past the handle check.
+			cmd := exec.Command("cat")
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			s := agent.NewSession(cmd, stdin, stdout, nil, nil, &testWire{}, nil)
+			tk.AttachSession(&SessionHandle{Session: s})
+			defer func() { _ = stdin.Close(); _ = cmd.Wait() }()
+
+			// User sends a regular message instead of "Clear and execute plan".
+			_ = tk.SendInput(t.Context(), agent.Prompt{Text: "do something else"})
+
+			snap = tk.Snapshot()
+			if snap.PlanContent != "" {
+				t.Errorf("PlanContent = %q after SendInput, want empty", snap.PlanContent)
+			}
+			if snap.PlanFile != "" {
+				t.Errorf("PlanFile = %q after SendInput, want empty", snap.PlanFile)
+			}
+		})
 		t.Run("NoSession", func(t *testing.T) {
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateWaiting)
