@@ -128,7 +128,9 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}
                     val output = task.cumulativeOutputTokens
                     Text(
                         text = "${formatTokens(tokenCount)}/${formatTokens(task.contextWindowLimit)}" +
-                            " (${formatTokens(cachedIn)} cached + ${formatTokens(inputIn)} in + ${formatTokens(output)} out)",
+                            " (${formatTokens(cachedIn)} cached" +
+                            " + ${formatTokens(inputIn)} in" +
+                            " + ${formatTokens(output)} out)",
                         style = MaterialTheme.typography.labelSmall,
                         color = tokenColor(tokenCount, task.contextWindowLimit),
                     )
