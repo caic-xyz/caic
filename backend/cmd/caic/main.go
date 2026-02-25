@@ -109,6 +109,7 @@ See contrib/caic.env for a template with all variables and documentation.
 		TailscaleAPIKey: os.Getenv("TAILSCALE_API_KEY"),
 		LLMProvider:     os.Getenv("CAIC_LLM_PROVIDER"),
 		LLMModel:        os.Getenv("CAIC_LLM_MODEL"),
+		PreferencesPath: configPath("preferences.json"),
 	}
 
 	if key := cfg.GeminiAPIKey; key != "" {
@@ -379,6 +380,20 @@ func cacheDir() string {
 		base = filepath.Join(home, ".cache")
 	}
 	return filepath.Join(base, "caic")
+}
+
+// configPath returns a file path under $XDG_CONFIG_HOME/caic/ with a fallback
+// to ~/.config/caic/.
+func configPath(name string) string {
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = "."
+		}
+		base = filepath.Join(home, ".config")
+	}
+	return filepath.Join(base, "caic", name)
 }
 
 // watchExecutable watches the current executable for modifications and calls

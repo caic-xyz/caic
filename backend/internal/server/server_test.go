@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -55,6 +56,14 @@ func decodeError(t *testing.T, w *httptest.ResponseRecorder) dto.ErrorDetails {
 	return resp.Error
 }
 
+func testPrefs(t *testing.T) *preferences.Store {
+	s, err := preferences.Open(filepath.Join(t.TempDir(), "preferences.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	return &Server{
@@ -62,6 +71,7 @@ func newTestServer(t *testing.T) *Server {
 		runners: map[string]*task.Runner{},
 		tasks:   make(map[string]*taskEntry),
 		changed: make(chan struct{}),
+		prefs:   testPrefs(t),
 	}
 }
 
@@ -321,6 +331,7 @@ func TestHandleCreateTask(t *testing.T) {
 			},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
+			prefs:   testPrefs(t),
 		}
 		handler := handle(s.createTask)
 
@@ -449,6 +460,7 @@ func TestHandleCreateTask(t *testing.T) {
 			},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
+			prefs:   testPrefs(t),
 		}
 		handler := handle(s.createTask)
 
@@ -481,6 +493,7 @@ func TestHandleCreateTask(t *testing.T) {
 			},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
+			prefs:   testPrefs(t),
 		}
 		handler := handle(s.createTask)
 

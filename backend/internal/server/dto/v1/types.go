@@ -198,5 +198,22 @@ type DiffResp struct {
 	Diff string `json:"diff"`
 }
 
+// RepoPrefsResp holds per-repository preferences.
+type RepoPrefsResp struct {
+	Path       string `json:"path"`
+	BaseBranch string `json:"baseBranch,omitempty"`
+	Harness    string `json:"harness,omitempty"`
+	Model      string `json:"model,omitempty"`
+	BaseImage  string `json:"baseImage,omitempty"`
+}
+
+// PreferencesResp is the response for GET /api/v1/server/preferences.
+type PreferencesResp struct {
+	Repositories []RepoPrefsResp   `json:"repositories"`
+	Harness      string            `json:"harness,omitempty"`
+	Models       map[string]string `json:"models,omitempty"`
+	BaseImage    string            `json:"baseImage,omitempty"`
+}
+
 // EmptyReq is used for endpoints that take no request body.
 type EmptyReq = dto.EmptyReq

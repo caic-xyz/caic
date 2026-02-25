@@ -47,6 +47,23 @@ data class Config(
 )
 
 @Serializable
+data class RepoPrefsResp(
+    val path: String,
+    val baseBranch: String? = null,
+    val harness: String? = null,
+    val model: String? = null,
+    val baseImage: String? = null,
+)
+
+@Serializable
+data class PreferencesResp(
+    val repositories: List<RepoPrefsResp>,
+    val harness: String? = null,
+    val models: ? = null,
+    val baseImage: String? = null,
+)
+
+@Serializable
 data class HarnessInfo(
     val name: String,
     val models: List<String>,

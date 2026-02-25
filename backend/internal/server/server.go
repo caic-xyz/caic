@@ -24,6 +24,7 @@ import (
 	"github.com/caic-xyz/caic/backend/frontend"
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/container"
+	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -66,6 +67,8 @@ type Config struct {
 	LLMModel string
 	// TailscaleAPIKey is necessary to support Tailscale networking inside the container.
 	TailscaleAPIKey string
+	// PreferencesPath is the path to the persistent user preferences file.
+	PreferencesPath string
 }
 
 // Server is the HTTP server for the caic web UI.
@@ -79,6 +82,7 @@ type Server struct {
 	changed      chan struct{} // closed on task mutation; replaced under mu
 	maxTurns     int
 	logDir       string
+	prefs        *preferences.Store
 	usage        *usageFetcher // nil if no OAuth token available
 	geminiAPIKey string
 	provider     genai.Provider
@@ -201,6 +205,11 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string, cfg *
 		return nil, fmt.Errorf("no git repos found under %s", rootDir)
 	}
 
+	prefs, err := preferences.Open(cfg.PreferencesPath)
+	if err != nil {
+		return nil, fmt.Errorf("open preferences: %w", err)
+	}
+
 	s := &Server{
 		ctx:          ctx,
 		runners:      make(map[string]*task.Runner, len(repoRes.paths)),
@@ -208,6 +217,7 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string, cfg *
 		changed:      make(chan struct{}),
 		maxTurns:     maxTurns,
 		logDir:       logDir,
+		prefs:        prefs,
 		usage:        newUsageFetcher(ctx),
 		geminiAPIKey: cfg.GeminiAPIKey,
 		mdClient:     mdClient,
@@ -308,6 +318,7 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string, cfg *
 func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/server/config", handle(s.getConfig))
+	mux.HandleFunc("GET /api/v1/server/preferences", handle(s.getPreferences))
 	mux.HandleFunc("GET /api/v1/server/harnesses", handle(s.listHarnesses))
 	mux.HandleFunc("GET /api/v1/server/repos", handle(s.listRepos))
 	mux.HandleFunc("GET /api/v1/tasks", handle(s.listTasks))
@@ -381,6 +392,26 @@ func (s *Server) getConfig(_ context.Context, _ *dto.EmptyReq) (*v1.Config, erro
 		TailscaleAvailable: s.mdClient.TailscaleAPIKey != "",
 		USBAvailable:       runtime.GOOS == "linux",
 		DisplayAvailable:   true,
+	}, nil
+}
+
+func (s *Server) getPreferences(_ context.Context, _ *dto.EmptyReq) (*v1.PreferencesResp, error) {
+	prefs := s.prefs.Get()
+	repos := make([]v1.RepoPrefsResp, len(prefs.Repositories))
+	for i, r := range prefs.Repositories {
+		repos[i] = v1.RepoPrefsResp{
+			Path:       r.Path,
+			BaseBranch: r.BaseBranch,
+			Harness:    r.Harness,
+			Model:      r.Model,
+			BaseImage:  r.BaseImage,
+		}
+	}
+	return &v1.PreferencesResp{
+		Repositories: repos,
+		Harness:      prefs.Harness,
+		Models:       prefs.Models,
+		BaseImage:    prefs.BaseImage,
 	}, nil
 }
 
@@ -465,6 +496,17 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		}
 		s.watchSession(entry, runner, h)
 	}()
+
+	if err := s.prefs.Update(func(p *preferences.Preferences) {
+		p.TouchRepo(req.Repo, &preferences.RepoPrefs{
+			BaseBranch: req.BaseBranch,
+			Harness:    string(req.Harness),
+			Model:      req.Model,
+			BaseImage:  req.Image,
+		})
+	}); err != nil {
+		return nil, dto.InternalError("save preferences: " + err.Error())
+	}
 
 	return &v1.CreateTaskResp{Status: "accepted", ID: t.ID}, nil
 }

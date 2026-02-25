@@ -81,6 +81,7 @@ class ApiClient(baseURL: String) {
 
     // JSON endpoints
     suspend fun getConfig(): Config = request("GET", "/api/v1/server/config")
+    suspend fun getPreferences(): PreferencesResp = request("GET", "/api/v1/server/preferences")
     suspend fun listHarnesses(): List<HarnessInfo> = request("GET", "/api/v1/server/harnesses")
     suspend fun listRepos(): List<Repo> = request("GET", "/api/v1/server/repos")
     suspend fun listTasks(): List<Task> = request("GET", "/api/v1/tasks")

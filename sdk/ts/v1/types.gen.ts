@@ -671,6 +671,25 @@ export interface DiffResp {
   diff: string;
 }
 /**
+ * RepoPrefsResp holds per-repository preferences.
+ */
+export interface RepoPrefsResp {
+  path: string;
+  baseBranch?: string;
+  harness?: string;
+  model?: string;
+  baseImage?: string;
+}
+/**
+ * PreferencesResp is the response for GET /api/v1/server/preferences.
+ */
+export interface PreferencesResp {
+  repositories: RepoPrefsResp[];
+  harness?: string;
+  models?: { [key: string]: string};
+  baseImage?: string;
+}
+/**
  * EmptyReq is used for endpoints that take no request body.
  */
 export type EmptyReq = any /* dto.EmptyReq */;

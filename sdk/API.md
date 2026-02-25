@@ -9,6 +9,7 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | Method | Path | Request | Response |
 |--------|------|---------|----------|
 | GET | `/api/v1/server/config` |  | `Config` |
+| GET | `/api/v1/server/preferences` |  | `PreferencesResp` |
 | GET | `/api/v1/server/harnesses` |  | `HarnessInfo[]` |
 | GET | `/api/v1/server/repos` |  | `Repo[]` |
 | GET | `/api/v1/server/tasks/events` |  | `Task[]` SSE |
@@ -67,6 +68,25 @@ All errors return:
 | `tailscaleAvailable` | `boolean` | yes |
 | `usbAvailable` | `boolean` | yes |
 | `displayAvailable` | `boolean` | yes |
+
+### RepoPrefsResp
+
+| Field | Type | Required |
+|-------|------|----------|
+| `path` | `string` | yes |
+| `baseBranch` | `string` |  |
+| `harness` | `string` |  |
+| `model` | `string` |  |
+| `baseImage` | `string` |  |
+
+### PreferencesResp
+
+| Field | Type | Required |
+|-------|------|----------|
+| `repositories` | `RepoPrefsResp[]` | yes |
+| `harness` | `string` |  |
+| `models` | `Record<string, unknown>` |  |
+| `baseImage` | `string` |  |
 
 ### HarnessInfo
 

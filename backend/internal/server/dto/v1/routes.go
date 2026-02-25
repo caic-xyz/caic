@@ -49,6 +49,7 @@ func (r *Route) CategoryName() string {
 // tool reads this slice to generate the typed TypeScript and Kotlin clients.
 var Routes = []Route{
 	{Name: "getConfig", Method: "GET", Path: "/api/v1/server/config", Resp: reflect.TypeFor[Config]()},
+	{Name: "getPreferences", Method: "GET", Path: "/api/v1/server/preferences", Resp: reflect.TypeFor[PreferencesResp]()},
 	{Name: "listHarnesses", Method: "GET", Path: "/api/v1/server/harnesses", Resp: reflect.TypeFor[HarnessInfo](), IsArray: true},
 	{Name: "listRepos", Method: "GET", Path: "/api/v1/server/repos", Resp: reflect.TypeFor[Repo](), IsArray: true},
 	{Name: "listTasks", Method: "GET", Path: "/api/v1/tasks", Resp: reflect.TypeFor[Task](), IsArray: true},
