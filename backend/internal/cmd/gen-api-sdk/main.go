@@ -265,6 +265,10 @@ func discoverKotlinStructs() []kotlinStruct {
 			walk(t.Elem())
 			return
 		}
+		if t.Kind() == reflect.Map {
+			walk(t.Elem())
+			return
+		}
 		if t.Kind() != reflect.Struct || !isSDKPkg(t.PkgPath()) {
 			return
 		}
@@ -361,6 +365,8 @@ func goTypeToKotlin(t reflect.Type) string {
 		return "Boolean"
 	case reflect.Slice:
 		return "List<" + goTypeToKotlin(t.Elem()) + ">"
+	case reflect.Map:
+		return "Map<" + goTypeToKotlin(t.Key()) + ", " + goTypeToKotlin(t.Elem()) + ">"
 	case reflect.Struct:
 		return t.Name()
 	default:
@@ -889,6 +895,10 @@ func discoverDocTypes() []reflect.Type {
 			t = t.Elem()
 		}
 		if t.Kind() == reflect.Slice {
+			walk(t.Elem())
+			return
+		}
+		if t.Kind() == reflect.Map {
 			walk(t.Elem())
 			return
 		}

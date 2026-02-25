@@ -59,7 +59,7 @@ data class RepoPrefsResp(
 data class PreferencesResp(
     val repositories: List<RepoPrefsResp>,
     val harness: String? = null,
-    val models: ? = null,
+    val models: Map<String, String>? = null,
     val baseImage: String? = null,
 )
 
