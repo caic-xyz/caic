@@ -100,7 +100,7 @@ type ContentBlock struct {
 // (typically single-digit). The bulk of the input context lands in cache
 // fields.
 //
-// In ResultMessage these values are per-query (one API round-trip).
+// In ResultMessage these values are per-query (sum of all API calls in the turn).
 // Task.liveUsage sums them across all queries for cumulative totals.
 type Usage struct {
 	InputTokens              int    `json:"input_tokens"`

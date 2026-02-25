@@ -99,7 +99,7 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
             {props.harness && props.harness !== "claude" ? props.harness + " · " : ""}{props.agentVersion}{props.agentVersion && props.model ? " · " : ""}{props.model}
             <Show when={props.activeInputTokens + props.activeCacheReadTokens > 0}>
               {" · "}
-              <Tooltip text={`Accumulated: ${formatTokens(props.cumulativeInputTokens + props.cumulativeCacheCreationInputTokens + props.cumulativeCacheReadInputTokens)} in + ${formatTokens(props.cumulativeOutputTokens)} out`}>
+              <Tooltip text={`Accumulated: ${formatTokens(props.cumulativeCacheReadInputTokens)} cached + ${formatTokens(props.cumulativeInputTokens + props.cumulativeCacheCreationInputTokens)} in + ${formatTokens(props.cumulativeOutputTokens)} out`}>
                 <span style={{ color: tokenColor(props.activeInputTokens + props.activeCacheReadTokens, props.contextWindowLimit) }}>
                   {formatTokens(props.activeInputTokens + props.activeCacheReadTokens)}/{formatTokens(props.contextWindowLimit)}
                 </span>

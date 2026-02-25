@@ -123,8 +123,12 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}
                 task.model?.let { MetaText(it) }
                 val tokenCount = task.activeInputTokens + task.activeCacheReadTokens
                 if (tokenCount > 0) {
+                    val cachedIn = task.cumulativeCacheReadInputTokens
+                    val inputIn = task.cumulativeInputTokens + task.cumulativeCacheCreationInputTokens
+                    val output = task.cumulativeOutputTokens
                     Text(
-                        text = "${formatTokens(tokenCount)}/${formatTokens(task.contextWindowLimit)}",
+                        text = "${formatTokens(tokenCount)}/${formatTokens(task.contextWindowLimit)}" +
+                            " (${formatTokens(cachedIn)} cached + ${formatTokens(inputIn)} in + ${formatTokens(output)} out)",
                         style = MaterialTheme.typography.labelSmall,
                         color = tokenColor(tokenCount, task.contextWindowLimit),
                     )

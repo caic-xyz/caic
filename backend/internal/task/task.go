@@ -117,6 +117,7 @@ type Task struct {
 	liveDuration   time.Duration
 	liveUsage      agent.Usage
 	lastUsage      agent.Usage    // Most recent ResultMessage usage (active context).
+	lastAPIUsage   agent.Usage    // Most recent per-API-call usage from AssistantMessage (context window fill).
 	liveDiffStat   agent.DiffStat // Updated by DiffStatMessage from relay.
 }
 
@@ -234,6 +235,7 @@ type Snapshot struct {
 	Duration       time.Duration
 	Usage          agent.Usage
 	LastUsage      agent.Usage
+	LastAPIUsage   agent.Usage
 	DiffStat       agent.DiffStat
 }
 
@@ -260,6 +262,7 @@ func (t *Task) Snapshot() Snapshot {
 		Duration:       t.liveDuration,
 		Usage:          t.liveUsage,
 		LastUsage:      t.lastUsage,
+		LastAPIUsage:   t.lastAPIUsage,
 		DiffStat:       t.liveDiffStat,
 	}
 }
@@ -309,6 +312,9 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 		}
 		if am, ok := m.(*agent.AssistantMessage); ok {
 			t.trackPlanState(am)
+			if u := am.Message.Usage; u.InputTokens+u.CacheCreationInputTokens+u.CacheReadInputTokens > 0 {
+				t.lastAPIUsage = u
+			}
 		}
 	}
 	// Restore live diff stat from the last DiffStatMessage or ResultMessage,
@@ -371,6 +377,9 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message) {
 	// Capture plan file path from Write tool_use targeting .claude/plans/.
 	if am, ok := m.(*agent.AssistantMessage); ok {
 		t.trackPlanState(am)
+		if u := am.Message.Usage; u.InputTokens+u.CacheCreationInputTokens+u.CacheReadInputTokens > 0 {
+			t.lastAPIUsage = u
+		}
 		// Transition to running when the agent starts producing output
 		// while the task is in a waiting state. This covers the case where
 		// the server restarts and RestoreMessages inferred StateWaiting

@@ -1520,9 +1520,9 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 	j.CumulativeOutputTokens = snap.Usage.OutputTokens
 	j.CumulativeCacheCreationInputTokens = snap.Usage.CacheCreationInputTokens
 	j.CumulativeCacheReadInputTokens = snap.Usage.CacheReadInputTokens
-	// Active input tokens includes ephemeral input + cache creation (anything sent over wire).
-	j.ActiveInputTokens = snap.LastUsage.InputTokens + snap.LastUsage.CacheCreationInputTokens
-	j.ActiveCacheReadTokens = snap.LastUsage.CacheReadInputTokens
+	// Active tokens = last API call's context window fill (not the per-query sum).
+	j.ActiveInputTokens = snap.LastAPIUsage.InputTokens + snap.LastAPIUsage.CacheCreationInputTokens
+	j.ActiveCacheReadTokens = snap.LastAPIUsage.CacheReadInputTokens
 	if r := s.runners[e.task.Repo]; r != nil {
 		if b := r.Backends[e.task.Harness]; b != nil {
 			j.ContextWindowLimit = b.ContextWindowLimit(snap.Model)
