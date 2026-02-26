@@ -2,7 +2,7 @@
 import { createEffect, createSignal, For, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData } from "@sdk/types.gen";
-import { getConfig, listHarnesses, listRepos, listTasks, createTask, getUsage } from "@sdk/api.gen";
+import { getConfig, getPreferences, listHarnesses, listRepos, listTasks, createTask, getUsage } from "@sdk/api.gen";
 import TaskView from "./TaskView";
 import TaskList from "./TaskList";
 import PromptInput from "./PromptInput";
@@ -14,46 +14,6 @@ import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import TailscaleIcon from "./tailscale.svg?solid";
 import styles from "./App.module.css";
-
-const RECENT_REPOS_KEY = "caic:recentRepos";
-const MAX_RECENT_REPOS = 5;
-const LAST_MODEL_KEY = "caic:lastModel";
-
-function getLastModels(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem(LAST_MODEL_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, string>)
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveLastModel(harness: string, model: string): void {
-  const map = getLastModels();
-  if (model) map[harness] = model;
-  else delete map[harness];
-  localStorage.setItem(LAST_MODEL_KEY, JSON.stringify(map));
-}
-
-function getRecentRepos(): string[] {
-  try {
-    const raw = localStorage.getItem(RECENT_REPOS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function addRecentRepo(path: string): void {
-  const list = [path, ...getRecentRepos().filter((r) => r !== path)].slice(0, MAX_RECENT_REPOS);
-  localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(list));
-}
 
 /** Max slug length in the URL (characters after the "+"). */
 const MAX_SLUG = 80;
@@ -95,7 +55,7 @@ export default function App() {
   const [selectedModel, setSelectedModel] = createSignal("");
   const [selectedImage, setSelectedImage] = createSignal("");
   const [harnesses, setHarnesses] = createSignal<HarnessInfo[]>([]);
-  const [selectedHarness, setSelectedHarness] = createSignal("claude");
+  const [selectedHarness, setSelectedHarness] = createSignal("");
   const [sidebarOpen, setSidebarOpen] = createSignal(true);
   const [usage, setUsage] = createSignal<UsageResp | null>(null);
   const [tailscaleAvailable, setTailscaleAvailable] = createSignal(false);
@@ -190,10 +150,17 @@ export default function App() {
     }
   });
 
+  // In-memory per-harness model preferences from the server.
+  let prefModels: Record<string, string> = {};
+
   onMount(async () => {
     requestNotificationPermission();
-    const data = await listRepos();
-    const recentPaths = getRecentRepos();
+    const [data, prefs, h] = await Promise.all([
+      listRepos(),
+      getPreferences().catch(() => null),
+      listHarnesses().catch(() => [] as HarnessInfo[]),
+    ]);
+    const recentPaths = prefs?.repositories.map((r) => r.path) ?? [];
     const recentSet = new Set(recentPaths);
     const recentRepos = recentPaths.reduce<Repo[]>((acc, r) => {
       const repo = data.find((d) => d.path === r);
@@ -205,23 +172,22 @@ export default function App() {
     setRepos(ordered);
     setRecentCount(recentRepos.length);
     if (ordered.length > 0) {
-      const last = localStorage.getItem("caic:lastRepo");
-      const match = last && ordered.find((r) => r.path === last);
-      setSelectedRepo(match ? match.path : ordered[0].path);
+      const first = recentRepos[0]?.path ?? ordered[0].path;
+      setSelectedRepo(first);
     }
     {
-      const current = selectedHarness();
-      listHarnesses().then((h) => {
-        setHarnesses(h);
-        // If the default harness isn't in the list (e.g. fake mode), select the first.
-        const harness = h.length > 0 && !h.find((x) => x.name === current) ? h[0].name : current;
-        if (harness !== current) setSelectedHarness(harness);
-        // Restore the last selected model for this harness.
-        const models = h.find((x) => x.name === harness)?.models ?? [];
-        const lastModel = getLastModels()[harness];
-        if (lastModel && models.includes(lastModel)) setSelectedModel(lastModel);
-      }).catch(() => {});
+      setHarnesses(h);
+      prefModels = prefs?.models ?? {};
+      const prefHarness = prefs?.harness ?? "";
+      const harness = prefHarness && h.find((x) => x.name === prefHarness)
+        ? prefHarness
+        : h[0]?.name ?? "";
+      setSelectedHarness(harness);
+      const models = h.find((x) => x.name === harness)?.models ?? [];
+      const lastModel = prefModels[harness];
+      if (lastModel && models.includes(lastModel)) setSelectedModel(lastModel);
     }
+    if (prefs?.baseImage) setSelectedImage(prefs.baseImage);
     getConfig().then((c) => {
       setTailscaleAvailable(c.tailscaleAvailable);
       setUSBAvailable(c.usbAvailable);
@@ -332,20 +298,15 @@ export default function App() {
     const repo = selectedRepo();
     if ((!p && imgs.length === 0) || !repo) return;
     setSubmitting(true);
-    localStorage.setItem("caic:lastRepo", repo);
-    addRecentRepo(repo);
     {
-      const recent = getRecentRepos();
-      const recentSet = new Set(recent);
+      // Optimistic reorder: move the selected repo to the front.
       const current = repos();
-      const recentRepos = recent.reduce<Repo[]>((acc, r) => {
-        const found = current.find((d) => d.path === r);
-        if (found) acc.push(found);
-        return acc;
-      }, []);
-      const rest = current.filter((d) => !recentSet.has(d.path));
-      setRepos([...recentRepos, ...rest]);
-      setRecentCount(recentRepos.length);
+      const idx = current.findIndex((r) => r.path === repo);
+      if (idx > 0) {
+        const updated = [current[idx], ...current.slice(0, idx), ...current.slice(idx + 1)];
+        setRepos(updated);
+      }
+      setRecentCount(Math.min(recentCount() + (idx > recentCount() - 1 ? 1 : 0), current.length));
     }
     try {
       const model = selectedModel();
@@ -354,7 +315,9 @@ export default function App() {
       const ts = tailscaleEnabled();
       const usb = usbEnabled();
       const disp = displayEnabled();
-      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repo, harness: selectedHarness(), ...(branch ? { baseBranch: branch } : {}), ...(model ? { model } : {}), ...(image ? { image } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}) });
+      const harness = selectedHarness();
+      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repo, harness, ...(branch ? { baseBranch: branch } : {}), ...(model ? { model } : {}), ...(image ? { image } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}) });
+      if (model) prefModels[harness] = model;
       setPrompt("");
       setPendingImages([]);
       setSelectedBranch("");
@@ -418,7 +381,7 @@ export default function App() {
               const h = e.currentTarget.value;
               setSelectedHarness(h);
               const models = harnesses().find((x) => x.name === h)?.models ?? [];
-              const lastModel = getLastModels()[h];
+              const lastModel = prefModels[h];
               setSelectedModel(lastModel && models.includes(lastModel) ? lastModel : "");
             }}
             disabled={submitting()}
@@ -435,7 +398,8 @@ export default function App() {
             onChange={(e) => {
               const m = e.currentTarget.value;
               setSelectedModel(m);
-              saveLastModel(selectedHarness(), m);
+              if (m) prefModels[selectedHarness()] = m;
+              else delete prefModels[selectedHarness()];
             }}
             disabled={submitting()}
             class={styles.modelSelect}

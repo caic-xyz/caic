@@ -51,7 +51,8 @@ class VoiceViewModel @Inject constructor(
                         val active = tasks.filter { it.id !in preTerminatedIds }
                         taskNumberMap.reset()
                         taskNumberMap.update(active)
-                        val recentRepo = settingsRepository.settings.value.recentRepos.firstOrNull()
+                        val prefs = settingsRepository.serverPreferences.value
+                        val recentRepo = prefs?.repositories?.firstOrNull()?.path
                         voiceSessionManager.injectText(buildSnapshot(active, recentRepo))
                         previousTaskStates = tasks.associate { it.id to it.state }
                     }

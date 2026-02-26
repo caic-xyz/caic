@@ -100,15 +100,21 @@ class TaskListViewModel @Inject constructor(
                 val repos = client.listRepos()
                 val harnesses = client.listHarnesses()
                 val config = client.getConfig()
-                val recent = settingsRepository.settings.value.recentRepos
-                val recentSet = recent.toSet()
-                val recentRepos = recent.mapNotNull { r -> repos.find { it.path == r } }
+                val prefs = try {
+                    client.getPreferences().also { settingsRepository.updateServerPreferences(it) }
+                } catch (_: Exception) { null }
+                val recentPaths = prefs?.repositories?.map { it.path }.orEmpty()
+                val recentSet = recentPaths.toSet()
+                val recentRepos = recentPaths.mapNotNull { r -> repos.find { it.path == r } }
                 val restRepos = repos.filter { it.path !in recentSet }
                 val ordered = recentRepos + restRepos
-                val selectedHarness = _formState.value.selectedHarness
-                    .ifBlank { harnesses.firstOrNull()?.name ?: "" }
-                val lastModels = settingsRepository.settings.value.lastModels
-                val lastModel = lastModels[selectedHarness] ?: ""
+                val prefModels = prefs?.models.orEmpty()
+                val prefHarness = prefs?.harness ?: ""
+                val selectedHarness = if (prefHarness.isNotBlank() && harnesses.any { it.name == prefHarness })
+                    prefHarness
+                else
+                    harnesses.firstOrNull()?.name ?: ""
+                val lastModel = prefModels[selectedHarness] ?: ""
                 val harnessModels = harnesses.find { it.name == selectedHarness }?.models.orEmpty()
                 _formState.value = _formState.value.copy(
                     repos = ordered,
@@ -118,6 +124,7 @@ class TaskListViewModel @Inject constructor(
                     selectedRepo = ordered.firstOrNull()?.path ?: "",
                     selectedHarness = selectedHarness,
                     selectedModel = if (lastModel in harnessModels) lastModel else "",
+                    prefModels = prefModels,
                 )
             } catch (_: Exception) {
                 // Form data will remain empty; user can still see tasks.
@@ -134,8 +141,7 @@ class TaskListViewModel @Inject constructor(
     }
 
     fun selectHarness(harness: String) {
-        val lastModels = settingsRepository.settings.value.lastModels
-        val lastModel = lastModels[harness] ?: ""
+        val lastModel = _formState.value.prefModels[harness] ?: ""
         val harnessModels = _formState.value.harnesses.find { it.name == harness }?.models.orEmpty()
         val model = if (lastModel in harnessModels) lastModel else ""
         _formState.value = _formState.value.copy(selectedHarness = harness, selectedModel = model)
@@ -143,10 +149,11 @@ class TaskListViewModel @Inject constructor(
 
     fun selectModel(model: String) {
         val harness = _formState.value.selectedHarness
-        _formState.value = _formState.value.copy(selectedModel = model)
-        viewModelScope.launch {
-            settingsRepository.updateLastModel(harness, model)
-        }
+        val updated = if (model.isBlank())
+            _formState.value.prefModels - harness
+        else
+            _formState.value.prefModels + (harness to model)
+        _formState.value = _formState.value.copy(selectedModel = model, prefModels = updated)
     }
 
     fun updateBaseBranch(branch: String) {
@@ -187,19 +194,32 @@ class TaskListViewModel @Inject constructor(
                         model = form.selectedModel.ifBlank { null },
                     )
                 )
-                settingsRepository.addRecentRepo(form.selectedRepo)
+                // Optimistic reorder: move the selected repo to the front.
                 val current = _formState.value
-                val recent = settingsRepository.settings.value.recentRepos
-                val recentSet = recent.toSet()
-                val recentRepos = recent.mapNotNull { r -> current.repos.find { it.path == r } }
-                val restRepos = current.repos.filter { it.path !in recentSet }
+                val idx = current.repos.indexOfFirst { it.path == form.selectedRepo }
+                val reorderedRepos = if (idx > 0) {
+                    val before = current.repos.subList(0, idx)
+                    val after = current.repos.subList(idx + 1, current.repos.size)
+                    listOf(current.repos[idx]) + before + after
+                } else {
+                    current.repos
+                }
+                val newRecentCount = if (idx > current.recentRepoCount - 1)
+                    (current.recentRepoCount + 1).coerceAtMost(current.repos.size)
+                else
+                    current.recentRepoCount
+                val updatedModels = if (form.selectedModel.isNotBlank())
+                    current.prefModels + (form.selectedHarness to form.selectedModel)
+                else
+                    current.prefModels
                 _formState.value = current.copy(
                     prompt = "",
                     baseBranch = "",
                     submitting = false,
-                    repos = recentRepos + restRepos,
-                    recentRepoCount = recentRepos.size,
+                    repos = reorderedRepos,
+                    recentRepoCount = newRecentCount,
                     pendingImages = emptyList(),
+                    prefModels = updatedModels,
                 )
             } catch (e: Exception) {
                 _formState.value = _formState.value.copy(
@@ -223,5 +243,6 @@ class TaskListViewModel @Inject constructor(
         val submitting: Boolean = false,
         val error: String? = null,
         val pendingImages: List<ImageData> = emptyList(),
+        val prefModels: Map<String, String> = emptyMap(),
     )
 }
