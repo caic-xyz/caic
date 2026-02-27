@@ -23,15 +23,18 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberTooltipState
@@ -137,10 +140,32 @@ fun InputBar(
             if (pendingAction == "terminate") {
                 CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(8.dp))
             } else {
+                var showTerminateConfirm by remember { mutableStateOf(false) }
                 Tip("Terminate") {
-                    IconButton(onClick = onTerminate, enabled = !busy) {
-                        Icon(Icons.Default.Delete, contentDescription = "Terminate")
+                    IconButton(onClick = { showTerminateConfirm = true }, enabled = !busy) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Terminate",
+                            tint = MaterialTheme.colorScheme.error,
+                        )
                     }
+                }
+                if (showTerminateConfirm) {
+                    AlertDialog(
+                        onDismissRequest = { showTerminateConfirm = false },
+                        title = { Text("Terminate container?") },
+                        text = { Text("This will stop the running task and destroy its container.") },
+                        confirmButton = {
+                            TextButton(onClick = { showTerminateConfirm = false; onTerminate() }) {
+                                Text("Terminate")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showTerminateConfirm = false }) {
+                                Text("Cancel")
+                            }
+                        },
+                    )
                 }
             }
         }

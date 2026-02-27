@@ -3,7 +3,6 @@ import { Show } from "solid-js";
 import type { Accessor } from "solid-js";
 import type { DiffStat } from "@sdk/types.gen";
 import Tooltip from "./Tooltip";
-import Button from "./Button";
 import TailscaleIcon from "./tailscale.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
@@ -71,9 +70,17 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
           </Show>
           <Show when={props.onTerminate && props.state !== "terminated" && props.state !== "failed"}>
             <span class={styles.terminateBtn} onClick={(e) => e.stopPropagation()}>
-              <Button variant="red" loading={props.terminateLoading} disabled={props.terminateLoading || props.state === "terminating"} onClick={() => props.onTerminate?.()} title="Terminate" data-testid="terminate-task">
-                <DeleteIcon width="0.85rem" height="0.85rem" />
-              </Button>
+              <button
+                class={styles.terminateIcon}
+                disabled={props.terminateLoading || props.state === "terminating"}
+                onClick={() => { if (window.confirm("Terminate this container?")) props.onTerminate?.(); }}
+                title="Terminate"
+                data-testid="terminate-task"
+              >
+                <Show when={props.terminateLoading} fallback={<DeleteIcon width="0.85rem" height="0.85rem" />}>
+                  <span class={styles.terminateSpinner} />
+                </Show>
+              </button>
             </span>
           </Show>
           <Show when={props.inPlanMode}>

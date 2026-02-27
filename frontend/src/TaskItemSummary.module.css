@@ -137,10 +137,39 @@
   transition: opacity 0.15s;
 }
 
-.terminateBtn button {
-  padding: 0.1rem 0.25rem;
-  min-height: 0;
+.terminateIcon {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #dc3545;
+  fill: currentColor;
+  cursor: pointer;
+  padding: 0.1rem;
   line-height: 1;
+}
+
+.terminateIcon:hover:not(:disabled) {
+  color: #a71d2a;
+}
+
+.terminateIcon:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.terminateSpinner {
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  border: 2px solid rgba(220, 53, 69, 0.3);
+  border-top-color: #dc3545;
+  border-radius: 50%;
+  animation: terminate-spin 0.6s linear infinite;
+}
+
+@keyframes terminate-spin {
+  to { transform: rotate(360deg); }
 }
 
 .card:hover .terminateBtn {
