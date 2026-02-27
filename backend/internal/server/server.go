@@ -1355,6 +1355,14 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		}
 	}
 
+	// Compute the host-side branch diff stat (md diff --numstat). The
+	// relay's diff_watcher may track only uncommitted changes (old relay
+	// code uses git diff HEAD which becomes empty after the agent
+	// commits). The host-side diff captures the full branch diff.
+	if ds := runner.BranchDiffStat(ctx, branch); len(ds) > 0 {
+		t.SetLiveDiffStat(ds)
+	}
+
 	entry := &taskEntry{task: t, done: make(chan struct{})}
 
 	s.mu.Lock()
@@ -1393,6 +1401,14 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 				return
 			}
 			slog.Info("auto-reconnect succeeded", "repo", t.Repo, "branch", t.Branch, "container", t.Container, "strategy", strategy)
+			// Recompute host-side diff stat after reconnect. Reconnect
+			// replays relay messages which may include stale
+			// DiffStatMessages (old relay code diffs against HEAD, not
+			// base) that overwrite the diff stat set above.
+			if ds := runner.BranchDiffStat(ctx, t.Branch); len(ds) > 0 {
+				t.SetLiveDiffStat(ds)
+			}
+			s.notifyTaskChange()
 			s.watchSession(entry, runner, h)
 		}()
 	} else if !relayAlive {

@@ -210,6 +210,16 @@ func (t *Task) LiveDiffStat() agent.DiffStat {
 	return t.liveDiffStat
 }
 
+// SetLiveDiffStat overwrites the live diff stat. Used by adoptOne to set
+// the host-side branch diff after RestoreMessages, because the relay's
+// diff_watcher only tracks uncommitted changes (git diff HEAD) which
+// becomes empty after the agent commits.
+func (t *Task) SetLiveDiffStat(ds agent.DiffStat) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.liveDiffStat = ds
+}
+
 // Title returns the task title under the mutex.
 func (t *Task) Title() string {
 	t.mu.Lock()

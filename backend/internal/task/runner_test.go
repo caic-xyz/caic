@@ -759,6 +759,18 @@ func TestRunner(t *testing.T) {
 			t.Error("log file does not contain context_cleared marker")
 		}
 	})
+
+	t.Run("BranchDiffStat", func(t *testing.T) {
+		sc := &stubContainer{}
+		r := &Runner{Container: sc, Dir: "/repo"}
+		ds := r.BranchDiffStat(t.Context(), "feature")
+		if !sc.fetched {
+			t.Error("BranchDiffStat did not call Fetch")
+		}
+		if len(ds) != 1 || ds[0].Path != "main.go" || ds[0].Added != 5 || ds[0].Deleted != 1 {
+			t.Errorf("BranchDiffStat = %+v, want [{main.go +5 -1}]", ds)
+		}
+	})
 }
 
 // stubContainer implements ContainerBackend for testing. Diff returns a fixed

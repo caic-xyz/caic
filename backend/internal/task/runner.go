@@ -736,6 +736,26 @@ func (r *Runner) fetchDiffStat(ctx context.Context, t *Task) {
 	})
 }
 
+// BranchDiffStat fetches from the container and returns the host-side branch
+// diff stat (md diff --numstat). Unlike the relay's diff_watcher which only
+// tracks uncommitted changes, this captures the full branch diff relative to
+// the base. Used by adoptOne to restore the diff stat after server restart.
+func (r *Runner) BranchDiffStat(ctx context.Context, branch string) agent.DiffStat {
+	r.initDefaults()
+	if r.Container == nil {
+		return nil
+	}
+	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
+	defer cancel()
+	r.branchMu.Lock()
+	defer r.branchMu.Unlock()
+	if err := r.Container.Fetch(fetchCtx, r.Dir, branch); err != nil {
+		slog.Warn("fetch for branch diff stat failed", "branch", branch, "err", err)
+		return nil
+	}
+	return r.diffStat(fetchCtx, branch)
+}
+
 // diffStat runs Diff("--numstat") and parses the output.
 func (r *Runner) diffStat(ctx context.Context, branch string) agent.DiffStat {
 	numstat, err := r.Container.Diff(ctx, r.Dir, branch, "--numstat")

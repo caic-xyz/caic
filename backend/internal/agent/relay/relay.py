@@ -235,6 +235,11 @@ def serve(cmd_args, work_dir, log_stdin=True):
     # Thread: run git diff --numstat on activity, with throttle + debounce.
     # Uses a temporary index to include untracked files without mutating
     # the real index (which the agent may be using concurrently).
+    #
+    # Diffs against "base" (the merge-base ref set by md start), not HEAD.
+    # HEAD only shows uncommitted changes, which becomes empty after the
+    # agent commits. "base" captures the full branch diff — committed and
+    # uncommitted — relative to the original branch point.
     DIFF_THROTTLE = 10  # minimum seconds between diff runs
     DIFF_DEBOUNCE = 2  # seconds of quiet before running diff
 
@@ -243,6 +248,20 @@ def serve(cmd_args, work_dir, log_stdin=True):
         diff_env = {**os.environ, "GIT_INDEX_FILE": tmp_index}
         prev_raw = None
         last_run = 0.0
+        # Check if the "base" ref exists; fall back to HEAD if it doesn't
+        # (e.g. container created outside of md).
+        diff_ref = "base"
+        try:
+            cp = subprocess.run(
+                ["git", "rev-parse", "--verify", "base"],
+                cwd=work_dir,
+                capture_output=True,
+                timeout=5,
+            )
+            if cp.returncode != 0:
+                diff_ref = "HEAD"
+        except (subprocess.TimeoutExpired, OSError):
+            diff_ref = "HEAD"
         while proc.poll() is None:
             # Wait for activity signal.
             if not diff_activity.wait(timeout=30):
@@ -270,7 +289,7 @@ def serve(cmd_args, work_dir, log_stdin=True):
             last_run = time.monotonic()
             try:
                 subprocess.run(
-                    ["git", "read-tree", "HEAD"],
+                    ["git", "read-tree", diff_ref],
                     cwd=work_dir,
                     env=diff_env,
                     capture_output=True,
@@ -284,7 +303,7 @@ def serve(cmd_args, work_dir, log_stdin=True):
                     timeout=5,
                 )
                 cp = subprocess.run(
-                    ["git", "diff", "--numstat", "HEAD"],
+                    ["git", "diff", "--numstat", diff_ref],
                     cwd=work_dir,
                     env=diff_env,
                     capture_output=True,

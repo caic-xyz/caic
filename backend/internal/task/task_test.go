@@ -488,6 +488,43 @@ func TestTask(t *testing.T) {
 				t.Errorf("LiveDiffStat = %+v, want relay.go", got)
 			}
 		})
+
+		// Regression: the relay's diff_watcher computes git diff HEAD
+		// (uncommitted changes). After the agent commits, this is empty.
+		// The ResultMessage.DiffStat (host-side branch diff) is set
+		// in-memory by startMessageDispatch and NOT persisted to the
+		// relay output, so RestoreMessages only sees the empty relay
+		// diff. Callers (adoptOne) must compute the host-side diff stat
+		// separately after RestoreMessages.
+		t.Run("EmptyRelayDiffAfterCommit", func(t *testing.T) {
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			// Simulate relay output: ResultMessage without DiffStat
+			// (host-side mutation not persisted) followed by an empty
+			// DiffStatMessage (relay sees no uncommitted changes).
+			tk.RestoreMessages([]agent.Message{
+				&agent.DiffStatMessage{
+					MessageType: "caic_diff_stat",
+					DiffStat:    agent.DiffStat{{Path: "main.go", Added: 10, Deleted: 2}},
+				},
+				&agent.ResultMessage{MessageType: "result"},
+				&agent.DiffStatMessage{
+					MessageType: "caic_diff_stat",
+					DiffStat:    agent.DiffStat{},
+				},
+			})
+			got := tk.LiveDiffStat()
+			if len(got) != 0 {
+				t.Fatalf("LiveDiffStat = %+v, want empty (relay reported no uncommitted changes)", got)
+			}
+			// After adoption, the caller should compute the host-side
+			// diff stat and set it.
+			tk.SetLiveDiffStat(agent.DiffStat{{Path: "main.go", Added: 10, Deleted: 2}})
+			got = tk.LiveDiffStat()
+			if len(got) != 1 || got[0].Path != "main.go" {
+				t.Errorf("LiveDiffStat after set = %+v, want main.go", got)
+			}
+		})
 	})
 
 	t.Run("LiveUsageCumulative", func(t *testing.T) {
