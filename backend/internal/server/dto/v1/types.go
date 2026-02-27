@@ -216,5 +216,12 @@ type PreferencesResp struct {
 	BaseImage    string            `json:"baseImage,omitempty"`
 }
 
+// CloneRepoReq is the request body for POST /api/v1/server/repos.
+type CloneRepoReq struct {
+	URL   string `json:"url"`            // Git clone URL (HTTPS or SSH).
+	Path  string `json:"path,omitempty"` // Target subdirectory under rootDir; defaults to repo basename.
+	Depth int    `json:"depth,omitempty"`
+}
+
 // EmptyReq is used for endpoints that take no request body.
 type EmptyReq = dto.EmptyReq

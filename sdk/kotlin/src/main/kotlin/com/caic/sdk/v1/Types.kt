@@ -78,6 +78,13 @@ data class Repo(
 )
 
 @Serializable
+data class CloneRepoReq(
+    val url: String,
+    val path: String? = null,
+    val depth: Int? = null,
+)
+
+@Serializable
 data class DiffFileStat(
     val path: String,
     val added: Int,

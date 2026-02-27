@@ -691,6 +691,14 @@ export interface PreferencesResp {
   baseImage?: string;
 }
 /**
+ * CloneRepoReq is the request body for POST /api/v1/server/repos.
+ */
+export interface CloneRepoReq {
+  url: string; // Git clone URL (HTTPS or SSH).
+  path?: string; // Target subdirectory under rootDir; defaults to repo basename.
+  depth?: number /* int */;
+}
+/**
  * EmptyReq is used for endpoints that take no request body.
  */
 export type EmptyReq = any /* dto.EmptyReq */;

@@ -1,7 +1,13 @@
 // Request validation methods (excluded from tygo generation).
 package v1
 
-import "github.com/caic-xyz/caic/backend/internal/server/dto"
+import (
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"github.com/caic-xyz/caic/backend/internal/server/dto"
+)
 
 // Validate checks that prompt or images are provided.
 func (r *InputReq) Validate() error {
@@ -44,6 +50,44 @@ var allowedImageTypes = map[string]bool{
 	"image/jpeg": true,
 	"image/gif":  true,
 	"image/webp": true,
+}
+
+// pathSegmentRe matches valid path segments: starts with alphanumeric, then alphanumeric, dots, hyphens, or underscores.
+var pathSegmentRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
+// Validate checks that the clone URL is provided and the optional path is safe.
+func (r *CloneRepoReq) Validate() error {
+	if r.URL == "" {
+		return dto.BadRequest("url is required")
+	}
+	if r.Depth < 0 {
+		return dto.BadRequest("depth must be non-negative")
+	}
+	if r.Path != "" {
+		if filepath.IsAbs(r.Path) {
+			return dto.BadRequest("path must be relative")
+		}
+		cleaned := filepath.Clean(r.Path)
+		if cleaned != r.Path {
+			return dto.BadRequest("path must be clean (use filepath.Clean form)")
+		}
+		if strings.Contains(cleaned, "..") {
+			return dto.BadRequest("path must not contain '..' segments")
+		}
+		if len(r.Path) > 255 {
+			return dto.BadRequest("path too long (max 255 characters)")
+		}
+		segments := strings.Split(cleaned, string(filepath.Separator))
+		if len(segments) > 3 {
+			return dto.BadRequest("path too deep (max 3 segments)")
+		}
+		for _, seg := range segments {
+			if !pathSegmentRe.MatchString(seg) {
+				return dto.BadRequest("path segment contains invalid characters: " + seg)
+			}
+		}
+	}
+	return nil
 }
 
 // validateImages checks that each ImageData entry has a valid media type and non-empty data.

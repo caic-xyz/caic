@@ -2,6 +2,7 @@
 package com.fghbuild.caic.voice
 
 import com.caic.sdk.v1.ApiClient
+import com.caic.sdk.v1.CloneRepoReq
 import com.caic.sdk.v1.CreateTaskReq
 import com.caic.sdk.v1.EventKinds
 import com.caic.sdk.v1.InputReq
@@ -40,6 +41,7 @@ class FunctionHandlers(
                 "task_terminate" -> handleTerminateTask(args)
                 "get_usage" -> handleGetUsage()
                 "list_repos" -> handleListRepos()
+                "clone_repo" -> handleCloneRepo(args)
                 "task_get_last_message_from_assistant" -> handleGetLastMessage(args)
                 else -> errorResult("Unknown function: $name")
             }
@@ -199,6 +201,13 @@ class FunctionHandlers(
             "- **${r.path}** (base: ${r.baseBranch})"
         }
         return textResult("## Repositories\n\n$lines")
+    }
+
+    private suspend fun handleCloneRepo(args: JsonObject): JsonElement {
+        val url = args.requireString("url")
+        val path = args.optString("path")
+        val repo = apiClient.cloneRepo(CloneRepoReq(url = url, path = path))
+        return textResult("Cloned **${repo.path}** (base: ${repo.baseBranch}).")
     }
 
     /** Resolve a repo name to its canonical path using case-insensitive matching. */

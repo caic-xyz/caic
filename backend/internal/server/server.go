@@ -13,10 +13,13 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +77,7 @@ type Config struct {
 // Server is the HTTP server for the caic web UI.
 type Server struct {
 	ctx          context.Context // server-lifetime context; outlives individual HTTP requests
+	absRoot      string          // absolute path to the root repos directory
 	repos        []repoInfo
 	runners      map[string]*task.Runner // keyed by RelPath
 	mdClient     *md.Client
@@ -86,6 +90,7 @@ type Server struct {
 	usage        *usageFetcher // nil if no OAuth token available
 	geminiAPIKey string
 	provider     genai.Provider
+	backend      *mdBackend // container backend for runner creation
 }
 
 // mdBackend adapts *md.Client to task.ContainerBackend.
@@ -210,8 +215,11 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string, cfg *
 		return nil, fmt.Errorf("open preferences: %w", err)
 	}
 
+	backend := &mdBackend{client: mdClient, llmProvider: cfg.LLMProvider, llmModel: cfg.LLMModel}
+
 	s := &Server{
 		ctx:          ctx,
+		absRoot:      absRoot,
 		runners:      make(map[string]*task.Runner, len(repoRes.paths)),
 		tasks:        make(map[string]*taskEntry),
 		changed:      make(chan struct{}),
@@ -221,6 +229,7 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string, cfg *
 		usage:        newUsageFetcher(ctx),
 		geminiAPIKey: cfg.GeminiAPIKey,
 		mdClient:     mdClient,
+		backend:      backend,
 	}
 	if cfg.LLMProvider != "" {
 		if c, ok := providers.All[cfg.LLMProvider]; !ok || c.Factory == nil {
@@ -240,8 +249,6 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string, cfg *
 			}
 		}
 	}
-
-	backend := &mdBackend{client: mdClient, llmProvider: cfg.LLMProvider, llmModel: cfg.LLMModel}
 
 	// Phase 2: Runner init (parallel per-repo).
 	type repoResult struct {
@@ -321,6 +328,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	mux.HandleFunc("GET /api/v1/server/preferences", handle(s.getPreferences))
 	mux.HandleFunc("GET /api/v1/server/harnesses", handle(s.listHarnesses))
 	mux.HandleFunc("GET /api/v1/server/repos", handle(s.listRepos))
+	mux.HandleFunc("POST /api/v1/server/repos", handle(s.cloneRepo))
 	mux.HandleFunc("GET /api/v1/tasks", handle(s.listTasks))
 	mux.HandleFunc("POST /api/v1/tasks", handle(s.createTask))
 	mux.HandleFunc("GET /api/v1/tasks/{id}/raw_events", s.handleTaskRawEvents)
@@ -439,6 +447,82 @@ func (s *Server) listRepos(_ context.Context, _ *dto.EmptyReq) (*[]v1.Repo, erro
 		out[i] = v1.Repo{Path: r.RelPath, BaseBranch: r.BaseBranch, RepoURL: r.RepoURL}
 	}
 	return &out, nil
+}
+
+func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo, error) {
+	// Derive target relative path.
+	targetPath := req.Path
+	if targetPath == "" {
+		// Extract basename from URL, stripping .git suffix.
+		base := filepath.Base(req.URL)
+		base = strings.TrimSuffix(base, ".git")
+		if base == "" || base == "." || base == "/" {
+			return nil, dto.BadRequest("cannot derive repo name from URL; specify path explicitly")
+		}
+		targetPath = base
+	}
+
+	absTarget := filepath.Join(s.absRoot, targetPath)
+	// Defense-in-depth: ensure the resolved path is under absRoot.
+	if rel, err := filepath.Rel(s.absRoot, absTarget); err != nil || strings.HasPrefix(rel, "..") {
+		return nil, dto.BadRequest("path escapes root directory")
+	}
+
+	// Check if directory already exists.
+	if _, err := os.Stat(absTarget); err == nil {
+		return nil, dto.Conflict("directory already exists: " + targetPath)
+	}
+
+	// Check if path already registered.
+	if _, ok := s.runners[targetPath]; ok {
+		return nil, dto.Conflict("repo already registered: " + targetPath)
+	}
+
+	// Determine clone depth.
+	depth := req.Depth
+	if depth == 0 {
+		depth = 1
+	}
+
+	// Run git clone with timeout.
+	cloneCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	args := []string{"clone", "--depth", strconv.Itoa(depth), req.URL, absTarget}
+	cmd := exec.CommandContext(cloneCtx, "git", args...) //nolint:gosec // args are validated: depth is an int, URL is user-provided input, absTarget is validated above
+	if out, err := cmd.CombinedOutput(); err != nil {
+		// Clean up partial clone.
+		_ = os.RemoveAll(absTarget)
+		slog.Warn("git clone failed", "url", req.URL, "err", err, "output", string(out))
+		return nil, dto.InternalError("git clone failed: " + err.Error())
+	}
+
+	// Discover repo info.
+	branch, err := gitutil.DefaultBranch(ctx, absTarget, "origin")
+	if err != nil {
+		_ = os.RemoveAll(absTarget)
+		return nil, dto.InternalError("cannot determine default branch: " + err.Error())
+	}
+	repoURL := gitutil.RemoteToHTTPS(gitutil.RemoteOriginURL(ctx, absTarget))
+
+	// Create and init runner.
+	runner := &task.Runner{
+		BaseBranch: branch,
+		Dir:        absTarget,
+		MaxTurns:   s.maxTurns,
+		LogDir:     s.logDir,
+		Container:  s.backend,
+	}
+	if err := runner.Init(ctx); err != nil {
+		_ = os.RemoveAll(absTarget)
+		return nil, dto.InternalError("failed to init runner: " + err.Error())
+	}
+
+	info := repoInfo{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, RepoURL: repoURL}
+	s.repos = append(s.repos, info)
+	s.runners[targetPath] = runner
+	slog.Info("cloned repo", "url", req.URL, "path", targetPath)
+
+	return &v1.Repo{Path: targetPath, BaseBranch: branch, RepoURL: repoURL}, nil
 }
 
 func (s *Server) listTasks(_ context.Context, _ *dto.EmptyReq) (*[]v1.Task, error) {

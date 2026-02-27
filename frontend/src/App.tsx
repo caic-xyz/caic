@@ -2,7 +2,7 @@
 import { createEffect, createSignal, For, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData } from "@sdk/types.gen";
-import { getConfig, getPreferences, listHarnesses, listRepos, listTasks, createTask, getUsage } from "@sdk/api.gen";
+import { getConfig, getPreferences, listHarnesses, listRepos, listTasks, createTask, cloneRepo, getUsage } from "@sdk/api.gen";
 import TaskView from "./TaskView";
 import TaskList from "./TaskList";
 import PromptInput from "./PromptInput";
@@ -13,6 +13,7 @@ import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import TailscaleIcon from "./tailscale.svg?solid";
+import CloneRepoDialog from "./CloneRepoDialog";
 import styles from "./App.module.css";
 
 /** Max slug length in the URL (characters after the "+"). */
@@ -66,6 +67,11 @@ export default function App() {
   const [displayEnabled, setDisplayEnabled] = createSignal(false);
   const [recentCount, setRecentCount] = createSignal(0);
   const [selectedBranch, setSelectedBranch] = createSignal("");
+
+  // Clone repo dialog state.
+  const [cloneOpen, setCloneOpen] = createSignal(false);
+  const [cloning, setCloning] = createSignal(false);
+  const [cloneError, setCloneError] = createSignal("");
 
   // Images attached to the new-task prompt.
   const [pendingImages, setPendingImages] = createSignal<APIImageData[]>([]);
@@ -327,6 +333,22 @@ export default function App() {
     }
   }
 
+  async function submitClone(url: string, path?: string) {
+    setCloning(true);
+    setCloneError("");
+    try {
+      const repo = await cloneRepo({ url, ...(path ? { path } : {}) });
+      setRepos((prev) => [repo, ...prev]);
+      setRecentCount((c) => c + 1);
+      setSelectedRepo(repo.path);
+      setCloneOpen(false);
+    } catch (e: unknown) {
+      setCloneError(e instanceof Error ? e.message : "Clone failed");
+    } finally {
+      setCloning(false);
+    }
+  }
+
   return (
     <div class={styles.app}>
       <div class={`${styles.titleRow} ${selectedId() ? styles.hidden : ""}`}>
@@ -364,6 +386,14 @@ export default function App() {
             </optgroup>
           </Show>
         </select>
+        <button
+          type="button"
+          class={styles.cloneButton}
+          onClick={() => { setCloneOpen(true); setCloneError(""); }}
+          disabled={submitting()}
+          title="Clone a repository"
+          data-testid="clone-toggle"
+        >+</button>
         <input
           type="text"
           value={selectedBranch()}
@@ -469,6 +499,15 @@ export default function App() {
           </Button>
         </PromptInput>
       </form>
+
+      <Show when={cloneOpen()}>
+        <CloneRepoDialog
+          loading={cloning()}
+          error={cloneError()}
+          onClone={submitClone}
+          onClose={() => setCloneOpen(false)}
+        />
+      </Show>
 
       <div class={styles.layout}>
         <TaskList

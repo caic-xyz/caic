@@ -4,6 +4,7 @@ package com.fghbuild.caic.ui.tasklist
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.caic.sdk.v1.ApiClient
+import com.caic.sdk.v1.CloneRepoReq
 import com.caic.sdk.v1.Config
 import com.caic.sdk.v1.CreateTaskReq
 import com.caic.sdk.v1.HarnessInfo
@@ -39,6 +40,7 @@ data class TaskListState(
     val prompt: String = "",
     val recentRepoCount: Int = 0,
     val submitting: Boolean = false,
+    val cloning: Boolean = false,
     val error: String? = null,
     val pendingImages: List<ImageData> = emptyList(),
     val supportsImages: Boolean = false,
@@ -80,6 +82,7 @@ class TaskListViewModel @Inject constructor(
             baseBranch = form.baseBranch,
             prompt = form.prompt,
             submitting = form.submitting,
+            cloning = form.cloning,
             error = form.error,
             pendingImages = form.pendingImages,
             supportsImages = imgSupport,
@@ -173,6 +176,26 @@ class TaskListViewModel @Inject constructor(
     }
 
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
+    fun cloneRepo(url: String, path: String?) {
+        if (url.isBlank()) return
+        _formState.value = _formState.value.copy(cloning = true, error = null)
+        viewModelScope.launch {
+            try {
+                val serverURL = settingsRepository.settings.value.serverURL
+                val client = ApiClient(serverURL)
+                client.cloneRepo(CloneRepoReq(url = url, path = path?.ifBlank { null }))
+                loadFormData()
+                _formState.value = _formState.value.copy(cloning = false)
+            } catch (e: Exception) {
+                _formState.value = _formState.value.copy(
+                    cloning = false,
+                    error = e.message ?: "Failed to clone repository",
+                )
+            }
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
     fun createTask() {
         val form = _formState.value
         val prompt = form.prompt.trim()
@@ -241,6 +264,7 @@ class TaskListViewModel @Inject constructor(
         val baseBranch: String = "",
         val prompt: String = "",
         val submitting: Boolean = false,
+        val cloning: Boolean = false,
         val error: String? = null,
         val pendingImages: List<ImageData> = emptyList(),
         val prefModels: Map<String, String> = emptyMap(),

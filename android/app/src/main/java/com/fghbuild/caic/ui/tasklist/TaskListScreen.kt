@@ -32,7 +32,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
@@ -47,6 +49,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBar
@@ -218,15 +221,39 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
     }
     val hasContent = state.prompt.isNotBlank() || state.pendingImages.isNotEmpty()
 
+    var showCloneDialog by remember { mutableStateOf(false) }
+
+    if (showCloneDialog) {
+        CloneRepoDialog(
+            cloning = state.cloning,
+            onDismiss = { showCloneDialog = false },
+            onClone = { url, path ->
+                viewModel.cloneRepo(url, path)
+                showCloneDialog = false
+            },
+        )
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (state.repos.isNotEmpty()) {
-            DropdownField(
-                label = "Repository",
-                selected = state.selectedRepo,
-                options = state.repos.map { it.path },
-                onSelect = viewModel::selectRepo,
-                dividerAfter = state.recentRepoCount,
-            )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.weight(1f)) {
+                if (state.repos.isNotEmpty()) {
+                    DropdownField(
+                        label = "Repository",
+                        selected = state.selectedRepo,
+                        options = state.repos.map { it.path },
+                        onSelect = viewModel::selectRepo,
+                        dividerAfter = state.recentRepoCount,
+                    )
+                }
+            }
+            IconButton(onClick = { showCloneDialog = true }, enabled = !state.cloning) {
+                if (state.cloning) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                } else {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Clone repository")
+                }
+            }
         }
 
         val defaultBranch = state.repos.find { it.path == state.selectedRepo }?.baseBranch ?: ""
@@ -394,4 +421,53 @@ private fun DropdownField(
             }
         }
     }
+}
+
+@Composable
+private fun CloneRepoDialog(
+    cloning: Boolean,
+    onDismiss: () -> Unit,
+    onClone: (url: String, path: String?) -> Unit,
+) {
+    var url by remember { mutableStateOf("") }
+    var path by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Clone Repository") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text("Repository URL") },
+                    placeholder = { Text("https://github.com/org/repo") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    enabled = !cloning,
+                )
+                OutlinedTextField(
+                    value = path,
+                    onValueChange = { path = it },
+                    label = { Text("Local path (optional)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    enabled = !cloning,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onClone(url.trim(), path.trim().ifBlank { null }) },
+                enabled = url.isNotBlank() && !cloning,
+            ) {
+                Text("Clone")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !cloning) {
+                Text("Cancel")
+            }
+        },
+    )
 }

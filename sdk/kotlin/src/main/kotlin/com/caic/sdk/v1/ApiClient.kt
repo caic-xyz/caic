@@ -84,6 +84,7 @@ class ApiClient(baseURL: String) {
     suspend fun getPreferences(): PreferencesResp = request("GET", "/api/v1/server/preferences")
     suspend fun listHarnesses(): List<HarnessInfo> = request("GET", "/api/v1/server/harnesses")
     suspend fun listRepos(): List<Repo> = request("GET", "/api/v1/server/repos")
+    suspend fun cloneRepo(req: CloneRepoReq): Repo = request("POST", "/api/v1/server/repos", json.encodeToString(req))
     suspend fun listTasks(): List<Task> = request("GET", "/api/v1/tasks")
     suspend fun createTask(req: CreateTaskReq): CreateTaskResp = request("POST", "/api/v1/tasks", json.encodeToString(req))
     suspend fun sendInput(id: String, req: InputReq): StatusResp = request("POST", "/api/v1/tasks/$id/input", json.encodeToString(req))

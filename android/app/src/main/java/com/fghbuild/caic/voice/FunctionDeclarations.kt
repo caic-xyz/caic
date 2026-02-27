@@ -182,6 +182,17 @@ fun buildFunctionDeclarations(harnesses: List<String>): List<FunctionDeclaration
         scheduling = "WHEN_IDLE",
     ),
     FunctionDeclaration(
+        name = "clone_repo",
+        description = "Clone a git repository by URL. Optionally specify a local path.",
+        parameters = objectSchema(
+            "url" to stringProp("The git repository URL to clone"),
+            "path" to stringProp("Local directory name (optional, derived from URL if omitted)"),
+            required = listOf("url"),
+        ),
+        behavior = "BLOCKING",
+        scheduling = "INTERRUPT",
+    ),
+    FunctionDeclaration(
         name = "task_get_last_message_from_assistant",
         description = "Get the last text message or question from a task by its number.",
         parameters = objectSchema(

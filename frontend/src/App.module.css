@@ -80,6 +80,28 @@
   cursor: text;
 }
 
+.cloneButton {
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  border: none;
+  border-radius: 4px;
+  background: #f0f0f0;
+  color: inherit;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.cloneButton:hover:not(:disabled) {
+  background: #e4e4e4;
+}
+
+.cloneButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .repoSelect:hover:not(:disabled),
 .modelSelect:hover:not(:disabled),
 .imageInput:hover:not(:disabled),
