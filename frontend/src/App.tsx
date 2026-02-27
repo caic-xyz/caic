@@ -4,6 +4,7 @@ import { useNavigate, useLocation } from "@solidjs/router";
 import type { HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData } from "@sdk/types.gen";
 import { getConfig, getPreferences, listHarnesses, listRepos, listTasks, createTask, cloneRepo, getUsage, terminateTask } from "@sdk/api.gen";
 import TaskView from "./TaskView";
+import DiffView from "./DiffView";
 import TaskList from "./TaskList";
 import PromptInput from "./PromptInput";
 import Button from "./Button";
@@ -35,13 +36,18 @@ function taskPath(id: string, repo: string, branch: string, query: string): stri
   return `/task/@${id}+${slug}`;
 }
 
-/** Extract the task ID from a /task/@{id}+{slug} pathname, or null. */
+/** Extract the task ID from a /task/@{id}+{slug} or /task/@{id}+{slug}/diff pathname, or null. */
 function taskIdFromPath(pathname: string): string | null {
   const prefix = "/task/@";
   if (!pathname.startsWith(prefix)) return null;
-  const rest = pathname.slice(prefix.length);
+  const rest = pathname.slice(prefix.length).replace(/\/diff$/, "");
   const plus = rest.indexOf("+");
   return plus === -1 ? rest : rest.slice(0, plus);
+}
+
+/** True when the pathname ends with /diff (diff view route). */
+function isDiffPath(pathname: string): boolean {
+  return pathname.startsWith("/task/@") && pathname.endsWith("/diff");
 }
 
 export default function App() {
@@ -543,9 +549,32 @@ export default function App() {
           }}
           onTerminate={handleTerminate}
           terminatingId={terminatingId}
+          onDiffClick={(id) => {
+            const found = tasks().find((t) => t.id === id);
+            if (found?.diffStat?.length) {
+              navigate(taskPath(found.id, found.repo, found.branch, found.title) + "/diff");
+            }
+          }}
         />
 
         <Switch>
+          <Match when={isDiffPath(location.pathname) && selectedId()} keyed>
+            {(id) => {
+              const t = selectedTask();
+              const tp = t ? taskPath(t.id, t.repo, t.branch, t.title) : `/task/@${id}`;
+              return (
+                <div class={styles.detailPane}>
+                  <DiffView
+                    taskId={id}
+                    diffStat={t?.diffStat ?? []}
+                    repo={t?.repo ?? ""}
+                    branch={t?.branch ?? ""}
+                    taskPath={tp}
+                  />
+                </div>
+              );
+            }}
+          </Match>
           <Match when={selectedId()} keyed>
             {(id) => (
               <div class={styles.detailPane}>
@@ -558,6 +587,7 @@ export default function App() {
                   repoURL={selectedTask()?.repoURL}
                   branch={selectedTask()?.branch ?? ""}
                   baseBranch={repos().find((r) => r.path === selectedTask()?.repo)?.baseBranch ?? "main"}
+                  diffStat={selectedTask()?.diffStat}
                   supportsImages={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsImages}
                   onClose={() => navigate("/")}
                   inputDraft={inputDrafts().get(id) ?? ""}

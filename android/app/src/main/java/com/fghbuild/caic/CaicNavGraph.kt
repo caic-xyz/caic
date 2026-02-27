@@ -42,6 +42,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.fghbuild.caic.navigation.Screen
+import com.fghbuild.caic.ui.diff.DiffScreen
 import com.fghbuild.caic.ui.settings.SettingsScreen
 import com.fghbuild.caic.ui.taskdetail.TaskDetailScreen
 import com.fghbuild.caic.ui.tasklist.TaskListScreen
@@ -184,6 +185,17 @@ private fun CompactLayout(
             TaskDetailScreen(
                 taskId = taskId,
                 onNavigateBack = { navController.popBackStack() },
+                onNavigateToDiff = {
+                    navController.navigate(Screen.TaskDiff(taskId).route)
+                },
+            )
+        }
+        composable(Screen.TaskDiff.ROUTE) { backStackEntry ->
+            val taskId = backStackEntry.arguments?.getString(Screen.TaskDiff.ARG_TASK_ID)
+                ?: return@composable
+            DiffScreen(
+                taskId = taskId,
+                onNavigateBack = { navController.popBackStack() },
             )
         }
     }
@@ -237,6 +249,19 @@ private fun WideLayout(
                 val taskId = backStackEntry.arguments?.getString(Screen.TaskDetail.ARG_TASK_ID)
                     ?: return@composable
                 TaskDetailScreen(
+                    taskId = taskId,
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToDiff = {
+                        navController.navigate(Screen.TaskDiff(taskId).route) {
+                            popUpTo(Screen.TaskList.route)
+                        }
+                    },
+                )
+            }
+            composable(Screen.TaskDiff.ROUTE) { backStackEntry ->
+                val taskId = backStackEntry.arguments?.getString(Screen.TaskDiff.ARG_TASK_ID)
+                    ?: return@composable
+                DiffScreen(
                     taskId = taskId,
                     onNavigateBack = { navController.popBackStack() },
                 )

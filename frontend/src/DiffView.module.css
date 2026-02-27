@@ -1,0 +1,178 @@
+/* Styles for the full-page DiffView component. */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.backBtn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #555;
+  border-radius: 4px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.backBtn:hover {
+  background: #eee;
+}
+
+.headerMeta {
+  font-size: 0.8rem;
+  color: #555;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headerRepo {
+  color: #0366d6;
+}
+
+.headerBranch {
+  margin-left: 0.4em;
+  color: #666;
+}
+
+.headerBranch::before {
+  content: "·";
+  margin-right: 0.4em;
+}
+
+.fileList {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 0.75rem;
+  background: #fafafa;
+  font-size: 0.85rem;
+  min-height: 0;
+}
+
+.fileRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  border-top: 1px solid #e0e0e0;
+  margin-top: 0.25rem;
+}
+
+.collapseIndicator {
+  font-size: 0.6rem;
+  color: #888;
+  flex-shrink: 0;
+  width: 0.8em;
+}
+
+.fileRowClickable {
+  cursor: pointer;
+}
+
+.fileRowClickable:hover .filePath {
+  text-decoration: underline;
+}
+
+.filePath {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.fileCounts {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.added {
+  color: #22863a;
+  margin-right: 0.3em;
+}
+
+.deleted {
+  color: #cb2431;
+}
+
+.binary {
+  color: #6a737d;
+  font-style: italic;
+  flex-shrink: 0;
+}
+
+.diffContent {
+  margin: 0.25rem 0;
+  padding: 0.5rem;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.diffContent div {
+  white-space: pre;
+}
+
+.diffLineAdded {
+  color: #4ec94e;
+}
+
+.diffLineDeleted {
+  color: #f44;
+}
+
+.diffLineHunk {
+  color: #b48ead;
+}
+
+.diffLineHeader {
+  color: #888;
+}
+
+.diffLoading {
+  font-size: 0.75rem;
+  color: #888;
+  padding: 0.25rem 0;
+}
+
+.diffError {
+  font-size: 0.75rem;
+  color: #c00;
+  padding: 0.25rem 0;
+}
+
+/* Mobile: <=768px */
+@media (max-width: 768px) {
+  .container {
+    margin: 0 -0.5rem;
+  }
+
+  .header {
+    padding: 0 0.5rem;
+  }
+
+  .fileList {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+}

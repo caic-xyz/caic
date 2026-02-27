@@ -145,6 +145,7 @@ private fun buildItems(
 fun TaskDetailScreen(
     taskId: String,
     onNavigateBack: () -> Unit,
+    onNavigateToDiff: () -> Unit = {},
     viewModel: TaskDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -303,6 +304,7 @@ fun TaskDetailScreen(
             viewModel.restartTask(state.inputDraft.trim())
             viewModel.updateInputDraft("")
         },
+        onNavigateToDiff = onNavigateToDiff,
     )
 
         }
@@ -315,6 +317,7 @@ private fun MessageList(
     padding: PaddingValues,
     onAnswer: (String) -> Unit,
     onClearAndExecutePlan: () -> Unit,
+    onNavigateToDiff: () -> Unit,
 ) {
     val listState = rememberLazyListState()
     var userScrolledUp by remember { mutableStateOf(false) }
@@ -383,6 +386,7 @@ private fun MessageList(
                         is MsgItem.Group -> MessageGroupContent(
                             group = item.group,
                             onAnswer = if (item.isLiveTurn) onAnswer else null,
+                            onNavigateToDiff = onNavigateToDiff,
                         )
                         is MsgItem.ToolGroupHeader -> ToolGroupHeaderItem(
                             toolCalls = item.toolCalls,

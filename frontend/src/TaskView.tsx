@@ -1,7 +1,8 @@
 // TaskView renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, For, Index, Show, onCleanup, createEffect, Switch, Match, type Accessor, type JSX } from "solid-js";
+import { useNavigate, useLocation } from "@solidjs/router";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskRawEvents } from "@sdk/api.gen";
-import type { ClaudeEventMessage, ClaudeAskQuestion, ClaudeEventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, DiffResp } from "@sdk/types.gen";
+import type { ClaudeEventMessage, ClaudeAskQuestion, ClaudeEventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat } from "@sdk/types.gen";
 import { groupMessages, groupTurns, toolCountSummary, turnSummary } from "./grouping";
 import type { ToolCall, Turn } from "./grouping";
 import { SyncTargetDefault } from "@sdk/types.gen";
@@ -15,13 +16,6 @@ import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import SyncIcon from "@material-symbols/svg-400/outlined/sync.svg?solid";
 import GitHubIcon from "./github.svg?solid";
 import styles from "./TaskView.module.css";
-
-async function fetchFileDiff(taskId: string, path: string): Promise<string> {
-  const res = await fetch(`/api/v1/tasks/${taskId}/diff?path=${encodeURIComponent(path)}`);
-  if (!res.ok) throw new Error(`diff fetch failed: ${res.status}`);
-  const data = (await res.json()) as DiffResp;
-  return data.diff;
-}
 
 // Module-level store for <details> open/closed state so it survives
 // component remounts (task switching, memo re-evaluation).
@@ -40,6 +34,7 @@ interface Props {
   repoURL?: string;
   branch: string;
   baseBranch: string;
+  diffStat?: DiffFileStat[];
   supportsImages?: boolean;
   onClose: () => void;
   inputDraft: string;
@@ -48,6 +43,8 @@ interface Props {
 }
 
 export default function TaskView(props: Props) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [messages, setMessages] = createSignal<ClaudeEventMessage[]>([]);
   const [pendingImages, setPendingImages] = createSignal<APIImageData[]>([]);
   const [sending, setSending] = createSignal(false);
@@ -228,6 +225,9 @@ export default function TaskView(props: Props) {
             <a class={styles.headerBranch} href={`${props.repoURL}/compare/${props.branch}?expand=1`} target="_blank" rel="noopener">{props.branch}</a>
           </Show>
         </span>
+        <Show when={(props.diffStat?.length ?? 0) > 0}>
+          <a class={styles.diffLink} href={`${location.pathname}/diff`} onClick={(e) => { e.preventDefault(); navigate(`${location.pathname}/diff`); }}>Diff</a>
+        </Show>
         <Show when={props.inPlanMode}>
           <span class={styles.planIndicator} title="Agent is in plan mode">Plan Mode</span>
         </Show>
@@ -267,7 +267,7 @@ export default function TaskView(props: Props) {
 
                 return (
                   <Show when={isLastTurn()} fallback={
-                    <ElidedTurn turn={turn()} taskId={props.taskId} />
+                    <ElidedTurn turn={turn()} />
                   }>
                     <Index each={turn().groups}>
                       {(group) => (
@@ -304,7 +304,7 @@ export default function TaskView(props: Props) {
                           </Match>
                           <Match when={group().kind === "other"}>
                             <For each={group().events}>
-                              {(ev) => <MessageItem ev={ev} taskId={props.taskId} />}
+                              {(ev) => <MessageItem ev={ev} />}
                             </For>
                           </Match>
                         </Switch>
@@ -385,7 +385,7 @@ export default function TaskView(props: Props) {
   );
 }
 
-function MessageItem(props: { ev: ClaudeEventMessage; taskId?: string }) {
+function MessageItem(props: { ev: ClaudeEventMessage }) {
   return (
     <Switch>
       <Match when={props.ev.init} keyed>
@@ -431,7 +431,7 @@ function MessageItem(props: { ev: ClaudeEventMessage; taskId?: string }) {
             </Show>
             <Show when={result.diffStat} keyed>
               {(files) => (
-                <DiffStatBlock files={files} taskId={props.taskId} />
+                <DiffStatBlock files={files} />
               )}
             </Show>
             <div class={styles.resultMeta}>
@@ -454,34 +454,24 @@ function MessageItem(props: { ev: ClaudeEventMessage; taskId?: string }) {
   );
 }
 
-function DiffStatBlock(props: { files: DiffFileStat[]; taskId?: string }) {
-  const [expandedFile, setExpandedFile] = createSignal<string | null>(null);
+function DiffStatBlock(props: { files: DiffFileStat[] }) {
+  const navigate = useNavigate();
+  const location = useLocation();
   return (
-    <div class={styles.resultDiffStat}>
+    <div class={`${styles.resultDiffStat} ${styles.diffFileClickable}`} onClick={() => navigate(`${location.pathname}/diff`)}>
       <For each={props.files}>
         {(f) => (
-          <>
-            <div
-              class={f.binary || !props.taskId ? styles.diffFile : `${styles.diffFile} ${styles.diffFileClickable}`}
-              onClick={() => {
-                if (f.binary || !props.taskId) return;
-                setExpandedFile((prev) => (prev === f.path ? null : f.path));
-              }}
-            >
-              <span class={styles.diffPath}>{f.path}</span>
-              <Show when={f.binary} fallback={
-                <span class={styles.diffCounts}>
-                  <Show when={f.added > 0}><span class={styles.diffAdded}>+{f.added}</span></Show>
-                  <Show when={f.deleted > 0}><span class={styles.diffDeleted}>&minus;{f.deleted}</span></Show>
-                </span>
-              }>
-                <span class={styles.diffBinary}>binary</span>
-              </Show>
-            </div>
-            <Show when={expandedFile() === f.path ? props.taskId : undefined} keyed>
-              {(id) => <DiffViewer taskId={id} path={f.path} />}
+          <div class={styles.diffFile}>
+            <span class={styles.diffPath}>{f.path}</span>
+            <Show when={f.binary} fallback={
+              <span class={styles.diffCounts}>
+                <Show when={f.added > 0}><span class={styles.diffAdded}>+{f.added}</span></Show>
+                <Show when={f.deleted > 0}><span class={styles.diffDeleted}>&minus;{f.deleted}</span></Show>
+              </span>
+            }>
+              <span class={styles.diffBinary}>binary</span>
             </Show>
-          </>
+          </div>
         )}
       </For>
     </div>
@@ -553,7 +543,7 @@ function TextMessageGroup(props: { events: ClaudeEventMessage[] }) {
 }
 
 
-function ElidedTurn(props: { turn: Turn; taskId?: string }) {
+function ElidedTurn(props: { turn: Turn }) {
   const turnKey = () => "turn:" + (props.turn.groups[0]?.events[0]?.ts ?? 0);
   const isOpen = () => detailsOpenState.get(turnKey()) ?? false;
   return (
@@ -598,7 +588,7 @@ function ElidedTurn(props: { turn: Turn; taskId?: string }) {
               </Match>
               <Match when={group.kind === "other"}>
                 <For each={group.events}>
-                  {(ev) => <MessageItem ev={ev} taskId={props.taskId} />}
+                  {(ev) => <MessageItem ev={ev} />}
                 </For>
               </Match>
             </Switch>
@@ -709,39 +699,6 @@ function ToolCallBlock(props: { call: ToolCall; open: boolean; onToggle: (open: 
         <pre class={styles.toolErrorPre}>{error()}</pre>
       </Show>
     </details>
-  );
-}
-
-function DiffViewer(props: { taskId: string; path: string }) {
-  const [diff, setDiff] = createSignal<string | null>(null);
-  const [error, setError] = createSignal<string | null>(null);
-  const [loading, setLoading] = createSignal(true);
-
-  createEffect(() => {
-    setLoading(true);
-    setError(null);
-    fetchFileDiff(props.taskId, props.path)
-      .then((d) => setDiff(d))
-      .catch((e) => setError(e instanceof Error ? e.message : "Unknown error"))
-      .finally(() => setLoading(false));
-  });
-
-  return (
-    <Show when={!loading()} fallback={<div class={styles.diffLoading}>Loading diff...</div>}>
-      <Show when={!error()} fallback={<div class={styles.diffError}>{error()}</div>}>
-        <pre class={styles.diffContent}>
-          <For each={(diff() ?? "").split("\n")}>
-            {(line) => {
-              let cls = "";
-              if (line.startsWith("+")) cls = styles.diffLineAdded;
-              else if (line.startsWith("-")) cls = styles.diffLineDeleted;
-              else if (line.startsWith("@@")) cls = styles.diffLineHunk;
-              return <div class={cls}>{line}</div>;
-            }}
-          </For>
-        </pre>
-      </Show>
-    </Show>
   );
 }
 

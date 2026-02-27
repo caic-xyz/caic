@@ -43,6 +43,7 @@ export interface TaskItemSummaryProps {
   onClick: () => void;
   onTerminate?: () => void;
   terminateLoading?: boolean;
+  onDiffClick?: () => void;
 }
 
 export default function TaskItemSummary(props: TaskItemSummaryProps) {
@@ -128,7 +129,10 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
       </Show>
       <Show when={props.diffStat?.length ? props.diffStat : undefined} keyed>
         {(ds) => (
-          <div class={styles.meta}>
+          <div
+            class={`${styles.meta} ${props.onDiffClick ? styles.diffClickable : ""}`}
+            onClick={(e) => { const fn = props.onDiffClick; if (fn) { e.stopPropagation(); fn(); } }}
+          >
             {ds.length} file{ds.length !== 1 ? "s" : ""}
             {" "}
             <span class={styles.diffAdded}>+{ds.reduce((s, f) => s + f.added, 0)}</span>

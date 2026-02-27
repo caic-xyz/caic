@@ -40,6 +40,7 @@ private val PlanBgColor = Color(0xFFF5F3FF)
 fun MessageGroupContent(
     group: MessageGroup,
     onAnswer: ((String) -> Unit)?,
+    onNavigateToDiff: (() -> Unit)? = null,
 ) {
     when (group.kind) {
         GroupKind.TEXT -> TextMessageGroup(events = group.events)
@@ -58,7 +59,7 @@ fun MessageGroupContent(
         GroupKind.OTHER -> {
             val result = group.events.firstOrNull { it.kind == EventKinds.Result }?.result
             if (result != null) {
-                ResultCard(result = result)
+                ResultCard(result = result, onNavigateToDiff = onNavigateToDiff)
             }
         }
     }

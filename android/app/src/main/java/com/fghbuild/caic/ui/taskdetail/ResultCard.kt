@@ -1,6 +1,7 @@
 // Card for a result event: success/error with metadata.
 package com.fghbuild.caic.ui.taskdetail
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,6 +11,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.ClaudeEventResult
 import com.fghbuild.caic.util.formatCost
@@ -18,7 +20,7 @@ import com.fghbuild.caic.ui.theme.markdownTypography
 import com.mikepenz.markdown.m3.Markdown
 
 @Composable
-fun ResultCard(result: ClaudeEventResult) {
+fun ResultCard(result: ClaudeEventResult, onNavigateToDiff: (() -> Unit)? = null) {
     val isError = result.isError
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -43,7 +45,17 @@ fun ResultCard(result: ClaudeEventResult) {
                     Text(
                         text = stats.joinToString(", ") { "${it.path} +${it.added}/-${it.deleted}" },
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.primary,
+                        textDecoration = if (onNavigateToDiff != null) {
+                            TextDecoration.Underline
+                        } else {
+                            TextDecoration.None
+                        },
+                        modifier = if (onNavigateToDiff != null) {
+                            Modifier.clickable { onNavigateToDiff() }
+                        } else {
+                            Modifier
+                        },
                     )
                 }
             }

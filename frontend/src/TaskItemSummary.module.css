@@ -115,6 +115,14 @@
   color: #888;
 }
 
+.diffClickable {
+  cursor: pointer;
+}
+
+.diffClickable:hover {
+  text-decoration: underline;
+}
+
 .diffAdded {
   color: #22863a;
 }

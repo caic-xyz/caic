@@ -16,6 +16,7 @@ export interface TaskListProps {
   onSelect: (id: string) => void;
   onTerminate: (id: string) => void;
   terminatingId: Accessor<string | null>;
+  onDiffClick?: (id: string) => void;
 }
 
 export default function TaskList(props: TaskListProps) {
@@ -75,6 +76,7 @@ export default function TaskList(props: TaskListProps) {
               onClick={() => props.onSelect(t().id)}
               onTerminate={() => props.onTerminate(t().id)}
               terminateLoading={props.terminatingId() === t().id}
+              onDiffClick={props.onDiffClick ? () => { const fn = props.onDiffClick; if (fn) fn(t().id); } : undefined}
             />
           )}
         </Index>

@@ -10,4 +10,10 @@ sealed class Screen(val route: String) {
             const val ARG_TASK_ID = "taskId"
         }
     }
+    data class TaskDiff(val taskId: String) : Screen("tasks/$taskId/diff") {
+        companion object {
+            const val ROUTE = "tasks/{taskId}/diff"
+            const val ARG_TASK_ID = "taskId"
+        }
+    }
 }

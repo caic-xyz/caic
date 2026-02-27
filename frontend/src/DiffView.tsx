@@ -1,0 +1,144 @@
+// Full-page diff viewer for a task's file changes.
+import { createSignal, createEffect, createMemo, For, Show } from "solid-js";
+import { useNavigate } from "@solidjs/router";
+import type { DiffFileStat, DiffResp } from "@sdk/types.gen";
+import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
+import styles from "./DiffView.module.css";
+
+/** Fetch the full unified diff for a task. */
+async function fetchFullDiff(taskId: string): Promise<string> {
+  const res = await fetch(`/api/v1/tasks/${taskId}/diff`);
+  if (!res.ok) throw new Error(`diff fetch failed: ${res.status}`);
+  const data = (await res.json()) as DiffResp;
+  return data.diff;
+}
+
+interface FileDiff {
+  path: string;
+  content: string;
+}
+
+/** Split a unified diff into per-file sections on "diff --git" boundaries. */
+function splitDiff(raw: string): FileDiff[] {
+  const files: FileDiff[] = [];
+  // Split on lines starting with "diff --git "
+  const parts = raw.split(/^(?=diff --git )/m);
+  for (const part of parts) {
+    if (!part.trim()) continue;
+    // Extract path from "diff --git a/... b/..."
+    const match = part.match(/^diff --git a\/.+ b\/(.+)/);
+    const path = match?.[1] ?? "unknown";
+    files.push({ path, content: part });
+  }
+  return files;
+}
+
+interface Props {
+  taskId: string;
+  diffStat: DiffFileStat[];
+  repo: string;
+  branch: string;
+  taskPath: string;
+}
+
+export default function DiffView(props: Props) {
+  const navigate = useNavigate();
+  const [fullDiff, setFullDiff] = createSignal<string | null>(null);
+  const [error, setError] = createSignal<string | null>(null);
+  const [loading, setLoading] = createSignal(true);
+  // Collapsed files (all expanded by default).
+  const [collapsedFiles, setCollapsedFiles] = createSignal<Set<string>>(new Set());
+
+  createEffect(() => {
+    const id = props.taskId;
+    setLoading(true);
+    setError(null);
+    setCollapsedFiles(new Set());
+    fetchFullDiff(id)
+      .then((d) => setFullDiff(d))
+      .catch((e) => setError(e instanceof Error ? e.message : "Unknown error"))
+      .finally(() => setLoading(false));
+  });
+
+  const fileDiffs = createMemo(() => {
+    const raw = fullDiff();
+    if (!raw) return [];
+    return splitDiff(raw);
+  });
+
+  // Build a lookup from diffStat for +/- counts.
+  const statByPath = createMemo(() => {
+    const m = new Map<string, DiffFileStat>();
+    for (const f of props.diffStat) m.set(f.path, f);
+    return m;
+  });
+
+  function toggleFile(path: string) {
+    setCollapsedFiles((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }
+
+  return (
+    <div class={styles.container}>
+      <div class={styles.header}>
+        <button class={styles.backBtn} onClick={() => navigate(props.taskPath)} title="Back to task">
+          <ArrowBackIcon width={20} height={20} />
+        </button>
+        <span class={styles.headerMeta}>
+          <span class={styles.headerRepo}>{props.repo}</span>
+          <span class={styles.headerBranch}>{props.branch}</span>
+        </span>
+      </div>
+      <div class={styles.fileList}>
+        <Show when={loading()}>
+          <div class={styles.diffLoading}>Loading diff...</div>
+        </Show>
+        <Show when={error()}>
+          <div class={styles.diffError}>{error()}</div>
+        </Show>
+        <Show when={!loading() && !error()}>
+          <For each={fileDiffs()}>
+            {(fd) => {
+              const stat = () => statByPath().get(fd.path);
+              const collapsed = () => collapsedFiles().has(fd.path);
+              return (
+                <>
+                  <div class={`${styles.fileRow} ${styles.fileRowClickable}`} onClick={() => toggleFile(fd.path)}>
+                    <span class={styles.collapseIndicator}>{collapsed() ? "\u25b6" : "\u25bc"}</span>
+                    <span class={styles.filePath}>{fd.path}</span>
+                    <Show when={stat()?.binary} fallback={
+                      <span class={styles.fileCounts}>
+                        <Show when={(stat()?.added ?? 0) > 0}><span class={styles.added}>+{stat()?.added}</span></Show>
+                        <Show when={(stat()?.deleted ?? 0) > 0}><span class={styles.deleted}>&minus;{stat()?.deleted}</span></Show>
+                      </span>
+                    }>
+                      <span class={styles.binary}>binary</span>
+                    </Show>
+                  </div>
+                  <Show when={!collapsed()}>
+                    <pre class={styles.diffContent}>
+                      <For each={fd.content.split("\n")}>
+                        {(line) => {
+                          let cls = "";
+                          if (line.startsWith("+")) cls = styles.diffLineAdded;
+                          else if (line.startsWith("-")) cls = styles.diffLineDeleted;
+                          else if (line.startsWith("@@")) cls = styles.diffLineHunk;
+                          else if (line.startsWith("diff ")) cls = styles.diffLineHeader;
+                          return <div class={cls}>{line}</div>;
+                        }}
+                      </For>
+                    </pre>
+                  </Show>
+                </>
+              );
+            }}
+          </For>
+        </Show>
+      </div>
+    </div>
+  );
+}
