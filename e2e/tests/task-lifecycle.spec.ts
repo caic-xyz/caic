@@ -30,12 +30,14 @@ test("create task, verify streaming text and result, then terminate", async ({ p
   });
 
   // The Terminate button appears on hover over the task card in the sidebar.
-  const taskCard = page.getByText(prompt).first();
+  // Scope to the specific card to avoid strict-mode violations from parallel tests.
+  const taskCard = page.locator("[data-task-id]", { hasText: prompt });
   await taskCard.hover();
-  const terminateBtn = page.getByTestId("terminate-task");
+  const terminateBtn = taskCard.getByTestId("terminate-task");
   await expect(terminateBtn).toBeVisible({ timeout: 15_000 });
 
-  // Click Terminate.
+  // Accept the confirmation dialog and click Terminate.
+  page.once("dialog", (d) => d.accept());
   await terminateBtn.click();
 
   // Poll API until our task is "terminated" — uses typed helper.
