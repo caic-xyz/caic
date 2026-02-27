@@ -18,19 +18,26 @@ interface FileDiff {
   content: string;
 }
 
+/** Extract the file path from a single diff section. */
+function extractDiffPath(section: string): string {
+  // Prefer +++ line: "+++ b/path" or "+++ path" (most reliable).
+  const plus = section.match(/^\+\+\+ (?:[a-z]\/)?(.+)/m);
+  if (plus && plus[1] !== "/dev/null") return plus[1];
+  // Deleted files: use --- line.
+  const minus = section.match(/^--- (?:[a-z]\/)?(.+)/m);
+  if (minus && minus[1] !== "/dev/null") return minus[1];
+  // Last resort: diff --git line with any single-char prefix.
+  const git = section.match(/^diff --git .\/(.+) .\/\1$/m);
+  if (git) return git[1];
+  return "unknown";
+}
+
 /** Split a unified diff into per-file sections on "diff --git" boundaries. */
 function splitDiff(raw: string): FileDiff[] {
-  const files: FileDiff[] = [];
-  // Split on lines starting with "diff --git "
   const parts = raw.split(/^(?=diff --git )/m);
-  for (const part of parts) {
-    if (!part.trim()) continue;
-    // Extract path from "diff --git a/... b/..."
-    const match = part.match(/^diff --git a\/.+ b\/(.+)/);
-    const path = match?.[1] ?? "unknown";
-    files.push({ path, content: part });
-  }
-  return files;
+  return parts
+    .filter((p) => p.trim())
+    .map((part) => ({ path: extractDiffPath(part), content: part }));
 }
 
 interface Props {

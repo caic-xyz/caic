@@ -106,17 +106,26 @@ class DiffViewModel @Inject constructor(
 
     companion object {
         private val DIFF_HEADER = Regex("^(?=diff --git )", RegexOption.MULTILINE)
-        private val PATH_RE = Regex("^diff --git a/.+ b/(.+)")
+        // +++ b/path or +++ path (most reliable source).
+        private val PLUS_RE = Regex("^\\+\\+\\+ (?:[a-z]/)?(.+)", RegexOption.MULTILINE)
+        // --- a/path for deleted files.
+        private val MINUS_RE = Regex("^--- (?:[a-z]/)?(.+)", RegexOption.MULTILINE)
+
+        /** Extract the file path from a single diff section. */
+        private fun extractPath(section: String): String {
+            PLUS_RE.find(section)?.groupValues?.get(1)
+                ?.takeIf { it != "/dev/null" }?.let { return it }
+            MINUS_RE.find(section)?.groupValues?.get(1)
+                ?.takeIf { it != "/dev/null" }?.let { return it }
+            return "unknown"
+        }
 
         /** Split a unified diff into per-file sections. */
         fun splitDiff(raw: String): List<FileDiff> {
             if (raw.isBlank()) return emptyList()
             return raw.split(DIFF_HEADER)
                 .filter { it.isNotBlank() }
-                .map { part ->
-                    val path = PATH_RE.find(part)?.groupValues?.get(1) ?: "unknown"
-                    FileDiff(path, part)
-                }
+                .map { part -> FileDiff(extractPath(part), part) }
         }
     }
 }
