@@ -119,7 +119,6 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}
             }
 
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                MetaText(task.harness)
                 task.model?.let { MetaText(it) }
                 val tokenCount = task.activeInputTokens + task.activeCacheReadTokens
                 if (tokenCount > 0) {
