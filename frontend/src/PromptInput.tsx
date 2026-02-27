@@ -1,5 +1,5 @@
 // Reusable prompt input with image support: paste, drag & drop, attach button, and preview strip.
-import { createSignal, For, Show, type JSX } from "solid-js";
+import { createSignal, For, Show, onCleanup, type JSX } from "solid-js";
 import type { ImageData as APIImageData } from "@sdk/types.gen";
 import { captureScreen, fileToImageData, imagesFromClipboard } from "./images";
 import AutoResizeTextarea from "./AutoResizeTextarea";
@@ -102,22 +102,25 @@ export default function PromptInput(props: Props) {
   }
 
   // Close menu when clicking outside.
-  function handleContainerClick(e: MouseEvent) {
-    if (menuOpen()) {
+  {
+    const onOutsideClick = (e: MouseEvent) => {
+      if (!menuOpen()) return;
       const target = e.target as HTMLElement;
       if (!target.closest(`.${styles.attachWrap}`)) {
         setMenuOpen(false);
       }
-    }
+    };
+    document.addEventListener("mousedown", onOutsideClick);
+    onCleanup(() => document.removeEventListener("mousedown", onOutsideClick));
   }
 
   return (
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- drag-and-drop target for file attachment
     <div
       class={`${styles.container}${dragging() ? ` ${styles.dragOver}` : ""}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onClick={handleContainerClick}
     >
       <div class={styles.row}>
         <AutoResizeTextarea

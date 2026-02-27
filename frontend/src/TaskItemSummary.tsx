@@ -49,8 +49,10 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
   return (
     <div
       data-task-id={props.id}
+      role="button"
       tabIndex={0}
       onClick={() => props.onClick()}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); props.onClick(); } }}
       class={`${styles.card} ${props.selected ? styles.selected : ""}`}
     >
       <div class={styles.header}>
@@ -69,11 +71,11 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
             <span class={styles.featureIcon} title="Display"><DisplayIcon width="0.75rem" height="0.75rem" /></span>
           </Show>
           <Show when={props.onTerminate && props.state !== "terminated" && props.state !== "failed"}>
-            <span class={styles.terminateBtn} onClick={(e) => e.stopPropagation()}>
+            <span class={styles.terminateBtn}>
               <button
                 class={styles.terminateIcon}
                 disabled={props.terminateLoading || props.state === "terminating"}
-                onClick={() => { if (window.confirm("Terminate this container?")) props.onTerminate?.(); }}
+                onClick={(e) => { e.stopPropagation(); if (window.confirm("Terminate this container?")) props.onTerminate?.(); }}
                 title="Terminate"
                 data-testid="terminate-task"
               >
@@ -135,18 +137,30 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
         </div>
       </Show>
       <Show when={props.diffStat?.length ? props.diffStat : undefined} keyed>
-        {(ds) => (
-          <div
-            class={`${styles.meta} ${props.onDiffClick ? styles.diffClickable : ""}`}
-            onClick={(e) => { const fn = props.onDiffClick; if (fn) { e.stopPropagation(); fn(); } }}
-          >
+        {(ds) => {
+          const content = () => <>
             {ds.length} file{ds.length !== 1 ? "s" : ""}
             {" "}
             <span class={styles.diffAdded}>+{ds.reduce((s, f) => s + f.added, 0)}</span>
             {" "}
             <span class={styles.diffDeleted}>-{ds.reduce((s, f) => s + f.deleted, 0)}</span>
-          </div>
-        )}
+          </>;
+          return (
+            <Show when={props.onDiffClick} fallback={<div class={styles.meta}>{content()}</div>}>
+              {(fn) => (
+                <div
+                  class={`${styles.meta} ${styles.diffClickable}`}
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); fn()(); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); fn()(); } }}
+                >
+                  {content()}
+                </div>
+              )}
+            </Show>
+          );
+        }}
       </Show>
       <Show when={props.error}>
         <div class={styles.error}>{props.error}</div>

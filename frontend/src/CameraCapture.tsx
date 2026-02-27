@@ -71,8 +71,10 @@ export default function CameraCapture(props: Props) {
   }
 
   return (
-    <div class={styles.overlay} onClick={() => props.onClose()}>
-      <div class={styles.dialog} onClick={(e) => e.stopPropagation()}>
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events -- backdrop dismiss is supplementary to Cancel button and Escape key
+    <div class={styles.overlay} onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }}>
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- Escape key dismissal is standard for modal dialogs */}
+      <div class={styles.dialog} role="dialog" aria-modal="true" onKeyDown={(e) => { if (e.key === "Escape") props.onClose(); }}>
         {error() ? (
           <p class={styles.error}>{error()}</p>
         ) : (

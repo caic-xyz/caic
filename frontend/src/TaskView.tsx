@@ -344,7 +344,7 @@ export default function TaskView(props: Props) {
             placeholder="Send message to agent..."
             disabled={sending()}
             class={styles.textInput}
-            tabIndex={1}
+            tabIndex={0}
             supportsImages={props.supportsImages}
             images={pendingImages()}
             onImagesChange={setPendingImages}
@@ -458,7 +458,7 @@ function DiffStatBlock(props: { files: DiffFileStat[] }) {
   const navigate = useNavigate();
   const location = useLocation();
   return (
-    <div class={`${styles.resultDiffStat} ${styles.diffFileClickable}`} onClick={() => navigate(`${location.pathname}/diff`)}>
+    <div class={`${styles.resultDiffStat} ${styles.diffFileClickable}`} role="button" tabIndex={0} onClick={() => navigate(`${location.pathname}/diff`)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(`${location.pathname}/diff`); } }}>
       <For each={props.files}>
         {(f) => (
           <div class={styles.diffFile}>

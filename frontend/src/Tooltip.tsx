@@ -63,9 +63,14 @@ export default function Tooltip(props: Props) {
     <span
       ref={wrapperRef}
       class={styles.wrapper}
+      role="button"
+      tabIndex={0}
       onMouseEnter={() => setShow(true)}
       onMouseLeave={() => setShow(false)}
+      onFocus={() => setShow(true)}
+      onBlur={() => setShow(false)}
       onClick={() => setShow((v) => !v)}
+      onKeyDown={(e) => { if (e.key === "Escape") setShow(false); if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setShow((v) => !v); } }}
     >
       {props.children}
       <Show when={show()}>

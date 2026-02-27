@@ -114,7 +114,7 @@ export default function DiffView(props: Props) {
               const collapsed = () => collapsedFiles().has(fd.path);
               return (
                 <>
-                  <div class={`${styles.fileRow} ${styles.fileRowClickable}`} onClick={() => toggleFile(fd.path)}>
+                  <div class={`${styles.fileRow} ${styles.fileRowClickable}`} role="button" tabIndex={0} onClick={() => toggleFile(fd.path)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFile(fd.path); } }}>
                     <span class={styles.collapseIndicator}>{collapsed() ? "\u25b6" : "\u25bc"}</span>
                     <span class={styles.filePath}>{fd.path}</span>
                     <Show when={stat()?.binary} fallback={

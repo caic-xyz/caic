@@ -25,6 +25,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/user-event": "^14.6.1",
     "eslint": "^10.0.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-solid": "^0.14.5",
     "globals": "^17.3.0",
     "jsdom": "^28.1.0",
