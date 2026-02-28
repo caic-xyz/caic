@@ -100,7 +100,7 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
               <a class={styles.repoLink} href={props.repoURL} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}>{props.repo}</a>
             </Show>
             {props.repo && props.branch ? " · " : ""}
-            <Show when={props.baseBranch}>
+            <Show when={props.baseBranch && props.branch}>
               <span class={styles.baseBranch}>{props.baseBranch}</span>
               <span class={styles.branchArrow}>→</span>
             </Show>
