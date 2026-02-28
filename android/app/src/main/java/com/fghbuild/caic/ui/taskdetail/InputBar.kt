@@ -65,6 +65,9 @@ fun InputBar(
     onSend: () -> Unit,
     onSync: () -> Unit,
     onTerminate: () -> Unit,
+    taskTitle: String = "",
+    taskRepo: String = "",
+    taskBranch: String = "",
     sending: Boolean,
     pendingAction: String?,
     repoURL: String? = null,
@@ -154,7 +157,7 @@ fun InputBar(
                     AlertDialog(
                         onDismissRequest = { showTerminateConfirm = false },
                         title = { Text("Terminate container?") },
-                        text = { Text("This will stop the running task and destroy its container.") },
+                        text = { Text("$taskTitle\nrepo: $taskRepo\nbranch: $taskBranch") },
                         confirmButton = {
                             TextButton(onClick = { showTerminateConfirm = false; onTerminate() }) {
                                 Text("Terminate")

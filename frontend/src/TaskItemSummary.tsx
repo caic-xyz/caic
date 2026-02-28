@@ -75,7 +75,7 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
               <button
                 class={styles.terminateIcon}
                 disabled={props.terminateLoading || props.state === "terminating"}
-                onClick={(e) => { e.stopPropagation(); if (window.confirm("Terminate this container?")) props.onTerminate?.(); }}
+                onClick={(e) => { e.stopPropagation(); if (window.confirm(`Terminate container?\n\n${props.title}\nrepo: ${props.repo}\nbranch: ${props.branch}`)) props.onTerminate?.(); }}
                 title="Terminate"
                 data-testid="terminate-task"
               >
