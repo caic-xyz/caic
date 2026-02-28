@@ -83,7 +83,7 @@ func generateTS(outDir string) error {
 
 	// Generic request helper.
 	b.WriteString(`async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const init: RequestInit = { method, headers: { "Content-Type": "application/json" } };
+  const init: RequestInit = { method, headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(60_000) };
   if (body !== undefined) init.body = JSON.stringify(body);
   const res = await fetch(path, init);
   if (!res.ok) {

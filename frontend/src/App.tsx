@@ -168,10 +168,12 @@ export default function App() {
 
   onMount(async () => {
     requestNotificationPermission();
-    const [data, prefs, h] = await Promise.all([
+    const [data, prefs, h, config, usageData] = await Promise.all([
       listRepos(),
       getPreferences().catch(() => null),
       listHarnesses().catch(() => [] as HarnessInfo[]),
+      getConfig().catch(() => null),
+      getUsage().catch(() => null),
     ]);
     const recentPaths = prefs?.repositories.map((r) => r.path) ?? [];
     const recentSet = new Set(recentPaths);
@@ -201,12 +203,12 @@ export default function App() {
       if (lastModel && models.includes(lastModel)) setSelectedModel(lastModel);
     }
     if (prefs?.baseImage) setSelectedImage(prefs.baseImage);
-    getConfig().then((c) => {
-      setTailscaleAvailable(c.tailscaleAvailable);
-      setUSBAvailable(c.usbAvailable);
-      setDisplayAvailable(c.displayAvailable);
-    }).catch(() => {});
-    getUsage().then(setUsage).catch(() => {});
+    if (config) {
+      setTailscaleAvailable(config.tailscaleAvailable);
+      setUSBAvailable(config.usbAvailable);
+      setDisplayAvailable(config.displayAvailable);
+    }
+    if (usageData) setUsage(usageData);
   });
 
   // Subscribe to task list updates via SSE with automatic reconnection.

@@ -1,17 +1,10 @@
 // Full-page diff viewer for a task's file changes.
 import { createSignal, createEffect, createMemo, For, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
-import type { DiffFileStat, DiffResp } from "@sdk/types.gen";
+import type { DiffFileStat } from "@sdk/types.gen";
+import { getTaskDiff } from "@sdk/api.gen";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 import styles from "./DiffView.module.css";
-
-/** Fetch the full unified diff for a task. */
-async function fetchFullDiff(taskId: string): Promise<string> {
-  const res = await fetch(`/api/v1/tasks/${taskId}/diff`);
-  if (!res.ok) throw new Error(`diff fetch failed: ${res.status}`);
-  const data = (await res.json()) as DiffResp;
-  return data.diff;
-}
 
 interface FileDiff {
   path: string;
@@ -61,8 +54,8 @@ export default function DiffView(props: Props) {
     setLoading(true);
     setError(null);
     setCollapsedFiles(new Set());
-    fetchFullDiff(id)
-      .then((d) => setFullDiff(d))
+    getTaskDiff(id)
+      .then((d) => setFullDiff(d.diff))
       .catch((e) => setError(e instanceof Error ? e.message : "Unknown error"))
       .finally(() => setLoading(false));
   });
