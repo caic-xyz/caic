@@ -183,7 +183,11 @@
 
 @media (max-width: 768px) {
   .terminateBtn {
-    display: none;
+    opacity: 1;
+  }
+
+  .terminateIcon {
+    padding: 0.4rem;
   }
 
   .metaRow {
