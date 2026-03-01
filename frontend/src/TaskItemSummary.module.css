@@ -117,6 +117,7 @@
 
 .diffClickable {
   cursor: pointer;
+  width: fit-content;
 }
 
 .diffClickable:hover {
