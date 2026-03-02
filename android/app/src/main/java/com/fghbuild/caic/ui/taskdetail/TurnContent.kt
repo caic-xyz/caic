@@ -117,9 +117,17 @@ private fun UserInputContent(text: String, images: List<ImageData>) {
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
         if (text.isNotBlank()) {
             Text(
-                text = "You: $text",
+                text = "You:",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.primary,
+            )
+            Markdown(
+                content = text,
+                typography = markdownTypography(),
+                colors = com.mikepenz.markdown.m3.markdownColor(
+                    text = MaterialTheme.colorScheme.onSurface,
+                    codeBackground = MaterialTheme.colorScheme.surfaceVariant,
+                ),
             )
         }
         if (images.isNotEmpty()) {

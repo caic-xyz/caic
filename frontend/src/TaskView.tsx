@@ -285,7 +285,7 @@ export default function TaskView(props: Props) {
                           <Match when={group().kind === "userInput" && group().events[0]?.userInput} keyed>
                             {(ui) => (
                               <div class={styles.userInputMsg}>
-                                {ui.text}
+                                <Markdown text={ui.text} />
                                 <Show when={ui.images?.length}>
                                   <div class={styles.userInputImages}>
                                     <For each={ui.images}>
