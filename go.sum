@@ -273,8 +273,8 @@ github.com/lyft/protoc-gen-star v0.5.3/go.mod h1:V0xaHgaf5oCCqmcxYcWiDfTiKsZsRc8
 github.com/magiconair/properties v1.8.5/go.mod h1:y3VJvCyxH9uVvJTWEGAELF3aiYNyPKd5NZ3oSwXrF60=
 github.com/mailru/easyjson v0.9.1 h1:LbtsOm5WAswyWbvTEOqhypdPeZzHavpZx96/n553mR8=
 github.com/mailru/easyjson v0.9.1/go.mod h1:1+xMtQp2MRNVL/V1bOzuP3aP8VNwRW55fQUto+XFtTU=
-github.com/maruel/genai v0.2.0 h1:jIt+avfTSTxlvU822T4T43GsR4KOvqRzyqUe9nZzs0k=
-github.com/maruel/genai v0.2.0/go.mod h1:5umBYxgRJHAjfc++Gto7w1Hnys5WHHHjwtkfiky5MSg=
+github.com/maruel/genai v0.2.1 h1:mQklHf1xqP4rm8Xv0ppcNAXEVigNIkhiDrks4Shv9X4=
+github.com/maruel/genai v0.2.1/go.mod h1:5umBYxgRJHAjfc++Gto7w1Hnys5WHHHjwtkfiky5MSg=
 github.com/maruel/httpjson v0.5.0 h1:fUkECNt2G2rSi9rzklMVcElsiucUj8LoKhKqaUvlaYA=
 github.com/maruel/httpjson v0.5.0/go.mod h1:Rbue+VwOe1TC6doGXddW8EWg2fW4Je6RhCo7iPuNpTo=
 github.com/maruel/huggingface v0.1.0 h1:+xhVTNrTxDjAvS+8UYp5Swd9bY63UfYRXXKk/DO5LRw=

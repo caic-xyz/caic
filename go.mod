@@ -8,7 +8,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/klauspost/compress v1.18.4
 	github.com/lmittmann/tint v1.1.3
-	github.com/maruel/genai v0.2.0
+	github.com/maruel/genai v0.2.1
 	github.com/maruel/ksid v0.1.1
 	github.com/mattn/go-colorable v0.1.14
 	github.com/mattn/go-isatty v0.0.20
