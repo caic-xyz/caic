@@ -450,6 +450,20 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message) {
 	}
 }
 
+// writeToolInput is the JSON input schema for the Write tool_use block.
+type writeToolInput struct {
+	FilePath string `json:"file_path"`
+	Content  string `json:"content"`
+}
+
+// editToolInput is the JSON input schema for the Edit tool_use block.
+type editToolInput struct {
+	FilePath   string `json:"file_path"`
+	OldString  string `json:"old_string"`
+	NewString  string `json:"new_string"`
+	ReplaceAll bool   `json:"replace_all"`
+}
+
 // trackPlanState inspects an AssistantMessage for plan-related tool_use blocks
 // and updates PlanFile and InPlanMode accordingly. The caller must hold t.mu.
 func (t *Task) trackPlanState(am *agent.AssistantMessage) {
@@ -466,10 +480,7 @@ func (t *Task) trackPlanState(am *agent.AssistantMessage) {
 			if t.planDismissed {
 				continue
 			}
-			var input struct {
-				FilePath string `json:"file_path"`
-				Content  string `json:"content"`
-			}
+			var input writeToolInput
 			if json.Unmarshal(b.Input, &input) == nil && strings.Contains(input.FilePath, ".claude/plans/") {
 				t.planFile = input.FilePath
 				t.planContent = input.Content
@@ -478,12 +489,7 @@ func (t *Task) trackPlanState(am *agent.AssistantMessage) {
 			if t.planDismissed {
 				continue
 			}
-			var input struct {
-				FilePath   string `json:"file_path"`
-				OldString  string `json:"old_string"`
-				NewString  string `json:"new_string"`
-				ReplaceAll bool   `json:"replace_all"`
-			}
+			var input editToolInput
 			if json.Unmarshal(b.Input, &input) == nil && t.planFile == input.FilePath && t.planContent != "" {
 				if input.ReplaceAll {
 					t.planContent = strings.ReplaceAll(t.planContent, input.OldString, input.NewString)
