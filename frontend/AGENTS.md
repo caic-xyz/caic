@@ -29,6 +29,12 @@ pnpm test:watch     # watch mode
 - Use `@testing-library/user-event` for interactions.
 - `@testing-library/jest-dom` matchers are available globally.
 
+## Styling
+
+CSS Modules with design tokens defined as CSS custom properties in `src/global.css`.
+Use `var(--color-*)` and `var(--radius-*)` variables instead of hardcoded hex colors
+or pixel radii. Add new tokens to `:root` in `global.css` when introducing new colors.
+
 ## Development
 
 ```bash
