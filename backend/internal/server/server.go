@@ -1157,6 +1157,9 @@ func (s *Server) loadTerminatedTasksFrom(all []*task.LoadedTask) error {
 			t.SetTitle(lt.Prompt)
 		}
 		// TODO: Figure out when it was terminated.
+		if err := lt.LoadMessages(); err != nil {
+			slog.Warn("failed to load messages for terminated task", "repo", lt.Repo, "branch", lt.Branch, "err", err)
+		}
 		if lt.Msgs != nil {
 			t.RestoreMessages(lt.Msgs)
 		}
@@ -1332,9 +1335,14 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		t.RestoreMessages(relayMsgs)
 		t.RelayOffset = relaySize
 		slog.Info("restored conversation from relay", "repo", ri.RelPath, "branch", branch, "container", c.Name, "messages", len(relayMsgs))
-	} else if lt != nil && len(lt.Msgs) > 0 {
-		t.RestoreMessages(lt.Msgs)
-		slog.Info("restored conversation from logs", "repo", ri.RelPath, "branch", branch, "container", c.Name, "messages", len(lt.Msgs))
+	} else if lt != nil {
+		if err := lt.LoadMessages(); err != nil {
+			slog.Warn("failed to load messages from log", "repo", ri.RelPath, "branch", branch, "err", err)
+		}
+		if len(lt.Msgs) > 0 {
+			t.RestoreMessages(lt.Msgs)
+			slog.Info("restored conversation from logs", "repo", ri.RelPath, "branch", branch, "container", c.Name, "messages", len(lt.Msgs))
+		}
 	}
 
 	// When the relay is dead (agent subprocess already exited) and
@@ -1407,13 +1415,6 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		slog.Warn("adopted orphaned task: relay dead and no session ID to resume",
 			"repo", ri.RelPath, "branch", branch, "container", c.Name,
 			"state", t.GetState())
-		// Compute diff stat in background so it doesn't block startup.
-		go func() {
-			if ds := runner.BranchDiffStat(ctx, branch); len(ds) > 0 {
-				t.SetLiveDiffStat(ds)
-				s.notifyTaskChange()
-			}
-		}()
 	}
 	return nil
 }

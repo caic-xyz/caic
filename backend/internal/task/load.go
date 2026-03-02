@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -32,11 +33,15 @@ type LoadedTask struct {
 	State             State
 	Msgs              []agent.Message
 	Result            *Result
+
+	path string // Absolute path for lazy message loading via LoadMessages.
 }
 
-// LoadLogs scans logDir for *.jsonl files and reconstructs tasks.
-// Files without a valid caic_meta header line are skipped. Returns one
-// LoadedTask per file, sorted by StartedAt ascending.
+// LoadLogs scans logDir for *.jsonl files and loads task metadata.
+// Only the header (first line) and result trailer (last line) are parsed;
+// individual messages are NOT loaded. Call LoadMessages on specific tasks
+// that need their conversation history. Returns one LoadedTask per file,
+// sorted by StartedAt ascending.
 func LoadLogs(logDir string) ([]*LoadedTask, error) {
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
@@ -46,25 +51,152 @@ func LoadLogs(logDir string) ([]*LoadedTask, error) {
 		return nil, err
 	}
 
-	var tasks []*LoadedTask
+	// Filter to .jsonl files.
+	var paths []string
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
-			continue
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".jsonl" {
+			paths = append(paths, filepath.Join(logDir, e.Name()))
 		}
-		lt, err := loadLogFile(filepath.Join(logDir, e.Name()))
-		if err != nil {
-			if !errors.Is(err, errNotLogFile) {
-				slog.Warn("skipping log file", "file", e.Name(), "err", err)
+	}
+
+	// Parse headers in parallel — each file is independent.
+	type result struct {
+		lt  *LoadedTask
+		err error
+	}
+	results := make([]result, len(paths))
+	var wg sync.WaitGroup
+	for i, p := range paths {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			lt, err := loadLogHeader(p)
+			results[i] = result{lt, err}
+		}()
+	}
+	wg.Wait()
+
+	var tasks []*LoadedTask
+	for i, r := range results {
+		if r.err != nil {
+			if !errors.Is(r.err, errNotLogFile) {
+				slog.Warn("skipping log file", "file", filepath.Base(paths[i]), "err", r.err)
 			}
 			continue
 		}
-		tasks = append(tasks, lt)
+		tasks = append(tasks, r.lt)
 	}
 
 	slices.SortFunc(tasks, func(a, b *LoadedTask) int {
 		return a.StartedAt.Compare(b.StartedAt)
 	})
 	return tasks, nil
+}
+
+// LoadMessages lazily loads the full conversation messages from the log file.
+// This is a no-op if messages are already loaded.
+func (lt *LoadedTask) LoadMessages() error {
+	if lt.Msgs != nil || lt.path == "" {
+		return nil
+	}
+	full, err := loadLogFile(lt.path)
+	if err != nil {
+		return err
+	}
+	lt.Msgs = full.Msgs
+	return nil
+}
+
+// loadLogHeader reads only the metadata header (first line) and the result
+// trailer (last line) from a JSONL log file. It does NOT parse individual
+// messages — call LoadMessages for that. The path is stored for lazy loading.
+func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err2 := f.Close(); retErr == nil {
+			retErr = err2
+		}
+	}()
+
+	// Read first line: metadata header.
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 4096), 32<<20)
+	if !scanner.Scan() {
+		return nil, errNotLogFile
+	}
+	var meta agent.MetaMessage
+	d := json.NewDecoder(bytes.NewReader(scanner.Bytes()))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&meta); err != nil {
+		return nil, errNotLogFile
+	}
+	if err := meta.Validate(); err != nil {
+		return nil, err
+	}
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	lt := &LoadedTask{
+		path:              path,
+		Prompt:            meta.Prompt,
+		Title:             meta.Title,
+		Repo:              meta.Repo,
+		Branch:            meta.Branch,
+		Harness:           meta.Harness,
+		StartedAt:         meta.StartedAt,
+		LastStateUpdateAt: info.ModTime().UTC(),
+		State:             StateFailed, // default if no trailer
+	}
+
+	// Read the tail of the file to find a caic_result trailer.
+	const tailSize = 65536 // 64 KiB — sufficient for any realistic trailer.
+	size := info.Size()
+	offset := max(int64(0), size-tailSize)
+	buf := make([]byte, size-offset)
+	n, _ := f.ReadAt(buf, offset)
+	if n > 0 {
+		// Find the last non-empty line.
+		tail := bytes.TrimRight(buf[:n], "\n\r\t ")
+		if i := bytes.LastIndexByte(tail, '\n'); i >= 0 {
+			tail = tail[i+1:]
+		}
+		if bytes.Contains(tail, []byte(`"caic_result"`)) {
+			var mr agent.MetaResultMessage
+			rd := json.NewDecoder(bytes.NewReader(tail))
+			rd.DisallowUnknownFields()
+			if err := rd.Decode(&mr); err == nil {
+				lt.State = parseState(mr.State)
+				if mr.Title != "" {
+					lt.Title = mr.Title
+				}
+				lt.Result = &Result{
+					State:    lt.State,
+					CostUSD:  mr.CostUSD,
+					Duration: time.Duration(mr.Duration * float64(time.Second)),
+					NumTurns: mr.NumTurns,
+					Usage: agent.Usage{
+						InputTokens:              mr.InputTokens,
+						OutputTokens:             mr.OutputTokens,
+						CacheCreationInputTokens: mr.CacheCreationInputTokens,
+						CacheReadInputTokens:     mr.CacheReadInputTokens,
+					},
+					DiffStat:    mr.DiffStat,
+					AgentResult: mr.AgentResult,
+				}
+				if mr.Error != "" {
+					lt.Result.Err = errors.New(mr.Error)
+				}
+			}
+		}
+	}
+
+	return lt, nil
 }
 
 // loadLogFile parses a single JSONL log file. Returns nil if the file has no

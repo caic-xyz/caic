@@ -105,6 +105,15 @@ func TestLoadLogs(t *testing.T) {
 		if tasks[1].Prompt != "second" {
 			t.Errorf("tasks[1].Prompt = %q, want %q", tasks[1].Prompt, "second")
 		}
+		// Msgs are nil until LoadMessages is called.
+		if tasks[0].Msgs != nil {
+			t.Error("tasks[0].Msgs should be nil before LoadMessages")
+		}
+		for _, lt := range tasks {
+			if err := lt.LoadMessages(); err != nil {
+				t.Fatal(err)
+			}
+		}
 		// Each task has its own messages, not merged.
 		if len(tasks[0].Msgs) != 1 {
 			t.Errorf("tasks[0].Msgs len = %d, want 1", len(tasks[0].Msgs))
@@ -139,6 +148,9 @@ func TestLoadLogs(t *testing.T) {
 			t.Fatalf("len = %d, want 1", len(tasks))
 		}
 		lt := tasks[0]
+		if err := lt.LoadMessages(); err != nil {
+			t.Fatal(err)
+		}
 		// After restore, plan state must be empty because context_cleared resets it.
 		tk := &Task{InitialPrompt: agent.Prompt{Text: lt.Prompt}}
 		tk.SetState(StateRunning)
