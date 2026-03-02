@@ -1,4 +1,85 @@
-/* Global resets. */
+/* Global resets and design tokens. */
+
+:root {
+  /* Primary action (buttons, focus rings) */
+  --color-primary: #4a90d9;
+  --color-primary-hover: #357abd;
+  --color-primary-ring: rgba(74, 144, 217, 0.3);
+
+  /* Links */
+  --color-link: #0366d6;
+
+  /* Success */
+  --color-success: #28a745;
+  --color-success-hover: #218838;
+  --color-success-bg: #d4edda;
+  --color-success-text: #155724;
+
+  /* Danger */
+  --color-danger: #dc3545;
+  --color-danger-hover: #c82333;
+  --color-danger-bg: #f8d7da;
+  --color-danger-text: #721c24;
+  --color-danger-border: #f5c6cb;
+  --color-error: #c00;
+
+  /* Warning */
+  --color-warning-bg: #fff3cd;
+  --color-warning-border: #ffc107;
+  --color-warning-text: #856404;
+
+  /* Gray button variant */
+  --color-gray: #6c757d;
+  --color-gray-hover: #5a6268;
+
+  /* Plan mode (purple) */
+  --color-plan: #7c3aed;
+  --color-plan-bg: #ede9fe;
+  --color-plan-surface: #f5f3ff;
+  --color-plan-border: #ddd6fe;
+
+  /* Text scale (dark → light) */
+  --color-text-secondary: #555;
+  --color-text-tertiary: #666;
+  --color-text-meta: #777;
+  --color-text-muted: #888;
+  --color-text-faint: #999;
+
+  /* Surface backgrounds */
+  --color-bg-input: #f0f0f0;
+  --color-bg-input-hover: #e4e4e4;
+  --color-bg-hover: #eee;
+  --color-bg-code: #e8e8e8;
+  --color-bg-surface: #fafafa;
+
+  /* Borders */
+  --color-border: #ddd;
+  --color-border-light: #e0e0e0;
+  --color-border-medium: #ccc;
+
+  /* Code / diff dark theme */
+  --color-code-bg: #1e1e1e;
+  --color-code-text: #d4d4d4;
+  --color-diff-added: #22863a;
+  --color-diff-deleted: #cb2431;
+  --color-diff-line-added: #4ec94e;
+  --color-diff-line-deleted: #f44;
+  --color-diff-hunk: #b48ead;
+  --color-diff-binary: #6a737d;
+
+  /* Selection */
+  --color-selected: #007bff;
+
+  /* User message tint */
+  --color-user-msg-bg: #dbe9f9;
+
+  /* Border radii */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+}
+
 body {
   margin: 0;
 }

@@ -12,7 +12,7 @@
 
 .dialog {
   background: #fff;
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   padding: 1.5rem;
   width: 90vw;
   max-width: 480px;
@@ -34,27 +34,27 @@
   gap: 0.3rem;
   font-size: 0.85rem;
   font-weight: 500;
-  color: #555;
+  color: var(--color-text-secondary);
 }
 
 .optional {
   font-weight: 400;
-  color: #999;
+  color: var(--color-text-faint);
 }
 
 .input {
   padding: 0.5rem 0.6rem;
   font: inherit;
   font-size: 0.9rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background: #fafafa;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-surface);
   color: inherit;
 }
 
 .input:focus {
   outline: none;
-  border-color: #4a90d9;
+  border-color: var(--color-primary);
   box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.2);
 }
 
@@ -78,15 +78,15 @@
   padding: 0.4rem 0.9rem;
   font: inherit;
   font-size: 0.9rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   background: #fff;
-  color: #555;
+  color: var(--color-text-secondary);
   cursor: pointer;
 }
 
 .cancelBtn:hover:not(:disabled) {
-  background: #f0f0f0;
+  background: var(--color-bg-input);
 }
 
 .cancelBtn:disabled {

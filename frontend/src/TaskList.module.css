@@ -35,23 +35,23 @@
   border: none;
   background: none;
   cursor: pointer;
-  color: #555;
-  border-radius: 4px;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
   padding: 4px;
   display: flex;
   align-items: center;
 }
 
 .collapseBtn:hover {
-  background: #eee;
+  background: var(--color-bg-hover);
 }
 
 .expandBtn {
   border: none;
   background: none;
   cursor: pointer;
-  color: #555;
-  border-radius: 4px;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
   padding: 4px;
   align-self: flex-start;
   display: flex;
@@ -59,11 +59,11 @@
 }
 
 .expandBtn:hover {
-  background: #eee;
+  background: var(--color-bg-hover);
 }
 
 .placeholder {
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 /* Mobile: <=768px */

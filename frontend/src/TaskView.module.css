@@ -22,20 +22,20 @@
   border: none;
   background: none;
   cursor: pointer;
-  color: #555;
-  border-radius: 4px;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
   padding: 4px;
   display: flex;
   align-items: center;
 }
 
 .closeBtn:hover {
-  background: #eee;
+  background: var(--color-bg-hover);
 }
 
 .headerMeta {
   font-size: 0.8rem;
-  color: #555;
+  color: var(--color-text-secondary);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -43,7 +43,7 @@
 }
 
 .headerRepo {
-  color: #0366d6;
+  color: var(--color-link);
   text-decoration: none;
 }
 
@@ -53,7 +53,7 @@ a.headerRepo:hover {
 
 .headerBranch {
   margin-left: 0.4em;
-  color: #666;
+  color: var(--color-text-tertiary);
 }
 
 .headerBranch::before {
@@ -64,16 +64,16 @@ a.headerRepo:hover {
 .messageArea {
   flex: 1;
   overflow: auto;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
   padding: 0.75rem;
-  background: #fafafa;
+  background: var(--color-bg-surface);
   font-size: 0.85rem;
   min-height: 0;
 }
 
 .placeholder {
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 .inputForm {
@@ -97,24 +97,24 @@ a.headerRepo:hover {
 
 .actionError {
   font-size: 0.8rem;
-  color: #dc3545;
+  color: var(--color-danger);
   margin-top: 0.25rem;
 }
 
 .systemInit {
-  color: #888;
+  color: var(--color-text-muted);
   font-size: 0.8rem;
   margin-bottom: 0.5rem;
 }
 
 .systemMsg {
-  color: #888;
+  color: var(--color-text-muted);
   font-size: 0.8rem;
   margin-bottom: 0.25rem;
 }
 
 .contextCleared {
-  color: #888;
+  color: var(--color-text-muted);
   font-size: 0.8rem;
   text-align: center;
   margin: 1rem 0;
@@ -123,10 +123,10 @@ a.headerRepo:hover {
 }
 
 .parseError {
-  color: #721c24;
-  background: #f8d7da;
-  border: 1px solid #f5c6cb;
-  border-radius: 4px;
+  color: var(--color-danger-text);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-md);
   padding: 0.4rem 0.6rem;
   font-size: 0.8rem;
   margin-bottom: 0.25rem;
@@ -136,8 +136,8 @@ a.headerRepo:hover {
 .userInputMsg {
   margin-bottom: 0.5rem;
   padding: 0.4rem 0.6rem;
-  background: #dbe9f9;
-  border-radius: 6px;
+  background: var(--color-user-msg-bg);
+  border-radius: var(--radius-lg);
   font-size: 0.85rem;
   word-break: break-word;
 }
@@ -188,17 +188,17 @@ a.headerRepo:hover {
 }
 
 .markdown code {
-  background: #e8e8e8;
+  background: var(--color-bg-code);
   padding: 0.15em 0.35em;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   font-size: 0.9em;
 }
 
 .markdown pre {
-  background: #1e1e1e;
-  color: #d4d4d4;
+  background: var(--color-code-bg);
+  color: var(--color-code-text);
   padding: 0.75em;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   overflow-x: auto;
   margin: 0.5em 0;
   font-size: 0.8em;
@@ -214,10 +214,10 @@ a.headerRepo:hover {
 }
 
 .markdown blockquote {
-  border-left: 3px solid #ccc;
+  border-left: 3px solid var(--color-border-medium);
   margin: 0.5em 0;
   padding: 0.25em 0.75em;
-  color: #555;
+  color: var(--color-text-secondary);
 }
 
 .markdown table {
@@ -228,22 +228,22 @@ a.headerRepo:hover {
 
 .markdown th,
 .markdown td {
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-border);
   padding: 0.3em 0.6em;
 }
 
 .markdown th {
-  background: #f0f0f0;
+  background: var(--color-bg-input);
 }
 
 .markdown hr {
   border: none;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid var(--color-border);
   margin: 0.75em 0;
 }
 
 .markdown a {
-  color: #0366d6;
+  color: var(--color-link);
   text-decoration: none;
 }
 
@@ -254,27 +254,27 @@ a.headerRepo:hover {
 .markdown img {
   max-width: min(100%, 720px);
   height: auto;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
 }
 
 .result {
   margin-top: 0.5rem;
   padding: 0.5rem;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   font-size: 0.85rem;
 }
 
 .resultSuccess {
-  background: #d4edda;
+  background: var(--color-success-bg);
 }
 
 .resultError {
-  background: #f8d7da;
+  background: var(--color-danger-bg);
 }
 
 .resultMeta {
   font-size: 0.8rem;
-  color: #555;
+  color: var(--color-text-secondary);
   margin-top: 0.25rem;
 }
 
@@ -284,7 +284,7 @@ a.headerRepo:hover {
 
 .diffLink {
   font-size: 0.75rem;
-  color: #0366d6;
+  color: var(--color-link);
   text-decoration: none;
   white-space: nowrap;
   flex-shrink: 0;
@@ -298,9 +298,9 @@ a.headerRepo:hover {
   font-size: 0.75rem;
   font-weight: 600;
   padding: 0.15rem 0.5rem;
-  border-radius: 3px;
-  background: #ede9fe;
-  color: #7c3aed;
+  border-radius: var(--radius-sm);
+  background: var(--color-plan-bg);
+  color: var(--color-plan);
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -312,9 +312,9 @@ a.headerRepo:hover {
 .planContent {
   margin-bottom: 0.75rem;
   padding: 0.75rem 1rem;
-  background: #f5f3ff;
-  border: 1px solid #ddd6fe;
-  border-radius: 6px;
+  background: var(--color-plan-surface);
+  border: 1px solid var(--color-plan-border);
+  border-radius: var(--radius-lg);
   overflow-x: auto;
 }
 
@@ -322,7 +322,7 @@ a.headerRepo:hover {
   margin: 0.25rem 0 0;
   padding: 0.4rem 0.6rem;
   background: rgba(0, 0, 0, 0.05);
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   font-size: 0.8rem;
   line-height: 1.5;
 }
@@ -355,16 +355,16 @@ a.headerRepo:hover {
 }
 
 .diffAdded {
-  color: #22863a;
+  color: var(--color-diff-added);
   margin-right: 0.3em;
 }
 
 .diffDeleted {
-  color: #cb2431;
+  color: var(--color-diff-deleted);
 }
 
 .diffBinary {
-  color: #6a737d;
+  color: var(--color-diff-binary);
   font-style: italic;
   flex-shrink: 0;
 }
@@ -372,11 +372,11 @@ a.headerRepo:hover {
 .diffContent {
   margin: 0.25rem 0;
   padding: 0.5rem;
-  background: #1e1e1e;
-  color: #d4d4d4;
+  background: var(--color-code-bg);
+  color: var(--color-code-text);
   font-size: 0.75rem;
   line-height: 1.4;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   overflow-x: auto;
   max-height: 400px;
   overflow-y: auto;
@@ -387,33 +387,33 @@ a.headerRepo:hover {
 }
 
 .diffLineAdded {
-  color: #4ec94e;
+  color: var(--color-diff-line-added);
 }
 
 .diffLineDeleted {
-  color: #f44;
+  color: var(--color-diff-line-deleted);
 }
 
 .diffLineHunk {
-  color: #b48ead;
+  color: var(--color-diff-hunk);
 }
 
 .diffLoading {
   font-size: 0.75rem;
-  color: #888;
+  color: var(--color-text-muted);
   padding: 0.25rem 0;
 }
 
 .diffError {
   font-size: 0.75rem;
-  color: #c00;
+  color: var(--color-error);
   padding: 0.25rem 0;
 }
 
 .toolResult {
   margin-bottom: 0.25rem;
   font-size: 0.8rem;
-  color: #666;
+  color: var(--color-text-tertiary);
 }
 
 .toolResult summary {
@@ -422,15 +422,15 @@ a.headerRepo:hover {
 
 .toolGroup {
   margin-bottom: 0.25rem;
-  background: #e8e8e8;
-  border-radius: 4px;
+  background: var(--color-bg-code);
+  border-radius: var(--radius-md);
   padding: 0.25rem 0.5rem;
 }
 
 .toolGroup summary {
   cursor: pointer;
   font-size: 0.8rem;
-  color: #555;
+  color: var(--color-text-secondary);
 }
 
 .toolGroupInner {
@@ -439,8 +439,8 @@ a.headerRepo:hover {
 
 .toolBlock {
   margin-bottom: 0.25rem;
-  background: #f0f0f0;
-  border-radius: 4px;
+  background: var(--color-bg-input);
+  border-radius: var(--radius-md);
   padding: 0.25rem 0.5rem;
 }
 
@@ -471,7 +471,7 @@ a.headerRepo:hover {
 }
 
 .toolInputKey {
-  color: #666;
+  color: var(--color-text-tertiary);
   font-weight: 500;
 }
 
@@ -485,7 +485,7 @@ a.headerRepo:hover {
 .elidedTurn {
   margin-bottom: 0.35rem;
   background: #e4eaf1;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 0.25rem 0.5rem;
 }
 
@@ -508,8 +508,8 @@ a.headerRepo:hover {
   width: 0.7em;
   height: 0.7em;
   margin-right: 0.4em;
-  border: 2px solid #ccc;
-  border-top-color: #666;
+  border: 2px solid var(--color-border-medium);
+  border-top-color: var(--color-text-tertiary);
   border-radius: 50%;
   animation: toolSpin 0.8s linear infinite;
   vertical-align: middle;
@@ -525,19 +525,19 @@ a.headerRepo:hover {
 .toolDetail {
   margin-left: 0.5em;
   font-size: 0.75rem;
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 .toolDuration {
   margin-left: 0.5em;
   font-size: 0.75rem;
-  color: #666;
+  color: var(--color-text-tertiary);
 }
 
 .toolError {
   margin-left: 0.5em;
   font-size: 0.75rem;
-  color: #c00;
+  color: var(--color-error);
   font-weight: bold;
 }
 
@@ -546,28 +546,28 @@ a.headerRepo:hover {
   white-space: pre-wrap;
   max-height: 150px;
   overflow: auto;
-  color: #c00;
+  color: var(--color-error);
   background: #fff0f0;
   padding: 0.25rem 0.5rem;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
 }
 
 .usageMeta {
   font-size: 0.75rem;
-  color: #888;
+  color: var(--color-text-muted);
   padding: 0.1rem 0.5rem;
 }
 
 .askGroup {
   margin-bottom: 0.5rem;
   padding: 0.75rem;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
   background: #f8f9fa;
 }
 
 .askGroupActive {
-  border-color: #4a90d9;
+  border-color: var(--color-primary);
   background: #f0f6ff;
 }
 
@@ -583,7 +583,7 @@ a.headerRepo:hover {
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
-  color: #666;
+  color: var(--color-text-tertiary);
   margin-bottom: 0.15rem;
 }
 
@@ -602,8 +602,8 @@ a.headerRepo:hover {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  border: 1px solid #ccc;
-  border-radius: 6px;
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-lg);
   padding: 0.35rem 0.6rem;
   background: white;
   cursor: pointer;
@@ -617,8 +617,8 @@ a.headerRepo:hover {
 }
 
 .askChipSelected {
-  border-color: #4a90d9;
-  background: #dbe9f9;
+  border-color: var(--color-primary);
+  background: var(--color-user-msg-bg);
 }
 
 .askChipLabel {
@@ -627,7 +627,7 @@ a.headerRepo:hover {
 
 .askChipDesc {
   font-size: 0.7rem;
-  color: #555;
+  color: var(--color-text-secondary);
   margin-top: 0.1rem;
 }
 
@@ -637,8 +637,8 @@ a.headerRepo:hover {
   box-sizing: border-box;
   margin-top: 0.35rem;
   padding: 0.35rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-md);
   font-size: 0.8rem;
   resize: none;
   font-family: inherit;
@@ -651,21 +651,21 @@ a.headerRepo:hover {
   margin-top: 0.5rem;
   padding: 0.4rem 1rem;
   border: none;
-  border-radius: 4px;
-  background: #4a90d9;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
   color: white;
   cursor: pointer;
   font-size: 0.85rem;
 }
 
 .askSubmit:hover {
-  background: #357abd;
+  background: var(--color-primary-hover);
 }
 
 .askSubmitted {
   margin-top: 0.35rem;
   font-size: 0.8rem;
-  color: #28a745;
+  color: var(--color-success);
 }
 
 .userInputImages {
@@ -678,21 +678,21 @@ a.headerRepo:hover {
 .userInputImage {
   max-width: min(100%, 720px);
   height: auto;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   border: 1px solid #b8d0ea;
 }
 
 .safetyWarning {
   margin-top: 0.5rem;
   padding: 0.5rem 0.75rem;
-  background: #fff3cd;
-  border: 1px solid #ffc107;
-  border-radius: 6px;
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-lg);
   font-size: 0.8rem;
 }
 
 .safetyWarning strong {
-  color: #856404;
+  color: var(--color-warning-text);
 }
 
 .safetyWarning ul {
@@ -711,14 +711,14 @@ a.headerRepo:hover {
 }
 
 .syncDropdownToggle {
-  border: 1px solid #ccc;
+  border: 1px solid var(--color-border-medium);
   border-left: none;
-  background: #f0f0f0;
+  background: var(--color-bg-input);
   cursor: pointer;
   font-size: 0.75rem;
   padding: 0 0.5rem;
   border-radius: 0 4px 4px 0;
-  color: #555;
+  color: var(--color-text-secondary);
 }
 
 .syncDropdownToggle:hover:not(:disabled) {
@@ -736,8 +736,8 @@ a.headerRepo:hover {
   right: 0;
   margin-bottom: 2px;
   background: white;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-md);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   z-index: 10;
   min-width: 10rem;
@@ -756,7 +756,7 @@ a.headerRepo:hover {
 }
 
 .syncDropdownItem:hover {
-  background: #f0f0f0;
+  background: var(--color-bg-input);
 }
 
 .syncDropdownItem:first-child {

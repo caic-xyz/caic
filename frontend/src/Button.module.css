@@ -3,7 +3,7 @@
   align-items: center;
   justify-content: center;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 0.4rem 0.75rem;
   cursor: pointer;
   color: white;
@@ -17,35 +17,35 @@
 }
 
 .primary {
-  background: #4a90d9;
+  background: var(--color-primary);
 }
 
 .primary:hover:not(:disabled) {
-  background: #357abd;
+  background: var(--color-primary-hover);
 }
 
 .gray {
-  background: #6c757d;
+  background: var(--color-gray);
 }
 
 .gray:hover:not(:disabled) {
-  background: #5a6268;
+  background: var(--color-gray-hover);
 }
 
 .red {
-  background: #dc3545;
+  background: var(--color-danger);
 }
 
 .red:hover:not(:disabled) {
-  background: #c82333;
+  background: var(--color-danger-hover);
 }
 
 .green {
-  background: #28a745;
+  background: var(--color-success);
 }
 
 .green:hover:not(:disabled) {
-  background: #218838;
+  background: var(--color-success-hover);
 }
 
 .spinner {

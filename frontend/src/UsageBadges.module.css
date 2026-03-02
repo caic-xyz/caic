@@ -9,30 +9,30 @@
 .badge {
   font-size: 0.75rem;
   padding: 0.15rem 0.45rem;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   font-weight: 500;
   white-space: nowrap;
   cursor: default;
 }
 
 .green {
-  background: #d4edda;
-  color: #155724;
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
 }
 
 .yellow {
-  background: #fff3cd;
-  color: #856404;
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
 }
 
 .red {
-  background: #f8d7da;
-  color: #721c24;
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
 }
 
 .disabled {
   background: #e2e3e5;
-  color: #6c757d;
+  color: var(--color-gray);
   text-decoration: line-through;
 }
 

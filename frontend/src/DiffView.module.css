@@ -18,20 +18,20 @@
   border: none;
   background: none;
   cursor: pointer;
-  color: #555;
-  border-radius: 4px;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
   padding: 4px;
   display: flex;
   align-items: center;
 }
 
 .backBtn:hover {
-  background: #eee;
+  background: var(--color-bg-hover);
 }
 
 .headerMeta {
   font-size: 0.8rem;
-  color: #555;
+  color: var(--color-text-secondary);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -39,12 +39,12 @@
 }
 
 .headerRepo {
-  color: #0366d6;
+  color: var(--color-link);
 }
 
 .headerBranch {
   margin-left: 0.4em;
-  color: #666;
+  color: var(--color-text-tertiary);
 }
 
 .headerBranch::before {
@@ -55,10 +55,10 @@
 .fileList {
   flex: 1;
   overflow: auto;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
   padding: 0.75rem;
-  background: #fafafa;
+  background: var(--color-bg-surface);
   font-size: 0.85rem;
   min-height: 0;
 }
@@ -68,13 +68,13 @@
   align-items: center;
   gap: 0.5rem;
   padding: 0.3rem 0;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid var(--color-border-light);
   margin-top: 0.25rem;
 }
 
 .collapseIndicator {
   font-size: 0.6rem;
-  color: #888;
+  color: var(--color-text-muted);
   flex-shrink: 0;
   width: 0.8em;
 }
@@ -103,16 +103,16 @@
 }
 
 .added {
-  color: #22863a;
+  color: var(--color-diff-added);
   margin-right: 0.3em;
 }
 
 .deleted {
-  color: #cb2431;
+  color: var(--color-diff-deleted);
 }
 
 .binary {
-  color: #6a737d;
+  color: var(--color-diff-binary);
   font-style: italic;
   flex-shrink: 0;
 }
@@ -120,11 +120,11 @@
 .diffContent {
   margin: 0.25rem 0;
   padding: 0.5rem;
-  background: #1e1e1e;
-  color: #d4d4d4;
+  background: var(--color-code-bg);
+  color: var(--color-code-text);
   font-size: 0.75rem;
   line-height: 1.4;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   overflow-x: auto;
 }
 
@@ -133,30 +133,30 @@
 }
 
 .diffLineAdded {
-  color: #4ec94e;
+  color: var(--color-diff-line-added);
 }
 
 .diffLineDeleted {
-  color: #f44;
+  color: var(--color-diff-line-deleted);
 }
 
 .diffLineHunk {
-  color: #b48ead;
+  color: var(--color-diff-hunk);
 }
 
 .diffLineHeader {
-  color: #888;
+  color: var(--color-text-muted);
 }
 
 .diffLoading {
   font-size: 0.75rem;
-  color: #888;
+  color: var(--color-text-muted);
   padding: 0.25rem 0;
 }
 
 .diffError {
   font-size: 0.75rem;
-  color: #c00;
+  color: var(--color-error);
   padding: 0.25rem 0;
 }
 
