@@ -129,9 +129,11 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("SendInput", func(t *testing.T) {
-		t.Run("ClearsPlanState", func(t *testing.T) {
+		t.Run("PreservesPlanContent", func(t *testing.T) {
 			// When the user sends regular input (instead of clicking
-			// "Clear and execute plan"), the stale plan must be dismissed.
+			// "Clear and execute plan"), planContent must be preserved
+			// so the plan UI reappears after the agent finishes. The
+			// UI hides naturally while the task is Running.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			// Simulate: agent entered plan mode, wrote a plan, exited.
@@ -177,14 +179,148 @@ func TestTask(t *testing.T) {
 			defer func() { _ = stdin.Close(); _ = cmd.Wait() }()
 
 			// User sends a regular message instead of "Clear and execute plan".
-			_ = tk.SendInput(t.Context(), agent.Prompt{Text: "do something else"})
+			_ = tk.SendInput(t.Context(), agent.Prompt{Text: "improve the plan"})
 
 			snap = tk.Snapshot()
-			if snap.PlanContent != "" {
-				t.Errorf("PlanContent = %q after SendInput, want empty", snap.PlanContent)
+			if snap.PlanContent != "the plan" {
+				t.Errorf("PlanContent = %q after SendInput, want %q", snap.PlanContent, "the plan")
 			}
-			if snap.PlanFile != "" {
-				t.Errorf("PlanFile = %q after SendInput, want empty", snap.PlanFile)
+			if snap.PlanFile != "/home/user/.claude/plans/p.md" {
+				t.Errorf("PlanFile = %q after SendInput, want %q", snap.PlanFile, "/home/user/.claude/plans/p.md")
+			}
+		})
+		t.Run("EditUpdatesPlanContent", func(t *testing.T) {
+			// When the agent uses the Edit tool on a plan file, the
+			// in-memory planContent must be updated so the UI shows
+			// the revised plan.
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			// Agent writes the initial plan.
+			tk.addMessage(t.Context(), &agent.AssistantMessage{
+				MessageType: "assistant",
+				Message: agent.APIMessage{
+					Content: []agent.ContentBlock{
+						{Type: "tool_use", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"step 1\nstep 2\n"}`)},
+					},
+				},
+			})
+			if snap := tk.Snapshot(); snap.PlanContent != "step 1\nstep 2\n" {
+				t.Fatalf("PlanContent = %q after Write, want %q", snap.PlanContent, "step 1\nstep 2\n")
+			}
+			// Agent edits the plan file.
+			tk.addMessage(t.Context(), &agent.AssistantMessage{
+				MessageType: "assistant",
+				Message: agent.APIMessage{
+					Content: []agent.ContentBlock{
+						{Type: "tool_use", Name: "Edit", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","old_string":"step 2","new_string":"step 2 (revised)\nstep 3"}`)},
+					},
+				},
+			})
+			snap := tk.Snapshot()
+			if snap.PlanContent != "step 1\nstep 2 (revised)\nstep 3\n" {
+				t.Errorf("PlanContent = %q after Edit, want %q", snap.PlanContent, "step 1\nstep 2 (revised)\nstep 3\n")
+			}
+		})
+		t.Run("EditReplaceAll", func(t *testing.T) {
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			tk.addMessage(t.Context(), &agent.AssistantMessage{
+				MessageType: "assistant",
+				Message: agent.APIMessage{
+					Content: []agent.ContentBlock{
+						{Type: "tool_use", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"TODO\nTODO\n"}`)},
+					},
+				},
+			})
+			tk.addMessage(t.Context(), &agent.AssistantMessage{
+				MessageType: "assistant",
+				Message: agent.APIMessage{
+					Content: []agent.ContentBlock{
+						{Type: "tool_use", Name: "Edit", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","old_string":"TODO","new_string":"DONE","replace_all":true}`)},
+					},
+				},
+			})
+			snap := tk.Snapshot()
+			if snap.PlanContent != "DONE\nDONE\n" {
+				t.Errorf("PlanContent = %q after replace_all Edit, want %q", snap.PlanContent, "DONE\nDONE\n")
+			}
+		})
+		t.Run("EditIgnoresNonPlanFile", func(t *testing.T) {
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			tk.addMessage(t.Context(), &agent.AssistantMessage{
+				MessageType: "assistant",
+				Message: agent.APIMessage{
+					Content: []agent.ContentBlock{
+						{Type: "tool_use", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`)},
+					},
+				},
+			})
+			// Edit a non-plan file — planContent must be unchanged.
+			tk.addMessage(t.Context(), &agent.AssistantMessage{
+				MessageType: "assistant",
+				Message: agent.APIMessage{
+					Content: []agent.ContentBlock{
+						{Type: "tool_use", Name: "Edit", Input: json.RawMessage(`{"file_path":"/home/user/src/main.go","old_string":"foo","new_string":"bar"}`)},
+					},
+				},
+			})
+			snap := tk.Snapshot()
+			if snap.PlanContent != "the plan" {
+				t.Errorf("PlanContent = %q after non-plan Edit, want %q", snap.PlanContent, "the plan")
+			}
+		})
+		t.Run("EditAfterSendInputUpdatesPlan", func(t *testing.T) {
+			// Core regression test: user rejects plan and asks for
+			// improvement, agent edits the plan file.
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			tk.addMessage(t.Context(), &agent.AssistantMessage{
+				MessageType: "assistant",
+				Message: agent.APIMessage{
+					Content: []agent.ContentBlock{
+						{Type: "tool_use", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"original plan"}`)},
+						{Type: "tool_use", Name: "ExitPlanMode"},
+					},
+				},
+			})
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+
+			// Attach a live session.
+			cmd := exec.Command("cat")
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			s := agent.NewSession(cmd, stdin, stdout, nil, nil, &testWire{}, nil)
+			tk.AttachSession(&SessionHandle{Session: s})
+			defer func() { _ = stdin.Close(); _ = cmd.Wait() }()
+
+			// User rejects plan and sends feedback.
+			_ = tk.SendInput(t.Context(), agent.Prompt{Text: "add error handling"})
+
+			// Agent edits the plan file.
+			tk.addMessage(t.Context(), &agent.AssistantMessage{
+				MessageType: "assistant",
+				Message: agent.APIMessage{
+					Content: []agent.ContentBlock{
+						{Type: "tool_use", Name: "Edit", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","old_string":"original plan","new_string":"updated plan with error handling"}`)},
+						{Type: "tool_use", Name: "ExitPlanMode"},
+					},
+				},
+			})
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+
+			snap := tk.Snapshot()
+			if snap.PlanContent != "updated plan with error handling" {
+				t.Errorf("PlanContent = %q, want %q", snap.PlanContent, "updated plan with error handling")
 			}
 		})
 		t.Run("NoSession", func(t *testing.T) {

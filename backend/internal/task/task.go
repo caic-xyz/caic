@@ -474,6 +474,23 @@ func (t *Task) trackPlanState(am *agent.AssistantMessage) {
 				t.planFile = input.FilePath
 				t.planContent = input.Content
 			}
+		case "Edit":
+			if t.planDismissed {
+				continue
+			}
+			var input struct {
+				FilePath   string `json:"file_path"`
+				OldString  string `json:"old_string"`
+				NewString  string `json:"new_string"`
+				ReplaceAll bool   `json:"replace_all"`
+			}
+			if json.Unmarshal(b.Input, &input) == nil && t.planFile == input.FilePath && t.planContent != "" {
+				if input.ReplaceAll {
+					t.planContent = strings.ReplaceAll(t.planContent, input.OldString, input.NewString)
+				} else {
+					t.planContent = strings.Replace(t.planContent, input.OldString, input.NewString, 1)
+				}
+			}
 		}
 	}
 }
@@ -749,11 +766,11 @@ func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
 	state := t.state
 	if h != nil && (state == StateWaiting || state == StateAsking) {
 		t.setState(StateRunning)
-		// Dismiss any stale plan — the user chose to send input rather
-		// than clicking "Clear and execute plan".
-		t.planFile = ""
-		t.planContent = ""
-		t.planDismissed = false
+		// Plan content is preserved — the UI hides naturally while the
+		// task is Running (isWaiting is false). When the agent finishes,
+		// the plan reappears (original or updated via Write/Edit).
+		// ClearMessages (the "Clear and execute plan" path) is the only
+		// place that erases plan state.
 	}
 	t.mu.Unlock()
 	if h == nil {
