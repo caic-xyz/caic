@@ -1,8 +1,8 @@
 // TaskView renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, For, Index, Show, onCleanup, createEffect, Switch, Match, type Accessor, type JSX } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
-import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskRawEvents } from "@sdk/api.gen";
-import type { ClaudeEventMessage, ClaudeAskQuestion, ClaudeEventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat } from "@sdk/types.gen";
+import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents } from "@sdk/api.gen";
+import type { EventMessage, AskQuestion, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat } from "@sdk/types.gen";
 import { groupMessages, groupTurns, toolCountSummary, turnSummary } from "./grouping";
 import type { ToolCall, Turn } from "./grouping";
 import { SyncTargetDefault } from "@sdk/types.gen";
@@ -45,7 +45,7 @@ interface Props {
 export default function TaskView(props: Props) {
   const navigate = useNavigate();
   const location = useLocation();
-  const [messages, setMessages] = createSignal<ClaudeEventMessage[]>([]);
+  const [messages, setMessages] = createSignal<EventMessage[]>([]);
   const [pendingImages, setPendingImages] = createSignal<APIImageData[]>([]);
   const [sending, setSending] = createSignal(false);
   const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | null>(null);
@@ -99,13 +99,13 @@ export default function TaskView(props: Props) {
     let timer: ReturnType<typeof setTimeout> | null = null;
     let delay = 500;
     // Buffer accumulates replayed history; swapped into signal on "ready" event.
-    let buf: ClaudeEventMessage[] = [];
+    let buf: EventMessage[] = [];
     let live = false;
 
     function connect() {
       buf = [];
       live = false;
-      es = taskRawEvents(id, (ev) => {
+      es = taskEvents(id, (ev) => {
         if (live) {
           setMessages((prev) => [...prev, ev]);
         } else {
@@ -385,7 +385,7 @@ export default function TaskView(props: Props) {
   );
 }
 
-function MessageItem(props: { ev: ClaudeEventMessage }) {
+function MessageItem(props: { ev: EventMessage }) {
   return (
     <Switch>
       <Match when={props.ev.init} keyed>
@@ -522,14 +522,14 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[] }) {
 
 // Renders a text group, combining textDelta fragments into a single view.
 // When a final "text" event arrives, it replaces the accumulated deltas.
-function TextMessageGroup(props: { events: ClaudeEventMessage[] }) {
+function TextMessageGroup(props: { events: EventMessage[] }) {
   const text = createMemo(() => {
     // If a final text event exists, use it (it has the complete content).
     const finalEv = props.events.findLast((e) => e.kind === "text");
     if (finalEv?.text) return finalEv.text.text;
     // Otherwise, accumulate textDelta fragments.
     return props.events
-      .filter((e): e is ClaudeEventMessage & { textDelta: ClaudeEventTextDelta } => e.kind === "textDelta" && !!e.textDelta)
+      .filter((e): e is EventMessage & { textDelta: EventTextDelta } => e.kind === "textDelta" && !!e.textDelta)
       .map((e) => e.textDelta.text)
       .join("");
   });
@@ -713,7 +713,7 @@ function Markdown(props: { text: string }) {
   return <div class={styles.markdown} innerHTML={html()} />;
 }
 
-function AskQuestionGroup(props: { ask: ClaudeEventAsk; interactive: boolean; answerText?: string; onSubmit: (text: string) => void }) {
+function AskQuestionGroup(props: { ask: EventAsk; interactive: boolean; answerText?: string; onSubmit: (text: string) => void }) {
   const questions = () => props.ask.questions;
   const [selections, setSelections] = createSignal<Map<number, Set<string>>>(new Map());
   const [otherTexts, setOtherTexts] = createSignal<Map<number, string>>(new Map());
@@ -786,7 +786,7 @@ function AskQuestionGroup(props: { ask: ClaudeEventAsk; interactive: boolean; an
   return (
     <div class={canInteract() ? `${styles.askGroup} ${styles.askGroupActive}` : styles.askGroup}>
       <For each={questions()}>
-        {(q: ClaudeAskQuestion, qIdx: Accessor<number>) => (
+        {(q: AskQuestion, qIdx: Accessor<number>) => (
           <div class={styles.askQuestion}>
             <Show when={q.header}>
               <div class={styles.askHeader}>{q.header}</div>

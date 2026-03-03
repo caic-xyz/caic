@@ -25,9 +25,10 @@ type Backend interface {
 	// use as an offset in AttachRelay.
 	ReadRelayOutput(ctx context.Context, container string) ([]Message, int64, error)
 
-	// ParseMessage decodes a single wire-format line into a normalized
-	// Message. Used for log replay (load.go).
-	ParseMessage(line []byte) (Message, error)
+	// ParseMessage decodes a single wire-format line into one or more
+	// normalized Messages. A single wire line (e.g. Claude content blocks)
+	// may produce multiple semantic messages.
+	ParseMessage(line []byte) ([]Message, error)
 
 	// Harness returns the harness identifier ("claude", "gemini", etc.)
 	Harness() Harness
@@ -43,17 +44,16 @@ type Backend interface {
 	ContextWindowLimit(model string) int
 }
 
-// Base provides default implementations for all Backend methods except Start.
-// Embed it in backend-specific types to inherit the boilerplate; only Start
-// (and optionally AttachRelay for backends with per-session wire state) needs
-// overriding.
+// Base provides default implementations for most Backend methods. Embed it in
+// backend-specific types to inherit the boilerplate. Each backend must provide
+// its own Start method.
 type Base struct {
 	HarnessID     Harness
 	ModelList     []string
 	Images        bool
 	ContextWindow int
-	Wire          WireFormat                    // Used by AttachRelay. Nil if the backend overrides AttachRelay.
-	Parse         func([]byte) (Message, error) // Used by ParseMessage and ReadRelayOutput.
+	Wire          WireFormat                      // Used by StartRelay and AttachRelay.
+	Parse         func([]byte) ([]Message, error) // Used by ParseMessage and ReadRelayOutput.
 }
 
 // Harness implements Backend.
@@ -69,7 +69,7 @@ func (b *Base) SupportsImages() bool { return b.Images }
 func (b *Base) ContextWindowLimit(string) int { return b.ContextWindow }
 
 // ParseMessage implements Backend by delegating to Parse.
-func (b *Base) ParseMessage(line []byte) (Message, error) { return b.Parse(line) }
+func (b *Base) ParseMessage(line []byte) ([]Message, error) { return b.Parse(line) }
 
 // ReadRelayOutput implements Backend.
 func (b *Base) ReadRelayOutput(ctx context.Context, container string) ([]Message, int64, error) {

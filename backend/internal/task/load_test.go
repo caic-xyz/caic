@@ -31,11 +31,35 @@ func mustJSON(t *testing.T, v any) string {
 	return string(b)
 }
 
+// claudeAssistant builds a Claude wire-format assistant NDJSON line from
+// content blocks. Each block is a map with at minimum a "type" key.
+func claudeAssistant(t *testing.T, blocks ...map[string]any) string {
+	t.Helper()
+	msg := map[string]any{
+		"type": "assistant",
+		"message": map[string]any{
+			"content": blocks,
+		},
+	}
+	return mustJSON(t, msg)
+}
+
+// claudeInit builds a Claude wire-format system/init NDJSON line.
+func claudeInit(t *testing.T, sessionID string) string {
+	t.Helper()
+	msg := map[string]any{
+		"type":       "system",
+		"subtype":    "init",
+		"session_id": sessionID,
+	}
+	return mustJSON(t, msg)
+}
+
 func TestLoadLogs(t *testing.T) {
 	t.Run("Valid", func(t *testing.T) {
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task1", Repo: "r", Branch: "caic-0", Harness: "claude"})
-		asst := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
+		asst := claudeAssistant(t, map[string]any{"type": "text", "text": "hello"})
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "terminated"})
 		writeLogFile(t, dir, "a.jsonl", meta, asst, trailer)
 
@@ -83,12 +107,12 @@ func TestLoadLogs(t *testing.T) {
 		dir := t.TempDir()
 
 		meta1 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "first", Repo: "r", Branch: "caic-0", Harness: "claude", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
-		asst1 := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
+		asst1 := claudeAssistant(t, map[string]any{"type": "text", "text": "hello"})
 		writeLogFile(t, dir, "a.jsonl", meta1, asst1)
 
 		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "second", Repo: "r", Branch: "caic-0", Harness: "claude", StartedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)})
-		init2 := mustJSON(t, agent.SystemInitMessage{MessageType: "system", Subtype: "init", SessionID: "sid-2"})
-		asst2 := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
+		init2 := claudeInit(t, "sid-2")
+		asst2 := claudeAssistant(t, map[string]any{"type": "text", "text": "world"})
 		writeLogFile(t, dir, "b.jsonl", meta2, init2, asst2)
 
 		tasks, err := LoadLogs(dir)
@@ -115,9 +139,11 @@ func TestLoadLogs(t *testing.T) {
 			}
 		}
 		// Each task has its own messages, not merged.
+		// asst1 produces 1 TextMessage.
 		if len(tasks[0].Msgs) != 1 {
 			t.Errorf("tasks[0].Msgs len = %d, want 1", len(tasks[0].Msgs))
 		}
+		// init2 produces 1 InitMessage; asst2 produces 1 TextMessage = 2 total.
 		if len(tasks[1].Msgs) != 2 {
 			t.Errorf("tasks[1].Msgs len = %d, want 2", len(tasks[1].Msgs))
 		}
@@ -126,17 +152,17 @@ func TestLoadLogs(t *testing.T) {
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "plan task", Repo: "r", Branch: "caic-0", Harness: "claude"})
 		// Old session: agent enters plan mode and writes a plan file.
-		planWrite := mustJSON(t, agent.AssistantMessage{
-			MessageType: "assistant",
-			Message: agent.APIMessage{Content: []agent.ContentBlock{
-				{Type: "tool_use", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`)},
-			}},
+		planWrite := claudeAssistant(t, map[string]any{
+			"type":  "tool_use",
+			"id":    "tu1",
+			"name":  "Write",
+			"input": map[string]any{"file_path": "/home/user/.claude/plans/p.md", "content": "the plan"},
 		})
 		// context_cleared written by RestartSession before starting new session.
 		cleared := mustJSON(t, agent.SystemMessage{MessageType: "system", Subtype: "context_cleared"})
 		// New session header + assistant message (no plan tools).
 		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "plan task", Repo: "r", Branch: "caic-0", Harness: "claude"})
-		asst2 := mustJSON(t, agent.AssistantMessage{MessageType: "assistant"})
+		asst2 := claudeAssistant(t, map[string]any{"type": "text", "text": "done"})
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "terminated"})
 		writeLogFile(t, dir, "task.jsonl", meta, planWrite, cleared, meta2, asst2, trailer)
 

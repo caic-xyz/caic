@@ -9,13 +9,16 @@ import (
 func TestParseMessage(t *testing.T) {
 	t.Run("Init", func(t *testing.T) {
 		const input = `{"type":"init","timestamp":"2026-02-13T19:00:05.416Z","session_id":"abc","model":"auto-gemini-3"}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		init, ok := msg.(*agent.SystemInitMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		init, ok := msgs[0].(*agent.InitMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.SystemInitMessage", msg)
+			t.Fatalf("type = %T, want *agent.InitMessage", msgs[0])
 		}
 		if init.SessionID != "abc" {
 			t.Errorf("SessionID = %q", init.SessionID)
@@ -26,85 +29,87 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("AssistantText", func(t *testing.T) {
 		const input = `{"type":"message","timestamp":"2026-02-13T19:00:10.729Z","role":"assistant","content":"Hello.","delta":true}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		am, ok := msg.(*agent.AssistantMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		tm, ok := msgs[0].(*agent.TextMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.AssistantMessage", msg)
+			t.Fatalf("type = %T, want *agent.TextMessage", msgs[0])
 		}
-		if len(am.Message.Content) != 1 {
-			t.Fatalf("content blocks = %d, want 1", len(am.Message.Content))
-		}
-		if am.Message.Content[0].Type != "text" {
-			t.Errorf("content type = %q, want text", am.Message.Content[0].Type)
-		}
-		if am.Message.Content[0].Text != "Hello." {
-			t.Errorf("text = %q", am.Message.Content[0].Text)
+		if tm.Text != "Hello." {
+			t.Errorf("Text = %q", tm.Text)
 		}
 	})
 	t.Run("UserMessage", func(t *testing.T) {
 		const input = `{"type":"message","timestamp":"2026-02-13T19:00:05.418Z","role":"user","content":"Say hello"}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		um, ok := msg.(*agent.UserMessage)
-		if !ok {
-			t.Fatalf("type = %T, want *agent.UserMessage", msg)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
 		}
-		if um.Type() != "user" {
+		um, ok := msgs[0].(*agent.UserInputMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.UserInputMessage", msgs[0])
+		}
+		if um.Type() != "user_input" {
 			t.Errorf("Type() = %q", um.Type())
 		}
 	})
 	t.Run("ToolUse", func(t *testing.T) {
 		const input = `{"type":"tool_use","timestamp":"2026-02-13T19:00:22.912Z","tool_name":"read_file","tool_id":"read_file-123","parameters":{"file_path":"/etc/hostname"}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		am, ok := msg.(*agent.AssistantMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		tu, ok := msgs[0].(*agent.ToolUseMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.AssistantMessage", msg)
+			t.Fatalf("type = %T, want *agent.ToolUseMessage", msgs[0])
 		}
-		if len(am.Message.Content) != 1 {
-			t.Fatalf("content blocks = %d, want 1", len(am.Message.Content))
+		if tu.Name != "Read" {
+			t.Errorf("Name = %q, want Read (normalized from read_file)", tu.Name)
 		}
-		cb := am.Message.Content[0]
-		if cb.Type != "tool_use" {
-			t.Errorf("content type = %q, want tool_use", cb.Type)
-		}
-		if cb.Name != "Read" {
-			t.Errorf("Name = %q, want Read (normalized from read_file)", cb.Name)
-		}
-		if cb.ID != "read_file-123" {
-			t.Errorf("ID = %q", cb.ID)
+		if tu.ToolUseID != "read_file-123" {
+			t.Errorf("ToolUseID = %q", tu.ToolUseID)
 		}
 	})
 	t.Run("ToolResult", func(t *testing.T) {
 		const input = `{"type":"tool_result","timestamp":"2026-02-13T19:00:26.397Z","tool_id":"run_shell_command-123","status":"success","output":"md-caic-0"}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		um, ok := msg.(*agent.UserMessage)
-		if !ok {
-			t.Fatalf("type = %T, want *agent.UserMessage", msg)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
 		}
-		if um.ParentToolUseID == nil || *um.ParentToolUseID != "run_shell_command-123" {
-			t.Errorf("ParentToolUseID = %v", um.ParentToolUseID)
+		tr, ok := msgs[0].(*agent.ToolResultMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.ToolResultMessage", msgs[0])
+		}
+		if tr.ToolUseID != "run_shell_command-123" {
+			t.Errorf("ToolUseID = %q", tr.ToolUseID)
 		}
 	})
 	t.Run("ResultSuccess", func(t *testing.T) {
 		const input = `{"type":"result","timestamp":"2026-02-13T19:00:10.738Z","status":"success","stats":{"total_tokens":12359,"input_tokens":11744,"output_tokens":47,"cached":0,"input":11744,"duration_ms":5322,"tool_calls":2}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		rm, ok := msg.(*agent.ResultMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		rm, ok := msgs[0].(*agent.ResultMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.ResultMessage", msg)
+			t.Fatalf("type = %T, want *agent.ResultMessage", msgs[0])
 		}
 		if rm.IsError {
 			t.Error("IsError should be false for success")
@@ -124,13 +129,16 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("ResultError", func(t *testing.T) {
 		const input = `{"type":"result","timestamp":"2026-02-13T19:00:10.738Z","status":"error","stats":{"total_tokens":0,"input_tokens":0,"output_tokens":0,"cached":0,"input":0,"duration_ms":100,"tool_calls":0}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		rm, ok := msg.(*agent.ResultMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		rm, ok := msgs[0].(*agent.ResultMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.ResultMessage", msg)
+			t.Fatalf("type = %T, want *agent.ResultMessage", msgs[0])
 		}
 		if !rm.IsError {
 			t.Error("IsError should be true for error status")
@@ -138,13 +146,16 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("UnknownType", func(t *testing.T) {
 		const input = `{"type":"unknown_event","data":"something"}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, ok := msg.(*agent.RawMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		raw, ok := msgs[0].(*agent.RawMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.RawMessage", msg)
+			t.Fatalf("type = %T, want *agent.RawMessage", msgs[0])
 		}
 		if raw.Type() != "unknown_event" {
 			t.Errorf("Type() = %q", raw.Type())

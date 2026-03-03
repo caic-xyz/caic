@@ -96,7 +96,7 @@ class ApiClient(baseURL: String) {
     suspend fun getVoiceToken(): VoiceTokenResp = request("GET", "/api/v1/voice/token")
 
     // SSE endpoints
-    fun taskRawEvents(id: String): Flow<ClaudeEventMessage> = sseFlow<ClaudeEventMessage>("/api/v1/tasks/$id/raw_events")
+    fun taskRawEvents(id: String): Flow<EventMessage> = sseFlow<EventMessage>("/api/v1/tasks/$id/raw_events")
     fun taskEvents(id: String): Flow<EventMessage> = sseFlow<EventMessage>("/api/v1/tasks/$id/events")
     fun globalTaskEvents(): Flow<Task> = sseFlow<Task>("/api/v1/server/tasks/events")
     fun globalUsageEvents(): Flow<UsageResp> = sseFlow<UsageResp>("/api/v1/server/usage/events")
@@ -127,7 +127,7 @@ class ApiClient(baseURL: String) {
     }
 
     // Reconnecting SSE wrappers with exponential backoff.
-    fun taskRawEventsReconnecting(id: String): Flow<ClaudeEventMessage> = reconnectingFlow { taskRawEvents(id) }
+    fun taskRawEventsReconnecting(id: String): Flow<EventMessage> = reconnectingFlow { taskRawEvents(id) }
     fun taskEventsReconnecting(id: String): Flow<EventMessage> = reconnectingFlow { taskEvents(id) }
     fun globalTaskEventsReconnecting(): Flow<Task> = reconnectingFlow { globalTaskEvents() }
     fun globalUsageEventsReconnecting(): Flow<UsageResp> = reconnectingFlow { globalUsageEvents() }

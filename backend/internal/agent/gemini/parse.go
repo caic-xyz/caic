@@ -34,9 +34,9 @@ func normalizeToolName(name string) string {
 	return name
 }
 
-// ParseMessage decodes a single Gemini CLI stream-json line into a typed
-// agent.Message.
-func ParseMessage(line []byte) (agent.Message, error) {
+// ParseMessage decodes a single Gemini CLI stream-json line into one or more
+// typed agent.Messages.
+func ParseMessage(line []byte) ([]agent.Message, error) {
 	var rec Record
 	if err := json.Unmarshal(line, &rec); err != nil {
 		return nil, fmt.Errorf("unmarshal record: %w", err)
@@ -47,12 +47,10 @@ func ParseMessage(line []byte) (agent.Message, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &agent.SystemInitMessage{
-			MessageType: "system",
-			Subtype:     "init",
-			SessionID:   r.SessionID,
-			Model:       r.Model,
-		}, nil
+		return []agent.Message{&agent.InitMessage{
+			SessionID: r.SessionID,
+			Model:     r.Model,
+		}}, nil
 
 	case TypeMessage:
 		r, err := rec.AsMessage()
@@ -61,27 +59,11 @@ func ParseMessage(line []byte) (agent.Message, error) {
 		}
 		switch r.Role {
 		case "assistant":
-			return &agent.AssistantMessage{
-				MessageType: "assistant",
-				Message: agent.APIMessage{
-					Role: "assistant",
-					Content: []agent.ContentBlock{{
-						Type: "text",
-						Text: r.Content,
-					}},
-				},
-			}, nil
+			return []agent.Message{&agent.TextMessage{Text: r.Content}}, nil
 		case "user":
-			raw, err := json.Marshal(r.Content)
-			if err != nil {
-				return nil, fmt.Errorf("marshal user content: %w", err)
-			}
-			return &agent.UserMessage{
-				MessageType: "user",
-				Message:     raw,
-			}, nil
+			return []agent.Message{&agent.UserInputMessage{Text: r.Content}}, nil
 		default:
-			return &agent.RawMessage{MessageType: rec.Type, Raw: append([]byte(nil), line...)}, nil
+			return []agent.Message{&agent.RawMessage{MessageType: rec.Type, Raw: append([]byte(nil), line...)}}, nil
 		}
 
 	case TypeToolUse:
@@ -89,33 +71,18 @@ func ParseMessage(line []byte) (agent.Message, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &agent.AssistantMessage{
-			MessageType: "assistant",
-			Message: agent.APIMessage{
-				Role: "assistant",
-				Content: []agent.ContentBlock{{
-					Type:  "tool_use",
-					ID:    r.ToolID,
-					Name:  normalizeToolName(r.ToolName),
-					Input: r.Parameters,
-				}},
-			},
-		}, nil
+		return []agent.Message{dispatchToolUse(r.ToolID, normalizeToolName(r.ToolName), r.Parameters)}, nil
 
 	case TypeToolResult:
 		r, err := rec.AsToolResult()
 		if err != nil {
 			return nil, err
 		}
-		raw, err := json.Marshal(r.Output)
-		if err != nil {
-			return nil, fmt.Errorf("marshal tool result: %w", err)
+		m := &agent.ToolResultMessage{ToolUseID: r.ToolID}
+		if r.Status == "error" && r.Error != nil {
+			m.Error = r.Error.Message
 		}
-		return &agent.UserMessage{
-			MessageType:     "user",
-			Message:         raw,
-			ParentToolUseID: &r.ToolID,
-		}, nil
+		return []agent.Message{m}, nil
 
 	case TypeResult:
 		r, err := rec.AsResult()
@@ -136,16 +103,38 @@ func ParseMessage(line []byte) (agent.Message, error) {
 				CacheReadInputTokens: r.Stats.Cached,
 			}
 		}
-		return msg, nil
+		return []agent.Message{msg}, nil
 
 	case "caic_diff_stat":
 		var m agent.DiffStatMessage
 		if err := json.Unmarshal(line, &m); err != nil {
 			return nil, err
 		}
-		return &m, nil
+		return []agent.Message{&m}, nil
 
 	default:
-		return &agent.RawMessage{MessageType: rec.Type, Raw: append([]byte(nil), line...)}, nil
+		return []agent.Message{&agent.RawMessage{MessageType: rec.Type, Raw: append([]byte(nil), line...)}}, nil
 	}
+}
+
+// dispatchToolUse creates the appropriate message type based on the normalized
+// tool name. AskUserQuestion and TodoWrite get their own semantic types.
+func dispatchToolUse(id, name string, input json.RawMessage) agent.Message {
+	switch name {
+	case "AskUserQuestion":
+		var parsed struct {
+			Questions []agent.AskQuestion `json:"questions"`
+		}
+		if json.Unmarshal(input, &parsed) == nil && len(parsed.Questions) > 0 {
+			return &agent.AskMessage{ToolUseID: id, Questions: parsed.Questions}
+		}
+	case "TodoWrite":
+		var parsed struct {
+			Todos []agent.TodoItem `json:"todos"`
+		}
+		if json.Unmarshal(input, &parsed) == nil && len(parsed.Todos) > 0 {
+			return &agent.TodoMessage{ToolUseID: id, Todos: parsed.Todos}
+		}
+	}
+	return &agent.ToolUseMessage{ToolUseID: id, Name: name, Input: input}
 }

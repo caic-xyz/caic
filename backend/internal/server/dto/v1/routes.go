@@ -55,7 +55,7 @@ var Routes = []Route{
 	{Name: "cloneRepo", Method: "POST", Path: "/api/v1/server/repos", Req: reflect.TypeFor[CloneRepoReq](), Resp: reflect.TypeFor[Repo]()},
 	{Name: "listTasks", Method: "GET", Path: "/api/v1/tasks", Resp: reflect.TypeFor[Task](), IsArray: true},
 	{Name: "createTask", Method: "POST", Path: "/api/v1/tasks", Req: reflect.TypeFor[CreateTaskReq](), Resp: reflect.TypeFor[CreateTaskResp]()},
-	{Name: "taskRawEvents", Method: "GET", Path: "/api/v1/tasks/{id}/raw_events", Resp: reflect.TypeFor[ClaudeEventMessage](), IsSSE: true},
+	{Name: "taskRawEvents", Method: "GET", Path: "/api/v1/tasks/{id}/raw_events", Resp: reflect.TypeFor[EventMessage](), IsSSE: true},
 	{Name: "taskEvents", Method: "GET", Path: "/api/v1/tasks/{id}/events", Resp: reflect.TypeFor[EventMessage](), IsSSE: true},
 	{Name: "sendInput", Method: "POST", Path: "/api/v1/tasks/{id}/input", Req: reflect.TypeFor[InputReq](), Resp: reflect.TypeFor[StatusResp]()},
 	{Name: "restartTask", Method: "POST", Path: "/api/v1/tasks/{id}/restart", Req: reflect.TypeFor[RestartReq](), Resp: reflect.TypeFor[StatusResp]()},

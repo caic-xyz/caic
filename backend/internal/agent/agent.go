@@ -70,8 +70,9 @@ type WireFormat interface {
 	// backend's wire format. logW receives a copy (may be nil).
 	WritePrompt(w io.Writer, p Prompt, logW io.Writer) error
 
-	// ParseMessage decodes a single NDJSON line into a typed Message.
-	ParseMessage(line []byte) (Message, error)
+	// ParseMessage decodes a single NDJSON line into one or more typed
+	// Messages. A single wire line may produce multiple semantic messages.
+	ParseMessage(line []byte) ([]Message, error)
 }
 
 // Session manages a running agent process.
@@ -189,7 +190,7 @@ func (s *Session) Wait() (*ResultMessage, error) {
 
 // readMessages reads NDJSON lines from r, dispatches to msgCh, and returns
 // the terminal ResultMessage. If logW is non-nil, each raw line is written to it.
-func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer, parseFn func([]byte) (Message, error)) (*ResultMessage, error) {
+func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer, parseFn func([]byte) ([]Message, error)) (*ResultMessage, error) {
 	scanner := bufio.NewScanner(r)
 	// 32 MiB max line: user input with base64 images can produce very long NDJSON lines.
 	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
@@ -207,7 +208,7 @@ func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer, parseFn fun
 			_, _ = logW.Write(line)
 			_, _ = logW.Write([]byte{'\n'})
 		}
-		msg, err := parseFn(line)
+		msgs, err := parseFn(line)
 		if err != nil {
 			slog.Warn("unparseable message", "err", err, "line", string(line)) //nolint:gosec // structured logging, no injection
 			if msgCh != nil {
@@ -215,90 +216,20 @@ func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer, parseFn fun
 			}
 			continue
 		}
-		if n <= 3 {
-			slog.Debug("readMessages: parsed message", "n", n, "type", fmt.Sprintf("%T", msg))
-		}
-		if msgCh != nil {
-			msgCh <- msg
-		}
-		if rm, ok := msg.(*ResultMessage); ok {
-			result = rm
+		for _, msg := range msgs {
+			if n <= 3 {
+				slog.Debug("readMessages: parsed message", "n", n, "type", fmt.Sprintf("%T", msg))
+			}
+			if msgCh != nil {
+				msgCh <- msg
+			}
+			if rm, ok := msg.(*ResultMessage); ok {
+				result = rm
+			}
 		}
 	}
 	slog.Debug("readMessages: loop exited", "linesRead", n, "hasResult", result != nil, "scanErr", scanner.Err()) //nolint:gosec // structured logging, no injection
 	return result, scanner.Err()
-}
-
-// ParseMessage decodes a single NDJSON line into a typed Message.
-func ParseMessage(line []byte) (Message, error) {
-	var envelope struct {
-		Type    string `json:"type"`
-		Subtype string `json:"subtype"`
-	}
-	if err := json.Unmarshal(line, &envelope); err != nil {
-		return nil, fmt.Errorf("unmarshal envelope: %w", err)
-	}
-	switch envelope.Type {
-	case "system":
-		switch envelope.Subtype {
-		case "init":
-			var m SystemInitMessage
-			if err := json.Unmarshal(line, &m); err != nil {
-				return nil, err
-			}
-			return &m, nil
-		default:
-			var m SystemMessage
-			if err := json.Unmarshal(line, &m); err != nil {
-				return nil, err
-			}
-			return &m, nil
-		}
-	case "assistant":
-		var m AssistantMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
-		}
-		return &m, nil
-	case "user":
-		var m UserMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
-		}
-		return &m, nil
-	case "result":
-		var m ResultMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
-		}
-		return &m, nil
-	case "stream_event":
-		var m StreamEvent
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
-		}
-		return &m, nil
-	case "caic_diff_stat":
-		var m DiffStatMessage
-		if err := json.Unmarshal(line, &m); err != nil {
-			return nil, err
-		}
-		return &m, nil
-	default:
-		// tool_progress, etc. — pass through as raw.
-		return &RawMessage{MessageType: envelope.Type, Raw: append([]byte(nil), line...)}, nil
-	}
-}
-
-// TextFromAssistant extracts all text blocks from an assistant message's content.
-func TextFromAssistant(m *AssistantMessage) string {
-	var parts []string
-	for _, b := range m.Message.Content {
-		if b.Type == "text" && b.Text != "" {
-			parts = append(parts, b.Text)
-		}
-	}
-	return strings.Join(parts, "\n")
 }
 
 // Relay paths inside the container.
@@ -406,9 +337,50 @@ func (w *SlogWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// StartRelay deploys the relay, launches an agent via relay serve-attach with
+// the given CLI args, and sends the initial prompt. Used by backends that
+// follow the standard relay protocol (claude, gemini, kilo).
+func StartRelay(ctx context.Context, opts *Options, agentArgs []string, msgCh chan<- Message, logW io.Writer, wire WireFormat) (*Session, error) {
+	if opts.Dir == "" {
+		return nil, errors.New("opts.Dir is required")
+	}
+	if err := DeployRelay(ctx, opts.Container); err != nil {
+		return nil, err
+	}
+
+	sshArgs := make([]string, 0, 7+len(agentArgs))
+	sshArgs = append(sshArgs, opts.Container, "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--")
+	sshArgs = append(sshArgs, agentArgs...)
+
+	slog.Info("launching via relay", "container", opts.Container, "args", agentArgs)
+	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdin pipe: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	cmd.Stderr = &SlogWriter{Prefix: "relay serve-attach", Container: opts.Container}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start relay: %w", err)
+	}
+
+	log := slog.With("container", opts.Container)
+	s := NewSession(cmd, stdin, stdout, msgCh, logW, wire, log)
+	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
+		if err := s.Send(opts.InitialPrompt); err != nil {
+			s.Close()
+			return nil, fmt.Errorf("write prompt: %w", err)
+		}
+	}
+	return s, nil
+}
+
 // readRelayOutput reads the complete output.jsonl from the container's relay
 // and parses each line using parseFn. Called by Base.ReadRelayOutput.
-func readRelayOutput(ctx context.Context, container string, parseFn func([]byte) (Message, error)) (msgs []Message, size int64, err error) {
+func readRelayOutput(ctx context.Context, container string, parseFn func([]byte) ([]Message, error)) (msgs []Message, size int64, err error) {
 	cmd := exec.CommandContext(ctx, "ssh", container, "cat", RelayOutputPath) //nolint:gosec // args are not user-controlled.
 	out, err := cmd.Output()
 	if err != nil {
@@ -423,12 +395,12 @@ func readRelayOutput(ctx context.Context, container string, parseFn func([]byte)
 		if len(line) == 0 {
 			continue
 		}
-		msg, parseErr := parseFn(line)
+		parsed, parseErr := parseFn(line)
 		if parseErr != nil {
 			slog.Warn("skipping unparseable relay output line", "container", container, "err", parseErr)
 			continue
 		}
-		msgs = append(msgs, msg)
+		msgs = append(msgs, parsed...)
 	}
 	return msgs, size, scanner.Err()
 }

@@ -1,7 +1,6 @@
 // Backend-neutral conversion from agent.Message to v1.EventMessage for SSE.
 // Every backend (Claude, Gemini, Codex, …) uses this converter to produce the
-// generic event stream served on /api/v1/tasks/{id}/events. The harness-
-// specific raw streams (e.g. eventconv.go for Claude) are separate.
+// event stream served on /api/v1/tasks/{id}/events and /api/v1/tasks/{id}/raw_events.
 package server
 
 import (
@@ -10,42 +9,37 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
-// genericToolTimingTracker mirrors toolTimingTracker but emits
-// EventMessage events with a harness field on init.
-type genericToolTimingTracker struct {
+// toolTimingTracker computes per-tool-call duration by recording the timestamp
+// when each tool_use is seen and computing the delta when the corresponding
+// ToolResultMessage arrives.
+type toolTimingTracker struct {
 	harness agent.Harness
 	pending map[string]time.Time
 }
 
-func newGenericToolTimingTracker(harness agent.Harness) *genericToolTimingTracker {
-	return &genericToolTimingTracker{harness: harness, pending: make(map[string]time.Time)}
+func newToolTimingTracker(harness agent.Harness) *toolTimingTracker {
+	return &toolTimingTracker{harness: harness, pending: make(map[string]time.Time)}
 }
 
 // convertMessage converts an agent.Message into zero or more EventMessages.
-func (gt *genericToolTimingTracker) convertMessage(msg agent.Message, now time.Time) []v1.EventMessage {
+func (tt *toolTimingTracker) convertMessage(msg agent.Message, now time.Time) []v1.EventMessage {
 	ts := now.UnixMilli()
 	switch m := msg.(type) {
-	case *agent.SystemInitMessage:
-		if m.Subtype == "init" {
-			return []v1.EventMessage{{
-				Kind: v1.EventKindInit,
-				Ts:   ts,
-				Init: &v1.EventInit{
-					Model:        m.Model,
-					AgentVersion: m.Version,
-					SessionID:    m.SessionID,
-					Tools:        m.Tools,
-					Cwd:          m.Cwd,
-					Harness:      string(gt.harness),
-				},
-			}}
-		}
+	case *agent.InitMessage:
 		return []v1.EventMessage{{
-			Kind:   v1.EventKindSystem,
-			Ts:     ts,
-			System: &v1.EventSystem{Subtype: m.Subtype},
+			Kind: v1.EventKindInit,
+			Ts:   ts,
+			Init: &v1.EventInit{
+				Model:        m.Model,
+				AgentVersion: m.Version,
+				SessionID:    m.SessionID,
+				Tools:        m.Tools,
+				Cwd:          m.Cwd,
+				Harness:      string(tt.harness),
+			},
 		}}
 	case *agent.SystemMessage:
 		return []v1.EventMessage{{
@@ -53,10 +47,86 @@ func (gt *genericToolTimingTracker) convertMessage(msg agent.Message, now time.T
 			Ts:     ts,
 			System: &v1.EventSystem{Subtype: m.Subtype},
 		}}
-	case *agent.AssistantMessage:
-		return gt.convertAssistant(m, ts, now)
-	case *agent.UserMessage:
-		return gt.convertUser(m, ts, now)
+	case *agent.TextMessage:
+		if m.Text != "" {
+			return []v1.EventMessage{{
+				Kind: v1.EventKindText,
+				Ts:   ts,
+				Text: &v1.EventText{Text: m.Text},
+			}}
+		}
+		return nil
+	case *agent.ToolUseMessage:
+		tt.pending[m.ToolUseID] = now
+		return []v1.EventMessage{{
+			Kind: v1.EventKindToolUse,
+			Ts:   ts,
+			ToolUse: &v1.EventToolUse{
+				ToolUseID: m.ToolUseID,
+				Name:      m.Name,
+				Input:     m.Input,
+			},
+		}}
+	case *agent.AskMessage:
+		tt.pending[m.ToolUseID] = now
+		return []v1.EventMessage{{
+			Kind: v1.EventKindAsk,
+			Ts:   ts,
+			Ask: &v1.EventAsk{
+				ToolUseID: m.ToolUseID,
+				Questions: toV1AskQuestions(m.Questions),
+			},
+		}}
+	case *agent.TodoMessage:
+		tt.pending[m.ToolUseID] = now
+		if todos := toV1TodoItems(m.Todos); len(todos) > 0 {
+			return []v1.EventMessage{{
+				Kind: v1.EventKindTodo,
+				Ts:   ts,
+				Todo: &v1.EventTodo{ToolUseID: m.ToolUseID, Todos: todos},
+			}}
+		}
+		return nil
+	case *agent.UserInputMessage:
+		if m.Text == "" && len(m.Images) == 0 {
+			return nil
+		}
+		var images []v1.ImageData
+		for _, img := range m.Images {
+			images = append(images, v1.ImageData{MediaType: img.MediaType, Data: img.Data})
+		}
+		return []v1.EventMessage{{
+			Kind:      v1.EventKindUserInput,
+			Ts:        ts,
+			UserInput: &v1.EventUserInput{Text: m.Text, Images: images},
+		}}
+	case *agent.ToolResultMessage:
+		var duration float64
+		if started, ok := tt.pending[m.ToolUseID]; ok {
+			duration = now.Sub(started).Seconds()
+			delete(tt.pending, m.ToolUseID)
+		}
+		return []v1.EventMessage{{
+			Kind: v1.EventKindToolResult,
+			Ts:   ts,
+			ToolResult: &v1.EventToolResult{
+				ToolUseID: m.ToolUseID,
+				Duration:  duration,
+				Error:     m.Error,
+			},
+		}}
+	case *agent.UsageMessage:
+		return []v1.EventMessage{{
+			Kind: v1.EventKindUsage,
+			Ts:   ts,
+			Usage: &v1.EventUsage{
+				InputTokens:              m.Usage.InputTokens,
+				OutputTokens:             m.Usage.OutputTokens,
+				CacheCreationInputTokens: m.Usage.CacheCreationInputTokens,
+				CacheReadInputTokens:     m.Usage.CacheReadInputTokens,
+				Model:                    m.Model,
+			},
+		}}
 	case *agent.ResultMessage:
 		return []v1.EventMessage{{
 			Kind: v1.EventKindResult,
@@ -75,16 +145,15 @@ func (gt *genericToolTimingTracker) convertMessage(msg agent.Message, now time.T
 					OutputTokens:             m.Usage.OutputTokens,
 					CacheCreationInputTokens: m.Usage.CacheCreationInputTokens,
 					CacheReadInputTokens:     m.Usage.CacheReadInputTokens,
-					ServiceTier:              m.Usage.ServiceTier,
 				},
 			},
 		}}
-	case *agent.StreamEvent:
-		if m.Event.Type == "content_block_delta" && m.Event.Delta != nil && m.Event.Delta.Type == "text_delta" && m.Event.Delta.Text != "" {
+	case *agent.TextDeltaMessage:
+		if m.Text != "" {
 			return []v1.EventMessage{{
 				Kind:      v1.EventKindTextDelta,
 				Ts:        ts,
-				TextDelta: &v1.EventTextDelta{Text: m.Event.Delta.Text},
+				TextDelta: &v1.EventTextDelta{Text: m.Text},
 			}}
 		}
 		return nil
@@ -105,100 +174,87 @@ func (gt *genericToolTimingTracker) convertMessage(msg agent.Message, now time.T
 	}
 }
 
-func (gt *genericToolTimingTracker) convertAssistant(m *agent.AssistantMessage, ts int64, now time.Time) []v1.EventMessage {
-	var events []v1.EventMessage
-	for _, block := range m.Message.Content {
-		switch block.Type {
-		case "text":
-			if block.Text != "" {
-				events = append(events, v1.EventMessage{
-					Kind: v1.EventKindText,
-					Ts:   ts,
-					Text: &v1.EventText{Text: block.Text},
-				})
-			}
-		case "tool_use":
-			gt.pending[block.ID] = now
-			switch block.Name {
-			case "AskUserQuestion":
-				events = append(events, v1.EventMessage{
-					Kind: v1.EventKindAsk,
-					Ts:   ts,
-					Ask: &v1.EventAsk{
-						ToolUseID: block.ID,
-						Questions: parseAskInput(block.Input),
-					},
-				})
-			case "TodoWrite":
-				if todo := parseTodoInput(block.ID, block.Input); todo != nil {
-					events = append(events, v1.EventMessage{
-						Kind: v1.EventKindTodo,
-						Ts:   ts,
-						Todo: todo,
-					})
-				}
-			default:
-				events = append(events, v1.EventMessage{
-					Kind: v1.EventKindToolUse,
-					Ts:   ts,
-					ToolUse: &v1.EventToolUse{
-						ToolUseID: block.ID,
-						Name:      block.Name,
-						Input:     block.Input,
-					},
-				})
-			}
+// toV1AskQuestions converts agent.AskQuestion to v1.AskQuestion.
+func toV1AskQuestions(qs []agent.AskQuestion) []v1.AskQuestion {
+	if len(qs) == 0 {
+		return nil
+	}
+	out := make([]v1.AskQuestion, len(qs))
+	for i, q := range qs {
+		opts := make([]v1.AskOption, len(q.Options))
+		for j, o := range q.Options {
+			opts[j] = v1.AskOption{Label: o.Label, Description: o.Description}
+		}
+		out[i] = v1.AskQuestion{
+			Question:    q.Question,
+			Header:      q.Header,
+			Options:     opts,
+			MultiSelect: q.MultiSelect,
 		}
 	}
-	u := m.Message.Usage
-	if u.InputTokens > 0 || u.OutputTokens > 0 {
-		events = append(events, v1.EventMessage{
-			Kind: v1.EventKindUsage,
-			Ts:   ts,
-			Usage: &v1.EventUsage{
-				InputTokens:              u.InputTokens,
-				OutputTokens:             u.OutputTokens,
-				CacheCreationInputTokens: u.CacheCreationInputTokens,
-				CacheReadInputTokens:     u.CacheReadInputTokens,
-				ServiceTier:              u.ServiceTier,
-				Model:                    m.Message.Model,
-			},
-		})
-	}
-	return events
+	return out
 }
 
-func (gt *genericToolTimingTracker) convertUser(m *agent.UserMessage, ts int64, now time.Time) []v1.EventMessage {
-	if m.ParentToolUseID == nil {
-		ui := extractUserInput(m.Message)
-		if ui.Text == "" && len(ui.Images) == 0 {
-			return nil
-		}
-		return []v1.EventMessage{{
-			Kind:      v1.EventKindUserInput,
-			Ts:        ts,
-			UserInput: &v1.EventUserInput{Text: ui.Text, Images: ui.Images},
-		}}
+// toV1TodoItems converts agent.TodoItem to v1.TodoItem.
+func toV1TodoItems(items []agent.TodoItem) []v1.TodoItem {
+	if len(items) == 0 {
+		return nil
 	}
-	toolUseID := *m.ParentToolUseID
-	var duration float64
-	if started, ok := gt.pending[toolUseID]; ok {
-		duration = now.Sub(started).Seconds()
-		delete(gt.pending, toolUseID)
+	out := make([]v1.TodoItem, len(items))
+	for i, t := range items {
+		out[i] = v1.TodoItem{Content: t.Content, Status: t.Status, ActiveForm: t.ActiveForm}
 	}
-	errText := extractToolError(m.Message)
-	return []v1.EventMessage{{
-		Kind: v1.EventKindToolResult,
-		Ts:   ts,
-		ToolResult: &v1.EventToolResult{
-			ToolUseID: toolUseID,
-			Duration:  duration,
-			Error:     errText,
-		},
-	}}
+	return out
 }
 
 // marshalEvent is a convenience wrapper for json.Marshal on EventMessage.
 func marshalEvent(ev *v1.EventMessage) ([]byte, error) {
 	return json.Marshal(ev)
+}
+
+// v1PromptToAgent converts v1.Prompt to agent.Prompt at the server boundary.
+func v1PromptToAgent(p v1.Prompt) agent.Prompt {
+	var images []agent.ImageData
+	if len(p.Images) > 0 {
+		images = make([]agent.ImageData, len(p.Images))
+		for i, img := range p.Images {
+			images[i] = agent.ImageData{MediaType: img.MediaType, Data: img.Data}
+		}
+	}
+	return agent.Prompt{Text: p.Text, Images: images}
+}
+
+// toV1Harness converts agent.Harness to v1.Harness at the server boundary.
+func toV1Harness(h agent.Harness) v1.Harness {
+	return v1.Harness(h)
+}
+
+// toAgentHarness converts v1.Harness to agent.Harness at the server boundary.
+func toAgentHarness(h v1.Harness) agent.Harness {
+	return agent.Harness(h)
+}
+
+// toV1SafetyIssues converts []task.SafetyIssue to []v1.SafetyIssue at the
+// server boundary.
+func toV1SafetyIssues(issues []task.SafetyIssue) []v1.SafetyIssue {
+	if len(issues) == 0 {
+		return nil
+	}
+	out := make([]v1.SafetyIssue, len(issues))
+	for i, si := range issues {
+		out[i] = v1.SafetyIssue{File: si.File, Kind: si.Kind, Detail: si.Detail}
+	}
+	return out
+}
+
+// toV1DiffStat converts agent.DiffStat to v1.DiffStat at the server boundary.
+func toV1DiffStat(ds agent.DiffStat) v1.DiffStat {
+	if len(ds) == 0 {
+		return nil
+	}
+	out := make(v1.DiffStat, len(ds))
+	for i, f := range ds {
+		out[i] = v1.DiffFileStat{Path: f.Path, Added: f.Added, Deleted: f.Deleted, Binary: f.Binary}
+	}
+	return out
 }

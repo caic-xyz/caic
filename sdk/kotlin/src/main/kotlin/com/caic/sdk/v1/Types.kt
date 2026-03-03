@@ -30,8 +30,6 @@ object EventKinds {
     const val DiffStat: EventKind = "diffStat"
 }
 
-typealias ClaudeEventKind = EventKind
-
 object ErrorCodes {
     const val BadRequest = "BAD_REQUEST"
     const val NotFound = "NOT_FOUND"
@@ -152,121 +150,6 @@ data class CreateTaskReq(
 data class CreateTaskResp(val status: String, val id: String)
 
 @Serializable
-data class ClaudeEventInit(
-    val model: String,
-    val agentVersion: String,
-    @SerialName("sessionID") val sessionID: String,
-    val tools: List<String>,
-    val cwd: String,
-)
-
-@Serializable
-data class ClaudeEventText(val text: String)
-
-@Serializable
-data class ClaudeEventTextDelta(val text: String)
-
-@Serializable
-data class ClaudeEventToolUse(
-    @SerialName("toolUseID") val toolUseID: String,
-    val name: String,
-    val input: JsonElement,
-)
-
-@Serializable
-data class ClaudeEventToolResult(
-    @SerialName("toolUseID") val toolUseID: String,
-    val duration: Double,
-    val error: String? = null,
-)
-
-@Serializable
-data class ClaudeAskOption(val label: String, val description: String? = null)
-
-@Serializable
-data class ClaudeAskQuestion(
-    val question: String,
-    val header: String? = null,
-    val options: List<ClaudeAskOption>,
-    val multiSelect: Boolean? = null,
-)
-
-@Serializable
-data class ClaudeEventAsk(
-    @SerialName("toolUseID") val toolUseID: String,
-    val questions: List<ClaudeAskQuestion>,
-)
-
-@Serializable
-data class ClaudeEventUsage(
-    val inputTokens: Int,
-    val outputTokens: Int,
-    val cacheCreationInputTokens: Int,
-    val cacheReadInputTokens: Int,
-    val serviceTier: String? = null,
-    val model: String,
-)
-
-@Serializable
-data class ClaudeEventResult(
-    val subtype: String,
-    val isError: Boolean,
-    val result: String,
-    val diffStat: List<DiffFileStat>? = null,
-    @SerialName("totalCostUSD") val totalCostUSD: Double,
-    val duration: Double,
-    @SerialName("durationAPI") val durationAPI: Double,
-    val numTurns: Int,
-    val usage: ClaudeEventUsage,
-)
-
-@Serializable
-data class ClaudeEventSystem(val subtype: String)
-
-@Serializable
-data class ClaudeEventUserInput(val text: String, val images: List<ImageData>? = null)
-
-@Serializable
-data class ClaudeTodoItem(
-    val content: String,
-    val status: String,
-    val activeForm: String? = null,
-)
-
-@Serializable
-data class ClaudeEventTodo(
-    @SerialName("toolUseID") val toolUseID: String,
-    val todos: List<ClaudeTodoItem>,
-)
-
-@Serializable
-data class ClaudeEventDiffStat(val diffStat: List<DiffFileStat>? = null)
-
-@Serializable
-data class ClaudeEventError(val err: String, val line: String)
-
-// Claude-specific event types
-
-@Serializable
-data class ClaudeEventMessage(
-    val kind: ClaudeEventKind,
-    val ts: Long,
-    val init: ClaudeEventInit? = null,
-    val text: ClaudeEventText? = null,
-    val textDelta: ClaudeEventTextDelta? = null,
-    val toolUse: ClaudeEventToolUse? = null,
-    val toolResult: ClaudeEventToolResult? = null,
-    val ask: ClaudeEventAsk? = null,
-    val usage: ClaudeEventUsage? = null,
-    val result: ClaudeEventResult? = null,
-    val system: ClaudeEventSystem? = null,
-    val userInput: ClaudeEventUserInput? = null,
-    val todo: ClaudeEventTodo? = null,
-    val diffStat: ClaudeEventDiffStat? = null,
-    val error: ClaudeEventError? = null,
-)
-
-@Serializable
 data class EventInit(
     val model: String,
     val agentVersion: String,
@@ -319,7 +202,6 @@ data class EventUsage(
     val outputTokens: Int,
     val cacheCreationInputTokens: Int,
     val cacheReadInputTokens: Int,
-    val serviceTier: String? = null,
     val model: String,
 )
 

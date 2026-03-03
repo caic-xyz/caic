@@ -162,12 +162,10 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 // ParseMessage wraps the package-level ParseMessage, intercepting
 // thread/tokenUsage/updated to accumulate usage and injecting it into
 // ResultMessage. It also captures the thread ID from thread/started.
-func (w *wireFormat) ParseMessage(line []byte) (agent.Message, error) {
+func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	// Intercept thread/tokenUsage/updated before general parsing so we can
 	// accumulate usage without adding a new agent.Message type.
-	var probe struct {
-		Method string `json:"method,omitempty"`
-	}
+	var probe methodProbe
 	_ = json.Unmarshal(line, &probe)
 	if probe.Method == MethodTokenUsageUpdated {
 		var msg JSONRPCMessage
@@ -183,26 +181,28 @@ func (w *wireFormat) ParseMessage(line []byte) (agent.Message, error) {
 				w.mu.Unlock()
 			}
 		}
-		return &agent.RawMessage{MessageType: MethodTokenUsageUpdated, Raw: append([]byte(nil), line...)}, nil
+		return []agent.Message{&agent.RawMessage{MessageType: MethodTokenUsageUpdated, Raw: append([]byte(nil), line...)}}, nil
 	}
 
-	msg, err := ParseMessage(line)
+	msgs, err := ParseMessage(line)
 	if err != nil {
 		return nil, err
 	}
-	// Capture thread ID from SystemInitMessage (produced by thread/started).
-	if init, ok := msg.(*agent.SystemInitMessage); ok && init.SessionID != "" {
-		w.mu.Lock()
-		w.threadID = init.SessionID
-		w.mu.Unlock()
+	for _, msg := range msgs {
+		// Capture thread ID from InitMessage (produced by thread/started).
+		if init, ok := msg.(*agent.InitMessage); ok && init.SessionID != "" {
+			w.mu.Lock()
+			w.threadID = init.SessionID
+			w.mu.Unlock()
+		}
+		// Inject accumulated usage into ResultMessage (turn/completed has no usage in v2).
+		if rm, ok := msg.(*agent.ResultMessage); ok {
+			w.mu.Lock()
+			rm.Usage = w.lastUsage
+			w.mu.Unlock()
+		}
 	}
-	// Inject accumulated usage into ResultMessage (turn/completed has no usage in v2).
-	if rm, ok := msg.(*agent.ResultMessage); ok {
-		w.mu.Lock()
-		rm.Usage = w.lastUsage
-		w.mu.Unlock()
-	}
-	return msg, nil
+	return msgs, nil
 }
 
 // handshake performs the JSON-RPC initialize → initialized → thread/start
@@ -277,11 +277,7 @@ func handshake(stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*wir
 	}
 
 	// Extract thread ID from the response result.
-	var result struct {
-		Thread struct {
-			ID string `json:"id"`
-		} `json:"thread"`
-	}
+	var result threadStartResult
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
 		return nil, fmt.Errorf("parse thread/start result: %w", err)
 	}

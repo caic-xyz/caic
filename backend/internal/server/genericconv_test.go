@@ -10,15 +10,13 @@ import (
 )
 
 func TestGenericConvertInitHasHarness(t *testing.T) {
-	gt := newGenericToolTimingTracker(agent.Claude)
-	msg := &agent.SystemInitMessage{
-		MessageType: "system",
-		Subtype:     "init",
-		Model:       "claude-opus-4-6",
-		Version:     "2.1.34",
-		SessionID:   "sess-1",
-		Tools:       []string{"Bash", "Read"},
-		Cwd:         "/home/user",
+	gt := newToolTimingTracker(agent.Claude)
+	msg := &agent.InitMessage{
+		Model:     "claude-opus-4-6",
+		Version:   "2.1.34",
+		SessionID: "sess-1",
+		Tools:     []string{"Bash", "Read"},
+		Cwd:       "/home/user",
 	}
 	now := time.Now()
 	events := gt.convertMessage(msg, now)
@@ -44,13 +42,14 @@ func TestGenericConvertInitHasHarness(t *testing.T) {
 }
 
 func TestGenericAskUserQuestionIsAsk(t *testing.T) {
-	gt := newGenericToolTimingTracker(agent.Claude)
-	askInput := `{"questions":[{"question":"Which approach?","header":"Approach","options":[{"label":"A"},{"label":"B"}]}]}`
-	msg := &agent.AssistantMessage{
-		MessageType: "assistant",
-		Message: agent.APIMessage{
-			Content: []agent.ContentBlock{
-				{Type: "tool_use", ID: "ask_1", Name: "AskUserQuestion", Input: json.RawMessage(askInput)},
+	gt := newToolTimingTracker(agent.Claude)
+	msg := &agent.AskMessage{
+		ToolUseID: "ask_1",
+		Questions: []agent.AskQuestion{
+			{
+				Question: "Which approach?",
+				Header:   "Approach",
+				Options:  []agent.AskOption{{Label: "A"}, {Label: "B"}},
 			},
 		},
 	}
@@ -77,14 +76,11 @@ func TestGenericAskUserQuestionIsAsk(t *testing.T) {
 }
 
 func TestGenericTodoWriteIsTodo(t *testing.T) {
-	gt := newGenericToolTimingTracker(agent.Claude)
-	todoInput := `{"todos":[{"content":"Fix bug","status":"in_progress","activeForm":"Fixing bug"}]}`
-	msg := &agent.AssistantMessage{
-		MessageType: "assistant",
-		Message: agent.APIMessage{
-			Content: []agent.ContentBlock{
-				{Type: "tool_use", ID: "todo_1", Name: "TodoWrite", Input: json.RawMessage(todoInput)},
-			},
+	gt := newToolTimingTracker(agent.Claude)
+	msg := &agent.TodoMessage{
+		ToolUseID: "todo_1",
+		Todos: []agent.TodoItem{
+			{Content: "Fix bug", Status: "in_progress", ActiveForm: "Fixing bug"},
 		},
 	}
 	events := gt.convertMessage(msg, time.Now())
@@ -110,27 +106,21 @@ func TestGenericTodoWriteIsTodo(t *testing.T) {
 }
 
 func TestGenericToolTiming(t *testing.T) {
-	gt := newGenericToolTimingTracker(agent.Claude)
+	gt := newToolTimingTracker(agent.Claude)
 	t0 := time.Now()
 	t1 := t0.Add(500 * time.Millisecond)
 
-	assistant := &agent.AssistantMessage{
-		MessageType: "assistant",
-		Message: agent.APIMessage{
-			Content: []agent.ContentBlock{
-				{Type: "tool_use", ID: "tool_1", Name: "Bash", Input: json.RawMessage(`{}`)},
-			},
-		},
+	toolUse := &agent.ToolUseMessage{
+		ToolUseID: "tool_1",
+		Name:      "Bash",
+		Input:     json.RawMessage(`{}`),
 	}
-	gt.convertMessage(assistant, t0)
+	gt.convertMessage(toolUse, t0)
 
-	parentID := "tool_1"
-	user := &agent.UserMessage{
-		MessageType:     "user",
-		ParentToolUseID: &parentID,
-		Message:         json.RawMessage(`{}`),
+	toolResult := &agent.ToolResultMessage{
+		ToolUseID: "tool_1",
 	}
-	events := gt.convertMessage(user, t1)
+	events := gt.convertMessage(toolResult, t1)
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
@@ -140,18 +130,19 @@ func TestGenericToolTiming(t *testing.T) {
 }
 
 func TestGenericConvertTextAndUsage(t *testing.T) {
-	gt := newGenericToolTimingTracker(agent.Gemini)
-	msg := &agent.AssistantMessage{
-		MessageType: "assistant",
-		Message: agent.APIMessage{
-			Model: "gemini-2.5-pro",
-			Content: []agent.ContentBlock{
-				{Type: "text", Text: "hello"},
-			},
-			Usage: agent.Usage{InputTokens: 200, OutputTokens: 100},
-		},
+	gt := newToolTimingTracker(agent.Gemini)
+
+	textMsg := &agent.TextMessage{Text: "hello"}
+	usageMsg := &agent.UsageMessage{
+		Usage: agent.Usage{InputTokens: 200, OutputTokens: 100},
+		Model: "gemini-2.5-pro",
 	}
-	events := gt.convertMessage(msg, time.Now())
+
+	now := time.Now()
+	events := make([]v1.EventMessage, 0, 2)
+	events = append(events, gt.convertMessage(textMsg, now)...)
+	events = append(events, gt.convertMessage(usageMsg, now)...)
+
 	if len(events) != 2 {
 		t.Fatalf("got %d events, want 2", len(events))
 	}
@@ -167,7 +158,7 @@ func TestGenericConvertTextAndUsage(t *testing.T) {
 }
 
 func TestGenericConvertResult(t *testing.T) {
-	gt := newGenericToolTimingTracker(agent.Claude)
+	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.ResultMessage{
 		MessageType:  "result",
 		Subtype:      "success",
@@ -190,15 +181,8 @@ func TestGenericConvertResult(t *testing.T) {
 }
 
 func TestGenericConvertStreamEvent(t *testing.T) {
-	gt := newGenericToolTimingTracker(agent.Claude)
-	msg := &agent.StreamEvent{
-		MessageType: "stream_event",
-		Event: agent.StreamEventData{
-			Type:  "content_block_delta",
-			Index: 0,
-			Delta: &agent.StreamDelta{Type: "text_delta", Text: "Hi"},
-		},
-	}
+	gt := newToolTimingTracker(agent.Claude)
+	msg := &agent.TextDeltaMessage{Text: "Hi"}
 	events := gt.convertMessage(msg, time.Now())
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
@@ -212,12 +196,11 @@ func TestGenericConvertStreamEvent(t *testing.T) {
 }
 
 func TestGenericConvertUserInput(t *testing.T) {
-	gt := newGenericToolTimingTracker(agent.Claude)
-	user := &agent.UserMessage{
-		MessageType: "user",
-		Message:     json.RawMessage(`{"role":"user","content":"hello agent"}`),
+	gt := newToolTimingTracker(agent.Claude)
+	msg := &agent.UserInputMessage{
+		Text: "hello agent",
 	}
-	events := gt.convertMessage(user, time.Now())
+	events := gt.convertMessage(msg, time.Now())
 	if len(events) != 1 {
 		t.Fatalf("got %d events, want 1", len(events))
 	}
@@ -230,7 +213,7 @@ func TestGenericConvertUserInput(t *testing.T) {
 }
 
 func TestGenericConvertSystemMessage(t *testing.T) {
-	gt := newGenericToolTimingTracker(agent.Claude)
+	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.SystemMessage{
 		MessageType: "system",
 		Subtype:     "status",
@@ -245,7 +228,7 @@ func TestGenericConvertSystemMessage(t *testing.T) {
 }
 
 func TestGenericConvertRawMessageFiltered(t *testing.T) {
-	gt := newGenericToolTimingTracker(agent.Claude)
+	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.RawMessage{
 		MessageType: "tool_progress",
 		Raw:         []byte(`{"type":"tool_progress"}`),

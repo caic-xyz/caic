@@ -27,9 +27,7 @@ type Record struct {
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (r *Record) UnmarshalJSON(data []byte) error {
-	var probe struct {
-		Type string `json:"type"`
-	}
+	var probe typeProbe
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return fmt.Errorf("Record: %w", err)
 	}

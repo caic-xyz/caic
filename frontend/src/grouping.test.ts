@@ -1,28 +1,28 @@
 // Tests for groupMessages and groupTurns logic.
 import { describe, it, expect } from "vitest";
 import { groupMessages, groupTurns, turnSummary } from "./grouping";
-import type { ClaudeEventMessage } from "@sdk/types.gen";
+import type { EventMessage } from "@sdk/types.gen";
 
-function toolUseEvent(id: string, name: string): ClaudeEventMessage {
+function toolUseEvent(id: string, name: string): EventMessage {
   return { kind: "toolUse", ts: 0, toolUse: { toolUseID: id, name, input: {} } };
 }
 
-function toolResultEvent(id: string): ClaudeEventMessage {
+function toolResultEvent(id: string): EventMessage {
   return { kind: "toolResult", ts: 0, toolResult: { toolUseID: id, duration: 0.1 } };
 }
 
-function textDeltaEvent(text: string): ClaudeEventMessage {
+function textDeltaEvent(text: string): EventMessage {
   return { kind: "textDelta", ts: 0, textDelta: { text } };
 }
 
-function usageEvent(): ClaudeEventMessage {
+function usageEvent(): EventMessage {
   return {
     kind: "usage", ts: 0,
     usage: { inputTokens: 100, outputTokens: 50, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, model: "test" },
   };
 }
 
-function resultEvent(): ClaudeEventMessage {
+function resultEvent(): EventMessage {
   return {
     kind: "result", ts: 0,
     result: {
@@ -103,7 +103,7 @@ describe("groupMessages", () => {
 
 describe("groupTurns", () => {
   it("result event splits turns", () => {
-    const events: ClaudeEventMessage[] = [
+    const events: EventMessage[] = [
       textDeltaEvent("first turn"),
       toolUseEvent("t1", "Read"),
       resultEvent(),

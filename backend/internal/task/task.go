@@ -305,7 +305,7 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	defer t.mu.Unlock()
 	t.msgs = msgs
 	for i := len(msgs) - 1; i >= 0; i-- {
-		if init, ok := msgs[i].(*agent.SystemInitMessage); ok && init.SessionID != "" {
+		if init, ok := msgs[i].(*agent.InitMessage); ok && init.SessionID != "" {
 			t.sessionID = init.SessionID
 			t.reportedModel = init.Model
 			t.agentVersion = init.Version
@@ -323,11 +323,11 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 			t.planContent = ""
 			t.planDismissed = true
 		}
-		if am, ok := m.(*agent.AssistantMessage); ok {
-			t.trackPlanState(am)
-			if u := am.Message.Usage; u.InputTokens+u.CacheCreationInputTokens+u.CacheReadInputTokens > 0 {
-				t.lastAPIUsage = u
-			}
+		if tu, ok := m.(*agent.ToolUseMessage); ok {
+			t.trackToolUse(tu)
+		}
+		if u, ok := m.(*agent.UsageMessage); ok {
+			t.lastAPIUsage = u.Usage
 		}
 		if _, ok := m.(*agent.ResultMessage); ok {
 			t.planDismissed = false
@@ -370,7 +370,7 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	// logs must keep their recorded state.
 	if len(msgs) > 0 && t.state != StateTerminated && t.state != StateFailed && t.state != StateTerminating {
 		if lastAgentMessage(msgs) != nil {
-			if lastAssistantHasAsk(msgs) {
+			if lastTurnHasAsk(msgs) {
 				t.setState(StateAsking)
 			} else {
 				t.setState(StateWaiting)
@@ -384,23 +384,25 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message) {
 	defer t.mu.Unlock()
 	t.msgs = append(t.msgs, m)
 	// Capture metadata from the init message.
-	if init, ok := m.(*agent.SystemInitMessage); ok && init.SessionID != "" {
+	if init, ok := m.(*agent.InitMessage); ok && init.SessionID != "" {
 		t.sessionID = init.SessionID
 		t.reportedModel = init.Model
 		t.agentVersion = init.Version
 	}
 	// Track plan mode and plan file from tool_use events.
-	// Capture plan file path from Write tool_use targeting .claude/plans/.
-	if am, ok := m.(*agent.AssistantMessage); ok {
-		t.trackPlanState(am)
-		if u := am.Message.Usage; u.InputTokens+u.CacheCreationInputTokens+u.CacheReadInputTokens > 0 {
-			t.lastAPIUsage = u
-		}
-		// Transition to running when the agent starts producing output
-		// while the task is in a waiting state. This covers the case where
-		// the server restarts and RestoreMessages inferred StateWaiting
-		// from a trailing ResultMessage, but the agent already started a
-		// new turn on the relay before we reattached.
+	if tu, ok := m.(*agent.ToolUseMessage); ok {
+		t.trackToolUse(tu)
+	}
+	if u, ok := m.(*agent.UsageMessage); ok {
+		t.lastAPIUsage = u.Usage
+	}
+	// Transition to running when the agent starts producing output
+	// while the task is in a waiting state. This covers the case where
+	// the server restarts and RestoreMessages inferred StateWaiting
+	// from a trailing ResultMessage, but the agent already started a
+	// new turn on the relay before we reattached.
+	switch m.(type) {
+	case *agent.TextMessage, *agent.ToolUseMessage, *agent.AskMessage, *agent.TodoMessage:
 		if t.state == StateWaiting || t.state == StateAsking {
 			t.setState(StateRunning)
 		}
@@ -429,7 +431,7 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message) {
 		// blocking Fetch first). In that case we still need to
 		// distinguish Waiting from Asking.
 		if t.state == StateRunning || t.state == StateWaiting {
-			if lastAssistantHasAsk(t.msgs) {
+			if lastTurnHasAsk(t.msgs) {
 				t.setState(StateAsking)
 			} else {
 				t.setState(StateWaiting)
@@ -464,38 +466,33 @@ type editToolInput struct {
 	ReplaceAll bool   `json:"replace_all"`
 }
 
-// trackPlanState inspects an AssistantMessage for plan-related tool_use blocks
-// and updates PlanFile and InPlanMode accordingly. The caller must hold t.mu.
-func (t *Task) trackPlanState(am *agent.AssistantMessage) {
-	for _, b := range am.Message.Content {
-		if b.Type != "tool_use" {
-			continue
+// trackToolUse inspects a ToolUseMessage for plan-related tools and updates
+// PlanFile and InPlanMode accordingly. The caller must hold t.mu.
+func (t *Task) trackToolUse(tu *agent.ToolUseMessage) {
+	switch tu.Name {
+	case "EnterPlanMode":
+		t.inPlanMode = true
+	case "ExitPlanMode":
+		t.inPlanMode = false
+	case "Write":
+		if t.planDismissed {
+			return
 		}
-		switch b.Name {
-		case "EnterPlanMode":
-			t.inPlanMode = true
-		case "ExitPlanMode":
-			t.inPlanMode = false
-		case "Write":
-			if t.planDismissed {
-				continue
-			}
-			var input writeToolInput
-			if json.Unmarshal(b.Input, &input) == nil && strings.Contains(input.FilePath, ".claude/plans/") {
-				t.planFile = input.FilePath
-				t.planContent = input.Content
-			}
-		case "Edit":
-			if t.planDismissed {
-				continue
-			}
-			var input editToolInput
-			if json.Unmarshal(b.Input, &input) == nil && t.planFile == input.FilePath && t.planContent != "" {
-				if input.ReplaceAll {
-					t.planContent = strings.ReplaceAll(t.planContent, input.OldString, input.NewString)
-				} else {
-					t.planContent = strings.Replace(t.planContent, input.OldString, input.NewString, 1)
-				}
+		var input writeToolInput
+		if json.Unmarshal(tu.Input, &input) == nil && strings.Contains(input.FilePath, ".claude/plans/") {
+			t.planFile = input.FilePath
+			t.planContent = input.Content
+		}
+	case "Edit":
+		if t.planDismissed {
+			return
+		}
+		var input editToolInput
+		if json.Unmarshal(tu.Input, &input) == nil && t.planFile == input.FilePath && t.planContent != "" {
+			if input.ReplaceAll {
+				t.planContent = strings.ReplaceAll(t.planContent, input.OldString, input.NewString)
+			} else {
+				t.planContent = strings.Replace(t.planContent, input.OldString, input.NewString, 1)
 			}
 		}
 	}
@@ -580,52 +577,23 @@ func (t *Task) ClearMessages(ctx context.Context) {
 	t.planDismissed = true
 }
 
-// syntheticUserInput creates a UserMessage representing user-provided text
-// input. It is injected into the message stream so that the JSONL log and SSE
-// events contain an explicit record of every user message.
-//
-// When images are present, the Content field is a JSON array of content blocks
-// (matching the Claude API format) so that event converters can extract both
-// text and images from the raw message.
-func syntheticUserInput(p agent.Prompt) *agent.UserMessage {
-	var content any
-	if len(p.Images) == 0 {
-		content = p.Text
-	} else {
-		type imgSrc struct {
-			Type      string `json:"type"`
-			MediaType string `json:"media_type"`
-			Data      string `json:"data"`
-		}
-		type block struct {
-			Type   string  `json:"type"`
-			Source *imgSrc `json:"source,omitempty"`
-			Text   string  `json:"text,omitempty"`
-		}
-		blocks := make([]block, 0, len(p.Images)+1)
-		for _, img := range p.Images {
-			blocks = append(blocks, block{
-				Type:   "image",
-				Source: &imgSrc{Type: "base64", MediaType: img.MediaType, Data: img.Data},
-			})
-		}
-		if p.Text != "" {
-			blocks = append(blocks, block{Type: "text", Text: p.Text})
-		}
-		content = blocks
+// syntheticUserInput creates a UserInputMessage representing user-provided
+// text/image input. It is injected into the message stream so that the JSONL
+// log and SSE events contain an explicit record of every user message.
+func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
+	var images []agent.ImageData
+	if len(p.Images) > 0 {
+		images = make([]agent.ImageData, len(p.Images))
+		copy(images, p.Images)
 	}
-	raw, _ := json.Marshal(struct {
-		Role    string `json:"role"`
-		Content any    `json:"content"`
-	}{Role: "user", Content: content})
-	return &agent.UserMessage{
-		MessageType: "user",
-		Message:     raw,
+	return &agent.UserInputMessage{
+		Text:   p.Text,
+		Images: images,
 	}
 }
 
 // lastAgentMessage scans backwards through msgs, skipping non-semantic
-// messages (DiffStatMessage, StreamEvent, RawMessage), and returns the
+// messages (DiffStatMessage, TextDeltaMessage, RawMessage), and returns the
 // trailing ResultMessage if the last semantically meaningful message is a
 // result. Returns nil if it is not a ResultMessage (agent still producing
 // output) or msgs is empty.
@@ -634,10 +602,12 @@ func lastAgentMessage(msgs []agent.Message) *agent.ResultMessage {
 		switch m := msgs[i].(type) {
 		case *agent.DiffStatMessage:
 			continue // Relay metadata; skip.
-		case *agent.StreamEvent:
+		case *agent.TextDeltaMessage:
 			continue // Streaming delta; skip.
 		case *agent.RawMessage:
 			continue // tool_progress, etc.; skip.
+		case *agent.UsageMessage:
+			continue // Token usage metadata; skip.
 		case *agent.ResultMessage:
 			return m
 		default:
@@ -647,32 +617,19 @@ func lastAgentMessage(msgs []agent.Message) *agent.ResultMessage {
 	return nil
 }
 
-// lastAssistantHasAsk reports whether any AssistantMessage in the current
-// turn contains an AskUserQuestion tool_use block. It scans backwards from
-// the end, checking every AssistantMessage until it hits a ResultMessage
-// (which marks the end of the previous turn). With --include-partial-messages,
-// the last AssistantMessage is typically a text-only partial snapshot; the
-// tool_use blocks appear in earlier AssistantMessage snapshots.
-func lastAssistantHasAsk(msgs []agent.Message) bool {
-	// Scan backwards through all AssistantMessages in the current turn.
-	// With --include-partial-messages, Claude Code emits multiple assistant
-	// snapshots per turn; AskUserQuestion tool_use may appear in an earlier
-	// snapshot while the final one is text-only. We stop at the previous
-	// turn's ResultMessage boundary. The caller may include the current
-	// turn's ResultMessage in the slice (it's the trigger for this check),
-	// so we skip the first ResultMessage we encounter.
+// lastTurnHasAsk reports whether the current turn contains an AskMessage.
+// It scans backwards from the end until it hits a previous turn's
+// ResultMessage boundary. The caller may include the current turn's
+// ResultMessage in the slice (it's the trigger for this check), so we skip
+// the first ResultMessage we encounter.
+func lastTurnHasAsk(msgs []agent.Message) bool {
 	skippedResult := false
 	for i := len(msgs) - 1; i >= 0; i-- {
-		switch m := msgs[i].(type) {
-		case *agent.AssistantMessage:
-			for _, b := range m.Message.Content {
-				if b.Type == "tool_use" && b.Name == "AskUserQuestion" {
-					return true
-				}
-			}
+		switch msgs[i].(type) {
+		case *agent.AskMessage:
+			return true
 		case *agent.ResultMessage:
 			if skippedResult {
-				// Reached the previous turn's result — stop scanning.
 				return false
 			}
 			skippedResult = true

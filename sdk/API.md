@@ -22,7 +22,7 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 |--------|------|---------|----------|
 | GET | `/api/v1/tasks` |  | `Task[]` |
 | POST | `/api/v1/tasks` | `CreateTaskReq` | `CreateTaskResp` |
-| GET | `/api/v1/tasks/{id}/raw_events` |  | `ClaudeEventMessage` SSE |
+| GET | `/api/v1/tasks/{id}/raw_events` |  | `EventMessage` SSE |
 | GET | `/api/v1/tasks/{id}/events` |  | `EventMessage` SSE |
 | POST | `/api/v1/tasks/{id}/input` | `InputReq` | `StatusResp` |
 | POST | `/api/v1/tasks/{id}/restart` | `RestartReq` | `StatusResp` |
@@ -195,153 +195,6 @@ All errors return:
 | `status` | `string` | yes |
 | `id` | `string` | yes |
 
-### ClaudeEventInit
-
-| Field | Type | Required |
-|-------|------|----------|
-| `model` | `string` | yes |
-| `agentVersion` | `string` | yes |
-| `sessionID` | `string` | yes |
-| `tools` | `string[]` | yes |
-| `cwd` | `string` | yes |
-
-### ClaudeEventText
-
-| Field | Type | Required |
-|-------|------|----------|
-| `text` | `string` | yes |
-
-### ClaudeEventTextDelta
-
-| Field | Type | Required |
-|-------|------|----------|
-| `text` | `string` | yes |
-
-### ClaudeEventToolUse
-
-| Field | Type | Required |
-|-------|------|----------|
-| `toolUseID` | `string` | yes |
-| `name` | `string` | yes |
-| `input` | `object` | yes |
-
-### ClaudeEventToolResult
-
-| Field | Type | Required |
-|-------|------|----------|
-| `toolUseID` | `string` | yes |
-| `duration` | `number` | yes |
-| `error` | `string` |  |
-
-### ClaudeAskOption
-
-| Field | Type | Required |
-|-------|------|----------|
-| `label` | `string` | yes |
-| `description` | `string` |  |
-
-### ClaudeAskQuestion
-
-| Field | Type | Required |
-|-------|------|----------|
-| `question` | `string` | yes |
-| `header` | `string` |  |
-| `options` | `ClaudeAskOption[]` | yes |
-| `multiSelect` | `boolean` |  |
-
-### ClaudeEventAsk
-
-| Field | Type | Required |
-|-------|------|----------|
-| `toolUseID` | `string` | yes |
-| `questions` | `ClaudeAskQuestion[]` | yes |
-
-### ClaudeEventUsage
-
-| Field | Type | Required |
-|-------|------|----------|
-| `inputTokens` | `number` | yes |
-| `outputTokens` | `number` | yes |
-| `cacheCreationInputTokens` | `number` | yes |
-| `cacheReadInputTokens` | `number` | yes |
-| `serviceTier` | `string` |  |
-| `model` | `string` | yes |
-
-### ClaudeEventResult
-
-| Field | Type | Required |
-|-------|------|----------|
-| `subtype` | `string` | yes |
-| `isError` | `boolean` | yes |
-| `result` | `string` | yes |
-| `diffStat` | `DiffFileStat[]` |  |
-| `totalCostUSD` | `number` | yes |
-| `duration` | `number` | yes |
-| `durationAPI` | `number` | yes |
-| `numTurns` | `number` | yes |
-| `usage` | `ClaudeEventUsage` | yes |
-
-### ClaudeEventSystem
-
-| Field | Type | Required |
-|-------|------|----------|
-| `subtype` | `string` | yes |
-
-### ClaudeEventUserInput
-
-| Field | Type | Required |
-|-------|------|----------|
-| `text` | `string` | yes |
-| `images` | `ImageData[]` |  |
-
-### ClaudeTodoItem
-
-| Field | Type | Required |
-|-------|------|----------|
-| `content` | `string` | yes |
-| `status` | `string` | yes |
-| `activeForm` | `string` |  |
-
-### ClaudeEventTodo
-
-| Field | Type | Required |
-|-------|------|----------|
-| `toolUseID` | `string` | yes |
-| `todos` | `ClaudeTodoItem[]` | yes |
-
-### ClaudeEventDiffStat
-
-| Field | Type | Required |
-|-------|------|----------|
-| `diffStat` | `DiffFileStat[]` |  |
-
-### ClaudeEventError
-
-| Field | Type | Required |
-|-------|------|----------|
-| `err` | `string` | yes |
-| `line` | `string` | yes |
-
-### ClaudeEventMessage
-
-| Field | Type | Required |
-|-------|------|----------|
-| `kind` | `string` | yes |
-| `ts` | `number` | yes |
-| `init` | `ClaudeEventInit` |  |
-| `text` | `ClaudeEventText` |  |
-| `textDelta` | `ClaudeEventTextDelta` |  |
-| `toolUse` | `ClaudeEventToolUse` |  |
-| `toolResult` | `ClaudeEventToolResult` |  |
-| `ask` | `ClaudeEventAsk` |  |
-| `usage` | `ClaudeEventUsage` |  |
-| `result` | `ClaudeEventResult` |  |
-| `system` | `ClaudeEventSystem` |  |
-| `userInput` | `ClaudeEventUserInput` |  |
-| `todo` | `ClaudeEventTodo` |  |
-| `diffStat` | `ClaudeEventDiffStat` |  |
-| `error` | `ClaudeEventError` |  |
-
 ### EventInit
 
 | Field | Type | Required |
@@ -412,7 +265,6 @@ All errors return:
 | `outputTokens` | `number` | yes |
 | `cacheCreationInputTokens` | `number` | yes |
 | `cacheReadInputTokens` | `number` | yes |
-| `serviceTier` | `string` |  |
 | `model` | `string` | yes |
 
 ### EventResult

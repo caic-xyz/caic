@@ -1,13 +1,13 @@
-// Pure grouping and turn-splitting logic for Claude Code event streams.
-import type { ClaudeEventMessage, ClaudeEventToolUse, ClaudeEventToolResult, ClaudeEventAsk } from "@sdk/types.gen";
+// Pure grouping and turn-splitting logic for agent event streams.
+import type { EventMessage, EventToolUse, EventToolResult, EventAsk } from "@sdk/types.gen";
 
 export interface MessageGroup {
   kind: "text" | "tool" | "ask" | "userInput" | "other";
-  events: ClaudeEventMessage[];
+  events: EventMessage[];
   // For "tool" groups: paired tool_use and tool_result events.
   toolCalls: ToolCall[];
   // For "ask" groups: the ask payload.
-  ask?: ClaudeEventAsk;
+  ask?: EventAsk;
   // For "ask" groups: the user's submitted answer (from the following userInput).
   answerText?: string;
 }
@@ -16,8 +16,8 @@ export interface MessageGroup {
 // done is true when the tool has completed — either via an explicit result
 // event or implicitly because a later event arrived (the agent moved on).
 export interface ToolCall {
-  use: ClaudeEventToolUse;
-  result?: ClaudeEventToolResult;
+  use: EventToolUse;
+  result?: EventToolResult;
   done: boolean;
 }
 
@@ -34,7 +34,7 @@ export interface Turn {
 // as soon as their toolUse event is emitted.
 const ASYNC_TOOLS = new Set(["bash", "task"]);
 
-export function groupMessages(msgs: ClaudeEventMessage[]): MessageGroup[] {
+export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
   const groups: MessageGroup[] = [];
 
   function lastGroup(): MessageGroup | undefined {

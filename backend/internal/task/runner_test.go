@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	agentclaude "github.com/caic-xyz/caic/backend/internal/agent/claude"
 	"github.com/maruel/ksid"
 )
 
@@ -45,8 +46,8 @@ func (b *testBackend) ReadRelayOutput(context.Context, string) ([]agent.Message,
 	return nil, 0, errors.New("test backend does not support relay")
 }
 
-func (b *testBackend) ParseMessage(line []byte) (agent.Message, error) {
-	return agent.ParseMessage(line)
+func (b *testBackend) ParseMessage(line []byte) ([]agent.Message, error) {
+	return agentclaude.ParseMessage(line)
 }
 
 func (b *testBackend) Models() []string { return []string{"test-model"} }
@@ -83,8 +84,8 @@ func (*testWire) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error 
 	return nil
 }
 
-func (*testWire) ParseMessage(line []byte) (agent.Message, error) {
-	return agent.ParseMessage(line)
+func (*testWire) ParseMessage(line []byte) ([]agent.Message, error) {
+	return agentclaude.ParseMessage(line)
 }
 
 func TestRunner(t *testing.T) {
@@ -552,26 +553,22 @@ func TestRunner(t *testing.T) {
 
 					msgCh := r.startMessageDispatch(t.Context(), tk)
 
-					// Send an AssistantMessage with a mutating tool_use block.
+					// Send a ToolUseMessage with a mutating tool.
 					toolID := "tool_edit_1"
-					msgCh <- &agent.AssistantMessage{
-						MessageType: "assistant",
-						Message: agent.APIMessage{
-							Content: []agent.ContentBlock{
-								{Type: "tool_use", ID: toolID, Name: tool, Input: json.RawMessage(`{}`)},
-							},
-						},
+					msgCh <- &agent.ToolUseMessage{
+						ToolUseID: toolID,
+						Name:      tool,
+						Input:     json.RawMessage(`{}`),
 					}
-					// Drain the assistant message from the subscriber.
+					// Drain the tool_use message from the subscriber.
 					recvMsg(t, ch)
 
-					// Send the tool result (UserMessage with ParentToolUseID).
-					msgCh <- &agent.UserMessage{
-						MessageType:     "user",
-						ParentToolUseID: &toolID,
+					// Send the tool result.
+					msgCh <- &agent.ToolResultMessage{
+						ToolUseID: toolID,
 					}
 
-					// Expect two messages: the UserMessage and a DiffStatMessage.
+					// Expect two messages: the ToolResultMessage and a DiffStatMessage.
 					var gotDiffStat bool
 					for range 2 {
 						msg := recvMsg(t, ch)
@@ -606,21 +603,17 @@ func TestRunner(t *testing.T) {
 			msgCh := r.startMessageDispatch(t.Context(), tk)
 
 			toolID := "tool_read_1"
-			msgCh <- &agent.AssistantMessage{
-				MessageType: "assistant",
-				Message: agent.APIMessage{
-					Content: []agent.ContentBlock{
-						{Type: "tool_use", ID: toolID, Name: "Read", Input: json.RawMessage(`{}`)},
-					},
-				},
+			msgCh <- &agent.ToolUseMessage{
+				ToolUseID: toolID,
+				Name:      "Read",
+				Input:     json.RawMessage(`{}`),
 			}
-			recvMsg(t, ch) // drain assistant
+			recvMsg(t, ch) // drain tool_use
 
-			msgCh <- &agent.UserMessage{
-				MessageType:     "user",
-				ParentToolUseID: &toolID,
+			msgCh <- &agent.ToolResultMessage{
+				ToolUseID: toolID,
 			}
-			// Only expect the UserMessage, no DiffStatMessage.
+			// Only expect the ToolResultMessage, no DiffStatMessage.
 			msg := recvMsg(t, ch)
 			if _, ok := msg.(*agent.DiffStatMessage); ok {
 				t.Error("unexpected DiffStatMessage emitted for non-mutating tool")
@@ -720,11 +713,9 @@ func TestRunner(t *testing.T) {
 		tk.SetState(StateRunning)
 
 		// Simulate the agent writing a plan file.
-		tk.addMessage(t.Context(), &agent.AssistantMessage{
-			MessageType: "assistant",
-			Message: agent.APIMessage{Content: []agent.ContentBlock{
-				{Type: "tool_use", Name: "Write", Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`)},
-			}},
+		tk.addMessage(t.Context(), &agent.ToolUseMessage{
+			ToolUseID: "tu1", Name: "Write",
+			Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`),
 		})
 		if snap := tk.Snapshot(); snap.PlanContent != "the plan" {
 			t.Fatalf("PlanContent = %q before restart, want %q", snap.PlanContent, "the plan")

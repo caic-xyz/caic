@@ -39,7 +39,7 @@ func (stubBackend) ReadRelayOutput(context.Context, string) ([]agent.Message, in
 	return nil, 0, errors.New("stub")
 }
 
-func (stubBackend) ParseMessage([]byte) (agent.Message, error) {
+func (stubBackend) ParseMessage([]byte) ([]agent.Message, error) {
 	return nil, errors.New("stub")
 }
 
@@ -666,8 +666,9 @@ func TestLoadTerminatedTasks(t *testing.T) {
 			MessageType: "caic_meta", Version: 1, Prompt: "fix bug",
 			Repo: "r", Branch: "caic-0", Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
-		initMsg := mustJSON(t, agent.SystemInitMessage{
-			MessageType: "system", Subtype: "init", Model: "claude-opus-4-6", Version: "2.0", SessionID: "s1",
+		initMsg := mustJSON(t, map[string]any{
+			"type": "system", "subtype": "init", "model": "claude-opus-4-6",
+			"claude_code_version": "2.0", "session_id": "s1",
 		})
 		result := mustJSON(t, agent.ResultMessage{
 			MessageType: "result", Subtype: "success", Result: "done",
@@ -723,8 +724,9 @@ func TestLoadTerminatedTasks(t *testing.T) {
 			MessageType: "caic_meta", Version: 1, Prompt: "fix bug",
 			Repo: "r", Branch: "caic-0", Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
-		initMsg := mustJSON(t, agent.SystemInitMessage{
-			MessageType: "system", Subtype: "init", Model: "claude-opus-4-6", Version: "2.0", SessionID: "s1",
+		initMsg := mustJSON(t, map[string]any{
+			"type": "system", "subtype": "init", "model": "claude-opus-4-6",
+			"claude_code_version": "2.0", "session_id": "s1",
 		})
 		result := mustJSON(t, agent.ResultMessage{
 			MessageType: "result", Subtype: "success", Result: "done",
@@ -857,8 +859,8 @@ func TestLoadTerminatedTasks(t *testing.T) {
 }
 
 // parseSSEEvents extracts message-type SSE events from a response body.
-func parseSSEEvents(t *testing.T, body string) []v1.ClaudeEventMessage {
-	var events []v1.ClaudeEventMessage
+func parseSSEEvents(t *testing.T, body string) []v1.EventMessage {
+	var events []v1.EventMessage
 	eventType := "message"
 	for _, line := range strings.Split(body, "\n") {
 		if after, ok := strings.CutPrefix(line, "event: "); ok {
@@ -875,7 +877,7 @@ func parseSSEEvents(t *testing.T, body string) []v1.ClaudeEventMessage {
 		if eventType != "message" {
 			continue
 		}
-		var ev v1.ClaudeEventMessage
+		var ev v1.EventMessage
 		if err := json.Unmarshal([]byte(after), &ev); err != nil {
 			t.Fatalf("unmarshal event: %v", err)
 		}
@@ -893,15 +895,20 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
 			Repo: "r", Branch: "caic-0", Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
-		initMsg := mustJSON(t, agent.SystemInitMessage{
-			MessageType: "system", Subtype: "init", Model: "claude-opus-4-6", Version: "2.0", SessionID: "s1",
+		initMsg := mustJSON(t, map[string]any{
+			"type": "system", "subtype": "init", "model": "claude-opus-4-6",
+			"claude_code_version": "2.0", "session_id": "s1",
 		})
-		assistant := mustJSON(t, agent.AssistantMessage{
-			MessageType: "assistant",
-			Message: agent.APIMessage{
-				Model:   "claude-opus-4-6",
-				Content: []agent.ContentBlock{{Type: "text", Text: "I found the bug"}},
-				Usage:   agent.Usage{InputTokens: 100, OutputTokens: 50},
+		assistant := mustJSON(t, map[string]any{
+			"type": "assistant",
+			"message": map[string]any{
+				"model": "claude-opus-4-6",
+				"content": []map[string]any{
+					{"type": "text", "text": "I found the bug"},
+				},
+				"usage": map[string]any{
+					"input_tokens": 100, "output_tokens": 50,
+				},
 			},
 		})
 		result := mustJSON(t, agent.ResultMessage{
@@ -954,11 +961,11 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			t.Fatal("no SSE events received for terminated task with messages")
 		}
 
-		kinds := make([]v1.ClaudeEventKind, len(events))
+		kinds := make([]v1.EventKind, len(events))
 		for i, ev := range events {
 			kinds[i] = ev.Kind
 		}
-		wantKinds := []v1.ClaudeEventKind{v1.ClaudeEventKindInit, v1.ClaudeEventKindText, v1.ClaudeEventKindUsage, v1.ClaudeEventKindResult}
+		wantKinds := []v1.EventKind{v1.EventKindInit, v1.EventKindText, v1.EventKindUsage, v1.EventKindResult}
 		if len(kinds) != len(wantKinds) {
 			t.Fatalf("event kinds = %v, want %v", kinds, wantKinds)
 		}
@@ -981,33 +988,23 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			MessageType: "caic_meta", Version: 1, Prompt: "explain streaming",
 			Repo: "r", Branch: "caic-0", Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
-		initMsg := mustJSON(t, agent.SystemInitMessage{
-			MessageType: "system", Subtype: "init", Model: "claude-opus-4-6", Version: "2.0", SessionID: "s1",
+		initMsg := mustJSON(t, map[string]any{
+			"type": "system", "subtype": "init", "model": "claude-opus-4-6",
+			"claude_code_version": "2.0", "session_id": "s1",
 		})
-		delta1 := mustJSON(t, agent.StreamEvent{
-			MessageType: "stream_event",
-			Event: agent.StreamEventData{
-				Type: "content_block_delta", Index: 0,
-				Delta: &agent.StreamDelta{Type: "text_delta", Text: "Hello "},
-			},
-		})
-		delta2 := mustJSON(t, agent.StreamEvent{
-			MessageType: "stream_event",
-			Event: agent.StreamEventData{
-				Type: "content_block_delta", Index: 0,
-				Delta: &agent.StreamDelta{Type: "text_delta", Text: "world"},
-			},
-		})
-		msgStart := mustJSON(t, agent.StreamEvent{
-			MessageType: "stream_event",
-			Event:       agent.StreamEventData{Type: "message_start"},
-		})
-		assistant := mustJSON(t, agent.AssistantMessage{
-			MessageType: "assistant",
-			Message: agent.APIMessage{
-				Model:   "claude-opus-4-6",
-				Content: []agent.ContentBlock{{Type: "text", Text: "Hello world"}},
-				Usage:   agent.Usage{InputTokens: 50, OutputTokens: 20},
+		delta1 := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello "}}}`
+		delta2 := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"world"}}}`
+		msgStart := `{"type":"stream_event","event":{"type":"message_start"}}`
+		assistant := mustJSON(t, map[string]any{
+			"type": "assistant",
+			"message": map[string]any{
+				"model": "claude-opus-4-6",
+				"content": []map[string]any{
+					{"type": "text", "text": "Hello world"},
+				},
+				"usage": map[string]any{
+					"input_tokens": 50, "output_tokens": 20,
+				},
 			},
 		})
 		result := mustJSON(t, agent.ResultMessage{
@@ -1050,12 +1047,12 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		}
 
 		events := parseSSEEvents(t, w.Body.String())
-		kinds := make([]v1.ClaudeEventKind, len(events))
+		kinds := make([]v1.EventKind, len(events))
 		for i, ev := range events {
 			kinds[i] = ev.Kind
 		}
 		// Expect: init + 2 textDelta (message_start filtered) + text + usage + result
-		wantKinds := []v1.ClaudeEventKind{v1.ClaudeEventKindInit, v1.ClaudeEventKindTextDelta, v1.ClaudeEventKindTextDelta, v1.ClaudeEventKindText, v1.ClaudeEventKindUsage, v1.ClaudeEventKindResult}
+		wantKinds := []v1.EventKind{v1.EventKindInit, v1.EventKindTextDelta, v1.EventKindTextDelta, v1.EventKindText, v1.EventKindUsage, v1.EventKindResult}
 		if len(kinds) != len(wantKinds) {
 			t.Fatalf("event kinds = %v, want %v", kinds, wantKinds)
 		}

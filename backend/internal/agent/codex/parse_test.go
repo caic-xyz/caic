@@ -11,13 +11,16 @@ import (
 func TestParseMessage(t *testing.T) {
 	t.Run("ThreadStarted", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"0199a213-81c0-7800-8aa1-bbab2a035a53","cliVersion":"1.0","createdAt":1771690198,"cwd":"/repo","modelProvider":"openai","path":"/repo","preview":"fix","source":"user","updatedAt":1771690200}}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		init, ok := msg.(*agent.SystemInitMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		init, ok := msgs[0].(*agent.InitMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.SystemInitMessage", msg)
+			t.Fatalf("type = %T, want *agent.InitMessage", msgs[0])
 		}
 		if init.SessionID != "0199a213-81c0-7800-8aa1-bbab2a035a53" {
 			t.Errorf("SessionID = %q", init.SessionID)
@@ -28,13 +31,16 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("TurnStarted", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"t1","turn":{"id":"turn_1","status":"inProgress"}}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		sm, ok := msg.(*agent.SystemMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		sm, ok := msgs[0].(*agent.SystemMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.SystemMessage", msg)
+			t.Fatalf("type = %T, want *agent.SystemMessage", msgs[0])
 		}
 		if sm.Subtype != "turn_started" {
 			t.Errorf("Subtype = %q", sm.Subtype)
@@ -42,13 +48,16 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("TurnCompleted", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn_1","status":"completed"}}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		rm, ok := msg.(*agent.ResultMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		rm, ok := msgs[0].(*agent.ResultMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.ResultMessage", msg)
+			t.Fatalf("type = %T, want *agent.ResultMessage", msgs[0])
 		}
 		if rm.IsError {
 			t.Error("IsError should be false")
@@ -56,13 +65,16 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("TurnFailed", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn_1","status":"failed","error":{"message":"rate limit exceeded"}}}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		rm, ok := msg.(*agent.ResultMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		rm, ok := msgs[0].(*agent.ResultMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.ResultMessage", msg)
+			t.Fatalf("type = %T, want *agent.ResultMessage", msgs[0])
 		}
 		if !rm.IsError {
 			t.Error("IsError should be true")
@@ -73,130 +85,138 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("ItemStartedCommandExecution", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"item_1","type":"commandExecution","command":"bash -lc ls","status":"inProgress"},"threadId":"t1","turnId":"turn_1"}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		am, ok := msg.(*agent.AssistantMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		tu, ok := msgs[0].(*agent.ToolUseMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.AssistantMessage", msg)
+			t.Fatalf("type = %T, want *agent.ToolUseMessage", msgs[0])
 		}
-		if len(am.Message.Content) != 1 {
-			t.Fatalf("content blocks = %d, want 1", len(am.Message.Content))
+		if tu.Name != "Bash" {
+			t.Errorf("Name = %q, want Bash", tu.Name)
 		}
-		cb := am.Message.Content[0]
-		if cb.Type != "tool_use" {
-			t.Errorf("content type = %q, want tool_use", cb.Type)
-		}
-		if cb.Name != "Bash" {
-			t.Errorf("Name = %q, want Bash", cb.Name)
-		}
-		if cb.ID != "item_1" {
-			t.Errorf("ID = %q", cb.ID)
+		if tu.ToolUseID != "item_1" {
+			t.Errorf("ToolUseID = %q", tu.ToolUseID)
 		}
 	})
 	t.Run("ItemCompletedCommandExecution", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_1","type":"commandExecution","command":"bash -lc ls","aggregatedOutput":"docs\nsrc\n","exitCode":0,"status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		um, ok := msg.(*agent.UserMessage)
-		if !ok {
-			t.Fatalf("type = %T, want *agent.UserMessage", msg)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
 		}
-		if um.ParentToolUseID == nil || *um.ParentToolUseID != "item_1" {
-			t.Errorf("ParentToolUseID = %v", um.ParentToolUseID)
+		tr, ok := msgs[0].(*agent.ToolResultMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.ToolResultMessage", msgs[0])
+		}
+		if tr.ToolUseID != "item_1" {
+			t.Errorf("ToolUseID = %q", tr.ToolUseID)
 		}
 	})
 	t.Run("ItemCompletedAgentMessage", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_3","type":"agentMessage","text":"Done.","status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		am, ok := msg.(*agent.AssistantMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		tm, ok := msgs[0].(*agent.TextMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.AssistantMessage", msg)
+			t.Fatalf("type = %T, want *agent.TextMessage", msgs[0])
 		}
-		if len(am.Message.Content) != 1 {
-			t.Fatalf("content blocks = %d, want 1", len(am.Message.Content))
-		}
-		if am.Message.Content[0].Text != "Done." {
-			t.Errorf("text = %q", am.Message.Content[0].Text)
+		if tm.Text != "Done." {
+			t.Errorf("Text = %q", tm.Text)
 		}
 	})
 	t.Run("ItemCompletedReasoning", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_0","type":"reasoning","summary":["**Scanning...**"],"content":[]},"threadId":"t1","turnId":"turn_1"}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		am, ok := msg.(*agent.AssistantMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		tm, ok := msgs[0].(*agent.TextMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.AssistantMessage", msg)
+			t.Fatalf("type = %T, want *agent.TextMessage", msgs[0])
 		}
-		if am.Message.Content[0].Type != "text" {
-			t.Errorf("content type = %q", am.Message.Content[0].Type)
-		}
-		if am.Message.Content[0].Text != "**Scanning...**" {
-			t.Errorf("text = %q", am.Message.Content[0].Text)
+		if tm.Text != "**Scanning...**" {
+			t.Errorf("Text = %q", tm.Text)
 		}
 	})
 	t.Run("ItemCompletedFileChangeAdd", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_4","type":"fileChange","changes":[{"path":"docs/foo.md","kind":{"type":"add"},"diff":""}],"status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		am, ok := msg.(*agent.AssistantMessage)
-		if !ok {
-			t.Fatalf("type = %T, want *agent.AssistantMessage", msg)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
 		}
-		cb := am.Message.Content[0]
-		if cb.Name != "Write" {
-			t.Errorf("Name = %q, want Write (file add)", cb.Name)
+		tu, ok := msgs[0].(*agent.ToolUseMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.ToolUseMessage", msgs[0])
+		}
+		if tu.Name != "Write" {
+			t.Errorf("Name = %q, want Write (file add)", tu.Name)
 		}
 	})
 	t.Run("ItemCompletedFileChangeUpdate", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_5","type":"fileChange","changes":[{"path":"src/main.go","kind":{"type":"update"},"diff":""}],"status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		am, ok := msg.(*agent.AssistantMessage)
-		if !ok {
-			t.Fatalf("type = %T, want *agent.AssistantMessage", msg)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
 		}
-		cb := am.Message.Content[0]
-		if cb.Name != "Edit" {
-			t.Errorf("Name = %q, want Edit (file update)", cb.Name)
+		tu, ok := msgs[0].(*agent.ToolUseMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.ToolUseMessage", msgs[0])
+		}
+		if tu.Name != "Edit" {
+			t.Errorf("Name = %q, want Edit (file update)", tu.Name)
 		}
 	})
 	t.Run("ItemCompletedWebSearch", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"item_6","type":"webSearch","query":"golang generics","status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		am, ok := msg.(*agent.AssistantMessage)
-		if !ok {
-			t.Fatalf("type = %T, want *agent.AssistantMessage", msg)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
 		}
-		cb := am.Message.Content[0]
-		if cb.Name != "WebSearch" {
-			t.Errorf("Name = %q, want WebSearch", cb.Name)
+		tu, ok := msgs[0].(*agent.ToolUseMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.ToolUseMessage", msgs[0])
+		}
+		if tu.Name != "WebSearch" {
+			t.Errorf("Name = %q, want WebSearch", tu.Name)
 		}
 	})
 	t.Run("ItemUpdated", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"item/updated","params":{"item":{"id":"item_1","type":"commandExecution","aggregatedOutput":"partial..."},"threadId":"t1","turnId":"turn_1"}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, ok := msg.(*agent.RawMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		raw, ok := msgs[0].(*agent.RawMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.RawMessage", msg)
+			t.Fatalf("type = %T, want *agent.RawMessage", msgs[0])
 		}
 		if raw.Type() != MethodItemUpdated {
 			t.Errorf("Type() = %q", raw.Type())
@@ -204,30 +224,33 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("ItemDelta", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"t1","turnId":"turn_1","itemId":"item_3","delta":"Hello "}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		se, ok := msg.(*agent.StreamEvent)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		td, ok := msgs[0].(*agent.TextDeltaMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.StreamEvent", msg)
+			t.Fatalf("type = %T, want *agent.TextDeltaMessage", msgs[0])
 		}
-		if se.Event.Type != "content_block_delta" {
-			t.Errorf("Event.Type = %q", se.Event.Type)
-		}
-		if se.Event.Delta == nil || se.Event.Delta.Text != "Hello " {
-			t.Errorf("Delta.Text = %v", se.Event.Delta)
+		if td.Text != "Hello " {
+			t.Errorf("Text = %q, want %q", td.Text, "Hello ")
 		}
 	})
 	t.Run("JSONRPCResponse", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","id":1,"result":{"thread":{"id":"t1"}}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, ok := msg.(*agent.RawMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		raw, ok := msgs[0].(*agent.RawMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.RawMessage", msg)
+			t.Fatalf("type = %T, want *agent.RawMessage", msgs[0])
 		}
 		if raw.Type() != "jsonrpc_response" {
 			t.Errorf("Type() = %q", raw.Type())
@@ -235,13 +258,16 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("DiffStat", func(t *testing.T) {
 		const input = `{"type":"caic_diff_stat","diff_stat":[{"path":"foo.go","added":10,"deleted":2}]}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		ds, ok := msg.(*agent.DiffStatMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		ds, ok := msgs[0].(*agent.DiffStatMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.DiffStatMessage", msg)
+			t.Fatalf("type = %T, want *agent.DiffStatMessage", msgs[0])
 		}
 		if len(ds.DiffStat) != 1 {
 			t.Fatalf("DiffStat = %d, want 1", len(ds.DiffStat))
@@ -252,13 +278,16 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("UnknownMethod", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"future/event","params":{"data":"something"}}`
-		msg, err := ParseMessage([]byte(input))
+		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, ok := msg.(*agent.RawMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		raw, ok := msgs[0].(*agent.RawMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.RawMessage", msg)
+			t.Fatalf("type = %T, want *agent.RawMessage", msgs[0])
 		}
 		if raw.Type() != "future/event" {
 			t.Errorf("Type() = %q", raw.Type())
@@ -278,23 +307,26 @@ func TestParseMessage(t *testing.T) {
 			`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn_1","status":"completed"}}}`,
 		}
 		wantTypes := []string{
-			"system",       // thread/started → SystemInitMessage
-			"system",       // turn/started → SystemMessage
-			"assistant",    // reasoning → AssistantMessage
-			"assistant",    // item/started commandExecution → AssistantMessage (tool_use)
-			"user",         // item/completed commandExecution → UserMessage (tool result)
-			"stream_event", // item/agentMessage/delta → StreamEvent
-			"assistant",    // fileChange → AssistantMessage (tool_use)
-			"assistant",    // agentMessage → AssistantMessage
-			"result",       // turn/completed → ResultMessage
+			"init",        // thread/started → InitMessage
+			"system",      // turn/started → SystemMessage
+			"text",        // reasoning → TextMessage
+			"tool_use",    // item/started commandExecution → ToolUseMessage
+			"tool_result", // item/completed commandExecution → ToolResultMessage
+			"text_delta",  // item/agentMessage/delta → TextDeltaMessage
+			"tool_use",    // fileChange → ToolUseMessage
+			"text",        // agentMessage → TextMessage
+			"result",      // turn/completed → ResultMessage
 		}
 		for i, line := range lines {
-			msg, err := ParseMessage([]byte(line))
+			msgs, err := ParseMessage([]byte(line))
 			if err != nil {
 				t.Fatalf("line %d: %v", i, err)
 			}
-			if msg.Type() != wantTypes[i] {
-				t.Errorf("line %d: Type() = %q, want %q", i, msg.Type(), wantTypes[i])
+			if len(msgs) != 1 {
+				t.Fatalf("line %d: msgs = %d, want 1", i, len(msgs))
+			}
+			if msgs[0].Type() != wantTypes[i] {
+				t.Errorf("line %d: Type() = %q, want %q", i, msgs[0].Type(), wantTypes[i])
 			}
 		}
 	})
@@ -356,12 +388,15 @@ func TestWireFormat(t *testing.T) {
 	t.Run("ParseMessageCapturesThreadID", func(t *testing.T) {
 		w := &wireFormat{}
 		const input = `{"jsonrpc":"2.0","method":"thread/started","params":{"thread":{"id":"captured-id","cliVersion":"1.0","createdAt":1,"cwd":"/repo","modelProvider":"openai","path":"/repo","preview":"","source":"user","updatedAt":2}}}`
-		msg, err := w.ParseMessage([]byte(input))
+		msgs, err := w.ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, ok := msg.(*agent.SystemInitMessage); !ok {
-			t.Fatalf("type = %T", msg)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		if _, ok := msgs[0].(*agent.InitMessage); !ok {
+			t.Fatalf("type = %T", msgs[0])
 		}
 		if w.threadID != "captured-id" {
 			t.Errorf("threadID = %q, want captured-id", w.threadID)
@@ -370,13 +405,16 @@ func TestWireFormat(t *testing.T) {
 	t.Run("TokenUsageUpdatedStoresUsage", func(t *testing.T) {
 		w := &wireFormat{}
 		const input = `{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"t1","turnId":"turn_1","tokenUsage":{"total":{"totalTokens":1000,"inputTokens":800,"cachedInputTokens":500,"outputTokens":200,"reasoningOutputTokens":0},"last":{"totalTokens":100,"inputTokens":80,"cachedInputTokens":50,"outputTokens":20,"reasoningOutputTokens":0}}}}`
-		msg, err := w.ParseMessage([]byte(input))
+		msgs, err := w.ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		raw, ok := msg.(*agent.RawMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		raw, ok := msgs[0].(*agent.RawMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.RawMessage", msg)
+			t.Fatalf("type = %T, want *agent.RawMessage", msgs[0])
 		}
 		if raw.Type() != MethodTokenUsageUpdated {
 			t.Errorf("Type() = %q", raw.Type())
@@ -397,13 +435,16 @@ func TestWireFormat(t *testing.T) {
 	t.Run("TurnCompletedInjectsUsage", func(t *testing.T) {
 		w := &wireFormat{lastUsage: agent.Usage{InputTokens: 42, OutputTokens: 7}}
 		const input = `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn_1","status":"completed"}}}`
-		msg, err := w.ParseMessage([]byte(input))
+		msgs, err := w.ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
 		}
-		rm, ok := msg.(*agent.ResultMessage)
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		rm, ok := msgs[0].(*agent.ResultMessage)
 		if !ok {
-			t.Fatalf("type = %T", msg)
+			t.Fatalf("type = %T", msgs[0])
 		}
 		if rm.Usage.InputTokens != 42 {
 			t.Errorf("Usage.InputTokens = %d, want 42", rm.Usage.InputTokens)

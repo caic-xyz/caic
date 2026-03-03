@@ -4,11 +4,7 @@ package claude
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
-	"log/slog"
-	"os/exec"
 	"strconv"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -29,7 +25,7 @@ func New() *Backend {
 		ModelList:     []string{"opus", "sonnet", "haiku"},
 		Images:        true,
 		ContextWindow: 180_000,
-		Parse:         agent.ParseMessage,
+		Parse:         ParseMessage,
 	}
 	b.Wire = b
 	return b
@@ -38,46 +34,9 @@ func New() *Backend {
 // Wire is the wire format for Claude Code (stream-json over stdin/stdout).
 var Wire agent.WireFormat = New()
 
-// Start launches a Claude Code process via the relay daemon in the given
-// container. It deploys the relay script and starts claude via serve-attach.
+// Start launches a Claude Code process via the relay daemon.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
-	if opts.Dir == "" {
-		return nil, errors.New("opts.Dir is required")
-	}
-	if err := agent.DeployRelay(ctx, opts.Container); err != nil {
-		return nil, err
-	}
-
-	claudeArgs := buildArgs(opts)
-
-	// Build the ssh command: ssh <container> python3 relay.py serve-attach --dir <dir> -- claude ...
-	sshArgs := make([]string, 0, 7+len(claudeArgs))
-	sshArgs = append(sshArgs, opts.Container, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--")
-	sshArgs = append(sshArgs, claudeArgs...)
-
-	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdin pipe: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-	cmd.Stderr = &agent.SlogWriter{Prefix: "relay serve-attach", Container: opts.Container}
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("start relay: %w", err)
-	}
-
-	log := slog.With("container", opts.Container)
-	s := agent.NewSession(cmd, stdin, stdout, msgCh, logW, b, log)
-	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
-		if err := s.Send(opts.InitialPrompt); err != nil {
-			s.Close()
-			return nil, fmt.Errorf("write prompt: %w", err)
-		}
-	}
-	return s, nil
+	return agent.StartRelay(ctx, opts, buildArgs(opts), msgCh, logW, b)
 }
 
 // userInputMessage is the NDJSON message sent to Claude Code via stdin.

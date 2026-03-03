@@ -74,8 +74,8 @@ func (r *Runner) initDefaults() {
 	r.initOnce.Do(func() {
 		if r.Backends == nil {
 			r.Backends = map[agent.Harness]agent.Backend{
-				agent.Claude: &claude.Backend{},
-				agent.Codex:  &codex.Backend{},
+				agent.Claude: claude.New(),
+				agent.Codex:  codex.New(),
 			}
 		}
 		if r.GitTimeout == 0 {
@@ -678,21 +678,18 @@ func (r *Runner) backupIfNeeded(ctx context.Context, t *Task) {
 func (r *Runner) startMessageDispatch(ctx context.Context, t *Task) chan agent.Message {
 	msgCh := make(chan agent.Message, 256)
 	go func() {
-		// Track tool_use IDs from AssistantMessage blocks that may mutate files.
+		// Track tool_use IDs from ToolUseMessage that may mutate files.
 		pendingMutating := make(map[string]struct{})
 		for m := range msgCh {
 			switch msg := m.(type) {
-			case *agent.AssistantMessage:
-				for _, b := range msg.Message.Content {
-					if _, ok := mutatingTools[b.Name]; b.Type == "tool_use" && ok {
-						pendingMutating[b.ID] = struct{}{}
-					}
+			case *agent.ToolUseMessage:
+				if _, ok := mutatingTools[msg.Name]; ok {
+					pendingMutating[msg.ToolUseID] = struct{}{}
 				}
-			case *agent.UserMessage:
-				if msg.ParentToolUseID != nil && r.Container != nil {
-					id := *msg.ParentToolUseID
-					if _, ok := pendingMutating[id]; ok {
-						delete(pendingMutating, id)
+			case *agent.ToolResultMessage:
+				if r.Container != nil {
+					if _, ok := pendingMutating[msg.ToolUseID]; ok {
+						delete(pendingMutating, msg.ToolUseID)
 						r.fetchDiffStat(ctx, t)
 					}
 				}

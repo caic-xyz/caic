@@ -595,66 +595,10 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 	return &v1.CreateTaskResp{Status: "accepted", ID: t.ID}, nil
 }
 
-// handleTaskRawEvents streams agent messages as SSE using typed EventMessage DTOs.
+// handleTaskRawEvents delegates to handleTaskEvents — both endpoints now
+// serve the same backend-neutral EventMessage stream.
 func (s *Server) handleTaskRawEvents(w http.ResponseWriter, r *http.Request) {
-	entry, err := s.getTask(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, dto.InternalError("streaming not supported"))
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	flusher.Flush()
-
-	history, live, unsub := entry.task.Subscribe(r.Context())
-	defer unsub()
-
-	tracker := newToolTimingTracker()
-	idx := 0
-
-	writeEvents := func(events []v1.ClaudeEventMessage) {
-		for i := range events {
-			data, err := json.Marshal(&events[i])
-			if err != nil {
-				slog.Warn("marshal SSE event", "err", err)
-				continue
-			}
-			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx) //nolint:gosec // SSE stream, data is json.Marshal output
-			idx++
-		}
-	}
-
-	// Phase 1: replay full history. Tool durations are 0 for replayed
-	// messages because original timestamps are not stored.
-	now := time.Now()
-	for _, msg := range history {
-		writeEvents(tracker.convertMessage(msg, now))
-	}
-	// Signal the client that history replay is complete so it can swap
-	// the buffered messages atomically, avoiding a flash of empty content.
-	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
-	flusher.Flush()
-
-	// Terminal tasks (terminated, failed) will never produce new messages.
-	// Return immediately so the client receives history without blocking.
-	state := entry.task.GetState()
-	if state == task.StateTerminated || state == task.StateFailed {
-		return
-	}
-
-	// Phase 2: stream live messages with accurate timestamps.
-	for msg := range live {
-		writeEvents(tracker.convertMessage(msg, time.Now()))
-		flusher.Flush()
-	}
+	s.handleTaskEvents(w, r)
 }
 
 // handleTaskEvents streams agent messages as SSE using backend-neutral
@@ -680,7 +624,7 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	history, live, unsub := entry.task.Subscribe(r.Context())
 	defer unsub()
 
-	tracker := newGenericToolTimingTracker(entry.task.Harness)
+	tracker := newToolTimingTracker(entry.task.Harness)
 	idx := 0
 
 	writeEvents := func(events []v1.EventMessage) {

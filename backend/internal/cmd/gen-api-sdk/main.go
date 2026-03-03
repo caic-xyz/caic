@@ -229,9 +229,7 @@ var kotlinAliases = []kotlinTypeAlias{
 var kotlinStandaloneAliases = []struct {
 	name   string
 	target string
-}{
-	{"ClaudeEventKind", "EventKind"},
-}
+}{}
 
 // Error code constants.
 var kotlinErrorCodes = []kotlinConstant{
@@ -244,8 +242,7 @@ var kotlinErrorCodes = []kotlinConstant{
 // kotlinSectionComments maps type names to section comments emitted before
 // the struct in the generated output.
 var kotlinSectionComments = map[string]string{
-	"EventMessage":       "Backend-neutral event types",
-	"ClaudeEventMessage": "Claude-specific event types",
+	"EventMessage": "Backend-neutral event types",
 }
 
 // discoverKotlinStructs walks the dto struct types reachable from route
@@ -311,9 +308,8 @@ var (
 // kotlinAliasNames is the set of Go named-string types that map to their
 // Kotlin typealias name rather than "String".
 var kotlinAliasNames = map[reflect.Type]string{
-	reflect.TypeFor[v1.Harness]():         "Harness",
-	reflect.TypeFor[v1.EventKind]():       "EventKind",
-	reflect.TypeFor[v1.ClaudeEventKind](): "ClaudeEventKind",
+	reflect.TypeFor[v1.Harness]():   "Harness",
+	reflect.TypeFor[v1.EventKind](): "EventKind",
 }
 
 // kotlinPlural returns the plural object name for a type alias.
@@ -347,7 +343,7 @@ func goTypeToKotlin(t reflect.Type) string {
 		return "Map<String, JsonElement>"
 	}
 
-	// Named string aliases (Harness, EventKind, ClaudeEventKind).
+	// Named string aliases (Harness, EventKind).
 	if name, ok := kotlinAliasNames[t]; ok {
 		return name
 	}
