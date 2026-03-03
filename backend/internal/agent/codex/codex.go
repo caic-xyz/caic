@@ -70,7 +70,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = &slogWriter{prefix: "relay serve-attach", container: opts.Container}
+	cmd.Stderr = &agent.SlogWriter{Prefix: "relay serve-attach", Container: opts.Container}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start relay: %w", err)
 	}
@@ -113,7 +113,7 @@ func (b *Backend) AttachRelay(ctx context.Context, container string, offset int6
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = &slogWriter{prefix: "relay attach", container: container}
+	cmd.Stderr = &agent.SlogWriter{Prefix: "relay attach", Container: container}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("attach relay: %w", err)
 	}
@@ -128,29 +128,8 @@ func (b *Backend) AttachRelay(ctx context.Context, container string, offset int6
 
 // ReadRelayOutput reads the complete output.jsonl from the container's relay
 // and parses it into Messages.
-func (b *Backend) ReadRelayOutput(ctx context.Context, container string) (msgs []agent.Message, size int64, err error) {
-	cmd := exec.CommandContext(ctx, "ssh", container, "cat", agent.RelayOutputPath) //nolint:gosec // args are not user-controlled.
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, 0, fmt.Errorf("read relay output: %w", err)
-	}
-	size = int64(len(out))
-	scanner := bufio.NewScanner(bytes.NewReader(out))
-	// 32 MiB max line: user input with base64 images can produce very long NDJSON lines.
-	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		msg, parseErr := b.ParseMessage(line)
-		if parseErr != nil {
-			slog.Warn("skipping unparseable relay output line", "container", container, "err", parseErr)
-			continue
-		}
-		msgs = append(msgs, msg)
-	}
-	return msgs, size, scanner.Err()
+func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agent.Message, int64, error) {
+	return agent.ReadRelayOutput(ctx, container, ParseMessage)
 }
 
 // ParseMessage decodes a single Codex CLI app-server line into a typed Message.
@@ -373,27 +352,4 @@ func readJSONRPCResponse(r *bufio.Reader) (*JSONRPCMessage, error) {
 // buildArgs constructs the Codex CLI app-server arguments.
 func buildArgs(_ *agent.Options) []string {
 	return []string{"codex", "app-server"}
-}
-
-// slogWriter is an io.Writer that logs each line via slog.Warn.
-type slogWriter struct {
-	prefix    string
-	container string
-	buf       []byte
-}
-
-func (w *slogWriter) Write(p []byte) (int, error) {
-	w.buf = append(w.buf, p...)
-	for {
-		i := bytes.IndexByte(w.buf, '\n')
-		if i < 0 {
-			break
-		}
-		line := string(bytes.TrimSpace(w.buf[:i]))
-		w.buf = w.buf[i+1:]
-		if line != "" {
-			slog.Warn("stderr", "source", w.prefix, "container", w.container, "line", line)
-		}
-	}
-	return len(p), nil
 }

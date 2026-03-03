@@ -32,6 +32,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -379,6 +380,102 @@ func ReadPlan(ctx context.Context, container, planFile string) (string, error) {
 		return "", fmt.Errorf("read plan: %w", err)
 	}
 	return string(out), nil
+}
+
+// SlogWriter is an io.Writer that logs each line via slog.Warn. It is used
+// as cmd.Stderr for SSH relay subprocesses across all backends.
+type SlogWriter struct {
+	Prefix    string
+	Container string
+	buf       []byte
+}
+
+func (w *SlogWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := string(bytes.TrimSpace(w.buf[:i]))
+		w.buf = w.buf[i+1:]
+		if line != "" {
+			slog.Warn("stderr", "source", w.Prefix, "container", w.Container, "line", line)
+		}
+	}
+	return len(p), nil
+}
+
+// ReadRelayOutput reads the complete output.jsonl from the container's relay
+// and parses each line using parseFn. This is the shared implementation used
+// by all backends.
+func ReadRelayOutput(ctx context.Context, container string, parseFn func([]byte) (Message, error)) (msgs []Message, size int64, err error) {
+	cmd := exec.CommandContext(ctx, "ssh", container, "cat", RelayOutputPath) //nolint:gosec // args are not user-controlled.
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, 0, fmt.Errorf("read relay output: %w", err)
+	}
+	size = int64(len(out))
+	scanner := bufio.NewScanner(bytes.NewReader(out))
+	// 32 MiB max line: user input with base64 images can produce very long NDJSON lines.
+	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		msg, parseErr := parseFn(line)
+		if parseErr != nil {
+			slog.Warn("skipping unparseable relay output line", "container", container, "err", parseErr)
+			continue
+		}
+		msgs = append(msgs, msg)
+	}
+	return msgs, size, scanner.Err()
+}
+
+// AttachRelaySession connects to an already-running relay in the container
+// and returns a new Session. This is the shared implementation for backends
+// whose attach path needs no per-session wire state (claude, gemini, kilo).
+func AttachRelaySession(ctx context.Context, container string, offset int64, msgCh chan<- Message, logW io.Writer, wire WireFormat) (*Session, error) {
+	sshArgs := []string{
+		container, "python3", RelayScriptPath, "attach",
+		"--offset", strconv.FormatInt(offset, 10),
+	}
+	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdin pipe: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	cmd.Stderr = &SlogWriter{Prefix: "relay attach", Container: container}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("attach relay: %w", err)
+	}
+
+	log := slog.With("container", container)
+	return NewSession(cmd, stdin, stdout, msgCh, logW, wire, log), nil
+}
+
+// PlainTextWritePrompt writes a user prompt as a plain text line on stdin
+// and logs it as NDJSON. Used by backends whose agent reads plain text
+// (gemini, kilo).
+func PlainTextWritePrompt(w io.Writer, p Prompt, logW io.Writer) error {
+	data := []byte(p.Text + "\n")
+	if _, err := w.Write(data); err != nil {
+		return err
+	}
+	if logW != nil {
+		entry, _ := json.Marshal(map[string]string{
+			"type":    "user_input",
+			"content": p.Text,
+		})
+		_, _ = logW.Write(append(entry, '\n'))
+	}
+	return nil
 }
 
 // isSignalExit reports whether err indicates the process was killed by a
