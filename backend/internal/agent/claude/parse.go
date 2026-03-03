@@ -9,6 +9,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
+// parseEnvelope is a local alias for typeProbe used by ParseMessage.
+type parseEnvelope = typeProbe
+
 // ParseMessage decodes a single Claude Code NDJSON line into one or more
 // typed agent.Messages. A single "assistant" line may contain multiple
 // content blocks (text + tool_use + usage), each producing a separate message.
@@ -25,11 +28,23 @@ func ParseMessage(line []byte) ([]agent.Message, error) {
 	case "user":
 		return parseUser(line)
 	case "result":
-		var m agent.ResultMessage
-		if err := json.Unmarshal(line, &m); err != nil {
+		var w resultWire
+		if err := json.Unmarshal(line, &w); err != nil {
 			return nil, err
 		}
-		return []agent.Message{&m}, nil
+		return []agent.Message{&agent.ResultMessage{
+			MessageType:   w.Type,
+			Subtype:       w.Subtype,
+			IsError:       w.IsError,
+			DurationMs:    w.DurationMs,
+			DurationAPIMs: w.DurationAPIMs,
+			NumTurns:      w.NumTurns,
+			Result:        w.Result,
+			SessionID:     w.SessionID,
+			TotalCostUSD:  w.TotalCostUSD,
+			Usage:         w.Usage,
+			UUID:          w.UUID,
+		}}, nil
 	case "stream_event":
 		return parseStreamEvent(line)
 	case "caic_diff_stat":
@@ -57,11 +72,16 @@ func parseSystem(line []byte, subtype string) ([]agent.Message, error) {
 			Version:   w.Version,
 		}}, nil
 	}
-	var m agent.SystemMessage
-	if err := json.Unmarshal(line, &m); err != nil {
+	var w systemWire
+	if err := json.Unmarshal(line, &w); err != nil {
 		return nil, err
 	}
-	return []agent.Message{&m}, nil
+	return []agent.Message{&agent.SystemMessage{
+		MessageType: w.Type,
+		Subtype:     w.Subtype,
+		SessionID:   w.SessionID,
+		UUID:        w.UUID,
+	}}, nil
 }
 
 func parseAssistant(line []byte) ([]agent.Message, error) {
@@ -188,95 +208,4 @@ func parseStreamEvent(line []byte) ([]agent.Message, error) {
 		return []agent.Message{&agent.TextDeltaMessage{Text: w.Event.Delta.Text}}, nil
 	}
 	return []agent.Message{&agent.RawMessage{MessageType: "stream_event", Raw: append([]byte(nil), line...)}}, nil
-}
-
-// --- Wire types for Claude Code NDJSON parsing ---
-
-type parseEnvelope struct {
-	Type    string `json:"type"`
-	Subtype string `json:"subtype"`
-}
-
-type initWire struct {
-	Cwd       string   `json:"cwd"`
-	SessionID string   `json:"session_id"`
-	Tools     []string `json:"tools"`
-	Model     string   `json:"model"`
-	Version   string   `json:"claude_code_version"`
-}
-
-type assistantWire struct {
-	Message assistantMessageBody `json:"message"`
-}
-
-type assistantMessageBody struct {
-	Model   string             `json:"model"`
-	Content []contentBlockWire `json:"content"`
-	Usage   agent.Usage        `json:"usage"`
-}
-
-type contentBlockWire struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text,omitempty"`
-	ID    string          `json:"id,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
-}
-
-type userWire struct {
-	Message         json.RawMessage `json:"message"`
-	ParentToolUseID *string         `json:"parent_tool_use_id"`
-}
-
-type askInput struct {
-	Questions []agent.AskQuestion `json:"questions"`
-}
-
-type todoInput struct {
-	Todos []agent.TodoItem `json:"todos"`
-}
-
-type userTextMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type userBlockMessage struct {
-	Role    string             `json:"role"`
-	Content []userContentBlock `json:"content"`
-}
-
-type userContentBlock struct {
-	Type   string           `json:"type"`
-	Text   string           `json:"text,omitempty"`
-	Source *imageSourceWire `json:"source,omitempty"`
-}
-
-type imageSourceWire struct {
-	MediaType string `json:"media_type"`
-	Data      string `json:"data"`
-}
-
-type toolResultWire struct {
-	Content []toolResultContent `json:"content"`
-	IsError bool                `json:"is_error"`
-}
-
-type toolResultContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
-type streamEventWire struct {
-	Event streamEventData `json:"event"`
-}
-
-type streamEventData struct {
-	Type  string           `json:"type"`
-	Delta *streamDeltaWire `json:"delta,omitempty"`
-}
-
-type streamDeltaWire struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
 }

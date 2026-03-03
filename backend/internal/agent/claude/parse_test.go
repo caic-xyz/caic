@@ -255,4 +255,26 @@ func TestParseMessage(t *testing.T) {
 			t.Fatalf("got %T, want *agent.RawMessage", msgs[0])
 		}
 	})
+	t.Run("UnknownFieldsForwardCompat", func(t *testing.T) {
+		// An init record with an extra unknown field should parse successfully
+		// (forward compatibility). The known fields must still be extracted.
+		line := `{"type":"system","subtype":"init","cwd":"/tmp","session_id":"s1","tools":[],"model":"m","claude_code_version":"1.0","uuid":"u1","brand_new_field":"surprise"}`
+		msgs, err := ParseMessage([]byte(line))
+		if err != nil {
+			t.Fatalf("unknown field caused error: %v", err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		m, ok := msgs[0].(*agent.InitMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.InitMessage", msgs[0])
+		}
+		if m.SessionID != "s1" {
+			t.Errorf("session_id = %q, want %q", m.SessionID, "s1")
+		}
+		if m.Model != "m" {
+			t.Errorf("model = %q, want %q", m.Model, "m")
+		}
+	})
 }

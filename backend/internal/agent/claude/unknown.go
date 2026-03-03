@@ -8,6 +8,7 @@ package claude
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sort"
 )
@@ -31,4 +32,43 @@ func warnUnknown(context string, extra map[string]json.RawMessage) {
 	}
 	sort.Strings(keys)
 	slog.Warn("unknown fields in Claude Code record", "context", context, "fields", keys)
+}
+
+// makeSet builds a map[string]struct{} from keys for O(1) lookup.
+func makeSet(keys ...string) map[string]struct{} {
+	s := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		s[k] = struct{}{}
+	}
+	return s
+}
+
+// collectUnknown returns entries from raw whose keys are not in known.
+func collectUnknown(raw map[string]json.RawMessage, known map[string]struct{}) map[string]json.RawMessage {
+	var extra map[string]json.RawMessage
+	for k, v := range raw {
+		if _, ok := known[k]; !ok {
+			if extra == nil {
+				extra = make(map[string]json.RawMessage)
+			}
+			extra[k] = v
+		}
+	}
+	return extra
+}
+
+// unmarshalRecord decodes data into dest (which must be a type-alias pointer
+// to break recursive UnmarshalJSON), collects unknown fields into overflow,
+// and logs a warning for each unknown key.
+func unmarshalRecord(data []byte, dest any, overflow *Overflow, known map[string]struct{}, name string) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	if err := json.Unmarshal(data, dest); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	overflow.Extra = collectUnknown(raw, known)
+	warnUnknown(name, overflow.Extra)
+	return nil
 }
