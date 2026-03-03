@@ -2,7 +2,10 @@ package claude
 
 import (
 	"encoding/json"
+
 	"fmt"
+
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // ContentBlock is a single block within a message's content array.
@@ -26,10 +29,10 @@ type ContentBlock struct {
 	ToolUseID string         `json:"tool_use_id,omitempty"`
 	Content   []ContentBlock `json:"content,omitempty"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var contentBlockKnown = makeSet("type", "text", "thinking", "signature", "id", "name", "input", "tool_use_id", "content")
+var contentBlockKnown = jsonutil.KnownFields(ContentBlock{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (c *ContentBlock) UnmarshalJSON(data []byte) error {
@@ -43,8 +46,8 @@ func (c *ContentBlock) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("ContentBlock: %w", err)
 	}
-	c.Extra = collectUnknown(raw, contentBlockKnown)
-	warnUnknown("ContentBlock("+c.Type+")", c.Extra)
+	c.Extra = jsonutil.CollectUnknown(raw, contentBlockKnown)
+	jsonutil.WarnUnknown("ContentBlock("+c.Type+")", c.Extra)
 	return nil
 }
 
@@ -61,10 +64,10 @@ type Usage struct {
 	ServerToolUse *ServerToolUse `json:"server_tool_use,omitempty"`
 	CacheCreation *CacheCreation `json:"cache_creation,omitempty"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var usageKnown = makeSet("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "service_tier", "inference_geo", "iterations", "server_tool_use", "cache_creation")
+var usageKnown = jsonutil.KnownFields(Usage{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (u *Usage) UnmarshalJSON(data []byte) error {
@@ -77,8 +80,8 @@ func (u *Usage) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("Usage: %w", err)
 	}
-	u.Extra = collectUnknown(raw, usageKnown)
-	warnUnknown("Usage", u.Extra)
+	u.Extra = jsonutil.CollectUnknown(raw, usageKnown)
+	jsonutil.WarnUnknown("Usage", u.Extra)
 	return nil
 }
 
@@ -87,10 +90,10 @@ type ServerToolUse struct {
 	WebSearchRequests int `json:"web_search_requests"`
 	WebFetchRequests  int `json:"web_fetch_requests"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var serverToolUseKnown = makeSet("web_search_requests", "web_fetch_requests")
+var serverToolUseKnown = jsonutil.KnownFields(ServerToolUse{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (s *ServerToolUse) UnmarshalJSON(data []byte) error {
@@ -103,8 +106,8 @@ func (s *ServerToolUse) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("ServerToolUse: %w", err)
 	}
-	s.Extra = collectUnknown(raw, serverToolUseKnown)
-	warnUnknown("ServerToolUse", s.Extra)
+	s.Extra = jsonutil.CollectUnknown(raw, serverToolUseKnown)
+	jsonutil.WarnUnknown("ServerToolUse", s.Extra)
 	return nil
 }
 
@@ -113,10 +116,10 @@ type CacheCreation struct {
 	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
 	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var cacheCreationKnown = makeSet("ephemeral_1h_input_tokens", "ephemeral_5m_input_tokens")
+var cacheCreationKnown = jsonutil.KnownFields(CacheCreation{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (c *CacheCreation) UnmarshalJSON(data []byte) error {
@@ -129,8 +132,8 @@ func (c *CacheCreation) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("CacheCreation: %w", err)
 	}
-	c.Extra = collectUnknown(raw, cacheCreationKnown)
-	warnUnknown("CacheCreation", c.Extra)
+	c.Extra = jsonutil.CollectUnknown(raw, cacheCreationKnown)
+	jsonutil.WarnUnknown("CacheCreation", c.Extra)
 	return nil
 }
 
@@ -147,10 +150,10 @@ type APIMessage struct {
 	Container         json.RawMessage `json:"container,omitempty"`
 	ContextManagement json.RawMessage `json:"context_management,omitempty"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var apiMessageKnown = makeSet("id", "type", "model", "role", "content", "stop_reason", "stop_sequence", "usage", "container", "context_management")
+var apiMessageKnown = jsonutil.KnownFields(APIMessage{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (m *APIMessage) UnmarshalJSON(data []byte) error {
@@ -163,8 +166,8 @@ func (m *APIMessage) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("APIMessage: %w", err)
 	}
-	m.Extra = collectUnknown(raw, apiMessageKnown)
-	warnUnknown("APIMessage", m.Extra)
+	m.Extra = jsonutil.CollectUnknown(raw, apiMessageKnown)
+	jsonutil.WarnUnknown("APIMessage", m.Extra)
 	return nil
 }
 
@@ -174,10 +177,10 @@ type UserMessage struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"` // string or []ContentBlock
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var userMessageKnown = makeSet("role", "content")
+var userMessageKnown = jsonutil.KnownFields(UserMessage{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (m *UserMessage) UnmarshalJSON(data []byte) error {
@@ -190,8 +193,8 @@ func (m *UserMessage) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("UserMessage: %w", err)
 	}
-	m.Extra = collectUnknown(raw, userMessageKnown)
-	warnUnknown("UserMessage", m.Extra)
+	m.Extra = jsonutil.CollectUnknown(raw, userMessageKnown)
+	jsonutil.WarnUnknown("UserMessage", m.Extra)
 	return nil
 }
 
@@ -221,10 +224,10 @@ type Todo struct {
 	Status     string `json:"status"`
 	ActiveForm string `json:"activeForm"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var todoKnown = makeSet("content", "status", "activeForm")
+var todoKnown = jsonutil.KnownFields(Todo{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (t *Todo) UnmarshalJSON(data []byte) error {
@@ -237,8 +240,8 @@ func (t *Todo) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("Todo: %w", err)
 	}
-	t.Extra = collectUnknown(raw, todoKnown)
-	warnUnknown("Todo", t.Extra)
+	t.Extra = jsonutil.CollectUnknown(raw, todoKnown)
+	jsonutil.WarnUnknown("Todo", t.Extra)
 	return nil
 }
 
@@ -249,10 +252,10 @@ type ThinkingMetadata struct {
 	Level             string          `json:"level,omitempty"`
 	Triggers          json.RawMessage `json:"triggers,omitempty"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var thinkingMetadataKnown = makeSet("maxThinkingTokens", "disabled", "level", "triggers")
+var thinkingMetadataKnown = jsonutil.KnownFields(ThinkingMetadata{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (t *ThinkingMetadata) UnmarshalJSON(data []byte) error {
@@ -265,8 +268,8 @@ func (t *ThinkingMetadata) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("ThinkingMetadata: %w", err)
 	}
-	t.Extra = collectUnknown(raw, thinkingMetadataKnown)
-	warnUnknown("ThinkingMetadata", t.Extra)
+	t.Extra = jsonutil.CollectUnknown(raw, thinkingMetadataKnown)
+	jsonutil.WarnUnknown("ThinkingMetadata", t.Extra)
 	return nil
 }
 
@@ -281,10 +284,10 @@ type ToolUseResult struct {
 	TotalToolUseCount int             `json:"totalToolUseCount"`
 	Usage             *Usage          `json:"usage,omitempty"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var toolUseResultKnown = makeSet("status", "prompt", "agentId", "content", "totalDurationMs", "totalTokens", "totalToolUseCount", "usage")
+var toolUseResultKnown = jsonutil.KnownFields(ToolUseResult{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (t *ToolUseResult) UnmarshalJSON(data []byte) error {
@@ -297,7 +300,7 @@ func (t *ToolUseResult) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("ToolUseResult: %w", err)
 	}
-	t.Extra = collectUnknown(raw, toolUseResultKnown)
-	warnUnknown("ToolUseResult", t.Extra)
+	t.Extra = jsonutil.CollectUnknown(raw, toolUseResultKnown)
+	jsonutil.WarnUnknown("ToolUseResult", t.Extra)
 	return nil
 }

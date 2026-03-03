@@ -2,7 +2,10 @@ package gemini
 
 import (
 	"encoding/json"
+
 	"fmt"
+
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // Record type constants.
@@ -93,10 +96,10 @@ type InitRecord struct {
 	SessionID string `json:"session_id"`
 	Model     string `json:"model"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var initRecordKnown = makeSet("type", "timestamp", "session_id", "model")
+var initRecordKnown = jsonutil.KnownFields(InitRecord{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (r *InitRecord) UnmarshalJSON(data []byte) error {
@@ -109,8 +112,8 @@ func (r *InitRecord) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("InitRecord: %w", err)
 	}
-	r.Extra = collectUnknown(raw, initRecordKnown)
-	warnUnknown("InitRecord", r.Extra)
+	r.Extra = jsonutil.CollectUnknown(raw, initRecordKnown)
+	jsonutil.WarnUnknown("InitRecord", r.Extra)
 	return nil
 }
 
@@ -128,10 +131,10 @@ type MessageRecord struct {
 	Content   string `json:"content"` // Text content.
 	Delta     bool   `json:"delta,omitempty"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var messageRecordKnown = makeSet("type", "timestamp", "role", "content", "delta")
+var messageRecordKnown = jsonutil.KnownFields(MessageRecord{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (r *MessageRecord) UnmarshalJSON(data []byte) error {
@@ -144,8 +147,8 @@ func (r *MessageRecord) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("MessageRecord: %w", err)
 	}
-	r.Extra = collectUnknown(raw, messageRecordKnown)
-	warnUnknown("MessageRecord("+r.Role+")", r.Extra)
+	r.Extra = jsonutil.CollectUnknown(raw, messageRecordKnown)
+	jsonutil.WarnUnknown("MessageRecord("+r.Role+")", r.Extra)
 	return nil
 }
 
@@ -162,10 +165,10 @@ type ToolUseRecord struct {
 	ToolID     string          `json:"tool_id"`
 	Parameters json.RawMessage `json:"parameters"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var toolUseRecordKnown = makeSet("type", "timestamp", "tool_name", "tool_id", "parameters")
+var toolUseRecordKnown = jsonutil.KnownFields(ToolUseRecord{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (r *ToolUseRecord) UnmarshalJSON(data []byte) error {
@@ -178,8 +181,8 @@ func (r *ToolUseRecord) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("ToolUseRecord: %w", err)
 	}
-	r.Extra = collectUnknown(raw, toolUseRecordKnown)
-	warnUnknown("ToolUseRecord("+r.ToolName+")", r.Extra)
+	r.Extra = jsonutil.CollectUnknown(raw, toolUseRecordKnown)
+	jsonutil.WarnUnknown("ToolUseRecord("+r.ToolName+")", r.Extra)
 	return nil
 }
 
@@ -201,10 +204,10 @@ type ToolResultRecord struct {
 	Output    string           `json:"output"`
 	Error     *ToolResultError `json:"error,omitempty"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var toolResultRecordKnown = makeSet("type", "timestamp", "tool_id", "status", "output", "error")
+var toolResultRecordKnown = jsonutil.KnownFields(ToolResultRecord{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (r *ToolResultRecord) UnmarshalJSON(data []byte) error {
@@ -217,8 +220,8 @@ func (r *ToolResultRecord) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("ToolResultRecord: %w", err)
 	}
-	r.Extra = collectUnknown(raw, toolResultRecordKnown)
-	warnUnknown("ToolResultRecord", r.Extra)
+	r.Extra = jsonutil.CollectUnknown(raw, toolResultRecordKnown)
+	jsonutil.WarnUnknown("ToolResultRecord", r.Extra)
 	return nil
 }
 
@@ -227,10 +230,10 @@ type ToolResultError struct {
 	Type    string `json:"type"`
 	Message string `json:"message"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var toolResultErrorKnown = makeSet("type", "message")
+var toolResultErrorKnown = jsonutil.KnownFields(ToolResultError{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (e *ToolResultError) UnmarshalJSON(data []byte) error {
@@ -243,8 +246,8 @@ func (e *ToolResultError) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("ToolResultError: %w", err)
 	}
-	e.Extra = collectUnknown(raw, toolResultErrorKnown)
-	warnUnknown("ToolResultError", e.Extra)
+	e.Extra = jsonutil.CollectUnknown(raw, toolResultErrorKnown)
+	jsonutil.WarnUnknown("ToolResultError", e.Extra)
 	return nil
 }
 
@@ -261,10 +264,10 @@ type ResultRecord struct {
 	Status    string       `json:"status"` // "success" or "error"
 	Stats     *ResultStats `json:"stats"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var resultRecordKnown = makeSet("type", "timestamp", "status", "stats")
+var resultRecordKnown = jsonutil.KnownFields(ResultRecord{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (r *ResultRecord) UnmarshalJSON(data []byte) error {
@@ -277,8 +280,8 @@ func (r *ResultRecord) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("ResultRecord: %w", err)
 	}
-	r.Extra = collectUnknown(raw, resultRecordKnown)
-	warnUnknown("ResultRecord", r.Extra)
+	r.Extra = jsonutil.CollectUnknown(raw, resultRecordKnown)
+	jsonutil.WarnUnknown("ResultRecord", r.Extra)
 	return nil
 }
 
@@ -292,10 +295,10 @@ type ResultStats struct {
 	DurationMs   int64 `json:"duration_ms"`
 	ToolCalls    int   `json:"tool_calls"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var resultStatsKnown = makeSet("total_tokens", "input_tokens", "output_tokens", "cached", "input", "duration_ms", "tool_calls")
+var resultStatsKnown = jsonutil.KnownFields(ResultStats{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (s *ResultStats) UnmarshalJSON(data []byte) error {
@@ -308,7 +311,7 @@ func (s *ResultStats) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("ResultStats: %w", err)
 	}
-	s.Extra = collectUnknown(raw, resultStatsKnown)
-	warnUnknown("ResultStats", s.Extra)
+	s.Extra = jsonutil.CollectUnknown(raw, resultStatsKnown)
+	jsonutil.WarnUnknown("ResultStats", s.Extra)
 	return nil
 }

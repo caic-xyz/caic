@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // ---------- Envelope probe ----------
@@ -28,20 +29,26 @@ type initWire struct {
 	Model     string   `json:"model"`
 	Version   string   `json:"claude_code_version"`
 	UUID      string   `json:"uuid"`
-	Overflow
+
+	Agents         json.RawMessage `json:"agents,omitempty"`
+	APIKeySource   json.RawMessage `json:"apiKeySource,omitempty"`
+	FastModeState  json.RawMessage `json:"fast_mode_state,omitempty"`
+	MCPServers     json.RawMessage `json:"mcp_servers,omitempty"`
+	OutputStyle    json.RawMessage `json:"output_style,omitempty"`
+	PermissionMode json.RawMessage `json:"permissionMode,omitempty"`
+	Plugins        json.RawMessage `json:"plugins,omitempty"`
+	Skills         json.RawMessage `json:"skills,omitempty"`
+	SlashCommands  json.RawMessage `json:"slash_commands,omitempty"`
+
+	jsonutil.Overflow
 }
 
-var initWireKnown = makeSet(
-	"type", "subtype", "cwd", "session_id", "tools",
-	"model", "claude_code_version", "uuid",
-	"agents", "apiKeySource", "fast_mode_state", "mcp_servers",
-	"output_style", "permissionMode", "plugins", "skills", "slash_commands",
-)
+var initWireKnown = jsonutil.KnownFields(initWire{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (w *initWire) UnmarshalJSON(data []byte) error {
 	type Alias initWire
-	return unmarshalRecord(data, (*Alias)(w), &w.Overflow, initWireKnown, "initWire")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(w), &w.Overflow, initWireKnown, "initWire")
 }
 
 // ---------- system (non-init) ----------
@@ -52,19 +59,25 @@ type systemWire struct {
 	Subtype   string `json:"subtype"`
 	SessionID string `json:"session_id"`
 	UUID      string `json:"uuid"`
-	Overflow
+
+	Description    json.RawMessage `json:"description,omitempty"`
+	TaskID         json.RawMessage `json:"task_id,omitempty"`
+	TaskType       json.RawMessage `json:"task_type,omitempty"`
+	ToolUseID      json.RawMessage `json:"tool_use_id,omitempty"`
+	LastToolName   json.RawMessage `json:"last_tool_name,omitempty"`
+	PermissionMode json.RawMessage `json:"permissionMode,omitempty"`
+	Status         json.RawMessage `json:"status,omitempty"`
+	UsageExtra     json.RawMessage `json:"usage,omitempty"`
+
+	jsonutil.Overflow
 }
 
-var systemWireKnown = makeSet(
-	"type", "subtype", "session_id", "uuid",
-	"description", "task_id", "task_type", "tool_use_id",
-	"last_tool_name", "permissionMode", "status", "usage",
-)
+var systemWireKnown = jsonutil.KnownFields(systemWire{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (w *systemWire) UnmarshalJSON(data []byte) error {
 	type Alias systemWire
-	return unmarshalRecord(data, (*Alias)(w), &w.Overflow, systemWireKnown, "systemWire")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(w), &w.Overflow, systemWireKnown, "systemWire")
 }
 
 // ---------- assistant ----------
@@ -77,42 +90,40 @@ type assistantWire struct {
 	Message         assistantMessageBody `json:"message"`
 	ParentToolUseID string               `json:"parent_tool_use_id"`
 	Error           string               `json:"error"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var assistantWireKnown = makeSet(
-	"type", "session_id", "uuid", "message",
-	"parent_tool_use_id", "error",
-)
+var assistantWireKnown = jsonutil.KnownFields(assistantWire{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (w *assistantWire) UnmarshalJSON(data []byte) error {
 	type Alias assistantWire
-	return unmarshalRecord(data, (*Alias)(w), &w.Overflow, assistantWireKnown, "assistantWire")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(w), &w.Overflow, assistantWireKnown, "assistantWire")
 }
 
 // assistantMessageBody is the inner message object within an assistant record.
 type assistantMessageBody struct {
 	ID           string             `json:"id"`
+	Type         string             `json:"type,omitempty"`
 	Role         string             `json:"role"`
 	Model        string             `json:"model"`
 	Content      []contentBlockWire `json:"content"`
 	Usage        agent.Usage        `json:"usage"`
 	StopReason   string             `json:"stop_reason"`
 	StopSequence *string            `json:"stop_sequence"`
-	Overflow
+
+	Container         json.RawMessage `json:"container,omitempty"`
+	ContextManagement json.RawMessage `json:"context_management,omitempty"`
+
+	jsonutil.Overflow
 }
 
-var assistantMessageBodyKnown = makeSet(
-	"id", "role", "model", "content", "usage",
-	"stop_reason", "stop_sequence", "type",
-	"container", "context_management",
-)
+var assistantMessageBodyKnown = jsonutil.KnownFields(assistantMessageBody{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (w *assistantMessageBody) UnmarshalJSON(data []byte) error {
 	type Alias assistantMessageBody
-	return unmarshalRecord(data, (*Alias)(w), &w.Overflow, assistantMessageBodyKnown, "assistantMessageBody")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(w), &w.Overflow, assistantMessageBodyKnown, "assistantMessageBody")
 }
 
 // contentBlockWire is a single content block inside an assistant message.
@@ -130,17 +141,19 @@ type contentBlockWire struct {
 type userWire struct {
 	Type            string          `json:"type"`
 	UUID            string          `json:"uuid"`
+	SessionID       string          `json:"session_id,omitempty"`
 	Message         json.RawMessage `json:"message"`
 	ParentToolUseID *string         `json:"parent_tool_use_id"`
-	Overflow
+	ToolUseResult   json.RawMessage `json:"tool_use_result,omitempty"`
+	jsonutil.Overflow
 }
 
-var userWireKnown = makeSet("type", "uuid", "session_id", "message", "parent_tool_use_id", "tool_use_result")
+var userWireKnown = jsonutil.KnownFields(userWire{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (w *userWire) UnmarshalJSON(data []byte) error {
 	type Alias userWire
-	return unmarshalRecord(data, (*Alias)(w), &w.Overflow, userWireKnown, "userWire")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(w), &w.Overflow, userWireKnown, "userWire")
 }
 
 // ---------- result ----------
@@ -159,20 +172,21 @@ type resultWire struct {
 	Usage            agent.Usage `json:"usage"`
 	UUID             string      `json:"uuid"`
 	StructuredOutput *string     `json:"structured_output"`
-	Overflow
+
+	FastModeState     json.RawMessage `json:"fast_mode_state,omitempty"`
+	ModelUsage        json.RawMessage `json:"modelUsage,omitempty"`
+	PermissionDenials json.RawMessage `json:"permission_denials,omitempty"`
+	StopReason        json.RawMessage `json:"stop_reason,omitempty"`
+
+	jsonutil.Overflow
 }
 
-var resultWireKnown = makeSet(
-	"type", "subtype", "is_error", "duration_ms", "duration_api_ms",
-	"num_turns", "result", "session_id", "total_cost_usd", "usage",
-	"uuid", "structured_output",
-	"fast_mode_state", "modelUsage", "permission_denials", "stop_reason",
-)
+var resultWireKnown = jsonutil.KnownFields(resultWire{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (w *resultWire) UnmarshalJSON(data []byte) error {
 	type Alias resultWire
-	return unmarshalRecord(data, (*Alias)(w), &w.Overflow, resultWireKnown, "resultWire")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(w), &w.Overflow, resultWireKnown, "resultWire")
 }
 
 // ---------- stream_event ----------
@@ -184,17 +198,15 @@ type streamEventWire struct {
 	SessionID       string          `json:"session_id"`
 	ParentToolUseID string          `json:"parent_tool_use_id"`
 	Event           streamEventData `json:"event"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var streamEventWireKnown = makeSet(
-	"type", "uuid", "session_id", "parent_tool_use_id", "event",
-)
+var streamEventWireKnown = jsonutil.KnownFields(streamEventWire{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (w *streamEventWire) UnmarshalJSON(data []byte) error {
 	type Alias streamEventWire
-	return unmarshalRecord(data, (*Alias)(w), &w.Overflow, streamEventWireKnown, "streamEventWire")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(w), &w.Overflow, streamEventWireKnown, "streamEventWire")
 }
 
 // streamEventData is the nested event body inside a stream_event record.
@@ -212,7 +224,7 @@ type streamDeltaWire struct {
 	PartialJSON string `json:"partial_json"`
 }
 
-// ---------- Helper types (no Overflow — not top-level wire objects) ----------
+// ---------- Helper types (no jsonutil.Overflow — not top-level wire objects) ----------
 
 type askInput struct {
 	Questions []agent.AskQuestion `json:"questions"`

@@ -2,7 +2,10 @@ package claude
 
 import (
 	"encoding/json"
+
 	"fmt"
+
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // Record type constants.
@@ -110,10 +113,10 @@ type QueueOperation struct {
 	SessionID string `json:"sessionId"`
 	Content   string `json:"content,omitempty"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var queueOperationKnown = makeSet("type", "operation", "timestamp", "sessionId", "content")
+var queueOperationKnown = jsonutil.KnownFields(QueueOperation{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (q *QueueOperation) UnmarshalJSON(data []byte) error {
@@ -126,16 +129,9 @@ func (q *QueueOperation) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("QueueOperation: %w", err)
 	}
-	q.Extra = collectUnknown(raw, queueOperationKnown)
-	warnUnknown("QueueOperation", q.Extra)
+	q.Extra = jsonutil.CollectUnknown(raw, queueOperationKnown)
+	jsonutil.WarnUnknown("QueueOperation", q.Extra)
 	return nil
-}
-
-// messageRecordFields are fields shared by user, assistant, and progress records.
-var messageRecordFields = []string{
-	"type", "parentUuid", "isSidechain", "userType", "cwd",
-	"sessionId", "version", "gitBranch", "agentId", "slug",
-	"uuid", "timestamp",
 }
 
 // MessageFields are common fields across user/assistant/progress records.
@@ -170,15 +166,10 @@ type UserRecord struct {
 	PlanContent               string            `json:"planContent,omitempty"`
 	SourceToolUseID           string            `json:"sourceToolUseID,omitempty"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var userRecordKnown = makeSet(append(messageRecordFields,
-	"message", "permissionMode", "thinkingMetadata", "todos",
-	"toolUseResult", "sourceToolAssistantUUID", "isCompactSummary",
-	"isMeta", "isVisibleInTranscriptOnly", "planContent",
-	"sourceToolUseID",
-)...)
+var userRecordKnown = jsonutil.KnownFields(UserRecord{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (u *UserRecord) UnmarshalJSON(data []byte) error {
@@ -191,8 +182,8 @@ func (u *UserRecord) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("UserRecord: %w", err)
 	}
-	u.Extra = collectUnknown(raw, userRecordKnown)
-	warnUnknown("UserRecord", u.Extra)
+	u.Extra = jsonutil.CollectUnknown(raw, userRecordKnown)
+	jsonutil.WarnUnknown("UserRecord", u.Extra)
 	return nil
 }
 
@@ -231,12 +222,10 @@ type AssistantRecord struct {
 	Error             string      `json:"error,omitempty"`
 	IsAPIErrorMessage bool        `json:"isApiErrorMessage,omitempty"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var assistantRecordKnown = makeSet(append(messageRecordFields,
-	"message", "requestId", "error", "isApiErrorMessage",
-)...)
+var assistantRecordKnown = jsonutil.KnownFields(AssistantRecord{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (a *AssistantRecord) UnmarshalJSON(data []byte) error {
@@ -249,8 +238,8 @@ func (a *AssistantRecord) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("AssistantRecord: %w", err)
 	}
-	a.Extra = collectUnknown(raw, assistantRecordKnown)
-	warnUnknown("AssistantRecord", a.Extra)
+	a.Extra = jsonutil.CollectUnknown(raw, assistantRecordKnown)
+	jsonutil.WarnUnknown("AssistantRecord", a.Extra)
 	return nil
 }
 
@@ -278,16 +267,10 @@ type SystemRecord struct {
 	StopReason            string           `json:"stopReason,omitempty"`
 	ToolUseID             string           `json:"toolUseID,omitempty"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var systemRecordKnown = makeSet(append(messageRecordFields,
-	"subtype", "content", "level", "isMeta", "logicalParentUuid",
-	"durationMs", "compactMetadata", "microcompactMetadata", "error", "retryInMs",
-	"retryAttempt", "maxRetries",
-	"hasOutput", "hookCount", "hookErrors", "hookInfos",
-	"preventedContinuation", "stopReason", "toolUseID",
-)...)
+var systemRecordKnown = jsonutil.KnownFields(SystemRecord{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (s *SystemRecord) UnmarshalJSON(data []byte) error {
@@ -300,8 +283,8 @@ func (s *SystemRecord) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("SystemRecord: %w", err)
 	}
-	s.Extra = collectUnknown(raw, systemRecordKnown)
-	warnUnknown("SystemRecord", s.Extra)
+	s.Extra = jsonutil.CollectUnknown(raw, systemRecordKnown)
+	jsonutil.WarnUnknown("SystemRecord", s.Extra)
 	return nil
 }
 
@@ -310,10 +293,10 @@ type CompactMetadata struct {
 	Trigger   string `json:"trigger"`
 	PreTokens int    `json:"preTokens"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var compactMetadataKnown = makeSet("trigger", "preTokens")
+var compactMetadataKnown = jsonutil.KnownFields(CompactMetadata{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (c *CompactMetadata) UnmarshalJSON(data []byte) error {
@@ -326,8 +309,8 @@ func (c *CompactMetadata) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("CompactMetadata: %w", err)
 	}
-	c.Extra = collectUnknown(raw, compactMetadataKnown)
-	warnUnknown("CompactMetadata", c.Extra)
+	c.Extra = jsonutil.CollectUnknown(raw, compactMetadataKnown)
+	jsonutil.WarnUnknown("CompactMetadata", c.Extra)
 	return nil
 }
 
@@ -337,10 +320,10 @@ type SummaryRecord struct {
 	Summary  string `json:"summary"`
 	LeafUUID string `json:"leafUuid"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var summaryRecordKnown = makeSet("type", "summary", "leafUuid")
+var summaryRecordKnown = jsonutil.KnownFields(SummaryRecord{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (s *SummaryRecord) UnmarshalJSON(data []byte) error {
@@ -353,8 +336,8 @@ func (s *SummaryRecord) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("SummaryRecord: %w", err)
 	}
-	s.Extra = collectUnknown(raw, summaryRecordKnown)
-	warnUnknown("SummaryRecord", s.Extra)
+	s.Extra = jsonutil.CollectUnknown(raw, summaryRecordKnown)
+	jsonutil.WarnUnknown("SummaryRecord", s.Extra)
 	return nil
 }
 
@@ -365,10 +348,10 @@ type FileHistorySnapshotRecord struct {
 	Snapshot         *Snapshot `json:"snapshot"`
 	IsSnapshotUpdate bool      `json:"isSnapshotUpdate"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var fileHistorySnapshotKnown = makeSet("type", "messageId", "snapshot", "isSnapshotUpdate")
+var fileHistorySnapshotKnown = jsonutil.KnownFields(FileHistorySnapshotRecord{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (f *FileHistorySnapshotRecord) UnmarshalJSON(data []byte) error {
@@ -381,8 +364,8 @@ func (f *FileHistorySnapshotRecord) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("FileHistorySnapshotRecord: %w", err)
 	}
-	f.Extra = collectUnknown(raw, fileHistorySnapshotKnown)
-	warnUnknown("FileHistorySnapshotRecord", f.Extra)
+	f.Extra = jsonutil.CollectUnknown(raw, fileHistorySnapshotKnown)
+	jsonutil.WarnUnknown("FileHistorySnapshotRecord", f.Extra)
 	return nil
 }
 
@@ -392,10 +375,10 @@ type Snapshot struct {
 	TrackedFileBackups map[string]FileBackup `json:"trackedFileBackups"`
 	Timestamp          string                `json:"timestamp"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var snapshotKnown = makeSet("messageId", "trackedFileBackups", "timestamp")
+var snapshotKnown = jsonutil.KnownFields(Snapshot{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (s *Snapshot) UnmarshalJSON(data []byte) error {
@@ -408,8 +391,8 @@ func (s *Snapshot) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("Snapshot: %w", err)
 	}
-	s.Extra = collectUnknown(raw, snapshotKnown)
-	warnUnknown("Snapshot", s.Extra)
+	s.Extra = jsonutil.CollectUnknown(raw, snapshotKnown)
+	jsonutil.WarnUnknown("Snapshot", s.Extra)
 	return nil
 }
 
@@ -419,10 +402,10 @@ type FileBackup struct {
 	Version        int    `json:"version"`
 	BackupTime     string `json:"backupTime"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var fileBackupKnown = makeSet("backupFileName", "version", "backupTime")
+var fileBackupKnown = jsonutil.KnownFields(FileBackup{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (f *FileBackup) UnmarshalJSON(data []byte) error {
@@ -435,7 +418,7 @@ func (f *FileBackup) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("FileBackup: %w", err)
 	}
-	f.Extra = collectUnknown(raw, fileBackupKnown)
-	warnUnknown("FileBackup", f.Extra)
+	f.Extra = jsonutil.CollectUnknown(raw, fileBackupKnown)
+	jsonutil.WarnUnknown("FileBackup", f.Extra)
 	return nil
 }

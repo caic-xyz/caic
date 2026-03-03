@@ -3,7 +3,8 @@ package codex
 
 import (
 	"encoding/json"
-	"fmt"
+
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // JSON-RPC notification method constants for codex app-server.
@@ -50,22 +51,6 @@ const (
 	ItemTypeEnteredReviewMode   = "enteredReviewMode"
 	ItemTypeExitedReviewMode    = "exitedReviewMode"
 )
-
-// unmarshalRecord decodes data into dest (which must be a type-alias pointer
-// to break recursive UnmarshalJSON), collects unknown fields into overflow,
-// and logs a warning for each unknown key.
-func unmarshalRecord(data []byte, dest any, overflow *Overflow, known map[string]struct{}, name string) error {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return fmt.Errorf("%s: %w", name, err)
-	}
-	if err := json.Unmarshal(data, dest); err != nil {
-		return fmt.Errorf("%s: %w", name, err)
-	}
-	overflow.Extra = collectUnknown(raw, known)
-	warnUnknown(name, overflow.Extra)
-	return nil
-}
 
 // ---------- JSON-RPC envelope ----------
 
@@ -121,15 +106,15 @@ type threadStartThread struct {
 // ThreadStartedParams holds the params for thread/started notifications.
 type ThreadStartedParams struct {
 	Thread ThreadInfo `json:"thread"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var threadStartedParamsKnown = makeSet("thread")
+var threadStartedParamsKnown = jsonutil.KnownFields(ThreadStartedParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *ThreadStartedParams) UnmarshalJSON(data []byte) error {
 	type Alias ThreadStartedParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, threadStartedParamsKnown, "ThreadStartedParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, threadStartedParamsKnown, "ThreadStartedParams")
 }
 
 // ThreadInfo describes a thread in thread/started params.
@@ -144,19 +129,20 @@ type ThreadInfo struct {
 	Preview       string          `json:"preview,omitzero"`
 	Source        string          `json:"source,omitzero"`
 	UpdatedAt     int64           `json:"updatedAt,omitzero"`
-	Overflow
+	Status        string          `json:"status,omitzero"`
+	Name          string          `json:"name,omitzero"`
+	AgentNickname string          `json:"agentNickname,omitzero"`
+	AgentRole     string          `json:"agentRole,omitzero"`
+	Turns         json.RawMessage `json:"turns,omitzero"`
+	jsonutil.Overflow
 }
 
-var threadInfoKnown = makeSet(
-	"id", "cliVersion", "createdAt", "cwd", "gitInfo", "modelProvider",
-	"path", "preview", "source", "updatedAt",
-	"status", "name", "agentNickname", "agentRole", "turns",
-)
+var threadInfoKnown = jsonutil.KnownFields(ThreadInfo{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (t *ThreadInfo) UnmarshalJSON(data []byte) error {
 	type Alias ThreadInfo
-	return unmarshalRecord(data, (*Alias)(t), &t.Overflow, threadInfoKnown, "ThreadInfo")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(t), &t.Overflow, threadInfoKnown, "ThreadInfo")
 }
 
 // ---------- Turn lifecycle ----------
@@ -165,61 +151,63 @@ func (t *ThreadInfo) UnmarshalJSON(data []byte) error {
 type TurnStartedParams struct {
 	ThreadID string   `json:"threadId"`
 	Turn     TurnInfo `json:"turn"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var turnStartedParamsKnown = makeSet("threadId", "turn")
+var turnStartedParamsKnown = jsonutil.KnownFields(TurnStartedParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *TurnStartedParams) UnmarshalJSON(data []byte) error {
 	type Alias TurnStartedParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, turnStartedParamsKnown, "TurnStartedParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, turnStartedParamsKnown, "TurnStartedParams")
 }
 
 // TurnCompletedParams holds the params for turn/completed notifications.
 type TurnCompletedParams struct {
 	ThreadID string   `json:"threadId"`
 	Turn     TurnInfo `json:"turn"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var turnCompletedParamsKnown = makeSet("threadId", "turn")
+var turnCompletedParamsKnown = jsonutil.KnownFields(TurnCompletedParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *TurnCompletedParams) UnmarshalJSON(data []byte) error {
 	type Alias TurnCompletedParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, turnCompletedParamsKnown, "TurnCompletedParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, turnCompletedParamsKnown, "TurnCompletedParams")
 }
 
 // TurnInfo describes a turn in turn/started and turn/completed params.
 type TurnInfo struct {
-	ID     string     `json:"id"`
-	Status string     `json:"status"`
-	Error  *TurnError `json:"error,omitzero"`
-	Overflow
+	ID     string          `json:"id"`
+	Status string          `json:"status"`
+	Error  *TurnError      `json:"error,omitzero"`
+	Items  json.RawMessage `json:"items,omitzero"`
+	jsonutil.Overflow
 }
 
-var turnInfoKnown = makeSet("id", "status", "error", "items")
+var turnInfoKnown = jsonutil.KnownFields(TurnInfo{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (t *TurnInfo) UnmarshalJSON(data []byte) error {
 	type Alias TurnInfo
-	return unmarshalRecord(data, (*Alias)(t), &t.Overflow, turnInfoKnown, "TurnInfo")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(t), &t.Overflow, turnInfoKnown, "TurnInfo")
 }
 
 // TurnError describes a turn failure.
 type TurnError struct {
-	Message           string `json:"message"`
-	AdditionalDetails string `json:"additionalDetails,omitzero"`
-	Overflow
+	Message           string          `json:"message"`
+	CodexErrorInfo    json.RawMessage `json:"codexErrorInfo,omitzero"`
+	AdditionalDetails string          `json:"additionalDetails,omitzero"`
+	jsonutil.Overflow
 }
 
-var turnErrorKnown = makeSet("message", "codexErrorInfo", "additionalDetails")
+var turnErrorKnown = jsonutil.KnownFields(TurnError{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (e *TurnError) UnmarshalJSON(data []byte) error {
 	type Alias TurnError
-	return unmarshalRecord(data, (*Alias)(e), &e.Overflow, turnErrorKnown, "TurnError")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(e), &e.Overflow, turnErrorKnown, "TurnError")
 }
 
 // ---------- Item envelope ----------
@@ -230,15 +218,15 @@ type ItemParams struct {
 	Item     json.RawMessage `json:"item"`
 	ThreadID string          `json:"threadId"`
 	TurnID   string          `json:"turnId"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var itemParamsKnown = makeSet("item", "threadId", "turnId")
+var itemParamsKnown = jsonutil.KnownFields(ItemParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *ItemParams) UnmarshalJSON(data []byte) error {
 	type Alias ItemParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, itemParamsKnown, "ItemParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, itemParamsKnown, "ItemParams")
 }
 
 // ItemHeader extracts the discriminant fields from a raw item for dispatch.
@@ -253,15 +241,15 @@ type ItemDeltaParams struct {
 	TurnID   string `json:"turnId"`
 	ItemID   string `json:"itemId"`
 	Delta    string `json:"delta"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var itemDeltaParamsKnown = makeSet("threadId", "turnId", "itemId", "delta")
+var itemDeltaParamsKnown = jsonutil.KnownFields(ItemDeltaParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *ItemDeltaParams) UnmarshalJSON(data []byte) error {
 	type Alias ItemDeltaParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, itemDeltaParamsKnown, "ItemDeltaParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, itemDeltaParamsKnown, "ItemDeltaParams")
 }
 
 // ---------- Per-item-type structs ----------
@@ -273,15 +261,15 @@ type AgentMessageItem struct {
 	Text   string `json:"text,omitzero"`
 	Phase  string `json:"phase,omitzero"`
 	Status string `json:"status,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var agentMessageItemKnown = makeSet("id", "type", "text", "phase", "status")
+var agentMessageItemKnown = jsonutil.KnownFields(AgentMessageItem{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (item *AgentMessageItem) UnmarshalJSON(data []byte) error {
 	type Alias AgentMessageItem
-	return unmarshalRecord(data, (*Alias)(item), &item.Overflow, agentMessageItemKnown, "AgentMessageItem")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, agentMessageItemKnown, "AgentMessageItem")
 }
 
 // PlanItem is an agent plan item.
@@ -290,15 +278,15 @@ type PlanItem struct {
 	Type   string `json:"type"`
 	Text   string `json:"text,omitzero"`
 	Status string `json:"status,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var planItemKnown = makeSet("id", "type", "text", "status")
+var planItemKnown = jsonutil.KnownFields(PlanItem{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (item *PlanItem) UnmarshalJSON(data []byte) error {
 	type Alias PlanItem
-	return unmarshalRecord(data, (*Alias)(item), &item.Overflow, planItemKnown, "PlanItem")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, planItemKnown, "PlanItem")
 }
 
 // ReasoningItem is an agent reasoning/thinking item.
@@ -308,15 +296,15 @@ type ReasoningItem struct {
 	Summary []string        `json:"summary,omitzero"`
 	Content json.RawMessage `json:"content,omitzero"`
 	Status  string          `json:"status,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var reasoningItemKnown = makeSet("id", "type", "summary", "content", "status")
+var reasoningItemKnown = jsonutil.KnownFields(ReasoningItem{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (item *ReasoningItem) UnmarshalJSON(data []byte) error {
 	type Alias ReasoningItem
-	return unmarshalRecord(data, (*Alias)(item), &item.Overflow, reasoningItemKnown, "ReasoningItem")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, reasoningItemKnown, "ReasoningItem")
 }
 
 // CommandExecutionItem is a shell command execution item.
@@ -331,18 +319,15 @@ type CommandExecutionItem struct {
 	AggregatedOutput *string         `json:"aggregatedOutput,omitzero"`
 	ExitCode         *int            `json:"exitCode,omitzero"`
 	DurationMs       *int64          `json:"durationMs,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var commandExecutionItemKnown = makeSet(
-	"id", "type", "command", "cwd", "processId", "status",
-	"commandActions", "aggregatedOutput", "exitCode", "durationMs",
-)
+var commandExecutionItemKnown = jsonutil.KnownFields(CommandExecutionItem{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (item *CommandExecutionItem) UnmarshalJSON(data []byte) error {
 	type Alias CommandExecutionItem
-	return unmarshalRecord(data, (*Alias)(item), &item.Overflow, commandExecutionItemKnown, "CommandExecutionItem")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, commandExecutionItemKnown, "CommandExecutionItem")
 }
 
 // FileChangeItem is a file creation/modification/deletion item.
@@ -351,15 +336,15 @@ type FileChangeItem struct {
 	Type    string             `json:"type"`
 	Changes []FileUpdateChange `json:"changes,omitzero"`
 	Status  string             `json:"status,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var fileChangeItemKnown = makeSet("id", "type", "changes", "status")
+var fileChangeItemKnown = jsonutil.KnownFields(FileChangeItem{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (item *FileChangeItem) UnmarshalJSON(data []byte) error {
 	type Alias FileChangeItem
-	return unmarshalRecord(data, (*Alias)(item), &item.Overflow, fileChangeItemKnown, "FileChangeItem")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, fileChangeItemKnown, "FileChangeItem")
 }
 
 // McpToolCallItem is an MCP tool call item.
@@ -373,18 +358,15 @@ type McpToolCallItem struct {
 	Result     *McpToolCallResult `json:"result,omitzero"`
 	Error      *McpToolCallError  `json:"error,omitzero"`
 	DurationMs *int64             `json:"durationMs,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var mcpToolCallItemKnown = makeSet(
-	"id", "type", "server", "tool", "status",
-	"arguments", "result", "error", "durationMs",
-)
+var mcpToolCallItemKnown = jsonutil.KnownFields(McpToolCallItem{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (item *McpToolCallItem) UnmarshalJSON(data []byte) error {
 	type Alias McpToolCallItem
-	return unmarshalRecord(data, (*Alias)(item), &item.Overflow, mcpToolCallItemKnown, "McpToolCallItem")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, mcpToolCallItemKnown, "McpToolCallItem")
 }
 
 // DynamicToolCallItem is a dynamically registered tool call item.
@@ -397,18 +379,15 @@ type DynamicToolCallItem struct {
 	ContentItems json.RawMessage `json:"contentItems,omitzero"`
 	Success      *bool           `json:"success,omitzero"`
 	DurationMs   *int64          `json:"durationMs,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var dynamicToolCallItemKnown = makeSet(
-	"id", "type", "tool", "arguments", "status",
-	"contentItems", "success", "durationMs",
-)
+var dynamicToolCallItemKnown = jsonutil.KnownFields(DynamicToolCallItem{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (item *DynamicToolCallItem) UnmarshalJSON(data []byte) error {
 	type Alias DynamicToolCallItem
-	return unmarshalRecord(data, (*Alias)(item), &item.Overflow, dynamicToolCallItemKnown, "DynamicToolCallItem")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, dynamicToolCallItemKnown, "DynamicToolCallItem")
 }
 
 // CollabAgentToolCallItem is a collaborative multi-agent tool call item.
@@ -421,18 +400,15 @@ type CollabAgentToolCallItem struct {
 	ReceiverThreadIDs json.RawMessage `json:"receiverThreadIds,omitzero"`
 	Prompt            string          `json:"prompt,omitzero"`
 	AgentsStates      json.RawMessage `json:"agentsStates,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var collabAgentToolCallItemKnown = makeSet(
-	"id", "type", "tool", "status",
-	"senderThreadId", "receiverThreadIds", "prompt", "agentsStates",
-)
+var collabAgentToolCallItemKnown = jsonutil.KnownFields(CollabAgentToolCallItem{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (item *CollabAgentToolCallItem) UnmarshalJSON(data []byte) error {
 	type Alias CollabAgentToolCallItem
-	return unmarshalRecord(data, (*Alias)(item), &item.Overflow, collabAgentToolCallItemKnown, "CollabAgentToolCallItem")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, collabAgentToolCallItemKnown, "CollabAgentToolCallItem")
 }
 
 // WebSearchItem is a web search item.
@@ -442,15 +418,15 @@ type WebSearchItem struct {
 	Query  string `json:"query,omitzero"`
 	Action string `json:"action,omitzero"`
 	Status string `json:"status,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var webSearchItemKnown = makeSet("id", "type", "query", "action", "status")
+var webSearchItemKnown = jsonutil.KnownFields(WebSearchItem{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (item *WebSearchItem) UnmarshalJSON(data []byte) error {
 	type Alias WebSearchItem
-	return unmarshalRecord(data, (*Alias)(item), &item.Overflow, webSearchItemKnown, "WebSearchItem")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, webSearchItemKnown, "WebSearchItem")
 }
 
 // ImageViewItem is an image viewing item.
@@ -459,15 +435,15 @@ type ImageViewItem struct {
 	Type   string `json:"type"`
 	Path   string `json:"path,omitzero"`
 	Status string `json:"status,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var imageViewItemKnown = makeSet("id", "type", "path", "status")
+var imageViewItemKnown = jsonutil.KnownFields(ImageViewItem{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (item *ImageViewItem) UnmarshalJSON(data []byte) error {
 	type Alias ImageViewItem
-	return unmarshalRecord(data, (*Alias)(item), &item.Overflow, imageViewItemKnown, "ImageViewItem")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, imageViewItemKnown, "ImageViewItem")
 }
 
 // EnteredReviewModeItem signals the agent entered review mode.
@@ -475,15 +451,15 @@ type EnteredReviewModeItem struct {
 	ID     string          `json:"id"`
 	Type   string          `json:"type"`
 	Review json.RawMessage `json:"review,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var enteredReviewModeItemKnown = makeSet("id", "type", "review")
+var enteredReviewModeItemKnown = jsonutil.KnownFields(EnteredReviewModeItem{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (item *EnteredReviewModeItem) UnmarshalJSON(data []byte) error {
 	type Alias EnteredReviewModeItem
-	return unmarshalRecord(data, (*Alias)(item), &item.Overflow, enteredReviewModeItemKnown, "EnteredReviewModeItem")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, enteredReviewModeItemKnown, "EnteredReviewModeItem")
 }
 
 // ExitedReviewModeItem signals the agent exited review mode.
@@ -491,30 +467,30 @@ type ExitedReviewModeItem struct {
 	ID     string          `json:"id"`
 	Type   string          `json:"type"`
 	Review json.RawMessage `json:"review,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var exitedReviewModeItemKnown = makeSet("id", "type", "review")
+var exitedReviewModeItemKnown = jsonutil.KnownFields(ExitedReviewModeItem{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (item *ExitedReviewModeItem) UnmarshalJSON(data []byte) error {
 	type Alias ExitedReviewModeItem
-	return unmarshalRecord(data, (*Alias)(item), &item.Overflow, exitedReviewModeItemKnown, "ExitedReviewModeItem")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, exitedReviewModeItemKnown, "ExitedReviewModeItem")
 }
 
 // ContextCompactionItem signals a context window compaction.
 type ContextCompactionItem struct {
 	ID   string `json:"id"`
 	Type string `json:"type"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var contextCompactionItemKnown = makeSet("id", "type")
+var contextCompactionItemKnown = jsonutil.KnownFields(ContextCompactionItem{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (item *ContextCompactionItem) UnmarshalJSON(data []byte) error {
 	type Alias ContextCompactionItem
-	return unmarshalRecord(data, (*Alias)(item), &item.Overflow, contextCompactionItemKnown, "ContextCompactionItem")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, contextCompactionItemKnown, "ContextCompactionItem")
 }
 
 // UserMessageItem is a user-submitted message item.
@@ -523,15 +499,15 @@ type UserMessageItem struct {
 	Type    string          `json:"type"`
 	Content json.RawMessage `json:"content,omitzero"`
 	Status  string          `json:"status,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var userMessageItemKnown = makeSet("id", "type", "content", "status")
+var userMessageItemKnown = jsonutil.KnownFields(UserMessageItem{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (item *UserMessageItem) UnmarshalJSON(data []byte) error {
 	type Alias UserMessageItem
-	return unmarshalRecord(data, (*Alias)(item), &item.Overflow, userMessageItemKnown, "UserMessageItem")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, userMessageItemKnown, "UserMessageItem")
 }
 
 // ---------- Item field types ----------
@@ -567,15 +543,15 @@ type TokenUsageUpdatedParams struct {
 	ThreadID   string           `json:"threadId"`
 	TurnID     string           `json:"turnId"`
 	TokenUsage ThreadTokenUsage `json:"tokenUsage"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var tokenUsageUpdatedParamsKnown = makeSet("threadId", "turnId", "tokenUsage")
+var tokenUsageUpdatedParamsKnown = jsonutil.KnownFields(TokenUsageUpdatedParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *TokenUsageUpdatedParams) UnmarshalJSON(data []byte) error {
 	type Alias TokenUsageUpdatedParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, tokenUsageUpdatedParamsKnown, "TokenUsageUpdatedParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, tokenUsageUpdatedParamsKnown, "TokenUsageUpdatedParams")
 }
 
 // ThreadTokenUsage holds cumulative and per-turn token usage for a thread.
@@ -602,15 +578,15 @@ type CommandOutputDeltaParams struct {
 	TurnID   string `json:"turnId"`
 	ItemID   string `json:"itemId"`
 	Delta    string `json:"delta"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var commandOutputDeltaParamsKnown = makeSet("threadId", "turnId", "itemId", "delta")
+var commandOutputDeltaParamsKnown = jsonutil.KnownFields(CommandOutputDeltaParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *CommandOutputDeltaParams) UnmarshalJSON(data []byte) error {
 	type Alias CommandOutputDeltaParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, commandOutputDeltaParamsKnown, "CommandOutputDeltaParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, commandOutputDeltaParamsKnown, "CommandOutputDeltaParams")
 }
 
 // TerminalInteractionParams holds params for item/commandExecution/terminalInteraction.
@@ -620,15 +596,15 @@ type TerminalInteractionParams struct {
 	ItemID    string `json:"itemId"`
 	ProcessID string `json:"processId"`
 	Stdin     string `json:"stdin"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var terminalInteractionParamsKnown = makeSet("threadId", "turnId", "itemId", "processId", "stdin")
+var terminalInteractionParamsKnown = jsonutil.KnownFields(TerminalInteractionParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *TerminalInteractionParams) UnmarshalJSON(data []byte) error {
 	type Alias TerminalInteractionParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, terminalInteractionParamsKnown, "TerminalInteractionParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, terminalInteractionParamsKnown, "TerminalInteractionParams")
 }
 
 // FileChangeOutputDeltaParams holds params for item/fileChange/outputDelta.
@@ -637,15 +613,15 @@ type FileChangeOutputDeltaParams struct {
 	TurnID   string `json:"turnId"`
 	ItemID   string `json:"itemId"`
 	Delta    string `json:"delta"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var fileChangeOutputDeltaParamsKnown = makeSet("threadId", "turnId", "itemId", "delta")
+var fileChangeOutputDeltaParamsKnown = jsonutil.KnownFields(FileChangeOutputDeltaParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *FileChangeOutputDeltaParams) UnmarshalJSON(data []byte) error {
 	type Alias FileChangeOutputDeltaParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, fileChangeOutputDeltaParamsKnown, "FileChangeOutputDeltaParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, fileChangeOutputDeltaParamsKnown, "FileChangeOutputDeltaParams")
 }
 
 // ReasoningSummaryTextDeltaParams holds params for item/reasoning/summaryTextDelta.
@@ -655,15 +631,15 @@ type ReasoningSummaryTextDeltaParams struct {
 	ItemID       string `json:"itemId"`
 	Delta        string `json:"delta"`
 	SummaryIndex int    `json:"summaryIndex"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var reasoningSummaryTextDeltaParamsKnown = makeSet("threadId", "turnId", "itemId", "delta", "summaryIndex")
+var reasoningSummaryTextDeltaParamsKnown = jsonutil.KnownFields(ReasoningSummaryTextDeltaParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *ReasoningSummaryTextDeltaParams) UnmarshalJSON(data []byte) error {
 	type Alias ReasoningSummaryTextDeltaParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, reasoningSummaryTextDeltaParamsKnown, "ReasoningSummaryTextDeltaParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, reasoningSummaryTextDeltaParamsKnown, "ReasoningSummaryTextDeltaParams")
 }
 
 // ReasoningSummaryPartAddedParams holds params for item/reasoning/summaryPartAdded.
@@ -672,15 +648,15 @@ type ReasoningSummaryPartAddedParams struct {
 	TurnID       string `json:"turnId"`
 	ItemID       string `json:"itemId"`
 	SummaryIndex int    `json:"summaryIndex"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var reasoningSummaryPartAddedParamsKnown = makeSet("threadId", "turnId", "itemId", "summaryIndex")
+var reasoningSummaryPartAddedParamsKnown = jsonutil.KnownFields(ReasoningSummaryPartAddedParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *ReasoningSummaryPartAddedParams) UnmarshalJSON(data []byte) error {
 	type Alias ReasoningSummaryPartAddedParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, reasoningSummaryPartAddedParamsKnown, "ReasoningSummaryPartAddedParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, reasoningSummaryPartAddedParamsKnown, "ReasoningSummaryPartAddedParams")
 }
 
 // ReasoningTextDeltaParams holds params for item/reasoning/textDelta.
@@ -690,15 +666,15 @@ type ReasoningTextDeltaParams struct {
 	ItemID       string `json:"itemId"`
 	Delta        string `json:"delta"`
 	ContentIndex int    `json:"contentIndex"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var reasoningTextDeltaParamsKnown = makeSet("threadId", "turnId", "itemId", "delta", "contentIndex")
+var reasoningTextDeltaParamsKnown = jsonutil.KnownFields(ReasoningTextDeltaParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *ReasoningTextDeltaParams) UnmarshalJSON(data []byte) error {
 	type Alias ReasoningTextDeltaParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, reasoningTextDeltaParamsKnown, "ReasoningTextDeltaParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, reasoningTextDeltaParamsKnown, "ReasoningTextDeltaParams")
 }
 
 // PlanDeltaParams holds params for item/plan/delta.
@@ -707,15 +683,15 @@ type PlanDeltaParams struct {
 	TurnID   string `json:"turnId"`
 	ItemID   string `json:"itemId"`
 	Delta    string `json:"delta"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var planDeltaParamsKnown = makeSet("threadId", "turnId", "itemId", "delta")
+var planDeltaParamsKnown = jsonutil.KnownFields(PlanDeltaParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *PlanDeltaParams) UnmarshalJSON(data []byte) error {
 	type Alias PlanDeltaParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, planDeltaParamsKnown, "PlanDeltaParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, planDeltaParamsKnown, "PlanDeltaParams")
 }
 
 // McpToolCallProgressParams holds params for item/mcpToolCall/progress.
@@ -724,15 +700,15 @@ type McpToolCallProgressParams struct {
 	TurnID   string `json:"turnId"`
 	ItemID   string `json:"itemId"`
 	Message  string `json:"message"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var mcpToolCallProgressParamsKnown = makeSet("threadId", "turnId", "itemId", "message")
+var mcpToolCallProgressParamsKnown = jsonutil.KnownFields(McpToolCallProgressParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *McpToolCallProgressParams) UnmarshalJSON(data []byte) error {
 	type Alias McpToolCallProgressParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, mcpToolCallProgressParamsKnown, "McpToolCallProgressParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, mcpToolCallProgressParamsKnown, "McpToolCallProgressParams")
 }
 
 // ---------- Other notification params ----------
@@ -742,15 +718,15 @@ type TurnDiffUpdatedParams struct {
 	ThreadID string          `json:"threadId"`
 	TurnID   string          `json:"turnId"`
 	Diff     json.RawMessage `json:"diff"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var turnDiffUpdatedParamsKnown = makeSet("threadId", "turnId", "diff")
+var turnDiffUpdatedParamsKnown = jsonutil.KnownFields(TurnDiffUpdatedParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *TurnDiffUpdatedParams) UnmarshalJSON(data []byte) error {
 	type Alias TurnDiffUpdatedParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, turnDiffUpdatedParamsKnown, "TurnDiffUpdatedParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, turnDiffUpdatedParamsKnown, "TurnDiffUpdatedParams")
 }
 
 // TurnPlanUpdatedParams holds params for turn/plan/updated.
@@ -759,45 +735,45 @@ type TurnPlanUpdatedParams struct {
 	TurnID      string          `json:"turnId"`
 	Explanation string          `json:"explanation,omitzero"`
 	Plan        json.RawMessage `json:"plan,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var turnPlanUpdatedParamsKnown = makeSet("threadId", "turnId", "explanation", "plan")
+var turnPlanUpdatedParamsKnown = jsonutil.KnownFields(TurnPlanUpdatedParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *TurnPlanUpdatedParams) UnmarshalJSON(data []byte) error {
 	type Alias TurnPlanUpdatedParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, turnPlanUpdatedParamsKnown, "TurnPlanUpdatedParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, turnPlanUpdatedParamsKnown, "TurnPlanUpdatedParams")
 }
 
 // ThreadStatusChangedParams holds params for thread/status/changed.
 type ThreadStatusChangedParams struct {
 	ThreadID string `json:"threadId"`
 	Status   string `json:"status"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var threadStatusChangedParamsKnown = makeSet("threadId", "status")
+var threadStatusChangedParamsKnown = jsonutil.KnownFields(ThreadStatusChangedParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *ThreadStatusChangedParams) UnmarshalJSON(data []byte) error {
 	type Alias ThreadStatusChangedParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, threadStatusChangedParamsKnown, "ThreadStatusChangedParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, threadStatusChangedParamsKnown, "ThreadStatusChangedParams")
 }
 
 // ThreadNameUpdatedParams holds params for thread/name/updated.
 type ThreadNameUpdatedParams struct {
 	ThreadID   string `json:"threadId"`
 	ThreadName string `json:"threadName"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var threadNameUpdatedParamsKnown = makeSet("threadId", "threadName")
+var threadNameUpdatedParamsKnown = jsonutil.KnownFields(ThreadNameUpdatedParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *ThreadNameUpdatedParams) UnmarshalJSON(data []byte) error {
 	type Alias ThreadNameUpdatedParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, threadNameUpdatedParamsKnown, "ThreadNameUpdatedParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, threadNameUpdatedParamsKnown, "ThreadNameUpdatedParams")
 }
 
 // ModelReroutedParams holds params for model/rerouted.
@@ -807,15 +783,15 @@ type ModelReroutedParams struct {
 	FromModel string `json:"fromModel"`
 	ToModel   string `json:"toModel"`
 	Reason    string `json:"reason,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var modelReroutedParamsKnown = makeSet("threadId", "turnId", "fromModel", "toModel", "reason")
+var modelReroutedParamsKnown = jsonutil.KnownFields(ModelReroutedParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *ModelReroutedParams) UnmarshalJSON(data []byte) error {
 	type Alias ModelReroutedParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, modelReroutedParamsKnown, "ModelReroutedParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, modelReroutedParamsKnown, "ModelReroutedParams")
 }
 
 // ErrorNotificationParams holds params for error notifications.
@@ -824,13 +800,13 @@ type ErrorNotificationParams struct {
 	WillRetry bool       `json:"willRetry,omitzero"`
 	ThreadID  string     `json:"threadId,omitzero"`
 	TurnID    string     `json:"turnId,omitzero"`
-	Overflow
+	jsonutil.Overflow
 }
 
-var errorNotificationParamsKnown = makeSet("error", "willRetry", "threadId", "turnId")
+var errorNotificationParamsKnown = jsonutil.KnownFields(ErrorNotificationParams{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *ErrorNotificationParams) UnmarshalJSON(data []byte) error {
 	type Alias ErrorNotificationParams
-	return unmarshalRecord(data, (*Alias)(p), &p.Overflow, errorNotificationParamsKnown, "ErrorNotificationParams")
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, errorNotificationParamsKnown, "ErrorNotificationParams")
 }

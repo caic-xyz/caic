@@ -2,7 +2,10 @@ package claude
 
 import (
 	"encoding/json"
+
 	"fmt"
+
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // ProgressRecord reports progress during tool execution.
@@ -13,12 +16,10 @@ type ProgressRecord struct {
 	ParentToolUseID string          `json:"parentToolUseID,omitempty"`
 	ToolUseID       string          `json:"toolUseID,omitempty"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var progressRecordKnown = makeSet(append(messageRecordFields,
-	"data", "parentToolUseID", "toolUseID",
-)...)
+var progressRecordKnown = jsonutil.KnownFields(ProgressRecord{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *ProgressRecord) UnmarshalJSON(data []byte) error {
@@ -31,8 +32,8 @@ func (p *ProgressRecord) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("ProgressRecord: %w", err)
 	}
-	p.Extra = collectUnknown(raw, progressRecordKnown)
-	warnUnknown("ProgressRecord", p.Extra)
+	p.Extra = jsonutil.CollectUnknown(raw, progressRecordKnown)
+	jsonutil.WarnUnknown("ProgressRecord", p.Extra)
 	return nil
 }
 
@@ -78,17 +79,10 @@ type ProgressPayload struct {
 	TaskDescription string `json:"taskDescription,omitempty"`
 	TaskType        string `json:"taskType,omitempty"`
 
-	Overflow
+	jsonutil.Overflow
 }
 
-var progressPayloadKnown = makeSet(
-	"type",
-	"hookEvent", "hookName", "command",
-	"output", "fullOutput", "totalLines", "elapsedTimeSeconds", "timeoutMs",
-	"agentId", "message", "prompt", "normalizedMessages",
-	"query", "resultCount",
-	"taskDescription", "taskType",
-)
+var progressPayloadKnown = jsonutil.KnownFields(ProgressPayload{})
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *ProgressPayload) UnmarshalJSON(data []byte) error {
@@ -101,7 +95,7 @@ func (p *ProgressPayload) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, alias); err != nil {
 		return fmt.Errorf("ProgressPayload: %w", err)
 	}
-	p.Extra = collectUnknown(raw, progressPayloadKnown)
-	warnUnknown("ProgressPayload("+p.Type+")", p.Extra)
+	p.Extra = jsonutil.CollectUnknown(raw, progressPayloadKnown)
+	jsonutil.WarnUnknown("ProgressPayload("+p.Type+")", p.Extra)
 	return nil
 }
