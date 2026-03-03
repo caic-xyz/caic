@@ -308,6 +308,8 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 }
 
 // parseFnForHarness returns the message parser for the given harness.
+//
+// TODO: This is a layering violation, let's fix this eventually.
 func parseFnForHarness(h agent.Harness) func([]byte) ([]agent.Message, error) {
 	switch h {
 	case agent.Codex:
