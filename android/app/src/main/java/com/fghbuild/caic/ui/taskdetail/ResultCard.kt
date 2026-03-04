@@ -13,14 +13,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import com.caic.sdk.v1.ClaudeEventResult
+import com.caic.sdk.v1.EventResult
 import com.fghbuild.caic.util.formatCost
 import com.fghbuild.caic.util.formatDuration
 import com.fghbuild.caic.ui.theme.markdownTypography
 import com.mikepenz.markdown.m3.Markdown
 
 @Composable
-fun ResultCard(result: ClaudeEventResult, onNavigateToDiff: (() -> Unit)? = null) {
+fun ResultCard(result: EventResult, onNavigateToDiff: (() -> Unit)? = null) {
     val isError = result.isError
     Surface(
         modifier = Modifier.fillMaxWidth(),

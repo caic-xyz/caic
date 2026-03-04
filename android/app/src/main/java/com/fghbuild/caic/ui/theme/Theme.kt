@@ -20,7 +20,10 @@ fun stateColor(state: String): Color = when (state) {
     else -> Color(0xFFFFF3CD)
 }
 
-val activeStates = setOf("running", "branching", "provisioning", "starting", "waiting", "asking", "has_plan", "terminating")
+val activeStates = setOf(
+    "running", "branching", "provisioning", "starting",
+    "waiting", "asking", "has_plan", "terminating",
+)
 val waitingStates = setOf("waiting", "asking", "has_plan")
 
 private val LightColorScheme = lightColorScheme()

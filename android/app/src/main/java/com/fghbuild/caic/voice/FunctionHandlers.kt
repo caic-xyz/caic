@@ -176,7 +176,7 @@ class FunctionHandlers(
         val taskId = resolveTaskNumber(args) ?: return errorResult("Unknown task number")
         val num = args.requireInt("task_number")
 
-        val events = mutableListOf<com.caic.sdk.v1.ClaudeEventMessage>()
+        val events = mutableListOf<com.caic.sdk.v1.EventMessage>()
         taskRepository.taskRawEventsWithReady(baseURL, taskId)
             .takeWhile { it !is TaskSSEEvent.Ready }
             .collect { event ->

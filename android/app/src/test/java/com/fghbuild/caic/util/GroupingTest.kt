@@ -1,16 +1,16 @@
 // Unit tests for message grouping and turn splitting logic.
 package com.fghbuild.caic.util
 
-import com.caic.sdk.v1.ClaudeEventMessage
-import com.caic.sdk.v1.ClaudeEventText
-import com.caic.sdk.v1.ClaudeEventTextDelta
-import com.caic.sdk.v1.ClaudeEventToolResult
-import com.caic.sdk.v1.ClaudeEventToolUse
-import com.caic.sdk.v1.ClaudeEventAsk
-import com.caic.sdk.v1.ClaudeAskQuestion
-import com.caic.sdk.v1.ClaudeEventResult
-import com.caic.sdk.v1.ClaudeEventUsage
-import com.caic.sdk.v1.ClaudeEventUserInput
+import com.caic.sdk.v1.EventMessage
+import com.caic.sdk.v1.EventText
+import com.caic.sdk.v1.EventTextDelta
+import com.caic.sdk.v1.EventToolResult
+import com.caic.sdk.v1.EventToolUse
+import com.caic.sdk.v1.EventAsk
+import com.caic.sdk.v1.AskQuestion
+import com.caic.sdk.v1.EventResult
+import com.caic.sdk.v1.EventUsage
+import com.caic.sdk.v1.EventUserInput
 import com.caic.sdk.v1.EventKinds
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
@@ -18,50 +18,50 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GroupingTest {
-    private fun textDeltaEvent(text: String, ts: Long = 0) = ClaudeEventMessage(
+    private fun textDeltaEvent(text: String, ts: Long = 0) = EventMessage(
         kind = EventKinds.TextDelta, ts = ts,
-        textDelta = ClaudeEventTextDelta(text = text),
+        textDelta = EventTextDelta(text = text),
     )
 
-    private fun textEvent(text: String, ts: Long = 0) = ClaudeEventMessage(
+    private fun textEvent(text: String, ts: Long = 0) = EventMessage(
         kind = EventKinds.Text, ts = ts,
-        text = ClaudeEventText(text = text),
+        text = EventText(text = text),
     )
 
-    private fun toolUseEvent(id: String, name: String, ts: Long = 0) = ClaudeEventMessage(
+    private fun toolUseEvent(id: String, name: String, ts: Long = 0) = EventMessage(
         kind = EventKinds.ToolUse, ts = ts,
-        toolUse = ClaudeEventToolUse(toolUseID = id, name = name, input = JsonObject(emptyMap())),
+        toolUse = EventToolUse(toolUseID = id, name = name, input = JsonObject(emptyMap())),
     )
 
-    private fun toolResultEvent(id: String, duration: Double = 0.1, ts: Long = 0) = ClaudeEventMessage(
+    private fun toolResultEvent(id: String, duration: Double = 0.1, ts: Long = 0) = EventMessage(
         kind = EventKinds.ToolResult, ts = ts,
-        toolResult = ClaudeEventToolResult(toolUseID = id, duration = duration),
+        toolResult = EventToolResult(toolUseID = id, duration = duration),
     )
 
     @Suppress("LongMethod")
-    private fun resultEvent(ts: Long = 0) = ClaudeEventMessage(
+    private fun resultEvent(ts: Long = 0) = EventMessage(
         kind = EventKinds.Result, ts = ts,
-        result = ClaudeEventResult(
+        result = EventResult(
             subtype = "success", isError = false, result = "done",
             totalCostUSD = 0.01, duration = 1.0, durationAPI = 0.9,
-            numTurns = 1, usage = ClaudeEventUsage(
+            numTurns = 1, usage = EventUsage(
                 inputTokens = 100, outputTokens = 50,
                 cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
             ),
         ),
     )
 
-    private fun askEvent(id: String, question: String, ts: Long = 0) = ClaudeEventMessage(
+    private fun askEvent(id: String, question: String, ts: Long = 0) = EventMessage(
         kind = EventKinds.Ask, ts = ts,
-        ask = ClaudeEventAsk(
+        ask = EventAsk(
             toolUseID = id,
-            questions = listOf(ClaudeAskQuestion(question = question, options = emptyList())),
+            questions = listOf(AskQuestion(question = question, options = emptyList())),
         ),
     )
 
-    private fun userInputEvent(text: String, ts: Long = 0) = ClaudeEventMessage(
+    private fun userInputEvent(text: String, ts: Long = 0) = EventMessage(
         kind = EventKinds.UserInput, ts = ts,
-        userInput = ClaudeEventUserInput(text = text),
+        userInput = EventUserInput(text = text),
     )
 
     @Test
@@ -134,9 +134,9 @@ class GroupingTest {
         t.run("usage event separates tool groups across assistant messages") {
             val groups = groupMessages(listOf(
                 toolUseEvent("t1", "Read"),
-                ClaudeEventMessage(
+                EventMessage(
                     kind = EventKinds.Usage, ts = 0,
-                    usage = ClaudeEventUsage(
+                    usage = EventUsage(
                         inputTokens = 100, outputTokens = 50,
                         cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
                     ),
@@ -165,9 +165,9 @@ class GroupingTest {
         t.run("non-last tool groups are implicitly marked done") {
             val groups = groupMessages(listOf(
                 toolUseEvent("t1", "Read"),
-                ClaudeEventMessage(
+                EventMessage(
                     kind = EventKinds.Usage, ts = 0,
-                    usage = ClaudeEventUsage(
+                    usage = EventUsage(
                         inputTokens = 100, outputTokens = 50,
                         cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
                     ),
@@ -216,18 +216,18 @@ class GroupingTest {
         t.run("tool groups separated by text merge into one") {
             val groups = groupMessages(listOf(
                 toolUseEvent("t1", "Read"),
-                ClaudeEventMessage(
+                EventMessage(
                     kind = EventKinds.Usage, ts = 0,
-                    usage = ClaudeEventUsage(
+                    usage = EventUsage(
                         inputTokens = 100, outputTokens = 50,
                         cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
                     ),
                 ),
                 textDeltaEvent("commentary"),
                 toolUseEvent("t2", "Bash"),
-                ClaudeEventMessage(
+                EventMessage(
                     kind = EventKinds.Usage, ts = 0,
-                    usage = ClaudeEventUsage(
+                    usage = EventUsage(
                         inputTokens = 200, outputTokens = 100,
                         cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
                     ),
@@ -244,9 +244,9 @@ class GroupingTest {
         t.run("ask group prevents tool group merging across turns") {
             // In practice, an ask is always followed by a usage event from the
             // next assistant turn. The ask + usage together form a hard boundary.
-            val usage = ClaudeEventMessage(
+            val usage = EventMessage(
                 kind = EventKinds.Usage, ts = 0,
-                usage = ClaudeEventUsage(
+                usage = EventUsage(
                     inputTokens = 100, outputTokens = 50,
                     cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
                 ),
@@ -268,7 +268,7 @@ class GroupingTest {
         t.run("todo events are skipped and don't split tool groups") {
             val groups = groupMessages(listOf(
                 toolUseEvent("t1", "Read"),
-                ClaudeEventMessage(kind = EventKinds.Todo, ts = 0),
+                EventMessage(kind = EventKinds.Todo, ts = 0),
                 toolUseEvent("t2", "Bash"),
             ))
             assertEquals(1, groups.size)

@@ -1,7 +1,7 @@
 // Singleton repository managing the global SSE connection, task list, and per-task event streams.
 package com.fghbuild.caic.data
 
-import com.caic.sdk.v1.ClaudeEventMessage
+import com.caic.sdk.v1.EventMessage
 import com.caic.sdk.v1.Task
 import com.caic.sdk.v1.UsageResp
 import kotlinx.coroutines.CancellationException
@@ -31,7 +31,7 @@ import javax.inject.Singleton
 /** Per-task SSE event wrapper distinguishing the "ready" sentinel from data events. */
 sealed class TaskSSEEvent {
     data object Ready : TaskSSEEvent()
-    data class Event(val msg: ClaudeEventMessage) : TaskSSEEvent()
+    data class Event(val msg: EventMessage) : TaskSSEEvent()
 }
 
 @Singleton
@@ -119,7 +119,7 @@ class TaskRepository @Inject constructor(
                     return
                 }
                 try {
-                    val msg = json.decodeFromString<ClaudeEventMessage>(data)
+                    val msg = json.decodeFromString<EventMessage>(data)
                     trySend(TaskSSEEvent.Event(msg))
                 } catch (_: Exception) {
                     // Skip malformed events.

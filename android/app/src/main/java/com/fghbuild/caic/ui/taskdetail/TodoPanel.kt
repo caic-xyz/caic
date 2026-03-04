@@ -31,10 +31,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.caic.sdk.v1.ClaudeTodoItem
+import com.caic.sdk.v1.TodoItem
 
 @Composable
-fun TodoPanel(todos: List<ClaudeTodoItem>, modifier: Modifier = Modifier) {
+fun TodoPanel(todos: List<TodoItem>, modifier: Modifier = Modifier) {
     if (todos.isEmpty()) return
     var expanded by rememberSaveable { mutableStateOf(false) }
     val completed = todos.count { it.status == "completed" }
@@ -74,7 +74,7 @@ fun TodoPanel(todos: List<ClaudeTodoItem>, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun TodoItemRow(item: ClaudeTodoItem) {
+private fun TodoItemRow(item: TodoItem) {
     Row(
         modifier = Modifier
             .fillMaxWidth()

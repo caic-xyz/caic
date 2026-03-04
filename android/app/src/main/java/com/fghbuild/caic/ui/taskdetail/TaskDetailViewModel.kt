@@ -5,8 +5,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.caic.sdk.v1.ApiClient
-import com.caic.sdk.v1.ClaudeEventMessage
-import com.caic.sdk.v1.ClaudeTodoItem
+import com.caic.sdk.v1.EventMessage
+import com.caic.sdk.v1.TodoItem
 import com.caic.sdk.v1.HarnessInfo
 import com.caic.sdk.v1.ImageData
 import com.caic.sdk.v1.InputReq
@@ -39,7 +39,7 @@ data class TaskDetailState(
     val hasMessages: Boolean = false,
     val messageCount: Int = 0,
     val turns: List<Turn> = emptyList(),
-    val todos: List<ClaudeTodoItem> = emptyList(),
+    val todos: List<TodoItem> = emptyList(),
     val isReady: Boolean = false,
     val sending: Boolean = false,
     val pendingAction: String? = null,
@@ -60,7 +60,7 @@ class TaskDetailViewModel @Inject constructor(
 
     private val taskId: String = savedStateHandle[Screen.TaskDetail.ARG_TASK_ID] ?: ""
 
-    private val _messages = MutableStateFlow<List<ClaudeEventMessage>>(emptyList())
+    private val _messages = MutableStateFlow<List<EventMessage>>(emptyList())
     private val _isReady = MutableStateFlow(false)
     private val _sending = MutableStateFlow(false)
     private val _pendingAction = MutableStateFlow<String?>(null)
@@ -144,10 +144,10 @@ class TaskDetailViewModel @Inject constructor(
             if (baseURL.isBlank()) return@launch
 
             var delayMs = 500L
-            val buf = mutableListOf<ClaudeEventMessage>()
+            val buf = mutableListOf<EventMessage>()
             var live = false
             // Pending live events batched between flushes.
-            val pending = mutableListOf<ClaudeEventMessage>()
+            val pending = mutableListOf<EventMessage>()
             var flushJob: Job? = null
 
             while (true) {

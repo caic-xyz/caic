@@ -2,28 +2,28 @@
 package com.fghbuild.caic.util
 
 import androidx.compose.runtime.Immutable
-import com.caic.sdk.v1.ClaudeEventAsk
-import com.caic.sdk.v1.ClaudeEventMessage
-import com.caic.sdk.v1.ClaudeEventToolResult
-import com.caic.sdk.v1.ClaudeEventToolUse
-import com.caic.sdk.v1.ClaudeTodoItem
+import com.caic.sdk.v1.EventAsk
+import com.caic.sdk.v1.EventMessage
+import com.caic.sdk.v1.EventToolResult
+import com.caic.sdk.v1.EventToolUse
+import com.caic.sdk.v1.TodoItem
 import com.caic.sdk.v1.EventKinds
 
 enum class GroupKind { TEXT, TOOL, ASK, USER_INPUT, OTHER }
 
 @Immutable
 data class ToolCall(
-    val use: ClaudeEventToolUse,
-    val result: ClaudeEventToolResult? = null,
+    val use: EventToolUse,
+    val result: EventToolResult? = null,
     val done: Boolean = false,
 )
 
 @Immutable
 data class MessageGroup(
     val kind: GroupKind,
-    val events: List<ClaudeEventMessage>,
+    val events: List<EventMessage>,
     val toolCalls: List<ToolCall> = emptyList(),
-    val ask: ClaudeEventAsk? = null,
+    val ask: EventAsk? = null,
     val answerText: String? = null,
 )
 
@@ -41,8 +41,8 @@ private val ASYNC_TOOLS = setOf("bash", "task")
 
 /** Mutable builder for ToolCall, used only inside groupMessages(). */
 private class MutableToolCall(
-    val use: ClaudeEventToolUse,
-    var result: ClaudeEventToolResult? = null,
+    val use: EventToolUse,
+    var result: EventToolResult? = null,
     var done: Boolean = false,
 ) {
     fun freeze() = ToolCall(use, result, done)
@@ -51,9 +51,9 @@ private class MutableToolCall(
 /** Mutable builder for MessageGroup, used only inside groupMessages(). */
 private class MutableGroup(
     val kind: GroupKind,
-    val events: MutableList<ClaudeEventMessage> = mutableListOf(),
+    val events: MutableList<EventMessage> = mutableListOf(),
     val toolCalls: MutableList<MutableToolCall> = mutableListOf(),
-    var ask: ClaudeEventAsk? = null,
+    var ask: EventAsk? = null,
     var answerText: String? = null,
 ) {
     fun freeze() = MessageGroup(
@@ -67,7 +67,7 @@ private class MutableGroup(
 
 /** Groups consecutive events for cohesive rendering. */
 @Suppress("CyclomaticComplexMethod", "LoopWithTooManyJumpStatements")
-fun groupMessages(msgs: List<ClaudeEventMessage>): List<MessageGroup> {
+fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
     val groups = mutableListOf<MutableGroup>()
 
     fun lastGroup(): MutableGroup? = groups.lastOrNull()
@@ -199,7 +199,7 @@ fun groupMessages(msgs: List<ClaudeEventMessage>): List<MessageGroup> {
     return merged.map { it.freeze() }
 }
 
-private fun newToolGroup(ev: ClaudeEventMessage, call: MutableToolCall) = MutableGroup(
+private fun newToolGroup(ev: EventMessage, call: MutableToolCall) = MutableGroup(
     kind = GroupKind.TOOL,
     events = mutableListOf(ev),
     toolCalls = mutableListOf(call),
@@ -268,7 +268,7 @@ data class IncrementalGrouped(
     val completedTurns: List<Turn> = emptyList(),
     val currentTurn: Turn? = null,
     val completedUpToIdx: Int = 0,
-    val todos: List<ClaudeTodoItem> = emptyList(),
+    val todos: List<TodoItem> = emptyList(),
 ) {
     val turns: List<Turn> get() = if (currentTurn != null) completedTurns + currentTurn!! else completedTurns
 }
@@ -280,7 +280,7 @@ data class IncrementalGrouped(
  * regrouped, keeping completed turns cached. Falls back to a full recompute when the list shrinks
  * (reconnect).
  */
-fun nextGrouped(prev: IncrementalGrouped, msgs: List<ClaudeEventMessage>): IncrementalGrouped {
+fun nextGrouped(prev: IncrementalGrouped, msgs: List<EventMessage>): IncrementalGrouped {
     val upTo = if (msgs.size >= prev.completedUpToIdx) prev.completedUpToIdx else 0
     val isReset = upTo < prev.completedUpToIdx
     val priorCompleted = if (isReset) emptyList() else prev.completedTurns

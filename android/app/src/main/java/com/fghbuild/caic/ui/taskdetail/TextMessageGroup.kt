@@ -9,7 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.caic.sdk.v1.ClaudeEventMessage
+import com.caic.sdk.v1.EventMessage
 import com.caic.sdk.v1.EventKinds
 import com.fghbuild.caic.ui.theme.markdownTypography
 import com.mikepenz.markdown.m3.Markdown
@@ -17,7 +17,7 @@ import com.mikepenz.markdown.m3.Markdown
 private data class TextState(val text: String, val isStreaming: Boolean)
 
 @Composable
-fun TextMessageGroup(events: List<ClaudeEventMessage>) {
+fun TextMessageGroup(events: List<EventMessage>) {
     val state = remember(events) {
         val finalEv = events.lastOrNull { it.kind == EventKinds.Text }
         if (finalEv?.text != null) {
