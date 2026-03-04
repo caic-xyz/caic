@@ -1,5 +1,5 @@
-// Sidebar task list with collapsible panel and sorted task cards.
-import { Index, Show } from "solid-js";
+// Sidebar task list with collapsible panel, grouped by repo for active tasks.
+import { For, Index, Show } from "solid-js";
 import type { Accessor } from "solid-js";
 import type { Task } from "@sdk/types.gen";
 import TaskItemSummary from "./TaskItemSummary";
@@ -19,15 +19,87 @@ export interface TaskListProps {
   onDiffClick?: (id: string) => void;
 }
 
+/** Sort active tasks by repo then branch; terminal tasks by ID descending. */
+export function sortTasks(tasks: Task[]): Task[] {
+  const isTerminal = (s: string) => s === "failed" || s === "terminated";
+  const active = tasks.filter((t) => !isTerminal(t.state));
+  const terminal = tasks.filter((t) => isTerminal(t.state));
+  active.sort((a, b) => {
+    const rc = a.repo.localeCompare(b.repo);
+    if (rc !== 0) return rc;
+    return a.branch.localeCompare(b.branch);
+  });
+  terminal.sort((a, b) => (b.id > a.id ? -1 : b.id < a.id ? 1 : 0));
+  return [...active, ...terminal];
+}
+
+interface RepoGroup {
+  repo: string;
+  tasks: Task[];
+}
+
 export default function TaskList(props: TaskListProps) {
   const isTerminal = (s: string) => s === "failed" || s === "terminated";
-  const sorted = () =>
-    [...props.tasks()].sort((a, b) => {
-      const aT = isTerminal(a.state) ? 1 : 0;
-      const bT = isTerminal(b.state) ? 1 : 0;
-      if (aT !== bT) return aT - bT;
-      return b.id > a.id ? -1 : b.id < a.id ? 1 : 0;
+
+  const grouped = () => {
+    const all = [...props.tasks()];
+    const active = all.filter((t) => !isTerminal(t.state));
+    const terminal = all.filter((t) => isTerminal(t.state));
+    active.sort((a, b) => {
+      const rc = a.repo.localeCompare(b.repo);
+      if (rc !== 0) return rc;
+      return a.branch.localeCompare(b.branch);
     });
+    const groups: RepoGroup[] = [];
+    for (const t of active) {
+      const last = groups[groups.length - 1];
+      if (last && last.repo === t.repo) {
+        last.tasks.push(t);
+      } else {
+        groups.push({ repo: t.repo, tasks: [t] });
+      }
+    }
+    terminal.sort((a, b) => (b.id > a.id ? -1 : b.id < a.id ? 1 : 0));
+    return { groups, terminal };
+  };
+
+  const renderTask = (t: () => Task) => (
+    <TaskItemSummary
+      id={t().id}
+      title={t().title}
+      state={t().state}
+      stateUpdatedAt={t().stateUpdatedAt}
+      repo={t().repo}
+      repoURL={t().repoURL}
+      baseBranch={t().baseBranch}
+      branch={t().branch}
+      harness={t().harness}
+      model={t().model}
+      costUSD={t().costUSD}
+      duration={t().duration}
+      numTurns={t().numTurns}
+      activeInputTokens={t().activeInputTokens}
+      activeCacheReadTokens={t().activeCacheReadTokens}
+      cumulativeInputTokens={t().cumulativeInputTokens}
+      cumulativeCacheCreationInputTokens={t().cumulativeCacheCreationInputTokens}
+      cumulativeCacheReadInputTokens={t().cumulativeCacheReadInputTokens}
+      cumulativeOutputTokens={t().cumulativeOutputTokens}
+      contextWindowLimit={t().contextWindowLimit}
+      containerUptimeMs={t().containerUptimeMs}
+      diffStat={t().diffStat}
+      error={t().error}
+      inPlanMode={t().inPlanMode}
+      tailscale={t().tailscale}
+      usb={t().usb}
+      display={t().display}
+      selected={props.selectedId === t().id}
+      now={props.now}
+      onClick={() => props.onSelect(t().id)}
+      onTerminate={() => props.onTerminate(t().id)}
+      terminateLoading={props.terminatingId() === t().id}
+      onDiffClick={props.onDiffClick ? () => { const fn = props.onDiffClick; if (fn) fn(t().id); } : undefined}
+    />
+  );
 
   return (
     <>
@@ -41,45 +113,15 @@ export default function TaskList(props: TaskListProps) {
         <Show when={props.tasks().length === 0}>
           <p class={styles.placeholder}>No tasks yet.</p>
         </Show>
-        <Index each={sorted()}>
-          {(t) => (
-            <TaskItemSummary
-              id={t().id}
-              title={t().title}
-              state={t().state}
-              stateUpdatedAt={t().stateUpdatedAt}
-              repo={t().repo}
-              repoURL={t().repoURL}
-              baseBranch={t().baseBranch}
-              branch={t().branch}
-              harness={t().harness}
-              model={t().model}
-              costUSD={t().costUSD}
-              duration={t().duration}
-              numTurns={t().numTurns}
-              activeInputTokens={t().activeInputTokens}
-              activeCacheReadTokens={t().activeCacheReadTokens}
-              cumulativeInputTokens={t().cumulativeInputTokens}
-              cumulativeCacheCreationInputTokens={t().cumulativeCacheCreationInputTokens}
-              cumulativeCacheReadInputTokens={t().cumulativeCacheReadInputTokens}
-              cumulativeOutputTokens={t().cumulativeOutputTokens}
-              contextWindowLimit={t().contextWindowLimit}
-              containerUptimeMs={t().containerUptimeMs}
-              diffStat={t().diffStat}
-              error={t().error}
-              inPlanMode={t().inPlanMode}
-              tailscale={t().tailscale}
-              usb={t().usb}
-              display={t().display}
-              selected={props.selectedId === t().id}
-              now={props.now}
-              onClick={() => props.onSelect(t().id)}
-              onTerminate={() => props.onTerminate(t().id)}
-              terminateLoading={props.terminatingId() === t().id}
-              onDiffClick={props.onDiffClick ? () => { const fn = props.onDiffClick; if (fn) fn(t().id); } : undefined}
-            />
+        <For each={grouped().groups}>
+          {(group) => (
+            <div class={styles.repoGroup}>
+              <div class={styles.repoGroupHeader}>{group.repo}</div>
+              <Index each={group.tasks}>{renderTask}</Index>
+            </div>
           )}
-        </Index>
+        </For>
+        <Index each={grouped().terminal}>{renderTask}</Index>
       </div>
       <Show when={!props.sidebarOpen() && props.selectedId !== null}>
         <button class={styles.expandBtn} onClick={() => props.setSidebarOpen(true)} title="Expand sidebar"><LeftPanelOpen width={20} height={20} /></button>

@@ -71,12 +71,14 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.ImageData
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.caic.util.createCameraPhotoUri
 import com.fghbuild.caic.util.imageDataToBitmap
+import com.fghbuild.caic.ui.theme.activeStates
 import com.fghbuild.caic.util.uriToImageData
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -190,7 +192,24 @@ private fun MainContent(
                 }
             }
         }
-        items(items = state.tasks, key = { it.id }) { task ->
+        val activeTasks = state.tasks.filter { it.state in activeStates }
+        val terminalTasks = state.tasks.filter { it.state !in activeStates }
+        val repoGroups = activeTasks.groupBy { it.repo }
+        for ((repo, tasksInRepo) in repoGroups) {
+            item(key = "repo_header_$repo") {
+                Text(
+                    text = repo,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            items(items = tasksInRepo, key = { it.id }) { task ->
+                TaskCard(task = task, onClick = { onNavigateToTask(task.id) })
+            }
+        }
+        items(items = terminalTasks, key = { it.id }) { task ->
             TaskCard(task = task, onClick = { onNavigateToTask(task.id) })
         }
     }

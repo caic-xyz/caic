@@ -104,7 +104,6 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}
             ) {
                 Text(
                     text = buildAnnotatedString {
-                        append("${task.repo} \u00b7 ")
                         if (!task.baseBranch.isNullOrBlank()) {
                             append("${task.baseBranch}\u2192")
                         }

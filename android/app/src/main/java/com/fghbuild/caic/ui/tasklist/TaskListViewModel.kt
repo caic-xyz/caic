@@ -61,10 +61,11 @@ class TaskListViewModel @Inject constructor(
         settingsRepository.settings,
         _formState,
     ) { tasks, connected, usage, settings, form ->
-        val sorted = tasks.sortedWith(
-            compareByDescending<Task> { it.state in activeStates }
-                .thenByDescending { it.id }
-        )
+        val active = tasks.filter { it.state in activeStates }
+            .sortedWith(compareBy<Task> { it.repo }.thenBy { it.branch })
+        val terminal = tasks.filter { it.state !in activeStates }
+            .sortedByDescending { it.id }
+        val sorted = active + terminal
         val imgSupport = form.harnesses
             .any { it.name == form.selectedHarness && it.supportsImages }
         TaskListState(

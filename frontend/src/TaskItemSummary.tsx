@@ -93,11 +93,9 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
           </span>
         </span>
       </div>
-      <Show when={props.repo || props.branch}>
+      <Show when={props.branch}>
         <div class={styles.metaRow}>
           <span class={styles.meta}>
-            {props.repo}
-            {props.repo && props.branch ? " · " : ""}
             <Show when={props.baseBranch && props.branch}>
               <span class={styles.baseBranch}>{props.baseBranch}</span>
               <span class={styles.branchArrow}>→</span>

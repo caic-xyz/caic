@@ -5,7 +5,7 @@ import type { HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData } fr
 import { getConfig, getPreferences, listHarnesses, listRepos, listTasks, createTask, cloneRepo, getUsage, terminateTask } from "@sdk/api.gen";
 import TaskView from "./TaskView";
 import DiffView from "./DiffView";
-import TaskList from "./TaskList";
+import TaskList, { sortTasks } from "./TaskList";
 import PromptInput from "./PromptInput";
 import Button from "./Button";
 import { requestNotificationPermission, notifyWaiting } from "./notifications";
@@ -101,15 +101,8 @@ export default function App() {
   // Ref to the main prompt textarea for focusing after Escape.
   let promptRef: HTMLTextAreaElement | undefined;
 
-  // Sort tasks the same way TaskList does: active first, then by ID descending.
-  const isTerminal = (s: string) => s === "failed" || s === "terminated";
-  const sortedTasks = () =>
-    [...tasks()].sort((a, b) => {
-      const aT = isTerminal(a.state) ? 1 : 0;
-      const bT = isTerminal(b.state) ? 1 : 0;
-      if (aT !== bT) return aT - bT;
-      return b.id > a.id ? -1 : b.id < a.id ? 1 : 0;
-    });
+  // Sort tasks the same way TaskList does: active by repo/branch, then terminal by ID.
+  const sortedTasks = () => sortTasks(tasks());
 
   // Global keyboard shortcuts:
   // - Escape: dismiss task view, focus prompt
