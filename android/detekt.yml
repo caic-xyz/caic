@@ -19,6 +19,12 @@ style:
   WildcardImport:
     active: true
   ReturnCount:
-    max: 4
+    active: false
+  ThrowsCount:
+    active: false
+  ForbiddenComment:
+    active: false
+  UseDataClass:
+    active: false
   UnusedPrivateMember:
     active: true

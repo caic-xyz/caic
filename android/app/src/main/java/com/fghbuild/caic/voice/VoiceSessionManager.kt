@@ -617,13 +617,20 @@ class VoiceSessionManager @Inject constructor(
     /** Listen for SCO audio link teardown — fired when the car's HFP hang-up disconnects
      *  the audio channel without removing the BT device from the system. */
     private fun registerScoReceiver() {
+        var scoWasConnected = false
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 if (intent.action != AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED) return
                 val state = intent.getIntExtra(
                     AudioManager.EXTRA_SCO_AUDIO_STATE, AudioManager.SCO_AUDIO_STATE_ERROR,
                 )
+                if (state == AudioManager.SCO_AUDIO_STATE_CONNECTED) {
+                    scoWasConnected = true
+                    return
+                }
                 if (state != AudioManager.SCO_AUDIO_STATE_DISCONNECTED) return
+                // Ignore spurious disconnects fired during HFP negotiation before SCO is up.
+                if (!scoWasConnected) return
                 val selectedId = _state.value.selectedDeviceId ?: return
                 val isBtSco = _state.value.availableDevices.any {
                     it.id == selectedId && it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
