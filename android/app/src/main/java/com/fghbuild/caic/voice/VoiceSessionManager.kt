@@ -86,6 +86,7 @@ class VoiceSessionManager @Inject constructor(
     private var recordingJob: Job? = null
     private var functionHandlers: FunctionHandlers? = null
     private var availableHarnesses: List<String> = emptyList()
+    private var availableRepos: List<String> = emptyList()
     private var deviceCallback: AudioDeviceCallback? = null
     private var scoReceiver: BroadcastReceiver? = null
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -149,6 +150,7 @@ class VoiceSessionManager @Inject constructor(
                     apiClient, taskRepository, settings.serverURL, taskNumberMap,
                 ) { excludedTaskIds }
                 availableHarnesses = apiClient.listHarnesses().map { it.name }
+                availableRepos = apiClient.listRepos().map { it.path }
 
                 val tokenResp = apiClient.getVoiceToken()
                 setStatus("Connecting…")
@@ -277,12 +279,12 @@ class VoiceSessionManager @Inject constructor(
     }
 
     private fun sendSetupMessage(voiceName: String) {
-        val setup = buildSetupMessage(voiceName, availableHarnesses)
+        val setup = buildSetupMessage(voiceName, availableHarnesses, availableRepos)
         Log.i(TAG, "sending setup message")
         webSocket?.send(setup)
     }
 
-    private fun buildSetupMessage(voiceName: String, harnesses: List<String>): String {
+    private fun buildSetupMessage(voiceName: String, harnesses: List<String>, repos: List<String>): String {
         val setup = BidiGenerateContentSetup(
             model = MODEL_NAME,
             generationConfig = GenerationConfig(
@@ -301,7 +303,7 @@ class VoiceSessionManager @Inject constructor(
             ),
             tools = listOf(
                 Tool(
-                    functionDeclarations = buildFunctionDeclarations(harnesses).map { fd ->
+                    functionDeclarations = buildFunctionDeclarations(harnesses, repos).map { fd ->
                         LiveFunctionDeclaration(
                             name = fd.name,
                             description = fd.description,
@@ -813,7 +815,8 @@ class VoiceSessionManager @Inject constructor(
                 "task_push_branch_to_remote, task_terminate.\n\n" +
                 "## Behavior guidelines\n" +
                 "- Be concise. The user is often away from the screen.\n" +
-                "- Summarize task status: state, elapsed time, cost, what the agent is doing.\n" +
+                "- Summarize task status: state and what the agent is doing. " +
+                "Only mention elapsed time or cost when the user specifically asks.\n" +
                 "- When an agent is asking, read the question and options clearly, wait for " +
                 "the verbal answer, then call task_answer_question.\n" +
                 "- When creating a task, use the default repo if one is provided in the " +

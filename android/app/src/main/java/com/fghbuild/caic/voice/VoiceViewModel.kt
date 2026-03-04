@@ -5,9 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.caic.sdk.v1.Task
 import com.fghbuild.caic.data.SettingsRepository
-import com.fghbuild.caic.data.TaskRepository
 import com.fghbuild.caic.util.formatCost
 import com.fghbuild.caic.util.formatElapsed
+import com.fghbuild.caic.data.TaskRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
