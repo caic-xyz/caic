@@ -255,6 +255,188 @@ func TestParseMessage(t *testing.T) {
 			t.Fatalf("got %T, want *agent.RawMessage", msgs[0])
 		}
 	})
+	t.Run("SystemNoiseDropped", func(t *testing.T) {
+		for _, subtype := range []string{"status", "task_progress", "turn_duration"} {
+			line := `{"type":"system","subtype":"` + subtype + `","session_id":"s1","uuid":"u1"}`
+			msgs, err := ParseMessage([]byte(line))
+			if err != nil {
+				t.Fatalf("subtype %q: %v", subtype, err)
+			}
+			if len(msgs) != 0 {
+				t.Errorf("subtype %q: got %d messages, want 0", subtype, len(msgs))
+			}
+		}
+	})
+	t.Run("SystemUsefulSubtypes", func(t *testing.T) {
+		for _, subtype := range []string{"compact_boundary", "context_cleared", "api_error"} {
+			line := `{"type":"system","subtype":"` + subtype + `","session_id":"s1","uuid":"u1"}`
+			msgs, err := ParseMessage([]byte(line))
+			if err != nil {
+				t.Fatalf("subtype %q: %v", subtype, err)
+			}
+			if len(msgs) != 1 {
+				t.Fatalf("subtype %q: got %d messages, want 1", subtype, len(msgs))
+			}
+			sm, ok := msgs[0].(*agent.SystemMessage)
+			if !ok {
+				t.Fatalf("subtype %q: got %T, want *agent.SystemMessage", subtype, msgs[0])
+			}
+			if sm.Subtype != subtype {
+				t.Errorf("subtype = %q, want %q", sm.Subtype, subtype)
+			}
+		}
+	})
+	t.Run("SystemTaskStarted", func(t *testing.T) {
+		line := `{"type":"system","subtype":"task_started","session_id":"s1","uuid":"u1","task_id":"task-abc","description":"Explore codebase"}`
+		msgs, err := ParseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		m, ok := msgs[0].(*agent.SubagentStartMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.SubagentStartMessage", msgs[0])
+		}
+		if m.TaskID != "task-abc" {
+			t.Errorf("task_id = %q, want %q", m.TaskID, "task-abc")
+		}
+		if m.Description != "Explore codebase" {
+			t.Errorf("description = %q, want %q", m.Description, "Explore codebase")
+		}
+	})
+	t.Run("SystemTaskNotification", func(t *testing.T) {
+		line := `{"type":"system","subtype":"task_notification","session_id":"s1","uuid":"u1","task_id":"task-abc","status":"completed"}`
+		msgs, err := ParseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		m, ok := msgs[0].(*agent.SubagentEndMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.SubagentEndMessage", msgs[0])
+		}
+		if m.TaskID != "task-abc" {
+			t.Errorf("task_id = %q, want %q", m.TaskID, "task-abc")
+		}
+		if m.Status != "completed" {
+			t.Errorf("status = %q, want %q", m.Status, "completed")
+		}
+	})
+	t.Run("AssistantThinking", func(t *testing.T) {
+		line := `{"type":"assistant","message":{"model":"claude-opus-4-6","id":"msg_01","role":"assistant","content":[{"type":"thinking","thinking":"let me think..."},{"type":"text","text":"hello"}],"usage":{"input_tokens":10,"output_tokens":5}},"session_id":"abc","uuid":"u1"}`
+		msgs, err := ParseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 3 {
+			t.Fatalf("got %d messages, want 3 (thinking + text + usage)", len(msgs))
+		}
+		tm, ok := msgs[0].(*agent.ThinkingMessage)
+		if !ok {
+			t.Fatalf("msgs[0] is %T, want *agent.ThinkingMessage", msgs[0])
+		}
+		if tm.Text != "let me think..." {
+			t.Errorf("thinking = %q, want %q", tm.Text, "let me think...")
+		}
+		if _, ok := msgs[1].(*agent.TextMessage); !ok {
+			t.Errorf("msgs[1] is %T, want *agent.TextMessage", msgs[1])
+		}
+		if _, ok := msgs[2].(*agent.UsageMessage); !ok {
+			t.Errorf("msgs[2] is %T, want *agent.UsageMessage", msgs[2])
+		}
+	})
+	t.Run("AssistantServerToolUseSkipped", func(t *testing.T) {
+		line := `{"type":"assistant","message":{"model":"m","id":"msg_01","role":"assistant","content":[{"type":"server_tool_use","id":"stu_1","name":"web_search"},{"type":"text","text":"result"}],"usage":{"input_tokens":10,"output_tokens":5}},"session_id":"abc","uuid":"u1"}`
+		msgs, err := ParseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 2 {
+			t.Fatalf("got %d messages, want 2 (text + usage)", len(msgs))
+		}
+		if _, ok := msgs[0].(*agent.TextMessage); !ok {
+			t.Errorf("msgs[0] is %T, want *agent.TextMessage", msgs[0])
+		}
+		if _, ok := msgs[1].(*agent.UsageMessage); !ok {
+			t.Errorf("msgs[1] is %T, want *agent.UsageMessage", msgs[1])
+		}
+	})
+	t.Run("AssistantOnlyThinking", func(t *testing.T) {
+		line := `{"type":"assistant","message":{"model":"m","id":"msg_01","role":"assistant","content":[{"type":"thinking","thinking":"deep thought"}],"usage":{}},"session_id":"abc","uuid":"u1"}`
+		msgs, err := ParseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		tm, ok := msgs[0].(*agent.ThinkingMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.ThinkingMessage", msgs[0])
+		}
+		if tm.Text != "deep thought" {
+			t.Errorf("text = %q, want %q", tm.Text, "deep thought")
+		}
+	})
+	t.Run("StreamEventThinkingDelta", func(t *testing.T) {
+		line := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"partial thought"}}}`
+		msgs, err := ParseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		m, ok := msgs[0].(*agent.ThinkingDeltaMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.ThinkingDeltaMessage", msgs[0])
+		}
+		if m.Text != "partial thought" {
+			t.Errorf("text = %q, want %q", m.Text, "partial thought")
+		}
+	})
+	t.Run("StreamEventNoiseDropped", func(t *testing.T) {
+		noiseLines := []string{
+			`{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}`,
+			`{"type":"stream_event","event":{"type":"content_block_stop","index":0}}`,
+			`{"type":"stream_event","event":{"type":"message_start","index":0}}`,
+			`{"type":"stream_event","event":{"type":"message_stop","index":0}}`,
+			`{"type":"stream_event","event":{"type":"message_delta","index":0}}`,
+			`{"type":"stream_event","event":{"type":"ping","index":0}}`,
+			`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{"}}}`,
+			`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","text":"sig"}}}`,
+		}
+		for _, line := range noiseLines {
+			msgs, err := ParseMessage([]byte(line))
+			if err != nil {
+				t.Fatalf("line %s: %v", line, err)
+			}
+			if len(msgs) != 0 {
+				t.Errorf("line %s: got %d messages, want 0", line, len(msgs))
+			}
+		}
+	})
+	t.Run("StreamEventError", func(t *testing.T) {
+		line := `{"type":"stream_event","event":{"type":"error","index":0}}`
+		msgs, err := ParseMessage([]byte(line))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		sm, ok := msgs[0].(*agent.SystemMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.SystemMessage", msgs[0])
+		}
+		if sm.Subtype != "api_error" {
+			t.Errorf("subtype = %q, want %q", sm.Subtype, "api_error")
+		}
+	})
 	t.Run("UnknownFieldsForwardCompat", func(t *testing.T) {
 		// An init record with an extra unknown field should parse successfully
 		// (forward compatibility). The known fields must still be extracted.

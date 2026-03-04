@@ -221,6 +221,10 @@ var kotlinAliases = []kotlinTypeAlias{
 			{"UserInput", string(v1.EventKindUserInput)},
 			{"Todo", string(v1.EventKindTodo)},
 			{"DiffStat", string(v1.EventKindDiffStat)},
+			{"Thinking", string(v1.EventKindThinking)},
+			{"ThinkingDelta", string(v1.EventKindThinkingDelta)},
+			{"SubagentStart", string(v1.EventKindSubagentStart)},
+			{"SubagentEnd", string(v1.EventKindSubagentEnd)},
 		},
 	},
 }

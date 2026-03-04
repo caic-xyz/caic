@@ -154,6 +154,14 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
       case "diffStat":
         // Metadata-only; live diff stat shown in the task list via Task.diffStat.
         break;
+      case "thinking":
+      case "thinkingDelta":
+      case "subagentStart":
+      case "subagentEnd":
+        // Skip: thinking blocks and subagent lifecycle events are not rendered
+        // yet. Explicitly listed to avoid creating OTHER groups that would act
+        // as hard boundaries for tool group merging.
+        break;
       default:
         groups.push({ kind: "other", events: [ev], toolCalls: [] });
         break;

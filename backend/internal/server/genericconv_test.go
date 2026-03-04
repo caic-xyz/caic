@@ -227,6 +227,66 @@ func TestGenericConvertSystemMessage(t *testing.T) {
 	}
 }
 
+func TestGenericConvertThinking(t *testing.T) {
+	gt := newToolTimingTracker(agent.Claude)
+	msg := &agent.ThinkingMessage{Text: "let me think..."}
+	events := gt.convertMessage(msg, time.Now())
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Kind != v1.EventKindThinking {
+		t.Errorf("kind = %q, want %q", events[0].Kind, v1.EventKindThinking)
+	}
+	if events[0].Thinking == nil {
+		t.Fatal("thinking payload is nil")
+	}
+	if events[0].Thinking.Text != "let me think..." {
+		t.Errorf("text = %q, want %q", events[0].Thinking.Text, "let me think...")
+	}
+}
+
+func TestGenericConvertSubagentStart(t *testing.T) {
+	gt := newToolTimingTracker(agent.Claude)
+	msg := &agent.SubagentStartMessage{TaskID: "task-1", Description: "Explore code"}
+	events := gt.convertMessage(msg, time.Now())
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Kind != v1.EventKindSubagentStart {
+		t.Errorf("kind = %q, want %q", events[0].Kind, v1.EventKindSubagentStart)
+	}
+	if events[0].SubagentStart == nil {
+		t.Fatal("subagentStart payload is nil")
+	}
+	if events[0].SubagentStart.TaskID != "task-1" {
+		t.Errorf("taskID = %q, want %q", events[0].SubagentStart.TaskID, "task-1")
+	}
+	if events[0].SubagentStart.Description != "Explore code" {
+		t.Errorf("description = %q, want %q", events[0].SubagentStart.Description, "Explore code")
+	}
+}
+
+func TestGenericConvertSubagentEnd(t *testing.T) {
+	gt := newToolTimingTracker(agent.Claude)
+	msg := &agent.SubagentEndMessage{TaskID: "task-1", Status: "completed"}
+	events := gt.convertMessage(msg, time.Now())
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Kind != v1.EventKindSubagentEnd {
+		t.Errorf("kind = %q, want %q", events[0].Kind, v1.EventKindSubagentEnd)
+	}
+	if events[0].SubagentEnd == nil {
+		t.Fatal("subagentEnd payload is nil")
+	}
+	if events[0].SubagentEnd.TaskID != "task-1" {
+		t.Errorf("taskID = %q, want %q", events[0].SubagentEnd.TaskID, "task-1")
+	}
+	if events[0].SubagentEnd.Status != "completed" {
+		t.Errorf("status = %q, want %q", events[0].SubagentEnd.Status, "completed")
+	}
+}
+
 func TestGenericConvertRawMessageFiltered(t *testing.T) {
 	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.RawMessage{

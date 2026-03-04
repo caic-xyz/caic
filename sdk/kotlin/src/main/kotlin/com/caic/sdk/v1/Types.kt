@@ -28,6 +28,10 @@ object EventKinds {
     const val UserInput: EventKind = "userInput"
     const val Todo: EventKind = "todo"
     const val DiffStat: EventKind = "diffStat"
+    const val Thinking: EventKind = "thinking"
+    const val ThinkingDelta: EventKind = "thinkingDelta"
+    const val SubagentStart: EventKind = "subagentStart"
+    const val SubagentEnd: EventKind = "subagentEnd"
 }
 
 object ErrorCodes {
@@ -244,6 +248,24 @@ data class EventDiffStat(val diffStat: List<DiffFileStat>? = null)
 @Serializable
 data class EventError(val err: String, val line: String)
 
+@Serializable
+data class EventThinking(val text: String)
+
+@Serializable
+data class EventThinkingDelta(val text: String)
+
+@Serializable
+data class EventSubagentStart(
+    @SerialName("taskID") val taskID: String,
+    val description: String,
+)
+
+@Serializable
+data class EventSubagentEnd(
+    @SerialName("taskID") val taskID: String,
+    val status: String,
+)
+
 // Backend-neutral event types
 
 @Serializable
@@ -263,6 +285,10 @@ data class EventMessage(
     val todo: EventTodo? = null,
     val diffStat: EventDiffStat? = null,
     val error: EventError? = null,
+    val thinking: EventThinking? = null,
+    val thinkingDelta: EventThinkingDelta? = null,
+    val subagentStart: EventSubagentStart? = null,
+    val subagentEnd: EventSubagentEnd? = null,
 )
 
 @Serializable

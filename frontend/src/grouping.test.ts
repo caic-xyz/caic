@@ -99,6 +99,20 @@ describe("groupMessages", () => {
     expect(groups[0].kind).toBe("tool");
     expect(groups[0].toolCalls).toHaveLength(3);
   });
+
+  it("thinking and subagent events are skipped and don't split tool groups", () => {
+    const groups = groupMessages([
+      toolUseEvent("t1", "Read"),
+      { kind: "thinking", ts: 0, thinking: { text: "hmm" } },
+      { kind: "thinkingDelta", ts: 0, thinkingDelta: { text: "partial" } },
+      { kind: "subagentStart", ts: 0, subagentStart: { taskID: "sa1", description: "explore" } },
+      toolUseEvent("t2", "Bash"),
+      { kind: "subagentEnd", ts: 0, subagentEnd: { taskID: "sa1", status: "completed" } },
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].kind).toBe("tool");
+    expect(groups[0].toolCalls).toHaveLength(2);
+  });
 });
 
 describe("groupTurns", () => {

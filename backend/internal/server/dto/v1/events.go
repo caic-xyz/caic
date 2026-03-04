@@ -15,39 +15,47 @@ type EventKind string
 
 // Event kind constants.
 const (
-	EventKindInit       EventKind = "init"
-	EventKindText       EventKind = "text"
-	EventKindTextDelta  EventKind = "textDelta"
-	EventKindToolUse    EventKind = "toolUse"
-	EventKindToolResult EventKind = "toolResult"
-	EventKindAsk        EventKind = "ask"
-	EventKindUsage      EventKind = "usage"
-	EventKindResult     EventKind = "result"
-	EventKindSystem     EventKind = "system"
-	EventKindUserInput  EventKind = "userInput"
-	EventKindTodo       EventKind = "todo"
-	EventKindDiffStat   EventKind = "diffStat"
-	EventKindError      EventKind = "error"
+	EventKindInit          EventKind = "init"
+	EventKindText          EventKind = "text"
+	EventKindTextDelta     EventKind = "textDelta"
+	EventKindToolUse       EventKind = "toolUse"
+	EventKindToolResult    EventKind = "toolResult"
+	EventKindAsk           EventKind = "ask"
+	EventKindUsage         EventKind = "usage"
+	EventKindResult        EventKind = "result"
+	EventKindSystem        EventKind = "system"
+	EventKindUserInput     EventKind = "userInput"
+	EventKindTodo          EventKind = "todo"
+	EventKindDiffStat      EventKind = "diffStat"
+	EventKindError         EventKind = "error"
+	EventKindThinking      EventKind = "thinking"
+	EventKindThinkingDelta EventKind = "thinkingDelta"
+	EventKindSubagentStart EventKind = "subagentStart"
+	EventKindSubagentEnd   EventKind = "subagentEnd"
 )
 
 // EventMessage is a single SSE event in the backend-neutral stream
 // (/api/v1/tasks/{id}/events). All backends produce these events.
 type EventMessage struct {
-	Kind       EventKind        `json:"kind"`
-	Ts         int64            `json:"ts"`
-	Init       *EventInit       `json:"init,omitempty"`
-	Text       *EventText       `json:"text,omitempty"`
-	TextDelta  *EventTextDelta  `json:"textDelta,omitempty"`
-	ToolUse    *EventToolUse    `json:"toolUse,omitempty"`
-	ToolResult *EventToolResult `json:"toolResult,omitempty"`
-	Ask        *EventAsk        `json:"ask,omitempty"`
-	Usage      *EventUsage      `json:"usage,omitempty"`
-	Result     *EventResult     `json:"result,omitempty"`
-	System     *EventSystem     `json:"system,omitempty"`
-	UserInput  *EventUserInput  `json:"userInput,omitempty"`
-	Todo       *EventTodo       `json:"todo,omitempty"`
-	DiffStat   *EventDiffStat   `json:"diffStat,omitempty"`
-	Error      *EventError      `json:"error,omitempty"`
+	Kind          EventKind           `json:"kind"`
+	Ts            int64               `json:"ts"`
+	Init          *EventInit          `json:"init,omitempty"`
+	Text          *EventText          `json:"text,omitempty"`
+	TextDelta     *EventTextDelta     `json:"textDelta,omitempty"`
+	ToolUse       *EventToolUse       `json:"toolUse,omitempty"`
+	ToolResult    *EventToolResult    `json:"toolResult,omitempty"`
+	Ask           *EventAsk           `json:"ask,omitempty"`
+	Usage         *EventUsage         `json:"usage,omitempty"`
+	Result        *EventResult        `json:"result,omitempty"`
+	System        *EventSystem        `json:"system,omitempty"`
+	UserInput     *EventUserInput     `json:"userInput,omitempty"`
+	Todo          *EventTodo          `json:"todo,omitempty"`
+	DiffStat      *EventDiffStat      `json:"diffStat,omitempty"`
+	Error         *EventError         `json:"error,omitempty"`
+	Thinking      *EventThinking      `json:"thinking,omitempty"`
+	ThinkingDelta *EventThinkingDelta `json:"thinkingDelta,omitempty"`
+	SubagentStart *EventSubagentStart `json:"subagentStart,omitempty"`
+	SubagentEnd   *EventSubagentEnd   `json:"subagentEnd,omitempty"`
 }
 
 // EventInit is emitted once at the start of a session. It includes a Harness
@@ -161,4 +169,26 @@ type EventDiffStat struct {
 type EventError struct {
 	Err  string `json:"err"`
 	Line string `json:"line"`
+}
+
+// EventThinking is an assistant thinking block.
+type EventThinking struct {
+	Text string `json:"text"`
+}
+
+// EventThinkingDelta is a streaming thinking fragment.
+type EventThinkingDelta struct {
+	Text string `json:"text"`
+}
+
+// EventSubagentStart is emitted when a subagent task begins.
+type EventSubagentStart struct {
+	TaskID      string `json:"taskID"`
+	Description string `json:"description"`
+}
+
+// EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
+type EventSubagentEnd struct {
+	TaskID string `json:"taskID"`
+	Status string `json:"status"` // "completed", "failed", "stopped"
 }

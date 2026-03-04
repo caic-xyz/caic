@@ -191,6 +191,40 @@ type TextDeltaMessage struct {
 // Type implements Message.
 func (m *TextDeltaMessage) Type() string { return "text_delta" }
 
+// ThinkingMessage is emitted when the agent produces a thinking block.
+type ThinkingMessage struct {
+	Text string `json:"text"`
+}
+
+// Type implements Message.
+func (m *ThinkingMessage) Type() string { return "thinking" }
+
+// ThinkingDeltaMessage is a streaming thinking fragment.
+type ThinkingDeltaMessage struct {
+	Text string
+}
+
+// Type implements Message.
+func (m *ThinkingDeltaMessage) Type() string { return "thinking_delta" }
+
+// SubagentStartMessage is emitted when a subagent task begins.
+type SubagentStartMessage struct {
+	TaskID      string `json:"task_id"`
+	Description string `json:"description"`
+}
+
+// Type implements Message.
+func (m *SubagentStartMessage) Type() string { return "subagent_start" }
+
+// SubagentEndMessage is emitted when a subagent task completes, fails, or stops.
+type SubagentEndMessage struct {
+	TaskID string `json:"task_id"`
+	Status string `json:"status"` // "completed", "failed", "stopped"
+}
+
+// Type implements Message.
+func (m *SubagentEndMessage) Type() string { return "subagent_end" }
+
 // RawMessage is a pass-through for message types we don't need to inspect
 // (tool_progress, etc.).
 type RawMessage struct {

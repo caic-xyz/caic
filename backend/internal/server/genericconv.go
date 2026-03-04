@@ -158,6 +158,42 @@ func (tt *toolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 			}}
 		}
 		return nil
+	case *agent.ThinkingMessage:
+		if m.Text != "" {
+			return []v1.EventMessage{{
+				Kind:     v1.EventKindThinking,
+				Ts:       ts,
+				Thinking: &v1.EventThinking{Text: m.Text},
+			}}
+		}
+		return nil
+	case *agent.ThinkingDeltaMessage:
+		if m.Text != "" {
+			return []v1.EventMessage{{
+				Kind:          v1.EventKindThinkingDelta,
+				Ts:            ts,
+				ThinkingDelta: &v1.EventThinkingDelta{Text: m.Text},
+			}}
+		}
+		return nil
+	case *agent.SubagentStartMessage:
+		return []v1.EventMessage{{
+			Kind: v1.EventKindSubagentStart,
+			Ts:   ts,
+			SubagentStart: &v1.EventSubagentStart{
+				TaskID:      m.TaskID,
+				Description: m.Description,
+			},
+		}}
+	case *agent.SubagentEndMessage:
+		return []v1.EventMessage{{
+			Kind: v1.EventKindSubagentEnd,
+			Ts:   ts,
+			SubagentEnd: &v1.EventSubagentEnd{
+				TaskID: m.TaskID,
+				Status: m.Status,
+			},
+		}}
 	case *agent.DiffStatMessage:
 		return []v1.EventMessage{{
 			Kind:     v1.EventKindDiffStat,

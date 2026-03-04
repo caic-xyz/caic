@@ -70,6 +70,22 @@ export const EventKindDiffStat: EventKind = "diffStat";
  */
 export const EventKindError: EventKind = "error";
 /**
+ * Event kind constants.
+ */
+export const EventKindThinking: EventKind = "thinking";
+/**
+ * Event kind constants.
+ */
+export const EventKindThinkingDelta: EventKind = "thinkingDelta";
+/**
+ * Event kind constants.
+ */
+export const EventKindSubagentStart: EventKind = "subagentStart";
+/**
+ * Event kind constants.
+ */
+export const EventKindSubagentEnd: EventKind = "subagentEnd";
+/**
  * EventMessage is a single SSE event in the backend-neutral stream
  * (/api/v1/tasks/{id}/events). All backends produce these events.
  */
@@ -89,6 +105,10 @@ export interface EventMessage {
   todo?: EventTodo;
   diffStat?: EventDiffStat;
   error?: EventError;
+  thinking?: EventThinking;
+  thinkingDelta?: EventThinkingDelta;
+  subagentStart?: EventSubagentStart;
+  subagentEnd?: EventSubagentEnd;
 }
 /**
  * EventInit is emitted once at the start of a session. It includes a Harness
@@ -218,6 +238,32 @@ export interface EventDiffStat {
 export interface EventError {
   err: string;
   line: string;
+}
+/**
+ * EventThinking is an assistant thinking block.
+ */
+export interface EventThinking {
+  text: string;
+}
+/**
+ * EventThinkingDelta is a streaming thinking fragment.
+ */
+export interface EventThinkingDelta {
+  text: string;
+}
+/**
+ * EventSubagentStart is emitted when a subagent task begins.
+ */
+export interface EventSubagentStart {
+  taskID: string;
+  description: string;
+}
+/**
+ * EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
+ */
+export interface EventSubagentEnd {
+  taskID: string;
+  status: string; // "completed", "failed", "stopped"
 }
 
 //////////

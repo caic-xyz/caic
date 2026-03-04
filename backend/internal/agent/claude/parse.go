@@ -76,12 +76,27 @@ func parseSystem(line []byte, subtype string) ([]agent.Message, error) {
 	if err := json.Unmarshal(line, &w); err != nil {
 		return nil, err
 	}
-	return []agent.Message{&agent.SystemMessage{
-		MessageType: w.Type,
-		Subtype:     w.Subtype,
-		SessionID:   w.SessionID,
-		UUID:        w.UUID,
-	}}, nil
+	switch subtype {
+	case "task_started":
+		return []agent.Message{&agent.SubagentStartMessage{
+			TaskID:      jsonString(w.TaskID),
+			Description: jsonString(w.Description),
+		}}, nil
+	case "task_notification":
+		return []agent.Message{&agent.SubagentEndMessage{
+			TaskID: jsonString(w.TaskID),
+			Status: jsonString(w.Status),
+		}}, nil
+	case "status", "task_progress", "turn_duration":
+		return nil, nil
+	default:
+		return []agent.Message{&agent.SystemMessage{
+			MessageType: w.Type,
+			Subtype:     w.Subtype,
+			SessionID:   w.SessionID,
+			UUID:        w.UUID,
+		}}, nil
+	}
 }
 
 func parseAssistant(line []byte) ([]agent.Message, error) {
@@ -99,6 +114,12 @@ func parseAssistant(line []byte) ([]agent.Message, error) {
 			}
 		case "tool_use":
 			msgs = append(msgs, parseToolUseBlock(b)...)
+		case "thinking":
+			if b.Thinking != "" {
+				msgs = append(msgs, &agent.ThinkingMessage{Text: b.Thinking})
+			}
+		case "server_tool_use", "web_search_tool_result", "tool_result":
+			continue
 		}
 	}
 	u := w.Message.Usage
@@ -204,8 +225,45 @@ func parseStreamEvent(line []byte) ([]agent.Message, error) {
 	if err := json.Unmarshal(line, &w); err != nil {
 		return nil, err
 	}
-	if w.Event.Type == "content_block_delta" && w.Event.Delta != nil && w.Event.Delta.Type == "text_delta" && w.Event.Delta.Text != "" {
-		return []agent.Message{&agent.TextDeltaMessage{Text: w.Event.Delta.Text}}, nil
+	switch w.Event.Type {
+	case "content_block_delta":
+		if w.Event.Delta == nil {
+			return nil, nil
+		}
+		switch w.Event.Delta.Type {
+		case "text_delta":
+			if w.Event.Delta.Text != "" {
+				return []agent.Message{&agent.TextDeltaMessage{Text: w.Event.Delta.Text}}, nil
+			}
+			return nil, nil
+		case "thinking_delta":
+			if w.Event.Delta.Thinking != "" {
+				return []agent.Message{&agent.ThinkingDeltaMessage{Text: w.Event.Delta.Thinking}}, nil
+			}
+			return nil, nil
+		case "input_json_delta", "signature_delta":
+			return nil, nil
+		default:
+			return nil, nil
+		}
+	case "content_block_start", "content_block_stop",
+		"message_start", "message_stop", "message_delta", "ping":
+		return nil, nil
+	case "error":
+		return []agent.Message{&agent.SystemMessage{
+			MessageType: "system",
+			Subtype:     "api_error",
+		}}, nil
+	default:
+		return []agent.Message{&agent.RawMessage{MessageType: "stream_event", Raw: append([]byte(nil), line...)}}, nil
 	}
-	return []agent.Message{&agent.RawMessage{MessageType: "stream_event", Raw: append([]byte(nil), line...)}}, nil
+}
+
+// jsonString extracts a JSON string value from a json.RawMessage.
+func jsonString(raw json.RawMessage) string {
+	var s string
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &s)
+	}
+	return s
 }

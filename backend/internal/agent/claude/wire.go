@@ -128,11 +128,13 @@ func (w *assistantMessageBody) UnmarshalJSON(data []byte) error {
 
 // contentBlockWire is a single content block inside an assistant message.
 type contentBlockWire struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text,omitempty"`
-	ID    string          `json:"id,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
+	Signature string          `json:"signature,omitempty"`
 }
 
 // ---------- user ----------
@@ -222,6 +224,7 @@ type streamDeltaWire struct {
 	Type        string `json:"type"`
 	Text        string `json:"text"`
 	PartialJSON string `json:"partial_json"`
+	Thinking    string `json:"thinking"`
 }
 
 // ---------- Helper types (no jsonutil.Overflow — not top-level wire objects) ----------

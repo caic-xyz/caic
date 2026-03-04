@@ -163,6 +163,11 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
             }
             EventKinds.Todo -> { /* Rendered by TodoPanel directly; skip to avoid splitting tool groups. */ }
             EventKinds.DiffStat -> { /* Metadata-only; skip. */ }
+            // Thinking blocks and subagent lifecycle events are not rendered yet.
+            // Explicitly listed to avoid creating OTHER groups that would act as
+            // hard boundaries for tool group merging.
+            EventKinds.Thinking, EventKinds.ThinkingDelta,
+            EventKinds.SubagentStart, EventKinds.SubagentEnd -> {}
             else -> {
                 groups.add(MutableGroup(kind = GroupKind.OTHER, events = mutableListOf(ev)))
             }

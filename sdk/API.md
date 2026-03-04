@@ -323,6 +323,32 @@ All errors return:
 | `err` | `string` | yes |
 | `line` | `string` | yes |
 
+### EventThinking
+
+| Field | Type | Required |
+|-------|------|----------|
+| `text` | `string` | yes |
+
+### EventThinkingDelta
+
+| Field | Type | Required |
+|-------|------|----------|
+| `text` | `string` | yes |
+
+### EventSubagentStart
+
+| Field | Type | Required |
+|-------|------|----------|
+| `taskID` | `string` | yes |
+| `description` | `string` | yes |
+
+### EventSubagentEnd
+
+| Field | Type | Required |
+|-------|------|----------|
+| `taskID` | `string` | yes |
+| `status` | `string` | yes |
+
 ### EventMessage
 
 | Field | Type | Required |
@@ -342,6 +368,10 @@ All errors return:
 | `todo` | `EventTodo` |  |
 | `diffStat` | `EventDiffStat` |  |
 | `error` | `EventError` |  |
+| `thinking` | `EventThinking` |  |
+| `thinkingDelta` | `EventThinkingDelta` |  |
+| `subagentStart` | `EventSubagentStart` |  |
+| `subagentEnd` | `EventSubagentEnd` |  |
 
 ### InputReq
 
