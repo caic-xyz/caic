@@ -65,7 +65,7 @@ func TestThreadStartedParams(t *testing.T) {
 		}
 	})
 	t.Run("KnownThreadInfoFields", func(t *testing.T) {
-		const input = `{"thread":{"id":"t1","cliVersion":"0.1.0","createdAt":1771690198,"cwd":"/repo","gitInfo":{"branch":"main"},"modelProvider":"openai","path":"/repo","preview":"fix the bug","source":"user","turns":[],"updatedAt":1771690200}}`
+		const input = `{"thread":{"id":"t1","cliVersion":"0.1.0","createdAt":1771690198,"cwd":"/repo","ephemeral":false,"gitInfo":{"branch":"main"},"modelProvider":"openai","path":"/repo","preview":"fix the bug","source":"user","status":{"type":"idle"},"turns":[],"updatedAt":1771690200}}`
 		var p ThreadStartedParams
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
@@ -73,8 +73,24 @@ func TestThreadStartedParams(t *testing.T) {
 		if p.Thread.ID != "t1" {
 			t.Errorf("Thread.ID = %q", p.Thread.ID)
 		}
+		if p.Thread.Status.Type != "idle" {
+			t.Errorf("Thread.Status.Type = %q, want idle", p.Thread.Status.Type)
+		}
 		if len(p.Thread.Extra) != 0 {
 			t.Errorf("unexpected extra fields in ThreadInfo: %v", p.Thread.Extra)
+		}
+	})
+	t.Run("ThreadStatusActive", func(t *testing.T) {
+		const input = `{"thread":{"id":"t1","status":{"type":"active","activeFlags":["waitingOnApproval"]}}}`
+		var p ThreadStartedParams
+		if err := json.Unmarshal([]byte(input), &p); err != nil {
+			t.Fatal(err)
+		}
+		if p.Thread.Status.Type != "active" {
+			t.Errorf("Thread.Status.Type = %q, want active", p.Thread.Status.Type)
+		}
+		if len(p.Thread.Status.ActiveFlags) != 1 || p.Thread.Status.ActiveFlags[0] != "waitingOnApproval" {
+			t.Errorf("Thread.Status.ActiveFlags = %v", p.Thread.Status.ActiveFlags)
 		}
 	})
 	t.Run("UnknownFields", func(t *testing.T) {
@@ -485,13 +501,13 @@ func TestDeltaNotificationParams(t *testing.T) {
 		}
 	})
 	t.Run("ThreadStatusChanged", func(t *testing.T) {
-		const input = `{"threadId":"t1","status":"idle"}`
+		const input = `{"threadId":"t1","status":{"type":"idle"}}`
 		var p ThreadStatusChangedParams
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
-		if p.Status != "idle" {
-			t.Errorf("Status = %q", p.Status)
+		if p.Status.Type != "idle" {
+			t.Errorf("Status.Type = %q, want idle", p.Status.Type)
 		}
 	})
 	t.Run("ModelRerouted", func(t *testing.T) {
@@ -521,7 +537,7 @@ func TestDeltaNotificationParams(t *testing.T) {
 		}
 	})
 	t.Run("UnknownField", func(t *testing.T) {
-		const input = `{"threadId":"t1","status":"idle","surprise":1}`
+		const input = `{"threadId":"t1","status":{"type":"idle"},"surprise":1}`
 		var p ThreadStatusChangedParams
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)

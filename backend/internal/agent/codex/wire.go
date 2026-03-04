@@ -123,18 +123,26 @@ type ThreadInfo struct {
 	CLIVersion    string          `json:"cliVersion,omitzero"`
 	CreatedAt     int64           `json:"createdAt,omitzero"`
 	CWD           string          `json:"cwd,omitzero"`
+	Ephemeral     bool            `json:"ephemeral,omitzero"`
 	GitInfo       json.RawMessage `json:"gitInfo,omitzero"`
 	ModelProvider string          `json:"modelProvider,omitzero"`
 	Path          string          `json:"path,omitzero"`
 	Preview       string          `json:"preview,omitzero"`
 	Source        string          `json:"source,omitzero"`
 	UpdatedAt     int64           `json:"updatedAt,omitzero"`
-	Status        string          `json:"status,omitzero"`
+	Status        ThreadStatus    `json:"status,omitzero"`
 	Name          string          `json:"name,omitzero"`
 	AgentNickname string          `json:"agentNickname,omitzero"`
 	AgentRole     string          `json:"agentRole,omitzero"`
 	Turns         json.RawMessage `json:"turns,omitzero"`
 	jsonutil.Overflow
+}
+
+// ThreadStatus is a tagged union representing thread lifecycle state.
+// Variants: notLoaded, idle, systemError, active (with activeFlags).
+type ThreadStatus struct {
+	Type        string   `json:"type"`
+	ActiveFlags []string `json:"activeFlags,omitzero"`
 }
 
 var threadInfoKnown = jsonutil.KnownFields(ThreadInfo{})
@@ -748,8 +756,8 @@ func (p *TurnPlanUpdatedParams) UnmarshalJSON(data []byte) error {
 
 // ThreadStatusChangedParams holds params for thread/status/changed.
 type ThreadStatusChangedParams struct {
-	ThreadID string `json:"threadId"`
-	Status   string `json:"status"`
+	ThreadID string       `json:"threadId"`
+	Status   ThreadStatus `json:"status"`
 	jsonutil.Overflow
 }
 
