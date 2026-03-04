@@ -225,6 +225,7 @@ All errors return:
 | `toolUseID` | `string` | yes |
 | `name` | `string` | yes |
 | `input` | `object` | yes |
+| `planContent` | `string` |  |
 
 ### EventToolResult
 

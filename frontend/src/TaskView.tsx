@@ -677,28 +677,37 @@ function ToolCallBlock(props: { call: ToolCall; open: boolean; onToggle: (open: 
   const error = () => props.call.result?.error ?? "";
   const detail = () => toolCallDetail(props.call.use.name, props.call.use.input ?? {});
   return (
-    <details class={styles.toolBlock} open={props.open}
-      onToggle={(e) => props.onToggle(e.currentTarget.open)}>
-      <summary>
-        <Show when={!props.call.done} fallback={<span class={styles.toolDone}>&#10003;</span>}>
-          <span class={styles.toolPending} />
-        </Show>
-        {props.call.use.name}
-        <Show when={detail()}>
-          <span class={styles.toolDetail}>{detail()}</span>
-        </Show>
-        <Show when={duration() > 0}>
-          <span class={styles.toolDuration}>{formatDuration(duration())}</span>
-        </Show>
+    <>
+      <details class={styles.toolBlock} open={props.open}
+        onToggle={(e) => props.onToggle(e.currentTarget.open)}>
+        <summary>
+          <Show when={!props.call.done} fallback={<span class={styles.toolDone}>&#10003;</span>}>
+            <span class={styles.toolPending} />
+          </Show>
+          {props.call.use.name}
+          <Show when={detail()}>
+            <span class={styles.toolDetail}>{detail()}</span>
+          </Show>
+          <Show when={duration() > 0}>
+            <span class={styles.toolDuration}>{formatDuration(duration())}</span>
+          </Show>
+          <Show when={error()}>
+            <span class={styles.toolError}> error</span>
+          </Show>
+        </summary>
+        <ToolCallInput input={props.call.use.input ?? {}} />
         <Show when={error()}>
-          <span class={styles.toolError}> error</span>
+          <pre class={styles.toolErrorPre}>{error()}</pre>
         </Show>
-      </summary>
-      <ToolCallInput input={props.call.use.input ?? {}} />
-      <Show when={error()}>
-        <pre class={styles.toolErrorPre}>{error()}</pre>
+      </details>
+      <Show when={props.call.use.planContent} keyed>
+        {(plan) => (
+          <div class={styles.planContent}>
+            <Markdown text={plan} />
+          </div>
+        )}
       </Show>
-    </details>
+    </>
   );
 }
 

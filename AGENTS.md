@@ -11,6 +11,15 @@ For specific guidelines, see:
 
 caic manages multiple coding agents in parallel. Each task runs in an isolated [md](https://github.com/caic-xyz/md) container with Claude Code communicating via streaming JSON over SSH.
 
+### Frontend / Android Parity
+
+`frontend/` (SolidJS) and `android/` (Compose) are two clients for the same
+backend. **Every user-facing change must be applied to both.** This includes but
+is not limited to: new task states, state colors, conditional UI, inline content
+rendering, and any feature gated on event fields. When you add or modify
+behaviour in one client, find and update the corresponding code in the other
+before considering the task complete.
+
 ### Documentation Changes
 
 - **Do NOT** create a markdown file listing changes you made.

@@ -170,6 +170,7 @@ data class EventToolUse(
     @SerialName("toolUseID") val toolUseID: String,
     val name: String,
     val input: JsonElement,
+    val planContent: String? = null,
 )
 
 @Serializable

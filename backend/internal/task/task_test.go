@@ -502,6 +502,21 @@ func TestTask(t *testing.T) {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateWaiting)
 			}
 		})
+		t.Run("ExitPlanModeSnapshotsPlanContent", func(t *testing.T) {
+			// trackToolUse must snapshot planContent onto the ExitPlanMode
+			// ToolUseMessage so the SSE converter can include it.
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			tk.addMessage(t.Context(), &agent.ToolUseMessage{
+				ToolUseID: "tu1", Name: "Write",
+				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan A"}`),
+			})
+			exitMsg := &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"}
+			tk.addMessage(t.Context(), exitMsg)
+			if exitMsg.PlanContent != "plan A" {
+				t.Errorf("ExitPlanMode.PlanContent = %q, want %q", exitMsg.PlanContent, "plan A")
+			}
+		})
 		t.Run("HasPlanToRunningOnText", func(t *testing.T) {
 			// TextMessage while HasPlan → Running.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}

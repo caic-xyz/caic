@@ -62,9 +62,10 @@ func (tt *toolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 			Kind: v1.EventKindToolUse,
 			Ts:   ts,
 			ToolUse: &v1.EventToolUse{
-				ToolUseID: m.ToolUseID,
-				Name:      m.Name,
-				Input:     m.Input,
+				ToolUseID:   m.ToolUseID,
+				Name:        m.Name,
+				Input:       m.Input,
+				PlanContent: m.PlanContent,
 			},
 		}}
 	case *agent.AskMessage:

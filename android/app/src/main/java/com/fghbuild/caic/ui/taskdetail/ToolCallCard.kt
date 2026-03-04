@@ -2,6 +2,7 @@
 package com.fghbuild.caic.ui.taskdetail
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -28,13 +30,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.fghbuild.caic.ui.theme.markdownTypography
 import com.fghbuild.caic.util.ToolCall
 import com.fghbuild.caic.util.formatDuration
 import com.fghbuild.caic.util.toolCallDetail
+import com.mikepenz.markdown.m3.Markdown
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonPrimitive
+
+private val PlanBorderColor = Color(0xFFDDD6FE)
+private val PlanBgColor = Color(0xFFF5F3FF)
 
 @Composable
 fun ToolCallCard(call: ToolCall, modifier: Modifier = Modifier) {
@@ -42,55 +49,73 @@ fun ToolCallCard(call: ToolCall, modifier: Modifier = Modifier) {
     val detail = remember(call.use.toolUseID) { toolCallDetail(call.use.name, call.use.input) }
     val hasError = call.result?.error != null
 
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        tonalElevation = 1.dp,
-        shape = MaterialTheme.shapes.small,
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded }
-                    .padding(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                ToolStatusIcon(done = call.done, hasError = hasError)
-                Text(
-                    text = call.use.name,
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                if (detail != null) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            tonalElevation = 1.dp,
+            shape = MaterialTheme.shapes.small,
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { expanded = !expanded }
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ToolStatusIcon(done = call.done, hasError = hasError)
                     Text(
-                        text = detail,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
+                        text = call.use.name,
+                        style = MaterialTheme.typography.labelMedium,
                     )
-                }
-                call.result?.let { result ->
-                    Text(
-                        text = formatDuration(result.duration),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            AnimatedVisibility(visible = expanded) {
-                Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                    ToolInputDisplay(input = call.use.input)
-                    call.result?.error?.let { error ->
+                    if (detail != null) {
                         Text(
-                            text = error,
+                            text = detail,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(top = 4.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    call.result?.let { result ->
+                        Text(
+                            text = formatDuration(result.duration),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
+                AnimatedVisibility(visible = expanded) {
+                    Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                        ToolInputDisplay(input = call.use.input)
+                        call.result?.error?.let { error ->
+                            Text(
+                                text = error,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        call.use.planContent?.let { plan ->
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+                    .border(1.dp, PlanBorderColor, RoundedCornerShape(6.dp)),
+                shape = RoundedCornerShape(6.dp),
+                color = PlanBgColor,
+            ) {
+                Markdown(
+                    content = plan,
+                    modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                    typography = markdownTypography(),
+                )
             }
         }
     }

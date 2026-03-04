@@ -68,9 +68,10 @@ func (m *TextMessage) Type() string { return "text" }
 // ToolUseMessage is emitted when the agent invokes a tool (except
 // AskUserQuestion and TodoWrite which have their own types).
 type ToolUseMessage struct {
-	ToolUseID string          `json:"id"`
-	Name      string          `json:"name"`
-	Input     json.RawMessage `json:"input,omitempty"`
+	ToolUseID   string          `json:"id"`
+	Name        string          `json:"name"`
+	Input       json.RawMessage `json:"input,omitempty"`
+	PlanContent string          `json:"-"` // Snapshot of plan content; set by task on ExitPlanMode.
 }
 
 // Type implements Message.

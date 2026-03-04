@@ -483,6 +483,7 @@ func (t *Task) trackToolUse(tu *agent.ToolUseMessage) {
 		t.inPlanMode = true
 	case "ExitPlanMode":
 		t.inPlanMode = false
+		tu.PlanContent = t.planContent
 	case "Write":
 		if t.planDismissed {
 			return

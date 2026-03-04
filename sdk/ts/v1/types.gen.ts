@@ -121,6 +121,7 @@ export interface EventToolUse {
   toolUseID: string;
   name: string;
   input: any /* json.RawMessage */;
+  planContent?: string; // Snapshot of plan content for ExitPlanMode events.
 }
 /**
  * EventToolResult is emitted when a tool call completes.

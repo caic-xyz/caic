@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.caic.ui.theme.stateColor
+import com.fghbuild.caic.ui.theme.waitingStates
 import com.fghbuild.caic.util.createCameraPhotoUri
 import com.fghbuild.caic.util.GroupKind
 import com.fghbuild.caic.util.MessageGroup
@@ -345,7 +346,7 @@ private fun MessageList(
     val listState = rememberLazyListState()
     var userScrolledUp by remember { mutableStateOf(false) }
     val turns = state.turns
-    val isWaiting = state.task?.state == "waiting" || state.task?.state == "asking"
+    val isWaiting = state.task?.state in waitingStates
     var expandedTurnKeys by remember { mutableStateOf(setOf<Long>()) }
     var expandedToolGroups by remember { mutableStateOf(setOf<String>()) }
     val items = remember(turns, expandedTurnKeys, expandedToolGroups) {
