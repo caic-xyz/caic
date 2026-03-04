@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -68,6 +69,7 @@ fun VoicePanel(
     onDisconnect: () -> Unit,
     onToggleMute: () -> Unit,
     onSelectDevice: (Int) -> Unit,
+    onClearTranscript: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (!voiceEnabled) return
@@ -87,7 +89,11 @@ fun VoicePanel(
                     onToggleMute = onToggleMute,
                     onSelectDevice = onSelectDevice,
                 )
-                !voiceState.connected -> IdlePanel(onConnect)
+                !voiceState.connected -> IdlePanel(
+                    transcript = voiceState.transcript,
+                    onConnect = onConnect,
+                    onClearTranscript = onClearTranscript,
+                )
                 else -> ConnectingPanel("Starting audio…")
             }
         }
@@ -95,27 +101,61 @@ fun VoicePanel(
 }
 
 @Composable
-private fun IdlePanel(onClick: () -> Unit) {
-    Row(
+private fun IdlePanel(
+    transcript: List<TranscriptEntry>,
+    onConnect: () -> Unit,
+    onClearTranscript: () -> Unit,
+) {
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Icon(
-            Icons.Default.Mic,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = "Voice assistant",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
-        )
-        Button(onClick = onClick) {
-            Text("Connect")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                Icons.Default.Mic,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = "Voice assistant",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Button(onClick = onConnect) {
+                Text("Connect")
+            }
+        }
+
+        if (transcript.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Previous transcript",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onClearTranscript) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Clear transcript",
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+            TranscriptLog(
+                entries = transcript,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

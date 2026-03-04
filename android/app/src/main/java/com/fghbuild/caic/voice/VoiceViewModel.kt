@@ -86,6 +86,10 @@ class VoiceViewModel @Inject constructor(
         voiceSessionManager.selectAudioDevice(deviceId)
     }
 
+    fun clearTranscript() {
+        voiceSessionManager.clearTranscript()
+    }
+
     private fun notifyTaskChanges(tasks: List<Task>) {
         tasks
             .filter { task ->

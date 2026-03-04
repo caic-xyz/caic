@@ -135,6 +135,7 @@ class VoiceSessionManager @Inject constructor(
         // Close any existing connection to prevent WebSocket leaks.
         webSocket?.close(WS_CLOSE_NORMAL, "Reconnecting")
         webSocket = null
+        clearTranscript()
         setStatus("Fetching token…")
 
         scope.launch {
@@ -261,7 +262,12 @@ class VoiceSessionManager @Inject constructor(
         webSocket?.close(WS_CLOSE_NORMAL, "User disconnected")
         webSocket = null
         functionHandlers = null
-        _state.value = VoiceState()  // clears transcripts too
+        // Preserve transcript so the user can review it after disconnecting.
+        _state.value = VoiceState(transcript = _state.value.transcript.map { it.copy(final = true) })
+    }
+
+    fun clearTranscript() {
+        _state.update { it.copy(transcript = emptyList()) }
     }
 
     fun injectText(text: String) {
