@@ -20,10 +20,10 @@ import (
 
 const (
 	usageAPIURL   = "https://api.anthropic.com/api/oauth/usage"
-	usageCacheTTL = 30 * time.Second
+	usageCacheTTL = 5 * time.Minute
 
 	// Exponential backoff parameters for fetch errors.
-	backoffMin = 30 * time.Second
+	backoffMin = 5 * time.Minute
 	backoffMax = 1 * time.Hour
 )
 

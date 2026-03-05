@@ -63,18 +63,20 @@ function ExtraBadge(props: { extra: ExtraUsage }) {
 
 export default function UsageBadges(props: { usage: Accessor<UsageResp | null>; now: Accessor<number> }) {
   return (
-    <Show when={props.usage()} keyed>
-      {(u) => (
-        <span class={styles.usageRow}>
-          <Show when={u.fiveHour.resetsAt}>
-            <Badge label="5h" window={u.fiveHour} now={props.now} yellowAt={80} redAt={90} />
-          </Show>
-          <Show when={u.sevenDay.resetsAt}>
-            <Badge label="7d" window={u.sevenDay} now={props.now} yellowAt={90} redAt={95} />
-          </Show>
-          <ExtraBadge extra={u.extraUsage} />
-        </span>
-      )}
-    </Show>
+    <span class={styles.usageRow}>
+      <Show when={props.usage()} keyed>
+        {(u) => (
+          <>
+            <Show when={u.fiveHour.resetsAt}>
+              <Badge label="5h" window={u.fiveHour} now={props.now} yellowAt={80} redAt={90} />
+            </Show>
+            <Show when={u.sevenDay.resetsAt}>
+              <Badge label="7d" window={u.sevenDay} now={props.now} yellowAt={90} redAt={95} />
+            </Show>
+            <ExtraBadge extra={u.extraUsage} />
+          </>
+        )}
+      </Show>
+    </span>
   );
 }

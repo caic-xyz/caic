@@ -819,7 +819,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleUsageEvents streams usage snapshots as SSE every 30 seconds (or on
+// handleUsageEvents streams usage snapshots as SSE every 5 minutes (or on
 // change). Each message is a single UsageResp JSON object.
 func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
@@ -833,7 +833,7 @@ func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	flusher.Flush()
 
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
 	var prev []byte
