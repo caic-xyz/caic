@@ -79,10 +79,11 @@ class FunctionHandlers(
         val tasks = apiClient.listTasks().filter { it.id !in excluded }
         taskNumberMap.update(tasks)
         val num = taskNumberMap.toNumber(resp.id)
+        val title = tasks.find { it.id == resp.id }?.title?.ifBlank { null } ?: resp.id
         return if (num != null) {
-            textResult("Created task #$num: ${prompt.lines().first().take(SHORT_NAME_MAX)}")
+            textResult("Created task #$num: $title")
         } else {
-            textResult("Created task: ${prompt.lines().first().take(SHORT_NAME_MAX)}")
+            textResult("Created task: $title")
         }
     }
 
@@ -92,7 +93,7 @@ class FunctionHandlers(
         val tasks = apiClient.listTasks()
         val t = tasks.find { it.id == taskId }
             ?: return errorResult("Task #$num not found")
-        val shortName = t.initialPrompt.lines().firstOrNull()?.take(SHORT_NAME_MAX) ?: t.id
+        val shortName = t.title.ifBlank { t.id }
         val detail = buildString {
             appendLine("## Task #$num: $shortName")
             appendLine()
@@ -100,11 +101,10 @@ class FunctionHandlers(
             append("Elapsed: ${formatElapsed(t.duration)}  ")
             appendLine("Cost: ${formatCost(t.costUSD)}")
             when {
-                t.state == "asking" -> appendLine("Waiting for user input before it can continue.")
                 t.state == "terminated" && !t.result.isNullOrBlank() ->
                     appendLine("**Result:** ${t.result}")
-                t.state == "failed" ->
-                    appendLine("**Error:** ${t.error ?: "unknown"}")
+                t.state == "failed" && !t.error.isNullOrBlank() ->
+                    appendLine("**Error:** ${t.error}")
             }
             t.diffStat?.takeIf { it.isNotEmpty() }?.let { diff ->
                 append("**Changed:** ${diff.joinToString(", ") { it.path }}")
@@ -208,19 +208,18 @@ class FunctionHandlers(
 }
 
 private fun taskSummaryLine(num: Int, t: Task): String {
-    val name = t.initialPrompt.lines().firstOrNull()?.take(SHORT_NAME_MAX) ?: t.id
+    val name = t.title.ifBlank { t.id }
     val base = "$num. **$name** — ${t.state}, ${formatElapsed(t.duration)}, " +
         "${formatCost(t.costUSD)}, ${t.harness}"
     return when {
-        t.state == "asking" -> "$base — NEEDS INPUT"
         t.state == "terminated" && !t.result.isNullOrBlank() ->
-            "$base — Result: ${t.result!!.take(RESULT_SNIPPET_MAX)}"
-        t.state == "failed" -> "$base — Error: ${t.error ?: "unknown"}"
+            "$base — ${t.result!!.take(RESULT_SNIPPET_MAX)}"
+        t.state == "failed" && !t.error.isNullOrBlank() ->
+            "$base — ${t.error}"
         else -> base
     }
 }
 
-private const val SHORT_NAME_MAX = 40
 private const val RESULT_SNIPPET_MAX = 120
 
 private fun JsonObject.requireString(key: String): String =

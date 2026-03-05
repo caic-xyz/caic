@@ -811,11 +811,19 @@ class VoiceSessionManager @Inject constructor(
                 "screen — and controls them by voice.\n\n" +
                 "## Task lifecycle\n" +
                 "A task has a prompt (what to build), a repo, a branch, and a state:\n" +
+                "- pending: task is queued, waiting to start\n" +
+                "- branching: creating git branch\n" +
+                "- provisioning: starting container\n" +
+                "- starting: launching agent session\n" +
                 "- running: agent is actively working\n" +
-                "- asking: agent needs the user to answer a question before it can continue\n" +
-                "- waiting: agent is paused, waiting for user input or a message\n" +
-                "- terminated: agent finished; result contains the outcome summary\n" +
-                "- failed: agent crashed or was aborted; error contains the reason\n\n" +
+                "- waiting: agent completed a turn, awaiting user input\n" +
+                "- asking: agent asked a question, needs the user to answer\n" +
+                "- has_plan: agent produced a plan, awaiting approval\n" +
+                "- pulling: pulling changes from container\n" +
+                "- pushing: pushing changes to remote\n" +
+                "- terminating: shutdown in progress\n" +
+                "- terminated: agent finished; result contains the outcome\n" +
+                "- failed: agent crashed or was aborted; error has the reason\n\n" +
                 "## Context you have\n" +
                 "At session start you receive a snapshot of all current tasks. Use it to " +
                 "answer questions about task status without calling tasks_list first. Call " +

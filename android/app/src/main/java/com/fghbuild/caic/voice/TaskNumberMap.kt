@@ -40,11 +40,7 @@ class TaskNumberMap {
 
     fun formatTaskRef(task: Task): String {
         val num = idToNumber[task.id] ?: return task.id
-        val shortName = task.initialPrompt.lines().firstOrNull()?.take(SHORT_NAME_MAX) ?: task.id
+        val shortName = task.title.ifBlank { task.id }
         return "task #$num ($shortName)"
-    }
-
-    companion object {
-        private const val SHORT_NAME_MAX = 40
     }
 }

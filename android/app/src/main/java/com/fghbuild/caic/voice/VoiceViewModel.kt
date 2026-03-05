@@ -112,10 +112,9 @@ class VoiceViewModel @Inject constructor(
         if (tasks.isNotEmpty()) {
             val lines = tasks.joinToString("\n") { task ->
                 val num = taskNumberMap.toNumber(task.id) ?: 0
-                val shortName = task.initialPrompt.lines().firstOrNull()?.take(SHORT_NAME_MAX) ?: task.id
-                val base = "- Task #$num: $shortName (${task.state}, ${formatElapsed(task.duration)}" +
+                val shortName = task.title.ifBlank { task.id }
+                "- Task #$num: $shortName (${task.state}, ${formatElapsed(task.duration)}" +
                     ", ${formatCost(task.costUSD)}, ${task.harness})"
-                if (task.state == "asking") "$base — needs input" else base
             }
             parts.add("[Current tasks at session start]\n$lines")
         } else if (recentRepo == null) {
@@ -126,16 +125,14 @@ class VoiceViewModel @Inject constructor(
 
     private fun buildNotification(task: Task): String? {
         val num = taskNumberMap.toNumber(task.id) ?: return null
-        val shortName = task.initialPrompt.lines().firstOrNull()?.take(SHORT_NAME_MAX) ?: task.id
-        return when {
-            task.state == "asking" ->
-                "[Task #$num ($shortName) needs input]"
-            task.state == "waiting" ->
-                "[Task #$num ($shortName) is waiting for input]"
-            task.state == "terminated" && task.result != null ->
-                "[Task #$num ($shortName) completed: ${task.result}]"
-            task.state == "failed" ->
-                "[Task #$num ($shortName) failed: ${task.error ?: "unknown error"}]"
+        val shortName = task.title.ifBlank { task.id }
+        return when (task.state) {
+            "asking", "waiting", "has_plan" ->
+                "[Task #$num ($shortName) — ${task.state}]"
+            "terminated" ->
+                task.result?.let { "[Task #$num ($shortName) — terminated: $it]" }
+            "failed" ->
+                "[Task #$num ($shortName) — failed: ${task.error ?: "unknown"}]"
             else -> null
         }
     }
@@ -143,9 +140,5 @@ class VoiceViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         voiceSessionManager.disconnect()
-    }
-
-    companion object {
-        private const val SHORT_NAME_MAX = 30
     }
 }
