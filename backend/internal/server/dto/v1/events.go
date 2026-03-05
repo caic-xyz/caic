@@ -81,10 +81,11 @@ type EventTextDelta struct {
 
 // EventToolUse is emitted when the assistant invokes a tool.
 type EventToolUse struct {
-	ToolUseID   string          `json:"toolUseID"`
-	Name        string          `json:"name"`
-	Input       json.RawMessage `json:"input"`
-	PlanContent string          `json:"planContent,omitempty"` // Snapshot of plan content for ExitPlanMode events.
+	ToolUseID      string          `json:"toolUseID"`
+	Name           string          `json:"name"`
+	Input          json.RawMessage `json:"input"`
+	PlanContent    string          `json:"planContent,omitempty"`    // Snapshot of plan content for ExitPlanMode events.
+	InputTruncated bool            `json:"inputTruncated,omitempty"` // True when Input was omitted due to size; fetch via GET /api/v1/tasks/{id}/tool/{toolUseID}.
 }
 
 // EventToolResult is emitted when a tool call completes.

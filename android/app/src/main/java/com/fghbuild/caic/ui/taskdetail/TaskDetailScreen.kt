@@ -56,6 +56,7 @@ import com.fghbuild.caic.ui.theme.stateColor
 import com.fghbuild.caic.ui.theme.waitingStates
 import com.fghbuild.caic.util.createCameraPhotoUri
 import com.fghbuild.caic.util.GroupKind
+import kotlinx.serialization.json.JsonElement
 import com.fghbuild.caic.util.MessageGroup
 import com.fghbuild.caic.util.ToolCall
 import com.fghbuild.caic.util.Turn
@@ -329,6 +330,7 @@ fun TaskDetailScreen(
             viewModel.updateInputDraft("")
         },
         onNavigateToDiff = onNavigateToDiff,
+        onLoadToolInput = { toolUseID -> viewModel.loadToolInput(toolUseID) },
     )
 
         }
@@ -342,6 +344,7 @@ private fun MessageList(
     onAnswer: (String) -> Unit,
     onClearAndExecutePlan: () -> Unit,
     onNavigateToDiff: () -> Unit,
+    onLoadToolInput: (suspend (String) -> JsonElement?)? = null,
 ) {
     val listState = rememberLazyListState()
     var userScrolledUp by remember { mutableStateOf(false) }
@@ -411,6 +414,7 @@ private fun MessageList(
                             group = item.group,
                             onAnswer = if (item.isLiveTurn) onAnswer else null,
                             onNavigateToDiff = onNavigateToDiff,
+                            onLoadToolInput = onLoadToolInput,
                         )
                         is MsgItem.ToolGroupHeader -> ToolGroupHeaderItem(
                             toolCalls = item.toolCalls,
@@ -422,7 +426,11 @@ private fun MessageList(
                                     expandedToolGroups + item.groupKey
                             },
                         )
-                        is MsgItem.ToolCallItem -> ToolCallCard(call = item.call)
+                        is MsgItem.ToolCallItem -> ToolCallCard(
+                            call = item.call,
+                            onLoadInput = onLoadToolInput?.takeIf { item.call.use.inputTruncated == true }
+                                ?.let { loader -> { loader(item.call.use.toolUseID) } },
+                        )
                     }
                 }
 

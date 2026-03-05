@@ -276,6 +276,25 @@ export default function App() {
               }
               return [...prev, t].sort((a, b) => (a.id < b.id ? -1 : 1));
             });
+          } else if (event.kind === "patch" && event.patch) {
+            const patch = event.patch as Record<string, unknown>;
+            const id = patch["id"] as string;
+            if (!id) return;
+            if (typeof patch["state"] === "string") {
+              const newState = patch["state"] as string;
+              const existing = tasks().find((t) => t.id === id);
+              if (existing) {
+                checkAndNotify({ ...existing, state: newState } as Task);
+              }
+              prevStates.set(id, newState);
+            }
+            setTasks((prev) => {
+              const idx = prev.findIndex((p) => p.id === id);
+              if (idx < 0) return prev;
+              const next = [...prev];
+              next[idx] = { ...next[idx], ...patch } as Task;
+              return next;
+            });
           } else if (event.kind === "delete" && event.id) {
             prevStates.delete(event.id);
             setTasks((prev) => prev.filter((t) => t.id !== event.id));

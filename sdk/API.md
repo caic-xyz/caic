@@ -29,6 +29,7 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | POST | `/api/v1/tasks/{id}/terminate` |  | `StatusResp` |
 | POST | `/api/v1/tasks/{id}/sync` | `SyncReq` | `SyncResp` |
 | GET | `/api/v1/tasks/{id}/diff` |  | `DiffResp` |
+| GET | `/api/v1/tasks/{id}/tool/{toolUseID}` |  | `TaskToolInputResp` |
 
 ## Usage
 
@@ -226,6 +227,7 @@ All errors return:
 | `name` | `string` | yes |
 | `input` | `object` | yes |
 | `planContent` | `string` |  |
+| `inputTruncated` | `boolean` |  |
 
 ### EventToolResult
 
@@ -421,6 +423,13 @@ All errors return:
 |-------|------|----------|
 | `diff` | `string` | yes |
 
+### TaskToolInputResp
+
+| Field | Type | Required |
+|-------|------|----------|
+| `toolUseID` | `string` | yes |
+| `input` | `object` | yes |
+
 ### TaskListEvent
 
 | Field | Type | Required |
@@ -428,6 +437,7 @@ All errors return:
 | `kind` | `string` | yes |
 | `tasks` | `Task[]` |  |
 | `task` | `Task` |  |
+| `patch` | `Record<string, unknown>` |  |
 | `id` | `string` |  |
 
 ### UsageWindow

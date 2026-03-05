@@ -12,13 +12,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.fghbuild.caic.util.ToolCall
 import com.fghbuild.caic.util.toolCountSummary
+import kotlinx.serialization.json.JsonElement
 
 // Used by MessageGroupContent for single-call TOOL groups only (size 0 or 1).
 // Multi-call groups are split into ToolGroupHeaderItem + individual ToolCallCard lazy items.
 @Composable
-fun ToolMessageGroup(toolCalls: List<ToolCall>) {
+fun ToolMessageGroup(
+    toolCalls: List<ToolCall>,
+    onLoadInput: (suspend (String) -> JsonElement?)? = null,
+) {
     if (toolCalls.isEmpty()) return
-    ToolCallCard(call = toolCalls[0])
+    val call = toolCalls[0]
+    ToolCallCard(
+        call = call,
+        onLoadInput = onLoadInput?.takeIf { call.use.inputTruncated == true }
+            ?.let { loader -> { loader(call.use.toolUseID) } },
+    )
 }
 
 /**

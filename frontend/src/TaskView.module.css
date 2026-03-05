@@ -557,6 +557,27 @@ a.headerBranch:hover {
   border-radius: var(--radius-sm);
 }
 
+.loadInputBtn {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.75rem;
+  margin: 0.25rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary, #f5f5f5);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.loadInputBtn:hover:not(:disabled) {
+  background: var(--color-bg-hover, #e8e8e8);
+  color: var(--color-text);
+}
+
+.loadInputBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .usageMeta {
   font-size: 0.75rem;
   color: var(--color-text-muted);

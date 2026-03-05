@@ -12,6 +12,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
+// inputTruncateThreshold is the maximum byte length of a tool input JSON before it
+// is omitted from the SSE stream. Clients fetch the full input on demand via
+// GET /api/v1/tasks/{id}/tool/{toolUseID}.
+const inputTruncateThreshold = 4096
+
 // toolTimingTracker computes per-tool-call duration by recording the timestamp
 // when each tool_use is seen and computing the delta when the corresponding
 // ToolResultMessage arrives.
@@ -58,14 +63,21 @@ func (tt *toolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 		return nil
 	case *agent.ToolUseMessage:
 		tt.pending[m.ToolUseID] = now
+		input := m.Input
+		truncated := false
+		if len(input) > inputTruncateThreshold {
+			input = nil
+			truncated = true
+		}
 		return []v1.EventMessage{{
 			Kind: v1.EventKindToolUse,
 			Ts:   ts,
 			ToolUse: &v1.EventToolUse{
-				ToolUseID:   m.ToolUseID,
-				Name:        m.Name,
-				Input:       m.Input,
-				PlanContent: m.PlanContent,
+				ToolUseID:      m.ToolUseID,
+				Name:           m.Name,
+				Input:          input,
+				PlanContent:    m.PlanContent,
+				InputTruncated: truncated,
 			},
 		}}
 	case *agent.AskMessage:
@@ -280,6 +292,42 @@ func toV1SafetyIssues(issues []task.SafetyIssue) []v1.SafetyIssue {
 	out := make([]v1.SafetyIssue, len(issues))
 	for i, si := range issues {
 		out[i] = v1.SafetyIssue{File: si.File, Kind: si.Kind, Detail: si.Detail}
+	}
+	return out
+}
+
+// filterHistoryForReplay removes streaming delta messages that have a
+// corresponding final message later in the history. TextDeltaMessage runs
+// preceding a TextMessage and ThinkingDeltaMessage runs preceding a
+// ThinkingMessage are omitted — the frontend uses only the final message when
+// available, so the deltas are pure waste during history replay.
+func filterHistoryForReplay(msgs []agent.Message) []agent.Message {
+	skip := make([]bool, len(msgs))
+	for i, msg := range msgs {
+		switch msg.(type) {
+		case *agent.TextMessage:
+			for j := i - 1; j >= 0; j-- {
+				if _, ok := msgs[j].(*agent.TextDeltaMessage); ok {
+					skip[j] = true
+				} else {
+					break
+				}
+			}
+		case *agent.ThinkingMessage:
+			for j := i - 1; j >= 0; j-- {
+				if _, ok := msgs[j].(*agent.ThinkingDeltaMessage); ok {
+					skip[j] = true
+				} else {
+					break
+				}
+			}
+		}
+	}
+	out := make([]agent.Message, 0, len(msgs))
+	for i, msg := range msgs {
+		if !skip[i] {
+			out = append(out, msg)
+		}
 	}
 	return out
 }

@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.caic.sdk.v1.ApiClient
 import com.caic.sdk.v1.EventMessage
+import kotlinx.serialization.json.JsonElement
 import com.caic.sdk.v1.TodoItem
 import com.caic.sdk.v1.HarnessInfo
 import com.caic.sdk.v1.ImageData
@@ -328,6 +329,13 @@ class TaskDetailViewModel @Inject constructor(
                 _pendingAction.value = null
             }
         }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures as null.
+    suspend fun loadToolInput(toolUseID: String): JsonElement? = try {
+        ApiClient(taskRepository.serverURL()).getTaskToolInput(taskId, toolUseID).input
+    } catch (_: Exception) {
+        null
     }
 
     fun dismissSafetyIssues() {

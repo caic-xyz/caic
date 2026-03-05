@@ -29,6 +29,7 @@ import com.fghbuild.caic.util.GroupKind
 import com.fghbuild.caic.util.MessageGroup
 import com.fghbuild.caic.util.Turn
 import com.fghbuild.caic.util.imageDataToBitmap
+import kotlinx.serialization.json.JsonElement
 import com.fghbuild.caic.ui.theme.markdownTypography
 import com.mikepenz.markdown.m3.Markdown
 
@@ -41,10 +42,11 @@ fun MessageGroupContent(
     group: MessageGroup,
     onAnswer: ((String) -> Unit)?,
     onNavigateToDiff: (() -> Unit)? = null,
+    onLoadToolInput: (suspend (String) -> JsonElement?)? = null,
 ) {
     when (group.kind) {
         GroupKind.TEXT -> TextMessageGroup(events = group.events)
-        GroupKind.TOOL -> ToolMessageGroup(toolCalls = group.toolCalls)
+        GroupKind.TOOL -> ToolMessageGroup(toolCalls = group.toolCalls, onLoadInput = onLoadToolInput)
         GroupKind.ASK -> {
             group.ask?.let { ask ->
                 AskQuestionCard(ask = ask, answerText = group.answerText, onAnswer = onAnswer)
@@ -70,13 +72,14 @@ fun MessageGroupContent(
 fun TurnContent(
     turn: Turn,
     onAnswer: ((String) -> Unit)?,
+    onLoadToolInput: (suspend (String) -> JsonElement?)? = null,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         turn.groups.forEach { group ->
-            MessageGroupContent(group, onAnswer)
+            MessageGroupContent(group, onAnswer, onLoadToolInput = onLoadToolInput)
         }
     }
 }

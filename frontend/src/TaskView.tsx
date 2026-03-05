@@ -1,7 +1,7 @@
 // TaskView renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, For, Index, Show, onCleanup, createEffect, Switch, Match, type Accessor, type JSX } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
-import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents } from "@sdk/api.gen";
+import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents, getTaskToolInput } from "@sdk/api.gen";
 import type { EventMessage, AskQuestion, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat } from "@sdk/types.gen";
 import { groupMessages, groupTurns, toolCountSummary, turnSummary } from "./grouping";
 import type { ToolCall, Turn } from "./grouping";
@@ -285,7 +285,7 @@ export default function TaskView(props: Props) {
 
                 return (
                   <Show when={isLastTurn()} fallback={
-                    <ElidedTurn turn={turn()} />
+                    <ElidedTurn turn={turn()} taskId={props.taskId} />
                   }>
                     <Index each={turn().groups}>
                       {(group) => (
@@ -315,7 +315,7 @@ export default function TaskView(props: Props) {
                             )}
                           </Match>
                           <Match when={group().kind === "tool"}>
-                            <ToolMessageGroup toolCalls={group().toolCalls} />
+                            <ToolMessageGroup toolCalls={group().toolCalls} taskId={props.taskId} />
                           </Match>
                           <Match when={group().kind === "text"}>
                             <TextMessageGroup events={group().events} />
@@ -509,14 +509,14 @@ function formatTokens(n: number): string {
 }
 
 
-function ToolMessageGroup(props: { toolCalls: ToolCall[] }) {
+function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string }) {
   const calls = () => props.toolCalls;
   const groupKey = () => "group:" + calls()[0]?.use.toolUseID;
   const isOpen = () => detailsOpenState.get(groupKey()) ?? false;
   return (
     <Show when={calls().length > 0}>
       <Show when={calls().length > 1} fallback={
-        <ToolCallBlock call={calls()[0]}
+        <ToolCallBlock call={calls()[0]} taskId={props.taskId}
           open={detailsOpenState.get(calls()[0].use.toolUseID) ?? false}
           onToggle={(v) => detailsOpenState.set(calls()[0].use.toolUseID, v)} />
       }>
@@ -527,7 +527,7 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[] }) {
           </summary>
           <div class={styles.toolGroupInner}>
             <For each={calls()}>
-              {(call) => <ToolCallBlock call={call}
+              {(call) => <ToolCallBlock call={call} taskId={props.taskId}
                 open={detailsOpenState.get(call.use.toolUseID) ?? false}
                 onToggle={(v) => detailsOpenState.set(call.use.toolUseID, v)} />}
             </For>
@@ -561,7 +561,7 @@ function TextMessageGroup(props: { events: EventMessage[] }) {
 }
 
 
-function ElidedTurn(props: { turn: Turn }) {
+function ElidedTurn(props: { turn: Turn; taskId: string }) {
   const turnKey = () => "turn:" + (props.turn.groups[0]?.events[0]?.ts ?? 0);
   const isOpen = () => detailsOpenState.get(turnKey()) ?? false;
   return (
@@ -599,7 +599,7 @@ function ElidedTurn(props: { turn: Turn }) {
                 )}
               </Match>
               <Match when={group.kind === "tool"}>
-                <ToolMessageGroup toolCalls={group.toolCalls} />
+                <ToolMessageGroup toolCalls={group.toolCalls} taskId={props.taskId} />
               </Match>
               <Match when={group.kind === "text"}>
                 <TextMessageGroup events={group.events} />
@@ -690,10 +690,27 @@ function ToolCallInput(props: { input: Record<string, unknown> }) {
   );
 }
 
-function ToolCallBlock(props: { call: ToolCall; open: boolean; onToggle: (open: boolean) => void }) {
+function ToolCallBlock(props: { call: ToolCall; taskId: string; open: boolean; onToggle: (open: boolean) => void }) {
+  const [loadedInput, setLoadedInput] = createSignal<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = createSignal(false);
+
   const duration = () => props.call.result?.duration ?? 0;
   const error = () => props.call.result?.error ?? "";
-  const detail = () => toolCallDetail(props.call.use.name, props.call.use.input ?? {});
+  const effectiveInput = (): Record<string, unknown> =>
+    (loadedInput() ?? props.call.use.input ?? {}) as Record<string, unknown>;
+  const detail = () => toolCallDetail(props.call.use.name, effectiveInput());
+  const showLoadBtn = () => props.call.use.inputTruncated && !loadedInput();
+
+  async function loadInput() {
+    setLoading(true);
+    try {
+      const resp = await getTaskToolInput(props.taskId, props.call.use.toolUseID);
+      setLoadedInput(resp.input as Record<string, unknown>);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <>
       <details class={styles.toolBlock} open={props.open}
@@ -713,7 +730,11 @@ function ToolCallBlock(props: { call: ToolCall; open: boolean; onToggle: (open: 
             <span class={styles.toolError}> error</span>
           </Show>
         </summary>
-        <ToolCallInput input={props.call.use.input ?? {}} />
+        <Show when={showLoadBtn()} fallback={<ToolCallInput input={effectiveInput()} />}>
+          <button class={styles.loadInputBtn} onClick={loadInput} disabled={loading()}>
+            {loading() ? "Loading…" : "Load input"}
+          </button>
+        </Show>
         <Show when={error()}>
           <pre class={styles.toolErrorPre}>{error()}</pre>
         </Show>

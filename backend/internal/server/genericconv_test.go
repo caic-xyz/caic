@@ -298,3 +298,112 @@ func TestGenericConvertRawMessageFiltered(t *testing.T) {
 		t.Errorf("got %d events for RawMessage, want nil", len(events))
 	}
 }
+
+func TestToolInputTruncation(t *testing.T) {
+	gt := newToolTimingTracker(agent.Claude)
+	t.Run("SmallInputPassedThrough", func(t *testing.T) {
+		msg := &agent.ToolUseMessage{ToolUseID: "t1", Name: "Read", Input: json.RawMessage(`{"file_path":"/etc/hosts"}`)}
+		events := gt.convertMessage(msg, time.Now())
+		if len(events) != 1 {
+			t.Fatalf("got %d events, want 1", len(events))
+		}
+		if events[0].ToolUse.InputTruncated {
+			t.Error("small input should not be truncated")
+		}
+		if events[0].ToolUse.Input == nil {
+			t.Error("small input should be present")
+		}
+	})
+	t.Run("LargeInputTruncated", func(t *testing.T) {
+		largeContent := make([]byte, inputTruncateThreshold+1)
+		for i := range largeContent {
+			largeContent[i] = 'x'
+		}
+		bigInput := json.RawMessage(`{"content":"` + string(largeContent) + `"}`)
+		msg := &agent.ToolUseMessage{ToolUseID: "t2", Name: "Write", Input: bigInput}
+		events := gt.convertMessage(msg, time.Now())
+		if len(events) != 1 {
+			t.Fatalf("got %d events, want 1", len(events))
+		}
+		if !events[0].ToolUse.InputTruncated {
+			t.Error("large input should be truncated")
+		}
+		if events[0].ToolUse.Input != nil {
+			t.Error("truncated input should be nil")
+		}
+	})
+}
+
+func TestFilterHistoryForReplay(t *testing.T) {
+	t.Run("RemovesTextDeltasBeforeText", func(t *testing.T) {
+		msgs := []agent.Message{
+			&agent.TextDeltaMessage{Text: "hel"},
+			&agent.TextDeltaMessage{Text: "lo"},
+			&agent.TextMessage{Text: "hello"},
+		}
+		got := filterHistoryForReplay(msgs)
+		if len(got) != 1 {
+			t.Fatalf("got %d messages, want 1", len(got))
+		}
+		if _, ok := got[0].(*agent.TextMessage); !ok {
+			t.Errorf("expected TextMessage, got %T", got[0])
+		}
+	})
+	t.Run("RemovesThinkingDeltasBeforeThinking", func(t *testing.T) {
+		msgs := []agent.Message{
+			&agent.ThinkingDeltaMessage{Text: "think..."},
+			&agent.ThinkingMessage{Text: "think...done"},
+		}
+		got := filterHistoryForReplay(msgs)
+		if len(got) != 1 {
+			t.Fatalf("got %d messages, want 1", len(got))
+		}
+		if _, ok := got[0].(*agent.ThinkingMessage); !ok {
+			t.Errorf("expected ThinkingMessage, got %T", got[0])
+		}
+	})
+	t.Run("KeepsDeltasWithoutFinalMessage", func(t *testing.T) {
+		msgs := []agent.Message{
+			&agent.TextDeltaMessage{Text: "hel"},
+			&agent.TextDeltaMessage{Text: "lo"},
+		}
+		got := filterHistoryForReplay(msgs)
+		if len(got) != 2 {
+			t.Fatalf("got %d messages, want 2", len(got))
+		}
+	})
+	t.Run("PreservesOtherMessages", func(t *testing.T) {
+		msgs := []agent.Message{
+			&agent.ToolUseMessage{ToolUseID: "t1", Name: "Read", Input: json.RawMessage(`{}`)},
+			&agent.TextDeltaMessage{Text: "hi"},
+			&agent.TextMessage{Text: "hi"},
+			&agent.ToolResultMessage{ToolUseID: "t1"},
+		}
+		got := filterHistoryForReplay(msgs)
+		if len(got) != 3 {
+			t.Fatalf("got %d messages, want 3", len(got))
+		}
+		if _, ok := got[0].(*agent.ToolUseMessage); !ok {
+			t.Errorf("[0] expected ToolUseMessage, got %T", got[0])
+		}
+		if _, ok := got[1].(*agent.TextMessage); !ok {
+			t.Errorf("[1] expected TextMessage, got %T", got[1])
+		}
+		if _, ok := got[2].(*agent.ToolResultMessage); !ok {
+			t.Errorf("[2] expected ToolResultMessage, got %T", got[2])
+		}
+	})
+	t.Run("MultipleTextBlocks", func(t *testing.T) {
+		msgs := []agent.Message{
+			&agent.TextDeltaMessage{Text: "a"},
+			&agent.TextMessage{Text: "a"},
+			&agent.ToolUseMessage{ToolUseID: "t1", Name: "Bash", Input: json.RawMessage(`{}`)},
+			&agent.TextDeltaMessage{Text: "b"},
+			&agent.TextMessage{Text: "b"},
+		}
+		got := filterHistoryForReplay(msgs)
+		if len(got) != 3 {
+			t.Fatalf("got %d messages, want 3", len(got))
+		}
+	})
+}

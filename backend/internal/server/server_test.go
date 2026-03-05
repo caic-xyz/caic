@@ -886,6 +886,66 @@ func parseSSEEvents(t *testing.T, body string) []v1.EventMessage {
 	return events
 }
 
+func TestComputeTaskPatch(t *testing.T) {
+	t.Run("ChangedFields", func(t *testing.T) {
+		old := `{"id":"abc","state":"running","costUSD":0.0}`
+		new_ := `{"id":"abc","state":"waiting","costUSD":1.5}`
+		patch, err := computeTaskPatch([]byte(old), []byte(new_))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(patch["id"]) != `"abc"` {
+			t.Errorf("id = %s, want \"abc\"", patch["id"])
+		}
+		if string(patch["state"]) != `"waiting"` {
+			t.Errorf("state = %s, want \"waiting\"", patch["state"])
+		}
+		if string(patch["costUSD"]) != `1.5` {
+			t.Errorf("costUSD = %s, want 1.5", patch["costUSD"])
+		}
+		// Unchanged field should not be in patch
+		if _, ok := patch["costUSD"]; !ok {
+			t.Error("costUSD should be in patch (changed from 0.0 to 1.5)")
+		}
+	})
+	t.Run("UnchangedFieldsOmitted", func(t *testing.T) {
+		old := `{"id":"abc","state":"running","repo":"myrepo"}`
+		new_ := `{"id":"abc","state":"waiting","repo":"myrepo"}`
+		patch, err := computeTaskPatch([]byte(old), []byte(new_))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := patch["repo"]; ok {
+			t.Error("repo should not be in patch (unchanged)")
+		}
+		if _, ok := patch["state"]; !ok {
+			t.Error("state should be in patch (changed)")
+		}
+	})
+	t.Run("RemovedFieldSetToNull", func(t *testing.T) {
+		old := `{"id":"abc","error":"boom"}`
+		new_ := `{"id":"abc"}`
+		patch, err := computeTaskPatch([]byte(old), []byte(new_))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(patch["error"]) != "null" {
+			t.Errorf("removed field error = %s, want null", patch["error"])
+		}
+	})
+	t.Run("AlwaysIncludesID", func(t *testing.T) {
+		old := `{"id":"xyz","state":"running"}`
+		new_ := `{"id":"xyz","state":"terminated"}`
+		patch, err := computeTaskPatch([]byte(old), []byte(new_))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(patch["id"]) != `"xyz"` {
+			t.Errorf("id = %s, want \"xyz\"", patch["id"])
+		}
+	})
+}
+
 func TestHandleTaskRawEvents(t *testing.T) {
 	t.Run("TerminatedTaskEvents", func(t *testing.T) {
 		logDir := t.TempDir()
@@ -1051,8 +1111,9 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		for i, ev := range events {
 			kinds[i] = ev.Kind
 		}
-		// Expect: init + 2 textDelta (message_start filtered) + text + usage + result
-		wantKinds := []v1.EventKind{v1.EventKindInit, v1.EventKindTextDelta, v1.EventKindTextDelta, v1.EventKindText, v1.EventKindUsage, v1.EventKindResult}
+		// Expect: init + text + usage + result. The two textDelta messages are
+		// filtered by filterHistoryForReplay because a final TextMessage follows.
+		wantKinds := []v1.EventKind{v1.EventKindInit, v1.EventKindText, v1.EventKindUsage, v1.EventKindResult}
 		if len(kinds) != len(wantKinds) {
 			t.Fatalf("event kinds = %v, want %v", kinds, wantKinds)
 		}
@@ -1061,15 +1122,8 @@ func TestHandleTaskRawEvents(t *testing.T) {
 				t.Errorf("kinds[%d] = %q, want %q", i, kinds[i], wantKinds[i])
 			}
 		}
-
-		if events[1].TextDelta == nil || events[1].TextDelta.Text != "Hello " {
-			t.Errorf("textDelta[0] = %+v, want text 'Hello '", events[1].TextDelta)
-		}
-		if events[2].TextDelta == nil || events[2].TextDelta.Text != "world" {
-			t.Errorf("textDelta[1] = %+v, want text 'world'", events[2].TextDelta)
-		}
-		if events[3].Text == nil || events[3].Text.Text != "Hello world" {
-			t.Errorf("text event = %+v, want text 'Hello world'", events[3].Text)
+		if events[1].Text == nil || events[1].Text.Text != "Hello world" {
+			t.Errorf("text event = %+v, want text 'Hello world'", events[1].Text)
 		}
 	})
 }

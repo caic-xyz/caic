@@ -340,6 +340,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	mux.HandleFunc("POST /api/v1/tasks/{id}/terminate", handleWithTask(s, s.terminateTask))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/sync", handleWithTask(s, s.syncTask))
 	mux.HandleFunc("GET /api/v1/tasks/{id}/diff", s.handleGetDiff)
+	mux.HandleFunc("GET /api/v1/tasks/{id}/tool/{toolUseID}", s.handleTaskToolInput)
 	mux.HandleFunc("GET /api/v1/usage", s.handleGetUsage)
 	mux.HandleFunc("GET /api/v1/voice/token", handle(s.getVoiceToken))
 	mux.HandleFunc("GET /api/v1/server/tasks/events", s.handleTaskListEvents)
@@ -642,7 +643,7 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
-	for _, msg := range history {
+	for _, msg := range filterHistoryForReplay(history) {
 		writeEvents(tracker.convertMessage(msg, now))
 	}
 	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
@@ -657,6 +658,56 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 		writeEvents(tracker.convertMessage(msg, time.Now()))
 		flusher.Flush()
 	}
+}
+
+// computeTaskPatch returns a sparse map containing only the fields that differ
+// between oldJSON and newJSON, always including "id". Fields present in oldJSON
+// but absent in newJSON are set to null so clients can clear them.
+func computeTaskPatch(oldJSON, newJSON []byte) (map[string]json.RawMessage, error) {
+	var oldMap, newMap map[string]json.RawMessage
+	if err := json.Unmarshal(oldJSON, &oldMap); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(newJSON, &newMap); err != nil {
+		return nil, err
+	}
+	patch := map[string]json.RawMessage{"id": newMap["id"]}
+	for k, newVal := range newMap {
+		if oldVal, ok := oldMap[k]; !ok || !bytes.Equal(oldVal, newVal) {
+			patch[k] = newVal
+		}
+	}
+	for k := range oldMap {
+		if _, ok := newMap[k]; !ok {
+			patch[k] = json.RawMessage("null")
+		}
+	}
+	return patch, nil
+}
+
+// handleTaskToolInput returns the full (untruncated) input for a tool call.
+// It scans the task's message history for the ToolUseMessage with the given
+// toolUseID and returns its Input field.
+func (s *Server) handleTaskToolInput(w http.ResponseWriter, r *http.Request) {
+	entry, err := s.getTask(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	toolUseID := r.PathValue("toolUseID")
+	if toolUseID == "" {
+		writeError(w, dto.BadRequest("toolUseID required"))
+		return
+	}
+	history, _, unsub := entry.task.Subscribe(r.Context())
+	unsub()
+	for _, msg := range history {
+		if tu, ok := msg.(*agent.ToolUseMessage); ok && tu.ToolUseID == toolUseID {
+			writeJSONResponse(w, &v1.TaskToolInputResp{ToolUseID: tu.ToolUseID, Input: tu.Input}, nil)
+			return
+		}
+	}
+	writeError(w, dto.NotFound("tool use"))
 }
 
 // emitTaskListEvent marshals ev and writes it as an SSE message event.
@@ -714,7 +765,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			first = false
 		} else {
-			// Emit upserts for new or changed tasks.
+			// Emit upserts/patches for new or changed tasks.
 			currentIDs := make(map[string]struct{}, len(out))
 			for i := range out {
 				id := out[i].ID.String()
@@ -725,11 +776,26 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				if !bytes.Equal(data, prevByID[id]) {
-					if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "upsert", Task: &out[i]}); err != nil {
-						slog.Warn("marshal task upsert", "id", id, "err", err)
-						return
-					}
+					prev := prevByID[id]
 					prevByID[id] = data
+					if prev == nil {
+						// New task: emit full object.
+						if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "upsert", Task: &out[i]}); err != nil {
+							slog.Warn("marshal task upsert", "id", id, "err", err)
+							return
+						}
+					} else {
+						// Existing task changed: emit only the diff.
+						patch, err := computeTaskPatch(prev, data)
+						if err != nil {
+							slog.Warn("compute task patch", "id", id, "err", err)
+							continue
+						}
+						if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "patch", Patch: patch}); err != nil {
+							slog.Warn("marshal task patch", "id", id, "err", err)
+							return
+						}
+					}
 				}
 			}
 			// Emit deletes for removed tasks.

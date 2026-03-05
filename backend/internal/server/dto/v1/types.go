@@ -2,6 +2,8 @@
 package v1
 
 import (
+	"encoding/json"
+
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	"github.com/maruel/ksid"
 )
@@ -94,13 +96,22 @@ type Task struct {
 
 // TaskListEvent is a discriminated-union event for the task list SSE stream.
 // kind=="snapshot": Tasks holds the full list on initial connect.
-// kind=="upsert":   Task holds one added or changed task.
+// kind=="upsert":   Task holds a newly created task.
+// kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
 // kind=="delete":   ID holds the string ID of the removed task.
 type TaskListEvent struct {
-	Kind  string `json:"kind"`
-	Tasks []Task `json:"tasks,omitempty"`
-	Task  *Task  `json:"task,omitempty"`
-	ID    string `json:"id,omitempty"`
+	Kind  string                     `json:"kind"`
+	Tasks []Task                     `json:"tasks,omitempty"`
+	Task  *Task                      `json:"task,omitempty"`
+	Patch map[string]json.RawMessage `json:"patch,omitempty"`
+	ID    string                     `json:"id,omitempty"`
+}
+
+// TaskToolInputResp is the response for GET /api/v1/tasks/{id}/tool/{toolUseID}.
+// It returns the full (untruncated) input for a tool call.
+type TaskToolInputResp struct {
+	ToolUseID string          `json:"toolUseID"`
+	Input     json.RawMessage `json:"input"`
 }
 
 // StatusResp is a common response for mutation endpoints.

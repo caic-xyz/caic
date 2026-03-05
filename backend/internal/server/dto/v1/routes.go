@@ -62,6 +62,7 @@ var Routes = []Route{
 	{Name: "terminateTask", Method: "POST", Path: "/api/v1/tasks/{id}/terminate", Resp: reflect.TypeFor[StatusResp]()},
 	{Name: "syncTask", Method: "POST", Path: "/api/v1/tasks/{id}/sync", Req: reflect.TypeFor[SyncReq](), Resp: reflect.TypeFor[SyncResp]()},
 	{Name: "getTaskDiff", Method: "GET", Path: "/api/v1/tasks/{id}/diff", Resp: reflect.TypeFor[DiffResp]()},
+	{Name: "getTaskToolInput", Method: "GET", Path: "/api/v1/tasks/{id}/tool/{toolUseID}", Resp: reflect.TypeFor[TaskToolInputResp]()},
 	{Name: "globalTaskEvents", Method: "GET", Path: "/api/v1/server/tasks/events", Resp: reflect.TypeFor[TaskListEvent](), IsSSE: true},
 	{Name: "globalUsageEvents", Method: "GET", Path: "/api/v1/server/usage/events", Resp: reflect.TypeFor[UsageResp](), IsSSE: true},
 	{Name: "getUsage", Method: "GET", Path: "/api/v1/usage", Resp: reflect.TypeFor[UsageResp]()},

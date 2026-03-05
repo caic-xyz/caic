@@ -175,6 +175,7 @@ data class EventToolUse(
     val name: String,
     val input: JsonElement,
     val planContent: String? = null,
+    val inputTruncated: Boolean? = null,
 )
 
 @Serializable
@@ -322,10 +323,17 @@ data class SyncResp(
 data class DiffResp(val diff: String)
 
 @Serializable
+data class TaskToolInputResp(
+    @SerialName("toolUseID") val toolUseID: String,
+    val input: JsonElement,
+)
+
+@Serializable
 data class TaskListEvent(
     val kind: String,
     val tasks: List<Task>? = null,
     val task: Task? = null,
+    val patch: Map<String, JsonElement>? = null,
     val id: String? = null,
 )
 

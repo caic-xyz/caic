@@ -19,6 +19,10 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.encodeToJsonElement
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -138,6 +142,13 @@ class TaskRepository @Inject constructor(
         awaitClose { source.cancel() }
     }
 
+    /** Merges patch fields from [TaskListEvent.patch] into an existing [Task] via JSON round-trip. */
+    private fun applyPatch(existing: Task, patch: Map<String, kotlinx.serialization.json.JsonElement>): Task {
+        val existingJson = json.encodeToJsonElement(existing) as? JsonObject ?: return existing
+        val merged = JsonObject(existingJson.toMutableMap().apply { putAll(patch) })
+        return json.decodeFromJsonElement<Task>(merged)
+    }
+
     /** SSE flow for the task list events endpoint. Maintains a local task map and applies patch events. */
     private fun taskListEvents(baseURL: String): Flow<List<Task>> = callbackFlow {
         val taskMap = LinkedHashMap<String, Task>()
@@ -156,6 +167,10 @@ class TaskRepository @Inject constructor(
                             event.tasks?.forEach { taskMap[it.id] = it }
                         }
                         "upsert" -> event.task?.let { taskMap[it.id] = it }
+                        "patch" -> event.patch?.let { patch ->
+                            val id = (patch["id"] as? JsonPrimitive)?.content ?: return@let
+                            taskMap[id] = applyPatch(taskMap[id] ?: return@let, patch)
+                        }
                         "delete" -> event.id?.let { taskMap.remove(it) }
                     }
                     trySend(taskMap.values.toList())

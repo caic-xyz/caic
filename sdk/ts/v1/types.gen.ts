@@ -142,6 +142,7 @@ export interface EventToolUse {
   name: string;
   input: any /* json.RawMessage */;
   planContent?: string; // Snapshot of plan content for ExitPlanMode events.
+  inputTruncated?: boolean; // True when Input was omitted due to size; fetch via GET /api/v1/tasks/{id}/tool/{toolUseID}.
 }
 /**
  * EventToolResult is emitted when a tool call completes.
@@ -375,14 +376,24 @@ export interface Task {
 /**
  * TaskListEvent is a discriminated-union event for the task list SSE stream.
  * kind=="snapshot": Tasks holds the full list on initial connect.
- * kind=="upsert":   Task holds one added or changed task.
+ * kind=="upsert":   Task holds a newly created task.
+ * kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
  * kind=="delete":   ID holds the string ID of the removed task.
  */
 export interface TaskListEvent {
   kind: string;
   tasks?: Task[];
   task?: Task;
+  patch?: { [key: string]: any /* json.RawMessage */};
   id?: string;
+}
+/**
+ * TaskToolInputResp is the response for GET /api/v1/tasks/{id}/tool/{toolUseID}.
+ * It returns the full (untruncated) input for a tool call.
+ */
+export interface TaskToolInputResp {
+  toolUseID: string;
+  input: any /* json.RawMessage */;
 }
 /**
  * StatusResp is a common response for mutation endpoints.

@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -23,8 +24,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -44,8 +47,15 @@ private val PlanBorderColor = Color(0xFFDDD6FE)
 private val PlanBgColor = Color(0xFFF5F3FF)
 
 @Composable
-fun ToolCallCard(call: ToolCall, modifier: Modifier = Modifier) {
+fun ToolCallCard(
+    call: ToolCall,
+    onLoadInput: (suspend () -> JsonElement?)? = null,
+    modifier: Modifier = Modifier,
+) {
     var expanded by rememberSaveable(call.use.toolUseID) { mutableStateOf(false) }
+    var loadedInput by remember(call.use.toolUseID) { mutableStateOf<JsonElement?>(null) }
+    var loadingInput by remember(call.use.toolUseID) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val detail = remember(call.use.toolUseID) { toolCallDetail(call.use.name, call.use.input) }
     val hasError = call.result?.error != null
 
@@ -89,7 +99,24 @@ fun ToolCallCard(call: ToolCall, modifier: Modifier = Modifier) {
                 }
                 AnimatedVisibility(visible = expanded) {
                     Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                        ToolInputDisplay(input = call.use.input)
+                        if (call.use.inputTruncated == true && loadedInput == null && onLoadInput != null) {
+                            Button(
+                                onClick = {
+                                    onLoadInput?.let { loader ->
+                                        scope.launch {
+                                            loadingInput = true
+                                            loadedInput = loader()
+                                            loadingInput = false
+                                        }
+                                    }
+                                },
+                                enabled = !loadingInput,
+                            ) {
+                                Text(if (loadingInput) "Loading…" else "Load input")
+                            }
+                        } else {
+                            ToolInputDisplay(input = loadedInput ?: call.use.input)
+                        }
                         call.result?.error?.let { error ->
                             Text(
                                 text = error,
