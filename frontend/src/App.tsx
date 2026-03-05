@@ -1,8 +1,8 @@
 // Main application component for caic web UI.
 import { createEffect, createSignal, For, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
-import type { HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData } from "@sdk/types.gen";
-import { getConfig, getPreferences, listHarnesses, listRepos, listTasks, createTask, cloneRepo, getUsage, terminateTask } from "@sdk/api.gen";
+import type { HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData } from "@sdk/types.gen";
+import { getConfig, getPreferences, listHarnesses, listRepos, createTask, cloneRepo, getUsage, terminateTask } from "@sdk/api.gen";
 import TaskView from "./TaskView";
 import DiffView from "./DiffView";
 import TaskList, { sortTasks } from "./TaskList";
@@ -246,20 +246,40 @@ export default function App() {
             }
           })
           .catch(() => {});
-        listTasks().then(setTasks).catch(() => {});
       });
       taskES.addEventListener("message", (e) => {
         try {
-          const updated = JSON.parse(e.data) as Task[];
-          for (const t of updated) {
+          const event = JSON.parse(e.data) as TaskListEvent;
+          const checkAndNotify = (t: Task) => {
             const needsInput = t.state === "waiting" || t.state === "asking" || t.state === "has_plan";
             const prevNeedsInput = prevStates.get(t.id) === "waiting" || prevStates.get(t.id) === "asking" || prevStates.get(t.id) === "has_plan";
             if (needsInput && !prevNeedsInput) {
               notifyWaiting(t.id, t.title);
             }
+          };
+          if (event.kind === "snapshot" && event.tasks) {
+            for (const t of event.tasks) {
+              checkAndNotify(t);
+            }
+            prevStates = new Map(event.tasks.map((t) => [t.id, t.state]));
+            setTasks(event.tasks);
+          } else if (event.kind === "upsert" && event.task) {
+            const t = event.task;
+            checkAndNotify(t);
+            prevStates.set(t.id, t.state);
+            setTasks((prev) => {
+              const idx = prev.findIndex((p) => p.id === t.id);
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = t;
+                return next;
+              }
+              return [...prev, t].sort((a, b) => (a.id < b.id ? -1 : 1));
+            });
+          } else if (event.kind === "delete" && event.id) {
+            prevStates.delete(event.id);
+            setTasks((prev) => prev.filter((t) => t.id !== event.id));
           }
-          prevStates = new Map(updated.map((t) => [t.id, t.state]));
-          setTasks(updated);
         } catch {
           // Ignore unparseable messages.
         }

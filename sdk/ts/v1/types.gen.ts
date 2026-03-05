@@ -373,6 +373,18 @@ export interface Task {
   display?: boolean;
 }
 /**
+ * TaskListEvent is a discriminated-union event for the task list SSE stream.
+ * kind=="snapshot": Tasks holds the full list on initial connect.
+ * kind=="upsert":   Task holds one added or changed task.
+ * kind=="delete":   ID holds the string ID of the removed task.
+ */
+export interface TaskListEvent {
+  kind: string;
+  tasks?: Task[];
+  task?: Task;
+  id?: string;
+}
+/**
  * StatusResp is a common response for mutation endpoints.
  */
 export interface StatusResp {

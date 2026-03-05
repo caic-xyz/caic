@@ -322,6 +322,14 @@ data class SyncResp(
 data class DiffResp(val diff: String)
 
 @Serializable
+data class TaskListEvent(
+    val kind: String,
+    val tasks: List<Task>? = null,
+    val task: Task? = null,
+    val id: String? = null,
+)
+
+@Serializable
 data class UsageWindow(val utilization: Double, val resetsAt: String)
 
 @Serializable

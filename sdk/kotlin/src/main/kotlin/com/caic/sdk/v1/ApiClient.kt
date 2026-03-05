@@ -98,7 +98,7 @@ class ApiClient(baseURL: String) {
     // SSE endpoints
     fun taskRawEvents(id: String): Flow<EventMessage> = sseFlow<EventMessage>("/api/v1/tasks/$id/raw_events")
     fun taskEvents(id: String): Flow<EventMessage> = sseFlow<EventMessage>("/api/v1/tasks/$id/events")
-    fun globalTaskEvents(): Flow<Task> = sseFlow<Task>("/api/v1/server/tasks/events")
+    fun globalTaskEvents(): Flow<TaskListEvent> = sseFlow<TaskListEvent>("/api/v1/server/tasks/events")
     fun globalUsageEvents(): Flow<UsageResp> = sseFlow<UsageResp>("/api/v1/server/usage/events")
 
     private inline fun <reified T> sseFlow(path: String): Flow<T> = callbackFlow {
@@ -129,7 +129,7 @@ class ApiClient(baseURL: String) {
     // Reconnecting SSE wrappers with exponential backoff.
     fun taskRawEventsReconnecting(id: String): Flow<EventMessage> = reconnectingFlow { taskRawEvents(id) }
     fun taskEventsReconnecting(id: String): Flow<EventMessage> = reconnectingFlow { taskEvents(id) }
-    fun globalTaskEventsReconnecting(): Flow<Task> = reconnectingFlow { globalTaskEvents() }
+    fun globalTaskEventsReconnecting(): Flow<TaskListEvent> = reconnectingFlow { globalTaskEvents() }
     fun globalUsageEventsReconnecting(): Flow<UsageResp> = reconnectingFlow { globalUsageEvents() }
 
     private fun <T> reconnectingFlow(connect: () -> Flow<T>): Flow<T> = flow {

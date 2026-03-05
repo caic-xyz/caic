@@ -659,9 +659,22 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleTaskListEvents streams the full task list as SSE. It pushes
-// immediately when a server-handled mutation fires the changed channel, and
-// falls back to a 2-second ticker to catch runner-internal state transitions.
+// emitTaskListEvent marshals ev and writes it as an SSE message event.
+func emitTaskListEvent(w http.ResponseWriter, flusher http.Flusher, ev v1.TaskListEvent) error {
+	data, err := json.Marshal(ev)
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", data)
+	flusher.Flush()
+	return nil
+}
+
+// handleTaskListEvents streams patch events for the task list as SSE. On first
+// iteration it sends a full snapshot; thereafter it sends only upsert/delete
+// events for changed or removed tasks. It pushes immediately when a
+// server-handled mutation fires the changed channel, and falls back to a
+// 2-second ticker to catch runner-internal state transitions.
 func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -677,7 +690,10 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	var prev []byte
+	// prevByID tracks the last marshalled JSON for each task ID.
+	prevByID := map[string][]byte{}
+	first := true
+
 	for {
 		s.mu.Lock()
 		out := make([]v1.Task, 0, len(s.tasks))
@@ -688,15 +704,45 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 
-		data, err := json.Marshal(out)
-		if err != nil {
-			slog.Warn("marshal task list", "err", err)
-			return
-		}
-		if !bytes.Equal(data, prev) {
-			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", data)
-			flusher.Flush()
-			prev = data
+		if first {
+			if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "snapshot", Tasks: out}); err != nil {
+				slog.Warn("marshal task list snapshot", "err", err)
+				return
+			}
+			for i := range out {
+				data, _ := json.Marshal(&out[i])
+				prevByID[out[i].ID.String()] = data
+			}
+			first = false
+		} else {
+			// Emit upserts for new or changed tasks.
+			currentIDs := make(map[string]struct{}, len(out))
+			for i := range out {
+				id := out[i].ID.String()
+				currentIDs[id] = struct{}{}
+				data, err := json.Marshal(&out[i])
+				if err != nil {
+					slog.Warn("marshal task", "id", id, "err", err)
+					continue
+				}
+				if !bytes.Equal(data, prevByID[id]) {
+					if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "upsert", Task: &out[i]}); err != nil {
+						slog.Warn("marshal task upsert", "id", id, "err", err)
+						return
+					}
+					prevByID[id] = data
+				}
+			}
+			// Emit deletes for removed tasks.
+			for id := range prevByID {
+				if _, ok := currentIDs[id]; !ok {
+					if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "delete", ID: id}); err != nil {
+						slog.Warn("marshal task delete", "id", id, "err", err)
+						return
+					}
+					delete(prevByID, id)
+				}
+			}
 		}
 
 		select {

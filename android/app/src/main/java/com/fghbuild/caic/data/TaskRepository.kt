@@ -3,6 +3,7 @@ package com.fghbuild.caic.data
 
 import com.caic.sdk.v1.EventMessage
 import com.caic.sdk.v1.Task
+import com.caic.sdk.v1.TaskListEvent
 import com.caic.sdk.v1.UsageResp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -137,8 +138,42 @@ class TaskRepository @Inject constructor(
         awaitClose { source.cancel() }
     }
 
-    /** SSE flow for the task list events endpoint. */
-    private fun taskListEvents(baseURL: String): Flow<List<Task>> = sseFlow("$baseURL/api/v1/server/tasks/events")
+    /** SSE flow for the task list events endpoint. Maintains a local task map and applies patch events. */
+    private fun taskListEvents(baseURL: String): Flow<List<Task>> = callbackFlow {
+        val taskMap = LinkedHashMap<String, Task>()
+        val request = Request.Builder()
+            .url("$baseURL/api/v1/server/tasks/events")
+            .header("Accept", "text/event-stream")
+            .build()
+        val factory = EventSources.createFactory(client)
+        val source = factory.newEventSource(request, object : EventSourceListener() {
+            override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
+                try {
+                    val event = json.decodeFromString<TaskListEvent>(data)
+                    when (event.kind) {
+                        "snapshot" -> {
+                            taskMap.clear()
+                            event.tasks?.forEach { taskMap[it.id] = it }
+                        }
+                        "upsert" -> event.task?.let { taskMap[it.id] = it }
+                        "delete" -> event.id?.let { taskMap.remove(it) }
+                    }
+                    trySend(taskMap.values.toList())
+                } catch (_: Exception) {
+                    // Skip malformed events.
+                }
+            }
+
+            override fun onFailure(eventSource: EventSource, t: Throwable?, response: Response?) {
+                close(t?.let { java.io.IOException("SSE connection failed", it) })
+            }
+
+            override fun onClosed(eventSource: EventSource) {
+                close()
+            }
+        })
+        awaitClose { source.cancel() }
+    }
 
     /** SSE flow for the usage events endpoint. */
     private fun usageEvents(baseURL: String): Flow<UsageResp> = sseFlow("$baseURL/api/v1/server/usage/events")

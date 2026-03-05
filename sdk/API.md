@@ -13,7 +13,7 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | GET | `/api/v1/server/harnesses` |  | `HarnessInfo[]` |
 | GET | `/api/v1/server/repos` |  | `Repo[]` |
 | POST | `/api/v1/server/repos` | `CloneRepoReq` | `Repo` |
-| GET | `/api/v1/server/tasks/events` |  | `Task[]` SSE |
+| GET | `/api/v1/server/tasks/events` |  | `TaskListEvent` SSE |
 | GET | `/api/v1/server/usage/events` |  | `UsageResp` SSE |
 
 ## Tasks
@@ -420,6 +420,15 @@ All errors return:
 | Field | Type | Required |
 |-------|------|----------|
 | `diff` | `string` | yes |
+
+### TaskListEvent
+
+| Field | Type | Required |
+|-------|------|----------|
+| `kind` | `string` | yes |
+| `tasks` | `Task[]` |  |
+| `task` | `Task` |  |
+| `id` | `string` |  |
 
 ### UsageWindow
 

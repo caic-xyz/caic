@@ -92,6 +92,17 @@ type Task struct {
 	Display           bool    `json:"display,omitempty"`
 }
 
+// TaskListEvent is a discriminated-union event for the task list SSE stream.
+// kind=="snapshot": Tasks holds the full list on initial connect.
+// kind=="upsert":   Task holds one added or changed task.
+// kind=="delete":   ID holds the string ID of the removed task.
+type TaskListEvent struct {
+	Kind  string `json:"kind"`
+	Tasks []Task `json:"tasks,omitempty"`
+	Task  *Task  `json:"task,omitempty"`
+	ID    string `json:"id,omitempty"`
+}
+
 // StatusResp is a common response for mutation endpoints.
 type StatusResp struct {
 	Status string `json:"status"`
