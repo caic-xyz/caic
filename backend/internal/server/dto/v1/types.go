@@ -80,16 +80,16 @@ type Task struct {
 	Error                              string   `json:"error,omitempty"`
 	Result                             string   `json:"result,omitempty"`
 	// Per-task harness/container metadata.
-	Harness           Harness `json:"harness"`
-	Model             string  `json:"model,omitempty"`
-	AgentVersion      string  `json:"agentVersion,omitempty"`
-	SessionID         string  `json:"sessionID,omitempty"`
-	ContainerUptimeMs int64   `json:"containerUptimeMs,omitempty"`
-	InPlanMode        bool    `json:"inPlanMode,omitempty"`
-	PlanContent       string  `json:"planContent,omitempty"`
-	Tailscale         string  `json:"tailscale,omitempty"` // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
-	USB               bool    `json:"usb,omitempty"`
-	Display           bool    `json:"display,omitempty"`
+	Harness      Harness `json:"harness"`
+	Model        string  `json:"model,omitempty"`
+	AgentVersion string  `json:"agentVersion,omitempty"`
+	SessionID    string  `json:"sessionID,omitempty"`
+	StartedAt    float64 `json:"startedAt,omitempty"` // Unix epoch seconds (ms precision) when the container started.
+	InPlanMode   bool    `json:"inPlanMode,omitempty"`
+	PlanContent  string  `json:"planContent,omitempty"`
+	Tailscale    string  `json:"tailscale,omitempty"` // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
+	USB          bool    `json:"usb,omitempty"`
+	Display      bool    `json:"display,omitempty"`
 }
 
 // TaskListEvent is a discriminated-union event for the task list SSE stream.

@@ -88,7 +88,7 @@ export default function TaskList(props: TaskListProps) {
       cumulativeCacheReadInputTokens={t().cumulativeCacheReadInputTokens}
       cumulativeOutputTokens={t().cumulativeOutputTokens}
       contextWindowLimit={t().contextWindowLimit}
-      containerUptimeMs={t().containerUptimeMs}
+      startedAt={t().startedAt}
       diffStat={t().diffStat}
       error={t().error}
       inPlanMode={t().inPlanMode}

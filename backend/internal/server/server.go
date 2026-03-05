@@ -702,7 +702,6 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		ch := s.changed
 		s.mu.Unlock()
-		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 
 		if first {
 			if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "snapshot", Tasks: out}); err != nil {
@@ -1647,7 +1646,7 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 		Duration:       snap.Duration.Seconds(),
 	}
 	if !e.task.StartedAt.IsZero() {
-		j.ContainerUptimeMs = time.Since(e.task.StartedAt).Milliseconds()
+		j.StartedAt = float64(e.task.StartedAt.UnixMilli()) / 1e3
 	}
 	j.CumulativeInputTokens = snap.Usage.InputTokens
 	j.CumulativeOutputTokens = snap.Usage.OutputTokens

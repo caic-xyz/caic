@@ -123,7 +123,7 @@ data class Task(
     val model: String? = null,
     val agentVersion: String? = null,
     @SerialName("sessionID") val sessionID: String? = null,
-    val containerUptimeMs: Long? = null,
+    val startedAt: Double? = null,
     val inPlanMode: Boolean? = null,
     val planContent: String? = null,
     val tailscale: String? = null,

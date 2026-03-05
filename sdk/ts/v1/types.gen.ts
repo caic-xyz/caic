@@ -365,7 +365,7 @@ export interface Task {
   model?: string;
   agentVersion?: string;
   sessionID?: string;
-  containerUptimeMs?: number /* int64 */;
+  startedAt?: number /* float64 */; // Unix epoch seconds (ms precision) when the container started.
   inPlanMode?: boolean;
   planContent?: string;
   tailscale?: string; // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.

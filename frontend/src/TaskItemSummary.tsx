@@ -30,7 +30,7 @@ export interface TaskItemSummaryProps {
   cumulativeCacheReadInputTokens: number;
   cumulativeOutputTokens: number;
   contextWindowLimit: number;
-  containerUptimeMs?: number;
+  startedAt?: number;
   diffStat?: DiffStat;
   error?: string;
   inPlanMode?: boolean;
@@ -123,8 +123,8 @@ export default function TaskItemSummary(props: TaskItemSummaryProps) {
               {" · "}${props.costUSD.toFixed(2)}
             </Show>
           </span>
-          <Show when={(props.containerUptimeMs ?? 0) > 0}>
-            <span class={styles.duration}>{formatUptime(props.containerUptimeMs ?? 0)}</span>
+          <Show when={(props.startedAt ?? 0) > 0}>
+            <span class={styles.duration}>{formatUptime(props.now() - (props.startedAt ?? 0) * 1000)}</span>
           </Show>
         </div>
       </Show>

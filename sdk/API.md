@@ -153,7 +153,7 @@ All errors return:
 | `model` | `string` |  |
 | `agentVersion` | `string` |  |
 | `sessionID` | `string` |  |
-| `containerUptimeMs` | `number` |  |
+| `startedAt` | `number` |  |
 | `inPlanMode` | `boolean` |  |
 | `planContent` | `string` |  |
 | `tailscale` | `string` |  |
