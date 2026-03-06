@@ -69,7 +69,7 @@ private const val MODEL_NAME = "models/gemini-2.5-flash-native-audio-preview-12-
 private const val PAUSE_POLL_MS = 20L
 
 @Singleton
-class VoiceSessionManager @Inject constructor(
+class VoiceSession @Inject constructor(
     @param:ApplicationContext private val appContext: Context,
     private val settingsRepository: SettingsRepository,
     private val taskRepository: TaskRepository,
@@ -328,7 +328,7 @@ class VoiceSessionManager @Inject constructor(
 
     private fun createWebSocketListener() = object : WebSocketListener() {
         /** Ignore callbacks from WebSockets we already replaced or disconnected. */
-        private fun isStale(ws: WebSocket) = ws !== this@VoiceSessionManager.webSocket
+        private fun isStale(ws: WebSocket) = ws !== this@VoiceSession.webSocket
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
             if (isStale(webSocket)) return

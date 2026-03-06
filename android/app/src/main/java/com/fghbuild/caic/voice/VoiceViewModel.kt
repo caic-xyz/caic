@@ -1,4 +1,4 @@
-// Activity-scoped ViewModel bridging VoiceSessionManager to the voice overlay UI.
+// Activity-scoped ViewModel bridging VoiceSession to the voice overlay UI.
 package com.fghbuild.caic.voice
 
 import androidx.lifecycle.ViewModel
@@ -17,7 +17,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class VoiceViewModel @Inject constructor(
-    private val voiceSessionManager: VoiceSessionManager,
+    private val voiceSessionManager: VoiceSession,
     private val taskRepository: TaskRepository,
     private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
