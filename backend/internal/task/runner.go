@@ -302,6 +302,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 //  6. Close msgCh and logW, write log trailer.
 //  7. Build and return Result.
 func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
+	r.initDefaults()
 	h := t.DetachSession()
 
 	name := t.Container
