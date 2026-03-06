@@ -29,6 +29,7 @@ export const detailsOpenState = new Map<string, boolean>();
 interface Props {
   taskId: string;
   taskState: string;
+  initialPrompt?: string;
   inPlanMode?: boolean;
   planContent?: string;
   repo: string;
@@ -353,7 +354,13 @@ export default function TaskView(props: Props) {
           )}
         </Show>
         <Show when={messages().length === 0}>
-          <p class={styles.placeholder}>Waiting for agent output...</p>
+          <Show when={props.initialPrompt} keyed fallback={<p class={styles.placeholder}>Waiting for agent output...</p>}>
+            {(prompt) => (
+              <div class={styles.userInputMsg}>
+                <Markdown text={prompt} />
+              </div>
+            )}
+          </Show>
         </Show>
       </div>
 
@@ -472,6 +479,11 @@ function MessageItem(props: { ev: EventMessage }) {
           <div class={styles.parseError}>
             Parse error: {err.err}
           </div>
+        )}
+      </Match>
+      <Match when={props.ev.log} keyed>
+        {(log) => (
+          <div class={styles.logLine}>{log.line}</div>
         )}
       </Match>
     </Switch>

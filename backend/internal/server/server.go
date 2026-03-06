@@ -107,8 +107,16 @@ func (b *mdBackend) Start(ctx context.Context, dir, branch string, labels []stri
 	if image == "" {
 		image = md.DefaultBaseImage + ":latest"
 	}
-	c := b.client.Container(dir, branch)
-	sr, err := c.Start(ctx, &md.StartOpts{Quiet: true, BaseImage: image, Labels: labels, USB: opts.USB, Tailscale: opts.Tailscale, Display: opts.Display})
+	client := b.client
+	quiet := true
+	if opts.LogWriter != nil {
+		clientCopy := *b.client
+		clientCopy.W = opts.LogWriter
+		client = &clientCopy
+		quiet = false
+	}
+	c := client.Container(dir, branch)
+	sr, err := c.Start(ctx, &md.StartOpts{Quiet: quiet, BaseImage: image, Labels: labels, USB: opts.USB, Tailscale: opts.Tailscale, Display: opts.Display})
 	if err != nil {
 		return "", "", err
 	}

@@ -24,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import com.fghbuild.caic.ui.theme.markdownTypography
+import com.mikepenz.markdown.m3.Markdown
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -321,13 +323,34 @@ fun TaskDetailScreen(
         },
     ) { padding ->
         if (!state.isReady && !state.hasMessages) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
+            val prompt = state.task?.initialPrompt
+            if (!prompt.isNullOrBlank()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)
+                        .padding(12.dp),
+                ) {
+                    Text(
+                        text = "You:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Markdown(
+                        content = prompt,
+                        typography = markdownTypography(),
+                    )
+                    CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp))
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
             }
         } else {
             MessageList(

@@ -250,6 +250,14 @@ type ParseErrorMessage struct {
 // Type implements Message.
 func (m *ParseErrorMessage) Type() string { return "parse_error" }
 
+// LogMessage is a provisioning/startup log line from the container backend.
+type LogMessage struct {
+	Line string
+}
+
+// Type implements Message.
+func (m *LogMessage) Type() string { return "log" }
+
 // DiffStatMessage is emitted periodically by the relay's diff watcher thread
 // with the current in-container git diff stats.
 type DiffStatMessage struct {

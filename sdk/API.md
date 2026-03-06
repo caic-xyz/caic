@@ -352,6 +352,12 @@ All errors return:
 | `taskID` | `string` | yes |
 | `status` | `string` | yes |
 
+### EventLog
+
+| Field | Type | Required |
+|-------|------|----------|
+| `line` | `string` | yes |
+
 ### EventMessage
 
 | Field | Type | Required |
@@ -375,6 +381,7 @@ All errors return:
 | `thinkingDelta` | `EventThinkingDelta` |  |
 | `subagentStart` | `EventSubagentStart` |  |
 | `subagentEnd` | `EventSubagentEnd` |  |
+| `log` | `EventLog` |  |
 
 ### InputReq
 

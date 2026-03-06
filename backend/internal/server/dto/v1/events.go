@@ -32,6 +32,7 @@ const (
 	EventKindThinkingDelta EventKind = "thinkingDelta"
 	EventKindSubagentStart EventKind = "subagentStart"
 	EventKindSubagentEnd   EventKind = "subagentEnd"
+	EventKindLog           EventKind = "log"
 )
 
 // EventMessage is a single SSE event in the backend-neutral stream
@@ -56,6 +57,7 @@ type EventMessage struct {
 	ThinkingDelta *EventThinkingDelta `json:"thinkingDelta,omitempty"`
 	SubagentStart *EventSubagentStart `json:"subagentStart,omitempty"`
 	SubagentEnd   *EventSubagentEnd   `json:"subagentEnd,omitempty"`
+	Log           *EventLog           `json:"log,omitempty"`
 }
 
 // EventInit is emitted once at the start of a session. It includes a Harness
@@ -195,4 +197,9 @@ type EventSubagentStart struct {
 type EventSubagentEnd struct {
 	TaskID string `json:"taskID"`
 	Status string `json:"status"` // "completed", "failed", "stopped"
+}
+
+// EventLog is a provisioning/startup log line from the container backend.
+type EventLog struct {
+	Line string `json:"line"`
 }

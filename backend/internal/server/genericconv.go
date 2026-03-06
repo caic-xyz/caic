@@ -220,6 +220,12 @@ func (tt *toolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 			Ts:    ts,
 			Error: &v1.EventError{Err: m.Err, Line: m.Line},
 		}}
+	case *agent.LogMessage:
+		return []v1.EventMessage{{
+			Kind: v1.EventKindLog,
+			Ts:   ts,
+			Log:  &v1.EventLog{Line: m.Line},
+		}}
 	default:
 		return nil
 	}

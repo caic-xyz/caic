@@ -225,6 +225,7 @@ var kotlinAliases = []kotlinTypeAlias{
 			{"ThinkingDelta", string(v1.EventKindThinkingDelta)},
 			{"SubagentStart", string(v1.EventKindSubagentStart)},
 			{"SubagentEnd", string(v1.EventKindSubagentEnd)},
+			{"Log", string(v1.EventKindLog)},
 		},
 	},
 }

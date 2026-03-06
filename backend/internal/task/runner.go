@@ -1,6 +1,7 @@
 package task
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,9 @@ type StartOptions struct {
 	Tailscale   bool
 	USB         bool
 	Display     bool
+	// LogWriter receives provisioning log lines. When non-nil, the container
+	// backend should set Quiet=false and write its progress messages here.
+	LogWriter io.Writer
 }
 
 // ContainerBackend abstracts md container lifecycle operations for testability.
@@ -70,6 +74,30 @@ type Runner struct {
 	initOnce sync.Once
 	branchMu sync.Mutex // Serializes operations that need a specific branch checked out (md commands).
 	nextID   int        // Next branch sequence number (protected by branchMu).
+}
+
+// provisioningWriter is an io.Writer that converts line-by-line output from the
+// container backend into LogMessage events stored on the task for SSE streaming.
+type provisioningWriter struct {
+	ctx context.Context
+	t   *Task
+	buf []byte
+}
+
+func (w *provisioningWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := strings.TrimSpace(string(w.buf[:i]))
+		w.buf = w.buf[i+1:]
+		if line != "" {
+			w.t.addMessage(w.ctx, &agent.LogMessage{Line: line})
+		}
+	}
+	return len(p), nil
 }
 
 func (r *Runner) initDefaults() {
@@ -435,6 +463,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResu
 	defer startCancel()
 	name, tailscaleFQDN, err := r.Container.Start(startCtx, r.Dir, branch, labels, StartOptions{
 		DockerImage: t.DockerImage, Tailscale: t.Tailscale, USB: t.USB, Display: t.Display,
+		LogWriter: &provisioningWriter{ctx: ctx, t: t},
 	})
 	if err != nil {
 		return setupResult{}, fmt.Errorf("start container: %w", err)

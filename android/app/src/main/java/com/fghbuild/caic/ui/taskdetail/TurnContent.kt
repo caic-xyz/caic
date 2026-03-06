@@ -71,9 +71,25 @@ fun MessageGroupContent(
             }
         }
         GroupKind.OTHER -> {
-            val result = group.events.firstOrNull { it.kind == EventKinds.Result }?.result
-            if (result != null) {
-                ResultCard(result = result, onNavigateToDiff = onNavigateToDiff)
+            val event = group.events.firstOrNull()
+            when {
+                event?.kind == EventKinds.Log -> {
+                    val line = event.log?.line
+                    if (!line.isNullOrBlank()) {
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        )
+                    }
+                }
+                event?.kind == EventKinds.Result -> {
+                    val result = event.result
+                    if (result != null) {
+                        ResultCard(result = result, onNavigateToDiff = onNavigateToDiff)
+                    }
+                }
             }
         }
     }

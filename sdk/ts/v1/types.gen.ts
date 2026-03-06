@@ -86,6 +86,10 @@ export const EventKindSubagentStart: EventKind = "subagentStart";
  */
 export const EventKindSubagentEnd: EventKind = "subagentEnd";
 /**
+ * Event kind constants.
+ */
+export const EventKindLog: EventKind = "log";
+/**
  * EventMessage is a single SSE event in the backend-neutral stream
  * (/api/v1/tasks/{id}/events). All backends produce these events.
  */
@@ -109,6 +113,7 @@ export interface EventMessage {
   thinkingDelta?: EventThinkingDelta;
   subagentStart?: EventSubagentStart;
   subagentEnd?: EventSubagentEnd;
+  log?: EventLog;
 }
 /**
  * EventInit is emitted once at the start of a session. It includes a Harness
@@ -268,6 +273,12 @@ export interface EventSubagentStart {
 export interface EventSubagentEnd {
   taskID: string;
   status: string; // "completed", "failed", "stopped"
+}
+/**
+ * EventLog is a provisioning/startup log line from the container backend.
+ */
+export interface EventLog {
+  line: string;
 }
 
 //////////

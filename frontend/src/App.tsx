@@ -616,6 +616,7 @@ export default function App() {
                 <TaskView
                   taskId={id}
                   taskState={selectedTask()?.state ?? "pending"}
+                  initialPrompt={selectedTask()?.initialPrompt}
                   inPlanMode={selectedTask()?.inPlanMode}
                   planContent={selectedTask()?.planContent}
                   repo={selectedTask()?.repo ?? ""}

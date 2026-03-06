@@ -127,6 +127,13 @@ a.headerBranch:hover {
   padding-top: 0.5rem;
 }
 
+.logLine {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-family: monospace;
+  margin-bottom: 0.1rem;
+}
+
 .parseError {
   color: var(--color-danger-text);
   background: var(--color-danger-bg);

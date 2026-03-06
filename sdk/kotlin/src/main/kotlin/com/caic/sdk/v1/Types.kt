@@ -32,6 +32,7 @@ object EventKinds {
     const val ThinkingDelta: EventKind = "thinkingDelta"
     const val SubagentStart: EventKind = "subagentStart"
     const val SubagentEnd: EventKind = "subagentEnd"
+    const val Log: EventKind = "log"
 }
 
 object ErrorCodes {
@@ -268,6 +269,9 @@ data class EventSubagentEnd(
     val status: String,
 )
 
+@Serializable
+data class EventLog(val line: String)
+
 // Backend-neutral event types
 
 @Serializable
@@ -291,6 +295,7 @@ data class EventMessage(
     val thinkingDelta: EventThinkingDelta? = null,
     val subagentStart: EventSubagentStart? = null,
     val subagentEnd: EventSubagentEnd? = null,
+    val log: EventLog? = null,
 )
 
 @Serializable
