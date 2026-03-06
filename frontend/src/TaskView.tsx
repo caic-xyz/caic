@@ -294,7 +294,7 @@ export default function TaskView(props: Props) {
                         <Switch>
                           <Match when={group().kind === "ask" && group().ask} keyed>
                             {(ask) => (
-                              <AskQuestionGroup
+                              <AskQuestionCard
                                 ask={ask}
                                 interactive={isWaiting() && group() === grouped()[lastAskIdx()]}
                                 answerText={group().answerText}
@@ -318,7 +318,7 @@ export default function TaskView(props: Props) {
                           </Match>
                           <Match when={group().kind === "action"}>
                             <Show when={group().toolCalls.length > 0}
-                              fallback={<ThinkingBlock events={group().events} />}>
+                              fallback={<ThinkingCard events={group().events} />}>
                               <ToolMessageGroup toolCalls={group().toolCalls} taskId={props.taskId} events={group().events} />
                             </Show>
                           </Match>
@@ -524,7 +524,7 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events
   return (
     <Show when={calls().length > 0}>
       <Show when={calls().length > 1} fallback={
-        <ToolCallBlock call={calls()[0]} taskId={props.taskId}
+        <ToolCallCard call={calls()[0]} taskId={props.taskId}
           thinkingEvents={thinkingEvents()}
           open={detailsOpenState.get(calls()[0].use.toolUseID) ?? false}
           onToggle={(v) => detailsOpenState.set(calls()[0].use.toolUseID, v)} />
@@ -536,10 +536,10 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events
           </summary>
           <div class={styles.toolGroupInner}>
             <Show when={thinkingEvents().length > 0}>
-              <ThinkingBlock events={thinkingEvents()} />
+              <ThinkingCard events={thinkingEvents()} />
             </Show>
             <For each={calls()}>
-              {(call) => <ToolCallBlock call={call} taskId={props.taskId}
+              {(call) => <ToolCallCard call={call} taskId={props.taskId}
                 open={detailsOpenState.get(call.use.toolUseID) ?? false}
                 onToggle={(v) => detailsOpenState.set(call.use.toolUseID, v)} />}
             </For>
@@ -550,8 +550,8 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events
   );
 }
 
-// Renders a thinking group, collapsed by default like a tool call.
-function ThinkingBlock(props: { events: EventMessage[] }) {
+// Renders a thinking group, collapsed by default like a ToolCallCard.
+function ThinkingCard(props: { events: EventMessage[] }) {
   const text = createMemo(() => {
     const finalEv = props.events.findLast((e) => e.kind === "thinking");
     if (finalEv?.thinking) return finalEv.thinking.text;
@@ -576,7 +576,7 @@ function ThinkingBlock(props: { events: EventMessage[] }) {
 // Renders a text group, combining textDelta fragments into a single view.
 // When a final "text" event arrives, it replaces the accumulated deltas.
 // If the group contains thinking events (absorbed from a preceding thinking-only
-// group), a collapsed ThinkingBlock is shown above the text.
+// group), a collapsed ThinkingCard is shown above the text.
 function TextMessageGroup(props: { events: EventMessage[] }) {
   const thinkingEvents = createMemo(() =>
     props.events.filter((e) => e.kind === "thinking" || e.kind === "thinkingDelta")
@@ -594,7 +594,7 @@ function TextMessageGroup(props: { events: EventMessage[] }) {
   return (
     <>
       <Show when={thinkingEvents().length > 0}>
-        <ThinkingBlock events={thinkingEvents()} />
+        <ThinkingCard events={thinkingEvents()} />
       </Show>
       <Show when={text()}>
         <div class={styles.assistantMsg}>
@@ -645,7 +645,7 @@ function ElidedTurn(props: { turn: Turn; taskId: string }) {
               </Match>
               <Match when={group.kind === "action"}>
                 <Show when={group.toolCalls.length > 0}
-                  fallback={<ThinkingBlock events={group.events} />}>
+                  fallback={<ThinkingCard events={group.events} />}>
                   <ToolMessageGroup toolCalls={group.toolCalls} taskId={props.taskId} events={group.events} />
                 </Show>
               </Match>
@@ -738,7 +738,7 @@ function ToolCallInput(props: { input: Record<string, unknown> }) {
   );
 }
 
-function ToolCallBlock(props: { call: ToolCall; taskId: string; open: boolean; onToggle: (open: boolean) => void; thinkingEvents?: EventMessage[] }) {
+function ToolCallCard(props: { call: ToolCall; taskId: string; open: boolean; onToggle: (open: boolean) => void; thinkingEvents?: EventMessage[] }) {
   const [loadedInput, setLoadedInput] = createSignal<Record<string, unknown> | null>(null);
   const [loading, setLoading] = createSignal(false);
 
@@ -779,7 +779,7 @@ function ToolCallBlock(props: { call: ToolCall; taskId: string; open: boolean; o
           </Show>
         </summary>
         <Show when={(props.thinkingEvents?.length ?? 0) > 0}>
-          <ThinkingBlock events={props.thinkingEvents ?? []} />
+          <ThinkingCard events={props.thinkingEvents ?? []} />
         </Show>
         <Show when={showLoadBtn()} fallback={<ToolCallInput input={effectiveInput()} />}>
           <button class={styles.loadInputBtn} onClick={loadInput} disabled={loading()}>
@@ -812,7 +812,7 @@ function Markdown(props: { text: string }) {
   return <div class={styles.markdown} innerHTML={html()} />;
 }
 
-function AskQuestionGroup(props: { ask: EventAsk; interactive: boolean; answerText?: string; onSubmit: (text: string) => void }) {
+function AskQuestionCard(props: { ask: EventAsk; interactive: boolean; answerText?: string; onSubmit: (text: string) => void }) {
   const questions = () => props.ask.questions;
   const [selections, setSelections] = createSignal<Map<number, Set<string>>>(new Map());
   const [otherTexts, setOtherTexts] = createSignal<Map<number, string>>(new Map());

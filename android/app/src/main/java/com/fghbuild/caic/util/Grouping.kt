@@ -1,4 +1,4 @@
-// Message grouping and turn splitting, ported from frontend/src/TaskView.tsx.
+// Message grouping and turn splitting, ported from frontend/src/grouping.ts.
 package com.fghbuild.caic.util
 
 import androidx.compose.runtime.Immutable

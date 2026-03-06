@@ -2,7 +2,7 @@
 import { For, Index, Show } from "solid-js";
 import type { Accessor } from "solid-js";
 import type { Task } from "@sdk/types.gen";
-import TaskItemSummary from "./TaskItemSummary";
+import TaskCard from "./TaskCard";
 import styles from "./TaskList.module.css";
 import LeftPanelClose from "@material-symbols/svg-400/outlined/left_panel_close.svg?solid";
 import LeftPanelOpen from "@material-symbols/svg-400/outlined/left_panel_open.svg?solid";
@@ -67,7 +67,7 @@ export default function TaskList(props: TaskListProps) {
   };
 
   const renderTask = (t: () => Task) => (
-    <TaskItemSummary
+    <TaskCard
       id={t().id}
       title={t().title}
       state={t().state}

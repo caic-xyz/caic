@@ -1,4 +1,4 @@
-// Compact summary card for a single task, used in the sidebar task list.
+// Compact card for a single task, used in the sidebar task list.
 import { Show } from "solid-js";
 import type { Accessor } from "solid-js";
 import type { DiffStat } from "@sdk/types.gen";
@@ -7,9 +7,9 @@ import TailscaleIcon from "./tailscale.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
-import styles from "./TaskItemSummary.module.css";
+import styles from "./TaskCard.module.css";
 
-export interface TaskItemSummaryProps {
+export interface TaskCardProps {
   id: string;
   title: string;
   state: string;
@@ -45,7 +45,7 @@ export interface TaskItemSummaryProps {
   onDiffClick?: () => void;
 }
 
-export default function TaskItemSummary(props: TaskItemSummaryProps) {
+export default function TaskCard(props: TaskCardProps) {
   return (
     <div
       data-task-id={props.id}
