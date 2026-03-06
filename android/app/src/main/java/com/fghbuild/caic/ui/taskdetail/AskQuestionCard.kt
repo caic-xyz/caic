@@ -1,6 +1,7 @@
 // Card for an ask question with options and answer display.
 package com.fghbuild.caic.ui.taskdetail
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -20,8 +21,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+
 import com.caic.sdk.v1.AskQuestion
 import com.caic.sdk.v1.EventAsk
+
+private val AskActiveBg = Color(0xFFF0F6FF)
+private val AskActiveBorder = Color(0xFF4A90D9)
+private val AskInactiveBg = Color(0xFFF8F9FA)
+private val AskInactiveBorder = Color(0xFFDDDDDD)
+private val AskAnsweredColor = Color(0xFF28A745)
 
 private fun toggleOption(
     selections: SnapshotStateMap<Int, Set<String>>,
@@ -68,11 +76,14 @@ fun AskQuestionCard(
     val selections = remember(ask.toolUseID) { mutableStateMapOf<Int, Set<String>>() }
     val otherTexts = remember(ask.toolUseID) { mutableStateMapOf<Int, String>() }
 
+    val bg = if (interactive) AskActiveBg else AskInactiveBg
+    val borderColor = if (interactive) AskActiveBorder else AskInactiveBorder
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        tonalElevation = 2.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, borderColor, MaterialTheme.shapes.medium),
         shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        color = bg,
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
@@ -154,7 +165,7 @@ fun AskQuestionCard(
                 Text(
                     text = "Answered: $answerText",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF22C55E),
+                    color = AskAnsweredColor,
                 )
             }
         }
