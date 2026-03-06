@@ -102,6 +102,13 @@ func ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 		return []agent.Message{&agent.TextDeltaMessage{Text: p.Delta}}, nil
 
+	case MethodReasoningSummaryTextDelta:
+		var p ReasoningSummaryTextDeltaParams
+		if err := json.Unmarshal(msg.Params, &p); err != nil {
+			return nil, fmt.Errorf("item/reasoning/summaryTextDelta params: %w", err)
+		}
+		return []agent.Message{&agent.ThinkingDeltaMessage{Text: p.Delta}}, nil
+
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: msg.Method, Raw: append([]byte(nil), line...)}}, nil
 	}

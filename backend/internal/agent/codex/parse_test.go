@@ -239,6 +239,24 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("Type() = %q", raw.Type())
 		}
 	})
+	t.Run("ReasoningSummaryTextDelta", func(t *testing.T) {
+		const input = `{"jsonrpc":"2.0","method":"item/reasoning/summaryTextDelta","params":{"threadId":"t1","turnId":"turn_1","itemId":"item_0","delta":"Let me think...","summaryIndex":0}}`
+		msgs, err := ParseMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		td, ok := msgs[0].(*agent.ThinkingDeltaMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.ThinkingDeltaMessage", msgs[0])
+		}
+		if td.Text != "Let me think..." {
+			t.Errorf("Text = %q, want %q", td.Text, "Let me think...")
+		}
+	})
+
 	t.Run("ItemDelta", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"t1","turnId":"turn_1","itemId":"item_3","delta":"Hello "}}`
 		msgs, err := ParseMessage([]byte(input))
