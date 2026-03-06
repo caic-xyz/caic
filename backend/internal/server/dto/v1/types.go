@@ -191,8 +191,13 @@ type SyncResp struct {
 
 // UsageWindow represents a single quota window (5-hour or 7-day).
 type UsageWindow struct {
+	// From Claude OAuth API (rate-limit quota); zero when OAuth unavailable.
 	Utilization float64 `json:"utilization"`
 	ResetsAt    string  `json:"resetsAt"`
+	// From local task streaming data (always populated).
+	CostUSD      float64 `json:"costUSD"`
+	InputTokens  int     `json:"inputTokens"`
+	OutputTokens int     `json:"outputTokens"`
 }
 
 // ExtraUsage represents the extra (pay-as-you-go) usage state.

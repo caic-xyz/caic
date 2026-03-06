@@ -176,7 +176,7 @@ fun buildFunctionDeclarations(harnesses: List<String>, repos: List<String> = emp
     ),
     FunctionDeclaration(
         name = "get_usage",
-        description = "Check current API quota utilization and limits.",
+        description = "Check current task cost and token usage for rolling 5-hour and 7-day windows.",
         parameters = emptyObjectSchema,
         behavior = "NON_BLOCKING",
         scheduling = "INTERRUPT",

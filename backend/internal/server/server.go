@@ -819,8 +819,9 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleUsageEvents streams usage snapshots as SSE every 5 minutes (or on
-// change). Each message is a single UsageResp JSON object.
+// handleUsageEvents streams usage snapshots as SSE. It reacts to task changes
+// immediately and ticks every 5 minutes for window rollovers and OAuth cache
+// refreshes. Each message is a single UsageResp JSON object.
 func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -833,39 +834,39 @@ func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	flusher.Flush()
 
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(usageCacheTTL)
 	defer ticker.Stop()
 
 	var prev []byte
 
-	emit := func() {
-		if s.usage == nil || !s.usage.hasToken() {
-			return
+	for {
+		s.mu.Lock()
+		resp := computeUsage(s.tasks, time.Now())
+		ch := s.changed
+		s.mu.Unlock()
+
+		if s.usage != nil {
+			if oauth := s.usage.get(); oauth != nil {
+				resp.FiveHour.Utilization = oauth.FiveHour.Utilization
+				resp.FiveHour.ResetsAt = oauth.FiveHour.ResetsAt
+				resp.SevenDay.Utilization = oauth.SevenDay.Utilization
+				resp.SevenDay.ResetsAt = oauth.SevenDay.ResetsAt
+				resp.ExtraUsage = oauth.ExtraUsage
+			}
 		}
-		u := s.usage.get()
-		if u == nil {
-			return
-		}
-		data, err := json.Marshal(u)
-		if err != nil {
-			return
-		}
-		if !bytes.Equal(data, prev) {
+
+		data, err := json.Marshal(resp)
+		if err == nil && !bytes.Equal(data, prev) {
 			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", data)
 			flusher.Flush()
 			prev = data
 		}
-	}
 
-	// Send initial usage immediately.
-	emit()
-
-	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-ch:
 		case <-ticker.C:
-			emit()
 		}
 	}
 }
@@ -1053,15 +1054,20 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetUsage(w http.ResponseWriter, _ *http.Request) {
-	if s.usage == nil || !s.usage.hasToken() {
-		writeError(w, dto.InternalError("usage not available: no OAuth token"))
-		return
+	s.mu.Lock()
+	resp := computeUsage(s.tasks, time.Now())
+	s.mu.Unlock()
+
+	if s.usage != nil {
+		if oauth := s.usage.get(); oauth != nil {
+			resp.FiveHour.Utilization = oauth.FiveHour.Utilization
+			resp.FiveHour.ResetsAt = oauth.FiveHour.ResetsAt
+			resp.SevenDay.Utilization = oauth.SevenDay.Utilization
+			resp.SevenDay.ResetsAt = oauth.SevenDay.ResetsAt
+			resp.ExtraUsage = oauth.ExtraUsage
+		}
 	}
-	resp := s.usage.get()
-	if resp == nil {
-		writeError(w, dto.InternalError("usage data unavailable"))
-		return
-	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }

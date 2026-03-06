@@ -446,6 +446,9 @@ All errors return:
 |-------|------|----------|
 | `utilization` | `number` | yes |
 | `resetsAt` | `string` | yes |
+| `costUSD` | `number` | yes |
+| `inputTokens` | `number` | yes |
+| `outputTokens` | `number` | yes |
 
 ### ExtraUsage
 

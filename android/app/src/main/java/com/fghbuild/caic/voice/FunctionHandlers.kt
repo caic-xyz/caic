@@ -154,19 +154,15 @@ class FunctionHandlers(
 
     private suspend fun handleGetUsage(): JsonElement {
         val usage = apiClient.getUsage()
-        fun pct(v: Double) = "${v.toInt()}%"
+        fun fmt(cost: Double) = if (cost >= 10) {
+            "\$${cost.toInt()}"
+        } else {
+            "\$${String.format(java.util.Locale.US, "%.2f", cost)}"
+        }
+        fun tokens(w: com.caic.sdk.v1.UsageWindow) = w.inputTokens + w.outputTokens
         val summary = buildString {
-            appendLine("5-hour window: ${pct(usage.fiveHour.utilization)} used, resets ${usage.fiveHour.resetsAt}")
-            append("7-day window: ${pct(usage.sevenDay.utilization)} used, resets ${usage.sevenDay.resetsAt}")
-            if (usage.extraUsage.isEnabled) {
-                appendLine()
-                val usedDollars = usage.extraUsage.usedCredits / 100
-                val limitDollars = usage.extraUsage.monthlyLimit / 100
-                append(
-                    "Extra usage: \$${usedDollars.toInt()} of " +
-                        "\$${limitDollars.toInt()} monthly limit used",
-                )
-            }
+            appendLine("5-hour cost: ${fmt(usage.fiveHour.costUSD)} (${tokens(usage.fiveHour)} tokens)")
+            append("7-day cost: ${fmt(usage.sevenDay.costUSD)} (${tokens(usage.sevenDay)} tokens)")
         }
         return textResult(summary)
     }

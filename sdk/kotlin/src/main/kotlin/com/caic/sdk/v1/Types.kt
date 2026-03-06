@@ -338,7 +338,13 @@ data class TaskListEvent(
 )
 
 @Serializable
-data class UsageWindow(val utilization: Double, val resetsAt: String)
+data class UsageWindow(
+    val utilization: Double,
+    val resetsAt: String,
+    @SerialName("costUSD") val costUSD: Double,
+    val inputTokens: Int,
+    val outputTokens: Int,
+)
 
 @Serializable
 data class ExtraUsage(

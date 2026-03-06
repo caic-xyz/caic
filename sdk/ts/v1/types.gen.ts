@@ -487,8 +487,17 @@ export interface SyncResp {
  * UsageWindow represents a single quota window (5-hour or 7-day).
  */
 export interface UsageWindow {
+  /**
+   * From Claude OAuth API (rate-limit quota); zero when OAuth unavailable.
+   */
   utilization: number /* float64 */;
   resetsAt: string;
+  /**
+   * From local task streaming data (always populated).
+   */
+  costUSD: number /* float64 */;
+  inputTokens: number /* int */;
+  outputTokens: number /* int */;
 }
 /**
  * ExtraUsage represents the extra (pay-as-you-go) usage state.

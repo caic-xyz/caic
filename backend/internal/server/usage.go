@@ -1,5 +1,5 @@
 // Claude Code OAuth usage quota fetcher with caching, credential file
-// watching, and exponential backoff on errors.
+// watching, and exponential backoff on errors. Also aggregates local task cost.
 package server
 
 import (
@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/fsnotify/fsnotify"
 )
@@ -134,13 +135,6 @@ func (f *usageFetcher) onCredentialsChanged() {
 	slog.Info("credentials updated, token refreshed")
 }
 
-// hasToken reports whether a token is available.
-func (f *usageFetcher) hasToken() bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.token != ""
-}
-
 // get returns the cached usage data, refreshing if stale. Respects
 // exponential backoff on prior errors.
 func (f *usageFetcher) get() *v1.UsageResp {
@@ -185,9 +179,10 @@ func (f *usageFetcher) fetch() (*v1.UsageResp, error) {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+f.token)
+	req.Header.Set("User-Agent", "caic")
 	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
 
-	resp, err := f.client.Do(req)
+	resp, err := f.client.Do(req) //nolint:gosec // G704: URL is a hardcoded constant, not user input
 	if err != nil {
 		return nil, err
 	}
@@ -219,16 +214,12 @@ func (f *usageFetcher) fetch() (*v1.UsageResp, error) {
 
 	out := &v1.UsageResp{}
 	if raw.FiveHour != nil {
-		out.FiveHour = v1.UsageWindow{
-			Utilization: raw.FiveHour.Utilization,
-			ResetsAt:    raw.FiveHour.ResetsAt,
-		}
+		out.FiveHour.Utilization = raw.FiveHour.Utilization
+		out.FiveHour.ResetsAt = raw.FiveHour.ResetsAt
 	}
 	if raw.SevenDay != nil {
-		out.SevenDay = v1.UsageWindow{
-			Utilization: raw.SevenDay.Utilization,
-			ResetsAt:    raw.SevenDay.ResetsAt,
-		}
+		out.SevenDay.Utilization = raw.SevenDay.Utilization
+		out.SevenDay.ResetsAt = raw.SevenDay.ResetsAt
 	}
 	if raw.ExtraUsage != nil {
 		out.ExtraUsage = v1.ExtraUsage{
@@ -254,6 +245,40 @@ func readCredentialsToken(credPath string) string {
 
 type claudeCreds struct {
 	ClaudeAiOauth struct {
-		AccessToken string `json:"accessToken"`
+		AccessToken string `json:"accessToken"` //nolint:gosec // G117: field is part of the credentials schema, not a secret value
 	} `json:"claudeAiOauth"`
+}
+
+// computeUsage aggregates task cost and token usage within rolling 5-hour and
+// 7-day windows. Tasks are attributed to the window that contains their
+// StartedAt time. For running tasks without a final result, the current live
+// stats are used.
+func computeUsage(tasks map[string]*taskEntry, now time.Time) v1.UsageResp {
+	cutoff5h := now.Add(-5 * time.Hour)
+	cutoff7d := now.Add(-7 * 24 * time.Hour)
+
+	var out v1.UsageResp
+	for _, e := range tasks {
+		if e.task.StartedAt.IsZero() || !e.task.StartedAt.After(cutoff7d) {
+			continue
+		}
+		var costUSD float64
+		var usage agent.Usage
+		if e.result != nil {
+			costUSD = e.result.CostUSD
+			usage = e.result.Usage
+		} else {
+			costUSD, _, _, usage, _ = e.task.LiveStats()
+		}
+		total := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
+		out.SevenDay.CostUSD += costUSD
+		out.SevenDay.InputTokens += total
+		out.SevenDay.OutputTokens += usage.OutputTokens
+		if e.task.StartedAt.After(cutoff5h) {
+			out.FiveHour.CostUSD += costUSD
+			out.FiveHour.InputTokens += total
+			out.FiveHour.OutputTokens += usage.OutputTokens
+		}
+	}
+	return out
 }
