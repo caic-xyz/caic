@@ -8,6 +8,7 @@ import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
 import styles from "./TaskCard.module.css";
+import { formatElapsed, formatTokens, tokenColor, stateColor } from "./formatting";
 
 export interface TaskCardProps {
   id: string;
@@ -124,7 +125,7 @@ export default function TaskCard(props: TaskCardProps) {
             </Show>
           </span>
           <Show when={(props.startedAt ?? 0) > 0}>
-            <span class={styles.duration}>{formatUptime(props.now() - (props.startedAt ?? 0) * 1000)}</span>
+            <span class={styles.duration}>{formatElapsed(props.now() - (props.startedAt ?? 0) * 1000)}</span>
           </Show>
         </div>
       </Show>
@@ -166,53 +167,3 @@ function StateDuration(props: { stateUpdatedAt: number; now: Accessor<number> })
   return <span class={styles.duration}>{formatElapsed(elapsed())}</span>;
 }
 
-function formatElapsed(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
-}
-
-function formatUptime(ms: number): string {
-  const sec = Math.floor(ms / 1000);
-  if (sec < 60) return `${sec}s`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ${sec % 60}s`;
-  const hr = Math.floor(min / 60);
-  return `${hr}h ${min % 60}m`;
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}Mt`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}kt`;
-  return `${n}t`;
-}
-
-function tokenColor(current: number, limit: number): string {
-  if (limit <= 0) return "inherit";
-  const ratio = current / limit;
-  if (ratio >= 0.9) return "#dc3545";
-  if (ratio >= 0.75) return "#d4a017";
-  return "inherit";
-}
-
-function stateColor(state: string): string {
-  switch (state) {
-    case "running":
-      return "#d4edda";
-    case "asking":
-      return "#cce5ff";
-    case "has_plan":
-      return "#ede9fe";
-    case "failed":
-      return "#f8d7da";
-    case "terminating":
-      return "#fde2c8";
-    case "terminated":
-      return "#e2e3e5";
-    default:
-      return "#fff3cd";
-  }
-}

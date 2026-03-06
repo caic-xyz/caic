@@ -4,6 +4,7 @@ import { useNavigate, useLocation } from "@solidjs/router";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents, getTaskToolInput } from "@sdk/api.gen";
 import type { EventMessage, AskQuestion, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat } from "@sdk/types.gen";
 import { groupMessages, groupTurns, toolCountSummary, turnSummary } from "./grouping";
+import { formatDuration, formatTokens, toolCallDetail } from "./formatting";
 import type { ToolCall, Turn } from "./grouping";
 import { SyncTargetDefault } from "@sdk/types.gen";
 import { Marked } from "marked";
@@ -501,19 +502,6 @@ function DiffStatBlock(props: { files: DiffFileStat[] }) {
   );
 }
 
-
-function formatDuration(seconds: number): string {
-  if (seconds < 1) return `${Math.round(seconds * 1000)}ms`;
-  return `${seconds.toFixed(1)}s`;
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}Mt`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}kt`;
-  return `${n}t`;
-}
-
-
 function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events?: EventMessage[] }) {
   const calls = () => props.toolCalls;
   const groupKey = () => "group:" + calls()[0]?.use.toolUseID;
@@ -663,38 +651,6 @@ function ElidedTurn(props: { turn: Turn; taskId: string }) {
       </div>
     </details>
   );
-}
-
-// Extracts a short, tool-specific detail string from tool input for display
-// in collapsed summaries (e.g. file path for Read, command for Bash).
-function toolCallDetail(name: string, input: Record<string, unknown>): string {
-  switch (name.toLowerCase()) {
-    case "read":
-    case "write":
-      return typeof input.file_path === "string" ? input.file_path.replace(/^.*\//, "") : "";
-    case "edit":
-      return typeof input.file_path === "string" ? input.file_path.replace(/^.*\//, "") : "";
-    case "bash":
-      if (typeof input.command === "string") {
-        const cmd = input.command.trimStart();
-        return cmd.length > 60 ? cmd.slice(0, 57) + "..." : cmd;
-      }
-      return "";
-    case "grep":
-      return typeof input.pattern === "string" ? input.pattern : "";
-    case "glob":
-      return typeof input.pattern === "string" ? input.pattern : "";
-    case "task":
-      return typeof input.description === "string" ? input.description : "";
-    case "webfetch":
-      return typeof input.url === "string" ? input.url : "";
-    case "websearch":
-      return typeof input.query === "string" ? input.query : "";
-    case "notebookedit":
-      return typeof input.notebook_path === "string" ? input.notebook_path.replace(/^.*\//, "") : "";
-    default:
-      return "";
-  }
 }
 
 // Returns true if every value in the object is a scalar (string, number, boolean, null).
