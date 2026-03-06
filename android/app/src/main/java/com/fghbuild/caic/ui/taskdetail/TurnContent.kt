@@ -28,6 +28,7 @@ import com.caic.sdk.v1.ImageData
 import com.fghbuild.caic.util.GroupKind
 import com.fghbuild.caic.util.MessageGroup
 import com.fghbuild.caic.util.Turn
+import com.fghbuild.caic.util.formatTokens
 import com.fghbuild.caic.util.imageDataToBitmap
 import kotlinx.serialization.json.JsonElement
 import com.fghbuild.caic.ui.theme.markdownTypography
@@ -73,6 +74,52 @@ fun MessageGroupContent(
         GroupKind.OTHER -> {
             val event = group.events.firstOrNull()
             when {
+                event?.kind == EventKinds.Init -> {
+                    val init = event.init
+                    if (init != null) {
+                        Text(
+                            text = "Session started \u00b7 ${init.model}" +
+                                " \u00b7 ${init.agentVersion} \u00b7 ${init.sessionID}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                event?.kind == EventKinds.Usage -> {
+                    val usage = event.usage
+                    if (usage != null) {
+                        val totalIn = usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens
+                        val cached = usage.cacheReadInputTokens
+                        val text = buildString {
+                            append("${usage.model} \u00b7 ${formatTokens(totalIn)}")
+                            append(" in + ${formatTokens(usage.outputTokens)} out")
+                            if (cached > 0) append(" \u00b7 ${formatTokens(cached)} cached")
+                        }
+                        Text(
+                            text = text,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                event?.kind == EventKinds.System && event.system?.subtype == "context_cleared" -> {
+                    Text(
+                        text = "Context cleared",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    )
+                }
+                event?.kind == EventKinds.System -> {
+                    val subtype = event.system?.subtype
+                    if (!subtype.isNullOrBlank()) {
+                        Text(
+                            text = "[$subtype]",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
                 event?.kind == EventKinds.Log -> {
                     val line = event.log?.line
                     if (!line.isNullOrBlank()) {
@@ -89,6 +136,13 @@ fun MessageGroupContent(
                     if (result != null) {
                         ResultCard(result = result, onNavigateToDiff = onNavigateToDiff)
                     }
+                }
+                event?.error != null -> {
+                    Text(
+                        text = "Parse error: ${event.error!!.err}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
         }
