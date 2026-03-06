@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -36,6 +35,8 @@ import com.mikepenz.markdown.m3.Markdown
 
 private val PlanBorderColor = Color(0xFFDDD6FE)
 private val PlanBgColor = Color(0xFFF5F3FF)
+private val UserMsgBgColor = Color(0xFFDBE9F9)
+private val ImageBorderColor = Color(0xFFB8D0EA)
 
 /** Renders a single [MessageGroup]. Used both in [TurnContent] and the flat list. */
 @Composable
@@ -183,6 +184,9 @@ fun PlanApprovalSection(planContent: String, onExecute: () -> Unit) {
                 content = planContent,
                 modifier = Modifier.padding(12.dp).fillMaxWidth(),
                 typography = markdownTypography(),
+                colors = com.mikepenz.markdown.m3.markdownColor(
+                    codeBackground = MaterialTheme.colorScheme.surfaceVariant,
+                ),
             )
         }
         Button(
@@ -199,33 +203,40 @@ fun PlanApprovalSection(planContent: String, onExecute: () -> Unit) {
 
 @Composable
 private fun UserInputContent(text: String, images: List<ImageData>) {
-    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-        if (text.isNotBlank()) {
-            Markdown(
-                content = text,
-                typography = markdownTypography(),
-                colors = com.mikepenz.markdown.m3.markdownColor(
-                    text = MaterialTheme.colorScheme.onSurface,
-                    codeBackground = MaterialTheme.colorScheme.surfaceVariant,
-                ),
-            )
-        }
-        if (images.isNotEmpty()) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.padding(top = if (text.isNotBlank()) 4.dp else 0.dp),
-            ) {
-                images.forEach { img ->
-                    val bitmap = remember(img) { imageDataToBitmap(img)?.asImageBitmap() }
-                    if (bitmap != null) {
-                        Image(
-                            bitmap = bitmap,
-                            contentDescription = "User image",
-                            modifier = Modifier
-                                .size(64.dp)
-                                .clip(RoundedCornerShape(4.dp)),
-                            contentScale = ContentScale.Crop,
-                        )
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(6.dp),
+        color = UserMsgBgColor,
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+            if (text.isNotBlank()) {
+                Markdown(
+                    content = text,
+                    typography = markdownTypography(),
+                    colors = com.mikepenz.markdown.m3.markdownColor(
+                        text = MaterialTheme.colorScheme.onSurface,
+                        codeBackground = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                )
+            }
+            if (images.isNotEmpty()) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(top = if (text.isNotBlank()) 4.dp else 0.dp),
+                ) {
+                    images.forEach { img ->
+                        val bitmap = remember(img) { imageDataToBitmap(img)?.asImageBitmap() }
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap,
+                                contentDescription = "User image",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .border(1.dp, ImageBorderColor, RoundedCornerShape(4.dp)),
+                                contentScale = ContentScale.FillWidth,
+                            )
+                        }
                     }
                 }
             }

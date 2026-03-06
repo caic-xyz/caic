@@ -48,6 +48,9 @@ fun ResultCard(result: EventResult, onNavigateToDiff: (() -> Unit)? = null) {
                     content = result.result,
                     modifier = Modifier.fillMaxWidth(),
                     typography = markdownTypography(),
+                    colors = com.mikepenz.markdown.m3.markdownColor(
+                        codeBackground = MaterialTheme.colorScheme.surfaceVariant,
+                    ),
                 )
             }
 
