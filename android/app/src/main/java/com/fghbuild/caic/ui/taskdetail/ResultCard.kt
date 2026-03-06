@@ -21,9 +21,11 @@ import com.fghbuild.caic.ui.theme.markdownTypography
 import com.mikepenz.markdown.m3.Markdown
 import java.util.Locale
 
-private val DiffAddedColor = Color(0xFF22C55E)
-private val DiffDeletedColor = Color(0xFFEF4444)
-private val DiffBinaryColor = Color(0xFF6B7280)
+private val ResultSuccessBg = Color(0xFFD4EDDA)
+private val ResultErrorBg = Color(0xFFF8D7DA)
+private val DiffAddedColor = Color(0xFF22863A)
+private val DiffDeletedColor = Color(0xFFCB2431)
+private val DiffBinaryColor = Color(0xFF6A737D)
 
 @Composable
 fun ResultCard(result: EventResult, onNavigateToDiff: (() -> Unit)? = null) {
@@ -32,7 +34,7 @@ fun ResultCard(result: EventResult, onNavigateToDiff: (() -> Unit)? = null) {
         modifier = Modifier.fillMaxWidth(),
         tonalElevation = 2.dp,
         shape = MaterialTheme.shapes.medium,
-        color = if (isError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+        color = if (isError) ResultErrorBg else ResultSuccessBg,
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
