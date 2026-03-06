@@ -203,10 +203,23 @@ class FunctionHandlers(
     }
 }
 
+private fun diffStatSummary(t: Task): String {
+    val ds = t.diffStat ?: return ""
+    if (ds.isEmpty()) return ""
+    var added = 0
+    var deleted = 0
+    for (f in ds) {
+        added += f.added
+        deleted += f.deleted
+    }
+    val label = if (ds.size == 1) "file" else "files"
+    return ", +$added -$deleted in ${ds.size} $label"
+}
+
 private fun taskSummaryLine(num: Int, t: Task): String {
     val name = t.title.ifBlank { t.id }
     val base = "$num. **$name** — ${t.state}, ${formatElapsed(t.duration)}, " +
-        "${formatCost(t.costUSD)}, ${t.harness}"
+        "${formatCost(t.costUSD)}, ${t.harness}${diffStatSummary(t)}"
     return when {
         t.state == "terminated" && !t.result.isNullOrBlank() ->
             "$base — ${t.result!!.take(RESULT_SNIPPET_MAX)}"

@@ -47,9 +47,21 @@ function errorResult(message: string): Record<string, string> {
 
 const RESULT_SNIPPET_MAX = 120;
 
+function diffStatSummary(t: Task): string {
+  const ds = t.diffStat;
+  if (!ds?.length) return "";
+  let added = 0;
+  let deleted = 0;
+  for (const f of ds) {
+    added += f.added;
+    deleted += f.deleted;
+  }
+  return `, +${added} -${deleted} in ${ds.length} ${ds.length === 1 ? "file" : "files"}`;
+}
+
 function taskSummaryLine(num: number, t: Task): string {
   const name = t.title || t.id;
-  const base = `${num}. **${name}** — ${t.state}, ${formatElapsed(t.duration * 1000)}, ${formatCost(t.costUSD)}, ${t.harness}`;
+  const base = `${num}. **${name}** — ${t.state}, ${formatElapsed(t.duration * 1000)}, ${formatCost(t.costUSD)}, ${t.harness}${diffStatSummary(t)}`;
   if (t.state === "terminated" && t.result) return `${base} — ${t.result.slice(0, RESULT_SNIPPET_MAX)}`;
   if (t.state === "failed" && t.error) return `${base} — ${t.error}`;
   return base;
