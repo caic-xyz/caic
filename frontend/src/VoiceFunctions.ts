@@ -10,6 +10,7 @@ import {
   taskEvents,
 } from "@sdk/api.gen";
 import type { Task, EventMessage } from "@sdk/types.gen";
+import { formatCost, formatElapsed } from "./formatting";
 
 // Function declaration schema helpers
 
@@ -226,19 +227,6 @@ export class TaskNumberMap {
   }
 }
 
-// Formatting helpers (exported for use in VoiceSession)
-
-export function formatCost(usd: number): string {
-  return usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`;
-}
-
-export function formatElapsed(seconds: number): string {
-  const s = Math.floor(seconds);
-  if (s >= 3600) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
-  if (s >= 60) return `${Math.floor(s / 60)}m ${s % 60}s`;
-  return `${s}s`;
-}
-
 // VoiceFunctions — dispatch Gemini tool calls to the caic API
 
 type FunctionArgs = Record<string, unknown>;
@@ -276,7 +264,7 @@ const RESULT_SNIPPET_MAX = 120;
 
 function taskSummaryLine(num: number, t: Task): string {
   const name = t.title || t.id;
-  const base = `${num}. **${name}** — ${t.state}, ${formatElapsed(t.duration)}, ${formatCost(t.costUSD)}, ${t.harness}`;
+  const base = `${num}. **${name}** — ${t.state}, ${formatElapsed(t.duration * 1000)}, ${formatCost(t.costUSD)}, ${t.harness}`;
   if (t.state === "terminated" && t.result) return `${base} — ${t.result.slice(0, RESULT_SNIPPET_MAX)}`;
   if (t.state === "failed" && t.error) return `${base} — ${t.error}`;
   return base;
@@ -357,7 +345,7 @@ export class VoiceFunctions {
     const lines = [
       `## Task #${num}: ${shortName}`,
       "",
-      `State: ${t.state}  Elapsed: ${formatElapsed(t.duration)}  Cost: ${formatCost(t.costUSD)}`,
+      `State: ${t.state}  Elapsed: ${formatElapsed(t.duration * 1000)}  Cost: ${formatCost(t.costUSD)}`,
     ];
     if (t.state === "terminated" && t.result) lines.push(`**Result:** ${t.result}`);
     if (t.state === "failed" && t.error) lines.push(`**Error:** ${t.error}`);

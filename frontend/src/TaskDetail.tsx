@@ -2,7 +2,7 @@
 import { createSignal, createMemo, For, Index, Show, onCleanup, onMount, createEffect, Switch, Match, type Accessor } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents, getTaskToolInput } from "@sdk/api.gen";
-import type { EventMessage, AskQuestion, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat } from "@sdk/types.gen";
+import type { EventMessage, EventResult, AskQuestion, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat } from "@sdk/types.gen";
 import { groupMessages, groupTurns, toolCountSummary, turnSummary } from "./grouping";
 import { formatDuration, formatTokens, toolCallDetail } from "./formatting";
 import type { ToolCall, Turn } from "./grouping";
@@ -454,25 +454,7 @@ function MessageItem(props: { ev: EventMessage }) {
         )}
       </Match>
       <Match when={props.ev.result} keyed>
-        {(result) => (
-          <div class={`${styles.result} ${result.isError ? styles.resultError : styles.resultSuccess}`}>
-            <strong>{result.isError ? "Error" : "Done"}</strong>
-            <Show when={result.result}>
-              <div class={styles.resultText}><Markdown text={result.result} /></div>
-            </Show>
-            <Show when={result.diffStat} keyed>
-              {(files) => (
-                <DiffStatBlock files={files} />
-              )}
-            </Show>
-            <div class={styles.resultMeta}>
-              <Show when={result.totalCostUSD !== 0}>
-                ${result.totalCostUSD.toFixed(4)} &middot;{" "}
-              </Show>
-              {result.duration.toFixed(1)}s &middot; {result.numTurns} turns
-            </div>
-          </div>
-        )}
+        {(result) => <ResultCard result={result} />}
       </Match>
       <Match when={props.ev.error} keyed>
         {(err) => (
@@ -487,6 +469,27 @@ function MessageItem(props: { ev: EventMessage }) {
         )}
       </Match>
     </Switch>
+  );
+}
+
+function ResultCard(props: { result: EventResult }) {
+  const result = () => props.result;
+  return (
+    <div class={`${styles.result} ${result().isError ? styles.resultError : styles.resultSuccess}`}>
+      <strong>{result().isError ? "Error" : "Done"}</strong>
+      <Show when={result().result}>
+        <div class={styles.resultText}><Markdown text={result().result} /></div>
+      </Show>
+      <Show when={result().diffStat} keyed>
+        {(files) => <DiffStatBlock files={files} />}
+      </Show>
+      <div class={styles.resultMeta}>
+        <Show when={result().totalCostUSD !== 0}>
+          ${result().totalCostUSD.toFixed(4)} &middot;{" "}
+        </Show>
+        {result().duration.toFixed(1)}s &middot; {result().numTurns} turns
+      </div>
+    </div>
   );
 }
 

@@ -4,7 +4,7 @@ import { useNavigate } from "@solidjs/router";
 import type { DiffFileStat } from "@sdk/types.gen";
 import { getTaskDiff } from "@sdk/api.gen";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
-import styles from "./DiffView.module.css";
+import styles from "./DiffDetail.module.css";
 
 interface FileDiff {
   path: string;
@@ -41,7 +41,7 @@ interface Props {
   taskPath: string;
 }
 
-export default function DiffView(props: Props) {
+export default function DiffDetail(props: Props) {
   const navigate = useNavigate();
   const [fullDiff, setFullDiff] = createSignal<string | null>(null);
   const [error, setError] = createSignal<string | null>(null);

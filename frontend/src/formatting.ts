@@ -1,6 +1,10 @@
 // Shared formatting utilities, parallel to android/util/Formatting.kt.
-// Note: formatElapsed takes milliseconds (JS timestamps), while the Android
-// equivalent takes seconds.
+// Note: formatElapsed takes milliseconds (JS timestamps); the Android
+// equivalent takes seconds. Call formatElapsed(seconds * 1000) for API durations.
+
+export function formatCost(usd: number): string {
+  return usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`;
+}
 
 export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}Mt`;

@@ -2,13 +2,8 @@
 import { createStore, produce } from "solid-js/store";
 import { getVoiceToken, listHarnesses, listRepos } from "@sdk/api.gen";
 import type { Task } from "@sdk/types.gen";
-import {
-  VoiceFunctions,
-  TaskNumberMap,
-  buildFunctionDeclarations,
-  formatElapsed,
-  formatCost,
-} from "./VoiceFunctions";
+import { VoiceFunctions, TaskNumberMap, buildFunctionDeclarations } from "./VoiceFunctions";
+import { formatElapsed, formatCost } from "./formatting";
 
 // Constants
 
@@ -628,7 +623,7 @@ function buildSnapshot(tasks: Task[], recentRepo: string, map: TaskNumberMap): s
     const lines = tasks.map((t) => {
       const num = map.toNumber(t.id) ?? 0;
       const shortName = t.title || t.id;
-      return `- Task #${num}: ${shortName} (${t.state}, ${formatElapsed(t.duration)}, ${formatCost(t.costUSD)}, ${t.harness})`;
+      return `- Task #${num}: ${shortName} (${t.state}, ${formatElapsed(t.duration * 1000)}, ${formatCost(t.costUSD)}, ${t.harness})`;
     });
     parts.push(`[Current tasks at session start]\n${lines.join("\n")}`);
   } else if (!recentRepo) {

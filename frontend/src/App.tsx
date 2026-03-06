@@ -4,7 +4,7 @@ import { useNavigate, useLocation } from "@solidjs/router";
 import type { HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData } from "@sdk/types.gen";
 import { getConfig, getPreferences, listHarnesses, listRepos, createTask, cloneRepo, getUsage, terminateTask } from "@sdk/api.gen";
 import TaskDetail from "./TaskDetail";
-import DiffView from "./DiffView";
+import DiffDetail from "./DiffDetail";
 import TaskList, { sortTasks } from "./TaskList";
 import PromptInput from "./PromptInput";
 import Button from "./Button";
@@ -599,7 +599,7 @@ export default function App() {
               const tp = t ? taskPath(t.id, t.repo, t.branch, t.title) : `/task/@${id}`;
               return (
                 <div class={styles.detailPane}>
-                  <DiffView
+                  <DiffDetail
                     taskId={id}
                     diffStat={t?.diffStat ?? []}
                     repo={t?.repo ?? ""}
