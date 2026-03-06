@@ -70,7 +70,7 @@ test("SSE event stream delivers text deltas", async ({ page, api, baseURL }) => 
       const es = new EventSource(`${base}/api/v1/tasks/${taskId}/events`);
       es.addEventListener("ready", () => {
         live = true;
-        (window as any).__sseReady();
+        (window as { __sseReady: () => void }).__sseReady();
       });
       es.addEventListener("message", (e) => {
         const msg = JSON.parse(e.data);
