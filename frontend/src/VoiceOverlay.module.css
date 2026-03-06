@@ -52,6 +52,17 @@
   flex-shrink: 0;
 }
 
+@media (max-width: 768px) {
+  .panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 /* ---- Row layouts within the panel ---- */
 
 .row {

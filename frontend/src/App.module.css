@@ -198,7 +198,7 @@
 /* Mobile: <=768px */
 @media (max-width: 768px) {
   .app {
-    padding: 0.5rem 0.5rem 1rem;
+    padding: 0.5rem 0.5rem calc(3rem + env(safe-area-inset-bottom, 0px));
     overflow-y: auto;
   }
 
