@@ -11,7 +11,7 @@ import { Marked } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import PromptInput from "./PromptInput";
 import Button from "./Button";
-import TodoPanel from "./TodoPanel";
+import ProgressPanel from "./ProgressPanel";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import SyncIcon from "@material-symbols/svg-400/outlined/sync.svg?solid";
@@ -364,7 +364,7 @@ export default function TaskDetail(props: Props) {
         </Show>
       </div>
 
-      <TodoPanel messages={messages()} />
+      <ProgressPanel messages={messages()} />
 
       <Show when={isActive() || !!pendingAction()}>
         <form onSubmit={(e) => { e.preventDefault(); sendInput(); }} class={styles.inputForm}>

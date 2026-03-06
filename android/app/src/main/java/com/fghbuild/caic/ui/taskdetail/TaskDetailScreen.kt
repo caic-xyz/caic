@@ -407,13 +407,11 @@ private fun MessageList(
 
     Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
     Column(modifier = Modifier.widthIn(max = 840.dp).fillMaxWidth()) {
-        // Todo panel
-        if (state.todos.isNotEmpty()) {
-            TodoPanel(
-                todos = state.todos,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-            )
-        }
+        ProgressPanel(
+            todos = state.todos,
+            activeAgentDescriptions = state.activeAgentDescriptions,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+        )
 
         // Unified lazy list: past turns are Elided (one row each, groups not composed);
         // the live turn's groups and tool-call items are individual lazy items. Expand state

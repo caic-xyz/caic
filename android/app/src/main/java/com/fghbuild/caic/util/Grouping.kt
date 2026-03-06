@@ -178,7 +178,7 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
                     groups.add(MutableGroup(kind = GroupKind.OTHER, events = mutableListOf(ev)))
                 }
             }
-            EventKinds.Todo -> { /* Rendered by TodoPanel directly; skip to avoid splitting tool groups. */ }
+            EventKinds.Todo -> { /* Rendered by ProgressPanel directly; skip to avoid splitting tool groups. */ }
             EventKinds.DiffStat -> { /* Metadata-only; skip. */ }
             EventKinds.Thinking -> {
                 val last = lastGroup()
@@ -336,6 +336,7 @@ data class IncrementalGrouped(
     val currentTurn: Turn? = null,
     val completedUpToIdx: Int = 0,
     val todos: List<TodoItem> = emptyList(),
+    val activeAgents: Map<String, String> = emptyMap(), // taskID → description
 ) {
     val turns: List<Turn> get() = if (currentTurn != null) completedTurns + currentTurn!! else completedTurns
 }
@@ -356,8 +357,21 @@ fun nextGrouped(prev: IncrementalGrouped, msgs: List<EventMessage>): Incremental
     val newTodo = currentMsgs.lastOrNull { it.kind == EventKinds.Todo }?.todo?.todos
     val todos = newTodo ?: if (isReset) emptyList() else prev.todos
 
+    // Compute active subagents incrementally: start from prev (or empty on reset) and
+    // apply subagentStart/End events seen in the new message slice.
+    val activeAgents = run {
+        val map = if (isReset) mutableMapOf() else prev.activeAgents.toMutableMap()
+        for (msg in currentMsgs) {
+            when (msg.kind) {
+                EventKinds.SubagentStart -> msg.subagentStart?.let { map[it.taskID] = it.description }
+                EventKinds.SubagentEnd -> msg.subagentEnd?.let { map.remove(it.taskID) }
+            }
+        }
+        map.toMap()
+    }
+
     if (currentMsgs.isEmpty()) {
-        return IncrementalGrouped(priorCompleted, null, upTo, todos)
+        return IncrementalGrouped(priorCompleted, null, upTo, todos, activeAgents)
     }
 
     val groups = groupMessages(currentMsgs)
@@ -391,5 +405,5 @@ fun nextGrouped(prev: IncrementalGrouped, msgs: List<EventMessage>): Incremental
         boundary
     }
 
-    return IncrementalGrouped(allCompleted, currentTurn, newBoundary, todos)
+    return IncrementalGrouped(allCompleted, currentTurn, newBoundary, todos, activeAgents)
 }

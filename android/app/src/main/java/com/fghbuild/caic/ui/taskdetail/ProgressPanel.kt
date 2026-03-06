@@ -1,4 +1,4 @@
-// Collapsible TODO list panel showing task progress.
+// Collapsible panel showing active todos and subagent count.
 package com.fghbuild.caic.ui.taskdetail
 
 import androidx.compose.animation.AnimatedVisibility
@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -34,10 +35,23 @@ import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.TodoItem
 
 @Composable
-fun TodoPanel(todos: List<TodoItem>, modifier: Modifier = Modifier) {
-    if (todos.isEmpty()) return
+fun ProgressPanel(
+    todos: List<TodoItem>,
+    activeAgentDescriptions: List<String>,
+    modifier: Modifier = Modifier,
+) {
+    if (todos.isEmpty() && activeAgentDescriptions.isEmpty()) return
     var expanded by rememberSaveable { mutableStateOf(false) }
     val completed = todos.count { it.status == "completed" }
+
+    val title = when {
+        todos.isNotEmpty() && activeAgentDescriptions.isNotEmpty() ->
+            "TODOS $completed/${todos.size} · AGENTS ×${activeAgentDescriptions.size}"
+        todos.isNotEmpty() ->
+            "TODOS $completed/${todos.size}"
+        else ->
+            "AGENTS ×${activeAgentDescriptions.size}"
+    }
 
     Card(modifier = modifier.fillMaxWidth()) {
         Column {
@@ -50,7 +64,7 @@ fun TodoPanel(todos: List<TodoItem>, modifier: Modifier = Modifier) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "TODOS $completed/${todos.size}",
+                    text = title,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
                 )
@@ -64,9 +78,8 @@ fun TodoPanel(todos: List<TodoItem>, modifier: Modifier = Modifier) {
             }
             AnimatedVisibility(visible = expanded) {
                 Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
-                    todos.forEach { item ->
-                        TodoItemRow(item)
-                    }
+                    todos.forEach { item -> TodoItemRow(item) }
+                    activeAgentDescriptions.forEach { desc -> AgentItemRow(desc) }
                 }
             }
         }
@@ -96,11 +109,7 @@ private fun TodoItemRow(item: TodoItem) {
                 tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp),
             )
         }
-        val displayText = if (item.status == "in_progress") {
-            item.activeForm ?: item.content
-        } else {
-            item.content
-        }
+        val displayText = if (item.status == "in_progress") item.activeForm ?: item.content else item.content
         Text(
             text = displayText,
             style = MaterialTheme.typography.bodySmall.let {
@@ -113,6 +122,30 @@ private fun TodoItemRow(item: TodoItem) {
                     else -> it
                 }
             },
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun AgentItemRow(description: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            Icons.Default.Refresh, contentDescription = "Running",
+            tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp),
+        )
+        Text(
+            text = description,
+            style = MaterialTheme.typography.bodySmall.copy(
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )

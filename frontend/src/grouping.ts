@@ -157,7 +157,7 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
         }
         break;
       case "todo":
-        // Rendered by TodoPanel from messages() directly; skip here to avoid
+        // Rendered by ProgressPanel from messages() directly; skip here to avoid
         // splitting consecutive tool groups.
         break;
       case "diffStat":
