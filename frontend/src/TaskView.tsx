@@ -1,5 +1,5 @@
 // TaskView renders the real-time agent output stream for a single task.
-import { createSignal, createMemo, For, Index, Show, onCleanup, createEffect, Switch, Match, type Accessor } from "solid-js";
+import { createSignal, createMemo, For, Index, Show, onCleanup, onMount, createEffect, Switch, Match, type Accessor } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents, getTaskToolInput } from "@sdk/api.gen";
 import type { EventMessage, AskQuestion, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat } from "@sdk/types.gen";
@@ -51,6 +51,10 @@ export default function TaskView(props: Props) {
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
   const [syncMenuOpen, setSyncMenuOpen] = createSignal(false);
+
+  let promptRef: HTMLTextAreaElement | undefined;
+
+  onMount(() => { promptRef?.focus(); });
 
   // Auto-scroll: keep scrolled to bottom unless the user scrolled up.
   let messageAreaRef: HTMLDivElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
@@ -354,6 +358,7 @@ export default function TaskView(props: Props) {
       <Show when={isActive() || !!pendingAction()}>
         <form onSubmit={(e) => { e.preventDefault(); sendInput(); }} class={styles.inputForm}>
           <PromptInput
+            ref={(el) => { promptRef = el; }}
             value={props.inputDraft}
             onInput={props.onInputDraft}
             onSubmit={sendInput}
