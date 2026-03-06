@@ -2,6 +2,7 @@
 package com.fghbuild.caic.ui.taskdetail
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.res.painterResource
 import com.fghbuild.caic.R
@@ -26,6 +27,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Surface
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -54,9 +56,15 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.ImageData
+import com.caic.sdk.v1.SafetyIssue
 import com.fghbuild.caic.util.imageDataToBitmap
+
+private val SafetyBgColor = Color(0xFFFFF3CD)
+private val SafetyBorderColor = Color(0xFFFFECB5)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,6 +87,8 @@ fun InputBar(
     onAttachGallery: () -> Unit = {},
     onAttachCamera: () -> Unit = {},
     onRemoveImage: (Int) -> Unit = {},
+    safetyIssues: List<SafetyIssue> = emptyList(),
+    onForceSync: () -> Unit = {},
 ) {
     val busy = sending || pendingAction != null
     val hasContent = draft.isNotBlank() || pendingImages.isNotEmpty()
@@ -87,6 +97,34 @@ fun InputBar(
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
+        if (safetyIssues.isNotEmpty()) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp)
+                    .border(1.dp, SafetyBorderColor, MaterialTheme.shapes.small),
+                shape = MaterialTheme.shapes.small,
+                color = SafetyBgColor,
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        "Safety issues detected:",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    safetyIssues.forEach { issue ->
+                        Text(
+                            "${issue.file}: ${issue.kind} \u2014 ${issue.detail}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    TextButton(onClick = onForceSync) { Text("Force Push") }
+                }
+            }
+        }
         if (pendingImages.isNotEmpty()) {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),

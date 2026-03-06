@@ -68,6 +68,7 @@ import com.fghbuild.caic.util.uriToImageData
 private val PlanBadgeBg = Color(0xFFEDE9FE)
 private val PlanBadgeFg = Color(0xFF7C3AED)
 private val TerminalStates = setOf("terminated", "failed")
+private val UserMsgBgColor = Color(0xFFDBE9F9)
 
 // Flat list items for the LazyColumn. Expansion state is owned here so collapsed items are
 // never composed — true laziness without AnimatedVisibility wrappers.
@@ -183,18 +184,6 @@ fun TaskDetailScreen(
             if (img != null) viewModel.addImages(listOf(img))
         }
         cameraUri = null
-    }
-
-    // Safety dialog
-    if (state.safetyIssues.isNotEmpty()) {
-        SafetyDialog(
-            issues = state.safetyIssues,
-            onDismiss = viewModel::dismissSafetyIssues,
-            onForceSync = {
-                viewModel.dismissSafetyIssues()
-                viewModel.syncTask(force = true)
-            },
-        )
     }
 
     Scaffold(
@@ -318,6 +307,11 @@ fun TaskDetailScreen(
                             cameraLauncher.launch(uri)
                         },
                         onRemoveImage = viewModel::removeImage,
+                        safetyIssues = state.safetyIssues,
+                        onForceSync = {
+                            viewModel.dismissSafetyIssues()
+                            viewModel.syncTask(force = true)
+                        },
                     )
                 }
                 }
@@ -333,10 +327,21 @@ fun TaskDetailScreen(
                         .padding(padding)
                         .padding(12.dp),
                 ) {
-                    Markdown(
-                        content = prompt,
-                        typography = markdownTypography(),
-                    )
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(6.dp),
+                        color = UserMsgBgColor,
+                    ) {
+                        Markdown(
+                            content = prompt,
+                            typography = markdownTypography(),
+                            colors = com.mikepenz.markdown.m3.markdownColor(
+                                text = MaterialTheme.colorScheme.onSurface,
+                                codeBackground = MaterialTheme.colorScheme.surfaceVariant,
+                            ),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
                     CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp))
                 }
             } else {
