@@ -110,7 +110,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("StepFinish", func(t *testing.T) {
-		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_4","sessionID":"ses_abc","messageID":"msg_1","type":"step-finish","cost":0.003,"tokens":{"total":1500,"input":500,"output":1000,"reasoning":0,"cache":{"read":100,"write":50}}}}}`
+		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_4","sessionID":"ses_abc","messageID":"msg_1","type":"step-finish","cost":0.003,"tokens":{"total":1500,"input":500,"output":1000,"reasoning":75,"cache":{"read":100,"write":50}}}}}`
 		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)
@@ -139,6 +139,9 @@ func TestParseMessage(t *testing.T) {
 		}
 		if rm.Usage.CacheCreationInputTokens != 50 {
 			t.Errorf("CacheCreationInputTokens = %d", rm.Usage.CacheCreationInputTokens)
+		}
+		if rm.Usage.ReasoningOutputTokens != 75 {
+			t.Errorf("ReasoningOutputTokens = %d, want 75", rm.Usage.ReasoningOutputTokens)
 		}
 	})
 

@@ -169,8 +169,9 @@ func parseStepFinish(part *Part) ([]agent.Message, error) {
 	}
 	if part.Tokens != nil {
 		msg.Usage = agent.Usage{
-			InputTokens:  part.Tokens.Input,
-			OutputTokens: part.Tokens.Output,
+			InputTokens:           part.Tokens.Input,
+			OutputTokens:          part.Tokens.Output,
+			ReasoningOutputTokens: part.Tokens.Reasoning,
 		}
 		if part.Tokens.Cache != nil {
 			msg.Usage.CacheReadInputTokens = part.Tokens.Cache.Read
