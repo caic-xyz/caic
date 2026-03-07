@@ -15,7 +15,7 @@ style:
   MagicNumber:
     active: false
   MaxLineLength:
-    maxLineLength: 120
+    maxLineLength: 140
   WildcardImport:
     active: true
   ReturnCount:
