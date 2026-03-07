@@ -774,6 +774,69 @@ func TestTask(t *testing.T) {
 		}
 	})
 
+	t.Run("LiveCostCumulativeAcrossSessions", func(t *testing.T) {
+		// Cost, turns, and duration must accumulate across sessions separated
+		// by ClearMessages ("Clear and execute plan").
+		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetState(StateRunning)
+		tk.addMessage(t.Context(), &agent.ResultMessage{
+			MessageType:  "result",
+			TotalCostUSD: 0.50,
+			NumTurns:     3,
+			DurationMs:   5000,
+		})
+		tk.ClearMessages(t.Context())
+		tk.SetState(StateRunning)
+		tk.addMessage(t.Context(), &agent.ResultMessage{
+			MessageType:  "result",
+			TotalCostUSD: 0.30,
+			NumTurns:     2,
+			DurationMs:   3000,
+		})
+		costUSD, numTurns, duration, _, _ := tk.LiveStats()
+		if costUSD != 0.80 {
+			t.Errorf("costUSD = %v, want 0.80", costUSD)
+		}
+		if numTurns != 5 {
+			t.Errorf("numTurns = %d, want 5", numTurns)
+		}
+		if duration != 8*time.Second {
+			t.Errorf("duration = %v, want 8s", duration)
+		}
+	})
+
+	t.Run("RestoreMessagesCostCumulativeAcrossSessions", func(t *testing.T) {
+		// RestoreMessages must sum cost/turns/duration across context_cleared
+		// boundaries, mirroring the live path.
+		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetState(StateTerminated)
+		tk.RestoreMessages([]agent.Message{
+			&agent.ResultMessage{
+				MessageType:  "result",
+				TotalCostUSD: 0.50,
+				NumTurns:     3,
+				DurationMs:   5000,
+			},
+			&agent.SystemMessage{MessageType: "system", Subtype: "context_cleared"},
+			&agent.ResultMessage{
+				MessageType:  "result",
+				TotalCostUSD: 0.30,
+				NumTurns:     2,
+				DurationMs:   3000,
+			},
+		})
+		costUSD, numTurns, duration, _, _ := tk.LiveStats()
+		if costUSD != 0.80 {
+			t.Errorf("costUSD = %v, want 0.80", costUSD)
+		}
+		if numTurns != 5 {
+			t.Errorf("numTurns = %d, want 5", numTurns)
+		}
+		if duration != 8*time.Second {
+			t.Errorf("duration = %v, want 8s", duration)
+		}
+	})
+
 	t.Run("ClearMessages", func(t *testing.T) {
 		t.Run("ResetsPlanState", func(t *testing.T) {
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}

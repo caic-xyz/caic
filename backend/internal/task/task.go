@@ -116,6 +116,9 @@ type Task struct {
 	msgs           []agent.Message
 	subs           []*sub         // active SSE subscribers
 	handle         *SessionHandle // current active session; nil when no session is attached
+	priorCostUSD   float64        // accumulated cost from all cleared sessions
+	priorNumTurns  int            // accumulated turns from all cleared sessions
+	priorDuration  time.Duration  // accumulated duration from all cleared sessions
 	liveCostUSD    float64
 	liveNumTurns   int
 	liveDuration   time.Duration
@@ -364,16 +367,23 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 			break
 		}
 	}
-	// Restore live stats: cost/turns/duration are cumulative in the last
-	// ResultMessage, but usage (tokens) is per-query and must be summed.
+	// Restore live stats: cost/turns/duration are cumulative within each
+	// session, but must be summed across sessions separated by
+	// context_cleared markers. Token usage is per-query and always summed.
 	for _, m := range msgs {
+		if sm, ok := m.(*agent.SystemMessage); ok && sm.Subtype == "context_cleared" {
+			t.priorCostUSD = t.liveCostUSD
+			t.priorNumTurns = t.liveNumTurns
+			t.priorDuration = t.liveDuration
+			continue
+		}
 		rm, ok := m.(*agent.ResultMessage)
 		if !ok {
 			continue
 		}
-		t.liveCostUSD = rm.TotalCostUSD
-		t.liveNumTurns = rm.NumTurns
-		t.liveDuration = time.Duration(rm.DurationMs) * time.Millisecond
+		t.liveCostUSD = t.priorCostUSD + rm.TotalCostUSD
+		t.liveNumTurns = t.priorNumTurns + rm.NumTurns
+		t.liveDuration = t.priorDuration + time.Duration(rm.DurationMs)*time.Millisecond
 		t.liveUsage.InputTokens += rm.Usage.InputTokens
 		t.liveUsage.OutputTokens += rm.Usage.OutputTokens
 		t.liveUsage.CacheCreationInputTokens += rm.Usage.CacheCreationInputTokens
@@ -446,9 +456,9 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message) {
 		if len(rm.DiffStat) > 0 {
 			t.liveDiffStat = rm.DiffStat
 		}
-		t.liveCostUSD = rm.TotalCostUSD
-		t.liveNumTurns = rm.NumTurns
-		t.liveDuration = time.Duration(rm.DurationMs) * time.Millisecond
+		t.liveCostUSD = t.priorCostUSD + rm.TotalCostUSD
+		t.liveNumTurns = t.priorNumTurns + rm.NumTurns
+		t.liveDuration = t.priorDuration + time.Duration(rm.DurationMs)*time.Millisecond
 		t.liveUsage.InputTokens += rm.Usage.InputTokens
 		t.liveUsage.OutputTokens += rm.Usage.OutputTokens
 		t.liveUsage.CacheCreationInputTokens += rm.Usage.CacheCreationInputTokens
@@ -602,9 +612,9 @@ func (t *Task) ClearMessages(ctx context.Context) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.sessionID = ""
-	t.liveCostUSD = 0
-	t.liveNumTurns = 0
-	t.liveDuration = 0
+	t.priorCostUSD += t.liveCostUSD
+	t.priorNumTurns += t.liveNumTurns
+	t.priorDuration += t.liveDuration
 	t.inPlanMode = false
 	t.planFile = ""
 	t.planContent = ""
