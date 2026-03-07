@@ -98,6 +98,9 @@ export default function App() {
   // Per-task input drafts survive task switching.
   const [inputDrafts, setInputDrafts] = createSignal<Map<string, string>>(new Map());
 
+  // Per-task image drafts survive task switching.
+  const [inputImageDrafts, setInputImageDrafts] = createSignal<Map<string, APIImageData[]>>(new Map());
+
   const harnessSupportsImages = () => harnesses().find((h) => h.name === selectedHarness())?.supportsImages ?? false;
 
   // Ref to the main prompt textarea for focusing after Escape.
@@ -628,6 +631,8 @@ export default function App() {
                   onClose={() => navigate("/")}
                   inputDraft={inputDrafts().get(id) ?? ""}
                   onInputDraft={(v) => setInputDrafts((prev) => { const next = new Map(prev); next.set(id, v); return next; })}
+                  inputImages={inputImageDrafts().get(id) ?? []}
+                  onInputImages={(imgs) => setInputImageDrafts((prev) => { const next = new Map(prev); next.set(id, imgs); return next; })}
                 />
               </div>
             )}

@@ -41,13 +41,14 @@ interface Props {
   onClose: () => void;
   inputDraft: string;
   onInputDraft: (value: string) => void;
+  inputImages: APIImageData[];
+  onInputImages: (imgs: APIImageData[]) => void;
 }
 
 export default function TaskDetail(props: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const [messages, setMessages] = createSignal<EventMessage[]>([]);
-  const [pendingImages, setPendingImages] = createSignal<APIImageData[]>([]);
   const [sending, setSending] = createSignal(false);
   const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
@@ -168,13 +169,13 @@ export default function TaskDetail(props: Props) {
 
   async function sendInput() {
     const text = props.inputDraft.trim();
-    const imgs = pendingImages();
+    const imgs = props.inputImages;
     if (!text && imgs.length === 0) return;
     setSending(true);
     try {
       await apiSendInput(props.taskId, { prompt: { text, ...(imgs.length > 0 ? { images: imgs } : {}) } });
       props.onInputDraft("");
-      setPendingImages([]);
+      props.onInputImages([]);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown error";
       setActionError(`send failed: ${msg}`);
@@ -377,10 +378,10 @@ export default function TaskDetail(props: Props) {
             class={styles.textInput}
             tabIndex={0}
             supportsImages={props.supportsImages}
-            images={pendingImages()}
-            onImagesChange={setPendingImages}
+            images={props.inputImages}
+            onImagesChange={props.onInputImages}
           >
-            <Button type="submit" disabled={sending() || (!props.inputDraft.trim() && pendingImages().length === 0)} title="Send"><SendIcon width="1.1em" height="1.1em" /></Button>
+            <Button type="submit" disabled={sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)} title="Send"><SendIcon width="1.1em" height="1.1em" /></Button>
             <div class={styles.syncButtonGroup}>
               <Button type="button" variant="gray" loading={pendingAction() === "sync"} disabled={!!pendingAction() || props.taskState === "terminating"} onClick={() => doSync(false)} title={`Push to ${props.branch}`}>
                 <Show when={isGitHub()} fallback={<SyncIcon width="1.1em" height="1.1em" />}>

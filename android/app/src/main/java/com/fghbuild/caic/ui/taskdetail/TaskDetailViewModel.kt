@@ -16,6 +16,7 @@ import com.caic.sdk.v1.RestartReq
 import com.caic.sdk.v1.SafetyIssue
 import com.caic.sdk.v1.SyncReq
 import com.caic.sdk.v1.Task
+import com.fghbuild.caic.data.DraftStore
 import com.fghbuild.caic.data.TaskRepository
 import com.fghbuild.caic.data.TaskSSEEvent
 import com.fghbuild.caic.navigation.Screen
@@ -57,6 +58,7 @@ private val TerminalStates = setOf("terminated", "failed")
 @HiltViewModel
 class TaskDetailViewModel @Inject constructor(
     private val taskRepository: TaskRepository,
+    private val draftStore: DraftStore,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -68,8 +70,8 @@ class TaskDetailViewModel @Inject constructor(
     private val _pendingAction = MutableStateFlow<String?>(null)
     private val _actionError = MutableStateFlow<String?>(null)
     private val _safetyIssues = MutableStateFlow<List<SafetyIssue>>(emptyList())
-    private val _inputDraft = MutableStateFlow("")
-    private val _pendingImages = MutableStateFlow<List<ImageData>>(emptyList())
+    private val _inputDraft = MutableStateFlow(draftStore.get(taskId).text)
+    private val _pendingImages = MutableStateFlow(draftStore.get(taskId).images)
     private val _harnesses = MutableStateFlow<List<HarnessInfo>>(emptyList())
 
     private var sseJob: Job? = null
@@ -247,14 +249,19 @@ class TaskDetailViewModel @Inject constructor(
 
     fun updateInputDraft(text: String) {
         _inputDraft.value = text
+        draftStore.setText(taskId, text)
     }
 
     fun addImages(images: List<ImageData>) {
-        _pendingImages.value = _pendingImages.value + images
+        val updated = _pendingImages.value + images
+        _pendingImages.value = updated
+        draftStore.setImages(taskId, updated)
     }
 
     fun removeImage(index: Int) {
-        _pendingImages.value = _pendingImages.value.filterIndexed { i, _ -> i != index }
+        val updated = _pendingImages.value.filterIndexed { i, _ -> i != index }
+        _pendingImages.value = updated
+        draftStore.setImages(taskId, updated)
     }
 
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
@@ -274,6 +281,7 @@ class TaskDetailViewModel @Inject constructor(
                 )
                 _inputDraft.value = ""
                 _pendingImages.value = emptyList()
+                draftStore.clear(taskId)
             } catch (e: Exception) {
                 showActionError("send failed: ${e.message}")
             } finally {
