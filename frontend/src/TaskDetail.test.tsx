@@ -52,6 +52,8 @@ describe("TaskDetail", () => {
     onClose: () => {},
     inputDraft: "",
     onInputDraft: () => {},
+    inputImages: [],
+    onInputImages: () => {},
   };
 
   it("shows Diff link when diffStat has items", () => {
