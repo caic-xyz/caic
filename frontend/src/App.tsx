@@ -110,13 +110,17 @@ export default function App() {
   const sortedTasks = () => sortTasks(tasks());
 
   // Global keyboard shortcuts:
-  // - Escape: dismiss task view, focus prompt
+  // - Escape: from diff view, return to task detail; from task detail, dismiss and focus prompt
   // - ArrowUp/ArrowDown: switch to previous/next task in sidebar order
   {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && selectedId() !== null) {
-        navigate("/");
-        promptRef?.focus();
+        if (isDiffPath(location.pathname)) {
+          navigate(location.pathname.replace(/\/diff$/, ""));
+        } else {
+          navigate("/");
+          promptRef?.focus();
+        }
         return;
       }
       if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
