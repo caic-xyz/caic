@@ -129,6 +129,7 @@ data class Task(
     val agentVersion: String? = null,
     @SerialName("sessionID") val sessionID: String? = null,
     val startedAt: Double? = null,
+    val turnStartedAt: Double? = null,
     val inPlanMode: Boolean? = null,
     val planContent: String? = null,
     val tailscale: String? = null,

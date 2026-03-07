@@ -165,6 +165,7 @@ All errors return:
 | `agentVersion` | `string` |  |
 | `sessionID` | `string` |  |
 | `startedAt` | `number` |  |
+| `turnStartedAt` | `number` |  |
 | `inPlanMode` | `boolean` |  |
 | `planContent` | `string` |  |
 | `tailscale` | `string` |  |

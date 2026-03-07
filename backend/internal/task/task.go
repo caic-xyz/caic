@@ -130,6 +130,7 @@ type Task struct {
 	priorCostUSD   float64        // accumulated cost from all cleared sessions
 	priorNumTurns  int            // accumulated turns from all cleared sessions
 	priorDuration  time.Duration  // accumulated duration from all cleared sessions
+	turnStartedAt  time.Time      // when the current running turn started; zero when not running
 	liveCostUSD    float64
 	liveNumTurns   int
 	liveDuration   time.Duration
@@ -146,6 +147,11 @@ type Task struct {
 // setState updates the state and records the transition time. The caller must
 // hold t.mu when called from a locked context, or ensure exclusive access.
 func (t *Task) setState(s State) {
+	if s == StateRunning && t.state != StateRunning {
+		t.turnStartedAt = time.Now().UTC()
+	} else if s != StateRunning {
+		t.turnStartedAt = time.Time{}
+	}
 	t.state = s
 	t.stateUpdatedAt = time.Now().UTC()
 }
@@ -163,6 +169,16 @@ func (t *Task) SetStateAt(s State, at time.Time) {
 	t.mu.Lock()
 	t.state = s
 	t.stateUpdatedAt = at
+	t.mu.Unlock()
+}
+
+// SetTurnStartedAt sets the turn start time if the task is currently running.
+// Called during adoption to estimate when the current mid-turn started.
+func (t *Task) SetTurnStartedAt(at time.Time) {
+	t.mu.Lock()
+	if t.state == StateRunning {
+		t.turnStartedAt = at
+	}
 	t.mu.Unlock()
 }
 
@@ -271,6 +287,7 @@ func (t *Task) Title() string {
 type Snapshot struct {
 	State          State
 	StateUpdatedAt time.Time
+	TurnStartedAt  time.Time // non-zero only while state is Running
 	Title          string
 	SessionID      string
 	Model          string
@@ -302,6 +319,7 @@ func (t *Task) Snapshot() Snapshot {
 	return Snapshot{
 		State:          t.state,
 		StateUpdatedAt: t.stateUpdatedAt,
+		TurnStartedAt:  t.turnStartedAt,
 		Title:          t.title,
 		SessionID:      t.sessionID,
 		Model:          model,

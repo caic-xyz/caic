@@ -10,10 +10,14 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -63,6 +67,7 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}
             ),
     ) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Line 1: title + plan badge + feature badges (no state badge)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -91,19 +96,14 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}
                     if (task.tailscale != null) FeatureBadge("TS", url = task.tailscale)
                     if (task.usb == true) FeatureBadge("USB")
                     if (task.display == true) FeatureBadge("D")
-                    Surface(shape = RoundedCornerShape(4.dp), color = stateColor(task.state)) {
-                        Text(
-                            text = task.state,
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-                        )
-                    }
                 }
             }
 
+            // Line 2: base→branch | [timer times] [state badge]
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     text = buildAnnotatedString {
@@ -120,11 +120,48 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                if (task.state !in TerminalStates && task.stateUpdatedAt > 0) {
-                    TickingElapsed(stateUpdatedAt = task.stateUpdatedAt)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val showTimes = (task.state !in TerminalStates && task.stateUpdatedAt > 0) || task.duration > 0
+                    if (showTimes) {
+                        Icon(
+                            Icons.Outlined.Timer,
+                            contentDescription = null,
+                            modifier = Modifier.size(11.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (task.state !in TerminalStates && task.stateUpdatedAt > 0) {
+                            TickingElapsed(stateUpdatedAt = task.stateUpdatedAt)
+                            if (task.duration > 0 || task.state == "running") {
+                                Text(
+                                    "/",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                )
+                            }
+                        }
+                        if (task.duration > 0 || task.state == "running") {
+                            TickingThinkTime(
+                                duration = task.duration,
+                                state = task.state,
+                                stateUpdatedAt = task.stateUpdatedAt,
+                                turnStartedAt = task.turnStartedAt ?: 0.0,
+                            )
+                        }
+                    }
+                    Surface(shape = RoundedCornerShape(4.dp), color = stateColor(task.state)) {
+                        Text(
+                            text = task.state,
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                        )
+                    }
                 }
             }
 
+            // Line 3: model · tokens · cost
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 task.model?.let { MetaText(it) }
                 if (task.harness != "claude") MetaText(task.harness)
@@ -145,7 +182,6 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}
                 if (task.costUSD > 0) {
                     MetaText(formatCost(task.costUSD))
                 }
-                MetaText(formatElapsed(task.duration))
             }
 
             task.diffStat?.takeIf { it.isNotEmpty() }?.let { stats ->
@@ -244,6 +280,30 @@ private fun TickingElapsed(stateUpdatedAt: Double) {
     val elapsedSec = (now - (stateUpdatedAt * 1000).toLong()).coerceAtLeast(0) / 1000.0
     Text(
         text = formatElapsed(elapsedSec),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun TickingThinkTime(duration: Double, state: String, stateUpdatedAt: Double, turnStartedAt: Double) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(state) {
+        if (state == "running") {
+            while (true) {
+                delay(1000)
+                now = System.currentTimeMillis()
+            }
+        }
+    }
+    val totalSec = if (state == "running") {
+        val turnStart = if (turnStartedAt > 0) turnStartedAt else stateUpdatedAt
+        duration + (now - (turnStart * 1000).toLong()).coerceAtLeast(0) / 1000.0
+    } else {
+        duration
+    }
+    Text(
+        text = formatElapsed(totalSec),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

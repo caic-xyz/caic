@@ -385,6 +385,7 @@ export interface Task {
   agentVersion?: string;
   sessionID?: string;
   startedAt?: number /* float64 */; // Unix epoch seconds (ms precision) when the container started.
+  turnStartedAt?: number /* float64 */; // Unix epoch seconds; non-zero only while state is "running".
   inPlanMode?: boolean;
   planContent?: string;
   tailscale?: string; // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.

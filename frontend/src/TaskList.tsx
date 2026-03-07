@@ -89,6 +89,7 @@ export default function TaskList(props: TaskListProps) {
       cumulativeOutputTokens={t().cumulativeOutputTokens}
       contextWindowLimit={t().contextWindowLimit}
       startedAt={t().startedAt}
+      turnStartedAt={t().turnStartedAt}
       diffStat={t().diffStat}
       error={t().error}
       inPlanMode={t().inPlanMode}

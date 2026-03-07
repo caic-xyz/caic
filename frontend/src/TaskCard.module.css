@@ -67,13 +67,23 @@
   line-height: 1;
 }
 
-.duration {
+.timePair {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
   font-size: 0.7rem;
   color: var(--color-text-muted);
-  white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  margin-left: 0.5rem;
-  margin-right: 0.5rem;
+}
+
+.timerIcon {
+  color: var(--color-text-faint);
+  flex-shrink: 0;
+  display: inline-flex;
+}
+
+.timeSep {
+  opacity: 0.5;
 }
 
 .metaRow {

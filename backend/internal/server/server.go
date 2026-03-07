@@ -1531,6 +1531,11 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		}
 	}
 
+	// If the task is still running after message restoration (agent is
+	// mid-turn), record now as the turn start. This is the best available
+	// approximation on adoption; the real turn start predates the restart.
+	t.SetTurnStartedAt(time.Now().UTC())
+
 	// When the relay is dead (agent subprocess already exited) and
 	// RestoreMessages didn't infer a terminal turn (no trailing
 	// ResultMessage), the task would be stuck as "running" with no
@@ -1842,6 +1847,9 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 	}
 	if !e.task.StartedAt.IsZero() {
 		j.StartedAt = float64(e.task.StartedAt.UnixMilli()) / 1e3
+	}
+	if !snap.TurnStartedAt.IsZero() {
+		j.TurnStartedAt = float64(snap.TurnStartedAt.UnixMilli()) / 1e3
 	}
 	j.CumulativeInputTokens = snap.Usage.InputTokens
 	j.CumulativeOutputTokens = snap.Usage.OutputTokens

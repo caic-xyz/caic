@@ -7,6 +7,7 @@ import TailscaleIcon from "./tailscale.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
+import TimerIcon from "@material-symbols/svg-400/outlined/timer.svg?solid";
 import styles from "./TaskCard.module.css";
 import { formatElapsed, formatTokens, tokenColor, stateColor } from "./formatting";
 
@@ -32,6 +33,7 @@ export interface TaskCardProps {
   cumulativeOutputTokens: number;
   contextWindowLimit: number;
   startedAt?: number;
+  turnStartedAt?: number;
   diffStat?: DiffStat;
   error?: string;
   inPlanMode?: boolean;
@@ -46,7 +48,11 @@ export interface TaskCardProps {
   onDiffClick?: () => void;
 }
 
+const terminalStates = new Set(["terminated", "failed"]);
+
 export default function TaskCard(props: TaskCardProps) {
+  const isTerminal = () => terminalStates.has(props.state);
+
   return (
     <div
       data-task-id={props.id}
@@ -56,6 +62,7 @@ export default function TaskCard(props: TaskCardProps) {
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); props.onClick(); } }}
       class={`${styles.card} ${props.selected ? styles.selected : ""}`}
     >
+      {/* Line 1: title + feature icons + plan badge + terminate (no state badge) */}
       <div class={styles.header}>
         <strong class={styles.title}>{props.title}</strong>
         <span class={styles.stateGroup}>
@@ -89,11 +96,10 @@ export default function TaskCard(props: TaskCardProps) {
           <Show when={props.inPlanMode}>
             <span class={styles.planBadge} title="Plan mode">P</span>
           </Show>
-          <span class={styles.badge} style={{ background: stateColor(props.state) }}>
-            {props.state}
-          </span>
         </span>
       </div>
+
+      {/* Line 2: base→branch | [timer times] [state badge] */}
       <Show when={props.branch}>
         <div class={styles.metaRow}>
           <span class={styles.meta}>
@@ -103,11 +109,29 @@ export default function TaskCard(props: TaskCardProps) {
             </Show>
             <span class={styles.branchName}>{props.branch}</span>
           </span>
-          <Show when={props.stateUpdatedAt > 0 && props.state !== "terminated"}>
-            <StateDuration stateUpdatedAt={props.stateUpdatedAt} now={props.now} />
-          </Show>
+          <span class={styles.stateGroup}>
+            <Show when={(!isTerminal() && props.stateUpdatedAt > 0) || props.duration > 0}>
+              <span class={styles.timePair}>
+                <TimerIcon width="0.65rem" height="0.65rem" class={styles.timerIcon} />
+                <Show when={!isTerminal() && props.stateUpdatedAt > 0}>
+                  <StateDuration stateUpdatedAt={props.stateUpdatedAt} now={props.now} />
+                  <Show when={props.duration > 0 || props.state === "running"}>
+                    <span class={styles.timeSep}>/</span>
+                  </Show>
+                </Show>
+                <Show when={props.duration > 0 || props.state === "running"}>
+                  <ThinkTime duration={props.duration} state={props.state} stateUpdatedAt={props.stateUpdatedAt} turnStartedAt={props.turnStartedAt} now={props.now} />
+                </Show>
+              </span>
+            </Show>
+            <span class={styles.badge} style={{ background: stateColor(props.state) }}>
+              {props.state}
+            </span>
+          </span>
         </div>
       </Show>
+
+      {/* Line 3: model · tokens · cost */}
       <Show when={props.harness || props.model}>
         <div class={styles.metaRow}>
           <span class={styles.meta}>
@@ -124,11 +148,10 @@ export default function TaskCard(props: TaskCardProps) {
               {" · "}${props.costUSD.toFixed(2)}
             </Show>
           </span>
-          <Show when={(props.startedAt ?? 0) > 0}>
-            <span class={styles.duration}>{formatElapsed(props.now() - (props.startedAt ?? 0) * 1000)}</span>
-          </Show>
         </div>
       </Show>
+
+      {/* Line 4 (optional): diff */}
       <Show when={props.diffStat?.length ? props.diffStat : undefined} keyed>
         {(ds) => {
           const content = () => <>
@@ -164,6 +187,17 @@ export default function TaskCard(props: TaskCardProps) {
 
 function StateDuration(props: { stateUpdatedAt: number; now: Accessor<number> }) {
   const elapsed = () => Math.max(0, props.now() - props.stateUpdatedAt * 1000);
-  return <span class={styles.duration}>{formatElapsed(elapsed())}</span>;
+  return <span>{formatElapsed(elapsed())}</span>;
 }
 
+function ThinkTime(props: { duration: number; state: string; stateUpdatedAt: number; turnStartedAt?: number; now: Accessor<number> }) {
+  const thinkMs = () => {
+    const base = props.duration * 1000;
+    if (props.state === "running") {
+      const turnStart = (props.turnStartedAt ?? 0) > 0 ? (props.turnStartedAt as number) : props.stateUpdatedAt;
+      return base + Math.max(0, props.now() - turnStart * 1000);
+    }
+    return base;
+  };
+  return <span>{formatElapsed(thinkMs())}</span>;
+}
