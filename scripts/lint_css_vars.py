@@ -10,6 +10,7 @@ _VAR_USE_RE = re.compile(r"var\((--[\w-]+)")
 _CLASS_DEF_RE = re.compile(r"\.([a-zA-Z][\w-]*)")
 _IMPORT_RE = re.compile(r'import\s+(\w+)\s+from\s+["\']([^"\']+\.module\.css)["\']')
 _CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_CSS_GLOBAL_RE = re.compile(r":global\([^)]*\)")
 
 
 def check_css_vars(css_files: list[str], source_files: list[str]) -> list[tuple[str, int, str]]:
@@ -36,7 +37,8 @@ def check_css_vars(css_files: list[str], source_files: list[str]) -> list[tuple[
 
 
 def extract_css_classes(text: str) -> set[str]:
-    return {m.group(1) for m in _CLASS_DEF_RE.finditer(_CSS_COMMENT_RE.sub("", text))}
+    cleaned = _CSS_GLOBAL_RE.sub("", _CSS_COMMENT_RE.sub("", text))
+    return {m.group(1) for m in _CLASS_DEF_RE.finditer(cleaned)}
 
 
 def find_used_classes(ts_text: str, alias: str) -> tuple[set[str], int]:
