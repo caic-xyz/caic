@@ -838,8 +838,10 @@ class VoiceSession @Inject constructor(
                 "answer questions about task status without calling tasks_list first. Call " +
                 "task_get_detail when the user asks for specifics (recent events, diffs).\n\n" +
                 "## On connection\n" +
-                "When the session starts, say only \"Ready\" and nothing else. Wait for " +
-                "the user to speak first. Speak fast.\n\n" +
+                "When the session starts, say exactly one word: \"Ready\". " +
+                "Do not say anything else — no greeting, no summary, no explanation. " +
+                "After saying \"Ready\", stop and remain silent until the user speaks. " +
+                "Always speak fast.\n\n" +
                 "## Behavior guidelines\n" +
                 "- Be concise. The user is often away from the screen.\n" +
                 "- Summarize task status: state and what the agent is doing. " +
