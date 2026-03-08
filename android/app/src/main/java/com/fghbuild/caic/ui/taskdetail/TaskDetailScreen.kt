@@ -1,11 +1,15 @@
 // Full-screen task detail view with live SSE message stream, grouping, and actions.
 package com.fghbuild.caic.ui.taskdetail
 
+import android.app.Activity
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.saveable.rememberSaveable
+import com.fghbuild.caic.util.ScreenshotService
+import com.fghbuild.caic.util.bitmapToImageData
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -243,6 +247,21 @@ fun TaskDetailScreen(
         }
         cameraUri = null
     }
+    val mpm = remember { context.getSystemService(MediaProjectionManager::class.java) }
+    val screenshotLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        // Pass resultCode + data to the service so it can call getMediaProjection AFTER
+        // startForeground — required on Android 14+ (getMediaProjection throws SecurityException
+        // if called before the FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION service is running).
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            ScreenshotService.start(context, result.resultCode, result.data!!) { bitmap ->
+                val img = bitmapToImageData(bitmap)
+                bitmap.recycle()
+                viewModel.addImages(listOf(img))
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -383,6 +402,9 @@ fun TaskDetailScreen(
                             val uri = createCameraPhotoUri(context)
                             cameraUri = uri
                             cameraLauncher.launch(uri)
+                        },
+                        onScreenshot = {
+                            screenshotLauncher.launch(mpm.createScreenCaptureIntent())
                         },
                         onRemoveImage = viewModel::removeImage,
                         safetyIssues = state.safetyIssues,

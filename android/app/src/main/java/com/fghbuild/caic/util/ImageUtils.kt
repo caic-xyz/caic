@@ -78,6 +78,26 @@ private fun downscaleToImageData(bytes: ByteArray, origW: Int, origH: Int): Imag
 }
 
 /**
+ * Encodes a [Bitmap] to [ImageData], downscaling if needed.
+ * The bitmap is not recycled by this function.
+ */
+fun bitmapToImageData(bitmap: Bitmap): ImageData {
+    val src = if (bitmap.width > MAX_DIMENSION || bitmap.height > MAX_DIMENSION) {
+        val scale = MAX_DIMENSION.toFloat() / maxOf(bitmap.width, bitmap.height)
+        bitmap.scale((bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), filter = true)
+    } else {
+        bitmap
+    }
+    val out = ByteArrayOutputStream()
+    src.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+    if (src !== bitmap) src.recycle()
+    return ImageData(
+        mediaType = "image/jpeg",
+        data = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP),
+    )
+}
+
+/**
  * Decodes a base64 [ImageData] into an Android [Bitmap], or null on failure.
  */
 fun imageDataToBitmap(img: ImageData): Bitmap? {

@@ -1,13 +1,12 @@
 // Task list screen with creation form, usage badges, and task navigation.
 package com.fghbuild.caic.ui.tasklist
 
+import android.app.Activity
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -30,7 +29,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Settings
@@ -74,6 +72,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.ImageData
+import com.fghbuild.caic.ui.common.AttachMenu
+import com.fghbuild.caic.util.ScreenshotService
+import com.fghbuild.caic.util.bitmapToImageData
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.caic.util.createCameraPhotoUri
@@ -238,6 +239,18 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
         }
         cameraUri = null
     }
+    val mpm = remember { context.getSystemService(MediaProjectionManager::class.java) }
+    val screenshotLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            ScreenshotService.start(context, result.resultCode, result.data!!) { bitmap ->
+                val img = bitmapToImageData(bitmap)
+                bitmap.recycle()
+                viewModel.addImages(listOf(img))
+            }
+        }
+    }
     val hasContent = state.prompt.isNotBlank() || state.pendingImages.isNotEmpty()
 
     var showCloneDialog by remember { mutableStateOf(false) }
@@ -370,42 +383,20 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
             },
         )
         if (state.supportsImages) {
-            Row {
-                var attachExpanded by remember { mutableStateOf(false) }
-                Box {
-                    IconButton(
-                        onClick = { attachExpanded = true },
-                        enabled = !state.submitting,
-                    ) {
-                        Icon(Icons.Default.AttachFile, contentDescription = "Attach image")
-                    }
-                    DropdownMenu(
-                        expanded = attachExpanded,
-                        onDismissRequest = { attachExpanded = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Take photo") },
-                            onClick = {
-                                attachExpanded = false
-                                val uri = createCameraPhotoUri(context)
-                                cameraUri = uri
-                                cameraLauncher.launch(uri)
-                            },
-                            leadingIcon = { Icon(Icons.Default.CameraAlt, contentDescription = null) },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Choose from gallery") },
-                            onClick = {
-                                attachExpanded = false
-                                photoPicker.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                )
-                            },
-                            leadingIcon = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
-                        )
-                    }
-                }
-            }
+            AttachMenu(
+                enabled = !state.submitting,
+                onCamera = {
+                    val uri = createCameraPhotoUri(context)
+                    cameraUri = uri
+                    cameraLauncher.launch(uri)
+                },
+                onScreenshot = { screenshotLauncher.launch(mpm.createScreenCaptureIntent()) },
+                onGallery = {
+                    photoPicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
+            )
         }
     }
 }

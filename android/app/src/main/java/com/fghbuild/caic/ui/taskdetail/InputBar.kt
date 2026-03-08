@@ -18,12 +18,11 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -61,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.ImageData
 import com.caic.sdk.v1.SafetyIssue
 import com.fghbuild.caic.ui.theme.appColors
+import com.fghbuild.caic.ui.common.AttachMenu
 import com.fghbuild.caic.util.imageDataToBitmap
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -83,6 +83,7 @@ fun InputBar(
     supportsImages: Boolean = false,
     onAttachGallery: () -> Unit = {},
     onAttachCamera: () -> Unit = {},
+    onScreenshot: () -> Unit = {},
     onRemoveImage: (Int) -> Unit = {},
     safetyIssues: List<SafetyIssue> = emptyList(),
     onForceSync: () -> Unit = {},
@@ -163,6 +164,7 @@ fun InputBar(
                     enabled = !busy,
                     onGallery = onAttachGallery,
                     onCamera = onAttachCamera,
+                    onScreenshot = onScreenshot,
                 )
             }
             if (pendingAction == "sync") {
@@ -238,34 +240,6 @@ fun InputBar(
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun AttachMenu(
-    enabled: Boolean,
-    onGallery: () -> Unit,
-    onCamera: () -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        Tip("Attach image") {
-            IconButton(onClick = { expanded = true }, enabled = enabled) {
-                Icon(Icons.Default.AttachFile, contentDescription = "Attach image")
-            }
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(
-                text = { Text("Take photo") },
-                onClick = { expanded = false; onCamera() },
-                leadingIcon = { Icon(Icons.Default.CameraAlt, contentDescription = null) },
-            )
-            DropdownMenuItem(
-                text = { Text("Choose from gallery") },
-                onClick = { expanded = false; onGallery() },
-                leadingIcon = { Icon(Icons.Default.PhotoLibrary, contentDescription = null) },
-            )
         }
     }
 }

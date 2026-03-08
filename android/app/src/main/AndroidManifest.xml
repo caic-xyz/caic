@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
@@ -41,6 +42,10 @@
         <service
             android:name=".voice.VoiceService"
             android:foregroundServiceType="microphone"
+            android:exported="false" />
+        <service
+            android:name=".util.ScreenshotService"
+            android:foregroundServiceType="mediaProjection"
             android:exported="false" />
         <provider
             android:name="androidx.core.content.FileProvider"
