@@ -15,42 +15,7 @@ phone with Tailscale. All private.
 go install github.com/caic-xyz/caic/backend/cmd/caic@latest
 ```
 
-When only a port is specified (e.g. `-http :8080` or `CAIC_HTTP=:8080`), the
-server listens on **localhost** only. To listen on all interfaces, specify the
-host explicitly: `-http 0.0.0.0:8080`.
-
-### systemd user service
-
-Install the unit file and env file, then enable the service:
-
-```bash
-mkdir -p ~/.config/systemd/user ~/.config/caic
-cp contrib/caic.service ~/.config/systemd/user/
-cp contrib/caic.env ~/.config/caic/caic.env
-# Edit ~/.config/caic/caic.env to set CAIC_HTTP, CAIC_ROOT, and API keys.
-systemctl --user daemon-reload
-systemctl --user enable --now caic
-```
-
-View logs:
-
-```bash
-journalctl --user -u caic -f
-```
-
-## Serving over Tailscale
-
-Safely expose `caic` on your [Tailscale](https://tailscale.com/) network using `tailscale serve`. This
-provides secure access from any device on your tailnet without opening ports or configuring firewalls.
-
-```bash
-# Expose caic on your tailnet at https://<hostname>.<tailnet>.ts.net
-tailscale serve --bg 8080
-```
-
-**HTTPS**: Tailscale serve provides HTTPS automatically via Let's Encrypt TLS certificates.
-
-Do not use tailscale funnel.
+See [SELF_HOSTING.md](SELF_HOSTING.md) for configuration, environment variables, systemd setup, and Tailscale.
 
 ## Architecture
 
