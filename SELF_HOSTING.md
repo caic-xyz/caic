@@ -2,8 +2,8 @@
 
 ## Prerequisites
 
-- **Docker** — required to run agent containers via [md](https://github.com/caic-xyz/md).
-- **Go** — to build from source, or use the prebuilt binary via `go install`.
+- **Docker** or **Podman** — required to run agent containers via [md](https://github.com/caic-xyz/md).
+- **Go** — to build from source.
 - **At least one agent** — install and authenticate at least one of the following.
 
 ### Agents
@@ -40,13 +40,9 @@ All configuration is via environment variables. Flags take precedence when set. 
 ## Running
 
 ```bash
-CAIC_HTTP=:8080 CAIC_ROOT=~/src caic
-```
-
-Or with flags:
-
-```bash
 caic -http :8080 -root ~/src
+
+caic -help
 ```
 
 ## systemd User Service
