@@ -590,6 +590,12 @@ export interface WebFetchResp {
   content: string;
 }
 /**
+ * RepoBranchesResp is the response for GET /api/v1/server/repos/branches.
+ */
+export interface RepoBranchesResp {
+  branches: string[];
+}
+/**
  * EmptyReq is used for endpoints that take no request body.
  */
 export type EmptyReq = any /* dto.EmptyReq */;

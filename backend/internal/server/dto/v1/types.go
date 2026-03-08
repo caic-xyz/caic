@@ -267,5 +267,10 @@ type WebFetchResp struct {
 	Content string `json:"content"`
 }
 
+// RepoBranchesResp is the response for GET /api/v1/server/repos/branches.
+type RepoBranchesResp struct {
+	Branches []string `json:"branches"`
+}
+
 // EmptyReq is used for endpoints that take no request body.
 type EmptyReq = dto.EmptyReq

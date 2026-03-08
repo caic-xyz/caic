@@ -276,15 +276,43 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
         }
 
         val defaultBranch = state.repos.find { it.path == state.selectedRepo }?.baseBranch ?: ""
-        OutlinedTextField(
-            value = state.baseBranch,
-            onValueChange = viewModel::updateBaseBranch,
-            label = { Text("Base branch") },
-            placeholder = { Text(defaultBranch.ifBlank { "main" }) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            enabled = !state.submitting,
-        )
+        var branchDropdownExpanded by remember { mutableStateOf(false) }
+        ExposedDropdownMenuBox(
+            expanded = branchDropdownExpanded && state.branches.isNotEmpty(),
+            onExpandedChange = { if (state.branches.isNotEmpty()) branchDropdownExpanded = it },
+        ) {
+            OutlinedTextField(
+                value = state.baseBranch,
+                onValueChange = viewModel::updateBaseBranch,
+                label = { Text("Base branch") },
+                placeholder = { Text(defaultBranch.ifBlank { "main" }) },
+                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
+                trailingIcon = {
+                    if (state.branches.isNotEmpty()) {
+                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = branchDropdownExpanded)
+                    }
+                },
+                singleLine = true,
+                enabled = !state.submitting,
+            )
+            if (state.branches.isNotEmpty()) {
+                ExposedDropdownMenu(
+                    expanded = branchDropdownExpanded,
+                    onDismissRequest = { branchDropdownExpanded = false },
+                ) {
+                    state.branches.forEach { branch ->
+                        DropdownMenuItem(
+                            text = { Text(branch) },
+                            onClick = {
+                                viewModel.updateBaseBranch(branch)
+                                branchDropdownExpanded = false
+                            },
+                            contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                        )
+                    }
+                }
+            }
+        }
 
         if (state.harnesses.size > 1) {
             DropdownField(

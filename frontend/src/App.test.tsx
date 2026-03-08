@@ -17,6 +17,7 @@ vi.mock("@sdk/api.gen", () => ({
   listHarnesses: vi.fn(),
   getConfig: vi.fn(),
   getUsage: vi.fn(),
+  listRepoBranches: vi.fn(),
   cloneRepo: vi.fn(),
   createTask: vi.fn(),
   terminateTask: vi.fn(),
@@ -52,6 +53,7 @@ beforeEach(() => {
   ] as HarnessInfo[]);
   vi.mocked(api.getConfig).mockRejectedValue(new Error("no config"));
   vi.mocked(api.getUsage).mockRejectedValue(new Error("no usage"));
+  vi.mocked(api.listRepoBranches).mockResolvedValue({ branches: ["main", "dev"] });
   vi.mocked(api.cloneRepo).mockResolvedValue(newRepo);
   vi.mocked(api.createTask).mockResolvedValue({ id: "task1" });
 });

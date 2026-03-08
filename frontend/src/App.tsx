@@ -2,7 +2,7 @@
 import { createEffect, createSignal, For, Show, Switch, Match, onMount, onCleanup } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData } from "@sdk/types.gen";
-import { getConfig, getPreferences, listHarnesses, listRepos, createTask, cloneRepo, getUsage, terminateTask } from "@sdk/api.gen";
+import { getConfig, getPreferences, listHarnesses, listRepos, listRepoBranches, createTask, cloneRepo, getUsage, terminateTask } from "@sdk/api.gen";
 import TaskDetail from "./TaskDetail";
 import DiffDetail from "./DiffDetail";
 import TaskList, { sortTasks } from "./TaskList";
@@ -85,6 +85,7 @@ export default function App() {
   const [displayEnabled, setDisplayEnabled] = createSignal(false);
   const [recentCount, setRecentCount] = createSignal(0);
   const [selectedBranch, setSelectedBranch] = createSignal("");
+  const [branches, setBranches] = createSignal<string[]>([]);
   const [terminatingId, setTerminatingId] = createSignal<string | null>(null);
 
   // Clone repo dialog state.
@@ -173,6 +174,14 @@ export default function App() {
     if (connected() && selectedId() !== null && tasks().length > 0 && selectedTask() === null) {
       navigate("/", { replace: true });
     }
+  });
+
+  // Fetch branches fresh whenever the selected repo changes; also reset the selected branch.
+  createEffect(() => {
+    const repo = selectedRepo();
+    setSelectedBranch("");
+    if (!repo) { setBranches([]); return; }
+    listRepoBranches(repo).then((r) => setBranches(r.branches)).catch(() => setBranches([]));
   });
 
   // In-memory per-harness model preferences from the server.
@@ -473,6 +482,7 @@ export default function App() {
         >+</button>
         <input
           type="text"
+          list="branch-list"
           value={selectedBranch()}
           onInput={(e) => setSelectedBranch(e.currentTarget.value)}
           placeholder={repos().find((r) => r.path === selectedRepo())?.baseBranch ?? "branch"}
@@ -480,6 +490,11 @@ export default function App() {
           data-testid="branch-input"
           title="Base branch to fork from (leave empty for default)"
         />
+        <datalist id="branch-list">
+          <For each={branches()}>
+            {(b) => <option value={b} />}
+          </For>
+        </datalist>
         <Show when={harnesses().length > 1}>
           <select
             value={selectedHarness()}

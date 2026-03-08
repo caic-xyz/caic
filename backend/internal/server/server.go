@@ -345,6 +345,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	mux.HandleFunc("GET /api/v1/server/harnesses", handle(s.listHarnesses))
 	mux.HandleFunc("GET /api/v1/server/repos", handle(s.listRepos))
 	mux.HandleFunc("POST /api/v1/server/repos", handle(s.cloneRepo))
+	mux.HandleFunc("GET /api/v1/server/repos/branches", s.handleListRepoBranches)
 	mux.HandleFunc("GET /api/v1/tasks", handle(s.listTasks))
 	mux.HandleFunc("POST /api/v1/tasks", handle(s.createTask))
 	mux.HandleFunc("GET /api/v1/tasks/{id}/raw_events", s.handleTaskRawEvents)
@@ -465,6 +466,28 @@ func (s *Server) listRepos(_ context.Context, _ *dto.EmptyReq) (*[]v1.Repo, erro
 		out[i] = v1.Repo{Path: r.RelPath, BaseBranch: r.BaseBranch, RepoURL: r.RepoURL}
 	}
 	return &out, nil
+}
+
+func (s *Server) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
+	repo := r.URL.Query().Get("repo")
+	if repo == "" {
+		writeError(w, dto.BadRequest("repo is required"))
+		return
+	}
+	absPath, ok := s.repoAbsPath(repo)
+	if !ok {
+		writeError(w, dto.NotFound("repo not found"))
+		return
+	}
+	pairs, err := gitutil.ListBranches(r.Context(), absPath, "origin")
+	if err != nil {
+		slog.WarnContext(r.Context(), "list branches failed", "repo", repo, "err", err)
+	}
+	names := make([]string, len(pairs))
+	for i, p := range pairs {
+		names[i] = p[0]
+	}
+	writeJSONResponse(w, &v1.RepoBranchesResp{Branches: names}, nil)
 }
 
 func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo, error) {
@@ -1791,6 +1814,15 @@ func (s *Server) repoURL(rel string) string {
 		}
 	}
 	return ""
+}
+
+func (s *Server) repoAbsPath(rel string) (string, bool) {
+	for _, r := range s.repos {
+		if r.RelPath == rel {
+			return r.AbsPath, true
+		}
+	}
+	return "", false
 }
 
 // tailscaleURL returns the Tailscale URL for the task, or "true" if enabled

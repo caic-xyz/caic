@@ -53,6 +53,7 @@ data class TaskListState(
     val selectedHarness: String = "",
     val selectedModel: String = "",
     val baseBranch: String = "",
+    val branches: List<String> = emptyList(),
     val prompt: String = "",
     val recentRepoCount: Int = 0,
     val submitting: Boolean = false,
@@ -100,6 +101,7 @@ class TaskListViewModel @Inject constructor(
             selectedHarness = form.selectedHarness,
             selectedModel = form.selectedModel,
             baseBranch = form.baseBranch,
+            branches = form.branches,
             prompt = form.prompt,
             submitting = form.submitting,
             cloning = form.cloning,
@@ -139,16 +141,18 @@ class TaskListViewModel @Inject constructor(
                     harnesses.firstOrNull()?.name ?: ""
                 val lastModel = prefModels[selectedHarness] ?: ""
                 val harnessModels = harnesses.find { it.name == selectedHarness }?.models.orEmpty()
+                val initialRepo = ordered.firstOrNull()?.path ?: ""
                 _formState.value = _formState.value.copy(
                     repos = ordered,
                     harnesses = harnesses,
                     config = config,
                     recentRepoCount = recentRepos.size,
-                    selectedRepo = ordered.firstOrNull()?.path ?: "",
+                    selectedRepo = initialRepo,
                     selectedHarness = selectedHarness,
                     selectedModel = if (lastModel in harnessModels) lastModel else "",
                     prefModels = prefModels,
                 )
+                if (initialRepo.isNotBlank()) loadBranches(initialRepo)
             } catch (_: Exception) {
                 // Form data will remain empty; user can still see tasks.
             }
@@ -160,7 +164,25 @@ class TaskListViewModel @Inject constructor(
     }
 
     fun selectRepo(repo: String) {
-        _formState.value = _formState.value.copy(selectedRepo = repo)
+        _formState.value = _formState.value.copy(selectedRepo = repo, baseBranch = "")
+        loadBranches(repo)
+    }
+
+    private fun loadBranches(repo: String) {
+        if (repo.isBlank()) {
+            _formState.value = _formState.value.copy(branches = emptyList())
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val url = settingsRepository.settings.value.serverURL
+                val client = ApiClient(url)
+                val resp = client.listRepoBranches(repo)
+                _formState.value = _formState.value.copy(branches = resp.branches)
+            } catch (_: Exception) {
+                _formState.value = _formState.value.copy(branches = emptyList())
+            }
+        }
     }
 
     fun selectHarness(harness: String) {
@@ -282,6 +304,7 @@ class TaskListViewModel @Inject constructor(
         val selectedHarness: String = "",
         val selectedModel: String = "",
         val baseBranch: String = "",
+        val branches: List<String> = emptyList(),
         val prompt: String = "",
         val submitting: Boolean = false,
         val cloning: Boolean = false,

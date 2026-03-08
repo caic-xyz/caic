@@ -8,13 +8,14 @@ import (
 
 // Route describes a single API endpoint for code generation.
 type Route struct {
-	Name    string       // Function name, e.g. "listRepos"
-	Method  string       // "GET" or "POST"
-	Path    string       // "/api/v1/tasks/{id}/input"
-	Req     reflect.Type // Request body type; nil for no body.
-	Resp    reflect.Type // Response body type.
-	IsArray bool         // response is T[] not T
-	IsSSE   bool         // SSE stream, not JSON
+	Name        string       // Function name, e.g. "listRepos"
+	Method      string       // "GET" or "POST"
+	Path        string       // "/api/v1/tasks/{id}/input"
+	Req         reflect.Type // Request body type; nil for no body.
+	Resp        reflect.Type // Response body type.
+	IsArray     bool         // response is T[] not T
+	IsSSE       bool         // SSE stream, not JSON
+	QueryParams []string     // Query parameter names (GET endpoints only).
 }
 
 // ReqName returns the request type name, or "" if Req is nil.
@@ -53,6 +54,7 @@ var Routes = []Route{
 	{Name: "listHarnesses", Method: "GET", Path: "/api/v1/server/harnesses", Resp: reflect.TypeFor[HarnessInfo](), IsArray: true},
 	{Name: "listRepos", Method: "GET", Path: "/api/v1/server/repos", Resp: reflect.TypeFor[Repo](), IsArray: true},
 	{Name: "cloneRepo", Method: "POST", Path: "/api/v1/server/repos", Req: reflect.TypeFor[CloneRepoReq](), Resp: reflect.TypeFor[Repo]()},
+	{Name: "listRepoBranches", Method: "GET", Path: "/api/v1/server/repos/branches", Resp: reflect.TypeFor[RepoBranchesResp](), QueryParams: []string{"repo"}},
 	{Name: "listTasks", Method: "GET", Path: "/api/v1/tasks", Resp: reflect.TypeFor[Task](), IsArray: true},
 	{Name: "createTask", Method: "POST", Path: "/api/v1/tasks", Req: reflect.TypeFor[CreateTaskReq](), Resp: reflect.TypeFor[CreateTaskResp]()},
 	{Name: "taskRawEvents", Method: "GET", Path: "/api/v1/tasks/{id}/raw_events", Resp: reflect.TypeFor[EventMessage](), IsSSE: true},

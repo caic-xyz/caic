@@ -88,6 +88,9 @@ data class CloneRepoReq(
 )
 
 @Serializable
+data class RepoBranchesResp(val branches: List<String>)
+
+@Serializable
 data class DiffFileStat(
     val path: String,
     val added: Int,

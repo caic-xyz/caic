@@ -118,16 +118,19 @@ func writeTSJSONFunc(b *strings.Builder, r *v1.Route, params []string) {
 	}
 
 	// Build function signature.
-	args := make([]string, 0, len(params)+1)
+	args := make([]string, 0, len(params)+len(r.QueryParams)+1)
 	for _, p := range params {
 		args = append(args, p+": string")
+	}
+	for _, q := range r.QueryParams {
+		args = append(args, q+": string")
 	}
 	hasReq := r.Req != nil
 	if hasReq {
 		args = append(args, "req: "+r.ReqName())
 	}
 
-	tsPath := buildTSPath(r.Path, params)
+	tsPath := buildTSPath(r.Path, params, r.QueryParams)
 
 	fmt.Fprintf(b, "export function %s(%s): Promise<%s> {\n", r.Name, strings.Join(args, ", "), respType)
 	if hasReq {
@@ -143,7 +146,7 @@ func writeTSSSEFunc(b *strings.Builder, r *v1.Route, params []string) {
 	for _, p := range params {
 		args = append(args, p+": string")
 	}
-	tsPath := buildTSPath(r.Path, params)
+	tsPath := buildTSPath(r.Path, params, nil)
 	respName := r.RespName()
 	args = append(args, "onMessage: (event: "+respName+") => void")
 	fmt.Fprintf(b, "export function %s(%s): EventSource {\n", r.Name, strings.Join(args, ", "))
@@ -727,16 +730,19 @@ func writeKotlinJSONFunc(b *strings.Builder, r *v1.Route, params []string) {
 	}
 
 	// Build function parameters.
-	args := make([]string, 0, len(params)+1)
+	args := make([]string, 0, len(params)+len(r.QueryParams)+1)
 	for _, p := range params {
 		args = append(args, p+": String")
+	}
+	for _, q := range r.QueryParams {
+		args = append(args, q+": String")
 	}
 	hasReq := r.Req != nil
 	if hasReq {
 		args = append(args, "req: "+r.ReqName())
 	}
 
-	ktPath := buildKotlinPath(r.Path, params)
+	ktPath := buildKotlinPath(r.Path, r.QueryParams)
 
 	sig := strings.Join(args, ", ")
 	if hasReq {
@@ -751,7 +757,7 @@ func writeKotlinSSEFunc(b *strings.Builder, r *v1.Route, params []string) {
 	for _, p := range params {
 		args = append(args, p+": String")
 	}
-	ktPath := buildKotlinPath(r.Path, params)
+	ktPath := buildKotlinPath(r.Path, nil)
 	respName := r.RespName()
 	fmt.Fprintf(b, "    fun %s(%s): Flow<%s> = sseFlow<%s>(%s)\n", r.Name, strings.Join(args, ", "), respName, respName, ktPath)
 }
@@ -760,9 +766,10 @@ func writeKotlinReconnectingFunc(b *strings.Builder, r *v1.Route, params []strin
 	// Build the function name: e.g. "taskEvents" -> "taskEventsReconnecting"
 	reconnectName := r.Name + "Reconnecting"
 
-	args := make([]string, 0, len(params))
-	callArgs := make([]string, 0, len(params))
-	for _, p := range params {
+	allParams := append(params, r.QueryParams...) //nolint:gocritic // concat is intentional
+	args := make([]string, 0, len(allParams))
+	callArgs := make([]string, 0, len(allParams))
+	for _, p := range allParams {
 		args = append(args, p+": String")
 		callArgs = append(callArgs, p)
 	}
@@ -772,16 +779,24 @@ func writeKotlinReconnectingFunc(b *strings.Builder, r *v1.Route, params []strin
 }
 
 // buildKotlinPath returns a Kotlin string expression for the path. Uses string
-// templates for paths with parameters.
-func buildKotlinPath(path string, params []string) string {
-	if len(params) == 0 {
-		return fmt.Sprintf("%q", path)
-	}
-	kt := pathParamRe.ReplaceAllStringFunc(path, func(match string) string {
+// templates for paths with parameters and appends query params if any.
+func buildKotlinPath(path string, queryParams []string) string {
+	var b strings.Builder
+	b.WriteString(pathParamRe.ReplaceAllStringFunc(path, func(match string) string {
 		name := match[1 : len(match)-1]
 		return "$" + name
-	})
-	return fmt.Sprintf("%q", kt)
+	}))
+	for i, q := range queryParams {
+		if i == 0 {
+			b.WriteByte('?')
+		} else {
+			b.WriteByte('&')
+		}
+		b.WriteString(q)
+		b.WriteString("=$")
+		b.WriteString(q)
+	}
+	return fmt.Sprintf("%q", b.String())
 }
 
 func extractPathParams(path string) []string {
@@ -794,16 +809,29 @@ func extractPathParams(path string) []string {
 }
 
 // buildTSPath returns either a quoted string or a template literal for paths
-// with parameters.
-func buildTSPath(path string, params []string) string {
-	if len(params) == 0 {
+// with path params and/or query params.
+func buildTSPath(path string, params, queryParams []string) string {
+	if len(params) == 0 && len(queryParams) == 0 {
 		return fmt.Sprintf("%q", path)
 	}
-	ts := pathParamRe.ReplaceAllStringFunc(path, func(match string) string {
+	var b strings.Builder
+	b.WriteString(pathParamRe.ReplaceAllStringFunc(path, func(match string) string {
 		name := match[1 : len(match)-1]
 		return "${" + name + "}"
-	})
-	return "`" + ts + "`"
+	}))
+	for i, q := range queryParams {
+		if i == 0 {
+			b.WriteByte('?')
+		} else {
+			b.WriteByte('&')
+		}
+		b.WriteString(q)
+		b.WriteString("=${encodeURIComponent(")
+		b.WriteString(q)
+		b.WriteByte(')')
+		b.WriteByte('}')
+	}
+	return "`" + b.String() + "`"
 }
 
 // generateDoc generates sdk/API.md from the route table.

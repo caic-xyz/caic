@@ -13,6 +13,7 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | GET | `/api/v1/server/harnesses` |  | `HarnessInfo[]` |
 | GET | `/api/v1/server/repos` |  | `Repo[]` |
 | POST | `/api/v1/server/repos` | `CloneRepoReq` | `Repo` |
+| GET | `/api/v1/server/repos/branches` |  | `RepoBranchesResp` |
 | GET | `/api/v1/server/tasks/events` |  | `TaskListEvent` SSE |
 | GET | `/api/v1/server/usage/events` |  | `UsageResp` SSE |
 
@@ -119,6 +120,12 @@ All errors return:
 | `url` | `string` | yes |
 | `path` | `string` |  |
 | `depth` | `number` |  |
+
+### RepoBranchesResp
+
+| Field | Type | Required |
+|-------|------|----------|
+| `branches` | `string[]` | yes |
 
 ### DiffFileStat
 
