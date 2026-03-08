@@ -65,6 +65,7 @@ import com.fghbuild.caic.ui.theme.appColors
 import com.fghbuild.caic.ui.theme.stateColor
 import com.fghbuild.caic.ui.theme.waitingStates
 import com.fghbuild.caic.util.createCameraPhotoUri
+import com.caic.sdk.v1.EventKinds
 import com.fghbuild.caic.util.GroupKind
 import kotlinx.serialization.json.JsonElement
 import com.fghbuild.caic.util.MessageGroup
@@ -128,42 +129,43 @@ private sealed interface MsgItem {
 }
 
 /**
- * Builds the flat item list from the 3-level hierarchy: sessions → turns → groups.
+ * Builds flat items for past sessions, the current session boundary, and completed turns
+ * within the current session. Stable during streaming: only changes at session/turn boundaries.
  *
- * - Past sessions (all except last) are elided to a single row; tap to expand.
- * - The current (last) session is always expanded; its boundary event shown inline.
- * - Past turns within the current session are elided; tap to expand.
- * - The live (last) turn in the current session is always expanded.
+ * @param expandedSessionKeys  Session keys that the user has expanded.
+ * @param expandedTurnKeys  Turn keys whose groups should be shown expanded.
+ * @param expandedToolGroups  Tool-group keys whose call items should be shown.
  */
-private fun buildItems(
-    sessions: List<Session>,
+private fun buildCompletedItems(
+    completedSessions: List<Session>,
+    currentSessionBoundaryEvent: com.caic.sdk.v1.EventMessage?,
+    currentSessionCompletedTurns: List<Turn>,
     expandedSessionKeys: Set<String>,
     expandedTurnKeys: Set<String>,
     expandedToolGroups: Set<String>,
 ): List<MsgItem> {
-    if (sessions.isEmpty()) return emptyList()
     val result = mutableListOf<MsgItem>()
-
-    for ((si, session) in sessions.withIndex()) {
-        val isCurrentSession = si == sessions.size - 1
+    for ((si, session) in completedSessions.withIndex()) {
         val sessionKey = "session:$si:${session.boundaryEvent?.ts ?: ""}"
-
-        if (!isCurrentSession) {
-            if (sessionKey !in expandedSessionKeys) {
-                result.add(MsgItem.SessionElided(session, sessionKey, "se:$sessionKey"))
-            } else {
-                result.add(MsgItem.SessionHeader(session, sessionKey, "sh:$sessionKey"))
-                emitTurns(
-                    result, session.turns, sessionKey, expandedTurnKeys, expandedToolGroups,
-                    liveSessionTurn = false, si, inPastSession = true,
-                )
-            }
+        if (sessionKey !in expandedSessionKeys) {
+            result.add(MsgItem.SessionElided(session, sessionKey, "se:$sessionKey"))
         } else {
-            // Current session: always shown expanded.
-            session.boundaryEvent?.let { result.add(MsgItem.SessionBoundary(it, "sb:$sessionKey")) }
-            emitTurns(result, session.turns, sessionKey, expandedTurnKeys, expandedToolGroups, liveSessionTurn = true, si)
+            result.add(MsgItem.SessionHeader(session, sessionKey, "sh:$sessionKey"))
+            emitTurns(
+                result, session.turns, sessionKey, expandedTurnKeys, expandedToolGroups,
+                liveSessionTurn = false, si, inPastSession = true,
+            )
         }
     }
+    val currentSi = completedSessions.size
+    val currentSessionKey = "session:$currentSi:${currentSessionBoundaryEvent?.ts ?: ""}"
+    currentSessionBoundaryEvent?.let {
+        result.add(MsgItem.SessionBoundary(it, "sb:$currentSessionKey"))
+    }
+    emitTurns(
+        result, currentSessionCompletedTurns, currentSessionKey, expandedTurnKeys, expandedToolGroups,
+        liveSessionTurn = false, currentSi,
+    )
     return result
 }
 
@@ -215,6 +217,35 @@ private fun emitTurns(
             }
         }
     }
+}
+
+/**
+ * Builds flat items for the live (current) turn. Rebuilds on every message batch.
+ */
+private fun buildLiveItems(liveTurn: Turn?, expandedToolGroups: Set<String>): List<MsgItem> {
+    val turn = liveTurn ?: return emptyList()
+    val result = mutableListOf<MsgItem>()
+    turn.groups.forEachIndexed { j, group ->
+        val base = "g:$j"
+        if (group.kind == GroupKind.ACTION && group.toolCalls.size > 1) {
+            val toolGroupKey = group.toolCalls.first().use.toolUseID
+            result.add(MsgItem.ToolGroupHeader(group.toolCalls, toolGroupKey, "${base}h"))
+            if (toolGroupKey in expandedToolGroups) {
+                val thinkingEvents = group.events.filter {
+                    it.kind == SdkEventKinds.Thinking || it.kind == SdkEventKinds.ThinkingDelta
+                }
+                if (thinkingEvents.isNotEmpty()) {
+                    result.add(MsgItem.ThinkingItem(thinkingEvents, "${base}thinking"))
+                }
+                group.toolCalls.forEachIndexed { k, call ->
+                    result.add(MsgItem.ToolCallItem(call, "$base:$k"))
+                }
+            }
+        } else {
+            result.add(MsgItem.Group(group, isLiveTurn = true, base))
+        }
+    }
+    return result
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -517,18 +548,34 @@ private fun MessageList(
 ) {
     val listState = rememberLazyListState()
     var userScrolledUp by remember { mutableStateOf(false) }
-    val sessions = state.sessions
+    val completedSessions = state.completedSessions
+    val currentSessionBoundaryEvent = state.currentSessionBoundaryEvent
+    val currentSessionCompletedTurns = state.currentSessionCompletedTurns
+    val liveTurn = state.liveTurn
     val isWaiting = state.task?.state in waitingStates
     var expandedSessionKeys by remember { mutableStateOf(setOf<String>()) }
     var expandedTurnKeys by remember { mutableStateOf(setOf<String>()) }
     var expandedToolGroups by remember { mutableStateOf(setOf<String>()) }
-    val items = remember(sessions, expandedSessionKeys, expandedTurnKeys, expandedToolGroups) {
-        buildItems(sessions, expandedSessionKeys, expandedTurnKeys, expandedToolGroups)
+    // Completed items are stable during streaming: references are unchanged until a turn boundary,
+    // so this remember block only recomputes then or on expansion.
+    val completedItems = remember(
+        completedSessions, currentSessionBoundaryEvent, currentSessionCompletedTurns,
+        expandedSessionKeys, expandedTurnKeys, expandedToolGroups,
+    ) {
+        buildCompletedItems(
+            completedSessions, currentSessionBoundaryEvent, currentSessionCompletedTurns,
+            expandedSessionKeys, expandedTurnKeys, expandedToolGroups,
+        )
     }
+    // Live items rebuild on every message batch, but only cover the current turn.
+    val liveItems = remember(liveTurn, expandedToolGroups) {
+        buildLiveItems(liveTurn, expandedToolGroups)
+    }
+    val items = remember(completedItems, liveItems) { completedItems + liveItems }
 
     // Auto-scroll to bottom when new messages arrive, unless user scrolled up.
-    LaunchedEffect(sessions.size, state.messageCount) {
-        if (!userScrolledUp && sessions.isNotEmpty()) {
+    LaunchedEffect(completedSessions.size, currentSessionCompletedTurns.size, state.messageCount) {
+        if (!userScrolledUp && (completedSessions.isNotEmpty() || currentSessionCompletedTurns.isNotEmpty() || liveTurn != null)) {
             val total = listState.layoutInfo.totalItemsCount
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
             if (total > 0 && lastVisible < total - 1) {

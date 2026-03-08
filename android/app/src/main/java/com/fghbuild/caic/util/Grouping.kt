@@ -584,7 +584,9 @@ fun nextGrouped(prev: IncrementalGrouped, msgs: List<EventMessage>): Incremental
         else if (currentTurns.size > 1) currentTurns.dropLast(1)
         else emptyList()
     val currentTurn = if (lastTurnComplete) null else currentTurns.lastOrNull()
-    val allCompleted = priorCompleted + newlyCompleted
+    // Reuse the same list reference when nothing changed so callers can use referential equality
+    // (e.g. Compose remember keys) to skip recomputation.
+    val allCompleted = if (newlyCompleted.isEmpty()) priorCompleted else priorCompleted + newlyCompleted
 
     val newBoundary = if (newlyCompleted.isEmpty()) {
         upTo

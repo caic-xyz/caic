@@ -22,6 +22,7 @@ import com.fghbuild.caic.data.TaskSSEEvent
 import com.fghbuild.caic.navigation.Screen
 import com.fghbuild.caic.util.IncrementalGrouped
 import com.fghbuild.caic.util.Session
+import com.fghbuild.caic.util.Turn
 import com.fghbuild.caic.util.nextGrouped
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -40,7 +41,10 @@ data class TaskDetailState(
     val task: Task? = null,
     val hasMessages: Boolean = false,
     val messageCount: Int = 0,
-    val sessions: List<Session> = emptyList(),
+    val completedSessions: List<Session> = emptyList(),
+    val currentSessionBoundaryEvent: EventMessage? = null,
+    val currentSessionCompletedTurns: List<Turn> = emptyList(),
+    val liveTurn: Turn? = null,
     val todos: List<TodoItem> = emptyList(),
     val activeAgentDescriptions: List<String> = emptyList(),
     val isReady: Boolean = false,
@@ -110,7 +114,10 @@ class TaskDetailViewModel @Inject constructor(
             task = task,
             hasMessages = msgCount > 0,
             messageCount = msgCount,
-            sessions = grouped.sessions,
+            completedSessions = grouped.completedSessions,
+            currentSessionBoundaryEvent = grouped.currentSessionBoundaryEvent,
+            currentSessionCompletedTurns = grouped.currentSessionCompletedTurns,
+            liveTurn = grouped.currentTurn,
             todos = grouped.todos,
             activeAgentDescriptions = grouped.activeAgents.values.toList(),
             isReady = ready,

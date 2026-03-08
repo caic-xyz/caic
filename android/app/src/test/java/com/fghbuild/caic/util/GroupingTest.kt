@@ -16,6 +16,7 @@ import com.caic.sdk.v1.EventThinking
 import com.caic.sdk.v1.EventThinkingDelta
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -363,6 +364,41 @@ class GroupingTest {
             assertEquals(GroupKind.TEXT, groups[0].kind)
             assertTrue(groups[0].events.any { it.kind == EventKinds.ThinkingDelta })
             assertTrue(groups[0].events.any { it.kind == EventKinds.TextDelta })
+        }
+    }
+
+    @Test
+    fun testNextGrouped() {
+        t.run("currentSessionCompletedTurns reference is stable across incremental live-turn updates") {
+            // One completed turn then a live turn message arrives.
+            val turn1Msgs = listOf(textDeltaEvent("first"), resultEvent(ts = 1))
+            val state1 = nextGrouped(IncrementalGrouped(), turn1Msgs)
+            assertEquals(1, state1.currentSessionCompletedTurns.size)
+            assertEquals(null, state1.currentTurn)
+
+            // Add a live message — currentSessionCompletedTurns must be the same list reference.
+            val state2 = nextGrouped(state1, turn1Msgs + textDeltaEvent("live", ts = 2))
+            assertSame(state1.currentSessionCompletedTurns, state2.currentSessionCompletedTurns)
+            assertEquals(1, state2.currentSessionCompletedTurns.size)
+        }
+
+        t.run("currentSessionCompletedTurns grows on result event") {
+            val turn1 = listOf(textDeltaEvent("first"), resultEvent(ts = 1))
+            val state1 = nextGrouped(IncrementalGrouped(), turn1)
+            val live = turn1 + listOf(textDeltaEvent("second"), resultEvent(ts = 2))
+            val state2 = nextGrouped(state1, live)
+            assertEquals(2, state2.currentSessionCompletedTurns.size)
+            assertEquals(null, state2.currentTurn)
+        }
+
+        t.run("reset on shrinking message list clears completed turns") {
+            val turn1 = listOf(textDeltaEvent("first"), resultEvent(ts = 1))
+            val state1 = nextGrouped(IncrementalGrouped(), turn1)
+            assertEquals(1, state1.currentSessionCompletedTurns.size)
+            // Reconnect: message list shrinks to empty.
+            val state2 = nextGrouped(state1, emptyList())
+            assertEquals(0, state2.currentSessionCompletedTurns.size)
+            assertEquals(0, state2.completedUpToIdx)
         }
     }
 
