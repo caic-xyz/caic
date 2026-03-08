@@ -21,6 +21,7 @@ import kotlinx.serialization.json.JsonElement
 fun ToolMessageGroup(
     toolCalls: List<ToolCall>,
     onLoadInput: (suspend (String) -> JsonElement?)? = null,
+    onClearAndExecutePlan: (() -> Unit)? = null,
 ) {
     if (toolCalls.isEmpty()) return
     val call = toolCalls[0]
@@ -28,6 +29,7 @@ fun ToolMessageGroup(
         call = call,
         onLoadInput = onLoadInput?.takeIf { call.use.inputTruncated == true }
             ?.let { loader -> { loader(call.use.toolUseID) } },
+        onClearAndExecutePlan = onClearAndExecutePlan,
     )
 }
 

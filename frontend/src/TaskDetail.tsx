@@ -393,24 +393,14 @@ export default function TaskDetail(props: Props) {
                     isWaiting={isWaiting}
                     lastAskGroup={lastAskGroup}
                     onAskAnswer={sendAskAnswer}
+                    onClearAndExecutePlan={clearAndExecutePlan}
+                    pendingAction={pendingAction}
                   />
                 </Match>
               </Switch>
             );
           }}
         </Index>
-        <Show when={isWaiting() && props.planContent} keyed>
-          {(plan) => (
-            <div class={styles.planAction}>
-              <div class={styles.planContent}>
-                <Markdown text={plan} />
-              </div>
-              <Button variant="gray" loading={pendingAction() === "restart"} disabled={!!pendingAction()} onClick={() => clearAndExecutePlan()}>
-                Clear and execute plan
-              </Button>
-            </div>
-          )}
-        </Show>
         <Show when={messages().length === 0}>
           <Show when={props.initialPrompt} keyed fallback={<p class={styles.placeholder}>Waiting for agent output...</p>}>
             {(prompt) => (
@@ -482,6 +472,8 @@ function GroupContent(props: {
   isWaiting: () => boolean;
   lastAskGroup: () => MessageGroup | null;
   onAskAnswer: (text: string) => void;
+  onClearAndExecutePlan?: () => void;
+  pendingAction?: () => string | null;
 }) {
   // eslint-disable-next-line solid/reactivity -- props.group is a function reference, not a reactive read
   const group = props.group;
@@ -514,7 +506,7 @@ function GroupContent(props: {
       <Match when={group().kind === "action"}>
         <Show when={group().toolCalls.length > 0}
           fallback={<ThinkingCard events={group().events} />}>
-          <ToolMessageGroup toolCalls={group().toolCalls} taskId={props.taskId} events={group().events} />
+          <ToolMessageGroup toolCalls={group().toolCalls} taskId={props.taskId} events={group().events} onClearAndExecutePlan={props.isWaiting() ? props.onClearAndExecutePlan : undefined} pendingAction={props.pendingAction} />
         </Show>
       </Match>
       <Match when={group().kind === "text"}>
@@ -639,7 +631,7 @@ function DiffStatBlock(props: { files: DiffFileStat[] }) {
   );
 }
 
-function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events?: EventMessage[] }) {
+function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events?: EventMessage[]; onClearAndExecutePlan?: () => void; pendingAction?: () => string | null }) {
   const calls = () => props.toolCalls;
   const groupKey = () => "group:" + calls()[0]?.use.toolUseID;
   const isOpen = () => detailsOpenState.get(groupKey()) ?? false;
@@ -652,7 +644,9 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events
         <ToolCallCard call={calls()[0]} taskId={props.taskId}
           thinkingEvents={thinkingEvents()}
           open={detailsOpenState.get(calls()[0].use.toolUseID) ?? false}
-          onToggle={(v) => detailsOpenState.set(calls()[0].use.toolUseID, v)} />
+          onToggle={(v) => detailsOpenState.set(calls()[0].use.toolUseID, v)}
+          onClearAndExecutePlan={props.onClearAndExecutePlan}
+          pendingAction={props.pendingAction} />
       }>
         <details class={styles.toolGroup} open={isOpen()}
           onToggle={(e) => detailsOpenState.set(groupKey(), e.currentTarget.open)}>
@@ -666,7 +660,9 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events
             <Index each={calls()}>
               {(call) => <ToolCallCard call={call()} taskId={props.taskId}
                 open={detailsOpenState.get(call().use.toolUseID) ?? false}
-                onToggle={(v) => detailsOpenState.set(call().use.toolUseID, v)} />}
+                onToggle={(v) => detailsOpenState.set(call().use.toolUseID, v)}
+                onClearAndExecutePlan={props.onClearAndExecutePlan}
+                pendingAction={props.pendingAction} />}
             </Index>
           </div>
         </details>
@@ -766,7 +762,7 @@ function ToolCallInput(props: { input: Record<string, unknown> }) {
   );
 }
 
-function ToolCallCard(props: { call: ToolCall; taskId: string; open: boolean; onToggle: (open: boolean) => void; thinkingEvents?: EventMessage[] }) {
+function ToolCallCard(props: { call: ToolCall; taskId: string; open: boolean; onToggle: (open: boolean) => void; thinkingEvents?: EventMessage[]; onClearAndExecutePlan?: () => void; pendingAction?: () => string | null }) {
   const [loadedInput, setLoadedInput] = createSignal<Record<string, unknown> | null>(null);
   const [loading, setLoading] = createSignal(false);
 
@@ -820,8 +816,15 @@ function ToolCallCard(props: { call: ToolCall; taskId: string; open: boolean; on
       </details>
       <Show when={props.call.use.planContent} keyed>
         {(plan) => (
-          <div class={styles.planContent}>
-            <Markdown text={plan} />
+          <div class={styles.planAction}>
+            <div class={styles.planContent}>
+              <Markdown text={plan} />
+            </div>
+            <Show when={props.onClearAndExecutePlan}>
+              <Button variant="gray" loading={props.pendingAction?.() === "restart"} disabled={!!props.pendingAction?.()} onClick={props.onClearAndExecutePlan}>
+                Clear and execute plan
+              </Button>
+            </Show>
           </div>
         )}
       </Show>

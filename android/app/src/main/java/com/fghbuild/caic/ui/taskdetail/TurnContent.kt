@@ -42,6 +42,7 @@ fun MessageGroupContent(
     onAnswer: ((String) -> Unit)?,
     onNavigateToDiff: (() -> Unit)? = null,
     onLoadToolInput: (suspend (String) -> JsonElement?)? = null,
+    onClearAndExecutePlan: (() -> Unit)? = null,
 ) {
     when (group.kind) {
         GroupKind.ACTION -> {
@@ -54,7 +55,11 @@ fun MessageGroupContent(
                 if (thinkingEvents.isNotEmpty()) {
                     ThinkingCard(events = thinkingEvents)
                 }
-                ToolMessageGroup(toolCalls = group.toolCalls, onLoadInput = onLoadToolInput)
+                ToolMessageGroup(
+                    toolCalls = group.toolCalls,
+                    onLoadInput = onLoadToolInput,
+                    onClearAndExecutePlan = onClearAndExecutePlan,
+                )
             }
         }
         GroupKind.TEXT -> TextMessageGroup(events = group.events)

@@ -465,6 +465,7 @@ private fun MessageList(
                             onAnswer = if (item.isLiveTurn) onAnswer else null,
                             onNavigateToDiff = onNavigateToDiff,
                             onLoadToolInput = onLoadToolInput,
+                            onClearAndExecutePlan = if (item.isLiveTurn && isWaiting) onClearAndExecutePlan else null,
                         )
                         is MsgItem.ToolGroupHeader -> ToolGroupHeaderItem(
                             toolCalls = item.toolCalls,
@@ -481,17 +482,7 @@ private fun MessageList(
                             call = item.call,
                             onLoadInput = onLoadToolInput?.takeIf { item.call.use.inputTruncated == true }
                                 ?.let { loader -> { loader(item.call.use.toolUseID) } },
-                        )
-                    }
-                }
-
-                // Plan panel: shown inline below messages when task is waiting with a plan.
-                val planContent = state.task?.planContent
-                if (isWaiting && !planContent.isNullOrEmpty()) {
-                    item(key = "plan") {
-                        PlanApprovalSection(
-                            planContent = planContent,
-                            onExecute = onClearAndExecutePlan,
+                            onClearAndExecutePlan = if (isWaiting) onClearAndExecutePlan else null,
                         )
                     }
                 }

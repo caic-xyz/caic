@@ -47,6 +47,7 @@ import kotlinx.serialization.json.jsonPrimitive
 fun ToolCallCard(
     call: ToolCall,
     onLoadInput: (suspend () -> JsonElement?)? = null,
+    onClearAndExecutePlan: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var expanded by rememberSaveable(call.use.toolUseID) { mutableStateOf(false) }
@@ -134,19 +135,23 @@ fun ToolCallCard(
             }
         }
         call.use.planContent?.let { plan ->
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp)
-                    .border(1.dp, MaterialTheme.appColors.planBorder, RoundedCornerShape(6.dp)),
-                shape = RoundedCornerShape(6.dp),
-                color = MaterialTheme.appColors.planSurface,
-            ) {
-                Markdown(
-                    content = plan,
-                    modifier = Modifier.padding(12.dp).fillMaxWidth(),
-                    typography = markdownTypography(),
-                )
+            if (onClearAndExecutePlan != null) {
+                PlanApprovalSection(planContent = plan, onExecute = onClearAndExecutePlan)
+            } else {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                        .border(1.dp, MaterialTheme.appColors.planBorder, RoundedCornerShape(6.dp)),
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.appColors.planSurface,
+                ) {
+                    Markdown(
+                        content = plan,
+                        modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                        typography = markdownTypography(),
+                    )
+                }
             }
         }
     }
