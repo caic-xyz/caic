@@ -379,6 +379,43 @@ fun TaskDetailScreen(
                                         modifier = Modifier.clickable { uriHandler.openUri(prURL) },
                                     )
                                 }
+                                val appColors = MaterialTheme.appColors
+                                when (it.ciStatus) {
+                                    "pending" -> Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = appColors.warningBg,
+                                    ) {
+                                        Text(
+                                            text = "CI: pending",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = appColors.warningText,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                        )
+                                    }
+                                    "success" -> Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = appColors.successBg,
+                                    ) {
+                                        Text(
+                                            text = "CI: passed",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = appColors.successText,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                        )
+                                    }
+                                    "failure" -> Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = MaterialTheme.colorScheme.errorContainer,
+                                    ) {
+                                        Text(
+                                            text = "CI: failed",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onErrorContainer,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                        )
+                                    }
+                                    else -> Unit
+                                }
                             }
                         }
                     }

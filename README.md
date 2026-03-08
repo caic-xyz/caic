@@ -57,6 +57,25 @@ independent of the SSH session). On restart the server:
 **Relay dead (Claude crashed):** Falls back to host-side JSONL logs and
 `claude --resume` to start a new session continuing the conversation.
 
+## GitHub Integration
+
+### PR creation
+
+After a successful sync to the task's branch, caic automatically opens a pull request against the base branch. The PR title comes from the task title (or initial prompt), and the body is the agent's result summary. Once created, the PR number appears as a link in the task detail header on both the web UI and Android app.
+
+### CI monitoring
+
+After the PR is created, caic polls GitHub check-runs every 30 seconds. While checks are running, the task header shows **CI: pending**. When all checks finish:
+
+- **CI: passed** — all checks succeeded; the agent is notified with a summary.
+- **CI: failed** — one or more checks failed; the agent is notified with the names and URLs of the failing checks so it can act on them.
+
+The agent resumes automatically based on the CI outcome — no manual intervention required.
+
+### Configuration
+
+`GITHUB_TOKEN` is required. See [SELF_HOSTING.md](SELF_HOSTING.md) for full environment variable reference.
+
 ## Android App
 
 Voice-first companion app to manage coding agents from your phone.

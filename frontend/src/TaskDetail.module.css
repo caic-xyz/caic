@@ -317,6 +317,30 @@ a.headerPR:hover {
   text-decoration: underline;
 }
 
+.ciStatus {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ciStatus_pending {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+.ciStatus_success {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.ciStatus_failure {
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}
+
 .planIndicator {
   font-size: 0.75rem;
   font-weight: 600;

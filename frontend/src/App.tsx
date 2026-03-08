@@ -651,6 +651,7 @@ export default function App() {
                   gitHubOwner={selectedTask()?.gitHubOwner}
                   gitHubRepo={selectedTask()?.gitHubRepo}
                   gitHubPR={selectedTask()?.gitHubPR}
+                  ciStatus={selectedTask()?.ciStatus}
                   diffStat={selectedTask()?.diffStat}
                   supportsImages={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsImages}
                   onClose={() => navigate("/")}

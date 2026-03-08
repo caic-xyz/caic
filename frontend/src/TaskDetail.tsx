@@ -42,6 +42,7 @@ interface Props {
   gitHubOwner?: string;
   gitHubRepo?: string;
   gitHubPR?: number;
+  ciStatus?: string;
   diffStat?: DiffFileStat[];
   supportsImages?: boolean;
   onClose: () => void;
@@ -50,6 +51,20 @@ interface Props {
   inputImages: APIImageData[];
   onInputImages: (imgs: APIImageData[]) => void;
 }
+
+type CIStatus = "pending" | "success" | "failure";
+
+const CI_STATUS_CLASS: Record<CIStatus, string> = {
+  pending: styles.ciStatus_pending,
+  success: styles.ciStatus_success,
+  failure: styles.ciStatus_failure,
+};
+
+const CI_STATUS_LABEL: Record<CIStatus, string> = {
+  pending: "CI: pending",
+  success: "CI: passed",
+  failure: "CI: failed",
+};
 
 export default function TaskDetail(props: Props) {
   const navigate = useNavigate();
@@ -399,6 +414,12 @@ export default function TaskDetail(props: Props) {
           </Show>
           <Show when={props.gitHubOwner && props.gitHubRepo && props.gitHubPR}>
             <a class={styles.headerPR} href={`https://github.com/${props.gitHubOwner}/${props.gitHubRepo}/pull/${props.gitHubPR}`} target="_blank" rel="noopener">PR #{props.gitHubPR}</a>
+          </Show>
+          <Show when={props.ciStatus && props.ciStatus in CI_STATUS_CLASS}>
+            {(() => {
+              const s = props.ciStatus as CIStatus;
+              return <span class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>{CI_STATUS_LABEL[s]}</span>;
+            })()}
           </Show>
         </span>
         <Show when={(props.diffStat?.length ?? 0) > 0}>
