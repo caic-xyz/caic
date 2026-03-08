@@ -3,7 +3,7 @@ import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, on
 import { useNavigate, useLocation } from "@solidjs/router";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents, getTaskToolInput } from "@sdk/api.gen";
 import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat } from "@sdk/types.gen";
-import { groupMessages, groupTurns, buildCompletedItems, toolCountSummary, turnSummary, type MsgItem, type MessageGroup } from "./grouping";
+import { groupMessages, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "./grouping";
 import { formatDuration, formatTokens, toolCallDetail } from "./formatting";
 import type { ToolCall } from "./grouping";
 import { SyncTargetDefault } from "@sdk/types.gen";
@@ -23,9 +23,11 @@ import styles from "./TaskDetail.module.css";
 // Survives component remounts on task switching.
 export const detailsOpenState = new Map<string, boolean>();
 
-// Per-task expansion state for collapsed past turns.
-// Key: taskId → Set of "turn:<firstEventTs>" strings.
+// Per-task expansion state for collapsed past turns and sessions.
+// Turn keys: "<sessionKey>:turn:<firstEventTs>".
+// Session keys: "session:<firstEventTs>".
 const expandedTurnsByTask = new Map<string, Set<string>>();
+const expandedSessionsByTask = new Map<string, Set<string>>();
 
 interface Props {
   taskId: string;
@@ -100,13 +102,17 @@ export default function TaskDetail(props: Props) {
     requestAnimationFrame(scrollToBottom);
   });
 
-  // Expansion state for collapsed past turns. Persisted per task across remounts.
+  // Expansion state for collapsed past turns and sessions. Persisted per task across remounts.
   const [expandedTurnKeys, setExpandedTurnKeys] = createSignal<ReadonlySet<string>>(
     expandedTurnsByTask.get(props.taskId) ?? new Set(), // eslint-disable-line solid/reactivity -- initial value; createEffect below syncs on taskId changes
+  );
+  const [expandedSessionKeys, setExpandedSessionKeys] = createSignal<ReadonlySet<string>>(
+    expandedSessionsByTask.get(props.taskId) ?? new Set(), // eslint-disable-line solid/reactivity -- initial value
   );
   // Sync expansion state when taskId changes.
   createEffect(() => {
     setExpandedTurnKeys(expandedTurnsByTask.get(props.taskId) ?? new Set());
+    setExpandedSessionKeys(expandedSessionsByTask.get(props.taskId) ?? new Set());
   });
   function toggleTurn(key: string) {
     setExpandedTurnKeys((prev) => {
@@ -116,10 +122,18 @@ export default function TaskDetail(props: Props) {
       return next;
     });
   }
+  function toggleSession(key: string) {
+    setExpandedSessionKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      expandedSessionsByTask.set(props.taskId, next);
+      return next;
+    });
+  }
 
   // Incremental grouping: cache completed-turn groups so streaming only reprocesses the current turn.
   // splitIdx is the index into messages() where the current (incomplete) turn starts.
-  // It advances only when a "result" event arrives, keeping completedGroups stable during streaming.
+  // It advances only when a "result" event arrives, keeping completedMsgs stable during streaming.
   const [splitIdx, setSplitIdx] = createSignal(0);
   const [completedMsgs, setCompletedMsgs] = createSignal<EventMessage[]>([]);
   createEffect(() => {
@@ -134,30 +148,80 @@ export default function TaskDetail(props: Props) {
     }
   });
 
-  // completedGroups: recomputes only when a turn completes (splitIdx advances).
-  const completedGroups = createMemo(() => groupMessages(completedMsgs()));
-  // currentGroups: recomputes on every message, but only over the current turn's messages.
-  const currentGroups = createMemo(() => groupMessages(messages().slice(splitIdx())));
-
-  // Flat item model split into stable (past) + last-completed + reactive (live) parts.
-  // pastItems: all completed turns except the most recent — stable during streaming.
-  // lastCompletedItems: most recent completed turn's groups — always shown inline, never collapsed.
-  // liveItems: current (in-progress) turn's groups — reactive.
-  const completedTurns = createMemo(() => groupTurns(completedGroups()));
-  const pastItems = createMemo(() => buildCompletedItems(completedTurns().slice(0, -1), expandedTurnKeys()));
-  const lastCompletedItems = createMemo((): MsgItem[] => {
-    const turns = completedTurns();
-    if (turns.length === 0) return [];
-    const lastTurn = turns[turns.length - 1];
-    return lastTurn.groups.map((g, j) => ({ kind: "group" as const, group: g, isLive: false, key: `last-g${j}` }));
+  // Sessions from completed messages: stable during streaming (only updates on turn completion).
+  // groupSessions extracts init/compact_boundary events as session headers, not message groups.
+  const allCompletedSessions = createMemo(() => groupSessions(completedMsgs()));
+  // Past sessions: all sessions before the current (last) one.
+  const pastSessions = createMemo(() => allCompletedSessions().slice(0, -1));
+  // Current session: the last session in completedMsgs (contains its completed turns + boundary event).
+  const currentSessionEntry = createMemo((): Session | null => {
+    const sessions = allCompletedSessions();
+    return sessions.length > 0 ? sessions[sessions.length - 1] : null;
   });
-  const liveItems = createMemo(() =>
-    currentGroups().map((g, j) => ({ kind: "group" as const, group: g, isLive: true, key: `live-g${j}` } satisfies MsgItem)),
+  const currentSessionCompletedTurns = createMemo(() => currentSessionEntry()?.turns ?? []);
+  // Boundary event for the current session from completed messages.
+  const currentSessionBoundaryFromCompleted = createMemo(() => currentSessionEntry()?.boundaryEvent);
+
+  // Scan live messages for a session boundary event (e.g., init before the first result).
+  // This handles the common case where the first session starts before any turn completes.
+  const liveSessionBoundary = createMemo(() => {
+    const msgs = messages();
+    const start = splitIdx();
+    for (let i = start; i < msgs.length; i++) {
+      if (isSessionBoundary(msgs[i])) return msgs[i];
+    }
+    return undefined;
+  });
+  const currentSessionBoundaryEvent = createMemo(() =>
+    currentSessionBoundaryFromCompleted() ?? liveSessionBoundary(),
   );
-  const items = createMemo(() => [...pastItems(), ...lastCompletedItems(), ...liveItems()]);
+  const currentSessionKey = createMemo(() => {
+    const idx = allCompletedSessions().length - 1;
+    const ev = currentSessionBoundaryEvent();
+    return `session:${Math.max(0, idx)}:${ev?.ts ?? ""}`;
+  });
+
+  // Live groups: recomputes on every message. Session boundary events are excluded —
+  // they become session headers, not message groups.
+  const currentGroups = createMemo(() => {
+    const msgs = messages().slice(splitIdx()).filter((ev) => !isSessionBoundary(ev));
+    return groupMessages(msgs);
+  });
+
+  // Flat item model: past sessions (elided) + current session boundary + current session
+  // completed turns (elided) + live turn groups (always visible).
+  // The last turn of the current session is always expanded: either it's in currentGroups()
+  // (actively streaming) or, when idle/done, it's the last completed turn shown without elision.
+  const items = createMemo((): MsgItem[] => {
+    const pastSessionItems = buildPastSessionItems(pastSessions(), expandedSessionKeys(), expandedTurnKeys());
+    const boundaryEv = currentSessionBoundaryEvent();
+    const sessionBoundaryItems: MsgItem[] = boundaryEv
+      ? [{ kind: "sessionBoundary", event: boundaryEv, key: "cur-sess-boundary" }]
+      : [];
+    const liveGroups = currentGroups();
+    const completedTurns = currentSessionCompletedTurns();
+    // If there are no live groups, the last completed turn is the current turn — always expand it.
+    const elidableTurns = liveGroups.length === 0 ? completedTurns.slice(0, -1) : completedTurns;
+    const lastCompletedTurn = liveGroups.length === 0 ? completedTurns[completedTurns.length - 1] : undefined;
+    const completedTurnItems = buildTurnItems(elidableTurns, expandedTurnKeys(), currentSessionKey());
+    const lastTurnItems: MsgItem[] = lastCompletedTurn
+      ? lastCompletedTurn.groups.map((g, j) => ({ kind: "group" as const, group: g, isLive: false, key: `last-g${j}` }))
+      : [];
+    const liveItems: MsgItem[] = liveGroups.map((g, j) => ({
+      kind: "group" as const,
+      group: g,
+      isLive: true,
+      key: `live-g${j}`,
+    }));
+    return [...pastSessionItems, ...sessionBoundaryItems, ...completedTurnItems, ...lastTurnItems, ...liveItems];
+  });
 
   // Last ask group: only the most recent ask is interactive.
-  const allGroups = createMemo(() => [...completedGroups(), ...currentGroups()]);
+  // Flatten all groups from all sessions + current live turn for ask detection.
+  const allGroups = createMemo(() => {
+    const sessionGroups = allCompletedSessions().flatMap((s) => s.turns.flatMap((t) => t.groups));
+    return [...sessionGroups, ...currentGroups()];
+  });
   const lastAskGroup = createMemo((): MessageGroup | null => {
     const groups = allGroups();
     for (let i = groups.length - 1; i >= 0; i--) {
@@ -185,29 +249,13 @@ export default function TaskDetail(props: Props) {
     let pendingLive: EventMessage[] = [];
     let rafId: number | null = null;
 
-    // Returns a copy of msgs with planContent cleared on all ExitPlanMode events.
-    function clearExitPlanContent(msgs: EventMessage[]): EventMessage[] {
-      return msgs.map((m) =>
-        m.toolUse?.name === "ExitPlanMode" && m.toolUse.planContent
-          ? { ...m, toolUse: { ...m.toolUse, planContent: "" } }
-          : m,
-      );
-    }
-
     function flushLive() {
       rafId = null;
       const evs = pendingLive;
       pendingLive = [];
-      setMessages((prev) => {
-        let next = prev;
-        for (const ev of evs) {
-          const clearsOldPlan =
-            (ev.toolUse?.name === "ExitPlanMode" && !!ev.toolUse.planContent) ||
-            ev.system?.subtype === "context_cleared";
-          next = clearsOldPlan ? [...clearExitPlanContent(next), ev] : [...next, ev];
-        }
-        return next;
-      });
+      // Each ExitPlanMode event keeps its own planContent snapshot so the evolution
+      // of the plan is visible at each point it was written.
+      setMessages((prev) => [...prev, ...evs]);
     }
 
     function connect() {
@@ -364,15 +412,38 @@ export default function TaskDetail(props: Props) {
         <Index each={items()}>
           {(item) => {
             // Type-narrowing accessors for the MsgItem discriminated union.
+            const sessElided = () => item().kind === "sessionElided" ? item() as Extract<MsgItem, { kind: "sessionElided" }> : null;
+            const sessHdr = () => item().kind === "sessionHeader" ? item() as Extract<MsgItem, { kind: "sessionHeader" }> : null;
+            const sessBoundary = () => item().kind === "sessionBoundary" ? item() as Extract<MsgItem, { kind: "sessionBoundary" }> : null;
             const elided = () => item().kind === "elided" ? item() as Extract<MsgItem, { kind: "elided" }> : null;
             const expHdr = () => item().kind === "expandedHeader" ? item() as Extract<MsgItem, { kind: "expandedHeader" }> : null;
-            const grp = () => item().kind === "group" ? (item() as Extract<MsgItem, { kind: "group" }>).group : null;
+            const grpItem = () => item().kind === "group" ? item() as Extract<MsgItem, { kind: "group" }> : null;
             return (
               <Switch>
+                {/* Collapsed past session: single clickable row. */}
+                <Match when={sessElided()} keyed>
+                  {(se) => (
+                    <button class={styles.sessionElided} onClick={() => toggleSession(se.sessionKey)}>
+                      {sessionSummary(se.session)}
+                    </button>
+                  )}
+                </Match>
+                {/* Expanded past session header: click to collapse. */}
+                <Match when={sessHdr()} keyed>
+                  {(sh) => (
+                    <button class={`${styles.sessionElided} ${styles.sessionElidedExpanded}`} onClick={() => toggleSession(sh.sessionKey)}>
+                      {sessionSummary(sh.session)}
+                    </button>
+                  )}
+                </Match>
+                {/* Session boundary: init or compact_boundary rendered as a separator. */}
+                <Match when={sessBoundary()} keyed>
+                  {(sb) => <SessionBoundaryItem event={sb.event} />}
+                </Match>
                 {/* Collapsed past turn: single clickable row. */}
                 <Match when={elided()} keyed>
                   {(e) => (
-                    <button class={styles.elidedTurn} onClick={() => toggleTurn(e.key)}>
+                    <button class={`${styles.elidedTurn}${e.indent === "session" ? ` ${styles.indentSession}` : ""}`} onClick={() => toggleTurn(e.key)}>
                       {turnSummary(e.turn)}
                     </button>
                   )}
@@ -380,22 +451,26 @@ export default function TaskDetail(props: Props) {
                 {/* Expanded past turn header: click to collapse. */}
                 <Match when={expHdr()} keyed>
                   {(h) => (
-                    <button class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}`} onClick={() => toggleTurn(h.turnKey)}>
+                    <button class={`${styles.elidedTurn} ${styles.elidedTurnExpanded}${h.indent === "session" ? ` ${styles.indentSession}` : ""}`} onClick={() => toggleTurn(h.turnKey)}>
                       {turnSummary(h.turn)}
                     </button>
                   )}
                 </Match>
                 {/* Message group: dispatch to group-specific renderer. */}
-                <Match when={grp()}>
-                  <GroupContent
-                    group={() => grp() as MessageGroup}
-                    taskId={props.taskId}
-                    isWaiting={isWaiting}
-                    lastAskGroup={lastAskGroup}
-                    onAskAnswer={sendAskAnswer}
-                    onClearAndExecutePlan={clearAndExecutePlan}
-                    pendingAction={pendingAction}
-                  />
+                <Match when={grpItem()} keyed>
+                  {(gi) => (
+                    <div class={gi.indent === "turn" ? styles.indentTurn : undefined}>
+                      <GroupContent
+                        group={() => gi.group}
+                        taskId={props.taskId}
+                        isWaiting={isWaiting}
+                        lastAskGroup={lastAskGroup}
+                        onAskAnswer={sendAskAnswer}
+                        onClearAndExecutePlan={clearAndExecutePlan}
+                        pendingAction={pendingAction}
+                      />
+                    </div>
+                  )}
                 </Match>
               </Switch>
             );
@@ -521,21 +596,31 @@ function GroupContent(props: {
   );
 }
 
-function MessageItem(props: { ev: EventMessage }) {
+// Renders the header for a session boundary (init or compact_boundary).
+// These events are extracted from the message stream and shown as section separators.
+function SessionBoundaryItem(props: { event: EventMessage }) {
+  const ev = () => props.event;
   return (
     <Switch>
-      <Match when={props.ev.init} keyed>
+      <Match when={ev().init} keyed>
         {(init) => (
           <div class={styles.systemInit}>
             Session started &middot; {init.model} &middot; {init.agentVersion} &middot; {init.sessionID}
           </div>
         )}
       </Match>
+      <Match when={ev().system?.subtype === "compact_boundary"}>
+        <div class={styles.contextCleared}>Conversation compacted</div>
+      </Match>
+    </Switch>
+  );
+}
+
+function MessageItem(props: { ev: EventMessage }) {
+  return (
+    <Switch>
       <Match when={props.ev.system?.subtype === "context_cleared"}>
         <div class={styles.contextCleared}>Context cleared</div>
-      </Match>
-      <Match when={props.ev.system?.subtype === "compact_boundary"}>
-        <div class={styles.contextCleared}>Conversation compacted</div>
       </Match>
       <Match when={props.ev.system?.subtype === "api_error"}>
         <div class={styles.parseError}>API error</div>

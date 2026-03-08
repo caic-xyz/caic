@@ -1,6 +1,6 @@
 // Tests for groupMessages and groupTurns logic.
 import { describe, it, expect } from "vitest";
-import { groupMessages, groupTurns, turnSummary } from "./grouping";
+import { groupMessages, groupTurns, groupSessions, turnSummary } from "./grouping";
 import type { EventMessage } from "@sdk/types.gen";
 
 function toolUseEvent(id: string, name: string): EventMessage {
@@ -160,6 +160,158 @@ describe("groupMessages", () => {
     expect(groups[0].kind).toBe("text");
     expect(groups[0].events.some((e) => e.kind === "thinkingDelta")).toBe(true);
     expect(groups[0].events.some((e) => e.kind === "textDelta")).toBe(true);
+  });
+});
+
+describe("groupSessions", () => {
+  it("splits on init events", () => {
+    const msgs: EventMessage[] = [
+      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("session 1"),
+      resultEvent(),
+      { kind: "init", ts: 2, init: { model: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("session 2"),
+    ];
+    const sessions = groupSessions(msgs);
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0].boundaryEvent?.kind).toBe("init");
+    expect(sessions[0].turns).toHaveLength(1);
+    expect(sessions[1].boundaryEvent?.kind).toBe("init");
+    expect(sessions[1].turns).toHaveLength(1);
+  });
+
+  it("splits on compact_boundary system events", () => {
+    const msgs: EventMessage[] = [
+      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("before compact"),
+      resultEvent(),
+      { kind: "system", ts: 2, system: { subtype: "compact_boundary" } },
+      textDeltaEvent("after compact"),
+    ];
+    const sessions = groupSessions(msgs);
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0].boundaryEvent?.kind).toBe("init");
+    expect(sessions[1].boundaryEvent?.system?.subtype).toBe("compact_boundary");
+  });
+
+  it("no boundary events produces one session with no boundaryEvent", () => {
+    const msgs: EventMessage[] = [
+      textDeltaEvent("hello"),
+      resultEvent(),
+      textDeltaEvent("world"),
+    ];
+    const sessions = groupSessions(msgs);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].boundaryEvent).toBeUndefined();
+    expect(sessions[0].turns).toHaveLength(2);
+  });
+
+  it("pre-init prompt is absorbed into the first session, not a separate implicit session", () => {
+    // The user's initial prompt arrives as a userInput event before the init event.
+    // It must appear in the same session as the init, not as a phantom "Compacted session".
+    const msgs: EventMessage[] = [
+      { kind: "userInput", ts: 0, userInput: { text: "hello" } },
+      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("response"),
+    ];
+    const sessions = groupSessions(msgs);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].boundaryEvent?.kind).toBe("init");
+    // The userInput event must be in this session's segment
+    const allEvents = sessions[0].turns.flatMap((t) => t.groups.flatMap((g) => g.events));
+    expect(allEvents.some((e) => e.kind === "userInput")).toBe(true);
+  });
+
+  it("userInput between sessions is carried into the next session, not left in the previous", () => {
+    // After a session result, the user types a message, then a new init arrives.
+    // The userInput should appear in session 2 (the one it triggered), not session 1.
+    const msgs: EventMessage[] = [
+      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("response"),
+      resultEvent(),
+      { kind: "userInput", ts: 2, userInput: { text: "follow-up" } },
+      { kind: "init", ts: 3, init: { model: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("session 2 response"),
+    ];
+    const sessions = groupSessions(msgs);
+    expect(sessions).toHaveLength(2);
+    const s1Events = sessions[0].turns.flatMap((t) => t.groups.flatMap((g) => g.events));
+    const s2Events = sessions[1].turns.flatMap((t) => t.groups.flatMap((g) => g.events));
+    expect(s1Events.some((e) => e.kind === "userInput")).toBe(false);
+    expect(s2Events.some((e) => e.kind === "userInput")).toBe(true);
+  });
+
+  it("turn starting with userInput is not empty when the agent response follows in the same session", () => {
+    // After carrying the userInput into the next session, the resulting turn should have
+    // textCount > 0 (agent replied), so turnSummary does not return "empty turn".
+    const msgs: EventMessage[] = [
+      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("first response"),
+      resultEvent(),
+      { kind: "userInput", ts: 2, userInput: { text: "follow-up" } },
+      { kind: "init", ts: 3, init: { model: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("second response"),
+      resultEvent(),
+    ];
+    const sessions = groupSessions(msgs);
+    expect(sessions).toHaveLength(2);
+    const lastTurn = sessions[1].turns[sessions[1].turns.length - 1];
+    expect(lastTurn.textCount).toBeGreaterThan(0);
+  });
+
+  it("userInput before compact_boundary is carried into the compacted session", () => {
+    const msgs: EventMessage[] = [
+      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("first response"),
+      resultEvent(),
+      { kind: "userInput", ts: 2, userInput: { text: "continue" } },
+      { kind: "system", ts: 3, system: { subtype: "compact_boundary" } },
+      textDeltaEvent("compacted response"),
+    ];
+    const sessions = groupSessions(msgs);
+    expect(sessions).toHaveLength(2);
+    const s2Events = sessions[1].turns.flatMap((t) => t.groups.flatMap((g) => g.events));
+    expect(s2Events.some((e) => e.kind === "userInput")).toBe(true);
+  });
+
+  it("repeated init with the same sessionID does not create a new session", () => {
+    // Claude Code re-invocations within the same conversation reuse the same sessionID.
+    // Only a different sessionID or compact_boundary should create a new top-level group.
+    const msgs: EventMessage[] = [
+      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("first response"),
+      resultEvent(),
+      { kind: "userInput", ts: 2, userInput: { text: "follow-up" } },
+      { kind: "init", ts: 3, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("second response"),
+      resultEvent(),
+    ];
+    const sessions = groupSessions(msgs);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].turns).toHaveLength(2);
+  });
+
+  it("boundary event alone produces a session with empty turns", () => {
+    const msgs: EventMessage[] = [
+      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+    ];
+    const sessions = groupSessions(msgs);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].turns).toHaveLength(0);
+  });
+
+  it("session toolCount and textCount aggregate turns", () => {
+    const msgs: EventMessage[] = [
+      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      toolUseEvent("t1", "Read"),
+      resultEvent(),
+      textDeltaEvent("text"),
+      resultEvent(),
+    ];
+    const sessions = groupSessions(msgs);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].toolCount).toBe(1);
+    expect(sessions[0].textCount).toBe(1);
   });
 });
 

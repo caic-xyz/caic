@@ -21,7 +21,7 @@ import com.fghbuild.caic.data.TaskRepository
 import com.fghbuild.caic.data.TaskSSEEvent
 import com.fghbuild.caic.navigation.Screen
 import com.fghbuild.caic.util.IncrementalGrouped
-import com.fghbuild.caic.util.Turn
+import com.fghbuild.caic.util.Session
 import com.fghbuild.caic.util.nextGrouped
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -40,7 +40,7 @@ data class TaskDetailState(
     val task: Task? = null,
     val hasMessages: Boolean = false,
     val messageCount: Int = 0,
-    val turns: List<Turn> = emptyList(),
+    val sessions: List<Session> = emptyList(),
     val todos: List<TodoItem> = emptyList(),
     val activeAgentDescriptions: List<String> = emptyList(),
     val isReady: Boolean = false,
@@ -110,7 +110,7 @@ class TaskDetailViewModel @Inject constructor(
             task = task,
             hasMessages = msgCount > 0,
             messageCount = msgCount,
-            turns = grouped.turns,
+            sessions = grouped.sessions,
             todos = grouped.todos,
             activeAgentDescriptions = grouped.activeAgents.values.toList(),
             isReady = ready,
@@ -180,34 +180,9 @@ class TaskDetailViewModel @Inject constructor(
                                             if (pending.isNotEmpty()) {
                                                 val batch = pending.toList()
                                                 pending.clear()
-                                                val clearsOldPlan = batch.any { msg ->
-                                                    val isExitWithPlan = msg.toolUse?.let {
-                                                        it.name == "ExitPlanMode" &&
-                                                            it.planContent != null
-                                                    } ?: false
-                                                    isExitWithPlan ||
-                                                        msg.system?.subtype == "context_cleared"
-                                                }
-                                                val base = if (clearsOldPlan) {
-                                                    _messages.value.map { m ->
-                                                        val hasStale = m.toolUse?.let {
-                                                            it.name == "ExitPlanMode" &&
-                                                                it.planContent != null
-                                                        } ?: false
-                                                        if (hasStale) {
-                                                            m.copy(
-                                                                toolUse = m.toolUse!!.copy(
-                                                                    planContent = null,
-                                                                ),
-                                                            )
-                                                        } else {
-                                                            m
-                                                        }
-                                                    }
-                                                } else {
-                                                    _messages.value
-                                                }
-                                                _messages.value = base + batch
+                                                // Each ExitPlanMode event keeps its own planContent snapshot
+                                                // so the evolution of the plan is visible at each point it was written.
+                                                _messages.value = _messages.value + batch
                                             }
                                             flushJob = null
                                         }

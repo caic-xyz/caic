@@ -281,6 +281,7 @@ a.headerPR:hover {
 
 .result {
   margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
   padding: 0.5rem;
   border-radius: var(--radius-md);
   font-size: 0.85rem;
@@ -480,6 +481,7 @@ a.headerPR:hover {
 .elidedTurn {
   display: block;
   width: 100%;
+  margin-top: 0.35rem;
   margin-bottom: 0.35rem;
   background: #e4eaf1;
   border: none;
@@ -507,6 +509,58 @@ a.headerPR:hover {
 }
 
 .elidedTurnExpanded::before {
+  content: "▼";
+}
+
+/* Left-border indent lines: indicate which container an item belongs to, like the task sidebar.
+   padding-bottom: 1px prevents margin-collapse of the last child's bottom-margin so the border
+   extends flush to the next sibling item, making the line appear continuous. */
+.indentSession {
+  border-left: 3px solid var(--color-border);
+  padding-left: 6px;
+  padding-bottom: 1px;
+  margin-left: 2px;
+}
+
+.indentTurn {
+  border-left: 2px solid var(--color-border-light);
+  padding-left: 6px;
+  padding-bottom: 1px;
+  margin-left: 2px;
+}
+
+/* Session-level eliding: visually heavier than turn eliding to reflect the hierarchy. */
+.sessionElided {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.4rem;
+  background: #c9d6e4;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #2f4f6e;
+  text-align: left;
+}
+
+.sessionElided::before {
+  content: "▶";
+  margin-right: 0.4em;
+  font-size: 0.7em;
+}
+
+.sessionElided:hover {
+  background: #b5c8dc;
+}
+
+.sessionElidedExpanded {
+  background: #b5c8dc;
+  margin-bottom: 0.1rem;
+}
+
+.sessionElidedExpanded::before {
   content: "▼";
 }
 

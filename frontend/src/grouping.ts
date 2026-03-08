@@ -29,10 +29,27 @@ export interface Turn {
   textCount: number;
 }
 
+// A session is a segment of the event stream opened by an init or compact_boundary event.
+// Session boundaries are init events (new Claude Code session) and compact_boundary system
+// events (context compaction). The current (last) session is never elided.
+export interface Session {
+  // The event that opened this session (init or compact_boundary system event).
+  // undefined for an implicit initial segment before the first session event.
+  boundaryEvent?: EventMessage;
+  turns: Turn[];
+  toolCount: number;
+  textCount: number;
+}
+
 // Tool names (case-insensitive) that are async and emit explicit toolResult
 // events. All other Claude Code tools complete synchronously and are done
 // as soon as their toolUse event is emitted.
 const ASYNC_TOOLS = new Set(["bash", "task"]);
+
+// Returns true if ev starts a new session.
+export function isSessionBoundary(ev: EventMessage): boolean {
+  return ev.kind === "init" || (ev.kind === "system" && ev.system?.subtype === "compact_boundary");
+}
 
 export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
   const groups: MessageGroup[] = [];
@@ -288,42 +305,106 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
   return turns;
 }
 
-// Flat display item for the message list.
-// Analogous to Android's sealed MsgItem interface. buildItems produces a linear
-// sequence that maps 1:1 to rendered rows, enabling future virtualization.
-export type MsgItem =
-  | { kind: "elided"; turn: Turn; key: string }
-  | { kind: "expandedHeader"; turn: Turn; turnKey: string; key: string }
-  | { kind: "group"; group: MessageGroup; isLive: boolean; key: string };
+// Splits messages into sessions at init (only when sessionID changes) and compact_boundary events.
+// The boundary event starts the new session and is NOT passed to groupMessages.
+// Re-invocations of Claude Code that share the same sessionID are NOT new sessions — they are
+// just new turns within the same session.
+export function groupSessions(msgs: EventMessage[]): Session[] {
+  const sessions: Session[] = [];
+  let segment: EventMessage[] = [];
+  let boundaryEvent: EventMessage | undefined;
+  let currentSessionID: string | undefined;
 
-// Builds flat display items for a set of completed (past) turns.
-// Exported separately so the live turn can be appended without recomputing past turns,
-// keeping completedItems stable during streaming (only updates on result events).
-export function buildCompletedItems(turns: Turn[], expandedTurnKeys: ReadonlySet<string>): MsgItem[] {
+  function flushSession() {
+    const groups = groupMessages(segment);
+    const turns = groupTurns(groups);
+    let toolCount = 0;
+    let textCount = 0;
+    for (const t of turns) {
+      toolCount += t.toolCount;
+      textCount += t.textCount;
+    }
+    sessions.push({ boundaryEvent, turns, toolCount, textCount });
+    boundaryEvent = undefined;
+    segment = [];
+  }
+
+  function flushAndCarry() {
+    // Carry post-result events forward into the new session (e.g. a userInput sent just
+    // before the new boundary). They belong to the session they triggered.
+    const lastResultIdx = segment.findLastIndex((e) => e.kind === "result");
+    const carry = lastResultIdx >= 0 ? segment.splice(lastResultIdx + 1) : [];
+    flushSession();
+    segment = carry;
+  }
+
+  for (const ev of msgs) {
+    if (ev.kind === "init") {
+      const newID = ev.init?.sessionID;
+      if (newID !== currentSessionID) {
+        // Genuinely new session: different sessionID.
+        if (boundaryEvent !== undefined) flushAndCarry();
+        boundaryEvent = ev;
+        currentSessionID = newID;
+      }
+      // Same sessionID: re-invocation within the same session; skip the init event entirely.
+    } else if (ev.kind === "system" && ev.system?.subtype === "compact_boundary") {
+      if (boundaryEvent !== undefined) flushAndCarry();
+      boundaryEvent = ev;
+      currentSessionID = undefined; // Reset so next init is treated as a new boundary.
+    } else {
+      segment.push(ev);
+    }
+  }
+  if (segment.length > 0 || boundaryEvent !== undefined) {
+    flushSession();
+  }
+  return sessions;
+}
+
+// Flat display item for the message list.
+export type MsgItem =
+  | { kind: "sessionElided"; session: Session; sessionKey: string; key: string }
+  | { kind: "sessionHeader"; session: Session; sessionKey: string; key: string }
+  | { kind: "sessionBoundary"; event: EventMessage; key: string }
+  | { kind: "elided"; turn: Turn; key: string; indent?: "session" }
+  | { kind: "expandedHeader"; turn: Turn; turnKey: string; key: string; indent?: "session" }
+  | { kind: "group"; group: MessageGroup; isLive: boolean; key: string; indent?: "turn" };
+
+// Builds flat items for a list of turns within a session.
+// All turns in this list are collapsible (caller handles the live turn separately).
+// inPastSession: true when building turns for an expanded past session — items receive
+// indent markers so the renderer can draw a visual left-border hierarchy.
+export function buildTurnItems(turns: Turn[], expandedTurnKeys: ReadonlySet<string>, sessionKey: string, inPastSession = false): MsgItem[] {
   const items: MsgItem[] = [];
   for (let i = 0; i < turns.length; i++) {
     const turn = turns[i];
-    const turnKey = "turn:" + (turn.groups[0]?.events[0]?.ts ?? i);
+    const turnKey = `${sessionKey}:turn:${i}:${turn.groups[0]?.events[0]?.ts ?? ""}`;
     if (expandedTurnKeys.has(turnKey)) {
-      items.push({ kind: "expandedHeader", turn, turnKey, key: `hdr:${turnKey}` });
+      items.push({ kind: "expandedHeader", turn, turnKey, key: `hdr:${turnKey}`, ...(inPastSession ? { indent: "session" as const } : {}) });
       for (let j = 0; j < turn.groups.length; j++) {
-        items.push({ kind: "group", group: turn.groups[j], isLive: false, key: `${turnKey}-g${j}` });
+        items.push({ kind: "group", group: turn.groups[j], isLive: false, key: `${turnKey}-g${j}`, indent: "turn" });
       }
     } else {
-      items.push({ kind: "elided", turn, key: turnKey });
+      items.push({ kind: "elided", turn, key: turnKey, ...(inPastSession ? { indent: "session" as const } : {}) });
     }
   }
   return items;
 }
 
-// Builds a flat list of display items from all turns + expansion state.
-// Past turns are elided or expanded; the last (live) turn is always expanded without a header.
-export function buildItems(turns: Turn[], expandedTurnKeys: ReadonlySet<string>): MsgItem[] {
-  if (turns.length === 0) return [];
-  const items = buildCompletedItems(turns.slice(0, -1), expandedTurnKeys);
-  const liveTurn = turns[turns.length - 1];
-  for (let j = 0; j < liveTurn.groups.length; j++) {
-    items.push({ kind: "group", group: liveTurn.groups[j], isLive: true, key: `live-g${j}` });
+// Builds flat items for past (non-current) sessions.
+// Each past session is elided to a single row by default; click to expand.
+export function buildPastSessionItems(sessions: Session[], expandedSessionKeys: ReadonlySet<string>, expandedTurnKeys: ReadonlySet<string>): MsgItem[] {
+  const items: MsgItem[] = [];
+  for (let i = 0; i < sessions.length; i++) {
+    const session = sessions[i];
+    const sessionKey = `session:${i}:${session.boundaryEvent?.ts ?? ""}`;
+    if (expandedSessionKeys.has(sessionKey)) {
+      items.push({ kind: "sessionHeader", session, sessionKey, key: `hdr:${sessionKey}` });
+      items.push(...buildTurnItems(session.turns, expandedTurnKeys, sessionKey, true));
+    } else {
+      items.push({ kind: "sessionElided", session, sessionKey, key: sessionKey });
+    }
   }
   return items;
 }
@@ -350,3 +431,19 @@ export function turnSummary(turn: Turn): string {
   return parts.length > 0 ? parts.join(", ") : "empty turn";
 }
 
+export function sessionSummary(session: Session): string {
+  const parts: string[] = [];
+  if (session.boundaryEvent?.kind === "init" && session.boundaryEvent.init) {
+    const id = session.boundaryEvent.init.sessionID;
+    parts.push(`Session ${id.slice(0, 8)}`);
+  } else {
+    parts.push("Compacted session");
+  }
+  if (session.textCount > 0) {
+    parts.push(session.textCount === 1 ? "1 message" : `${session.textCount} messages`);
+  }
+  if (session.toolCount > 0) {
+    parts.push(session.toolCount === 1 ? "1 tool call" : `${session.toolCount} tool calls`);
+  }
+  return parts.join(" \u00b7 ");
+}
