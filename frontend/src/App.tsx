@@ -8,7 +8,7 @@ import DiffDetail from "./DiffDetail";
 import TaskList, { sortTasks } from "./TaskList";
 import PromptInput from "./PromptInput";
 import Button from "./Button";
-import { requestNotificationPermission, notifyWaiting } from "./notifications";
+import { requestNotificationPermission, notifyWaiting, dismissNotification } from "./notifications";
 import UsageBadges from "./UsageBadges";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
@@ -274,9 +274,12 @@ export default function App() {
           const event = JSON.parse(e.data) as TaskListEvent;
           const checkAndNotify = (t: Task) => {
             const needsInput = t.state === "waiting" || t.state === "asking" || t.state === "has_plan";
-            const prevNeedsInput = prevStates.get(t.id) === "waiting" || prevStates.get(t.id) === "asking" || prevStates.get(t.id) === "has_plan";
+            const prevState = prevStates.get(t.id);
+            const prevNeedsInput = prevState === "waiting" || prevState === "asking" || prevState === "has_plan";
             if (needsInput && !prevNeedsInput) {
               notifyWaiting(t.id, t.title);
+            } else if (!needsInput && prevNeedsInput) {
+              dismissNotification(t.id);
             }
           };
           if (event.kind === "snapshot" && event.tasks) {

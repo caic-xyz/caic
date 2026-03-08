@@ -3,4 +3,6 @@
     <string name="voice_channel_name">Voice Session</string>
     <string name="voice_notification_title">Voice session active</string>
     <string name="voice_notification_text">Listening for voice commands</string>
+    <string name="task_channel_name">Task Updates</string>
+    <string name="task_notification_text">Ready for input</string>
 </resources>

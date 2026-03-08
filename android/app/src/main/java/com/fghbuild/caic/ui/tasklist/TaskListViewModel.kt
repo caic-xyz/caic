@@ -14,6 +14,7 @@ import com.caic.sdk.v1.Repo
 import com.caic.sdk.v1.Task
 import com.caic.sdk.v1.UsageResp
 import com.fghbuild.caic.data.SettingsRepository
+import com.fghbuild.caic.data.TaskNotifier
 import com.fghbuild.caic.data.TaskRepository
 import com.fghbuild.caic.ui.theme.activeStates
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -67,6 +68,7 @@ data class TaskListState(
 class TaskListViewModel @Inject constructor(
     private val taskRepository: TaskRepository,
     private val settingsRepository: SettingsRepository,
+    private val taskNotifier: TaskNotifier,
 ) : ViewModel() {
 
     private val _formState = MutableStateFlow(FormState())
@@ -113,6 +115,7 @@ class TaskListViewModel @Inject constructor(
 
     init {
         taskRepository.start(viewModelScope)
+        taskNotifier.start(viewModelScope)
         loadFormData()
     }
 
