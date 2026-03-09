@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,10 @@ import (
 	"strconv"
 	"strings"
 )
+
+// ErrNotFound is returned when the GitHub API responds with 404, typically
+// because the token lacks access to the resource.
+var ErrNotFound = errors.New("not found")
 
 // Client is a minimal GitHub API client authenticated with a personal access token.
 type Client struct {
@@ -173,6 +178,9 @@ func (c *Client) GetCheckRuns(ctx context.Context, owner, repo, sha string) ([]C
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("github get check-runs: %w", ErrNotFound)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("github get check-runs: status %d: %s", resp.StatusCode, data)

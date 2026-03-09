@@ -111,6 +111,7 @@ type Server struct {
 	tasks         map[string]*taskEntry
 	repoCIStatus  map[string]repoCIState        // keyed by repoInfo.RelPath
 	repoCIPollers map[string]context.CancelFunc // keyed by repoInfo.RelPath
+	ciNoAccess    map[string]struct{}           // keyed by "owner/repo"; repos where the token lacks CI access
 	changed       chan struct{}                 // closed on task mutation; replaced under mu
 }
 
@@ -275,6 +276,7 @@ func New(ctx context.Context, rootDir string, maxTurns int, logDir string, cfg *
 		tasks:         make(map[string]*taskEntry),
 		repoCIStatus:  make(map[string]repoCIState),
 		repoCIPollers: make(map[string]context.CancelFunc),
+		ciNoAccess:    make(map[string]struct{}),
 		changed:       make(chan struct{}),
 	}
 	if cfg.LLMProvider != "" {
@@ -1209,8 +1211,15 @@ func (s *Server) monitorCI(ctx context.Context, entry *taskEntry, gh *github.Cli
 		if st != task.StateWaiting && st != task.StateAsking && st != task.StateHasPlan {
 			return
 		}
+		if s.isCINoAccess(owner, repo) {
+			return
+		}
 		runs, err := gh.GetCheckRuns(ctx, owner, repo, sha)
 		if err != nil {
+			if errors.Is(err, github.ErrNotFound) {
+				s.markCINoAccess(owner, repo)
+				return
+			}
 			slog.Warn("monitorCI: get check-runs", "task", t.ID, "err", err)
 			continue
 		}
@@ -1318,8 +1327,15 @@ func (s *Server) pollDefaultBranchCI(ctx context.Context, info repoInfo) { //nol
 			case <-ticker.C:
 			}
 		}
+		if s.isCINoAccess(info.GitHubOwner, info.GitHubRepo) {
+			return
+		}
 		sha, err := gh.GetDefaultBranchSHA(ctx, info.GitHubOwner, info.GitHubRepo, info.BaseBranch)
 		if err != nil {
+			if errors.Is(err, github.ErrNotFound) {
+				s.markCINoAccess(info.GitHubOwner, info.GitHubRepo)
+				return
+			}
 			slog.Warn("pollDefaultBranchCI: get SHA", "repo", info.RelPath, "err", err)
 			continue
 		}
@@ -1331,6 +1347,10 @@ func (s *Server) pollDefaultBranchCI(ctx context.Context, info repoInfo) { //nol
 		// Fetch check-runs for the new SHA.
 		runs, err := gh.GetCheckRuns(ctx, info.GitHubOwner, info.GitHubRepo, sha)
 		if err != nil {
+			if errors.Is(err, github.ErrNotFound) {
+				s.markCINoAccess(info.GitHubOwner, info.GitHubRepo)
+				return
+			}
 			slog.Warn("pollDefaultBranchCI: get check-runs", "repo", info.RelPath, "err", err)
 			continue
 		}
@@ -1366,6 +1386,22 @@ func (s *Server) setRepoCIStatus(relPath string, result cicache.Result) {
 	if changed {
 		s.notifyTaskChange()
 	}
+}
+
+// markCINoAccess records that the token lacks access to CI for owner/repo.
+func (s *Server) markCINoAccess(owner, repo string) {
+	s.mu.Lock()
+	s.ciNoAccess[owner+"/"+repo] = struct{}{}
+	s.mu.Unlock()
+	slog.Warn("CI polling disabled: token lacks access", "owner", owner, "repo", repo)
+}
+
+// isCINoAccess reports whether CI polling has been disabled for owner/repo.
+func (s *Server) isCINoAccess(owner, repo string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.ciNoAccess[owner+"/"+repo]
+	return ok
 }
 
 // repoHasActiveTasksLocked returns true if relPath has any non-terminal tasks.
