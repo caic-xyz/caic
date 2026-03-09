@@ -95,33 +95,34 @@ type Repo struct {
 
 // Task is the JSON representation sent to the frontend.
 type Task struct {
-	ID                                 ksid.ID  `json:"id"`
-	InitialPrompt                      string   `json:"initialPrompt"`
-	Title                              string   `json:"title"`
-	Repo                               string   `json:"repo"`
-	RemoteURL                          string   `json:"remoteURL,omitempty"`
-	BaseBranch                         string   `json:"baseBranch,omitempty"` // branch the task was forked from
-	Branch                             string   `json:"branch"`
-	Container                          string   `json:"container"`
-	State                              string   `json:"state"`
-	StateUpdatedAt                     float64  `json:"stateUpdatedAt"` // Unix epoch seconds (ms precision) of last state change.
-	DiffStat                           DiffStat `json:"diffStat,omitzero"`
-	CostUSD                            float64  `json:"costUSD"`
-	Duration                           float64  `json:"duration"` // Seconds.
-	NumTurns                           int      `json:"numTurns"`
-	CumulativeInputTokens              int      `json:"cumulativeInputTokens"`
-	CumulativeOutputTokens             int      `json:"cumulativeOutputTokens"`
-	CumulativeCacheCreationInputTokens int      `json:"cumulativeCacheCreationInputTokens"`
-	CumulativeCacheReadInputTokens     int      `json:"cumulativeCacheReadInputTokens"`
-	ActiveInputTokens                  int      `json:"activeInputTokens"`     // Last turn's non-cached input tokens (including cache creation).
-	ActiveCacheReadTokens              int      `json:"activeCacheReadTokens"` // Last turn's cache-read input tokens.
-	ContextWindowLimit                 int      `json:"contextWindowLimit"`    // Model context window limit (tokens).
-	Error                              string   `json:"error,omitempty"`
-	Result                             string   `json:"result,omitempty"`
-	ForgeOwner                         string   `json:"forgeOwner,omitempty"`
-	ForgeRepo                          string   `json:"forgeRepo,omitempty"`
-	ForgePR                            int      `json:"forgePR,omitempty"`
-	CIStatus                           CIStatus `json:"ciStatus,omitempty"`
+	ID                                 ksid.ID      `json:"id"`
+	InitialPrompt                      string       `json:"initialPrompt"`
+	Title                              string       `json:"title"`
+	Repo                               string       `json:"repo"`
+	RemoteURL                          string       `json:"remoteURL,omitempty"`
+	BaseBranch                         string       `json:"baseBranch,omitempty"` // branch the task was forked from
+	Branch                             string       `json:"branch"`
+	Container                          string       `json:"container"`
+	State                              string       `json:"state"`
+	StateUpdatedAt                     float64      `json:"stateUpdatedAt"` // Unix epoch seconds (ms precision) of last state change.
+	DiffStat                           DiffStat     `json:"diffStat,omitzero"`
+	CostUSD                            float64      `json:"costUSD"`
+	Duration                           float64      `json:"duration"` // Seconds.
+	NumTurns                           int          `json:"numTurns"`
+	CumulativeInputTokens              int          `json:"cumulativeInputTokens"`
+	CumulativeOutputTokens             int          `json:"cumulativeOutputTokens"`
+	CumulativeCacheCreationInputTokens int          `json:"cumulativeCacheCreationInputTokens"`
+	CumulativeCacheReadInputTokens     int          `json:"cumulativeCacheReadInputTokens"`
+	ActiveInputTokens                  int          `json:"activeInputTokens"`     // Last turn's non-cached input tokens (including cache creation).
+	ActiveCacheReadTokens              int          `json:"activeCacheReadTokens"` // Last turn's cache-read input tokens.
+	ContextWindowLimit                 int          `json:"contextWindowLimit"`    // Model context window limit (tokens).
+	Error                              string       `json:"error,omitempty"`
+	Result                             string       `json:"result,omitempty"`
+	ForgeOwner                         string       `json:"forgeOwner,omitempty"`
+	ForgeRepo                          string       `json:"forgeRepo,omitempty"`
+	ForgePR                            int          `json:"forgePR,omitempty"`
+	CIStatus                           CIStatus     `json:"ciStatus,omitempty"`
+	CIChecks                           []ForgeCheck `json:"ciChecks,omitempty"`
 	// Per-task harness/container metadata.
 	Harness       Harness `json:"harness"`
 	Model         string  `json:"model,omitempty"`
@@ -167,6 +168,13 @@ type StatusResp struct {
 type CreateTaskResp struct {
 	Status string  `json:"status"`
 	ID     ksid.ID `json:"id"`
+}
+
+// CILogResp is the response for GET /api/v1/tasks/{id}/ci-log.
+// It contains the name of the first failed CI step and its log tail.
+type CILogResp struct {
+	StepName string `json:"stepName"`
+	Log      string `json:"log"`
 }
 
 // CreateTaskReq is the request body for POST /api/v1/tasks.

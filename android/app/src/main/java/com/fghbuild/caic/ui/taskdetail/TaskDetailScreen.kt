@@ -255,6 +255,7 @@ fun TaskDetailScreen(
     taskId: String,
     onNavigateBack: () -> Unit,
     onNavigateToDiff: () -> Unit = {},
+    onNavigateToTask: (String) -> Unit = {},
     viewModel: TaskDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -415,16 +416,38 @@ fun TaskDetailScreen(
                                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
                                         )
                                     }
-                                    "failure" -> Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = MaterialTheme.colorScheme.errorContainer,
+                                    "failure" -> Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                                     ) {
-                                        Text(
-                                            text = "CI: failed",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onErrorContainer,
-                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                                        )
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = MaterialTheme.colorScheme.errorContainer,
+                                        ) {
+                                            Text(
+                                                text = "CI: failed",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                            )
+                                        }
+                                        val fixingCI = state.pendingAction == "fixCI"
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = if (fixingCI) MaterialTheme.colorScheme.errorContainer
+                                                    else MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.clickable(enabled = !fixingCI) {
+                                                viewModel.fixCI { newTaskId -> onNavigateToTask(newTaskId) }
+                                            },
+                                        ) {
+                                            Text(
+                                                text = if (fixingCI) "Creating…" else "Fix CI",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (fixingCI) MaterialTheme.colorScheme.onErrorContainer
+                                                        else MaterialTheme.colorScheme.onError,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                            )
+                                        }
                                     }
                                     else -> Unit
                                 }

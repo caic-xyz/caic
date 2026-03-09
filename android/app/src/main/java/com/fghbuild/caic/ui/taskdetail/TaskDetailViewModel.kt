@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonElement
 import com.caic.sdk.v1.TodoItem
 import com.caic.sdk.v1.HarnessInfo
 import com.caic.sdk.v1.ImageData
+import com.caic.sdk.v1.CreateTaskReq
 import com.caic.sdk.v1.InputReq
 import com.caic.sdk.v1.Prompt
 import com.caic.sdk.v1.RestartReq
@@ -328,6 +329,36 @@ class TaskDetailViewModel @Inject constructor(
         ApiClient(taskRepository.serverURL()).getTaskToolInput(taskId, toolUseID).input
     } catch (_: Exception) {
         null
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
+    fun fixCI(onSuccess: (String) -> Unit) {
+        _pendingAction.value = "fixCI"
+        viewModelScope.launch {
+            try {
+                val client = ApiClient(taskRepository.serverURL())
+                val task = state.value.task
+                val failedCheck = task?.ciChecks?.firstOrNull { check ->
+                    check.conclusion != "success" && check.conclusion != "neutral" && check.conclusion != "skipped"
+                } ?: error("no failed CI check found")
+                val ciLog = client.getTaskCILog(taskId, failedCheck.jobID.toString())
+                val prompt = "CI failed on GitHub Actions for step \"${ciLog.stepName}\", with log:\n```\n${ciLog.log}\n```"
+                val resp = client.createTask(
+                    CreateTaskReq(
+                        initialPrompt = Prompt(text = prompt),
+                        repo = task?.repo ?: "",
+                        harness = task?.harness ?: "",
+                        baseBranch = task?.baseBranch,
+                        model = task?.model,
+                    ),
+                )
+                onSuccess(resp.id)
+            } catch (e: Exception) {
+                showActionError("fix CI failed: ${e.message}")
+            } finally {
+                _pendingAction.value = null
+            }
+        }
     }
 
     fun dismissSafetyIssues() {

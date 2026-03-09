@@ -91,6 +91,7 @@ class ApiClient(baseURL: String) {
     suspend fun sendInput(id: String, req: InputReq): StatusResp = request("POST", "/api/v1/tasks/$id/input", json.encodeToString(req))
     suspend fun restartTask(id: String, req: RestartReq): StatusResp = request("POST", "/api/v1/tasks/$id/restart", json.encodeToString(req))
     suspend fun terminateTask(id: String): StatusResp = request("POST", "/api/v1/tasks/$id/terminate")
+    suspend fun getTaskCILog(id: String, jobID: String): CILogResp = request("GET", "/api/v1/tasks/$id/ci-log?jobID=$jobID")
     suspend fun syncTask(id: String, req: SyncReq): SyncResp = request("POST", "/api/v1/tasks/$id/sync", json.encodeToString(req))
     suspend fun getTaskDiff(id: String): DiffResp = request("GET", "/api/v1/tasks/$id/diff")
     suspend fun getTaskToolInput(id: String, toolUseID: String): TaskToolInputResp = request("GET", "/api/v1/tasks/$id/tool/$toolUseID")

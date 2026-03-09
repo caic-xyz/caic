@@ -166,6 +166,38 @@ func (c *Client) GetCheckRuns(ctx context.Context, owner, repo, sha string) ([]f
 	return runs, nil
 }
 
+// GetJobLog fetches the log for a GitHub Actions job and returns the last
+// maxBytes bytes of its content. maxBytes <= 0 means no limit.
+func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64, maxBytes int) (string, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/jobs/%d/logs", owner, repo, jobID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return "", err
+	}
+	c.setHeaders(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("github get job log: status %d: %s", resp.StatusCode, data)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if maxBytes > 0 && len(data) > maxBytes {
+		data = data[len(data)-maxBytes:]
+		// Trim to next line boundary to avoid splitting a log line.
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			data = data[i+1:]
+		}
+	}
+	return string(data), nil
+}
+
 // PRURL returns the GitHub pull request URL.
 func (c *Client) PRURL(owner, repo string, prNumber int) string {
 	return fmt.Sprintf("https://github.com/%s/%s/pull/%d", owner, repo, prNumber)

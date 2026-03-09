@@ -28,6 +28,7 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | POST | `/api/v1/tasks/{id}/input` | `InputReq` | `StatusResp` |
 | POST | `/api/v1/tasks/{id}/restart` | `RestartReq` | `StatusResp` |
 | POST | `/api/v1/tasks/{id}/terminate` |  | `StatusResp` |
+| GET | `/api/v1/tasks/{id}/ci-log` |  | `CILogResp` |
 | POST | `/api/v1/tasks/{id}/sync` | `SyncReq` | `SyncResp` |
 | GET | `/api/v1/tasks/{id}/diff` |  | `DiffResp` |
 | GET | `/api/v1/tasks/{id}/tool/{toolUseID}` |  | `TaskToolInputResp` |
@@ -180,6 +181,7 @@ All errors return:
 | `forgeRepo` | `string` |  |
 | `forgePR` | `number` |  |
 | `ciStatus` | `string` |  |
+| `ciChecks` | `ForgeCheck[]` |  |
 | `harness` | `string` | yes |
 | `model` | `string` |  |
 | `agentVersion` | `string` |  |
@@ -431,6 +433,13 @@ All errors return:
 | Field | Type | Required |
 |-------|------|----------|
 | `prompt` | `Prompt` | yes |
+
+### CILogResp
+
+| Field | Type | Required |
+|-------|------|----------|
+| `stepName` | `string` | yes |
+| `log` | `string` | yes |
 
 ### SyncReq
 

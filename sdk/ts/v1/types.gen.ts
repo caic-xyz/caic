@@ -442,6 +442,7 @@ export interface Task {
   forgeRepo?: string;
   forgePR?: number /* int */;
   ciStatus?: CIStatus;
+  ciChecks?: ForgeCheck[];
   /**
    * Per-task harness/container metadata.
    */
@@ -493,6 +494,14 @@ export interface StatusResp {
 export interface CreateTaskResp {
   status: string;
   id: string;
+}
+/**
+ * CILogResp is the response for GET /api/v1/tasks/{id}/ci-log.
+ * It contains the name of the first failed CI step and its log tail.
+ */
+export interface CILogResp {
+  stepName: string;
+  log: string;
 }
 /**
  * CreateTaskReq is the request body for POST /api/v1/tasks.

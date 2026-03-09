@@ -1,8 +1,8 @@
 // TaskDetail renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
-import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents, getTaskToolInput } from "@sdk/api.gen";
-import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat } from "@sdk/types.gen";
+import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents, getTaskToolInput, getTaskCILog, createTask } from "@sdk/api.gen";
+import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, GitHubCheck } from "@sdk/types.gen";
 import { groupMessages, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "./grouping";
 import { formatDuration, formatTokens, toolCallDetail } from "./formatting";
 import type { ToolCall } from "./grouping";
@@ -44,6 +44,9 @@ interface Props {
   forgeRepo?: string;
   forgePR?: number;
   ciStatus?: string;
+  ciChecks?: GitHubCheck[];
+  harness: string;
+  model?: string;
   diffStat?: DiffFileStat[];
   supportsImages?: boolean;
   onClose: () => void;
@@ -76,6 +79,7 @@ export default function TaskDetail(props: Props) {
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
   const [syncMenuOpen, setSyncMenuOpen] = createSignal(false);
+  const [fixingCI, setFixingCI] = createSignal(false);
 
   let promptRef: HTMLTextAreaElement | undefined;
 
@@ -416,6 +420,32 @@ export default function TaskDetail(props: Props) {
     }
   }
 
+  async function handleFixCI() {
+    if (fixingCI()) return;
+    const failedCheck = props.ciChecks?.find((c) => c.conclusion !== "success" && c.conclusion !== "neutral" && c.conclusion !== "skipped");
+    if (!failedCheck) return;
+    setFixingCI(true);
+    setActionError(null);
+    try {
+      const ciLog = await getTaskCILog(props.taskId, String(failedCheck.jobID));
+      const prompt = `CI failed on GitHub Actions for step ${JSON.stringify(ciLog.stepName)}, with log:\n\`\`\`\n${ciLog.log}\n\`\`\``;
+      const resp = await createTask({
+        initialPrompt: { text: prompt },
+        repo: props.repo,
+        harness: props.harness,
+        ...(props.baseBranch ? { baseBranch: props.baseBranch } : {}),
+        ...(props.model ? { model: props.model } : {}),
+      });
+      navigate(`/tasks/${resp.id}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      setActionError(`fix CI failed: ${msg}`);
+      setTimeout(() => setActionError(null), 5000);
+    } finally {
+      setFixingCI(false);
+    }
+  }
+
   async function runAction(name: "sync" | "restart", fn: () => Promise<unknown>) {
     if (pendingAction()) return;
     setPendingAction(name);
@@ -448,7 +478,16 @@ export default function TaskDetail(props: Props) {
           <Show when={props.ciStatus && props.ciStatus in CI_STATUS_CLASS}>
             {(() => {
               const s = props.ciStatus as CIStatus;
-              return <span class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>{CI_STATUS_LABEL[s]}</span>;
+              return (
+                <>
+                  <span class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>{CI_STATUS_LABEL[s]}</span>
+                  <Show when={s === "failure" && props.ciChecks?.some((c) => c.conclusion !== "success" && c.conclusion !== "neutral" && c.conclusion !== "skipped")}>
+                    <button class={styles.fixCIBtn} onClick={handleFixCI} disabled={fixingCI()} title="Create a new task to investigate this CI failure">
+                      {fixingCI() ? "Creating…" : "Fix CI"}
+                    </button>
+                  </Show>
+                </>
+              );
             })()}
           </Show>
         </span>

@@ -189,6 +189,9 @@ private fun CompactLayout(
                 onNavigateToDiff = {
                     navController.navigate(Screen.TaskDiff(taskId).route)
                 },
+                onNavigateToTask = { newTaskId ->
+                    navController.navigate(Screen.TaskDetail(newTaskId).route)
+                },
             )
         }
         composable(Screen.TaskDiff.ROUTE) { backStackEntry ->
@@ -254,6 +257,11 @@ private fun WideLayout(
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToDiff = {
                         navController.navigate(Screen.TaskDiff(taskId).route) {
+                            popUpTo(Screen.TaskList.route)
+                        }
+                    },
+                    onNavigateToTask = { newTaskId ->
+                        navController.navigate(Screen.TaskDetail(newTaskId).route) {
                             popUpTo(Screen.TaskList.route)
                         }
                     },

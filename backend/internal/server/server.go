@@ -407,6 +407,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	mux.HandleFunc("POST /api/v1/tasks/{id}/input", handleWithTask(s, s.sendInput))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/restart", handleWithTask(s, s.restartTask))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/terminate", handleWithTask(s, s.terminateTask))
+	mux.HandleFunc("GET /api/v1/tasks/{id}/ci-log", s.handleGetCILog)
 	mux.HandleFunc("POST /api/v1/tasks/{id}/sync", handleWithTask(s, s.syncTask))
 	mux.HandleFunc("GET /api/v1/tasks/{id}/diff", s.handleGetDiff)
 	mux.HandleFunc("GET /api/v1/tasks/{id}/tool/{toolUseID}", s.handleTaskToolInput)
@@ -1089,6 +1090,67 @@ func (s *Server) restartTask(_ context.Context, entry *taskEntry, req *v1.Restar
 	return &v1.StatusResp{Status: "restarted"}, nil
 }
 
+// handleGetCILog fetches the log for a specific CI job by jobID.
+// The jobID is a required query parameter; the caller knows it from the
+// task's ciChecks field. The log is capped at ~8 KB (tail).
+func (s *Server) handleGetCILog(w http.ResponseWriter, r *http.Request) {
+	entry, err := s.getTask(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	t := entry.task
+	snap := t.Snapshot()
+	info := s.repoInfoFor(t.Repo)
+	if info == nil {
+		writeError(w, dto.BadRequest("no repo info found"))
+		return
+	}
+	f := s.forgeForInfo(info)
+	if f == nil {
+		writeError(w, dto.BadRequest("no forge token configured for this repo"))
+		return
+	}
+
+	jobIDStr := r.URL.Query().Get("jobID")
+	if jobIDStr == "" {
+		writeError(w, dto.BadRequest("jobID query parameter is required"))
+		return
+	}
+	var jobID int64
+	if _, scanErr := fmt.Sscanf(jobIDStr, "%d", &jobID); scanErr != nil || jobID <= 0 {
+		writeError(w, dto.BadRequest("invalid jobID"))
+		return
+	}
+
+	// Find the check by jobID to get owner/repo/name.
+	var check *task.CICheck
+	for i := range snap.CIChecks {
+		if snap.CIChecks[i].JobID == jobID {
+			check = &snap.CIChecks[i]
+			break
+		}
+	}
+	if check == nil {
+		writeError(w, dto.NotFound("no CI check with that jobID"))
+		return
+	}
+
+	const maxLogBytes = 8192
+	jobLog, logErr := f.GetJobLog(r.Context(), check.Owner, check.Repo, jobID, maxLogBytes)
+	if logErr != nil {
+		slog.Warn("getTaskCILog: fetch job log", "task", t.ID, "jobID", jobID, "err", logErr)
+		jobLog = "(log unavailable: " + logErr.Error() + ")"
+	}
+
+	if r.URL.Query().Get("raw") == "true" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = fmt.Fprintf(w, "Step: %s\n\n%s", check.Name, jobLog)
+		return
+	}
+	writeJSONResponse(w, &v1.CILogResp{StepName: check.Name, Log: jobLog}, nil)
+}
+
 func (s *Server) terminateTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
 	state := entry.task.GetState()
 	if state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan && state != task.StateRunning {
@@ -1229,7 +1291,7 @@ func (s *Server) monitorCI(ctx context.Context, entry *taskEntry, f forge.Forge,
 		}
 		result, done := evaluateCheckRuns(owner, repo, runs)
 		if !done {
-			t.SetCIStatus(task.CIStatusPending)
+			t.SetCIStatus(task.CIStatusPending, nil)
 			s.notifyTaskChange()
 			continue
 		}
@@ -1274,7 +1336,18 @@ func (s *Server) applyMonitorCIResult(ctx context.Context, entry *taskEntry, f f
 	} else {
 		summary = fmt.Sprintf("%s CI: all checks passed for %s/%s@%s.", f.Name(), owner, repo, sha[:min(7, len(sha))])
 	}
-	t.SetCIStatus(ciStatus)
+	taskChecks := make([]task.CICheck, len(result.Checks))
+	for i, c := range result.Checks {
+		taskChecks[i] = task.CICheck{
+			Name:       c.Name,
+			Owner:      c.Owner,
+			Repo:       c.Repo,
+			RunID:      c.RunID,
+			JobID:      c.JobID,
+			Conclusion: forge.CheckRunConclusion(c.Conclusion),
+		}
+	}
+	t.SetCIStatus(ciStatus, taskChecks)
 	s.notifyTaskChange()
 	if err := t.SendInput(ctx, agent.Prompt{Text: summary}); err != nil {
 		slog.Warn("monitorCI: send input", "task", t.ID, "err", err)
@@ -2216,6 +2289,19 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 	j.ForgeRepo = snap.ForgeRepo
 	j.ForgePR = snap.ForgePR
 	j.CIStatus = v1.CIStatus(snap.CIStatus)
+	if len(snap.CIChecks) > 0 {
+		j.CIChecks = make([]v1.ForgeCheck, len(snap.CIChecks))
+		for i, c := range snap.CIChecks {
+			j.CIChecks[i] = v1.ForgeCheck{
+				Name:       c.Name,
+				Owner:      c.Owner,
+				Repo:       c.Repo,
+				RunID:      c.RunID,
+				JobID:      c.JobID,
+				Conclusion: v1.CheckConclusion(c.Conclusion),
+			}
+		}
+	}
 	return j
 }
 

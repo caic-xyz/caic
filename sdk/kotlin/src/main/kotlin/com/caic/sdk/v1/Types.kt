@@ -139,6 +139,7 @@ data class Task(
     val forgeRepo: String? = null,
     @SerialName("forgePR") val forgePR: Int? = null,
     val ciStatus: String? = null,
+    val ciChecks: List<ForgeCheck>? = null,
     val harness: Harness,
     val model: String? = null,
     val agentVersion: String? = null,
@@ -326,6 +327,9 @@ data class StatusResp(val status: String)
 
 @Serializable
 data class RestartReq(val prompt: Prompt)
+
+@Serializable
+data class CILogResp(val stepName: String, val log: String)
 
 @Serializable
 data class SyncReq(val force: Boolean? = null, val target: String? = null)

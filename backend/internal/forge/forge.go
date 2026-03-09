@@ -87,6 +87,9 @@ type Forge interface {
 	BranchCompareURL(remoteURL, branch string) string
 	// Name returns the forge name for display (e.g. "GitHub", "GitLab").
 	Name() string
+	// GetJobLog fetches the log for a CI job and returns the last maxBytes bytes.
+	// maxBytes <= 0 means no limit.
+	GetJobLog(ctx context.Context, owner, repo string, jobID int64, maxBytes int) (string, error)
 }
 
 // Remote URL regex patterns for supported forges.

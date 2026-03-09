@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 )
@@ -81,6 +82,16 @@ const (
 	CIStatusFailure CIStatus = "failure"
 )
 
+// CICheck holds the identifying information for a CI check run.
+type CICheck struct {
+	Name       string
+	Owner      string
+	Repo       string
+	RunID      int64
+	JobID      int64
+	Conclusion forge.CheckRunConclusion
+}
+
 // SessionHandle bundles the three resources associated with an active agent
 // session: the SSH session, the message dispatch channel, and the log writer.
 type SessionHandle struct {
@@ -142,6 +153,7 @@ type Task struct {
 	forgeRepo      string
 	forgePR        int
 	ciStatus       CIStatus
+	ciChecks       []CICheck
 }
 
 // setState updates the state and records the transition time. The caller must
@@ -267,10 +279,11 @@ func (t *Task) SetPR(owner, repo string, pr int) {
 	t.mu.Unlock()
 }
 
-// SetCIStatus updates the ciStatus field under the mutex.
-func (t *Task) SetCIStatus(status CIStatus) {
+// SetCIStatus updates the ciStatus and ciChecks fields under the mutex.
+func (t *Task) SetCIStatus(status CIStatus, checks []CICheck) {
 	t.mu.Lock()
 	t.ciStatus = status
+	t.ciChecks = checks
 	t.mu.Unlock()
 }
 
@@ -306,6 +319,7 @@ type Snapshot struct {
 	ForgeRepo      string
 	ForgePR        int
 	CIStatus       CIStatus
+	CIChecks       []CICheck
 }
 
 // Snapshot returns a consistent read of all volatile fields under the mutex.
@@ -338,6 +352,7 @@ func (t *Task) Snapshot() Snapshot {
 		ForgeRepo:      t.forgeRepo,
 		ForgePR:        t.forgePR,
 		CIStatus:       t.ciStatus,
+		CIChecks:       append([]CICheck(nil), t.ciChecks...),
 	}
 }
 

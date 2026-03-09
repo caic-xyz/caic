@@ -341,6 +341,28 @@ a.headerPR:hover {
   color: var(--color-danger-text);
 }
 
+.fixCIBtn {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-danger);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.fixCIBtn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.fixCIBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .planIndicator {
   font-size: 0.75rem;
   font-weight: 600;

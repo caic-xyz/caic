@@ -62,6 +62,7 @@ var Routes = []Route{
 	{Name: "sendInput", Method: "POST", Path: "/api/v1/tasks/{id}/input", Req: reflect.TypeFor[InputReq](), Resp: reflect.TypeFor[StatusResp]()},
 	{Name: "restartTask", Method: "POST", Path: "/api/v1/tasks/{id}/restart", Req: reflect.TypeFor[RestartReq](), Resp: reflect.TypeFor[StatusResp]()},
 	{Name: "terminateTask", Method: "POST", Path: "/api/v1/tasks/{id}/terminate", Resp: reflect.TypeFor[StatusResp]()},
+	{Name: "getTaskCILog", Method: "GET", Path: "/api/v1/tasks/{id}/ci-log", Resp: reflect.TypeFor[CILogResp](), QueryParams: []string{"jobID"}},
 	{Name: "syncTask", Method: "POST", Path: "/api/v1/tasks/{id}/sync", Req: reflect.TypeFor[SyncReq](), Resp: reflect.TypeFor[SyncResp]()},
 	{Name: "getTaskDiff", Method: "GET", Path: "/api/v1/tasks/{id}/diff", Resp: reflect.TypeFor[DiffResp]()},
 	{Name: "getTaskToolInput", Method: "GET", Path: "/api/v1/tasks/{id}/tool/{toolUseID}", Resp: reflect.TypeFor[TaskToolInputResp]()},

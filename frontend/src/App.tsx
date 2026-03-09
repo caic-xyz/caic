@@ -657,6 +657,9 @@ export default function App() {
                   forgeRepo={selectedTask()?.forgeRepo}
                   forgePR={selectedTask()?.forgePR}
                   ciStatus={selectedTask()?.ciStatus}
+                  ciChecks={selectedTask()?.ciChecks}
+                  harness={selectedTask()?.harness ?? ""}
+                  model={selectedTask()?.model}
                   diffStat={selectedTask()?.diffStat}
                   supportsImages={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsImages}
                   onClose={() => navigate("/")}

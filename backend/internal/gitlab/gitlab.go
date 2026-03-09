@@ -232,3 +232,33 @@ func gitLabConclusion(status string, allowFailure bool) forge.CheckRunConclusion
 		return ""
 	}
 }
+
+// GetJobLog fetches the log for a GitLab CI job and returns the last
+// maxBytes bytes of its content. maxBytes <= 0 means no limit.
+func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64, maxBytes int) (string, error) {
+	apiURL := fmt.Sprintf("%s/projects/%s/jobs/%d/trace", apiBase, projectID(owner, repo), jobID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
+	if err != nil {
+		return "", err
+	}
+	c.setHeaders(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("gitlab get job log: status %d: %s", resp.StatusCode, data)
+	}
+	if maxBytes > 0 && len(data) > maxBytes {
+		data = data[len(data)-maxBytes:]
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			data = data[i+1:]
+		}
+	}
+	return string(data), nil
+}
