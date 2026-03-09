@@ -78,7 +78,13 @@ export default function TaskDetail(props: Props) {
 
   let promptRef: HTMLTextAreaElement | undefined;
 
-  onMount(() => { promptRef?.focus(); });
+  onMount(() => {
+    // Skip autofocus on touch-primary devices (mobile) to avoid the soft keyboard
+    // taking up half the screen. No reliable way to detect a physical keyboard.
+    if (!window.matchMedia('(hover: none) and (pointer: coarse)').matches) {
+      promptRef?.focus();
+    }
+  });
 
   // Auto-scroll: keep scrolled to bottom unless the user scrolled up.
   let messageAreaRef: HTMLDivElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
