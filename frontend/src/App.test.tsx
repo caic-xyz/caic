@@ -59,6 +59,24 @@ beforeEach(() => {
 });
 
 describe("App repo select ordering", () => {
+  it("defaults to the last-used repo from preferences on load", async () => {
+    // getPreferences returns repos/b as MRU first (last used to create a task).
+    // Recent group is sorted alphabetically so repos/a appears first visually,
+    // but the selected value must still be repos/b.
+    vi.mocked(api.getPreferences).mockResolvedValue({
+      repositories: [{ path: "repos/b" }, { path: "repos/a" }],
+      models: {},
+      harness: "",
+      baseImage: "",
+    } as PreferencesResp);
+    render(() => <App />);
+
+    await waitFor(() => {
+      const sel = screen.getByTestId("repo-select") as HTMLSelectElement;
+      expect(sel.value).toBe("repos/b");
+    });
+  });
+
   it("cloned repo appears in All repositories (not Recent) before first task", async () => {
     const user = userEvent.setup();
     render(() => <App />);
