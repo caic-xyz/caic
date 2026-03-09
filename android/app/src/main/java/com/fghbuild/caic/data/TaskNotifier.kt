@@ -21,7 +21,7 @@ private val ATTENTION_STATES = setOf("waiting", "asking", "has_plan")
 
 @Singleton
 class TaskNotifier @Inject constructor(
-    @ApplicationContext private val context: Context,
+    @param:ApplicationContext private val context: Context,
     private val taskRepository: TaskRepository,
 ) {
     private val nm = context.getSystemService(NotificationManager::class.java)
