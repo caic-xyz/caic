@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -127,6 +128,7 @@ type Server struct {
 	ciCache       *cicache.Cache
 	provider      genai.Provider
 	backend       *mdBackend // container backend for runner creation
+	allowedHost   string     // hostname from ExternalURL; empty disables host checking
 
 	// Guarded by mu.
 	mu            sync.Mutex
@@ -274,7 +276,13 @@ func New(ctx context.Context, rootDir string, maxTurns int, cfg *Config) (*Serve
 	var sessionSecret []byte
 	var githubOAuth *auth.ProviderConfig
 	var gitlabOAuth *auth.ProviderConfig
+	var allowedHost string
 	if cfg.ExternalURL != "" {
+		u, err := url.Parse(cfg.ExternalURL)
+		if err != nil {
+			return nil, fmt.Errorf("parse ExternalURL: %w", err)
+		}
+		allowedHost = u.Hostname()
 		secret, err := hexDecode(settings.SessionSecret)
 		if err != nil {
 			return nil, fmt.Errorf("decode session secret: %w", err)
@@ -333,6 +341,7 @@ func New(ctx context.Context, rootDir string, maxTurns int, cfg *Config) (*Serve
 		sessionSecret: sessionSecret,
 		githubOAuth:   githubOAuth,
 		gitlabOAuth:   gitlabOAuth,
+		allowedHost:   allowedHost,
 		usage:         newUsageFetcher(ctx),
 		geminiAPIKey:  cfg.GeminiAPIKey,
 		githubToken:   cfg.GitHubToken,
@@ -505,11 +514,14 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	}
 	mux.HandleFunc("/", newStaticHandler(dist))
 
-	// Middleware chain: logging → auth → decompress → compress → mux.
+	// Middleware chain: logging → host check → auth → decompress → compress → mux.
 	var inner http.Handler = mux
 	inner = compressMiddleware(inner)
 	inner = decompressMiddleware(inner)
 	inner = auth.Middleware(s.authStore, s.sessionSecret)(inner)
+	if s.allowedHost != "" {
+		inner = hostCheckMiddleware(s.allowedHost, inner)
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()

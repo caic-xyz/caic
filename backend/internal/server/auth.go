@@ -101,11 +101,11 @@ func (s *Server) handleAuthCallback(provider string) http.HandlerFunc {
 			redirectMode = "app"
 		}
 
-		// Verify the state query parameter matches.
-		// The callback receives the raw state (without HMAC), so we re-sign and compare.
+		// Verify the state query parameter matches the value extracted from the
+		// HMAC-validated cookie. The provider echoes back the raw (unsigned) state
+		// we originally sent in AuthURL, so compare against fullState directly.
 		qState := r.URL.Query().Get("state")
-		expectedCookieVal := auth.SignState(fullState, s.sessionSecret)
-		if qState != expectedCookieVal {
+		if qState != fullState {
 			writeError(w, dto.BadRequest("state mismatch"))
 			return
 		}

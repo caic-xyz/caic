@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1158,6 +1159,166 @@ func TestBuildHandler(t *testing.T) {
 			if w.Code != http.StatusMethodNotAllowed {
 				t.Errorf("%s / = %d, want %d", method, w.Code, http.StatusMethodNotAllowed)
 			}
+		}
+	})
+
+	t.Run("host check rejects wrong host", func(t *testing.T) {
+		s := newTestServer(t)
+		s.allowedHost = "caic.example.com"
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "evil.example.com"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("wrong host: status = %d, want %d", w.Code, http.StatusForbidden)
+		}
+	})
+
+	t.Run("host check allows matching host", func(t *testing.T) {
+		s := newTestServer(t)
+		s.allowedHost = "caic.example.com"
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "caic.example.com"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code == http.StatusForbidden {
+			t.Errorf("matching host should not be forbidden")
+		}
+	})
+
+	t.Run("host check strips port", func(t *testing.T) {
+		s := newTestServer(t)
+		s.allowedHost = "caic.example.com"
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "caic.example.com:8080"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code == http.StatusForbidden {
+			t.Errorf("matching host with port should not be forbidden")
+		}
+	})
+
+	t.Run("host check is case insensitive", func(t *testing.T) {
+		s := newTestServer(t)
+		s.allowedHost = "caic.example.com"
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "CAIC.Example.COM"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code == http.StatusForbidden {
+			t.Errorf("case-insensitive host should not be forbidden")
+		}
+	})
+
+	t.Run("no host check when allowedHost empty", func(t *testing.T) {
+		s := newTestServer(t)
+		// allowedHost is empty by default
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "anything.example.com"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code == http.StatusForbidden {
+			t.Errorf("no host check should not reject any host")
+		}
+	})
+}
+
+func TestOAuthCallbackStateValidation(t *testing.T) {
+	// Spin up a fake OAuth token endpoint that returns a valid access token,
+	// and a fake userinfo endpoint.
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"tok","token_type":"bearer"}`))
+	}))
+	defer tokenServer.Close()
+	userServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":42,"login":"testuser","avatar_url":"https://example.com/avatar.png"}`))
+	}))
+	defer userServer.Close()
+
+	secret := make([]byte, 32)
+	usersPath := filepath.Join(t.TempDir(), "users.json")
+	store, err := auth.Open(usersPath)
+	if err != nil {
+		t.Fatalf("open auth store: %v", err)
+	}
+
+	s := newTestServer(t)
+	s.sessionSecret = secret
+	s.authStore = store
+	s.githubOAuth = &auth.ProviderConfig{
+		ClientID:     "cid",
+		ClientSecret: "csec",
+		AuthEndpoint: "https://github.com/login/oauth/authorize",
+		TokenURL:     tokenServer.URL,
+		UserInfoURL:  userServer.URL,
+		Scopes:       []string{"repo"},
+		RedirectURI:  "http://localhost/api/v1/auth/github/callback",
+	}
+
+	t.Run("valid state round-trip succeeds", func(t *testing.T) {
+		// Simulate the start handler to get a valid state cookie.
+		startW := httptest.NewRecorder()
+		startReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/github/start", http.NoBody)
+		s.handleAuthStart("github")(startW, startReq)
+		if startW.Code != http.StatusFound {
+			t.Fatalf("start status = %d, want %d", startW.Code, http.StatusFound)
+		}
+
+		// Extract the state cookie and the state query param from the redirect URL.
+		var stateCookie *http.Cookie
+		for _, c := range startW.Result().Cookies() {
+			if c.Name == auth.StateCookieName {
+				stateCookie = c
+				break
+			}
+		}
+		if stateCookie == nil {
+			t.Fatal("no state cookie set")
+		}
+		loc := startW.Header().Get("Location")
+		redirectURL, err := url.Parse(loc)
+		if err != nil {
+			t.Fatalf("parse redirect URL: %v", err)
+		}
+		rawState := redirectURL.Query().Get("state")
+
+		// Build callback request with the state echoed back (as GitHub would).
+		cbReq := httptest.NewRequest(http.MethodGet,
+			"/api/v1/auth/github/callback?code=testcode&state="+url.QueryEscape(rawState), http.NoBody)
+		cbReq.AddCookie(stateCookie)
+		cbW := httptest.NewRecorder()
+		s.handleAuthCallback("github")(cbW, cbReq)
+
+		if cbW.Code != http.StatusFound {
+			body, _ := io.ReadAll(cbW.Result().Body)
+			t.Fatalf("callback status = %d, want %d; body = %s", cbW.Code, http.StatusFound, body)
 		}
 	})
 }
