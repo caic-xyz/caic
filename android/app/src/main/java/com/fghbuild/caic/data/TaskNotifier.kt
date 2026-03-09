@@ -32,14 +32,17 @@ class TaskNotifier @Inject constructor(
         ensureChannel()
         job = scope.launch {
             var prevStates = emptyMap<String, String>()
+            var initialized = false
             taskRepository.tasks.collect { tasks ->
                 val currentIds = tasks.map { it.id }.toSet()
-                for (task in tasks) {
-                    val needsInput = task.state in ATTENTION_STATES
-                    val prevNeedsInput = prevStates[task.id] in ATTENTION_STATES
-                    when {
-                        needsInput && !prevNeedsInput -> postNotification(task)
-                        !needsInput && prevNeedsInput -> nm.cancel(notificationId(task.id))
+                if (initialized) {
+                    for (task in tasks) {
+                        val needsInput = task.state in ATTENTION_STATES
+                        val prevNeedsInput = prevStates[task.id] in ATTENTION_STATES
+                        when {
+                            needsInput && prevStates[task.id] == "running" -> postNotification(task)
+                            !needsInput && prevNeedsInput -> nm.cancel(notificationId(task.id))
+                        }
                     }
                 }
                 // Cancel notifications for tasks that were removed from the list.
@@ -49,6 +52,7 @@ class TaskNotifier @Inject constructor(
                     }
                 }
                 prevStates = tasks.associate { it.id to it.state }
+                initialized = true
             }
         }
     }

@@ -276,16 +276,13 @@ export default function App() {
             const needsInput = t.state === "waiting" || t.state === "asking" || t.state === "has_plan";
             const prevState = prevStates.get(t.id);
             const prevNeedsInput = prevState === "waiting" || prevState === "asking" || prevState === "has_plan";
-            if (needsInput && !prevNeedsInput) {
+            if (needsInput && prevState === "running") {
               notifyWaiting(t.id, t.title);
             } else if (!needsInput && prevNeedsInput) {
               dismissNotification(t.id);
             }
           };
           if (event.kind === "snapshot" && event.tasks) {
-            for (const t of event.tasks) {
-              checkAndNotify(t);
-            }
             prevStates = new Map(event.tasks.map((t) => [t.id, t.state]));
             setTasks(event.tasks);
           } else if (event.kind === "upsert" && event.task) {
