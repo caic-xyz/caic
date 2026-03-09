@@ -68,7 +68,7 @@ class TaskNotifier @Inject constructor(
         )
         val title = task.title.ifBlank { task.id }
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_mic)
+            .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle(title)
             .setContentText(context.getString(R.string.task_notification_text))
             .setContentIntent(tapIntent)
