@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // currentVersion is the preferences file format version.
@@ -43,6 +44,9 @@ type RepoPrefs struct {
 	Model string `json:"model,omitempty"`
 	// BaseImage overrides the default container base image for this repo.
 	BaseImage string `json:"baseImage,omitempty"`
+	// LastUsed is the Unix timestamp (seconds) of the last task created for
+	// this repo.
+	LastUsed int64 `json:"lastUsed,omitempty"`
 }
 
 // Validate checks that the preferences are well-formed.
@@ -83,6 +87,7 @@ func (p *Preferences) TouchRepo(repoPath string, overrides *RepoPrefs) {
 		copy(p.Repositories[1:], p.Repositories[:len(p.Repositories)-1])
 	}
 	r.Path = repoPath
+	r.LastUsed = time.Now().Unix()
 	if overrides.BaseBranch != "" {
 		r.BaseBranch = overrides.BaseBranch
 	}
@@ -110,6 +115,27 @@ func (p *Preferences) TouchRepo(repoPath string, overrides *RepoPrefs) {
 	if overrides.BaseImage != "" {
 		p.BaseImage = overrides.BaseImage
 	}
+}
+
+// recentWindow is how far back we consider a repo "recent".
+const recentWindow = 7 * 24 * time.Hour
+
+// minRecentRepos is the minimum number of repos always shown as recent,
+// regardless of last-used time.
+const minRecentRepos = 10
+
+// RecentRepos returns the subset of Repositories that should appear in the
+// "Recent" section: the first minRecentRepos entries plus any beyond that
+// used within recentWindow.
+func (p *Preferences) RecentRepos(now time.Time) []RepoPrefs {
+	cutoff := now.Add(-recentWindow).Unix()
+	result := make([]RepoPrefs, 0, len(p.Repositories))
+	for i, r := range p.Repositories {
+		if i < minRecentRepos || r.LastUsed >= cutoff {
+			result = append(result, r)
+		}
+	}
+	return result
 }
 
 // Store manages persistent user preferences with in-memory caching.

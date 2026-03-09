@@ -90,11 +90,13 @@ class TaskListViewModel @Inject constructor(
         val sorted = active + terminal
         val imgSupport = form.harnesses
             .any { it.name == form.selectedHarness && it.supportsImages }
+        val sortedRepos = form.repos.take(form.recentRepoCount).sortedBy { it.path } +
+            form.repos.drop(form.recentRepoCount)
         TaskListState(
             tasks = sorted,
             connected = connected,
             serverConfigured = settings.serverURL.isNotBlank(),
-            repos = form.repos,
+            repos = sortedRepos,
             harnesses = form.harnesses,
             config = form.config,
             usage = usage,

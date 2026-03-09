@@ -424,8 +424,9 @@ func (s *Server) getConfig(_ context.Context, _ *dto.EmptyReq) (*v1.Config, erro
 
 func (s *Server) getPreferences(_ context.Context, _ *dto.EmptyReq) (*v1.PreferencesResp, error) {
 	prefs := s.prefs.Get()
-	repos := make([]v1.RepoPrefsResp, len(prefs.Repositories))
-	for i, r := range prefs.Repositories {
+	recent := prefs.RecentRepos(time.Now())
+	repos := make([]v1.RepoPrefsResp, len(recent))
+	for i, r := range recent {
 		repos[i] = v1.RepoPrefsResp{
 			Path:       r.Path,
 			BaseBranch: r.BaseBranch,

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestValidate(t *testing.T) {
@@ -181,6 +182,7 @@ func TestStore(t *testing.T) {
 
 func TestTouchRepo(t *testing.T) {
 	t.Run("new_repo_with_overrides", func(t *testing.T) {
+		before := time.Now().Unix()
 		p := newPreferences()
 		p.TouchRepo("github/foo", &RepoPrefs{Harness: "claude", Model: "opus"})
 		if len(p.Repositories) != 1 {
@@ -189,6 +191,9 @@ func TestTouchRepo(t *testing.T) {
 		r := p.Repositories[0]
 		if r.Path != "github/foo" || r.Harness != "claude" || r.Model != "opus" {
 			t.Fatalf("got %+v", r)
+		}
+		if r.LastUsed < before {
+			t.Errorf("lastUsed = %d, want >= %d", r.LastUsed, before)
 		}
 		// Global defaults updated.
 		if p.Harness != "claude" {
@@ -258,6 +263,75 @@ func TestTouchRepo(t *testing.T) {
 		r := p.Repositories[0]
 		if r.Harness != "codex" || r.Model != "o3" || r.BaseImage != "custom:v1" || r.BaseBranch != "dev" {
 			t.Fatalf("fields clobbered: %+v", r)
+		}
+	})
+}
+
+func TestRecentRepos(t *testing.T) {
+	now := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
+	recent := now.Add(-3 * 24 * time.Hour).Unix() // 3 days ago — within window
+	old := now.Add(-10 * 24 * time.Hour).Unix()   // 10 days ago — outside window
+
+	t.Run("all_recent_under_min", func(t *testing.T) {
+		// Fewer than minRecentRepos repos, all old: all returned.
+		p := &Preferences{
+			Version: 1,
+			Repositories: []RepoPrefs{
+				{Path: "a", LastUsed: old},
+				{Path: "b", LastUsed: old},
+			},
+		}
+		got := p.RecentRepos(now)
+		if len(got) != 2 {
+			t.Fatalf("got %d repos, want 2", len(got))
+		}
+	})
+
+	t.Run("keeps_min_10_regardless_of_age", func(t *testing.T) {
+		repos := make([]RepoPrefs, 15)
+		for i := range repos {
+			repos[i] = RepoPrefs{Path: string(rune('a' + i)), LastUsed: old}
+		}
+		p := &Preferences{Version: 1, Repositories: repos}
+		got := p.RecentRepos(now)
+		if len(got) != 10 {
+			t.Fatalf("got %d repos, want 10", len(got))
+		}
+		// First 10 preserved in order.
+		for i, r := range got {
+			if r.Path != repos[i].Path {
+				t.Errorf("repos[%d] = %q, want %q", i, r.Path, repos[i].Path)
+			}
+		}
+	})
+
+	t.Run("recent_beyond_min_included", func(t *testing.T) {
+		repos := make([]RepoPrefs, 12)
+		for i := range repos {
+			repos[i] = RepoPrefs{Path: string(rune('a' + i)), LastUsed: old}
+		}
+		// Make repo at index 11 (beyond min 10) recently used.
+		repos[11].LastUsed = recent
+		p := &Preferences{Version: 1, Repositories: repos}
+		got := p.RecentRepos(now)
+		if len(got) != 11 {
+			t.Fatalf("got %d repos, want 11", len(got))
+		}
+		if got[10].Path != repos[11].Path {
+			t.Errorf("repos[10] = %q, want %q", got[10].Path, repos[11].Path)
+		}
+	})
+
+	t.Run("no_timestamp_falls_back_to_min", func(t *testing.T) {
+		// Repos with no LastUsed (zero) beyond index 10 are excluded.
+		repos := make([]RepoPrefs, 15)
+		for i := range repos {
+			repos[i] = RepoPrefs{Path: string(rune('a' + i))}
+		}
+		p := &Preferences{Version: 1, Repositories: repos}
+		got := p.RecentRepos(now)
+		if len(got) != 10 {
+			t.Fatalf("got %d repos, want 10", len(got))
 		}
 	})
 }

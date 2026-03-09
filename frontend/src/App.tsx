@@ -465,7 +465,7 @@ export default function App() {
             </For>
           }>
             <optgroup label="Recent">
-              <For each={repos().slice(0, recentCount())}>
+              <For each={[...repos().slice(0, recentCount())].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)}>
                 {(r) => <option value={r.path}>{r.path}</option>}
               </For>
             </optgroup>
