@@ -808,6 +808,36 @@ func TestTask(t *testing.T) {
 		}
 	})
 
+	t.Run("LiveDurationAccumulatesWithinSession", func(t *testing.T) {
+		// Multiple result events within a single session (no ClearMessages/compact_boundary)
+		// must accumulate duration rather than overwriting with only the last invocation's value.
+		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetState(StateRunning)
+		tk.addMessage(t.Context(), &agent.ResultMessage{
+			MessageType: "result",
+			NumTurns:    1,
+			DurationMs:  946943,
+		})
+		tk.addMessage(t.Context(), &agent.ResultMessage{
+			MessageType: "result",
+			NumTurns:    1,
+			DurationMs:  5278,
+		})
+		tk.addMessage(t.Context(), &agent.ResultMessage{
+			MessageType: "result",
+			NumTurns:    1,
+			DurationMs:  214500,
+		})
+		_, numTurns, duration, _, _ := tk.LiveStats()
+		if numTurns != 3 {
+			t.Errorf("numTurns = %d, want 3", numTurns)
+		}
+		wantDuration := time.Duration(946943+5278+214500) * time.Millisecond
+		if duration != wantDuration {
+			t.Errorf("duration = %v, want %v", duration, wantDuration)
+		}
+	})
+
 	t.Run("LiveCostCumulativeAcrossThreeSessions", func(t *testing.T) {
 		// Regression: ClearMessages used += (double-count) instead of = assignment.
 		// Verify cost is correct after two ClearMessages calls.
@@ -841,6 +871,26 @@ func TestTask(t *testing.T) {
 		}
 		if numTurns != 3 {
 			t.Errorf("numTurns = %d, want 3", numTurns)
+		}
+	})
+
+	t.Run("RestoreMessagesDurationAccumulatesWithinSession", func(t *testing.T) {
+		// RestoreMessages (reloadFromMsgs) must accumulate DurationMs across
+		// multiple result events within a single session.
+		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetState(StateTerminated)
+		tk.RestoreMessages([]agent.Message{
+			&agent.ResultMessage{MessageType: "result", NumTurns: 1, DurationMs: 946943},
+			&agent.ResultMessage{MessageType: "result", NumTurns: 1, DurationMs: 5278},
+			&agent.ResultMessage{MessageType: "result", NumTurns: 1, DurationMs: 214500},
+		})
+		_, numTurns, duration, _, _ := tk.LiveStats()
+		if numTurns != 3 {
+			t.Errorf("numTurns = %d, want 3", numTurns)
+		}
+		wantDuration := time.Duration(946943+5278+214500) * time.Millisecond
+		if duration != wantDuration {
+			t.Errorf("duration = %v, want %v", duration, wantDuration)
 		}
 	})
 

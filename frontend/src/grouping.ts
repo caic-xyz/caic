@@ -288,11 +288,15 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
   let hasTs = false;
   // Authoritative duration from the result event (seconds → ms). Undefined for
   // live incomplete turns, which fall back to ts-based computation.
+  // ResultMessage.DurationMs is per-invocation (not cumulative), use directly.
   let resultDurationMs: number | undefined;
+  // True when a result event has been seen for this turn (even if duration == 0).
+  // Completed turns don't fall back to ts-based, which would inflate with idle time.
+  let hasResultEvent = false;
 
   function flush() {
     if (current.length > 0) {
-      const durationMs = resultDurationMs ?? Math.max(0, lastTs - firstTs);
+      const durationMs = hasResultEvent ? (resultDurationMs ?? 0) : Math.max(0, lastTs - firstTs);
       turns.push({ groups: current, toolCount, textCount, durationMs });
       current = [];
       toolCount = 0;
@@ -301,6 +305,7 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
       lastTs = 0;
       hasTs = false;
       resultDurationMs = undefined;
+      hasResultEvent = false;
     }
   }
 
@@ -314,8 +319,12 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
     for (const ev of g.events) {
       if (!hasTs) { firstTs = ev.ts; hasTs = true; }
       lastTs = ev.ts;
-      if (ev.kind === "result" && ev.result !== undefined && ev.result.duration > 0) {
-        resultDurationMs = Math.round(ev.result.duration * 1000);
+      if (ev.kind === "result" && ev.result !== undefined) {
+        hasResultEvent = true;
+        const durationMs = Math.round((ev.result.duration ?? 0) * 1000);
+        if (durationMs > 0) {
+          resultDurationMs = durationMs;
+        }
       }
     }
     if (g.kind === "other" && g.events.some((ev) => ev.kind === "result")) {

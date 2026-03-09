@@ -340,6 +340,30 @@ describe("groupTurns", () => {
     expect(turns[0].durationMs).toBe(1000); // resultEvent() has duration: 1.0s
   });
 
+  it("durationMs uses result.duration directly (per-invocation, not cumulative)", () => {
+    // ResultMessage.DurationMs is per-invocation wall-clock time for that turn.
+    const makeResult = (duration: number): EventMessage => ({
+      kind: "result", ts: 0,
+      result: {
+        subtype: "success", isError: false, result: "done",
+        totalCostUSD: 0.01, duration, durationAPI: duration * 0.9,
+        numTurns: 1,
+        usage: { inputTokens: 100, outputTokens: 50, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, model: "test" },
+      },
+    });
+    const events: EventMessage[] = [
+      textDeltaEvent("turn 1"),
+      makeResult(1.0),  // turn 1 took 1s
+      textDeltaEvent("turn 2"),
+      makeResult(3.0),  // turn 2 took 3s
+    ];
+    const groups = groupMessages(events);
+    const turns = groupTurns(groups);
+    expect(turns).toHaveLength(2);
+    expect(turns[0].durationMs).toBe(1000); // 1.0s → 1000ms
+    expect(turns[1].durationMs).toBe(3000); // 3.0s → 3000ms
+  });
+
   it("turnSummary formats correctly", () => {
     const turn = { groups: [], toolCount: 3, textCount: 2, durationMs: 5000 };
     expect(turnSummary(turn)).toBe("2 messages, 3 tool calls · 5s");

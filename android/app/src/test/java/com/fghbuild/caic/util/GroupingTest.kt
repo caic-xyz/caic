@@ -212,6 +212,32 @@ class GroupingTest {
             assertEquals(1000L, turns[0].durationMs) // resultEvent() has duration: 1.0s
         }
 
+        t.run("durationMs uses result.duration directly (per-invocation, not cumulative)") {
+            // ResultMessage.DurationMs is per-invocation wall-clock time for that turn.
+            fun makeResult(duration: Double) = EventMessage(
+                kind = EventKinds.Result, ts = 0,
+                result = EventResult(
+                    subtype = "success", isError = false, result = "done",
+                    totalCostUSD = 0.01, duration = duration, durationAPI = duration * 0.9,
+                    numTurns = 1, usage = EventUsage(
+                        inputTokens = 100, outputTokens = 50,
+                        cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
+                    ),
+                ),
+            )
+            val events = listOf(
+                textDeltaEvent("turn 1"),
+                makeResult(1.0),  // turn 1 took 1s
+                textDeltaEvent("turn 2"),
+                makeResult(3.0),  // turn 2 took 3s
+            )
+            val groups = groupMessages(events)
+            val turns = groupTurns(groups)
+            assertEquals(2, turns.size)
+            assertEquals(1000L, turns[0].durationMs) // 1.0s → 1000ms
+            assertEquals(3000L, turns[1].durationMs) // 3.0s → 3000ms
+        }
+
         t.run("turnSummary formats correctly") {
             val turn = Turn(groups = emptyList(), toolCount = 3, textCount = 2, durationMs = 5000)
             assertEquals("2 messages, 3 tool calls · 5s", turnSummary(turn))
@@ -417,6 +443,34 @@ class GroupingTest {
             // completedSessions must contain no null-boundary sessions
             assertTrue("null-boundary session must not appear in completedSessions",
                 state.completedSessions.none { it.boundaryEvent == null })
+        }
+
+        t.run("per-turn duration is correct across incremental updates") {
+            // Simulate turn 1 completing, then turn 2 completing incrementally.
+            // Both result events have per-invocation DurationMs (1s and 3s).
+            fun makeResult(duration: Double, ts: Long) = EventMessage(
+                kind = EventKinds.Result, ts = ts,
+                result = EventResult(
+                    subtype = "success", isError = false, result = "done",
+                    totalCostUSD = 0.01, duration = duration, durationAPI = duration * 0.9,
+                    numTurns = 1, usage = EventUsage(
+                        inputTokens = 100, outputTokens = 50,
+                        cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
+                    ),
+                ),
+            )
+            // Turn 1 arrives.
+            val turn1Msgs = listOf(textDeltaEvent("first", ts = 1), makeResult(1.0, ts = 2))
+            val state1 = nextGrouped(IncrementalGrouped(), turn1Msgs)
+            assertEquals(1, state1.currentSessionCompletedTurns.size)
+            assertEquals(1000L, state1.currentSessionCompletedTurns[0].durationMs) // 1.0s → 1000ms
+
+            // Turn 2 arrives incrementally.
+            val allMsgs = turn1Msgs + listOf(textDeltaEvent("second", ts = 3), makeResult(3.0, ts = 4))
+            val state2 = nextGrouped(state1, allMsgs)
+            assertEquals(2, state2.currentSessionCompletedTurns.size)
+            assertEquals(1000L, state2.currentSessionCompletedTurns[0].durationMs) // unchanged
+            assertEquals(3000L, state2.currentSessionCompletedTurns[1].durationMs) // 3.0s → 3000ms
         }
 
         t.run("reset on shrinking message list clears completed turns") {

@@ -293,7 +293,8 @@ private fun newActionGroup(ev: EventMessage, call: MutableToolCall) = MutableGro
     toolCalls = mutableListOf(call),
 )
 
-/** Splits message groups into turns separated by "result" events. */
+// Splits message groups into turns separated by "result" events.
+// ResultMessage.DurationMs is per-invocation; use it directly as the turn's duration.
 fun groupTurns(groups: List<MessageGroup>): List<Turn> {
     val turns = mutableListOf<Turn>()
     var current = mutableListOf<MessageGroup>()
@@ -302,13 +303,16 @@ fun groupTurns(groups: List<MessageGroup>): List<Turn> {
     var firstTs = 0L
     var lastTs = 0L
     var hasTs = false
-    // Authoritative duration from the result event (seconds → ms). Null for
-    // live incomplete turns, which fall back to ts-based computation.
+    // Authoritative duration from the result event (seconds → ms).
+    // Null for live incomplete turns, which fall back to ts-based computation.
     var resultDurationMs: Long? = null
+    // True when a result event has been seen for this turn (even if duration == 0).
+    // Completed turns don't fall back to ts-based, which would inflate with idle time.
+    var hasResultEvent = false
 
     fun flush() {
         if (current.isNotEmpty()) {
-            val durationMs = resultDurationMs ?: max(0L, lastTs - firstTs)
+            val durationMs = if (hasResultEvent) (resultDurationMs ?: 0L) else max(0L, lastTs - firstTs)
             turns.add(Turn(
                 groups = current.toList(),
                 toolCount = toolCount,
@@ -322,6 +326,7 @@ fun groupTurns(groups: List<MessageGroup>): List<Turn> {
             lastTs = 0L
             hasTs = false
             resultDurationMs = null
+            hasResultEvent = false
         }
     }
 
@@ -336,7 +341,11 @@ fun groupTurns(groups: List<MessageGroup>): List<Turn> {
             if (!hasTs) { firstTs = ev.ts; hasTs = true }
             lastTs = ev.ts
             if (ev.kind == EventKinds.Result) {
-                ev.result?.duration?.takeIf { it > 0 }?.let { resultDurationMs = (it * 1000).toLong() }
+                hasResultEvent = true
+                val durationMs = ((ev.result?.duration ?: 0.0) * 1000).toLong()
+                if (durationMs > 0L) {
+                    resultDurationMs = durationMs
+                }
             }
         }
         if (g.kind == GroupKind.OTHER && g.events.any { it.kind == EventKinds.Result }) {

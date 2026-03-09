@@ -439,9 +439,10 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 			break
 		}
 	}
-	// Restore live stats: cost/turns/duration are cumulative within each
-	// session, but must be summed across sessions separated by
-	// context_cleared or compact_boundary markers. Token usage is always summed.
+	// Restore live stats: TotalCostUSD is cumulative per-session (resets on
+	// compact_boundary), so cost uses priorCostUSD + currentSessionTotal.
+	// DurationMs and NumTurns are per-invocation, so they always accumulate (+=).
+	// Token usage is always summed.
 	for _, m := range msgs {
 		if sm, ok := m.(*agent.SystemMessage); ok &&
 			(sm.Subtype == "context_cleared" || sm.Subtype == "compact_boundary") {
@@ -462,8 +463,8 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 		// Compute cost from token counts: TotalCostUSD from Claude Code excludes
 		// cache_read_input_tokens, which are charged but omitted from its total.
 		t.liveCostUSD = t.priorCostUSD + computeCost(rm.TotalCostUSD, rm.Usage)
-		t.liveNumTurns = t.priorNumTurns + rm.NumTurns
-		t.liveDuration = t.priorDuration + time.Duration(rm.DurationMs)*time.Millisecond
+		t.liveNumTurns += rm.NumTurns
+		t.liveDuration += time.Duration(rm.DurationMs) * time.Millisecond
 	}
 	// Infer state: if the last agent-emitted message is a ResultMessage, the
 	// agent finished its turn and is waiting for user input (or asking a
@@ -526,9 +527,11 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message) {
 	if ds, ok := m.(*agent.DiffStatMessage); ok {
 		t.liveDiffStat = ds.DiffStat
 	}
-	// compact_boundary resets NumTurns, DurationMs, and usage-based cost in
-	// Claude Code's subsequent ResultMessages (same as context_cleared).
-	// Snapshot priors here so accumulation across the boundary is correct.
+	// compact_boundary resets TotalCostUSD in Claude Code's subsequent
+	// ResultMessages (same as context_cleared). Snapshot priors so the
+	// cost accumulation across the boundary is correct. DurationMs and
+	// NumTurns are per-invocation and always use +=, so priors just carry
+	// the running total forward.
 	if sm, ok := m.(*agent.SystemMessage); ok && sm.Subtype == "compact_boundary" {
 		t.priorCostUSD = t.liveCostUSD
 		t.priorNumTurns = t.liveNumTurns
@@ -547,8 +550,8 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message) {
 		// Compute cost from token counts: TotalCostUSD from Claude Code excludes
 		// cache_read_input_tokens, which are charged but omitted from its total.
 		t.liveCostUSD = t.priorCostUSD + computeCost(rm.TotalCostUSD, rm.Usage)
-		t.liveNumTurns = t.priorNumTurns + rm.NumTurns
-		t.liveDuration = t.priorDuration + time.Duration(rm.DurationMs)*time.Millisecond
+		t.liveNumTurns += rm.NumTurns
+		t.liveDuration += time.Duration(rm.DurationMs) * time.Millisecond
 		t.planDismissed = false
 		// Transition Running→Waiting/Asking/HasPlan. Also handle
 		// Running/Waiting because watchSession may have already set
