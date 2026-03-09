@@ -7,6 +7,8 @@ import styles from "./Tooltip.module.css";
 interface Props {
   text: string;
   children: JSX.Element;
+  class?: string;
+  disabled?: boolean;
 }
 
 const GAP = 6; // px between element and popup
@@ -59,25 +61,32 @@ export default function Tooltip(props: Props) {
     document.removeEventListener("scroll", dismiss, true);
   });
 
+  const wrapperClass = () => `${styles.wrapper}${props.class ? ` ${props.class}` : ""}`;
+
   return (
-    <span
-      ref={wrapperRef}
-      class={styles.wrapper}
-      role="button"
-      tabIndex={0}
-      onMouseEnter={() => setShow(true)}
-      onMouseLeave={() => setShow(false)}
-      onFocus={() => setShow(true)}
-      onBlur={() => setShow(false)}
-      onClick={() => setShow((v) => !v)}
-      onKeyDown={(e) => { if (e.key === "Escape") setShow(false); if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setShow((v) => !v); } }}
+    <Show
+      when={!props.disabled}
+      fallback={<span class={wrapperClass()}>{props.children}</span>}
     >
-      {props.children}
-      <Show when={show()}>
-        <Portal>
-          <span ref={popupRef} class={styles.popup}>{props.text}</span>
-        </Portal>
-      </Show>
-    </span>
+      <span
+        ref={wrapperRef}
+        class={wrapperClass()}
+        role="button"
+        tabIndex={0}
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+        onFocus={() => setShow(true)}
+        onBlur={() => setShow(false)}
+        onClick={() => setShow((v) => !v)}
+        onKeyDown={(e) => { if (e.key === "Escape") setShow(false); if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setShow((v) => !v); } }}
+      >
+        {props.children}
+        <Show when={show()}>
+          <Portal>
+            <span ref={popupRef} class={styles.popup}>{props.text}</span>
+          </Portal>
+        </Show>
+      </span>
+    </Show>
   );
 }

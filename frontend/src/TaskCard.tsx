@@ -1,5 +1,5 @@
 // Compact card for a single task, used in the sidebar task list.
-import { Show } from "solid-js";
+import { Show, createSignal, onMount, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
 import type { DiffStat } from "@sdk/types.gen";
 import Tooltip from "./Tooltip";
@@ -52,6 +52,18 @@ const terminalStates = new Set(["terminated", "failed"]);
 
 export default function TaskCard(props: TaskCardProps) {
   const isTerminal = () => terminalStates.has(props.state);
+  const [titleTruncated, setTitleTruncated] = createSignal(false);
+  let titleRef: HTMLElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
+
+  onMount(() => {
+    const check = () => { if (titleRef) setTitleTruncated(titleRef.scrollWidth > titleRef.clientWidth); };
+    check();
+    if (titleRef) {
+      const ro = new ResizeObserver(check);
+      ro.observe(titleRef);
+      onCleanup(() => ro.disconnect());
+    }
+  });
 
   return (
     <div
@@ -64,7 +76,9 @@ export default function TaskCard(props: TaskCardProps) {
     >
       {/* Line 1: title + feature icons + plan badge + terminate (no state badge) */}
       <div class={styles.header}>
-        <strong class={styles.title}>{props.title}</strong>
+        <Tooltip text={props.title} class={styles.titleWrapper} disabled={!titleTruncated()}>
+          <strong ref={titleRef} class={styles.title}>{props.title}</strong>
+        </Tooltip>
         <span class={styles.stateGroup}>
           <Show when={props.tailscale} keyed>
             {(ts) => ts.startsWith("https://")
