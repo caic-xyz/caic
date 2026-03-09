@@ -1,5 +1,6 @@
 // Pure grouping and turn-splitting logic for agent event streams.
 import type { EventMessage, EventToolUse, EventToolResult, EventAsk } from "@sdk/types.gen";
+import { formatElapsed } from "./formatting";
 
 export interface MessageGroup {
   kind: "text" | "action" | "ask" | "userInput" | "other";
@@ -27,6 +28,8 @@ export interface Turn {
   groups: MessageGroup[];
   toolCount: number;
   textCount: number;
+  // Duration of the turn in milliseconds (last event ts minus first event ts).
+  durationMs: number;
 }
 
 // A session is a segment of the event stream opened by an init or compact_boundary event.
@@ -280,13 +283,24 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
   let current: MessageGroup[] = [];
   let toolCount = 0;
   let textCount = 0;
+  let firstTs = 0;
+  let lastTs = 0;
+  let hasTs = false;
+  // Authoritative duration from the result event (seconds → ms). Undefined for
+  // live incomplete turns, which fall back to ts-based computation.
+  let resultDurationMs: number | undefined;
 
   function flush() {
     if (current.length > 0) {
-      turns.push({ groups: current, toolCount, textCount });
+      const durationMs = resultDurationMs ?? Math.max(0, lastTs - firstTs);
+      turns.push({ groups: current, toolCount, textCount, durationMs });
       current = [];
       toolCount = 0;
       textCount = 0;
+      firstTs = 0;
+      lastTs = 0;
+      hasTs = false;
+      resultDurationMs = undefined;
     }
   }
 
@@ -296,6 +310,13 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
       toolCount += g.toolCalls.length;
     } else if (g.kind === "text") {
       textCount++;
+    }
+    for (const ev of g.events) {
+      if (!hasTs) { firstTs = ev.ts; hasTs = true; }
+      lastTs = ev.ts;
+      if (ev.kind === "result" && ev.result !== undefined && ev.result.duration > 0) {
+        resultDurationMs = Math.round(ev.result.duration * 1000);
+      }
     }
     if (g.kind === "other" && g.events.some((ev) => ev.kind === "result")) {
       flush();
@@ -428,7 +449,8 @@ export function turnSummary(turn: Turn): string {
   if (turn.toolCount > 0) {
     parts.push(turn.toolCount === 1 ? "1 tool call" : `${turn.toolCount} tool calls`);
   }
-  return parts.length > 0 ? parts.join(", ") : "empty turn";
+  const summary = parts.length > 0 ? parts.join(", ") : "empty turn";
+  return turn.durationMs > 0 ? `${summary} \u00b7 ${formatElapsed(turn.durationMs)}` : summary;
 }
 
 export function sessionSummary(session: Session): string {

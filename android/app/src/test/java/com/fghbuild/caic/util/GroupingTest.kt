@@ -204,14 +204,22 @@ class GroupingTest {
             assertEquals(1, turns[1].textCount)
         }
 
+        t.run("durationMs comes from result event duration") {
+            val events = listOf(textDeltaEvent("text"), resultEvent())
+            val groups = groupMessages(events)
+            val turns = groupTurns(groups)
+            assertEquals(1, turns.size)
+            assertEquals(1000L, turns[0].durationMs) // resultEvent() has duration: 1.0s
+        }
+
         t.run("turnSummary formats correctly") {
-            val turn = Turn(groups = emptyList(), toolCount = 3, textCount = 2)
-            assertEquals("2 messages, 3 tool calls", turnSummary(turn))
+            val turn = Turn(groups = emptyList(), toolCount = 3, textCount = 2, durationMs = 5000)
+            assertEquals("2 messages, 3 tool calls · 5s", turnSummary(turn))
         }
 
         t.run("turnSummary singular forms") {
-            val turn = Turn(groups = emptyList(), toolCount = 1, textCount = 1)
-            assertEquals("1 message, 1 tool call", turnSummary(turn))
+            val turn = Turn(groups = emptyList(), toolCount = 1, textCount = 1, durationMs = 65000)
+            assertEquals("1 message, 1 tool call · 1m 5s", turnSummary(turn))
         }
     }
 

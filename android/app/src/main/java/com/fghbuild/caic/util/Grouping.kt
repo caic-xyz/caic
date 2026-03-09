@@ -8,6 +8,7 @@ import com.caic.sdk.v1.EventToolResult
 import com.caic.sdk.v1.EventToolUse
 import com.caic.sdk.v1.TodoItem
 import com.caic.sdk.v1.EventKinds
+import kotlin.math.max
 
 enum class GroupKind { TEXT, ACTION, ASK, USER_INPUT, OTHER }
 
@@ -32,6 +33,8 @@ data class Turn(
     val groups: List<MessageGroup>,
     val toolCount: Int,
     val textCount: Int,
+    // Duration of the turn in milliseconds (last event ts minus first event ts).
+    val durationMs: Long,
 )
 
 // A session is a segment of the event stream opened by an init or compact_boundary event.
@@ -296,13 +299,29 @@ fun groupTurns(groups: List<MessageGroup>): List<Turn> {
     var current = mutableListOf<MessageGroup>()
     var toolCount = 0
     var textCount = 0
+    var firstTs = 0L
+    var lastTs = 0L
+    var hasTs = false
+    // Authoritative duration from the result event (seconds → ms). Null for
+    // live incomplete turns, which fall back to ts-based computation.
+    var resultDurationMs: Long? = null
 
     fun flush() {
         if (current.isNotEmpty()) {
-            turns.add(Turn(groups = current.toList(), toolCount = toolCount, textCount = textCount))
+            val durationMs = resultDurationMs ?: max(0L, lastTs - firstTs)
+            turns.add(Turn(
+                groups = current.toList(),
+                toolCount = toolCount,
+                textCount = textCount,
+                durationMs = durationMs,
+            ))
             current = mutableListOf()
             toolCount = 0
             textCount = 0
+            firstTs = 0L
+            lastTs = 0L
+            hasTs = false
+            resultDurationMs = null
         }
     }
 
@@ -312,6 +331,13 @@ fun groupTurns(groups: List<MessageGroup>): List<Turn> {
             GroupKind.ACTION -> toolCount += g.toolCalls.size
             GroupKind.TEXT -> textCount++
             else -> {}
+        }
+        for (ev in g.events) {
+            if (!hasTs) { firstTs = ev.ts; hasTs = true }
+            lastTs = ev.ts
+            if (ev.kind == EventKinds.Result) {
+                ev.result?.duration?.takeIf { it > 0 }?.let { resultDurationMs = (it * 1000).toLong() }
+            }
         }
         if (g.kind == GroupKind.OTHER && g.events.any { it.kind == EventKinds.Result }) {
             flush()
@@ -389,7 +415,8 @@ fun turnSummary(turn: Turn): String {
     if (turn.toolCount > 0) {
         parts.add(if (turn.toolCount == 1) "1 tool call" else "${turn.toolCount} tool calls")
     }
-    return if (parts.isNotEmpty()) parts.joinToString(", ") else "empty turn"
+    val summary = if (parts.isNotEmpty()) parts.joinToString(", ") else "empty turn"
+    return if (turn.durationMs > 0) "$summary \u00b7 ${formatElapsed(turn.durationMs / 1000.0)}" else summary
 }
 
 /** Summarize a session for elided display. */

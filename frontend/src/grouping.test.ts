@@ -332,8 +332,16 @@ describe("groupTurns", () => {
     expect(turns[1].textCount).toBe(1);
   });
 
+  it("durationMs comes from result event duration", () => {
+    const events: EventMessage[] = [textDeltaEvent("text"), resultEvent()];
+    const groups = groupMessages(events);
+    const turns = groupTurns(groups);
+    expect(turns).toHaveLength(1);
+    expect(turns[0].durationMs).toBe(1000); // resultEvent() has duration: 1.0s
+  });
+
   it("turnSummary formats correctly", () => {
-    const turn = { groups: [], toolCount: 3, textCount: 2 };
-    expect(turnSummary(turn)).toBe("2 messages, 3 tool calls");
+    const turn = { groups: [], toolCount: 3, textCount: 2, durationMs: 5000 };
+    expect(turnSummary(turn)).toBe("2 messages, 3 tool calls · 5s");
   });
 });
