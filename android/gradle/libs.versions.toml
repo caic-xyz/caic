@@ -15,7 +15,8 @@ composeBom = "2024.12.01"
 activityCompose = "1.9.3"
 lifecycleViewmodelCompose = "2.8.7"
 navigationCompose = "2.8.5"
-hilt = "2.53.1"
+hilt = "2.57.2"
+ksp = "2.2.10-2.0.2"
 hiltNavigationCompose = "1.2.0"
 datastorePreferences = "1.1.2"
 composeCompiler = "1.5.15"
@@ -66,7 +67,7 @@ detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
 versions = { id = "com.github.ben-manes.versions", version.ref = "versions" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
-kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 
