@@ -1,5 +1,5 @@
 // Main application component for caic web UI.
-import { createEffect, createSignal, For, Show, Switch, Match, onMount, onCleanup } from "solid-js";
+import { createEffect, createSignal, For, Show, Switch, Match, onCleanup } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData } from "@sdk/types.gen";
 import { getConfig, getPreferences, listHarnesses, listRepos, listRepoBranches, createTask, cloneRepo, getUsage, terminateTask } from "./api";
@@ -190,53 +190,61 @@ export default function App() {
   // In-memory per-harness model preferences from the server.
   let prefModels: Record<string, string> = {};
 
-  onMount(async () => {
-    try {
-      requestNotificationPermission();
-      const [data, prefs, h, config, usageData] = await Promise.all([
-        listRepos(),
-        getPreferences().catch(() => null),
-        listHarnesses().catch(() => [] as HarnessInfo[]),
-        getConfig().catch(() => null),
-        getUsage().catch(() => null),
-      ]);
-      const recentPaths = prefs?.repositories.map((r) => r.path) ?? [];
-      const recentSet = new Set(recentPaths);
-      const recentRepos = recentPaths.reduce<Repo[]>((acc, r) => {
-        const repo = data.find((d) => d.path === r);
-        if (repo) acc.push(repo);
-        return acc;
-      }, []);
-      const rest = data.filter((d) => !recentSet.has(d.path));
-      const ordered = [...recentRepos, ...rest];
-      setRepos(ordered);
-      setRecentCount(recentRepos.length);
-      if (ordered.length > 0) {
-        const first = recentRepos[0]?.path ?? ordered[0].path;
-        setSelectedRepo(first);
+  const isAuthenticated = () => auth.ready() && (auth.providers().length === 0 || auth.user() !== null);
+
+  // Load initial data once authentication is confirmed.
+  let dataLoaded = false;
+  createEffect(() => {
+    if (!isAuthenticated() || dataLoaded) return;
+    dataLoaded = true;
+    requestNotificationPermission();
+    void (async () => {
+      try {
+        const [data, prefs, h, config, usageData] = await Promise.all([
+          listRepos(),
+          getPreferences().catch(() => null),
+          listHarnesses().catch(() => [] as HarnessInfo[]),
+          getConfig().catch(() => null),
+          getUsage().catch(() => null),
+        ]);
+        const recentPaths = prefs?.repositories.map((r) => r.path) ?? [];
+        const recentSet = new Set(recentPaths);
+        const recentRepos = recentPaths.reduce<Repo[]>((acc, r) => {
+          const repo = data.find((d) => d.path === r);
+          if (repo) acc.push(repo);
+          return acc;
+        }, []);
+        const rest = data.filter((d) => !recentSet.has(d.path));
+        const ordered = [...recentRepos, ...rest];
+        setRepos(ordered);
+        setRecentCount(recentRepos.length);
+        if (ordered.length > 0) {
+          const first = recentRepos[0]?.path ?? ordered[0].path;
+          setSelectedRepo(first);
+        }
+        {
+          setHarnesses(h);
+          prefModels = prefs?.models ?? {};
+          const prefHarness = prefs?.harness ?? "";
+          const harness = prefHarness && h.find((x) => x.name === prefHarness)
+            ? prefHarness
+            : h[0]?.name ?? "";
+          setSelectedHarness(harness);
+          const models = h.find((x) => x.name === harness)?.models ?? [];
+          const lastModel = prefModels[harness];
+          if (lastModel && models.includes(lastModel)) setSelectedModel(lastModel);
+        }
+        if (prefs?.baseImage) setSelectedImage(prefs.baseImage);
+        if (config) {
+          setTailscaleAvailable(config.tailscaleAvailable);
+          setUSBAvailable(config.usbAvailable);
+          setDisplayAvailable(config.displayAvailable);
+        }
+        if (usageData) setUsage(usageData);
+      } finally {
+        setInitializing(false);
       }
-      {
-        setHarnesses(h);
-        prefModels = prefs?.models ?? {};
-        const prefHarness = prefs?.harness ?? "";
-        const harness = prefHarness && h.find((x) => x.name === prefHarness)
-          ? prefHarness
-          : h[0]?.name ?? "";
-        setSelectedHarness(harness);
-        const models = h.find((x) => x.name === harness)?.models ?? [];
-        const lastModel = prefModels[harness];
-        if (lastModel && models.includes(lastModel)) setSelectedModel(lastModel);
-      }
-      if (prefs?.baseImage) setSelectedImage(prefs.baseImage);
-      if (config) {
-        setTailscaleAvailable(config.tailscaleAvailable);
-        setUSBAvailable(config.usbAvailable);
-        setDisplayAvailable(config.displayAvailable);
-      }
-      if (usageData) setUsage(usageData);
-    } finally {
-      setInitializing(false);
-    }
+    })();
   });
 
   // Subscribe to task list updates via SSE with automatic reconnection.
@@ -364,8 +372,6 @@ export default function App() {
         usageDelay = Math.min(usageDelay * 1.5, 4000);
       };
     }
-
-    const isAuthenticated = () => auth.ready() && (auth.providers().length === 0 || auth.user() !== null);
 
     createEffect(() => {
       if (!isAuthenticated()) return;
