@@ -622,12 +622,15 @@ private fun MessageList(
         }
     }
 
-    // Detect user scroll direction.
+    // Update userScrolledUp when a scroll gesture ends so the final position is used.
+    // Checking at scroll-start is unreliable: the user is still at the bottom when the gesture begins.
     LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress) {
+        if (!listState.isScrollInProgress) {
             val info = listState.layoutInfo
-            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-            userScrolledUp = lastVisible < info.totalItemsCount - 2
+            if (info.totalItemsCount > 0) {
+                val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+                userScrolledUp = lastVisible < info.totalItemsCount - 2
+            }
         }
     }
 
