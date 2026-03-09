@@ -27,6 +27,19 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
+// expandTilde replaces a leading "~/" or bare "~" with the current user's home directory.
+func expandTilde(path string) string {
+	if path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		rest := strings.TrimLeft(path[1:], `/\`)
+		return filepath.Join(home, rest)
+	}
+	return path
+}
+
 // envDefault returns the value of the named environment variable, or def if unset/empty.
 func envDefault(name, def string) string {
 	if v := os.Getenv(name); v != "" {
@@ -102,6 +115,7 @@ See contrib/caic.env for a template with all variables and documentation.
 	if args := flag.Args(); len(args) > 0 {
 		return fmt.Errorf("unexpected arguments: %v", args)
 	}
+	*root = expandTilde(*root)
 
 	initLogging(*logLevel)
 
