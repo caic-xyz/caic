@@ -380,8 +380,15 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
         )
     }
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    val defaultBranch = state.repos.find { it.path == state.selectedRepo }?.baseBranch ?: ""
+    val models = state.harnesses.firstOrNull { it.name == state.selectedHarness }?.models.orEmpty()
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // Row 1: Repo + Clone + Branch
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Box(modifier = Modifier.weight(1f)) {
                 if (state.repos.isNotEmpty()) {
                     DropdownField(
@@ -400,64 +407,73 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
                     Icon(Icons.Default.ContentCopy, contentDescription = "Clone repository")
                 }
             }
-        }
-
-        val defaultBranch = state.repos.find { it.path == state.selectedRepo }?.baseBranch ?: ""
-        var branchDropdownExpanded by remember { mutableStateOf(false) }
-        ExposedDropdownMenuBox(
-            expanded = branchDropdownExpanded && state.branches.isNotEmpty(),
-            onExpandedChange = { if (state.branches.isNotEmpty()) branchDropdownExpanded = it },
-        ) {
-            OutlinedTextField(
-                value = state.baseBranch,
-                onValueChange = viewModel::updateBaseBranch,
-                label = { Text("Base branch") },
-                placeholder = { Text(defaultBranch.ifBlank { "main" }) },
-                modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
-                trailingIcon = {
-                    if (state.branches.isNotEmpty()) {
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = branchDropdownExpanded)
-                    }
-                },
-                singleLine = true,
-                enabled = !state.submitting,
-            )
-            if (state.branches.isNotEmpty()) {
-                ExposedDropdownMenu(
-                    expanded = branchDropdownExpanded,
-                    onDismissRequest = { branchDropdownExpanded = false },
-                ) {
-                    state.branches.forEach { branch ->
-                        DropdownMenuItem(
-                            text = { Text(branch) },
-                            onClick = {
-                                viewModel.updateBaseBranch(branch)
-                                branchDropdownExpanded = false
-                            },
-                            contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
-                        )
+            var branchDropdownExpanded by remember { mutableStateOf(false) }
+            ExposedDropdownMenuBox(
+                expanded = branchDropdownExpanded && state.branches.isNotEmpty(),
+                onExpandedChange = { if (state.branches.isNotEmpty()) branchDropdownExpanded = it },
+                modifier = Modifier.weight(0.6f),
+            ) {
+                OutlinedTextField(
+                    value = state.baseBranch,
+                    onValueChange = viewModel::updateBaseBranch,
+                    label = { Text("Branch") },
+                    placeholder = { Text(defaultBranch.ifBlank { "main" }) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
+                    trailingIcon = {
+                        if (state.branches.isNotEmpty()) {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = branchDropdownExpanded)
+                        }
+                    },
+                    singleLine = true,
+                    enabled = !state.submitting,
+                )
+                if (state.branches.isNotEmpty()) {
+                    ExposedDropdownMenu(
+                        expanded = branchDropdownExpanded,
+                        onDismissRequest = { branchDropdownExpanded = false },
+                    ) {
+                        state.branches.forEach { branch ->
+                            DropdownMenuItem(
+                                text = { Text(branch) },
+                                onClick = {
+                                    viewModel.updateBaseBranch(branch)
+                                    branchDropdownExpanded = false
+                                },
+                                contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                            )
+                        }
                     }
                 }
             }
         }
 
-        if (state.harnesses.size > 1) {
-            DropdownField(
-                label = "Harness",
-                selected = state.selectedHarness,
-                options = state.harnesses.map { it.name },
-                onSelect = viewModel::selectHarness,
-            )
-        }
-
-        val models = state.harnesses.firstOrNull { it.name == state.selectedHarness }?.models.orEmpty()
-        if (models.isNotEmpty()) {
-            DropdownField(
-                label = "Model",
-                selected = state.selectedModel.ifBlank { models.first() },
-                options = models,
-                onSelect = viewModel::selectModel,
-            )
+        // Row 2: Harness + Model (side by side when both present)
+        if (state.harnesses.size > 1 || models.isNotEmpty()) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (state.harnesses.size > 1) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        DropdownField(
+                            label = "Harness",
+                            selected = state.selectedHarness,
+                            options = state.harnesses.map { it.name },
+                            onSelect = viewModel::selectHarness,
+                        )
+                    }
+                }
+                if (models.isNotEmpty()) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        DropdownField(
+                            label = "Model",
+                            selected = state.selectedModel.ifBlank { models.first() },
+                            options = models,
+                            onSelect = viewModel::selectModel,
+                        )
+                    }
+                }
+            }
         }
 
         if (state.pendingImages.isNotEmpty()) {
