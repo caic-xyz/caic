@@ -469,8 +469,41 @@ export default function App() {
         <UsageBadges usage={usage} now={now} />
         <ConnectionDot connected={connected()} />
         <Show when={auth.providers().length > 0 && auth.user()}>
-          <span class={styles.navUser} title="Signed in">{auth.user()?.username}</span>
-          <button class={styles.navLogout} onClick={() => void auth.logout()} title="Sign out">Sign out</button>
+          {(() => {
+            const [menuOpen, setMenuOpen] = createSignal(false);
+            let menuRef: HTMLDivElement | undefined;
+            const onClickOutside = (e: MouseEvent) => {
+              if (menuRef && !menuRef.contains(e.target as Node)) setMenuOpen(false);
+            };
+            createEffect(() => {
+              if (menuOpen()) document.addEventListener("click", onClickOutside, true);
+              else document.removeEventListener("click", onClickOutside, true);
+              onCleanup(() => document.removeEventListener("click", onClickOutside, true));
+            });
+            const user = () => auth.user() ?? { username: "", avatarURL: undefined };
+            const initials = () => user().username.slice(0, 2).toUpperCase();
+            return (
+              <div class={styles.userMenu} ref={(el) => { menuRef = el; }}>
+                <button
+                  class={styles.avatarButton}
+                  onClick={() => setMenuOpen((v) => !v)}
+                  title={user().username}
+                >
+                  <Show when={user().avatarURL} keyed fallback={
+                    <span class={styles.avatarInitials}>{initials()}</span>
+                  }>
+                    {(url) => <img src={url} alt={user().username} class={styles.avatarImg} />}
+                  </Show>
+                </button>
+                <Show when={menuOpen()}>
+                  <div class={styles.userDropdown}>
+                    <span class={styles.dropdownUser}>{user().username}</span>
+                    <button class={styles.dropdownItem} onClick={() => { setMenuOpen(false); void auth.logout(); }}>Sign out</button>
+                  </div>
+                </Show>
+              </div>
+            );
+          })()}
         </Show>
       </div>
 

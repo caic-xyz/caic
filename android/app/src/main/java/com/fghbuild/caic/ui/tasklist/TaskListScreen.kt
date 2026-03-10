@@ -36,6 +36,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -52,7 +53,9 @@ import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberTooltipState
+import android.graphics.BitmapFactory
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,6 +77,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.ImageData
 import com.caic.sdk.v1.Repo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.fghbuild.caic.ui.common.AttachMenu
 import com.fghbuild.caic.ui.login.LoginScreen
 import com.fghbuild.caic.util.ScreenshotService
@@ -105,13 +110,23 @@ fun TaskListScreen(
                     if (state.serverConfigured) {
                         ConnectionDot(connected = state.connected)
                     }
-                    TooltipBox(
-                        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
-                        tooltip = { PlainTooltip { Text("Settings") } },
-                        state = rememberTooltipState(),
-                    ) {
-                        IconButton(onClick = onNavigateToSettings) {
-                            Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    val user = state.user
+                    if (user != null) {
+                        UserAvatar(
+                            username = user.username,
+                            avatarURL = user.avatarURL,
+                            onSettings = onNavigateToSettings,
+                            onLogout = { viewModel.logout() },
+                        )
+                    } else {
+                        TooltipBox(
+                            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                            tooltip = { PlainTooltip { Text("Settings") } },
+                            state = rememberTooltipState(),
+                        ) {
+                            IconButton(onClick = onNavigateToSettings) {
+                                Icon(Icons.Default.Settings, contentDescription = "Settings")
+                            }
                         }
                     }
                 },
@@ -136,6 +151,76 @@ private fun ConnectionDot(connected: Boolean) {
             .clip(CircleShape)
             .background(color)
     )
+}
+
+@Composable
+private fun UserAvatar(
+    username: String,
+    avatarURL: String?,
+    onSettings: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var avatarBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    if (avatarURL != null) {
+        LaunchedEffect(avatarURL) {
+            avatarBitmap = withContext(Dispatchers.IO) {
+                try {
+                    val url = java.net.URL(avatarURL)
+                    val stream = url.openStream()
+                    BitmapFactory.decodeStream(stream).also { stream.close() }
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+    }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            val bmp = avatarBitmap
+            if (bmp != null) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = username,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = username.take(2).uppercase(),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text(username, fontWeight = FontWeight.SemiBold) },
+                onClick = {},
+                enabled = false,
+            )
+            DropdownMenuItem(
+                text = { Text("Settings") },
+                onClick = { expanded = false; onSettings() },
+                leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+            )
+            DropdownMenuItem(
+                text = { Text("Sign out") },
+                onClick = { expanded = false; onLogout() },
+            )
+        }
+    }
 }
 
 @Composable

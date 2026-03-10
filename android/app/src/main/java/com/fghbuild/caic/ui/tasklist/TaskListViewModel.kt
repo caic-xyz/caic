@@ -12,6 +12,7 @@ import com.caic.sdk.v1.ImageData
 import com.caic.sdk.v1.Prompt
 import com.caic.sdk.v1.Repo
 import com.caic.sdk.v1.Task
+import com.caic.sdk.v1.UserResp
 import com.caic.sdk.v1.UsageResp
 import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.data.TaskNotifier
@@ -65,6 +66,7 @@ data class TaskListState(
     val authRequired: Boolean = false,
     val authProviders: List<String> = emptyList(),
     val serverURL: String = "",
+    val user: UserResp? = null,
 )
 
 @HiltViewModel
@@ -118,6 +120,7 @@ class TaskListViewModel @Inject constructor(
             authRequired = form.authRequired,
             authProviders = form.authProviders,
             serverURL = settings.serverURL,
+            user = form.user,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskListState())
 
@@ -138,8 +141,8 @@ class TaskListViewModel @Inject constructor(
                 val config = client.getConfig()
                 if (config.authProviders?.isNotEmpty() == true) {
                     try {
-                        client.getMe()
-                        _formState.value = _formState.value.copy(authRequired = false)
+                        val me = client.getMe()
+                        _formState.value = _formState.value.copy(authRequired = false, user = me)
                     } catch (_: Exception) {
                         _formState.value = _formState.value.copy(
                             authRequired = true,
@@ -321,7 +324,7 @@ class TaskListViewModel @Inject constructor(
     fun logout() {
         viewModelScope.launch {
             settingsRepository.clearAuthToken()
-            _formState.value = _formState.value.copy(authRequired = true)
+            _formState.value = _formState.value.copy(authRequired = true, user = null)
         }
     }
 
@@ -343,5 +346,6 @@ class TaskListViewModel @Inject constructor(
         val prefModels: Map<String, String> = emptyMap(),
         val authRequired: Boolean = false,
         val authProviders: List<String> = emptyList(),
+        val user: UserResp? = null,
     )
 }

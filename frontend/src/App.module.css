@@ -1,21 +1,85 @@
 /* Styles for the App component. */
 
-.navUser {
-  font-size: 0.85rem;
-  color: var(--color-text-muted);
+.userMenu {
+  position: relative;
 }
 
-.navLogout {
-  padding: 0.2rem 0.5rem;
-  font-size: 0.8rem;
-  border: 1px solid var(--color-border-medium);
-  border-radius: var(--radius-sm);
+.avatarButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.avatarButton:hover {
+  opacity: 0.8;
+}
+
+.avatarImg {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.avatarInitials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.userDropdown {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  min-width: 10rem;
+  padding: 0.35rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+}
+
+.dropdownUser {
+  display: block;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border-light);
+  margin-bottom: 0.2rem;
+}
+
+.dropdownItem {
+  display: block;
+  width: 100%;
+  padding: 0.4rem 0.75rem;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  border: none;
   background: transparent;
   cursor: pointer;
   color: inherit;
 }
 
-.navLogout:hover {
+.dropdownItem:hover {
   background: var(--color-bg-hover);
 }
 
