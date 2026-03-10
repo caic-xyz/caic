@@ -226,6 +226,32 @@ func (c *Client) BranchCompareURL(remoteURL, branch string) string {
 	return remoteURL + "/compare/" + branch + "?expand=1"
 }
 
+// PostComment posts a comment on the given issue or pull request.
+func (c *Client) PostComment(ctx context.Context, owner, repo string, issueNumber int, body string) error {
+	payload, err := json.Marshal(struct {
+		Body string `json:"body"`
+	}{Body: body})
+	if err != nil {
+		return err
+	}
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/comments", owner, repo, issueNumber)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	c.setHeaders(req)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusCreated {
+		data, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github post comment: status %d: %s", resp.StatusCode, data)
+	}
+	return nil
+}
+
 // Name returns "GitHub".
 func (c *Client) Name() string { return "GitHub" }
 

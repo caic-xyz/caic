@@ -78,37 +78,37 @@ type AuthToken struct {
 // Config bundles environment-derived values read once at startup and threaded
 // into the server instead of calling os.Getenv at runtime.
 type Config struct {
-	// GeminiAPIKey is necessary to support Gemini Live audio.
-	GeminiAPIKey string
-	// LLMProvider is the genai provider for LLM features (title generation, commit descriptions).
+	// Directories.
+	ConfigDir string // persistent server state, e.g. ~/.config/caic
+	CacheDir  string // logs and cache files, e.g. ~/.cache/caic
+
+	// Agent backends.
+	GeminiAPIKey    string // required for Gemini Live audio
+	TailscaleAPIKey string // required for Tailscale networking inside containers
+
+	// LLM features (title generation, commit descriptions).
 	LLMProvider string
-	// LLMModel is the model for LLM features.
-	LLMModel string
-	// TailscaleAPIKey is necessary to support Tailscale networking inside the container.
-	TailscaleAPIKey string
-	// ConfigDir is the root directory for persistent server state (e.g. ~/.config/caic).
-	ConfigDir string
-	// CacheDir is the root directory for cache and log files (e.g. ~/.cache/caic).
-	CacheDir string
-	// GitHubToken is a PAT for PR creation and CI monitoring on github.com.
-	// Mutually exclusive with GitHubOAuthClientID: set one or the other, not both.
-	GitHubToken string
-	// GitLabToken is a PAT for MR creation and CI monitoring on gitlab.com.
-	// Mutually exclusive with GitLabOAuthClientID: set one or the other, not both.
-	GitLabToken string
-	// Auth config — auth is disabled when ExternalURL or all OAuth pairs are absent.
-	ExternalURL             string
-	GitHubOAuthClientID     string
+	LLMModel    string
+
+	// GitHub — PAT and OAuth are mutually exclusive; App is independent.
+	GitHubToken             string // PAT; mutually exclusive with GitHubOAuthClientID
+	GitHubOAuthClientID     string // OAuth app client ID; mutually exclusive with GitHubToken
 	GitHubOAuthClientSecret string
-	GitLabOAuthClientID     string
+	GitHubOAuthAllowedUsers string // comma-separated; required with OAuth
+	GitHubWebhookSecret     []byte // HMAC secret; enables POST /api/v1/github/webhook
+	GitHubAppID             int64  // GitHub App ID; used with GitHubAppPrivateKeyPEM
+	GitHubAppPrivateKeyPEM  []byte // RSA private key PEM (path or content)
+
+	// GitLab — PAT and OAuth are mutually exclusive.
+	GitLabToken             string // PAT; mutually exclusive with GitLabOAuthClientID
+	GitLabOAuthClientID     string // OAuth app client ID; mutually exclusive with GitLabToken
 	GitLabOAuthClientSecret string
+	GitLabOAuthAllowedUsers string // comma-separated; required with OAuth
 	GitLabURL               string // default "https://gitlab.com"
-	// GitHubAllowedUsers is a comma-separated allowlist of GitHub usernames
-	// permitted to log in. Required when GitHub OAuth is configured.
-	GitHubAllowedUsers string
-	// GitLabAllowedUsers is a comma-separated allowlist of GitLab usernames
-	// permitted to log in. Required when GitLab OAuth is configured.
-	GitLabAllowedUsers string
+
+	// ExternalURL is the public base URL (e.g. https://caic.example.com).
+	// Required for OAuth login and webhook delivery.
+	ExternalURL string
 }
 
 // Validate returns an error if the configuration is invalid.
@@ -152,11 +152,11 @@ func (c *Config) Validate() error {
 		return errors.New("GITLAB_TOKEN and GITLAB_OAUTH_CLIENT_ID are mutually exclusive: " +
 			"remove GITLAB_TOKEN when using GitLab OAuth login")
 	}
-	if c.GitHubOAuthClientID != "" && c.GitHubAllowedUsers == "" {
-		return errors.New("GITHUB_ALLOWED_USERS is required when GitHub OAuth login is configured")
+	if c.GitHubOAuthClientID != "" && c.GitHubOAuthAllowedUsers == "" {
+		return errors.New("GITHUB_OAUTH_ALLOWED_USERS is required when GitHub OAuth login is configured")
 	}
-	if c.GitLabOAuthClientID != "" && c.GitLabAllowedUsers == "" {
-		return errors.New("GITLAB_ALLOWED_USERS is required when GitLab OAuth login is configured")
+	if c.GitLabOAuthClientID != "" && c.GitLabOAuthAllowedUsers == "" {
+		return errors.New("GITLAB_OAUTH_ALLOWED_USERS is required when GitLab OAuth login is configured")
 	}
 	return nil
 }
@@ -164,28 +164,42 @@ func (c *Config) Validate() error {
 // Server is the HTTP server for the caic web UI.
 type Server struct {
 	// Immutable after construction.
-	ctx                context.Context // server-lifetime context; outlives individual HTTP requests
-	absRoot            string          // absolute path to the root repos directory
-	repos              []repoInfo
-	runners            map[string]*task.Runner // keyed by RelPath
-	mdClient           *md.Client
-	logDir             string
-	prefsDir           string               // directory for per-user preference files
-	prefsStores        sync.Map             // map[string]*preferences.Store, keyed by userID
-	authStore          *auth.Store          // nil when auth disabled
-	sessionSecret      []byte               // nil when auth disabled
-	githubOAuth        *auth.ProviderConfig // nil if not configured
-	gitlabOAuth        *auth.ProviderConfig // nil if not configured
-	githubAllowedUsers map[string]struct{}  // nil if GitHub OAuth not configured
-	gitlabAllowedUsers map[string]struct{}  // nil if GitLab OAuth not configured
-	usage              *usageFetcher        // nil if no OAuth token available
-	geminiAPIKey       string
-	githubToken        string
+
+	// Core infrastructure.
+	ctx      context.Context // server-lifetime context; outlives individual HTTP requests
+	absRoot  string          // absolute path to the root repos directory
+	repos    []repoInfo
+	runners  map[string]*task.Runner // keyed by RelPath
+	mdClient *md.Client
+	backend  *mdBackend // container backend for runner creation
+	logDir   string
+	ciCache  *cicache.Cache
+	provider genai.Provider // nil if LLM not configured
+
+	// Agent backends.
+	geminiAPIKey string
+
+	// GitHub.
+	githubToken         string
+	githubOAuth         *auth.ProviderConfig // nil if not configured
+	githubAllowedUsers  map[string]struct{}  // nil if GitHub OAuth not configured
+	githubWebhookSecret []byte               // nil when webhook not configured
+	githubApp           *github.AppClient    // nil when app not configured
+
+	// GitLab.
 	gitlabToken        string
-	ciCache            *cicache.Cache
-	provider           genai.Provider
-	backend            *mdBackend // container backend for runner creation
-	allowedHost        string     // hostname from ExternalURL; empty disables host checking
+	gitlabOAuth        *auth.ProviderConfig // nil if not configured
+	gitlabAllowedUsers map[string]struct{}  // nil if GitLab OAuth not configured
+
+	// Auth / session.
+	authStore     *auth.Store // nil when auth disabled
+	sessionSecret []byte      // nil when auth disabled
+	allowedHost   string      // hostname from ExternalURL; empty disables host checking
+	usage         *usageFetcher
+
+	// User preferences.
+	prefsDir    string   // directory for per-user preference files
+	prefsStores sync.Map // map[string]*preferences.Store, keyed by userID
 
 	// Guarded by mu.
 	mu           sync.Mutex
@@ -258,6 +272,10 @@ type taskEntry struct {
 	result      *task.Result
 	done        chan struct{}
 	cleanupOnce sync.Once // ensures exactly one cleanup runs per task
+	// Webhook callback: when set, post a comment on the originating issue after task terminates.
+	webhookInstallationID int64  // 0 when no app configured
+	webhookForgeFullName  string // "owner/repo"
+	webhookIssueNumber    int    // 0 when not a comment-triggerable event
 }
 
 // New creates a new Server. It discovers repos under rootDir, creates a Runner
@@ -369,8 +387,8 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		}
 	}
 
-	githubAllowedUsers := parseAllowedUsers(cfg.GitHubAllowedUsers)
-	gitlabAllowedUsers := parseAllowedUsers(cfg.GitLabAllowedUsers)
+	githubAllowedUsers := parseAllowedUsers(cfg.GitHubOAuthAllowedUsers)
+	gitlabAllowedUsers := parseAllowedUsers(cfg.GitLabOAuthAllowedUsers)
 
 	// Migrate legacy preferences.json to preferences/default.json on first startup in no-auth mode.
 	prefsDir := filepath.Join(cfg.ConfigDir, "preferences")
@@ -422,6 +440,17 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		repoCIStatus:       make(map[string]repoCIState),
 		changed:            make(chan struct{}),
 	}
+	if len(cfg.GitHubWebhookSecret) > 0 {
+		s.githubWebhookSecret = cfg.GitHubWebhookSecret
+	}
+	if cfg.GitHubAppID != 0 && len(cfg.GitHubAppPrivateKeyPEM) > 0 {
+		app, err := github.NewAppClient(cfg.GitHubAppID, cfg.GitHubAppPrivateKeyPEM)
+		if err != nil {
+			return nil, fmt.Errorf("github app: %w", err)
+		}
+		s.githubApp = app
+	}
+
 	if cfg.LLMProvider != "" {
 		if c, ok := providers.All[cfg.LLMProvider]; !ok || c.Factory == nil {
 			slog.Warn("unknown LLM provider for title generation", "prov", cfg.LLMProvider)
@@ -533,6 +562,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	authMux.HandleFunc("GET /api/v1/auth/gitlab/callback", s.handleAuthCallback("gitlab"))
 	authMux.HandleFunc("GET /api/v1/auth/me", s.handleGetMe)
 	authMux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
+	authMux.HandleFunc("POST /api/v1/github/webhook", s.handleGitHubWebhook)
 
 	// Protected routes.
 	apiMux := http.NewServeMux()
@@ -1355,7 +1385,7 @@ func (s *Server) terminateTask(_ context.Context, entry *taskEntry, _ *dto.Empty
 	s.taskChanged()
 	s.mu.Unlock()
 	runner := s.runners[entry.task.Repo]
-	go s.cleanupTask(entry, runner, task.StateTerminated)
+	go s.cleanupTask(entry, runner, task.StateTerminated) //nolint:contextcheck // cleanupTask intentionally uses server context
 	return &v1.StatusResp{Status: "terminating"}, nil
 }
 
@@ -2258,6 +2288,10 @@ func (s *Server) cleanupTask(entry *taskEntry, runner *task.Runner, reason task.
 		s.taskChanged()
 		s.mu.Unlock()
 		close(entry.done)
+		// Post a comment back to GitHub if this was a webhook-triggered task.
+		if entry.webhookIssueNumber > 0 && entry.webhookForgeFullName != "" {
+			go s.postWebhookComment(entry)
+		}
 	})
 }
 
@@ -2319,7 +2353,7 @@ func (s *Server) watchContainerEvents(ctx context.Context) {
 				}
 			}
 			for ev := range ch {
-				s.handleContainerDeath(ev.Name)
+				s.handleContainerDeath(ev.Name) //nolint:contextcheck // handleContainerDeath intentionally uses server context
 			}
 			// Stream ended. Reconnect unless context cancelled.
 			if ctx.Err() != nil {

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,21 +80,35 @@ Flags:
 		_, _ = fmt.Fprintf(w, `
 Environment variables (flags take precedence when set):
 
-  CAIC_HTTP                 HTTP listen address (e.g. :8080)
-  CAIC_ROOT                 Parent directory containing git repos
-  CAIC_LOG_LEVEL            Log level: debug, info, warn, error (default: info)
-  CAIC_LLM_PROVIDER         AI provider for LLM features (title generation, commit descriptions)
-  CAIC_LLM_MODEL            Model name for LLM features
-  CAIC_EXTERNAL_URL         External base URL (e.g. https://caic.example.com); required for OAuth
-  GEMINI_API_KEY            Gemini API key for the Gemini agent backend
-  TAILSCALE_API_KEY         Tailscale API key for Tailscale integration
-  GITHUB_OAUTH_CLIENT_ID    GitHub OAuth app client ID — enables login; user token used for PR/CI (mutually exclusive with GITHUB_TOKEN)
-  GITHUB_OAUTH_CLIENT_SECRET GitHub OAuth app client secret
-  GITLAB_OAUTH_CLIENT_ID    GitLab OAuth app client ID — enables login; user token used for MR/CI (mutually exclusive with GITLAB_TOKEN)
-  GITLAB_OAUTH_CLIENT_SECRET GitLab OAuth app client secret
-  GITHUB_TOKEN              GitHub PAT for PR/CI in headless deployments (mutually exclusive with GITHUB_OAUTH_CLIENT_ID)
-  GITLAB_TOKEN              GitLab PAT for MR/CI in headless deployments (mutually exclusive with GITLAB_OAUTH_CLIENT_ID)
-  GITLAB_URL                GitLab instance URL (default: https://gitlab.com)
+  Core:
+    CAIC_HTTP                  HTTP listen address (e.g. :8080)
+    CAIC_ROOT                  Parent directory containing git repos
+    CAIC_LOG_LEVEL             Log level: debug, info, warn, error (default: info)
+    CAIC_EXTERNAL_URL          Public base URL; required for OAuth login and webhooks
+
+  LLM features (title generation, commit descriptions):
+    CAIC_LLM_PROVIDER          Provider: anthropic, gemini, openaichat, etc.
+    CAIC_LLM_MODEL             Model name (e.g. claude-haiku-4-5-20251001)
+
+  GitHub — choose one of PAT or OAuth; GitHub App is independent:
+    GITHUB_TOKEN               PAT for PR/CI; headless/single-user (mutually exclusive with GITHUB_OAUTH_CLIENT_ID)
+    GITHUB_OAUTH_CLIENT_ID     OAuth app client ID; multi-user login (mutually exclusive with GITHUB_TOKEN)
+    GITHUB_OAUTH_CLIENT_SECRET OAuth app client secret
+    GITHUB_OAUTH_ALLOWED_USERS       Comma-separated GitHub usernames allowed to log in (required with OAuth)
+    GITHUB_APP_ID              GitHub App ID for org-wide webhooks and installation tokens
+    GITHUB_APP_PRIVATE_KEY_PEM Path to RSA private key PEM file, or the PEM content directly
+    GITHUB_WEBHOOK_SECRET      HMAC-SHA256 secret; enables POST /api/v1/github/webhook
+
+  GitLab — choose one of PAT or OAuth:
+    GITLAB_TOKEN               PAT for MR/CI; headless/single-user (mutually exclusive with GITLAB_OAUTH_CLIENT_ID)
+    GITLAB_OAUTH_CLIENT_ID     OAuth app client ID; multi-user login (mutually exclusive with GITLAB_TOKEN)
+    GITLAB_OAUTH_CLIENT_SECRET OAuth app client secret
+    GITLAB_OAUTH_ALLOWED_USERS       Comma-separated GitLab usernames allowed to log in (required with OAuth)
+    GITLAB_URL                 GitLab instance URL (default: https://gitlab.com)
+
+  Agents:
+    GEMINI_API_KEY             Gemini API key for the Gemini Live voice agent
+    TAILSCALE_API_KEY          Tailscale API key for Tailscale ephemeral node
 
 See contrib/caic.env for a template with all variables and documentation.
 `)
@@ -126,8 +141,11 @@ See contrib/caic.env for a template with all variables and documentation.
 		GitLabOAuthClientID:     os.Getenv("GITLAB_OAUTH_CLIENT_ID"),
 		GitLabOAuthClientSecret: os.Getenv("GITLAB_OAUTH_CLIENT_SECRET"),
 		GitLabURL:               os.Getenv("GITLAB_URL"),
-		GitHubAllowedUsers:      os.Getenv("GITHUB_ALLOWED_USERS"),
-		GitLabAllowedUsers:      os.Getenv("GITLAB_ALLOWED_USERS"),
+		GitHubOAuthAllowedUsers: os.Getenv("GITHUB_OAUTH_ALLOWED_USERS"),
+		GitLabOAuthAllowedUsers: os.Getenv("GITLAB_OAUTH_ALLOWED_USERS"),
+		GitHubWebhookSecret:     []byte(os.Getenv("GITHUB_WEBHOOK_SECRET")),
+		GitHubAppID:             parseInt64(os.Getenv("GITHUB_APP_ID")),
+		GitHubAppPrivateKeyPEM:  []byte(readFileOrEnv("GITHUB_APP_PRIVATE_KEY_PEM")),
 	}
 
 	if key := cfg.GeminiAPIKey; key != "" {
@@ -432,6 +450,33 @@ func configDir() string {
 		base = filepath.Join(home, ".config")
 	}
 	return filepath.Join(base, "caic")
+}
+
+func parseInt64(s string) int64 {
+	if s == "" {
+		return 0
+	}
+	id, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		slog.Warn("invalid int64 env value", "val", s) //nolint:gosec // G706: config value, not user input
+		return 0
+	}
+	return id
+}
+
+// readFileOrEnv returns the contents of the file at path if it exists,
+// otherwise returns path itself (allowing the env var to hold the PEM directly).
+func readFileOrEnv(envVar string) string {
+	v := os.Getenv(envVar)
+	if v == "" {
+		return ""
+	}
+	data, err := os.ReadFile(v) //nolint:gosec // path from trusted env var
+	if err != nil {
+		// Not a file path — treat the env var value as the PEM content directly.
+		return v
+	}
+	return string(data)
 }
 
 // watchExecutable watches the current executable for modifications and calls

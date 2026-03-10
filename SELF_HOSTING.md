@@ -27,21 +27,24 @@ All configuration is via environment variables. Flags take precedence when set. 
 
 | Variable | Flag | Required | Default | Description |
 |---|---|---|---|---|
-| `CAIC_HTTP` | `-http` | Yes | — | HTTP listen address (e.g. `:8080`). Port-only addresses listen on localhost. Use `0.0.0.0:8080` to listen on all interfaces. |
-| `CAIC_ROOT` | `-root` | Yes | — | Parent directory containing your git repositories. Each subdirectory is a repo caic can manage. |
+| `CAIC_HTTP` | `-http` | Yes | — | HTTP listen address (e.g. `:8080`). Port-only addresses listen on localhost. Use `0.0.0.0:8080` to listen on all interfaces. (required) |
+| `CAIC_ROOT` | `-root` | Yes | — | Parent directory containing your git repositories. Each subdirectory is a repo caic can manage. (required) |
 | `CAIC_LOG_LEVEL` | `-log-level` | No | `info` | Log verbosity: `debug`, `info`, `warn`, `error`. |
 | `CAIC_LLM_PROVIDER` | — | No | — | AI provider for LLM features (title generation, commit descriptions). E.g. `anthropic`, `gemini`, `openaichat`. See [genai providers](https://pkg.go.dev/github.com/maruel/genai/providers). |
 | `CAIC_LLM_MODEL` | — | No | — | Model name for LLM features (e.g. `claude-haiku-4-5-20251001`). |
-| `GEMINI_API_KEY` | — | No | — | Gemini API key for the Gemini agent backend. |
-| `GITHUB_TOKEN` | — | No | — | GitHub PAT for PR creation and CI monitoring. Required for github.com repos when GitHub OAuth login is **not** configured. Mutually exclusive with `GITHUB_OAUTH_CLIENT_ID`. [Create a fine-grained token](https://github.com/settings/personal-access-tokens/new?name=caic&description=caic+PR+creation+and+CI+monitoring&pull_requests=write&checks=read&expires_in=365) with `pull_requests: write` and `checks: read`. |
-| `GITLAB_TOKEN` | — | No | — | GitLab PAT for MR creation and CI monitoring. Required for gitlab.com repos when GitLab OAuth login is **not** configured. Mutually exclusive with `GITLAB_OAUTH_CLIENT_ID`. [Create a token](https://gitlab.com/-/user_settings/personal_access_tokens?name=caic&scopes=api) with `api` scope. |
-| `TAILSCALE_API_KEY` | — | No | — | Tailscale API key for Tailscale integration. Get one at [login.tailscale.com/admin/settings/keys](https://login.tailscale.com/admin/settings/keys). |
+| `GEMINI_API_KEY` | — | No | — | Gemini API key for the Gemini Live voice agent. |
+| `TAILSCALE_API_KEY` | — | No | — | Tailscale API key for Tailscale ephemeral node. Get one at [login.tailscale.com/admin/settings/keys](https://login.tailscale.com/admin/settings/keys). |
 
 ## Running
 
 ```bash
+# Via flags:
 caic -http :8080 -root ~/src
 
+# Via environment variables:
+CAIC_HTTP=:8080 CAIC_ROOT=~/src caic
+
+# Get help:
 caic -help
 ```
 
@@ -67,42 +70,39 @@ journalctl --user -u caic -f
 When caic is reinstalled (binary replaced), the service detects the change and
 restarts automatically.
 
-## Forge integration: PAT vs OAuth
+## GitHub integration modes
 
-caic can create PRs/MRs and monitor CI on github.com and gitlab.com. There are
-two ways to provide credentials — **PAT mode** and **OAuth mode**. They are
-mutually exclusive per provider. The server refuses to start if both are set
-for the same provider.
+Without any GitHub configuration, caic works for local repos but PR creation, CI monitoring, and webhook features are unavailable.
 
-### PAT mode (headless / single-user)
+caic supports three GitHub integration modes. They cover different use cases
+and are not mutually exclusive — PAT or OAuth handles forge operations (PR
+creation, CI monitoring), while GitHub App handles webhook delivery and
+automatic task creation independently.
 
-Set a personal access token. No external URL or HTTPS is required.
+| | **GitHub PAT** | **GitHub OAuth** | **GitHub App** |
+|---|---|---|---|
+| **Use case** | Single-user | Multi-user with login | Org-wide automation |
+| **Setup complexity** | Minimal — one token | Medium — OAuth app + HTTPS URL | Medium — app registration + HTTPS URL |
+| **User authentication** | ❌ — anyone with access to caic can use it | ✅ Users log in via GitHub; access controlled by allowlist | ❌ — app acts on behalf of itself |
+| **Identity used for actions** | ✅ PAT for all PR/CI operations | ✅ Each user's own token for PR/CI | ✅ Installation token for PR/CI |
+| **Webhook** | ❌ | ❌ | ✅ Receives events from GitHub automatically for fast response |
+| **Polling** | ✅ — slower reaction | ✅ — slower reaction | ❌ |
+| **Automatic task creation** | ❌ | ❌ | ✅ Issues, PRs, comments trigger tasks |
+| **Post-completion comments** | ✅ Via `GITHUB_TOKEN` (same PAT) | ❌ | ✅ Via installation token |
+| **Token scope** | Server-wide single token | Per-user, per-session | Per-installation |
+| **Env vars** | `GITHUB_TOKEN` | `CAIC_EXTERNAL_URL` + `GITHUB_OAUTH_CLIENT_ID` + `GITHUB_OAUTH_CLIENT_SECRET` + `GITHUB_OAUTH_ALLOWED_USERS` | `CAIC_EXTERNAL_URL` + `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY_PEM` + `GITHUB_WEBHOOK_SECRET` |
+| **Mutually exclusive with** | GitHub OAuth | GitHub PAT | Neither — combines with PAT or OAuth |
+| **Token creation** | [Fine-grained token](https://github.com/settings/personal-access-tokens/new?name=my+caic+instance&description=caic+PR+creation+and+CI+monitoring&pull_requests=write&checks=read&expires_in=365) (`pull_requests: write`, `checks: read`) | [GitHub OAuth app](https://github.com/settings/applications/new) | [GitHub App](https://github.com/settings/apps/new?name=my+caic+instance&webhook_active=true&issues=write&pull_requests=write&checks=read&events[]=issues&events[]=pull_request&events[]=issue_comment) (generate private key from app settings) |
 
-- **GitHub**: set `GITHUB_TOKEN`. [Create a fine-grained token](https://github.com/settings/personal-access-tokens/new?name=caic&description=caic+PR+creation+and+CI+monitoring&pull_requests=write&checks=read&expires_in=365) with `pull_requests: write` and `checks: read`.
-- **GitLab**: set `GITLAB_TOKEN`. [Create a token](https://gitlab.com/-/user_settings/personal_access_tokens?name=caic&scopes=api) with `api` scope.
+PAT and OAuth are mutually exclusive per provider. GitHub App is independent
+and can be layered on top of either. The server refuses to start if both PAT
+and OAuth are set for the same provider.
 
-### OAuth mode (multi-user, requires external HTTPS URL)
+### OAuth setup
 
-Configure an OAuth app for the provider. Users log in via the browser and their
-own token is used for all forge operations — no PAT is needed or allowed.
-
-**Requires**: `CAIC_EXTERNAL_URL` set to a stable HTTPS URL that the OAuth
-provider can redirect back to. See [Serving over Tailscale](#serving-over-tailscale)
-for an easy way to get one without opening public ports.
-
-Do **not** set `GITHUB_TOKEN` when GitHub OAuth is configured, and do **not**
-set `GITLAB_TOKEN` when GitLab OAuth is configured.
-
-## OAuth Login
-
-caic supports optional OAuth 2.0 login via GitHub and/or GitLab. When OAuth is
-enabled, users must sign in before accessing the UI. Auth is disabled by
-default.
-
-A session secret is generated automatically on first startup and stored in
+When OAuth is enabled, users must sign in before accessing the UI. A session
+secret is generated automatically on first startup and stored in
 `~/.config/caic/settings.json`. No manual key management is required.
-
-### GitHub OAuth app
 
 1. Go to **Settings → Developer settings → OAuth Apps → New OAuth App**
    (or [click here](https://github.com/settings/applications/new)).
@@ -116,12 +116,71 @@ A session secret is generated automatically on first startup and stored in
    CAIC_EXTERNAL_URL=https://<your-domain>
    GITHUB_OAUTH_CLIENT_ID=<client-id>
    GITHUB_OAUTH_CLIENT_SECRET=<client-secret>
-   GITHUB_ALLOWED_USERS=alice,bob
+   GITHUB_OAUTH_ALLOWED_USERS=alice,bob
    ```
 
-Do **not** set `GITHUB_TOKEN` alongside these — the server will refuse to start.
+### GitHub App setup
 
-### GitLab OAuth app
+A GitHub App receives webhooks from all repositories in an org in real time,
+enabling automatic task creation the moment an issue is opened, a PR is
+created, or a comment mentions `@caic`. It uses short-lived installation
+tokens instead of a PAT. GitHub must be able to reach caic to deliver
+webhooks — see [Exposure options](#exposure-options).
+
+Once configured, caic creates tasks automatically for:
+
+| Event | Condition | Prompt sent to agent |
+|---|---|---|
+| Issue opened | Issue has the `caic` label | Fix the linked issue |
+| PR opened or reopened | Any PR targeting the default branch | Review/fix the PR |
+| Comment created | Comment body contains `@caic` | Act on the comment |
+
+When the task completes, caic posts a comment on the originating issue or PR.
+
+1. Go to **Settings → Developer settings → GitHub Apps → New GitHub App**
+   (or your org's equivalent).
+2. Fill in:
+   - **GitHub App name**: `caic`
+   - **Homepage URL**: your caic URL
+   - **Webhook URL**: `https://<your-domain>/api/v1/github/webhook`
+   - **Webhook secret**: a random string (same value as `GITHUB_WEBHOOK_SECRET`)
+   - **Permissions**: Issues (read/write), Pull requests (read/write), Checks (read)
+   - **Subscribe to events**: Issues, Pull requests, Issue comments
+3. Click **Create GitHub App**, then **Generate a private key** (downloads a `.pem` file).
+4. Note the **App ID** shown on the app's settings page.
+5. Install the app on your org or specific repositories.
+6. Set environment variables:
+   ```
+   GITHUB_WEBHOOK_SECRET=<webhook-secret>
+   GITHUB_APP_ID=<app-id>
+   GITHUB_APP_PRIVATE_KEY_PEM=/path/to/private-key.pem
+   ```
+   Or set `GITHUB_APP_PRIVATE_KEY_PEM` to the PEM content directly.
+
+## GitLab integration modes
+
+caic supports two GitLab integration modes. GitLab does not have an equivalent
+to GitHub App for webhook delivery.
+
+| | **GitLab PAT** | **GitLab OAuth** |
+|---|---|---|
+| **Use case** | Single-user | Multi-user with login |
+| **Setup complexity** | Minimal — one token | Medium — OAuth app + HTTPS URL |
+| **User authentication** | ❌ — anyone with access to caic can use it | ✅ — Users log in via GitLab; access controlled by allowlist |
+| **Identity used for actions** | ✅ PAT for all MR/CI operations | ✅ Each user's own token for MR/CI |
+| **Polling** | ✅ | ✅ |
+| **Token scope** | Server-wide single token | Per-user, per-session |
+| **Env vars** | `GITLAB_TOKEN` | `CAIC_EXTERNAL_URL` + `GITLAB_OAUTH_CLIENT_ID` + `GITLAB_OAUTH_CLIENT_SECRET` + `GITLAB_OAUTH_ALLOWED_USERS` |
+| **Mutually exclusive with** | GitLab OAuth | GitLab PAT |
+| **Token creation** | [Personal access token](https://gitlab.com/-/user_settings/personal_access_tokens?name=my+caic+instance&scopes=api) (`api` scope) | [GitLab OAuth app](https://gitlab.com/-/user_settings/applications) |
+
+PAT and OAuth are mutually exclusive. The server refuses to start if both are set.
+
+### OAuth setup
+
+When OAuth is enabled, users must sign in before accessing the UI. A session
+secret is generated automatically on first startup and stored in
+`~/.config/caic/settings.json`. No manual key management is required.
 
 **gitlab.com:**
 
@@ -136,10 +195,8 @@ Do **not** set `GITHUB_TOKEN` alongside these — the server will refuse to star
    CAIC_EXTERNAL_URL=https://<your-domain>
    GITLAB_OAUTH_CLIENT_ID=<application-id>
    GITLAB_OAUTH_CLIENT_SECRET=<secret>
-   GITLAB_ALLOWED_USERS=alice,bob
+   GITLAB_OAUTH_ALLOWED_USERS=alice,bob
    ```
-
-Do **not** set `GITLAB_TOKEN` alongside these — the server will refuse to start.
 
 **Self-hosted GitLab instance:**
 
@@ -148,33 +205,33 @@ Follow the same steps on your instance, then also set:
 GITLAB_URL=https://<your-gitlab-instance>
 ```
 
-### Using both providers
+## Exposure options
 
-Set variables for both GitHub and GitLab — caic will show a login button for
-each configured provider.
+OAuth login and webhooks require `CAIC_EXTERNAL_URL` to be set. Webhooks
+additionally require GitHub to reach caic from the internet. OAuth login only
+requires that users' browsers can reach caic, so a tailnet URL is sufficient.
 
-### Environment variable reference
+**Public HTTPS endpoint** — fully internet-accessible. Required for webhooks
+if not using Tailscale:
 
-| Variable | Description |
-|---|---|
-| `CAIC_EXTERNAL_URL` | Public HTTPS base URL (e.g. `https://caic.example.com`). Required to enable OAuth. |
-| `GITHUB_OAUTH_CLIENT_ID` | GitHub OAuth app client ID. Mutually exclusive with `GITHUB_TOKEN`. |
-| `GITHUB_OAUTH_CLIENT_SECRET` | GitHub OAuth app client secret. |
-| `GITLAB_OAUTH_CLIENT_ID` | GitLab OAuth app client ID. Mutually exclusive with `GITLAB_TOKEN`. |
-| `GITLAB_OAUTH_CLIENT_SECRET` | GitLab OAuth app client secret. |
-| `GITHUB_ALLOWED_USERS` | Comma-separated list of GitHub usernames allowed to log in. Required when GitHub OAuth is configured. |
-| `GITLAB_ALLOWED_USERS` | Comma-separated list of GitLab usernames allowed to log in. Required when GitLab OAuth is configured. |
-| `GITLAB_URL` | GitLab instance base URL. Default: `https://gitlab.com`. |
+```
+CAIC_EXTERNAL_URL=https://<your-domain>
+```
 
-## Serving over Tailscale
+**Tailscale Funnel** — exposes caic to the internet via Tailscale without
+opening any ports. Suitable for webhooks:
 
-Safely expose caic on your [Tailscale](https://tailscale.com/) network using
-`tailscale serve` when using single user mode, not exposed on the internet. This provides HTTPS (via Let's
-Encrypt), with the server exclusively accessible over your tailnet.
+```bash
+tailscale funnel 8080
+CAIC_EXTERNAL_URL=https://<hostname>.<tailnet>.ts.net  # confirm with: tailscale funnel status
+```
+
+**Tailscale serve** — private access over your tailnet only, not reachable
+from the internet. Sufficient for OAuth login (users on the tailnet can
+complete the OAuth flow), but not for webhooks:
 
 ```bash
 tailscale serve --bg 8080
+CAIC_EXTERNAL_URL=https://<hostname>.<tailnet>.ts.net
 ```
 
-caic is then reachable at `https://<hostname>.<tailnet>.ts.net` from any device
-on your tailnet.
