@@ -2,7 +2,14 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/cicache"
@@ -51,6 +58,13 @@ func (f *stubForge) BranchCompareURL(_, _ string) string     { return "" }
 func (f *stubForge) Name() string                            { return "stub" }
 func (f *stubForge) GetJobLog(_ context.Context, _, _ string, _ int64, _ int) (string, error) {
 	return "", nil
+}
+
+// signGitHub computes X-Hub-Signature-256 for the given body and secret.
+func signGitHub(body, secret []byte) string {
+	mac := hmac.New(sha256.New, secret)
+	mac.Write(body)
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
 func TestHandleCheckSuiteEvent(t *testing.T) {
@@ -109,6 +123,219 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 		s.mu.Unlock()
 		if got != "" {
 			t.Errorf("repoCIStatus = %q, want empty (stale event should be ignored)", got)
+		}
+	})
+}
+
+func TestHandleGitHubWebhook(t *testing.T) {
+	secret := []byte("test-secret-abc123")
+
+	t.Run("ping event returns 200", func(t *testing.T) {
+		s := newTestServer(t)
+		s.githubWebhookSecret = secret
+
+		body := []byte(`{}`)
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
+		req.Header.Set("X-GitHub-Event", "ping")
+		req.Header.Set("X-Hub-Signature-256", signGitHub(body, secret))
+
+		w := httptest.NewRecorder()
+		s.handleGitHubWebhook(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
+		}
+	})
+
+	t.Run("bad signature returns 401", func(t *testing.T) {
+		s := newTestServer(t)
+		s.githubWebhookSecret = secret
+
+		body := []byte(`{}`)
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
+		req.Header.Set("X-GitHub-Event", "ping")
+		req.Header.Set("X-Hub-Signature-256", signGitHub(body, []byte("wrong-secret")))
+
+		w := httptest.NewRecorder()
+		s.handleGitHubWebhook(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("missing signature returns 401", func(t *testing.T) {
+		s := newTestServer(t)
+		s.githubWebhookSecret = secret
+
+		body := []byte(`{}`)
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
+		req.Header.Set("X-GitHub-Event", "ping")
+		// No X-Hub-Signature-256
+
+		w := httptest.NewRecorder()
+		s.handleGitHubWebhook(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("completed check_run returns 204", func(t *testing.T) {
+		s := newTestServer(t)
+		s.githubWebhookSecret = secret
+
+		ev := githubCheckRunEvent{}
+		ev.CheckRun.Status = "completed"
+		ev.CheckRun.Conclusion = "success"
+		ev.CheckRun.HeadSHA = "abc123def456"
+		ev.Repository.FullName = "owner/repo"
+		body, _ := json.Marshal(ev)
+
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
+		req.Header.Set("X-GitHub-Event", "check_run")
+		req.Header.Set("X-Hub-Signature-256", signGitHub(body, secret))
+
+		w := httptest.NewRecorder()
+		s.handleGitHubWebhook(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
+		}
+	})
+}
+
+func TestHandleGitLabWebhook(t *testing.T) {
+	secret := []byte("gitlab-secret-xyz")
+
+	t.Run("valid pipeline event returns 204", func(t *testing.T) {
+		s := newTestServer(t)
+		s.gitlabWebhookSecret = secret
+
+		ev := gitlabPipelineEvent{}
+		ev.ObjectAttributes.SHA = "deadbeef1234"
+		ev.ObjectAttributes.Status = "success"
+		ev.Project.PathWithNamespace = "group/repo"
+		body, _ := json.Marshal(ev)
+
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/gitlab", bytes.NewReader(body))
+		req.Header.Set("X-Gitlab-Event", "Pipeline Hook")
+		req.Header.Set("X-Gitlab-Token", string(secret))
+
+		w := httptest.NewRecorder()
+		s.handleGitLabWebhook(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
+		}
+	})
+
+	t.Run("bad token returns 401", func(t *testing.T) {
+		s := newTestServer(t)
+		s.gitlabWebhookSecret = secret
+
+		body := []byte(`{}`)
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/gitlab", bytes.NewReader(body))
+		req.Header.Set("X-Gitlab-Event", "Pipeline Hook")
+		req.Header.Set("X-Gitlab-Token", "wrong-token")
+
+		w := httptest.NewRecorder()
+		s.handleGitLabWebhook(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("non-terminal status returns 204 without dispatch", func(t *testing.T) {
+		s := newTestServer(t)
+		s.gitlabWebhookSecret = secret
+
+		ev := gitlabPipelineEvent{}
+		ev.ObjectAttributes.SHA = "deadbeef1234"
+		ev.ObjectAttributes.Status = "running"
+		ev.Project.PathWithNamespace = "group/repo"
+		body, _ := json.Marshal(ev)
+
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/gitlab", bytes.NewReader(body))
+		req.Header.Set("X-Gitlab-Event", "Pipeline Hook")
+		req.Header.Set("X-Gitlab-Token", string(secret))
+
+		w := httptest.NewRecorder()
+		s.handleGitLabWebhook(w, req)
+
+		if w.Code != http.StatusNoContent {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
+		}
+	})
+
+	t.Run("oversized body returns 413", func(t *testing.T) {
+		s := newTestServer(t)
+		s.gitlabWebhookSecret = secret
+
+		body := make([]byte, maxWebhookBodyBytes+1)
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/gitlab", bytes.NewReader(body))
+		req.Header.Set("X-Gitlab-Event", "Pipeline Hook")
+		req.Header.Set("X-Gitlab-Token", string(secret))
+
+		w := httptest.NewRecorder()
+		s.handleGitLabWebhook(w, req)
+
+		if w.Code != http.StatusRequestEntityTooLarge {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
+		}
+	})
+}
+
+func TestBuildHandlerWebhookRoutes(t *testing.T) {
+	t.Run("gitlab webhook registered when secret set", func(t *testing.T) {
+		s := newTestServer(t)
+		s.gitlabWebhookSecret = []byte("secret")
+
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+
+		ev := gitlabPipelineEvent{}
+		ev.ObjectAttributes.SHA = "abc123"
+		ev.ObjectAttributes.Status = "success"
+		ev.Project.PathWithNamespace = "group/repo"
+		body, _ := json.Marshal(ev)
+
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/gitlab", bytes.NewReader(body))
+		req.Header.Set("X-Gitlab-Event", "Pipeline Hook")
+		req.Header.Set("X-Gitlab-Token", "secret")
+
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+
+		// Valid token + pipeline event → 204
+		if w.Code != http.StatusNoContent {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
+		}
+	})
+
+	t.Run("gitlab webhook not registered when secret unset", func(t *testing.T) {
+		s := newTestServer(t)
+		// gitlabWebhookSecret is nil (not configured).
+
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+
+		body := []byte(`{}`)
+		req := httptest.NewRequest(http.MethodPost, "/webhooks/gitlab", bytes.NewReader(body))
+		req.Header.Set("X-Gitlab-Event", "Pipeline Hook")
+		req.Header.Set("X-Gitlab-Token", "any-token")
+
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+
+		// Route not registered → falls through; should not return 204 as if handled.
+		if w.Code == http.StatusNoContent {
+			t.Errorf("status = %d; gitlab webhook endpoint should not be active when secret is unset", w.Code)
 		}
 	})
 }

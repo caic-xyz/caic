@@ -140,8 +140,8 @@ When the task completes, caic posts a comment on the originating issue or PR.
 2. Fill in:
    - **GitHub App name**: `caic`
    - **Homepage URL**: your caic URL
-   - **Webhook URL**: `https://<your-domain>/api/v1/github/webhook`
-   - **Webhook secret**: a random string (same value as `GITHUB_WEBHOOK_SECRET`)
+   - **Webhook URL**: `https://<your-domain>/webhooks/github`
+   - **Webhook secret**: generate with `openssl rand -hex 32`
    - **Permissions**: Issues (read/write), Pull requests (read/write), Checks (read)
    - **Subscribe to events**: Issues, Pull requests, Issue comments, Check suites
 3. Click **Create GitHub App**, then **Generate a private key** (downloads a `.pem` file).
@@ -210,6 +210,23 @@ Follow the same steps on your instance, then also set:
 ```
 GITLAB_URL=https://<your-gitlab-instance>
 ```
+
+### GitLab Webhook setup
+
+Webhooks deliver GitLab CI status in real time instead of waiting up to 30 s for the
+next poll cycle. Polling remains active as a fallback — webhooks and polling
+are complementary.
+
+1. Go to **Settings → Webhooks** on the project.
+2. Fill in:
+   - **URL**: `https://<your-domain>/webhooks/gitlab`
+   - **Secret token**: generate with `openssl rand -hex 32`
+   - **Trigger**: enable **Pipeline events**
+3. Click **Add webhook**.
+4. Set the environment variable:
+   ```
+   GITLAB_WEBHOOK_SECRET=<the secret you generated>
+   ```
 
 ## HTTPS exposure options
 

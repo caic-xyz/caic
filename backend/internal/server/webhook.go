@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,12 +13,16 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/cicache"
+	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/github"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/maruel/ksid"
 )
 
-// handleGitHubWebhook handles POST /api/v1/github/webhook.
+const maxWebhookBodyBytes = 10 << 20 // 10 MB
+
+// handleGitHubWebhook handles POST /webhooks/github.
 // It verifies the HMAC signature and dispatches on X-GitHub-Event.
 func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	if len(s.githubWebhookSecret) == 0 {
@@ -73,10 +78,154 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.handleCheckSuiteEvent(r.Context(), &ev)
+	case "check_run":
+		var ev githubCheckRunEvent
+		if err := json.Unmarshal(body, &ev); err != nil {
+			http.Error(w, "bad payload", http.StatusBadRequest)
+			return
+		}
+		if ev.CheckRun.Status == "completed" {
+			owner, repo, _ := strings.Cut(ev.Repository.FullName, "/")
+			if owner != "" && repo != "" && ev.CheckRun.HeadSHA != "" {
+				go s.webhookOnCI(s.ctx, forge.KindGitHub, owner, repo, ev.CheckRun.HeadSHA) //nolint:contextcheck // intentionally using server context; webhook dispatch must outlive request
+			}
+		}
+	case "workflow_run":
+		var ev githubWorkflowRunEvent
+		if err := json.Unmarshal(body, &ev); err != nil {
+			http.Error(w, "bad payload", http.StatusBadRequest)
+			return
+		}
+		if ev.WorkflowRun.Status == "completed" {
+			owner, repo, _ := strings.Cut(ev.Repository.FullName, "/")
+			if owner != "" && repo != "" && ev.WorkflowRun.HeadSHA != "" {
+				go s.webhookOnCI(s.ctx, forge.KindGitHub, owner, repo, ev.WorkflowRun.HeadSHA) //nolint:contextcheck // intentionally using server context; webhook dispatch must outlive request
+			}
+		}
 	default:
 		// Unknown event — silently ignore, return 200.
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleGitLabWebhook verifies the X-Gitlab-Token header and dispatches
+// Pipeline Hook events.
+func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
+	if len(s.gitlabWebhookSecret) == 0 {
+		http.Error(w, "webhooks not configured", http.StatusNotFound)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxWebhookBodyBytes+1))
+	if err != nil {
+		http.Error(w, "read body", http.StatusInternalServerError)
+		return
+	}
+	if len(body) > maxWebhookBodyBytes {
+		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	// Verify secret token using constant-time compare.
+	token := r.Header.Get("X-Gitlab-Token")
+	if subtle.ConstantTimeCompare([]byte(token), s.gitlabWebhookSecret) != 1 {
+		http.Error(w, "invalid token", http.StatusUnauthorized)
+		return
+	}
+
+	if r.Header.Get("X-Gitlab-Event") != "Pipeline Hook" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	var ev gitlabPipelineEvent
+	if err := json.Unmarshal(body, &ev); err != nil {
+		http.Error(w, "invalid payload", http.StatusBadRequest)
+		return
+	}
+
+	// Only dispatch on terminal pipeline statuses.
+	switch ev.ObjectAttributes.Status {
+	case "success", "failed", "canceled", "skipped":
+	default:
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	sha := ev.ObjectAttributes.SHA
+	owner, repo, _ := strings.Cut(ev.Project.PathWithNamespace, "/")
+	if owner != "" && repo != "" && sha != "" {
+		go s.webhookOnCI(s.ctx, forge.KindGitLab, owner, repo, sha) //nolint:contextcheck // intentionally using server context; webhook dispatch must outlive request
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// webhookOnCI handles a CI completion event from a forge webhook by fetching
+// the current check-run state and updating affected tasks and repos.
+func (s *Server) webhookOnCI(ctx context.Context, kind forge.Kind, owner, repo, sha string) {
+	f := s.forgeFor(ctx, kind)
+	if f == nil {
+		return
+	}
+
+	// Collect affected task entries and repo paths under the lock.
+	s.mu.Lock()
+	var affected []*taskEntry
+	for _, e := range s.tasks {
+		if e.ciSHA == sha {
+			snap := e.task.Snapshot()
+			if snap.ForgeOwner == owner && snap.ForgeRepo == repo {
+				affected = append(affected, e)
+			}
+		}
+	}
+	var affectedRepoPaths []string
+	for i := range s.repos { // s.repos is immutable after construction
+		info := &s.repos[i]
+		if info.ForgeOwner == owner && info.ForgeRepo == repo {
+			if s.repoCIStatus[info.RelPath].HeadSHA == sha {
+				affectedRepoPaths = append(affectedRepoPaths, info.RelPath)
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	if len(affected) == 0 && len(affectedRepoPaths) == 0 {
+		return
+	}
+
+	runs, err := f.GetCheckRuns(ctx, owner, repo, sha)
+	if err != nil {
+		slog.Warn("webhookOnCI: get check-runs", "owner", owner, "repo", repo, "sha", sha[:min(7, len(sha))], "err", err)
+		return
+	}
+	if len(runs) == 0 {
+		return
+	}
+
+	result, done := evaluateCheckRuns(owner, repo, runs)
+
+	for _, e := range affected {
+		if !done {
+			e.task.SetCIStatus(task.CIStatusPending, nil)
+			s.notifyTaskChange()
+			continue
+		}
+		if err := s.ciCache.Put(owner, repo, sha, result); err != nil {
+			slog.Warn("webhookOnCI: cache put", "err", err)
+		}
+		s.applyMonitorCIResult(ctx, e, f, owner, repo, sha, result)
+	}
+
+	for _, relPath := range affectedRepoPaths {
+		if !done {
+			s.setRepoCIStatus(relPath, sha, cicache.Result{Status: cicache.StatusPending})
+			continue
+		}
+		if err := s.ciCache.Put(owner, repo, sha, result); err != nil {
+			slog.Warn("webhookOnCI: cache put", "err", err)
+		}
+		s.setRepoCIStatus(relPath, sha, result)
+	}
 }
 
 // handleIssuesEvent creates a task when a labeled issue is opened.
@@ -215,7 +364,7 @@ func (s *Server) handleCheckSuiteEvent(ctx context.Context, ev *github.CheckSuit
 		case err != nil:
 			slog.Warn("handleCheckSuiteEvent: get HEAD SHA", "repo", repo.RelPath, "err", err)
 		case headSHA == sha:
-			s.setRepoCIStatus(repo.RelPath, result)
+			s.setRepoCIStatus(repo.RelPath, sha, result)
 		default:
 			slog.Debug("handleCheckSuiteEvent: ignoring stale check suite", "sha", sha, "head", headSHA)
 		}

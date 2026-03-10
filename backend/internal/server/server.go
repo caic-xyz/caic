@@ -66,8 +66,9 @@ type githubAppClient interface {
 
 // repoCIState holds the live default-branch CI status for one repo.
 type repoCIState struct {
-	Status cicache.Status
-	Checks []v1.ForgeCheck
+	Status  cicache.Status
+	Checks  []v1.ForgeCheck
+	HeadSHA string // default branch HEAD SHA when last updated; used for webhook dispatch
 }
 
 // CreateAuthTokenConfig is the request for POST /v1alpha/auth_tokens.
@@ -104,7 +105,7 @@ type Config struct {
 	GitHubOAuthClientID     string // OAuth app client ID; mutually exclusive with GitHubToken
 	GitHubOAuthClientSecret string
 	GitHubOAuthAllowedUsers string // comma-separated; required with OAuth
-	GitHubWebhookSecret     []byte // HMAC secret; enables POST /api/v1/github/webhook
+	GitHubWebhookSecret     []byte // HMAC secret; enables POST /webhooks/github
 	GitHubAppID             int64  // GitHub App ID; used with GitHubAppPrivateKeyPEM
 	GitHubAppPrivateKeyPEM  []byte // RSA private key PEM (path or content)
 	GitHubAppAllowedOwners  string // comma-separated; if set, reject installs from other owners
@@ -115,6 +116,7 @@ type Config struct {
 	GitLabOAuthClientSecret string
 	GitLabOAuthAllowedUsers string // comma-separated; required with OAuth
 	GitLabURL               string // default "https://gitlab.com"
+	GitLabWebhookSecret     []byte // X-Gitlab-Token secret; enables POST /webhooks/gitlab
 
 	// ExternalURL is the public base URL (e.g. https://caic.example.com).
 	// Required for OAuth login and webhook delivery.
@@ -198,9 +200,10 @@ type Server struct {
 	githubAppAllowedOwners map[string]struct{}  // nil = allow all; rejects installs from other owners
 
 	// GitLab.
-	gitlabToken        string
-	gitlabOAuth        *auth.ProviderConfig // nil if not configured
-	gitlabAllowedUsers map[string]struct{}  // nil if GitLab OAuth not configured
+	gitlabToken         string
+	gitlabWebhookSecret []byte               // nil when GitLab webhook not configured
+	gitlabOAuth         *auth.ProviderConfig // nil if not configured
+	gitlabAllowedUsers  map[string]struct{}  // nil if GitLab OAuth not configured
 
 	// Auth / session.
 	authStore     *auth.Store // nil when auth disabled
@@ -456,9 +459,8 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		changed:             make(chan struct{}),
 		githubInstallations: make(map[string]int64),
 	}
-	if len(cfg.GitHubWebhookSecret) > 0 {
-		s.githubWebhookSecret = cfg.GitHubWebhookSecret
-	}
+	s.githubWebhookSecret = cfg.GitHubWebhookSecret
+	s.gitlabWebhookSecret = cfg.GitLabWebhookSecret
 	if cfg.GitHubAppID != 0 && len(cfg.GitHubAppPrivateKeyPEM) > 0 {
 		app, err := github.NewAppClient(cfg.GitHubAppID, cfg.GitHubAppPrivateKeyPEM)
 		if err != nil {
@@ -615,7 +617,8 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/auth/", authMux)
 	mux.HandleFunc("GET /api/v1/server/config", handle(s.getConfig))
-	mux.HandleFunc("POST /api/v1/github/webhook", s.handleGitHubWebhook)
+	mux.HandleFunc("POST /webhooks/github", s.handleGitHubWebhook)
+	mux.HandleFunc("POST /webhooks/gitlab", s.handleGitLabWebhook)
 	mux.Handle("/api/v1/", protectedAPI)
 
 	// Serve embedded frontend with SPA fallback and precompressed variants.
@@ -1677,7 +1680,7 @@ func (s *Server) pollRepoCIOnce(ctx context.Context, info repoInfo, f forge.Forg
 	}
 	// Cache hit: use stored terminal result directly.
 	if cached, ok := s.ciCache.Get(info.ForgeOwner, info.ForgeRepo, sha); ok {
-		s.setRepoCIStatus(info.RelPath, cached)
+		s.setRepoCIStatus(info.RelPath, sha, cached)
 		return
 	}
 	// Fetch check-runs for the new SHA.
@@ -1694,13 +1697,13 @@ func (s *Server) pollRepoCIOnce(ctx context.Context, info repoInfo, f forge.Forg
 	result, done := evaluateCheckRuns(info.ForgeOwner, info.ForgeRepo, runs)
 	if !done {
 		// Still pending — store pending status without caching.
-		s.setRepoCIStatus(info.RelPath, cicache.Result{Status: cicache.StatusPending})
+		s.setRepoCIStatus(info.RelPath, sha, cicache.Result{Status: cicache.StatusPending})
 		return
 	}
 	if err := s.ciCache.Put(info.ForgeOwner, info.ForgeRepo, sha, result); err != nil {
 		slog.Warn("pollRepoCIOnce: cache put", "repo", info.RelPath, "err", err)
 	}
-	s.setRepoCIStatus(info.RelPath, result)
+	s.setRepoCIStatus(info.RelPath, sha, result)
 }
 
 // pollCIForActiveRepos checks the default branch CI status for all repos that
@@ -1727,12 +1730,12 @@ func (s *Server) pollCIForActiveRepos(ctx context.Context) {
 
 // setRepoCIStatus updates the in-memory CI state for a repo and notifies
 // SSE subscribers if the status changed.
-func (s *Server) setRepoCIStatus(relPath string, result cicache.Result) {
+func (s *Server) setRepoCIStatus(relPath, sha string, result cicache.Result) {
 	checks := make([]v1.ForgeCheck, len(result.Checks))
 	for i, c := range result.Checks {
 		checks[i] = v1.ForgeCheck{Name: c.Name, Owner: c.Owner, Repo: c.Repo, RunID: c.RunID, JobID: c.JobID, Conclusion: v1.CheckConclusion(c.Conclusion)}
 	}
-	next := repoCIState{Status: result.Status, Checks: checks}
+	next := repoCIState{Status: result.Status, Checks: checks, HeadSHA: sha}
 	s.mu.Lock()
 	prev := s.repoCIStatus[relPath]
 	changed := prev.Status != next.Status

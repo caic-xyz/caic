@@ -98,7 +98,7 @@ Environment variables (flags take precedence when set):
     GITHUB_APP_ID               GitHub App ID for org-wide webhooks and installation tokens
     GITHUB_APP_PRIVATE_KEY_PEM  Path to RSA private key PEM file, or the PEM content directly
     GITHUB_APP_ALLOWED_OWNERS   Comma-separated owners/orgs allowed to install the app; rejects others
-    GITHUB_WEBHOOK_SECRET       HMAC-SHA256 secret; enables POST /api/v1/github/webhook
+    GITHUB_WEBHOOK_SECRET       HMAC-SHA256 secret; enables POST /webhooks/github
 
   GitLab — choose one of PAT or OAuth:
     GITLAB_TOKEN                PAT for MR/CI; headless/single-user (mutually exclusive with GITLAB_OAUTH_CLIENT_ID)
@@ -106,6 +106,7 @@ Environment variables (flags take precedence when set):
     GITLAB_OAUTH_CLIENT_SECRET  OAuth app client secret
     GITLAB_OAUTH_ALLOWED_USERS  Comma-separated GitLab usernames allowed to log in (required with OAuth)
     GITLAB_URL                  GitLab instance URL (default: https://gitlab.com)
+    GITLAB_WEBHOOK_SECRET       Shared secret; enables POST /webhooks/gitlab
 
   Agents:
     GEMINI_API_KEY              Gemini API key for the Gemini Live voice agent
@@ -148,6 +149,7 @@ See contrib/caic.env for a template with all variables and documentation.
 		GitHubAppID:             parseInt64(os.Getenv("GITHUB_APP_ID")),
 		GitHubAppPrivateKeyPEM:  []byte(readFileOrEnv("GITHUB_APP_PRIVATE_KEY_PEM")),
 		GitHubAppAllowedOwners:  os.Getenv("GITHUB_APP_ALLOWED_OWNERS"),
+		GitLabWebhookSecret:     []byte(os.Getenv("GITLAB_WEBHOOK_SECRET")),
 	}
 
 	if key := cfg.GeminiAPIKey; key != "" {
