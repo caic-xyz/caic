@@ -110,6 +110,18 @@ type IssueCommentEvent struct {
 	Installation WebhookInstallation `json:"installation"`
 }
 
+// InstallationEvent is the payload for X-GitHub-Event: installation.
+type InstallationEvent struct {
+	Action       string `json:"action"` // "created", "deleted", "suspend", "unsuspend"
+	Installation struct {
+		ID      int64 `json:"id"`
+		Account struct {
+			Login string `json:"login"`
+			Type  string `json:"type"` // "User" or "Organization"
+		} `json:"account"`
+	} `json:"installation"`
+}
+
 // CheckSuiteEvent is the payload for X-GitHub-Event: check_suite.
 type CheckSuiteEvent struct {
 	Action     string `json:"action"`

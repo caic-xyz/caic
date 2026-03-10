@@ -90,7 +90,7 @@ automatic task creation independently.
 | **Automatic task creation** | ❌ | ❌ | ✅ Issues, PRs, comments trigger tasks |
 | **Post-completion comments** | ✅ Via `GITHUB_TOKEN` (same PAT) | ❌ | ✅ Via installation token |
 | **Token scope** | Server-wide single token | Per-user, per-session | Per-installation |
-| **Env vars** | `GITHUB_TOKEN` | `CAIC_EXTERNAL_URL` + `GITHUB_OAUTH_CLIENT_ID` + `GITHUB_OAUTH_CLIENT_SECRET` + `GITHUB_OAUTH_ALLOWED_USERS` | `CAIC_EXTERNAL_URL` + `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY_PEM` + `GITHUB_WEBHOOK_SECRET` |
+| **Env vars** | `GITHUB_TOKEN` | `CAIC_EXTERNAL_URL` + `GITHUB_OAUTH_CLIENT_ID` + `GITHUB_OAUTH_CLIENT_SECRET` + `GITHUB_OAUTH_ALLOWED_USERS` | `CAIC_EXTERNAL_URL` + `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY_PEM` + `GITHUB_WEBHOOK_SECRET` + `GITHUB_APP_ALLOWED_OWNERS` (optional) |
 | **Mutually exclusive with** | GitHub OAuth | GitHub PAT | Neither — combines with PAT or OAuth |
 | **Token creation** | [Fine-grained token](https://github.com/settings/personal-access-tokens/new?name=my+caic+instance&description=caic+PR+creation+and+CI+monitoring&pull_requests=write&checks=read&expires_in=365) (`pull_requests: write`, `checks: read`) | [GitHub OAuth app](https://github.com/settings/applications/new) | [GitHub App](https://github.com/settings/apps/new?name=my+caic+instance&webhook_active=true&issues=write&pull_requests=write&checks=read&events[]=issues&events[]=pull_request&events[]=issue_comment&events[]=check_suite) (generate private key from app settings) |
 
@@ -148,14 +148,22 @@ When the task completes, caic posts a comment on the originating issue or PR.
    - **Subscribe to events**: Issues, Pull requests, Issue comments, Check suites
 3. Click **Create GitHub App**, then **Generate a private key** (downloads a `.pem` file).
 4. Note the **App ID** shown on the app's settings page.
-5. Install the app on your org or specific repositories.
-6. Set environment variables:
+5. To install the app on an organization (including ones you own or admin),
+   the app must be **public**. On the app's settings page scroll to the bottom,
+   click **Make public**, and confirm. Private apps can only be installed on the
+   account that created them.
+6. Install the app on your org or specific repositories.
+7. Set environment variables:
    ```
    GITHUB_WEBHOOK_SECRET=<webhook-secret>
    GITHUB_APP_ID=<app-id>
    GITHUB_APP_PRIVATE_KEY_PEM=/path/to/private-key.pem
    ```
    Or set `GITHUB_APP_PRIVATE_KEY_PEM` to the PEM content directly.
+   Optionally, restrict which owners/orgs can install the app — installs from other accounts are deleted automatically:
+   ```
+   GITHUB_APP_ALLOWED_OWNERS=my-org,my-username
+   ```
 
 ## GitLab integration modes
 

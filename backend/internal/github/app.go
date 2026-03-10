@@ -150,6 +150,33 @@ func (a *AppClient) InstallationToken(ctx context.Context, installationID int64)
 	return tokenResp.Token, nil
 }
 
+// DeleteInstallation removes the app installation, effectively uninstalling it.
+// Used to reject installs from non-allowlisted owners.
+func (a *AppClient) DeleteInstallation(ctx context.Context, installationID int64) error {
+	jwt, err := a.generateJWT()
+	if err != nil {
+		return err
+	}
+	url := fmt.Sprintf("https://api.github.com/app/installations/%d", installationID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, http.NoBody)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNoContent {
+		data, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github app delete installation: status %d: %s", resp.StatusCode, data)
+	}
+	return nil
+}
+
 // RepoInstallation returns the installation ID for the app on the given repository.
 // This is used to obtain an installation token when no installation ID is cached.
 func (a *AppClient) RepoInstallation(ctx context.Context, owner, repo string) (int64, error) {

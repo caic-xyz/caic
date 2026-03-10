@@ -59,6 +59,13 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.handleIssueCommentEvent(r.Context(), &ev)
+	case "installation":
+		var ev github.InstallationEvent
+		if err := json.Unmarshal(body, &ev); err != nil {
+			http.Error(w, "bad payload", http.StatusBadRequest)
+			return
+		}
+		s.handleInstallationEvent(r.Context(), &ev)
 	case "check_suite":
 		var ev github.CheckSuiteEvent
 		if err := json.Unmarshal(body, &ev); err != nil {
@@ -141,6 +148,28 @@ func (s *Server) handleIssueCommentEvent(ctx context.Context, ev *github.IssueCo
 		ev.Comment.HTMLURL,
 		ev.Comment.Body)
 	s.createWebhookTask(ctx, repo, prompt, 0, "", 0)
+}
+
+// handleInstallationEvent enforces the owner allowlist on new installs.
+// When GITHUB_APP_ALLOWED_OWNERS is set and the installing account is not in
+// the list, the installation is deleted immediately.
+func (s *Server) handleInstallationEvent(ctx context.Context, ev *github.InstallationEvent) {
+	if ev.Action != "created" {
+		return
+	}
+	login := ev.Installation.Account.Login
+	if s.githubAppAllowedOwners == nil {
+		s.storeInstallationID(login, ev.Installation.ID)
+		return
+	}
+	if _, ok := s.githubAppAllowedOwners[strings.ToLower(login)]; ok {
+		s.storeInstallationID(login, ev.Installation.ID)
+		return
+	}
+	slog.Warn("github app: rejecting installation from non-allowed owner", "owner", login, "installation_id", ev.Installation.ID)
+	if err := s.githubApp.DeleteInstallation(ctx, ev.Installation.ID); err != nil {
+		slog.Warn("github app: delete installation failed", "owner", login, "err", err)
+	}
 }
 
 // handleCheckSuiteEvent updates CI status when a check suite completes.

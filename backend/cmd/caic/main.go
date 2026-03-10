@@ -81,34 +81,35 @@ Flags:
 Environment variables (flags take precedence when set):
 
   Core:
-    CAIC_HTTP                  HTTP listen address (e.g. :8080)
-    CAIC_ROOT                  Parent directory containing git repos
-    CAIC_LOG_LEVEL             Log level: debug, info, warn, error (default: info)
-    CAIC_EXTERNAL_URL          Public base URL; required for OAuth login and webhooks
+    CAIC_HTTP                   HTTP listen address (e.g. :8080)
+    CAIC_ROOT                   Parent directory containing git repos
+    CAIC_LOG_LEVEL              Log level: debug, info, warn, error (default: info)
+    CAIC_EXTERNAL_URL           Public base URL; required for OAuth login and webhooks
 
   LLM features (title generation, commit descriptions):
-    CAIC_LLM_PROVIDER          Provider: anthropic, gemini, openaichat, etc.
-    CAIC_LLM_MODEL             Model name (e.g. claude-haiku-4-5-20251001)
+    CAIC_LLM_PROVIDER           Provider: anthropic, gemini, openaichat, etc.
+    CAIC_LLM_MODEL              Model name (e.g. claude-haiku-4-5-20251001)
 
   GitHub — choose one of PAT or OAuth; GitHub App is independent:
-    GITHUB_TOKEN               PAT for PR/CI; headless/single-user (mutually exclusive with GITHUB_OAUTH_CLIENT_ID)
-    GITHUB_OAUTH_CLIENT_ID     OAuth app client ID; multi-user login (mutually exclusive with GITHUB_TOKEN)
-    GITHUB_OAUTH_CLIENT_SECRET OAuth app client secret
-    GITHUB_OAUTH_ALLOWED_USERS       Comma-separated GitHub usernames allowed to log in (required with OAuth)
-    GITHUB_APP_ID              GitHub App ID for org-wide webhooks and installation tokens
-    GITHUB_APP_PRIVATE_KEY_PEM Path to RSA private key PEM file, or the PEM content directly
-    GITHUB_WEBHOOK_SECRET      HMAC-SHA256 secret; enables POST /api/v1/github/webhook
+    GITHUB_TOKEN                PAT for PR/CI; headless/single-user (mutually exclusive with GITHUB_OAUTH_CLIENT_ID)
+    GITHUB_OAUTH_CLIENT_ID      OAuth app client ID; multi-user login (mutually exclusive with GITHUB_TOKEN)
+    GITHUB_OAUTH_CLIENT_SECRET  OAuth app client secret
+    GITHUB_OAUTH_ALLOWED_USERS  Comma-separated GitHub usernames allowed to log in (required with OAuth)
+    GITHUB_APP_ID               GitHub App ID for org-wide webhooks and installation tokens
+    GITHUB_APP_PRIVATE_KEY_PEM  Path to RSA private key PEM file, or the PEM content directly
+    GITHUB_APP_ALLOWED_OWNERS   Comma-separated owners/orgs allowed to install the app; rejects others
+    GITHUB_WEBHOOK_SECRET       HMAC-SHA256 secret; enables POST /api/v1/github/webhook
 
   GitLab — choose one of PAT or OAuth:
-    GITLAB_TOKEN               PAT for MR/CI; headless/single-user (mutually exclusive with GITLAB_OAUTH_CLIENT_ID)
-    GITLAB_OAUTH_CLIENT_ID     OAuth app client ID; multi-user login (mutually exclusive with GITLAB_TOKEN)
-    GITLAB_OAUTH_CLIENT_SECRET OAuth app client secret
-    GITLAB_OAUTH_ALLOWED_USERS       Comma-separated GitLab usernames allowed to log in (required with OAuth)
-    GITLAB_URL                 GitLab instance URL (default: https://gitlab.com)
+    GITLAB_TOKEN                PAT for MR/CI; headless/single-user (mutually exclusive with GITLAB_OAUTH_CLIENT_ID)
+    GITLAB_OAUTH_CLIENT_ID      OAuth app client ID; multi-user login (mutually exclusive with GITLAB_TOKEN)
+    GITLAB_OAUTH_CLIENT_SECRET  OAuth app client secret
+    GITLAB_OAUTH_ALLOWED_USERS  Comma-separated GitLab usernames allowed to log in (required with OAuth)
+    GITLAB_URL                  GitLab instance URL (default: https://gitlab.com)
 
   Agents:
-    GEMINI_API_KEY             Gemini API key for the Gemini Live voice agent
-    TAILSCALE_API_KEY          Tailscale API key for Tailscale ephemeral node
+    GEMINI_API_KEY              Gemini API key for the Gemini Live voice agent
+    TAILSCALE_API_KEY           Tailscale API key for Tailscale ephemeral node
 
 See contrib/caic.env for a template with all variables and documentation.
 `)
@@ -146,6 +147,7 @@ See contrib/caic.env for a template with all variables and documentation.
 		GitHubWebhookSecret:     []byte(os.Getenv("GITHUB_WEBHOOK_SECRET")),
 		GitHubAppID:             parseInt64(os.Getenv("GITHUB_APP_ID")),
 		GitHubAppPrivateKeyPEM:  []byte(readFileOrEnv("GITHUB_APP_PRIVATE_KEY_PEM")),
+		GitHubAppAllowedOwners:  os.Getenv("GITHUB_APP_ALLOWED_OWNERS"),
 	}
 
 	if key := cfg.GeminiAPIKey; key != "" {

@@ -98,6 +98,7 @@ type Config struct {
 	GitHubWebhookSecret     []byte // HMAC secret; enables POST /api/v1/github/webhook
 	GitHubAppID             int64  // GitHub App ID; used with GitHubAppPrivateKeyPEM
 	GitHubAppPrivateKeyPEM  []byte // RSA private key PEM (path or content)
+	GitHubAppAllowedOwners  string // comma-separated; if set, reject installs from other owners
 
 	// GitLab — PAT and OAuth are mutually exclusive.
 	GitLabToken             string // PAT; mutually exclusive with GitLabOAuthClientID
@@ -180,11 +181,12 @@ type Server struct {
 	geminiAPIKey string
 
 	// GitHub.
-	githubToken         string
-	githubOAuth         *auth.ProviderConfig // nil if not configured
-	githubAllowedUsers  map[string]struct{}  // nil if GitHub OAuth not configured
-	githubWebhookSecret []byte               // nil when webhook not configured
-	githubApp           *github.AppClient    // nil when app not configured
+	githubToken            string
+	githubOAuth            *auth.ProviderConfig // nil if not configured
+	githubAllowedUsers     map[string]struct{}  // nil if GitHub OAuth not configured
+	githubWebhookSecret    []byte               // nil when webhook not configured
+	githubApp              *github.AppClient    // nil when app not configured
+	githubAppAllowedOwners map[string]struct{}  // nil = allow all; rejects installs from other owners
 
 	// GitLab.
 	gitlabToken        string
@@ -454,6 +456,9 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 			return nil, fmt.Errorf("github app: %w", err)
 		}
 		s.githubApp = app
+		if cfg.GitHubAppAllowedOwners != "" {
+			s.githubAppAllowedOwners = parseAllowedUsers(cfg.GitHubAppAllowedOwners)
+		}
 	}
 
 	if cfg.LLMProvider != "" {
