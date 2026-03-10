@@ -562,7 +562,6 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	authMux.HandleFunc("GET /api/v1/auth/gitlab/callback", s.handleAuthCallback("gitlab"))
 	authMux.HandleFunc("GET /api/v1/auth/me", s.handleGetMe)
 	authMux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
-	authMux.HandleFunc("POST /api/v1/github/webhook", s.handleGitHubWebhook)
 
 	// Protected routes.
 	apiMux := http.NewServeMux()
@@ -597,6 +596,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/auth/", authMux)
 	mux.HandleFunc("GET /api/v1/server/config", handle(s.getConfig))
+	mux.HandleFunc("POST /api/v1/github/webhook", s.handleGitHubWebhook)
 	mux.Handle("/api/v1/", protectedAPI)
 
 	// Serve embedded frontend with SPA fallback and precompressed variants.
