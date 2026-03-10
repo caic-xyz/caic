@@ -1121,6 +1121,104 @@ func TestHandleTaskRawEvents(t *testing.T) {
 	})
 }
 
+func TestConfigValidate(t *testing.T) {
+	t.Run("both empty is valid", func(t *testing.T) {
+		if err := (&Config{}).Validate(); err != nil {
+			t.Fatalf("Validate() unexpected error: %v", err)
+		}
+	})
+	t.Run("PAT only is valid", func(t *testing.T) {
+		c := &Config{GitHubToken: "ghp_abc", GitLabToken: "glpat-abc"}
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() unexpected error: %v", err)
+		}
+	})
+	t.Run("OAuth with ExternalURL is valid", func(t *testing.T) {
+		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com"}
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() unexpected error: %v", err)
+		}
+	})
+	t.Run("OAuth without ExternalURL is invalid", func(t *testing.T) {
+		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec"}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("OAuth with http ExternalURL is invalid", func(t *testing.T) {
+		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", ExternalURL: "http://caic.example.com"}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("invalid ExternalURL is invalid", func(t *testing.T) {
+		c := &Config{ExternalURL: "not a url"}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("ExternalURL with subpath is invalid", func(t *testing.T) {
+		c := &Config{ExternalURL: "https://caic.example.com/sub"}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("ExternalURL with trailing slash is valid", func(t *testing.T) {
+		c := &Config{ExternalURL: "https://caic.example.com/"}
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() unexpected error: %v", err)
+		}
+	})
+	t.Run("invalid GitLabURL is invalid", func(t *testing.T) {
+		c := &Config{GitLabURL: "not a url"}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("GitLabURL with subpath is invalid", func(t *testing.T) {
+		c := &Config{GitLabURL: "https://gitlab.example.com/sub"}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("GitHub OAuth ID without secret is invalid", func(t *testing.T) {
+		c := &Config{GitHubOAuthClientID: "id"}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("GitHub OAuth secret without ID is invalid", func(t *testing.T) {
+		c := &Config{GitHubOAuthClientSecret: "sec"}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("GitLab OAuth ID without secret is invalid", func(t *testing.T) {
+		c := &Config{GitLabOAuthClientID: "id"}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("GitLab OAuth secret without ID is invalid", func(t *testing.T) {
+		c := &Config{GitLabOAuthClientSecret: "sec"}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("GitHub PAT and OAuth together is invalid", func(t *testing.T) {
+		c := &Config{GitHubToken: "ghp_abc", GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com"}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("GitLab PAT and OAuth together is invalid", func(t *testing.T) {
+		c := &Config{GitLabToken: "glpat-abc", GitLabOAuthClientID: "id", GitLabOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com"}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+}
+
 func TestBuildHandler(t *testing.T) {
 	t.Run("auth disabled", func(t *testing.T) {
 		s := newTestServer(t)

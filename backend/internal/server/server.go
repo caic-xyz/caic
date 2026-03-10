@@ -90,11 +90,11 @@ type Config struct {
 	ConfigDir string
 	// CacheDir is the root directory for cache and log files (e.g. ~/.cache/caic).
 	CacheDir string
-	// GitHubToken is used to create pull requests and poll CI check-runs after sync
-	// for github.com repositories. Leave empty to disable.
+	// GitHubToken is a PAT for PR creation and CI monitoring on github.com.
+	// Mutually exclusive with GitHubOAuthClientID: set one or the other, not both.
 	GitHubToken string
-	// GitLabToken is used to create merge requests and poll CI pipelines after sync
-	// for gitlab.com repositories. Leave empty to disable.
+	// GitLabToken is a PAT for MR creation and CI monitoring on gitlab.com.
+	// Mutually exclusive with GitLabOAuthClientID: set one or the other, not both.
 	GitLabToken string
 	// Auth config — auth is disabled when ExternalURL or all OAuth pairs are absent.
 	ExternalURL             string
@@ -103,6 +103,50 @@ type Config struct {
 	GitLabOAuthClientID     string
 	GitLabOAuthClientSecret string
 	GitLabURL               string // default "https://gitlab.com"
+}
+
+// Validate returns an error if the configuration is invalid.
+func (c *Config) Validate() error {
+	if (c.GitHubOAuthClientID == "") != (c.GitHubOAuthClientSecret == "") {
+		return errors.New("GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET must both be set or both be unset")
+	}
+	if (c.GitLabOAuthClientID == "") != (c.GitLabOAuthClientSecret == "") {
+		return errors.New("GITLAB_OAUTH_CLIENT_ID and GITLAB_OAUTH_CLIENT_SECRET must both be set or both be unset")
+	}
+	oauthConfigured := c.GitHubOAuthClientID != "" || c.GitLabOAuthClientID != ""
+	if oauthConfigured && c.ExternalURL == "" {
+		return errors.New("CAIC_EXTERNAL_URL is required when OAuth login is configured")
+	}
+	if c.ExternalURL != "" {
+		u, err := url.Parse(c.ExternalURL)
+		if err != nil || u.Host == "" {
+			return fmt.Errorf("CAIC_EXTERNAL_URL is not a valid URL: %q", c.ExternalURL)
+		}
+		if u.Path != "" && u.Path != "/" {
+			return fmt.Errorf("CAIC_EXTERNAL_URL must not contain a path: %q", c.ExternalURL)
+		}
+		if oauthConfigured && u.Scheme != "https" {
+			return errors.New("CAIC_EXTERNAL_URL must use https:// when OAuth login is configured")
+		}
+	}
+	if c.GitLabURL != "" {
+		u, err := url.Parse(c.GitLabURL)
+		if err != nil || u.Host == "" {
+			return fmt.Errorf("GITLAB_URL is not a valid URL: %q", c.GitLabURL)
+		}
+		if u.Path != "" && u.Path != "/" {
+			return fmt.Errorf("GITLAB_URL must not contain a path: %q", c.GitLabURL)
+		}
+	}
+	if c.GitHubToken != "" && c.GitHubOAuthClientID != "" {
+		return errors.New("GITHUB_TOKEN and GITHUB_OAUTH_CLIENT_ID are mutually exclusive: " +
+			"remove GITHUB_TOKEN when using GitHub OAuth login")
+	}
+	if c.GitLabToken != "" && c.GitLabOAuthClientID != "" {
+		return errors.New("GITLAB_TOKEN and GITLAB_OAUTH_CLIENT_ID are mutually exclusive: " +
+			"remove GITLAB_TOKEN when using GitLab OAuth login")
+	}
+	return nil
 }
 
 // Server is the HTTP server for the caic web UI.
@@ -1670,11 +1714,12 @@ func (s *Server) forgeForInfo(ctx context.Context, info *repoInfo) forge.Forge {
 	return s.forgeFor(ctx, info.ForgeKind)
 }
 
-// forgeFor returns a Forge client for the given kind, using the authenticated
-// user's OAuth token if available, falling back to the global PAT.
+// forgeFor returns a Forge client for the given kind.
+// In OAuth mode the authenticated user's access token is used.
+// In PAT mode (no OAuth) the global token is used.
+// Config.Validate ensures these two modes are never mixed.
 // Returns nil if no token is available.
 func (s *Server) forgeFor(ctx context.Context, kind forge.Kind) forge.Forge {
-	// Prefer the authenticated user's access token.
 	if u, ok := auth.UserFromContext(ctx); ok && u.Provider == kind && u.AccessToken != "" {
 		switch kind {
 		case forge.KindGitHub:
@@ -1683,7 +1728,6 @@ func (s *Server) forgeFor(ctx context.Context, kind forge.Kind) forge.Forge {
 			return &gitlab.Client{Token: u.AccessToken}
 		}
 	}
-	// Fall back to global PAT.
 	switch kind {
 	case forge.KindGitHub:
 		if s.githubToken != "" {

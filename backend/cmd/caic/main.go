@@ -101,11 +101,12 @@ Environment variables (flags take precedence when set):
   CAIC_EXTERNAL_URL         External base URL (e.g. https://caic.example.com); required for OAuth
   GEMINI_API_KEY            Gemini API key for the Gemini agent backend
   TAILSCALE_API_KEY         Tailscale API key for Tailscale integration
-  GITHUB_TOKEN              GitHub personal access token for automatic PR creation and CI monitoring
-  GITHUB_OAUTH_CLIENT_ID    GitHub OAuth app client ID (enables GitHub login)
+  GITHUB_OAUTH_CLIENT_ID    GitHub OAuth app client ID — enables login; user token used for PR/CI (mutually exclusive with GITHUB_TOKEN)
   GITHUB_OAUTH_CLIENT_SECRET GitHub OAuth app client secret
-  GITLAB_OAUTH_CLIENT_ID    GitLab OAuth app client ID (enables GitLab login)
+  GITLAB_OAUTH_CLIENT_ID    GitLab OAuth app client ID — enables login; user token used for MR/CI (mutually exclusive with GITLAB_TOKEN)
   GITLAB_OAUTH_CLIENT_SECRET GitLab OAuth app client secret
+  GITHUB_TOKEN              GitHub PAT for PR/CI in headless deployments (mutually exclusive with GITHUB_OAUTH_CLIENT_ID)
+  GITLAB_TOKEN              GitLab PAT for MR/CI in headless deployments (mutually exclusive with GITLAB_OAUTH_CLIENT_ID)
   GITLAB_URL                GitLab instance URL (default: https://gitlab.com)
 
 See contrib/caic.env for a template with all variables and documentation.
@@ -133,6 +134,7 @@ See contrib/caic.env for a template with all variables and documentation.
 		ConfigDir:               configDir(),
 		CacheDir:                cacheDir(),
 		GitHubToken:             os.Getenv("GITHUB_TOKEN"),
+		GitLabToken:             os.Getenv("GITLAB_TOKEN"),
 		ExternalURL:             os.Getenv("CAIC_EXTERNAL_URL"),
 		GitHubOAuthClientID:     os.Getenv("GITHUB_OAUTH_CLIENT_ID"),
 		GitHubOAuthClientSecret: os.Getenv("GITHUB_OAUTH_CLIENT_SECRET"),
@@ -161,6 +163,9 @@ See contrib/caic.env for a template with all variables and documentation.
 	}
 	slog.Info("LLM", "provider", cfg.LLMProvider, "model", cfg.LLMModel) //nolint:gosec // G706: config values, not user input
 
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	if *fakeMode {
 		return serveFake(ctx, *addr, *root, cfg)
 	}
