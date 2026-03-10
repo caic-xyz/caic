@@ -219,27 +219,43 @@ OAuth login and webhooks require `CAIC_EXTERNAL_URL` to be set. Webhooks
 additionally require GitHub to reach caic from the internet. OAuth login only
 requires that users' browsers can reach caic, so a tailnet URL is sufficient.
 
-**Public HTTPS endpoint** — fully internet-accessible. Required for webhooks
-if not using Tailscale:
+### Public HTTPS endpoint
+
+Fully internet-accessible. Suitable for webhooks.
+
+**Caddy + DDNS (home server)** — run caic at home on a domain you own.
+[Caddy](https://caddyserver.com/) handles automatic TLS. A dynamic DNS updater
+such as [ddns-updater](https://github.com/qdm12/ddns-updater) keeps your
+domain pointed at your home IP. Forward port 443 on your router to the Caddy
+host.
+
+Minimal `Caddyfile`:
+
+```
+<your-domain> {
+    reverse_proxy localhost:8080
+}
+```
 
 ```
 CAIC_EXTERNAL_URL=https://<your-domain>
 ```
 
-**Tailscale Funnel** — exposes caic to the internet via Tailscale without
-opening any ports. Suitable for webhooks:
+### Tailscale Funnel
+
+Exposes caic to the internet via Tailscale without opening any ports. Suitable for webhooks.
 
 ```bash
 tailscale funnel 8080
 CAIC_EXTERNAL_URL=https://<hostname>.<tailnet>.ts.net  # confirm with: tailscale funnel status
 ```
 
-**Tailscale serve** — private access over your tailnet only, not reachable
-from the internet. Sufficient for OAuth login (users on the tailnet can
-complete the OAuth flow), but not for webhooks:
+### Tailscale serve
+
+Private access over your tailnet only, not reachable from the internet. Sufficient for OAuth login (users on
+the tailnet can complete the OAuth flow), but not for webhooks. Great for private instances.
 
 ```bash
 tailscale serve --bg 8080
 CAIC_EXTERNAL_URL=https://<hostname>.<tailnet>.ts.net
 ```
-
