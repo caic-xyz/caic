@@ -15,7 +15,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -69,8 +71,11 @@ class TaskRepository @Inject constructor(
      */
     fun start(scope: CoroutineScope) {
         scope.launch {
-            settingsRepository.settings.collectLatest { settings ->
-                if (settings.serverURL.isBlank()) {
+            settingsRepository.settings
+                .map { it.serverURL to it.authToken }
+                .distinctUntilChanged()
+                .collectLatest { (serverURL, _) ->
+                if (serverURL.isBlank()) {
                     _tasksConnected.value = false
                     _usageConnected.value = false
                     updateConnected()
@@ -80,7 +85,7 @@ class TaskRepository @Inject constructor(
                 }
                 launch {
                     try {
-                        taskEventsReconnecting(settings.serverURL, _tasksConnected).collect { tasks ->
+                        taskEventsReconnecting(serverURL, _tasksConnected).collect { tasks ->
                             _tasks.value = tasks
                         }
                     } catch (e: CancellationException) {
@@ -92,7 +97,7 @@ class TaskRepository @Inject constructor(
                 }
                 launch {
                     try {
-                        usageEventsReconnecting(settings.serverURL, _usageConnected).collect { usage ->
+                        usageEventsReconnecting(serverURL, _usageConnected).collect { usage ->
                             _usage.value = usage
                         }
                     } catch (e: CancellationException) {

@@ -22,6 +22,7 @@ enum class ConnectionStatus { Idle, Testing, Success, Failed }
 data class SettingsScreenState(
     val settings: SettingsState = SettingsState(),
     val connectionStatus: ConnectionStatus = ConnectionStatus.Idle,
+    val serverLabel: String = "",
 )
 
 private const val DEBOUNCE_MS = 500L
@@ -35,18 +36,29 @@ class SettingsViewModel @Inject constructor(
     private val _state = MutableStateFlow(SettingsScreenState())
     val state: StateFlow<SettingsScreenState> = _state.asStateFlow()
 
-    // Local buffer for the URL text field so keystrokes aren't blocked by DataStore round-trips.
+    // Local buffers for the active server's text fields so keystrokes aren't blocked by DataStore round-trips.
     private val serverURLDraft = MutableStateFlow("")
+    private val serverLabelDraft = MutableStateFlow("")
 
     init {
         viewModelScope.launch {
+            var previousServerId = ""
             settingsRepository.settings.collect { settings ->
+                val serverChanged = settings.activeServerId != previousServerId && previousServerId.isNotEmpty()
+                previousServerId = settings.activeServerId
                 _state.update { prev ->
-                    // Seed the draft from DataStore on first load only.
-                    if (prev.settings.serverURL.isEmpty() && settings.serverURL.isNotEmpty()) {
+                    val seedDrafts = serverChanged ||
+                        (prev.settings.serverURL.isEmpty() && settings.serverURL.isNotEmpty())
+                    if (seedDrafts) {
                         serverURLDraft.value = settings.serverURL
+                        val active = settings.servers.firstOrNull { it.id == settings.activeServerId }
+                        serverLabelDraft.value = active?.label ?: ""
                     }
-                    prev.copy(settings = settings.copy(serverURL = serverURLDraft.value))
+                    prev.copy(
+                        settings = settings.copy(serverURL = serverURLDraft.value),
+                        serverLabel = serverLabelDraft.value,
+                        connectionStatus = if (serverChanged) ConnectionStatus.Idle else prev.connectionStatus,
+                    )
                 }
             }
         }
@@ -56,11 +68,22 @@ class SettingsViewModel @Inject constructor(
                 settingsRepository.updateServerURL(url)
             }
         }
+        // Debounce label writes to DataStore.
+        viewModelScope.launch {
+            serverLabelDraft.drop(1).debounce(DEBOUNCE_MS).collect { label ->
+                settingsRepository.updateServerLabel(label)
+            }
+        }
     }
 
     fun updateServerURL(url: String) {
         serverURLDraft.value = url
         _state.update { it.copy(settings = it.settings.copy(serverURL = url)) }
+    }
+
+    fun updateServerLabel(label: String) {
+        serverLabelDraft.value = label
+        _state.update { it.copy(serverLabel = label) }
     }
 
     fun updateVoiceEnabled(enabled: Boolean) {
@@ -71,6 +94,18 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { settingsRepository.updateVoiceName(name) }
     }
 
+    fun addServer() {
+        viewModelScope.launch { settingsRepository.addServer() }
+    }
+
+    fun removeServer(id: String) {
+        viewModelScope.launch { settingsRepository.removeServer(id) }
+    }
+
+    fun switchServer(id: String) {
+        viewModelScope.launch { settingsRepository.switchServer(id) }
+    }
+
     fun testConnection() {
         val url = _state.value.settings.serverURL.trimEnd('/')
         if (url.isBlank()) {
@@ -79,7 +114,9 @@ class SettingsViewModel @Inject constructor(
         }
         // Persist the trimmed URL immediately so subsequent navigations use it.
         serverURLDraft.value = url
-        _state.update { it.copy(settings = it.settings.copy(serverURL = url), connectionStatus = ConnectionStatus.Testing) }
+        _state.update {
+            it.copy(settings = it.settings.copy(serverURL = url), connectionStatus = ConnectionStatus.Testing)
+        }
         viewModelScope.launch {
             settingsRepository.updateServerURL(url)
             try {

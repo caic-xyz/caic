@@ -23,6 +23,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -128,20 +131,17 @@ class TaskListViewModel @Inject constructor(
         taskRepository.start(viewModelScope)
         taskNotifier.start(viewModelScope)
         loadFormData()
-        observeAuthTokenChanges()
+        observeServerChanges()
     }
 
-    /** Re-runs [loadFormData] when the auth token changes (e.g. after OAuth deep link or logout). */
-    private fun observeAuthTokenChanges() {
+    /** Re-runs [loadFormData] when the server URL or auth token changes (e.g. server switch or OAuth). */
+    private fun observeServerChanges() {
         viewModelScope.launch {
-            var previous: String? = settingsRepository.settings.value.authToken
-            settingsRepository.settings.collect { settings ->
-                val current = settings.authToken
-                if (current != previous) {
-                    previous = current
-                    loadFormData()
-                }
-            }
+            settingsRepository.settings
+                .map { it.serverURL to it.authToken }
+                .distinctUntilChanged()
+                .drop(1) // Skip initial value; handled by loadFormData() in init.
+                .collect { loadFormData() }
         }
     }
 
@@ -349,7 +349,7 @@ class TaskListViewModel @Inject constructor(
             } catch (_: Exception) {
                 // Best-effort; continue clearing local state.
             }
-            settingsRepository.clearAuthToken()
+            settingsRepository.updateAuthToken(null)
             _formState.value = _formState.value.copy(authRequired = true, user = null)
         }
     }

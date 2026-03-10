@@ -10,5 +10,5 @@ class AuthTokenStore @Inject constructor(private val settingsRepository: Setting
 
     suspend fun setToken(token: String) = settingsRepository.updateAuthToken(token)
 
-    suspend fun clearToken() = settingsRepository.clearAuthToken()
+    suspend fun clearToken() = settingsRepository.updateAuthToken(null)
 }
