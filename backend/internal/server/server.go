@@ -55,6 +55,15 @@ type repoInfo struct {
 	ForgeRepo  string     // empty if remote is not a recognized forge
 }
 
+// githubAppClient is the interface used by the server to interact with a GitHub App.
+// Abstracted so that tests can substitute a stub.
+type githubAppClient interface {
+	ForgeClient(ctx context.Context, installationID int64) (forge.Forge, error)
+	DeleteInstallation(ctx context.Context, installationID int64) error
+	RepoInstallation(ctx context.Context, owner, repo string) (int64, error)
+	PostComment(ctx context.Context, installationID int64, owner, repo string, issueNumber int, body string) error
+}
+
 // repoCIState holds the live default-branch CI status for one repo.
 type repoCIState struct {
 	Status cicache.Status
@@ -185,7 +194,7 @@ type Server struct {
 	githubOAuth            *auth.ProviderConfig // nil if not configured
 	githubAllowedUsers     map[string]struct{}  // nil if GitHub OAuth not configured
 	githubWebhookSecret    []byte               // nil when webhook not configured
-	githubApp              *github.AppClient    // nil when app not configured
+	githubApp              githubAppClient      // nil when app not configured
 	githubAppAllowedOwners map[string]struct{}  // nil = allow all; rejects installs from other owners
 
 	// GitLab.

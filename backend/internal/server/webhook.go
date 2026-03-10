@@ -205,9 +205,20 @@ func (s *Server) handleCheckSuiteEvent(ctx context.Context, ev *github.CheckSuit
 		slog.Warn("handleCheckSuiteEvent: cache put", "err", err)
 	}
 
-	// Update default-branch CI status if this SHA is on the default branch.
+	// Update default-branch CI status only when this SHA is still the HEAD of
+	// the default branch. Webhooks may arrive out of order, so an older commit's
+	// check suite could complete after a newer one's; skipping stale events
+	// prevents the displayed CI status from regressing.
 	if ev.CheckSuite.HeadBranch == repo.BaseBranch || repo.BaseBranch == "" {
-		s.setRepoCIStatus(repo.RelPath, result)
+		headSHA, err := client.GetDefaultBranchSHA(ctx, repo.ForgeOwner, repo.ForgeRepo, repo.BaseBranch)
+		switch {
+		case err != nil:
+			slog.Warn("handleCheckSuiteEvent: get HEAD SHA", "repo", repo.RelPath, "err", err)
+		case headSHA == sha:
+			s.setRepoCIStatus(repo.RelPath, result)
+		default:
+			slog.Debug("handleCheckSuiteEvent: ignoring stale check suite", "sha", sha, "head", headSHA)
+		}
 	}
 
 	// Deliver the result to any task monitoring this SHA.

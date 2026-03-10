@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/forge"
 )
 
 // AppClient authenticates as a GitHub App using RS256 JWTs and caches
@@ -213,8 +215,8 @@ func (a *AppClient) RepoInstallation(ctx context.Context, owner, repo string) (i
 	return installResp.ID, nil
 }
 
-// ForgeClient returns a forge Client authenticated with an installation access token.
-func (a *AppClient) ForgeClient(ctx context.Context, installationID int64) (*Client, error) {
+// ForgeClient returns a forge.Forge authenticated with an installation access token.
+func (a *AppClient) ForgeClient(ctx context.Context, installationID int64) (forge.Forge, error) {
 	token, err := a.InstallationToken(ctx, installationID)
 	if err != nil {
 		return nil, err
