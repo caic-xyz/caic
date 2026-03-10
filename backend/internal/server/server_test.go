@@ -1134,20 +1134,32 @@ func TestConfigValidate(t *testing.T) {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
-	t.Run("OAuth with ExternalURL is valid", func(t *testing.T) {
-		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com"}
+	t.Run("OAuth with ExternalURL and allowlist is valid", func(t *testing.T) {
+		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com", GitHubAllowedUsers: "alice,bob"}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
 	t.Run("OAuth without ExternalURL is invalid", func(t *testing.T) {
-		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec"}
+		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", GitHubAllowedUsers: "alice"}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("GitHub OAuth without allowlist is invalid", func(t *testing.T) {
+		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com"}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("GitLab OAuth without allowlist is invalid", func(t *testing.T) {
+		c := &Config{GitLabOAuthClientID: "id", GitLabOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("OAuth with http ExternalURL is invalid", func(t *testing.T) {
-		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", ExternalURL: "http://caic.example.com"}
+		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", GitHubAllowedUsers: "alice", ExternalURL: "http://caic.example.com"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
@@ -1207,13 +1219,13 @@ func TestConfigValidate(t *testing.T) {
 		}
 	})
 	t.Run("GitHub PAT and OAuth together is invalid", func(t *testing.T) {
-		c := &Config{GitHubToken: "ghp_abc", GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com"}
+		c := &Config{GitHubToken: "ghp_abc", GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", GitHubAllowedUsers: "alice", ExternalURL: "https://caic.example.com"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitLab PAT and OAuth together is invalid", func(t *testing.T) {
-		c := &Config{GitLabToken: "glpat-abc", GitLabOAuthClientID: "id", GitLabOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com"}
+		c := &Config{GitLabToken: "glpat-abc", GitLabOAuthClientID: "id", GitLabOAuthClientSecret: "sec", GitLabAllowedUsers: "alice", ExternalURL: "https://caic.example.com"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}

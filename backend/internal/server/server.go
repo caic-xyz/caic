@@ -103,6 +103,12 @@ type Config struct {
 	GitLabOAuthClientID     string
 	GitLabOAuthClientSecret string
 	GitLabURL               string // default "https://gitlab.com"
+	// GitHubAllowedUsers is a comma-separated allowlist of GitHub usernames
+	// permitted to log in. Required when GitHub OAuth is configured.
+	GitHubAllowedUsers string
+	// GitLabAllowedUsers is a comma-separated allowlist of GitLab usernames
+	// permitted to log in. Required when GitLab OAuth is configured.
+	GitLabAllowedUsers string
 }
 
 // Validate returns an error if the configuration is invalid.
@@ -146,33 +152,41 @@ func (c *Config) Validate() error {
 		return errors.New("GITLAB_TOKEN and GITLAB_OAUTH_CLIENT_ID are mutually exclusive: " +
 			"remove GITLAB_TOKEN when using GitLab OAuth login")
 	}
+	if c.GitHubOAuthClientID != "" && c.GitHubAllowedUsers == "" {
+		return errors.New("GITHUB_ALLOWED_USERS is required when GitHub OAuth login is configured")
+	}
+	if c.GitLabOAuthClientID != "" && c.GitLabAllowedUsers == "" {
+		return errors.New("GITLAB_ALLOWED_USERS is required when GitLab OAuth login is configured")
+	}
 	return nil
 }
 
 // Server is the HTTP server for the caic web UI.
 type Server struct {
 	// Immutable after construction.
-	ctx           context.Context // server-lifetime context; outlives individual HTTP requests
-	absRoot       string          // absolute path to the root repos directory
-	repos         []repoInfo
-	runners       map[string]*task.Runner // keyed by RelPath
-	mdClient      *md.Client
-	maxTurns      int
-	logDir        string
-	prefsDir      string               // directory for per-user preference files
-	prefsStores   sync.Map             // map[string]*preferences.Store, keyed by userID
-	authStore     *auth.Store          // nil when auth disabled
-	sessionSecret []byte               // nil when auth disabled
-	githubOAuth   *auth.ProviderConfig // nil if not configured
-	gitlabOAuth   *auth.ProviderConfig // nil if not configured
-	usage         *usageFetcher        // nil if no OAuth token available
-	geminiAPIKey  string
-	githubToken   string
-	gitlabToken   string
-	ciCache       *cicache.Cache
-	provider      genai.Provider
-	backend       *mdBackend // container backend for runner creation
-	allowedHost   string     // hostname from ExternalURL; empty disables host checking
+	ctx                context.Context // server-lifetime context; outlives individual HTTP requests
+	absRoot            string          // absolute path to the root repos directory
+	repos              []repoInfo
+	runners            map[string]*task.Runner // keyed by RelPath
+	mdClient           *md.Client
+	maxTurns           int
+	logDir             string
+	prefsDir           string               // directory for per-user preference files
+	prefsStores        sync.Map             // map[string]*preferences.Store, keyed by userID
+	authStore          *auth.Store          // nil when auth disabled
+	sessionSecret      []byte               // nil when auth disabled
+	githubOAuth        *auth.ProviderConfig // nil if not configured
+	gitlabOAuth        *auth.ProviderConfig // nil if not configured
+	githubAllowedUsers map[string]struct{}  // nil if GitHub OAuth not configured
+	gitlabAllowedUsers map[string]struct{}  // nil if GitLab OAuth not configured
+	usage              *usageFetcher        // nil if no OAuth token available
+	geminiAPIKey       string
+	githubToken        string
+	gitlabToken        string
+	ciCache            *cicache.Cache
+	provider           genai.Provider
+	backend            *mdBackend // container backend for runner creation
+	allowedHost        string     // hostname from ExternalURL; empty disables host checking
 
 	// Guarded by mu.
 	mu           sync.Mutex
@@ -345,6 +359,9 @@ func New(ctx context.Context, rootDir string, maxTurns int, cfg *Config) (*Serve
 		}
 	}
 
+	githubAllowedUsers := parseAllowedUsers(cfg.GitHubAllowedUsers)
+	gitlabAllowedUsers := parseAllowedUsers(cfg.GitLabAllowedUsers)
+
 	// Migrate legacy preferences.json to preferences/default.json on first startup in no-auth mode.
 	prefsDir := filepath.Join(cfg.ConfigDir, "preferences")
 	legacyPrefsPath := filepath.Join(cfg.ConfigDir, "preferences.json")
@@ -372,27 +389,29 @@ func New(ctx context.Context, rootDir string, maxTurns int, cfg *Config) (*Serve
 	}
 
 	s := &Server{
-		ctx:           ctx,
-		absRoot:       absRoot,
-		runners:       make(map[string]*task.Runner, len(repoRes.paths)),
-		mdClient:      mdClient,
-		maxTurns:      maxTurns,
-		logDir:        logDir,
-		prefsDir:      prefsDir,
-		authStore:     authStore,
-		sessionSecret: sessionSecret,
-		githubOAuth:   githubOAuth,
-		gitlabOAuth:   gitlabOAuth,
-		allowedHost:   allowedHost,
-		usage:         newUsageFetcher(ctx),
-		geminiAPIKey:  cfg.GeminiAPIKey,
-		githubToken:   cfg.GitHubToken,
-		gitlabToken:   cfg.GitLabToken,
-		ciCache:       cache,
-		backend:       backend,
-		tasks:         make(map[string]*taskEntry),
-		repoCIStatus:  make(map[string]repoCIState),
-		changed:       make(chan struct{}),
+		ctx:                ctx,
+		absRoot:            absRoot,
+		runners:            make(map[string]*task.Runner, len(repoRes.paths)),
+		mdClient:           mdClient,
+		maxTurns:           maxTurns,
+		logDir:             logDir,
+		prefsDir:           prefsDir,
+		authStore:          authStore,
+		sessionSecret:      sessionSecret,
+		githubOAuth:        githubOAuth,
+		gitlabOAuth:        gitlabOAuth,
+		githubAllowedUsers: githubAllowedUsers,
+		gitlabAllowedUsers: gitlabAllowedUsers,
+		allowedHost:        allowedHost,
+		usage:              newUsageFetcher(ctx),
+		geminiAPIKey:       cfg.GeminiAPIKey,
+		githubToken:        cfg.GitHubToken,
+		gitlabToken:        cfg.GitLabToken,
+		ciCache:            cache,
+		backend:            backend,
+		tasks:              make(map[string]*taskEntry),
+		repoCIStatus:       make(map[string]repoCIState),
+		changed:            make(chan struct{}),
 	}
 	if cfg.LLMProvider != "" {
 		if c, ok := providers.All[cfg.LLMProvider]; !ok || c.Factory == nil {
@@ -1728,6 +1747,21 @@ func hexNibble(c byte) int {
 		return int(c-'A') + 10
 	}
 	return -1
+}
+
+// parseAllowedUsers splits a comma-separated username list into a set.
+// Returns nil for an empty input.
+func parseAllowedUsers(csv string) map[string]struct{} {
+	if csv == "" {
+		return nil
+	}
+	m := make(map[string]struct{})
+	for _, u := range strings.Split(csv, ",") {
+		if u = strings.TrimSpace(u); u != "" {
+			m[strings.ToLower(u)] = struct{}{}
+		}
+	}
+	return m
 }
 
 // authEnabled reports whether OAuth authentication is configured.

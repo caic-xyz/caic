@@ -141,6 +141,8 @@ See contrib/caic.env for a template with all variables and documentation.
 		GitLabOAuthClientID:     os.Getenv("GITLAB_OAUTH_CLIENT_ID"),
 		GitLabOAuthClientSecret: os.Getenv("GITLAB_OAUTH_CLIENT_SECRET"),
 		GitLabURL:               os.Getenv("GITLAB_URL"),
+		GitHubAllowedUsers:      os.Getenv("GITHUB_ALLOWED_USERS"),
+		GitLabAllowedUsers:      os.Getenv("GITLAB_ALLOWED_USERS"),
 	}
 
 	if key := cfg.GeminiAPIKey; key != "" {

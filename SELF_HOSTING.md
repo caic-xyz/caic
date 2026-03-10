@@ -117,6 +117,7 @@ A session secret is generated automatically on first startup and stored in
    CAIC_EXTERNAL_URL=https://<your-domain>
    GITHUB_OAUTH_CLIENT_ID=<client-id>
    GITHUB_OAUTH_CLIENT_SECRET=<client-secret>
+   GITHUB_ALLOWED_USERS=alice,bob
    ```
 
 Do **not** set `GITHUB_TOKEN` alongside these — the server will refuse to start.
@@ -136,6 +137,7 @@ Do **not** set `GITHUB_TOKEN` alongside these — the server will refuse to star
    CAIC_EXTERNAL_URL=https://<your-domain>
    GITLAB_OAUTH_CLIENT_ID=<application-id>
    GITLAB_OAUTH_CLIENT_SECRET=<secret>
+   GITLAB_ALLOWED_USERS=alice,bob
    ```
 
 Do **not** set `GITLAB_TOKEN` alongside these — the server will refuse to start.
@@ -161,6 +163,8 @@ each configured provider.
 | `GITHUB_OAUTH_CLIENT_SECRET` | GitHub OAuth app client secret. |
 | `GITLAB_OAUTH_CLIENT_ID` | GitLab OAuth app client ID. Mutually exclusive with `GITLAB_TOKEN`. |
 | `GITLAB_OAUTH_CLIENT_SECRET` | GitLab OAuth app client secret. |
+| `GITHUB_ALLOWED_USERS` | Comma-separated list of GitHub usernames allowed to log in. Required when GitHub OAuth is configured. |
+| `GITLAB_ALLOWED_USERS` | Comma-separated list of GitLab usernames allowed to log in. Required when GitLab OAuth is configured. |
 | `GITLAB_URL` | GitLab instance base URL. Default: `https://gitlab.com`. |
 
 ## Serving over Tailscale

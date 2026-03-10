@@ -138,6 +138,15 @@ func (s *Server) handleAuthCallback(provider string) http.HandlerFunc {
 			return
 		}
 
+		// Check allowlist.
+		if allowed := s.allowedUsersFor(provider); allowed != nil {
+			if _, ok := allowed[strings.ToLower(username)]; !ok {
+				slog.WarnContext(r.Context(), "user not in allowlist", "provider", provider, "username", username)
+				writeError(w, dto.Forbidden("user "+username+" is not in the "+provider+" allowlist"))
+				return
+			}
+		}
+
 		// Upsert user in store.
 		u, err := s.authStore.UpsertUser(&auth.User{
 			Provider:     forge.Kind(provider),
@@ -208,6 +217,17 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 	})
 	writeJSONResponse(w, &v1.StatusResp{Status: "ok"}, nil)
+}
+
+// allowedUsersFor returns the allowlist for the named provider, or nil.
+func (s *Server) allowedUsersFor(provider string) map[string]struct{} {
+	switch provider {
+	case "github":
+		return s.githubAllowedUsers
+	case "gitlab":
+		return s.gitlabAllowedUsers
+	}
+	return nil
 }
 
 // oauthConfigFor returns the ProviderConfig for the named provider, or nil.
