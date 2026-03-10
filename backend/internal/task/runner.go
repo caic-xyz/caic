@@ -26,6 +26,7 @@ import (
 // StartOptions holds optional flags for container startup.
 type StartOptions struct {
 	DockerImage string
+	Harness     agent.Harness
 	Tailscale   bool
 	USB         bool
 	Display     bool
@@ -460,7 +461,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResu
 	startCtx, startCancel := context.WithTimeout(detached, r.ContainerStartTimeout)
 	defer startCancel()
 	name, tailscaleFQDN, err := r.Container.Start(startCtx, r.Dir, branch, labels, StartOptions{
-		DockerImage: t.DockerImage, Tailscale: t.Tailscale, USB: t.USB, Display: t.Display,
+		DockerImage: t.DockerImage, Harness: t.Harness, Tailscale: t.Tailscale, USB: t.USB, Display: t.Display,
 		LogWriter: &provisioningWriter{ctx: ctx, t: t},
 	})
 	if err != nil {

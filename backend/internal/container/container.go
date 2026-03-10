@@ -21,9 +21,6 @@ func New(tailscaleAPIKey string) (*md.Client, error) {
 	}
 	c.W = os.Stderr
 	c.TailscaleAPIKey = tailscaleAPIKey
-	if err := c.Prepare(); err != nil {
-		return nil, err
-	}
 	return c, nil
 }
 

@@ -4,7 +4,7 @@ go 1.25.7
 
 require (
 	github.com/andybalholm/brotli v1.2.0
-	github.com/caic-xyz/md v0.7.5-0.20260310130013-fdab80d00eea
+	github.com/caic-xyz/md v0.7.5-0.20260310141443-07dd01c7ce17
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/klauspost/compress v1.18.4
 	github.com/lmittmann/tint v1.1.3
