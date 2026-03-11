@@ -227,10 +227,10 @@ private fun emitTurns(
     }
 }
 
-/**
- * Builds flat items for the live (current) turn. Rebuilds on every message batch.
- */
-private fun buildLiveItems(liveTurn: Turn?, expandedToolGroups: Set<String>): List<MsgItem> {
+// Builds flat items for the live (current) turn. Rebuilds on every message batch.
+// When isLiveTurn is false the groups are shown expanded but without interactive
+// actions (used for the last completed turn when there is no active live turn).
+private fun buildLiveItems(liveTurn: Turn?, expandedToolGroups: Set<String>, isLiveTurn: Boolean = true): List<MsgItem> {
     val turn = liveTurn ?: return emptyList()
     val result = mutableListOf<MsgItem>()
     turn.groups.forEachIndexed { j, group ->
@@ -254,7 +254,7 @@ private fun buildLiveItems(liveTurn: Turn?, expandedToolGroups: Set<String>): Li
                 }
             }
         } else {
-            result.add(MsgItem.Group(group, isLiveTurn = true, base))
+            result.add(MsgItem.Group(group, isLiveTurn = isLiveTurn, base))
         }
     }
     return result
@@ -641,22 +641,33 @@ private fun MessageList(
     var expandedSessionKeys by remember { mutableStateOf(setOf<String>()) }
     var expandedTurnKeys by remember { mutableStateOf(setOf<String>()) }
     var expandedToolGroups by remember { mutableStateOf(setOf<String>()) }
+    // Mirror frontend: when no live turn, the last completed turn is the "current" one and
+    // must always be shown expanded so users can see the agent's latest output.
+    val elidableCompletedTurns = if (liveTurn == null) currentSessionCompletedTurns.dropLast(1)
+                                  else currentSessionCompletedTurns
+    val lastExpandedTurn = if (liveTurn == null) currentSessionCompletedTurns.lastOrNull() else null
     // Completed items are stable during streaming: references are unchanged until a turn boundary,
     // so this remember block only recomputes then or on expansion.
     val completedItems = remember(
-        completedSessions, currentSessionBoundaryEvent, currentSessionCompletedTurns,
+        completedSessions, currentSessionBoundaryEvent, elidableCompletedTurns,
         expandedSessionKeys, expandedTurnKeys, expandedToolGroups,
     ) {
         buildCompletedItems(
-            completedSessions, currentSessionBoundaryEvent, currentSessionCompletedTurns,
+            completedSessions, currentSessionBoundaryEvent, elidableCompletedTurns,
             expandedSessionKeys, expandedTurnKeys, expandedToolGroups,
         )
+    }
+    // Last completed turn shown expanded (no interactive actions) when there is no live turn.
+    // Uses the same key prefix as liveItems ("g:j") so the LazyColumn can reuse composables
+    // as the turn transitions between live and last-expanded states.
+    val lastTurnItems = remember(lastExpandedTurn, expandedToolGroups) {
+        buildLiveItems(lastExpandedTurn, expandedToolGroups, isLiveTurn = false)
     }
     // Live items rebuild on every message batch, but only cover the current turn.
     val liveItems = remember(liveTurn, expandedToolGroups) {
         buildLiveItems(liveTurn, expandedToolGroups)
     }
-    val items = remember(completedItems, liveItems) { completedItems + liveItems }
+    val items = remember(completedItems, lastTurnItems, liveItems) { completedItems + lastTurnItems + liveItems }
 
     // Auto-scroll to bottom when new messages arrive, unless user scrolled up.
     LaunchedEffect(completedSessions.size, currentSessionCompletedTurns.size, state.messageCount) {

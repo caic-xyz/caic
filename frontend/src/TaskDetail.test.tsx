@@ -1,7 +1,8 @@
-// Tests for the TaskDetail diff link navigation.
-import { describe, it, expect, vi, afterEach } from "vitest";
+// Tests for the TaskDetail diff link navigation and SSE connection behaviour.
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
+import type { EventMessage } from "@sdk/types.gen";
 
 const navigateMock = vi.fn();
 
@@ -48,25 +49,28 @@ vi.mock("./api", () => ({
 
 // Import after mocks are set up.
 import TaskDetail from "./TaskDetail";
+import { taskEvents } from "./api";
 
 afterEach(() => {
   navigateMock.mockClear();
 });
 
+const baseProps = {
+  taskId: "abc",
+  taskState: "running",
+  repo: "my-repo",
+  remoteURL: "https://github.com/org/my-repo",
+  branch: "feature-branch",
+  baseBranch: "main",
+  harness: "claude",
+  onClose: () => {},
+  inputDraft: "",
+  onInputDraft: () => {},
+  inputImages: [],
+  onInputImages: () => {},
+};
+
 describe("TaskDetail", () => {
-  const baseProps = {
-    taskId: "abc",
-    taskState: "running",
-    repo: "my-repo",
-    remoteURL: "https://github.com/org/my-repo",
-    branch: "feature-branch",
-    baseBranch: "main",
-    onClose: () => {},
-    inputDraft: "",
-    onInputDraft: () => {},
-    inputImages: [],
-    onInputImages: () => {},
-  };
 
   it("shows Diff link when diffStat has items", () => {
     const { getByText } = render(() => (
@@ -104,5 +108,91 @@ describe("TaskDetail", () => {
     ));
     await user.click(getByText("Diff"));
     expect(navigateMock).toHaveBeenCalledWith("/task/@abc+test-task/diff");
+  });
+});
+
+// Helper type for a controllable fake EventSource.
+type FakeES = {
+  addEventListener: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+  onerror: ((e: Event) => void) | null;
+};
+
+// Build a mock that fires the "ready" event synchronously so tests don't need
+// to advance timers just to get the component into live mode.
+function makeSyncReadyMock(
+  created: FakeES[],
+  capturedCb?: { value: ((ev: EventMessage) => void) | null },
+) {
+  vi.mocked(taskEvents).mockImplementation((_id, cb) => {
+    if (capturedCb) capturedCb.value = cb as (ev: EventMessage) => void;
+    const fakeES: FakeES = {
+      addEventListener: vi.fn((event: string, handler: () => void) => {
+        if (event === "ready") handler();
+      }),
+      close: vi.fn(),
+      onerror: null,
+    };
+    created.push(fakeES);
+    return fakeES as unknown as EventSource;
+  });
+}
+
+describe("SSE connection", () => {
+  beforeEach(() => {
+    // Fake timers so we can control setTimeout (reconnect delays) and
+    // requestAnimationFrame (live-event batching, polyfilled as setTimeout(16)).
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("duplicate onerror fires schedule only one reconnect", () => {
+    // Regression test for the clearTimeout fix: a second onerror (which some
+    // EventSource implementations fire) must cancel the first reconnect timer
+    // and schedule exactly one new one, not pile up two connect() calls.
+    const created: FakeES[] = [];
+    makeSyncReadyMock(created);
+
+    render(() => <TaskDetail {...baseProps} />);
+
+    // createEffect runs synchronously during render in SolidJS.
+    expect(created).toHaveLength(1);
+    const es1 = created[0];
+
+    // First onerror: sets timer (500 ms), es → null, delay → 750.
+    if (!es1.onerror) throw new Error("onerror not set");
+    es1.onerror(new Event("error"));
+    // Second onerror: clears first timer, sets new timer (750 ms), delay → 1125.
+    es1.onerror(new Event("error"));
+
+    // Advance past the 750 ms timer (but not far enough to trigger a third).
+    vi.advanceTimersByTime(800);
+
+    // Exactly one reconnect: initial connect (1) + one timer-fired connect (2).
+    expect(created).toHaveLength(2);
+  });
+
+  it("live textDelta events appear in the message list after SSE fires them", () => {
+    // Verifies the rAF-batched streaming path: events pushed via the SSE
+    // callback surface in the DOM after the animation frame is flushed.
+    const created: FakeES[] = [];
+    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
+    makeSyncReadyMock(created, capturedCb);
+
+    render(() => <TaskDetail {...baseProps} />);
+
+    expect(capturedCb.value).not.toBeNull();
+
+    // Push a textDelta live event (component is in live mode because ready fired).
+    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+    capturedCb.value({ kind: "textDelta", ts: 1, textDelta: { text: "agent reply" } });
+
+    // Flush the rAF batch: vi.useFakeTimers() polyfills rAF as setTimeout(fn, 16).
+    vi.advanceTimersByTime(20);
+
+    expect(document.body.textContent).toContain("agent reply");
   });
 });

@@ -17,6 +17,7 @@ import com.caic.sdk.v1.EventThinking
 import com.caic.sdk.v1.EventThinkingDelta
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -481,6 +482,65 @@ class GroupingTest {
             val state2 = nextGrouped(state1, emptyList())
             assertEquals(0, state2.currentSessionCompletedTurns.size)
             assertEquals(0, state2.completedUpToIdx)
+        }
+
+        t.run("currentTurn is null immediately after result - last turn must be shown expanded") {
+            // Regression: when the agent completes a turn the UI used to elide the last
+            // completed turn because buildLiveItems was only called with the live turn.
+            // The fix shows the last completed turn expanded when currentTurn is null.
+            val msgs = listOf(
+                textDeltaEvent("agent output", ts = 1),
+                toolUseEvent("t1", "Read", ts = 2),
+                toolResultEvent("t1", ts = 3),
+                textDeltaEvent("done", ts = 4),
+                resultEvent(ts = 5),
+            )
+            val state = nextGrouped(IncrementalGrouped(), msgs)
+            assertEquals(null, state.currentTurn)
+            assertEquals(1, state.currentSessionCompletedTurns.size)
+            val turn = state.currentSessionCompletedTurns[0]
+            // Turn has both text and tool groups.
+            assertTrue(turn.toolCount > 0)
+            assertTrue(turn.textCount > 0)
+        }
+
+        t.run("currentTurn becomes non-null when user reply arrives after result") {
+            // After the agent completes a turn (result event), the user sends a reply
+            // (userInput event). A new turn begins: currentTurn must be non-null.
+            val turn1 = listOf(textDeltaEvent("agent output", ts = 1), resultEvent(ts = 2))
+            val state1 = nextGrouped(IncrementalGrouped(), turn1)
+            assertEquals(null, state1.currentTurn)
+
+            val withReply = turn1 + listOf(
+                userInputEvent("user reply", ts = 3),
+                textDeltaEvent("second agent output", ts = 4),
+            )
+            val state2 = nextGrouped(state1, withReply)
+            // The first turn is still complete; a new live turn has started.
+            assertEquals(1, state2.currentSessionCompletedTurns.size)
+            assertNotNull(state2.currentTurn)
+            val liveTurn = state2.currentTurn!!
+            assertTrue(liveTurn.groups.any { g -> g.events.any { it.kind == EventKinds.UserInput } })
+        }
+
+        t.run("last completed turn has correct content after multi-turn conversation") {
+            // Two full turns. After the second result the last completed turn must have
+            // the second turn's content (not the first) and currentTurn must be null.
+            val allMsgs = listOf(
+                textDeltaEvent("turn 1", ts = 1),
+                resultEvent(ts = 2),
+                userInputEvent("reply", ts = 3),
+                textDeltaEvent("turn 2", ts = 4),
+                resultEvent(ts = 5),
+            )
+            val state = nextGrouped(IncrementalGrouped(), allMsgs)
+            assertEquals(null, state.currentTurn)
+            assertEquals(2, state.currentSessionCompletedTurns.size)
+            // The last completed turn contains the user reply and the second agent response.
+            val lastTurn = state.currentSessionCompletedTurns.last()
+            val allEvents = lastTurn.groups.flatMap { it.events }
+            assertTrue(allEvents.any { it.kind == EventKinds.UserInput })
+            assertTrue(allEvents.any { it.kind == EventKinds.TextDelta })
         }
     }
 

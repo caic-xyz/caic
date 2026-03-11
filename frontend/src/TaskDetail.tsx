@@ -286,6 +286,9 @@ export default function TaskDetail(props: Props) {
     }
 
     function connect() {
+      // Close any stale connection that may exist if connect() is called while
+      // a previous EventSource is still open (e.g. from a duplicate timer fire).
+      es?.close();
       buf = [];
       live = false;
       es = taskEvents(id, (ev) => {
@@ -312,6 +315,11 @@ export default function TaskDetail(props: Props) {
         if (live && messages().length > 0 && (st === "terminated" || st === "failed")) {
           return;
         }
+        // Cancel any pending timer before scheduling a new one. Without this,
+        // a second onerror fire (possible with some EventSource implementations)
+        // would leave the first timer running, causing connect() to be called
+        // twice and creating a leaked/duplicate SSE connection.
+        if (timer !== null) clearTimeout(timer);
         timer = setTimeout(connect, delay);
         delay = Math.min(delay * 1.5, 4000);
       };

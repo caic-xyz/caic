@@ -1,6 +1,6 @@
 // Tests for groupMessages and groupTurns logic.
 import { describe, it, expect } from "vitest";
-import { groupMessages, groupTurns, groupSessions, turnSummary } from "./grouping";
+import { groupMessages, groupTurns, groupSessions, turnSummary, buildTurnItems } from "./grouping";
 import type { EventMessage } from "@sdk/types.gen";
 
 function toolUseEvent(id: string, name: string): EventMessage {
@@ -367,5 +367,31 @@ describe("groupTurns", () => {
   it("turnSummary formats correctly", () => {
     const turn = { groups: [], toolCount: 3, textCount: 2, durationMs: 5000 };
     expect(turnSummary(turn)).toBe("2 messages, 3 tool calls · 5s");
+  });
+});
+
+describe("buildTurnItems", () => {
+  it("all turns are elidable when passed to buildTurnItems", () => {
+    // buildTurnItems elidates every turn it receives — the caller is responsible
+    // for excluding the last completed turn (which should always be expanded).
+    const events: EventMessage[] = [
+      textDeltaEvent("turn 1"),
+      resultEvent(),
+      textDeltaEvent("turn 2"),
+      resultEvent(),
+    ];
+    const turns = groupTurns(groupMessages(events));
+    const items = buildTurnItems(turns, new Set(), "session:0:");
+    expect(items).toHaveLength(2);
+    expect(items.every((i) => i.kind === "elided")).toBe(true);
+  });
+
+  it("expanded turn emits header + group items", () => {
+    const events: EventMessage[] = [textDeltaEvent("text"), resultEvent()];
+    const turns = groupTurns(groupMessages(events));
+    const turnKey = `session:0::turn:0:${turns[0].groups[0]?.events[0]?.ts ?? ""}`;
+    const items = buildTurnItems(turns, new Set([turnKey]), "session:0:");
+    expect(items[0].kind).toBe("expandedHeader");
+    expect(items[1].kind).toBe("group");
   });
 });
