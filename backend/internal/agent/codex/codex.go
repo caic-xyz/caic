@@ -53,7 +53,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	sshArgs = append(sshArgs, opts.Container, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin", "--")
 	sshArgs = append(sshArgs, codexArgs...)
 
-	slog.Info("codex: launching via relay", "container", opts.Container, "args", codexArgs)
+	slog.Debug("relay", "msg", "launch", "ctr", opts.Container, "args", codexArgs)
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

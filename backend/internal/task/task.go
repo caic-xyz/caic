@@ -166,6 +166,7 @@ func (t *Task) setState(s State) {
 	}
 	t.state = s
 	t.stateUpdatedAt = time.Now().UTC()
+	slog.Debug("container", "state", s, "task", t.ID, "ctr", t.Container)
 }
 
 // SetState updates the state under the mutex and records the transition time.

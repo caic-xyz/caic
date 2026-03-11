@@ -549,7 +549,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 				},
 				runner: runner,
 			}
-			slog.Info("discovered repo", "path", rel, "br", branch)
+			slog.Debug("discovered repo", "path", rel, "br", branch)
 		})
 	}
 	wg.Wait()
@@ -589,11 +589,8 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 			return nil, fmt.Errorf("open ipgeo db: %w", err)
 		}
 		s.ipgeoChecker = checker
-		slog.Info("ipgeo database loaded", "path", cfg.IPGeoDB)
-	}
-	if cfg.IPGeoAllowlist != "" {
 		s.ipgeoAllowlist = ipgeo.ParseAllowlist(cfg.IPGeoAllowlist)
-		slog.Info("ipgeo allowlist configured", "list", cfg.IPGeoAllowlist)
+		slog.Info("ipgeo", "path", cfg.IPGeoDB, "list", cfg.IPGeoAllowlist)
 	}
 
 	s.watchContainerEvents(ctx)
@@ -679,7 +676,11 @@ func (s *Server) buildHandler() (http.Handler, error) {
 		start := time.Now()
 		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
 		inner.ServeHTTP(rw, r)
-		slog.InfoContext(r.Context(), "http",
+		logFn := slog.InfoContext
+		if rw.status < 300 {
+			logFn = slog.DebugContext
+		}
+		logFn(r.Context(), "http",
 			"m", r.Method,
 			"p", r.URL.Path,
 			"s", rw.status,
@@ -2247,7 +2248,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		return fmt.Errorf("label check for %s: %w", c.Name, err)
 	}
 	if labelVal == "" {
-		slog.Info("skipping non-caic container", "repo", ri.RelPath, "ctr", c.Name, "br", branch)
+		slog.Info("container", "msg", "skipping non-caic", "repo", ri.RelPath, "ctr", c.Name, "br", branch)
 		return nil
 	}
 	taskID, err := ksid.Parse(labelVal)
@@ -2285,7 +2286,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	// Check whether the relay daemon is alive in this container.
 	relayAlive, relayErr := agent.IsRelayRunning(ctx, c.Name)
 	if relayErr != nil {
-		slog.Warn("relay check failed during adopt", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", relayErr)
+		slog.Warn("relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", relayErr)
 	}
 
 	var relayMsgs []agent.Message
@@ -2294,7 +2295,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		// Relay is alive — read authoritative output from container.
 		relayMsgs, relaySize, relayErr = runner.ReadRelayOutput(ctx, c.Name, harnessName)
 		if relayErr != nil {
-			slog.Warn("read relay output failed", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", relayErr)
+			slog.Warn("relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", relayErr)
 			relayAlive = false
 		}
 	}
@@ -2336,7 +2337,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		// Claude Code stdout and user inputs (logged by the relay).
 		t.RestoreMessages(relayMsgs)
 		t.RelayOffset = relaySize
-		slog.Info("restored from relay", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(relayMsgs))
+		slog.Info("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(relayMsgs))
 	} else if lt != nil {
 		if err := lt.LoadMessages(); err != nil {
 			slog.Warn("load messages failed", "repo", ri.RelPath, "br", branch, "err", err)
@@ -2360,11 +2361,11 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	if !relayAlive {
 		relayLog := agent.ReadRelayLog(ctx, c.Name, 4096)
 		if relayLog != "" {
-			slog.Warn("relay log from dead relay", "ctr", c.Name, "br", branch, "log", relayLog)
+			slog.Warn("relay", "msg", "log from dead relay", "ctr", c.Name, "br", branch, "log", relayLog)
 		}
 		if t.GetState() == task.StateRunning {
 			t.SetState(task.StateWaiting)
-			slog.Warn("adopted with dead relay, marking waiting",
+			slog.Warn("relay", "msg", "dead, marking waiting",
 				"repo", ri.RelPath, "br", branch, "ctr", c.Name,
 				"sess", t.GetSessionID(), "msgs", len(t.Messages()))
 		}
@@ -2381,7 +2382,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	s.taskChanged()
 	s.mu.Unlock()
 
-	slog.Info("adopted container",
+	slog.Info("container", "msg", "adopted",
 		"repo", ri.RelPath, "ctr", c.Name, "br", branch,
 		"relay", relayAlive, "state", t.GetState(), "sess", t.GetSessionID())
 
@@ -2397,17 +2398,17 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		if !relayAlive {
 			strategy = "resume"
 		}
-		slog.Info("auto-reconnect starting", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "st", strategy)
+		slog.Debug("container", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "st", strategy)
 		go func() {
 			h, err := runner.Reconnect(ctx, t)
 			if err != nil {
-				slog.Warn("auto-reconnect failed",
+				slog.Warn("container", "msg", "auto-reconnect failed",
 					"repo", t.Repo, "br", t.Branch, "ctr", t.Container,
 					"st", strategy, "err", err)
 				s.notifyTaskChange()
 				return
 			}
-			slog.Info("auto-reconnect succeeded", "repo", t.Repo, "br", t.Branch, "ctr", t.Container, "st", strategy)
+			slog.Debug("container", "msg", "auto-reconnect succeeded", "repo", t.Repo, "br", t.Branch, "ctr", t.Container, "st", strategy)
 			// Compute host-side diff stat after reconnect. Reconnect
 			// replays relay messages which may include stale
 			// DiffStatMessages (old relay code diffs against HEAD, not
@@ -2574,7 +2575,7 @@ func (s *Server) handleContainerDeath(containerName string) {
 	if found == nil || runner == nil {
 		return
 	}
-	slog.Info("container died, cleaning up task", "ctr", containerName, "task", found.task.ID, "br", found.task.Branch)
+	slog.Info("container", "msg", "died, cleaning up task", "ctr", containerName, "task", found.task.ID, "br", found.task.Branch)
 	go s.cleanupTask(found, runner, task.StateFailed)
 }
 

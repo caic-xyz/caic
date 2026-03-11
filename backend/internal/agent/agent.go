@@ -351,7 +351,7 @@ func StartRelay(ctx context.Context, opts *Options, agentArgs []string, msgCh ch
 	sshArgs = append(sshArgs, opts.Container, "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--")
 	sshArgs = append(sshArgs, agentArgs...)
 
-	slog.Info("relay launch", "ctr", opts.Container, "args", agentArgs)
+	slog.Debug("relay", "msg", "launch", "ctr", opts.Container, "args", agentArgs)
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -396,7 +396,7 @@ func ReadRelayOutput(ctx context.Context, container string, parseFn func([]byte)
 		}
 		parsed, parseErr := parseFn(line)
 		if parseErr != nil {
-			slog.Warn("skipping unparseable relay output line", "ctr", container, "err", parseErr)
+			slog.Warn("relay", "msg", "skipping unparseable output line", "ctr", container, "err", parseErr)
 			continue
 		}
 		msgs = append(msgs, parsed...)
