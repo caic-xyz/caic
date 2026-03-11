@@ -1139,7 +1139,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Seed CI status immediately on connect (once); subsequent updates come from
 	// webhooks (App) or the ciTicker (polling).
-	go s.pollCIForActiveRepos(r.Context())
+	go s.pollCIForActiveRepos(s.ctx) //nolint:contextcheck // intentionally using server context; CI poll must outlive request
 
 	// prevByID tracks the last marshalled JSON for each task ID.
 	prevByID := map[string][]byte{}
@@ -1233,7 +1233,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 		case <-ch:
 		case <-ticker.C:
 		case <-ciTickerC:
-			go s.pollCIForActiveRepos(r.Context())
+			go s.pollCIForActiveRepos(s.ctx) //nolint:contextcheck // intentionally using server context; CI poll must outlive request
 		}
 	}
 }
