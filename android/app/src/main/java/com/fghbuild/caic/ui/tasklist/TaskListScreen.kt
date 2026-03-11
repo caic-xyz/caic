@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -40,12 +41,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
@@ -390,36 +388,8 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
             state = state,
             viewModel = viewModel,
             onShowCloneDialog = { showCloneDialog = true },
+            models = models,
         )
-
-        // Row 2: Harness + Model (side by side when both present)
-        if (state.harnesses.size > 1 || models.isNotEmpty()) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (state.harnesses.size > 1) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        DropdownField(
-                            label = "Harness",
-                            selected = state.selectedHarness,
-                            options = state.harnesses.map { it.name },
-                            onSelect = viewModel::selectHarness,
-                        )
-                    }
-                }
-                if (models.isNotEmpty()) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        DropdownField(
-                            label = "Model",
-                            selected = state.selectedModel.ifBlank { models.first() },
-                            options = models,
-                            onSelect = viewModel::selectModel,
-                        )
-                    }
-                }
-            }
-        }
 
         if (state.pendingImages.isNotEmpty()) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -482,6 +452,7 @@ private fun RepoChipStrip(
     state: TaskListState,
     viewModel: TaskListViewModel,
     onShowCloneDialog: () -> Unit,
+    models: List<String>,
 ) {
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -514,14 +485,28 @@ private fun RepoChipStrip(
             IconButton(
                 onClick = onShowCloneDialog,
                 enabled = !state.cloning && !state.submitting,
-                modifier = Modifier.size(32.dp),
+                modifier = Modifier.size(chipIconButtonSize),
             ) {
                 if (state.cloning) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                    CircularProgressIndicator(modifier = Modifier.size(chipIconSize))
                 } else {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Clone repository", modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Clone repository", modifier = Modifier.size(chipIconSize))
                 }
             }
+        }
+        if (state.harnesses.size > 1) {
+            DropdownField(
+                selected = state.selectedHarness,
+                options = state.harnesses.map { it.name },
+                onSelect = viewModel::selectHarness,
+            )
+        }
+        if (models.isNotEmpty()) {
+            DropdownField(
+                selected = state.selectedModel.ifBlank { models.first() },
+                options = models,
+                onSelect = viewModel::selectModel,
+            )
         }
     }
 }
@@ -674,10 +659,8 @@ private fun FormImageThumbnail(img: ImageData, onRemove: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DropdownField(
-    label: String,
     selected: String,
     options: List<String>,
     onSelect: (String) -> Unit,
@@ -685,25 +668,29 @@ private fun DropdownField(
     itemLabel: (String) -> String = { it },
 ) {
     var expanded by remember { mutableStateOf(false) }
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
-        OutlinedTextField(
-            value = itemLabel(selected),
-            onValueChange = {},
-            readOnly = true,
-            label = { Text(label) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+    Box {
+        Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable),
-        )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                .clip(MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .clickable { expanded = true }
+                .padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(itemLabel(selected), style = MaterialTheme.typography.bodyMedium)
+            Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEachIndexed { index, option ->
                 DropdownMenuItem(
-                    text = { Text(itemLabel(option)) },
-                    onClick = {
-                        onSelect(option)
-                        expanded = false
+                    text = {
+                        Text(
+                            itemLabel(option),
+                            fontWeight = if (option == selected) FontWeight.Bold else FontWeight.Normal,
+                        )
                     },
+                    onClick = { onSelect(option); expanded = false },
                 )
                 if (index == dividerAfter - 1 && dividerAfter in 1..<options.size) {
                     HorizontalDivider()
@@ -761,6 +748,10 @@ private fun CloneRepoDialog(
         },
     )
 }
+
+// Compact icon button size used in the chip strip, matching chip height.
+private val chipIconButtonSize = 32.dp
+private val chipIconSize = 18.dp
 
 private val nonPassingConclusions = setOf("failure", "cancelled", "timed_out", "action_required", "stale")
 

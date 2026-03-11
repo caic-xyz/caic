@@ -5,8 +5,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -56,7 +54,7 @@ import kotlinx.coroutines.delay
 
 private val TerminalStates = setOf("terminated", "failed")
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}) {
     var showMenu by remember { mutableStateOf(false) }
@@ -181,27 +179,32 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}
                 }
             }
 
-            // Line 3: model · tokens · cost
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                task.model?.let { MetaText(it) }
-                if (task.harness != "claude") MetaText(task.harness)
-                val tokenCount = task.activeInputTokens + task.activeCacheReadTokens
+            // Line 3: model · harness · tokens · cost
+            val tokenCount = task.activeInputTokens + task.activeCacheReadTokens
+            val tColor = tokenColor(tokenCount, task.contextWindowLimit)
+            val metaParts = buildList {
+                task.model?.let { add(it to Color.Unspecified) }
+                if (task.harness != "claude") add(task.harness to Color.Unspecified)
                 if (tokenCount > 0) {
-                    val cachedIn = task.cumulativeCacheReadInputTokens
-                    val inputIn = task.cumulativeInputTokens + task.cumulativeCacheCreationInputTokens
-                    val output = task.cumulativeOutputTokens
-                    Text(
-                        text = "${formatTokens(tokenCount)}/${formatTokens(task.contextWindowLimit)}" +
-                            " (${formatTokens(cachedIn)} cached" +
-                            " + ${formatTokens(inputIn)} in" +
-                            " + ${formatTokens(output)} out)",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = tokenColor(tokenCount, task.contextWindowLimit),
-                    )
+                    add("${formatTokens(tokenCount)}/${formatTokens(task.contextWindowLimit)}" to tColor)
                 }
-                if (task.costUSD > 0) {
-                    MetaText(formatCost(task.costUSD))
-                }
+                if (task.costUSD > 0) add(formatCost(task.costUSD) to Color.Unspecified)
+            }
+            if (metaParts.isNotEmpty()) {
+                Text(
+                    text = buildAnnotatedString {
+                        metaParts.forEachIndexed { i, (text, color) ->
+                            if (i > 0) append(" · ")
+                            if (color != Color.Unspecified) {
+                                withStyle(SpanStyle(color = color)) { append(text) }
+                            } else {
+                                append(text)
+                            }
+                        }
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             task.diffStat?.takeIf { it.isNotEmpty() }?.let { stats ->
@@ -258,15 +261,6 @@ private fun tokenColor(current: Int, limit: Int): Color {
         ratio >= 0.75f -> Color(0xFFD4A017)
         else -> Color.Unspecified
     }
-}
-
-@Composable
-private fun MetaText(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
 }
 
 @Composable
