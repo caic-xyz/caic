@@ -2850,17 +2850,16 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 	// Build Repos slice for API response.
 	taskRepos := make([]v1.TaskRepo, len(e.task.Repos))
 	for i, r := range e.task.Repos {
-		taskRepos[i] = v1.TaskRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch}
+		taskRepos[i] = v1.TaskRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, RemoteURL: s.repoURL(r.Name)}
 	}
 	if len(taskRepos) == 0 {
 		taskRepos = nil
 	}
 
-	// Derive primary info for convenience fields.
-	var primaryName, remoteURL string
+	// Derive primary name for context window lookup.
+	var primaryName string
 	if p := e.task.Primary(); p != nil {
 		primaryName = p.Name
-		remoteURL = s.repoURL(primaryName)
 	}
 
 	j := v1.Task{
@@ -2868,7 +2867,6 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 		InitialPrompt:  e.task.InitialPrompt.Text,
 		Title:          snap.Title,
 		Repos:          taskRepos,
-		RemoteURL:      remoteURL,
 		Container:      e.task.Container,
 		State:          snap.State.String(),
 		StateUpdatedAt: float64(snap.StateUpdatedAt.UnixMilli()) / 1e3,

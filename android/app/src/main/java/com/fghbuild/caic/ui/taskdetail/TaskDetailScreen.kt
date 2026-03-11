@@ -317,7 +317,7 @@ fun TaskDetailScreen(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            val remoteURL = task?.remoteURL
+                            val remoteURL = task?.repos?.firstOrNull()?.remoteURL
                             Text(
                                 text = task?.repos?.firstOrNull()?.name ?: taskId,
                                 style = MaterialTheme.typography.titleMedium,
@@ -351,7 +351,7 @@ fun TaskDetailScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 val primaryBranch = it.repos?.firstOrNull()?.branch ?: ""
-                                val branchURL = it.remoteURL?.let { url ->
+                                val branchURL = it.repos?.firstOrNull()?.remoteURL?.let { url ->
                                     when {
                                         "gitlab.com" in url -> "$url/-/compare/${primaryBranch}?expand=1"
                                         "github.com" in url -> "$url/compare/${primaryBranch}?expand=1"
@@ -386,7 +386,7 @@ fun TaskDetailScreen(
                                 val forgeRepo = it.forgeRepo
                                 val forgePR = it.forgePR
                                 if (forgeOwner != null && forgeRepo != null && forgePR != null && forgePR > 0) {
-                                    val isGitLab = it.remoteURL?.let { url -> "gitlab.com" in url } == true
+                                    val isGitLab = it.repos?.firstOrNull()?.remoteURL?.let { url -> "gitlab.com" in url } == true
                                     val prURL = if (isGitLab) {
                                         "https://gitlab.com/$forgeOwner/$forgeRepo/-/merge_requests/$forgePR"
                                     } else {
@@ -506,7 +506,7 @@ fun TaskDetailScreen(
                         taskBaseBranch = task?.repos?.firstOrNull()?.baseBranch ?: "",
                         sending = state.sending,
                         pendingAction = state.pendingAction,
-                        remoteURL = task?.remoteURL,
+                        remoteURL = task?.repos?.firstOrNull()?.remoteURL,
                         pendingImages = state.pendingImages,
                         supportsImages = state.supportsImages,
                         onAttachGallery = {

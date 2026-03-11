@@ -120,6 +120,7 @@ data class TaskRepo(
     val name: String,
     val baseBranch: String? = null,
     val branch: String,
+    @SerialName("remoteURL") val remoteURL: String? = null,
 )
 
 @Serializable
@@ -136,7 +137,6 @@ data class Task(
     val initialPrompt: String,
     val title: String,
     val repos: List<TaskRepo>? = null,
-    @SerialName("remoteURL") val remoteURL: String? = null,
     val container: String,
     val state: String,
     val stateUpdatedAt: Double,

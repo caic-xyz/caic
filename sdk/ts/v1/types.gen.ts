@@ -450,6 +450,7 @@ export interface TaskRepo {
   name: string;
   baseBranch?: string;
   branch: string;
+  remoteURL?: string;
 }
 /**
  * Task is the JSON representation sent to the frontend.
@@ -459,7 +460,6 @@ export interface Task {
   initialPrompt: string;
   title: string;
   repos?: TaskRepo[];
-  remoteURL?: string;
   container: string;
   state: string;
   stateUpdatedAt: number /* float64 */; // Unix epoch seconds (ms precision) of last state change.

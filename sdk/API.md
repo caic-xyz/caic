@@ -171,6 +171,7 @@ All errors return:
 | `name` | `string` | yes |
 | `baseBranch` | `string` |  |
 | `branch` | `string` | yes |
+| `remoteURL` | `string` |  |
 
 ### DiffFileStat
 
@@ -189,7 +190,6 @@ All errors return:
 | `initialPrompt` | `string` | yes |
 | `title` | `string` | yes |
 | `repos` | `TaskRepo[]` |  |
-| `remoteURL` | `string` |  |
 | `container` | `string` | yes |
 | `state` | `string` | yes |
 | `stateUpdatedAt` | `number` | yes |

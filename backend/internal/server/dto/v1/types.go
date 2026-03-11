@@ -113,6 +113,7 @@ type TaskRepo struct {
 	Name       string `json:"name"`
 	BaseBranch string `json:"baseBranch,omitempty"`
 	Branch     string `json:"branch"`
+	RemoteURL  string `json:"remoteURL,omitempty"`
 }
 
 // Task is the JSON representation sent to the frontend.
@@ -121,7 +122,6 @@ type Task struct {
 	InitialPrompt                      string       `json:"initialPrompt"`
 	Title                              string       `json:"title"`
 	Repos                              []TaskRepo   `json:"repos,omitempty"`
-	RemoteURL                          string       `json:"remoteURL,omitempty"`
 	Container                          string       `json:"container"`
 	State                              string       `json:"state"`
 	StateUpdatedAt                     float64      `json:"stateUpdatedAt"` // Unix epoch seconds (ms precision) of last state change.
