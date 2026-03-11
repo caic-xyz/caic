@@ -15,6 +15,20 @@ import (
 //   - A caic-injected JSON object with a "type" field (e.g. caic_diff_stat).
 //   - A JSON-RPC 2.0 notification (has "method", no "id").
 //   - A JSON-RPC 2.0 response (has "id").
+//
+// Emitted agent.Message types:
+//   - InitMessage          — thread/started
+//   - TextMessage          — item/completed agentMessage or plan
+//   - TextDeltaMessage     — item/agentMessage/delta
+//   - ThinkingMessage      — item/completed reasoning
+//   - ThinkingDeltaMessage — item/reasoning/summaryTextDelta
+//   - ToolUseMessage       — item/started commandExecution, fileChange, mcpToolCall, dynamicToolCall, collabAgentToolCall
+//   - ToolResultMessage    — item/completed commandExecution, fileChange, mcpToolCall, dynamicToolCall, collabAgentToolCall
+//   - ToolOutputDeltaMessage — commandExecution/outputDelta, mcpToolCall/progress
+//   - SystemMessage        — thread/status/changed, model/rerouted, item/completed contextCompaction
+//   - ResultMessage        — turn/completed, error notification
+//   - DiffStatMessage      — caic_diff_stat injection
+//   - RawMessage           — unrecognised wire types (preserved verbatim)
 func ParseMessage(line []byte) ([]agent.Message, error) {
 	// Fast probe: check for "type" (caic-injected) vs "method"/"id" (JSON-RPC).
 	var probe messageProbe

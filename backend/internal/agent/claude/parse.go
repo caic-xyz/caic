@@ -15,6 +15,25 @@ type parseEnvelope = typeProbe
 // ParseMessage decodes a single Claude Code NDJSON line into one or more
 // typed agent.Messages. A single "assistant" line may contain multiple
 // content blocks (text + tool_use + usage), each producing a separate message.
+//
+// Emitted agent.Message types:
+//   - InitMessage          — system/init
+//   - SystemMessage        — system subtypes (compact_boundary, model_rerouted, api_error, …)
+//   - SubagentStartMessage — system/task_started
+//   - SubagentEndMessage   — system/task_notification
+//   - TextMessage          — assistant content text blocks
+//   - TextDeltaMessage     — stream_event content_block_delta/text_delta
+//   - ThinkingMessage      — assistant content thinking blocks
+//   - ThinkingDeltaMessage — stream_event content_block_delta/thinking_delta
+//   - ToolUseMessage       — assistant tool_use blocks (generic tools)
+//   - AskMessage           — AskUserQuestion tool_use block
+//   - TodoMessage          — TodoWrite tool_use block
+//   - ToolResultMessage    — user message with parent_tool_use_id
+//   - UserInputMessage     — user message without parent_tool_use_id
+//   - UsageMessage         — assistant message usage counters
+//   - ResultMessage        — result record
+//   - DiffStatMessage      — caic_diff_stat injection
+//   - RawMessage           — unrecognised wire types (preserved verbatim)
 func ParseMessage(line []byte) ([]agent.Message, error) {
 	var env parseEnvelope
 	if err := json.Unmarshal(line, &env); err != nil {

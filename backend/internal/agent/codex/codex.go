@@ -176,10 +176,15 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 	return writeJSON(wr, req)
 }
 
-// ParseMessage wraps the package-level ParseMessage, intercepting
-// thread/tokenUsage/updated to emit UsageMessages and accumulate per-turn
-// totals for injection into ResultMessage. It also captures the thread ID
-// from thread/started.
+// ParseMessage wraps the package-level ParseMessage with two interceptions:
+//
+//   - thread/tokenUsage/updated → emits UsageMessage (incremental Last
+//     breakdown); values are also accumulated into totalUsage. Not forwarded
+//     to the package-level ParseMessage.
+//   - ResultMessage (from turn/completed) has Usage populated from totalUsage,
+//     then totalUsage is reset for the next turn.
+//
+// It also captures the thread ID from InitMessage (thread/started).
 func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	// Intercept thread/tokenUsage/updated: emit a UsageMessage with the
 	// incremental (Last) usage and accumulate into totalUsage.

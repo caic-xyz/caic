@@ -34,6 +34,20 @@ func normalizeToolName(name string) string {
 
 // ParseMessage decodes a single kilo bridge NDJSON line into one or more
 // typed agent.Messages.
+//
+// Emitted agent.Message types:
+//   - InitMessage       — type=system subtype=init
+//   - SystemMessage     — type=system (other subtypes), message.part.updated part.type=step_start
+//   - TextMessage       — message.part.updated part.type=text
+//   - TextDeltaMessage  — message.part.delta
+//   - ThinkingMessage   — message.part.updated part.type=reasoning
+//   - ToolUseMessage    — message.part.updated part.type=tool state.status=running (generic tools)
+//   - AskMessage        — ask_user tool (state.status=running)
+//   - TodoMessage       — todo_write tool (state.status=running)
+//   - ToolResultMessage — message.part.updated part.type=tool state.status=completed|error
+//   - ResultMessage     — message.part.updated part.type=step_finish, session.error
+//   - DiffStatMessage   — caic_diff_stat injection
+//   - RawMessage        — unrecognised wire types (preserved verbatim)
 func ParseMessage(line []byte) ([]agent.Message, error) {
 	var rec Record
 	if err := json.Unmarshal(line, &rec); err != nil {

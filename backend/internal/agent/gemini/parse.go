@@ -36,6 +36,18 @@ func normalizeToolName(name string) string {
 
 // ParseMessage decodes a single Gemini CLI stream-json line into one or more
 // typed agent.Messages.
+//
+// Emitted agent.Message types:
+//   - InitMessage       — type=init
+//   - TextMessage       — type=message role=assistant
+//   - UserInputMessage  — type=message role=user
+//   - ToolUseMessage    — type=tool_use (generic tools)
+//   - AskMessage        — type=tool_use name=ask_user
+//   - TodoMessage       — type=tool_use name=write_todos
+//   - ToolResultMessage — type=tool_result
+//   - ResultMessage     — type=result
+//   - DiffStatMessage   — caic_diff_stat injection
+//   - RawMessage        — unrecognised wire types (preserved verbatim)
 func ParseMessage(line []byte) ([]agent.Message, error) {
 	var rec Record
 	if err := json.Unmarshal(line, &rec); err != nil {
