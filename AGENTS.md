@@ -55,6 +55,13 @@ make lint          # Go + frontend + Python + binaries
 make lint-all      # All of the above + Android
 ```
 
+### E2E Tests
+
+The `e2e/` directory contains Playwright tests. There is **no `tsconfig.json`**
+in `e2e/` — Playwright transpiles the TypeScript itself. Do not run `tsc`
+directly on e2e files; use `make e2e` instead, which starts the fake backend
+server and runs Playwright (type errors surface as test failures).
+
 ### Make Targets
 
 ```
@@ -64,7 +71,7 @@ make frontend-dev   # Run Vite frontend dev server on :5173
 make types          # Generate types (go generate → tygo + gen-api-sdk)
 make docs           # Update AGENTS.md file indexes
 make test           # Go unit tests with coverage
-make e2e            # Playwright end-to-end tests
+make e2e            # Playwright end-to-end tests (also type-checks e2e/ TypeScript)
 make lint           # Run linters (Go + frontend + Python + binaries)
 make lint-all       # Run all linters including Android
 make lint-fix       # Auto-fix all linters

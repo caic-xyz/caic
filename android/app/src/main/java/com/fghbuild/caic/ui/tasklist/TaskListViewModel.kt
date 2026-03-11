@@ -47,6 +47,8 @@ private fun naturalCompare(a: String, b: String): Int {
     return ac.size.compareTo(bc.size)
 }
 
+data class RepoEntry(val path: String, val branch: String)
+
 data class TaskListState(
     val tasks: List<Task> = emptyList(),
     val connected: Boolean = false,
@@ -55,11 +57,10 @@ data class TaskListState(
     val harnesses: List<HarnessInfo> = emptyList(),
     val config: Config? = null,
     val usage: UsageResp? = null,
-    val selectedRepo: String = "",
+    val selectedRepos: List<RepoEntry> = emptyList(),
+    val editingBranches: List<String> = emptyList(),
     val selectedHarness: String = "",
     val selectedModel: String = "",
-    val baseBranch: String = "",
-    val branches: List<String> = emptyList(),
     val prompt: String = "",
     val recentRepoCount: Int = 0,
     val submitting: Boolean = false,
@@ -71,6 +72,8 @@ data class TaskListState(
     val authProviders: List<String> = emptyList(),
     val serverURL: String = "",
     val user: UserResp? = null,
+    val availableRecent: List<Repo> = emptyList(),
+    val availableRest: List<Repo> = emptyList(),
 )
 
 @HiltViewModel
@@ -94,18 +97,21 @@ class TaskListViewModel @Inject constructor(
                 Comparator<Task> { a, b ->
                     naturalCompare(a.repos?.firstOrNull()?.name ?: "", b.repos?.firstOrNull()?.name ?: "")
                 }.thenComparator { a, b ->
-                    naturalCompare(a.repos?.firstOrNull()?.branch ?: "", b.repos?.firstOrNull()?.branch ?: "")
+                    naturalCompare(
+                        a.repos?.firstOrNull()?.branch ?: "",
+                        b.repos?.firstOrNull()?.branch ?: "",
+                    )
                 }
             )
-        val terminal = tasks.filter { it.state !in activeStates }
-            .sortedByDescending { it.id }
-        val sorted = active + terminal
-        val imgSupport = form.harnesses
-            .any { it.name == form.selectedHarness && it.supportsImages }
+        val terminal = tasks.filter { it.state !in activeStates }.sortedByDescending { it.id }
+        val imgSupport = form.harnesses.any { it.name == form.selectedHarness && it.supportsImages }
         val sortedRepos = form.repos.take(form.recentRepoCount).sortedBy { it.path } +
             form.repos.drop(form.recentRepoCount)
+        val selectedPaths = form.selectedRepos.map { it.path }.toSet()
+        val recentSlice = sortedRepos.take(form.recentRepoCount)
+        val restSlice = sortedRepos.drop(form.recentRepoCount)
         TaskListState(
-            tasks = sorted,
+            tasks = active + terminal,
             connected = connected,
             serverConfigured = settings.serverURL.isNotBlank(),
             repos = sortedRepos,
@@ -113,11 +119,10 @@ class TaskListViewModel @Inject constructor(
             config = form.config,
             usage = usage,
             recentRepoCount = form.recentRepoCount,
-            selectedRepo = form.selectedRepo,
+            selectedRepos = form.selectedRepos,
+            editingBranches = form.editingBranches,
             selectedHarness = form.selectedHarness,
             selectedModel = form.selectedModel,
-            baseBranch = form.baseBranch,
-            branches = form.branches,
             prompt = form.prompt,
             submitting = form.submitting,
             cloning = form.cloning,
@@ -128,6 +133,8 @@ class TaskListViewModel @Inject constructor(
             authProviders = form.authProviders,
             serverURL = settings.serverURL,
             user = form.user,
+            availableRecent = recentSlice.filter { it.path !in selectedPaths },
+            availableRest = restSlice.filter { it.path !in selectedPaths },
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskListState())
 
@@ -149,7 +156,7 @@ class TaskListViewModel @Inject constructor(
         }
     }
 
-    private fun loadFormData() {
+    private fun loadFormData(selectRepo: String? = null) {
         viewModelScope.launch {
             val url = settingsRepository.settings.value.serverURL
             if (url.isBlank()) return@launch
@@ -187,18 +194,18 @@ class TaskListViewModel @Inject constructor(
                     harnesses.firstOrNull()?.name ?: ""
                 val lastModel = prefModels[selectedHarness] ?: ""
                 val harnessModels = harnesses.find { it.name == selectedHarness }?.models.orEmpty()
-                val initialRepo = ordered.firstOrNull()?.path ?: ""
+                val initialRepo = selectRepo?.takeIf { path -> repos.any { it.path == path } }
+                    ?: ordered.firstOrNull()?.path ?: ""
                 _formState.value = _formState.value.copy(
                     repos = ordered,
                     harnesses = harnesses,
                     config = config,
                     recentRepoCount = recentRepos.size,
-                    selectedRepo = initialRepo,
+                    selectedRepos = if (initialRepo.isNotBlank()) listOf(RepoEntry(initialRepo, "")) else emptyList(),
                     selectedHarness = selectedHarness,
                     selectedModel = if (lastModel in harnessModels) lastModel else "",
                     prefModels = prefModels,
                 )
-                if (initialRepo.isNotBlank()) loadBranches(initialRepo)
             } catch (_: Exception) {
                 // Form data will remain empty; user can still see tasks.
             }
@@ -209,24 +216,37 @@ class TaskListViewModel @Inject constructor(
         _formState.value = _formState.value.copy(prompt = text)
     }
 
-    fun selectRepo(repo: String) {
-        _formState.value = _formState.value.copy(selectedRepo = repo, baseBranch = "")
-        loadBranches(repo)
+    fun addRepo(path: String) {
+        val current = _formState.value
+        if (current.selectedRepos.any { it.path == path }) return
+        _formState.value = current.copy(selectedRepos = current.selectedRepos + RepoEntry(path, ""))
     }
 
-    private fun loadBranches(repo: String) {
-        if (repo.isBlank()) {
-            _formState.value = _formState.value.copy(branches = emptyList())
-            return
-        }
+    fun removeRepo(path: String) {
+        _formState.value = _formState.value.copy(
+            selectedRepos = _formState.value.selectedRepos.filter { it.path != path },
+        )
+    }
+
+    fun setBranch(path: String, branch: String) {
+        _formState.value = _formState.value.copy(
+            selectedRepos = _formState.value.selectedRepos.map {
+                if (it.path == path) it.copy(branch = branch) else it
+            },
+        )
+    }
+
+    fun loadBranchesForPath(path: String) {
+        _formState.value = _formState.value.copy(editingBranches = emptyList())
+        if (path.isBlank()) return
         viewModelScope.launch {
             try {
                 val url = settingsRepository.settings.value.serverURL
                 val client = ApiClient(url, tokenProvider = { settingsRepository.settings.value.authToken })
-                val resp = client.listRepoBranches(repo)
-                _formState.value = _formState.value.copy(branches = resp.branches)
+                val resp = client.listRepoBranches(path)
+                _formState.value = _formState.value.copy(editingBranches = resp.branches)
             } catch (_: Exception) {
-                _formState.value = _formState.value.copy(branches = emptyList())
+                _formState.value = _formState.value.copy(editingBranches = emptyList())
             }
         }
     }
@@ -245,10 +265,6 @@ class TaskListViewModel @Inject constructor(
         else
             _formState.value.prefModels + (harness to model)
         _formState.value = _formState.value.copy(selectedModel = model, prefModels = updated)
-    }
-
-    fun updateBaseBranch(branch: String) {
-        _formState.value = _formState.value.copy(baseBranch = branch)
     }
 
     fun addImages(images: List<ImageData>) {
@@ -271,8 +287,8 @@ class TaskListViewModel @Inject constructor(
             try {
                 val serverURL = settingsRepository.settings.value.serverURL
                 val client = ApiClient(serverURL, tokenProvider = { settingsRepository.settings.value.authToken })
-                client.cloneRepo(CloneRepoReq(url = url, path = path?.ifBlank { null }))
-                loadFormData()
+                val cloned = client.cloneRepo(CloneRepoReq(url = url, path = path?.ifBlank { null }))
+                loadFormData(selectRepo = cloned.path)
                 _formState.value = _formState.value.copy(cloning = false)
             } catch (e: Exception) {
                 _formState.value = _formState.value.copy(
@@ -299,40 +315,34 @@ class TaskListViewModel @Inject constructor(
                             text = prompt,
                             images = form.pendingImages.ifEmpty { null },
                         ),
-                        repos = if (form.selectedRepo.isNotEmpty()) listOf(
-                            RepoSpec(
-                                name = form.selectedRepo,
-                                baseBranch = form.baseBranch.ifBlank { null },
-                            )
-                        ) else null,
+                        repos = form.selectedRepos.ifEmpty { null }?.map {
+                            RepoSpec(name = it.path, baseBranch = it.branch.ifBlank { null })
+                        },
                         harness = form.selectedHarness,
                         model = form.selectedModel.ifBlank { null },
                     )
                 )
-                // Optimistic reorder: move the selected repo to the front.
+                // Promote all selected repos to the front of the MRU list.
                 val current = _formState.value
-                val idx = current.repos.indexOfFirst { it.path == form.selectedRepo }
-                val reorderedRepos = if (idx > 0) {
-                    val before = current.repos.subList(0, idx)
-                    val after = current.repos.subList(idx + 1, current.repos.size)
-                    listOf(current.repos[idx]) + before + after
-                } else {
-                    current.repos
+                val selectedPaths = form.selectedRepos.map { it.path }.toSet()
+                val selectedRepoObjects = form.selectedRepos.mapNotNull { entry ->
+                    current.repos.find { it.path == entry.path }
                 }
-                val newRecentCount = if (idx > current.recentRepoCount - 1)
-                    (current.recentRepoCount + 1).coerceAtMost(current.repos.size)
-                else
-                    current.recentRepoCount
+                val oldRecentPaths = current.repos.take(current.recentRepoCount).map { it.path }.toSet()
+                val newRecentRepos = selectedRepoObjects +
+                    current.repos.take(current.recentRepoCount).filter { it.path !in selectedPaths }
+                val reorderedRepos = newRecentRepos + current.repos.filter {
+                    it.path !in selectedPaths && it.path !in oldRecentPaths
+                }
                 val updatedModels = if (form.selectedModel.isNotBlank())
                     current.prefModels + (form.selectedHarness to form.selectedModel)
                 else
                     current.prefModels
                 _formState.value = current.copy(
                     prompt = "",
-                    baseBranch = "",
                     submitting = false,
                     repos = reorderedRepos,
-                    recentRepoCount = newRecentCount,
+                    recentRepoCount = newRecentRepos.size,
                     pendingImages = emptyList(),
                     prefModels = updatedModels,
                 )
@@ -367,11 +377,10 @@ class TaskListViewModel @Inject constructor(
         val harnesses: List<HarnessInfo> = emptyList(),
         val config: Config? = null,
         val recentRepoCount: Int = 0,
-        val selectedRepo: String = "",
+        val selectedRepos: List<RepoEntry> = emptyList(),
+        val editingBranches: List<String> = emptyList(),
         val selectedHarness: String = "",
         val selectedModel: String = "",
-        val baseBranch: String = "",
-        val branches: List<String> = emptyList(),
         val prompt: String = "",
         val submitting: Boolean = false,
         val cloning: Boolean = false,

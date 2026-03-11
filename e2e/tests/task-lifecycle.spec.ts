@@ -4,8 +4,8 @@ import { test, expect, waitForTaskState } from "../helpers";
 test("create task, verify streaming text and result, then terminate", async ({ page, api }) => {
   await page.goto("/");
 
-  // Wait for repos to load (select gets an option).
-  await expect(page.getByTestId("repo-select").locator("option")).not.toHaveCount(0);
+  // Wait for repos to load (a chip appears in the strip).
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   // Use a unique prompt to avoid collisions with parallel tests.
   const prompt = `e2e lifecycle ${Date.now()}`;
@@ -45,4 +45,28 @@ test("create task, verify streaming text and result, then terminate", async ({ p
   const task = tasks.find((t) => t.initialPrompt === prompt);
   expect(task).toBeTruthy();
   await waitForTaskState(api, task!.id, "terminated");
+});
+
+test("add-repo dropdown is visible and not clipped by overflow", async ({ page }) => {
+  await page.goto("/");
+
+  // Wait for repos to load.
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
+
+  // The add-repo button should be present (at least one repo is not yet selected).
+  const addBtn = page.getByTestId("add-repo-button");
+  await expect(addBtn).toBeVisible();
+
+  // Open the dropdown.
+  await addBtn.click();
+  const dropdown = page.getByTestId("add-repo-dropdown");
+  await expect(dropdown).toBeVisible();
+
+  // The dropdown must not be clipped: its bounding box must be fully within the viewport.
+  const box = await dropdown.boundingBox();
+  expect(box).not.toBeNull();
+  const viewportSize = page.viewportSize();
+  expect(viewportSize).not.toBeNull();
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(viewportSize!.height);
 });

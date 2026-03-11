@@ -1,4 +1,4 @@
-// Tests for repo dropdown ordering after clone and task creation.
+// Tests for repo chip selection after clone and task creation.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
@@ -61,6 +61,12 @@ const repoA: Repo = { path: "repos/a", baseBranch: "main", remoteURL: "" };
 const repoB: Repo = { path: "repos/b", baseBranch: "main", remoteURL: "" };
 const newRepo: Repo = { path: "repos/new", baseBranch: "main", remoteURL: "" };
 
+function chipPathValues(): string[] {
+  const btns = screen.queryAllByTestId("repo-chips")[0]
+    ?.querySelectorAll<HTMLButtonElement>("button[data-testid^='chip-label-']");
+  return Array.from(btns ?? []).map((b) => b.dataset["testid"]?.replace("chip-label-", "") ?? "");
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   navigateMock.mockClear();
@@ -82,56 +88,53 @@ beforeEach(() => {
   vi.mocked(api.createTask).mockResolvedValue({ id: "task1" });
 });
 
-describe("App repo select: No repository", () => {
-  it("stays on No repository after manual selection", async () => {
+describe("App repo chips: No repository", () => {
+  it("has no chips after removing the last one", async () => {
     const user = userEvent.setup();
     render(() => <App />);
 
-    // Wait for initial load: repos/a is the recent repo and should be selected.
+    // Wait for initial load: repos/a chip should appear.
     await waitFor(() => {
-      expect((screen.getByTestId("repo-select") as HTMLSelectElement).value).toBe("repos/a");
+      expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument();
     });
 
-    // User explicitly selects "No repository".
-    const sel = screen.getByTestId("repo-select") as HTMLSelectElement;
-    await user.selectOptions(sel, "");
+    // Remove repos/a chip.
+    await user.click(screen.getByRole("button", { name: "Remove repos/a" }));
 
-    // The selection must remain "No repository" (value="").
-    expect(sel.value).toBe("");
+    // No chips remain.
+    expect(chipPathValues()).toHaveLength(0);
   });
 
-  it("stays on No repository after repos SSE event updates CI status", async () => {
+  it("stays empty after repos SSE event updates CI status", async () => {
     const user = userEvent.setup();
     render(() => <App />);
 
     await waitFor(() => {
-      expect((screen.getByTestId("repo-select") as HTMLSelectElement).value).toBe("repos/a");
+      expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument();
     });
 
-    const sel = screen.getByTestId("repo-select") as HTMLSelectElement;
-    await user.selectOptions(sel, "");
-    expect(sel.value).toBe("");
+    await user.click(screen.getByRole("button", { name: "Remove repos/a" }));
+    expect(chipPathValues()).toHaveLength(0);
 
     // Simulate a "repos" SSE event (e.g. CI status update) which triggers setRepos.
     const repoAUpdated: Repo = { path: "repos/a", baseBranch: "main", remoteURL: "", defaultBranchCIStatus: "success" as const };
     dispatchSSE({ kind: "repos", repos: [repoAUpdated] });
 
     await waitFor(() => {
-      // Selection must remain "No repository" — not revert to the first repo.
-      expect(sel.value).toBe("");
+      // No chip should have been added back.
+      expect(chipPathValues()).toHaveLength(0);
     });
   });
 
-  it("creates task without repos when No repository is selected", async () => {
+  it("creates task without repos when no chips are selected", async () => {
     const user = userEvent.setup();
     render(() => <App />);
 
     await waitFor(() => {
-      expect((screen.getByTestId("repo-select") as HTMLSelectElement).value).toBe("repos/a");
+      expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument();
     });
 
-    const sel = screen.getByTestId("repo-select") as HTMLSelectElement;
-    await user.selectOptions(sel, "");
+    await user.click(screen.getByRole("button", { name: "Remove repos/a" }));
 
     await user.type(screen.getByTestId("prompt-input"), "do something");
     await user.click(screen.getByTestId("submit-task"));
@@ -142,11 +145,9 @@ describe("App repo select: No repository", () => {
   });
 });
 
-describe("App repo select ordering", () => {
+describe("App repo chip ordering", () => {
   it("defaults to the last-used repo from preferences on load", async () => {
-    // getPreferences returns repos/b as MRU first (last used to create a task).
-    // Recent group is sorted alphabetically so repos/a appears first visually,
-    // but the selected value must still be repos/b.
+    // getPreferences returns repos/b as MRU first.
     vi.mocked(api.getPreferences).mockResolvedValue({
       repositories: [{ path: "repos/b" }, { path: "repos/a" }],
       models: {},
@@ -156,55 +157,18 @@ describe("App repo select ordering", () => {
     render(() => <App />);
 
     await waitFor(() => {
-      const sel = screen.getByTestId("repo-select") as HTMLSelectElement;
-      expect(sel.value).toBe("repos/b");
+      expect(screen.getByTestId("chip-label-repos/b")).toBeInTheDocument();
+      expect(screen.queryByTestId("chip-label-repos/a")).not.toBeInTheDocument();
     });
   });
 
-  it("cloned repo appears in All repositories (not Recent) before first task", async () => {
+  it("cloned repo appears in add-dropdown (not Recent) before first task", async () => {
     const user = userEvent.setup();
     render(() => <App />);
 
-    // Wait for initial load: A is recent so optgroups are shown.
+    // Wait for initial load: repos/a chip visible.
     await waitFor(() => {
-      const sel = screen.getByTestId("repo-select");
-      expect(sel.querySelector("optgroup[label='Recent']")).toBeInTheDocument();
-    });
-
-    // Clone a new repo.
-    await user.click(screen.getByTestId("clone-toggle"));
-    await user.type(screen.getByTestId("clone-url"), "https://github.com/org/new.git");
-    await user.click(screen.getByTestId("clone-submit"));
-
-    // Wait for clone to complete and dialog to close.
-    await waitFor(() => expect(screen.queryByTestId("clone-url")).not.toBeInTheDocument());
-
-    const repoSelect = screen.getByTestId("repo-select");
-
-    // The cloned repo must NOT appear in the Recent optgroup.
-    const recentGroup = repoSelect.querySelector("optgroup[label='Recent']");
-    expect(recentGroup).toBeInTheDocument();
-    const recentPaths = Array.from(recentGroup?.querySelectorAll("option") ?? []).map(
-      (o) => (o as HTMLOptionElement).value,
-    );
-    expect(recentPaths).not.toContain(newRepo.path);
-
-    // The cloned repo MUST appear in the All repositories optgroup.
-    const allGroup = repoSelect.querySelector("optgroup[label='All repositories']");
-    expect(allGroup).toBeInTheDocument();
-    const allPaths = Array.from(allGroup?.querySelectorAll("option") ?? []).map(
-      (o) => (o as HTMLOptionElement).value,
-    );
-    expect(allPaths).toContain(newRepo.path);
-  });
-
-  it("cloned repo moves to Recent after first task", async () => {
-    const user = userEvent.setup();
-    render(() => <App />);
-
-    await waitFor(() => {
-      const sel = screen.getByTestId("repo-select");
-      expect(sel.querySelector("optgroup[label='Recent']")).toBeInTheDocument();
+      expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument();
     });
 
     // Clone a new repo.
@@ -213,16 +177,72 @@ describe("App repo select ordering", () => {
     await user.click(screen.getByTestId("clone-submit"));
     await waitFor(() => expect(screen.queryByTestId("clone-url")).not.toBeInTheDocument());
 
-    // Submit a task for the new repo (it should already be selected after clone).
+    // After clone, repos/new is the single selected chip (clone replaces selection).
+    await waitFor(() => {
+      expect(screen.getByTestId("chip-label-repos/new")).toBeInTheDocument();
+    });
+
+    // Remove the repos/new chip so we can inspect the add-dropdown.
+    await user.click(screen.getByRole("button", { name: "Remove repos/new" }));
+
+    // Open the add-dropdown.
+    await user.click(screen.getByTestId("add-repo-button"));
+    const dropdown = screen.getByTestId("add-repo-dropdown");
+
+    // repos/new must appear in "All repositories" section (no Recent label next to it).
+    const groupLabels = Array.from(dropdown.querySelectorAll("[class*='dropdownGroupLabel']")).map(
+      (el) => el.textContent,
+    );
+    const options = Array.from(dropdown.querySelectorAll("button")).map((b) => b.textContent);
+
+    // repos/a is recent; repos/new is not — so Recent group should be present.
+    expect(groupLabels).toContain("Recent");
+    expect(groupLabels).toContain("All repositories");
+    expect(options).toContain("repos/new");
+    // repos/new should come after repos/a (in All repositories, not Recent).
+    const recentIdx = groupLabels.indexOf("Recent");
+    const allIdx = groupLabels.indexOf("All repositories");
+    expect(allIdx).toBeGreaterThan(recentIdx);
+  });
+
+  it("cloned repo moves to Recent section in add-dropdown after first task", async () => {
+    const user = userEvent.setup();
+    render(() => <App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument();
+    });
+
+    // Clone a new repo.
+    await user.click(screen.getByTestId("clone-toggle"));
+    await user.type(screen.getByTestId("clone-url"), "https://github.com/org/new.git");
+    await user.click(screen.getByTestId("clone-submit"));
+    await waitFor(() => expect(screen.queryByTestId("clone-url")).not.toBeInTheDocument());
+
+    // Submit a task for repos/new (it's the current chip after clone).
     await user.type(screen.getByTestId("prompt-input"), "do something");
     await user.click(screen.getByTestId("submit-task"));
     await waitFor(() => expect(api.createTask).toHaveBeenCalledOnce());
 
-    const repoSelect = screen.getByTestId("repo-select");
-    const recentGroup = repoSelect.querySelector("optgroup[label='Recent']");
-    const recentPaths = Array.from(recentGroup?.querySelectorAll("option") ?? []).map(
-      (o) => (o as HTMLOptionElement).value,
+    // Remove chip to inspect the dropdown.
+    await user.click(screen.getByRole("button", { name: "Remove repos/new" }));
+    await user.click(screen.getByTestId("add-repo-button"));
+    const dropdown = screen.getByTestId("add-repo-dropdown");
+
+    // After first task, repos/new is promoted to Recent.
+    const groupLabels = Array.from(dropdown.querySelectorAll("[class*='dropdownGroupLabel']")).map(
+      (el) => el.textContent,
     );
-    expect(recentPaths).toContain(newRepo.path);
+    expect(groupLabels).toContain("Recent");
+
+    // repos/new should now appear before the "All repositories" divider (i.e. in Recent).
+    const nodes = Array.from(dropdown.children);
+    const recentLabelIdx = nodes.findIndex((n) => n.textContent === "Recent");
+    const allLabelIdx = nodes.findIndex((n) => n.textContent === "All repositories");
+    const newOptionIdx = nodes.findIndex((n) => n.textContent === "repos/new");
+    expect(newOptionIdx).toBeGreaterThan(recentLabelIdx);
+    if (allLabelIdx >= 0) {
+      expect(newOptionIdx).toBeLessThan(allLabelIdx);
+    }
   });
 });

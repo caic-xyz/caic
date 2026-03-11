@@ -41,7 +41,7 @@ test("send input to nonexistent task returns 404", async ({ api }) => {
 
 test("network failure shows reconnect banner", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByTestId("repo-select").locator("option")).not.toHaveCount(0);
+  await expect(page.getByTestId("repo-chips").locator("[data-testid^='chip-label-']").first()).toBeVisible();
 
   // Intercept all API requests to simulate network failure. This must close
   // the existing SSE connection too, so we abort any in-flight requests and

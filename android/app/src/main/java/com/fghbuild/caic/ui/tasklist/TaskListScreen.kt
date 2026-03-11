@@ -13,6 +13,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -314,7 +316,9 @@ private fun MainContent(
                                 .size(8.dp)
                                 .clip(CircleShape)
                                 .background(dotColor)
-                                .then(if (ciUrl != null) Modifier.clickable { uriHandler.openUri(ciUrl) } else Modifier),
+                                .then(
+                                    if (ciUrl != null) Modifier.clickable { uriHandler.openUri(ciUrl) } else Modifier
+                                ),
                         )
                     }
                 }
@@ -366,7 +370,6 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
         }
     }
     val hasContent = state.prompt.isNotBlank() || state.pendingImages.isNotEmpty()
-
     var showCloneDialog by remember { mutableStateOf(false) }
 
     if (showCloneDialog) {
@@ -380,74 +383,14 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
         )
     }
 
-    val defaultBranch = state.repos.find { it.path == state.selectedRepo }?.baseBranch ?: ""
     val models = state.harnesses.firstOrNull { it.name == state.selectedHarness }?.models.orEmpty()
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        // Row 1: Repo + Clone + Branch
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(modifier = Modifier.weight(1f)) {
-                val repoOptions = listOf("") + state.repos.map { it.path }
-                DropdownField(
-                    label = "Repository",
-                    selected = state.selectedRepo,
-                    options = repoOptions,
-                    onSelect = viewModel::selectRepo,
-                    dividerAfter = if (state.recentRepoCount > 0) state.recentRepoCount + 1 else 1,
-                    itemLabel = { if (it.isEmpty()) "No repository" else it },
-                )
-            }
-            IconButton(onClick = { showCloneDialog = true }, enabled = !state.cloning) {
-                if (state.cloning) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                } else {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Clone repository")
-                }
-            }
-            if (state.selectedRepo.isNotEmpty()) {
-                var branchDropdownExpanded by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(
-                    expanded = branchDropdownExpanded && state.branches.isNotEmpty(),
-                    onExpandedChange = { if (state.branches.isNotEmpty()) branchDropdownExpanded = it },
-                    modifier = Modifier.weight(0.6f),
-                ) {
-                    OutlinedTextField(
-                        value = state.baseBranch,
-                        onValueChange = viewModel::updateBaseBranch,
-                        label = { Text("Branch") },
-                        placeholder = { Text(defaultBranch.ifBlank { "main" }) },
-                        modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryEditable),
-                        trailingIcon = {
-                            if (state.branches.isNotEmpty()) {
-                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = branchDropdownExpanded)
-                            }
-                        },
-                        singleLine = true,
-                        enabled = !state.submitting,
-                    )
-                    if (state.branches.isNotEmpty()) {
-                        ExposedDropdownMenu(
-                            expanded = branchDropdownExpanded,
-                            onDismissRequest = { branchDropdownExpanded = false },
-                        ) {
-                            state.branches.forEach { branch ->
-                                DropdownMenuItem(
-                                    text = { Text(branch) },
-                                    onClick = {
-                                        viewModel.updateBaseBranch(branch)
-                                        branchDropdownExpanded = false
-                                    },
-                                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        RepoChipStrip(
+            state = state,
+            viewModel = viewModel,
+            onShowCloneDialog = { showCloneDialog = true },
+        )
 
         // Row 2: Harness + Model (side by side when both present)
         if (state.harnesses.size > 1 || models.isNotEmpty()) {
@@ -529,6 +472,182 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
                     )
                 },
             )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun RepoChipStrip(
+    state: TaskListState,
+    viewModel: TaskListViewModel,
+    onShowCloneDialog: () -> Unit,
+) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        state.selectedRepos.forEach { entry ->
+            RepoChip(
+                entry = entry,
+                baseBranch = state.repos.find { it.path == entry.path }?.baseBranch ?: "",
+                editingBranches = state.editingBranches,
+                enabled = !state.submitting,
+                onRemove = { viewModel.removeRepo(entry.path) },
+                onSetBranch = { branch -> viewModel.setBranch(entry.path, branch) },
+                onLoadBranches = { viewModel.loadBranchesForPath(entry.path) },
+            )
+        }
+        if (state.availableRecent.isNotEmpty() || state.availableRest.isNotEmpty()) {
+            AddRepoChip(
+                availableRecent = state.availableRecent,
+                availableRest = state.availableRest,
+                onAdd = viewModel::addRepo,
+            )
+        }
+        TooltipBox(
+            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+            tooltip = { PlainTooltip { Text("Clone repository") } },
+            state = rememberTooltipState(),
+        ) {
+            IconButton(
+                onClick = onShowCloneDialog,
+                enabled = !state.cloning && !state.submitting,
+                modifier = Modifier.size(32.dp),
+            ) {
+                if (state.cloning) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                } else {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Clone repository", modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RepoChip(
+    entry: RepoEntry,
+    baseBranch: String,
+    editingBranches: List<String>,
+    enabled: Boolean,
+    onRemove: () -> Unit,
+    onSetBranch: (String) -> Unit,
+    onLoadBranches: () -> Unit,
+) {
+    var branchOpen by remember { mutableStateOf(false) }
+    val shortName = entry.path.substringAfterLast("/")
+    Box {
+        Row(
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .clickable(enabled = enabled) {
+                        branchOpen = !branchOpen
+                        if (branchOpen) onLoadBranches()
+                    }
+                    .padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(shortName, style = MaterialTheme.typography.bodyMedium)
+                    if (entry.branch.isNotEmpty()) {
+                        Text(
+                            " · ${entry.branch}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .clickable(enabled = enabled, onClick = onRemove)
+                    .padding(start = 4.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            ) {
+                Text("×", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        DropdownMenu(expanded = branchOpen, onDismissRequest = { branchOpen = false }) {
+            DropdownMenuItem(
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Default ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("($baseBranch)")
+                    }
+                },
+                onClick = { onSetBranch(""); branchOpen = false },
+            )
+            editingBranches.forEach { branch ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            branch,
+                            fontWeight = if (branch == entry.branch) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    },
+                    onClick = { onSetBranch(branch); branchOpen = false },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddRepoChip(
+    availableRecent: List<Repo>,
+    availableRest: List<Repo>,
+    onAdd: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .clickable { expanded = true }
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+        ) {
+            Text("+", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (availableRecent.isNotEmpty()) {
+                Text(
+                    text = "Recent",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                )
+                availableRecent.sortedBy { it.path }.forEach { repo ->
+                    DropdownMenuItem(
+                        text = { Text(repo.path, style = MaterialTheme.typography.bodyMedium) },
+                        onClick = { onAdd(repo.path); expanded = false },
+                    )
+                }
+            }
+            if (availableRecent.isNotEmpty() && availableRest.isNotEmpty()) {
+                HorizontalDivider()
+            }
+            if (availableRest.isNotEmpty()) {
+                if (availableRecent.isNotEmpty()) {
+                    Text(
+                        text = "All repositories",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                    )
+                }
+                availableRest.forEach { repo ->
+                    DropdownMenuItem(
+                        text = { Text(repo.path, style = MaterialTheme.typography.bodyMedium) },
+                        onClick = { onAdd(repo.path); expanded = false },
+                    )
+                }
+            }
         }
     }
 }
