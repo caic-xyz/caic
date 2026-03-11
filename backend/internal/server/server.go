@@ -343,7 +343,7 @@ func (b *mdBackend) Fetch(ctx context.Context, repos []md.Repo) error {
 	if len(repos) > 0 {
 		slog.Info("md fetch", "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	}
-	return b.client.Container(repos...).Fetch(ctx, b.provider)
+	return b.client.Container(repos...).Fetch(ctx, 0, b.provider)
 }
 
 func (b *mdBackend) Kill(ctx context.Context, name string, repos []md.Repo) error {
@@ -352,8 +352,10 @@ func (b *mdBackend) Kill(ctx context.Context, name string, repos []md.Repo) erro
 	} else {
 		slog.Info("md kill", "name", name)
 	}
-	ct := b.client.ContainerByName(name)
-	ct.Repos = repos
+	ct := b.client.Container(repos...)
+	if len(repos) == 0 {
+		ct.Name = name
+	}
 	return ct.Kill(ctx)
 }
 
