@@ -2337,14 +2337,14 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		// Claude Code stdout and user inputs (logged by the relay).
 		t.RestoreMessages(relayMsgs)
 		t.RelayOffset = relaySize
-		slog.Info("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(relayMsgs))
+		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(relayMsgs))
 	} else if lt != nil {
 		if err := lt.LoadMessages(); err != nil {
 			slog.Warn("load messages failed", "repo", ri.RelPath, "br", branch, "err", err)
 		}
 		if len(lt.Msgs) > 0 {
 			t.RestoreMessages(lt.Msgs)
-			slog.Info("restored from logs", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(lt.Msgs))
+			slog.Warn("relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(lt.Msgs))
 		}
 	}
 
@@ -2524,12 +2524,12 @@ func (s *Server) discoverKiloModels() {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Get("https://openrouter.ai/api/v1/models")
 	if err != nil {
-		slog.Warn("kilo: fetch OpenRouter models failed", "err", err)
+		slog.Warn("kilo", "msg", "fetch OpenRouter models failed", "err", err)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		slog.Warn("kilo: OpenRouter non-200", "st", resp.StatusCode)
+		slog.Warn("kilo", "msg", "fetch OpenRouter non-200", "st", resp.StatusCode)
 		return
 	}
 	var body struct {
@@ -2538,7 +2538,7 @@ func (s *Server) discoverKiloModels() {
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		slog.Warn("kilo: decode OpenRouter response failed", "err", err)
+		slog.Warn("kilo", "msg", "JSON decode OpenRouter response failed", "err", err)
 		return
 	}
 	models := make([]string, 0, len(body.Data))
@@ -2548,7 +2548,7 @@ func (s *Server) discoverKiloModels() {
 		}
 	}
 	if len(models) == 0 {
-		slog.Warn("kilo: OpenRouter returned no models")
+		slog.Warn("kilo", "msg", "fetch OpenRouter returned no models")
 		return
 	}
 	for _, r := range s.runners {
@@ -2556,7 +2556,7 @@ func (s *Server) discoverKiloModels() {
 			b.SetModels(kilo.SortModels(models))
 		}
 	}
-	slog.Info("kilo: models discovered", "n", len(models))
+	slog.Debug("kilo", "num_models", len(models))
 }
 
 // handleContainerDeath looks up a task by container name and triggers cleanup.

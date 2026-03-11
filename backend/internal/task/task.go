@@ -980,9 +980,9 @@ func (t *Task) GenerateTitle(ctx context.Context) {
 	// Strip surrounding quotes if the model adds them despite instructions.
 	title := strings.Trim(strings.TrimSpace(res.String()), "\"'`")
 	if title == "" {
-		slog.Warn("title empty", "task", t.ID, "d", d, "raw", res.String())
+		slog.Warn("title", "task", t.ID, "d", d, "msg", "empty")
 		return
 	}
-	slog.Info("title generated", "task", t.ID, "title", title, "d", d)
+	slog.Info("title", "task", t.ID, "title", title, "d", d)
 	t.SetTitle(title)
 }
