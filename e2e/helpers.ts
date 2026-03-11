@@ -1,70 +1,41 @@
 // Shared e2e test helpers: typed API client and utilities.
 import { test as base, expect, type APIRequestContext } from "@playwright/test";
-import type {
-  CreateTaskReq,
-  CreateTaskResp,
-  HarnessInfo,
-  InputReq,
-  Repo,
-  RestartReq,
-  StatusResp,
-  Task,
-} from "../sdk/ts/v1/types.gen";
+import { createApiClient, APIError, type FetchFn } from "../sdk/ts/v1/api.gen";
+import type { Task } from "../sdk/ts/v1/types.gen";
 
 // ---------------------------------------------------------------------------
-// Typed API client wrapping Playwright's APIRequestContext.
+// Adapt Playwright's APIRequestContext to the SDK's FetchFn interface.
 // ---------------------------------------------------------------------------
 
-export class APIClient {
-  constructor(private request: APIRequestContext) {}
-
-  async listHarnesses(): Promise<HarnessInfo[]> {
-    return this.get("/api/v1/server/harnesses");
-  }
-
-  async listRepos(): Promise<Repo[]> {
-    return this.get("/api/v1/server/repos");
-  }
-
-  async listTasks(): Promise<Task[]> {
-    return this.get("/api/v1/tasks");
-  }
-
-  async createTask(req: CreateTaskReq): Promise<CreateTaskResp> {
-    return this.post("/api/v1/tasks", req);
-  }
-
-  async sendInput(id: string, req: InputReq): Promise<StatusResp> {
-    return this.post(`/api/v1/tasks/${id}/input`, req);
-  }
-
-  async restartTask(id: string, req: RestartReq): Promise<StatusResp> {
-    return this.post(`/api/v1/tasks/${id}/restart`, req);
-  }
-
-  async terminateTask(id: string): Promise<StatusResp> {
-    return this.post(`/api/v1/tasks/${id}/terminate`);
-  }
-
-  async getTask(id: string): Promise<Task | undefined> {
-    const tasks = await this.listTasks();
-    return tasks.find((t) => t.id === id);
-  }
-
-  // -- internal helpers --
-
-  private async get<T>(path: string): Promise<T> {
-    const res = await this.request.get(path);
-    expect(res.ok(), `GET ${path}: ${res.status()}`).toBe(true);
-    return res.json() as Promise<T>;
-  }
-
-  private async post<T>(path: string, body?: unknown): Promise<T> {
-    const res = await this.request.post(path, { data: body });
-    expect(res.ok(), `POST ${path}: ${res.status()}`).toBe(true);
-    return res.json() as Promise<T>;
-  }
+function playwrightFetch(request: APIRequestContext): FetchFn {
+  return async (url: string, init?: RequestInit): Promise<Response> => {
+    const method = init?.method ?? "GET";
+    const data = init?.body != null ? JSON.parse(init.body as string) : undefined;
+    const pwRes = await request.fetch(url, { method, data });
+    const body = await pwRes.body();
+    return new Response(body, {
+      status: pwRes.status(),
+      headers: new Headers(pwRes.headers()),
+    });
+  };
 }
+
+// ---------------------------------------------------------------------------
+// APIClient: SDK client extended with a getTask convenience method.
+// ---------------------------------------------------------------------------
+
+function createClient(request: APIRequestContext) {
+  const sdk = createApiClient(playwrightFetch(request));
+  return {
+    ...sdk,
+    getTask: async (id: string): Promise<Task | undefined> => {
+      const tasks = await sdk.listTasks();
+      return tasks.find((t) => t.id === id);
+    },
+  };
+}
+
+export type APIClient = ReturnType<typeof createClient>;
 
 // ---------------------------------------------------------------------------
 // Fixtures: extends Playwright's base test with an `api` client.
@@ -72,11 +43,11 @@ export class APIClient {
 
 export const test = base.extend<{ api: APIClient }>({
   api: async ({ request }, use) => {
-    await use(new APIClient(request));
+    await use(createClient(request));
   },
 });
 
-export { expect };
+export { expect, APIError };
 
 // ---------------------------------------------------------------------------
 // Utility: create a task via API and return its ID.

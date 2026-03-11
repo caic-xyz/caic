@@ -1,39 +1,42 @@
 // Error handling and edge case tests.
-import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, APIError } from "../helpers";
 
-test("POST /api/v1/tasks with missing prompt returns 400", async ({ request }) => {
-  const res = await request.post("/api/v1/tasks", {
-    data: { repo: "nonexistent", harness: "fake" },
-  });
-  expect(res.status()).toBe(400);
-  const body = await res.json();
-  expect(body.error.code).toBeTruthy();
+test("POST /api/v1/tasks with missing prompt returns 400", async ({ api }) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const err = await api.createTask({ harness: "fake" } as any).catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(APIError);
+  expect((err as APIError).status).toBe(400);
+  expect((err as APIError).code).toBeTruthy();
 });
 
-test("POST /api/v1/tasks with unknown repo returns 400", async ({ request }) => {
-  const res = await request.post("/api/v1/tasks", {
-    data: { initialPrompt: { text: "hello" }, repos: [{ name: "nonexistent" }], harness: "fake" },
-  });
-  expect(res.status()).toBe(400);
+test("POST /api/v1/tasks with unknown repo returns 400", async ({ api }) => {
+  const err = await api
+    .createTask({ initialPrompt: { text: "hello" }, repos: [{ name: "nonexistent" }], harness: "fake" })
+    .catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(APIError);
+  expect((err as APIError).status).toBe(400);
 });
 
-test("POST /api/v1/tasks with unknown harness returns 400", async ({ request }) => {
-  const res = await request.post("/api/v1/tasks", {
-    data: { initialPrompt: { text: "hello" }, repo: "nonexistent", harness: "does-not-exist" },
-  });
-  expect(res.status()).toBe(400);
+test("POST /api/v1/tasks with unknown harness returns 400", async ({ api }) => {
+  const err = await api
+    .createTask({ initialPrompt: { text: "hello" }, harness: "does-not-exist" })
+    .catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(APIError);
+  expect((err as APIError).status).toBe(400);
 });
 
-test("terminate nonexistent task returns 404", async ({ request }) => {
-  const res = await request.post("/api/v1/tasks/nonexistent-id/terminate");
-  expect(res.status()).toBe(404);
+test("terminate nonexistent task returns 404", async ({ api }) => {
+  const err = await api.terminateTask("nonexistent-id").catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(APIError);
+  expect((err as APIError).status).toBe(404);
 });
 
-test("send input to nonexistent task returns 404", async ({ request }) => {
-  const res = await request.post("/api/v1/tasks/nonexistent-id/input", {
-    data: { prompt: { text: "hello" } },
-  });
-  expect(res.status()).toBe(404);
+test("send input to nonexistent task returns 404", async ({ api }) => {
+  const err = await api
+    .sendInput("nonexistent-id", { prompt: { text: "hello" } })
+    .catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(APIError);
+  expect((err as APIError).status).toBe(404);
 });
 
 test("network failure shows reconnect banner", async ({ page }) => {
