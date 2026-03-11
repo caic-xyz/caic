@@ -3,6 +3,8 @@
 .list {
   flex: 1;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding-right: 1rem;
   min-height: 0;
   opacity: 1;
   transition: width 150ms ease-out, opacity 150ms ease-out;
