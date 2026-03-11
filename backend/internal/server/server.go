@@ -328,12 +328,10 @@ func (b *mdBackend) Connect(ctx context.Context, repos []md.Repo, opts *task.Sta
 	return c.Name, sr.TailscaleFQDN, nil
 }
 
-func (b *mdBackend) Diff(ctx context.Context, repos []md.Repo, args ...string) (string, error) {
-	if len(repos) > 0 {
-		slog.Info("md diff", "dir", repos[0].GitRoot, "br", repos[0].Branch, "args", args)
-	}
+func (b *mdBackend) Diff(ctx context.Context, repo md.Repo, args ...string) (string, error) {
+	slog.Info("md diff", "dir", repo.GitRoot, "br", repo.Branch, "args", args)
 	var stdout bytes.Buffer
-	if err := b.client.Container(repos...).Diff(ctx, 0, &stdout, io.Discard, args); err != nil {
+	if err := b.client.Container(repo).Diff(ctx, 0, &stdout, io.Discard, args); err != nil {
 		return "", err
 	}
 	return stdout.String(), nil

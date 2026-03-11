@@ -411,7 +411,7 @@ func (*fakeContainer) Connect(_ context.Context, repos []md.Repo, _ *task.StartO
 	return "md-test-" + strings.ReplaceAll(repos[0].Branch, "/", "-"), "", nil
 }
 
-func (*fakeContainer) Diff(_ context.Context, _ []md.Repo, _ ...string) (string, error) {
+func (*fakeContainer) Diff(_ context.Context, _ md.Repo, _ ...string) (string, error) {
 	return "", nil
 }
 

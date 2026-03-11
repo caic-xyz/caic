@@ -45,7 +45,7 @@ type ContainerBackend interface {
 	// Connect waits for SSH and pushes repos into the container.
 	// Returns the container name and optional Tailscale FQDN.
 	Connect(ctx context.Context, repos []md.Repo, opts *StartOptions) (name, tailscaleFQDN string, err error)
-	Diff(ctx context.Context, repos []md.Repo, args ...string) (string, error)
+	Diff(ctx context.Context, repo md.Repo, args ...string) (string, error)
 	Fetch(ctx context.Context, repos []md.Repo) error
 	// Kill kills the container identified by name, removing any git remotes for
 	// the given repos.
@@ -741,7 +741,7 @@ func (r *Runner) DiffContent(ctx context.Context, branch, path string) (string, 
 	if path != "" {
 		args = append(args, "--", path)
 	}
-	return r.Container.Diff(ctx, []md.Repo{{GitRoot: r.Dir, Branch: branch}}, args...)
+	return r.Container.Diff(ctx, md.Repo{GitRoot: r.Dir, Branch: branch}, args...)
 }
 
 // KillContainer kills the md container identified by containerName, cleaning
@@ -916,7 +916,7 @@ func (r *Runner) diffStat(ctx context.Context, branch string) agent.DiffStat {
 	if r.Dir == "" {
 		return nil
 	}
-	numstat, err := r.Container.Diff(ctx, []md.Repo{{GitRoot: r.Dir, Branch: branch}}, "--numstat")
+	numstat, err := r.Container.Diff(ctx, md.Repo{GitRoot: r.Dir, Branch: branch}, "--numstat")
 	if err != nil {
 		r.log.Warn("diff numstat failed", "br", branch, "err", err)
 		return nil
