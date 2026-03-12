@@ -403,6 +403,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init container library: %w", err)
 	}
+	mdClient.DigestCacheTTL = warmupInterval
 
 	// Phase 1: Parallel I/O — repos discovery, logs loading, and container listing.
 	type reposResult struct {
@@ -653,6 +654,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 
 	s.watchContainerEvents(ctx)
 	go s.discoverKiloModels()
+	go s.warmupImages()
 	return s, nil
 }
 
@@ -2763,6 +2765,44 @@ func (s *Server) watchContainerEvents(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// warmupInterval controls how often warmupImages re-checks for new base image
+// versions. It also sets DigestCacheTTL so that container starts between
+// warmup cycles reuse the cached digest instead of hitting the registry.
+const warmupInterval = 6 * time.Hour
+
+// warmupImages periodically calls md.Client.Warmup for the default base image
+// and any custom images configured in user preferences. This ensures the image
+// is pulled and the md-user layer is built before a task needs it.
+func (s *Server) warmupImages() {
+	// Run immediately on startup, then every warmupInterval.
+	ticker := time.NewTicker(warmupInterval)
+	defer ticker.Stop()
+	for {
+		images := []string{md.DefaultBaseImage + ":latest"}
+		for _, img := range s.prefs.BaseImages() {
+			if !slices.Contains(images, img) {
+				images = append(images, img)
+			}
+		}
+		for _, img := range images {
+			built, err := s.mdClient.Warmup(s.ctx, &md.WarmupOpts{
+				BaseImage: img,
+				Quiet:     true,
+			})
+			if err != nil {
+				slog.Warn("warmup", "image", img, "err", err)
+			} else if built {
+				slog.Info("warmup", "image", img, "built", true)
+			}
+		}
+		select {
+		case <-ticker.C:
+		case <-s.ctx.Done():
+			return
+		}
+	}
 }
 
 // discoverKiloModels fetches available models from the OpenRouter API and

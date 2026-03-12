@@ -240,6 +240,25 @@ type usersFile struct {
 	Users map[string]Preferences `json:"users,omitempty"`
 }
 
+// BaseImages returns all distinct non-empty base images configured across all
+// users' global and per-repo preferences.
+func (s *Store) BaseImages() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := make(map[string]struct{})
+	for _, p := range s.cached {
+		if p.BaseImage != "" {
+			seen[p.BaseImage] = struct{}{}
+		}
+		for _, r := range p.Repositories {
+			if r.BaseImage != "" {
+				seen[r.BaseImage] = struct{}{}
+			}
+		}
+	}
+	return slices.Sorted(maps.Keys(seen))
+}
+
 // Validate checks that the on-disk format is well-formed.
 func (f *usersFile) Validate() error {
 	for id, p := range f.Users {
