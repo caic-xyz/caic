@@ -2655,7 +2655,7 @@ func (s *Server) SetRunnerOps(c task.ContainerBackend, backends map[agent.Harnes
 	}
 }
 
-// loadPurgedTasks loads the last 10 purged tasks from JSONL logs on disk.
+// loadPurgedTasks loads the last 20 purged tasks from JSONL logs on disk.
 // Exported for testing; New() uses the parallelized variant.
 func (s *Server) loadPurgedTasks() error {
 	all, err := task.LoadLogs(s.logDir)
@@ -2666,20 +2666,22 @@ func (s *Server) loadPurgedTasks() error {
 }
 
 // loadPurgedTasksFrom populates s.tasks from pre-loaded log data. It filters
-// to tasks with an explicit caic_result trailer and keeps the most recent 10.
+// to tasks with an explicit caic_result trailer, keeps only those updated
+// within the last 3 days, and limits the result to the 20 most recent.
 func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
-	// Filter to tasks with an explicit caic_result trailer.
+	// Filter to tasks with an explicit caic_result trailer and updated within 3 days.
 	// Log files without a trailer may belong to still-running tasks.
 	var purged []*task.LoadedTask
+	now := time.Now().UTC()
 	for _, lt := range all {
-		if lt.Result != nil {
+		if lt.Result != nil && now.Sub(lt.LastStateUpdateAt) <= 3*24*time.Hour {
 			purged = append(purged, lt)
 		}
 	}
-	// LoadLogs returns ascending; reverse for most-recent-first, keep last 10.
+	// LoadLogs returns ascending; reverse for most-recent-first, keep last 20.
 	slices.Reverse(purged)
-	if len(purged) > 10 {
-		purged = purged[:10]
+	if len(purged) > 20 {
+		purged = purged[:20]
 	}
 	if len(purged) == 0 {
 		return nil

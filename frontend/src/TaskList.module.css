@@ -84,6 +84,26 @@
   padding: 4px 0 2px;
 }
 
+.subGroupHeader {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 0;
+  width: 100%;
+  text-align: left;
+  border-radius: var(--radius-sm);
+}
+
+.subGroupHeader:hover {
+  color: var(--color-text-secondary);
+  background: var(--color-bg-hover);
+}
+
 .ciDot {
   display: inline-block;
   width: 8px;

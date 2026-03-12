@@ -49,8 +49,16 @@ private fun naturalCompare(a: String, b: String): Int {
 
 data class RepoEntry(val path: String, val branch: String)
 
+data class TaskGroup(
+    val repo: String,
+    val active: List<Task> = emptyList(),
+    val stopped: List<Task> = emptyList(),
+    val purged: List<Task> = emptyList(),
+)
+
 data class TaskListState(
     val tasks: List<Task> = emptyList(),
+    val groups: List<TaskGroup> = emptyList(),
     val connected: Boolean = false,
     val serverConfigured: Boolean = false,
     val repos: List<Repo> = emptyList(),
@@ -92,26 +100,67 @@ class TaskListViewModel @Inject constructor(
         settingsRepository.settings,
         _formState,
     ) { tasks, connected, usage, settings, form ->
-        val active = tasks.filter { it.state !in terminalStates }
-            .sortedWith(
-                Comparator<Task> { a, b ->
-                    naturalCompare(a.repos?.firstOrNull()?.name ?: "", b.repos?.firstOrNull()?.name ?: "")
-                }.thenComparator { a, b ->
-                    naturalCompare(
-                        a.repos?.firstOrNull()?.branch ?: "",
-                        b.repos?.firstOrNull()?.branch ?: "",
-                    )
-                }
-            )
-        val terminal = tasks.filter { it.state in terminalStates }.sortedByDescending { it.id }
-        val imgSupport = form.harnesses.any { it.name == form.selectedHarness && it.supportsImages }
         val sortedRepos = form.repos.take(form.recentRepoCount).sortedBy { it.path } +
             form.repos.drop(form.recentRepoCount)
+
+        val groupsMap = mutableMapOf<String, TaskGroup>()
+        var other = TaskGroup("")
+
+        for (t in tasks) {
+            val repoName = t.repos?.firstOrNull()?.name ?: ""
+            val g = if (repoName.isNotEmpty()) {
+                groupsMap.getOrPut(repoName) { TaskGroup(repoName) }
+            } else {
+                other
+            }
+
+            val nextGroup = when (t.state) {
+                "purged", "failed" -> g.copy(purged = g.purged + t)
+                "stopped" -> g.copy(stopped = g.stopped + t)
+                else -> g.copy(active = g.active + t)
+            }
+
+            if (repoName.isNotEmpty()) {
+                groupsMap[repoName] = nextGroup
+            } else {
+                other = nextGroup
+            }
+        }
+
+        val reposWithTasks = sortedRepos.filter { groupsMap.containsKey(it.path) }
+        val sortedGroups = reposWithTasks.mapNotNull { groupsMap[it.path] }.map { g ->
+            g.copy(
+                active = g.active.sortedWith(
+                    Comparator<Task> { a, b ->
+                        naturalCompare(
+                            a.repos?.firstOrNull()?.branch ?: "",
+                            b.repos?.firstOrNull()?.branch ?: "",
+                        )
+                    }
+                ),
+                stopped = g.stopped.sortedByDescending { it.id },
+                purged = g.purged.sortedByDescending { it.id },
+            )
+        }.toMutableList()
+
+        if (other.active.isNotEmpty() || other.stopped.isNotEmpty() || other.purged.isNotEmpty()) {
+            sortedGroups.add(
+                other.copy(
+                    active = other.active.sortedByDescending { it.id },
+                    stopped = other.stopped.sortedByDescending { it.id },
+                    purged = other.purged.sortedByDescending { it.id },
+                )
+            )
+        }
+
         val selectedPaths = form.selectedRepos.map { it.path }.toSet()
         val recentSlice = sortedRepos.take(form.recentRepoCount)
         val restSlice = sortedRepos.drop(form.recentRepoCount)
+        val imgSupport = form.harnesses.any { it.name == form.selectedHarness && it.supportsImages }
+
         TaskListState(
-            tasks = active + terminal,
+            tasks = tasks,
+            groups = sortedGroups,
             connected = connected,
             serverConfigured = settings.serverURL.isNotBlank(),
             repos = sortedRepos,

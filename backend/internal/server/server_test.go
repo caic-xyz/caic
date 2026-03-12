@@ -698,6 +698,51 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 	})
 
+	t.Run("TimeLimit", func(t *testing.T) {
+		logDir := t.TempDir()
+
+		// task 0: recent (purged)
+		meta0 := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "recent task", Harness: agent.Claude, StartedAt: time.Now().Add(-1 * time.Hour),
+		})
+		trailer0 := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		writeLogFile(t, logDir, "recent.jsonl", meta0, trailer0)
+
+		// task 1: old (purged, > 3 days)
+		meta1 := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "old task", Harness: agent.Claude, StartedAt: time.Now().Add(-10 * 24 * time.Hour),
+		})
+		trailer1 := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		oldPath := filepath.Join(logDir, "old.jsonl")
+		writeLogFile(t, logDir, "old.jsonl", meta1, trailer1)
+		// Set mtime to 4 days ago.
+		oldTime := time.Now().Add(-4 * 24 * time.Hour)
+		if err := os.Chtimes(oldPath, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+
+		s := &Server{
+			runners: map[string]*task.Runner{},
+			tasks:   make(map[string]*taskEntry),
+			changed: make(chan struct{}),
+			logDir:  logDir,
+		}
+		if err := s.loadPurgedTasks(); err != nil {
+			t.Fatal(err)
+		}
+
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if len(s.tasks) != 1 {
+			t.Fatalf("len(tasks) = %d, want 1 (old task should be filtered out)", len(s.tasks))
+		}
+		for _, e := range s.tasks {
+			if e.task.InitialPrompt.Text != "recent task" {
+				t.Errorf("prompt = %q, want \"recent task\"", e.task.InitialPrompt.Text)
+			}
+		}
+	})
+
 	t.Run("CostInJSON", func(t *testing.T) {
 		logDir := t.TempDir()
 

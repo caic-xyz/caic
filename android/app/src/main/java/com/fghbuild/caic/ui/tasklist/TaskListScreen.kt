@@ -30,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowRight
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -57,6 +58,7 @@ import android.graphics.BitmapFactory
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -250,87 +252,149 @@ private fun MainContent(
     onNavigateToTask: (String) -> Unit,
     viewModel: TaskListViewModel,
 ) {
+    val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
+
     Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
-    LazyColumn(
-        modifier = Modifier
-            .widthIn(max = 840.dp)
-            .fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        item(key = "__creation_form__") {
-            TaskCreationForm(state = state, viewModel = viewModel)
-        }
-        if (state.error != null) {
-            item(key = "__error__") {
-                Text(
-                    text = state.error,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.padding(vertical = 4.dp),
-                )
+        LazyColumn(
+            modifier = Modifier
+                .widthIn(max = 840.dp)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            item(key = "__creation_form__") {
+                TaskCreationForm(state = state, viewModel = viewModel)
             }
-        }
-        if (state.tasks.isEmpty()) {
-            item(key = "__empty__") {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 32.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("No active tasks", style = MaterialTheme.typography.bodyLarge)
+            if (state.error != null) {
+                item(key = "__error__") {
+                    Text(
+                        text = state.error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(vertical = 4.dp),
+                    )
                 }
             }
-        }
-        val activeTasks = state.tasks.filter { it.state !in terminalStates }
-        val terminalTasks = state.tasks.filter { it.state in terminalStates }
-        val repoGroups = activeTasks.groupBy { it.repos?.firstOrNull()?.name ?: "" }
-        for ((repo, tasksInRepo) in repoGroups) {
-            item(key = "repo_header_$repo") {
-                val uriHandler = LocalUriHandler.current
-                val repoMeta = state.repos.find { it.path == repo }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.padding(top = 4.dp),
-                ) {
-                    Text(
-                        text = repo,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    val ciStatus = repoMeta?.defaultBranchCIStatus
-                    if (ciStatus != null) {
-                        val dotColor = when (ciStatus) {
-                            "success" -> Color(0xFF28A745)
-                            "failure" -> Color(0xFFDC3545)
-                            else -> Color(0xFFFFC107)
-                        }
-                        val ciUrl = ciDotUrl(repoMeta)
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(dotColor)
-                                .then(
-                                    if (ciUrl != null) Modifier.clickable { uriHandler.openUri(ciUrl) } else Modifier
-                                ),
-                        )
+            if (state.tasks.isEmpty()) {
+                item(key = "__empty__") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("No tasks yet.", style = MaterialTheme.typography.bodyLarge)
                     }
                 }
             }
-            items(items = tasksInRepo, key = { it.id }) { task ->
-                TaskCard(task = task, onClick = { onNavigateToTask(task.id) })
+
+            for (group in state.groups) {
+                item(key = "repo_header_${group.repo}") {
+                    val uriHandler = LocalUriHandler.current
+                    val repoMeta = state.repos.find { it.path == group.repo }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(top = 4.dp),
+                    ) {
+                        Text(
+                            text = group.repo.ifEmpty { "Other" },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        val ciStatus = repoMeta?.defaultBranchCIStatus
+                        if (ciStatus != null) {
+                            val dotColor = when (ciStatus) {
+                                "success" -> Color(0xFF28A745)
+                                "failure" -> Color(0xFFDC3545)
+                                else -> Color(0xFFFFC107)
+                            }
+                            val ciUrl = ciDotUrl(repoMeta)
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(dotColor)
+                                    .then(
+                                        if (ciUrl != null) Modifier.clickable { uriHandler.openUri(ciUrl) } else Modifier
+                                    ),
+                            )
+                        }
+                    }
+                }
+
+                items(items = group.active, key = { it.id }) { task ->
+                    TaskCard(task = task, onClick = { onNavigateToTask(task.id) })
+                }
+
+                if (group.stopped.isNotEmpty()) {
+                    val stoppedKey = "stopped_${group.repo}"
+                    val isExpanded = expandedGroups[stoppedKey] == true
+                    item(key = "stopped_header_${group.repo}") {
+                        SubGroupHeader(
+                            title = "Stopped (${group.stopped.size})",
+                            expanded = isExpanded,
+                            onClick = { expandedGroups[stoppedKey] = !isExpanded }
+                        )
+                    }
+                    if (isExpanded) {
+                        items(items = group.stopped, key = { it.id }) { task ->
+                            TaskCard(task = task, onClick = { onNavigateToTask(task.id) })
+                        }
+                    }
+                }
+
+                if (group.purged.isNotEmpty()) {
+                    val purgedKey = "purged_${group.repo}"
+                    val isExpanded = expandedGroups[purgedKey] == true
+                    item(key = "purged_header_${group.repo}") {
+                        SubGroupHeader(
+                            title = "Purged (${group.purged.size})",
+                            expanded = isExpanded,
+                            onClick = { expandedGroups[purgedKey] = !isExpanded }
+                        )
+                    }
+                    if (isExpanded) {
+                        items(items = group.purged, key = { it.id }) { task ->
+                            TaskCard(task = task, onClick = { onNavigateToTask(task.id) })
+                        }
+                    }
+                }
             }
         }
-        items(items = terminalTasks, key = { it.id }) { task ->
-            TaskCard(task = task, onClick = { onNavigateToTask(task.id) })
-        }
-    }
     }
 }
+
+@Composable
+private fun SubGroupHeader(
+    title: String,
+    expanded: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Icon(
+            imageVector = if (expanded) Icons.Default.ArrowDropDown else Icons.AutoMirrored.Filled.ArrowRight,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        )
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
