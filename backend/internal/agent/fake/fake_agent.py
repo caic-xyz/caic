@@ -2,7 +2,7 @@
 #
 # Reads NDJSON from stdin (one prompt per line), responds with streaming text
 # deltas followed by complete assistant and result messages. Exits on EOF.
-# Used by the caic -fake server for e2e testing.
+# Used by the caic -tags e2e server for e2e testing.
 
 import json
 import sys

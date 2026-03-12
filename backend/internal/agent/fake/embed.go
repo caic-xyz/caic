@@ -1,3 +1,5 @@
+//go:build e2e
+
 // Package fake embeds the fake agent Python script for e2e testing.
 package fake
 
