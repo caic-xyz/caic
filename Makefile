@@ -1,4 +1,4 @@
-.PHONY: help build dev test coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix docs types git-hooks frontend-dev upgrade e2e android-build android-push android-test
+.PHONY: help build dev test coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix docs types git-hooks frontend-dev upgrade frontend-e2e android-build android-push android-test android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:8080
@@ -18,7 +18,14 @@ help:
 	@echo "  make android-build  - Build Android app (debug APK)"
 	@echo "  make android-push   - Build, install, and start APK on connected device"
 	@echo "  make android-test   - Run Android unit tests"
+	@echo "  make android-e2e    - Run Android instrumented tests"
+	@echo "  make android-setup-emulator - Install emulator image and create AVD"
+	@echo "  make android-start-emulator - Start the headless Android emulator"
+	@echo "  make android-stop-emulator  - Stop the running Android emulator"
+	@echo "  make frontend-e2e   - Run Playwright end-to-end tests"
 	@echo "  make lint-android   - Run Android linters (detekt + lint)"
+	@echo "  make upgrade        - Upgrade Go and pnpm dependencies"
+
 	@echo "  make upgrade        - Upgrade Go and pnpm dependencies"
 
 $(FRONTEND_STAMP): pnpm-lock.yaml
@@ -70,6 +77,21 @@ lint-android:
 android-build:
 	@cd android && ./gradlew --no-daemon assembleDebug
 
+android-setup-emulator:
+	@yes | sdkmanager --install "system-images;android-36;google_apis;x86_64"
+	@echo "no" | avdmanager create avd -n caic_test -k "system-images;android-36;google_apis;x86_64" -d "pixel_6" --force
+
+android-start-emulator:
+	@echo "Starting emulator caic_test..."
+	@$${ANDROID_HOME}/emulator/emulator -avd caic_test \
+		-no-window -no-audio -gpu swiftshader_indirect -no-boot-anim -wipe-data > /dev/null 2>&1 & \
+		adb wait-for-device && \
+		echo "Emulator is ready."
+
+android-stop-emulator:
+	@echo "Stopping emulator..."
+	@adb emu kill || pkill -f emulator || true
+
 android-push: android-build
 	@devices=$$(adb devices | awk '/\tdevice$$/{print $$1}'); \
 	[ -n "$$devices" ] || { echo "No devices connected"; exit 1; }; \
@@ -83,6 +105,9 @@ android-push: android-build
 
 android-test:
 	@cd android && ./gradlew --no-daemon test
+
+android-e2e:
+	@cd android && ./gradlew --no-daemon connectedAndroidTest
 
 lint-fix: $(FRONTEND_STAMP)
 	@golangci-lint run ./... --fix || true
@@ -100,7 +125,7 @@ git-hooks:
 frontend-dev: $(FRONTEND_STAMP)
 	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm dev
 
-e2e: $(FRONTEND_STAMP) types
+frontend-e2e: $(FRONTEND_STAMP) types
 	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm build
 	@pnpm exec playwright test --config e2e/playwright.config.ts
 

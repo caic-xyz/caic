@@ -47,6 +47,7 @@ No business logic in Compose. No Android dependencies in the SDK module.
 make lint-android   # detekt + Android lint
 make android-build  # assembleDebug
 make android-test   # JVM unit tests
+make android-e2e    # Android instrumented tests
 ```
 
 Lint is strict: `warningsAsErrors = true`, `maxIssues: 0`.

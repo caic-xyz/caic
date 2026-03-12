@@ -85,7 +85,7 @@ import com.fghbuild.caic.ui.common.AttachMenu
 import com.fghbuild.caic.ui.login.LoginScreen
 import com.fghbuild.caic.util.ScreenshotService
 import com.fghbuild.caic.util.bitmapToImageData
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.caic.util.createCameraPhotoUri
 import com.fghbuild.caic.util.imageDataToBitmap
@@ -96,10 +96,10 @@ import com.fghbuild.caic.util.uriToImageData
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TaskListScreen(
+    modifier: Modifier = Modifier,
     viewModel: TaskListViewModel = hiltViewModel(),
     onNavigateToSettings: () -> Unit = {},
     onNavigateToTask: (String) -> Unit = {},
-    modifier: Modifier = Modifier,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 

@@ -11,21 +11,51 @@ Guide for debugging the caic Android app when a physical device is unavailable.
 
 ## One-Time Setup
 
+You can use the make target to automate the system image installation and AVD creation:
+
+```bash
+make android-setup-emulator
+```
+
+Or perform the steps manually:
+
 ### 1. Install the system image and create an AVD
 
 ```bash
-yes | sdkmanager --install "system-images;android-35;google_apis;x86_64"
-echo "no" | avdmanager create avd -n caic_test -k "system-images;android-35;google_apis;x86_64" -d "pixel_6" --force
+yes | sdkmanager --install "system-images;android-36;google_apis;x86_64"
+echo "no" | avdmanager create avd -n caic_test -k "system-images;android-36;google_apis;x86_64" -d "pixel_6" --force
 ```
 
-We use Android 35 (not 36) because 36 system images may not be available yet.
+We use Android 36 because it is the target SDK.
 The `google_apis` variant is required for Google Play Services compatibility.
 
 ### 2. Start the emulator headless
 
+You can use the make target:
+
+```bash
+make android-start-emulator
+```
+
+Or start it manually:
+
 ```bash
 $ANDROID_HOME/emulator/emulator -avd caic_test \
     -no-window -no-audio -gpu swiftshader_indirect -no-boot-anim -wipe-data &
+```
+
+### 3. Stop the emulator
+
+Use the make target:
+
+```bash
+make android-stop-emulator
+```
+
+Or manually:
+
+```bash
+adb emu kill
 ```
 
 Flags:

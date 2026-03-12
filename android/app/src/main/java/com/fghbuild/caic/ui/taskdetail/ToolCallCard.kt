@@ -42,11 +42,11 @@ import kotlinx.serialization.json.jsonPrimitive
 @Composable
 fun ToolCallCard(
     call: ToolCall,
+    modifier: Modifier = Modifier,
     outputDelta: String? = null,
     onLoadInput: (suspend () -> JsonElement?)? = null,
     onClearAndExecutePlan: (() -> Unit)? = null,
     suppressPlanContent: Boolean = false,
-    modifier: Modifier = Modifier,
 ) {
     var expanded by rememberSaveable(call.use.toolUseID) { mutableStateOf(false) }
     var loadedInput by remember(call.use.toolUseID) { mutableStateOf<JsonElement?>(null) }
