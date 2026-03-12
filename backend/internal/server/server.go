@@ -1694,6 +1694,7 @@ func (s *Server) syncTask(ctx context.Context, entry *taskEntry, req *v1.SyncReq
 // monitoring. Runs in a goroutine; logs errors and returns on failure.
 // f and info are resolved at the call site so the caller's auth context is used.
 func (s *Server) startPRFlow(ctx context.Context, entry *taskEntry, f forge.Forge, info *repoInfo, branch, baseBranch string) {
+	slog.Info("startPRFlow", "forge", f.Name(), "owner", info.ForgeOwner, "repo", info.ForgeRepo, "branch", branch, "base", baseBranch)
 	t := entry.task
 	title := t.Title()
 	if title == "" {
