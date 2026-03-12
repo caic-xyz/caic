@@ -106,16 +106,16 @@ export default function TaskCard(props: TaskCardProps) {
           {/* Stopped: revive + purge buttons */}
           <Show when={props.state === "stopped"}>
             <Show when={props.onRevive}>
-              <span class={styles.purgeBtn}>
+              <span class={styles.reviveBtn}>
                 <button
-                  class={styles.purgeIcon}
+                  class={styles.reviveIcon}
                   disabled={props.actionLoading}
                   onClick={(e) => { e.stopPropagation(); props.onRevive?.(); }}
                   title="Revive"
                   data-testid="revive-task"
                 >
                   <Show when={props.actionLoading} fallback={<RestoreIcon width="0.85rem" height="0.85rem" />}>
-                    <span class={styles.purgeSpinner} />
+                    <span class={styles.reviveSpinner} />
                   </Show>
                 </button>
               </span>

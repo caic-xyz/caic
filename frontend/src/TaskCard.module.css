@@ -133,48 +133,72 @@
   color: var(--color-diff-deleted);
 }
 
-.purgeBtn {
+.purgeBtn,
+.reviveBtn {
   display: inline-flex;
   opacity: 0;
   transition: opacity 0.15s;
 }
 
-.purgeIcon {
+.purgeIcon,
+.reviveIcon {
   all: unset;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-danger);
   fill: currentColor;
   cursor: pointer;
   padding: 0.1rem;
   line-height: 1;
 }
 
+.purgeIcon {
+  color: var(--color-danger);
+}
+
+.reviveIcon {
+  color: var(--color-success);
+}
+
 .purgeIcon:hover:not(:disabled) {
   color: #a71d2a;
 }
 
-.purgeIcon:disabled {
+.reviveIcon:hover:not(:disabled) {
+  color: var(--color-success-hover);
+}
+
+.purgeIcon:disabled,
+.reviveIcon:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.purgeSpinner {
+.purgeSpinner,
+.reviveSpinner {
   display: inline-block;
   width: 0.75em;
   height: 0.75em;
-  border: 2px solid rgba(220, 53, 69, 0.3);
-  border-top-color: var(--color-danger);
   border-radius: 50%;
   animation: purge-spin 0.6s linear infinite;
+}
+
+.purgeSpinner {
+  border: 2px solid rgba(220, 53, 69, 0.3);
+  border-top-color: var(--color-danger);
+}
+
+.reviveSpinner {
+  border: 2px solid rgba(40, 167, 69, 0.3);
+  border-top-color: var(--color-success);
 }
 
 @keyframes purge-spin {
   to { transform: rotate(360deg); }
 }
 
-.card:hover .purgeBtn {
+.card:hover .purgeBtn,
+.card:hover .reviveBtn {
   opacity: 1;
 }
 
@@ -203,11 +227,13 @@
 }
 
 @media (max-width: 768px) {
-  .purgeBtn {
+  .purgeBtn,
+  .reviveBtn {
     opacity: 1;
   }
 
-  .purgeIcon {
+  .purgeIcon,
+  .reviveIcon {
     padding: 0.4rem;
   }
 

@@ -40,6 +40,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberTooltipState
+import com.fghbuild.caic.ui.theme.appColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -231,6 +232,7 @@ fun InputBar(
                         Icon(
                             Icons.Default.Refresh,
                             contentDescription = "Revive",
+                            tint = MaterialTheme.appColors.success,
                         )
                     }
                 }
