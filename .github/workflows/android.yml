@@ -5,9 +5,11 @@ on:
     branches: [main]
     paths:
       - 'android/**'
+      - 'sdk/kotlin/**'
   pull_request:
     paths:
       - 'android/**'
+      - 'sdk/kotlin/**'
 permissions:
   contents: read
 
