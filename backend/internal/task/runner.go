@@ -385,9 +385,6 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 
 	t.SetState(reason)
 
-	// Backup container commits before purging, in case they were never pushed.
-	r.backupIfNeeded(ctx, t)
-
 	tlog.Info("purge container")
 	if name != "" && r.Container != nil {
 		if err := r.PurgeContainer(ctx, name, primaryBranch, t.ExtraMDRepos()); err != nil {
@@ -944,61 +941,6 @@ var mutatingTools = map[string]struct{}{
 	"Edit":         {},
 	"Write":        {},
 	"NotebookEdit": {},
-}
-
-// backupIfNeeded fetches the latest commits from the container and creates a
-// local backup branch if the container's HEAD is not reachable from any
-// durable ref (refs/heads/* or refs/remotes/origin/*). Errors are logged as
-// warnings and never prevent the subsequent container kill.
-func (r *Runner) backupIfNeeded(ctx context.Context, t *Task) {
-	r.initDefaults()
-	if t.Container == "" || r.Container == nil || r.Dir == "" {
-		return
-	}
-
-	fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
-	defer fetchCancel()
-
-	primaryBranch := ""
-	if p := t.Primary(); p != nil {
-		primaryBranch = p.Branch
-	}
-
-	// Fetch latest commits from the container. Needs branchMu because md
-	// fetch may interact with the working tree.
-	r.branchMu.Lock()
-	err := r.Container.Fetch(fetchCtx, append([]md.Repo{{GitRoot: r.Dir, Branch: primaryBranch}}, t.ExtraMDRepos()...))
-	r.branchMu.Unlock()
-	if err != nil {
-		r.log.Warn("backup: fetch failed", "br", primaryBranch, "err", err)
-		return
-	}
-
-	// Resolve the container remote-tracking ref to a commit hash.
-	ref := "refs/remotes/" + t.Container + "/" + primaryBranch
-	commit, err := gitutil.RevParse(fetchCtx, r.Dir, ref)
-	if err != nil {
-		r.log.Warn("backup: resolve ref failed", "ref", ref, "err", err)
-		return
-	}
-
-	// Check if the commit is reachable from any local branch or origin ref.
-	reachable, err := gitutil.IsReachable(fetchCtx, r.Dir, commit)
-	if err != nil {
-		r.log.Warn("backup: reachability failed", "cmt", commit, "err", err)
-		return
-	}
-	if reachable {
-		r.log.Info("backup: commit reachable", "br", primaryBranch, "cmt", commit[:min(12, len(commit))])
-		return
-	}
-
-	backupBranch := "caic-backup/" + primaryBranch
-	if err := gitutil.CreateBranchAt(fetchCtx, r.Dir, backupBranch, commit); err != nil {
-		r.log.Warn("backup: create failed", "bak", backupBranch, "err", err)
-		return
-	}
-	r.log.Info("backup: created", "bak", backupBranch, "cmt", commit[:min(12, len(commit))])
 }
 
 // startMessageDispatch starts a goroutine that reads from msgCh and dispatches
