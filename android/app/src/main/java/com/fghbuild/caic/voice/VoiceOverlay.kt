@@ -1,4 +1,4 @@
-// Bottom voice panel composable: mic button, status, and transcription display.
+// Full-width bottom voice panel composable: mic button, status, and transcription display.
 package com.fghbuild.caic.voice
 
 import androidx.compose.animation.core.RepeatMode
@@ -8,6 +8,8 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,8 +18,8 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,10 +29,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -79,82 +81,47 @@ fun VoicePanel(
         tonalElevation = 4.dp,
     ) {
         Column(modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)) {
-            HorizontalDivider()
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             when {
-                voiceState.error != null -> ErrorPanel(onConnect)
-                voiceState.connectStatus != null -> ConnectingPanel(voiceState.connectStatus)
-                voiceState.listening || voiceState.speaking -> ActivePanel(
-                    voiceState = voiceState,
-                    onDisconnect = onDisconnect,
-                    onToggleMute = onToggleMute,
-                    onSelectDevice = onSelectDevice,
-                )
-                !voiceState.connected -> IdlePanel(
-                    transcript = voiceState.transcript,
-                    onConnect = onConnect,
-                    onClearTranscript = onClearTranscript,
-                )
-                else -> ConnectingPanel("Starting audio…")
-            }
+            voiceState.error != null -> ErrorPanel(onConnect)
+            voiceState.connectStatus != null -> ConnectingPanel(voiceState.connectStatus)
+            voiceState.listening || voiceState.speaking -> ActivePanel(
+                voiceState = voiceState,
+                onDisconnect = onDisconnect,
+                onToggleMute = onToggleMute,
+                onSelectDevice = onSelectDevice,
+                onClearTranscript = onClearTranscript,
+            )
+            !voiceState.connected -> IdlePanel(onConnect)
+            else -> ConnectingPanel("Starting audio…")
+        }
         }
     }
 }
 
 @Composable
-private fun IdlePanel(
-    transcript: List<TranscriptEntry>,
-    onConnect: () -> Unit,
-    onClearTranscript: () -> Unit,
-) {
-    Column(
+private fun IdlePanel(onConnect: () -> Unit) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.End,
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        IconButton(
+            onClick = onConnect,
+            modifier = Modifier
+                .size(36.dp)
+                .border(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.outline,
+                    shape = CircleShape,
+                ),
         ) {
             Icon(
                 Icons.Default.Mic,
-                contentDescription = null,
+                contentDescription = "Connect voice assistant",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                text = "Voice assistant",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            Button(onClick = onConnect) {
-                Text("Connect")
-            }
-        }
-
-        if (transcript.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Previous transcript",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = onClearTranscript) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Clear transcript",
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-            }
-            TranscriptLog(
-                entries = transcript,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.size(20.dp),
             )
         }
     }
@@ -175,13 +142,20 @@ private fun ConnectingPanel(status: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .alpha(alpha)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .alpha(alpha),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Icon(Icons.Default.Mic, contentDescription = null)
-        Text(text = status, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = status,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = {}) {
+            Icon(Icons.Default.Close, contentDescription = "Cancel")
+        }
     }
 }
 
@@ -191,11 +165,10 @@ private fun ActivePanel(
     onDisconnect: () -> Unit,
     onToggleMute: () -> Unit,
     onSelectDevice: (Int) -> Unit,
+    onClearTranscript: () -> Unit,
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
@@ -229,7 +202,11 @@ private fun ActivePanel(
             }
 
             IconButton(onClick = onDisconnect) {
-                Icon(Icons.Default.Stop, contentDescription = "End voice")
+                Icon(
+                    Icons.Default.CallEnd,
+                    contentDescription = "End voice",
+                    tint = MaterialTheme.colorScheme.error,
+                )
             }
         }
 
@@ -241,6 +218,26 @@ private fun ActivePanel(
             )
         }
 
+        if (voiceState.transcript.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Transcript",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onClearTranscript, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Clear transcript",
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+        }
         TranscriptLog(
             entries = voiceState.transcript,
             modifier = Modifier.fillMaxWidth(),
@@ -280,21 +277,13 @@ private fun TranscriptLog(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    // Scroll to bottom whenever the last entry changes (new entry or partial update).
     val lastEntryText = entries.lastOrNull()?.text
     LaunchedEffect(entries.size, lastEntryText) {
         if (entries.isNotEmpty()) {
             listState.scrollToItem(entries.size - 1)
         }
     }
-    if (entries.isEmpty()) {
-        Text(
-            text = "Transcript will appear here…",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-            modifier = modifier.padding(vertical = 8.dp),
-        )
-    } else {
+    if (entries.isNotEmpty()) {
         LazyColumn(
             state = listState,
             modifier = modifier.height(TranscriptHeight),
@@ -326,7 +315,6 @@ private fun TranscriptLog(
 
 @Composable
 private fun MicLevelIndicator(micLevel: Float = 0f) {
-    // Per-bar animation durations: center bar reacts fastest, outer bars lag behind.
     val durations = intArrayOf(80, 40, 120)
     Box(
         modifier = Modifier.size(BarContainerSize.dp),
@@ -374,4 +362,3 @@ private fun AudioDevicePicker(
         }
     }
 }
-

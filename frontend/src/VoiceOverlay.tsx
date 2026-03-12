@@ -94,9 +94,9 @@ export default function VoiceOverlay(props: Props) {
 
   return (
     <div class={styles.panel} role="region" aria-label="Voice assistant">
-      {/* Idle state: mic button + label */}
+      {/* Idle state: mic button right-aligned */}
       <Show when={!isActive()}>
-        <div class={styles.row}>
+        <div class={styles.rowEnd}>
           <button
             type="button"
             class={styles.micButton}
@@ -106,7 +106,6 @@ export default function VoiceOverlay(props: Props) {
           >
             <MicIcon width="1.1em" height="1.1em" />
           </button>
-          <span class={styles.idleLabel}>Voice assistant</span>
         </div>
       </Show>
 
