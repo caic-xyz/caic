@@ -359,17 +359,37 @@ func (b *mdBackend) Fetch(ctx context.Context, repos []md.Repo) error {
 	return nil
 }
 
-func (b *mdBackend) Kill(ctx context.Context, name string, repos []md.Repo) error {
+func (b *mdBackend) Stop(ctx context.Context, name string) error {
+	slog.Info("md stop", "name", name)
+	ct := b.client.Container()
+	ct.Name = name
+	return ct.Stop(ctx)
+}
+
+func (b *mdBackend) Purge(ctx context.Context, name string, repos []md.Repo) error {
 	if len(repos) > 0 {
-		slog.Info("md kill", "dir", repos[0].GitRoot, "br", repos[0].Branch)
+		slog.Info("md purge", "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	} else {
-		slog.Info("md kill", "name", name)
+		slog.Info("md purge", "name", name)
 	}
 	ct := b.client.Container(repos...)
 	if len(repos) == 0 {
 		ct.Name = name
 	}
-	return ct.Kill(ctx)
+	return ct.Purge(ctx)
+}
+
+func (b *mdBackend) Revive(ctx context.Context, name string, repos []md.Repo) error {
+	if len(repos) > 0 {
+		slog.Info("md revive", "dir", repos[0].GitRoot, "br", repos[0].Branch, "ctr", name)
+	} else {
+		slog.Info("md revive", "name", name)
+	}
+	ct := b.client.Container(repos...)
+	if len(repos) == 0 {
+		ct.Name = name
+	}
+	return ct.Revive(ctx)
 }
 
 type taskEntry struct {
@@ -380,7 +400,7 @@ type taskEntry struct {
 	// CI monitoring: set when a PR is created; used by check_suite webhook handler to
 	// find the task waiting for CI results.
 	ciSHA string // PR head SHA being monitored; empty when no CI monitoring active
-	// Webhook callback: when set, post a comment on the originating issue after task terminates.
+	// Webhook callback: when set, post a comment on the originating issue after task is purged.
 	webhookInstallationID int64  // 0 when no app configured
 	webhookForgeFullName  string // "owner/repo"
 	webhookIssueNumber    int    // 0 when not a comment-triggerable event
@@ -391,7 +411,7 @@ type taskEntry struct {
 //
 // Startup sequence:
 //  1. Initialize container client (instant).
-//  2. Parallel I/O phase: discover repos, load terminated task logs, and list
+//  2. Parallel I/O phase: discover repos, load purged task logs, and list
 //     containers concurrently.
 //  3. Runner init phase: create a Runner per repo with container and agent backends
 //     (runs parallel within after repos are discovered).
@@ -639,12 +659,12 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	_ = noRepoRunner.Init(ctx) // populates Backends; no-op for no-repo (no branches to scan)
 	s.runners[""] = noRepoRunner
 
-	// Phase 3: Load terminated tasks from pre-loaded logs.
+	// Phase 3: Load purged tasks from pre-loaded logs.
 	if logRes.err != nil {
 		slog.Warn("load logs failed", "err", logRes.err)
 	} else {
-		if err := s.loadTerminatedTasksFrom(logRes.logs); err != nil {
-			return nil, fmt.Errorf("load terminated tasks: %w", err)
+		if err := s.loadPurgedTasksFrom(logRes.logs); err != nil {
+			return nil, fmt.Errorf("load purged tasks: %w", err)
 		}
 	}
 
@@ -701,7 +721,9 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("GET /api/v1/tasks/{id}/events", s.handleTaskEvents)
 	apiMux.HandleFunc("POST /api/v1/tasks/{id}/input", handleWithTask(s, s.sendInput))
 	apiMux.HandleFunc("POST /api/v1/tasks/{id}/restart", handleWithTask(s, s.restartTask))
-	apiMux.HandleFunc("POST /api/v1/tasks/{id}/terminate", handleWithTask(s, s.terminateTask))
+	apiMux.HandleFunc("POST /api/v1/tasks/{id}/stop", handleWithTask(s, s.stopTask))
+	apiMux.HandleFunc("POST /api/v1/tasks/{id}/purge", handleWithTask(s, s.purgeTask))
+	apiMux.HandleFunc("POST /api/v1/tasks/{id}/revive", handleWithTask(s, s.reviveTask))
 	apiMux.HandleFunc("GET /api/v1/tasks/{id}/ci-log", s.handleGetCILog)
 	apiMux.HandleFunc("POST /api/v1/tasks/{id}/sync", handleWithTask(s, s.syncTask))
 	apiMux.HandleFunc("GET /api/v1/tasks/{id}/diff", s.handleGetDiff)
@@ -1183,7 +1205,7 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	state := entry.task.GetState()
-	if state == task.StateTerminated || state == task.StateFailed {
+	if state == task.StatePurged || state == task.StateFailed {
 		return
 	}
 
@@ -1478,8 +1500,8 @@ func (s *Server) sendInput(ctx context.Context, entry *taskEntry, req *v1.InputR
 		t := entry.task
 		rs := relayNoContainer
 		if t.Container != "" {
-			ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
-			alive, relayErr := agent.IsRelayRunning(ctx, t.Container) //nolint:contextcheck // diagnostic probe; must outlive request
+			probeCtx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+			alive, relayErr := agent.IsRelayRunning(probeCtx, t.Container) //nolint:contextcheck // diagnostic probe; must outlive request
 			cancel()
 			switch {
 			case relayErr != nil:
@@ -1606,22 +1628,74 @@ func (s *Server) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, &v1.CILogResp{StepName: check.Name, Log: jobLog}, nil)
 }
 
-func (s *Server) terminateTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
+func (s *Server) stopTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
 	state := entry.task.GetState()
 	if state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan && state != task.StateRunning {
 		return nil, dto.Conflict("task is not running or waiting")
 	}
-	entry.task.SetState(task.StateTerminating)
+	entry.task.SetState(task.StateStopping)
 	s.mu.Lock()
 	s.taskChanged()
 	s.mu.Unlock()
-	terminatePrimaryName := ""
+	stopPrimaryName := ""
 	if p := entry.task.Primary(); p != nil {
-		terminatePrimaryName = p.Name
+		stopPrimaryName = p.Name
 	}
-	runner := s.runners[terminatePrimaryName]
-	go s.cleanupTask(entry, runner, task.StateTerminated) //nolint:contextcheck // cleanupTask intentionally uses server context
-	return &v1.StatusResp{Status: "terminating"}, nil
+	runner := s.runners[stopPrimaryName]
+	go func() {
+		runner.StopTask(s.ctx, entry.task)
+		s.mu.Lock()
+		s.taskChanged()
+		s.mu.Unlock()
+	}()
+	return &v1.StatusResp{Status: "stopping"}, nil
+}
+
+func (s *Server) purgeTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
+	state := entry.task.GetState()
+	if state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan && state != task.StateRunning && state != task.StateStopping && state != task.StateStopped {
+		return nil, dto.Conflict("task is not running or waiting")
+	}
+	entry.task.SetState(task.StatePurging)
+	s.mu.Lock()
+	s.taskChanged()
+	s.mu.Unlock()
+	purgePrimaryName := ""
+	if p := entry.task.Primary(); p != nil {
+		purgePrimaryName = p.Name
+	}
+	runner := s.runners[purgePrimaryName]
+	go s.cleanupTask(entry, runner, task.StatePurged) //nolint:contextcheck // cleanupTask intentionally uses server context
+	return &v1.StatusResp{Status: "purging"}, nil
+}
+
+func (s *Server) reviveTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
+	state := entry.task.GetState()
+	if state != task.StateStopped {
+		return nil, dto.Conflict("task is not stopped")
+	}
+	revivePrimaryName := ""
+	if p := entry.task.Primary(); p != nil {
+		revivePrimaryName = p.Name
+	}
+	runner := s.runners[revivePrimaryName]
+	entry.task.SetState(task.StateProvisioning)
+	s.mu.Lock()
+	// Reset done channel so watchSession works on the revived task.
+	entry.done = make(chan struct{})
+	entry.result = nil
+	entry.cleanupOnce = sync.Once{}
+	s.taskChanged()
+	s.mu.Unlock()
+	go func() {
+		h, err := runner.ReviveTask(s.ctx, entry.task)
+		if err != nil {
+			slog.Warn("revive failed", "task", entry.task.ID, "err", err)
+			return
+		}
+		s.watchSession(entry, runner, h)
+	}()
+	return &v1.StatusResp{Status: "provisioning"}, nil
 }
 
 func (s *Server) syncTask(ctx context.Context, entry *taskEntry, req *v1.SyncReq) (*v1.SyncResp, error) {
@@ -1629,7 +1703,7 @@ func (s *Server) syncTask(ctx context.Context, entry *taskEntry, req *v1.SyncReq
 	switch t.GetState() {
 	case task.StatePending:
 		return nil, dto.Conflict("task has no container yet")
-	case task.StateTerminating, task.StateFailed, task.StateTerminated:
+	case task.StateStopping, task.StateStopped, task.StatePurging, task.StateFailed, task.StatePurged:
 		return nil, dto.Conflict("task is in a terminal state")
 	case task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StatePulling, task.StatePushing:
 	}
@@ -1771,7 +1845,7 @@ func (s *Server) monitorCI(ctx context.Context, entry *taskEntry, f forge.Forge,
 			return
 		case <-ticker.C:
 		}
-		// Stop if the task is no longer waiting (user sent input / terminated).
+		// Stop if the task is no longer waiting (user sent input / purged).
 		st := t.GetState()
 		if st != task.StateWaiting && st != task.StateAsking && st != task.StateHasPlan {
 			return
@@ -2469,42 +2543,42 @@ func (s *Server) SetRunnerOps(c task.ContainerBackend, backends map[agent.Harnes
 	}
 }
 
-// loadTerminatedTasks loads the last 10 terminated tasks from JSONL logs on disk.
+// loadPurgedTasks loads the last 10 purged tasks from JSONL logs on disk.
 // Exported for testing; New() uses the parallelized variant.
-func (s *Server) loadTerminatedTasks() error {
+func (s *Server) loadPurgedTasks() error {
 	all, err := task.LoadLogs(s.logDir)
 	if err != nil {
 		return err
 	}
-	return s.loadTerminatedTasksFrom(all)
+	return s.loadPurgedTasksFrom(all)
 }
 
-// loadTerminatedTasksFrom populates s.tasks from pre-loaded log data. It filters
+// loadPurgedTasksFrom populates s.tasks from pre-loaded log data. It filters
 // to tasks with an explicit caic_result trailer and keeps the most recent 10.
-func (s *Server) loadTerminatedTasksFrom(all []*task.LoadedTask) error {
+func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 	// Filter to tasks with an explicit caic_result trailer.
 	// Log files without a trailer may belong to still-running tasks.
-	var terminated []*task.LoadedTask
+	var purged []*task.LoadedTask
 	for _, lt := range all {
 		if lt.Result != nil {
-			terminated = append(terminated, lt)
+			purged = append(purged, lt)
 		}
 	}
 	// LoadLogs returns ascending; reverse for most-recent-first, keep last 10.
-	slices.Reverse(terminated)
-	if len(terminated) > 10 {
-		terminated = terminated[:10]
+	slices.Reverse(purged)
+	if len(purged) > 10 {
+		purged = purged[:10]
 	}
-	if len(terminated) == 0 {
+	if len(purged) == 0 {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, lt := range terminated {
+	for _, lt := range purged {
 		t := &task.Task{
 			ID:            ksid.NewID(),
 			InitialPrompt: agent.Prompt{Text: lt.Prompt},
-			Repos:         lt.Repos, // GitRoot is empty for terminated tasks
+			Repos:         lt.Repos, // GitRoot is empty for purged tasks
 			Harness:       lt.Harness,
 			StartedAt:     lt.StartedAt,
 		}
@@ -2514,7 +2588,7 @@ func (s *Server) loadTerminatedTasksFrom(all []*task.LoadedTask) error {
 		} else {
 			t.SetTitle(lt.Prompt)
 		}
-		// TODO: Figure out when it was terminated.
+		// TODO: Figure out when it was purged.
 		if err := lt.LoadMessages(); err != nil {
 			ltPrimary := lt.Primary()
 			ltRepo, ltBranch := "", ""
@@ -2538,7 +2612,7 @@ func (s *Server) loadTerminatedTasksFrom(all []*task.LoadedTask) error {
 		s.tasks[t.ID.String()] = entry
 	}
 	s.taskChanged()
-	slog.Info("loaded terminated tasks from logs", "n", len(terminated))
+	slog.Info("loaded purged tasks from logs", "n", len(purged))
 	return nil
 }
 
@@ -2546,7 +2620,7 @@ func (s *Server) loadTerminatedTasksFrom(all []*task.LoadedTask) error {
 // for them so they appear in the UI.
 //
 // Flow:
-//  1. Map branches from terminated tasks to their IDs so live containers
+//  1. Map branches from purged tasks to their IDs so live containers
 //     can replace stale entries.
 //  2. For each container matching a caic repo, call adoptOne concurrently.
 //
@@ -2557,7 +2631,7 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 		return nil
 	}
 
-	// Map repo+branch loaded from terminated task logs to their ID in
+	// Map repo+branch loaded from purged task logs to their ID in
 	// s.tasks so we can replace stale entries with live containers.
 	// The key is "repo\x00branch" because different repos can share a
 	// branch name.
@@ -2638,6 +2712,13 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		return fmt.Errorf("parse caic label %q on %s: %w", labelVal, c.Name, err)
 	}
 
+	// Exited containers are adopted as stopped tasks. The user can
+	// explicitly revive them via the UI or API when ready.
+	isExited := c.State == "exited"
+	if isExited {
+		slog.Info("container", "msg", "adopting exited container as stopped", "ctr", c.Name, "br", branch)
+	}
+
 	// Find the log file for this task. For repo-based tasks, match by repo+branch
 	// (most recent first) since different repos can share branch names. For no-repo
 	// tasks (branch==""), match by task ID parsed from the filename, which is the
@@ -2677,19 +2758,23 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	}
 
 	// Check whether the relay daemon is alive in this container.
-	relayAlive, relayErr := agent.IsRelayRunning(ctx, c.Name)
-	if relayErr != nil {
-		slog.Warn("relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", relayErr)
-	}
-
+	// Skip for exited containers — can't exec into them.
+	var relayAlive bool
 	var relayMsgs []agent.Message
 	var relaySize int64
-	if relayAlive {
-		// Relay is alive — read authoritative output from container.
-		relayMsgs, relaySize, relayErr = runner.ReadRelayOutput(ctx, c.Name, harnessName)
+	if !isExited {
+		var relayErr error
+		relayAlive, relayErr = agent.IsRelayRunning(ctx, c.Name)
 		if relayErr != nil {
-			slog.Warn("relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", relayErr)
-			relayAlive = false
+			slog.Warn("relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", relayErr)
+		}
+		if relayAlive {
+			// Relay is alive — read authoritative output from container.
+			relayMsgs, relaySize, relayErr = runner.ReadRelayOutput(ctx, c.Name, harnessName)
+			if relayErr != nil {
+				slog.Warn("relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", relayErr)
+				relayAlive = false
+			}
 		}
 	}
 
@@ -2757,14 +2842,17 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	// If the task is still running after message restoration (agent is
 	// mid-turn), record now as the turn start. This is the best available
 	// approximation on adoption; the real turn start predates the restart.
-	t.SetTurnStartedAt(time.Now().UTC())
+	if !isExited {
+		t.SetTurnStartedAt(time.Now().UTC())
+	}
 
-	// When the relay is dead (agent subprocess already exited) and
-	// RestoreMessages didn't infer a terminal turn (no trailing
-	// ResultMessage), the task would be stuck as "running" with no
-	// session and no way to interact. Transition to StateWaiting so
-	// the user can restart with a new prompt or terminate.
-	if !relayAlive {
+	// Exited containers are always stopped — user must revive explicitly.
+	if isExited {
+		t.SetState(task.StateStopped)
+	} else if !relayAlive {
+		// Relay is dead but container is running. Read relay log for
+		// diagnostics, then mark waiting so the user can restart or
+		// we can auto-reconnect via --resume.
 		relayLog := agent.ReadRelayLog(ctx, c.Name, 4096)
 		if relayLog != "" {
 			slog.Warn("relay", "msg", "log from dead relay", "ctr", c.Name, "br", branch, "log", relayLog)
@@ -2781,7 +2869,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 
 	s.mu.Lock()
 	if oldID, ok := branchID[ri.RelPath+"\x00"+branch]; ok && (ri.RelPath != "" || branch != "") {
-		// Replace the stale terminated entry with the live container.
+		// Replace the stale purged entry with the live container.
 		delete(s.tasks, oldID)
 	}
 	s.tasks[t.ID.String()] = entry
@@ -2797,24 +2885,32 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	go t.GenerateTitle(s.ctx) //nolint:contextcheck // fire-and-forget; must outlive adoption
 
 	// Auto-reconnect in background: relay alive → attach; relay dead
-	// but SessionID present → --resume. Reconnect handles both paths
-	// and reverts to StateWaiting if all strategies fail.
-	if relayAlive || t.GetSessionID() != "" {
+	// → restart relay via --resume (requires a session ID).
+	// Skip reconnect for stopped tasks — container is not running.
+	if t.GetState() != task.StateStopped && (relayAlive || t.GetSessionID() != "") {
 		strategy := "attach"
 		if !relayAlive {
 			strategy = "resume"
 		}
 		slog.Debug("container", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "st", strategy)
 		go func() {
+			tlog := slog.With("repo", ri.RelPath, "br", branch, "ctr", t.Container)
 			h, err := runner.Reconnect(ctx, t)
 			if err != nil {
-				slog.Warn("container", "msg", "auto-reconnect failed",
-					"repo", ri.RelPath, "br", branch, "ctr", t.Container,
-					"st", strategy, "err", err)
+				tlog.Warn("auto-reconnect failed", "st", strategy, "err", err)
 				s.notifyTaskChange()
 				return
 			}
-			slog.Debug("container", "msg", "auto-reconnect succeeded", "repo", ri.RelPath, "br", branch, "ctr", t.Container, "st", strategy)
+			// If --resume exits immediately (previous session complete),
+			// start a fresh idle relay so the task can accept prompts.
+			h, err = runner.EnsureSession(ctx, t, h, tlog)
+			if err != nil {
+				tlog.Warn("ensure session failed", "err", err)
+				t.SetState(task.StateWaiting)
+				s.notifyTaskChange()
+				return
+			}
+			tlog.Debug("auto-reconnect succeeded", "st", strategy)
 			// Compute host-side diff stat after reconnect. Reconnect
 			// replays relay messages which may include stale
 			// DiffStatMessages (old relay code diffs against HEAD, not
@@ -2829,7 +2925,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 			s.notifyTaskChange()
 			s.watchSession(entry, runner, h)
 		}()
-	} else if !relayAlive {
+	} else if !relayAlive && t.GetState() != task.StateStopped {
 		slog.Warn("adopted orphaned task",
 			"repo", ri.RelPath, "br", branch, "ctr", c.Name,
 			"state", t.GetState())
@@ -2859,7 +2955,7 @@ func (s *Server) cleanupTask(entry *taskEntry, runner *task.Runner, reason task.
 // relay daemon may still be alive — see Flow 2 in the relay shutdown protocol
 // in package agent). If entry.done fires first, the goroutine exits silently.
 func (s *Server) watchSession(entry *taskEntry, runner *task.Runner, h *task.SessionHandle) {
-	_ = runner // kept for interface consistency; may be used for future auto-reconnect
+	_ = runner // kept for interface consistency
 	go func() {
 		done := h.Session.Done()
 		select {
@@ -2890,7 +2986,7 @@ func (s *Server) watchSession(entry *taskEntry, runner *task.Runner, h *task.Ses
 				slog.Info("session exited", attrs...)
 			}
 			// Only transition Running→Waiting. If addMessage() already set
-			// Asking (agent asked a question) or the task is Terminating,
+			// Asking (agent asked a question) or the task is Purging,
 			// don't clobber that state.
 			t.SetStateIf(task.StateRunning, task.StateWaiting)
 			s.notifyTaskChange()
@@ -2918,7 +3014,7 @@ func (s *Server) watchContainerEvents(ctx context.Context) {
 				}
 			}
 			for ev := range ch {
-				s.handleContainerDeath(ev.Name) //nolint:contextcheck // handleContainerDeath intentionally uses server context
+				s.handleContainerDeath(ev.Name)
 			}
 			// Stream ended. Reconnect unless context cancelled.
 			if ctx.Err() != nil {
@@ -3013,33 +3109,39 @@ func (s *Server) discoverKiloModels() {
 	slog.Debug("kilo", "num_models", len(models))
 }
 
-// handleContainerDeath looks up a task by container name and triggers cleanup.
+// handleContainerDeath looks up a task by container name and archives it.
+// The container is not destroyed — it transitions to StateStopped so it
+// can be revived on the next server restart (e.g. after a Docker or
+// machine restart).
 func (s *Server) handleContainerDeath(containerName string) {
 	s.mu.Lock()
 	var found *taskEntry
-	var runner *task.Runner
 	for _, e := range s.tasks {
 		if e.task.Container != containerName {
 			continue
 		}
 		found = e
-		deathPrimaryName := ""
-		if p := e.task.Primary(); p != nil {
-			deathPrimaryName = p.Name
-		}
-		runner = s.runners[deathPrimaryName]
 		break
 	}
 	s.mu.Unlock()
-	if found == nil || runner == nil {
+	if found == nil {
+		return
+	}
+	t := found.task
+	state := t.GetState()
+	// Only archive active tasks. Already-terminal tasks should not be touched.
+	if state == task.StatePurged || state == task.StateFailed || state == task.StateStopped || state == task.StateStopping {
 		return
 	}
 	deathBranch := ""
-	if p := found.task.Primary(); p != nil {
+	if p := t.Primary(); p != nil {
 		deathBranch = p.Branch
 	}
-	slog.Info("container", "msg", "died, cleaning up task", "ctr", containerName, "task", found.task.ID, "br", deathBranch)
-	go s.cleanupTask(found, runner, task.StateFailed)
+	slog.Info("container", "msg", "died, archiving as stopped", "ctr", containerName, "task", t.ID, "br", deathBranch, "prev_state", state)
+	// Detach any active session (SSH is dead).
+	t.DetachSession()
+	t.SetState(task.StateStopped)
+	s.notifyTaskChange()
 }
 
 // getTask looks up a task by the {id} path parameter.

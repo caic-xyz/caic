@@ -4,12 +4,13 @@ go 1.25.7
 
 require (
 	github.com/andybalholm/brotli v1.2.0
-	github.com/caic-xyz/md v0.8.1-0.20260312000123-d0aa9ebd511b
+	github.com/caic-xyz/md v0.8.1-0.20260312164644-41dfdec931e2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/klauspost/compress v1.18.4
 	github.com/lmittmann/tint v1.1.3
 	github.com/maruel/genai v0.3.0
 	github.com/maruel/ksid v0.1.1
+	github.com/maruel/roundtrippers v0.5.0
 	github.com/mattn/go-colorable v0.1.14
 	github.com/mattn/go-isatty v0.0.20
 	github.com/oschwald/maxminddb-golang/v2 v2.1.1
@@ -26,7 +27,6 @@ require (
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/mailru/easyjson v0.9.1 // indirect
 	github.com/maruel/httpjson v0.5.0 // indirect
-	github.com/maruel/roundtrippers v0.5.0 // indirect
 	github.com/spf13/cobra v1.3.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect

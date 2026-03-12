@@ -42,7 +42,9 @@ class FunctionHandlers(
                 "task_send_message" -> handleSendMessage(args)
                 "task_answer_question" -> handleAnswerQuestion(args)
                 "task_push_branch_to_remote" -> handleSyncTask(args)
-                "task_terminate" -> handleTerminateTask(args)
+                "task_stop" -> handleStopTask(args)
+                "task_purge" -> handlePurgeTask(args)
+                "task_revive" -> handleReviveTask(args)
                 "get_usage" -> handleGetUsage()
                 "clone_repo" -> handleCloneRepo(args)
                 "task_get_last_message_from_assistant" -> handleGetLastMessage(args)
@@ -107,8 +109,10 @@ class FunctionHandlers(
             append("Elapsed: ${formatElapsed(t.duration)}  ")
             appendLine("Cost: ${formatCost(t.costUSD)}")
             when {
-                t.state == "terminated" && !t.result.isNullOrBlank() ->
+                t.state == "purged" && !t.result.isNullOrBlank() ->
                     appendLine("**Result:** ${t.result}")
+                t.state == "stopped" ->
+                    appendLine("**Stopped:** container died")
                 t.state == "failed" && !t.error.isNullOrBlank() ->
                     appendLine("**Error:** ${t.error}")
             }
@@ -151,11 +155,25 @@ class FunctionHandlers(
         }
     }
 
-    private suspend fun handleTerminateTask(args: JsonObject): JsonElement {
+    private suspend fun handleStopTask(args: JsonObject): JsonElement {
         val taskId = resolveTaskNumber(args) ?: return errorResult("Unknown task number")
         val num = args.requireInt("task_number")
-        apiClient.terminateTask(taskId)
-        return textResult("Terminated task #$num.")
+        apiClient.stopTask(taskId)
+        return textResult("Stopping task #$num.")
+    }
+
+    private suspend fun handlePurgeTask(args: JsonObject): JsonElement {
+        val taskId = resolveTaskNumber(args) ?: return errorResult("Unknown task number")
+        val num = args.requireInt("task_number")
+        apiClient.purgeTask(taskId)
+        return textResult("Purged task #$num.")
+    }
+
+    private suspend fun handleReviveTask(args: JsonObject): JsonElement {
+        val taskId = resolveTaskNumber(args) ?: return errorResult("Unknown task number")
+        val num = args.requireInt("task_number")
+        apiClient.reviveTask(taskId)
+        return textResult("Reviving task #$num.")
     }
 
     private suspend fun handleGetUsage(): JsonElement {
@@ -240,8 +258,10 @@ private fun taskSummaryLine(num: Int, t: Task): String {
     val base = "$num. **$name** — ${t.state}, ${formatElapsed(t.duration)}, " +
         "${formatCost(t.costUSD)}, ${t.harness}${diffStatSummary(t)}"
     return when {
-        t.state == "terminated" && !t.result.isNullOrBlank() ->
+        t.state == "purged" && !t.result.isNullOrBlank() ->
             "$base — ${t.result!!.take(RESULT_SNIPPET_MAX)}"
+        t.state == "stopped" ->
+            "$base — container died"
         t.state == "failed" && !t.error.isNullOrBlank() ->
             "$base — ${t.error}"
         else -> base

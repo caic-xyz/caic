@@ -313,7 +313,7 @@ export default function TaskDetail(props: Props) {
         es?.close();
         es = null;
         const st = props.taskState;
-        if (live && messages().length > 0 && (st === "terminated" || st === "failed")) {
+        if (live && messages().length > 0 && (st === "purged" || st === "failed")) {
           return;
         }
         // Cancel any pending timer before scheduling a new one. Without this,
@@ -373,7 +373,7 @@ export default function TaskDetail(props: Props) {
 
   const isActive = () => {
     const s = props.taskState;
-    return s === "running" || s === "branching" || s === "provisioning" || s === "starting" || s === "waiting" || s === "asking" || s === "has_plan" || s === "terminating";
+    return s === "running" || s === "branching" || s === "provisioning" || s === "starting" || s === "waiting" || s === "asking" || s === "has_plan" || s === "purging";
   };
 
   const isWaiting = () => props.taskState === "waiting" || props.taskState === "asking" || props.taskState === "has_plan";
@@ -602,7 +602,7 @@ export default function TaskDetail(props: Props) {
           >
             <Button type="submit" disabled={sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)} title="Send"><SendIcon width="1.1em" height="1.1em" /></Button>
             <div class={styles.syncButtonGroup}>
-              <Button type="button" variant="gray" loading={pendingAction() === "sync"} disabled={!!pendingAction() || props.taskState === "terminating"} onClick={() => doSync(false)} title={`Push to ${props.branch}`}>
+              <Button type="button" variant="gray" loading={pendingAction() === "sync"} disabled={!!pendingAction() || props.taskState === "purging"} onClick={() => doSync(false)} title={`Push to ${props.branch}`}>
                 <Switch fallback={<SyncIcon width="1.1em" height="1.1em" />}>
                   <Match when={props.forge === "github"}>
                     <GitHubIcon width="1.1em" height="1.1em" style={{ color: "black" }} />
@@ -613,7 +613,7 @@ export default function TaskDetail(props: Props) {
                 </Switch>
                 {props.forge ? (props.forgePR ? " Push" : " Create PR") : " Push"}
               </Button>
-              <button type="button" class={styles.syncDropdownToggle} disabled={!!pendingAction() || props.taskState === "terminating"} onClick={() => setSyncMenuOpen((v) => !v)} aria-label="Sync options">&#9660;</button>
+              <button type="button" class={styles.syncDropdownToggle} disabled={!!pendingAction() || props.taskState === "purging"} onClick={() => setSyncMenuOpen((v) => !v)} aria-label="Sync options">&#9660;</button>
               <Show when={syncMenuOpen()}>
                 <div class={styles.syncDropdown}>
                   <button type="button" class={styles.syncDropdownItem} onClick={() => doSync(false, SyncTargetDefault)}>Push to {props.baseBranch}</button>

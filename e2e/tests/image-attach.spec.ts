@@ -20,8 +20,8 @@ test("API: images are accepted in task inputs when harness supports them", async
   });
   await waitForTaskState(api, id, "waiting");
 
-  await api.terminateTask(id);
-  await waitForTaskState(api, id, "terminated");
+  await api.purgeTask(id);
+  await waitForTaskState(api, id, "purged");
 });
 
 test("UI: screenshot capture attaches a thumbnail which is sent and cleared on submit", async ({
@@ -110,6 +110,6 @@ test("UI: screenshot capture attaches a thumbnail which is sent and cleared on s
   // Agent processes the turn and returns to "waiting".
   await waitForTaskState(api, id, "waiting");
 
-  await api.terminateTask(id);
-  await waitForTaskState(api, id, "terminated");
+  await api.purgeTask(id);
+  await waitForTaskState(api, id, "purged");
 });

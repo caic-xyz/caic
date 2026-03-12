@@ -29,14 +29,16 @@ const (
 	StateProvisioning       // Starting docker container.
 	StateStarting           // Launching agent session.
 	StateRunning            // Agent is executing.
-	StateWaiting            // Agent completed a turn, awaiting user input or terminate.
+	StateWaiting            // Agent completed a turn, awaiting user input or purge.
 	StateAsking             // Agent asked a question (AskUserQuestion), needs answer.
 	StateHasPlan            // Agent finished planning (ExitPlanMode with plan content), awaiting approval.
 	StatePulling            // Pulling changes from container.
 	StatePushing            // Pushing to origin.
-	StateTerminating        // User requested termination; cleanup in progress.
+	StateStopping           // Graceful stop in progress (container being stopped, preserved for revival).
+	StateStopped            // Container stopped but not deleted; can be revived.
+	StatePurging            // User requested purge; cleanup in progress.
 	StateFailed             // Failed at some stage.
-	StateTerminated         // Terminated by user.
+	StatePurged             // Container deleted, task is final.
 )
 
 func (s State) String() string {
@@ -61,12 +63,16 @@ func (s State) String() string {
 		return "pulling"
 	case StatePushing:
 		return "pushing"
-	case StateTerminating:
-		return "terminating"
+	case StateStopping:
+		return "stopping"
+	case StateStopped:
+		return "stopped"
+	case StatePurging:
+		return "purging"
 	case StateFailed:
 		return "failed"
-	case StateTerminated:
-		return "terminated"
+	case StatePurged:
+		return "purged"
 	default:
 		return "unknown"
 	}
@@ -107,7 +113,7 @@ type RepoMount struct {
 	Name       string // relative path, e.g. "github/caic"
 	BaseBranch string // branch to fork from; empty = runner default
 	Branch     string // allocated branch, e.g. "caic-0"
-	GitRoot    string // absolute host path; empty in terminated-task entries
+	GitRoot    string // absolute host path; empty in purged-task entries
 }
 
 // Task represents a single unit of work.
@@ -412,7 +418,7 @@ func (t *Task) Messages() []agent.Message {
 //   - Trailing ResultMessage (no ask) → StateWaiting
 //   - No trailing ResultMessage → state unchanged (agent was mid-output)
 //
-// Called during both log loading (loadTerminatedTasks) and container adoption
+// Called during both log loading (loadPurgedTasks) and container adoption
 // (adoptOne). For adoption, the caller must handle the case where state
 // remains StateRunning with no relay alive — see adoptOne.
 func (t *Task) RestoreMessages(msgs []agent.Message) {
@@ -513,9 +519,9 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	// agent finished its turn and is waiting for user input (or asking a
 	// question). Skip trailing DiffStatMessages — the relay emits periodic
 	// diff stats that can appear after the ResultMessage.
-	// Only override non-terminal states — terminated/failed tasks loaded from
+	// Only override non-terminal states — purged/failed tasks loaded from
 	// logs must keep their recorded state.
-	if len(msgs) > 0 && t.state != StateTerminated && t.state != StateFailed && t.state != StateTerminating {
+	if len(msgs) > 0 && t.state != StatePurged && t.state != StateFailed && t.state != StatePurging {
 		if lastAgentMessage(msgs) != nil {
 			switch {
 			case lastTurnHasAsk(msgs):
@@ -902,11 +908,11 @@ func (t *Task) Subscribe(ctx context.Context) (history []agent.Message, live <-c
 //     relay daemon. It is set by Runner.Start, Runner.Reconnect, or
 //     Runner.RestartSession.
 //   - The session is cleared by CloseSession (during restart), Kill (during
-//     termination), or lazily by SendInput when it detects the SSH process
+//     purge), or lazily by SendInput when it detects the SSH process
 //     already exited (Done channel closed).
 //   - "none" means no session was ever attached for this task — either the task
 //     hasn't started, or the relay died and reconnect failed.
-//   - "exited" means a session existed but the underlying SSH process terminated
+//   - "exited" means a session existed but the underlying SSH process exited
 //     (relay or agent crashed, SSH dropped) before the user sent input.
 type SessionStatus string
 

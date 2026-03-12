@@ -15,8 +15,10 @@ export interface TaskListProps {
   setSidebarOpen: (open: boolean) => void;
   now: Accessor<number>;
   onSelect: (id: string) => void;
-  onTerminate: (id: string) => void;
-  terminatingId: Accessor<string | null>;
+  onStop: (id: string) => void;
+  onPurge: (id: string) => void;
+  onRevive: (id: string) => void;
+  actionId: Accessor<string | null>;
   onDiffClick?: (id: string) => void;
 }
 
@@ -25,7 +27,7 @@ const naturalCompare = (a: string, b: string) =>
 
 /** Sort active tasks by repo then branch; terminal tasks by ID descending. */
 export function sortTasks(tasks: Task[]): Task[] {
-  const isTerminal = (s: string) => s === "failed" || s === "terminated";
+  const isTerminal = (s: string) => s === "failed" || s === "purged";
   const active = tasks.filter((t) => !isTerminal(t.state));
   const terminal = tasks.filter((t) => isTerminal(t.state));
   active.sort((a, b) => {
@@ -65,7 +67,7 @@ const CI_DOT_COLOR: Record<string, string> = {
 };
 
 export default function TaskList(props: TaskListProps) {
-  const isTerminal = (s: string) => s === "failed" || s === "terminated";
+  const isTerminal = (s: string) => s === "failed" || s === "purged";
 
   const grouped = () => {
     const all = [...props.tasks()];
@@ -123,8 +125,10 @@ export default function TaskList(props: TaskListProps) {
       selected={props.selectedId === t().id}
       now={props.now}
       onClick={() => props.onSelect(t().id)}
-      onTerminate={() => props.onTerminate(t().id)}
-      terminateLoading={props.terminatingId() === t().id}
+      onStop={() => props.onStop(t().id)}
+      onPurge={() => props.onPurge(t().id)}
+      onRevive={() => props.onRevive(t().id)}
+      actionLoading={props.actionId() === t().id}
       onDiffClick={props.onDiffClick ? () => { const fn = props.onDiffClick; if (fn) fn(t().id); } : undefined}
     />
   );

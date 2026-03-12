@@ -47,9 +47,15 @@ type ContainerBackend interface {
 	Connect(ctx context.Context, repos []md.Repo, opts *StartOptions) (name, tailscaleFQDN string, err error)
 	Diff(ctx context.Context, repo md.Repo, args ...string) (string, error)
 	Fetch(ctx context.Context, repos []md.Repo) error
-	// Kill kills the container identified by name, removing any git remotes for
-	// the given repos.
-	Kill(ctx context.Context, name string, repos []md.Repo) error
+	// Stop gracefully stops the container without removing it. The container
+	// can be restarted later with Revive.
+	Stop(ctx context.Context, name string) error
+	// Purge stops and removes the container identified by name, cleaning up
+	// SSH config and git remotes for the given repos.
+	Purge(ctx context.Context, name string, repos []md.Repo) error
+	// Revive restarts a stopped (exited) container, re-establishes SSH, and
+	// waits for connectivity. The container's filesystem is preserved.
+	Revive(ctx context.Context, name string, repos []md.Repo) error
 }
 
 // Result holds the outcome of a completed task.
@@ -177,7 +183,7 @@ func (r *Runner) Init(ctx context.Context) error {
 //     reconnects to the still-running agent process with zero message loss.
 //  3. If attaching fails (relay died between check and attach), fall back to
 //     starting a new agent session with --resume to continue the conversation.
-//  4. If both fail, revert to StateWaiting so the user can retry or terminate.
+//  4. If both fail, revert to StateWaiting so the user can retry or purge.
 //
 // State transitions:
 //   - Relay attach: keeps StateWaiting/StateAsking if agent already finished its
@@ -250,7 +256,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) (*SessionHandle, error)
 		_ = logW.Close()
 		close(msgCh)
 		// Both attach and --resume failed. Revert to StateWaiting so the
-		// user can try again (restart) or terminate.
+		// user can try again (restart) or purge.
 		t.SetState(StateWaiting)
 		return nil, fmt.Errorf("reconnect: %w", err)
 	}
@@ -339,14 +345,14 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 // shutdown protocol — see package agent). It sends the null-byte sentinel
 // to trigger graceful agent exit, then kills the container.
 //
-// This is only called for intentional termination (user action or container
+// This is only called for intentional purge (user action or container
 // death), never during backend restart. On restart, the relay daemon stays
 // alive and the server reconnects via adoptOne → Reconnect.
 //
 // Steps:
 //  1. Detach the session handle from the task.
 //  2. If a session exists: Session.Close sends \x00 + closes stdin, wait up to 10s.
-//  3. Set task state to reason (StateTerminated or StateFailed).
+//  3. Set task state to reason (StatePurged or StateFailed).
 //  4. Kill the container.
 //  5. If graceful wait timed out, drain session now (container dead, SSH severed).
 //  6. Close msgCh and logW, write log trailer.
@@ -379,13 +385,13 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 
 	t.SetState(reason)
 
-	// Backup container commits before killing, in case they were never pushed.
+	// Backup container commits before purging, in case they were never pushed.
 	r.backupIfNeeded(ctx, t)
 
-	tlog.Info("kill container")
+	tlog.Info("purge container")
 	if name != "" && r.Container != nil {
-		if err := r.KillContainer(ctx, name, primaryBranch, t.ExtraMDRepos()); err != nil {
-			tlog.Warn("kill failed", "err", err)
+		if err := r.PurgeContainer(ctx, name, primaryBranch, t.ExtraMDRepos()); err != nil {
+			tlog.Warn("purge failed", "err", err)
 		}
 	}
 
@@ -419,7 +425,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	}
 	// Use the relay's live diff stat. The ResultMessage.DiffStat is set
 	// by startMessageDispatch during normal flow, but Cleanup may run
-	// without a ResultMessage (e.g. user-initiated termination).
+	// without a ResultMessage (e.g. user-initiated purge).
 	if ds := t.LiveDiffStat(); len(ds) > 0 {
 		res.DiffStat = ds
 	}
@@ -432,6 +438,176 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 		_ = logW.Close()
 	}
 	return res
+}
+
+// StopTask gracefully shuts down the agent session and stops the container
+// without removing it. The container can be revived later. Unlike Cleanup,
+// this preserves git remotes and SSH config.
+func (r *Runner) StopTask(ctx context.Context, t *Task) {
+	r.initDefaults()
+	h := t.DetachSession()
+
+	name := t.Container
+	var primaryBranch string
+	if p := t.Primary(); p != nil {
+		primaryBranch = p.Branch
+	}
+	tlog := r.log.With("br", primaryBranch, "ctr", name)
+
+	// Graceful shutdown: close stdin so the agent can emit a final result.
+	if h != nil {
+		h.Session.Close()
+		timer := time.NewTimer(20 * time.Second)
+		select {
+		case <-h.Session.Done():
+			timer.Stop()
+		case <-timer.C:
+			tlog.Warn("session timeout during stop")
+		}
+	}
+
+	t.SetState(StateStopping)
+
+	tlog.Info("stop container")
+	if name != "" && r.Container != nil {
+		if err := r.Container.Stop(ctx, name); err != nil {
+			tlog.Warn("stop failed", "err", err)
+		}
+	}
+
+	// Drain session after container is stopped.
+	if h != nil {
+		_, _ = h.Session.Wait()
+		close(h.MsgCh)
+	}
+
+	t.SetState(StateStopped)
+
+	var logW io.WriteCloser
+	if h != nil {
+		logW = h.LogW
+	}
+	if logW != nil {
+		_ = logW.Close()
+	}
+}
+
+// ReviveTask restarts a stopped container and reconnects to the agent.
+// The container's filesystem is preserved from the previous run. After
+// docker-start + SSH, Reconnect attaches to the relay (if alive) or
+// resumes the session via --resume, landing in StateWaiting.
+func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error) {
+	r.initDefaults()
+	if r.Container == nil {
+		return nil, errors.New("runner has no container backend configured")
+	}
+	if t.Container == "" {
+		return nil, errors.New("no container to revive")
+	}
+	var primaryBranch string
+	if p := t.Primary(); p != nil {
+		primaryBranch = p.Branch
+	}
+	tlog := r.log.With("br", primaryBranch, "ctr", t.Container)
+
+	// 1. Revive the container (docker start + SSH).
+	t.SetState(StateProvisioning)
+	repos := t.MDRepos()
+	tlog.Info("reviving container")
+	if err := r.Container.Revive(ctx, t.Container, repos); err != nil {
+		t.SetState(StateFailed)
+		return nil, fmt.Errorf("revive container: %w", err)
+	}
+
+	// 2. Reconnect to the agent (attach relay or --resume).
+	t.SetState(StateStarting)
+	tlog.Info("reconnecting after revive", "sess", t.GetSessionID())
+	h, err := r.Reconnect(ctx, t)
+	if err != nil {
+		t.SetState(StateFailed)
+		return nil, fmt.Errorf("reconnect after revive: %w", err)
+	}
+
+	// 3. If --resume caused the session to exit immediately (e.g. previous
+	// session was already complete), start a fresh idle session.
+	h, err = r.EnsureSession(ctx, t, h, tlog)
+	if err != nil {
+		t.SetState(StateFailed)
+		return nil, err
+	}
+	tlog.Info("agent ready after revive", "state", t.GetState())
+	return h, nil
+}
+
+// EnsureSession waits briefly for h to confirm it's alive. If the session
+// exits within 10 seconds (e.g. --resume found a completed session), it
+// starts a fresh idle relay so the task can accept new prompts.
+func (r *Runner) EnsureSession(ctx context.Context, t *Task, h *SessionHandle, tlog *slog.Logger) (*SessionHandle, error) {
+	select {
+	case <-h.Session.Done():
+		// Session exited immediately. Detach and start fresh.
+		t.DetachSession()
+		result, _ := h.Session.Wait()
+		close(h.MsgCh)
+		_ = h.LogW.Close()
+		sub := ""
+		if result != nil {
+			sub = result.Subtype
+		}
+		tlog.Info("resumed session exited, starting fresh relay", "result", sub)
+		t.SetStateIf(StateRunning, StateWaiting)
+		return r.StartSession(ctx, t, agent.Prompt{})
+	case <-time.After(10 * time.Second):
+		// Session is alive — all good.
+		return h, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// StartSession starts a fresh relay+agent session on an existing container.
+// If prompt is non-empty, it is sent as the initial input and the task
+// transitions to StateRunning. If prompt is empty, the agent starts idle
+// and the task stays in its current state (typically StateWaiting).
+func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
+	r.initDefaults()
+	if t.Container == "" {
+		return nil, errors.New("no container")
+	}
+	var primaryBranch string
+	if p := t.Primary(); p != nil {
+		primaryBranch = p.Branch
+	}
+	tlog := r.log.With("br", primaryBranch, "ctr", t.Container)
+
+	msgCh := r.startMessageDispatch(ctx, t)
+	logW, err := r.openLog(t)
+	if err != nil {
+		close(msgCh)
+		return nil, err
+	}
+
+	tlog.Info("starting session", "hns", t.Harness)
+	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
+		Container:     t.Container,
+		Dir:           r.containerDir(),
+		Model:         t.Model,
+		InitialPrompt: prompt,
+	}, msgCh, logW)
+	if err != nil {
+		_ = logW.Close()
+		close(msgCh)
+		tlog.Error("session start failed", "err", err)
+		return nil, err
+	}
+
+	h := &SessionHandle{Session: session, MsgCh: msgCh, LogW: logW}
+	t.AttachSession(h)
+	if prompt.Text != "" || len(prompt.Images) > 0 {
+		t.addMessage(ctx, syntheticUserInput(prompt))
+		t.SetState(StateRunning)
+	}
+	return h, nil
 }
 
 // setupResult holds the outputs of setup: the container name and optional Tailscale FQDN.
@@ -748,9 +924,9 @@ func (r *Runner) DiffContent(ctx context.Context, branch, path string) (string, 
 	return r.Container.Diff(ctx, md.Repo{GitRoot: r.Dir, Branch: branch}, args...)
 }
 
-// KillContainer kills the md container identified by containerName, cleaning
-// up any git remotes for repos associated with this runner.
-func (r *Runner) KillContainer(ctx context.Context, containerName, branch string, extraRepos []md.Repo) error {
+// PurgeContainer stops and removes the md container identified by containerName,
+// cleaning up any git remotes for repos associated with this runner.
+func (r *Runner) PurgeContainer(ctx context.Context, containerName, branch string, extraRepos []md.Repo) error {
 	r.initDefaults()
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 	defer cancel()
@@ -758,7 +934,7 @@ func (r *Runner) KillContainer(ctx context.Context, containerName, branch string
 	if r.Dir != "" {
 		repos = append([]md.Repo{{GitRoot: r.Dir, Branch: branch}}, extraRepos...)
 	}
-	return r.Container.Kill(ctx, containerName, repos)
+	return r.Container.Purge(ctx, containerName, repos)
 }
 
 // mutatingTools lists tool names whose execution may change files in the

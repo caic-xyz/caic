@@ -11,7 +11,6 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -112,31 +111,11 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 // opts.ResumeSessionID is used to pre-populate the thread ID so that
 // WritePrompt works immediately without waiting for thread/started replay.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
-	sshArgs := []string{
-		opts.Container, "python3", agent.RelayScriptPath, "attach",
-		"--offset", strconv.FormatInt(opts.RelayOffset, 10),
-	}
-	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdin pipe: %w", err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-	cmd.Stderr = &agent.SlogWriter{Prefix: "relay attach", Container: opts.Container}
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("attach relay: %w", err)
-	}
-
 	// Pre-populate thread ID from the known session so WritePrompt works
 	// immediately. wireFormat.process() will update it again if thread/started
 	// appears in the replayed output.
 	wire := &wireFormat{threadID: opts.ResumeSessionID}
-
-	log := slog.With("container", opts.Container)
-	return agent.NewSession(cmd, stdin, stdout, msgCh, logW, wire, log), nil
+	return agent.AttachRelaySession(ctx, opts.Container, opts.RelayOffset, msgCh, logW, wire)
 }
 
 // wireFormat implements agent.WireFormat for the codex app-server JSON-RPC

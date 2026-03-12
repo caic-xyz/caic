@@ -17,7 +17,7 @@
 #   Crucially, stdin EOF alone does NOT trigger shutdown. This is what
 #   distinguishes the two flows below.
 #
-# Flow 1 — One task is terminated (user clicks "terminate"):
+# Flow 1 — One task is purged (user clicks "purge"):
 #   1. Server calls Runner.Cleanup → Session.Close
 #   2. Session.Close writes \x00 then closes stdin
 #   3. attach_client forwards \x00 through the socket, then disconnects
@@ -404,7 +404,7 @@ def serve(cmd_args, work_dir, log_stdin=True):
                             logging.info("client #%d recv returned empty (EOF/disconnect)", cid)
                             break
                         # A null byte signals the client wants proc.stdin closed
-                        # (graceful termination). Strip it and set the flag.
+                        # (graceful shutdown). Strip it and set the flag.
                         if b"\x00" in data:
                             data = data.replace(b"\x00", b"")
                             close_stdin = True

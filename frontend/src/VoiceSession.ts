@@ -39,8 +39,8 @@ const SYSTEM_INSTRUCTION =
   "- has_plan: agent produced a plan, awaiting approval\n" +
   "- pulling: pulling changes from container\n" +
   "- pushing: pushing changes to remote\n" +
-  "- terminating: shutdown in progress\n" +
-  "- terminated: agent finished; result contains the outcome\n" +
+  "- purging: cleanup in progress, container being deleted\n" +
+  "- purged: container deleted; result contains the outcome\n" +
   "- failed: agent crashed or was aborted; error has the reason\n\n" +
   "## Context you have\n" +
   "At session start you receive a snapshot of all current tasks. Use it to " +
@@ -130,7 +130,7 @@ export class VoiceSession {
 
   readonly taskNumberMap = new TaskNumberMap();
 
-  /** Task IDs excluded from AI context (pre-terminated at session start). */
+  /** Task IDs excluded from AI context (pre-purged at session start). */
   excludedTaskIds: Set<string> = new Set();
 
   private _ws: WebSocket | null = null;
@@ -189,13 +189,13 @@ export class VoiceSession {
       const repoPaths = repos.map((r) => r.path);
 
       // Build snapshot before resetting the map.
-      const preTerminated = new Set(
+      const prePurged = new Set(
         tasks
-          .filter((t) => t.state === "terminated" || t.state === "failed")
+          .filter((t) => t.state === "purged" || t.state === "failed" || t.state === "stopped" || t.state === "stopping")
           .map((t) => t.id),
       );
-      this.excludedTaskIds = preTerminated;
-      const active = tasks.filter((t) => !preTerminated.has(t.id));
+      this.excludedTaskIds = prePurged;
+      const active = tasks.filter((t) => !prePurged.has(t.id));
       this.taskNumberMap.reset();
       this.taskNumberMap.update(active);
       this._pendingSnapshot = buildSnapshot(active, recentRepo, this.taskNumberMap, defaultHarness, defaultModel);

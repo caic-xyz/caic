@@ -45,10 +45,14 @@ export function stateColor(state: string): string {
       return "#ede9fe";
     case "failed":
       return "#f8d7da";
-    case "terminating":
+    case "purging":
       return "#fde2c8";
-    case "terminated":
+    case "stopping":
+      return "#fde2c8";
+    case "purged":
       return "#e2e3e5";
+    case "stopped":
+      return "#c8daf0";
     default:
       return "#fff3cd";
   }

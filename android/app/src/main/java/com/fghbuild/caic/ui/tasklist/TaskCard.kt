@@ -52,7 +52,7 @@ import com.fghbuild.caic.util.formatElapsed
 import com.fghbuild.caic.util.formatTokens
 import kotlinx.coroutines.delay
 
-private val TerminalStates = setOf("terminated", "failed")
+private val TerminalStates = setOf("purged", "failed")
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable

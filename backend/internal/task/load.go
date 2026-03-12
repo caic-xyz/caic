@@ -33,7 +33,7 @@ type LoadedTask struct {
 	TaskID            string // Task ID parsed from log filename; empty if unparseable.
 	Prompt            string
 	Title             string
-	Repos             []RepoMount // GitRoot will be empty for terminated tasks loaded from logs.
+	Repos             []RepoMount // GitRoot will be empty for purged tasks loaded from logs.
 	Harness           agent.Harness
 	StartedAt         time.Time
 	LastStateUpdateAt time.Time // Derived from log file mtime; best-effort for adopt.
@@ -365,8 +365,8 @@ func parseState(s string) State {
 	switch s {
 	case "failed":
 		return StateFailed
-	case "terminated":
-		return StateTerminated
+	case "purged", "terminated": // "terminated" is for backward compat with pre-rename logs; remove once old logs age out
+		return StatePurged
 	default:
 		return StateFailed
 	}

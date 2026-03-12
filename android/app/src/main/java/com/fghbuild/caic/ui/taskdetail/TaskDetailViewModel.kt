@@ -61,7 +61,7 @@ data class TaskDetailState(
     val supportsImages: Boolean = false,
 )
 
-private val TerminalStates = setOf("terminated", "failed")
+private val TerminalStates = setOf("stopping", "stopped", "purging", "purged", "failed")
 
 @HiltViewModel
 class TaskDetailViewModel @Inject constructor(
@@ -305,14 +305,44 @@ class TaskDetailViewModel @Inject constructor(
     }
 
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
-    fun terminateTask() {
-        _pendingAction.value = "terminate"
+    fun stopTask() {
+        _pendingAction.value = "stop"
         viewModelScope.launch {
             try {
                 val client = apiClient()
-                client.terminateTask(taskId)
+                client.stopTask(taskId)
             } catch (e: Exception) {
-                showActionError("terminate failed: ${e.message}")
+                showActionError("stop failed: ${e.message}")
+            } finally {
+                _pendingAction.value = null
+            }
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
+    fun purgeTask() {
+        _pendingAction.value = "purge"
+        viewModelScope.launch {
+            try {
+                val client = apiClient()
+                client.purgeTask(taskId)
+            } catch (e: Exception) {
+                showActionError("purge failed: ${e.message}")
+            } finally {
+                _pendingAction.value = null
+            }
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
+    fun reviveTask() {
+        _pendingAction.value = "revive"
+        viewModelScope.launch {
+            try {
+                val client = apiClient()
+                client.reviveTask(taskId)
+            } catch (e: Exception) {
+                showActionError("revive failed: ${e.message}")
             } finally {
                 _pendingAction.value = null
             }

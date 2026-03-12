@@ -243,9 +243,9 @@ func TestRunner(t *testing.T) {
 				},
 			})
 
-			result := r.Cleanup(t.Context(), tk, StateTerminated)
-			if result.State != StateTerminated {
-				t.Errorf("state = %v, want %v", result.State, StateTerminated)
+			result := r.Cleanup(t.Context(), tk, StatePurged)
+			if result.State != StatePurged {
+				t.Errorf("state = %v, want %v", result.State, StatePurged)
 			}
 			if result.CostUSD != 0.42 {
 				t.Errorf("CostUSD = %f, want 0.42", result.CostUSD)
@@ -283,7 +283,7 @@ func TestRunner(t *testing.T) {
 				},
 			})
 
-			result := r.Cleanup(t.Context(), tk, StateTerminated)
+			result := r.Cleanup(t.Context(), tk, StatePurged)
 			if len(result.DiffStat) != 2 {
 				t.Fatalf("DiffStat has %d entries, want 2", len(result.DiffStat))
 			}
@@ -341,7 +341,7 @@ func TestRunner(t *testing.T) {
 			}
 			tk.SetState(StateRunning)
 
-			r.Cleanup(t.Context(), tk, StateTerminated)
+			r.Cleanup(t.Context(), tk, StatePurged)
 
 			// Verify the backup branch was created.
 			cmd := exec.Command("git", "rev-parse", "--verify", "caic-backup/caic/w0")
@@ -398,7 +398,7 @@ func TestRunner(t *testing.T) {
 			}
 			tk.SetState(StateRunning)
 
-			r.Cleanup(t.Context(), tk, StateTerminated)
+			r.Cleanup(t.Context(), tk, StatePurged)
 
 			// Verify no backup branch was created.
 			cmd := exec.Command("git", "rev-parse", "--verify", "caic-backup/caic/w1")
@@ -430,9 +430,9 @@ func TestRunner(t *testing.T) {
 			}
 			tk.SetState(StateRunning)
 
-			result := r.Cleanup(t.Context(), tk, StateTerminated)
-			if result.State != StateTerminated {
-				t.Errorf("state = %v, want %v", result.State, StateTerminated)
+			result := r.Cleanup(t.Context(), tk, StatePurged)
+			if result.State != StatePurged {
+				t.Errorf("state = %v, want %v", result.State, StatePurged)
 			}
 			// No backup branch should exist (fetch failed).
 			cmd := exec.Command("git", "rev-parse", "--verify", "caic-backup/caic/w0")
@@ -785,7 +785,9 @@ func (s *stubContainer) Fetch(_ context.Context, repos []md.Repo) error {
 	return nil
 }
 
-func (s *stubContainer) Kill(_ context.Context, _ string, _ []md.Repo) error { return nil }
+func (s *stubContainer) Stop(_ context.Context, _ string) error                { return nil }
+func (s *stubContainer) Purge(_ context.Context, _ string, _ []md.Repo) error  { return nil }
+func (s *stubContainer) Revive(_ context.Context, _ string, _ []md.Repo) error { return nil }
 
 // recvMsg reads a single message from ch, respecting the test context and a
 // 1-second safety timeout.

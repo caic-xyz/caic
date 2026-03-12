@@ -20,7 +20,9 @@ vi.mock("./api", () => ({
   listRepoBranches: vi.fn(),
   cloneRepo: vi.fn(),
   createTask: vi.fn(),
-  terminateTask: vi.fn(),
+  stopTask: vi.fn(),
+  purgeTask: vi.fn(),
+  reviveTask: vi.fn(),
 }));
 
 vi.mock("./AuthContext", () => ({

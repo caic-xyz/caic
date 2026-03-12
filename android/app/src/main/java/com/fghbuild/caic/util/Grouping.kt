@@ -494,7 +494,7 @@ data class IncrementalGrouped(
     val completedSessions: List<Session> = emptyList(),
     /** The boundary event (init/compact_boundary) that opened the current session; null if none. */
     val currentSessionBoundaryEvent: EventMessage? = null,
-    /** Completed turns within the current session (terminated by result events). */
+    /** Completed turns within the current session (delimited by result events). */
     val currentSessionCompletedTurns: List<Turn> = emptyList(),
     /** The in-progress turn at the end of the current session; null if current session is idle. */
     val currentTurn: Turn? = null,

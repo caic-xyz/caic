@@ -35,7 +35,9 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | GET | `/api/v1/tasks/{id}/events` |  | `EventMessage` SSE |
 | POST | `/api/v1/tasks/{id}/input` | `InputReq` | `StatusResp` |
 | POST | `/api/v1/tasks/{id}/restart` | `RestartReq` | `StatusResp` |
-| POST | `/api/v1/tasks/{id}/terminate` |  | `StatusResp` |
+| POST | `/api/v1/tasks/{id}/stop` |  | `StatusResp` |
+| POST | `/api/v1/tasks/{id}/purge` |  | `StatusResp` |
+| POST | `/api/v1/tasks/{id}/revive` |  | `StatusResp` |
 | GET | `/api/v1/tasks/{id}/ci-log` |  | `CILogResp` |
 | POST | `/api/v1/tasks/{id}/sync` | `SyncReq` | `SyncResp` |
 | GET | `/api/v1/tasks/{id}/diff` |  | `DiffResp` |

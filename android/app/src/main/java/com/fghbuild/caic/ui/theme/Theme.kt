@@ -18,15 +18,18 @@ fun stateColor(state: String): Color = when (state) {
     "asking" -> Color(0xFFCCE5FF)
     "has_plan" -> Color(0xFFEDE9FE)
     "failed" -> Color(0xFFF8D7DA)
-    "terminating" -> Color(0xFFFDE2C8)
-    "terminated" -> Color(0xFFE2E3E5)
+    "stopping" -> Color(0xFFFDE2C8)
+    "purging" -> Color(0xFFFDE2C8)
+    "purged" -> Color(0xFFE2E3E5)
+    "stopped" -> Color(0xFFC8DAF0)
     else -> Color(0xFFFFF3CD)
 }
 
 val activeStates = setOf(
     "running", "branching", "provisioning", "starting",
-    "waiting", "asking", "has_plan", "terminating",
+    "waiting", "asking", "has_plan", "stopping", "purging",
 )
+val terminalStates = setOf("failed", "purged")
 val waitingStates = setOf("waiting", "asking", "has_plan")
 
 private val LightColorScheme = lightColorScheme(

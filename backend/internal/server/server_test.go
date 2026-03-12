@@ -206,7 +206,7 @@ func TestHandleRestart(t *testing.T) {
 	})
 }
 
-func TestHandleTerminate(t *testing.T) {
+func TestHandlePurge(t *testing.T) {
 	t.Run("NotWaiting", func(t *testing.T) {
 		s := newTestServer(t)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -216,10 +216,10 @@ func TestHandleTerminate(t *testing.T) {
 			done: make(chan struct{}),
 		}
 
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/terminate", http.NoBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/purge", http.NoBody)
 		req.SetPathValue("id", "t1")
 		w := httptest.NewRecorder()
-		handleWithTask(s, s.terminateTask)(w, req)
+		handleWithTask(s, s.purgeTask)(w, req)
 		if w.Code != http.StatusConflict {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
 		}
@@ -239,23 +239,23 @@ func TestHandleTerminate(t *testing.T) {
 			done: make(chan struct{}),
 		}
 
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/terminate", http.NoBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/purge", http.NoBody)
 		req.SetPathValue("id", "t1")
 		w := httptest.NewRecorder()
-		handleWithTask(s, s.terminateTask)(w, req)
+		handleWithTask(s, s.purgeTask)(w, req)
 		if w.Code != http.StatusOK {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 		}
 
-		// Verify the response reports terminating. Don't check tk.State
+		// Verify the response reports purging. Don't check tk.State
 		// directly: cleanupTask runs in a goroutine and may have already
-		// transitioned the state to StateTerminated by now.
+		// transitioned the state to StatePurged by now.
 		var resp v1.StatusResp
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("failed to decode response: %v", err)
 		}
-		if resp.Status != "terminating" {
-			t.Errorf("status = %q, want %q", resp.Status, "terminating")
+		if resp.Status != "purging" {
+			t.Errorf("status = %q, want %q", resp.Status, "purging")
 		}
 	})
 
@@ -273,11 +273,11 @@ func TestHandleTerminate(t *testing.T) {
 		// where BaseContext is cancelled before the handler completes.
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/terminate", http.NoBody)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/purge", http.NoBody)
 		req = req.WithContext(ctx)
 		req.SetPathValue("id", "t1")
 		w := httptest.NewRecorder()
-		handleWithTask(s, s.terminateTask)(w, req)
+		handleWithTask(s, s.purgeTask)(w, req)
 		if w.Code != http.StatusOK {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 		}
@@ -285,7 +285,7 @@ func TestHandleTerminate(t *testing.T) {
 }
 
 func TestHandleContainerDeath(t *testing.T) {
-	t.Run("TriggersCleanup", func(t *testing.T) {
+	t.Run("ArchivesAsStopped", func(t *testing.T) {
 		s := newTestServer(t)
 		tk := &task.Task{
 			InitialPrompt: agent.Prompt{Text: "test"},
@@ -299,22 +299,8 @@ func TestHandleContainerDeath(t *testing.T) {
 
 		s.handleContainerDeath("md-repo-caic-0")
 
-		// Wait for the async cleanup goroutine to complete.
-		select {
-		case <-entry.done:
-		case <-time.After(5 * time.Second):
-			t.Fatal("cleanup did not complete in time")
-		}
-
-		if tk.GetState() != task.StateFailed {
-			t.Errorf("state = %v, want %v", tk.GetState(), task.StateFailed)
-		}
-
-		s.mu.Lock()
-		result := entry.result
-		s.mu.Unlock()
-		if result == nil {
-			t.Fatal("result is nil after container death cleanup")
+		if tk.GetState() != task.StateStopped {
+			t.Errorf("state = %v, want %v", tk.GetState(), task.StateStopped)
 		}
 	})
 
@@ -654,12 +640,12 @@ func mustJSON(t *testing.T, v any) string {
 	return string(b)
 }
 
-func TestLoadTerminatedTasks(t *testing.T) {
+func TestLoadPurgedTasks(t *testing.T) {
 	t.Run("OnStartup", func(t *testing.T) {
 		logDir := t.TempDir()
 
 		// Write 3 terminal task logs.
-		for i, state := range []string{"terminated", "failed", "terminated"} {
+		for i, state := range []string{"purged", "failed", "purged"} {
 			meta := mustJSON(t, agent.MetaMessage{
 				MessageType: "caic_meta", Version: 1, Prompt: fmt.Sprintf("task %d", i), Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-" + strings.Repeat("0", i+1)}}, Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
 			})
@@ -673,7 +659,7 @@ func TestLoadTerminatedTasks(t *testing.T) {
 			changed: make(chan struct{}),
 			logDir:  logDir,
 		}
-		if err := s.loadTerminatedTasks(); err != nil {
+		if err := s.loadPurgedTasks(); err != nil {
 			t.Fatal(err)
 		}
 
@@ -728,7 +714,7 @@ func TestLoadTerminatedTasks(t *testing.T) {
 			TotalCostUSD: 1.23, Usage: agent.Usage{OutputTokens: 16400}, DurationMs: 5000, NumTurns: 3,
 		})
 		trailer := mustJSON(t, agent.MetaResultMessage{
-			MessageType: "caic_result", State: "terminated",
+			MessageType: "caic_result", State: "purged",
 			CostUSD: 1.23, Duration: 5, NumTurns: 3,
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
@@ -739,7 +725,7 @@ func TestLoadTerminatedTasks(t *testing.T) {
 			changed: make(chan struct{}),
 			logDir:  logDir,
 		}
-		if err := s.loadTerminatedTasks(); err != nil {
+		if err := s.loadPurgedTasks(); err != nil {
 			t.Fatal(err)
 		}
 
@@ -786,7 +772,7 @@ func TestLoadTerminatedTasks(t *testing.T) {
 			TotalCostUSD: 0.42, Usage: agent.Usage{OutputTokens: 5600}, DurationMs: 3000, NumTurns: 2,
 		})
 		trailer := mustJSON(t, agent.MetaResultMessage{
-			MessageType: "caic_result", State: "terminated",
+			MessageType: "caic_result", State: "purged",
 			// CostUSD intentionally zero.
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
@@ -797,7 +783,7 @@ func TestLoadTerminatedTasks(t *testing.T) {
 			changed: make(chan struct{}),
 			logDir:  logDir,
 		}
-		if err := s.loadTerminatedTasks(); err != nil {
+		if err := s.loadPurgedTasks(); err != nil {
 			t.Fatal(err)
 		}
 
@@ -832,7 +818,7 @@ func TestLoadTerminatedTasks(t *testing.T) {
 			Title: "Skip Unnecessary MD Container Build",
 		})
 		trailerA := mustJSON(t, agent.MetaResultMessage{
-			MessageType: "caic_result", State: "terminated",
+			MessageType: "caic_result", State: "purged",
 			Title: "Optimize GenAI Provider",
 		})
 		writeLogFile(t, logDir, "a.jsonl", metaA, trailerA)
@@ -844,7 +830,7 @@ func TestLoadTerminatedTasks(t *testing.T) {
 			Title: "Skip Docker Rebuilds",
 		})
 		trailerB := mustJSON(t, agent.MetaResultMessage{
-			MessageType: "caic_result", State: "terminated",
+			MessageType: "caic_result", State: "purged",
 			Title: "Skip Unnecessary Docker Image Rebuilds",
 		})
 		writeLogFile(t, logDir, "b.jsonl", metaB, trailerB)
@@ -855,7 +841,7 @@ func TestLoadTerminatedTasks(t *testing.T) {
 			changed: make(chan struct{}),
 			logDir:  logDir,
 		}
-		if err := s.loadTerminatedTasks(); err != nil {
+		if err := s.loadPurgedTasks(); err != nil {
 			t.Fatal(err)
 		}
 
@@ -906,7 +892,7 @@ func TestLoadTerminatedTasks(t *testing.T) {
 			changed: make(chan struct{}),
 			logDir:  t.TempDir(),
 		}
-		if err := s.loadTerminatedTasks(); err != nil {
+		if err := s.loadPurgedTasks(); err != nil {
 			t.Fatal(err)
 		}
 		if len(s.tasks) != 0 {
@@ -992,7 +978,7 @@ func TestComputeTaskPatch(t *testing.T) {
 	})
 	t.Run("AlwaysIncludesID", func(t *testing.T) {
 		old := `{"id":"xyz","state":"running"}`
-		new_ := `{"id":"xyz","state":"terminated"}`
+		new_ := `{"id":"xyz","state":"purged"}`
 		patch, err := computeTaskPatch([]byte(old), []byte(new_))
 		if err != nil {
 			t.Fatal(err)
@@ -1004,10 +990,10 @@ func TestComputeTaskPatch(t *testing.T) {
 }
 
 func TestHandleTaskRawEvents(t *testing.T) {
-	t.Run("TerminatedTaskEvents", func(t *testing.T) {
+	t.Run("PurgedTaskEvents", func(t *testing.T) {
 		logDir := t.TempDir()
 
-		// Write a terminated task log with real agent messages.
+		// Write a purged task log with real agent messages.
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
 			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -1032,7 +1018,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.05, DurationMs: 1000, NumTurns: 1,
 		})
 		trailer := mustJSON(t, agent.MetaResultMessage{
-			MessageType: "caic_result", State: "terminated", CostUSD: 0.05, Duration: 1,
+			MessageType: "caic_result", State: "purged", CostUSD: 0.05, Duration: 1,
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, assistant, result, trailer)
 
@@ -1042,7 +1028,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			changed: make(chan struct{}),
 			logDir:  logDir,
 		}
-		if err := s.loadTerminatedTasks(); err != nil {
+		if err := s.loadPurgedTasks(); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1057,7 +1043,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		s.mu.Unlock()
 
 		// Subscribe to events via SSE. The handler should return immediately for
-		// terminated tasks instead of blocking until context deadline.
+		// purged tasks instead of blocking until context deadline.
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
@@ -1067,7 +1053,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		s.handleTaskRawEvents(w, req)
 		elapsed := time.Since(start)
 		if elapsed > 200*time.Millisecond {
-			t.Errorf("handleTaskRawEvents blocked for %v; terminated tasks should return immediately after history replay", elapsed)
+			t.Errorf("handleTaskRawEvents blocked for %v; purged tasks should return immediately after history replay", elapsed)
 		}
 
 		if w.Code != http.StatusOK {
@@ -1075,7 +1061,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		}
 		events := parseSSEEvents(t, w.Body.String())
 		if len(events) == 0 {
-			t.Fatal("no SSE events received for terminated task with messages")
+			t.Fatal("no SSE events received for purged task with messages")
 		}
 
 		kinds := make([]v1.EventKind, len(events))
@@ -1099,7 +1085,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 	t.Run("StreamEventTextDelta", func(t *testing.T) {
 		logDir := t.TempDir()
 
-		// Write a terminated task log with stream events (text deltas) followed
+		// Write a purged task log with stream events (text deltas) followed
 		// by the final assistant message, simulating --include-partial-messages output.
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "explain streaming",
@@ -1128,7 +1114,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			MessageType: "result", Subtype: "success", Result: "done", TotalCostUSD: 0.02, DurationMs: 200, NumTurns: 1,
 		})
 		trailer := mustJSON(t, agent.MetaResultMessage{
-			MessageType: "caic_result", State: "terminated", CostUSD: 0.02, Duration: 0.2,
+			MessageType: "caic_result", State: "purged", CostUSD: 0.02, Duration: 0.2,
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, msgStart, delta1, delta2, assistant, result, trailer)
 
@@ -1138,7 +1124,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 			changed: make(chan struct{}),
 			logDir:  logDir,
 		}
-		if err := s.loadTerminatedTasks(); err != nil {
+		if err := s.loadPurgedTasks(); err != nil {
 			t.Fatal(err)
 		}
 

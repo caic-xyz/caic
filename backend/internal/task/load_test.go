@@ -60,7 +60,7 @@ func TestLoadLogs(t *testing.T) {
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task1", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
 		asst := claudeAssistant(t, map[string]any{"type": "text", "text": "hello"})
-		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "terminated"})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, dir, "a.jsonl", meta, asst, trailer)
 
 		// Non-jsonl file should be ignored.
@@ -78,8 +78,8 @@ func TestLoadLogs(t *testing.T) {
 		if tasks[0].Prompt != "task1" {
 			t.Errorf("Prompt = %q, want %q", tasks[0].Prompt, "task1")
 		}
-		if tasks[0].State != StateTerminated {
-			t.Errorf("State = %v, want %v", tasks[0].State, StateTerminated)
+		if tasks[0].State != StatePurged {
+			t.Errorf("State = %v, want %v", tasks[0].State, StatePurged)
 		}
 	})
 	t.Run("NotExist", func(t *testing.T) {
@@ -163,7 +163,7 @@ func TestLoadLogs(t *testing.T) {
 		// New session header + assistant message (no plan tools).
 		meta2 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "plan task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
 		asst2 := claudeAssistant(t, map[string]any{"type": "text", "text": "done"})
-		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "terminated"})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, dir, "task.jsonl", meta, planWrite, cleared, meta2, asst2, trailer)
 
 		tasks, err := LoadLogs(dir)
@@ -197,7 +197,7 @@ func TestParseState(t *testing.T) {
 		want State
 	}{
 		{"failed", StateFailed},
-		{"terminated", StateTerminated},
+		{"purged", StatePurged},
 		{"unknown", StateFailed},
 	} {
 		t.Run(tt.in, func(t *testing.T) {

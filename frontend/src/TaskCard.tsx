@@ -7,6 +7,7 @@ import TailscaleIcon from "./tailscale.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
+import RestoreIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
 import TimerIcon from "@material-symbols/svg-400/outlined/timer.svg?solid";
 import styles from "./TaskCard.module.css";
 import { formatElapsed, formatTokens, tokenColor, stateColor } from "./formatting";
@@ -43,12 +44,14 @@ export interface TaskCardProps {
   selected: boolean;
   now: Accessor<number>;
   onClick: () => void;
-  onTerminate?: () => void;
-  terminateLoading?: boolean;
+  onStop?: () => void;
+  onPurge?: () => void;
+  onRevive?: () => void;
+  actionLoading?: boolean;
   onDiffClick?: () => void;
 }
 
-const terminalStates = new Set(["terminated", "failed"]);
+const terminalStates = new Set(["stopping", "stopped", "purging", "purged", "failed"]);
 
 export default function TaskCard(props: TaskCardProps) {
   const isTerminal = () => terminalStates.has(props.state);
@@ -74,7 +77,7 @@ export default function TaskCard(props: TaskCardProps) {
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); props.onClick(); } }}
       class={`${styles.card} ${props.selected ? styles.selected : ""}`}
     >
-      {/* Line 1: title + feature icons + plan badge + terminate (no state badge) */}
+      {/* Line 1: title + feature icons + plan badge + purge (no state badge) */}
       <div class={styles.header}>
         <Tooltip text={props.title} class={styles.titleWrapper} disabled={!titleTruncated()}>
           <strong ref={titleRef} class={styles.title}>{props.title}</strong>
@@ -92,17 +95,56 @@ export default function TaskCard(props: TaskCardProps) {
           <Show when={props.display}>
             <span class={styles.featureIcon} title="Display"><DisplayIcon width="0.75rem" height="0.75rem" /></span>
           </Show>
-          <Show when={props.onTerminate && props.state !== "terminated" && props.state !== "failed"}>
-            <span class={styles.terminateBtn}>
+          {/* Stopped: revive + purge buttons */}
+          <Show when={props.state === "stopped"}>
+            <Show when={props.onRevive}>
+              <span class={styles.purgeBtn}>
+                <button
+                  class={styles.purgeIcon}
+                  disabled={props.actionLoading}
+                  onClick={(e) => { e.stopPropagation(); props.onRevive?.(); }}
+                  title="Revive"
+                  data-testid="revive-task"
+                >
+                  <Show when={props.actionLoading} fallback={<RestoreIcon width="0.85rem" height="0.85rem" />}>
+                    <span class={styles.purgeSpinner} />
+                  </Show>
+                </button>
+              </span>
+            </Show>
+            <Show when={props.onPurge}>
+              <span class={styles.purgeBtn}>
+                <button
+                  class={styles.purgeIcon}
+                  disabled={props.actionLoading}
+                  onClick={(e) => { e.stopPropagation(); if (window.confirm(`Purge container?\n\n${props.title}\nrepo: ${props.repo}\nbranch: ${props.branch}`)) props.onPurge?.(); }}
+                  title="Purge"
+                  data-testid="purge-task"
+                >
+                  <DeleteIcon width="0.85rem" height="0.85rem" />
+                </button>
+              </span>
+            </Show>
+          </Show>
+          {/* Active states: stop button (trash can) */}
+          <Show when={props.state !== "stopped" && props.onStop && !terminalStates.has(props.state)}>
+            <span class={styles.purgeBtn}>
               <button
-                class={styles.terminateIcon}
-                disabled={props.terminateLoading || props.state === "terminating"}
-                onClick={(e) => { e.stopPropagation(); if (window.confirm(`Terminate container?\n\n${props.title}\nrepo: ${props.repo}\nbranch: ${props.branch}`)) props.onTerminate?.(); }}
-                title="Terminate"
-                data-testid="terminate-task"
+                class={styles.purgeIcon}
+                disabled={props.actionLoading}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (props.state === "running") {
+                    if (window.confirm(`Stop container?\n\n${props.title}\nrepo: ${props.repo}\nbranch: ${props.branch}`)) props.onStop?.();
+                  } else {
+                    props.onStop?.();
+                  }
+                }}
+                title="Stop"
+                data-testid="stop-task"
               >
-                <Show when={props.terminateLoading} fallback={<DeleteIcon width="0.85rem" height="0.85rem" />}>
-                  <span class={styles.terminateSpinner} />
+                <Show when={props.actionLoading} fallback={<DeleteIcon width="0.85rem" height="0.85rem" />}>
+                  <span class={styles.purgeSpinner} />
                 </Show>
               </button>
             </span>

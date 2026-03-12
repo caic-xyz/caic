@@ -104,7 +104,7 @@ class VoiceSession @Inject constructor(
 
     val taskNumberMap = TaskNumberMap()
 
-    /** Task IDs to exclude from AI context (e.g. already-terminated tasks at session start). */
+    /** Task IDs to exclude from AI context (e.g. already-purged tasks at session start). */
     @Volatile
     var excludedTaskIds: Set<String> = emptySet()
 
@@ -830,8 +830,8 @@ class VoiceSession @Inject constructor(
                 "- has_plan: agent produced a plan, awaiting approval\n" +
                 "- pulling: pulling changes from container\n" +
                 "- pushing: pushing changes to remote\n" +
-                "- terminating: shutdown in progress\n" +
-                "- terminated: agent finished; result contains the outcome\n" +
+                "- purging: cleanup in progress, container being deleted\n" +
+                "- purged: container deleted; result contains the outcome\n" +
                 "- failed: agent crashed or was aborted; error has the reason\n\n" +
                 "## Context you have\n" +
                 "At session start you receive a snapshot of all current tasks. Use it to " +

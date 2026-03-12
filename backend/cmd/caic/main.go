@@ -405,8 +405,10 @@ func (*fakeContainer) Diff(_ context.Context, _ md.Repo, _ ...string) (string, e
 	return "", nil
 }
 
-func (*fakeContainer) Fetch(_ context.Context, _ []md.Repo) error          { return nil }
-func (*fakeContainer) Kill(_ context.Context, _ string, _ []md.Repo) error { return nil }
+func (*fakeContainer) Fetch(_ context.Context, _ []md.Repo) error            { return nil }
+func (*fakeContainer) Stop(_ context.Context, _ string) error                { return nil }
+func (*fakeContainer) Purge(_ context.Context, _ string, _ []md.Repo) error  { return nil }
+func (*fakeContainer) Revive(_ context.Context, _ string, _ []md.Repo) error { return nil }
 
 // fakeBackend implements agent.Backend with a shell process that emits
 // streaming text deltas followed by complete messages, simulating

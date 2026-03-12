@@ -24,8 +24,8 @@ const BAR_MAX_H = 20;
 export default function VoiceOverlay(props: Props) {
   const session = new VoiceSession();
 
-  // Track pre-terminated task IDs to exclude from notifications.
-  const [preTerminatedIds, setPreTerminatedIds] = createSignal(new Set<string>());
+  // Track pre-purged task IDs to exclude from notifications.
+  const [prePurgedIds, setPreTerminatedIds] = createSignal(new Set<string>());
 
   // Previous task states for detecting transitions.
   let prevStates = new Map<string, string>();
@@ -36,12 +36,12 @@ export default function VoiceOverlay(props: Props) {
     const connected = session.state.connected;
     if (connected && !wasConnected) {
       const tasks = untrack(() => props.tasks());
-      const preTerminated = new Set(
+      const prePurged = new Set(
         tasks
-          .filter((t) => t.state === "terminated" || t.state === "failed")
+          .filter((t) => t.state === "purged" || t.state === "failed" || t.state === "stopped" || t.state === "stopping")
           .map((t) => t.id),
       );
-      setPreTerminatedIds(preTerminated);
+      setPreTerminatedIds(prePurged);
       prevStates = new Map(tasks.map((t) => [t.id, t.state]));
     }
     wasConnected = connected;
@@ -51,7 +51,7 @@ export default function VoiceOverlay(props: Props) {
   createEffect(() => {
     const currentTasks = props.tasks();
     if (session.state.connected) {
-      const excluded = preTerminatedIds();
+      const excluded = prePurgedIds();
       session.taskNumberMap.update(currentTasks.filter((t) => !excluded.has(t.id)));
       for (const task of currentTasks) {
         const prev = prevStates.get(task.id);
@@ -318,8 +318,10 @@ function buildNotification(task: Task, session: VoiceSession): string | null {
     case "waiting":
     case "has_plan":
       return `[Task #${num} (${shortName}) — ${task.state}]`;
-    case "terminated":
-      return task.result ? `[Task #${num} (${shortName}) — terminated: ${task.result}]` : null;
+    case "purged":
+      return task.result ? `[Task #${num} (${shortName}) — completed: ${task.result}]` : null;
+    case "stopped":
+      return `[Task #${num} (${shortName}) — stopped: container died]`;
     case "failed":
       return `[Task #${num} (${shortName}) — failed: ${task.error ?? "unknown"}]`;
     default:

@@ -170,8 +170,28 @@ fun buildFunctionDeclarations(
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
-        name = "task_terminate",
-        description = "Stop a running coding task by its number.",
+        name = "task_stop",
+        description = "Stop a running or waiting task. The container is preserved and can be revived later.",
+        parameters = objectSchema(
+            "task_number" to intProp("The task number, e.g. 1 for task #1"),
+            required = listOf("task_number"),
+        ),
+        behavior = "NON_BLOCKING",
+        scheduling = "INTERRUPT",
+    ),
+    FunctionDeclaration(
+        name = "task_purge",
+        description = "Permanently delete a stopped task's container. Cannot be undone.",
+        parameters = objectSchema(
+            "task_number" to intProp("The task number, e.g. 1 for task #1"),
+            required = listOf("task_number"),
+        ),
+        behavior = "NON_BLOCKING",
+        scheduling = "INTERRUPT",
+    ),
+    FunctionDeclaration(
+        name = "task_revive",
+        description = "Revive a stopped task, restarting its container and agent session.",
         parameters = objectSchema(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
             required = listOf("task_number"),

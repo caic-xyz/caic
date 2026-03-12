@@ -31,8 +31,8 @@ class VoiceViewModel @Inject constructor(
 
     private var previousTaskStates: Map<String, String> = emptyMap()
 
-    /** Task IDs that were already terminated/failed when the voice session connected. */
-    private var preTerminatedIds: Set<String> = emptySet()
+    /** Task IDs that were already purged/failed when the voice session connected. */
+    private var prePurgedIds: Set<String> = emptySet()
 
     init {
         // Inject snapshot when the session transitions to connected.
@@ -43,12 +43,12 @@ class VoiceViewModel @Inject constructor(
                 .collect { connected ->
                     if (connected) {
                         val tasks = taskRepository.tasks.value
-                        preTerminatedIds = tasks
-                            .filter { it.state == "terminated" || it.state == "failed" }
+                        prePurgedIds = tasks
+                            .filter { it.state in setOf("stopping", "stopped", "purging", "purged", "failed") }
                             .map { it.id }
                             .toSet()
-                        voiceSessionManager.excludedTaskIds = preTerminatedIds
-                        val active = tasks.filter { it.id !in preTerminatedIds }
+                        voiceSessionManager.excludedTaskIds = prePurgedIds
+                        val active = tasks.filter { it.id !in prePurgedIds }
                         taskNumberMap.reset()
                         taskNumberMap.update(active)
                         val prefs = settingsRepository.serverPreferences.value
@@ -64,7 +64,7 @@ class VoiceViewModel @Inject constructor(
         viewModelScope.launch {
             taskRepository.tasks.collect { tasks ->
                 if (voiceSessionManager.state.value.connected) {
-                    taskNumberMap.update(tasks.filter { it.id !in preTerminatedIds })
+                    taskNumberMap.update(tasks.filter { it.id !in prePurgedIds })
                     notifyTaskChanges(tasks)
                 }
                 previousTaskStates = tasks.associate { it.id to it.state }
@@ -136,8 +136,10 @@ class VoiceViewModel @Inject constructor(
         return when (task.state) {
             "asking", "waiting", "has_plan" ->
                 "[Task #$num ($shortName) — ${task.state}]"
-            "terminated" ->
-                task.result?.let { "[Task #$num ($shortName) — terminated: $it]" }
+            "purged" ->
+                task.result?.let { "[Task #$num ($shortName) — completed: $it]" }
+            "stopped" ->
+                "[Task #$num ($shortName) — stopped: container died]"
             "failed" ->
                 "[Task #$num ($shortName) — failed: ${task.error ?: "unknown"}]"
             else -> null

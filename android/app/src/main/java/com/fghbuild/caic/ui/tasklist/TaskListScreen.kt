@@ -88,7 +88,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.caic.util.createCameraPhotoUri
 import com.fghbuild.caic.util.imageDataToBitmap
 import com.fghbuild.caic.ui.common.rememberNotificationPermissionRequester
-import com.fghbuild.caic.ui.theme.activeStates
+import com.fghbuild.caic.ui.theme.terminalStates
 import com.fghbuild.caic.util.uriToImageData
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -283,8 +283,8 @@ private fun MainContent(
                 }
             }
         }
-        val activeTasks = state.tasks.filter { it.state in activeStates }
-        val terminalTasks = state.tasks.filter { it.state !in activeStates }
+        val activeTasks = state.tasks.filter { it.state !in terminalStates }
+        val terminalTasks = state.tasks.filter { it.state in terminalStates }
         val repoGroups = activeTasks.groupBy { it.repos?.firstOrNull()?.name ?: "" }
         for ((repo, tasksInRepo) in repoGroups) {
             item(key = "repo_header_$repo") {

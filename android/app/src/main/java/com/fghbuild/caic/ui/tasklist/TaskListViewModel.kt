@@ -18,7 +18,7 @@ import com.caic.sdk.v1.UsageResp
 import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.data.TaskNotifier
 import com.fghbuild.caic.data.TaskRepository
-import com.fghbuild.caic.ui.theme.activeStates
+import com.fghbuild.caic.ui.theme.terminalStates
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -92,7 +92,7 @@ class TaskListViewModel @Inject constructor(
         settingsRepository.settings,
         _formState,
     ) { tasks, connected, usage, settings, form ->
-        val active = tasks.filter { it.state in activeStates }
+        val active = tasks.filter { it.state !in terminalStates }
             .sortedWith(
                 Comparator<Task> { a, b ->
                     naturalCompare(a.repos?.firstOrNull()?.name ?: "", b.repos?.firstOrNull()?.name ?: "")
@@ -103,7 +103,7 @@ class TaskListViewModel @Inject constructor(
                     )
                 }
             )
-        val terminal = tasks.filter { it.state !in activeStates }.sortedByDescending { it.id }
+        val terminal = tasks.filter { it.state in terminalStates }.sortedByDescending { it.id }
         val imgSupport = form.harnesses.any { it.name == form.selectedHarness && it.supportsImages }
         val sortedRepos = form.repos.take(form.recentRepoCount).sortedBy { it.path } +
             form.repos.drop(form.recentRepoCount)

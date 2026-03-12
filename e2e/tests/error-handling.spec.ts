@@ -25,8 +25,8 @@ test("POST /api/v1/tasks with unknown harness returns 400", async ({ api }) => {
   expect((err as APIError).status).toBe(400);
 });
 
-test("terminate nonexistent task returns 404", async ({ api }) => {
-  const err = await api.terminateTask("nonexistent-id").catch((e: unknown) => e);
+test("purge nonexistent task returns 404", async ({ api }) => {
+  const err = await api.purgeTask("nonexistent-id").catch((e: unknown) => e);
   expect(err).toBeInstanceOf(APIError);
   expect((err as APIError).status).toBe(404);
 });

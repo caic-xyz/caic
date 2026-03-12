@@ -80,8 +80,6 @@ import com.fghbuild.caic.util.turnSummary
 import com.fghbuild.caic.util.uriToImageData
 import com.caic.sdk.v1.EventKinds as SdkEventKinds
 
-private val TerminalStates = setOf("terminated", "failed")
-
 /** Visual indent level for items inside expanded containers (session or turn). */
 private enum class Indent { Session, Turn }
 
@@ -483,7 +481,8 @@ fun TaskDetailScreen(
             )
         },
         bottomBar = {
-            if (task?.state !in TerminalStates) {
+            val noActionStates = setOf("stopping", "purging", "purged", "failed")
+            if (task?.state !in noActionStates) {
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
                 Column(modifier = Modifier.widthIn(max = 840.dp)) {
                     state.actionError?.let { error ->
@@ -500,7 +499,10 @@ fun TaskDetailScreen(
                         onSend = { requestNotificationPermission(); viewModel.sendInput() },
                         onSync = { viewModel.syncTask() },
                         onSyncToBaseBranch = { viewModel.syncTask(target = "default") },
-                        onTerminate = viewModel::terminateTask,
+                        onStop = viewModel::stopTask,
+                        onPurge = viewModel::purgeTask,
+                        onRevive = viewModel::reviveTask,
+                        taskState = task?.state ?: "",
                         taskTitle = task?.title ?: "",
                         taskRepo = task?.repos?.firstOrNull()?.name ?: "",
                         taskBranch = task?.repos?.firstOrNull()?.branch ?: "",

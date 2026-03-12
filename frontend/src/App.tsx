@@ -3,7 +3,7 @@ import { createEffect, createSignal, For, Show, Switch, Match, onCleanup } from 
 import { Portal } from "solid-js/web";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData } from "@sdk/types.gen";
-import { getConfig, getPreferences, updatePreferences, listHarnesses, listRepos, listRepoBranches, createTask, cloneRepo, getUsage, terminateTask } from "./api";
+import { getConfig, getPreferences, updatePreferences, listHarnesses, listRepos, listRepoBranches, createTask, cloneRepo, getUsage, stopTask, purgeTask, reviveTask } from "./api";
 import { useAuth } from "./AuthContext";
 import Login from "./Login";
 import TaskDetail from "./TaskDetail";
@@ -96,7 +96,7 @@ export default function App() {
   const [displayAvailable, setDisplayAvailable] = createSignal(false);
   const [displayEnabled, setDisplayEnabled] = createSignal(false);
   const [recentCount, setRecentCount] = createSignal(0);
-  const [terminatingId, setTerminatingId] = createSignal<string | null>(null);
+  const [actionId, setActionId] = createSignal<string | null>(null);
 
   const [autoFixCI, setAutoFixCI] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
@@ -441,23 +441,43 @@ export default function App() {
     });
   }
 
-  // Clear stale terminatingId once the server state reflects it.
+  // Clear stale actionId once the server state reflects the transition.
   createEffect(() => {
-    const tid = terminatingId();
+    const tid = actionId();
     if (!tid) return;
     const t = tasks().find((task) => task.id === tid);
-    if (t && (t.state === "terminating" || t.state === "terminated" || t.state === "failed")) {
-      setTerminatingId(null);
+    if (t && (t.state === "purging" || t.state === "purged" || t.state === "failed" || t.state === "stopping" || t.state === "stopped" || t.state === "provisioning")) {
+      setActionId(null);
     }
   });
 
-  async function handleTerminate(id: string) {
-    if (terminatingId()) return;
-    setTerminatingId(id);
+  async function handleStop(id: string) {
+    if (actionId()) return;
+    setActionId(id);
     try {
-      await terminateTask(id);
+      await stopTask(id);
     } catch {
-      setTerminatingId(null);
+      setActionId(null);
+    }
+  }
+
+  async function handlePurge(id: string) {
+    if (actionId()) return;
+    setActionId(id);
+    try {
+      await purgeTask(id);
+    } catch {
+      setActionId(null);
+    }
+  }
+
+  async function handleRevive(id: string) {
+    if (actionId()) return;
+    setActionId(id);
+    try {
+      await reviveTask(id);
+    } catch {
+      setActionId(null);
     }
   }
 
@@ -823,8 +843,10 @@ export default function App() {
             const found = tasks().find((t) => t.id === id);
             navigate(found ? taskPath(found.id, found.repos?.[0]?.name ?? "", found.repos?.[0]?.branch ?? "", found.title) : `/task/@${id}`);
           }}
-          onTerminate={handleTerminate}
-          terminatingId={terminatingId}
+          onStop={handleStop}
+          onPurge={handlePurge}
+          onRevive={handleRevive}
+          actionId={actionId}
           onDiffClick={(id) => {
             const found = tasks().find((t) => t.id === id);
             if (found?.diffStat?.length) {

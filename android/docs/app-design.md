@@ -204,17 +204,17 @@ situational awareness:
 [Current tasks at session start]
 - fix-auth-bug (running, 12m, $0.43, claude)
 - add-pagination (asking, 5m, $0.12, gemini) — Question: "Should I use cursor or offset?"
-- update-deps (terminated, $0.08, claude) — Completed: "Updated all deps to latest"
+- update-deps (purged, $0.08, claude) — Completed: "Updated all deps to latest"
 ```
 
 Each line: `- <shortName> (<state>, <elapsed>, <cost>, <harness>)` with an optional
-suffix for `asking` (the question text) and `terminated` (the result summary).
+suffix for `asking` (the question text) and `purged` (the result summary).
 
 Subsequent state transition notifications (diff-based):
 
 - `asking` → `"[Task 'shortName' needs input] Question: ... Options: ..."`
 - `waiting` → `"[Task 'shortName' is waiting for input]"`
-- `terminated` → `"[Task 'shortName' completed: ...]"`
+- `purged` → `"[Task 'shortName' completed: ...]"`
 - `failed` → `"[Task 'shortName' failed: ...]"`
 
 ### Voice Overlay
@@ -236,7 +236,7 @@ Swipe down or "End" to disconnect.
 | "Show me the test task" | Navigate to task detail |
 | "Send it: use JWT tokens" | Input appears in message list |
 | "What's the status?" | No screen change |
-| "Terminate the auth task" | Task state updates |
+| "Purge the auth task" | Task state updates |
 | User taps task in list | Voice session gains context |
 
 `VoiceViewModel` observes `TaskRepository` to keep voice context current.
@@ -258,7 +258,7 @@ backgrounded. Detects state transitions → Android notifications + voice contex
 **Notification triggers**:
 - `asking`/`waiting` → "Task needs your input"
 - `failed` → "Task failed" with error snippet
-- `terminated` with result → "Task completed"
+- `purged` with result → "Task completed"
 
 Tapping opens `TaskDetail` via deep link.
 
@@ -286,7 +286,7 @@ prompt input, "Create Task" button, scrollable task card list, usage bar.
 
 **Task Card** (mirrors `TaskItemSummary.tsx`):
 - State indicator dot: `running`→green, `asking`→blue, `failed`→red,
-  `terminating`→orange, `terminated`→gray, default→yellow
+  `purging`→orange, `purged`→gray, default→yellow
 - Title (first line of prompt), cost, duration
 - Repo/branch, harness badge (if not claude), model badge
 - Error text in red, plan mode "P" badge
@@ -351,7 +351,7 @@ Disabled with spinner when `sending`.
 
 **Action buttons**:
 - **Sync**: `syncTask()`. If `"blocked"` → safety issues dialog with force option.
-- **Terminate**: `terminateTask()` with confirmation dialog.
+- **Purge**: `purgeTask()` with confirmation dialog.
 - **Restart**: `restartTask(prompt)`. Only for terminal states.
 - Loading indicator + disable other buttons while in flight (`pendingAction`).
 - Errors → Snackbar, auto-dismiss 5s.

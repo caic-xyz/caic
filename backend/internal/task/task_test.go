@@ -559,7 +559,7 @@ func TestTask(t *testing.T) {
 		t.Run("NoTransitionForNonActiveStates", func(t *testing.T) {
 			// TextMessages should NOT transition terminal or
 			// setup states.
-			for _, state := range []State{StatePending, StateBranching, StateProvisioning, StateStarting, StateTerminating, StateFailed, StateTerminated} {
+			for _, state := range []State{StatePending, StateBranching, StateProvisioning, StateStarting, StatePurging, StateFailed, StatePurged} {
 				tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 				tk.SetState(state)
 				tk.addMessage(t.Context(), &agent.TextMessage{Text: "output"})
@@ -617,7 +617,7 @@ func TestTask(t *testing.T) {
 	t.Run("RestoreMessagesDiffStat", func(t *testing.T) {
 		t.Run("DiffStatMessage", func(t *testing.T) {
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
-			tk.SetState(StateTerminated)
+			tk.SetState(StatePurged)
 			tk.RestoreMessages([]agent.Message{
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
@@ -637,7 +637,7 @@ func TestTask(t *testing.T) {
 
 		t.Run("ResultMessageAfterDiffStat", func(t *testing.T) {
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
-			tk.SetState(StateTerminated)
+			tk.SetState(StatePurged)
 			tk.RestoreMessages([]agent.Message{
 				&agent.DiffStatMessage{
 					MessageType: "caic_diff_stat",
@@ -656,7 +656,7 @@ func TestTask(t *testing.T) {
 
 		t.Run("DiffStatAfterResult", func(t *testing.T) {
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
-			tk.SetState(StateTerminated)
+			tk.SetState(StatePurged)
 			tk.RestoreMessages([]agent.Message{
 				&agent.ResultMessage{
 					MessageType: "result",
@@ -746,7 +746,7 @@ func TestTask(t *testing.T) {
 
 	t.Run("RestoreMessagesUsageCumulative", func(t *testing.T) {
 		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
-		tk.SetState(StateTerminated)
+		tk.SetState(StatePurged)
 		tk.RestoreMessages([]agent.Message{
 			&agent.ResultMessage{
 				MessageType: "result",
@@ -878,7 +878,7 @@ func TestTask(t *testing.T) {
 		// RestoreMessages (reloadFromMsgs) must accumulate DurationMs across
 		// multiple result events within a single session.
 		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
-		tk.SetState(StateTerminated)
+		tk.SetState(StatePurged)
 		tk.RestoreMessages([]agent.Message{
 			&agent.ResultMessage{MessageType: "result", NumTurns: 1, DurationMs: 946943},
 			&agent.ResultMessage{MessageType: "result", NumTurns: 1, DurationMs: 5278},
@@ -898,7 +898,7 @@ func TestTask(t *testing.T) {
 		// RestoreMessages must sum cost/turns/duration across context_cleared
 		// boundaries, mirroring the live path.
 		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
-		tk.SetState(StateTerminated)
+		tk.SetState(StatePurged)
 		tk.RestoreMessages([]agent.Message{
 			// Session 1: TotalCostUSD = $10.00.
 			&agent.ResultMessage{
@@ -991,7 +991,7 @@ func TestTask(t *testing.T) {
 
 		t.Run("Restore", func(t *testing.T) {
 			tk := newTask()
-			tk.SetState(StateTerminated)
+			tk.SetState(StatePurged)
 			tk.RestoreMessages([]agent.Message{result1, compact, result2})
 			costUSD, numTurns, duration, _, _ := tk.LiveStats()
 			if costUSD != 15.0 {
@@ -1219,7 +1219,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("TerminalStatePreserved", func(t *testing.T) {
-			for _, state := range []State{StateTerminated, StateFailed, StateTerminating} {
+			for _, state := range []State{StatePurged, StateFailed, StatePurging} {
 				tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 				tk.SetState(state)
 				msgs := []agent.Message{
@@ -1442,9 +1442,9 @@ func TestState(t *testing.T) {
 			{StateHasPlan, "has_plan"},
 			{StatePulling, "pulling"},
 			{StatePushing, "pushing"},
-			{StateTerminating, "terminating"},
+			{StatePurging, "purging"},
 			{StateFailed, "failed"},
-			{StateTerminated, "terminated"},
+			{StatePurged, "purged"},
 		} {
 			if got := tt.state.String(); got != tt.want {
 				t.Errorf("State(%d).String() = %q, want %q", tt.state, got, tt.want)

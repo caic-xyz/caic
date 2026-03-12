@@ -10,12 +10,12 @@ test("create task and reach waiting state via API", async ({ api }) => {
   expect(task.numTurns).toBeGreaterThanOrEqual(1);
 });
 
-test("terminate a waiting task via API", async ({ api }) => {
-  const id = await createTaskAPI(api, "api terminate test");
+test("purge a waiting task via API", async ({ api }) => {
+  const id = await createTaskAPI(api, "api purge test");
   await waitForTaskState(api, id, "waiting");
 
-  await api.terminateTask(id);
-  await waitForTaskState(api, id, "terminated");
+  await api.purgeTask(id);
+  await waitForTaskState(api, id, "purged");
 });
 
 test("send input to a waiting task triggers another turn", async ({ api }) => {

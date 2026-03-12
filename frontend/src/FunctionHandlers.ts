@@ -5,7 +5,9 @@ import {
   createTask,
   sendInput,
   syncTask,
-  terminateTask,
+  stopTask,
+  purgeTask,
+  reviveTask,
   getUsage,
   cloneRepo,
   taskEvents,
@@ -63,7 +65,8 @@ function diffStatSummary(t: Task): string {
 function taskSummaryLine(num: number, t: Task): string {
   const name = t.title || t.id;
   const base = `${num}. **${name}** — ${t.state}, ${formatElapsed(t.duration * 1000)}, ${formatCost(t.costUSD)}, ${t.harness}${diffStatSummary(t)}`;
-  if (t.state === "terminated" && t.result) return `${base} — ${t.result.slice(0, RESULT_SNIPPET_MAX)}`;
+  if (t.state === "purged" && t.result) return `${base} — ${t.result.slice(0, RESULT_SNIPPET_MAX)}`;
+  if (t.state === "stopped") return `${base} — container died`;
   if (t.state === "failed" && t.error) return `${base} — ${t.error}`;
   return base;
 }
@@ -91,8 +94,12 @@ export class FunctionHandlers {
           return await this.handleAnswerQuestion(args);
         case "task_push_branch_to_remote":
           return await this.handleSyncTask(args);
-        case "task_terminate":
-          return await this.handleTerminateTask(args);
+        case "task_stop":
+          return await this.handleStopTask(args);
+        case "task_purge":
+          return await this.handlePurgeTask(args);
+        case "task_revive":
+          return await this.handleReviveTask(args);
         case "get_usage":
           return await this.handleGetUsage();
         case "clone_repo":
@@ -151,7 +158,8 @@ export class FunctionHandlers {
       "",
       `State: ${t.state}  Elapsed: ${formatElapsed(t.duration * 1000)}  Cost: ${formatCost(t.costUSD)}`,
     ];
-    if (t.state === "terminated" && t.result) lines.push(`**Result:** ${t.result}`);
+    if (t.state === "purged" && t.result) lines.push(`**Result:** ${t.result}`);
+    if (t.state === "stopped") lines.push(`**Stopped:** container died`);
     if (t.state === "failed" && t.error) lines.push(`**Error:** ${t.error}`);
     if (t.diffStat?.length) lines.push(`**Changed:** ${t.diffStat.map((d) => d.path).join(", ")}`);
     return textResult(lines.join("\n").trim());
@@ -192,12 +200,28 @@ export class FunctionHandlers {
     return textResult(`${verb} with safety issues:\n${issueLines}`);
   }
 
-  private async handleTerminateTask(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handleStopTask(args: FunctionArgs): Promise<Record<string, unknown>> {
     const num = requireInt(args, "task_number");
     const taskId = this.taskNumberMap.toId(num);
     if (!taskId) return errorResult("Unknown task number");
-    await terminateTask(taskId);
-    return textResult(`Terminated task #${num}.`);
+    await stopTask(taskId);
+    return textResult(`Stopping task #${num}.`);
+  }
+
+  private async handlePurgeTask(args: FunctionArgs): Promise<Record<string, unknown>> {
+    const num = requireInt(args, "task_number");
+    const taskId = this.taskNumberMap.toId(num);
+    if (!taskId) return errorResult("Unknown task number");
+    await purgeTask(taskId);
+    return textResult(`Purged task #${num}.`);
+  }
+
+  private async handleReviveTask(args: FunctionArgs): Promise<Record<string, unknown>> {
+    const num = requireInt(args, "task_number");
+    const taskId = this.taskNumberMap.toId(num);
+    if (!taskId) return errorResult("Unknown task number");
+    await reviveTask(taskId);
+    return textResult(`Reviving task #${num}.`);
   }
 
   private async handleGetUsage(): Promise<Record<string, unknown>> {

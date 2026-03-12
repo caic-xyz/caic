@@ -44,7 +44,7 @@ class InputBarScreenshotTest {
                     onDraftChange = {},
                     onSend = {},
                     onSync = {},
-                    onTerminate = {},
+                    onPurge = {},
                     sending = false,
                     pendingAction = null,
                     supportsImages = supportsImages,

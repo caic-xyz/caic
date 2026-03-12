@@ -37,14 +37,14 @@ test("concurrent tasks run independently", async ({ api }) => {
   expect(task1.id).not.toBe(task2.id);
   expect(task1.repos![0].branch).not.toBe(task2.repos![0].branch);
 
-  // Terminate both.
+  // Purge both.
   await Promise.all([
-    api.terminateTask(id1),
-    api.terminateTask(id2),
+    api.purgeTask(id1),
+    api.purgeTask(id2),
   ]);
   await Promise.all([
-    waitForTaskState(api, id1, "terminated"),
-    waitForTaskState(api, id2, "terminated"),
+    waitForTaskState(api, id1, "purged"),
+    waitForTaskState(api, id2, "purged"),
   ]);
 });
 

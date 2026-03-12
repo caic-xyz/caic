@@ -1,4 +1,4 @@
-// Bottom input bar with send, sync, terminate, and optional image attach actions.
+// Bottom input bar with send, sync, stop, purge, revive, and optional image attach actions.
 package com.fghbuild.caic.ui.taskdetail
 
 import androidx.compose.foundation.Image
@@ -22,7 +22,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -55,6 +55,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.ImageData
@@ -71,7 +72,10 @@ fun InputBar(
     onSend: () -> Unit,
     onSync: () -> Unit,
     onSyncToBaseBranch: () -> Unit = {},
-    onTerminate: () -> Unit,
+    onStop: () -> Unit,
+    onPurge: () -> Unit,
+    onRevive: () -> Unit,
+    taskState: String = "",
     taskTitle: String = "",
     taskRepo: String = "",
     taskBranch: String = "",
@@ -216,31 +220,76 @@ fun InputBar(
                     }
                 }
             }
-            if (pendingAction == "terminate") {
+            val activeStates = setOf("waiting", "running", "asking", "has_plan")
+            val isStopped = taskState == "stopped"
+            val isActive = taskState in activeStates
+            if (pendingAction == "stop" || pendingAction == "purge" || pendingAction == "revive") {
                 CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(8.dp))
-            } else {
-                var showTerminateConfirm by remember { mutableStateOf(false) }
-                Tip("Terminate") {
-                    IconButton(onClick = { showTerminateConfirm = true }, enabled = !busy) {
+            } else if (isStopped) {
+                Tip("Revive") {
+                    IconButton(onClick = onRevive, enabled = !busy, modifier = Modifier.testTag("revive-task")) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "Revive",
+                        )
+                    }
+                }
+                var showPurgeConfirm by remember { mutableStateOf(false) }
+                Tip("Purge") {
+                    IconButton(onClick = { showPurgeConfirm = true }, enabled = !busy, modifier = Modifier.testTag("purge-task")) {
                         Icon(
                             Icons.Default.Delete,
-                            contentDescription = "Terminate",
+                            contentDescription = "Purge",
                             tint = MaterialTheme.colorScheme.error,
                         )
                     }
                 }
-                if (showTerminateConfirm) {
+                if (showPurgeConfirm) {
                     AlertDialog(
-                        onDismissRequest = { showTerminateConfirm = false },
-                        title = { Text("Terminate container?") },
+                        onDismissRequest = { showPurgeConfirm = false },
+                        title = { Text("Purge container?") },
                         text = { Text("$taskTitle\nrepo: $taskRepo\nbranch: $taskBranch") },
                         confirmButton = {
-                            TextButton(onClick = { showTerminateConfirm = false; onTerminate() }) {
-                                Text("Terminate")
+                            TextButton(onClick = { showPurgeConfirm = false; onPurge() }) {
+                                Text("Purge")
                             }
                         },
                         dismissButton = {
-                            TextButton(onClick = { showTerminateConfirm = false }) {
+                            TextButton(onClick = { showPurgeConfirm = false }) {
+                                Text("Cancel")
+                            }
+                        },
+                    )
+                }
+            } else if (isActive) {
+                var showStopConfirm by remember { mutableStateOf(false) }
+                Tip("Stop") {
+                    IconButton(
+                        onClick = {
+                            if (taskState == "running") showStopConfirm = true else onStop()
+                        },
+                        enabled = !busy,
+                        modifier = Modifier.testTag("stop-task"),
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = "Stop",
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+                if (showStopConfirm) {
+                    AlertDialog(
+                        onDismissRequest = { showStopConfirm = false },
+                        title = { Text("Stop task?") },
+                        text = { Text("$taskTitle\nrepo: $taskRepo\nbranch: $taskBranch") },
+                        confirmButton = {
+                            TextButton(onClick = { showStopConfirm = false; onStop() }) {
+                                Text("Stop")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showStopConfirm = false }) {
                                 Text("Cancel")
                             }
                         },

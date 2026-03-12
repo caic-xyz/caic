@@ -1,7 +1,7 @@
 // End-to-end tests for the task lifecycle using a fake backend.
 import { test, expect, waitForTaskState } from "../helpers";
 
-test("create task, verify streaming text and result, then terminate", async ({ page, api }) => {
+test("create task, verify streaming text and result, then purge", async ({ page, api }) => {
   await page.goto("/");
 
   // Wait for repos to load (a chip appears in the strip).
@@ -29,22 +29,25 @@ test("create task, verify streaming text and result, then terminate", async ({ p
     timeout: 10_000,
   });
 
-  // The Terminate button appears on hover over the task card in the sidebar.
+  // The Stop button (trash can) appears on hover over the task card in the sidebar.
   // Scope to the specific card to avoid strict-mode violations from parallel tests.
   const taskCard = page.locator("[data-task-id]", { hasText: prompt });
   await taskCard.hover();
-  const terminateBtn = taskCard.getByTestId("terminate-task");
-  await expect(terminateBtn).toBeVisible({ timeout: 15_000 });
+  const stopBtn = taskCard.getByTestId("stop-task");
+  await expect(stopBtn).toBeVisible({ timeout: 15_000 });
 
-  // Accept the confirmation dialog and click Terminate.
-  page.once("dialog", (d) => d.accept());
-  await terminateBtn.click();
+  // Click Stop (no confirmation needed for waiting tasks).
+  await stopBtn.click();
 
-  // Poll API until our task is "terminated" — uses typed helper.
+  // Poll API until our task is "stopped".
   const tasks = await api.listTasks();
   const task = tasks.find((t) => t.initialPrompt === prompt);
   expect(task).toBeTruthy();
-  await waitForTaskState(api, task!.id, "terminated");
+  await waitForTaskState(api, task!.id, "stopped");
+
+  // Now purge the stopped task via API and verify it reaches "purged".
+  await api.purgeTask(task!.id);
+  await waitForTaskState(api, task!.id, "purged");
 });
 
 test("add-repo dropdown is visible and not clipped by overflow", async ({ page }) => {

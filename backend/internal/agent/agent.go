@@ -7,7 +7,7 @@
 // survives SSH disconnects. Graceful shutdown uses a null-byte (\x00)
 // sentinel written to stdin:
 //
-// Flow 1 — One task is terminated (user action or container death):
+// Flow 1 — One task is purged (user action or container death):
 //
 //	Server calls Runner.Cleanup → Session.Close writes \x00 → attach_client
 //	forwards it through the Unix socket → relay daemon closes proc.stdin →
@@ -129,7 +129,7 @@ func NewSession(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, msgCh cha
 		case waitErr != nil:
 			s.err = fmt.Errorf("agent exited: %w", waitErr)
 			// Signal-based exits (SIGKILL, SIGTERM) are expected when
-			// containers are terminated. Log at Info, not Error.
+			// containers are purged. Log at Info, not Error.
 			if isSignalExit(waitErr) {
 				log.Info("session killed", "err", waitErr)
 			} else {
@@ -270,13 +270,20 @@ func HasRelayDir(ctx context.Context, container string) (bool, error) {
 
 // IsRelayRunning checks whether the relay socket exists in the container.
 func IsRelayRunning(ctx context.Context, container string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "ssh", container, "test", "-S", RelaySockPath) //nolint:gosec // container is not user-controlled
+	// Check both socket existence and process liveness. A stale socket
+	// (left after docker stop/start) would pass "test -S" but the relay
+	// process is dead. Reading the PID file and sending kill -0 confirms
+	// the daemon is actually running.
+	check := fmt.Sprintf(
+		`test -S %s && kill -0 "$(cat %s 2>/dev/null)" 2>/dev/null`,
+		RelaySockPath, RelayDir+"/pid")
+	cmd := exec.CommandContext(ctx, "ssh", container, "sh", "-c", check) //nolint:gosec // container is not user-controlled
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		if errors.As(err, &exitErr) && exitErr.ExitCode() != 0 {
 			return false, nil
 		}
-		return false, fmt.Errorf("test relay socket: %w", err)
+		return false, fmt.Errorf("test relay: %w", err)
 	}
 	return true, nil
 }
@@ -409,7 +416,9 @@ func ReadRelayOutput(ctx context.Context, container string, parseFn func([]byte)
 }
 
 // AttachRelaySession connects to an already-running relay in the container
-// and returns a new Session.
+// and returns a new Session. It waits briefly for the attach process to
+// confirm connectivity; if the process exits immediately (e.g. relay socket
+// is stale), an error is returned so the caller can fall back to --resume.
 func AttachRelaySession(ctx context.Context, container string, offset int64, msgCh chan<- Message, logW io.Writer, wire WireFormat) (*Session, error) {
 	sshArgs := []string{
 		container, "python3", RelayScriptPath, "attach",
@@ -452,7 +461,7 @@ func PlainTextWritePrompt(w io.Writer, p Prompt, logW io.Writer) error {
 }
 
 // isSignalExit reports whether err indicates the process was killed by a
-// signal (e.g. SIGKILL from container termination).
+// signal (e.g. SIGKILL from container purge).
 func isSignalExit(err error) bool {
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
