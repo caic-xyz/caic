@@ -1676,7 +1676,7 @@ func (s *Server) syncTask(ctx context.Context, entry *taskEntry, req *v1.SyncReq
 	} else if len(issues) > 0 && !req.Force {
 		status = "blocked"
 	}
-	if status == "synced" {
+	if status != "blocked" {
 		if info := s.repoInfoFor(syncPrimaryName); info != nil {
 			if f := s.forgeForInfo(ctx, info); f != nil {
 				go s.startPRFlow(s.ctx, entry, f, info, syncPrimaryBranch, s.effectiveBaseBranch(t)) //nolint:contextcheck // intentionally using server context; PR flow must outlive request
