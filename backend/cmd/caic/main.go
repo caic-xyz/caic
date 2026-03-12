@@ -216,6 +216,7 @@ func initLogging(level string) {
 	}
 	// Skip timestamps when running under systemd (it adds its own).
 	underSystemd := os.Getenv("JOURNAL_STREAM") != ""
+	homeDir, _ := os.UserHomeDir()
 	slog.SetDefault(slog.New(tint.NewHandler(colorable.NewColorable(os.Stderr), &tint.Options{
 		Level:      ll,
 		TimeFormat: "15:04:05.000",
@@ -229,6 +230,9 @@ func initLogging(level string) {
 			switch t := val.(type) {
 			case string:
 				skip = t == ""
+				if !skip && homeDir != "" && strings.HasPrefix(t, homeDir) {
+					a = slog.String(a.Key, "~"+t[len(homeDir):])
+				}
 			case bool:
 				skip = !t
 			case uint64:
