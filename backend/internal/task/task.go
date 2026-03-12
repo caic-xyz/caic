@@ -314,6 +314,13 @@ func (t *Task) SetPR(owner, repo string, pr int) {
 	t.mu.Unlock()
 }
 
+// GetPR returns the forge PR number (0 if no PR has been created).
+func (t *Task) GetPR() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.forgePR
+}
+
 // SetCIStatus updates the ciStatus and ciChecks fields under the mutex.
 func (t *Task) SetCIStatus(status CIStatus, checks []CICheck) {
 	t.mu.Lock()

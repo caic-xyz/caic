@@ -178,6 +178,25 @@
   opacity: 1;
 }
 
+.ciDot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ciDot_pending {
+  background: var(--color-warning-text);
+}
+
+.ciDot_success {
+  background: var(--color-success-text);
+}
+
+.ciDot_failure {
+  background: var(--color-danger-text);
+}
+
 .error {
   color: red;
   font-size: 0.8rem;

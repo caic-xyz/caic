@@ -325,6 +325,7 @@ func serveFake(ctx context.Context, addr, rootDir string, cfg *server.Config) er
 	}
 	fb := &fakeBackend{}
 	srv.SetRunnerOps(&fakeContainer{}, map[agent.Harness]agent.Backend{fb.Harness(): fb})
+	srv.FakeCI = true
 
 	err = srv.ListenAndServe(ctx, addr)
 	if errors.Is(err, http.ErrServerClosed) {

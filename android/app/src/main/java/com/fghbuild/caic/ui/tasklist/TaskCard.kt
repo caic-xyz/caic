@@ -3,12 +3,15 @@ package com.fghbuild.caic.ui.tasklist
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Timer
@@ -33,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -168,6 +172,9 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}
                                 turnStartedAt = task.turnStartedAt ?: 0.0,
                             )
                         }
+                    }
+                    if (task.forgePR != null && task.ciStatus != null) {
+                        CiDot(task.ciStatus)
                     }
                     Surface(shape = RoundedCornerShape(4.dp), color = stateColor(task.state)) {
                         Text(
@@ -320,5 +327,22 @@ private fun TickingThinkTime(duration: Double, state: String, stateUpdatedAt: Do
         text = formatElapsed(totalSec),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun CiDot(status: String?) {
+    val appColors = MaterialTheme.appColors
+    val color = when (status) {
+        "pending" -> appColors.warningText
+        "success" -> appColors.successText
+        "failure" -> MaterialTheme.colorScheme.error
+        else -> return
+    }
+    Box(
+        modifier = Modifier
+            .size(8.dp)
+            .clip(CircleShape)
+            .background(color),
     )
 }

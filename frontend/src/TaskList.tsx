@@ -120,6 +120,8 @@ export default function TaskList(props: TaskListProps) {
       tailscale={t().tailscale}
       usb={t().usb}
       display={t().display}
+      forgePR={t().forgePR}
+      ciStatus={t().ciStatus}
       selected={props.selectedId === t().id}
       now={props.now}
       onClick={() => props.onSelect(t().id)}

@@ -40,6 +40,24 @@ test("restart a waiting task starts a new session", async ({ api }) => {
   expect(task.numTurns).toBeGreaterThanOrEqual(1);
 });
 
+test("fake backend sets PR and CI status that cycles to success", async ({ api }) => {
+  const id = await createTaskAPI(api, "api ci dot test");
+  await waitForTaskState(api, id, "waiting");
+
+  // Fake backend sets PR #1 and pending CI shortly after reaching waiting.
+  await expect(async () => {
+    const t = await api.getTask(id);
+    expect(t!.forgePR).toBe(1);
+    expect(t!.ciStatus).toBeDefined();
+  }).toPass({ timeout: 5_000, intervals: [500] });
+
+  // CI transitions to success within ~5s.
+  await expect(async () => {
+    const t = await api.getTask(id);
+    expect(t!.ciStatus).toBe("success");
+  }).toPass({ timeout: 10_000, intervals: [500] });
+});
+
 test("list tasks includes created task", async ({ api }) => {
   const id = await createTaskAPI(api, "api list test");
 

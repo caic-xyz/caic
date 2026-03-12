@@ -205,6 +205,7 @@ type Server struct {
 
 	// Agent backends.
 	geminiAPIKey string
+	FakeCI       bool // simulate PR+CI on new tasks; set by serveFake in main.go
 
 	// Throttle transports for forge API calls. GitHub OAuth, PAT, and App tokens
 	// each have separate GitHub-side rate-limit buckets and must not share a throttle.
@@ -1114,6 +1115,10 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		}
 		s.watchSession(entry, primaryRunner, h)
 	}()
+
+	if s.FakeCI {
+		go s.simulateFakeCI(t)
+	}
 
 	if len(req.Repos) > 0 {
 		if err := s.prefs.Update(userIDFromCtx(ctx), func(p *preferences.Preferences) {
@@ -2467,6 +2472,34 @@ func (s *Server) SetRunnerOps(c task.ContainerBackend, backends map[agent.Harnes
 			r.Backends = backends
 		}
 	}
+}
+
+// simulateFakeCI polls until the task reaches a non-running state, then sets a
+// fake PR and transitions CI from pending to success after 3 seconds.
+func (s *Server) simulateFakeCI(t *task.Task) {
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+		switch t.GetState() {
+		case task.StateWaiting, task.StateAsking, task.StateHasPlan:
+			goto ready
+		case task.StateTerminated, task.StateFailed:
+			return
+		default:
+		}
+	}
+ready:
+	t.SetPR("fake-owner", "fake-repo", 1)
+	t.SetCIStatus(task.CIStatusPending, nil)
+	select {
+	case <-time.After(3 * time.Second):
+	case <-s.ctx.Done():
+		return
+	}
+	t.SetCIStatus(task.CIStatusSuccess, nil)
 }
 
 // loadTerminatedTasks loads the last 10 terminated tasks from JSONL logs on disk.

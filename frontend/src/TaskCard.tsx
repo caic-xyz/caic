@@ -40,6 +40,8 @@ export interface TaskCardProps {
   tailscale?: string;
   usb?: boolean;
   display?: boolean;
+  forgePR?: number;
+  ciStatus?: string;
   selected: boolean;
   now: Accessor<number>;
   onClick: () => void;
@@ -49,6 +51,12 @@ export interface TaskCardProps {
 }
 
 const terminalStates = new Set(["terminated", "failed"]);
+
+const CI_DOT_CLASS: Record<string, string> = {
+  pending: styles.ciDot_pending,
+  success: styles.ciDot_success,
+  failure: styles.ciDot_failure,
+};
 
 export default function TaskCard(props: TaskCardProps) {
   const isTerminal = () => terminalStates.has(props.state);
@@ -138,6 +146,9 @@ export default function TaskCard(props: TaskCardProps) {
                 <ThinkTime duration={props.duration} state={props.state} stateUpdatedAt={props.stateUpdatedAt} turnStartedAt={props.turnStartedAt} now={props.now} />
               </Show>
             </span>
+          </Show>
+          <Show when={props.forgePR && props.ciStatus}>
+            <span class={`${styles.ciDot} ${CI_DOT_CLASS[props.ciStatus as string] ?? ""}`} title={`CI: ${props.ciStatus}`} />
           </Show>
           <span class={styles.badge} style={{ background: stateColor(props.state) }}>
             {props.state}
