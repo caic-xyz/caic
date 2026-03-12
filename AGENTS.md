@@ -27,12 +27,6 @@ before considering the task complete.
   the code's purpose changes. This comment is used to generate the file index
   in `AGENTS.md`.
 
-### md Containers
-
-`md start`, `md diff`, `md pull`, and `md kill` operate on the **current git
-branch**. The working tree must be checked out to the task's branch before
-calling any `md` command for that task.
-
 ### Professionalism
 
 **Always** lint after making changes. This is mandatory, not optional:
