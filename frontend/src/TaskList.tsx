@@ -22,6 +22,8 @@ export interface TaskListProps {
   onRevive: (id: string) => void;
   actionId: Accessor<string | null>;
   onDiffClick?: (id: string) => void;
+  autoFixCI: Accessor<boolean>;
+  onFixCI?: (repoPath: string) => void;
 }
 
 const naturalCompare = (a: string, b: string) =>
@@ -208,9 +210,14 @@ export default function TaskList(props: TaskListProps) {
                       {(status) => {
                         const url = ciDotURL(meta);
                         const label = `Default branch CI: ${status}`;
-                        return url
-                          ? <a class={styles.ciDot} style={{ background: CI_DOT_COLOR[status] }} href={url} target="_blank" rel="noopener" title={label} onClick={(e) => e.stopPropagation()} />
-                          : <span class={styles.ciDot} style={{ background: CI_DOT_COLOR[status] }} title={label} />;
+                        return <>
+                          {url
+                            ? <a class={styles.ciDot} style={{ background: CI_DOT_COLOR[status] }} href={url} target="_blank" rel="noopener" title={label} onClick={(e) => e.stopPropagation()} />
+                            : <span class={styles.ciDot} style={{ background: CI_DOT_COLOR[status] }} title={label} />}
+                          <Show when={status === "failure" && !props.autoFixCI() && props.onFixCI}>
+                            <button class={styles.fixCIBtn} title="Fix CI" onClick={(e) => { e.stopPropagation(); props.onFixCI?.(group.repo); }}>Fix CI</button>
+                          </Show>
+                        </>;
                       }}
                     </Show>
                   )}

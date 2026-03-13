@@ -872,6 +872,19 @@ export default function App() {
               navigate(taskPath(found.id, found.repos?.[0]?.name ?? "", found.repos?.[0]?.branch ?? "", found.title) + "/diff");
             }
           }}
+          autoFixCI={autoFixCI}
+          onFixCI={(repoPath) => {
+            const repo = repos().find((r) => r.path === repoPath);
+            if (!repo) return;
+            const nonPassing = new Set(["failure", "cancelled", "timed_out", "action_required", "stale"]);
+            const failing = repo.defaultBranchChecks?.filter((c) => nonPassing.has(c.conclusion)) ?? [];
+            const names = failing.map((c) => c.name).join(", ");
+            const fixPrompt = `CI is failing on the default branch of ${repoPath}. Please fix the failing CI checks and push to the default branch:\n\nFailing checks: ${names || "(unknown)"}`;
+            const harness = selectedHarness();
+            createTask({ initialPrompt: { text: fixPrompt }, repos: [{ name: repoPath }], harness }).then((data) => {
+              navigate(taskPath(data.id, repoPath, "", `Fix CI: ${repoPath}`));
+            });
+          }}
         />
 
         <Switch>

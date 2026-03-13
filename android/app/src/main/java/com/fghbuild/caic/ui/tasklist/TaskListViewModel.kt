@@ -82,6 +82,7 @@ data class TaskListState(
     val user: UserResp? = null,
     val availableRecent: List<Repo> = emptyList(),
     val availableRest: List<Repo> = emptyList(),
+    val autoFixCI: Boolean = false,
 )
 
 @HiltViewModel
@@ -99,7 +100,15 @@ class TaskListViewModel @Inject constructor(
         taskRepository.usage,
         settingsRepository.settings,
         _formState,
-    ) { tasks, connected, usage, settings, form ->
+        settingsRepository.serverPreferences,
+    ) { arr ->
+        @Suppress("UNCHECKED_CAST")
+        val tasks = arr[0] as List<Task>
+        val connected = arr[1] as Boolean
+        val usage = arr[2] as UsageResp?
+        val settings = arr[3] as com.fghbuild.caic.data.SettingsState
+        val form = arr[4] as FormState
+        val serverPrefs = arr[5] as com.caic.sdk.v1.PreferencesResp?
         val sortedRepos = form.repos.take(form.recentRepoCount).sortedBy { it.path } +
             form.repos.drop(form.recentRepoCount)
 
@@ -184,6 +193,7 @@ class TaskListViewModel @Inject constructor(
             user = form.user,
             availableRecent = recentSlice.filter { it.path !in selectedPaths },
             availableRest = restSlice.filter { it.path !in selectedPaths },
+            autoFixCI = serverPrefs?.settings?.autoFixOnCIFailure == true,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskListState())
 
@@ -399,6 +409,42 @@ class TaskListViewModel @Inject constructor(
                 _formState.value = _formState.value.copy(
                     submitting = false,
                     error = e.message ?: "Failed to create task",
+                )
+            }
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
+    fun fixCI(repoPath: String) {
+        val form = _formState.value
+        val repo = form.repos.find { it.path == repoPath } ?: return
+        val nonPassing = setOf("failure", "cancelled", "timed_out", "action_required", "stale")
+        val failing = repo.defaultBranchChecks
+            ?.filter { it.conclusion in nonPassing }
+            .orEmpty()
+        val names = failing.joinToString(", ") { it.name }
+        val fixPrompt = buildString {
+            append("CI is failing on the default branch of $repoPath.")
+            append(" Please fix the failing CI checks and push to the default branch:\n\n")
+            append("Failing checks: ${names.ifEmpty { "(unknown)" }}")
+        }
+        _formState.value = form.copy(submitting = true, error = null)
+        viewModelScope.launch {
+            try {
+                val url = settingsRepository.settings.value.serverURL
+                val client = ApiClient(url, tokenProvider = { settingsRepository.settings.value.authToken })
+                client.createTask(
+                    CreateTaskReq(
+                        initialPrompt = Prompt(text = fixPrompt),
+                        repos = listOf(RepoSpec(name = repoPath)),
+                        harness = form.selectedHarness,
+                    )
+                )
+                _formState.value = _formState.value.copy(submitting = false)
+            } catch (e: Exception) {
+                _formState.value = _formState.value.copy(
+                    submitting = false,
+                    error = e.message ?: "Failed to create CI fix task",
                 )
             }
         }

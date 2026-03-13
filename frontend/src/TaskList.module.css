@@ -117,6 +117,23 @@ a.ciDot:hover {
   opacity: 0.75;
 }
 
+.fixCIBtn {
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-danger);
+  cursor: pointer;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+.fixCIBtn:hover {
+  background: var(--color-danger);
+  color: white;
+}
+
 /* Mobile: <=768px */
 @media (max-width: 768px) {
   .list {

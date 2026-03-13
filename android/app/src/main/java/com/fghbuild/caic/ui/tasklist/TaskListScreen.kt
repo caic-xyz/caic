@@ -12,6 +12,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -323,6 +324,9 @@ private fun MainContent(
                                         if (ciUrl != null) Modifier.clickable { uriHandler.openUri(ciUrl) } else Modifier
                                     ),
                             )
+                            if (ciStatus == "failure" && !state.autoFixCI) {
+                                FixCIButton(onClick = { viewModel.fixCI(group.repo) })
+                            }
                         }
                     }
                 }
@@ -834,6 +838,21 @@ private fun CloneRepoDialog(
                 Text("Cancel")
             }
         },
+    )
+}
+
+@Composable
+private fun FixCIButton(onClick: () -> Unit) {
+    Text(
+        text = "Fix CI",
+        style = MaterialTheme.typography.labelSmall,
+        color = Color(0xFFDC3545),
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .border(1.dp, Color(0xFFDC3545), RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 5.dp, vertical = 1.dp),
     )
 }
 
