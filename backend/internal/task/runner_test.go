@@ -387,7 +387,7 @@ func TestRunner(t *testing.T) {
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh := r.startMessageDispatch(t.Context(), tk, false)
+			msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
 
 			rm := &agent.ResultMessage{MessageType: "result"}
 			msgCh <- rm
@@ -424,7 +424,7 @@ func TestRunner(t *testing.T) {
 					_, ch, unsub := tk.Subscribe(t.Context())
 					defer unsub()
 
-					msgCh := r.startMessageDispatch(t.Context(), tk, false)
+					msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
 
 					// Send a ToolUseMessage with a mutating tool.
 					toolID := "tool_edit_1"
@@ -473,7 +473,7 @@ func TestRunner(t *testing.T) {
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh := r.startMessageDispatch(t.Context(), tk, false)
+			msgCh, _ := r.startMessageDispatch(t.Context(), tk, false)
 
 			toolID := "tool_read_1"
 			msgCh <- &agent.ToolUseMessage{
@@ -495,6 +495,43 @@ func TestRunner(t *testing.T) {
 				t.Error("Fetch was called for non-mutating tool")
 			}
 			close(msgCh)
+		})
+
+		t.Run("DispatchDrainBeforeClose", func(t *testing.T) {
+			r := &Runner{}
+			r.initDefaults()
+
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, false)
+
+			// Buffer several messages, then close without draining.
+			msgs := []*agent.TextMessage{
+				{Text: "first"},
+				{Text: "second"},
+				{Text: "third"},
+			}
+			for _, m := range msgs {
+				msgCh <- m
+			}
+			close(msgCh)
+			<-done
+
+			// All messages must be in t.msgs after done fires.
+			got := tk.Messages()
+			if len(got) != len(msgs) {
+				t.Fatalf("Messages() has %d items, want %d", len(got), len(msgs))
+			}
+			for i, m := range got {
+				tm, ok := m.(*agent.TextMessage)
+				if !ok {
+					t.Fatalf("Messages()[%d] = %T, want *agent.TextMessage", i, m)
+				}
+				if tm.Text != msgs[i].Text {
+					t.Errorf("Messages()[%d].Text = %q, want %q", i, tm.Text, msgs[i].Text)
+				}
+			}
 		})
 	})
 
@@ -583,7 +620,9 @@ func TestRunner(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		h1 := &SessionHandle{Session: session, MsgCh: msgCh, LogW: logW}
+		alreadyDone := make(chan struct{})
+		close(alreadyDone)
+		h1 := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: alreadyDone, LogW: logW}
 		tk.AttachSession(h1)
 		tk.SetState(StateRunning)
 

@@ -203,11 +203,12 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 	// blindly override it to StateRunning for an idle relay.
 	prevState := t.GetState()
 
-	msgCh := r.startMessageDispatch(ctx, t, skipSideEffects)
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, skipSideEffects)
 
 	logW, err := r.openLog(t)
 	if err != nil {
 		close(msgCh)
+		<-dispatchDone
 		return nil, err
 	}
 
@@ -255,13 +256,14 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)
+		<-dispatchDone
 		// Both attach and --resume failed. Revert to StateWaiting so the
 		// user can try again (restart) or purge.
 		t.SetState(StateWaiting)
 		return nil, fmt.Errorf("reconnect: %w", err)
 	}
 
-	h := &SessionHandle{Session: session, MsgCh: msgCh, LogW: logW}
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
 	t.AttachSession(h)
 	return h, nil
 }
@@ -306,10 +308,11 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 
 	// 2. Start the agent session.
 	t.SetState(StateStarting)
-	msgCh := r.startMessageDispatch(ctx, t, false)
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
 	logW, err := r.openLog(t)
 	if err != nil {
 		close(msgCh)
+		<-dispatchDone
 		t.SetState(StateFailed)
 		return nil, err
 	}
@@ -326,13 +329,14 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)
+		<-dispatchDone
 		t.SetState(StateFailed)
 		tlog.Error("session start failed", "err", err)
 		return nil, err
 	}
 
 	// Store handle so SendInput can reach it.
-	h := &SessionHandle{Session: session, MsgCh: msgCh, LogW: logW}
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
 	t.AttachSession(h)
 
 	t.addMessage(ctx, syntheticUserInput(t.InitialPrompt), false)
@@ -399,6 +403,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	}
 	if h != nil {
 		close(h.MsgCh)
+		<-h.DispatchDone
 	}
 
 	res := Result{
@@ -472,10 +477,13 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 		}
 	}
 
-	// Drain session after container is stopped.
+	// Drain session after container is stopped, then wait for the dispatch
+	// goroutine to finish processing all buffered messages so that t.msgs
+	// is complete before the state transitions to StateStopped.
 	if h != nil {
 		_, _ = h.Session.Wait()
 		close(h.MsgCh)
+		<-h.DispatchDone
 	}
 
 	t.SetState(StateStopped)
@@ -546,6 +554,7 @@ func (r *Runner) EnsureSession(ctx context.Context, t *Task, h *SessionHandle, t
 		t.DetachSession()
 		result, _ := h.Session.Wait()
 		close(h.MsgCh)
+		<-h.DispatchDone
 		_ = h.LogW.Close()
 		sub := ""
 		if result != nil {
@@ -577,10 +586,11 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 	}
 	tlog := r.log.With("br", primaryBranch, "ctr", t.Container)
 
-	msgCh := r.startMessageDispatch(ctx, t, false)
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
 	logW, err := r.openLog(t)
 	if err != nil {
 		close(msgCh)
+		<-dispatchDone
 		return nil, err
 	}
 
@@ -594,11 +604,12 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)
+		<-dispatchDone
 		tlog.Error("session start failed", "err", err)
 		return nil, err
 	}
 
-	h := &SessionHandle{Session: session, MsgCh: msgCh, LogW: logW}
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
 	t.AttachSession(h)
 	if prompt.Text != "" || len(prompt.Images) > 0 {
 		t.addMessage(ctx, syntheticUserInput(prompt), false)
@@ -845,6 +856,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	oldH := t.CloseAndDetachSession()
 	if oldH != nil {
 		close(oldH.MsgCh)
+		<-oldH.DispatchDone
 		if oldH.LogW != nil {
 			writeContextCleared(oldH.LogW)
 			_ = oldH.LogW.Close()
@@ -864,7 +876,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	// 4. Start new session.
 	t.SetState(StateStarting)
 
-	msgCh := r.startMessageDispatch(ctx, t, false)
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
 
 	var restartBranch string
 	if p := t.Primary(); p != nil {
@@ -881,12 +893,13 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)
+		<-dispatchDone
 		t.SetState(StateFailed)
 		return nil, fmt.Errorf("start session: %w", err)
 	}
 
 	// 5. Store new handle.
-	h := &SessionHandle{Session: session, MsgCh: msgCh, LogW: logW}
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
 	t.AttachSession(h)
 
 	t.addMessage(ctx, syntheticUserInput(prompt), false)
@@ -949,16 +962,20 @@ var mutatingTools = map[string]struct{}{
 // Bash, Write, NotebookEdit), it also fetches and emits a DiffStatMessage.
 // When skipSideEffects is true, fetch+diff and title generation are suppressed
 // (used during adoption where these are handled once at the end).
-// Returns the channel for the caller to pass to the agent backend.
-func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) chan agent.Message {
+// Returns the message channel and a done channel that closes when the
+// goroutine exits (after msgCh is fully drained).
+func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) (msgCh chan agent.Message, dispatchDone <-chan struct{}) {
 	// Capture branch and extra repos outside the goroutine to avoid races.
 	primaryBranch := ""
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
 	extraRepos := t.ExtraMDRepos()
-	msgCh := make(chan agent.Message, 256)
+	msgCh = make(chan agent.Message, 256)
+	done := make(chan struct{})
+	dispatchDone = done
 	go func() {
+		defer close(done)
 		// Track tool_use IDs from ToolUseMessage that may mutate files.
 		pendingMutating := make(map[string]struct{})
 		for m := range msgCh {
@@ -989,7 +1006,7 @@ func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffe
 			t.addMessage(ctx, m, skipSideEffects)
 		}
 	}()
-	return msgCh
+	return
 }
 
 // fetchDiffStatBranch fetches from the container and emits a DiffStatMessage

@@ -78,12 +78,14 @@ func (s State) String() string {
 	}
 }
 
-// SessionHandle bundles the three resources associated with an active agent
-// session: the SSH session, the message dispatch channel, and the log writer.
+// SessionHandle bundles the resources associated with an active agent session:
+// the SSH session, the message dispatch channel, and the log writer.
+// DispatchDone is closed when the dispatch goroutine exits after MsgCh is closed.
 type SessionHandle struct {
-	Session *agent.Session
-	MsgCh   chan agent.Message
-	LogW    io.WriteCloser
+	Session      *agent.Session
+	MsgCh        chan agent.Message
+	DispatchDone <-chan struct{}
+	LogW         io.WriteCloser
 }
 
 // RepoMount describes one repository in a task.
