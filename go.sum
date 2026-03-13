@@ -70,8 +70,8 @@ github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6r
 github.com/bgentry/speakeasy v0.1.0/go.mod h1:+zsyZBPWlz7T6j88CTgSN5bM796AkVf0kBD4zp0CCIs=
 github.com/buger/jsonparser v1.1.1 h1:2PnMjfWD7wBILjqQbt530v576A/cAbQvEW9gGIpYMUs=
 github.com/buger/jsonparser v1.1.1/go.mod h1:6RYKKt7H4d4+iWqouImQ9R2FZql3VbhNgx27UK13J/0=
-github.com/caic-xyz/md v0.8.1-0.20260312173331-7e6d29ea0889 h1:5z7T6BoA96ai7rTcwbCDSj44kiiK7mRWt3SWYQSf1FA=
-github.com/caic-xyz/md v0.8.1-0.20260312173331-7e6d29ea0889/go.mod h1:AVS3x1I9C4SpFZEXDawdKEWVzmrjjrT0NY7Xy4MqJ5M=
+github.com/caic-xyz/md v0.9.0 h1:4yzs5xEuShrcaZnEIrVjcwEyIJwiBjkPrJR/MtVazbQ=
+github.com/caic-xyz/md v0.9.0/go.mod h1:AVS3x1I9C4SpFZEXDawdKEWVzmrjjrT0NY7Xy4MqJ5M=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/census-instrumentation/opencensus-proto v0.3.0/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
 github.com/cespare/xxhash v1.1.0/go.mod h1:XrSqR1VqqWfGrhpAt58auRo0WTKS1nRRg3ghfAqPWnc=
