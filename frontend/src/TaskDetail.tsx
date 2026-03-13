@@ -402,13 +402,6 @@ export default function TaskDetail(props: Props) {
   };
 
   const isWaiting = () => props.taskState === "waiting" || props.taskState === "asking" || props.taskState === "has_plan";
-  const branchCompareURL = () => {
-    const url = props.remoteURL;
-    if (!url) return undefined;
-    if (props.forge === "gitlab") return `${url}/-/compare/${props.branch}?expand=1`;
-    return `${url}/compare/${props.branch}?expand=1`; // GitHub default
-  };
-
   const prURL = () => {
     const owner = props.forgeOwner;
     const repo = props.forgeRepo;
@@ -501,9 +494,7 @@ export default function TaskDetail(props: Props) {
           <Show when={props.remoteURL} fallback={<span class={styles.headerRepo}>{props.repo}</span>}>
             <a class={styles.headerRepo} href={props.remoteURL} target="_blank" rel="noopener">{props.repo}</a>
           </Show>
-          <Show when={branchCompareURL()} fallback={<span class={styles.headerBranch}>{props.branch}</span>}>
-            <a class={styles.headerBranch} href={branchCompareURL()} target="_blank" rel="noopener">{props.branch}</a>
-          </Show>
+          <span class={styles.headerBranch}>{props.branch}</span>
           <Show when={prURL()}>
             <a class={styles.headerPR} href={prURL()} target="_blank" rel="noopener">{prLabel()}</a>
           </Show>

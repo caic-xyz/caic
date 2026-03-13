@@ -53,12 +53,6 @@ a.headerRepo:hover {
 
 .headerBranch {
   margin-left: 0.4em;
-  color: var(--color-link);
-  text-decoration: none;
-}
-
-a.headerBranch:hover {
-  text-decoration: underline;
 }
 
 .headerBranch::before {
