@@ -292,6 +292,22 @@
   z-index: 100;
 }
 
+.branchInput {
+  display: block;
+  width: calc(100% - 1rem);
+  margin: 0.25rem 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.branchInput:focus {
+  border-color: var(--color-primary);
+}
+
 .dropdownOptionMuted {
   color: var(--color-text-muted);
 }

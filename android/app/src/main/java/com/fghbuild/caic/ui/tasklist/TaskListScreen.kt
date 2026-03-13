@@ -8,6 +8,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -586,6 +589,7 @@ private fun RepoChip(
     onLoadBranches: () -> Unit,
 ) {
     var branchOpen by remember { mutableStateOf(false) }
+    var branchFilter by remember { mutableStateOf("") }
     val shortName = entry.path.substringAfterLast("/")
     Box {
         Row(
@@ -598,7 +602,10 @@ private fun RepoChip(
                 modifier = Modifier
                     .clickable(enabled = enabled) {
                         branchOpen = !branchOpen
-                        if (branchOpen) onLoadBranches()
+                        if (branchOpen) {
+                            branchFilter = entry.branch
+                            onLoadBranches()
+                        }
                     }
                     .padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
             ) {
@@ -622,26 +629,43 @@ private fun RepoChip(
             }
         }
         DropdownMenu(expanded = branchOpen, onDismissRequest = { branchOpen = false }) {
-            DropdownMenuItem(
-                text = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Default ", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("($baseBranch)")
-                    }
-                },
-                onClick = { onSetBranch(""); branchOpen = false },
+            OutlinedTextField(
+                value = branchFilter,
+                onValueChange = { branchFilter = it },
+                placeholder = { Text("Branch name…", style = MaterialTheme.typography.bodySmall) },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp).widthIn(min = 180.dp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    onSetBranch(branchFilter)
+                    branchOpen = false
+                }),
             )
-            editingBranches.forEach { branch ->
+            if (branchFilter.isEmpty()) {
                 DropdownMenuItem(
                     text = {
-                        Text(
-                            branch,
-                            fontWeight = if (branch == entry.branch) FontWeight.Bold else FontWeight.Normal,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Default ", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("($baseBranch)")
+                        }
                     },
-                    onClick = { onSetBranch(branch); branchOpen = false },
+                    onClick = { onSetBranch(""); branchOpen = false },
                 )
             }
+            val filterLower = branchFilter.lowercase()
+            editingBranches.filter { filterLower.isEmpty() || it.lowercase().contains(filterLower) }
+                .forEach { branch ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                branch,
+                                fontWeight = if (branch == entry.branch) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        },
+                        onClick = { onSetBranch(branch); branchOpen = false },
+                    )
+                }
         }
     }
 }

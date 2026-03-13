@@ -81,6 +81,7 @@ export default function App() {
   const [editingPath, setEditingPath] = createSignal<string | null>(null);
   const [editingBranches, setEditingBranches] = createSignal<string[]>([]);
   const [branchTriggerRect, setBranchTriggerRect] = createSignal<DOMRect | null>(null);
+  const [branchFilter, setBranchFilter] = createSignal("");
   // Add-repo dropdown open state.
   const [addOpen, setAddOpen] = createSignal(false);
   const [selectedModel, setSelectedModel] = createSignal("");
@@ -208,6 +209,7 @@ export default function App() {
     if (editingPath() === path) { setEditingPath(null); return; }
     setEditingPath(path);
     setBranchTriggerRect(triggerRect);
+    setBranchFilter(selectedRepos().find((r) => r.path === path)?.branch ?? "");
     setEditingBranches([]);
     listRepoBranches(path).then((r) => setEditingBranches(r.branches)).catch(() => {});
   }
@@ -642,13 +644,30 @@ export default function App() {
               <Show when={editingPath()}>
                 <Portal>
                   <div ref={(el) => { branchDropdownRef = el; }} class={styles.branchDropdown}>
-                    <button type="button" class={styles.dropdownOption}
-                      onClick={() => commitBranch("")}
-                    >
-                      <span class={styles.dropdownOptionMuted}>Default</span>
-                      {" "}({repos().find((r) => r.path === editingPath())?.baseBranch ?? "base"})
-                    </button>
-                    <For each={editingBranches()}>
+                    <input
+                      ref={(el) => setTimeout(() => el.focus(), 0)}
+                      type="text"
+                      class={styles.branchInput}
+                      placeholder="Branch name…"
+                      value={branchFilter()}
+                      onInput={(e) => setBranchFilter(e.currentTarget.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { commitBranch(branchFilter()); e.preventDefault(); }
+                        if (e.key === "Escape") { setEditingPath(null); e.preventDefault(); }
+                      }}
+                    />
+                    <Show when={!branchFilter()}>
+                      <button type="button" class={styles.dropdownOption}
+                        onClick={() => commitBranch("")}
+                      >
+                        <span class={styles.dropdownOptionMuted}>Default</span>
+                        {" "}({repos().find((r) => r.path === editingPath())?.baseBranch ?? "base"})
+                      </button>
+                    </Show>
+                    <For each={editingBranches().filter((b) => {
+                      const f = branchFilter().toLowerCase();
+                      return !f || b.toLowerCase().includes(f);
+                    })}>
                       {(b) => (
                         <button type="button" class={`${styles.dropdownOption}${selectedRepos().find((r) => r.path === editingPath())?.branch === b ? ` ${styles.dropdownOptionActive}` : ""}`}
                           onClick={() => commitBranch(b)}
