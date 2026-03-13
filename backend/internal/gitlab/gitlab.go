@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/maruel/roundtrippers"
 
@@ -70,11 +71,12 @@ type branchResponse struct {
 
 // commitStatus is one entry from the GitLab commit statuses API.
 type commitStatus struct {
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	Status       string `json:"status"` // "pending", "running", "success", "failed", "canceled"
-	AllowFailure bool   `json:"allow_failure"`
-	TargetURL    string `json:"target_url"` // e.g. https://gitlab.com/owner/repo/-/jobs/{jobID}
+	ID           int64      `json:"id"`
+	Name         string     `json:"name"`
+	Status       string     `json:"status"` // "pending", "running", "success", "failed", "canceled"
+	AllowFailure bool       `json:"allow_failure"`
+	TargetURL    string     `json:"target_url"` // e.g. https://gitlab.com/owner/repo/-/jobs/{jobID}
+	CreatedAt    *time.Time `json:"created_at"`
 }
 
 // CreatePR creates a merge request on GitLab and returns its metadata.
@@ -205,12 +207,17 @@ func (c *Client) GetCheckRuns(ctx context.Context, owner, repo, sha string) ([]f
 	}
 	runs := make([]forge.CheckRun, len(statuses))
 	for i, s := range statuses {
+		var queuedAt time.Time
+		if s.CreatedAt != nil {
+			queuedAt = *s.CreatedAt
+		}
 		runs[i] = forge.CheckRun{
 			JobID:      s.ID,
 			RunID:      0, // GitLab job URLs don't require a separate run ID
 			Name:       s.Name,
 			Status:     gitLabStatus(s.Status),
 			Conclusion: gitLabConclusion(s.Status, s.AllowFailure),
+			QueuedAt:   queuedAt,
 		}
 	}
 	return runs, nil

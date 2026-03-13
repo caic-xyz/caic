@@ -30,10 +30,11 @@ func (s *Server) maybeFakeCI(t *task.Task) {
 	}
 ready:
 	t.SetPR("fake-owner", "fake-repo", 1)
+	now := time.Now()
 	checks := []task.CICheck{
-		{Name: "build", Owner: "fake-owner", Repo: "fake-repo", RunID: 1, JobID: 1},
-		{Name: "test", Owner: "fake-owner", Repo: "fake-repo", RunID: 1, JobID: 2},
-		{Name: "lint", Owner: "fake-owner", Repo: "fake-repo", RunID: 1, JobID: 3},
+		{Name: "build", Owner: "fake-owner", Repo: "fake-repo", RunID: 1, JobID: 1, Status: forge.CheckRunStatusInProgress, QueuedAt: now, StartedAt: now},
+		{Name: "test", Owner: "fake-owner", Repo: "fake-repo", RunID: 1, JobID: 2, Status: forge.CheckRunStatusQueued, QueuedAt: now},
+		{Name: "lint", Owner: "fake-owner", Repo: "fake-repo", RunID: 1, JobID: 3, Status: forge.CheckRunStatusQueued, QueuedAt: now},
 	}
 	t.SetCIStatus(task.CIStatusPending, checks)
 	for i := range checks {
@@ -42,7 +43,13 @@ ready:
 		case <-s.ctx.Done():
 			return
 		}
+		checks[i].Status = forge.CheckRunStatusCompleted
 		checks[i].Conclusion = forge.CheckRunConclusionSuccess
+		checks[i].CompletedAt = time.Now()
+		if i+1 < len(checks) {
+			checks[i+1].Status = forge.CheckRunStatusInProgress
+			checks[i+1].StartedAt = time.Now()
+		}
 		t.SetCIStatus(task.CIStatusPending, checks)
 	}
 	t.SetCIStatus(task.CIStatusSuccess, checks)

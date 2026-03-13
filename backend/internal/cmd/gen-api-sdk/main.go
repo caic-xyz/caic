@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
@@ -324,6 +325,7 @@ var (
 	ksidIDType         = reflect.TypeFor[ksid.ID]()
 	diffStatType       = reflect.TypeFor[v1.DiffStat]()
 	mapStringAnyType   = reflect.TypeFor[map[string]any]()
+	timeType           = reflect.TypeFor[time.Time]()
 )
 
 // kotlinAliasNames is the set of Go named-string types that map to their
@@ -358,6 +360,8 @@ func goTypeToKotlin(t reflect.Type) string {
 		return "JsonElement"
 	case ksidIDType:
 		return "String"
+	case timeType:
+		return "String" // Go marshals time.Time as ISO 8601 string.
 	case diffStatType:
 		return "List<DiffFileStat>"
 	case mapStringAnyType:
@@ -1009,6 +1013,8 @@ func goTypeToDoc(t reflect.Type) string {
 	case diffStatType:
 		return "DiffFileStat[]"
 	case ksidIDType:
+		return "string"
+	case timeType:
 		return "string"
 	case jsonRawMessageType:
 		return "object"

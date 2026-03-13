@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/maruel/roundtrippers"
 
@@ -69,11 +70,14 @@ type refResponse struct {
 // checkRunsResponse is the relevant subset of the GitHub check-runs list response.
 type checkRunsResponse struct {
 	CheckRuns []struct {
-		ID         int64                    `json:"id"`
-		Name       string                   `json:"name"`
-		Status     forge.CheckRunStatus     `json:"status"`
-		Conclusion forge.CheckRunConclusion `json:"conclusion"`
-		HTMLURL    string                   `json:"html_url"` // e.g. https://github.com/owner/repo/actions/runs/{runID}/job/{jobID}
+		ID          int64                    `json:"id"`
+		Name        string                   `json:"name"`
+		Status      forge.CheckRunStatus     `json:"status"`
+		Conclusion  forge.CheckRunConclusion `json:"conclusion"`
+		HTMLURL     string                   `json:"html_url"` // e.g. https://github.com/owner/repo/actions/runs/{runID}/job/{jobID}
+		CreatedAt   *time.Time               `json:"created_at"`
+		StartedAt   *time.Time               `json:"started_at"`
+		CompletedAt *time.Time               `json:"completed_at"`
 	} `json:"check_runs"`
 }
 
@@ -215,12 +219,25 @@ func (c *Client) GetCheckRuns(ctx context.Context, owner, repo, sha string) ([]f
 		if m := actionsRunRe.FindStringSubmatch(cr.HTMLURL); m != nil {
 			runID, _ = strconv.ParseInt(m[1], 10, 64)
 		}
+		var queuedAt, startedAt, completedAt time.Time
+		if cr.CreatedAt != nil {
+			queuedAt = *cr.CreatedAt
+		}
+		if cr.StartedAt != nil {
+			startedAt = *cr.StartedAt
+		}
+		if cr.CompletedAt != nil {
+			completedAt = *cr.CompletedAt
+		}
 		runs[i] = forge.CheckRun{
-			JobID:      cr.ID,
-			RunID:      runID,
-			Name:       cr.Name,
-			Status:     cr.Status,
-			Conclusion: cr.Conclusion,
+			JobID:       cr.ID,
+			RunID:       runID,
+			Name:        cr.Name,
+			Status:      cr.Status,
+			Conclusion:  cr.Conclusion,
+			QueuedAt:    queuedAt,
+			StartedAt:   startedAt,
+			CompletedAt: completedAt,
 		}
 	}
 	return runs, nil

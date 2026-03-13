@@ -155,7 +155,11 @@ All errors return:
 | `repo` | `string` | yes |
 | `runID` | `number` | yes |
 | `jobID` | `number` | yes |
+| `status` | `string` | yes |
 | `conclusion` | `string` | yes |
+| `queuedAt` | `string` |  |
+| `startedAt` | `string` |  |
+| `completedAt` | `string` |  |
 
 ### Repo
 

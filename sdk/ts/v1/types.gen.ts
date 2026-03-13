@@ -430,7 +430,23 @@ export const CheckConclusionActionRequired: CheckConclusion = "action_required";
  */
 export const CheckConclusionStale: CheckConclusion = "stale";
 /**
- * ForgeCheck describes a CI check run with its conclusion, from any supported forge.
+ * CheckStatus is the status of a CI check run.
+ */
+export type CheckStatus = string;
+/**
+ * CI check-run status values.
+ */
+export const CheckStatusQueued: CheckStatus = "queued";
+/**
+ * CI check-run status values.
+ */
+export const CheckStatusInProgress: CheckStatus = "in_progress";
+/**
+ * CI check-run status values.
+ */
+export const CheckStatusCompleted: CheckStatus = "completed";
+/**
+ * ForgeCheck describes a CI check run with its status, conclusion, and timing.
  */
 export interface ForgeCheck {
   name: string;
@@ -438,7 +454,11 @@ export interface ForgeCheck {
   repo: string;
   runID: number /* int64 */; // Pipeline/workflow run ID.
   jobID: number /* int64 */; // Check run / job ID.
-  conclusion: CheckConclusion;
+  status: CheckStatus; // queued, in_progress, completed.
+  conclusion: CheckConclusion; // Empty when not completed.
+  queuedAt?: string; // When the check was created/queued.
+  startedAt?: string; // When execution began.
+  completedAt?: string; // When execution finished.
 }
 /**
  * Repo is the JSON representation of a discovered repo.

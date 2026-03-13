@@ -39,14 +39,18 @@ const (
 	CheckConclusionStale          CheckConclusion = "stale"
 )
 
-// ForgeCheck is a CI check run with its conclusion, used in cached results.
+// ForgeCheck is a CI check run with its status, conclusion, and timing.
 type ForgeCheck struct {
-	Name       string          `json:"name"`
-	Owner      string          `json:"owner"`
-	Repo       string          `json:"repo"`
-	RunID      int64           `json:"runID"` // Pipeline/workflow run ID.
-	JobID      int64           `json:"jobID"` // Check run / job ID.
-	Conclusion CheckConclusion `json:"conclusion"`
+	Name        string          `json:"name"`
+	Owner       string          `json:"owner"`
+	Repo        string          `json:"repo"`
+	RunID       int64           `json:"runID"`  // Pipeline/workflow run ID.
+	JobID       int64           `json:"jobID"`  // Check run / job ID.
+	Status      string          `json:"status"` // queued, in_progress, completed.
+	Conclusion  CheckConclusion `json:"conclusion"`
+	QueuedAt    time.Time       `json:"queuedAt,omitzero"`    // When the check was created/queued.
+	StartedAt   time.Time       `json:"startedAt,omitzero"`   // When execution began.
+	CompletedAt time.Time       `json:"completedAt,omitzero"` // When execution finished.
 }
 
 // Result is the cached outcome for a commit SHA.

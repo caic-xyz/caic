@@ -6,3 +6,4 @@ packages:
       - routes.go
     type_mappings:
       ksid.ID: "string"
+      time.Time: "string"

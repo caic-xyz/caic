@@ -91,12 +91,16 @@ const (
 
 // CICheck holds the identifying information for a CI check run.
 type CICheck struct {
-	Name       string
-	Owner      string
-	Repo       string
-	RunID      int64
-	JobID      int64
-	Conclusion forge.CheckRunConclusion
+	Name        string
+	Owner       string
+	Repo        string
+	RunID       int64
+	JobID       int64
+	Status      forge.CheckRunStatus
+	Conclusion  forge.CheckRunConclusion
+	QueuedAt    time.Time
+	StartedAt   time.Time
+	CompletedAt time.Time
 }
 
 // SessionHandle bundles the three resources associated with an active agent

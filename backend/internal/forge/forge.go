@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // ErrNotFound is returned when the forge API responds with 404, typically
@@ -57,13 +58,24 @@ const (
 	CheckRunConclusionStale          CheckRunConclusion = "stale"
 )
 
+// IsFailed reports whether the conclusion counts as a CI failure
+// (anything other than success, neutral, or skipped).
+func (c CheckRunConclusion) IsFailed() bool {
+	return c != CheckRunConclusionSuccess &&
+		c != CheckRunConclusionNeutral &&
+		c != CheckRunConclusionSkipped
+}
+
 // CheckRun describes a single CI check run.
 type CheckRun struct {
-	JobID      int64 // Job ID.
-	RunID      int64 // Pipeline/workflow run ID; 0 if not available.
-	Name       string
-	Status     CheckRunStatus
-	Conclusion CheckRunConclusion
+	JobID       int64 // Job ID.
+	RunID       int64 // Pipeline/workflow run ID; 0 if not available.
+	Name        string
+	Status      CheckRunStatus
+	Conclusion  CheckRunConclusion
+	QueuedAt    time.Time // When the check was created/queued. Zero if unavailable.
+	StartedAt   time.Time // When execution began. Zero if not yet started.
+	CompletedAt time.Time // When execution finished. Zero if still running.
 }
 
 // Forge is the interface for interacting with a code hosting forge.

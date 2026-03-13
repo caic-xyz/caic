@@ -4,7 +4,7 @@ import { A, useNavigate, useLocation } from "@solidjs/router";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents, getTaskToolInput, getTaskCILog, createTask } from "./api";
 import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck } from "@sdk/types.gen";
 import { groupMessages, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "./grouping";
-import { formatDuration, formatTokens, toolCallDetail } from "./formatting";
+import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "./formatting";
 import type { ToolCall } from "./grouping";
 import { SyncTargetDefault } from "@sdk/types.gen";
 import { Marked } from "marked";
@@ -74,11 +74,27 @@ const CI_STATUS_LABEL: Record<CIStatus, string> = {
 
 function ciLabel(status: CIStatus, checks?: ForgeCheck[]): string {
   if (!checks || checks.length === 0) return CI_STATUS_LABEL[status];
-  if (status === "pending") {
-    const done = checks.filter((c) => c.conclusion !== "").length;
-    return `CI: ${done}/${checks.length}`;
+  if (status === "pending" || status === "failure") {
+    const done = checks.filter((c) => c.status === "completed").length;
+    if (done < checks.length) return `CI: ${done}/${checks.length}`;
   }
   return CI_STATUS_LABEL[status];
+}
+
+function checkDuration(c: ForgeCheck, now: number): string {
+  const start = c.startedAt ? new Date(c.startedAt).getTime() : c.queuedAt ? new Date(c.queuedAt).getTime() : 0;
+  if (!start) return "";
+  const end = c.completedAt ? new Date(c.completedAt).getTime() : now;
+  return formatElapsed(end - start);
+}
+
+function checkStatusLabel(c: ForgeCheck): string {
+  if (c.status === "completed") {
+    if (c.conclusion === "success" || c.conclusion === "neutral" || c.conclusion === "skipped") return "passed";
+    return c.conclusion || "failed";
+  }
+  if (c.status === "in_progress") return "running";
+  return "queued";
 }
 
 export default function TaskDetail(props: Props) {
@@ -494,9 +510,32 @@ export default function TaskDetail(props: Props) {
           <Show when={props.ciStatus && props.ciStatus in CI_STATUS_CLASS}>
             {(() => {
               const s = props.ciStatus as CIStatus;
+              const hasChecks = () => (props.ciChecks?.length ?? 0) > 0;
               return (
                 <>
-                  <span class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>{ciLabel(s, props.ciChecks)}</span>
+                  <Show when={hasChecks()} fallback={<span class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>{ciLabel(s, props.ciChecks)}</span>}>
+                    <details class={styles.ciDetails}>
+                      <summary class={`${styles.ciStatus} ${CI_STATUS_CLASS[s]}`}>{ciLabel(s, props.ciChecks)}</summary>
+                      <div class={styles.ciDropdown}>
+                        <For each={props.ciChecks}>
+                          {(c) => {
+                            const statusCls = c.status === "completed"
+                              ? (c.conclusion === "success" || c.conclusion === "neutral" || c.conclusion === "skipped" ? styles.ciCheckPassed : styles.ciCheckFailed)
+                              : c.status === "in_progress" ? styles.ciCheckRunning : styles.ciCheckQueued;
+                            return (
+                              <div class={`${styles.ciCheckRow} ${statusCls}`}>
+                                <span class={styles.ciCheckName}>{c.name}</span>
+                                <span class={styles.ciCheckStatus}>{checkStatusLabel(c)}</span>
+                                <Show when={c.startedAt || c.queuedAt}>
+                                  <span class={styles.ciCheckDuration}>{checkDuration(c, Date.now())}</span>
+                                </Show>
+                              </div>
+                            );
+                          }}
+                        </For>
+                      </div>
+                    </details>
+                  </Show>
                   <Show when={s === "failure" && props.ciChecks?.some((c) => c.conclusion !== "success" && c.conclusion !== "neutral" && c.conclusion !== "skipped")}>
                     <button class={styles.fixCIBtn} onClick={handleFixCI} disabled={fixingCI()} title="Create a new task to investigate this CI failure">
                       {fixingCI() ? "Creating…" : "Fix CI"}

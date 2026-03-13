@@ -203,9 +203,16 @@ func (s *Server) webhookOnCI(ctx context.Context, kind forge.Kind, owner, repo, 
 
 	result, done := bot.EvaluateCheckRuns(owner, repo, runs)
 
+	// Pre-compute interim status once for all affected tasks/repos.
+	var interimStatus task.CIStatus
+	var interimChecks []task.CICheck
+	if !done {
+		interimStatus, interimChecks = bot.InterimCIStatus(runs, result.Checks)
+	}
+
 	for _, e := range affected {
 		if !done {
-			e.task.SetCIStatus(task.CIStatusPending, nil)
+			e.task.SetCIStatus(interimStatus, interimChecks)
 			s.notifyTaskChange()
 			continue
 		}
@@ -217,7 +224,11 @@ func (s *Server) webhookOnCI(ctx context.Context, kind forge.Kind, owner, repo, 
 
 	for _, relPath := range affectedRepoPaths {
 		if !done {
-			s.setRepoCIStatus(relPath, sha, cicache.Result{Status: cicache.StatusPending})
+			repoStatus := cicache.StatusPending
+			if interimStatus == task.CIStatusFailure {
+				repoStatus = cicache.StatusFailure
+			}
+			s.setRepoCIStatus(relPath, sha, cicache.Result{Status: repoStatus, Checks: result.Checks})
 			continue
 		}
 		if err := s.ciCache.Put(owner, repo, sha, result); err != nil {

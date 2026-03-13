@@ -103,7 +103,11 @@ data class ForgeCheck(
     val repo: String,
     @SerialName("runID") val runID: Long,
     @SerialName("jobID") val jobID: Long,
+    val status: String,
     val conclusion: String,
+    val queuedAt: String? = null,
+    val startedAt: String? = null,
+    val completedAt: String? = null,
 )
 
 @Serializable

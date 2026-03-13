@@ -67,7 +67,10 @@ import com.fghbuild.caic.ui.theme.appColors
 import com.fghbuild.caic.ui.theme.stateColor
 import com.fghbuild.caic.ui.theme.waitingStates
 import com.fghbuild.caic.util.createCameraPhotoUri
+import com.fghbuild.caic.util.formatElapsed
 import com.caic.sdk.v1.EventKinds
+import com.caic.sdk.v1.ForgeCheck
+import java.time.Instant
 import com.fghbuild.caic.util.GroupKind
 import kotlinx.serialization.json.JsonElement
 import com.fghbuild.caic.util.MessageGroup
@@ -406,66 +409,98 @@ fun TaskDetailScreen(
                                 }
                                 val appColors = MaterialTheme.appColors
                                 val checks = it.ciChecks
-                                val pendingLabel = if (!checks.isNullOrEmpty()) {
-                                    val done = checks.count { c -> c.conclusion.isNotEmpty() }
-                                    "CI: $done/${checks.size}"
-                                } else {
-                                    "CI: pending"
-                                }
+                                val hasChecks = !checks.isNullOrEmpty()
+                                val ciLabel = ciLabel(it.ciStatus, checks)
+                                var ciExpanded by rememberSaveable { mutableStateOf(false) }
                                 when (it.ciStatus) {
-                                    "pending" -> Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = appColors.warningBg,
-                                    ) {
-                                        Text(
-                                            text = pendingLabel,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = appColors.warningText,
-                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                                        )
-                                    }
-                                    "success" -> Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = appColors.successBg,
-                                    ) {
-                                        Text(
-                                            text = "CI: passed",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = appColors.successText,
-                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                                        )
-                                    }
-                                    "failure" -> Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    ) {
+                                    "pending" -> Column {
                                         Surface(
                                             shape = RoundedCornerShape(4.dp),
-                                            color = MaterialTheme.colorScheme.errorContainer,
+                                            color = appColors.warningBg,
+                                            modifier = if (hasChecks) Modifier.clickable {
+                                                ciExpanded = !ciExpanded
+                                            } else Modifier,
                                         ) {
                                             Text(
-                                                text = "CI: failed",
+                                                text = ciLabel,
                                                 style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                                color = appColors.warningText,
                                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
                                             )
                                         }
-                                        val fixingCI = state.pendingAction == "fixCI"
+                                        if (ciExpanded && hasChecks) {
+                                            CICheckList(checks = checks!!)
+                                        }
+                                    }
+                                    "success" -> Column {
                                         Surface(
                                             shape = RoundedCornerShape(4.dp),
-                                            color = if (fixingCI) MaterialTheme.colorScheme.errorContainer
-                                                    else MaterialTheme.colorScheme.error,
-                                            modifier = Modifier.clickable(enabled = !fixingCI) {
-                                                viewModel.fixCI { newTaskId -> onNavigateToTask(newTaskId) }
-                                            },
+                                            color = appColors.successBg,
+                                            modifier = if (hasChecks) Modifier.clickable {
+                                                ciExpanded = !ciExpanded
+                                            } else Modifier,
                                         ) {
                                             Text(
-                                                text = if (fixingCI) "Creating…" else "Fix CI",
+                                                text = ciLabel,
                                                 style = MaterialTheme.typography.labelSmall,
-                                                color = if (fixingCI) MaterialTheme.colorScheme.onErrorContainer
-                                                        else MaterialTheme.colorScheme.onError,
+                                                color = appColors.successText,
                                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
                                             )
+                                        }
+                                        if (ciExpanded && hasChecks) {
+                                            CICheckList(checks = checks!!)
+                                        }
+                                    }
+                                    "failure" -> Column {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        ) {
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = MaterialTheme.colorScheme.errorContainer,
+                                                modifier = if (hasChecks) Modifier.clickable {
+                                                    ciExpanded = !ciExpanded
+                                                } else Modifier,
+                                            ) {
+                                                Text(
+                                                    text = ciLabel,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                                    modifier = Modifier.padding(
+                                                        horizontal = 4.dp,
+                                                        vertical = 1.dp,
+                                                    ),
+                                                )
+                                            }
+                                            val fixingCI = state.pendingAction == "fixCI"
+                                            Surface(
+                                                shape = RoundedCornerShape(4.dp),
+                                                color = if (fixingCI) MaterialTheme.colorScheme.errorContainer
+                                                        else MaterialTheme.colorScheme.error,
+                                                modifier = Modifier.clickable(enabled = !fixingCI) {
+                                                    viewModel.fixCI { newTaskId ->
+                                                        onNavigateToTask(newTaskId)
+                                                    }
+                                                },
+                                            ) {
+                                                Text(
+                                                    text = if (fixingCI) "Creating…" else "Fix CI",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = if (fixingCI) {
+                                                        MaterialTheme.colorScheme.onErrorContainer
+                                                    } else {
+                                                        MaterialTheme.colorScheme.onError
+                                                    },
+                                                    modifier = Modifier.padding(
+                                                        horizontal = 4.dp,
+                                                        vertical = 1.dp,
+                                                    ),
+                                                )
+                                            }
+                                        }
+                                        if (ciExpanded && hasChecks) {
+                                            CICheckList(checks = checks!!)
                                         }
                                     }
                                     else -> Unit
@@ -874,6 +909,106 @@ private fun SessionBoundaryRow(event: com.caic.sdk.v1.EventMessage) {
                     .fillMaxWidth()
                     .padding(top = 4.dp),
             )
+        }
+    }
+}
+
+/** Compute the CI badge label, showing completion progress when checks are available. */
+private fun ciLabel(status: String?, checks: List<ForgeCheck>?): String {
+    if (checks.isNullOrEmpty()) {
+        return when (status) {
+            "pending" -> "CI: pending"
+            "success" -> "CI: passed"
+            "failure" -> "CI: failed"
+            else -> "CI"
+        }
+    }
+    if (status == "pending" || status == "failure") {
+        val done = checks.count { it.status == "completed" }
+        if (done < checks.size) return "CI: $done/${checks.size}"
+    }
+    return when (status) {
+        "pending" -> "CI: pending"
+        "success" -> "CI: passed"
+        "failure" -> "CI: failed"
+        else -> "CI"
+    }
+}
+
+/** Human-readable status label for a single CI check. */
+private fun checkStatusLabel(c: ForgeCheck): String = when {
+    c.status == "completed" -> {
+        if (c.conclusion == "success" || c.conclusion == "neutral" || c.conclusion == "skipped") "passed"
+        else c.conclusion.ifEmpty { "failed" }
+    }
+    c.status == "in_progress" -> "running"
+    else -> "queued"
+}
+
+/** Elapsed duration string for a CI check, from startedAt (or queuedAt) to completedAt (or now). */
+private fun checkDuration(c: ForgeCheck): String {
+    val startStr = c.startedAt ?: c.queuedAt ?: return ""
+    val start = try {
+        Instant.parse(startStr)
+    } catch (_: Exception) {
+        return ""
+    }
+    val end = if (c.completedAt != null) {
+        try {
+            Instant.parse(c.completedAt)
+        } catch (_: Exception) {
+            Instant.now()
+        }
+    } else {
+        Instant.now()
+    }
+    val seconds = java.time.Duration.between(start, end).seconds.toDouble()
+    return formatElapsed(seconds)
+}
+
+/** Expandable list of per-check detail rows for the CI badge. */
+@Composable
+private fun CICheckList(checks: List<ForgeCheck>) {
+    val appColors = MaterialTheme.appColors
+    Column(
+        modifier = Modifier.padding(start = 4.dp, top = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        for (c in checks) {
+            val label = checkStatusLabel(c)
+            val color = when {
+                c.status == "completed" && (c.conclusion == "success" || c.conclusion == "neutral"
+                    || c.conclusion == "skipped") -> appColors.successText
+                c.status == "completed" -> MaterialTheme.colorScheme.error
+                c.status == "in_progress" -> appColors.warningText
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = c.name,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = color,
+                )
+                val duration = checkDuration(c)
+                if (duration.isNotEmpty()) {
+                    Text(
+                        text = duration,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }

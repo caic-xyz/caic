@@ -3,6 +3,7 @@ package v1
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	"github.com/maruel/ksid"
@@ -94,14 +95,28 @@ const (
 	CheckConclusionStale          CheckConclusion = "stale"
 )
 
-// ForgeCheck describes a CI check run with its conclusion, from any supported forge.
+// CheckStatus is the status of a CI check run.
+type CheckStatus string
+
+// CI check-run status values.
+const (
+	CheckStatusQueued     CheckStatus = "queued"
+	CheckStatusInProgress CheckStatus = "in_progress"
+	CheckStatusCompleted  CheckStatus = "completed"
+)
+
+// ForgeCheck describes a CI check run with its status, conclusion, and timing.
 type ForgeCheck struct {
-	Name       string          `json:"name"`
-	Owner      string          `json:"owner"`
-	Repo       string          `json:"repo"`
-	RunID      int64           `json:"runID"` // Pipeline/workflow run ID.
-	JobID      int64           `json:"jobID"` // Check run / job ID.
-	Conclusion CheckConclusion `json:"conclusion"`
+	Name        string          `json:"name"`
+	Owner       string          `json:"owner"`
+	Repo        string          `json:"repo"`
+	RunID       int64           `json:"runID"`                // Pipeline/workflow run ID.
+	JobID       int64           `json:"jobID"`                // Check run / job ID.
+	Status      CheckStatus     `json:"status"`               // queued, in_progress, completed.
+	Conclusion  CheckConclusion `json:"conclusion"`           // Empty when not completed.
+	QueuedAt    time.Time       `json:"queuedAt,omitzero"`    // When the check was created/queued.
+	StartedAt   time.Time       `json:"startedAt,omitzero"`   // When execution began.
+	CompletedAt time.Time       `json:"completedAt,omitzero"` // When execution finished.
 }
 
 // Repo is the JSON representation of a discovered repo.

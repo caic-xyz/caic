@@ -1843,7 +1843,8 @@ func (s *Server) monitorCI(ctx context.Context, entry *taskEntry, f forge.Forge,
 				s.applyMonitorCIResult(ctx, entry, f, owner, repo, sha, result)
 				return
 			}
-			t.SetCIStatus(task.CIStatusPending, nil)
+			status, checks := bot.InterimCIStatus(runs, result.Checks)
+			t.SetCIStatus(status, checks)
 			s.notifyTaskChange()
 		}
 		return // check_suite webhook delivers the terminal result
@@ -1876,7 +1877,8 @@ func (s *Server) monitorCI(ctx context.Context, entry *taskEntry, f forge.Forge,
 		}
 		result, done := bot.EvaluateCheckRuns(owner, repo, runs)
 		if !done {
-			t.SetCIStatus(task.CIStatusPending, nil)
+			status, checks := bot.InterimCIStatus(runs, result.Checks)
+			t.SetCIStatus(status, checks)
 			s.notifyTaskChange()
 			continue
 		}
@@ -1989,15 +1991,8 @@ func (s *Server) applyMonitorCIResult(ctx context.Context, entry *taskEntry, f f
 		}
 	}
 	taskChecks := make([]task.CICheck, len(result.Checks))
-	for i, c := range result.Checks {
-		taskChecks[i] = task.CICheck{
-			Name:       c.Name,
-			Owner:      c.Owner,
-			Repo:       c.Repo,
-			RunID:      c.RunID,
-			JobID:      c.JobID,
-			Conclusion: forge.CheckRunConclusion(c.Conclusion),
-		}
+	for i := range result.Checks {
+		taskChecks[i] = bot.CacheCheckToTask(&result.Checks[i])
 	}
 	t.SetCIStatus(ciStatus, taskChecks)
 	s.notifyTaskChange()
@@ -2243,8 +2238,13 @@ func (s *Server) pollRepoCIOnce(ctx context.Context, info repoInfo, f forge.Forg
 	}
 	result, done := bot.EvaluateCheckRuns(info.ForgeOwner, info.ForgeRepo, runs)
 	if !done {
-		// Still pending — store pending status without caching.
-		s.setRepoCIStatus(info.RelPath, sha, cicache.Result{Status: cicache.StatusPending})
+		// Still in progress — show failure early if any check already failed.
+		interimStatus, _ := bot.InterimCIStatus(runs, result.Checks)
+		repoStatus := cicache.StatusPending
+		if interimStatus == task.CIStatusFailure {
+			repoStatus = cicache.StatusFailure
+		}
+		s.setRepoCIStatus(info.RelPath, sha, cicache.Result{Status: repoStatus, Checks: result.Checks})
 		return
 	}
 	if err := s.ciCache.Put(info.ForgeOwner, info.ForgeRepo, sha, result); err != nil {
@@ -2283,14 +2283,46 @@ func (s *Server) pollCIForActiveRepos(ctx context.Context) {
 	}
 }
 
+// taskCheckToDTO converts a single task.CICheck to a v1.ForgeCheck.
+func taskCheckToDTO(c *task.CICheck) v1.ForgeCheck {
+	return v1.ForgeCheck{
+		Name:        c.Name,
+		Owner:       c.Owner,
+		Repo:        c.Repo,
+		RunID:       c.RunID,
+		JobID:       c.JobID,
+		Status:      v1.CheckStatus(c.Status),
+		Conclusion:  v1.CheckConclusion(c.Conclusion),
+		QueuedAt:    c.QueuedAt,
+		StartedAt:   c.StartedAt,
+		CompletedAt: c.CompletedAt,
+	}
+}
+
+// cacheCheckToDTO converts a single cicache.ForgeCheck to a v1.ForgeCheck.
+func cacheCheckToDTO(c *cicache.ForgeCheck) v1.ForgeCheck {
+	return v1.ForgeCheck{
+		Name:        c.Name,
+		Owner:       c.Owner,
+		Repo:        c.Repo,
+		RunID:       c.RunID,
+		JobID:       c.JobID,
+		Status:      v1.CheckStatus(c.Status),
+		Conclusion:  v1.CheckConclusion(c.Conclusion),
+		QueuedAt:    c.QueuedAt,
+		StartedAt:   c.StartedAt,
+		CompletedAt: c.CompletedAt,
+	}
+}
+
 // setRepoCIStatus updates the in-memory CI state for a repo and notifies
 // SSE subscribers if the status changed.
 func (s *Server) setRepoCIStatus(relPath, sha string, result cicache.Result) {
-	checks := make([]v1.ForgeCheck, len(result.Checks))
-	for i, c := range result.Checks {
-		checks[i] = v1.ForgeCheck{Name: c.Name, Owner: c.Owner, Repo: c.Repo, RunID: c.RunID, JobID: c.JobID, Conclusion: v1.CheckConclusion(c.Conclusion)}
+	dtoChecks := make([]v1.ForgeCheck, len(result.Checks))
+	for i := range result.Checks {
+		dtoChecks[i] = cacheCheckToDTO(&result.Checks[i])
 	}
-	next := repoCIState{Status: result.Status, Checks: checks, HeadSHA: sha}
+	next := repoCIState{Status: result.Status, Checks: dtoChecks, HeadSHA: sha}
 	s.mu.Lock()
 	prev := s.repoCIStatus[relPath]
 	changed := prev.Status != next.Status
@@ -3508,15 +3540,8 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 	j.CIStatus = v1.CIStatus(snap.CIStatus)
 	if len(snap.CIChecks) > 0 {
 		j.CIChecks = make([]v1.ForgeCheck, len(snap.CIChecks))
-		for i, c := range snap.CIChecks {
-			j.CIChecks[i] = v1.ForgeCheck{
-				Name:       c.Name,
-				Owner:      c.Owner,
-				Repo:       c.Repo,
-				RunID:      c.RunID,
-				JobID:      c.JobID,
-				Conclusion: v1.CheckConclusion(c.Conclusion),
-			}
+		for i := range snap.CIChecks {
+			j.CIChecks[i] = taskCheckToDTO(&snap.CIChecks[i])
 		}
 	}
 	if s.authStore != nil && e.task.OwnerID != "" {
