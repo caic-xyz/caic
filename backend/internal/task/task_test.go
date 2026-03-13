@@ -24,10 +24,10 @@ func TestTask(t *testing.T) {
 
 			// Fill the subscriber buffer (256) so the next send overflows.
 			for range 256 {
-				tk.addMessage(t.Context(), &agent.SystemMessage{MessageType: "system", Subtype: "status"})
+				tk.addMessage(t.Context(), &agent.SystemMessage{MessageType: "system", Subtype: "status"}, false)
 			}
 			// This send should trigger the slow-subscriber drop+close.
-			tk.addMessage(t.Context(), &agent.SystemMessage{MessageType: "system", Subtype: "status"})
+			tk.addMessage(t.Context(), &agent.SystemMessage{MessageType: "system", Subtype: "status"}, false)
 
 			// Drain to confirm channel was closed by fan-out.
 			for range ch {
@@ -43,8 +43,8 @@ func TestTask(t *testing.T) {
 			// Add messages before subscribing.
 			msg1 := &agent.SystemMessage{MessageType: "system", Subtype: "status"}
 			msg2 := &agent.TextMessage{Text: "hello"}
-			tk.addMessage(t.Context(), msg1)
-			tk.addMessage(t.Context(), msg2)
+			tk.addMessage(t.Context(), msg1, false)
+			tk.addMessage(t.Context(), msg2, false)
 
 			history, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
@@ -65,7 +65,7 @@ func TestTask(t *testing.T) {
 			// Add more messages than any reasonable channel buffer to verify no deadlock.
 			const n = 1000
 			for range n {
-				tk.addMessage(t.Context(), &agent.TextMessage{Text: "msg"})
+				tk.addMessage(t.Context(), &agent.TextMessage{Text: "msg"}, false)
 			}
 
 			history, ch, unsub := tk.Subscribe(t.Context())
@@ -78,7 +78,7 @@ func TestTask(t *testing.T) {
 		})
 		t.Run("MultipleListeners", func(t *testing.T) {
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
-			tk.addMessage(t.Context(), &agent.SystemMessage{MessageType: "system", Subtype: "init"})
+			tk.addMessage(t.Context(), &agent.SystemMessage{MessageType: "system", Subtype: "init"}, false)
 
 			// Start two subscribers.
 			h1, ch1, unsub1 := tk.Subscribe(t.Context())
@@ -92,7 +92,7 @@ func TestTask(t *testing.T) {
 			}
 
 			// Send a live message — both channels should receive it.
-			tk.addMessage(t.Context(), &agent.TextMessage{Text: "live"})
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "live"}, false)
 
 			timeout := time.After(time.Second)
 			for i, ch := range []<-chan agent.Message{ch1, ch2} {
@@ -114,7 +114,7 @@ func TestTask(t *testing.T) {
 
 			// Send a live message after subscribing.
 			msg := &agent.TextMessage{Text: "live"}
-			tk.addMessage(t.Context(), msg)
+			tk.addMessage(t.Context(), msg, false)
 
 			timeout := time.After(time.Second)
 			select {
@@ -139,15 +139,15 @@ func TestTask(t *testing.T) {
 			// Simulate: agent entered plan mode, wrote a plan, exited.
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "EnterPlanMode",
-			})
+			}, false)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu2", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`),
-			})
+			}, false)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu3", Name: "ExitPlanMode",
-			})
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			}, false)
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 
 			snap := tk.Snapshot()
 			if snap.PlanContent != "the plan" {
@@ -192,7 +192,7 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"step 1\nstep 2\n"}`),
-			})
+			}, false)
 			if snap := tk.Snapshot(); snap.PlanContent != "step 1\nstep 2\n" {
 				t.Fatalf("PlanContent = %q after Write, want %q", snap.PlanContent, "step 1\nstep 2\n")
 			}
@@ -200,7 +200,7 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu2", Name: "Edit",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","old_string":"step 2","new_string":"step 2 (revised)\nstep 3"}`),
-			})
+			}, false)
 			snap := tk.Snapshot()
 			if snap.PlanContent != "step 1\nstep 2 (revised)\nstep 3\n" {
 				t.Errorf("PlanContent = %q after Edit, want %q", snap.PlanContent, "step 1\nstep 2 (revised)\nstep 3\n")
@@ -212,11 +212,11 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"TODO\nTODO\n"}`),
-			})
+			}, false)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu2", Name: "Edit",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","old_string":"TODO","new_string":"DONE","replace_all":true}`),
-			})
+			}, false)
 			snap := tk.Snapshot()
 			if snap.PlanContent != "DONE\nDONE\n" {
 				t.Errorf("PlanContent = %q after replace_all Edit, want %q", snap.PlanContent, "DONE\nDONE\n")
@@ -228,12 +228,12 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`),
-			})
+			}, false)
 			// Edit a non-plan file — planContent must be unchanged.
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu2", Name: "Edit",
 				Input: json.RawMessage(`{"file_path":"/home/user/src/main.go","old_string":"foo","new_string":"bar"}`),
-			})
+			}, false)
 			snap := tk.Snapshot()
 			if snap.PlanContent != "the plan" {
 				t.Errorf("PlanContent = %q after non-plan Edit, want %q", snap.PlanContent, "the plan")
@@ -247,11 +247,11 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"original plan"}`),
-			})
+			}, false)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu2", Name: "ExitPlanMode",
-			})
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			}, false)
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 
 			// Attach a live session.
 			cmd := exec.Command("cat")
@@ -277,11 +277,11 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu3", Name: "Edit",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","old_string":"original plan","new_string":"updated plan with error handling"}`),
-			})
+			}, false)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu4", Name: "ExitPlanMode",
-			})
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			}, false)
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 
 			snap := tk.Snapshot()
 			if snap.PlanContent != "updated plan with error handling" {
@@ -379,7 +379,7 @@ func TestTask(t *testing.T) {
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			result := &agent.ResultMessage{MessageType: "result"}
-			tk.addMessage(t.Context(), result)
+			tk.addMessage(t.Context(), result, false)
 			if tk.GetState() != StateWaiting {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateWaiting)
 			}
@@ -391,9 +391,9 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.AskMessage{
 				ToolUseID: "ask1",
 				Questions: []agent.AskQuestion{{Question: "which?"}},
-			})
+			}, false)
 			// Now add a result message — should transition to StateAsking.
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 			if tk.GetState() != StateAsking {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateAsking)
 			}
@@ -405,14 +405,14 @@ func TestTask(t *testing.T) {
 			// machine must scan all messages in the turn.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
-			tk.addMessage(t.Context(), &agent.TextMessage{Text: "I need to ask you something."})
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "I need to ask you something."}, false)
 			tk.addMessage(t.Context(), &agent.AskMessage{
 				ToolUseID: "ask1",
 				Questions: []agent.AskQuestion{{Question: "which?"}},
-			})
+			}, false)
 			// Final partial snapshot: text-only, no tool_use.
-			tk.addMessage(t.Context(), &agent.TextMessage{Text: "I need to ask you something."})
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "I need to ask you something."}, false)
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 			if tk.GetState() != StateAsking {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateAsking)
 			}
@@ -423,7 +423,7 @@ func TestTask(t *testing.T) {
 			// state should transition back to running.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateWaiting)
-			tk.addMessage(t.Context(), &agent.TextMessage{Text: "output"})
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "output"}, false)
 			if tk.GetState() != StateRunning {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateRunning)
 			}
@@ -431,7 +431,7 @@ func TestTask(t *testing.T) {
 		t.Run("ToolUseMessageTransitionsAskingToRunning", func(t *testing.T) {
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateAsking)
-			tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "tu1", Name: "Read"})
+			tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "tu1", Name: "Read"}, false)
 			if tk.GetState() != StateRunning {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateRunning)
 			}
@@ -445,11 +445,11 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.AskMessage{
 				ToolUseID: "ask1",
 				Questions: []agent.AskQuestion{{Question: "which?"}},
-			})
+			}, false)
 			// Simulate watchSession setting Waiting before ResultMessage
 			// is processed by the dispatch goroutine.
 			tk.SetState(StateWaiting)
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 			if tk.GetState() != StateAsking {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateAsking)
 			}
@@ -461,11 +461,11 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`),
-			})
+			}, false)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu2", Name: "ExitPlanMode",
-			})
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			}, false)
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 			if tk.GetState() != StateHasPlan {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateHasPlan)
 			}
@@ -477,15 +477,15 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`),
-			})
+			}, false)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu2", Name: "ExitPlanMode",
-			})
+			}, false)
 			tk.addMessage(t.Context(), &agent.AskMessage{
 				ToolUseID: "ask1",
 				Questions: []agent.AskQuestion{{Question: "which?"}},
-			})
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			}, false)
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 			if tk.GetState() != StateAsking {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateAsking)
 			}
@@ -496,8 +496,8 @@ func TestTask(t *testing.T) {
 			tk.SetState(StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "ExitPlanMode",
-			})
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			}, false)
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 			if tk.GetState() != StateWaiting {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateWaiting)
 			}
@@ -510,9 +510,9 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan A"}`),
-			})
+			}, false)
 			exitMsg := &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"}
-			tk.addMessage(t.Context(), exitMsg)
+			tk.addMessage(t.Context(), exitMsg, false)
 			if exitMsg.PlanContent != "plan A" {
 				t.Errorf("ExitPlanMode.PlanContent = %q, want %q", exitMsg.PlanContent, "plan A")
 			}
@@ -525,21 +525,21 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan v1"}`),
-			})
+			}, false)
 			exitMsg1 := &agent.ToolUseMessage{ToolUseID: "tu2", Name: "ExitPlanMode"}
-			tk.addMessage(t.Context(), exitMsg1)
+			tk.addMessage(t.Context(), exitMsg1, false)
 			if exitMsg1.PlanContent != "plan v1" {
 				t.Fatalf("exitMsg1.PlanContent = %q before update, want %q", exitMsg1.PlanContent, "plan v1")
 			}
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 
 			// Agent updates the plan.
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu3", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan v2"}`),
-			})
+			}, false)
 			exitMsg2 := &agent.ToolUseMessage{ToolUseID: "tu4", Name: "ExitPlanMode"}
-			tk.addMessage(t.Context(), exitMsg2)
+			tk.addMessage(t.Context(), exitMsg2, false)
 			if exitMsg1.PlanContent != "" {
 				t.Errorf("exitMsg1.PlanContent = %q, want empty (superseded by plan v2)", exitMsg1.PlanContent)
 			}
@@ -551,7 +551,7 @@ func TestTask(t *testing.T) {
 			// TextMessage while HasPlan → Running.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateHasPlan)
-			tk.addMessage(t.Context(), &agent.TextMessage{Text: "output"})
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "output"}, false)
 			if tk.GetState() != StateRunning {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateRunning)
 			}
@@ -562,7 +562,7 @@ func TestTask(t *testing.T) {
 			for _, state := range []State{StatePending, StateBranching, StateProvisioning, StateStarting, StatePurging, StateFailed, StatePurged} {
 				tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 				tk.SetState(state)
-				tk.addMessage(t.Context(), &agent.TextMessage{Text: "output"})
+				tk.addMessage(t.Context(), &agent.TextMessage{Text: "output"}, false)
 				if tk.GetState() != state {
 					t.Errorf("state %v changed to %v; want unchanged", state, tk.GetState())
 				}
@@ -581,7 +581,7 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.DiffStatMessage{
 				MessageType: "caic_diff_stat",
 				DiffStat:    ds,
-			})
+			}, false)
 			got := tk.LiveDiffStat()
 			if len(got) != 2 {
 				t.Fatalf("LiveDiffStat len = %d, want 2", len(got))
@@ -593,7 +593,7 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.DiffStatMessage{
 				MessageType: "caic_diff_stat",
 				DiffStat:    agent.DiffStat{{Path: "new.go", Added: 1, Deleted: 0}},
-			})
+			}, false)
 			got = tk.LiveDiffStat()
 			if len(got) != 1 || got[0].Path != "new.go" {
 				t.Errorf("LiveDiffStat after update = %+v", got)
@@ -606,7 +606,7 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ResultMessage{
 				MessageType: "result",
 				DiffStat:    agent.DiffStat{{Path: "a.go", Added: 5, Deleted: 2}},
-			})
+			}, false)
 			got := tk.LiveDiffStat()
 			if len(got) != 1 || got[0].Path != "a.go" || got[0].Added != 5 {
 				t.Errorf("LiveDiffStat = %+v, want [{a.go 5 2}]", got)
@@ -717,11 +717,11 @@ func TestTask(t *testing.T) {
 		tk.addMessage(t.Context(), &agent.ResultMessage{
 			MessageType: "result",
 			Usage:       agent.Usage{InputTokens: 100, OutputTokens: 50, CacheReadInputTokens: 10},
-		})
+		}, false)
 		tk.addMessage(t.Context(), &agent.ResultMessage{
 			MessageType: "result",
 			Usage:       agent.Usage{InputTokens: 200, OutputTokens: 80, CacheCreationInputTokens: 30},
-		})
+		}, false)
 		_, _, _, usage, lastUsage := tk.LiveStats()
 		if usage.InputTokens != 300 {
 			t.Errorf("InputTokens = %d, want 300", usage.InputTokens)
@@ -786,7 +786,7 @@ func TestTask(t *testing.T) {
 			TotalCostUSD: 10.0,
 			NumTurns:     3,
 			DurationMs:   5000,
-		})
+		}, false)
 		tk.ClearMessages(t.Context())
 		tk.SetState(StateRunning)
 		// Session 2: TotalCostUSD = $5.00.
@@ -795,7 +795,7 @@ func TestTask(t *testing.T) {
 			TotalCostUSD: 5.0,
 			NumTurns:     2,
 			DurationMs:   3000,
-		})
+		}, false)
 		costUSD, numTurns, duration, _, _ := tk.LiveStats()
 		if costUSD != 15.0 {
 			t.Errorf("costUSD = %v, want 15.0", costUSD)
@@ -817,17 +817,17 @@ func TestTask(t *testing.T) {
 			MessageType: "result",
 			NumTurns:    1,
 			DurationMs:  946943,
-		})
+		}, false)
 		tk.addMessage(t.Context(), &agent.ResultMessage{
 			MessageType: "result",
 			NumTurns:    1,
 			DurationMs:  5278,
-		})
+		}, false)
 		tk.addMessage(t.Context(), &agent.ResultMessage{
 			MessageType: "result",
 			NumTurns:    1,
 			DurationMs:  214500,
-		})
+		}, false)
 		_, numTurns, duration, _, _ := tk.LiveStats()
 		if numTurns != 3 {
 			t.Errorf("numTurns = %d, want 3", numTurns)
@@ -848,7 +848,7 @@ func TestTask(t *testing.T) {
 			MessageType:  "result",
 			TotalCostUSD: 75.0,
 			NumTurns:     1,
-		})
+		}, false)
 		tk.ClearMessages(t.Context())
 		tk.SetState(StateRunning)
 		// Session 2: $75.
@@ -856,7 +856,7 @@ func TestTask(t *testing.T) {
 			MessageType:  "result",
 			TotalCostUSD: 75.0,
 			NumTurns:     1,
-		})
+		}, false)
 		tk.ClearMessages(t.Context())
 		tk.SetState(StateRunning)
 		// Session 3: $75.
@@ -864,7 +864,7 @@ func TestTask(t *testing.T) {
 			MessageType:  "result",
 			TotalCostUSD: 75.0,
 			NumTurns:     1,
-		})
+		}, false)
 		costUSD, numTurns, _, _, _ := tk.LiveStats()
 		if costUSD != 225.0 {
 			t.Errorf("costUSD = %v, want 225.0 (three sessions × $75)", costUSD)
@@ -942,7 +942,7 @@ func TestTask(t *testing.T) {
 				InputTokens:          100_000,
 				CacheReadInputTokens: 10_000_000,
 			},
-		})
+		}, false)
 		costUSD, _, _, _, _ := tk.LiveStats()
 		if costUSD != 16.50 { // $1.50 (reported) + $15.00 (cache read surcharge)
 			t.Errorf("costUSD = %v, want 16.50 (cache reads must be added to TotalCostUSD)", costUSD)
@@ -974,9 +974,9 @@ func TestTask(t *testing.T) {
 
 		t.Run("Live", func(t *testing.T) {
 			tk := newTask()
-			tk.addMessage(t.Context(), result1)
-			tk.addMessage(t.Context(), compact)
-			tk.addMessage(t.Context(), result2)
+			tk.addMessage(t.Context(), result1, false)
+			tk.addMessage(t.Context(), compact, false)
+			tk.addMessage(t.Context(), result2, false)
 			costUSD, numTurns, duration, _, _ := tk.LiveStats()
 			if costUSD != 15.0 {
 				t.Errorf("costUSD = %v, want 15.0", costUSD)
@@ -1013,11 +1013,11 @@ func TestTask(t *testing.T) {
 			// Simulate an agent entering plan mode and writing a plan file.
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "EnterPlanMode",
-			})
+			}, false)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu2", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`),
-			})
+			}, false)
 			snap := tk.Snapshot()
 			if !snap.InPlanMode {
 				t.Fatal("InPlanMode = false before ClearMessages, want true")
@@ -1048,11 +1048,11 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`),
-			})
+			}, false)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu2", Name: "ExitPlanMode",
-			})
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			}, false)
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 
 			// User clicks "Clear and execute plan".
 			tk.ClearMessages(t.Context())
@@ -1061,15 +1061,15 @@ func TestTask(t *testing.T) {
 			// Agent re-enters plan mode during execution.
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu3", Name: "EnterPlanMode",
-			})
+			}, false)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu4", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"rewritten plan"}`),
-			})
+			}, false)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu5", Name: "ExitPlanMode",
-			})
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			}, false)
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 
 			snap := tk.Snapshot()
 			if snap.PlanContent != "" {
@@ -1088,9 +1088,9 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`),
-			})
-			tk.addMessage(t.Context(), exitMsg)
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			}, false)
+			tk.addMessage(t.Context(), exitMsg, false)
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 			if exitMsg.PlanContent != "the plan" {
 				t.Fatalf("exitMsg.PlanContent = %q before ClearMessages, want %q", exitMsg.PlanContent, "the plan")
 			}
@@ -1109,23 +1109,23 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu1", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"plan"}`),
-			})
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			}, false)
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 
 			// Restart.
 			tk.ClearMessages(t.Context())
 			tk.SetState(StateRunning)
 			// Turn completes without plan.
-			tk.addMessage(t.Context(), &agent.TextMessage{Text: "done"})
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "done"}, false)
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 
 			// Suppression lifted — next turn can set plan.
 			tk.SetState(StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
 				ToolUseID: "tu2", Name: "Write",
 				Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"fresh plan"}`),
-			})
-			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"})
+			}, false)
+			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 
 			snap := tk.Snapshot()
 			if snap.PlanContent != "fresh plan" {

@@ -387,7 +387,7 @@ func TestRunner(t *testing.T) {
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh := r.startMessageDispatch(t.Context(), tk)
+			msgCh := r.startMessageDispatch(t.Context(), tk, false)
 
 			rm := &agent.ResultMessage{MessageType: "result"}
 			msgCh <- rm
@@ -424,7 +424,7 @@ func TestRunner(t *testing.T) {
 					_, ch, unsub := tk.Subscribe(t.Context())
 					defer unsub()
 
-					msgCh := r.startMessageDispatch(t.Context(), tk)
+					msgCh := r.startMessageDispatch(t.Context(), tk, false)
 
 					// Send a ToolUseMessage with a mutating tool.
 					toolID := "tool_edit_1"
@@ -473,7 +473,7 @@ func TestRunner(t *testing.T) {
 			_, ch, unsub := tk.Subscribe(t.Context())
 			defer unsub()
 
-			msgCh := r.startMessageDispatch(t.Context(), tk)
+			msgCh := r.startMessageDispatch(t.Context(), tk, false)
 
 			toolID := "tool_read_1"
 			msgCh <- &agent.ToolUseMessage{
@@ -591,7 +591,7 @@ func TestRunner(t *testing.T) {
 		tk.addMessage(t.Context(), &agent.ToolUseMessage{
 			ToolUseID: "tu1", Name: "Write",
 			Input: json.RawMessage(`{"file_path":"/home/user/.claude/plans/p.md","content":"the plan"}`),
-		})
+		}, false)
 		if snap := tk.Snapshot(); snap.PlanContent != "the plan" {
 			t.Fatalf("PlanContent = %q before restart, want %q", snap.PlanContent, "the plan")
 		}

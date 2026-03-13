@@ -3048,9 +3048,13 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		"repo", ri.RelPath, "ctr", c.Name, "br", branch,
 		"relay", relayAlive, "state", t.GetState(), "sess", t.GetSessionID())
 
-	// Regenerate title async — relay may have new conversation data since the
-	// log was written. The fallback title is already set above.
-	go t.GenerateTitle(s.ctx) //nolint:contextcheck // fire-and-forget; must outlive adoption
+	// Only regenerate title if a new turn was completed since the log was
+	// written (relay captured ResultMessages beyond what the log has).
+	// Count results in the restored messages; if the relay has more than the
+	// log, a turn happened while the server was down and the title is stale.
+	if needsTitleRegen(t, lt) {
+		go t.GenerateTitle(s.ctx) //nolint:contextcheck // fire-and-forget; must outlive adoption
+	}
 
 	// Auto-reconnect in background: relay alive → attach; relay dead
 	// → restart relay via --resume (requires a session ID).
@@ -3063,7 +3067,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		slog.Debug("container", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "st", strategy)
 		go func() {
 			tlog := slog.With("repo", ri.RelPath, "br", branch, "ctr", t.Container)
-			h, err := runner.Reconnect(ctx, t)
+			h, err := runner.Reconnect(ctx, t, true)
 			if err != nil {
 				tlog.Warn("auto-reconnect failed", "st", strategy, "err", err)
 				s.notifyTaskChange()
@@ -3099,6 +3103,34 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 			"state", t.GetState())
 	}
 	return nil
+}
+
+// needsTitleRegen reports whether the adopted task needs an LLM title
+// regeneration. It returns true when no usable title exists or when the
+// relay captured more completed turns (ResultMessages) than the log file,
+// indicating a turn finished while the server was down.
+func needsTitleRegen(t *task.Task, lt *task.LoadedTask) bool {
+	if lt == nil || lt.Title == "" {
+		return true // no saved title — must generate
+	}
+	// Load log messages to count completed turns the title was based on.
+	logResults := 0
+	if err := lt.LoadMessages(); err == nil {
+		logResults = countResultMessages(lt.Msgs)
+	}
+	restoredResults := countResultMessages(t.Messages())
+	return restoredResults > logResults
+}
+
+// countResultMessages counts the number of ResultMessages in msgs.
+func countResultMessages(msgs []agent.Message) int {
+	n := 0
+	for _, m := range msgs {
+		if _, ok := m.(*agent.ResultMessage); ok {
+			n++
+		}
+	}
+	return n
 }
 
 // cleanupTask runs runner.Cleanup exactly once per task (guarded by

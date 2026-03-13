@@ -109,7 +109,7 @@ func (w *provisioningWriter) Write(p []byte) (int, error) {
 		line := strings.TrimSpace(string(w.buf[:i]))
 		w.buf = w.buf[i+1:]
 		if line != "" {
-			w.t.addMessage(w.ctx, &agent.LogMessage{Line: line})
+			w.t.addMessage(w.ctx, &agent.LogMessage{Line: line}, false)
 		}
 	}
 	return len(p), nil
@@ -191,7 +191,7 @@ func (r *Runner) Init(ctx context.Context) error {
 //   - --resume fallback: always transitions to StateRunning since a new agent
 //     process is started.
 //   - All-fail: reverts to StateWaiting.
-func (r *Runner) Reconnect(ctx context.Context, t *Task) (*SessionHandle, error) {
+func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (*SessionHandle, error) {
 	r.initDefaults()
 	if t.HasSession() {
 		return nil, errors.New("session already active")
@@ -203,7 +203,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task) (*SessionHandle, error)
 	// blindly override it to StateRunning for an idle relay.
 	prevState := t.GetState()
 
-	msgCh := r.startMessageDispatch(ctx, t)
+	msgCh := r.startMessageDispatch(ctx, t, skipSideEffects)
 
 	logW, err := r.openLog(t)
 	if err != nil {
@@ -306,7 +306,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 
 	// 2. Start the agent session.
 	t.SetState(StateStarting)
-	msgCh := r.startMessageDispatch(ctx, t)
+	msgCh := r.startMessageDispatch(ctx, t, false)
 	logW, err := r.openLog(t)
 	if err != nil {
 		close(msgCh)
@@ -335,7 +335,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	h := &SessionHandle{Session: session, MsgCh: msgCh, LogW: logW}
 	t.AttachSession(h)
 
-	t.addMessage(ctx, syntheticUserInput(t.InitialPrompt))
+	t.addMessage(ctx, syntheticUserInput(t.InitialPrompt), false)
 	t.SetState(StateRunning)
 	tlog.Info("agent running", "session_dur", time.Since(tSession), "total_startup_dur", time.Since(tStart))
 	return h, nil
@@ -519,7 +519,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	// 2. Reconnect to the agent (attach relay or --resume).
 	t.SetState(StateStarting)
 	tlog.Info("reconnecting after revive", "sess", t.GetSessionID())
-	h, err := r.Reconnect(ctx, t)
+	h, err := r.Reconnect(ctx, t, false)
 	if err != nil {
 		t.SetState(StateFailed)
 		return nil, fmt.Errorf("reconnect after revive: %w", err)
@@ -577,7 +577,7 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 	}
 	tlog := r.log.With("br", primaryBranch, "ctr", t.Container)
 
-	msgCh := r.startMessageDispatch(ctx, t)
+	msgCh := r.startMessageDispatch(ctx, t, false)
 	logW, err := r.openLog(t)
 	if err != nil {
 		close(msgCh)
@@ -601,7 +601,7 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 	h := &SessionHandle{Session: session, MsgCh: msgCh, LogW: logW}
 	t.AttachSession(h)
 	if prompt.Text != "" || len(prompt.Images) > 0 {
-		t.addMessage(ctx, syntheticUserInput(prompt))
+		t.addMessage(ctx, syntheticUserInput(prompt), false)
 		t.SetState(StateRunning)
 	}
 	return h, nil
@@ -864,7 +864,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	// 4. Start new session.
 	t.SetState(StateStarting)
 
-	msgCh := r.startMessageDispatch(ctx, t)
+	msgCh := r.startMessageDispatch(ctx, t, false)
 
 	var restartBranch string
 	if p := t.Primary(); p != nil {
@@ -889,7 +889,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	h := &SessionHandle{Session: session, MsgCh: msgCh, LogW: logW}
 	t.AttachSession(h)
 
-	t.addMessage(ctx, syntheticUserInput(prompt))
+	t.addMessage(ctx, syntheticUserInput(prompt), false)
 
 	t.SetState(StateRunning)
 	tlog.Info("session restarted")
@@ -947,8 +947,10 @@ var mutatingTools = map[string]struct{}{
 // to t.addMessage. For ResultMessages, it fetches from the container first and
 // attaches the diff stat. For tool results following a mutating tool (Edit,
 // Bash, Write, NotebookEdit), it also fetches and emits a DiffStatMessage.
+// When skipSideEffects is true, fetch+diff and title generation are suppressed
+// (used during adoption where these are handled once at the end).
 // Returns the channel for the caller to pass to the agent backend.
-func (r *Runner) startMessageDispatch(ctx context.Context, t *Task) chan agent.Message {
+func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) chan agent.Message {
 	// Capture branch and extra repos outside the goroutine to avoid races.
 	primaryBranch := ""
 	if p := t.Primary(); p != nil {
@@ -966,14 +968,14 @@ func (r *Runner) startMessageDispatch(ctx context.Context, t *Task) chan agent.M
 					pendingMutating[msg.ToolUseID] = struct{}{}
 				}
 			case *agent.ToolResultMessage:
-				if r.Container != nil && r.Dir != "" {
+				if !skipSideEffects && r.Container != nil && r.Dir != "" {
 					if _, ok := pendingMutating[msg.ToolUseID]; ok {
 						delete(pendingMutating, msg.ToolUseID)
 						r.fetchDiffStatBranch(ctx, t, primaryBranch, extraRepos)
 					}
 				}
 			case *agent.ResultMessage:
-				if r.Container != nil && r.Dir != "" {
+				if !skipSideEffects && r.Container != nil && r.Dir != "" {
 					fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 					r.branchMu.Lock()
 					if err := r.Container.Fetch(fetchCtx, append([]md.Repo{{GitRoot: r.Dir, Branch: primaryBranch}}, extraRepos...)); err != nil {
@@ -984,7 +986,7 @@ func (r *Runner) startMessageDispatch(ctx context.Context, t *Task) chan agent.M
 					fetchCancel()
 				}
 			}
-			t.addMessage(ctx, m)
+			t.addMessage(ctx, m, skipSideEffects)
 		}
 	}()
 	return msgCh
@@ -1010,7 +1012,7 @@ func (r *Runner) fetchDiffStatBranch(ctx context.Context, t *Task, branch string
 	t.addMessage(ctx, &agent.DiffStatMessage{
 		MessageType: "caic_diff_stat",
 		DiffStat:    ds,
-	})
+	}, false)
 }
 
 // BranchDiffStat fetches from the container and returns the host-side branch

@@ -562,7 +562,7 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	}
 }
 
-func (t *Task) addMessage(ctx context.Context, m agent.Message) {
+func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.msgs = append(t.msgs, m)
@@ -651,7 +651,9 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message) {
 				t.setState(StateWaiting)
 			}
 		}
-		go t.GenerateTitle(ctx)
+		if !skipTitleGen {
+			go t.GenerateTitle(ctx)
+		}
 	}
 	// Fan out to subscribers (non-blocking).
 	for i := 0; i < len(t.subs); i++ {
@@ -778,7 +780,7 @@ func (t *Task) CloseAndDetachSession() *SessionHandle {
 // stream and resets live stats. Message history is preserved so that SSE
 // subscribers (including reconnecting clients) can see the full timeline.
 func (t *Task) ClearMessages(ctx context.Context) {
-	t.addMessage(ctx, syntheticContextCleared())
+	t.addMessage(ctx, syntheticContextCleared(), false)
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -982,7 +984,7 @@ func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
 	if h == nil {
 		return fmt.Errorf("no active session (state=%s session=%s)", state, sessionStatus)
 	}
-	t.addMessage(ctx, syntheticUserInput(p))
+	t.addMessage(ctx, syntheticUserInput(p), false)
 	return h.Session.Send(p)
 }
 
