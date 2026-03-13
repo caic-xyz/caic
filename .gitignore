@@ -4,6 +4,7 @@
 .npmrc
 coverage.out
 node_modules/
+/emulator*.log
 /package-lock.json
 /test-results/
 /tmp/

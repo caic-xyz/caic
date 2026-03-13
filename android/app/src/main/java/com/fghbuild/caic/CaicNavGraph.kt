@@ -15,14 +15,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -149,39 +149,37 @@ private fun CompactLayout(
 ) {
     NavHost(
         navController = navController,
-        startDestination = Screen.TaskList.route,
+        startDestination = Screen.TaskList,
         modifier = modifier,
     ) {
-        composable(Screen.TaskList.route) {
+        composable<Screen.TaskList> {
             TaskListScreen(
-                onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
+                onNavigateToSettings = { navController.navigate(Screen.Settings) },
                 onNavigateToTask = { taskId ->
-                    navController.navigate(Screen.TaskDetail(taskId).route)
+                    navController.navigate(Screen.TaskDetail(taskId))
                 },
             )
         }
-        composable(Screen.Settings.route) {
+        composable<Screen.Settings> {
             SettingsScreen(
                 onNavigateBack = { navController.popBackStack() },
             )
         }
-        composable(Screen.TaskDetail.ROUTE) { backStackEntry ->
-            val taskId = backStackEntry.arguments?.getString(Screen.TaskDetail.ARG_TASK_ID)
-                ?: return@composable
+        composable<Screen.TaskDetail> {
+            val taskId = it.arguments?.getString(Screen.TaskDetail.ARG_TASK_ID) ?: return@composable
             TaskDetailScreen(
                 taskId = taskId,
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToDiff = {
-                    navController.navigate(Screen.TaskDiff(taskId).route)
+                    navController.navigate(Screen.TaskDiff(taskId))
                 },
                 onNavigateToTask = { newTaskId ->
-                    navController.navigate(Screen.TaskDetail(newTaskId).route)
+                    navController.navigate(Screen.TaskDetail(newTaskId))
                 },
             )
         }
-        composable(Screen.TaskDiff.ROUTE) { backStackEntry ->
-            val taskId = backStackEntry.arguments?.getString(Screen.TaskDiff.ARG_TASK_ID)
-                ?: return@composable
+        composable<Screen.TaskDiff> {
+            val taskId = it.arguments?.getString(Screen.TaskDiff.ARG_TASK_ID) ?: return@composable
             DiffScreen(
                 taskId = taskId,
                 onNavigateBack = { navController.popBackStack() },
@@ -199,13 +197,13 @@ private fun WideLayout(
     Row(modifier = modifier) {
         TaskListScreen(
             onNavigateToSettings = {
-                navController.navigate(Screen.Settings.route) {
-                    popUpTo(Screen.TaskList.route)
+                navController.navigate(Screen.Settings) {
+                    popUpTo(Screen.TaskList)
                 }
             },
             onNavigateToTask = { taskId ->
-                navController.navigate(Screen.TaskDetail(taskId).route) {
-                    popUpTo(Screen.TaskList.route)
+                navController.navigate(Screen.TaskDetail(taskId)) {
+                    popUpTo(Screen.TaskList)
                 }
             },
             modifier = Modifier
@@ -215,12 +213,12 @@ private fun WideLayout(
         VerticalDivider()
         NavHost(
             navController = navController,
-            startDestination = Screen.TaskList.route,
+            startDestination = Screen.TaskList,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxHeight(),
         ) {
-            composable(Screen.TaskList.route) {
+            composable<Screen.TaskList> {
                 // Placeholder when no task is selected in wide mode.
                 Box(
                     modifier = Modifier.fillMaxSize(),
@@ -229,32 +227,30 @@ private fun WideLayout(
                     Text("Select a task", style = MaterialTheme.typography.bodyLarge)
                 }
             }
-            composable(Screen.Settings.route) {
+            composable<Screen.Settings> {
                 SettingsScreen(
                     onNavigateBack = { navController.popBackStack() },
                 )
             }
-            composable(Screen.TaskDetail.ROUTE) { backStackEntry ->
-                val taskId = backStackEntry.arguments?.getString(Screen.TaskDetail.ARG_TASK_ID)
-                    ?: return@composable
+            composable<Screen.TaskDetail> {
+                val taskId = it.arguments?.getString(Screen.TaskDetail.ARG_TASK_ID) ?: return@composable
                 TaskDetailScreen(
                     taskId = taskId,
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToDiff = {
-                        navController.navigate(Screen.TaskDiff(taskId).route) {
-                            popUpTo(Screen.TaskList.route)
+                        navController.navigate(Screen.TaskDiff(taskId)) {
+                            popUpTo(Screen.TaskList)
                         }
                     },
                     onNavigateToTask = { newTaskId ->
-                        navController.navigate(Screen.TaskDetail(newTaskId).route) {
-                            popUpTo(Screen.TaskList.route)
+                        navController.navigate(Screen.TaskDetail(newTaskId)) {
+                            popUpTo(Screen.TaskList)
                         }
                     },
                 )
             }
-            composable(Screen.TaskDiff.ROUTE) { backStackEntry ->
-                val taskId = backStackEntry.arguments?.getString(Screen.TaskDiff.ARG_TASK_ID)
-                    ?: return@composable
+            composable<Screen.TaskDiff> {
+                val taskId = it.arguments?.getString(Screen.TaskDiff.ARG_TASK_ID) ?: return@composable
                 DiffScreen(
                     taskId = taskId,
                     onNavigateBack = { navController.popBackStack() },
