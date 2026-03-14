@@ -696,6 +696,8 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("GET /api/v1/server/repos", handle(s.listRepos))
 	apiMux.HandleFunc("POST /api/v1/server/repos", handle(s.cloneRepo))
 	apiMux.HandleFunc("GET /api/v1/server/repos/branches", s.handleListRepoBranches)
+	apiMux.HandleFunc("POST /api/v1/bot/fix-ci", handle(s.botFixCI))
+	apiMux.HandleFunc("POST /api/v1/bot/fix-pr", handle(s.botFixPR))
 	apiMux.HandleFunc("GET /api/v1/tasks", handle(s.listTasks))
 	apiMux.HandleFunc("POST /api/v1/tasks", handle(s.createTask))
 	apiMux.HandleFunc("GET /api/v1/tasks/{id}/raw_events", s.handleTaskRawEvents)

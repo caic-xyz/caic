@@ -1,7 +1,7 @@
 // TaskDetail renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
-import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents, getTaskToolInput, getTaskCILog, createTask } from "./api";
+import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents, getTaskToolInput, getTaskCILog, createTask, botFixPR } from "./api";
 import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck } from "@sdk/types.gen";
 import { groupMessages, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "./grouping";
 import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "./formatting";
@@ -459,19 +459,24 @@ export default function TaskDetail(props: Props) {
 
   async function handleFixCI() {
     if (fixingCI()) return;
-    const failedCheck = props.ciChecks?.find((c) => c.conclusion !== "success" && c.conclusion !== "neutral" && c.conclusion !== "skipped");
-    if (!failedCheck) return;
     setFixingCI(true);
     setActionError(null);
     try {
-      const ciLog = await getTaskCILog(props.taskId, String(failedCheck.jobID));
-      const prompt = `CI failed on GitHub Actions for step ${JSON.stringify(ciLog.stepName)}, with log:\n\`\`\`\n${ciLog.log}\n\`\`\``;
-      const resp = await createTask({
-        initialPrompt: { text: prompt },
-        repos: props.repo ? [{ name: props.repo, ...(props.baseBranch ? { baseBranch: props.baseBranch } : {}) }] : undefined,
-        harness: props.harness,
-        ...(props.model ? { model: props.model } : {}),
-      });
+      let resp: { id: string };
+      if (props.forgePR) {
+        resp = await botFixPR({ taskId: props.taskId });
+      } else {
+        const failedCheck = props.ciChecks?.find((c) => c.conclusion !== "success" && c.conclusion !== "neutral" && c.conclusion !== "skipped");
+        if (!failedCheck) { setFixingCI(false); return; }
+        const ciLog = await getTaskCILog(props.taskId, String(failedCheck.jobID));
+        const prompt = `CI failed on GitHub Actions for step ${JSON.stringify(ciLog.stepName)}, with log:\n\`\`\`\n${ciLog.log}\n\`\`\``;
+        resp = await createTask({
+          initialPrompt: { text: prompt },
+          repos: props.repo ? [{ name: props.repo, ...(props.baseBranch ? { baseBranch: props.baseBranch } : {}) }] : undefined,
+          harness: props.harness,
+          ...(props.model ? { model: props.model } : {}),
+        });
+      }
       navigate(`/tasks/${resp.id}`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown error";

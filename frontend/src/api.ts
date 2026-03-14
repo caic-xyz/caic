@@ -14,6 +14,8 @@ export const {
   listRepos,
   cloneRepo,
   listRepoBranches,
+  botFixCI,
+  botFixPR,
   listTasks,
   createTask,
   taskRawEvents,

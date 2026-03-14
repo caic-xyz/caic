@@ -593,6 +593,20 @@ export interface CreateTaskReq {
   display?: boolean;
 }
 /**
+ * BotFixCIReq is the request body for POST /api/v1/bot/fix-ci.
+ * The server fetches CI logs, builds a prompt, and creates a fix task.
+ */
+export interface BotFixCIReq {
+  repo: string;
+}
+/**
+ * BotFixPRReq is the request body for POST /api/v1/bot/fix-pr.
+ * The server fetches CI logs for the task's PR, builds a prompt, and creates a fix task.
+ */
+export interface BotFixPRReq {
+  taskId: string;
+}
+/**
  * InputReq is the request body for POST /api/v1/tasks/{id}/input.
  */
 export interface InputReq {

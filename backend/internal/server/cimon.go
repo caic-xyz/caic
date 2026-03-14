@@ -11,12 +11,14 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/maruel/ksid"
 )
 
 // repoCIState holds the live default-branch CI status for one repo.
@@ -368,6 +370,131 @@ func (s *Server) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONResponse(w, &v1.CILogResp{StepName: check.Name, Log: jobLog}, nil)
+}
+
+// botFixCI creates a task to fix failing CI on a repo's default branch.
+// It fetches CI logs via the forge, builds a rich prompt using bot.FailureSummary,
+// and creates a new agent task — the same path as the automated maybeAutoFix.
+func (s *Server) botFixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateTaskResp, error) {
+	info := s.repoInfoFor(req.Repo)
+	if info == nil {
+		return nil, dto.BadRequest("repo not found")
+	}
+	f := s.forgeForInfo(ctx, info)
+	if f == nil {
+		return nil, dto.BadRequest("no forge token configured for this repo")
+	}
+
+	s.mu.Lock()
+	state := s.repoCIStatus[req.Repo]
+	s.mu.Unlock()
+
+	if state.Status != forge.CIStatusFailure {
+		return nil, dto.BadRequest("no CI failure on default branch")
+	}
+
+	// Convert stored DTO checks back to forge.Check for bot.FailureSummary.
+	checks := make([]forge.Check, len(state.Checks))
+	for i := range state.Checks {
+		c := &state.Checks[i]
+		checks[i] = forge.Check{
+			Name:        c.Name,
+			Owner:       c.Owner,
+			Repo:        c.Repo,
+			RunID:       c.RunID,
+			JobID:       c.JobID,
+			Status:      forge.CheckRunStatus(c.Status),
+			Conclusion:  forge.CheckRunConclusion(c.Conclusion),
+			QueuedAt:    c.QueuedAt,
+			StartedAt:   c.StartedAt,
+			CompletedAt: c.CompletedAt,
+		}
+	}
+	result := forgecache.Result{Status: forge.CIStatusFailure, Checks: checks}
+	summary := bot.FailureSummary(ctx, f, s.provider, result)
+
+	var ownerID string
+	if u, ok := auth.UserFromContext(ctx); ok {
+		ownerID = u.ID
+	}
+	taskIDStr, err := s.CreateTask(ctx, bot.TaskRequest{Repo: info.RelPath, Prompt: summary, OwnerID: ownerID})
+	if err != nil {
+		return nil, fmt.Errorf("create task: %w", err)
+	}
+	taskID, err := ksid.Parse(taskIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("parse task id: %w", err)
+	}
+	return &v1.CreateTaskResp{ID: taskID}, nil
+}
+
+// botFixPR creates a task to fix failing CI on a task's PR branch.
+// It fetches CI logs via the forge using the task's existing CI checks,
+// builds a rich prompt using bot.FailureSummary, and creates a new agent task —
+// the same path as the automated maybeAutoFix.
+func (s *Server) botFixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.CreateTaskResp, error) {
+	s.mu.Lock()
+	entry, ok := s.tasks[req.TaskID]
+	s.mu.Unlock()
+	if !ok {
+		return nil, dto.NotFound("task")
+	}
+	t := entry.task
+	snap := t.Snapshot()
+	if snap.ForgePR == 0 {
+		return nil, dto.BadRequest("task has no associated PR")
+	}
+	primary := t.Primary()
+	if primary == nil {
+		return nil, dto.BadRequest("task has no primary repo")
+	}
+	info := s.repoInfoFor(primary.Name)
+	if info == nil {
+		return nil, dto.BadRequest("repo not found")
+	}
+	f := s.forgeForInfo(ctx, info)
+	if f == nil {
+		return nil, dto.BadRequest("no forge token configured for this repo")
+	}
+
+	checks := snap.CIChecks
+	if len(checks) == 0 {
+		// CI monitoring may not have run (e.g. no GitHub App, terminal task).
+		// Fetch fresh check runs from the forge using the PR branch HEAD SHA.
+		sha, shaErr := f.GetDefaultBranchSHA(ctx, snap.ForgeOwner, snap.ForgeRepo, primary.Branch)
+		if shaErr != nil {
+			return nil, fmt.Errorf("get branch SHA: %w", shaErr)
+		}
+		runs, runsErr := f.GetCheckRuns(ctx, snap.ForgeOwner, snap.ForgeRepo, sha)
+		if runsErr != nil {
+			return nil, fmt.Errorf("get check runs: %w", runsErr)
+		}
+		result, _ := bot.EvaluateCheckRuns(snap.ForgeOwner, snap.ForgeRepo, runs)
+		checks = result.Checks
+	}
+	result := forgecache.Result{Status: forge.CIStatusFailure, Checks: checks}
+	summary := bot.FailureSummary(ctx, f, s.provider, result)
+
+	prURL := f.PRURL(snap.ForgeOwner, snap.ForgeRepo, snap.ForgePR)
+	prompt := fmt.Sprintf("CI failed on PR #%d", snap.ForgePR)
+	if prURL != "" {
+		prompt += fmt.Sprintf(" (%s)", prURL)
+	}
+	prompt += fmt.Sprintf(". Please fix the failing CI checks on branch %q and push the fix:\n\n%s", primary.Branch, summary)
+
+	var ownerID string
+	if u, ok := auth.UserFromContext(ctx); ok {
+		ownerID = u.ID
+	}
+	taskIDStr, err := s.CreateTask(ctx, bot.TaskRequest{Repo: info.RelPath, Prompt: prompt, OwnerID: ownerID})
+	if err != nil {
+		return nil, fmt.Errorf("create task: %w", err)
+	}
+	taskID, err := ksid.Parse(taskIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("parse task id: %w", err)
+	}
+	return &v1.CreateTaskResp{ID: taskID}, nil
 }
 
 // pollRepoCIOnce fetches the default branch CI status for a single repo.

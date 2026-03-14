@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,9 +24,20 @@ import (
 // It implements forge.Forge.
 type Client struct {
 	HTTPClient *http.Client
+	// baseURL overrides the GitHub API base URL. Empty means https://api.github.com.
+	// Used by tests to point at a fake server.
+	baseURL string
 }
 
 var _ forge.Forge = (*Client)(nil)
+
+// apiBase returns the GitHub API base URL, using the override if set.
+func (c *Client) apiBase() string {
+	if c.baseURL != "" {
+		return c.baseURL
+	}
+	return "https://api.github.com"
+}
 
 // NewClient returns a Client that authenticates with token and throttles/retries
 // via throttle. The transport chain is: Header → Retry → throttle.
@@ -253,21 +265,43 @@ func (c *Client) GetCheckRuns(ctx context.Context, owner, repo, sha string) ([]f
 // failingOnly is true, the log is trimmed to only the steps that contain
 // ##[error] markers; if no such steps are found the full log is returned.
 func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64, failingOnly bool) (string, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/jobs/%d/logs", owner, repo, jobID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	apiURL := fmt.Sprintf("%s/repos/%s/%s/actions/jobs/%d/logs", c.apiBase(), owner, repo, jobID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
 		return "", err
 	}
-	resp, err := c.HTTPClient.Do(req)
+	// Don't auto-follow the redirect: the GitHub API returns 302 to a pre-signed
+	// blob storage URL, and our transport injects Authorization on every request.
+	// Sending the GitHub token to Azure's pre-signed URL causes a 403.
+	noFollow := *c.HTTPClient
+	noFollow.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := noFollow.Do(req)
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("github get job log: status %d: %s", resp.StatusCode, data)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		return "", fmt.Errorf("github get job log: expected redirect, got status %d", resp.StatusCode)
 	}
-	log, err := forge.ReadLog(resp.Body)
+	location := resp.Header.Get("Location")
+	if location == "" {
+		return "", errors.New("github get job log: redirect has no Location header")
+	}
+	// Fetch the pre-signed URL without any auth headers.
+	blobReq, err := http.NewRequestWithContext(ctx, http.MethodGet, location, http.NoBody)
+	if err != nil {
+		return "", err
+	}
+	blobResp, err := http.DefaultClient.Do(blobReq)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = blobResp.Body.Close() }()
+	if blobResp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(blobResp.Body)
+		return "", fmt.Errorf("github get job log: status %d: %s", blobResp.StatusCode, data)
+	}
+	log, err := forge.ReadLog(blobResp.Body)
 	if err != nil {
 		return "", err
 	}

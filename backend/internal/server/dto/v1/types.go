@@ -239,6 +239,18 @@ type CreateTaskReq struct {
 	Display       bool       `json:"display,omitempty"`
 }
 
+// BotFixCIReq is the request body for POST /api/v1/bot/fix-ci.
+// The server fetches CI logs, builds a prompt, and creates a fix task.
+type BotFixCIReq struct {
+	Repo string `json:"repo"`
+}
+
+// BotFixPRReq is the request body for POST /api/v1/bot/fix-pr.
+// The server fetches CI logs for the task's PR, builds a prompt, and creates a fix task.
+type BotFixPRReq struct {
+	TaskID string `json:"taskId"`
+}
+
 // InputReq is the request body for POST /api/v1/tasks/{id}/input.
 type InputReq struct {
 	Prompt Prompt `json:"prompt"`

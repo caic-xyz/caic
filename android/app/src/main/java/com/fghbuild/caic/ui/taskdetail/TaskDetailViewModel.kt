@@ -10,6 +10,7 @@ import kotlinx.serialization.json.JsonElement
 import com.caic.sdk.v1.TodoItem
 import com.caic.sdk.v1.HarnessInfo
 import com.caic.sdk.v1.ImageData
+import com.caic.sdk.v1.BotFixPRReq
 import com.caic.sdk.v1.CreateTaskReq
 import com.caic.sdk.v1.InputReq
 import com.caic.sdk.v1.Prompt
@@ -378,20 +379,24 @@ class TaskDetailViewModel @Inject constructor(
             try {
                 val client = apiClient()
                 val task = state.value.task
-                val failedCheck = task?.ciChecks?.firstOrNull { check ->
-                    check.conclusion != "success" && check.conclusion != "neutral" && check.conclusion != "skipped"
-                } ?: error("no failed CI check found")
-                val ciLog = client.getTaskCILog(taskId, failedCheck.jobID.toString())
-                val prompt = "CI failed on GitHub Actions for step \"${ciLog.stepName}\", with log:\n```\n${ciLog.log}\n```"
-                val primaryRepo = task?.repos?.firstOrNull()
-                val resp = client.createTask(
-                    CreateTaskReq(
-                        initialPrompt = Prompt(text = prompt),
-                        repos = primaryRepo?.let { listOf(RepoSpec(name = it.name, baseBranch = it.baseBranch)) },
-                        harness = task?.harness ?: "",
-                        model = task?.model,
-                    ),
-                )
+                val resp = if ((task?.forgePR ?: 0) > 0) {
+                    client.botFixPR(BotFixPRReq(taskId = taskId))
+                } else {
+                    val failedCheck = task?.ciChecks?.firstOrNull { check ->
+                        check.conclusion != "success" && check.conclusion != "neutral" && check.conclusion != "skipped"
+                    } ?: error("no failed CI check found")
+                    val ciLog = client.getTaskCILog(taskId, failedCheck.jobID.toString())
+                    val prompt = "CI failed on GitHub Actions for step \"${ciLog.stepName}\", with log:\n```\n${ciLog.log}\n```"
+                    val primaryRepo = task?.repos?.firstOrNull()
+                    client.createTask(
+                        CreateTaskReq(
+                            initialPrompt = Prompt(text = prompt),
+                            repos = primaryRepo?.let { listOf(RepoSpec(name = it.name, baseBranch = it.baseBranch)) },
+                            harness = task?.harness ?: "",
+                            model = task?.model,
+                        ),
+                    )
+                }
                 onSuccess(resp.id)
             } catch (e: Exception) {
                 showActionError("fix CI failed: ${e.message}")

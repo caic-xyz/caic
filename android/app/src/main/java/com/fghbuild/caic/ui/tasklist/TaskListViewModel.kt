@@ -4,6 +4,7 @@ package com.fghbuild.caic.ui.tasklist
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.caic.sdk.v1.ApiClient
+import com.caic.sdk.v1.BotFixCIReq
 import com.caic.sdk.v1.CloneRepoReq
 import com.caic.sdk.v1.Config
 import com.caic.sdk.v1.CreateTaskReq
@@ -416,30 +417,12 @@ class TaskListViewModel @Inject constructor(
 
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
     fun fixCI(repoPath: String) {
-        val form = _formState.value
-        val repo = form.repos.find { it.path == repoPath } ?: return
-        val nonPassing = setOf("failure", "cancelled", "timed_out", "action_required", "stale")
-        val failing = repo.defaultBranchChecks
-            ?.filter { it.conclusion in nonPassing }
-            .orEmpty()
-        val names = failing.joinToString(", ") { it.name }
-        val fixPrompt = buildString {
-            append("CI is failing on the default branch of $repoPath.")
-            append(" Please fix the failing CI checks and push to the default branch:\n\n")
-            append("Failing checks: ${names.ifEmpty { "(unknown)" }}")
-        }
-        _formState.value = form.copy(submitting = true, error = null)
+        _formState.value = _formState.value.copy(submitting = true, error = null)
         viewModelScope.launch {
             try {
                 val url = settingsRepository.settings.value.serverURL
                 val client = ApiClient(url, tokenProvider = { settingsRepository.settings.value.authToken })
-                client.createTask(
-                    CreateTaskReq(
-                        initialPrompt = Prompt(text = fixPrompt),
-                        repos = listOf(RepoSpec(name = repoPath)),
-                        harness = form.selectedHarness,
-                    )
-                )
+                client.botFixCI(BotFixCIReq(repo = repoPath))
                 _formState.value = _formState.value.copy(submitting = false)
             } catch (e: Exception) {
                 _formState.value = _formState.value.copy(

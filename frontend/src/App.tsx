@@ -3,7 +3,7 @@ import { createEffect, createSignal, For, Show, Switch, Match, onCleanup } from 
 import { Portal } from "solid-js/web";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp } from "@sdk/types.gen";
-import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, listRepoBranches, createTask, cloneRepo, getUsage, stopTask, purgeTask, reviveTask } from "./api";
+import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, listRepoBranches, createTask, cloneRepo, getUsage, stopTask, purgeTask, reviveTask, botFixCI } from "./api";
 import { useAuth } from "./AuthContext";
 import Login from "./Login";
 import TaskDetail from "./TaskDetail";
@@ -898,14 +898,7 @@ export default function App() {
           }}
           autoFixCI={autoFixCI}
           onFixCI={(repoPath) => {
-            const repo = repos().find((r) => r.path === repoPath);
-            if (!repo) return;
-            const nonPassing = new Set(["failure", "cancelled", "timed_out", "action_required", "stale"]);
-            const failing = repo.defaultBranchChecks?.filter((c) => nonPassing.has(c.conclusion)) ?? [];
-            const names = failing.map((c) => c.name).join(", ");
-            const fixPrompt = `CI is failing on the default branch of ${repoPath}. Please fix the failing CI checks and push to the default branch:\n\nFailing checks: ${names || "(unknown)"}`;
-            const harness = selectedHarness();
-            createTask({ initialPrompt: { text: fixPrompt }, repos: [{ name: repoPath }], harness }).then((data) => {
+            botFixCI({ repo: repoPath }).then((data) => {
               navigate(taskPath(data.id, repoPath, "", `Fix CI: ${repoPath}`));
             });
           }}

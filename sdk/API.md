@@ -26,6 +26,13 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | GET | `/api/v1/auth/me` |  | `UserResp` |
 | POST | `/api/v1/auth/logout` |  | `StatusResp` |
 
+## Bot
+
+| Method | Path | Request | Response |
+|--------|------|---------|----------|
+| POST | `/api/v1/bot/fix-ci` | `BotFixCIReq` | `CreateTaskResp` |
+| POST | `/api/v1/bot/fix-pr` | `BotFixPRReq` | `CreateTaskResp` |
+
 ## Tasks
 
 | Method | Path | Request | Response |
@@ -213,6 +220,25 @@ All errors return:
 |-------|------|----------|
 | `branches` | `string[]` | yes |
 
+### BotFixCIReq
+
+| Field | Type | Required |
+|-------|------|----------|
+| `repo` | `string` | yes |
+
+### CreateTaskResp
+
+| Field | Type | Required |
+|-------|------|----------|
+| `status` | `string` | yes |
+| `id` | `string` | yes |
+
+### BotFixPRReq
+
+| Field | Type | Required |
+|-------|------|----------|
+| `taskId` | `string` | yes |
+
 ### TaskRepo
 
 | Field | Type | Required |
@@ -308,13 +334,6 @@ All errors return:
 | `tailscale` | `boolean` |  |
 | `usb` | `boolean` |  |
 | `display` | `boolean` |  |
-
-### CreateTaskResp
-
-| Field | Type | Required |
-|-------|------|----------|
-| `status` | `string` | yes |
-| `id` | `string` | yes |
 
 ### EventInit
 

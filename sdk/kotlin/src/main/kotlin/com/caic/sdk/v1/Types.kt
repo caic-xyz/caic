@@ -148,6 +148,15 @@ data class CloneRepoReq(
 data class RepoBranchesResp(val branches: List<String>)
 
 @Serializable
+data class BotFixCIReq(val repo: String)
+
+@Serializable
+data class CreateTaskResp(val status: String, val id: String)
+
+@Serializable
+data class BotFixPRReq(val taskId: String)
+
+@Serializable
 data class TaskRepo(
     val name: String,
     val baseBranch: String? = null,
@@ -226,9 +235,6 @@ data class CreateTaskReq(
     val usb: Boolean? = null,
     val display: Boolean? = null,
 )
-
-@Serializable
-data class CreateTaskResp(val status: String, val id: String)
 
 @Serializable
 data class EventInit(

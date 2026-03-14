@@ -114,6 +114,22 @@ func (r *WebFetchReq) Validate() error {
 	return nil
 }
 
+// Validate checks that the repo field is provided.
+func (r *BotFixCIReq) Validate() error {
+	if r.Repo == "" {
+		return dto.BadRequest("repo is required")
+	}
+	return nil
+}
+
+// Validate checks that the taskId field is provided.
+func (r *BotFixPRReq) Validate() error {
+	if r.TaskID == "" {
+		return dto.BadRequest("taskId is required")
+	}
+	return nil
+}
+
 // Validate is a no-op; all settings values are accepted.
 func (r *UpdatePreferencesReq) Validate() error { return nil }
 

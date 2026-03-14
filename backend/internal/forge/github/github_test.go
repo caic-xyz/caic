@@ -2,9 +2,53 @@
 package github
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+// NewClientForTest creates a Client pointing at baseURL instead of api.github.com.
+func NewClientForTest(token, baseURL string) *Client {
+	c := NewClient(token, http.DefaultTransport)
+	c.baseURL = baseURL
+	return c
+}
+
+func TestGetJobLog(t *testing.T) {
+	t.Run("follows redirect without Authorization header", func(t *testing.T) {
+		logContent := "##[group]Run tests\n##[error]FAIL: TestFoo\n##[endgroup]"
+
+		// Blob storage server: must NOT receive an Authorization header.
+		blobSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "" {
+				http.Error(w, "unexpected Authorization header on pre-signed URL", http.StatusForbidden)
+				return
+			}
+			_, _ = w.Write([]byte(logContent))
+		}))
+		defer blobSrv.Close()
+
+		// GitHub API server: returns 302 to the blob server.
+		apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") == "" {
+				http.Error(w, "missing Authorization", http.StatusUnauthorized)
+				return
+			}
+			http.Redirect(w, r, blobSrv.URL+"/log", http.StatusFound)
+		}))
+		defer apiSrv.Close()
+
+		client := NewClientForTest("token", apiSrv.URL)
+		log, err := client.GetJobLog(t.Context(), "owner", "repo", 42, false)
+		if err != nil {
+			t.Fatalf("GetJobLog failed: %v", err)
+		}
+		if !strings.Contains(log, "FAIL: TestFoo") {
+			t.Errorf("unexpected log: %q", log)
+		}
+	})
+}
 
 func TestExtractGitHubSteps(t *testing.T) {
 	t.Run("extracts failing step", func(t *testing.T) {
