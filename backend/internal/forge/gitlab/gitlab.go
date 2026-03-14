@@ -322,6 +322,12 @@ func (c *Client) MergePR(ctx context.Context, owner, repo string, prNumber int, 
 	return nil
 }
 
+// GetJobLabels returns nil for GitLab; the commit statuses API does not
+// expose runner labels.
+func (c *Client) GetJobLabels(_ context.Context, _, _ string, _ int64) ([]string, error) {
+	return nil, nil
+}
+
 // GetJobLog fetches the log for a GitLab CI job, capped at 100 MB.
 // failingOnly is accepted but has no effect: GitLab's plain-text trace API
 // does not include reliable step-level markers.

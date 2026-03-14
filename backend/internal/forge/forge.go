@@ -74,6 +74,7 @@ type CheckRun struct {
 	Name        string
 	Status      CheckRunStatus
 	Conclusion  CheckRunConclusion
+	Labels      []string  // Runner labels (e.g. ["ubuntu-latest"]); nil until fetched.
 	QueuedAt    time.Time // When the check was created/queued. Zero if unavailable.
 	StartedAt   time.Time // When execution began. Zero if not yet started.
 	CompletedAt time.Time // When execution finished. Zero if still running.
@@ -90,6 +91,7 @@ type Check struct {
 	JobID       int64              `json:"jobID"`
 	Status      CheckRunStatus     `json:"status"`
 	Conclusion  CheckRunConclusion `json:"conclusion"`
+	Labels      []string           `json:"labels,omitempty"`
 	QueuedAt    time.Time          `json:"queuedAt,omitzero"`
 	StartedAt   time.Time          `json:"startedAt,omitzero"`
 	CompletedAt time.Time          `json:"completedAt,omitzero"`
@@ -105,6 +107,7 @@ func CheckFromRun(owner, repo string, r *CheckRun) Check {
 		JobID:       r.JobID,
 		Status:      r.Status,
 		Conclusion:  r.Conclusion,
+		Labels:      r.Labels,
 		QueuedAt:    r.QueuedAt,
 		StartedAt:   r.StartedAt,
 		CompletedAt: r.CompletedAt,
@@ -151,6 +154,10 @@ type Forge interface {
 	// the failing step(s) if the forge's log format supports step-level
 	// markers; otherwise the full log is returned.
 	GetJobLog(ctx context.Context, owner, repo string, jobID int64, failingOnly bool) (string, error)
+	// GetJobLabels returns the runner labels for a CI job (e.g.
+	// ["ubuntu-latest"]). Returns nil without error when the forge does
+	// not expose runner metadata.
+	GetJobLabels(ctx context.Context, owner, repo string, jobID int64) ([]string, error)
 	// MergePR squash-merges a pull/merge request with the given commit title
 	// and message. Returns an error if the merge cannot be completed (e.g.
 	// merge conflict, branch-protection rule, or already merged).

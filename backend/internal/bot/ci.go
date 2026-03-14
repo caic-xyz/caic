@@ -54,7 +54,7 @@ func InterimCIStatus(runs []forge.CheckRun) forge.CIStatus {
 // via the LLM provider, and formats the result with job URLs and log excerpts.
 // provider may be nil (LLM summarisation is skipped).
 func FailureSummary(ctx context.Context, f forge.Forge, provider genai.Provider, result forgecache.Result) string {
-	logs := fetchFailingJobLogs(ctx, f, provider, result)
+	logs := enrichFailingChecks(ctx, f, provider, result.Checks)
 
 	var sb strings.Builder
 	numFailed := 0
@@ -69,11 +69,15 @@ func FailureSummary(ctx context.Context, f forge.Forge, provider genai.Provider,
 		if !c.Conclusion.IsFailed() {
 			continue
 		}
-		if jobURL := f.CIJobURL(c.Owner, c.Repo, c.RunID, c.JobID); jobURL != "" {
-			fmt.Fprintf(&sb, "- %s (%s): %s\n", c.Name, c.Conclusion, jobURL)
-		} else {
-			fmt.Fprintf(&sb, "- %s (%s)\n", c.Name, c.Conclusion)
+		// Header: job name, conclusion, optional runner labels, optional URL.
+		header := fmt.Sprintf("- %s (%s)", c.Name, c.Conclusion)
+		if len(c.Labels) > 0 {
+			header += fmt.Sprintf(" [%s]", strings.Join(c.Labels, ", "))
 		}
+		if jobURL := f.CIJobURL(c.Owner, c.Repo, c.RunID, c.JobID); jobURL != "" {
+			header += ": " + jobURL
+		}
+		sb.WriteString(header + "\n")
 		if logText := logs[c.JobID]; logText != "" {
 			fmt.Fprintf(&sb, "  Log:\n  ```\n%s\n  ```\n", logText)
 		}
@@ -82,20 +86,31 @@ func FailureSummary(ctx context.Context, f forge.Forge, provider genai.Provider,
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-// fetchFailingJobLogs fetches the log for each failing check, extracts the
-// relevant step content, and summarises via LLM if the result is still large.
-func fetchFailingJobLogs(ctx context.Context, f forge.Forge, provider genai.Provider, result forgecache.Result) map[int64]string {
+// enrichFailingChecks fetches the log and runner labels for each failing
+// check. Labels are stored on the Check (mutating the slice in place); logs
+// are returned keyed by JobID. The LLM provider (may be nil) is used to
+// summarise logs that exceed 16 KB.
+func enrichFailingChecks(ctx context.Context, f forge.Forge, provider genai.Provider, checks []forge.Check) map[int64]string {
 	const summarizeAbove = 16_000   // ask LLM to summarize logs larger than this
 	const summaryMaxChars = 100_000 // truncate input to LLM
 	logs := make(map[int64]string)
-	for i := range result.Checks {
-		c := &result.Checks[i]
+	for i := range checks {
+		c := &checks[i]
 		if !c.Conclusion.IsFailed() || c.JobID == 0 {
 			continue
 		}
+		// Fetch runner labels (best-effort).
+		if len(c.Labels) == 0 {
+			if labels, err := f.GetJobLabels(ctx, c.Owner, c.Repo, c.JobID); err == nil {
+				c.Labels = labels
+			} else {
+				slog.Warn("enrichFailingChecks: get labels", "job", c.JobID, "check", c.Name, "err", err)
+			}
+		}
+		// Fetch log.
 		logText, err := f.GetJobLog(ctx, c.Owner, c.Repo, c.JobID, true)
 		if err != nil {
-			slog.Warn("fetchFailingJobLogs: get log", "job", c.JobID, "check", c.Name, "err", err)
+			slog.Warn("enrichFailingChecks: get log", "job", c.JobID, "check", c.Name, "err", err)
 			continue
 		}
 		// Summarize with LLM when the log is still large.

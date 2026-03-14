@@ -82,6 +82,11 @@ type checkRunsResponse struct {
 	} `json:"check_runs"`
 }
 
+// jobResponse is the relevant subset of the GitHub Actions job detail response.
+type jobResponse struct {
+	Labels []string `json:"labels"`
+}
+
 // searchPRsResponse is the relevant subset of the GitHub search PRs response.
 type searchPRsResponse struct {
 	TotalCount int `json:"total_count"`
@@ -270,6 +275,31 @@ func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64,
 		log = extractGitHubSteps(log)
 	}
 	return log, nil
+}
+
+// GetJobLabels returns the runner labels for a GitHub Actions job by fetching
+// the job details endpoint. Labels typically include the runner OS (e.g.
+// "ubuntu-latest").
+func (c *Client) GetJobLabels(ctx context.Context, owner, repo string, jobID int64) ([]string, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/jobs/%d", owner, repo, jobID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("github get job: status %d: %s", resp.StatusCode, data)
+	}
+	var r jobResponse
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return nil, err
+	}
+	return r.Labels, nil
 }
 
 // PRURL returns the GitHub pull request URL.

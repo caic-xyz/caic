@@ -64,6 +64,9 @@ func (f *stubForge) Name() string                            { return "stub" }
 func (f *stubForge) GetJobLog(_ context.Context, _, _ string, _ int64, _ bool) (string, error) {
 	return "", nil
 }
+func (f *stubForge) GetJobLabels(_ context.Context, _, _ string, _ int64) ([]string, error) {
+	return nil, nil
+}
 func (f *stubForge) MergePR(_ context.Context, _, _ string, _ int, _, _ string) error {
 	return nil
 }
