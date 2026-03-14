@@ -2,8 +2,12 @@
 package bot
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"strings"
+
+	"github.com/maruel/genai"
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
@@ -45,9 +49,13 @@ func InterimCIStatus(runs []forge.CheckRun) forge.CIStatus {
 	return forge.CIStatusPending
 }
 
-// FailureSummary builds the agent-facing text summary for a CI failure result,
-// listing each failing check with its conclusion and job URL where available.
-func FailureSummary(f forge.Forge, result forgecache.Result) string {
+// FailureSummary builds the agent-facing text summary for a CI failure result.
+// It fetches the log for each failing check, optionally summarises large logs
+// via the LLM provider, and formats the result with job URLs and log excerpts.
+// provider may be nil (LLM summarisation is skipped).
+func FailureSummary(ctx context.Context, f forge.Forge, provider genai.Provider, result forgecache.Result) string {
+	logs := fetchFailingJobLogs(ctx, f, provider, result)
+
 	var sb strings.Builder
 	numFailed := 0
 	for i := range result.Checks {
@@ -66,7 +74,61 @@ func FailureSummary(f forge.Forge, result forgecache.Result) string {
 		} else {
 			fmt.Fprintf(&sb, "- %s (%s)\n", c.Name, c.Conclusion)
 		}
+		if logText := logs[c.JobID]; logText != "" {
+			fmt.Fprintf(&sb, "  Log:\n  ```\n%s\n  ```\n", logText)
+		}
 	}
 	sb.WriteString("\nPlease fix the failures above.")
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// fetchFailingJobLogs fetches the log for each failing check, extracts the
+// relevant step content, and summarises via LLM if the result is still large.
+func fetchFailingJobLogs(ctx context.Context, f forge.Forge, provider genai.Provider, result forgecache.Result) map[int64]string {
+	const summarizeAbove = 16_000   // ask LLM to summarize logs larger than this
+	const summaryMaxChars = 100_000 // truncate input to LLM
+	logs := make(map[int64]string)
+	for i := range result.Checks {
+		c := &result.Checks[i]
+		if !c.Conclusion.IsFailed() || c.JobID == 0 {
+			continue
+		}
+		logText, err := f.GetJobLog(ctx, c.Owner, c.Repo, c.JobID, true)
+		if err != nil {
+			slog.Warn("fetchFailingJobLogs: get log", "job", c.JobID, "check", c.Name, "err", err)
+			continue
+		}
+		// Summarize with LLM when the log is still large.
+		if provider != nil && len(logText) > summarizeAbove {
+			if summary := summarizeCILog(ctx, provider, c.Name, logText, summaryMaxChars); summary != "" {
+				logs[c.JobID] = summary
+				continue
+			}
+		}
+		logs[c.JobID] = logText
+	}
+	return logs
+}
+
+const ciLogSummaryPrompt = `You are a CI log analyst. Extract only the meaningful error information from the CI log below.
+Return a concise summary that a developer needs to fix the failure: the actual error messages, failing test names, compiler errors, or command failures.
+Strip setup noise, download progress, timing lines, and successful steps.
+Return plain text, no markdown.`
+
+// summarizeCILog asks the LLM to extract the meaningful error from a large CI log.
+// Returns empty string on failure so the caller can fall back to the raw log.
+func summarizeCILog(ctx context.Context, provider genai.Provider, checkName, logText string, maxChars int) string {
+	if len(logText) > maxChars {
+		logText = logText[len(logText)-maxChars:]
+	}
+	input := fmt.Sprintf("CI check %q failed. Log:\n%s", checkName, logText)
+	res, err := provider.GenSync(ctx,
+		genai.Messages{genai.NewTextMessage(input)},
+		&genai.GenOptionText{SystemPrompt: ciLogSummaryPrompt},
+	)
+	if err != nil {
+		slog.Warn("summarizeCILog: LLM call failed", "check", checkName, "err", err)
+		return ""
+	}
+	return res.String()
 }

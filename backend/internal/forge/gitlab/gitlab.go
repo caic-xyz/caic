@@ -322,9 +322,10 @@ func (c *Client) MergePR(ctx context.Context, owner, repo string, prNumber int, 
 	return nil
 }
 
-// GetJobLog fetches the log for a GitLab CI job and returns the last
-// maxBytes bytes of its content. maxBytes <= 0 means no limit.
-func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64, maxBytes int) (string, error) {
+// GetJobLog fetches the log for a GitLab CI job, capped at 100 MB.
+// failingOnly is accepted but has no effect: GitLab's plain-text trace API
+// does not include reliable step-level markers.
+func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64, _ bool) (string, error) {
 	apiURL := fmt.Sprintf("%s/projects/%s/jobs/%d/trace", apiBase, projectID(owner, repo), jobID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, http.NoBody)
 	if err != nil {
@@ -335,18 +336,9 @@ func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64,
 		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
 	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("gitlab get job log: status %d: %s", resp.StatusCode, data)
 	}
-	if maxBytes > 0 && len(data) > maxBytes {
-		data = data[len(data)-maxBytes:]
-		if i := bytes.IndexByte(data, '\n'); i >= 0 {
-			data = data[i+1:]
-		}
-	}
-	return string(data), nil
+	return forge.ReadLog(resp.Body)
 }

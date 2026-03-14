@@ -24,24 +24,35 @@ type Result struct {
 	CachedAt time.Time      `json:"cachedAt"`
 }
 
+// maxAge is the TTL for both cached results and notification records.
+const maxAge = 7 * 24 * time.Hour
+
 // Cache is a thread-safe persistent store of terminal CI results keyed by
-// "owner/repo/sha". Pending states are never cached.
+// "owner/repo/sha". Pending states are never cached. The cache also tracks
+// which (taskID, sha) pairs have already been notified to avoid duplicate
+// messages to agents. Both maps are pruned on load: entries older than maxAge
+// are discarded.
 type Cache struct {
 	mu   sync.Mutex
 	path string // empty → in-memory only
 	data map[string]Result
+	// notified tracks taskID+sha pairs that have already had their CI result
+	// sent to the agent. Value is the time the notification was recorded.
+	// Persisted so dedup survives restarts.
+	notified map[string]time.Time
 }
 
 // fileData is the on-disk format.
 type fileData struct {
-	Results map[string]Result `json:"results"`
+	Results  map[string]Result    `json:"results"`
+	Notified map[string]time.Time `json:"notified,omitempty"`
 }
 
 // Open loads or creates a Cache backed by path. If path is empty, the cache
 // operates in-memory only (no persistence). Returns a functional empty cache
 // if the file does not exist or cannot be parsed.
 func Open(path string) (*Cache, error) {
-	c := &Cache{path: path, data: make(map[string]Result)}
+	c := &Cache{path: path, data: make(map[string]Result), notified: make(map[string]time.Time)}
 	if path == "" {
 		return c, nil
 	}
@@ -57,8 +68,18 @@ func Open(path string) (*Cache, error) {
 		// Corrupted — start fresh rather than failing startup.
 		return c, nil //nolint:nilerr // intentional: treat corrupt cache as empty
 	}
-	if f.Results != nil {
-		c.data = f.Results
+	cutoff := time.Now().Add(-maxAge)
+	for k, r := range f.Results {
+		if !r.CachedAt.IsZero() && r.CachedAt.Before(cutoff) {
+			continue
+		}
+		c.data[k] = r
+	}
+	for k, t := range f.Notified {
+		if !t.IsZero() && t.Before(cutoff) {
+			continue
+		}
+		c.notified[k] = t
 	}
 	return c, nil
 }
@@ -76,7 +97,29 @@ func (c *Cache) Get(owner, repo, sha string) (Result, bool) {
 func (c *Cache) Put(owner, repo, sha string, r Result) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	r.CachedAt = time.Now()
 	c.data[cacheKey(owner, repo, sha)] = r
+	if c.path == "" {
+		return nil
+	}
+	return c.save()
+}
+
+// IsNotified reports whether a CI result has already been sent to the agent
+// for the given task and SHA.
+func (c *Cache) IsNotified(taskID, sha string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.notified[taskID+"/"+sha]
+	return ok
+}
+
+// MarkNotified records that a CI result has been sent to the agent for the
+// given task and SHA, and persists to disk.
+func (c *Cache) MarkNotified(taskID, sha string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.notified[taskID+"/"+sha] = time.Now()
 	if c.path == "" {
 		return nil
 	}
@@ -89,7 +132,7 @@ func cacheKey(owner, repo, sha string) string {
 
 // save writes the cache to disk atomically. Must be called with c.mu held.
 func (c *Cache) save() error {
-	raw, err := json.MarshalIndent(fileData{Results: c.data}, "", "  ")
+	raw, err := json.MarshalIndent(fileData{Results: c.data, Notified: c.notified}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("forgecache marshal: %w", err)
 	}

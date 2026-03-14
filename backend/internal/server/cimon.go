@@ -202,11 +202,20 @@ func (s *Server) autoResync(ctx context.Context, entry *taskEntry, f forge.Forge
 //   - CI success: squash-merge the PR via the forge API, then notify the agent.
 func (s *Server) applyMonitorCIResult(ctx context.Context, entry *taskEntry, f forge.Forge, owner, repo, sha string, result forgecache.Result) {
 	t := entry.task
+
+	// Dedup: skip if we already notified this task for this SHA.
+	if s.ciCache.IsNotified(t.ID.String(), sha) {
+		slog.Info("applyMonitorCIResult: already notified, skipping", "task", t.ID, "sha", sha[:min(7, len(sha))])
+		t.SetCIStatus(result.Status, result.Checks)
+		s.notifyTaskChange()
+		return
+	}
+
 	ciStatus := forge.CIStatusSuccess
 	var summary string
 	if result.Status == forge.CIStatusFailure {
 		ciStatus = forge.CIStatusFailure
-		summary = bot.FailureSummary(f, result)
+		summary = bot.FailureSummary(ctx, f, s.provider, result)
 	} else {
 		// CI passed — attempt a squash merge.
 		snap := t.Snapshot()
@@ -240,6 +249,9 @@ func (s *Server) applyMonitorCIResult(ctx context.Context, entry *taskEntry, f f
 				s.maybeAutoFix(t, f, summary)
 			}
 		}
+	}
+	if err := s.ciCache.MarkNotified(t.ID.String(), sha); err != nil {
+		slog.Warn("applyMonitorCIResult: mark notified", "task", t.ID, "err", err)
 	}
 	// On CI failure: wait for the agent to finish its fix turn, then
 	// auto-sync the branch and restart CI monitoring.
@@ -344,8 +356,7 @@ func (s *Server) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	const maxLogBytes = 8192
-	jobLog, logErr := f.GetJobLog(r.Context(), check.Owner, check.Repo, jobID, maxLogBytes)
+	jobLog, logErr := f.GetJobLog(r.Context(), check.Owner, check.Repo, jobID, false)
 	if logErr != nil {
 		slog.Warn("getTaskCILog: fetch job log", "task", t.ID, "jobID", jobID, "err", logErr)
 		jobLog = "(log unavailable: " + logErr.Error() + ")"

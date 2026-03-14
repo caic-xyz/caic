@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -145,9 +146,11 @@ type Forge interface {
 	BranchCompareURL(remoteURL, branch string) string
 	// Name returns the forge name for display (e.g. "GitHub", "GitLab").
 	Name() string
-	// GetJobLog fetches the log for a CI job and returns the last maxBytes bytes.
-	// maxBytes <= 0 means no limit.
-	GetJobLog(ctx context.Context, owner, repo string, jobID int64, maxBytes int) (string, error)
+	// GetJobLog fetches the log for a CI job, capped at 100 MB. When
+	// failingOnly is true, the returned log is trimmed to the content of
+	// the failing step(s) if the forge's log format supports step-level
+	// markers; otherwise the full log is returned.
+	GetJobLog(ctx context.Context, owner, repo string, jobID int64, failingOnly bool) (string, error)
 	// MergePR squash-merges a pull/merge request with the given commit title
 	// and message. Returns an error if the merge cannot be completed (e.g.
 	// merge conflict, branch-protection rule, or already merged).
@@ -179,6 +182,18 @@ func ParseRemoteURL(rawURL string) (kind Kind, owner, repo string, err error) {
 		return KindGitLab, m[1], m[2], nil
 	}
 	return "", "", "", fmt.Errorf("unrecognized forge remote URL: %q", rawURL)
+}
+
+// MaxLogBytes is the hard cap on how much log data we read from a forge API.
+const MaxLogBytes = 100 << 20 // 100 MB
+
+// ReadLog reads the full response body from r, capped at MaxLogBytes.
+func ReadLog(r io.Reader) (string, error) {
+	data, err := io.ReadAll(io.LimitReader(r, MaxLogBytes))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // RemoteURL returns the URL of the "origin" remote for the git repository at dir.

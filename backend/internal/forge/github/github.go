@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/maruel/roundtrippers"
@@ -243,9 +244,10 @@ func (c *Client) GetCheckRuns(ctx context.Context, owner, repo, sha string) ([]f
 	return runs, nil
 }
 
-// GetJobLog fetches the log for a GitHub Actions job and returns the last
-// maxBytes bytes of its content. maxBytes <= 0 means no limit.
-func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64, maxBytes int) (string, error) {
+// GetJobLog fetches the log for a GitHub Actions job, capped at 100 MB. When
+// failingOnly is true, the log is trimmed to only the steps that contain
+// ##[error] markers; if no such steps are found the full log is returned.
+func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64, failingOnly bool) (string, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/actions/jobs/%d/logs", owner, repo, jobID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
@@ -260,18 +262,14 @@ func (c *Client) GetJobLog(ctx context.Context, owner, repo string, jobID int64,
 		data, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("github get job log: status %d: %s", resp.StatusCode, data)
 	}
-	data, err := io.ReadAll(resp.Body)
+	log, err := forge.ReadLog(resp.Body)
 	if err != nil {
 		return "", err
 	}
-	if maxBytes > 0 && len(data) > maxBytes {
-		data = data[len(data)-maxBytes:]
-		// Trim to next line boundary to avoid splitting a log line.
-		if i := bytes.IndexByte(data, '\n'); i >= 0 {
-			data = data[i+1:]
-		}
+	if failingOnly {
+		log = extractGitHubSteps(log)
 	}
-	return string(data), nil
+	return log, nil
 }
 
 // PRURL returns the GitHub pull request URL.
@@ -363,3 +361,58 @@ func (c *Client) PostComment(ctx context.Context, owner, repo string, issueNumbe
 
 // Name returns "GitHub".
 func (c *Client) Name() string { return "GitHub" }
+
+// extractGitHubSteps returns the content of ##[group]…##[endgroup] sections
+// that contain at least one ##[error] line. Falls back to rawLog when no
+// groups or no errors are found.
+func extractGitHubSteps(rawLog string) string {
+	type section struct {
+		header string
+		body   string
+		hasErr bool
+	}
+	var sections []section
+	var cur *section
+	for line := range strings.SplitSeq(rawLog, "\n") {
+		stripped := stripTimestamp(line)
+		switch {
+		case strings.HasPrefix(stripped, "##[group]"):
+			sections = append(sections, section{header: strings.TrimPrefix(stripped, "##[group]")})
+			cur = &sections[len(sections)-1]
+		case strings.HasPrefix(stripped, "##[endgroup]"):
+			cur = nil
+		default:
+			if cur != nil {
+				cur.body += line + "\n"
+				if strings.HasPrefix(stripped, "##[error]") {
+					cur.hasErr = true
+				}
+			}
+		}
+	}
+	// Collect sections that have errors.
+	var sb strings.Builder
+	for i := range sections {
+		if !sections[i].hasErr {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteByte('\n')
+		}
+		fmt.Fprintf(&sb, "Step: %s\n%s", sections[i].header, sections[i].body)
+	}
+	if sb.Len() == 0 {
+		return rawLog
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// stripTimestamp removes the leading ISO-8601 timestamp that GitHub Actions
+// prepends to each log line (e.g. "2024-01-01T00:00:00.1234567Z ").
+func stripTimestamp(line string) string {
+	// Timestamps are exactly 28 chars: "YYYY-MM-DDTHH:MM:SS.fffffffZ "
+	if len(line) > 29 && line[4] == '-' && line[10] == 'T' && line[27] == 'Z' && line[28] == ' ' {
+		return line[29:]
+	}
+	return line
+}

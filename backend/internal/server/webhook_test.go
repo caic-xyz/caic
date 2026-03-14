@@ -61,7 +61,7 @@ func (f *stubForge) CIJobURL(_, _ string, _, _ int64) string { return "" }
 func (f *stubForge) CIHomeURL(_ string) string               { return "" }
 func (f *stubForge) BranchCompareURL(_, _ string) string     { return "" }
 func (f *stubForge) Name() string                            { return "stub" }
-func (f *stubForge) GetJobLog(_ context.Context, _, _ string, _ int64, _ int) (string, error) {
+func (f *stubForge) GetJobLog(_ context.Context, _, _ string, _ int64, _ bool) (string, error) {
 	return "", nil
 }
 func (f *stubForge) MergePR(_ context.Context, _, _ string, _ int, _, _ string) error {
