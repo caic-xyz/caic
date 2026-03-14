@@ -147,7 +147,7 @@ export default function PromptInput(props: Props) {
             onChange={handleFileChange}
           />
           <div class={styles.attachWrap}>
-            <Button type="button" variant="gray" disabled={props.disabled} title="Attach images" onClick={handleAttachClick}>
+            <Button type="button" variant="gray" disabled={props.disabled} title="Attach images" onClick={handleAttachClick} data-testid="attach-images">
               <AttachIcon width="1.2em" height="1.2em" />
             </Button>
             <Show when={menuOpen()}>
@@ -157,7 +157,7 @@ export default function PromptInput(props: Props) {
                   Take photo
                 </button>
                 <Show when={!!navigator.mediaDevices?.getDisplayMedia}>
-                  <button class={styles.menuItem} role="menuitem" onClick={handleScreenshot}>
+                  <button class={styles.menuItem} role="menuitem" onClick={handleScreenshot} data-testid="screenshot-menu-item">
                     <ScreenshotIcon width="1.1em" height="1.1em" />
                     Screenshot
                   </button>

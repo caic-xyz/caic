@@ -85,13 +85,11 @@ test("UI: screenshot capture attaches a thumbnail which is sent and cleared on s
 
   // Scope all input interactions to the task-detail form to avoid ambiguity
   // with the sidebar's prompt-input which also has an "Attach images" button.
-  const detailForm = page
-    .locator("form")
-    .filter({ has: page.getByPlaceholder("Send message to agent...") });
+  const detailForm = page.getByTestId("task-detail-form");
 
   // Open the attach menu and trigger screenshot capture.
-  await detailForm.getByTitle("Attach images").click();
-  await page.getByRole("menuitem", { name: "Screenshot" }).click();
+  await detailForm.getByTestId("attach-images").click();
+  await page.getByTestId("screenshot-menu-item").click();
 
   // A thumbnail (img[alt="attached"]) must appear in the input preview strip.
   // Scope to detailForm so we don't match images in the conversation history,
@@ -101,7 +99,7 @@ test("UI: screenshot capture attaches a thumbnail which is sent and cleared on s
 
   // Send the screenshot together with a text message.
   await detailForm.getByPlaceholder("Send message to agent...").fill("here is a screenshot");
-  await detailForm.getByTitle("Send").click();
+  await detailForm.getByTestId("send-input").click();
 
   // After a successful send the input images are cleared, so the preview-strip
   // thumbnail disappears (the image still appears in the conversation history).

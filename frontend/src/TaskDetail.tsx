@@ -660,7 +660,7 @@ export default function TaskDetail(props: Props) {
       <ProgressPanel messages={messages()} />
 
       <Show when={isActive() || !!pendingAction()}>
-        <form onSubmit={(e) => { e.preventDefault(); sendInput(); }} class={styles.inputForm}>
+        <form onSubmit={(e) => { e.preventDefault(); sendInput(); }} class={styles.inputForm} data-testid="task-detail-form">
           <PromptInput
             ref={(el) => { promptRef = el; }}
             value={props.inputDraft}
@@ -673,7 +673,7 @@ export default function TaskDetail(props: Props) {
             images={props.inputImages}
             onImagesChange={props.onInputImages}
           >
-            <Button type="submit" disabled={sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)} title="Send"><SendIcon width="1.1em" height="1.1em" /></Button>
+            <Button type="submit" disabled={sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)} title="Send" data-testid="send-input"><SendIcon width="1.1em" height="1.1em" /></Button>
             <div class={styles.syncButtonGroup}>
               <Button type="button" variant="gray" loading={pendingAction() === "sync"} disabled={!!pendingAction() || props.taskState === "purging"} onClick={() => doSync(false)} title={`Push to ${props.branch}`}>
                 <Switch fallback={<SyncIcon width="1.1em" height="1.1em" />}>
@@ -947,7 +947,7 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events
                   <Markdown text={plan} />
                 </div>
                 <Show when={props.onClearAndExecutePlan}>
-                  <Button variant="gray" loading={props.pendingAction?.() === "restart"} disabled={!!props.pendingAction?.()} onClick={props.onClearAndExecutePlan}>
+                  <Button variant="gray" loading={props.pendingAction?.() === "restart"} disabled={!!props.pendingAction?.()} onClick={props.onClearAndExecutePlan} data-testid="clear-and-execute-plan">
                     Clear and execute plan
                   </Button>
                 </Show>
@@ -1223,6 +1223,7 @@ function AskQuestionCard(props: { ask: EventAsk; interactive: boolean; answerTex
                       class={selected() ? `${styles.askChip} ${styles.askChipSelected}` : styles.askChip}
                       disabled={!canInteract()}
                       onClick={() => toggleOption(qIdx(), opt.label, q.multiSelect ?? false)}
+                      data-testid={`ask-option-${opt.label}`}
                     >
                       <span class={styles.askChipLabel}>{opt.label}</span>
                       <Show when={opt.description}>
@@ -1254,7 +1255,7 @@ function AskQuestionCard(props: { ask: EventAsk; interactive: boolean; answerTex
         )}
       </For>
       <Show when={canInteract()}>
-        <button class={styles.askSubmit} onClick={() => handleSubmit()}>Submit</button>
+        <button class={styles.askSubmit} onClick={() => handleSubmit()} data-testid="ask-submit">Submit</button>
       </Show>
       <Show when={answered()}>
         <div class={styles.askSubmitted} data-testid="ask-submitted-answer">

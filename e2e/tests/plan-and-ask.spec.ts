@@ -37,14 +37,14 @@ test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, ap
   await waitForTaskState(api, taskId, "has_plan", 20_000);
 
   // The "Clear and execute plan" button must be visible.
-  const clearBtn = page.getByRole("button", { name: "Clear and execute plan" });
+  const clearBtn = page.getByTestId("clear-and-execute-plan");
   await expect(clearBtn).toBeVisible({ timeout: 10_000 });
 
   // The plan content should be rendered (exact match on the markdown list item).
   await expect(page.getByText("Analyze the problem", { exact: true })).toBeVisible();
 
   // Fill in a non-empty prompt so restart doesn't try to read the container plan file.
-  await page.getByPlaceholder("Send message to agent...").fill("execute now");
+  await page.getByTestId("task-detail-form").getByPlaceholder("Send message to agent...").fill("execute now");
 
   // Click the button; the task restarts and settles back to waiting.
   await clearBtn.click();
@@ -70,12 +70,12 @@ test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({
 
   // The question and option chips must be visible.
   await expect(page.getByText("Which approach should I use?")).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByRole("button", { name: "Option A" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Option B" })).toBeVisible();
+  await expect(page.getByTestId("ask-option-Option A")).toBeVisible();
+  await expect(page.getByTestId("ask-option-Option B")).toBeVisible();
 
   // Select Option A and submit.
-  await page.getByRole("button", { name: "Option A" }).click();
-  await page.getByRole("button", { name: "Submit" }).click();
+  await page.getByTestId("ask-option-Option A").click();
+  await page.getByTestId("ask-submit").click();
 
   // Submitted answer should be displayed in the ask-submitted-answer div.
   await expect(page.getByTestId("ask-submitted-answer")).toHaveText("Option A", { timeout: 10_000 });
