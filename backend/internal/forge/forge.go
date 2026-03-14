@@ -194,13 +194,17 @@ func ParseRemoteURL(rawURL string) (kind Kind, owner, repo string, err error) {
 // MaxLogBytes is the hard cap on how much log data we read from a forge API.
 const MaxLogBytes = 100 << 20 // 100 MB
 
-// ReadLog reads the full response body from r, capped at MaxLogBytes.
+// ansiEscape matches ANSI CSI escape sequences (e.g. color codes: ESC [ ... m).
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// ReadLog reads the full response body from r, capped at MaxLogBytes, and
+// strips ANSI escape sequences so the result is plain text.
 func ReadLog(r io.Reader) (string, error) {
 	data, err := io.ReadAll(io.LimitReader(r, MaxLogBytes))
 	if err != nil {
 		return "", err
 	}
-	return string(data), nil
+	return ansiEscape.ReplaceAllString(string(data), ""), nil
 }
 
 // RemoteURL returns the URL of the "origin" remote for the git repository at dir.
