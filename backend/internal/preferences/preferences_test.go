@@ -21,9 +21,9 @@ func TestValidate(t *testing.T) {
 				{Path: "github/foo", BaseBranch: "develop"},
 				{Path: "github/bar"},
 			},
-			Harness:   "claude",
-			Models:    map[string]string{"claude": "opus", "codex": "o3"},
-			BaseImage: "custom:latest",
+			Harness:  "claude",
+			Models:   map[string]string{"claude": "opus", "codex": "o3"},
+			Settings: Settings{BaseImage: "custom:latest"},
 		}
 		if err := p.Validate(); err != nil {
 			t.Fatal(err)
@@ -51,6 +51,45 @@ func TestValidate(t *testing.T) {
 		}
 		if err := p.Validate(); err == nil {
 			t.Fatal("expected error for duplicate repo path")
+		}
+	})
+	t.Run("valid_cache_mappings", func(t *testing.T) {
+		p := &Preferences{
+			Version: 1,
+			Settings: Settings{
+				CacheMappings: []CacheMapping{
+					{HostPath: "/host/a", ContainerPath: "/container/a"},
+				},
+			},
+		}
+		if err := p.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("cache_mapping_empty_host", func(t *testing.T) {
+		p := &Preferences{
+			Version: 1,
+			Settings: Settings{
+				CacheMappings: []CacheMapping{
+					{HostPath: "", ContainerPath: "/container/a"},
+				},
+			},
+		}
+		if err := p.Validate(); err == nil {
+			t.Fatal("expected error for empty hostPath")
+		}
+	})
+	t.Run("cache_mapping_empty_container", func(t *testing.T) {
+		p := &Preferences{
+			Version: 1,
+			Settings: Settings{
+				CacheMappings: []CacheMapping{
+					{HostPath: "/host/a", ContainerPath: ""},
+				},
+			},
+		}
+		if err := p.Validate(); err == nil {
+			t.Fatal("expected error for empty containerPath")
 		}
 	})
 }
@@ -108,9 +147,16 @@ func TestUsers(t *testing.T) {
 				{Path: "github/caic", BaseBranch: "develop"},
 				{Path: "github/other"},
 			},
-			Harness:   "claude",
-			Models:    map[string]string{"claude": "opus"},
-			BaseImage: "custom:latest",
+			Harness: "claude",
+			Models:  map[string]string{"claude": "opus"},
+			Settings: Settings{
+				BaseImage:        "custom:latest",
+				UseDefaultCaches: true,
+				WellKnownCaches:  map[string]bool{"go-mod": true, "npm": false},
+				CacheMappings: []CacheMapping{
+					{HostPath: "/host/cache", ContainerPath: "/container/cache"},
+				},
+			},
 		}
 		if err := s.Update("alice", func(p *Preferences) { *p = want }); err != nil {
 			t.Fatal(err)
@@ -124,8 +170,8 @@ func TestUsers(t *testing.T) {
 		if got.Harness != want.Harness {
 			t.Errorf("harness = %q, want %q", got.Harness, want.Harness)
 		}
-		if got.BaseImage != want.BaseImage {
-			t.Errorf("baseImage = %q, want %q", got.BaseImage, want.BaseImage)
+		if got.Settings.BaseImage != want.Settings.BaseImage {
+			t.Errorf("baseImage = %q, want %q", got.Settings.BaseImage, want.Settings.BaseImage)
 		}
 		if len(got.Repositories) != len(want.Repositories) {
 			t.Fatalf("repos len = %d, want %d", len(got.Repositories), len(want.Repositories))
@@ -137,6 +183,24 @@ func TestUsers(t *testing.T) {
 		}
 		if m := got.Models["claude"]; m != "opus" {
 			t.Errorf("models[claude] = %q, want %q", m, "opus")
+		}
+		if !got.Settings.UseDefaultCaches {
+			t.Error("useDefaultCaches = false, want true")
+		}
+		if len(got.Settings.WellKnownCaches) != 2 {
+			t.Fatalf("wellKnownCaches len = %d, want 2", len(got.Settings.WellKnownCaches))
+		}
+		if !got.Settings.WellKnownCaches["go-mod"] {
+			t.Error("wellKnownCaches[go-mod] = false, want true")
+		}
+		if got.Settings.WellKnownCaches["npm"] {
+			t.Error("wellKnownCaches[npm] = true, want false")
+		}
+		if len(got.Settings.CacheMappings) != 1 {
+			t.Fatalf("cacheMappings len = %d, want 1", len(got.Settings.CacheMappings))
+		}
+		if got.Settings.CacheMappings[0].HostPath != "/host/cache" {
+			t.Errorf("cacheMappings[0].hostPath = %q, want %q", got.Settings.CacheMappings[0].HostPath, "/host/cache")
 		}
 	})
 
@@ -213,6 +277,8 @@ func TestUsers(t *testing.T) {
 		}
 		if err := s.Update("u", func(p *Preferences) {
 			p.TouchRepo("github/foo", &RepoPrefs{Harness: "claude", Model: "opus"})
+			p.Settings.WellKnownCaches = map[string]bool{"go-mod": true}
+			p.Settings.CacheMappings = []CacheMapping{{HostPath: "/a", ContainerPath: "/b"}}
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -232,6 +298,16 @@ func TestUsers(t *testing.T) {
 		snapshot.Models["claude"] = "mutated"
 		if got := s.Get("u"); got.Models["claude"] == "mutated" {
 			t.Error("map aliased")
+		}
+
+		snapshot.Settings.WellKnownCaches["go-mod"] = false
+		if got := s.Get("u"); !got.Settings.WellKnownCaches["go-mod"] {
+			t.Error("wellKnownCaches map aliased")
+		}
+
+		snapshot.Settings.CacheMappings[0].HostPath = "mutated"
+		if got := s.Get("u"); got.Settings.CacheMappings[0].HostPath == "mutated" {
+			t.Error("cacheMappings slice aliased")
 		}
 	})
 }

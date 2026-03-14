@@ -73,8 +73,16 @@ data class RepoPrefsResp(
 )
 
 @Serializable
+data class CacheMappingResp(val hostPath: String, val containerPath: String)
+
+@Serializable
 data class UserSettings(
     @SerialName("autoFixOnCIFailure") val autoFixOnCIFailure: Boolean,
+    @SerialName("autoFixOnPROpen") val autoFixOnPROpen: Boolean,
+    val baseImage: String? = null,
+    val useDefaultCaches: Boolean? = null,
+    val wellKnownCaches: Map<String, Boolean>? = null,
+    val cacheMappings: List<CacheMappingResp>? = null,
 )
 
 @Serializable
@@ -82,7 +90,6 @@ data class PreferencesResp(
     val repositories: List<RepoPrefsResp>,
     val harness: String? = null,
     val models: Map<String, String>? = null,
-    val baseImage: String? = null,
     val settings: UserSettings,
 )
 
@@ -95,6 +102,16 @@ data class HarnessInfo(
     val models: List<String>,
     val supportsImages: Boolean,
 )
+
+@Serializable
+data class WellKnownCache(
+    val name: String,
+    val description: String,
+    val mounts: List<String>,
+)
+
+@Serializable
+data class WellKnownCachesResp(val harnessMounts: List<String>, val wellKnown: List<WellKnownCache>)
 
 @Serializable
 data class ForgeCheck(

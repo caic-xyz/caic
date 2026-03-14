@@ -263,8 +263,8 @@ func (s *Server) handleIssuesEvent(ctx context.Context, ev *github.IssuesEvent) 
 // has a container/task but no PR yet.
 // Trigger: action=="opened" OR action=="reopened".
 func (s *Server) handlePullRequestEvent(ctx context.Context, ev *github.PullRequestEvent) {
-	// First, try to create a new task (existing behavior).
-	if ev.Action == "opened" || ev.Action == "reopened" {
+	// Create a new task to review/fix the PR if auto-fix on PR open is enabled.
+	if (ev.Action == "opened" || ev.Action == "reopened") && s.prefs.Get("default").Settings.AutoFixOnPROpen {
 		s.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
 		s.bot.OnPROpened(ctx, &bot.PREvent{
 			ForgeFullName: ev.Repository.FullName,

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -163,6 +164,81 @@ fun SettingsScreen(
                     )
                 },
             )
+            ListItem(
+                headlineContent = { Text("Auto-fix PRs") },
+                supportingContent = { Text("Automatically review and fix opened pull requests") },
+                trailingContent = {
+                    Switch(
+                        checked = screenState.autoFixPR,
+                        onCheckedChange = { viewModel.updateAutoFixPR(it) },
+                    )
+                },
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Text("Container", style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(
+                value = screenState.baseImage,
+                onValueChange = { viewModel.updateBaseImage(it) },
+                label = { Text("Docker image") },
+                placeholder = { Text("ghcr.io/caic-xyz/md:latest") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Text("Well-known caches", style = MaterialTheme.typography.titleMedium)
+            screenState.wellKnownCachesList.forEach { cache ->
+                val currentlyOn = screenState.wellKnownCaches[cache.name] != false
+                ListItem(
+                    headlineContent = { Text(cache.name) },
+                    supportingContent = if (cache.description.isNotBlank()) {
+                        { Text(cache.description) }
+                    } else {
+                        null
+                    },
+                    leadingContent = {
+                        Checkbox(
+                            checked = currentlyOn,
+                            onCheckedChange = { viewModel.updateWellKnownCache(cache.name, it) },
+                        )
+                    },
+                    modifier = Modifier.clickable { viewModel.updateWellKnownCache(cache.name, !currentlyOn) },
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Text("Custom cache mappings", style = MaterialTheme.typography.titleMedium)
+            screenState.cacheMappings.forEachIndexed { index, mapping ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    OutlinedTextField(
+                        value = mapping.hostPath,
+                        onValueChange = { viewModel.updateCacheMapping(index, it, mapping.containerPath) },
+                        placeholder = { Text("Host path") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(" → ", style = MaterialTheme.typography.bodyMedium)
+                    OutlinedTextField(
+                        value = mapping.containerPath,
+                        onValueChange = { viewModel.updateCacheMapping(index, mapping.hostPath, it) },
+                        placeholder = { Text("Container path") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { viewModel.removeCacheMapping(index) }) {
+                        Icon(Icons.Filled.Delete, contentDescription = "Remove")
+                    }
+                }
+            }
+            TextButton(onClick = { viewModel.addCacheMapping() }) {
+                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Add mapping")
+            }
 
         }
     }

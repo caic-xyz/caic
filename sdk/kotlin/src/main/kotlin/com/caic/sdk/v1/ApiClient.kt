@@ -90,6 +90,7 @@ class ApiClient(
     suspend fun getPreferences(): PreferencesResp = request("GET", "/api/v1/server/preferences")
     suspend fun updatePreferences(req: UpdatePreferencesReq): PreferencesResp = request("POST", "/api/v1/server/preferences", json.encodeToString(req))
     suspend fun listHarnesses(): List<HarnessInfo> = request("GET", "/api/v1/server/harnesses")
+    suspend fun listCaches(): WellKnownCachesResp = request("GET", "/api/v1/server/caches")
     suspend fun listRepos(): List<Repo> = request("GET", "/api/v1/server/repos")
     suspend fun cloneRepo(req: CloneRepoReq): Repo = request("POST", "/api/v1/server/repos", json.encodeToString(req))
     suspend fun listRepoBranches(repo: String): RepoBranchesResp = request("GET", "/api/v1/server/repos/branches?repo=$repo")

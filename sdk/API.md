@@ -12,6 +12,7 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | GET | `/api/v1/server/preferences` |  | `PreferencesResp` |
 | POST | `/api/v1/server/preferences` | `UpdatePreferencesReq` | `PreferencesResp` |
 | GET | `/api/v1/server/harnesses` |  | `HarnessInfo[]` |
+| GET | `/api/v1/server/caches` |  | `WellKnownCachesResp` |
 | GET | `/api/v1/server/repos` |  | `Repo[]` |
 | POST | `/api/v1/server/repos` | `CloneRepoReq` | `Repo` |
 | GET | `/api/v1/server/repos/branches` |  | `RepoBranchesResp` |
@@ -116,11 +117,23 @@ All errors return:
 | `model` | `string` |  |
 | `baseImage` | `string` |  |
 
+### CacheMappingResp
+
+| Field | Type | Required |
+|-------|------|----------|
+| `hostPath` | `string` | yes |
+| `containerPath` | `string` | yes |
+
 ### UserSettings
 
 | Field | Type | Required |
 |-------|------|----------|
 | `autoFixOnCIFailure` | `boolean` | yes |
+| `autoFixOnPROpen` | `boolean` | yes |
+| `baseImage` | `string` |  |
+| `useDefaultCaches` | `boolean` |  |
+| `wellKnownCaches` | `Record<string, unknown>` |  |
+| `cacheMappings` | `CacheMappingResp[]` |  |
 
 ### PreferencesResp
 
@@ -129,7 +142,6 @@ All errors return:
 | `repositories` | `RepoPrefsResp[]` | yes |
 | `harness` | `string` |  |
 | `models` | `Record<string, unknown>` |  |
-| `baseImage` | `string` |  |
 | `settings` | `UserSettings` | yes |
 
 ### UpdatePreferencesReq
@@ -145,6 +157,21 @@ All errors return:
 | `name` | `string` | yes |
 | `models` | `string[]` | yes |
 | `supportsImages` | `boolean` | yes |
+
+### WellKnownCache
+
+| Field | Type | Required |
+|-------|------|----------|
+| `name` | `string` | yes |
+| `description` | `string` | yes |
+| `mounts` | `string[]` | yes |
+
+### WellKnownCachesResp
+
+| Field | Type | Required |
+|-------|------|----------|
+| `harnessMounts` | `string[]` | yes |
+| `wellKnown` | `WellKnownCache[]` | yes |
 
 ### ForgeCheck
 

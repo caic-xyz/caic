@@ -4,8 +4,10 @@ package com.fghbuild.caic.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.caic.sdk.v1.ApiClient
+import com.caic.sdk.v1.CacheMappingResp
 import com.caic.sdk.v1.UpdatePreferencesReq
 import com.caic.sdk.v1.UserSettings
+import com.caic.sdk.v1.WellKnownCache
 import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.data.SettingsState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -26,6 +28,12 @@ data class SettingsScreenState(
     val connectionStatus: ConnectionStatus = ConnectionStatus.Idle,
     val serverLabel: String = "",
     val autoFixCI: Boolean = false,
+    val autoFixPR: Boolean = false,
+    val baseImage: String = "",
+    val useDefaultCaches: Boolean = true,
+    val wellKnownCaches: Map<String, Boolean> = emptyMap(),
+    val wellKnownCachesList: List<WellKnownCache> = emptyList(),
+    val cacheMappings: List<CacheMappingResp> = emptyList(),
 )
 
 private const val DEBOUNCE_MS = 500L
@@ -138,8 +146,17 @@ class SettingsViewModel @Inject constructor(
             try {
                 val client = ApiClient(serverURL, tokenProvider = { authToken })
                 val prefs = client.getPreferences()
+                val caches = try { client.listCaches() } catch (_: Exception) { null }
                 _state.update { prev ->
-                    prev.copy(autoFixCI = prefs.settings.autoFixOnCIFailure)
+                    prev.copy(
+                        autoFixCI = prefs.settings.autoFixOnCIFailure,
+                        autoFixPR = prefs.settings.autoFixOnPROpen ?: false,
+                        baseImage = prefs.settings.baseImage ?: "",
+                        useDefaultCaches = prefs.settings.useDefaultCaches ?: true,
+                        wellKnownCaches = prefs.settings.wellKnownCaches ?: emptyMap(),
+                        wellKnownCachesList = caches?.wellKnown ?: emptyList(),
+                        cacheMappings = prefs.settings.cacheMappings ?: emptyList(),
+                    )
                 }
             } catch (_: Exception) {
                 // Server may not be reachable; leave defaults.
@@ -149,14 +166,92 @@ class SettingsViewModel @Inject constructor(
 
     fun updateAutoFixCI(enabled: Boolean) {
         _state.update { it.copy(autoFixCI = enabled) }
+        saveSettings { it.copy(autoFixOnCIFailure = enabled) }
+    }
+
+    fun updateAutoFixPR(enabled: Boolean) {
+        _state.update { it.copy(autoFixPR = enabled) }
+        saveSettings { it.copy(autoFixOnPROpen = enabled) }
+    }
+
+    fun updateBaseImage(image: String) {
+        _state.update { it.copy(baseImage = image) }
+    }
+
+    fun saveBaseImage() {
+        saveSettings { it.copy(baseImage = _state.value.baseImage.ifBlank { null }) }
+    }
+
+    fun updateUseDefaultCaches(enabled: Boolean) {
+        _state.update { it.copy(useDefaultCaches = enabled) }
+        saveSettings { it.copy(useDefaultCaches = enabled) }
+    }
+
+    fun updateWellKnownCache(cache: String, enabled: Boolean) {
+        val current = _state.value.wellKnownCaches.toMutableMap()
+        if (enabled) {
+            current[cache] = true
+        } else {
+            current[cache] = false
+        }
+        _state.update { it.copy(wellKnownCaches = current) }
+        saveSettings { it.copy(wellKnownCaches = current.ifEmpty { null }) }
+    }
+
+    fun addCacheMapping() {
+        val current = _state.value.cacheMappings.toMutableList()
+        current.add(CacheMappingResp("", ""))
+        _state.update { it.copy(cacheMappings = current) }
+    }
+
+    fun updateCacheMapping(index: Int, hostPath: String, containerPath: String) {
+        val current = _state.value.cacheMappings.toMutableList()
+        if (index in current.indices) {
+            current[index] = CacheMappingResp(hostPath, containerPath)
+            _state.update { it.copy(cacheMappings = current) }
+        }
+    }
+
+    fun removeCacheMapping(index: Int) {
+        val current = _state.value.cacheMappings.toMutableList()
+        if (index in current.indices) {
+            current.removeAt(index)
+            _state.update { it.copy(cacheMappings = current) }
+            saveSettings { it.copy(cacheMappings = current.ifEmpty { null }) }
+        }
+    }
+
+    fun saveCacheMappings() {
+        saveSettings { it.copy(cacheMappings = _state.value.cacheMappings.ifEmpty { null }) }
+    }
+
+    private fun saveSettings(update: (UserSettings) -> UserSettings) {
+        val snapshot = _state.value
         viewModelScope.launch {
             try {
                 val settings = settingsRepository.settings.value
                 val client = ApiClient(settings.serverURL, tokenProvider = { settings.authToken })
-                client.updatePreferences(UpdatePreferencesReq(settings = UserSettings(autoFixOnCIFailure = enabled)))
+                val current = UserSettings(
+                    autoFixOnCIFailure = snapshot.autoFixCI,
+                    autoFixOnPROpen = snapshot.autoFixPR,
+                    baseImage = snapshot.baseImage.ifBlank { null },
+                    useDefaultCaches = snapshot.useDefaultCaches,
+                    wellKnownCaches = snapshot.wellKnownCaches.ifEmpty { null },
+                    cacheMappings = snapshot.cacheMappings.ifEmpty { null },
+                )
+                client.updatePreferences(UpdatePreferencesReq(settings = update(current)))
             } catch (_: Exception) {
                 // Revert optimistic update on failure.
-                _state.update { it.copy(autoFixCI = !enabled) }
+                _state.update {
+                    it.copy(
+                        autoFixCI = snapshot.autoFixCI,
+                        autoFixPR = snapshot.autoFixPR,
+                        baseImage = snapshot.baseImage,
+                        useDefaultCaches = snapshot.useDefaultCaches,
+                        wellKnownCaches = snapshot.wellKnownCaches,
+                        cacheMappings = snapshot.cacheMappings,
+                    )
+                }
             }
         }
     }

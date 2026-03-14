@@ -692,6 +692,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("GET /api/v1/server/preferences", handle(s.getPreferences))
 	apiMux.HandleFunc("POST /api/v1/server/preferences", handle(s.updatePreferences))
 	apiMux.HandleFunc("GET /api/v1/server/harnesses", handle(s.listHarnesses))
+	apiMux.HandleFunc("GET /api/v1/server/caches", handle(s.listCaches))
 	apiMux.HandleFunc("GET /api/v1/server/repos", handle(s.listRepos))
 	apiMux.HandleFunc("POST /api/v1/server/repos", handle(s.cloneRepo))
 	apiMux.HandleFunc("GET /api/v1/server/repos/branches", s.handleListRepoBranches)
@@ -829,13 +830,24 @@ func (s *Server) getPreferences(ctx context.Context, _ *dto.EmptyReq) (*v1.Prefe
 			BaseImage:  r.BaseImage,
 		}
 	}
+	cacheMappings := make([]v1.CacheMappingResp, len(prefs.Settings.CacheMappings))
+	for i, m := range prefs.Settings.CacheMappings {
+		cacheMappings[i] = v1.CacheMappingResp{
+			HostPath:      m.HostPath,
+			ContainerPath: m.ContainerPath,
+		}
+	}
 	return &v1.PreferencesResp{
 		Repositories: repos,
 		Harness:      prefs.Harness,
 		Models:       prefs.Models,
-		BaseImage:    prefs.BaseImage,
 		Settings: v1.UserSettings{
 			AutoFixOnCIFailure: prefs.Settings.AutoFixOnCIFailure,
+			AutoFixOnPROpen:    prefs.Settings.AutoFixOnPROpen,
+			BaseImage:          prefs.Settings.BaseImage,
+			UseDefaultCaches:   prefs.Settings.UseDefaultCaches,
+			WellKnownCaches:    prefs.Settings.WellKnownCaches,
+			CacheMappings:      cacheMappings,
 		},
 	}, nil
 }
@@ -843,6 +855,19 @@ func (s *Server) getPreferences(ctx context.Context, _ *dto.EmptyReq) (*v1.Prefe
 func (s *Server) updatePreferences(ctx context.Context, req *v1.UpdatePreferencesReq) (*v1.PreferencesResp, error) {
 	if err := s.prefs.Update(userIDFromCtx(ctx), func(p *preferences.Preferences) {
 		p.Settings.AutoFixOnCIFailure = req.Settings.AutoFixOnCIFailure
+		p.Settings.AutoFixOnPROpen = req.Settings.AutoFixOnPROpen
+		p.Settings.BaseImage = req.Settings.BaseImage
+		p.Settings.UseDefaultCaches = req.Settings.UseDefaultCaches
+		p.Settings.WellKnownCaches = req.Settings.WellKnownCaches
+		if req.Settings.CacheMappings != nil {
+			p.Settings.CacheMappings = make([]preferences.CacheMapping, len(req.Settings.CacheMappings))
+			for i, m := range req.Settings.CacheMappings {
+				p.Settings.CacheMappings[i] = preferences.CacheMapping{
+					HostPath:      m.HostPath,
+					ContainerPath: m.ContainerPath,
+				}
+			}
+		}
 	}); err != nil {
 		return nil, dto.InternalError("save preferences: " + err.Error())
 	}
@@ -866,6 +891,38 @@ func (s *Server) listHarnesses(_ context.Context, _ *dto.EmptyReq) (*[]v1.Harnes
 		return strings.Compare(a.Name, b.Name)
 	})
 	return &out, nil
+}
+
+func (s *Server) listCaches(_ context.Context, _ *dto.EmptyReq) (*v1.WellKnownCachesResp, error) {
+	harnessMounts := make([]string, 0, len(md.HarnessMounts))
+	for _, hp := range md.HarnessMounts {
+		for _, p := range hp.HomePaths {
+			harnessMounts = append(harnessMounts, "~/"+p)
+		}
+	}
+	slices.Sort(harnessMounts)
+	harnessMounts = slices.Compact(harnessMounts)
+
+	wellKnown := make([]v1.WellKnownCache, 0, len(md.WellKnownCaches))
+	for name, mounts := range md.WellKnownCaches {
+		containerPaths := make([]string, len(mounts))
+		for i, m := range mounts {
+			containerPaths[i] = m.ContainerPath
+		}
+		wellKnown = append(wellKnown, v1.WellKnownCache{
+			Name:        name,
+			Description: mounts[0].Description,
+			Mounts:      containerPaths,
+		})
+	}
+	slices.SortFunc(wellKnown, func(a, b v1.WellKnownCache) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+
+	return &v1.WellKnownCachesResp{
+		HarnessMounts: harnessMounts,
+		WellKnown:     wellKnown,
+	}, nil
 }
 
 func (s *Server) listRepos(_ context.Context, _ *dto.EmptyReq) (*[]v1.Repo, error) {

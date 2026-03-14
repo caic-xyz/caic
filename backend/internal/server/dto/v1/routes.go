@@ -55,6 +55,7 @@ var Routes = []Route{
 	{Name: "getPreferences", Method: "GET", Path: "/api/v1/server/preferences", Resp: reflect.TypeFor[PreferencesResp]()},
 	{Name: "updatePreferences", Method: "POST", Path: "/api/v1/server/preferences", Req: reflect.TypeFor[UpdatePreferencesReq](), Resp: reflect.TypeFor[PreferencesResp]()},
 	{Name: "listHarnesses", Method: "GET", Path: "/api/v1/server/harnesses", Resp: reflect.TypeFor[HarnessInfo](), IsArray: true},
+	{Name: "listCaches", Method: "GET", Path: "/api/v1/server/caches", Resp: reflect.TypeFor[WellKnownCachesResp]()},
 	{Name: "listRepos", Method: "GET", Path: "/api/v1/server/repos", Resp: reflect.TypeFor[Repo](), IsArray: true},
 	{Name: "cloneRepo", Method: "POST", Path: "/api/v1/server/repos", Req: reflect.TypeFor[CloneRepoReq](), Resp: reflect.TypeFor[Repo]()},
 	{Name: "listRepoBranches", Method: "GET", Path: "/api/v1/server/repos/branches", Resp: reflect.TypeFor[RepoBranchesResp](), QueryParams: []string{"repo"}},

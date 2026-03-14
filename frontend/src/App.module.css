@@ -454,6 +454,114 @@
   color: var(--color-text-secondary);
 }
 
+.settingsSection {
+  margin-bottom: 1.25rem;
+}
+
+.settingsSectionTitle {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.settingsInput {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+
+.settingsInput::placeholder {
+  color: var(--color-text-secondary);
+  opacity: 0.7;
+}
+
+.settingsInput:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.cacheGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.cacheCheckbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-input);
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.cacheCheckbox:hover {
+  border-color: var(--color-primary);
+}
+
+.cacheCheckbox[data-state="default"] {
+  background: var(--color-bg-hover);
+  color: var(--color-text-secondary);
+  border-style: dashed;
+}
+
+.cacheCheckbox[data-state="disabled"] {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.cacheMappingRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.cacheMappingArrow {
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.cacheMappingRemove {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  padding: 0.25rem 0.5rem;
+  flex-shrink: 0;
+}
+
+.cacheMappingRemove:hover {
+  color: var(--color-error);
+}
+
+.settingsButton {
+  background: none;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  width: 100%;
+}
+
+.settingsButton:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
 /* Mobile: <=768px */
 @media (max-width: 768px) {
   .app {

@@ -15,6 +15,7 @@ vi.mock("./api", () => ({
   listRepos: vi.fn(),
   getPreferences: vi.fn(),
   listHarnesses: vi.fn(),
+  listCaches: vi.fn(() => Promise.resolve(null)),
   getConfig: vi.fn(),
   getUsage: vi.fn(),
   listRepoBranches: vi.fn(),

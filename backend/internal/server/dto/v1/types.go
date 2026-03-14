@@ -338,12 +338,32 @@ type RepoPrefsResp struct {
 	BaseImage  string `json:"baseImage,omitempty"`
 }
 
+// CacheMappingResp represents a directory mapping for cache/state sharing.
+type CacheMappingResp struct {
+	HostPath      string `json:"hostPath"`
+	ContainerPath string `json:"containerPath"`
+}
+
 // UserSettings holds user-configurable behavioral settings.
 type UserSettings struct {
 	// AutoFixOnCIFailure automatically starts a new task to fix CI when a
 	// task's PR CI fails and the original task can no longer receive input.
 	// Only effective when the GitHub App is configured.
 	AutoFixOnCIFailure bool `json:"autoFixOnCIFailure"`
+	// AutoFixOnPROpen automatically creates a task to review and fix a pull
+	// request when it is opened or reopened via a forge webhook.
+	AutoFixOnPROpen bool `json:"autoFixOnPROpen"`
+	// BaseImage overrides the default container base image. Empty means use
+	// the default.
+	BaseImage string `json:"baseImage,omitempty"`
+	// UseDefaultCaches controls whether default harness caches are mounted.
+	// When false, only custom CacheMappings are used.
+	UseDefaultCaches bool `json:"useDefaultCaches,omitempty"`
+	// WellKnownCaches maps cache name to enabled state. nil means use default
+	// (all true), true means explicitly enabled, false means explicitly disabled.
+	WellKnownCaches map[string]bool `json:"wellKnownCaches,omitempty"`
+	// CacheMappings are custom host-to-container directory mappings.
+	CacheMappings []CacheMappingResp `json:"cacheMappings,omitempty"`
 }
 
 // PreferencesResp is the response for GET /api/v1/server/preferences.
@@ -351,7 +371,6 @@ type PreferencesResp struct {
 	Repositories []RepoPrefsResp   `json:"repositories"`
 	Harness      string            `json:"harness,omitempty"`
 	Models       map[string]string `json:"models,omitempty"`
-	BaseImage    string            `json:"baseImage,omitempty"`
 	Settings     UserSettings      `json:"settings"`
 }
 
@@ -381,6 +400,19 @@ type WebFetchResp struct {
 // RepoBranchesResp is the response for GET /api/v1/server/repos/branches.
 type RepoBranchesResp struct {
 	Branches []string `json:"branches"`
+}
+
+// WellKnownCache describes a single well-known cache.
+type WellKnownCache struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Mounts      []string `json:"mounts"` // List of container paths
+}
+
+// WellKnownCachesResp is the response for GET /api/v1/server/caches.
+type WellKnownCachesResp struct {
+	HarnessMounts []string         `json:"harnessMounts"` // e.g. "~/.claude", "~/.codex"
+	WellKnown     []WellKnownCache `json:"wellKnown"`
 }
 
 // EmptyReq is used for endpoints that take no request body.

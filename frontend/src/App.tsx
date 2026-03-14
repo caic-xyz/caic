@@ -2,8 +2,8 @@
 import { createEffect, createSignal, For, Show, Switch, Match, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useNavigate, useLocation } from "@solidjs/router";
-import type { HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData } from "@sdk/types.gen";
-import { getConfig, getPreferences, updatePreferences, listHarnesses, listRepos, listRepoBranches, createTask, cloneRepo, getUsage, stopTask, purgeTask, reviveTask } from "./api";
+import type { HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp } from "@sdk/types.gen";
+import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, listRepoBranches, createTask, cloneRepo, getUsage, stopTask, purgeTask, reviveTask } from "./api";
 import { useAuth } from "./AuthContext";
 import Login from "./Login";
 import TaskDetail from "./TaskDetail";
@@ -100,7 +100,25 @@ export default function App() {
   const [actionId, setActionId] = createSignal<string | null>(null);
 
   const [autoFixCI, setAutoFixCI] = createSignal(false);
+  const [autoFixPR, setAutoFixPR] = createSignal(false);
+  const [useDefaultCaches, setUseDefaultCaches] = createSignal(true);
+  const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
+  const [wellKnownCachesList, setWellKnownCachesList] = createSignal<WellKnownCachesResp["wellKnown"]>([]);
+  const [cacheMappings, setCacheMappings] = createSignal<CacheMappingResp[]>([]);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+
+  /** Build the current settings payload for updatePreferences, with optional overrides. */
+  const currentSettings = (overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}) => ({
+    settings: {
+      autoFixOnCIFailure: autoFixCI(),
+      autoFixOnPROpen: autoFixPR(),
+      baseImage: selectedImage() || "",
+      useDefaultCaches: useDefaultCaches(),
+      wellKnownCaches: wellKnownCaches() as Record<string, boolean>,
+      cacheMappings: cacheMappings(),
+      ...overrides,
+    },
+  });
 
   // Clone repo dialog state.
   const [cloneOpen, setCloneOpen] = createSignal(false);
@@ -233,13 +251,15 @@ export default function App() {
     dataLoaded = true;
     void (async () => {
       try {
-        const [data, prefs, h, config, usageData] = await Promise.all([
+        const [data, prefs, h, config, usageData, cachesData] = await Promise.all([
           listRepos(),
           getPreferences().catch(() => null),
           listHarnesses().catch(() => [] as HarnessInfo[]),
           getConfig().catch(() => null),
           getUsage().catch(() => null),
+          listCaches().catch(() => null) as Promise<WellKnownCachesResp | null>,
         ]);
+        if (cachesData) setWellKnownCachesList(cachesData.wellKnown);
         const recentPaths = prefs?.repositories.map((r) => r.path) ?? [];
         const recentSet = new Set(recentPaths);
         const recentRepos = recentPaths.reduce<Repo[]>((acc, r) => {
@@ -267,7 +287,7 @@ export default function App() {
           const lastModel = prefModels[harness];
           if (lastModel && models.includes(lastModel)) setSelectedModel(lastModel);
         }
-        if (prefs?.baseImage) setSelectedImage(prefs.baseImage);
+        if (prefs?.settings?.baseImage) setSelectedImage(prefs.settings.baseImage);
         if (config) {
           setTailscaleAvailable(config.tailscaleAvailable);
           setUSBAvailable(config.usbAvailable);
@@ -275,6 +295,10 @@ export default function App() {
         }
         if (prefs?.settings) {
           setAutoFixCI(prefs.settings.autoFixOnCIFailure);
+          setAutoFixPR(prefs.settings.autoFixOnPROpen);
+          setUseDefaultCaches(prefs.settings.useDefaultCaches ?? true);
+          setWellKnownCaches(prefs.settings.wellKnownCaches ?? {});
+          setCacheMappings(prefs.settings.cacheMappings ?? []);
         }
         if (usageData) setUsage(usageData);
       } finally {
@@ -957,19 +981,141 @@ export default function App() {
             onKeyDown={(e) => e.stopPropagation()}
           >
             <h2 class={styles.settingsPanelTitle}>Settings</h2>
-            <label class={styles.settingsLabel}>
-              <input
-                type="checkbox"
-                checked={autoFixCI()}
-                onChange={async (e) => {
-                  const val = e.currentTarget.checked;
-                  setAutoFixCI(val);
-                  await updatePreferences({ settings: { autoFixOnCIFailure: val } });
+            <div class={styles.settingsSection}>
+              <h3 class={styles.settingsSectionTitle}>Container</h3>
+              <label class={styles.settingsLabel}>
+                Docker image
+                <input
+                  type="text"
+                  class={styles.settingsInput}
+                  placeholder="ghcr.io/caic-xyz/md:latest"
+                  value={selectedImage() || ""}
+                  onChange={(e) => setSelectedImage(e.currentTarget.value)}
+                  onBlur={async () => {
+                    await updatePreferences(currentSettings());
+                  }}
+                />
+              </label>
+            </div>
+            <div class={styles.settingsSection}>
+              <h3 class={styles.settingsSectionTitle}>Well-known caches</h3>
+              <div class={styles.cacheGrid}>
+                <For each={wellKnownCachesList()}>
+                  {(cache) => {
+                    const state = () => wellKnownCaches()[cache.name];
+                    const isEnabled = () => state() !== false;
+                    return (
+                      <label
+                        class={styles.cacheCheckbox}
+                        data-state={state() === undefined ? "default" : isEnabled() ? "enabled" : "disabled"}
+                        title={cache.description}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isEnabled()}
+                          onChange={async (e) => {
+                            const newCaches = { ...wellKnownCaches() };
+                            if (e.currentTarget.checked) {
+                              newCaches[cache.name] = true;
+                            } else {
+                              newCaches[cache.name] = false;
+                            }
+                            setWellKnownCaches(newCaches);
+                            await updatePreferences(currentSettings({ wellKnownCaches: newCaches }));
+                          }}
+                        />
+                        {cache.name}
+                      </label>
+                    );
+                  }}
+                </For>
+              </div>
+            </div>
+            <div class={styles.settingsSection}>
+              <h3 class={styles.settingsSectionTitle}>Custom cache mappings</h3>
+              <For each={cacheMappings()}>
+                {(mapping, index) => (
+                  <div class={styles.cacheMappingRow}>
+                    <input
+                      type="text"
+                      class={styles.settingsInput}
+                      placeholder="Host path"
+                      value={mapping.hostPath}
+                      onChange={(e) => {
+                        const newMappings = [...cacheMappings()];
+                        newMappings[index()].hostPath = e.currentTarget.value;
+                        setCacheMappings(newMappings);
+                      }}
+                      onBlur={async () => {
+                        await updatePreferences(currentSettings());
+                      }}
+                    />
+                    <span class={styles.cacheMappingArrow}>→</span>
+                    <input
+                      type="text"
+                      class={styles.settingsInput}
+                      placeholder="Container path"
+                      value={mapping.containerPath}
+                      onChange={(e) => {
+                        const newMappings = [...cacheMappings()];
+                        newMappings[index()].containerPath = e.currentTarget.value;
+                        setCacheMappings(newMappings);
+                      }}
+                      onBlur={async () => {
+                        await updatePreferences(currentSettings());
+                      }}
+                    />
+                    <button
+                      class={styles.cacheMappingRemove}
+                      onClick={async () => {
+                        const newMappings = cacheMappings().filter((_, i) => i !== index());
+                        setCacheMappings(newMappings);
+                        await updatePreferences(currentSettings({ cacheMappings: newMappings }));
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
+              </For>
+              <button
+                class={styles.settingsButton}
+                onClick={() => {
+                  setCacheMappings([...cacheMappings(), { hostPath: "", containerPath: "" }]);
                 }}
-              />
-              Auto-fix CI failures
-            </label>
-            <p class={styles.settingsDescription}>When CI fails on a PR and the agent has finished, automatically start a new task to fix it.</p>
+              >
+                + Add mapping
+              </button>
+            </div>
+            <div class={styles.settingsSection}>
+              <h3 class={styles.settingsSectionTitle}>Automation</h3>
+              <label class={styles.settingsLabel}>
+                <input
+                  type="checkbox"
+                  checked={autoFixCI()}
+                  onChange={async (e) => {
+                    const val = e.currentTarget.checked;
+                    setAutoFixCI(val);
+                    await updatePreferences(currentSettings({ autoFixOnCIFailure: val }));
+                  }}
+                />
+                Auto-fix CI failures
+              </label>
+              <p class={styles.settingsDescription}>When CI fails on a PR and the agent has finished, automatically start a new task to fix it.</p>
+              <label class={styles.settingsLabel}>
+                <input
+                  type="checkbox"
+                  checked={autoFixPR()}
+                  onChange={async (e) => {
+                    const val = e.currentTarget.checked;
+                    setAutoFixPR(val);
+                    await updatePreferences(currentSettings({ autoFixOnPROpen: val }));
+                  }}
+                />
+                Auto-fix PRs
+              </label>
+              <p class={styles.settingsDescription}>When a pull request is opened or reopened, automatically start a task to review and fix it.</p>
+            </div>
           </div>
         </div>
       </Show>

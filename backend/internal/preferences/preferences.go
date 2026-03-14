@@ -15,6 +15,14 @@ import (
 	"time"
 )
 
+// CacheMapping maps a host directory to a container path for cache/state sharing.
+type CacheMapping struct {
+	// HostPath is the path on the host filesystem to mount.
+	HostPath string `json:"hostPath"`
+	// ContainerPath is the path inside the container where hostPath will be mounted.
+	ContainerPath string `json:"containerPath"`
+}
+
 // Preferences holds persistent user preferences.
 type Preferences struct {
 	// Version is the preferences file format version.
@@ -26,9 +34,6 @@ type Preferences struct {
 	Harness string `json:"harness,omitempty"`
 	// Models maps harness name to the last used model for that harness.
 	Models map[string]string `json:"models,omitempty"`
-	// BaseImage overrides the default container base image. Empty means use
-	// the default.
-	BaseImage string `json:"baseImage,omitempty"`
 	// Settings holds user-configurable behavioral settings.
 	Settings Settings `json:"settings,omitempty"`
 }
@@ -47,6 +52,14 @@ func (p *Preferences) Validate() error {
 			return fmt.Errorf("repositories[%d]: duplicate path %q", i, r.Path)
 		}
 		seen[r.Path] = struct{}{}
+	}
+	for i, m := range p.Settings.CacheMappings {
+		if m.HostPath == "" {
+			return fmt.Errorf("cacheMappings[%d]: empty hostPath", i)
+		}
+		if m.ContainerPath == "" {
+			return fmt.Errorf("cacheMappings[%d]: empty containerPath", i)
+		}
 	}
 	return nil
 }
@@ -97,7 +110,7 @@ func (p *Preferences) TouchRepo(repoPath string, overrides *RepoPrefs) {
 		p.Models[overrides.Harness] = overrides.Model
 	}
 	if overrides.BaseImage != "" {
-		p.BaseImage = overrides.BaseImage
+		p.Settings.BaseImage = overrides.BaseImage
 	}
 }
 
@@ -119,6 +132,8 @@ func (p *Preferences) clone() Preferences {
 	c := *p
 	c.Repositories = slices.Clone(p.Repositories)
 	c.Models = maps.Clone(p.Models)
+	c.Settings.CacheMappings = slices.Clone(p.Settings.CacheMappings)
+	c.Settings.WellKnownCaches = maps.Clone(p.Settings.WellKnownCaches)
 	return c
 }
 
@@ -127,6 +142,20 @@ type Settings struct {
 	// AutoFixOnCIFailure automatically starts a new task to fix CI when a
 	// task's PR CI fails and the original task can no longer receive input.
 	AutoFixOnCIFailure bool `json:"autoFixOnCIFailure,omitempty"`
+	// AutoFixOnPROpen automatically creates a task to review and fix a pull
+	// request when it is opened or reopened via a forge webhook.
+	AutoFixOnPROpen bool `json:"autoFixOnPROpen,omitempty"`
+	// BaseImage overrides the default container base image. Empty means use
+	// the default.
+	BaseImage string `json:"baseImage,omitempty"`
+	// UseDefaultCaches controls whether default harness caches are mounted.
+	// When false, only custom CacheMappings are used.
+	UseDefaultCaches bool `json:"useDefaultCaches,omitempty"`
+	// WellKnownCaches maps cache name to enabled state. nil means use default
+	// (all true), true means explicitly enabled, false means explicitly disabled.
+	WellKnownCaches map[string]bool `json:"wellKnownCaches,omitempty"`
+	// CacheMappings are custom directory mappings to mount into the container.
+	CacheMappings []CacheMapping `json:"cacheMappings,omitempty"`
 }
 
 // RepoPrefs stores per-repository user preferences. Fields override the
@@ -247,8 +276,8 @@ func (s *Store) BaseImages() []string {
 	defer s.mu.Unlock()
 	seen := make(map[string]struct{})
 	for _, p := range s.cached {
-		if p.BaseImage != "" {
-			seen[p.BaseImage] = struct{}{}
+		if p.Settings.BaseImage != "" {
+			seen[p.Settings.BaseImage] = struct{}{}
 		}
 		for _, r := range p.Repositories {
 			if r.BaseImage != "" {

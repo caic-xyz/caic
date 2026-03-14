@@ -712,6 +712,13 @@ export interface RepoPrefsResp {
   baseImage?: string;
 }
 /**
+ * CacheMappingResp represents a directory mapping for cache/state sharing.
+ */
+export interface CacheMappingResp {
+  hostPath: string;
+  containerPath: string;
+}
+/**
  * UserSettings holds user-configurable behavioral settings.
  */
 export interface UserSettings {
@@ -721,6 +728,30 @@ export interface UserSettings {
    * Only effective when the GitHub App is configured.
    */
   autoFixOnCIFailure: boolean;
+  /**
+   * AutoFixOnPROpen automatically creates a task to review and fix a pull
+   * request when it is opened or reopened via a forge webhook.
+   */
+  autoFixOnPROpen: boolean;
+  /**
+   * BaseImage overrides the default container base image. Empty means use
+   * the default.
+   */
+  baseImage?: string;
+  /**
+   * UseDefaultCaches controls whether default harness caches are mounted.
+   * When false, only custom CacheMappings are used.
+   */
+  useDefaultCaches?: boolean;
+  /**
+   * WellKnownCaches maps cache name to enabled state. nil means use default
+   * (all true), true means explicitly enabled, false means explicitly disabled.
+   */
+  wellKnownCaches?: { [key: string]: boolean};
+  /**
+   * CacheMappings are custom host-to-container directory mappings.
+   */
+  cacheMappings?: CacheMappingResp[];
 }
 /**
  * PreferencesResp is the response for GET /api/v1/server/preferences.
@@ -729,7 +760,6 @@ export interface PreferencesResp {
   repositories: RepoPrefsResp[];
   harness?: string;
   models?: { [key: string]: string};
-  baseImage?: string;
   settings: UserSettings;
 }
 /**
@@ -764,6 +794,21 @@ export interface WebFetchResp {
  */
 export interface RepoBranchesResp {
   branches: string[];
+}
+/**
+ * WellKnownCache describes a single well-known cache.
+ */
+export interface WellKnownCache {
+  name: string;
+  description: string;
+  mounts: string[]; // List of container paths
+}
+/**
+ * WellKnownCachesResp is the response for GET /api/v1/server/caches.
+ */
+export interface WellKnownCachesResp {
+  harnessMounts: string[]; // e.g. "~/.claude", "~/.codex"
+  wellKnown: WellKnownCache[];
 }
 /**
  * EmptyReq is used for endpoints that take no request body.

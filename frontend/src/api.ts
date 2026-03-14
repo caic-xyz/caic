@@ -10,6 +10,7 @@ export const {
   getPreferences,
   updatePreferences,
   listHarnesses,
+  listCaches,
   listRepos,
   cloneRepo,
   listRepoBranches,
