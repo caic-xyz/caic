@@ -77,10 +77,15 @@ test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({
   await page.getByTestId("ask-option-In-memory (sync.Map)").click();
   await page.getByTestId("ask-submit").click();
 
-  // Submitted answer should be displayed in the ask-submitted-answer div.
-  await expect(page.getByTestId("ask-submitted-answer")).toHaveText("In-memory (sync.Map)", { timeout: 10_000 });
-
   // The answer is forwarded to the fake agent as a new prompt; it replies
   // with a joke and the task transitions back to waiting.
   await waitForTaskState(api, taskId, "waiting", 20_000);
+
+  // Verify the agent processed the answer by checking for its joke response.
+  // The ask turn is collapsed once the new turn completes, so we verify the
+  // round-trip via the visible response rather than the collapsed submitted
+  // answer div.
+  await expect(
+    page.getByText("A SQL query walks into a bar").first(),
+  ).toBeVisible({ timeout: 10_000 });
 });

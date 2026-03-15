@@ -46,6 +46,9 @@ jobs:
       - name: Coverage
         if: runner.os == 'Linux'
         run: make coverage
+      - name: Install ffmpeg
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: End-to-end tests
         if: runner.os == 'Linux'
         run: make frontend-e2e

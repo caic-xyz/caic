@@ -29,6 +29,16 @@ test("create task, verify streaming text and result, then purge", async ({ page,
     timeout: 10_000,
   });
 
+  // Resolve the task ID and wait for "waiting" state via API before clicking
+  // stop. The UI may show the result message before the SSE delivers the
+  // "waiting" state; clicking stop while still "running" triggers a
+  // window.confirm() that Playwright auto-dismisses as false, skipping the
+  // stop.
+  const tasks = await api.listTasks();
+  const task = tasks.find((t) => t.initialPrompt === prompt);
+  expect(task).toBeTruthy();
+  await waitForTaskState(api, task!.id, "waiting");
+
   // The Stop button (trash can) appears on hover over the task card in the sidebar.
   // Scope to the specific card to avoid strict-mode violations from parallel tests.
   const taskCard = page.locator("[data-task-id]", { hasText: prompt });
@@ -40,9 +50,6 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   await stopBtn.click();
 
   // Poll API until our task is "stopped".
-  const tasks = await api.listTasks();
-  const task = tasks.find((t) => t.initialPrompt === prompt);
-  expect(task).toBeTruthy();
   await waitForTaskState(api, task!.id, "stopped");
 
   // Now purge the stopped task via API and verify it reaches "purged".
