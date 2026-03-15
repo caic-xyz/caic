@@ -5,7 +5,7 @@ import stat
 import subprocess
 import sys
 
-ALLOWED_BINARY_EXT = {".br", ".gif", ".ico", ".jar", ".jpg", ".png", ".svg", ".webp", ".zst"}
+ALLOWED_BINARY_EXT = {".avif", ".br", ".gif", ".ico", ".jar", ".jpg", ".png", ".svg", ".webp", ".zst"}
 
 
 def is_binary(file_path):

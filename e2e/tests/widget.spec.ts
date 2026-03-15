@@ -17,10 +17,10 @@ test("FAKE_WIDGET renders a widget card with iframe", async ({ page }) => {
   await page.getByText(prompt).first().click();
 
   // The widget card should appear with the title.
-  await expect(page.getByText("Test Widget").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("light_refraction_in_water").first()).toBeVisible({ timeout: 15_000 });
 
   // A sandboxed iframe should be present (the widget renderer).
-  const iframe = page.locator("iframe[title='Test Widget']");
+  const iframe = page.locator("iframe[title='light_refraction_in_water']");
   await expect(iframe).toBeVisible({ timeout: 10_000 });
 
   // The completion checkmark should appear once the widget finishes.

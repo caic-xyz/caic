@@ -28,8 +28,206 @@ PLAN_CONTENT = """## Fix authentication token validation
 5. **Update** the token refresh logic to handle clock skew (±30s tolerance)
 """
 
-WIDGET_HTML = "<h1>Fake Widget</h1><p>This is a test widget.</p>"
-WIDGET_TITLE = "Test Widget"
+WIDGET_HTML = (
+    "<style>\n"
+    "  :root {\n"
+    "    --text-primary: #1a1a2e;\n"
+    "    --text-secondary: #555;\n"
+    "    --border: #d0d0d0;\n"
+    "    --surface: rgba(0,0,0,0.03);\n"
+    "    --sky-top: #c9e8f7;\n"
+    "    --sky-bot: #e8f4fb;\n"
+    "    --water-top: #1a6fa8;\n"
+    "    --water-bot: #0a3d6b;\n"
+    "    --ray-color: #ffd700;\n"
+    "    --normal-color: #aaa;\n"
+    "    --angle-inc: #e55;\n"
+    "    --angle-ref: #4a9;\n"
+    "    --formula-bg: rgba(0,0,0,0.04);\n"
+    "  }\n"
+    "  @media (prefers-color-scheme: dark) {\n"
+    "    :root {\n"
+    "      --text-primary: #e0e0e0;\n"
+    "      --text-secondary: #999;\n"
+    "      --border: #333;\n"
+    "      --surface: rgba(255,255,255,0.05);\n"
+    "      --sky-top: #0d1f2d;\n"
+    "      --sky-bot: #1a3344;\n"
+    "      --water-top: #0a3d6b;\n"
+    "      --water-bot: #041c30;\n"
+    "      --formula-bg: rgba(255,255,255,0.06);\n"
+    "    }\n"
+    "  }\n"
+    "  * { box-sizing: border-box; margin: 0; padding: 0; }\n"
+    "  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }\n"
+    "  .widget { padding: 16px; max-width: 640px; margin: 0 auto; }\n"
+    "  h2 { font-size: 18px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }\n"
+    "  .subtitle { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }\n"
+    "  .diagram-wrap { width: 100%; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }\n"
+    "  .controls { margin-top: 14px; display: flex; align-items: center; gap: 12px; }\n"
+    "  .controls label { font-size: 14px; font-weight: 600; color: var(--text-primary); white-space: nowrap; }\n"
+    "  input[type=range] { flex: 1; accent-color: var(--angle-inc); cursor: pointer; }\n"
+    "  .angle-val { font-size: 14px; font-weight: 600; color: var(--angle-inc); min-width: 36px; text-align: right; }\n"
+    "  .formula-box { margin-top: 14px; background: var(--formula-bg); border: 1px solid var(--border);\n"
+    "    border-radius: 8px; padding: 12px 16px; }\n"
+    "  .formula-title { font-size: 12px; font-weight: 600; color: var(--text-secondary);\n"
+    "    text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }\n"
+    "  .formula-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }\n"
+    "  .formula-text { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 14px;\n"
+    "    color: var(--text-primary); }\n"
+    "  .val-inc { color: var(--angle-inc); font-weight: 600; }\n"
+    "  .val-ref { color: var(--angle-ref); font-weight: 600; }\n"
+    "  .explanation { margin-top: 12px; font-size: 13px; color: var(--text-secondary);\n"
+    "    line-height: 1.6; border-top: 1px solid var(--border); padding-top: 12px; }\n"
+    "</style>\n"
+    "\n"
+    '<div class="widget">\n'
+    "  <h2>Light Refraction in Water</h2>\n"
+    '  <p class="subtitle">Snell\'s Law: how light bends at the air\u2013water interface</p>\n'
+    "\n"
+    '  <div class="diagram-wrap">\n'
+    '    <svg id="diagram" viewBox="0 0 500 340" style="width:100%;height:auto;display:block;">\n'
+    "      <defs>\n"
+    '        <linearGradient id="skyGrad" x1="0" y1="0" x2="0" y2="1">\n'
+    '          <stop offset="0%" stop-color="var(--sky-top)"/>\n'
+    '          <stop offset="100%" stop-color="var(--sky-bot)"/>\n'
+    "        </linearGradient>\n"
+    '        <linearGradient id="waterGrad" x1="0" y1="0" x2="0" y2="1">\n'
+    '          <stop offset="0%" stop-color="var(--water-top)"/>\n'
+    '          <stop offset="100%" stop-color="var(--water-bot)"/>\n'
+    "        </linearGradient>\n"
+    '        <marker id="arrowY" viewBox="0 0 10 7" refX="9" refY="3.5"\n'
+    '          markerWidth="7" markerHeight="5" orient="auto-start-reverse">\n'
+    '          <polygon points="0 0, 10 3.5, 0 7" fill="#ffd700"/>\n'
+    "        </marker>\n"
+    "      </defs>\n"
+    '      <rect x="0" y="0" width="500" height="170" fill="url(#skyGrad)"/>\n'
+    '      <rect x="0" y="170" width="500" height="170" fill="url(#waterGrad)"/>\n'
+    '      <line x1="0" y1="170" x2="500" y2="170" stroke="rgba(255,255,255,0.4)" stroke-width="1.5"/>\n'
+    '      <text x="14" y="24" font-size="13" fill="var(--text-secondary)"\n'
+    '        font-family="-apple-system,sans-serif">AIR  n\u2081 = 1.00</text>\n'
+    '      <text x="14" y="200" font-size="13" fill="rgba(255,255,255,0.7)"\n'
+    '        font-family="-apple-system,sans-serif">WATER  n\u2082 = 1.33</text>\n'
+    '      <line id="normalLine" x1="250" y1="40" x2="250" y2="300"\n'
+    '        stroke="var(--normal-color)" stroke-width="1" stroke-dasharray="5,4"/>\n'
+    '      <line id="incidentRay" stroke="#ffd700" stroke-width="2.5" marker-end="url(#arrowY)"/>\n'
+    '      <line id="refractedRay" stroke="#ffd700" stroke-width="2.5" marker-end="url(#arrowY)"/>\n'
+    '      <path id="arcInc" fill="none" stroke="var(--angle-inc)" stroke-width="1.5"/>\n'
+    '      <path id="arcRef" fill="none" stroke="var(--angle-ref)" stroke-width="1.5"/>\n'
+    '      <text id="lblInc" font-size="13" font-weight="600" fill="var(--angle-inc)"\n'
+    '        font-family="-apple-system,sans-serif"/>\n'
+    '      <text id="lblRef" font-size="13" font-weight="600" fill="var(--angle-ref)"\n'
+    '        font-family="-apple-system,sans-serif"/>\n'
+    "    </svg>\n"
+    "  </div>\n"
+    "\n"
+    '  <div class="controls">\n'
+    "    <label>Angle of incidence</label>\n"
+    '    <input type="range" id="slider" min="0" max="89" value="40"/>\n'
+    '    <span class="angle-val" id="sliderVal">40\u00b0</span>\n'
+    "  </div>\n"
+    "\n"
+    '  <div class="formula-box">\n'
+    '    <div class="formula-title">Snell\'s Law</div>\n'
+    '    <div class="formula-row">\n'
+    '      <span class="formula-text">n\u2081 \u00b7 sin(<span class="val-inc" id="fTheta1">40.0\u00b0</span>)'
+    ' = n\u2082 \u00b7 sin(<span class="val-ref" id="fTheta2">28.9\u00b0</span>)</span>\n'
+    '      <span class="formula-text" style="color:var(--text-secondary)">\u2192</span>\n'
+    '      <span class="formula-text">1.00 \u00b7 <span class="val-inc" id="fSin1">0.6428</span>'
+    ' = 1.33 \u00b7 <span class="val-ref" id="fSin2">0.4833</span></span>\n'
+    "    </div>\n"
+    "  </div>\n"
+    "\n"
+    '  <div class="explanation">\n'
+    "    Light travels slower in water (speed \u2248 c/1.33) than in air (speed = c).\n"
+    "    When a wavefront hits the surface at an angle, the part entering water slows first,\n"
+    "    bending the ray toward the normal. The greater the speed difference (higher refractive\n"
+    "    index), the sharper the bend. At <strong>0\u00b0</strong> (straight down) there is no\n"
+    "    bending. Beyond the <em>critical angle</em> (~48.8\u00b0 from water side), total\n"
+    "    internal reflection occurs.\n"
+    "  </div>\n"
+    "</div>\n"
+    "\n"
+    "<script>\n"
+    "(function() {\n"
+    "  const CX = 250, CY = 170;\n"
+    "  const N1 = 1.0, N2 = 1.33;\n"
+    "  const slider = document.getElementById('slider');\n"
+    "  const sliderVal = document.getElementById('sliderVal');\n"
+    "  const incidentRay = document.getElementById('incidentRay');\n"
+    "  const refractedRay = document.getElementById('refractedRay');\n"
+    "  const arcInc = document.getElementById('arcInc');\n"
+    "  const arcRef = document.getElementById('arcRef');\n"
+    "  const lblInc = document.getElementById('lblInc');\n"
+    "  const lblRef = document.getElementById('lblRef');\n"
+    "  const fTheta1 = document.getElementById('fTheta1');\n"
+    "  const fTheta2 = document.getElementById('fTheta2');\n"
+    "  const fSin1 = document.getElementById('fSin1');\n"
+    "  const fSin2 = document.getElementById('fSin2');\n"
+    "\n"
+    "  function arcPath(cx, cy, r, startAngle, endAngle) {\n"
+    "    const x1 = cx + r * Math.cos(startAngle);\n"
+    "    const y1 = cy + r * Math.sin(startAngle);\n"
+    "    const x2 = cx + r * Math.cos(endAngle);\n"
+    "    const y2 = cy + r * Math.sin(endAngle);\n"
+    "    const large = Math.abs(endAngle - startAngle) > Math.PI ? 1 : 0;\n"
+    "    return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`;\n"
+    "  }\n"
+    "\n"
+    "  function update() {\n"
+    "    const deg1 = parseFloat(slider.value);\n"
+    "    const rad1 = deg1 * Math.PI / 180;\n"
+    "    const sinR = (N1 / N2) * Math.sin(rad1);\n"
+    "    const rad2 = Math.asin(Math.min(sinR, 1));\n"
+    "    const deg2 = rad2 * 180 / Math.PI;\n"
+    "    sliderVal.textContent = deg1 + '\\u00b0';\n"
+    "    const L1 = 130, L2 = 130;\n"
+    "    const ix1 = CX - L1 * Math.sin(rad1);\n"
+    "    const iy1 = CY - L1 * Math.cos(rad1);\n"
+    "    const ix2 = CX - 8 * Math.sin(rad1);\n"
+    "    const iy2 = CY - 8 * Math.cos(rad1);\n"
+    "    incidentRay.setAttribute('x1', ix1); incidentRay.setAttribute('y1', iy1);\n"
+    "    incidentRay.setAttribute('x2', ix2); incidentRay.setAttribute('y2', iy2);\n"
+    "    const rx2 = CX + L2 * Math.sin(rad2);\n"
+    "    const ry2 = CY + L2 * Math.cos(rad2);\n"
+    "    const rx1 = CX + 8 * Math.sin(rad2);\n"
+    "    const ry1 = CY + 8 * Math.cos(rad2);\n"
+    "    refractedRay.setAttribute('x1', rx1); refractedRay.setAttribute('y1', ry1);\n"
+    "    refractedRay.setAttribute('x2', rx2); refractedRay.setAttribute('y2', ry2);\n"
+    "    if (deg1 > 2) {\n"
+    "      const arcR1 = 40;\n"
+    "      const incDirAngle = Math.atan2(-Math.cos(rad1), -Math.sin(rad1));\n"
+    "      const normalUpAngle = -Math.PI / 2;\n"
+    "      arcInc.setAttribute('d', arcPath(CX, CY, arcR1, normalUpAngle, incDirAngle));\n"
+    "      const midAngle1 = (normalUpAngle + incDirAngle) / 2;\n"
+    "      lblInc.setAttribute('x', CX + (arcR1 + 14) * Math.cos(midAngle1));\n"
+    "      lblInc.setAttribute('y', CY + (arcR1 + 14) * Math.sin(midAngle1) + 4);\n"
+    "      lblInc.setAttribute('text-anchor', 'middle');\n"
+    "      lblInc.textContent = '\\u03b8\\u2081=' + deg1 + '\\u00b0';\n"
+    "    } else { arcInc.setAttribute('d', ''); lblInc.textContent = ''; }\n"
+    "    if (deg2 > 2) {\n"
+    "      const arcR2 = 48;\n"
+    "      const refDirAngle = Math.atan2(Math.cos(rad2), Math.sin(rad2));\n"
+    "      const normalDownAngle = Math.PI / 2;\n"
+    "      arcRef.setAttribute('d', arcPath(CX, CY, arcR2, normalDownAngle, refDirAngle));\n"
+    "      const midAngle2 = (normalDownAngle + refDirAngle) / 2;\n"
+    "      lblRef.setAttribute('x', CX + (arcR2 + 14) * Math.cos(midAngle2));\n"
+    "      lblRef.setAttribute('y', CY + (arcR2 + 14) * Math.sin(midAngle2) + 4);\n"
+    "      lblRef.setAttribute('text-anchor', 'middle');\n"
+    "      lblRef.setAttribute('fill', 'rgba(255,255,255,0.9)');\n"
+    "      lblRef.textContent = '\\u03b8\\u2082=' + deg2.toFixed(1) + '\\u00b0';\n"
+    "    } else { arcRef.setAttribute('d', ''); lblRef.textContent = ''; }\n"
+    "    fTheta1.textContent = deg1.toFixed(1) + '\\u00b0';\n"
+    "    fTheta2.textContent = deg2.toFixed(1) + '\\u00b0';\n"
+    "    fSin1.textContent = Math.sin(rad1).toFixed(4);\n"
+    "    fSin2.textContent = Math.sin(rad2).toFixed(4);\n"
+    "  }\n"
+    "  slider.addEventListener('input', update);\n"
+    "  update();\n"
+    "})();\n"
+    "</script>"
+)
+WIDGET_TITLE = "light_refraction_in_water"
 
 ASK_QUESTION = {
     "question": "The rate limiter needs a storage backend. Which approach should I use?",
