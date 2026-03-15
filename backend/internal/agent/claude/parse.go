@@ -271,15 +271,7 @@ func parseToolUseBlock(b *contentBlockWire) []agent.Message {
 			}}
 		}
 	case agent.WidgetToolNames[b.Name]:
-		html := extractWidgetHTML(b.Input)
-		if len(html) > agent.MaxWidgetHTMLBytes {
-			html = `<p style="color:red;font-family:system-ui">Widget too large (256 KB limit exceeded)</p>`
-		}
-		return []agent.Message{&agent.WidgetMessage{
-			ToolUseID: b.ID,
-			Title:     extractWidgetTitle(b.Input),
-			HTML:      html,
-		}}
+		return []agent.Message{agent.NewWidgetMessage(b.ID, b.Input)}
 	}
 	return []agent.Message{&agent.ToolUseMessage{
 		ToolUseID: b.ID,
@@ -472,27 +464,6 @@ func extractPartialWidgetCode(partial string) string {
 	}
 	// Unterminated — return what we have so far.
 	return sb.String()
-}
-
-type widgetInput struct {
-	WidgetCode string `json:"widget_code"`
-	Title      string `json:"title"`
-}
-
-func extractWidgetHTML(input json.RawMessage) string {
-	var w widgetInput
-	if json.Unmarshal(input, &w) == nil {
-		return w.WidgetCode
-	}
-	return ""
-}
-
-func extractWidgetTitle(input json.RawMessage) string {
-	var w widgetInput
-	if json.Unmarshal(input, &w) == nil {
-		return w.Title
-	}
-	return ""
 }
 
 // jsonString extracts a JSON string value from a json.RawMessage.

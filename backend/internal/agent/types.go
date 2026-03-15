@@ -259,6 +259,31 @@ var WidgetToolNames = map[string]bool{
 	"mcp__plugin_caic-widget_widget__show_widget": true, // Plugin MCP-prefixed.
 }
 
+// widgetInput is the expected JSON schema for the show_widget tool's input.
+type widgetInput struct {
+	Title      string `json:"title"`
+	WidgetCode string `json:"widget_code"`
+}
+
+// NewWidgetMessage creates a WidgetMessage from raw tool input JSON. It
+// extracts the title and widget_code fields and enforces MaxWidgetHTMLBytes.
+// Shared by all backend parsers.
+func NewWidgetMessage(toolUseID string, input json.RawMessage) *WidgetMessage {
+	var w widgetInput
+	if len(input) > 0 {
+		_ = json.Unmarshal(input, &w)
+	}
+	html := w.WidgetCode
+	if len(html) > MaxWidgetHTMLBytes {
+		html = `<p style="color:red;font-family:system-ui">Widget too large (256 KB limit exceeded)</p>`
+	}
+	return &WidgetMessage{
+		ToolUseID: toolUseID,
+		Title:     w.Title,
+		HTML:      html,
+	}
+}
+
 // WidgetMessage is emitted when the agent produces an interactive HTML widget
 // via a tool call (e.g. Claude's show_widget). The HTML is the complete,
 // renderable widget code.

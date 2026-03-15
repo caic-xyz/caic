@@ -18,6 +18,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
+// widgetMCPServerPath is the container path for the widget MCP server script.
+var widgetMCPServerPath = agent.WidgetPluginDir + "/mcp_server.py"
+
 // Backend implements agent.Backend for Codex CLI using the app-server
 // JSON-RPC 2.0 protocol.
 type Backend struct {
@@ -55,6 +58,9 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 		return nil, errors.New("opts.Dir is required")
 	}
 	if err := agent.DeployRelay(ctx, opts.Container); err != nil {
+		return nil, err
+	}
+	if err := deployWidgetMCP(ctx, opts.Container); err != nil {
 		return nil, err
 	}
 
@@ -390,7 +396,23 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*JSONRPCMessage,
 	}
 }
 
+// deployWidgetMCP writes the widget MCP server script to the container so
+// that codex can launch it as a stdio MCP server.
+func deployWidgetMCP(ctx context.Context, container string) error {
+	cmd := exec.CommandContext(ctx, "ssh", container, //nolint:gosec // container is not user-controlled
+		"mkdir -p "+agent.WidgetPluginDir+" && cat > "+widgetMCPServerPath)
+	cmd.Stdin = bytes.NewReader(agent.WidgetMCPServerScript)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("deploy widget MCP: %w: %s", err, out)
+	}
+	return nil
+}
+
 // buildArgs constructs the Codex CLI app-server arguments.
 func buildArgs(_ *agent.Options) []string {
-	return []string{"codex", "app-server"}
+	return []string{
+		"codex", "app-server",
+		"-c", `mcp_servers.widget.command="python3"`,
+		"-c", `mcp_servers.widget.args=["` + widgetMCPServerPath + `"]`,
+	}
 }

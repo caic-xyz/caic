@@ -223,6 +223,9 @@ func parseItemStarted(msg *JSONRPCMessage) ([]agent.Message, error) {
 		if err := json.Unmarshal(p.Item, &item); err != nil {
 			return nil, fmt.Errorf("item/started mcpToolCall: %w", err)
 		}
+		if agent.WidgetToolNames[item.Tool] {
+			return []agent.Message{agent.NewWidgetMessage(item.ID, item.Arguments)}, nil
+		}
 		return []agent.Message{&agent.ToolUseMessage{
 			ToolUseID: item.ID,
 			Name:      item.Tool,

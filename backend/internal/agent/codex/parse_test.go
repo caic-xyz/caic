@@ -398,6 +398,46 @@ func TestParseMessage(t *testing.T) {
 			t.Error("Error should be set for failed collab agent tool call")
 		}
 	})
+	t.Run("ItemStartedMcpToolCallWidget", func(t *testing.T) {
+		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"w1","type":"mcpToolCall","server":"widget","tool":"show_widget","status":"inProgress","arguments":{"title":"demo_chart","widget_code":"<p>Hello</p>"}},"threadId":"t1","turnId":"turn_1"}}`
+		msgs, err := ParseMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		wm, ok := msgs[0].(*agent.WidgetMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.WidgetMessage", msgs[0])
+		}
+		if wm.ToolUseID != "w1" {
+			t.Errorf("ToolUseID = %q, want w1", wm.ToolUseID)
+		}
+		if wm.Title != "demo_chart" {
+			t.Errorf("Title = %q, want demo_chart", wm.Title)
+		}
+		if wm.HTML != "<p>Hello</p>" {
+			t.Errorf("HTML = %q, want <p>Hello</p>", wm.HTML)
+		}
+	})
+	t.Run("ItemStartedMcpToolCallNonWidget", func(t *testing.T) {
+		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"m1","type":"mcpToolCall","server":"fs","tool":"read_file","status":"inProgress","arguments":{"path":"/tmp/a"}},"threadId":"t1","turnId":"turn_1"}}`
+		msgs, err := ParseMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		tu, ok := msgs[0].(*agent.ToolUseMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.ToolUseMessage (non-widget MCP tool)", msgs[0])
+		}
+		if tu.Name != "read_file" {
+			t.Errorf("Name = %q, want read_file", tu.Name)
+		}
+	})
 	t.Run("ItemCompletedContextCompaction", func(t *testing.T) {
 		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"cc_1","type":"contextCompaction"},"threadId":"t1","turnId":"turn_1"}}`
 		msgs, err := ParseMessage([]byte(input))
@@ -622,8 +662,21 @@ func TestParseMessage(t *testing.T) {
 func TestBuildArgs(t *testing.T) {
 	t.Run("AppServer", func(t *testing.T) {
 		args := buildArgs(&agent.Options{InitialPrompt: agent.Prompt{Text: "fix the bug"}, Model: "o4-mini"})
-		if len(args) != 2 || args[0] != "codex" || args[1] != "app-server" {
-			t.Errorf("args = %v, want [codex app-server]", args)
+		if len(args) < 2 || args[0] != "codex" || args[1] != "app-server" {
+			t.Errorf("args[:2] = %v, want [codex app-server ...]", args)
+		}
+	})
+	t.Run("WidgetMCPConfig", func(t *testing.T) {
+		args := buildArgs(&agent.Options{})
+		// Should contain -c flags for widget MCP server config.
+		found := 0
+		for _, a := range args {
+			if a == "-c" {
+				found++
+			}
+		}
+		if found < 2 {
+			t.Errorf("expected at least 2 -c flags for widget MCP config, got %d in %v", found, args)
 		}
 	})
 }
