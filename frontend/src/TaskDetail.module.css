@@ -33,6 +33,17 @@
   background: var(--color-bg-hover);
 }
 
+.headerTitle {
+  display: none;
+  font-size: 0.85rem;
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .headerMeta {
   font-size: 0.8rem;
   color: var(--color-text-secondary);
@@ -1007,6 +1018,10 @@ a.ciStatus:hover {
 
   .header {
     padding: 0 0.5rem;
+  }
+
+  .headerTitle {
+    display: block;
   }
 
   .textInput {

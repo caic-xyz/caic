@@ -176,6 +176,7 @@ private fun CompactLayout(
                 onNavigateToTask = { newTaskId ->
                     navController.navigate(Screen.TaskDetail(newTaskId))
                 },
+                showTitle = true,
             )
         }
         composable<Screen.TaskDiff> {

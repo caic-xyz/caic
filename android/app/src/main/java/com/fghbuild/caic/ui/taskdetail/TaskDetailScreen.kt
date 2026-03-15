@@ -268,6 +268,7 @@ fun TaskDetailScreen(
     onNavigateBack: () -> Unit,
     onNavigateToDiff: () -> Unit = {},
     onNavigateToTask: (String) -> Unit = {},
+    showTitle: Boolean = false,
     viewModel: TaskDetailViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -314,6 +315,14 @@ fun TaskDetailScreen(
             TopAppBar(
                 title = {
                     Column {
+                        if (showTitle && !task?.title.isNullOrBlank()) {
+                            Text(
+                                text = task!!.title!!,
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -321,7 +330,11 @@ fun TaskDetailScreen(
                             val remoteURL = task?.repos?.firstOrNull()?.remoteURL
                             Text(
                                 text = task?.repos?.firstOrNull()?.name ?: taskId,
-                                style = MaterialTheme.typography.titleMedium,
+                                style = if (showTitle && !task?.title.isNullOrBlank()) {
+                                    MaterialTheme.typography.bodySmall
+                                } else {
+                                    MaterialTheme.typography.titleMedium
+                                },
                                 color = if (remoteURL != null) MaterialTheme.colorScheme.primary else Color.Unspecified,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,

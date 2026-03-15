@@ -928,6 +928,7 @@ export default function App() {
                 <TaskDetail
                   taskId={id}
                   taskState={selectedTask()?.state ?? "pending"}
+                  title={selectedTask()?.title}
                   initialPrompt={selectedTask()?.initialPrompt}
                   inPlanMode={selectedTask()?.inPlanMode}
                   planContent={selectedTask()?.planContent}

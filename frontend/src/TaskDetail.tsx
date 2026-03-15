@@ -34,6 +34,7 @@ const expandedSessionsByTask = new Map<string, Set<string>>();
 interface Props {
   taskId: string;
   taskState: string;
+  title?: string;
   initialPrompt?: string;
   inPlanMode?: boolean;
   planContent?: string;
@@ -506,6 +507,9 @@ export default function TaskDetail(props: Props) {
     <div class={styles.container}>
       <div class={styles.header}>
         <button class={styles.closeBtn} onClick={() => props.onClose()} title="Close"><CloseIcon width={20} height={20} /></button>
+        <Show when={props.title}>
+          <span class={styles.headerTitle}>{props.title}</span>
+        </Show>
         <span class={styles.headerMeta}>
           <Show when={props.remoteURL} fallback={<span class={styles.headerRepo}>{props.repo}</span>}>
             <a class={styles.headerRepo} href={props.remoteURL} target="_blank" rel="noopener">{props.repo}</a>
