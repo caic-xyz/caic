@@ -428,11 +428,10 @@ func (s *Server) botFixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateT
 	return &v1.CreateTaskResp{ID: taskID}, nil
 }
 
-// botFixPR creates a task to fix failing CI on a task's PR branch.
+// botFixPR injects a fix-PR command into an existing task's agent session.
 // It fetches CI logs via the forge using the task's existing CI checks,
-// builds a rich prompt using bot.FailureSummary, and creates a new agent task —
-// the same path as the automated maybeAutoFix.
-func (s *Server) botFixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.CreateTaskResp, error) {
+// builds a rich prompt using bot.FailureSummary, and sends it as input to the task.
+func (s *Server) botFixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.StatusResp, error) {
 	s.mu.Lock()
 	entry, ok := s.tasks[req.TaskID]
 	s.mu.Unlock()
@@ -459,8 +458,6 @@ func (s *Server) botFixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.CreateT
 
 	checks := snap.CIChecks
 	if len(checks) == 0 {
-		// CI monitoring may not have run (e.g. no GitHub App, terminal task).
-		// Fetch fresh check runs from the forge using the PR branch HEAD SHA.
 		sha, shaErr := f.GetDefaultBranchSHA(ctx, snap.ForgeOwner, snap.ForgeRepo, primary.Branch)
 		if shaErr != nil {
 			return nil, fmt.Errorf("get branch SHA: %w", shaErr)
@@ -482,19 +479,10 @@ func (s *Server) botFixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.CreateT
 	}
 	prompt += fmt.Sprintf(". Please fix the failing CI checks on branch %q and push the fix:\n\n%s", primary.Branch, summary)
 
-	var ownerID string
-	if u, ok := auth.UserFromContext(ctx); ok {
-		ownerID = u.ID
+	if err := t.SendInput(ctx, agent.Prompt{Text: prompt}); err != nil {
+		return nil, fmt.Errorf("send input: %w", err)
 	}
-	taskIDStr, err := s.CreateTask(ctx, bot.TaskRequest{Repo: info.RelPath, Prompt: prompt, OwnerID: ownerID})
-	if err != nil {
-		return nil, fmt.Errorf("create task: %w", err)
-	}
-	taskID, err := ksid.Parse(taskIDStr)
-	if err != nil {
-		return nil, fmt.Errorf("parse task id: %w", err)
-	}
-	return &v1.CreateTaskResp{ID: taskID}, nil
+	return &v1.StatusResp{Status: "ok"}, nil
 }
 
 // pollRepoCIOnce fetches the default branch CI status for a single repo.

@@ -31,7 +31,7 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | Method | Path | Request | Response |
 |--------|------|---------|----------|
 | POST | `/api/v1/bot/fix-ci` | `BotFixCIReq` | `CreateTaskResp` |
-| POST | `/api/v1/bot/fix-pr` | `BotFixPRReq` | `CreateTaskResp` |
+| POST | `/api/v1/bot/fix-pr` | `BotFixPRReq` | `StatusResp` |
 
 ## Tasks
 

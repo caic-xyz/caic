@@ -60,7 +60,7 @@ var Routes = []Route{
 	{Name: "cloneRepo", Method: "POST", Path: "/api/v1/server/repos", Req: reflect.TypeFor[CloneRepoReq](), Resp: reflect.TypeFor[Repo]()},
 	{Name: "listRepoBranches", Method: "GET", Path: "/api/v1/server/repos/branches", Resp: reflect.TypeFor[RepoBranchesResp](), QueryParams: []string{"repo"}},
 	{Name: "botFixCI", Method: "POST", Path: "/api/v1/bot/fix-ci", Req: reflect.TypeFor[BotFixCIReq](), Resp: reflect.TypeFor[CreateTaskResp]()},
-	{Name: "botFixPR", Method: "POST", Path: "/api/v1/bot/fix-pr", Req: reflect.TypeFor[BotFixPRReq](), Resp: reflect.TypeFor[CreateTaskResp]()},
+	{Name: "botFixPR", Method: "POST", Path: "/api/v1/bot/fix-pr", Req: reflect.TypeFor[BotFixPRReq](), Resp: reflect.TypeFor[StatusResp]()},
 	{Name: "listTasks", Method: "GET", Path: "/api/v1/tasks", Resp: reflect.TypeFor[Task](), IsArray: true},
 	{Name: "createTask", Method: "POST", Path: "/api/v1/tasks", Req: reflect.TypeFor[CreateTaskReq](), Resp: reflect.TypeFor[CreateTaskResp]()},
 	{Name: "taskRawEvents", Method: "GET", Path: "/api/v1/tasks/{id}/raw_events", Resp: reflect.TypeFor[EventMessage](), IsSSE: true},

@@ -1,7 +1,7 @@
 // TaskDetail renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
-import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents, getTaskToolInput, getTaskCILog, createTask, botFixPR } from "./api";
+import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents, getTaskToolInput, botFixPR } from "./api";
 import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck } from "@sdk/types.gen";
 import { groupMessages, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "./grouping";
 import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "./formatting";
@@ -111,7 +111,6 @@ function ciActionsURL(remoteURL?: string, forge?: string): string | undefined {
 }
 
 export default function TaskDetail(props: Props) {
-  const navigate = useNavigate();
   const location = useLocation();
   const [messages, setMessages] = createSignal<EventMessage[]>([]);
   const [sending, setSending] = createSignal(false);
@@ -119,7 +118,7 @@ export default function TaskDetail(props: Props) {
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
   const [syncMenuOpen, setSyncMenuOpen] = createSignal(false);
-  const [fixingCI, setFixingCI] = createSignal(false);
+  const [fixingPR, setFixingPR] = createSignal(false);
 
   let promptRef: HTMLTextAreaElement | undefined;
 
@@ -459,33 +458,18 @@ export default function TaskDetail(props: Props) {
     }
   }
 
-  async function handleFixCI() {
-    if (fixingCI()) return;
-    setFixingCI(true);
+  async function handleFixPR() {
+    if (fixingPR()) return;
+    setFixingPR(true);
     setActionError(null);
     try {
-      let resp: { id: string };
-      if (props.forgePR) {
-        resp = await botFixPR({ taskId: props.taskId });
-      } else {
-        const failedCheck = props.ciChecks?.find((c) => c.conclusion !== "success" && c.conclusion !== "neutral" && c.conclusion !== "skipped");
-        if (!failedCheck) { setFixingCI(false); return; }
-        const ciLog = await getTaskCILog(props.taskId, String(failedCheck.jobID));
-        const prompt = `CI failed on GitHub Actions for step ${JSON.stringify(ciLog.stepName)}, with log:\n\`\`\`\n${ciLog.log}\n\`\`\``;
-        resp = await createTask({
-          initialPrompt: { text: prompt },
-          repos: props.repo ? [{ name: props.repo, ...(props.baseBranch ? { baseBranch: props.baseBranch } : {}) }] : undefined,
-          harness: props.harness,
-          ...(props.model ? { model: props.model } : {}),
-        });
-      }
-      navigate(`/tasks/${resp.id}`);
+      await botFixPR({ taskId: props.taskId });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Unknown error";
-      setActionError(`fix CI failed: ${msg}`);
+      setActionError(`fix PR failed: ${msg}`);
       setTimeout(() => setActionError(null), 5000);
     } finally {
-      setFixingCI(false);
+      setFixingPR(false);
     }
   }
 
@@ -567,8 +551,8 @@ export default function TaskDetail(props: Props) {
                     </details>
                   </Show>
                   <Show when={s === "failure" && props.ciChecks?.some((c) => c.conclusion !== "success" && c.conclusion !== "neutral" && c.conclusion !== "skipped")}>
-                    <button class={styles.fixCIBtn} onClick={handleFixCI} disabled={fixingCI()} title="Create a new task to investigate this CI failure">
-                      {fixingCI() ? "Creating…" : "Fix CI"}
+                    <button class={styles.fixCIBtn} onClick={handleFixPR} disabled={fixingPR()} title="Inject a fix-PR command into this task (auto mode — no new task created)">
+                      {fixingPR() ? "Sending…" : "Fix PR"}
                     </button>
                   </Show>
                 </>

@@ -60,7 +60,7 @@ private val TerminalStates = setOf("purged", "failed")
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}) {
+fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = false, onClick: () -> Unit = {}) {
     var showMenu by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     val appColors = MaterialTheme.appColors
@@ -175,6 +175,9 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, onClick: () -> Unit = {}
                     }
                     if (task.forgePR != null) {
                         PrBadge()
+                    }
+                    if (autoFixPR && task.forgePR != null) {
+                        AutoBadge()
                     }
                     if (task.forgePR != null && task.ciStatus != null) {
                         CiDot(task.ciStatus)
@@ -340,6 +343,19 @@ private fun PrBadge() {
             "PR",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+        )
+    }
+}
+
+@Composable
+private fun AutoBadge() {
+    Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+        Text(
+            "auto",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
         )

@@ -246,7 +246,7 @@ type BotFixCIReq struct {
 }
 
 // BotFixPRReq is the request body for POST /api/v1/bot/fix-pr.
-// The server fetches CI logs for the task's PR, builds a prompt, and creates a fix task.
+// The server fetches CI logs for the task's PR and injects a fix command.
 type BotFixPRReq struct {
 	TaskID string `json:"taskId"`
 }

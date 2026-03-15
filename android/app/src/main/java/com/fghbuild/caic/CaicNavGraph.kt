@@ -173,9 +173,6 @@ private fun CompactLayout(
                 onNavigateToDiff = {
                     navController.navigate(Screen.TaskDiff(taskId))
                 },
-                onNavigateToTask = { newTaskId ->
-                    navController.navigate(Screen.TaskDetail(newTaskId))
-                },
                 showTitle = true,
             )
         }
@@ -240,11 +237,6 @@ private fun WideLayout(
                     onNavigateBack = { navController.popBackStack() },
                     onNavigateToDiff = {
                         navController.navigate(Screen.TaskDiff(taskId)) {
-                            popUpTo(Screen.TaskList)
-                        }
-                    },
-                    onNavigateToTask = { newTaskId ->
-                        navController.navigate(Screen.TaskDetail(newTaskId)) {
                             popUpTo(Screen.TaskList)
                         }
                     },

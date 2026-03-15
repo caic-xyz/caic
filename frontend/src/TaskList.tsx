@@ -24,6 +24,7 @@ export interface TaskListProps {
   actionId: Accessor<string | null>;
   onDiffClick?: (id: string) => void;
   autoFixCI: Accessor<boolean>;
+  autoFixPR: Accessor<boolean>;
   onFixCI?: (repoPath: string) => void;
 }
 
@@ -169,6 +170,7 @@ export default function TaskList(props: TaskListProps) {
       forgePR={t().forgePR}
       ciStatus={t().ciStatus}
       ciChecks={t().ciChecks}
+      autoFixPR={props.autoFixPR()}
       selected={props.selectedId === t().id}
       now={props.now}
       onClick={() => props.onSelect(t().id)}
@@ -206,6 +208,9 @@ export default function TaskList(props: TaskListProps) {
                     <Show when={meta.defaultBranchCIStatus} keyed>
                       {(status) => <>
                         <CIDot status={status as CIStatus} checks={meta.defaultBranchChecks} href={ciDotURL(meta)} />
+                        <Show when={status === "failure" && props.autoFixCI()}>
+                          <span class={styles.autoBadge} title="Auto-fix CI enabled">auto</span>
+                        </Show>
                         <Show when={status === "failure" && !props.autoFixCI() && props.onFixCI}>
                           <button class={styles.fixCIBtn} title="Fix CI" onClick={(e) => { e.stopPropagation(); props.onFixCI?.(group.repo); }}>Fix CI</button>
                         </Show>

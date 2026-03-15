@@ -247,5 +247,29 @@ fun buildFunctionDeclarations(
         behavior = "NON_BLOCKING",
         scheduling = "INTERRUPT",
     ),
+    FunctionDeclaration(
+        name = "task_fix_pr",
+        description = "Inject a fix-PR command into an existing task to fix its failing PR CI in auto mode.",
+        parameters = objectSchema(
+            "task_number" to intProp("The task number whose PR CI should be fixed"),
+            required = listOf("task_number"),
+        ),
+        behavior = "NON_BLOCKING",
+        scheduling = "INTERRUPT",
+    ),
+    FunctionDeclaration(
+        name = "bot_fix_ci",
+        description = "Create a task to investigate and fix a failing CI on a repository's default branch.",
+        parameters = objectSchema(
+            "repo" to if (repos.isNotEmpty()) {
+                enumProp("Repository to fix CI for", repos)
+            } else {
+                stringProp("Repository path to fix CI for")
+            },
+            required = listOf("repo"),
+        ),
+        behavior = "NON_BLOCKING",
+        scheduling = "INTERRUPT",
+    ),
     )
 }

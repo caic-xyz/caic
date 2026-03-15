@@ -267,7 +267,6 @@ fun TaskDetailScreen(
     taskId: String,
     onNavigateBack: () -> Unit,
     onNavigateToDiff: () -> Unit = {},
-    onNavigateToTask: (String) -> Unit = {},
     showTitle: Boolean = false,
     viewModel: TaskDetailViewModel = hiltViewModel(),
 ) {
@@ -473,21 +472,19 @@ fun TaskDetailScreen(
                                                     ),
                                                 )
                                             }
-                                            val fixingCI = state.pendingAction == "fixCI"
+                                            val fixingPR = state.pendingAction == "fixPR"
                                             Surface(
                                                 shape = RoundedCornerShape(4.dp),
-                                                color = if (fixingCI) MaterialTheme.colorScheme.errorContainer
+                                                color = if (fixingPR) MaterialTheme.colorScheme.errorContainer
                                                         else MaterialTheme.colorScheme.error,
-                                                modifier = Modifier.clickable(enabled = !fixingCI) {
-                                                    viewModel.fixCI { newTaskId ->
-                                                        onNavigateToTask(newTaskId)
-                                                    }
+                                                modifier = Modifier.clickable(enabled = !fixingPR) {
+                                                    viewModel.fixPR()
                                                 },
                                             ) {
                                                 Text(
-                                                    text = if (fixingCI) "Creating…" else "Fix CI",
+                                                    text = if (fixingPR) "Sending…" else "Fix PR",
                                                     style = MaterialTheme.typography.labelSmall,
-                                                    color = if (fixingCI) {
+                                                    color = if (fixingPR) {
                                                         MaterialTheme.colorScheme.onErrorContainer
                                                     } else {
                                                         MaterialTheme.colorScheme.onError

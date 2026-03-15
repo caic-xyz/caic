@@ -12,6 +12,8 @@ import {
   cloneRepo,
   taskEvents,
   webFetch,
+  botFixCI,
+  botFixPR,
 } from "./api";
 import type { Task, EventMessage } from "@sdk/types.gen";
 import { formatCost, formatElapsed } from "./formatting";
@@ -110,6 +112,10 @@ export class FunctionHandlers {
           return await this.handleWebSearch(args);
         case "web_fetch":
           return await this.handleWebFetch(args);
+        case "task_fix_pr":
+          return await this.handleTaskFixPR(args);
+        case "bot_fix_ci":
+          return await this.handleBotFixCI(args);
         default:
           return errorResult(`Unknown function: ${name}`);
       }
@@ -257,6 +263,24 @@ export class FunctionHandlers {
     const url = requireString(args, "url");
     const resp = await webFetch({ url });
     return { title: resp.title, content: resp.content };
+  }
+
+  private async handleTaskFixPR(args: FunctionArgs): Promise<Record<string, unknown>> {
+    const num = requireInt(args, "task_number");
+    const taskId = this.taskNumberMap.toId(num);
+    if (!taskId) return errorResult("Unknown task number");
+    await botFixPR({ taskId });
+    return textResult(`Injected fix-PR command into task #${num}.`);
+  }
+
+  private async handleBotFixCI(args: FunctionArgs): Promise<Record<string, unknown>> {
+    const repo = requireString(args, "repo");
+    const resp = await botFixCI({ repo });
+    const excluded = this.excludedTaskIds();
+    const tasks = (await listTasks()).filter((t) => !excluded.has(t.id));
+    this.taskNumberMap.update(tasks);
+    const num = this.taskNumberMap.toNumber(resp.id);
+    return textResult(num !== undefined ? `Created fix-CI task #${num} for ${repo}.` : `Created fix-CI task for ${repo}.`);
   }
 
   private handleGetLastMessage(args: FunctionArgs): Promise<Record<string, unknown>> {

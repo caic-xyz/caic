@@ -897,6 +897,7 @@ export default function App() {
             }
           }}
           autoFixCI={autoFixCI}
+          autoFixPR={autoFixPR}
           onFixCI={(repoPath) => {
             botFixCI({ repo: repoPath }).then((data) => {
               navigate(taskPath(data.id, repoPath, "", `Fix CI: ${repoPath}`));

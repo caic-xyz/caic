@@ -95,7 +95,7 @@ class ApiClient(
     suspend fun cloneRepo(req: CloneRepoReq): Repo = request("POST", "/api/v1/server/repos", json.encodeToString(req))
     suspend fun listRepoBranches(repo: String): RepoBranchesResp = request("GET", "/api/v1/server/repos/branches?repo=$repo")
     suspend fun botFixCI(req: BotFixCIReq): CreateTaskResp = request("POST", "/api/v1/bot/fix-ci", json.encodeToString(req))
-    suspend fun botFixPR(req: BotFixPRReq): CreateTaskResp = request("POST", "/api/v1/bot/fix-pr", json.encodeToString(req))
+    suspend fun botFixPR(req: BotFixPRReq): StatusResp = request("POST", "/api/v1/bot/fix-pr", json.encodeToString(req))
     suspend fun listTasks(): List<Task> = request("GET", "/api/v1/tasks")
     suspend fun createTask(req: CreateTaskReq): CreateTaskResp = request("POST", "/api/v1/tasks", json.encodeToString(req))
     suspend fun sendInput(id: String, req: InputReq): StatusResp = request("POST", "/api/v1/tasks/$id/input", json.encodeToString(req))

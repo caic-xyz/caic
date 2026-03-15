@@ -324,7 +324,9 @@ private fun MainContent(
                                         if (ciUrl != null) Modifier.clickable { uriHandler.openUri(ciUrl) } else Modifier
                                     ),
                             )
-                            if (ciStatus == "failure" && !state.autoFixCI) {
+                            if (ciStatus == "failure" && state.autoFixCI) {
+                                AutoBadge()
+                            } else if (ciStatus == "failure" && !state.autoFixCI) {
                                 FixCIButton(onClick = { viewModel.fixCI(group.repo) })
                             }
                         }
@@ -332,7 +334,7 @@ private fun MainContent(
                 }
 
                 items(items = group.active, key = { it.id }) { task ->
-                    TaskCard(task = task, onClick = { onNavigateToTask(task.id) })
+                    TaskCard(task = task, autoFixPR = state.autoFixPR, onClick = { onNavigateToTask(task.id) })
                 }
 
                 if (group.stopped.isNotEmpty()) {
@@ -347,7 +349,7 @@ private fun MainContent(
                     }
                     if (isExpanded) {
                         items(items = group.stopped, key = { it.id }) { task ->
-                            TaskCard(task = task, onClick = { onNavigateToTask(task.id) })
+                            TaskCard(task = task, autoFixPR = state.autoFixPR, onClick = { onNavigateToTask(task.id) })
                         }
                     }
                 }
@@ -364,7 +366,7 @@ private fun MainContent(
                     }
                     if (isExpanded) {
                         items(items = group.purged, key = { it.id }) { task ->
-                            TaskCard(task = task, onClick = { onNavigateToTask(task.id) })
+                            TaskCard(task = task, autoFixPR = state.autoFixPR, onClick = { onNavigateToTask(task.id) })
                         }
                     }
                 }
@@ -838,6 +840,20 @@ private fun CloneRepoDialog(
                 Text("Cancel")
             }
         },
+    )
+}
+
+@Composable
+private fun AutoBadge() {
+    Text(
+        text = "auto",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.primary,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(MaterialTheme.colorScheme.primaryContainer)
+            .padding(horizontal = 5.dp, vertical = 1.dp),
     )
 }
 

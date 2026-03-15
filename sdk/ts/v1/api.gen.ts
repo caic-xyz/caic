@@ -45,7 +45,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     cloneRepo: (req: CloneRepoReq): Promise<Repo> => request<Repo>("POST", "/api/v1/server/repos", req),
     listRepoBranches: (repo: string): Promise<RepoBranchesResp> => request<RepoBranchesResp>("GET", `/api/v1/server/repos/branches?repo=${encodeURIComponent(repo)}`),
     botFixCI: (req: BotFixCIReq): Promise<CreateTaskResp> => request<CreateTaskResp>("POST", "/api/v1/bot/fix-ci", req),
-    botFixPR: (req: BotFixPRReq): Promise<CreateTaskResp> => request<CreateTaskResp>("POST", "/api/v1/bot/fix-pr", req),
+    botFixPR: (req: BotFixPRReq): Promise<StatusResp> => request<StatusResp>("POST", "/api/v1/bot/fix-pr", req),
     listTasks: (): Promise<Task[]> => request<Task[]>("GET", "/api/v1/tasks"),
     createTask: (req: CreateTaskReq): Promise<CreateTaskResp> => request<CreateTaskResp>("POST", "/api/v1/tasks", req),
     taskRawEvents: (id: string, onMessage: (event: EventMessage) => void): EventSource => {

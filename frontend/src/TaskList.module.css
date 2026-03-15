@@ -121,6 +121,17 @@
   color: white;
 }
 
+.autoBadge {
+  font-size: 0.65rem;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-ring);
+  color: var(--color-primary);
+  font-weight: 700;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
 /* Mobile: <=768px */
 @media (max-width: 768px) {
   .list {

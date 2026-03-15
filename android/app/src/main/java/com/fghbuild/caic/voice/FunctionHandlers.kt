@@ -2,6 +2,8 @@
 package com.fghbuild.caic.voice
 
 import com.caic.sdk.v1.ApiClient
+import com.caic.sdk.v1.BotFixCIReq
+import com.caic.sdk.v1.BotFixPRReq
 import com.caic.sdk.v1.CloneRepoReq
 import com.caic.sdk.v1.CreateTaskReq
 import com.caic.sdk.v1.EventKinds
@@ -50,6 +52,8 @@ class FunctionHandlers(
                 "task_get_last_message_from_assistant" -> handleGetLastMessage(args)
                 "web_search" -> handleWebSearch(args)
                 "web_fetch" -> handleWebFetch(args)
+                "task_fix_pr" -> handleTaskFixPR(args)
+                "bot_fix_ci" -> handleBotFixCI(args)
                 else -> errorResult("Unknown function: $name")
             }
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
@@ -224,6 +228,27 @@ class FunctionHandlers(
         val url = args.requireString("url")
         val resp = apiClient.webFetch(WebFetchReq(url = url))
         return JsonObject(mapOf("title" to JsonPrimitive(resp.title), "content" to JsonPrimitive(resp.content)))
+    }
+
+    private suspend fun handleTaskFixPR(args: JsonObject): JsonElement {
+        val taskId = resolveTaskNumber(args) ?: return errorResult("Unknown task number")
+        val num = args.requireInt("task_number")
+        apiClient.botFixPR(BotFixPRReq(taskId = taskId))
+        return textResult("Injected fix-PR command into task #$num.")
+    }
+
+    private suspend fun handleBotFixCI(args: JsonObject): JsonElement {
+        val repo = args.requireString("repo")
+        val resp = apiClient.botFixCI(BotFixCIReq(repo = repo))
+        val excluded = excludedTaskIds()
+        val tasks = apiClient.listTasks().filter { it.id !in excluded }
+        taskNumberMap.update(tasks)
+        val num = taskNumberMap.toNumber(resp.id)
+        return if (num != null) {
+            textResult("Created fix-CI task #$num for $repo.")
+        } else {
+            textResult("Created fix-CI task for $repo.")
+        }
     }
 
     private suspend fun handleCloneRepo(args: JsonObject): JsonElement {

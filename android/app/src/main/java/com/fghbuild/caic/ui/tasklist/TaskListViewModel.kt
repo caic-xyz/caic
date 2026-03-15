@@ -84,6 +84,7 @@ data class TaskListState(
     val availableRecent: List<Repo> = emptyList(),
     val availableRest: List<Repo> = emptyList(),
     val autoFixCI: Boolean = false,
+    val autoFixPR: Boolean = false,
 )
 
 @HiltViewModel
@@ -195,6 +196,7 @@ class TaskListViewModel @Inject constructor(
             availableRecent = recentSlice.filter { it.path !in selectedPaths },
             availableRest = restSlice.filter { it.path !in selectedPaths },
             autoFixCI = serverPrefs?.settings?.autoFixOnCIFailure == true,
+            autoFixPR = serverPrefs?.settings?.autoFixOnPROpen == true,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskListState())
 

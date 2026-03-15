@@ -45,6 +45,7 @@ export interface TaskCardProps {
   forgePR?: number;
   ciStatus?: CIStatus;
   ciChecks?: ForgeCheck[];
+  autoFixPR?: boolean;
   selected: boolean;
   now: Accessor<number>;
   onClick: () => void;
@@ -188,6 +189,9 @@ export default function TaskCard(props: TaskCardProps) {
           </Show>
           <Show when={props.forgePR}>
             <span class={styles.prBadge} title={`PR #${props.forgePR}`}>PR</span>
+          </Show>
+          <Show when={props.autoFixPR && props.forgePR}>
+            <span class={styles.autoBadge} title="Auto-fix PR enabled">auto</span>
           </Show>
           <Show when={props.forgePR && props.ciStatus} keyed>
             {(status) => <CIDot status={status as CIStatus} checks={props.ciChecks} />}
