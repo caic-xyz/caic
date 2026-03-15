@@ -1842,7 +1842,7 @@ func (s *Server) SetRunnerOps(c task.ContainerBackend, backends map[agent.Harnes
 	}
 }
 
-// loadPurgedTasks loads recent purged tasks from JSONL logs on disk.
+// loadPurgedTasks loads the last 5 purged tasks per repository from JSONL logs on disk.
 // Exported for testing; New() uses the parallelized variant.
 func (s *Server) loadPurgedTasks() error {
 	all, err := task.LoadLogs(s.logDir)
@@ -1854,7 +1854,7 @@ func (s *Server) loadPurgedTasks() error {
 
 // loadPurgedTasksFrom populates s.tasks from pre-loaded log data. It filters
 // to tasks with an explicit caic_result trailer, keeps only those updated
-// within the last 7 days, and limits the result to the 5 most recent per repo.
+// within the last 7 days, and limits the result to the 5 most recent per repository.
 func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 	// Filter to tasks updated within the last 7 days. Tasks without a
 	// caic_result trailer (e.g. interrupted by server shutdown) get a
@@ -1884,7 +1884,21 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 			repoCount[repo]++
 		}
 	}
-	purged = filtered
+	// LoadLogs returns ascending; reverse for most-recent-first, keep last 5 per repo.
+	slices.Reverse(purged)
+	perRepo := make(map[string]int)
+	kept := purged[:0]
+	for _, lt := range purged {
+		key := ""
+		if p := lt.Primary(); p != nil {
+			key = p.Name
+		}
+		if perRepo[key] < 5 {
+			perRepo[key]++
+			kept = append(kept, lt)
+		}
+	}
+	purged = kept
 	if len(purged) == 0 {
 		slog.Info("no purged tasks to load", "candidates", len(all))
 		return nil

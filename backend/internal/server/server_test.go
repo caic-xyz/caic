@@ -1056,6 +1056,59 @@ func TestLoadPurgedTasks(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("PerRepoLimit", func(t *testing.T) {
+		logDir := t.TempDir()
+
+		// Write 6 tasks for repo-a and 6 for repo-b; expect only the 5 most
+		// recent per repo (10 total) to be loaded.
+		for i := range 12 {
+			repoName := "repo-a"
+			if i >= 6 {
+				repoName = "repo-b"
+			}
+			meta := mustJSON(t, agent.MetaMessage{
+				MessageType: "caic_meta", Version: 1,
+				Prompt:    fmt.Sprintf("task %d", i),
+				Repos:     []agent.MetaRepo{{Name: repoName, Branch: fmt.Sprintf("caic-%d", i)}},
+				Harness:   agent.Claude,
+				StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
+			})
+			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+			writeLogFile(t, logDir, fmt.Sprintf("%02d.jsonl", i), meta, trailer)
+		}
+
+		s := &Server{
+			runners: map[string]*task.Runner{},
+			tasks:   make(map[string]*taskEntry),
+			changed: make(chan struct{}),
+			logDir:  logDir,
+		}
+		if err := s.loadPurgedTasks(); err != nil {
+			t.Fatal(err)
+		}
+
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if len(s.tasks) != 10 {
+			t.Fatalf("len(tasks) = %d, want 10 (5 per repo)", len(s.tasks))
+		}
+
+		// Collect prompts and verify oldest task per repo was dropped.
+		prompts := make([]string, 0, len(s.tasks))
+		for _, e := range s.tasks {
+			prompts = append(prompts, e.task.InitialPrompt.Text)
+		}
+		sort.Strings(prompts)
+		// "task 0" (oldest repo-a) and "task 6" (oldest repo-b) should be excluded.
+		for _, dropped := range []string{"task 0", "task 6"} {
+			for _, p := range prompts {
+				if p == dropped {
+					t.Errorf("prompt %q should have been dropped (exceeds per-repo limit)", dropped)
+				}
+			}
+		}
+	})
 }
 
 // parseSSEEvents extracts message-type SSE events from a response body.
