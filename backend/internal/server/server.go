@@ -1872,20 +1872,6 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 	}
 	// LoadLogs returns ascending; reverse for most-recent-first, keep last 5 per repo.
 	slices.Reverse(purged)
-	repoCount := map[string]int{}
-	filtered := purged[:0]
-	for _, lt := range purged {
-		repo := ""
-		if p := lt.Primary(); p != nil {
-			repo = p.Name
-		}
-		if repoCount[repo] < 5 {
-			filtered = append(filtered, lt)
-			repoCount[repo]++
-		}
-	}
-	// LoadLogs returns ascending; reverse for most-recent-first, keep last 5 per repo.
-	slices.Reverse(purged)
 	perRepo := make(map[string]int)
 	kept := purged[:0]
 	for _, lt := range purged {
