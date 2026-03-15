@@ -131,6 +131,16 @@ def serve(cmd_args, work_dir, log_stdin=True):
     # Child: become session leader so we survive SSH disconnects.
     os.setsid()
 
+    # Close inherited stdio FDs. The daemon communicates via the Unix socket
+    # and subprocess pipes, not via its parent's stdio. Leaving them open
+    # leaks the parent's pipe FDs, which can prevent the attach_client from
+    # exiting cleanly on macOS.
+    devnull = os.open(os.devnull, os.O_RDWR)
+    os.dup2(devnull, 0)  # stdin → /dev/null
+    os.dup2(devnull, 1)  # stdout → /dev/null
+    # stderr is redirected to relay.log below.
+    os.close(devnull)
+
     # Set up logging to relay.log. This replaces the old stderr redirect so
     # that key lifecycle events are always recorded for diagnostics.
     log_path = os.path.join(RELAY_DIR, "relay.log")

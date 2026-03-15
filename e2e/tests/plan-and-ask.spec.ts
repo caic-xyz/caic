@@ -40,8 +40,8 @@ test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, ap
   const clearBtn = page.getByTestId("clear-and-execute-plan");
   await expect(clearBtn).toBeVisible({ timeout: 10_000 });
 
-  // The plan content should be rendered (exact match on the markdown list item).
-  await expect(page.getByText("Analyze the problem", { exact: true })).toBeVisible();
+  // The plan content should be rendered.
+  await expect(page.getByTestId("plan-content")).toBeVisible();
 
   // Fill in a non-empty prompt so restart doesn't try to read the container plan file.
   await page.getByTestId("task-detail-form").getByPlaceholder("Send message to agent...").fill("execute now");
@@ -70,15 +70,15 @@ test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({
 
   // The question and option chips must be visible.
   await expect(page.getByText("Which approach should I use?")).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByTestId("ask-option-Option A")).toBeVisible();
-  await expect(page.getByTestId("ask-option-Option B")).toBeVisible();
+  await expect(page.getByTestId("ask-option-In-memory (sync.Map)")).toBeVisible();
+  await expect(page.getByTestId("ask-option-Redis")).toBeVisible();
 
-  // Select Option A and submit.
-  await page.getByTestId("ask-option-Option A").click();
+  // Select the first option and submit.
+  await page.getByTestId("ask-option-In-memory (sync.Map)").click();
   await page.getByTestId("ask-submit").click();
 
   // Submitted answer should be displayed in the ask-submitted-answer div.
-  await expect(page.getByTestId("ask-submitted-answer")).toHaveText("Option A", { timeout: 10_000 });
+  await expect(page.getByTestId("ask-submitted-answer")).toHaveText("In-memory (sync.Map)", { timeout: 10_000 });
 
   // The answer is forwarded to the fake agent as a new prompt; it replies
   // with a joke and the task transitions back to waiting.

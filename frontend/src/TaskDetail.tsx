@@ -947,7 +947,7 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events
           <Show when={calls().find((c) => c.use.planContent)?.use.planContent} keyed>
             {(plan) => (
               <div class={styles.planAction}>
-                <div class={styles.planContent}>
+                <div class={styles.planContent} data-testid="plan-content">
                   <Markdown text={plan} />
                 </div>
                 <Show when={props.onClearAndExecutePlan}>
@@ -1113,7 +1113,7 @@ function ToolCallCard(props: { call: ToolCall; taskId: string; open: boolean; on
       <Show when={!props.suppressPlanContent && props.call.use.planContent} keyed>
         {(plan) => (
           <div class={styles.planAction}>
-            <div class={styles.planContent}>
+            <div class={styles.planContent} data-testid="plan-content">
               <Markdown text={plan} />
             </div>
             <Show when={props.onClearAndExecutePlan}>

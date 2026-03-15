@@ -132,6 +132,7 @@ def test_stdin_eof_keeps_subprocess():
 
         # Reconnect and verify subprocess is alive.
         conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        conn.settimeout(5.0)
         conn.connect(sock_path)
         hs = json.dumps({"offset": 0}) + "\n"
         conn.sendall(hs.encode())
