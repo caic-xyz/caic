@@ -54,8 +54,35 @@ jobs:
             exit 1
           fi
 
-  finalize-release:
+  validate-build:
     needs: [setup]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Build frontend
+        run: make build
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: latest
+          args: release --snapshot --clean
+        env:
+          GORELEASER_CURRENT_TAG: ${{ needs.setup.outputs.version }}
+
+  finalize-release:
+    needs: [setup, validate-build]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
