@@ -32,21 +32,15 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-private val naturalChunkRegex = Regex("(\\d+|\\D+)")
 
-private fun naturalCompare(a: String, b: String): Int {
-    val ac = naturalChunkRegex.findAll(a).map { it.value }.toList()
-    val bc = naturalChunkRegex.findAll(b).map { it.value }.toList()
-    for (i in 0 until minOf(ac.size, bc.size)) {
-        val cmp = if (ac[i][0].isDigit() && bc[i][0].isDigit()) {
-            ac[i].toLong().compareTo(bc[i].toLong())
-        } else {
-            ac[i].compareTo(bc[i], ignoreCase = true)
-        }
-        if (cmp != 0) return cmp
-    }
-    return ac.size.compareTo(bc.size)
-}
+// Compare task IDs descending (newest first). Ksid strings use base32 Extended
+// Hex (0-9A-V), so lexicographic order matches numeric order only for equal-length
+// strings. Sort by length descending first, then lexicographically descending.
+private val taskIdDesc = compareByDescending<Task> { it.id?.length ?: 0 }
+    .thenByDescending { it.id ?: "" }
+
+// Compare by last state change time descending (most recently active first).
+private val taskStateUpdatedDesc = compareByDescending<Task> { it.stateUpdatedAt }
 
 data class RepoEntry(val path: String, val branch: String)
 
@@ -141,25 +135,18 @@ class TaskListViewModel @Inject constructor(
         val reposWithTasks = sortedRepos.filter { groupsMap.containsKey(it.path) }
         val sortedGroups = reposWithTasks.mapNotNull { groupsMap[it.path] }.map { g ->
             g.copy(
-                active = g.active.sortedWith(
-                    Comparator<Task> { a, b ->
-                        naturalCompare(
-                            a.repos?.firstOrNull()?.branch ?: "",
-                            b.repos?.firstOrNull()?.branch ?: "",
-                        )
-                    }
-                ),
-                stopped = g.stopped.sortedByDescending { it.id },
-                purged = g.purged.sortedByDescending { it.id },
+                active = g.active.sortedWith(taskIdDesc),
+                stopped = g.stopped.sortedWith(taskStateUpdatedDesc),
+                purged = g.purged.sortedWith(taskStateUpdatedDesc),
             )
         }.toMutableList()
 
         if (other.active.isNotEmpty() || other.stopped.isNotEmpty() || other.purged.isNotEmpty()) {
             sortedGroups.add(
                 other.copy(
-                    active = other.active.sortedByDescending { it.id },
-                    stopped = other.stopped.sortedByDescending { it.id },
-                    purged = other.purged.sortedByDescending { it.id },
+                    active = other.active.sortedWith(taskIdDesc),
+                    stopped = other.stopped.sortedWith(taskStateUpdatedDesc),
+                    purged = other.purged.sortedWith(taskStateUpdatedDesc),
                 )
             )
         }

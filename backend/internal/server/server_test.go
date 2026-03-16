@@ -1061,21 +1061,29 @@ func TestLoadPurgedTasks(t *testing.T) {
 		logDir := t.TempDir()
 
 		// Write 6 tasks for repo-a and 6 for repo-b; expect only the 5 most
-		// recent per repo (10 total) to be loaded.
+		// recently active per repo (10 total) to be loaded.
+		// Use times relative to now so all tasks pass the 7-day filter.
+		// Task i has stoppedAt = now - (11-i)*hour so task 0 is oldest, task 11 newest.
+		now := time.Now().UTC()
 		for i := range 12 {
 			repoName := "repo-a"
 			if i >= 6 {
 				repoName = "repo-b"
 			}
+			stoppedAt := now.Add(-time.Duration(11-i) * time.Hour)
 			meta := mustJSON(t, agent.MetaMessage{
 				MessageType: "caic_meta", Version: 1,
 				Prompt:    fmt.Sprintf("task %d", i),
 				Repos:     []agent.MetaRepo{{Name: repoName, Branch: fmt.Sprintf("caic-%d", i)}},
 				Harness:   agent.Claude,
-				StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
+				StartedAt: stoppedAt,
 			})
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
-			writeLogFile(t, logDir, fmt.Sprintf("%02d.jsonl", i), meta, trailer)
+			name := fmt.Sprintf("%02d.jsonl", i)
+			writeLogFile(t, logDir, name, meta, trailer)
+			if err := os.Chtimes(filepath.Join(logDir, name), stoppedAt, stoppedAt); err != nil {
+				t.Fatal(err)
+			}
 		}
 
 		s := &Server{

@@ -31,21 +31,24 @@ export interface TaskListProps {
 const naturalCompare = (a: string, b: string) =>
   a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 
-/** Sort tasks according to sidebar grouping: Active (repo/branch), then Stopped (ID desc), then Purged (ID desc). */
+/** Sort tasks according to sidebar grouping: active by ID desc, stopped/purged by last state change desc. */
 export function sortTasks(tasks: Task[]): Task[] {
   const active = tasks.filter((t) => t.state !== "stopped" && t.state !== "purged" && t.state !== "failed");
   const stopped = tasks.filter((t) => t.state === "stopped");
   const purged = tasks.filter((t) => t.state === "purged" || t.state === "failed");
 
-  active.sort((a, b) => {
-    const rc = naturalCompare(a.repos?.[0]?.name ?? "", b.repos?.[0]?.name ?? "");
-    if (rc !== 0) return rc;
-    return naturalCompare(a.repos?.[0]?.branch ?? "", b.repos?.[0]?.branch ?? "");
-  });
-
-  const idDesc = (a: Task, b: Task) => (b.id > a.id ? 1 : b.id < a.id ? -1 : 0);
-  stopped.sort(idDesc);
-  purged.sort(idDesc);
+  // Sort by length first (longer = larger numeric value), then lexicographically.
+  // Plain lexicographic comparison fails across different lengths: "B" > "1A" in
+  // ASCII even though the numeric value of "B" (11) < "1A" (42).
+  const idDesc = (a: Task, b: Task) => {
+    const lc = b.id.length - a.id.length;
+    if (lc !== 0) return lc;
+    return b.id > a.id ? 1 : b.id < a.id ? -1 : 0;
+  };
+  const stateUpdatedDesc = (a: Task, b: Task) => b.stateUpdatedAt - a.stateUpdatedAt;
+  active.sort(idDesc);
+  stopped.sort(stateUpdatedDesc);
+  purged.sort(stateUpdatedDesc);
 
   return [...active, ...stopped, ...purged];
 }
@@ -119,18 +122,23 @@ export default function TaskList(props: TaskListProps) {
       }
     }
 
-    const sortFn = (a: Task, b: Task) => (b.id > a.id ? 1 : b.id < a.id ? -1 : 0);
+    const idDesc = (a: Task, b: Task) => {
+      const lc = b.id.length - a.id.length;
+      if (lc !== 0) return lc;
+      return b.id > a.id ? 1 : b.id < a.id ? -1 : 0;
+    };
+    const stateUpdatedDesc = (a: Task, b: Task) => b.stateUpdatedAt - a.stateUpdatedAt;
     const sortedGroups = Object.values(groups).sort((a, b) => naturalCompare(a.repo, b.repo));
     for (const g of sortedGroups) {
-      g.active.sort((a, b) => naturalCompare(a.repos?.[0]?.branch ?? "", b.repos?.[0]?.branch ?? ""));
-      g.stopped.sort(sortFn);
-      g.purged.sort(sortFn);
+      g.active.sort(idDesc);
+      g.stopped.sort(stateUpdatedDesc);
+      g.purged.sort(stateUpdatedDesc);
     }
-    
+
     if (other.active.length > 0 || other.stopped.length > 0 || other.purged.length > 0) {
-      other.active.sort((a, b) => (b.id > a.id ? 1 : b.id < a.id ? -1 : 0));
-      other.stopped.sort(sortFn);
-      other.purged.sort(sortFn);
+      other.active.sort(idDesc);
+      other.stopped.sort(stateUpdatedDesc);
+      other.purged.sort(stateUpdatedDesc);
       sortedGroups.push(other);
     }
 

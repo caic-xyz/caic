@@ -1874,8 +1874,11 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 		}
 		purged = append(purged, lt)
 	}
-	// LoadLogs returns ascending; reverse for most-recent-first, keep last 5 per repo.
-	slices.Reverse(purged)
+	// Sort by last state update descending so the 5-per-repo limit keeps the
+	// most recently active tasks, not just the most recently started ones.
+	slices.SortFunc(purged, func(a, b *task.LoadedTask) int {
+		return b.LastStateUpdateAt.Compare(a.LastStateUpdateAt)
+	})
 	perRepo := make(map[string]int)
 	kept := purged[:0]
 	for _, lt := range purged {
@@ -1897,7 +1900,11 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 	defer s.mu.Unlock()
 	for _, lt := range purged {
 		taskID := ksid.NewID()
-		if len(lt.TaskID) == 13 {
+		// The original ID is embedded in the log filename as the prefix before the
+		// first '-'. Real server IDs are 10–12 chars (current-era timestamps in
+		// base32). Reject short strings (e.g. "a" from test filenames) that parse
+		// to implausibly small values.
+		if len(lt.TaskID) >= 9 {
 			if parsed, parseErr := ksid.Parse(lt.TaskID); parseErr == nil && parsed != 0 {
 				taskID = parsed
 			}
@@ -1909,13 +1916,12 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 			Harness:       lt.Harness,
 			StartedAt:     lt.StartedAt,
 		}
-		t.SetState(lt.State)
+		t.SetStateAt(lt.State, lt.LastStateUpdateAt)
 		if lt.Title != "" {
 			t.SetTitle(lt.Title)
 		} else {
 			t.SetTitle(lt.Prompt)
 		}
-		// TODO: Figure out when it was purged.
 		if err := lt.LoadMessages(); err != nil {
 			ltPrimary := lt.Primary()
 			ltRepo, ltBranch := "", ""
