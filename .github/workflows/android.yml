@@ -52,7 +52,9 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 4096
           disable-animations: true
           emulator-boot-timeout: 600
-          script: make android-e2e
+          script: |
+            adb shell 'while ! pm list packages > /dev/null 2>&1; do echo "Waiting for package manager..."; sleep 2; done'
+            make android-e2e
       - name: Upload lint results
         if: always()
         uses: actions/upload-artifact@v6
