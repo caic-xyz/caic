@@ -6,10 +6,12 @@ on:
     paths:
       - 'android/**'
       - 'sdk/kotlin/**'
+      - '.github/workflows/android.yml'
   pull_request:
     paths:
       - 'android/**'
       - 'sdk/kotlin/**'
+      - '.github/workflows/android.yml'
 permissions:
   contents: read
 
