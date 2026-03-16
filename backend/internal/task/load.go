@@ -200,7 +200,7 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 		Harness:           meta.Harness,
 		StartedAt:         meta.StartedAt,
 		LastStateUpdateAt: info.ModTime().UTC(),
-		State:             StateFailed, // default if no trailer
+		State:             StateRunning, // sentinel: overridden by caic_result trailer or loadPurgedTasksFrom
 		ForgeIssue:        meta.ForgeIssue,
 	}
 
@@ -307,7 +307,7 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 		Harness:           meta.Harness,
 		StartedAt:         meta.StartedAt,
 		LastStateUpdateAt: mtime,
-		State:             StateFailed, // default if no trailer
+		State:             StateRunning, // sentinel: overridden by caic_result trailer or loadPurgedTasksFrom
 		ForgeIssue:        meta.ForgeIssue,
 	}
 

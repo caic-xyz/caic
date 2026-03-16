@@ -970,17 +970,17 @@ func TestLoadPurgedTasks(t *testing.T) {
 			}
 		}
 
-		// Verify that branchID scoped by repo does not lose either entry.
-		// This mirrors the branchID construction in adoptContainers.
-		branchID := make(map[string]string, len(s.tasks))
+		// Verify that branchIDs scoped by repo does not lose either entry.
+		// This mirrors the branchIDs construction in adoptContainers.
+		branchIDs := make(map[string][]string, len(s.tasks))
 		for id, e := range s.tasks {
 			if p := e.task.Primary(); p != nil && p.Branch != "" {
 				key := p.Name + "\x00" + p.Branch
-				branchID[key] = id
+				branchIDs[key] = append(branchIDs[key], id)
 			}
 		}
-		if len(branchID) != 2 {
-			t.Errorf("branchID has %d entries, want 2 (repo-scoped keys must not collide)", len(branchID))
+		if len(branchIDs) != 2 {
+			t.Errorf("branchIDs has %d keys, want 2 (repo-scoped keys must not collide)", len(branchIDs))
 		}
 	})
 
@@ -1107,6 +1107,65 @@ func TestLoadPurgedTasks(t *testing.T) {
 					t.Errorf("prompt %q should have been dropped (exceeds per-repo limit)", dropped)
 				}
 			}
+		}
+	})
+
+	t.Run("StateInference", func(t *testing.T) {
+		// Tasks without a caic_result trailer always load as "failed" —
+		// we cannot distinguish purged-without-trailer from interrupted.
+		// adoptContainers replaces stale entries with live state when a
+		// container is still running.
+		logDir := t.TempDir()
+
+		meta := func(prompt string) string {
+			return mustJSON(t, agent.MetaMessage{
+				MessageType: "caic_meta", Version: 1, Prompt: prompt, Harness: agent.Claude,
+				Repos:     []agent.MetaRepo{{Name: "r", Branch: "caic-0"}},
+				StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			})
+		}
+		resultMsg := mustJSON(t, agent.ResultMessage{
+			MessageType: "result", Subtype: "success", Result: "done",
+		})
+
+		// no trailer + ResultMessage present → "failed" (container may be gone)
+		writeLogFile(t, logDir, "waiting.jsonl", meta("waiting task"), resultMsg)
+
+		// no trailer + no ResultMessage → "failed"
+		writeLogFile(t, logDir, "interrupted.jsonl", meta("interrupted task"))
+
+		// explicit trailer → "purged"
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		writeLogFile(t, logDir, "purged.jsonl", meta("purged task"), trailer)
+
+		s := &Server{
+			runners: map[string]*task.Runner{},
+			tasks:   make(map[string]*taskEntry),
+			changed: make(chan struct{}),
+			logDir:  logDir,
+		}
+		if err := s.loadPurgedTasks(); err != nil {
+			t.Fatal(err)
+		}
+
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if len(s.tasks) != 3 {
+			t.Fatalf("len(tasks) = %d, want 3", len(s.tasks))
+		}
+
+		states := make(map[string]string, len(s.tasks))
+		for _, e := range s.tasks {
+			states[e.task.InitialPrompt.Text] = e.task.Snapshot().State.String()
+		}
+		if got := states["waiting task"]; got != "failed" {
+			t.Errorf("waiting task state = %q, want \"failed\"", got)
+		}
+		if got := states["interrupted task"]; got != "failed" {
+			t.Errorf("interrupted task state = %q, want \"failed\"", got)
+		}
+		if got := states["purged task"]; got != "purged" {
+			t.Errorf("purged task state = %q, want \"purged\"", got)
 		}
 	})
 }

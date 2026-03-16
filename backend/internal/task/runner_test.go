@@ -293,6 +293,55 @@ func TestRunner(t *testing.T) {
 			}
 		})
 
+		t.Run("StoppedTaskWritesTrailer", func(t *testing.T) {
+			// When a stopped task (no session handle) is purged, Cleanup must
+			// reopen the existing log and write a caic_result trailer so the
+			// task loads as "purged" (not "failed") on the next server restart.
+			logDir := t.TempDir()
+			clone := initTestRepo(t, "main")
+			r := &Runner{
+				BaseBranch: "main",
+				Dir:        clone,
+				LogDir:     logDir,
+			}
+
+			tk := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "test"},
+				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
+				Harness:       agent.Claude,
+			}
+			tk.SetState(StateStopped)
+
+			// Create a pre-existing log file (written by StopTask scenario).
+			logW, err := r.openLog(tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = logW.Close()
+
+			// Purge the stopped task — should reopen the log and write the trailer.
+			r.Cleanup(t.Context(), tk, StatePurged)
+
+			// Load the log and verify the trailer was written.
+			lt, err := LoadLogs(logDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(lt) != 1 {
+				t.Fatalf("LoadLogs returned %d tasks, want 1", len(lt))
+			}
+			if lt[0].State != StatePurged {
+				t.Errorf("state = %v, want StatePurged", lt[0].State)
+			}
+			if lt[0].Result == nil {
+				t.Fatal("Result is nil, want caic_result trailer")
+			}
+			if lt[0].Result.State != StatePurged {
+				t.Errorf("Result.State = %v, want StatePurged", lt[0].Result.State)
+			}
+		})
+
 		t.Run("UsesLiveDiffStat", func(t *testing.T) {
 			clone := initTestRepo(t, "main")
 			r := &Runner{

@@ -432,6 +432,16 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	var logW io.WriteCloser
 	if h != nil {
 		logW = h.LogW
+	} else {
+		// Task was stopped before purge: the session handle (and its LogW) was
+		// released by StopTask. Reopen the log for appending so we can write
+		// the caic_result trailer; without it the task would load as "failed"
+		// on the next server restart instead of "purged".
+		var reopenErr error
+		logW, reopenErr = r.reopenLog(t)
+		if reopenErr != nil {
+			tlog.Warn("reopen log for trailer failed", "err", reopenErr)
+		}
 	}
 	writeLogTrailer(logW, t.Title(), &res)
 	if logW != nil {
@@ -1100,6 +1110,23 @@ func (r *Runner) openLog(t *Task) (io.WriteCloser, error) {
 		_, _ = f.Write(append(data, '\n'))
 	}
 	return f, nil
+}
+
+// reopenLog opens an existing log file for appending without writing a new
+// metadata header. Used by Cleanup to write the caic_result trailer for
+// stopped tasks whose session handle has already been released.
+func (r *Runner) reopenLog(t *Task) (io.WriteCloser, error) {
+	if r.LogDir == "" {
+		return nil, errors.New("no log dir")
+	}
+	safeRepo := ""
+	safeBranch := ""
+	if p := t.Primary(); p != nil {
+		safeRepo = strings.ReplaceAll(p.Name, "/", "-")
+		safeBranch = strings.ReplaceAll(p.Branch, "/", "-")
+	}
+	name := t.ID.String() + "-" + safeRepo + "-" + safeBranch + ".jsonl"
+	return os.OpenFile(filepath.Join(r.LogDir, name), os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // name is derived from ksid, not arbitrary user input.
 }
 
 // writeLogTrailer appends a MetaResultMessage to the log file.

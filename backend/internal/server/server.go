@@ -1852,13 +1852,17 @@ func (s *Server) loadPurgedTasks() error {
 	return s.loadPurgedTasksFrom(all)
 }
 
-// loadPurgedTasksFrom populates s.tasks from pre-loaded log data. It filters
-// to tasks with an explicit caic_result trailer, keeps only those updated
-// within the last 7 days, and limits the result to the 5 most recent per repository.
+// loadPurgedTasksFrom populates s.tasks from pre-loaded log data. It keeps
+// tasks updated within the last 7 days and limits the result to the 5 most
+// recent per repository. Tasks without a caic_result trailer get a synthetic
+// result; their state is inferred from messages and finalised in the setup
+// loop. adoptContainers removes all stale entries for any branch that has a
+// live container, so no-trailer tasks never duplicate adopted ones.
 func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
-	// Filter to tasks updated within the last 7 days. Tasks without a
-	// caic_result trailer (e.g. interrupted by server shutdown) get a
-	// synthetic failed result so they still appear in the UI.
+	// Include all tasks updated within the last 7 days, with or without a
+	// caic_result trailer. Trailer-less tasks (interrupted or still-running)
+	// are deduplicated by adoptContainers which sweeps all stale entries for
+	// each branch it adopts.
 	var purged []*task.LoadedTask
 	now := time.Now().UTC()
 	for _, lt := range all {
@@ -1866,7 +1870,7 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 			continue
 		}
 		if lt.Result == nil {
-			lt.Result = &task.Result{State: lt.State}
+			lt.Result = &task.Result{State: task.StateFailed}
 		}
 		purged = append(purged, lt)
 	}
@@ -1892,8 +1896,14 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, lt := range purged {
+		taskID := ksid.NewID()
+		if len(lt.TaskID) == 13 {
+			if parsed, parseErr := ksid.Parse(lt.TaskID); parseErr == nil && parsed != 0 {
+				taskID = parsed
+			}
+		}
 		t := &task.Task{
-			ID:            ksid.NewID(),
+			ID:            taskID,
 			InitialPrompt: agent.Prompt{Text: lt.Prompt},
 			Repos:         lt.Repos, // GitRoot is empty for purged tasks
 			Harness:       lt.Harness,
@@ -1917,6 +1927,14 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 		}
 		if lt.Msgs != nil {
 			t.RestoreMessages(lt.Msgs)
+		}
+		// For tasks without a caic_result trailer (lt.State == StateRunning
+		// sentinel), any state RestoreMessages inferred is unreliable — the
+		// task may have been purged or interrupted without a trailer.
+		// Force StateFailed; adoptContainers replaces this entry with the
+		// correct live state if the container is still running.
+		if lt.State == task.StateRunning {
+			t.SetState(task.StateFailed)
 		}
 		// SetPR after LoadMessages: the header-only tail scan may miss
 		// caic_pr when the record is beyond the 64 KiB window; the full
@@ -1959,10 +1977,15 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 	// The key is "repo\x00branch" because different repos can share a
 	// branch name.
 	s.mu.Lock()
-	branchID := make(map[string]string, len(s.tasks))
+	// Map repo+branch → all stale task IDs so adoptOne can remove every
+	// matching entry (there may be multiple log files per branch when a
+	// branch was reused or when trailer-less tasks were loaded alongside
+	// properly-purged ones with the same branch).
+	branchIDs := make(map[string][]string, len(s.tasks))
 	for id, e := range s.tasks {
 		if p := e.task.Primary(); p != nil && p.Branch != "" {
-			branchID[p.Name+"\x00"+p.Branch] = id
+			key := p.Name + "\x00" + p.Branch
+			branchIDs[key] = append(branchIDs[key], id)
 		}
 	}
 	s.mu.Unlock()
@@ -1981,7 +2004,7 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 			}
 			claimed[c.Name] = true
 			wg.Go(func() {
-				if err := s.adoptOne(ctx, ri, runner, c, branch, branchID, allLogs); err != nil {
+				if err := s.adoptOne(ctx, ri, runner, c, branch, branchIDs, allLogs); err != nil {
 					mu.Lock()
 					errs = append(errs, err)
 					mu.Unlock()
@@ -1999,7 +2022,7 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 				continue
 			}
 			wg.Go(func() {
-				if err := s.adoptOne(ctx, repoInfo{}, noRepoRunner, c, "", branchID, allLogs); err != nil {
+				if err := s.adoptOne(ctx, repoInfo{}, noRepoRunner, c, "", branchIDs, allLogs); err != nil {
 					mu.Lock()
 					errs = append(errs, err)
 					mu.Unlock()
@@ -2019,7 +2042,7 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 // whether the relay is alive, and registers the task. If the relay is
 // alive, it spawns a background goroutine to reattach. allLogs is the
 // pre-loaded set of JSONL log files (shared across all adoptOne calls).
-func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner, c *md.Container, branch string, branchID map[string]string, allLogs []*task.LoadedTask) error { //nolint:gocritic // repoInfo size increase from GitHub fields; refactor not worth it
+func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner, c *md.Container, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) error { //nolint:gocritic // repoInfo size increase from GitHub fields; refactor not worth it
 	// Only adopt containers that caic started. The caic label is set at
 	// container creation and is the authoritative proof of ownership.
 	labelVal, err := container.LabelValue(ctx, c.Name, "caic")
@@ -2251,8 +2274,10 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		slog.Info("adopt: CI monitoring", "task", t.ID, "pr", t.GetPR(), "forgeKind", ri.ForgeKind, "forgeOwner", ri.ForgeOwner, "hasForge", f != nil)
 		if f != nil {
 			s.mu.Lock()
-			if oldID, ok := branchID[ri.RelPath+"\x00"+branch]; ok && (ri.RelPath != "" || branch != "") {
-				delete(s.tasks, oldID)
+			if ri.RelPath != "" || branch != "" {
+				for _, oldID := range branchIDs[ri.RelPath+"\x00"+branch] {
+					delete(s.tasks, oldID)
+				}
 			}
 			s.tasks[t.ID.String()] = entry
 			s.taskChanged()
@@ -2277,9 +2302,10 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 
 	if !entryRegistered {
 		s.mu.Lock()
-		if oldID, ok := branchID[ri.RelPath+"\x00"+branch]; ok && (ri.RelPath != "" || branch != "") {
-			// Replace the stale purged entry with the live container.
-			delete(s.tasks, oldID)
+		if ri.RelPath != "" || branch != "" {
+			for _, oldID := range branchIDs[ri.RelPath+"\x00"+branch] {
+				delete(s.tasks, oldID)
+			}
 		}
 		s.tasks[t.ID.String()] = entry
 		s.taskChanged()
