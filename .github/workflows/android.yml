@@ -43,12 +43,13 @@ jobs:
       - name: E2E Test
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 36
-          target: google_apis
+          api-level: 34
+          target: default
           arch: x86_64
           force-avd-creation: false
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -memory 4096
           disable-animations: true
+          emulator-boot-timeout: 600
           script: make android-e2e
       - name: Upload lint results
         if: always()
