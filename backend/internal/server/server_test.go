@@ -22,6 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
+	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
@@ -53,7 +54,6 @@ func (stubBackend) SupportsImages() bool { return false }
 func (stubBackend) ContextWindowLimit(string) int { return 180_000 }
 
 func decodeError(t *testing.T, w *httptest.ResponseRecorder) dto.ErrorDetails {
-	t.Helper()
 	var resp dto.ErrorResponse
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode error response: %v", err)
@@ -62,7 +62,6 @@ func decodeError(t *testing.T, w *httptest.ResponseRecorder) dto.ErrorDetails {
 }
 
 func newTestPrefs(t *testing.T) *preferences.Store {
-	t.Helper()
 	path := filepath.Join(t.TempDir(), "preferences.json")
 	store, err := preferences.Open(path)
 	if err != nil {
@@ -72,13 +71,17 @@ func newTestPrefs(t *testing.T) *preferences.Store {
 }
 
 func newTestServer(t *testing.T) *Server {
-	t.Helper()
+	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "")
+	if err != nil {
+		t.Fatalf("ipgeo.NewChecker: %v", err)
+	}
 	return &Server{
-		ctx:     t.Context(),
-		runners: map[string]*task.Runner{},
-		tasks:   make(map[string]*taskEntry),
-		changed: make(chan struct{}),
-		prefs:   newTestPrefs(t),
+		ctx:          t.Context(),
+		runners:      map[string]*task.Runner{},
+		tasks:        make(map[string]*taskEntry),
+		changed:      make(chan struct{}),
+		prefs:        newTestPrefs(t),
+		ipgeoChecker: checker,
 	}
 }
 
@@ -620,7 +623,6 @@ func TestHandleListRepos(t *testing.T) {
 }
 
 func writeLogFile(t *testing.T, dir, name string, lines ...string) {
-	t.Helper()
 	data := make([]byte, 0, len(lines)*64)
 	for _, l := range lines {
 		data = append(data, l...)
@@ -632,7 +634,6 @@ func writeLogFile(t *testing.T, dir, name string, lines ...string) {
 }
 
 func mustJSON(t *testing.T, v any) string {
-	t.Helper()
 	b, err := json.Marshal(v)
 	if err != nil {
 		t.Fatal(err)

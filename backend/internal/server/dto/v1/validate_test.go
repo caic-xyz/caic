@@ -177,7 +177,6 @@ func TestValidate(t *testing.T) {
 
 // assertBadRequest checks that err is an *dto.APIError with 400 status and the expected message.
 func assertBadRequest(t *testing.T, err error, wantMsg string) {
-	t.Helper()
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

@@ -11,7 +11,6 @@ import (
 )
 
 func writeLogFile(t *testing.T, dir, name string, lines ...string) {
-	t.Helper()
 	data := make([]byte, 0, len(lines)*64)
 	for _, l := range lines {
 		data = append(data, l...)
@@ -23,7 +22,6 @@ func writeLogFile(t *testing.T, dir, name string, lines ...string) {
 }
 
 func mustJSON(t *testing.T, v any) string {
-	t.Helper()
 	b, err := json.Marshal(v)
 	if err != nil {
 		t.Fatal(err)
@@ -34,7 +32,6 @@ func mustJSON(t *testing.T, v any) string {
 // claudeAssistant builds a Claude wire-format assistant NDJSON line from
 // content blocks. Each block is a map with at minimum a "type" key.
 func claudeAssistant(t *testing.T, blocks ...map[string]any) string {
-	t.Helper()
 	msg := map[string]any{
 		"type": "assistant",
 		"message": map[string]any{
@@ -46,7 +43,6 @@ func claudeAssistant(t *testing.T, blocks ...map[string]any) string {
 
 // claudeInit builds a Claude wire-format system/init NDJSON line.
 func claudeInit(t *testing.T, sessionID string) string {
-	t.Helper()
 	msg := map[string]any{
 		"type":       "system",
 		"subtype":    "init",

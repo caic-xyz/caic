@@ -777,7 +777,6 @@ func recvMsg(t *testing.T, ch <-chan agent.Message) agent.Message {
 // baseBranch. Returns the clone directory. origin points to the bare repo so
 // git fetch/push work locally.
 func initTestRepo(t *testing.T, baseBranch string) string { //nolint:unparam // baseBranch is parameterized for clarity.
-	t.Helper()
 	dir := t.TempDir()
 	bare := filepath.Join(dir, "remote.git")
 	clone := filepath.Join(dir, "clone")
@@ -799,7 +798,6 @@ func initTestRepo(t *testing.T, baseBranch string) string { //nolint:unparam // 
 }
 
 func runGit(t *testing.T, dir string, args ...string) {
-	t.Helper()
 	cmd := exec.Command("git", args...) //nolint:gosec // test helper with controlled args
 	if dir != "" {
 		cmd.Dir = dir

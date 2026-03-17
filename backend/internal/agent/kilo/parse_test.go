@@ -324,7 +324,6 @@ func TestKiloWireFormat(t *testing.T) {
 	sessionError := []byte(`{"type":"session.error","properties":{"sessionID":"ses_abc","error":{"name":"SomeError","data":{"message":"oops"}}}}`)
 
 	parse := func(t *testing.T, w *kiloWireFormat, line []byte) []agent.Message {
-		t.Helper()
 		msgs, err := w.ParseMessage(line)
 		if err != nil {
 			t.Fatalf("ParseMessage error: %v", err)

@@ -353,7 +353,6 @@ func TestBuildHandlerWebhookRoutes(t *testing.T) {
 
 // minimalServer returns a Server with just enough state for webhook handler tests.
 func minimalServer(t *testing.T) *Server {
-	t.Helper()
 	cache, err := forgecache.Open(t.TempDir() + "/forgecache.json")
 	if err != nil {
 		t.Fatal(err)

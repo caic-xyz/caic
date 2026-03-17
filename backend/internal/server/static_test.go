@@ -15,7 +15,6 @@ import (
 
 // brCompress returns data brotli-compressed at max quality.
 func brCompress(t *testing.T, data []byte) []byte {
-	t.Helper()
 	var buf bytes.Buffer
 	w := brotli.NewWriterLevel(&buf, brotli.BestCompression)
 	if _, err := w.Write(data); err != nil {
@@ -36,7 +35,6 @@ var (
 
 // testFS returns a brotli-only FS matching what compress_dist.py produces.
 func testFS(t *testing.T) fstest.MapFS {
-	t.Helper()
 	return fstest.MapFS{
 		"index.html.br":       {Data: brCompress(t, indexContent)},
 		"favicon.svg.br":      {Data: brCompress(t, iconContent)},
@@ -224,7 +222,6 @@ func TestParseAcceptEncoding(t *testing.T) {
 // Decompression helpers for roundtrip verification.
 
 func decompressBrotli(t *testing.T, data []byte) []byte {
-	t.Helper()
 	out, err := io.ReadAll(brotli.NewReader(bytes.NewReader(data)))
 	if err != nil {
 		t.Fatalf("brotli decompress: %v", err)
@@ -233,7 +230,6 @@ func decompressBrotli(t *testing.T, data []byte) []byte {
 }
 
 func decompressZstd(t *testing.T, data []byte) []byte {
-	t.Helper()
 	r, err := zstd.NewReader(bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("zstd reader: %v", err)
@@ -247,7 +243,6 @@ func decompressZstd(t *testing.T, data []byte) []byte {
 }
 
 func decompressGzip(t *testing.T, data []byte) []byte {
-	t.Helper()
 	r, err := kgzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("gzip reader: %v", err)
