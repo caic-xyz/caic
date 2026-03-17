@@ -24,16 +24,16 @@ import (
 )
 
 // expandTilde replaces a leading "~/" or bare "~" with the current user's home directory.
-func expandTilde(path string) string {
+func expandTilde(path string) (string, error) {
 	if path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return path
+			return path, err
 		}
 		rest := strings.TrimLeft(path[1:], `/\`)
-		return filepath.Join(home, rest)
+		return filepath.Join(home, rest), nil
 	}
-	return path
+	return filepath.Abs(path)
 }
 
 // envDefault returns the value of the named environment variable, or def if unset/empty.
@@ -115,14 +115,17 @@ See contrib/caic.env for a template with all variables and documentation.
 `)
 	}
 
-	addr := flag.String("http", os.Getenv("CAIC_HTTP"), "start web UI on this address (e.g. :8080)")
-	root := flag.String("root", os.Getenv("CAIC_ROOT"), "parent directory containing git repos")
+	addr := flag.String("http", envDefault("CAIC_HTTP", ":8080"), "start web UI on this address (e.g. :8080)")
+	root := flag.String("root", envDefault("CAIC_ROOT", "."), "parent directory containing git repos")
 	logLevel := flag.String("log-level", envDefault("CAIC_LOG_LEVEL", "info"), "log level (debug, info, warn, error)")
 	flag.Parse()
 	if args := flag.Args(); len(args) > 0 {
 		return fmt.Errorf("unexpected arguments: %v", args)
 	}
-	*root = expandTilde(*root)
+	var err error
+	if *root, err = expandTilde(*root); err != nil {
+		return err
+	}
 
 	initLogging(*logLevel)
 

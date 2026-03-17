@@ -57,48 +57,32 @@ func TestExpandTilde(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	t.Run("bare tilde", func(t *testing.T) {
-		got := expandTilde("~")
-		if got != home {
-			t.Errorf("expandTilde(~) = %q, want %q", got, home)
-		}
-	})
-
-	t.Run("tilde with path", func(t *testing.T) {
-		got := expandTilde("~/repos")
-		want := filepath.Join(home, "repos")
-		if got != want {
-			t.Errorf("expandTilde(~/repos) = %q, want %q", got, want)
-		}
-	})
-
-	t.Run("absolute path unchanged", func(t *testing.T) {
-		got := expandTilde("/opt/repos")
-		if got != "/opt/repos" {
-			t.Errorf("expandTilde(/opt/repos) = %q, want /opt/repos", got)
-		}
-	})
-
-	t.Run("empty string unchanged", func(t *testing.T) {
-		got := expandTilde("")
-		if got != "" {
-			t.Errorf("expandTilde(\"\") = %q, want \"\"", got)
-		}
-	})
-
-	t.Run("tilde with backslash", func(t *testing.T) {
-		got := expandTilde(`~\repos`)
-		want := filepath.Join(home, "repos")
-		if got != want {
-			t.Errorf(`expandTilde(~\repos) = %q, want %q`, got, want)
-		}
-	})
-
-	t.Run("relative path unchanged", func(t *testing.T) {
-		got := expandTilde("repos/foo")
-		if got != "repos/foo" {
-			t.Errorf("expandTilde(repos/foo) = %q, want repos/foo", got)
-		}
-	})
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"bare tilde", "~", home},
+		{"tilde with slash", "~/repos", filepath.Join(home, "repos")},
+		{"tilde with backslash", `~\repos`, filepath.Join(home, "repos")},
+		{"absolute path unchanged", "/opt/repos", "/opt/repos"},
+		{"empty string resolves to cwd", "", cwd},
+		{"relative path made absolute", "repos/foo", filepath.Join(cwd, "repos", "foo")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := expandTilde(tt.input)
+			if err != nil {
+				t.Fatalf("expandTilde(%q) error: %v", tt.input, err)
+			}
+			if got != tt.want {
+				t.Errorf("expandTilde(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
 }
