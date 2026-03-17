@@ -109,7 +109,7 @@ Environment variables (flags take precedence when set):
 
   IP geolocation (optional):
     CAIC_IPGEO_DB               Path to a MaxMind MMDB file; relative paths resolve against ~/.config/caic/ (e.g. GeoLite2-Country.mmdb)
-    CAIC_IPGEO_ALLOWLIST        Comma-separated allowlist: ISO country codes (e.g. CA,US), "local", "tailscale"; requires CAIC_IPGEO_DB when country codes are present
+    CAIC_IPGEO_ALLOWLIST        Comma-separated allowlist (default: "local,tailscale,github"): ISO country codes (e.g. CA,US), "local", "tailscale", "github", or CIDR ranges (e.g. 34.74.90.64/28); requires CAIC_IPGEO_DB when country codes are present
 
 See contrib/caic.env for a template with all variables and documentation.
 `)
@@ -149,7 +149,7 @@ See contrib/caic.env for a template with all variables and documentation.
 		GitHubAppAllowedOwners:  os.Getenv("GITHUB_APP_ALLOWED_OWNERS"),
 		GitLabWebhookSecret:     []byte(os.Getenv("GITLAB_WEBHOOK_SECRET")),
 		IPGeoDB:                 resolvePathFromEnv("CAIC_IPGEO_DB"),
-		IPGeoAllowlist:          os.Getenv("CAIC_IPGEO_ALLOWLIST"),
+		IPGeoAllowlist:          envDefault("CAIC_IPGEO_ALLOWLIST", "local,tailscale,github"),
 	}
 
 	slog.Info("gemini", "apikey", maskedToken(cfg.GeminiAPIKey))                                            //nolint:gosec // G706: value from env, not user input

@@ -159,9 +159,6 @@ func (c *Config) Validate() error {
 	if c.GitLabOAuthClientID != "" && c.GitLabOAuthAllowedUsers == "" {
 		return errors.New("GITLAB_OAUTH_ALLOWED_USERS is required when GitLab OAuth login is configured")
 	}
-	if ipgeo.ParseAllowlist(c.IPGeoAllowlist).NeedsDB() && c.IPGeoDB == "" {
-		return errors.New("CAIC_IPGEO_DB is required when CAIC_IPGEO_ALLOWLIST contains country codes")
-	}
 	return nil
 }
 
@@ -214,8 +211,7 @@ type Server struct {
 	usage         *usageFetcher
 
 	// IP geolocation.
-	ipgeoChecker   *ipgeo.Checker   // nil when CAIC_IPGEO_DB not set
-	ipgeoAllowlist *ipgeo.Allowlist // nil when CAIC_IPGEO_ALLOWLIST not set
+	ipgeoChecker *ipgeo.Checker
 
 	// User preferences — all users in a single file.
 	prefs *preferences.Store
@@ -540,6 +536,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	}
 	s.githubWebhookSecret = cfg.GitHubWebhookSecret
 	s.gitlabWebhookSecret = cfg.GitLabWebhookSecret
+
 	if cfg.GitHubAppID != 0 && len(cfg.GitHubAppPrivateKeyPEM) > 0 {
 		app, err := github.NewAppClient(cfg.GitHubAppID, cfg.GitHubAppPrivateKeyPEM, s.githubAppThrottle)
 		if err != nil {
@@ -658,13 +655,11 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	// Resume bot comment watchers for adopted tasks with pending forge issues.
 	s.bot.ResumePendingComments()
 
+	s.ipgeoChecker, err = ipgeo.NewChecker(ctx, cfg.IPGeoAllowlist, cfg.IPGeoDB)
+	if err != nil {
+		return nil, fmt.Errorf("ipgeo: %w", err)
+	}
 	if cfg.IPGeoDB != "" {
-		checker, err := ipgeo.Open(cfg.IPGeoDB)
-		if err != nil {
-			return nil, fmt.Errorf("open ipgeo db: %w", err)
-		}
-		s.ipgeoChecker = checker
-		s.ipgeoAllowlist = ipgeo.ParseAllowlist(cfg.IPGeoAllowlist)
 		slog.Info("ipgeo", "path", cfg.IPGeoDB, "list", cfg.IPGeoAllowlist)
 	}
 
@@ -749,7 +744,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clientIP := ipgeo.GetClientIP(r)
 		cc := s.ipgeoChecker.CountryCode(clientIP)
-		if !s.ipgeoAllowlist.Allowed(cc) {
+		if !s.ipgeoChecker.IsAllowed(clientIP) {
 			http.Error(w, "forbidden: country not allowed", http.StatusForbidden)
 			slog.Info("http blocked", "m", r.Method, "p", r.URL.Path, "s", http.StatusForbidden, "ip", clientIP, "cc", cc) //nolint:gosec // G706: request metadata logged for audit; not used in security decisions
 			return

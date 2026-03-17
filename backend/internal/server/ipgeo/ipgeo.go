@@ -3,8 +3,13 @@
 package ipgeo
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/netip"
+	"slices"
 	"strings"
 
 	"github.com/oschwald/maxminddb-golang/v2"
@@ -41,10 +46,18 @@ func GetClientIP(r *http.Request) string {
 	return addr
 }
 
-// Checker resolves IP addresses to ISO 3166-1 alpha-2 country codes using a
-// MaxMind MMDB file. A nil *Checker is valid and handles local/Tailscale IPs.
+// namedPrefix associates a name with an IP prefix for use in CountryCode.
+type namedPrefix struct {
+	name   string
+	prefix netip.Prefix
+}
+
+// Checker resolves IP addresses to country codes or named origins using a
+// MaxMind MMDB file and optional named CIDR groups, and enforces an allowlist.
 type Checker struct {
-	reader *maxminddb.Reader
+	reader     *maxminddb.Reader
+	namedCIDRs []namedPrefix
+	allowlist  *allowlist
 }
 
 // Open opens an MMDB file for country lookups.
@@ -54,6 +67,38 @@ func Open(dbPath string) (*Checker, error) {
 		return nil, err
 	}
 	return &Checker{reader: r}, nil
+}
+
+// NewChecker builds a Checker from a comma-separated allowlist string and an
+// optional geo DB path. Named origins that require network fetches are resolved
+// automatically (e.g. "github" fetches IP ranges from api.github.com/meta).
+// A fetch failure is logged as a warning and does not abort startup.
+func NewChecker(ctx context.Context, allowlistStr, dbPath string) (*Checker, error) {
+	al, err := parseAllowlist(allowlistStr)
+	if err != nil {
+		return nil, fmt.Errorf("allowlist: %w", err)
+	}
+	if al.needsDB() && dbPath == "" {
+		return nil, errors.New("CAIC_IPGEO_DB is required when CAIC_IPGEO_ALLOWLIST contains country codes")
+	}
+	c := &Checker{allowlist: al}
+	if dbPath != "" {
+		c, err = Open(dbPath)
+		if err != nil {
+			return nil, err
+		}
+		c.allowlist = al
+	}
+	if al.allowed("github") {
+		if prefixes, err := fetchGitHubHookCIDRs(ctx); err != nil {
+			slog.Warn("failed to fetch GitHub hook CIDRs; webhook IPs will not be auto-allowed", "err", err)
+		} else {
+			for _, p := range prefixes {
+				c.namedCIDRs = append(c.namedCIDRs, namedPrefix{name: "github", prefix: p.Masked()})
+			}
+		}
+	}
+	return c, nil
 }
 
 // Close releases MMDB reader resources.
@@ -71,11 +116,13 @@ type countryRecord struct {
 	} `maxminddb:"country"`
 }
 
-// CountryCode returns the ISO 3166-1 alpha-2 country code for the given IP
-// string. Special return values:
-//   - "local" for loopback, private, link-local, and unspecified IPs
-//   - "tailscale" for Tailscale CGNAT IPs (100.64.0.0/10)
-//   - "" on parse error, lookup error, or if c is nil with a public IP
+// CountryCode returns the ISO 3166-1 alpha-2 country code or a named origin
+// for the given IP string. Resolution order:
+//  1. "local" for loopback, private, link-local, and unspecified IPs
+//  2. "tailscale" for Tailscale CGNAT IPs (100.64.0.0/10)
+//  3. Named CIDR groups (e.g. "github")
+//  4. ISO 3166-1 alpha-2 country code from the MMDB geo database
+//  5. "" on parse error, lookup error, or no DB with a public IP
 func (c *Checker) CountryCode(ipStr string) string {
 	addr, err := netip.ParseAddr(ipStr)
 	if err != nil {
@@ -87,61 +134,85 @@ func (c *Checker) CountryCode(ipStr string) string {
 	if tailscalePrefix.Contains(addr) {
 		return "tailscale"
 	}
-	if c == nil || c.reader == nil {
-		return ""
-	}
-	var rec countryRecord
-	if err := c.reader.Lookup(addr).Decode(&rec); err != nil {
-		return ""
-	}
-	return rec.Country.ISOCode
-}
-
-// Allowlist checks whether a country code is permitted. A nil *Allowlist
-// allows everything.
-type Allowlist struct {
-	allowed map[string]struct{}
-}
-
-// ParseAllowlist parses a comma-separated list of allowed values. Each token
-// is uppercased; "LOCAL" and "TAILSCALE" match the special return values from
-// CountryCode; any other token is treated as an ISO 3166-1 alpha-2 country
-// code (e.g. "CA", "US"). Returns nil if s is empty.
-func ParseAllowlist(s string) *Allowlist {
-	if s == "" {
-		return nil
-	}
-	a := &Allowlist{allowed: make(map[string]struct{})}
-	for token := range strings.SplitSeq(s, ",") {
-		token = strings.ToUpper(strings.TrimSpace(token))
-		if token != "" {
-			a.allowed[token] = struct{}{}
+	for _, nc := range c.namedCIDRs {
+		if nc.prefix.Contains(addr) {
+			return nc.name
 		}
 	}
-	if len(a.allowed) == 0 {
-		return nil
+	if c.reader != nil {
+		var rec countryRecord
+		if err := c.reader.Lookup(addr).Decode(&rec); err == nil {
+			return rec.Country.ISOCode
+		}
 	}
-	return a
+	return ""
 }
 
-// Allowed reports whether the given country code (as returned by CountryCode)
-// is on the allowlist. Returns true if the allowlist is nil.
-func (a *Allowlist) Allowed(cc string) bool {
-	if a == nil {
-		return true
+// IsAllowed reports whether the given IP is permitted by the checker's
+// allowlist. Returns true when no allowlist is configured.
+func (c *Checker) IsAllowed(clientIP string) bool {
+	return c.allowlist.allowed(c.CountryCode(clientIP)) || c.allowlist.containsIP(clientIP)
+}
+
+// allowlist checks whether a country code or IP address is permitted.
+// A nil *allowlist allows everything.
+type allowlist struct {
+	codes    map[string]struct{} // uppercase tokens: country codes and named origins
+	prefixes []netip.Prefix      // CIDR entries from the allowlist
+}
+
+// parseAllowlist parses a comma-separated list of allowed values. Tokens
+// containing "/" are parsed as CIDR prefixes (e.g. "34.74.90.64/28"); all
+// others are uppercased and treated as ISO 3166-1 alpha-2 country codes or
+// named origins (e.g. "local", "tailscale", "github"). An empty or
+// whitespace-only string is an error; use "0.0.0.0/0,::/0" to allow all IPs.
+func parseAllowlist(s string) (*allowlist, error) {
+	a := &allowlist{codes: make(map[string]struct{})}
+	for token := range strings.SplitSeq(s, ",") {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+		if strings.Contains(token, "/") {
+			p, err := netip.ParsePrefix(token)
+			if err != nil {
+				return nil, fmt.Errorf("invalid CIDR %q in allowlist: %w", token, err)
+			}
+			a.prefixes = append(a.prefixes, p.Masked())
+		} else {
+			a.codes[strings.ToUpper(token)] = struct{}{}
+		}
 	}
-	_, ok := a.allowed[strings.ToUpper(cc)]
+	if len(a.codes) == 0 && len(a.prefixes) == 0 {
+		return nil, errors.New("allowlist must not be empty; use 0.0.0.0/0,::/0 to allow all IPs")
+	}
+	return a, nil
+}
+
+// allowed reports whether the given country code or named origin (as returned
+// by CountryCode) is on the allowlist.
+func (a *allowlist) allowed(cc string) bool {
+	_, ok := a.codes[strings.ToUpper(cc)]
 	return ok
 }
 
-// NeedsDB reports whether the allowlist contains any entry that requires a
-// MaxMind MMDB to resolve (i.e. not just "LOCAL" or "TAILSCALE").
-func (a *Allowlist) NeedsDB() bool {
-	if a == nil {
+// containsIP reports whether the given IP string falls within any CIDR prefix
+// in the allowlist. Returns false if the IP is invalid.
+func (a *allowlist) containsIP(ipStr string) bool {
+	addr, err := netip.ParseAddr(ipStr)
+	if err != nil {
 		return false
 	}
-	for token := range a.allowed {
-		if token != "LOCAL" && token != "TAILSCALE" {
+	return slices.ContainsFunc(a.prefixes, func(p netip.Prefix) bool { return p.Contains(addr) })
+}
+
+// needsDB reports whether the allowlist contains any country-code entry that
+// requires a MaxMind MMDB to resolve. ISO 3166-1 alpha-2 country codes are
+// always exactly two uppercase letters; longer tokens ("local", "tailscale",
+// "github", etc.) and CIDR prefixes do not require a DB.
+func (a *allowlist) needsDB() bool {
+	for token := range a.codes {
+		if len(token) == 2 && token[0] >= 'A' && token[0] <= 'Z' && token[1] >= 'A' && token[1] <= 'Z' {
 			return true
 		}
 	}
