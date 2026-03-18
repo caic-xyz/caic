@@ -21,6 +21,7 @@ EXTENSIONS = {
     ".mjs": "//",
     ".py": "#",
     ".sh": "#",
+    ".swift": "//",
     ".ts": "//",
     ".tsx": "//",
     ".yaml": "#",
@@ -113,6 +114,8 @@ def get_file_comment(filepath):
                 if sline.startswith(f"{prefix} +build"):
                     continue
                 if sline.startswith(f"{prefix} nolint"):
+                    continue
+                if sline.startswith(f"{prefix} swift-tools-version:"):
                     continue
 
                 if sline.startswith(prefix):

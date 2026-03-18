@@ -1,4 +1,4 @@
-// Generates typed TypeScript and Kotlin API clients plus API.md from the Go route declarations.
+// Generates typed TypeScript, Kotlin, and Swift API clients plus API.md from the Go route declarations.
 package main
 
 import (
@@ -25,6 +25,7 @@ const (
 	sdkDir    = "../../../../../sdk"
 	tsDir     = sdkDir + "/ts/v1"
 	kotlinDir = sdkDir + "/kotlin/src/main/kotlin/com/caic/sdk/v1"
+	swiftDir  = sdkDir + "/swift/Sources/CaicSDK"
 )
 
 var pathParamRe = regexp.MustCompile(`\{(\w+)\}`)
@@ -161,6 +162,9 @@ func run() error {
 		return err
 	}
 	if err := generateKotlin(kotlinDir, docs); err != nil {
+		return err
+	}
+	if err := generateSwift(swiftDir, docs); err != nil {
 		return err
 	}
 	return generateDoc(sdkDir, docs)
@@ -1181,6 +1185,567 @@ func goTypeToDoc(t reflect.Type) string {
 	default:
 		return t.Name()
 	}
+}
+
+// --- Swift generation ---
+
+// swiftReservedWords is the set of Swift keywords that require backtick escaping
+// when used as property names.
+var swiftReservedWords = map[string]bool{
+	"init": true, "deinit": true, "class": true, "struct": true, "enum": true,
+	"extension": true, "protocol": true, "var": true, "let": true, "func": true,
+	"return": true, "if": true, "else": true, "switch": true, "case": true,
+	"default": true, "for": true, "in": true, "while": true, "repeat": true,
+	"do": true, "try": true, "catch": true, "throw": true, "throws": true,
+	"import": true, "typealias": true, "where": true, "guard": true,
+	"defer": true, "break": true, "continue": true, "fallthrough": true,
+	"as": true, "is": true, "nil": true, "true": true, "false": true,
+	"self": true, "Self": true, "super": true, "static": true, "operator": true,
+	"type": true,
+}
+
+// swiftAliasNames is the set of Go named-string types that map to their
+// Swift typealias name rather than "String".
+var swiftAliasNames = map[reflect.Type]string{
+	reflect.TypeFor[v1.Harness]():   "Harness",
+	reflect.TypeFor[v1.EventKind](): "EventKind",
+}
+
+// swiftAliases describes typealias declarations with associated constant namespaces.
+// Mirrors kotlinAliases — reuses kotlinTypeAlias/kotlinConstant as generic data holders.
+var swiftAliases = []kotlinTypeAlias{
+	{
+		name: "Harness",
+		constants: []kotlinConstant{
+			{"Claude", string(v1.HarnessClaude)},
+			{"Codex", string(v1.HarnessCodex)},
+			{"Gemini", string(v1.HarnessGemini)},
+		},
+	},
+	{
+		name: "EventKind",
+		constants: []kotlinConstant{
+			{"Init", string(v1.EventKindInit)},
+			{"Text", string(v1.EventKindText)},
+			{"TextDelta", string(v1.EventKindTextDelta)},
+			{"ToolUse", string(v1.EventKindToolUse)},
+			{"ToolResult", string(v1.EventKindToolResult)},
+			{"Ask", string(v1.EventKindAsk)},
+			{"Usage", string(v1.EventKindUsage)},
+			{"Result", string(v1.EventKindResult)},
+			{"System", string(v1.EventKindSystem)},
+			{"UserInput", string(v1.EventKindUserInput)},
+			{"Todo", string(v1.EventKindTodo)},
+			{"DiffStat", string(v1.EventKindDiffStat)},
+			{"Thinking", string(v1.EventKindThinking)},
+			{"ThinkingDelta", string(v1.EventKindThinkingDelta)},
+			{"SubagentStart", string(v1.EventKindSubagentStart)},
+			{"SubagentEnd", string(v1.EventKindSubagentEnd)},
+			{"Log", string(v1.EventKindLog)},
+			{"ToolOutputDelta", string(v1.EventKindToolOutputDelta)},
+			{"Widget", string(v1.EventKindWidget)},
+			{"WidgetDelta", string(v1.EventKindWidgetDelta)},
+		},
+	},
+}
+
+// swiftErrorCodes mirrors kotlinErrorCodes for Swift output.
+var swiftErrorCodes = []kotlinConstant{
+	{"badRequest", string(dto.CodeBadRequest)},
+	{"notFound", string(dto.CodeNotFound)},
+	{"conflict", string(dto.CodeConflict)},
+	{"internalError", string(dto.CodeInternalError)},
+}
+
+// swiftSectionComments mirrors kotlinSectionComments for Swift output.
+var swiftSectionComments = map[string]string{
+	"EventMessage": "Backend-neutral event types",
+}
+
+// swiftPluralOverrides maps singular alias names to their plural namespace names.
+var swiftPluralOverrides = map[string]string{
+	"Harness": "Harnesses",
+}
+
+func swiftPlural(name string) string {
+	if p, ok := swiftPluralOverrides[name]; ok {
+		return p
+	}
+	return name + "s"
+}
+
+// swiftEscapeIdent wraps name in backticks if it is a Swift reserved word.
+func swiftEscapeIdent(name string) string {
+	if swiftReservedWords[name] {
+		return "`" + name + "`"
+	}
+	return name
+}
+
+// goTypeToSwift maps a Go reflect.Type to its Swift type string.
+func goTypeToSwift(t reflect.Type) string {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	switch t {
+	case jsonRawMessageType:
+		return "JSONValue"
+	case ksidIDType:
+		return "String"
+	case timeType:
+		return "String"
+	case diffStatType:
+		return "[DiffFileStat]"
+	case mapStringAnyType:
+		return "[String: JSONValue]"
+	}
+	if name, ok := swiftAliasNames[t]; ok {
+		return name
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "String"
+	case reflect.Int, reflect.Int64:
+		return "Int"
+	case reflect.Float64:
+		return "Double"
+	case reflect.Bool:
+		return "Bool"
+	case reflect.Slice:
+		return "[" + goTypeToSwift(t.Elem()) + "]"
+	case reflect.Map:
+		return "[" + goTypeToSwift(t.Key()) + ": " + goTypeToSwift(t.Elem()) + "]"
+	case reflect.Struct:
+		return t.Name()
+	default:
+		return t.Name()
+	}
+}
+
+// formatSwiftDoc formats a doc string as Swift triple-slash documentation comments.
+// Returns an empty string when doc is empty.
+func formatSwiftDoc(doc, indent string) string {
+	if doc == "" {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(doc), "\n")
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, l := range lines {
+		if l == "" {
+			b.WriteString(indent + "///\n")
+		} else {
+			b.WriteString(indent + "/// " + l + "\n")
+		}
+	}
+	return b.String()
+}
+
+// buildSwiftPath returns a Swift string literal for the path.
+// Path params are replaced with Swift string interpolation \(name).
+// Query params are appended as URL-encoded interpolated strings.
+func buildSwiftPath(path string, queryParams []string) string {
+	var b strings.Builder
+	b.WriteString(pathParamRe.ReplaceAllStringFunc(path, func(match string) string {
+		name := match[1 : len(match)-1]
+		return "\\(" + name + ")"
+	}))
+	for i, q := range queryParams {
+		if i == 0 {
+			b.WriteByte('?')
+		} else {
+			b.WriteByte('&')
+		}
+		b.WriteString(q + "=\\(" + q + ".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? " + q + ")")
+	}
+	return "\"" + b.String() + "\""
+}
+
+// emitSwiftStruct writes a public Codable struct to b.
+func emitSwiftStruct(b *strings.Builder, t reflect.Type, docs *docRegistry) {
+	if doc := docs.typeDoc[t.Name()]; doc != "" {
+		b.WriteString(formatSwiftDoc(doc, ""))
+	}
+	name := t.Name()
+	fmt.Fprintf(b, "public struct %s: Codable {\n", name)
+	for i := range t.NumField() {
+		sf := t.Field(i)
+		if !sf.IsExported() {
+			continue
+		}
+		tag := sf.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		jsonName, opts := parseJSONTag(tag)
+		if jsonName == "" {
+			jsonName = sf.Name
+		}
+		omit := opts.contains("omitempty") || opts.contains("omitzero")
+		isPtr := sf.Type.Kind() == reflect.Ptr
+		swiftType := goTypeToSwift(sf.Type)
+		optional := isPtr || (omit && !isPtr)
+		swiftName := swiftEscapeIdent(jsonName)
+
+		if fdocs, ok := docs.fieldDoc[name]; ok {
+			if fdoc := fdocs[sf.Name]; fdoc != "" {
+				b.WriteString(formatSwiftDoc(fdoc, "    "))
+			}
+		}
+		if optional {
+			fmt.Fprintf(b, "    public let %s: %s?\n", swiftName, swiftType)
+		} else {
+			fmt.Fprintf(b, "    public let %s: %s\n", swiftName, swiftType)
+		}
+	}
+	b.WriteString("}\n")
+}
+
+// discoverSwiftStructs walks the dto struct types reachable from route types
+// and returns them in dependency order, annotated with Swift section comments.
+func discoverSwiftStructs() []kotlinStruct {
+	seen := map[reflect.Type]bool{}
+	var order []reflect.Type
+
+	var walk func(t reflect.Type)
+	walk = func(t reflect.Type) {
+		if t.Kind() == reflect.Ptr {
+			t = t.Elem()
+		}
+		if t.Kind() == reflect.Slice {
+			walk(t.Elem())
+			return
+		}
+		if t.Kind() == reflect.Map {
+			walk(t.Elem())
+			return
+		}
+		if t.Kind() != reflect.Struct || !isSDKPkg(t.PkgPath()) {
+			return
+		}
+		if seen[t] {
+			return
+		}
+		seen[t] = true
+		for i := range t.NumField() {
+			walk(t.Field(i).Type)
+		}
+		order = append(order, t)
+	}
+
+	for i := range v1.Routes {
+		r := &v1.Routes[i]
+		if r.Req != nil {
+			walk(r.Req)
+		}
+		walk(r.Resp)
+	}
+	walk(reflect.TypeFor[dto.ErrorResponse]())
+
+	result := make([]kotlinStruct, len(order))
+	for i, t := range order {
+		result[i] = kotlinStruct{t: t, comment: swiftSectionComments[t.Name()]}
+	}
+	return result
+}
+
+func writeSwiftTypes(outDir string, docs *docRegistry) error {
+	var b strings.Builder
+	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\nimport Foundation\n\n")
+
+	// JSONValue: a Codable enum for arbitrary JSON (used for json.RawMessage / map[string]any fields).
+	b.WriteString(`/// A Codable representation of an arbitrary JSON value.
+public enum JSONValue: Codable, Equatable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() { self = .null; return }
+        if let v = try? c.decode(Bool.self) { self = .bool(v); return }
+        if let v = try? c.decode(Double.self) { self = .number(v); return }
+        if let v = try? c.decode(String.self) { self = .string(v); return }
+        if let v = try? c.decode([String: JSONValue].self) { self = .object(v); return }
+        if let v = try? c.decode([JSONValue].self) { self = .array(v); return }
+        throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown JSON value"))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .string(let v): try c.encode(v)
+        case .number(let v): try c.encode(v)
+        case .bool(let v): try c.encode(v)
+        case .object(let v): try c.encode(v)
+        case .array(let v): try c.encode(v)
+        case .null: try c.encodeNil()
+        }
+    }
+}
+
+`)
+
+	// Type aliases with constant namespaces.
+	for _, a := range swiftAliases {
+		fmt.Fprintf(&b, "public typealias %s = String\n\n", a.name)
+		fmt.Fprintf(&b, "public enum %s {\n", swiftPlural(a.name))
+		for _, c := range a.constants {
+			fmt.Fprintf(&b, "    public static let %s: %s = %q\n", c.name, a.name, c.value)
+		}
+		b.WriteString("}\n\n")
+	}
+
+	// Error codes.
+	b.WriteString("public enum ErrorCodes {\n")
+	for _, c := range swiftErrorCodes {
+		fmt.Fprintf(&b, "    public static let %s = %q\n", c.name, c.value)
+	}
+	b.WriteString("}\n\n")
+
+	// Structs.
+	for _, ks := range discoverSwiftStructs() {
+		if ks.comment != "" {
+			fmt.Fprintf(&b, "// %s\n\n", ks.comment)
+		}
+		emitSwiftStruct(&b, ks.t, docs)
+		b.WriteString("\n")
+	}
+
+	return os.WriteFile(filepath.Join(outDir, "Types.swift"), []byte(b.String()), 0o600)
+}
+
+func writeSwiftJSONFunc(b *strings.Builder, r *v1.Route, params []string) {
+	if r.Doc != "" {
+		b.WriteString(formatSwiftDoc(r.Doc, "    "))
+	}
+	respType := r.RespName()
+	if r.IsArray {
+		respType = "[" + respType + "]"
+	}
+
+	args := make([]string, 0, len(params)+len(r.QueryParams)+1)
+	for _, p := range params {
+		args = append(args, p+": String")
+	}
+	for _, q := range r.QueryParams {
+		args = append(args, q+": String")
+	}
+	hasReq := r.Req != nil
+	if hasReq {
+		args = append(args, "req: "+r.ReqName())
+	}
+	swiftPath := buildSwiftPath(r.Path, r.QueryParams)
+
+	fmt.Fprintf(b, "    public func %s(%s) async throws -> %s {\n", r.Name, strings.Join(args, ", "), respType)
+	if hasReq {
+		fmt.Fprintf(b, "        try await request(%q, path: %s, body: try encoder.encode(req))\n", r.Method, swiftPath)
+	} else {
+		fmt.Fprintf(b, "        try await request(%q, path: %s)\n", r.Method, swiftPath)
+	}
+	b.WriteString("    }\n")
+}
+
+func writeSwiftSSEFunc(b *strings.Builder, r *v1.Route, params []string) {
+	if r.Doc != "" {
+		b.WriteString(formatSwiftDoc(r.Doc, "    "))
+	}
+	args := make([]string, 0, len(params))
+	for _, p := range params {
+		args = append(args, p+": String")
+	}
+	swiftPath := buildSwiftPath(r.Path, nil)
+	respName := r.RespName()
+	fmt.Fprintf(b, "    public func %s(%s) -> AsyncThrowingStream<%s, Error> {\n", r.Name, strings.Join(args, ", "), respName)
+	fmt.Fprintf(b, "        sseStream(path: %s)\n", swiftPath)
+	b.WriteString("    }\n")
+}
+
+func writeSwiftReconnectingFunc(b *strings.Builder, r *v1.Route, params []string) {
+	allParams := append(params, r.QueryParams...) //nolint:gocritic // concat is intentional
+	args := make([]string, 0, len(allParams))
+	callArgs := make([]string, 0, len(allParams))
+	for _, p := range allParams {
+		args = append(args, p+": String")
+		callArgs = append(callArgs, p+": "+p)
+	}
+	reconnectName := r.Name + "Reconnecting"
+	respName := r.RespName()
+	fmt.Fprintf(b, "    public func %s(%s) -> AsyncThrowingStream<%s, Error> {\n",
+		reconnectName, strings.Join(args, ", "), respName)
+	fmt.Fprintf(b, "        reconnectingStream { self.%s(%s) }\n", r.Name, strings.Join(callArgs, ", "))
+	b.WriteString("    }\n")
+}
+
+func writeSwiftClient(outDir string) error {
+	var b strings.Builder
+
+	b.WriteString(`// Code generated by gen-api-sdk. DO NOT EDIT.
+import Foundation
+
+public struct ApiError: Error {
+    public let statusCode: Int
+    public let code: String
+    public let message: String
+    public let details: [String: JSONValue]?
+}
+
+public final class ApiClient {
+    private let baseURL: String
+    private let tokenProvider: (() -> String?)?
+    private let urlSession: URLSession
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    public init(baseURL: String, tokenProvider: (() -> String?)? = nil) {
+        self.baseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        self.tokenProvider = tokenProvider
+        self.urlSession = URLSession(configuration: .default)
+    }
+
+    private func request<T: Decodable>(_ method: String, path: String, body: Data? = nil) async throws -> T {
+        var req = URLRequest(url: URL(string: baseURL + path)!)
+        req.httpMethod = method
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 60
+        if let token = tokenProvider?() {
+            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        if let body {
+            req.httpBody = body
+        } else if ["POST", "PUT", "PATCH"].contains(method) {
+            req.httpBody = Data()
+        }
+        let (data, response) = try await urlSession.data(for: req)
+        let httpResponse = response as! HTTPURLResponse
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            if let errResp = try? decoder.decode(ErrorResponse.self, from: data) {
+                throw ApiError(statusCode: httpResponse.statusCode, code: errResp.error.code,
+                               message: errResp.error.message, details: nil)
+            }
+            throw ApiError(statusCode: httpResponse.statusCode, code: "UNKNOWN",
+                           message: String(data: data, encoding: .utf8) ?? "", details: nil)
+        }
+        return try decoder.decode(T.self, from: data)
+    }
+
+    private func sseStream<T: Decodable>(path: String) -> AsyncThrowingStream<T, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    var req = URLRequest(url: URL(string: self.baseURL + path)!)
+                    req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                    if let token = self.tokenProvider?() {
+                        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                    }
+                    let (bytes, response) = try await self.urlSession.bytes(for: req)
+                    if let httpResponse = response as? HTTPURLResponse,
+                       !(200..<300).contains(httpResponse.statusCode) {
+                        continuation.finish(throwing: ApiError(
+                            statusCode: httpResponse.statusCode, code: "HTTP_ERROR",
+                            message: "SSE connection failed with status \(httpResponse.statusCode)",
+                            details: nil))
+                        return
+                    }
+                    for try await line in bytes.lines {
+                        if Task.isCancelled { break }
+                        guard line.hasPrefix("data: ") else { continue }
+                        let data = Data(line.dropFirst(6).utf8)
+                        if let event = try? self.decoder.decode(T.self, from: data) {
+                            continuation.yield(event)
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private func reconnectingStream<T>(_ connect: @escaping () -> AsyncThrowingStream<T, Error>) -> AsyncThrowingStream<T, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                var delayNs: UInt64 = 500_000_000
+                while !Task.isCancelled {
+                    do {
+                        for try await value in connect() {
+                            delayNs = 500_000_000
+                            continuation.yield(value)
+                        }
+                        continuation.finish()
+                        return
+                    } catch {
+                        if Task.isCancelled { break }
+                        try? await Task.sleep(nanoseconds: delayNs)
+                        delayNs = min(delayNs * 3 / 2, 4_000_000_000)
+                    }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+`)
+
+	// JSON endpoint methods.
+	b.WriteString("    // JSON endpoints\n")
+	for i := range v1.Routes {
+		r := &v1.Routes[i]
+		if r.IsSSE {
+			continue
+		}
+		params := extractPathParams(r.Path)
+		writeSwiftJSONFunc(&b, r, params)
+	}
+	b.WriteString("\n")
+
+	// SSE endpoint methods.
+	b.WriteString("    // SSE endpoints\n")
+	for i := range v1.Routes {
+		r := &v1.Routes[i]
+		if !r.IsSSE {
+			continue
+		}
+		params := extractPathParams(r.Path)
+		writeSwiftSSEFunc(&b, r, params)
+	}
+	b.WriteString("\n")
+
+	// Reconnecting SSE wrappers.
+	b.WriteString("    // Reconnecting SSE wrappers with exponential backoff\n")
+	for i := range v1.Routes {
+		r := &v1.Routes[i]
+		if !r.IsSSE {
+			continue
+		}
+		params := extractPathParams(r.Path)
+		writeSwiftReconnectingFunc(&b, r, params)
+	}
+	b.WriteString("}\n")
+
+	return os.WriteFile(filepath.Join(outDir, "ApiClient.swift"), []byte(b.String()), 0o600)
+}
+
+// generateSwift generates Types.swift and ApiClient.swift in outDir.
+func generateSwift(outDir string, docs *docRegistry) error {
+	if err := os.MkdirAll(outDir, 0o750); err != nil {
+		return err
+	}
+	if err := writeSwiftTypes(outDir, docs); err != nil {
+		return err
+	}
+	return writeSwiftClient(outDir)
 }
 
 func sortedKeys(m map[string]struct{}) []string {
