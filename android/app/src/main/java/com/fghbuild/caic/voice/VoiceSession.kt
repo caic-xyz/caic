@@ -507,30 +507,42 @@ class VoiceSession @Inject constructor(
     }
 
     private suspend fun handleToolCall(toolCall: BidiGenerateContentToolCall) {
-        val responses = toolCall.functionCalls.mapNotNull { fc ->
-            val scheduling = functionScheduling[fc.name]
-            _state.update { it.copy(activeTool = fc.name) }
-            val result = functionHandlers?.handle(fc.name, fc.args) ?: errorJson("No handler")
-            _state.update { it.copy(activeTool = null) }
-            // Surface tool errors in the transcript so they're visible in the UI.
-            val errorMsg = (result as? JsonObject)?.get("error")?.jsonPrimitive?.content
-            if (errorMsg != null) {
-                Log.e(TAG, "Tool ${fc.name} failed: $errorMsg")
+        val responses = toolCall.functionCalls.map { fc ->
+            try {
+                val scheduling = functionScheduling[fc.name]
+                _state.update { it.copy(activeTool = fc.name) }
+                val result = functionHandlers?.handle(fc.name, fc.args) ?: errorJson("No handler")
+                _state.update { it.copy(activeTool = null) }
+                // Surface tool errors in the transcript so they're visible in the UI.
+                val errorMsg = (result as? JsonObject)?.get("error")?.jsonPrimitive?.content
+                if (errorMsg != null) {
+                    Log.e(TAG, "Tool ${fc.name} failed: $errorMsg")
+                    _state.update {
+                        it.copy(transcript = it.transcript + TranscriptEntry(
+                            TranscriptSpeaker.ASSISTANT, "[${fc.name}] $errorMsg", final = true,
+                        ))
+                    }
+                }
+
+                val response = if (scheduling != null && result is JsonObject) {
+                    JsonObject(result.toMutableMap().apply {
+                        put("scheduling", JsonPrimitive(scheduling))
+                    })
+                } else {
+                    result
+                }
+                FunctionResponse(id = fc.id, name = fc.name, response = response)
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                _state.update { it.copy(activeTool = null) }
+                val errMsg = e.message ?: "Unknown error"
+                Log.e(TAG, "Tool ${fc.name} threw: $errMsg", e)
                 _state.update {
                     it.copy(transcript = it.transcript + TranscriptEntry(
-                        TranscriptSpeaker.ASSISTANT, "[${fc.name}] $errorMsg", final = true,
+                        TranscriptSpeaker.ASSISTANT, "[${fc.name}] $errMsg", final = true,
                     ))
                 }
+                FunctionResponse(id = fc.id, name = fc.name, response = errorJson(errMsg))
             }
-
-            val response = if (scheduling != null && result is JsonObject) {
-                JsonObject(result.toMutableMap().apply {
-                    put("scheduling", JsonPrimitive(scheduling))
-                })
-            } else {
-                result
-            }
-            FunctionResponse(id = fc.id, name = fc.name, response = response)
         }
         val toolResponse = BidiGenerateContentToolResponse(functionResponses = responses)
         webSocket?.send(

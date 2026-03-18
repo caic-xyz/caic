@@ -490,29 +490,43 @@ export class VoiceSession {
 
     const responses: FunctionResponse[] = [];
     for (const fc of toolCall.functionCalls ?? []) {
-      const scheduling = FUNCTION_SCHEDULING.get(fc.name);
-      this._update((s) => {
-        s.activeTool = fc.name;
-      });
-      const result = await fns.handle(fc.name, fc.args ?? {});
-      this._update((s) => {
-        s.activeTool = null;
-      });
+      try {
+        const scheduling = FUNCTION_SCHEDULING.get(fc.name);
+        this._update((s) => {
+          s.activeTool = fc.name;
+        });
+        const result = await fns.handle(fc.name, fc.args ?? {});
+        this._update((s) => {
+          s.activeTool = null;
+        });
 
-      // Surface tool errors in the transcript.
-      if (typeof result["error"] === "string") {
-        const errMsg = result["error"];
+        // Surface tool errors in the transcript.
+        if (typeof result["error"] === "string") {
+          const errMsg = result["error"];
+          this._update((s) => {
+            s.transcript = [
+              ...s.transcript,
+              { speaker: "assistant" as TranscriptSpeaker, text: `[${fc.name}] ${errMsg}`, final: true },
+            ];
+          });
+        }
+
+        const response: Record<string, unknown> =
+          scheduling !== undefined ? { ...result, scheduling } : result;
+        responses.push({ id: fc.id, name: fc.name, response });
+      } catch (e: unknown) {
+        this._update((s) => {
+          s.activeTool = null;
+        });
+        const errMsg = e instanceof Error ? e.message : "Unknown error";
         this._update((s) => {
           s.transcript = [
             ...s.transcript,
             { speaker: "assistant" as TranscriptSpeaker, text: `[${fc.name}] ${errMsg}`, final: true },
           ];
         });
+        responses.push({ id: fc.id, name: fc.name, response: { error: errMsg } });
       }
-
-      const response: Record<string, unknown> =
-        scheduling !== undefined ? { ...result, scheduling } : result;
-      responses.push({ id: fc.id, name: fc.name, response });
     }
 
     if (this._ws?.readyState === WebSocket.OPEN) {
