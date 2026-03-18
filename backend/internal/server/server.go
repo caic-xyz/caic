@@ -1847,21 +1847,23 @@ func (s *Server) loadPurgedTasks() error {
 	return s.loadPurgedTasksFrom(all)
 }
 
-// loadPurgedTasksFrom populates s.tasks from pre-loaded log data. It keeps
-// tasks updated within the last 7 days and limits the result to the 5 most
-// recent per repository. Tasks without a caic_result trailer get a synthetic
-// result; their state is inferred from messages and finalised in the setup
-// loop. adoptContainers removes all stale entries for any branch that has a
-// live container, so no-trailer tasks never duplicate adopted ones.
+// loadPurgedTasksFrom populates s.tasks from pre-loaded log data.
+//
+// It keeps tasks updated within the last few days and limits the result to the N most recent per repository.
+// Tasks without a caic_result trailer get a synthetic result; their state is inferred from messages and
+// finalised in the setup loop. adoptContainers removes all stale entries for any branch that has a live
+// container, so no-trailer tasks never duplicate adopted ones.
 func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
-	// Include all tasks updated within the last 7 days, with or without a
+	// Include all tasks updated within the last few days, with or without a
 	// caic_result trailer. Trailer-less tasks (interrupted or still-running)
 	// are deduplicated by adoptContainers which sweeps all stale entries for
 	// each branch it adopts.
+	const oldest = 14 * 24 * time.Hour
+	const maxPurgedPerRepo = 5
 	var purged []*task.LoadedTask
 	now := time.Now().UTC()
 	for _, lt := range all {
-		if now.Sub(lt.LastStateUpdateAt) > 7*24*time.Hour {
+		if now.Sub(lt.LastStateUpdateAt) > oldest {
 			continue
 		}
 		if lt.Result == nil {
@@ -1869,7 +1871,7 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 		}
 		purged = append(purged, lt)
 	}
-	// Sort by last state update descending so the 5-per-repo limit keeps the
+	// Sort by last state update descending so the max-per-repo limit keeps the
 	// most recently active tasks, not just the most recently started ones.
 	slices.SortFunc(purged, func(a, b *task.LoadedTask) int {
 		return b.LastStateUpdateAt.Compare(a.LastStateUpdateAt)
@@ -1881,7 +1883,7 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 		if p := lt.Primary(); p != nil {
 			key = p.Name
 		}
-		if perRepo[key] < 5 {
+		if perRepo[key] < maxPurgedPerRepo {
 			perRepo[key]++
 			kept = append(kept, lt)
 		}
