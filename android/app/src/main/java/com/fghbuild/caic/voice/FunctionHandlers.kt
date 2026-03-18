@@ -65,6 +65,7 @@ class FunctionHandlers(
     private suspend fun handleListTasks(): JsonElement {
         val excluded = excludedTaskIds()
         val tasks = apiClient.listTasks().filter { it.id !in excluded }
+            .sortedWith(compareBy<Task> { it.id.length }.thenBy { it.id })
         if (tasks.isEmpty()) return textResult("No tasks running.")
         val lines = tasks.joinToString("\n") { t ->
             val num = taskNumberMap.toNumber(t.id) ?: 0

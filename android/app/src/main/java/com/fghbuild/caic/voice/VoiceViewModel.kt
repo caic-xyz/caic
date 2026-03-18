@@ -49,6 +49,7 @@ class VoiceViewModel @Inject constructor(
                             .toSet()
                         voiceSessionManager.excludedTaskIds = prePurgedIds
                         val active = tasks.filter { it.id !in prePurgedIds }
+                            .sortedWith(compareBy<Task> { it.id.length }.thenBy { it.id })
                         taskNumberMap.reset()
                         taskNumberMap.update(active)
                         val prefs = settingsRepository.serverPreferences.value

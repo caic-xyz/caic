@@ -7,7 +7,7 @@ export class TaskNumberMap {
   private readonly numberToId = new Map<number, string>();
   private nextNumber = 1;
 
-  /** Sync with current task list. Existing tasks keep their number; new ones get the next. */
+  /** Sync with current task list. Existing tasks keep their number; new ones get the next (ordered by creation time via KSID). */
   update(tasks: Task[]): void {
     const currentIds = new Set(tasks.map((t) => t.id));
     for (const [id, num] of this.idToNumber) {
@@ -16,12 +16,18 @@ export class TaskNumberMap {
         this.numberToId.delete(num);
       }
     }
-    for (const task of tasks) {
-      if (!this.idToNumber.has(task.id)) {
-        this.idToNumber.set(task.id, this.nextNumber);
-        this.numberToId.set(this.nextNumber, task.id);
-        this.nextNumber++;
-      }
+    // Sort new tasks by ID ascending (KSID encodes creation time) so that
+    // the oldest task gets the lowest number.
+    const newTasks = tasks.filter((t) => !this.idToNumber.has(t.id));
+    newTasks.sort((a, b) => {
+      const lc = a.id.length - b.id.length;
+      if (lc !== 0) return lc;
+      return a.id > b.id ? 1 : a.id < b.id ? -1 : 0;
+    });
+    for (const task of newTasks) {
+      this.idToNumber.set(task.id, this.nextNumber);
+      this.numberToId.set(this.nextNumber, task.id);
+      this.nextNumber++;
     }
   }
 

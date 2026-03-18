@@ -8,7 +8,7 @@ class TaskNumberMap {
     private val numberToId = mutableMapOf<Int, String>()
     private var nextNumber = 1
 
-    /** Sync with current task list. Existing tasks keep their number; new tasks get the next. */
+    /** Sync with current task list. Existing tasks keep their number; new tasks get the next (ordered by creation time via KSID). */
     fun update(tasks: List<Task>) {
         val currentIds = tasks.map { it.id }.toSet()
         // Remove stale mappings.
@@ -17,13 +17,14 @@ class TaskNumberMap {
             val num = idToNumber.remove(id)
             if (num != null) numberToId.remove(num)
         }
-        // Assign numbers to new tasks.
-        for (task in tasks) {
-            if (task.id !in idToNumber) {
-                idToNumber[task.id] = nextNumber
-                numberToId[nextNumber] = task.id
-                nextNumber++
-            }
+        // Assign numbers to new tasks sorted by ID ascending (KSID encodes
+        // creation time) so that the oldest task gets the lowest number.
+        val newTasks = tasks.filter { it.id !in idToNumber }
+            .sortedWith(compareBy<Task> { it.id.length }.thenBy { it.id })
+        for (task in newTasks) {
+            idToNumber[task.id] = nextNumber
+            numberToId[nextNumber] = task.id
+            nextNumber++
         }
     }
 

@@ -197,7 +197,13 @@ export class VoiceSession {
           .map((t) => t.id),
       );
       this.excludedTaskIds = prePurged;
-      const active = tasks.filter((t) => !prePurged.has(t.id));
+      const active = tasks
+        .filter((t) => !prePurged.has(t.id))
+        .sort((a, b) => {
+          const lc = a.id.length - b.id.length;
+          if (lc !== 0) return lc;
+          return a.id > b.id ? 1 : a.id < b.id ? -1 : 0;
+        });
       this.taskNumberMap.reset();
       this.taskNumberMap.update(active);
       this._pendingSnapshot = buildSnapshot(active, recentRepo, this.taskNumberMap, defaultHarness, defaultModel);

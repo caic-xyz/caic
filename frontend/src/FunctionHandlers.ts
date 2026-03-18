@@ -128,6 +128,12 @@ export class FunctionHandlers {
     const excluded = this.excludedTaskIds();
     const tasks = (await listTasks()).filter((t) => !excluded.has(t.id));
     if (tasks.length === 0) return textResult("No tasks running.");
+    // Sort by creation time (KSID ascending) so numbering matches display order.
+    tasks.sort((a, b) => {
+      const lc = a.id.length - b.id.length;
+      if (lc !== 0) return lc;
+      return a.id > b.id ? 1 : a.id < b.id ? -1 : 0;
+    });
     const lines = tasks.map((t) => taskSummaryLine(this.taskNumberMap.toNumber(t.id) ?? 0, t));
     return textResult(`## Tasks\n\n${lines.join("\n")}`);
   }
