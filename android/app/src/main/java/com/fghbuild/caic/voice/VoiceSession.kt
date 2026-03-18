@@ -67,6 +67,8 @@ private const val WS_CLOSE_NORMAL = 1000
 private const val MODEL_NAME = "models/gemini-2.5-flash-native-audio-preview-12-2025"
 /** Poll interval (ms) when mic is paused during model playback. */
 private const val PAUSE_POLL_MS = 20L
+/** Max time (ms) to wait for setupComplete before timing out. */
+private const val SETUP_TIMEOUT_MS = 15_000L
 
 @Singleton
 class VoiceSession @Inject constructor(
@@ -78,6 +80,7 @@ class VoiceSession @Inject constructor(
     private val json = Json { ignoreUnknownKeys = true }
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
+        .pingInterval(30, TimeUnit.SECONDS) // Detect silently dead connections (NAT timeout, proxy drop).
         .build()
 
     private var webSocket: WebSocket? = null
@@ -92,6 +95,7 @@ class VoiceSession @Inject constructor(
     private var deviceCallback: AudioDeviceCallback? = null
     private var scoReceiver: BroadcastReceiver? = null
     private var audioFocusRequest: AudioFocusRequest? = null
+    private var setupTimeoutJob: Job? = null
 
     private val _state = MutableStateFlow(VoiceState())
     val state: StateFlow<VoiceState> = _state.asStateFlow()
@@ -193,6 +197,14 @@ class VoiceSession @Inject constructor(
 
                 val request = Request.Builder().url(wsUrl).build()
                 webSocket = client.newWebSocket(request, createWebSocketListener())
+                // Fail fast if server never sends setupComplete (overloaded, network black hole).
+                setupTimeoutJob?.cancel()
+                setupTimeoutJob = scope.launch {
+                    delay(SETUP_TIMEOUT_MS)
+                    if (_state.value.connectStatus != null && !_state.value.connected) {
+                        setError("Connection timed out — server did not respond")
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -273,6 +285,8 @@ class VoiceSession @Inject constructor(
 
     fun disconnect() {
         muted = false
+        setupTimeoutJob?.cancel()
+        setupTimeoutJob = null
         releaseAudio()
         webSocket?.close(WS_CLOSE_NORMAL, "User disconnected")
         webSocket = null
@@ -428,6 +442,8 @@ class VoiceSession @Inject constructor(
             when {
                 "setupComplete" in msg -> {
                     Log.i(TAG, "setupComplete received, starting audio")
+                    setupTimeoutJob?.cancel()
+                    setupTimeoutJob = null
                     _state.update { it.copy(connectStatus = null, connected = true, error = null) }
                     startAudio()
                 }

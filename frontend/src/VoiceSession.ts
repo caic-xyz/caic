@@ -11,6 +11,8 @@ import { formatElapsed, formatCost } from "./formatting";
 
 const MODEL_NAME = "models/gemini-2.5-flash-native-audio-preview-12-2025";
 const PLAYBACK_SAMPLE_RATE = 24000;
+/** Max time (ms) to wait for setupComplete before timing out. */
+const SETUP_TIMEOUT_MS = 15000;
 
 /** Scheduling hint map derived from function declarations (same as Android). */
 const FUNCTION_SCHEDULING = new Map<string, string>(
@@ -145,6 +147,7 @@ export class VoiceSession {
   private _functions: FunctionHandlers | null = null;
   /** Snapshot to inject after setupComplete. */
   private _pendingSnapshot: string | null = null;
+  private _setupTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     const [state, setState] = createStore<VoiceState>({
@@ -223,6 +226,16 @@ export class VoiceSession {
       const ws = new WebSocket(wsUrl);
       this._ws = ws;
 
+      // Fail fast if server never sends setupComplete (overloaded, network black hole).
+      if (this._setupTimer !== null) clearTimeout(this._setupTimer);
+      this._setupTimer = setTimeout(() => {
+        if (ws === this._ws && !this.state.connected) {
+          ws.close();
+          this._ws = null;
+          this._setError("Connection timed out — server did not respond");
+        }
+      }, SETUP_TIMEOUT_MS);
+
       ws.onopen = () => {
         if (ws !== this._ws) return;
         this._setStatus("Waiting for server…");
@@ -267,6 +280,10 @@ export class VoiceSession {
   }
 
   disconnect(): void {
+    if (this._setupTimer !== null) {
+      clearTimeout(this._setupTimer);
+      this._setupTimer = null;
+    }
     this._releaseAudio();
     this._ws?.close(1000, "User disconnected");
     this._ws = null;
@@ -403,6 +420,10 @@ export class VoiceSession {
     }
 
     if ("setupComplete" in msg) {
+      if (this._setupTimer !== null) {
+        clearTimeout(this._setupTimer);
+        this._setupTimer = null;
+      }
       this._update((s) => {
         s.connectStatus = null;
         s.connected = true;
