@@ -4,6 +4,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -33,6 +36,115 @@ func isSDKPkg(pkgPath string) bool {
 		pkgPath == reflect.TypeFor[dto.ErrorResponse]().PkgPath()
 }
 
+// docRegistry holds parsed documentation extracted from Go source files.
+type docRegistry struct {
+	typeDoc  map[string]string            // Go type name → doc comment text
+	fieldDoc map[string]map[string]string // Go type name → Go field name → doc comment text
+}
+
+// loadDocs parses Go source files in the current directory and extracts
+// documentation comments for types and their fields.
+func loadDocs() (*docRegistry, error) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		return nil, err
+	}
+	fset := token.NewFileSet()
+	var files []*ast.File
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, e.Name(), nil, parser.ParseComments)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, f)
+	}
+	reg := &docRegistry{
+		typeDoc:  map[string]string{},
+		fieldDoc: map[string]map[string]string{},
+	}
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			genDecl, ok := decl.(*ast.GenDecl)
+			if !ok {
+				continue
+			}
+			for _, spec := range genDecl.Specs {
+				typeSpec, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				structType, ok := typeSpec.Type.(*ast.StructType)
+				if !ok {
+					continue
+				}
+				// Type-level doc: prefer TypeSpec doc, fall back to GenDecl doc when there is
+				// only one spec in the declaration (the common case for struct types).
+				var doc string
+				if typeSpec.Doc != nil {
+					doc = typeSpec.Doc.Text()
+				} else if genDecl.Doc != nil && len(genDecl.Specs) == 1 {
+					doc = genDecl.Doc.Text()
+				}
+				if doc = strings.TrimSpace(doc); doc != "" {
+					reg.typeDoc[typeSpec.Name.Name] = doc
+				}
+				// Field-level docs: prefer leading doc comment, fall back to trailing line comment.
+				fieldDocs := map[string]string{}
+				for _, field := range structType.Fields.List {
+					var fdoc string
+					if field.Doc != nil {
+						fdoc = strings.TrimSpace(field.Doc.Text())
+					} else if field.Comment != nil {
+						fdoc = strings.TrimSpace(field.Comment.Text())
+					}
+					if fdoc != "" {
+						for _, name := range field.Names {
+							fieldDocs[name.Name] = fdoc
+						}
+					}
+				}
+				if len(fieldDocs) > 0 {
+					reg.fieldDoc[typeSpec.Name.Name] = fieldDocs
+				}
+			}
+		}
+	}
+	return reg, nil
+}
+
+// formatBlockDoc formats a doc string as a /** ... */ block comment with the given indent.
+// Returns an empty string when doc is empty.
+func formatBlockDoc(doc, indent string) string {
+	if doc == "" {
+		return ""
+	}
+	lines := strings.Split(doc, "\n")
+	// Drop trailing empty lines.
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	if len(lines) == 1 {
+		return indent + "/** " + lines[0] + " */\n"
+	}
+	var b strings.Builder
+	b.WriteString(indent + "/**\n")
+	for _, l := range lines {
+		if l == "" {
+			b.WriteString(indent + " *\n")
+		} else {
+			b.WriteString(indent + " * " + l + "\n")
+		}
+	}
+	b.WriteString(indent + " */\n")
+	return b.String()
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -41,17 +153,21 @@ func main() {
 }
 
 func run() error {
-	if err := generateTS(tsDir); err != nil {
+	docs, err := loadDocs()
+	if err != nil {
+		return fmt.Errorf("loading docs: %w", err)
+	}
+	if err := generateTS(tsDir, docs); err != nil {
 		return err
 	}
-	if err := generateKotlin(kotlinDir); err != nil {
+	if err := generateKotlin(kotlinDir, docs); err != nil {
 		return err
 	}
-	return generateDoc(sdkDir)
+	return generateDoc(sdkDir, docs)
 }
 
 // generateTS generates the TypeScript API client as a createApiClient factory.
-func generateTS(outDir string) error {
+func generateTS(outDir string, _ *docRegistry) error {
 	// Collect all referenced types for the import statement.
 	types := map[string]struct{}{}
 	for i := range v1.Routes {
@@ -128,6 +244,9 @@ function makeRequester(fetchFn: FetchFn) {
 }
 
 func writeTSJSONMethod(b *strings.Builder, r *v1.Route, params []string) {
+	if r.Doc != "" {
+		b.WriteString(formatBlockDoc(r.Doc, "    "))
+	}
 	respType := r.RespName()
 	if r.IsArray {
 		respType += "[]"
@@ -155,6 +274,9 @@ func writeTSJSONMethod(b *strings.Builder, r *v1.Route, params []string) {
 }
 
 func writeTSSSEMethod(b *strings.Builder, r *v1.Route, params []string) {
+	if r.Doc != "" {
+		b.WriteString(formatBlockDoc(r.Doc, "    "))
+	}
 	args := make([]string, 0, len(params)+1)
 	for _, p := range params {
 		args = append(args, p+": string")
@@ -172,11 +294,11 @@ func writeTSSSEMethod(b *strings.Builder, r *v1.Route, params []string) {
 }
 
 // generateKotlin generates Types.kt and ApiClient.kt in outDir.
-func generateKotlin(outDir string) error {
+func generateKotlin(outDir string, docs *docRegistry) error {
 	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return err
 	}
-	if err := writeKotlinTypes(outDir); err != nil {
+	if err := writeKotlinTypes(outDir, docs); err != nil {
 		return err
 	}
 	return writeKotlinClient(outDir)
@@ -457,7 +579,10 @@ func needsSerialName(name string) bool {
 }
 
 // emitKotlinStruct writes a @Serializable data class to b.
-func emitKotlinStruct(b *strings.Builder, t reflect.Type) {
+func emitKotlinStruct(b *strings.Builder, t reflect.Type, docs *docRegistry) {
+	if doc := docs.typeDoc[t.Name()]; doc != "" {
+		b.WriteString(formatBlockDoc(doc, ""))
+	}
 	fields := parseStructFields(t)
 	name := t.Name()
 
@@ -530,7 +655,7 @@ func (o jsonTagOptions) contains(opt string) bool {
 	return false
 }
 
-func writeKotlinTypes(outDir string) error {
+func writeKotlinTypes(outDir string, docs *docRegistry) error {
 	var b strings.Builder
 	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\n")
 	b.WriteString("package com.caic.sdk.v1\n\n")
@@ -565,7 +690,7 @@ func writeKotlinTypes(outDir string) error {
 		if ks.comment != "" {
 			fmt.Fprintf(&b, "// %s\n\n", ks.comment)
 		}
-		emitKotlinStruct(&b, ks.t)
+		emitKotlinStruct(&b, ks.t, docs)
 		b.WriteString("\n")
 	}
 
@@ -748,6 +873,9 @@ class ApiClient(
 }
 
 func writeKotlinJSONFunc(b *strings.Builder, r *v1.Route, params []string) {
+	if r.Doc != "" {
+		b.WriteString(formatBlockDoc(r.Doc, "    "))
+	}
 	respType := r.RespName()
 	if r.IsArray {
 		respType = "List<" + respType + ">"
@@ -777,6 +905,9 @@ func writeKotlinJSONFunc(b *strings.Builder, r *v1.Route, params []string) {
 }
 
 func writeKotlinSSEFunc(b *strings.Builder, r *v1.Route, params []string) {
+	if r.Doc != "" {
+		b.WriteString(formatBlockDoc(r.Doc, "    "))
+	}
 	args := make([]string, 0, len(params))
 	for _, p := range params {
 		args = append(args, p+": String")
@@ -787,6 +918,9 @@ func writeKotlinSSEFunc(b *strings.Builder, r *v1.Route, params []string) {
 }
 
 func writeKotlinReconnectingFunc(b *strings.Builder, r *v1.Route, params []string) {
+	if r.Doc != "" {
+		b.WriteString(formatBlockDoc(r.Doc, "    "))
+	}
 	// Build the function name: e.g. "taskEvents" -> "taskEventsReconnecting"
 	reconnectName := r.Name + "Reconnecting"
 
@@ -859,7 +993,7 @@ func buildTSPath(path string, params, queryParams []string) string {
 }
 
 // generateDoc generates sdk/API.md from the route table.
-func generateDoc(outDir string) error {
+func generateDoc(outDir string, docs *docRegistry) error {
 	var b strings.Builder
 	b.WriteString("# caic API Reference\n\n")
 	b.WriteString("<!-- Code generated by gen-api-sdk; DO NOT EDIT. -->\n\n")
@@ -870,9 +1004,10 @@ func generateDoc(outDir string) error {
 	// Route tables.
 	for _, g := range groups {
 		fmt.Fprintf(&b, "## %s\n\n", g.name)
-		b.WriteString("| Method | Path | Request | Response |\n")
-		b.WriteString("|--------|------|---------|----------|\n")
-		for _, r := range g.routes {
+		b.WriteString("| Method | Path | Description | Request | Response |\n")
+		b.WriteString("|--------|------|-------------|---------|----------|\n")
+		for i := range g.routes {
+			r := &g.routes[i]
 			req := ""
 			if r.Req != nil {
 				req = "`" + r.ReqName() + "`"
@@ -884,7 +1019,7 @@ func generateDoc(outDir string) error {
 			if r.IsSSE {
 				resp += " SSE"
 			}
-			fmt.Fprintf(&b, "| %s | `%s` | %s | %s |\n", r.Method, r.Path, req, resp)
+			fmt.Fprintf(&b, "| %s | `%s` | %s | %s | %s |\n", r.Method, r.Path, r.Doc, req, resp)
 		}
 		b.WriteString("\n")
 	}
@@ -908,7 +1043,7 @@ func generateDoc(outDir string) error {
 	// Types section.
 	b.WriteString("## Types\n\n")
 	for _, t := range discoverDocTypes() {
-		writeDocType(&b, t)
+		writeDocType(&b, t, docs)
 	}
 
 	return os.WriteFile(filepath.Join(outDir, "API.md"), []byte(b.String()), 0o600)
@@ -978,10 +1113,13 @@ func discoverDocTypes() []reflect.Type {
 	return order
 }
 
-func writeDocType(b *strings.Builder, t reflect.Type) {
+func writeDocType(b *strings.Builder, t reflect.Type, docs *docRegistry) {
 	fmt.Fprintf(b, "### %s\n\n", t.Name())
-	b.WriteString("| Field | Type | Required |\n")
-	b.WriteString("|-------|------|----------|\n")
+	if typeDoc := docs.typeDoc[t.Name()]; typeDoc != "" {
+		fmt.Fprintf(b, "%s\n\n", typeDoc)
+	}
+	b.WriteString("| Field | Type | Description | Required |\n")
+	b.WriteString("|-------|------|-------------|----------|\n")
 	for i := range t.NumField() {
 		sf := t.Field(i)
 		if !sf.IsExported() {
@@ -1001,7 +1139,11 @@ func writeDocType(b *strings.Builder, t reflect.Type) {
 		if optional {
 			req = ""
 		}
-		fmt.Fprintf(b, "| `%s` | `%s` | %s |\n", jsonName, typeName, req)
+		fieldDoc := ""
+		if fdocs, ok := docs.fieldDoc[t.Name()]; ok {
+			fieldDoc = fdocs[sf.Name]
+		}
+		fmt.Fprintf(b, "| `%s` | `%s` | %s | %s |\n", jsonName, typeName, fieldDoc, req)
 	}
 	b.WriteString("\n")
 }

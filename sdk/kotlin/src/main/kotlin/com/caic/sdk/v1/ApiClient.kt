@@ -84,37 +84,67 @@ class ApiClient(
     }
 
     // JSON endpoints
+    /** Returns server capabilities and feature flags. */
     suspend fun getConfig(): Config = request("GET", "/api/v1/server/config")
+    /** Returns the authenticated user's profile. */
     suspend fun getMe(): UserResp = request("GET", "/api/v1/auth/me")
+    /** Invalidates the current session. */
     suspend fun logout(): StatusResp = request("POST", "/api/v1/auth/logout")
+    /** Returns server and per-repository preferences. */
     suspend fun getPreferences(): PreferencesResp = request("GET", "/api/v1/server/preferences")
+    /** Updates server settings and preferences. */
     suspend fun updatePreferences(req: UpdatePreferencesReq): PreferencesResp = request("POST", "/api/v1/server/preferences", json.encodeToString(req))
+    /** Lists available coding agent harnesses. */
     suspend fun listHarnesses(): List<HarnessInfo> = request("GET", "/api/v1/server/harnesses")
+    /** Lists well-known cache configurations. */
     suspend fun listCaches(): WellKnownCachesResp = request("GET", "/api/v1/server/caches")
+    /** Lists all discovered repositories. */
     suspend fun listRepos(): List<Repo> = request("GET", "/api/v1/server/repos")
+    /** Clones a repository into the server's root directory. */
     suspend fun cloneRepo(req: CloneRepoReq): Repo = request("POST", "/api/v1/server/repos", json.encodeToString(req))
+    /** Lists branches for a repository. */
     suspend fun listRepoBranches(repo: String): RepoBranchesResp = request("GET", "/api/v1/server/repos/branches?repo=$repo")
+    /** Creates a task to fix a failing CI pipeline. */
     suspend fun botFixCI(req: BotFixCIReq): CreateTaskResp = request("POST", "/api/v1/bot/fix-ci", json.encodeToString(req))
+    /** Injects a CI fix command into an existing task's PR. */
     suspend fun botFixPR(req: BotFixPRReq): StatusResp = request("POST", "/api/v1/bot/fix-pr", json.encodeToString(req))
+    /** Returns all tasks. */
     suspend fun listTasks(): List<Task> = request("GET", "/api/v1/tasks")
+    /** Creates and starts a new coding agent task. */
     suspend fun createTask(req: CreateTaskReq): CreateTaskResp = request("POST", "/api/v1/tasks", json.encodeToString(req))
+    /** Sends user input to a running task. */
     suspend fun sendInput(id: String, req: InputReq): StatusResp = request("POST", "/api/v1/tasks/$id/input", json.encodeToString(req))
+    /** Restarts a completed or errored task with a new prompt. */
     suspend fun restartTask(id: String, req: RestartReq): StatusResp = request("POST", "/api/v1/tasks/$id/restart", json.encodeToString(req))
+    /** Requests graceful stop of a running task. */
     suspend fun stopTask(id: String): StatusResp = request("POST", "/api/v1/tasks/$id/stop")
+    /** Permanently deletes a task and its container. */
     suspend fun purgeTask(id: String): StatusResp = request("POST", "/api/v1/tasks/$id/purge")
+    /** Reconnects to an orphaned task container. */
     suspend fun reviveTask(id: String): StatusResp = request("POST", "/api/v1/tasks/$id/revive")
+    /** Returns the log tail of a failed CI check run. */
     suspend fun getTaskCILog(id: String, jobID: String): CILogResp = request("GET", "/api/v1/tasks/$id/ci-log?jobID=$jobID")
+    /** Pushes task changes to the remote repository. */
     suspend fun syncTask(id: String, req: SyncReq): SyncResp = request("POST", "/api/v1/tasks/$id/sync", json.encodeToString(req))
+    /** Returns the unified diff for a task's branch. */
     suspend fun getTaskDiff(id: String): DiffResp = request("GET", "/api/v1/tasks/$id/diff")
+    /** Returns the full (untruncated) input for a tool call. */
     suspend fun getTaskToolInput(id: String, toolUseID: String): TaskToolInputResp = request("GET", "/api/v1/tasks/$id/tool/$toolUseID")
+    /** Returns current usage quota statistics. */
     suspend fun getUsage(): UsageResp = request("GET", "/api/v1/usage")
+    /** Returns a short-lived voice API token. */
     suspend fun getVoiceToken(): VoiceTokenResp = request("GET", "/api/v1/voice/token")
+    /** Fetches a URL and returns its text content. */
     suspend fun webFetch(req: WebFetchReq): WebFetchResp = request("POST", "/api/v1/web/fetch", json.encodeToString(req))
 
     // SSE endpoints
+    /** Streams raw backend-specific task events via SSE. */
     fun taskRawEvents(id: String): Flow<EventMessage> = sseFlow<EventMessage>("/api/v1/tasks/$id/raw_events")
+    /** Streams backend-neutral task events via SSE. */
     fun taskEvents(id: String): Flow<EventMessage> = sseFlow<EventMessage>("/api/v1/tasks/$id/events")
+    /** Streams task list updates for all tasks via SSE. */
     fun globalTaskEvents(): Flow<TaskListEvent> = sseFlow<TaskListEvent>("/api/v1/server/tasks/events")
+    /** Streams usage quota updates via SSE. */
     fun globalUsageEvents(): Flow<UsageResp> = sseFlow<UsageResp>("/api/v1/server/usage/events")
 
     private inline fun <reified T> sseFlow(path: String): Flow<T> = callbackFlow {
@@ -144,9 +174,13 @@ class ApiClient(
     }
 
     // Reconnecting SSE wrappers with exponential backoff.
+    /** Streams raw backend-specific task events via SSE. */
     fun taskRawEventsReconnecting(id: String): Flow<EventMessage> = reconnectingFlow { taskRawEvents(id) }
+    /** Streams backend-neutral task events via SSE. */
     fun taskEventsReconnecting(id: String): Flow<EventMessage> = reconnectingFlow { taskEvents(id) }
+    /** Streams task list updates for all tasks via SSE. */
     fun globalTaskEventsReconnecting(): Flow<TaskListEvent> = reconnectingFlow { globalTaskEvents() }
+    /** Streams usage quota updates via SSE. */
     fun globalUsageEventsReconnecting(): Flow<UsageResp> = reconnectingFlow { globalUsageEvents() }
 
     private fun <T> reconnectingFlow(connect: () -> Flow<T>): Flow<T> = flow {

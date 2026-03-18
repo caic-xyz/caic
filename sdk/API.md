@@ -6,68 +6,68 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 
 ## Server
 
-| Method | Path | Request | Response |
-|--------|------|---------|----------|
-| GET | `/api/v1/server/config` |  | `Config` |
-| GET | `/api/v1/server/preferences` |  | `PreferencesResp` |
-| POST | `/api/v1/server/preferences` | `UpdatePreferencesReq` | `PreferencesResp` |
-| GET | `/api/v1/server/harnesses` |  | `HarnessInfo[]` |
-| GET | `/api/v1/server/caches` |  | `WellKnownCachesResp` |
-| GET | `/api/v1/server/repos` |  | `Repo[]` |
-| POST | `/api/v1/server/repos` | `CloneRepoReq` | `Repo` |
-| GET | `/api/v1/server/repos/branches` |  | `RepoBranchesResp` |
-| GET | `/api/v1/server/tasks/events` |  | `TaskListEvent` SSE |
-| GET | `/api/v1/server/usage/events` |  | `UsageResp` SSE |
+| Method | Path | Description | Request | Response |
+|--------|------|-------------|---------|----------|
+| GET | `/api/v1/server/config` | Returns server capabilities and feature flags. |  | `Config` |
+| GET | `/api/v1/server/preferences` | Returns server and per-repository preferences. |  | `PreferencesResp` |
+| POST | `/api/v1/server/preferences` | Updates server settings and preferences. | `UpdatePreferencesReq` | `PreferencesResp` |
+| GET | `/api/v1/server/harnesses` | Lists available coding agent harnesses. |  | `HarnessInfo[]` |
+| GET | `/api/v1/server/caches` | Lists well-known cache configurations. |  | `WellKnownCachesResp` |
+| GET | `/api/v1/server/repos` | Lists all discovered repositories. |  | `Repo[]` |
+| POST | `/api/v1/server/repos` | Clones a repository into the server's root directory. | `CloneRepoReq` | `Repo` |
+| GET | `/api/v1/server/repos/branches` | Lists branches for a repository. |  | `RepoBranchesResp` |
+| GET | `/api/v1/server/tasks/events` | Streams task list updates for all tasks via SSE. |  | `TaskListEvent` SSE |
+| GET | `/api/v1/server/usage/events` | Streams usage quota updates via SSE. |  | `UsageResp` SSE |
 
 ## Auth
 
-| Method | Path | Request | Response |
-|--------|------|---------|----------|
-| GET | `/api/v1/auth/me` |  | `UserResp` |
-| POST | `/api/v1/auth/logout` |  | `StatusResp` |
+| Method | Path | Description | Request | Response |
+|--------|------|-------------|---------|----------|
+| GET | `/api/v1/auth/me` | Returns the authenticated user's profile. |  | `UserResp` |
+| POST | `/api/v1/auth/logout` | Invalidates the current session. |  | `StatusResp` |
 
 ## Bot
 
-| Method | Path | Request | Response |
-|--------|------|---------|----------|
-| POST | `/api/v1/bot/fix-ci` | `BotFixCIReq` | `CreateTaskResp` |
-| POST | `/api/v1/bot/fix-pr` | `BotFixPRReq` | `StatusResp` |
+| Method | Path | Description | Request | Response |
+|--------|------|-------------|---------|----------|
+| POST | `/api/v1/bot/fix-ci` | Creates a task to fix a failing CI pipeline. | `BotFixCIReq` | `CreateTaskResp` |
+| POST | `/api/v1/bot/fix-pr` | Injects a CI fix command into an existing task's PR. | `BotFixPRReq` | `StatusResp` |
 
 ## Tasks
 
-| Method | Path | Request | Response |
-|--------|------|---------|----------|
-| GET | `/api/v1/tasks` |  | `Task[]` |
-| POST | `/api/v1/tasks` | `CreateTaskReq` | `CreateTaskResp` |
-| GET | `/api/v1/tasks/{id}/raw_events` |  | `EventMessage` SSE |
-| GET | `/api/v1/tasks/{id}/events` |  | `EventMessage` SSE |
-| POST | `/api/v1/tasks/{id}/input` | `InputReq` | `StatusResp` |
-| POST | `/api/v1/tasks/{id}/restart` | `RestartReq` | `StatusResp` |
-| POST | `/api/v1/tasks/{id}/stop` |  | `StatusResp` |
-| POST | `/api/v1/tasks/{id}/purge` |  | `StatusResp` |
-| POST | `/api/v1/tasks/{id}/revive` |  | `StatusResp` |
-| GET | `/api/v1/tasks/{id}/ci-log` |  | `CILogResp` |
-| POST | `/api/v1/tasks/{id}/sync` | `SyncReq` | `SyncResp` |
-| GET | `/api/v1/tasks/{id}/diff` |  | `DiffResp` |
-| GET | `/api/v1/tasks/{id}/tool/{toolUseID}` |  | `TaskToolInputResp` |
+| Method | Path | Description | Request | Response |
+|--------|------|-------------|---------|----------|
+| GET | `/api/v1/tasks` | Returns all tasks. |  | `Task[]` |
+| POST | `/api/v1/tasks` | Creates and starts a new coding agent task. | `CreateTaskReq` | `CreateTaskResp` |
+| GET | `/api/v1/tasks/{id}/raw_events` | Streams raw backend-specific task events via SSE. |  | `EventMessage` SSE |
+| GET | `/api/v1/tasks/{id}/events` | Streams backend-neutral task events via SSE. |  | `EventMessage` SSE |
+| POST | `/api/v1/tasks/{id}/input` | Sends user input to a running task. | `InputReq` | `StatusResp` |
+| POST | `/api/v1/tasks/{id}/restart` | Restarts a completed or errored task with a new prompt. | `RestartReq` | `StatusResp` |
+| POST | `/api/v1/tasks/{id}/stop` | Requests graceful stop of a running task. |  | `StatusResp` |
+| POST | `/api/v1/tasks/{id}/purge` | Permanently deletes a task and its container. |  | `StatusResp` |
+| POST | `/api/v1/tasks/{id}/revive` | Reconnects to an orphaned task container. |  | `StatusResp` |
+| GET | `/api/v1/tasks/{id}/ci-log` | Returns the log tail of a failed CI check run. |  | `CILogResp` |
+| POST | `/api/v1/tasks/{id}/sync` | Pushes task changes to the remote repository. | `SyncReq` | `SyncResp` |
+| GET | `/api/v1/tasks/{id}/diff` | Returns the unified diff for a task's branch. |  | `DiffResp` |
+| GET | `/api/v1/tasks/{id}/tool/{toolUseID}` | Returns the full (untruncated) input for a tool call. |  | `TaskToolInputResp` |
 
 ## Usage
 
-| Method | Path | Request | Response |
-|--------|------|---------|----------|
-| GET | `/api/v1/usage` |  | `UsageResp` |
+| Method | Path | Description | Request | Response |
+|--------|------|-------------|---------|----------|
+| GET | `/api/v1/usage` | Returns current usage quota statistics. |  | `UsageResp` |
 
 ## Voice
 
-| Method | Path | Request | Response |
-|--------|------|---------|----------|
-| GET | `/api/v1/voice/token` |  | `VoiceTokenResp` |
+| Method | Path | Description | Request | Response |
+|--------|------|-------------|---------|----------|
+| GET | `/api/v1/voice/token` | Returns a short-lived voice API token. |  | `VoiceTokenResp` |
 
 ## Web
 
-| Method | Path | Request | Response |
-|--------|------|---------|----------|
-| POST | `/api/v1/web/fetch` | `WebFetchReq` | `WebFetchResp` |
+| Method | Path | Description | Request | Response |
+|--------|------|-------------|---------|----------|
+| POST | `/api/v1/web/fetch` | Fetches a URL and returns its text content. | `WebFetchReq` | `WebFetchResp` |
 
 ## Errors
 
@@ -91,576 +91,727 @@ All errors return:
 
 ### Config
 
-| Field | Type | Required |
-|-------|------|----------|
-| `tailscaleAvailable` | `boolean` | yes |
-| `usbAvailable` | `boolean` | yes |
-| `displayAvailable` | `boolean` | yes |
-| `gitHubAppEnabled` | `boolean` |  |
-| `authProviders` | `string[]` |  |
+Config reports server capabilities to the frontend.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `tailscaleAvailable` | `boolean` |  | yes |
+| `usbAvailable` | `boolean` |  | yes |
+| `displayAvailable` | `boolean` |  | yes |
+| `gitHubAppEnabled` | `boolean` |  |  |
+| `authProviders` | `string[]` | e.g. ["github","gitlab"] |  |
 
 ### UserResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `id` | `string` | yes |
-| `provider` | `string` | yes |
-| `username` | `string` | yes |
-| `avatarURL` | `string` |  |
+UserResp is returned by GET /api/v1/auth/me.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `id` | `string` |  | yes |
+| `provider` | `string` |  | yes |
+| `username` | `string` |  | yes |
+| `avatarURL` | `string` |  |  |
 
 ### StatusResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `status` | `string` | yes |
+StatusResp is a common response for mutation endpoints.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `status` | `string` |  | yes |
 
 ### RepoPrefsResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `path` | `string` | yes |
-| `baseBranch` | `string` |  |
-| `harness` | `string` |  |
-| `model` | `string` |  |
-| `baseImage` | `string` |  |
+RepoPrefsResp holds per-repository preferences.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `path` | `string` |  | yes |
+| `baseBranch` | `string` |  |  |
+| `harness` | `string` |  |  |
+| `model` | `string` |  |  |
+| `baseImage` | `string` |  |  |
 
 ### CacheMappingResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `hostPath` | `string` | yes |
-| `containerPath` | `string` | yes |
+CacheMappingResp represents a directory mapping for cache/state sharing.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `hostPath` | `string` |  | yes |
+| `containerPath` | `string` |  | yes |
 
 ### UserSettings
 
-| Field | Type | Required |
-|-------|------|----------|
-| `autoFixOnCIFailure` | `boolean` | yes |
-| `autoFixOnPROpen` | `boolean` | yes |
-| `baseImage` | `string` |  |
-| `useDefaultCaches` | `boolean` |  |
-| `wellKnownCaches` | `Record<string, unknown>` |  |
-| `cacheMappings` | `CacheMappingResp[]` |  |
+UserSettings holds user-configurable behavioral settings.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `autoFixOnCIFailure` | `boolean` | AutoFixOnCIFailure automatically starts a new task to fix CI when a
+task's PR CI fails and the original task can no longer receive input.
+Only effective when the GitHub App is configured. | yes |
+| `autoFixOnPROpen` | `boolean` | AutoFixOnPROpen automatically creates a task to review and fix a pull
+request when it is opened or reopened via a forge webhook. | yes |
+| `baseImage` | `string` | BaseImage overrides the default container base image. Empty means use
+the default. |  |
+| `useDefaultCaches` | `boolean` | UseDefaultCaches controls whether default harness caches are mounted.
+When false, only custom CacheMappings are used. |  |
+| `wellKnownCaches` | `Record<string, unknown>` | WellKnownCaches maps cache name to enabled state. nil means use default
+(all true), true means explicitly enabled, false means explicitly disabled. |  |
+| `cacheMappings` | `CacheMappingResp[]` | CacheMappings are custom host-to-container directory mappings. |  |
 
 ### PreferencesResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `repositories` | `RepoPrefsResp[]` | yes |
-| `harness` | `string` |  |
-| `models` | `Record<string, unknown>` |  |
-| `settings` | `UserSettings` | yes |
+PreferencesResp is the response for GET /api/v1/server/preferences.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `repositories` | `RepoPrefsResp[]` |  | yes |
+| `harness` | `string` |  |  |
+| `models` | `Record<string, unknown>` |  |  |
+| `settings` | `UserSettings` |  | yes |
 
 ### UpdatePreferencesReq
 
-| Field | Type | Required |
-|-------|------|----------|
-| `settings` | `UserSettings` | yes |
+UpdatePreferencesReq is the request body for POST /api/v1/server/preferences.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `settings` | `UserSettings` |  | yes |
 
 ### HarnessInfo
 
-| Field | Type | Required |
-|-------|------|----------|
-| `name` | `string` | yes |
-| `models` | `string[]` | yes |
-| `supportsImages` | `boolean` | yes |
+HarnessInfo is the JSON representation of an available harness.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `models` | `string[]` |  | yes |
+| `supportsImages` | `boolean` |  | yes |
 
 ### WellKnownCache
 
-| Field | Type | Required |
-|-------|------|----------|
-| `name` | `string` | yes |
-| `description` | `string` | yes |
-| `mounts` | `string[]` | yes |
+WellKnownCache describes a single well-known cache.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `description` | `string` |  | yes |
+| `mounts` | `string[]` | List of container paths | yes |
 
 ### WellKnownCachesResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `harnessMounts` | `string[]` | yes |
-| `wellKnown` | `WellKnownCache[]` | yes |
+WellKnownCachesResp is the response for GET /api/v1/server/caches.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `harnessMounts` | `string[]` | e.g. "~/.claude", "~/.codex" | yes |
+| `wellKnown` | `WellKnownCache[]` |  | yes |
 
 ### ForgeCheck
 
-| Field | Type | Required |
-|-------|------|----------|
-| `name` | `string` | yes |
-| `owner` | `string` | yes |
-| `repo` | `string` | yes |
-| `runID` | `number` | yes |
-| `jobID` | `number` | yes |
-| `status` | `string` | yes |
-| `conclusion` | `string` | yes |
-| `queuedAt` | `string` |  |
-| `startedAt` | `string` |  |
-| `completedAt` | `string` |  |
+ForgeCheck describes a CI check run with its status, conclusion, and timing.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `owner` | `string` |  | yes |
+| `repo` | `string` |  | yes |
+| `runID` | `number` | Pipeline/workflow run ID. | yes |
+| `jobID` | `number` | Check run / job ID. | yes |
+| `status` | `string` | queued, in_progress, completed. | yes |
+| `conclusion` | `string` | Empty when not completed. | yes |
+| `queuedAt` | `string` | When the check was created/queued. |  |
+| `startedAt` | `string` | When execution began. |  |
+| `completedAt` | `string` | When execution finished. |  |
 
 ### Repo
 
-| Field | Type | Required |
-|-------|------|----------|
-| `path` | `string` | yes |
-| `baseBranch` | `string` | yes |
-| `remoteURL` | `string` |  |
-| `forge` | `string` |  |
-| `defaultBranchCIStatus` | `string` |  |
-| `defaultBranchChecks` | `ForgeCheck[]` |  |
+Repo is the JSON representation of a discovered repo.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `path` | `string` |  | yes |
+| `baseBranch` | `string` |  | yes |
+| `remoteURL` | `string` |  |  |
+| `forge` | `string` | "github", "gitlab", or empty if unknown. |  |
+| `defaultBranchCIStatus` | `string` |  |  |
+| `defaultBranchChecks` | `ForgeCheck[]` |  |  |
 
 ### CloneRepoReq
 
-| Field | Type | Required |
-|-------|------|----------|
-| `url` | `string` | yes |
-| `path` | `string` |  |
-| `depth` | `number` |  |
+CloneRepoReq is the request body for POST /api/v1/server/repos.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `url` | `string` | Git clone URL (HTTPS or SSH). | yes |
+| `path` | `string` | Target subdirectory under rootDir; defaults to repo basename. |  |
+| `depth` | `number` |  |  |
 
 ### RepoBranchesResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `branches` | `string[]` | yes |
+RepoBranchesResp is the response for GET /api/v1/server/repos/branches.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `branches` | `string[]` |  | yes |
 
 ### BotFixCIReq
 
-| Field | Type | Required |
-|-------|------|----------|
-| `repo` | `string` | yes |
+BotFixCIReq is the request body for POST /api/v1/bot/fix-ci.
+The server fetches CI logs, builds a prompt, and creates a fix task.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `repo` | `string` |  | yes |
 
 ### CreateTaskResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `status` | `string` | yes |
-| `id` | `string` | yes |
+CreateTaskResp is the response for POST /api/v1/tasks.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `status` | `string` |  | yes |
+| `id` | `string` |  | yes |
 
 ### BotFixPRReq
 
-| Field | Type | Required |
-|-------|------|----------|
-| `taskId` | `string` | yes |
+BotFixPRReq is the request body for POST /api/v1/bot/fix-pr.
+The server fetches CI logs for the task's PR and injects a fix command.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `taskId` | `string` |  | yes |
 
 ### TaskRepo
 
-| Field | Type | Required |
-|-------|------|----------|
-| `name` | `string` | yes |
-| `baseBranch` | `string` |  |
-| `branch` | `string` | yes |
-| `remoteURL` | `string` |  |
-| `forge` | `string` |  |
+TaskRepo describes a repository associated with a task in the API response.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `baseBranch` | `string` |  |  |
+| `branch` | `string` |  | yes |
+| `remoteURL` | `string` |  |  |
+| `forge` | `string` | "github", "gitlab", or empty if unknown. |  |
 
 ### DiffFileStat
 
-| Field | Type | Required |
-|-------|------|----------|
-| `path` | `string` | yes |
-| `added` | `number` | yes |
-| `deleted` | `number` | yes |
-| `binary` | `boolean` |  |
+DiffFileStat describes changes to a single file.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `path` | `string` |  | yes |
+| `added` | `number` |  | yes |
+| `deleted` | `number` |  | yes |
+| `binary` | `boolean` |  |  |
 
 ### Task
 
-| Field | Type | Required |
-|-------|------|----------|
-| `id` | `string` | yes |
-| `initialPrompt` | `string` | yes |
-| `title` | `string` | yes |
-| `repos` | `TaskRepo[]` |  |
-| `container` | `string` | yes |
-| `state` | `string` | yes |
-| `stateUpdatedAt` | `number` | yes |
-| `diffStat` | `DiffFileStat[]` |  |
-| `costUSD` | `number` | yes |
-| `duration` | `number` | yes |
-| `numTurns` | `number` | yes |
-| `cumulativeInputTokens` | `number` | yes |
-| `cumulativeOutputTokens` | `number` | yes |
-| `cumulativeCacheCreationInputTokens` | `number` | yes |
-| `cumulativeCacheReadInputTokens` | `number` | yes |
-| `activeInputTokens` | `number` | yes |
-| `activeCacheReadTokens` | `number` | yes |
-| `contextWindowLimit` | `number` | yes |
-| `error` | `string` |  |
-| `result` | `string` |  |
-| `forgeOwner` | `string` |  |
-| `forgeRepo` | `string` |  |
-| `forgePR` | `number` |  |
-| `forgeIssue` | `number` |  |
-| `ciStatus` | `string` |  |
-| `ciChecks` | `ForgeCheck[]` |  |
-| `owner` | `string` |  |
-| `harness` | `string` | yes |
-| `model` | `string` |  |
-| `agentVersion` | `string` |  |
-| `sessionID` | `string` |  |
-| `startedAt` | `number` |  |
-| `turnStartedAt` | `number` |  |
-| `inPlanMode` | `boolean` |  |
-| `planContent` | `string` |  |
-| `tailscale` | `string` |  |
-| `usb` | `boolean` |  |
-| `display` | `boolean` |  |
+Task is the JSON representation sent to the frontend.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `id` | `string` |  | yes |
+| `initialPrompt` | `string` |  | yes |
+| `title` | `string` |  | yes |
+| `repos` | `TaskRepo[]` |  |  |
+| `container` | `string` |  | yes |
+| `state` | `string` |  | yes |
+| `stateUpdatedAt` | `number` | Unix epoch seconds (ms precision) of last state change. | yes |
+| `diffStat` | `DiffFileStat[]` |  |  |
+| `costUSD` | `number` |  | yes |
+| `duration` | `number` | Seconds. | yes |
+| `numTurns` | `number` |  | yes |
+| `cumulativeInputTokens` | `number` |  | yes |
+| `cumulativeOutputTokens` | `number` |  | yes |
+| `cumulativeCacheCreationInputTokens` | `number` |  | yes |
+| `cumulativeCacheReadInputTokens` | `number` |  | yes |
+| `activeInputTokens` | `number` | Last turn's non-cached input tokens (including cache creation). | yes |
+| `activeCacheReadTokens` | `number` | Last turn's cache-read input tokens. | yes |
+| `contextWindowLimit` | `number` | Model context window limit (tokens). | yes |
+| `error` | `string` |  |  |
+| `result` | `string` |  |  |
+| `forgeOwner` | `string` |  |  |
+| `forgeRepo` | `string` |  |  |
+| `forgePR` | `number` |  |  |
+| `forgeIssue` | `number` |  |  |
+| `ciStatus` | `string` |  |  |
+| `ciChecks` | `ForgeCheck[]` |  |  |
+| `owner` | `string` | username of creator; omitted in no-auth mode |  |
+| `harness` | `string` | Per-task harness/container metadata. | yes |
+| `model` | `string` |  |  |
+| `agentVersion` | `string` |  |  |
+| `sessionID` | `string` |  |  |
+| `startedAt` | `number` | Unix epoch seconds (ms precision) when the container started. |  |
+| `turnStartedAt` | `number` | Unix epoch seconds; non-zero only while state is "running". |  |
+| `inPlanMode` | `boolean` |  |  |
+| `planContent` | `string` |  |  |
+| `tailscale` | `string` | Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. |  |
+| `usb` | `boolean` |  |  |
+| `display` | `boolean` |  |  |
 
 ### ImageData
 
-| Field | Type | Required |
-|-------|------|----------|
-| `mediaType` | `string` | yes |
-| `data` | `string` | yes |
+ImageData carries a single base64-encoded image.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `mediaType` | `string` | e.g. "image/png", "image/jpeg" | yes |
+| `data` | `string` | base64-encoded | yes |
 
 ### Prompt
 
-| Field | Type | Required |
-|-------|------|----------|
-| `text` | `string` | yes |
-| `images` | `ImageData[]` |  |
+Prompt bundles user text with optional images.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `text` | `string` |  | yes |
+| `images` | `ImageData[]` |  |  |
 
 ### RepoSpec
 
-| Field | Type | Required |
-|-------|------|----------|
-| `name` | `string` | yes |
-| `baseBranch` | `string` |  |
+RepoSpec describes a repository to associate with a task at creation time.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `baseBranch` | `string` |  |  |
 
 ### CreateTaskReq
 
-| Field | Type | Required |
-|-------|------|----------|
-| `initialPrompt` | `Prompt` | yes |
-| `repos` | `RepoSpec[]` |  |
-| `model` | `string` |  |
-| `harness` | `string` | yes |
-| `image` | `string` |  |
-| `tailscale` | `boolean` |  |
-| `usb` | `boolean` |  |
-| `display` | `boolean` |  |
+CreateTaskReq is the request body for POST /api/v1/tasks.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `initialPrompt` | `Prompt` |  | yes |
+| `repos` | `RepoSpec[]` |  |  |
+| `model` | `string` |  |  |
+| `harness` | `string` |  | yes |
+| `image` | `string` |  |  |
+| `tailscale` | `boolean` |  |  |
+| `usb` | `boolean` |  |  |
+| `display` | `boolean` |  |  |
 
 ### EventInit
 
-| Field | Type | Required |
-|-------|------|----------|
-| `model` | `string` | yes |
-| `agentVersion` | `string` | yes |
-| `sessionID` | `string` | yes |
-| `tools` | `string[]` | yes |
-| `cwd` | `string` | yes |
-| `harness` | `string` | yes |
+EventInit is emitted once at the start of a session. It includes a Harness
+field so the client knows which backend produced the stream.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `model` | `string` |  | yes |
+| `agentVersion` | `string` |  | yes |
+| `sessionID` | `string` |  | yes |
+| `tools` | `string[]` |  | yes |
+| `cwd` | `string` |  | yes |
+| `harness` | `string` |  | yes |
 
 ### EventText
 
-| Field | Type | Required |
-|-------|------|----------|
-| `text` | `string` | yes |
+EventText is an assistant text block.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `text` | `string` |  | yes |
 
 ### EventTextDelta
 
-| Field | Type | Required |
-|-------|------|----------|
-| `text` | `string` | yes |
+EventTextDelta is a streaming text fragment from --include-partial-messages.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `text` | `string` |  | yes |
 
 ### EventToolUse
 
-| Field | Type | Required |
-|-------|------|----------|
-| `toolUseID` | `string` | yes |
-| `name` | `string` | yes |
-| `input` | `object` | yes |
-| `planContent` | `string` |  |
-| `inputTruncated` | `boolean` |  |
+EventToolUse is emitted when the assistant invokes a tool.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `name` | `string` |  | yes |
+| `input` | `object` |  | yes |
+| `planContent` | `string` | Snapshot of plan content for ExitPlanMode events. |  |
+| `inputTruncated` | `boolean` | True when Input was omitted due to size; fetch via GET /api/v1/tasks/{id}/tool/{toolUseID}. |  |
 
 ### EventToolResult
 
-| Field | Type | Required |
-|-------|------|----------|
-| `toolUseID` | `string` | yes |
-| `duration` | `number` | yes |
-| `error` | `string` |  |
+EventToolResult is emitted when a tool call completes.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `duration` | `number` | Seconds; server-computed; 0 if unknown. | yes |
+| `error` | `string` |  |  |
 
 ### AskOption
 
-| Field | Type | Required |
-|-------|------|----------|
-| `label` | `string` | yes |
-| `description` | `string` |  |
+AskOption is a single option in an AskUserQuestion.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `label` | `string` |  | yes |
+| `description` | `string` |  |  |
 
 ### AskQuestion
 
-| Field | Type | Required |
-|-------|------|----------|
-| `question` | `string` | yes |
-| `header` | `string` |  |
-| `options` | `AskOption[]` | yes |
-| `multiSelect` | `boolean` |  |
+AskQuestion is a single question from AskUserQuestion.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `question` | `string` |  | yes |
+| `header` | `string` |  |  |
+| `options` | `AskOption[]` |  | yes |
+| `multiSelect` | `boolean` |  |  |
 
 ### EventAsk
 
-| Field | Type | Required |
-|-------|------|----------|
-| `toolUseID` | `string` | yes |
-| `questions` | `AskQuestion[]` | yes |
+EventAsk is emitted when the agent asks the user a question.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `questions` | `AskQuestion[]` |  | yes |
 
 ### EventUsage
 
-| Field | Type | Required |
-|-------|------|----------|
-| `inputTokens` | `number` | yes |
-| `outputTokens` | `number` | yes |
-| `cacheCreationInputTokens` | `number` | yes |
-| `cacheReadInputTokens` | `number` | yes |
-| `reasoningOutputTokens` | `number` |  |
-| `model` | `string` | yes |
+EventUsage reports per-turn token usage.
+ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
+or reasoning summaries (Codex). Zero when the harness does not report it.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `inputTokens` | `number` |  | yes |
+| `outputTokens` | `number` |  | yes |
+| `cacheCreationInputTokens` | `number` |  | yes |
+| `cacheReadInputTokens` | `number` |  | yes |
+| `reasoningOutputTokens` | `number` |  |  |
+| `model` | `string` |  | yes |
 
 ### EventResult
 
-| Field | Type | Required |
-|-------|------|----------|
-| `subtype` | `string` | yes |
-| `isError` | `boolean` | yes |
-| `result` | `string` | yes |
-| `diffStat` | `DiffFileStat[]` |  |
-| `totalCostUSD` | `number` | yes |
-| `duration` | `number` | yes |
-| `durationAPI` | `number` | yes |
-| `numTurns` | `number` | yes |
-| `usage` | `EventUsage` | yes |
+EventResult is emitted when the task reaches a terminal state.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `subtype` | `string` |  | yes |
+| `isError` | `boolean` |  | yes |
+| `result` | `string` |  | yes |
+| `diffStat` | `DiffFileStat[]` |  |  |
+| `totalCostUSD` | `number` |  | yes |
+| `duration` | `number` | Seconds. | yes |
+| `durationAPI` | `number` | Seconds. | yes |
+| `numTurns` | `number` |  | yes |
+| `usage` | `EventUsage` |  | yes |
 
 ### EventSystem
 
-| Field | Type | Required |
-|-------|------|----------|
-| `subtype` | `string` | yes |
-| `detail` | `string` |  |
+EventSystem is a system event (status, compact_boundary, etc.).
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `subtype` | `string` |  | yes |
+| `detail` | `string` | Optional human-readable detail (e.g. model names for model_rerouted). |  |
 
 ### EventUserInput
 
-| Field | Type | Required |
-|-------|------|----------|
-| `text` | `string` | yes |
-| `images` | `ImageData[]` |  |
+EventUserInput is emitted when a user sends a text message to the agent.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `text` | `string` |  | yes |
+| `images` | `ImageData[]` |  |  |
 
 ### TodoItem
 
-| Field | Type | Required |
-|-------|------|----------|
-| `content` | `string` | yes |
-| `status` | `string` | yes |
-| `activeForm` | `string` |  |
+TodoItem is a single todo entry from a TodoWrite tool call.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `content` | `string` |  | yes |
+| `status` | `string` | "pending", "in_progress", "completed". | yes |
+| `activeForm` | `string` |  |  |
 
 ### EventTodo
 
-| Field | Type | Required |
-|-------|------|----------|
-| `toolUseID` | `string` | yes |
-| `todos` | `TodoItem[]` | yes |
+EventTodo is emitted when the agent writes/updates its todo list.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `todos` | `TodoItem[]` |  | yes |
 
 ### EventDiffStat
 
-| Field | Type | Required |
-|-------|------|----------|
-| `diffStat` | `DiffFileStat[]` |  |
+EventDiffStat is emitted when the relay reports updated diff statistics.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `diffStat` | `DiffFileStat[]` |  |  |
 
 ### EventError
 
-| Field | Type | Required |
-|-------|------|----------|
-| `err` | `string` | yes |
-| `line` | `string` | yes |
+EventError is emitted when the backend fails to parse an agent output line.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `err` | `string` |  | yes |
+| `line` | `string` |  | yes |
 
 ### EventThinking
 
-| Field | Type | Required |
-|-------|------|----------|
-| `text` | `string` | yes |
+EventThinking is an assistant thinking block.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `text` | `string` |  | yes |
 
 ### EventThinkingDelta
 
-| Field | Type | Required |
-|-------|------|----------|
-| `text` | `string` | yes |
+EventThinkingDelta is a streaming thinking fragment.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `text` | `string` |  | yes |
 
 ### EventSubagentStart
 
-| Field | Type | Required |
-|-------|------|----------|
-| `taskID` | `string` | yes |
-| `description` | `string` | yes |
+EventSubagentStart is emitted when a subagent task begins.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `taskID` | `string` |  | yes |
+| `description` | `string` |  | yes |
 
 ### EventSubagentEnd
 
-| Field | Type | Required |
-|-------|------|----------|
-| `taskID` | `string` | yes |
-| `status` | `string` | yes |
+EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `taskID` | `string` |  | yes |
+| `status` | `string` | "completed", "failed", "stopped" | yes |
 
 ### EventLog
 
-| Field | Type | Required |
-|-------|------|----------|
-| `line` | `string` | yes |
+EventLog is a provisioning/startup log line from the container backend.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `line` | `string` |  | yes |
 
 ### EventToolOutputDelta
 
-| Field | Type | Required |
-|-------|------|----------|
-| `toolUseID` | `string` | yes |
-| `delta` | `string` | yes |
+EventToolOutputDelta is a streaming output fragment from a running tool.
+Codex only: emitted for Bash stdout (item/commandExecution/outputDelta) and
+MCP tool progress messages (item/mcpToolCall/progress).
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `delta` | `string` |  | yes |
 
 ### EventWidget
 
-| Field | Type | Required |
-|-------|------|----------|
-| `toolUseID` | `string` | yes |
-| `title` | `string` | yes |
-| `html` | `string` | yes |
+EventWidget is emitted when the agent produces a complete HTML widget.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `title` | `string` |  | yes |
+| `html` | `string` |  | yes |
 
 ### EventWidgetDelta
 
-| Field | Type | Required |
-|-------|------|----------|
-| `toolUseID` | `string` | yes |
-| `delta` | `string` | yes |
+EventWidgetDelta is a streaming HTML fragment for progressive widget rendering.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `delta` | `string` |  | yes |
 
 ### EventMessage
 
-| Field | Type | Required |
-|-------|------|----------|
-| `kind` | `string` | yes |
-| `ts` | `number` | yes |
-| `init` | `EventInit` |  |
-| `text` | `EventText` |  |
-| `textDelta` | `EventTextDelta` |  |
-| `toolUse` | `EventToolUse` |  |
-| `toolResult` | `EventToolResult` |  |
-| `ask` | `EventAsk` |  |
-| `usage` | `EventUsage` |  |
-| `result` | `EventResult` |  |
-| `system` | `EventSystem` |  |
-| `userInput` | `EventUserInput` |  |
-| `todo` | `EventTodo` |  |
-| `diffStat` | `EventDiffStat` |  |
-| `error` | `EventError` |  |
-| `thinking` | `EventThinking` |  |
-| `thinkingDelta` | `EventThinkingDelta` |  |
-| `subagentStart` | `EventSubagentStart` |  |
-| `subagentEnd` | `EventSubagentEnd` |  |
-| `log` | `EventLog` |  |
-| `toolOutputDelta` | `EventToolOutputDelta` |  |
-| `widget` | `EventWidget` |  |
-| `widgetDelta` | `EventWidgetDelta` |  |
+EventMessage is a single SSE event in the backend-neutral stream
+(/api/v1/tasks/{id}/events). All backends produce these events.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `ts` | `number` |  | yes |
+| `init` | `EventInit` |  |  |
+| `text` | `EventText` |  |  |
+| `textDelta` | `EventTextDelta` |  |  |
+| `toolUse` | `EventToolUse` |  |  |
+| `toolResult` | `EventToolResult` |  |  |
+| `ask` | `EventAsk` |  |  |
+| `usage` | `EventUsage` |  |  |
+| `result` | `EventResult` |  |  |
+| `system` | `EventSystem` |  |  |
+| `userInput` | `EventUserInput` |  |  |
+| `todo` | `EventTodo` |  |  |
+| `diffStat` | `EventDiffStat` |  |  |
+| `error` | `EventError` |  |  |
+| `thinking` | `EventThinking` |  |  |
+| `thinkingDelta` | `EventThinkingDelta` |  |  |
+| `subagentStart` | `EventSubagentStart` |  |  |
+| `subagentEnd` | `EventSubagentEnd` |  |  |
+| `log` | `EventLog` |  |  |
+| `toolOutputDelta` | `EventToolOutputDelta` |  |  |
+| `widget` | `EventWidget` |  |  |
+| `widgetDelta` | `EventWidgetDelta` |  |  |
 
 ### InputReq
 
-| Field | Type | Required |
-|-------|------|----------|
-| `prompt` | `Prompt` | yes |
+InputReq is the request body for POST /api/v1/tasks/{id}/input.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `prompt` | `Prompt` |  | yes |
 
 ### RestartReq
 
-| Field | Type | Required |
-|-------|------|----------|
-| `prompt` | `Prompt` | yes |
+RestartReq is the request body for POST /api/v1/tasks/{id}/restart.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `prompt` | `Prompt` |  | yes |
 
 ### CILogResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `stepName` | `string` | yes |
-| `log` | `string` | yes |
+CILogResp is the response for GET /api/v1/tasks/{id}/ci-log.
+It contains the name of the first failed CI step and its log tail.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `stepName` | `string` |  | yes |
+| `log` | `string` |  | yes |
 
 ### SyncReq
 
-| Field | Type | Required |
-|-------|------|----------|
-| `force` | `boolean` |  |
-| `target` | `string` |  |
+SyncReq is the request body for POST /api/v1/tasks/{id}/sync.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `force` | `boolean` |  |  |
+| `target` | `string` |  |  |
 
 ### SafetyIssue
 
-| Field | Type | Required |
-|-------|------|----------|
-| `file` | `string` | yes |
-| `kind` | `string` | yes |
-| `detail` | `string` | yes |
+SafetyIssue describes a potential problem detected before pushing to origin.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `file` | `string` |  | yes |
+| `kind` | `string` | "large_binary" or "secret" | yes |
+| `detail` | `string` | Human-readable description. | yes |
 
 ### SyncResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `status` | `string` | yes |
-| `branch` | `string` |  |
-| `diffStat` | `DiffFileStat[]` |  |
-| `safetyIssues` | `SafetyIssue[]` |  |
-| `prNumber` | `number` |  |
+SyncResp is the response for POST /api/v1/tasks/{id}/sync.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `status` | `string` | "synced", "blocked", or "empty" | yes |
+| `branch` | `string` |  |  |
+| `diffStat` | `DiffFileStat[]` |  |  |
+| `safetyIssues` | `SafetyIssue[]` |  |  |
+| `prNumber` | `number` | non-zero if a PR/MR was created |  |
 
 ### DiffResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `diff` | `string` | yes |
+DiffResp is the response for GET /api/v1/tasks/{id}/diff.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `diff` | `string` |  | yes |
 
 ### TaskToolInputResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `toolUseID` | `string` | yes |
-| `input` | `object` | yes |
+TaskToolInputResp is the response for GET /api/v1/tasks/{id}/tool/{toolUseID}.
+It returns the full (untruncated) input for a tool call.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `toolUseID` | `string` |  | yes |
+| `input` | `object` |  | yes |
 
 ### TaskListEvent
 
-| Field | Type | Required |
-|-------|------|----------|
-| `kind` | `string` | yes |
-| `tasks` | `Task[]` |  |
-| `task` | `Task` |  |
-| `patch` | `Record<string, unknown>` |  |
-| `id` | `string` |  |
-| `repos` | `Repo[]` |  |
+TaskListEvent is a discriminated-union event for the task list SSE stream.
+kind=="snapshot": Tasks holds the full list on initial connect.
+kind=="upsert":   Task holds a newly created task.
+kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
+kind=="delete":   ID holds the string ID of the removed task.
+kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `tasks` | `Task[]` |  |  |
+| `task` | `Task` |  |  |
+| `patch` | `Record<string, unknown>` |  |  |
+| `id` | `string` |  |  |
+| `repos` | `Repo[]` |  |  |
 
 ### UsageWindow
 
-| Field | Type | Required |
-|-------|------|----------|
-| `utilization` | `number` | yes |
-| `resetsAt` | `string` | yes |
-| `costUSD` | `number` | yes |
-| `inputTokens` | `number` | yes |
-| `outputTokens` | `number` | yes |
+UsageWindow represents a single quota window (5-hour or 7-day).
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `utilization` | `number` | From Claude OAuth API (rate-limit quota); zero when OAuth unavailable. | yes |
+| `resetsAt` | `string` |  | yes |
+| `costUSD` | `number` | From local task streaming data (always populated). | yes |
+| `inputTokens` | `number` |  | yes |
+| `outputTokens` | `number` |  | yes |
 
 ### ExtraUsage
 
-| Field | Type | Required |
-|-------|------|----------|
-| `isEnabled` | `boolean` | yes |
-| `monthlyLimit` | `number` | yes |
-| `usedCredits` | `number` | yes |
-| `utilization` | `number` | yes |
+ExtraUsage represents the extra (pay-as-you-go) usage state.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `isEnabled` | `boolean` |  | yes |
+| `monthlyLimit` | `number` |  | yes |
+| `usedCredits` | `number` |  | yes |
+| `utilization` | `number` |  | yes |
 
 ### UsageResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `fiveHour` | `UsageWindow` | yes |
-| `sevenDay` | `UsageWindow` | yes |
-| `extraUsage` | `ExtraUsage` | yes |
+UsageResp is the response for GET /api/v1/usage.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `fiveHour` | `UsageWindow` |  | yes |
+| `sevenDay` | `UsageWindow` |  | yes |
+| `extraUsage` | `ExtraUsage` |  | yes |
 
 ### VoiceTokenResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `token` | `string` | yes |
-| `expiresAt` | `string` | yes |
-| `ephemeral` | `boolean` | yes |
+VoiceTokenResp is the response for GET /api/v1/voice/token.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `token` | `string` |  | yes |
+| `expiresAt` | `string` |  | yes |
+| `ephemeral` | `boolean` |  | yes |
 
 ### WebFetchReq
 
-| Field | Type | Required |
-|-------|------|----------|
-| `url` | `string` | yes |
+WebFetchReq is the request body for POST /api/v1/web/fetch.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `url` | `string` |  | yes |
 
 ### WebFetchResp
 
-| Field | Type | Required |
-|-------|------|----------|
-| `title` | `string` | yes |
-| `content` | `string` | yes |
+WebFetchResp is the response for POST /api/v1/web/fetch.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `title` | `string` |  | yes |
+| `content` | `string` |  | yes |
 

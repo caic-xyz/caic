@@ -45,6 +45,7 @@ object ErrorCodes {
     const val InternalError = "INTERNAL_ERROR"
 }
 
+/** Config reports server capabilities to the frontend. */
 @Serializable
 data class Config(
     val tailscaleAvailable: Boolean,
@@ -54,6 +55,7 @@ data class Config(
     val authProviders: List<String>? = null,
 )
 
+/** UserResp is returned by GET /api/v1/auth/me. */
 @Serializable
 data class UserResp(
     val id: String,
@@ -62,9 +64,11 @@ data class UserResp(
     @SerialName("avatarURL") val avatarURL: String? = null,
 )
 
+/** StatusResp is a common response for mutation endpoints. */
 @Serializable
 data class StatusResp(val status: String)
 
+/** RepoPrefsResp holds per-repository preferences. */
 @Serializable
 data class RepoPrefsResp(
     val path: String,
@@ -74,9 +78,11 @@ data class RepoPrefsResp(
     val baseImage: String? = null,
 )
 
+/** CacheMappingResp represents a directory mapping for cache/state sharing. */
 @Serializable
 data class CacheMappingResp(val hostPath: String, val containerPath: String)
 
+/** UserSettings holds user-configurable behavioral settings. */
 @Serializable
 data class UserSettings(
     @SerialName("autoFixOnCIFailure") val autoFixOnCIFailure: Boolean,
@@ -87,6 +93,7 @@ data class UserSettings(
     val cacheMappings: List<CacheMappingResp>? = null,
 )
 
+/** PreferencesResp is the response for GET /api/v1/server/preferences. */
 @Serializable
 data class PreferencesResp(
     val repositories: List<RepoPrefsResp>,
@@ -95,9 +102,11 @@ data class PreferencesResp(
     val settings: UserSettings,
 )
 
+/** UpdatePreferencesReq is the request body for POST /api/v1/server/preferences. */
 @Serializable
 data class UpdatePreferencesReq(val settings: UserSettings)
 
+/** HarnessInfo is the JSON representation of an available harness. */
 @Serializable
 data class HarnessInfo(
     val name: String,
@@ -105,6 +114,7 @@ data class HarnessInfo(
     val supportsImages: Boolean,
 )
 
+/** WellKnownCache describes a single well-known cache. */
 @Serializable
 data class WellKnownCache(
     val name: String,
@@ -112,9 +122,11 @@ data class WellKnownCache(
     val mounts: List<String>,
 )
 
+/** WellKnownCachesResp is the response for GET /api/v1/server/caches. */
 @Serializable
 data class WellKnownCachesResp(val harnessMounts: List<String>, val wellKnown: List<WellKnownCache>)
 
+/** ForgeCheck describes a CI check run with its status, conclusion, and timing. */
 @Serializable
 data class ForgeCheck(
     val name: String,
@@ -129,6 +141,7 @@ data class ForgeCheck(
     val completedAt: String? = null,
 )
 
+/** Repo is the JSON representation of a discovered repo. */
 @Serializable
 data class Repo(
     val path: String,
@@ -139,6 +152,7 @@ data class Repo(
     val defaultBranchChecks: List<ForgeCheck>? = null,
 )
 
+/** CloneRepoReq is the request body for POST /api/v1/server/repos. */
 @Serializable
 data class CloneRepoReq(
     val url: String,
@@ -146,18 +160,29 @@ data class CloneRepoReq(
     val depth: Int? = null,
 )
 
+/** RepoBranchesResp is the response for GET /api/v1/server/repos/branches. */
 @Serializable
 data class RepoBranchesResp(val branches: List<String>)
 
+/**
+ * BotFixCIReq is the request body for POST /api/v1/bot/fix-ci.
+ * The server fetches CI logs, builds a prompt, and creates a fix task.
+ */
 @Serializable
 data class BotFixCIReq(val repo: String)
 
+/** CreateTaskResp is the response for POST /api/v1/tasks. */
 @Serializable
 data class CreateTaskResp(val status: String, val id: String)
 
+/**
+ * BotFixPRReq is the request body for POST /api/v1/bot/fix-pr.
+ * The server fetches CI logs for the task's PR and injects a fix command.
+ */
 @Serializable
 data class BotFixPRReq(val taskId: String)
 
+/** TaskRepo describes a repository associated with a task in the API response. */
 @Serializable
 data class TaskRepo(
     val name: String,
@@ -167,6 +192,7 @@ data class TaskRepo(
     val forge: String? = null,
 )
 
+/** DiffFileStat describes changes to a single file. */
 @Serializable
 data class DiffFileStat(
     val path: String,
@@ -175,6 +201,7 @@ data class DiffFileStat(
     val binary: Boolean? = null,
 )
 
+/** Task is the JSON representation sent to the frontend. */
 @Serializable
 data class Task(
     val id: String,
@@ -217,15 +244,19 @@ data class Task(
     val display: Boolean? = null,
 )
 
+/** ImageData carries a single base64-encoded image. */
 @Serializable
 data class ImageData(val mediaType: String, val data: String)
 
+/** Prompt bundles user text with optional images. */
 @Serializable
 data class Prompt(val text: String, val images: List<ImageData>? = null)
 
+/** RepoSpec describes a repository to associate with a task at creation time. */
 @Serializable
 data class RepoSpec(val name: String, val baseBranch: String? = null)
 
+/** CreateTaskReq is the request body for POST /api/v1/tasks. */
 @Serializable
 data class CreateTaskReq(
     val initialPrompt: Prompt,
@@ -238,6 +269,10 @@ data class CreateTaskReq(
     val display: Boolean? = null,
 )
 
+/**
+ * EventInit is emitted once at the start of a session. It includes a Harness
+ * field so the client knows which backend produced the stream.
+ */
 @Serializable
 data class EventInit(
     val model: String,
@@ -248,12 +283,15 @@ data class EventInit(
     val harness: String,
 )
 
+/** EventText is an assistant text block. */
 @Serializable
 data class EventText(val text: String)
 
+/** EventTextDelta is a streaming text fragment from --include-partial-messages. */
 @Serializable
 data class EventTextDelta(val text: String)
 
+/** EventToolUse is emitted when the assistant invokes a tool. */
 @Serializable
 data class EventToolUse(
     @SerialName("toolUseID") val toolUseID: String,
@@ -263,6 +301,7 @@ data class EventToolUse(
     val inputTruncated: Boolean? = null,
 )
 
+/** EventToolResult is emitted when a tool call completes. */
 @Serializable
 data class EventToolResult(
     @SerialName("toolUseID") val toolUseID: String,
@@ -270,9 +309,11 @@ data class EventToolResult(
     val error: String? = null,
 )
 
+/** AskOption is a single option in an AskUserQuestion. */
 @Serializable
 data class AskOption(val label: String, val description: String? = null)
 
+/** AskQuestion is a single question from AskUserQuestion. */
 @Serializable
 data class AskQuestion(
     val question: String,
@@ -281,12 +322,18 @@ data class AskQuestion(
     val multiSelect: Boolean? = null,
 )
 
+/** EventAsk is emitted when the agent asks the user a question. */
 @Serializable
 data class EventAsk(
     @SerialName("toolUseID") val toolUseID: String,
     val questions: List<AskQuestion>,
 )
 
+/**
+ * EventUsage reports per-turn token usage.
+ * ReasoningOutputTokens is a subset of OutputTokens for extended thinking (Claude)
+ * or reasoning summaries (Codex). Zero when the harness does not report it.
+ */
 @Serializable
 data class EventUsage(
     val inputTokens: Int,
@@ -297,6 +344,7 @@ data class EventUsage(
     val model: String,
 )
 
+/** EventResult is emitted when the task reaches a terminal state. */
 @Serializable
 data class EventResult(
     val subtype: String,
@@ -310,12 +358,15 @@ data class EventResult(
     val usage: EventUsage,
 )
 
+/** EventSystem is a system event (status, compact_boundary, etc.). */
 @Serializable
 data class EventSystem(val subtype: String, val detail: String? = null)
 
+/** EventUserInput is emitted when a user sends a text message to the agent. */
 @Serializable
 data class EventUserInput(val text: String, val images: List<ImageData>? = null)
 
+/** TodoItem is a single todo entry from a TodoWrite tool call. */
 @Serializable
 data class TodoItem(
     val content: String,
@@ -323,45 +374,59 @@ data class TodoItem(
     val activeForm: String? = null,
 )
 
+/** EventTodo is emitted when the agent writes/updates its todo list. */
 @Serializable
 data class EventTodo(
     @SerialName("toolUseID") val toolUseID: String,
     val todos: List<TodoItem>,
 )
 
+/** EventDiffStat is emitted when the relay reports updated diff statistics. */
 @Serializable
 data class EventDiffStat(val diffStat: List<DiffFileStat>? = null)
 
+/** EventError is emitted when the backend fails to parse an agent output line. */
 @Serializable
 data class EventError(val err: String, val line: String)
 
+/** EventThinking is an assistant thinking block. */
 @Serializable
 data class EventThinking(val text: String)
 
+/** EventThinkingDelta is a streaming thinking fragment. */
 @Serializable
 data class EventThinkingDelta(val text: String)
 
+/** EventSubagentStart is emitted when a subagent task begins. */
 @Serializable
 data class EventSubagentStart(
     @SerialName("taskID") val taskID: String,
     val description: String,
 )
 
+/** EventSubagentEnd is emitted when a subagent task completes, fails, or stops. */
 @Serializable
 data class EventSubagentEnd(
     @SerialName("taskID") val taskID: String,
     val status: String,
 )
 
+/** EventLog is a provisioning/startup log line from the container backend. */
 @Serializable
 data class EventLog(val line: String)
 
+/**
+ * EventToolOutputDelta is a streaming output fragment from a running tool.
+ * Codex only: emitted for Bash stdout (item/commandExecution/outputDelta) and
+ * MCP tool progress messages (item/mcpToolCall/progress).
+ */
 @Serializable
 data class EventToolOutputDelta(
     @SerialName("toolUseID") val toolUseID: String,
     val delta: String,
 )
 
+/** EventWidget is emitted when the agent produces a complete HTML widget. */
 @Serializable
 data class EventWidget(
     @SerialName("toolUseID") val toolUseID: String,
@@ -369,6 +434,7 @@ data class EventWidget(
     val html: String,
 )
 
+/** EventWidgetDelta is a streaming HTML fragment for progressive widget rendering. */
 @Serializable
 data class EventWidgetDelta(
     @SerialName("toolUseID") val toolUseID: String,
@@ -377,6 +443,10 @@ data class EventWidgetDelta(
 
 // Backend-neutral event types
 
+/**
+ * EventMessage is a single SSE event in the backend-neutral stream
+ * (/api/v1/tasks/{id}/events). All backends produce these events.
+ */
 @Serializable
 data class EventMessage(
     val kind: EventKind,
@@ -404,18 +474,26 @@ data class EventMessage(
     val widgetDelta: EventWidgetDelta? = null,
 )
 
+/** InputReq is the request body for POST /api/v1/tasks/{id}/input. */
 @Serializable
 data class InputReq(val prompt: Prompt)
 
+/** RestartReq is the request body for POST /api/v1/tasks/{id}/restart. */
 @Serializable
 data class RestartReq(val prompt: Prompt)
 
+/**
+ * CILogResp is the response for GET /api/v1/tasks/{id}/ci-log.
+ * It contains the name of the first failed CI step and its log tail.
+ */
 @Serializable
 data class CILogResp(val stepName: String, val log: String)
 
+/** SyncReq is the request body for POST /api/v1/tasks/{id}/sync. */
 @Serializable
 data class SyncReq(val force: Boolean? = null, val target: String? = null)
 
+/** SafetyIssue describes a potential problem detected before pushing to origin. */
 @Serializable
 data class SafetyIssue(
     val file: String,
@@ -423,6 +501,7 @@ data class SafetyIssue(
     val detail: String,
 )
 
+/** SyncResp is the response for POST /api/v1/tasks/{id}/sync. */
 @Serializable
 data class SyncResp(
     val status: String,
@@ -432,15 +511,28 @@ data class SyncResp(
     val prNumber: Int? = null,
 )
 
+/** DiffResp is the response for GET /api/v1/tasks/{id}/diff. */
 @Serializable
 data class DiffResp(val diff: String)
 
+/**
+ * TaskToolInputResp is the response for GET /api/v1/tasks/{id}/tool/{toolUseID}.
+ * It returns the full (untruncated) input for a tool call.
+ */
 @Serializable
 data class TaskToolInputResp(
     @SerialName("toolUseID") val toolUseID: String,
     val input: JsonElement,
 )
 
+/**
+ * TaskListEvent is a discriminated-union event for the task list SSE stream.
+ * kind=="snapshot": Tasks holds the full list on initial connect.
+ * kind=="upsert":   Task holds a newly created task.
+ * kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
+ * kind=="delete":   ID holds the string ID of the removed task.
+ * kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
+ */
 @Serializable
 data class TaskListEvent(
     val kind: String,
@@ -451,6 +543,7 @@ data class TaskListEvent(
     val repos: List<Repo>? = null,
 )
 
+/** UsageWindow represents a single quota window (5-hour or 7-day). */
 @Serializable
 data class UsageWindow(
     val utilization: Double,
@@ -460,6 +553,7 @@ data class UsageWindow(
     val outputTokens: Int,
 )
 
+/** ExtraUsage represents the extra (pay-as-you-go) usage state. */
 @Serializable
 data class ExtraUsage(
     val isEnabled: Boolean,
@@ -468,6 +562,7 @@ data class ExtraUsage(
     val utilization: Double,
 )
 
+/** UsageResp is the response for GET /api/v1/usage. */
 @Serializable
 data class UsageResp(
     val fiveHour: UsageWindow,
@@ -475,6 +570,7 @@ data class UsageResp(
     val extraUsage: ExtraUsage,
 )
 
+/** VoiceTokenResp is the response for GET /api/v1/voice/token. */
 @Serializable
 data class VoiceTokenResp(
     val token: String,
@@ -482,9 +578,11 @@ data class VoiceTokenResp(
     val ephemeral: Boolean,
 )
 
+/** WebFetchReq is the request body for POST /api/v1/web/fetch. */
 @Serializable
 data class WebFetchReq(val url: String)
 
+/** WebFetchResp is the response for POST /api/v1/web/fetch. */
 @Serializable
 data class WebFetchResp(val title: String, val content: String)
 

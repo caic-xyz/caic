@@ -34,20 +34,35 @@ function makeRequester(fetchFn: FetchFn) {
 export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bind(globalThis)) {
   const request = makeRequester(fetchFn);
   return {
+    /** Returns server capabilities and feature flags. */
     getConfig: (): Promise<Config> => request<Config>("GET", "/api/v1/server/config"),
+    /** Returns the authenticated user's profile. */
     getMe: (): Promise<UserResp> => request<UserResp>("GET", "/api/v1/auth/me"),
+    /** Invalidates the current session. */
     logout: (): Promise<StatusResp> => request<StatusResp>("POST", "/api/v1/auth/logout"),
+    /** Returns server and per-repository preferences. */
     getPreferences: (): Promise<PreferencesResp> => request<PreferencesResp>("GET", "/api/v1/server/preferences"),
+    /** Updates server settings and preferences. */
     updatePreferences: (req: UpdatePreferencesReq): Promise<PreferencesResp> => request<PreferencesResp>("POST", "/api/v1/server/preferences", req),
+    /** Lists available coding agent harnesses. */
     listHarnesses: (): Promise<HarnessInfo[]> => request<HarnessInfo[]>("GET", "/api/v1/server/harnesses"),
+    /** Lists well-known cache configurations. */
     listCaches: (): Promise<WellKnownCachesResp> => request<WellKnownCachesResp>("GET", "/api/v1/server/caches"),
+    /** Lists all discovered repositories. */
     listRepos: (): Promise<Repo[]> => request<Repo[]>("GET", "/api/v1/server/repos"),
+    /** Clones a repository into the server's root directory. */
     cloneRepo: (req: CloneRepoReq): Promise<Repo> => request<Repo>("POST", "/api/v1/server/repos", req),
+    /** Lists branches for a repository. */
     listRepoBranches: (repo: string): Promise<RepoBranchesResp> => request<RepoBranchesResp>("GET", `/api/v1/server/repos/branches?repo=${encodeURIComponent(repo)}`),
+    /** Creates a task to fix a failing CI pipeline. */
     botFixCI: (req: BotFixCIReq): Promise<CreateTaskResp> => request<CreateTaskResp>("POST", "/api/v1/bot/fix-ci", req),
+    /** Injects a CI fix command into an existing task's PR. */
     botFixPR: (req: BotFixPRReq): Promise<StatusResp> => request<StatusResp>("POST", "/api/v1/bot/fix-pr", req),
+    /** Returns all tasks. */
     listTasks: (): Promise<Task[]> => request<Task[]>("GET", "/api/v1/tasks"),
+    /** Creates and starts a new coding agent task. */
     createTask: (req: CreateTaskReq): Promise<CreateTaskResp> => request<CreateTaskResp>("POST", "/api/v1/tasks", req),
+    /** Streams raw backend-specific task events via SSE. */
     taskRawEvents: (id: string, onMessage: (event: EventMessage) => void): EventSource => {
       const es = new EventSource(`/api/v1/tasks/${id}/raw_events`);
       es.addEventListener("message", (e) => {
@@ -55,6 +70,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
       });
       return es;
     },
+    /** Streams backend-neutral task events via SSE. */
     taskEvents: (id: string, onMessage: (event: EventMessage) => void): EventSource => {
       const es = new EventSource(`/api/v1/tasks/${id}/events`);
       es.addEventListener("message", (e) => {
@@ -62,15 +78,25 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
       });
       return es;
     },
+    /** Sends user input to a running task. */
     sendInput: (id: string, req: InputReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/v1/tasks/${id}/input`, req),
+    /** Restarts a completed or errored task with a new prompt. */
     restartTask: (id: string, req: RestartReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/v1/tasks/${id}/restart`, req),
+    /** Requests graceful stop of a running task. */
     stopTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/v1/tasks/${id}/stop`),
+    /** Permanently deletes a task and its container. */
     purgeTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/v1/tasks/${id}/purge`),
+    /** Reconnects to an orphaned task container. */
     reviveTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/v1/tasks/${id}/revive`),
+    /** Returns the log tail of a failed CI check run. */
     getTaskCILog: (id: string, jobID: string): Promise<CILogResp> => request<CILogResp>("GET", `/api/v1/tasks/${id}/ci-log?jobID=${encodeURIComponent(jobID)}`),
+    /** Pushes task changes to the remote repository. */
     syncTask: (id: string, req: SyncReq): Promise<SyncResp> => request<SyncResp>("POST", `/api/v1/tasks/${id}/sync`, req),
+    /** Returns the unified diff for a task's branch. */
     getTaskDiff: (id: string): Promise<DiffResp> => request<DiffResp>("GET", `/api/v1/tasks/${id}/diff`),
+    /** Returns the full (untruncated) input for a tool call. */
     getTaskToolInput: (id: string, toolUseID: string): Promise<TaskToolInputResp> => request<TaskToolInputResp>("GET", `/api/v1/tasks/${id}/tool/${toolUseID}`),
+    /** Streams task list updates for all tasks via SSE. */
     globalTaskEvents: (onMessage: (event: TaskListEvent) => void): EventSource => {
       const es = new EventSource("/api/v1/server/tasks/events");
       es.addEventListener("message", (e) => {
@@ -78,6 +104,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
       });
       return es;
     },
+    /** Streams usage quota updates via SSE. */
     globalUsageEvents: (onMessage: (event: UsageResp) => void): EventSource => {
       const es = new EventSource("/api/v1/server/usage/events");
       es.addEventListener("message", (e) => {
@@ -85,8 +112,11 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
       });
       return es;
     },
+    /** Returns current usage quota statistics. */
     getUsage: (): Promise<UsageResp> => request<UsageResp>("GET", "/api/v1/usage"),
+    /** Returns a short-lived voice API token. */
     getVoiceToken: (): Promise<VoiceTokenResp> => request<VoiceTokenResp>("GET", "/api/v1/voice/token"),
+    /** Fetches a URL and returns its text content. */
     webFetch: (req: WebFetchReq): Promise<WebFetchResp> => request<WebFetchResp>("POST", "/api/v1/web/fetch", req),
   };
 }
