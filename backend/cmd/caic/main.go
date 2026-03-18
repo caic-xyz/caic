@@ -165,7 +165,7 @@ See contrib/caic.env for a template with all variables and documentation.
 		return err
 	}
 	if isFakeMode {
-		return serveFake(ctx, *addr, *root, cfg)
+		return serveFake(ctx, *addr, cfg)
 	}
 	if *addr == "" {
 		return errors.New("HTTP address is required: set -http flag or CAIC_HTTP env var")

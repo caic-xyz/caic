@@ -25,26 +25,20 @@ const isFakeMode = true
 
 // serveFake starts the HTTP server with fake container/agent ops and a temp
 // git repo. Used for e2e testing without md CLI or SSH.
-func serveFake(ctx context.Context, addr, rootDir string, cfg *server.Config) error {
-	if addr == "" {
-		addr = "localhost:8090"
-	} else {
-		addr = localizeAddr(addr)
-	}
+func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr error) {
+	addr = localizeAddr(addr)
 
-	// When -root is not provided, create a temp git repo.
-	if rootDir == "" {
-		tmpDir, err := os.MkdirTemp("", "caic-e2e-*")
-		if err != nil {
-			return err
-		}
-		defer func() { _ = os.RemoveAll(tmpDir) }()
-		clone, err := initFakeRepo(tmpDir)
-		if err != nil {
-			return fmt.Errorf("init fake repo: %w", err)
-		}
-		rootDir = filepath.Dir(clone)
+	// Always create a temp git repo — fake mode doesn't use real repos.
+	tmpDir, err := os.MkdirTemp("", "caic-e2e-*")
+	if err != nil {
+		return err
 	}
+	defer func() { retErr = errors.Join(retErr, os.RemoveAll(tmpDir)) }()
+	clone, err := initFakeRepo(tmpDir)
+	if err != nil {
+		return fmt.Errorf("init fake repo: %w", err)
+	}
+	rootDir := filepath.Dir(clone)
 
 	// Use a temp dir for XDG_CONFIG_HOME so md can write its keys without
 	// hitting the read-only ~/.config/md mount in the dev container.
@@ -52,7 +46,7 @@ func serveFake(ctx context.Context, addr, rootDir string, cfg *server.Config) er
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.RemoveAll(mdConfigDir) }()
+	defer func() { retErr = errors.Join(retErr, os.RemoveAll(mdConfigDir)) }()
 	if err := os.Setenv("XDG_CONFIG_HOME", mdConfigDir); err != nil {
 		return fmt.Errorf("set XDG_CONFIG_HOME: %w", err)
 	}
@@ -61,7 +55,7 @@ func serveFake(ctx context.Context, addr, rootDir string, cfg *server.Config) er
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.RemoveAll(fakeConfigDir) }()
+	defer func() { retErr = errors.Join(retErr, os.RemoveAll(fakeConfigDir)) }()
 	cfg.ConfigDir = fakeConfigDir
 	cfg.CacheDir = filepath.Join(os.TempDir(), "caic-e2e-logs")
 	srv, err := server.New(ctx, rootDir, cfg)
@@ -73,7 +67,7 @@ func serveFake(ctx context.Context, addr, rootDir string, cfg *server.Config) er
 
 	err = srv.ListenAndServe(ctx, addr)
 	if errors.Is(err, http.ErrServerClosed) {
-		return nil
+		err = nil
 	}
 	return err
 }

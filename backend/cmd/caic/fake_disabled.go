@@ -11,6 +11,6 @@ import (
 
 const isFakeMode = false
 
-func serveFake(ctx context.Context, addr, rootDir string, cfg *server.Config) error {
+func serveFake(ctx context.Context, addr string, cfg *server.Config) error {
 	return errors.New("fake mode is not enabled in this build; use -tags e2e")
 }
