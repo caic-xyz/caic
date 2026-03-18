@@ -43,6 +43,7 @@ import androidx.compose.material3.rememberTooltipState
 import com.fghbuild.caic.ui.theme.appColors
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -265,10 +266,20 @@ fun InputBar(
                 }
             } else if (isActive) {
                 var showStopConfirm by remember { mutableStateOf(false) }
-                Tip("Stop") {
+                var showPurgeFromActive by remember { mutableStateOf(false) }
+                var lastStopTap by remember { mutableLongStateOf(0L) }
+                Tip("Stop (double-tap to purge)") {
                     IconButton(
                         onClick = {
-                            if (taskState == "running") showStopConfirm = true else onStop()
+                            val now = System.currentTimeMillis()
+                            if (now - lastStopTap < 400) {
+                                // Double-tap: skip stop, go straight to purge.
+                                lastStopTap = 0L
+                                showPurgeFromActive = true
+                            } else {
+                                lastStopTap = now
+                                if (taskState == "running") showStopConfirm = true else onStop()
+                            }
                         },
                         enabled = !busy,
                         modifier = Modifier.testTag("stop-task"),
@@ -292,6 +303,23 @@ fun InputBar(
                         },
                         dismissButton = {
                             TextButton(onClick = { showStopConfirm = false }) {
+                                Text("Cancel")
+                            }
+                        },
+                    )
+                }
+                if (showPurgeFromActive) {
+                    AlertDialog(
+                        onDismissRequest = { showPurgeFromActive = false },
+                        title = { Text("Purge container?") },
+                        text = { Text("$taskTitle\nrepo: $taskRepo\nbranch: $taskBranch") },
+                        confirmButton = {
+                            TextButton(onClick = { showPurgeFromActive = false; onPurge() }) {
+                                Text("Purge")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showPurgeFromActive = false }) {
                                 Text("Cancel")
                             }
                         },

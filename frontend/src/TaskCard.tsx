@@ -132,7 +132,7 @@ export default function TaskCard(props: TaskCardProps) {
               </span>
             </Show>
           </Show>
-          {/* Active states: stop button (trash can) */}
+          {/* Active states: stop button (trash can). Shift-click or double-click/tap skips stop and goes straight to purge. */}
           <Show when={props.state !== "stopped" && props.onStop && !terminalStates.has(props.state)}>
             <span class={styles.purgeBtn}>
               <button
@@ -140,13 +140,19 @@ export default function TaskCard(props: TaskCardProps) {
                 disabled={props.actionLoading}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (props.state === "running") {
+                  if (e.shiftKey && props.onPurge) {
+                    if (window.confirm(`Purge container?\n\n${props.title}\nrepo: ${props.repo}\nbranch: ${props.branch}`)) props.onPurge();
+                  } else if (props.state === "running") {
                     if (window.confirm(`Stop container?\n\n${props.title}\nrepo: ${props.repo}\nbranch: ${props.branch}`)) props.onStop?.();
                   } else {
                     props.onStop?.();
                   }
                 }}
-                title="Stop"
+                onDblClick={(e) => {
+                  e.stopPropagation();
+                  if (props.onPurge && window.confirm(`Purge container?\n\n${props.title}\nrepo: ${props.repo}\nbranch: ${props.branch}`)) props.onPurge();
+                }}
+                title="Stop (shift-click or double-click to purge)"
                 data-testid="stop-task"
               >
                 <Show when={props.actionLoading} fallback={<DeleteIcon width="0.85rem" height="0.85rem" />}>
