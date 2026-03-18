@@ -1202,6 +1202,14 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 				Model:      req.Model,
 				BaseImage:  req.Image,
 			})
+			// When the user selects the default model (empty string),
+			// TouchRepo won't clear the old value because empty means
+			// "don't override". Clear it explicitly so the stale
+			// non-default model doesn't persist.
+			if req.Model == "" {
+				p.Repositories[0].Model = ""
+				delete(p.Models, string(req.Harness))
+			}
 		}); err != nil {
 			return nil, dto.InternalError("save preferences: " + err.Error())
 		}

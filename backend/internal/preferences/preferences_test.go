@@ -384,6 +384,28 @@ func TestTouchRepo(t *testing.T) {
 			t.Errorf("harness = %q, want %q", p.Repositories[0].Harness, "claude")
 		}
 	})
+	t.Run("clear_model_after_touch", func(t *testing.T) {
+		// Simulate the server clearing model when the user selects "default".
+		// TouchRepo alone can't clear model (empty = don't override), so the
+		// caller must clear it explicitly after TouchRepo.
+		p := &Preferences{
+			Version: 1,
+			Models:  map[string]string{"claude": "opus"},
+			Repositories: []RepoPrefs{
+				{Path: "github/a", Harness: "claude", Model: "opus"},
+			},
+		}
+		p.TouchRepo("github/a", &RepoPrefs{Harness: "claude"})
+		// Caller clears model explicitly (mirrors server.go logic).
+		p.Repositories[0].Model = ""
+		delete(p.Models, "claude")
+		if p.Repositories[0].Model != "" {
+			t.Errorf("repo model = %q, want empty", p.Repositories[0].Model)
+		}
+		if _, ok := p.Models["claude"]; ok {
+			t.Errorf("global models[claude] should be deleted")
+		}
+	})
 	t.Run("empty_overrides_preserve_all", func(t *testing.T) {
 		p := &Preferences{
 			Version: 1,

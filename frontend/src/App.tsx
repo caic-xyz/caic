@@ -584,6 +584,7 @@ export default function App() {
       const repoSpecs = selRepos.length > 0 ? selRepos.map((r) => ({ name: r.path, ...(r.branch ? { baseBranch: r.branch } : {}) })) : undefined;
       const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repos: repoSpecs, harness, ...(model ? { model } : {}), ...(image ? { image } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}) });
       if (model) prefModels[harness] = model;
+      else delete prefModels[harness];
       setPrompt("");
       setPendingImages([]);
       navigate(taskPath(data.id, selRepos[0]?.path ?? "", "", p));

@@ -386,7 +386,7 @@ class TaskListViewModel @Inject constructor(
                 val updatedModels = if (form.selectedModel.isNotBlank())
                     current.prefModels + (form.selectedHarness to form.selectedModel)
                 else
-                    current.prefModels
+                    current.prefModels - form.selectedHarness
                 _formState.value = current.copy(
                     prompt = "",
                     submitting = false,
