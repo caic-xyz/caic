@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.data.TaskNotifier
 import com.fghbuild.caic.data.TaskRepository
+import com.fghbuild.caic.voice.VoiceSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -103,7 +104,8 @@ class TaskListViewModelTest {
 
         val taskRepository = TaskRepository(settingsRepository)
         val context = ApplicationProvider.getApplicationContext<Application>()
-        val taskNotifier = TaskNotifier(context, taskRepository)
+        val voiceSession = VoiceSession(context, settingsRepository, taskRepository)
+        val taskNotifier = TaskNotifier(context, taskRepository, voiceSession)
         val viewModel = TaskListViewModel(taskRepository, settingsRepository, taskNotifier)
 
         // Wait for loadFormData to complete (real HTTP to MockWebServer).
@@ -188,7 +190,8 @@ class TaskListViewModelTest {
 
         val taskRepository = TaskRepository(settingsRepository)
         val context = ApplicationProvider.getApplicationContext<Application>()
-        val taskNotifier = TaskNotifier(context, taskRepository)
+        val voiceSession = VoiceSession(context, settingsRepository, taskRepository)
+        val taskNotifier = TaskNotifier(context, taskRepository, voiceSession)
         val viewModel = TaskListViewModel(taskRepository, settingsRepository, taskNotifier)
 
         val state = withTimeout(5000) {

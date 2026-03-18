@@ -4,7 +4,7 @@ Kotlin/Compose Android app for caic. Voice-first companion for managing coding a
 
 ## Linting
 
-**Always** run `make lint-android` after any Android/Kotlin file change. Do not skip this step.
+**Always** run `make lint-android` and `make android-test` after any Android/Kotlin file change. Do not skip this step.
 
 ## Current State
 
