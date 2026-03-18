@@ -15,8 +15,7 @@ Wants=network-online.target
 Type=simple
 EnvironmentFile=-%h/.config/caic/caic.env
 ExecStart=%h/.local/bin/caic
-# ⏩️ Adjust as needed:
-WorkingDirectory=%h/src
+WorkingDirectory=%h
 Restart=always
 RestartSec=1s
 
@@ -24,9 +23,6 @@ RestartSec=1s
 
 # Filesystem isolation
 ProtectSystem=strict
-ProtectHome=read-only
-# ⏩️ Adjust as needed:
-ReadWritePaths=%h/src
 PrivateTmp=true
 ProtectControlGroups=true
 ProtectKernelTunables=true
