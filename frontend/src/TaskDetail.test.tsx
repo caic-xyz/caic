@@ -153,26 +153,33 @@ describe("SSE connection", () => {
     // Regression test for the clearTimeout fix: a second onerror (which some
     // EventSource implementations fire) must cancel the first reconnect timer
     // and schedule exactly one new one, not pile up two connect() calls.
-    const created: FakeES[] = [];
-    makeSyncReadyMock(created);
+    // Pin Math.random so jitteredDelay is deterministic (factor = 0.75 + 0.5*0.5 = 1.0).
+    const origRandom = Math.random;
+    Math.random = () => 0.5;
+    try {
+      const created: FakeES[] = [];
+      makeSyncReadyMock(created);
 
-    render(() => <TaskDetail {...baseProps} />);
+      render(() => <TaskDetail {...baseProps} />);
 
-    // createEffect runs synchronously during render in SolidJS.
-    expect(created).toHaveLength(1);
-    const es1 = created[0];
+      // createEffect runs synchronously during render in SolidJS.
+      expect(created).toHaveLength(1);
+      const es1 = created[0];
 
-    // First onerror: sets timer (500 ms), es → null, delay → 750.
-    if (!es1.onerror) throw new Error("onerror not set");
-    es1.onerror(new Event("error"));
-    // Second onerror: clears first timer, sets new timer (750 ms), delay → 1125.
-    es1.onerror(new Event("error"));
+      // First onerror: sets timer (jitteredDelay(500)=500ms), es → null, delay → 750.
+      if (!es1.onerror) throw new Error("onerror not set");
+      es1.onerror(new Event("error"));
+      // Second onerror: clears first timer, sets new timer (jitteredDelay(750)=750ms), delay → 1125.
+      es1.onerror(new Event("error"));
 
-    // Advance past the 750 ms timer (but not far enough to trigger a third).
-    vi.advanceTimersByTime(800);
+      // Advance past the 750 ms timer (but not far enough to trigger a third).
+      vi.advanceTimersByTime(800);
 
-    // Exactly one reconnect: initial connect (1) + one timer-fired connect (2).
-    expect(created).toHaveLength(2);
+      // Exactly one reconnect: initial connect (1) + one timer-fired connect (2).
+      expect(created).toHaveLength(2);
+    } finally {
+      Math.random = origRandom;
+    }
   });
 
   it("multiple thinking blocks across tool calls are both visible", () => {
