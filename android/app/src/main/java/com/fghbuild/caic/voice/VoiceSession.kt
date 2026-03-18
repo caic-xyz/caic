@@ -112,6 +112,12 @@ class VoiceSession @Inject constructor(
     @Volatile
     private var muted = false
 
+    /** True while the model is speaking — injected text is queued and sent after the turn ends. */
+    private var speakerActive = false
+
+    /** Text notifications buffered while the model is speaking; flushed on turn end. */
+    private val pendingNotifications = ArrayList<String>()
+
     fun setError(message: String) {
         Log.e(TAG, "setError: $message")
         releaseAudio()
@@ -247,6 +253,8 @@ class VoiceSession @Inject constructor(
         }
         audioTrack = null
         clearCommunicationDevice()
+        speakerActive = false
+        pendingNotifications.clear()
     }
 
     /** Toggle microphone mute. Recording continues but audio is discarded. */
@@ -278,6 +286,14 @@ class VoiceSession @Inject constructor(
     }
 
     fun injectText(text: String) {
+        if (speakerActive) {
+            pendingNotifications.add(text)
+            return
+        }
+        sendClientContent(text)
+    }
+
+    private fun sendClientContent(text: String) {
         val clientContent = BidiGenerateContentClientContent(
             turns = listOf(
                 Content(
@@ -289,6 +305,13 @@ class VoiceSession @Inject constructor(
         )
         webSocket?.send(json.encodeToString(BidiGenerateContentClientContent.serializer(), clientContent)
             .wrapTopLevel("clientContent"))
+    }
+
+    private fun flushPendingNotifications() {
+        if (pendingNotifications.isEmpty()) return
+        val text = pendingNotifications.joinToString("\n")
+        pendingNotifications.clear()
+        sendClientContent(text)
     }
 
     private fun sendSetupMessage(voiceName: String) {
@@ -450,6 +473,7 @@ class VoiceSession @Inject constructor(
                 val pcmBytes = Base64.decode(inlineData.data, Base64.NO_WRAP)
                 // Pause mic while model speaks so speaker output doesn't feed back
                 // into the recording as garbled input. AEC alone is not reliable.
+                speakerActive = true
                 pauseRecording()
                 playAudio(pcmBytes)
                 _state.update { it.copy(speaking = true, micLevel = 0f) }
@@ -463,12 +487,16 @@ class VoiceSession @Inject constructor(
         }
         if (content.interrupted == true) {
             // User barged in — resume mic immediately.
+            speakerActive = false
             resumeRecording()
+            flushPendingNotifications()
             _state.update { it.copy(speaking = false) }
         }
         if (content.turnComplete == true) {
             // Model finished speaking — resume mic so user can reply.
+            speakerActive = false
             resumeRecording()
+            flushPendingNotifications()
             _state.update {
                 it.copy(
                     speaking = false,

@@ -140,6 +140,8 @@ export class VoiceSession {
   private _nextPlayTime = 0;
   /** True while the model is speaking — mic audio is discarded to prevent echo. */
   private _speakerActive = false;
+  /** Text notifications buffered while the model is speaking; flushed on turn end. */
+  private _pendingNotifications: string[] = [];
   private _functions: FunctionHandlers | null = null;
   /** Snapshot to inject after setupComplete. */
   private _pendingSnapshot: string | null = null;
@@ -287,6 +289,10 @@ export class VoiceSession {
   }
 
   injectText(text: string): void {
+    if (this._speakerActive) {
+      this._pendingNotifications.push(text);
+      return;
+    }
     if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return;
     this._ws.send(
       JSON.stringify({
@@ -296,6 +302,13 @@ export class VoiceSession {
         },
       }),
     );
+  }
+
+  private _flushPendingNotifications(): void {
+    if (this._pendingNotifications.length === 0) return;
+    const text = this._pendingNotifications.join("\n");
+    this._pendingNotifications = [];
+    this.injectText(text);
   }
 
   clearTranscript(): void {
@@ -454,6 +467,7 @@ export class VoiceSession {
     if (content.interrupted) {
       this._speakerActive = false;
       this._workletNode?.port.postMessage("drain");
+      this._flushPendingNotifications();
       this._update((s) => {
         s.speaking = false;
       });
@@ -462,6 +476,7 @@ export class VoiceSession {
     if (content.turnComplete) {
       this._speakerActive = false;
       this._workletNode?.port.postMessage("drain");
+      this._flushPendingNotifications();
       this._update((s) => {
         s.speaking = false;
         s.transcript = s.transcript.map((e) => ({ ...e, final: true }));
@@ -568,6 +583,7 @@ export class VoiceSession {
     }
     this._nextPlayTime = 0;
     this._speakerActive = false;
+    this._pendingNotifications = [];
   }
 
   // -----------------------------------------------------------------------
