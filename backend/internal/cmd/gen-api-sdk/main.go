@@ -861,11 +861,13 @@ class ApiClient(
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
-                delay(delayMs)
-                delayMs = (delayMs * 3 / 2).coerceAtMost(4000L)
+                delay(jitteredDelay(delayMs))
+                delayMs = (delayMs * 3 / 2).coerceAtMost(30_000L)
             }
         }
     }
+
+    private fun jitteredDelay(base: Long): Long = (base * (0.75 + Math.random() * 0.5)).toLong()
 }
 `)
 

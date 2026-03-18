@@ -22,6 +22,11 @@ import CloneRepoDialog from "./CloneRepoDialog";
 import VoiceOverlay from "./VoiceOverlay";
 import styles from "./App.module.css";
 
+/** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
+function jitteredDelay(base: number): number {
+  return base * (0.75 + Math.random() * 0.5);
+}
+
 /** Max slug length in the URL (characters after the "+"). */
 const MAX_SLUG = 80;
 
@@ -308,9 +313,10 @@ export default function App() {
   });
 
   // Subscribe to task list updates via SSE with automatic reconnection.
-  // Backoff: 500ms × 1.5 each failure, capped at 4s, reset on success.
+  // Backoff: 500ms × 1.5 each failure, capped at 30s with ±25% jitter, reset on success.
   // On 401, stop retrying and clear auth state so the login page shows.
   // On reconnect, check if the frontend was rebuilt and reload if so.
+  // Pauses reconnection when tab is hidden or browser goes offline.
   const [connected, setConnected] = createSignal(true);
   {
     let taskES: EventSource | null = null;
@@ -422,10 +428,11 @@ export default function App() {
         taskES?.close();
         taskES = null;
         setConnected(false);
+        if (taskTimer !== null) clearTimeout(taskTimer);
         checkUnauthorized().then((is401) => {
           if (is401) return; // Stop retrying; effect restarts after re-login.
-          taskTimer = setTimeout(connectTasks, taskDelay);
-          taskDelay = Math.min(taskDelay * 1.5, 4000);
+          taskTimer = setTimeout(connectTasks, jitteredDelay(taskDelay));
+          taskDelay = Math.min(taskDelay * 1.5, 30_000);
         });
       };
     }
@@ -446,23 +453,64 @@ export default function App() {
       usageES.onerror = () => {
         usageES?.close();
         usageES = null;
+        if (usageTimer !== null) clearTimeout(usageTimer);
         checkUnauthorized().then((is401) => {
           if (is401) return;
-          usageTimer = setTimeout(connectUsage, usageDelay);
-          usageDelay = Math.min(usageDelay * 1.5, 4000);
+          usageTimer = setTimeout(connectUsage, jitteredDelay(usageDelay));
+          usageDelay = Math.min(usageDelay * 1.5, 30_000);
         });
       };
     }
 
-    createEffect(() => {
-      if (!isAuthenticated()) return;
+    function closeAll() {
+      taskES?.close();
+      taskES = null;
+      usageES?.close();
+      usageES = null;
+      if (taskTimer !== null) clearTimeout(taskTimer);
+      taskTimer = null;
+      if (usageTimer !== null) clearTimeout(usageTimer);
+      usageTimer = null;
+    }
+
+    function connectAll() {
+      closeAll();
+      taskDelay = 500;
+      usageDelay = 500;
       connectTasks();
       connectUsage();
+    }
+
+    /** Pause reconnection when tab is hidden or offline; reconnect immediately when back. */
+    function onVisibilityChange() {
+      if (document.hidden) {
+        closeAll();
+        setConnected(false);
+      } else if (navigator.onLine) {
+        connectAll();
+      }
+    }
+
+    function onOnline() {
+      if (!document.hidden) connectAll();
+    }
+
+    function onOffline() {
+      closeAll();
+      setConnected(false);
+    }
+
+    createEffect(() => {
+      if (!isAuthenticated()) return;
+      connectAll();
+      document.addEventListener("visibilitychange", onVisibilityChange);
+      window.addEventListener("online", onOnline);
+      window.addEventListener("offline", onOffline);
       onCleanup(() => {
-        taskES?.close();
-        usageES?.close();
-        if (taskTimer !== null) clearTimeout(taskTimer);
-        if (usageTimer !== null) clearTimeout(usageTimer);
+        closeAll();
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+        window.removeEventListener("online", onOnline);
+        window.removeEventListener("offline", onOffline);
       });
     });
   }

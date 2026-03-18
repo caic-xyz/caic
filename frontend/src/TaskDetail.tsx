@@ -21,6 +21,11 @@ import GitLabIcon from "./gitlab.svg?solid";
 import WidgetCard from "./WidgetCard";
 import styles from "./TaskDetail.module.css";
 
+/** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
+function jitteredDelay(base: number): number {
+  return base * (0.75 + Math.random() * 0.5);
+}
+
 // Module-level store for <details> open/closed state (tool calls, thinking blocks).
 // Keys: toolUseID, "group:<firstToolUseID>", "thinking:<firstEventTs>".
 // Survives component remounts on task switching.
@@ -358,8 +363,8 @@ export default function TaskDetail(props: Props) {
         // would leave the first timer running, causing connect() to be called
         // twice and creating a leaked/duplicate SSE connection.
         if (timer !== null) clearTimeout(timer);
-        timer = setTimeout(connect, delay);
-        delay = Math.min(delay * 1.5, 4000);
+        timer = setTimeout(connect, jitteredDelay(delay));
+        delay = Math.min(delay * 1.5, 30_000);
       };
     }
 

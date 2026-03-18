@@ -36,7 +36,10 @@ import java.net.HttpURLConnection.HTTP_UNAUTHORIZED
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val DELAY_CAP = 4000L
+private const val DELAY_CAP = 30_000L
+
+/** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
+private fun jitteredDelay(base: Long): Long = (base * (0.75 + Math.random() * 0.5)).toLong()
 
 /** Thrown when an SSE connection receives HTTP 401, used to throttle reconnect backoff. */
 class SseAuthException : IOException("SSE connection returned 401")
@@ -240,11 +243,11 @@ class TaskRepository @Inject constructor(
         return t?.let { IOException("SSE connection failed", it) }
     }
 
-    /** Reconnecting wrapper with exponential backoff (500ms initial, 1.5x, max 4s). Stops on 401. */
+    /** Reconnecting wrapper with exponential backoff (500ms initial, 1.5x, max 30s, ±25% jitter). Stops on 401. */
     private fun taskEventsReconnecting(baseURL: String, flag: MutableStateFlow<Boolean>): Flow<List<Task>> =
         reconnectingFlow(flag) { taskListEvents(baseURL) }
 
-    /** Reconnecting wrapper with exponential backoff (500ms initial, 1.5x, max 4s). Stops on 401. */
+    /** Reconnecting wrapper with exponential backoff (500ms initial, 1.5x, max 30s, ±25% jitter). Stops on 401. */
     private fun usageEventsReconnecting(baseURL: String, flag: MutableStateFlow<Boolean>): Flow<UsageResp> =
         reconnectingFlow(flag) { usageEvents(baseURL) }
 
@@ -266,7 +269,7 @@ class TaskRepository @Inject constructor(
             } catch (_: Exception) {
                 flag.value = false
                 updateConnected()
-                delay(delayMs)
+                delay(jitteredDelay(delayMs))
                 delayMs = (delayMs * 3 / 2).coerceAtMost(DELAY_CAP)
             }
         }
