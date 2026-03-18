@@ -79,7 +79,7 @@ Environment variables (flags take precedence when set):
     CAIC_HTTP                   HTTP listen address (e.g. :8080)
     CAIC_ROOT                   Parent directory containing git repos
     CAIC_LOG_LEVEL              Log level: debug, info, warn, error (default: info)
-    CAIC_EXTERNAL_URL           Public base URL; required for OAuth login and webhooks
+    CAIC_EXTERNAL_URL           Public base URL; "auto" (default) locks hostname from first FQDN request
 
   LLM features (title generation, commit descriptions):
     CAIC_LLM_PROVIDER           Provider: anthropic, gemini, openaichat, etc.
@@ -138,7 +138,7 @@ See contrib/caic.env for a template with all variables and documentation.
 		CacheDir:                cacheDir(),
 		GitHubToken:             resolveGitHubToken(),
 		GitLabToken:             os.Getenv("GITLAB_TOKEN"),
-		ExternalURL:             os.Getenv("CAIC_EXTERNAL_URL"),
+		ExternalURL:             envDefault("CAIC_EXTERNAL_URL", "auto"),
 		GitHubOAuthClientID:     os.Getenv("GITHUB_OAUTH_CLIENT_ID"),
 		GitHubOAuthClientSecret: os.Getenv("GITHUB_OAUTH_CLIENT_SECRET"),
 		GitLabOAuthClientID:     os.Getenv("GITLAB_OAUTH_CLIENT_ID"),

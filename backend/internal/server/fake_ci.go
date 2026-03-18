@@ -10,7 +10,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
-
 // maybeFakeCI polls until the task reaches a non-running state, then sets a
 // fake PR and transitions CI from pending to success with progressive check
 // completion.

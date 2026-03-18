@@ -1467,6 +1467,18 @@ func TestConfigValidate(t *testing.T) {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
+	t.Run("ExternalURL auto is valid", func(t *testing.T) {
+		c := &Config{ExternalURL: "auto"}
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() unexpected error: %v", err)
+		}
+	})
+	t.Run("OAuth with ExternalURL auto is valid", func(t *testing.T) {
+		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", GitHubOAuthAllowedUsers: "alice", ExternalURL: "auto"}
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() unexpected error: %v", err)
+		}
+	})
 	t.Run("OAuth without ExternalURL is invalid", func(t *testing.T) {
 		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", GitHubOAuthAllowedUsers: "alice"}
 		if err := c.Validate(); err == nil {
@@ -1682,6 +1694,179 @@ func TestBuildHandler(t *testing.T) {
 		h.ServeHTTP(w, req)
 		if w.Code == http.StatusForbidden {
 			t.Errorf("no host check should not reject any host")
+		}
+	})
+
+	t.Run("auto host check locks first FQDN", func(t *testing.T) {
+		s := newTestServer(t)
+		s.autoHostLock = &autoHostState{}
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+
+		// First FQDN request locks the host.
+		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "caic.example.com"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code == http.StatusForbidden {
+			t.Errorf("first FQDN request should not be forbidden")
+		}
+
+		// Same host is allowed.
+		req = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "caic.example.com"
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code == http.StatusForbidden {
+			t.Errorf("same host should not be forbidden")
+		}
+
+		// Different FQDN is rejected.
+		req = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "evil.example.com"
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("different FQDN: status = %d, want %d", w.Code, http.StatusForbidden)
+		}
+	})
+
+	t.Run("auto host check allows IP before and after lock", func(t *testing.T) {
+		s := newTestServer(t)
+		s.autoHostLock = &autoHostState{}
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+
+		// IP request before any FQDN — allowed.
+		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "192.168.1.1:8080"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code == http.StatusForbidden {
+			t.Errorf("IP request before lock should not be forbidden")
+		}
+
+		// Lock a FQDN.
+		req = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "caic.example.com"
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+
+		// IP request after lock — still allowed.
+		req = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "192.168.1.1:8080"
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code == http.StatusForbidden {
+			t.Errorf("IP request after lock should not be forbidden")
+		}
+	})
+
+	t.Run("auto host check allows localhost", func(t *testing.T) {
+		s := newTestServer(t)
+		s.autoHostLock = &autoHostState{}
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "localhost:8080"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code == http.StatusForbidden {
+			t.Errorf("localhost should not be forbidden")
+		}
+	})
+
+	t.Run("auto host check is case insensitive", func(t *testing.T) {
+		s := newTestServer(t)
+		s.autoHostLock = &autoHostState{}
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "CAIC.Example.COM"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code == http.StatusForbidden {
+			t.Errorf("first FQDN should not be forbidden")
+		}
+
+		req = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "caic.example.com"
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code == http.StatusForbidden {
+			t.Errorf("case-insensitive match should not be forbidden")
+		}
+	})
+
+	for _, tc := range []struct {
+		name string
+		host string
+		xfp  string // X-Forwarded-Proto
+		want string
+	}{
+		{"non-default HTTP port", "caic.example.com:8080", "", "http://caic.example.com:8080"},
+		{"default HTTP port omitted", "caic.example.com:80", "", "http://caic.example.com"},
+		{"default HTTPS port omitted", "caic.example.com:443", "https", "https://caic.example.com"},
+		{"non-default HTTPS port", "quick.giraffe-cobra.ts.net:8443", "https", "https://quick.giraffe-cobra.ts.net:8443"},
+		{"HTTPS without port", "caic.example.com", "https", "https://caic.example.com"},
+		{"HTTP without port", "caic.example.com", "", "http://caic.example.com"},
+	} {
+		t.Run("auto host lock "+tc.name, func(t *testing.T) {
+			state := &autoHostState{}
+			r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+			r.Host = tc.host
+			if tc.xfp != "" {
+				r.Header.Set("X-Forwarded-Proto", tc.xfp)
+			}
+			state.lock(r)
+			if got := state.ExternalURL(); got != tc.want {
+				t.Errorf("ExternalURL = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	t.Run("auto host oauth config resolves redirect URI", func(t *testing.T) {
+		s := newTestServer(t)
+		s.autoHostLock = &autoHostState{}
+		s.githubOAuth = &auth.ProviderConfig{
+			ClientID:     "id",
+			ClientSecret: "sec",
+		}
+
+		// Before lock, oauthConfigFor returns nil.
+		if cfg := s.oauthConfigFor("github"); cfg != nil {
+			t.Fatal("oauthConfigFor should return nil before lock")
+		}
+
+		// Lock via a request.
+		r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		r.Host = "caic.example.com"
+		r.Header.Set("X-Forwarded-Proto", "https")
+		s.autoHostLock.lock(r)
+
+		// After lock, redirect URI is resolved.
+		cfg := s.oauthConfigFor("github")
+		if cfg == nil {
+			t.Fatal("oauthConfigFor should not return nil after lock")
+		}
+		want := "https://caic.example.com/api/v1/auth/github/callback"
+		if cfg.RedirectURI != want {
+			t.Errorf("RedirectURI = %q, want %q", cfg.RedirectURI, want)
+		}
+
+		// Original config is not modified.
+		if s.githubOAuth.RedirectURI != "" {
+			t.Errorf("original config should not be modified, got RedirectURI = %q", s.githubOAuth.RedirectURI)
 		}
 	})
 }

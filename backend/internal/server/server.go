@@ -98,6 +98,7 @@ type Config struct {
 	GitLabWebhookSecret     []byte // X-Gitlab-Token secret; enables POST /webhooks/gitlab
 
 	// ExternalURL is the public base URL (e.g. https://caic.example.com).
+	// "auto" (the default) locks the hostname from the first FQDN request.
 	// Required for OAuth login and webhook delivery.
 	ExternalURL string
 
@@ -124,7 +125,7 @@ func (c *Config) Validate() error {
 	if oauthConfigured && c.ExternalURL == "" {
 		return errors.New("CAIC_EXTERNAL_URL is required when OAuth login is configured")
 	}
-	if c.ExternalURL != "" {
+	if c.ExternalURL != "" && !strings.EqualFold(c.ExternalURL, "auto") {
 		u, err := url.Parse(c.ExternalURL)
 		if err != nil || u.Host == "" {
 			return fmt.Errorf("CAIC_EXTERNAL_URL is not a valid URL: %q", c.ExternalURL)
@@ -205,9 +206,10 @@ type Server struct {
 	gitlabAllowedUsers  map[string]struct{}  // nil if GitLab OAuth not configured
 
 	// Auth / session.
-	authStore     *auth.Store // nil when auth disabled
-	sessionSecret []byte      // nil when auth disabled
-	allowedHost   string      // hostname from ExternalURL; empty disables host checking
+	authStore     *auth.Store    // nil when auth disabled
+	sessionSecret []byte         // nil when auth disabled
+	allowedHost   string         // hostname from ExternalURL; empty disables static host checking
+	autoHostLock  *autoHostState // non-nil when ExternalURL is "auto"
 	usage         *usageFetcher
 
 	// IP geolocation.
@@ -454,18 +456,27 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("load settings: %w", err)
 	}
 
-	// Initialize auth store and OAuth providers when auth is configured.
-	var authStore *auth.Store
-	var sessionSecret []byte
-	var githubOAuth *auth.ProviderConfig
-	var gitlabOAuth *auth.ProviderConfig
+	// Initialize host checking.
 	var allowedHost string
-	if cfg.ExternalURL != "" {
+	var autoLock *autoHostState
+	isAuto := strings.EqualFold(cfg.ExternalURL, "auto")
+	if isAuto {
+		autoLock = &autoHostState{}
+	} else if cfg.ExternalURL != "" {
 		u, err := url.Parse(cfg.ExternalURL)
 		if err != nil {
 			return nil, fmt.Errorf("parse ExternalURL: %w", err)
 		}
 		allowedHost = u.Hostname()
+	}
+
+	// Initialize auth store and OAuth providers when auth is configured.
+	var authStore *auth.Store
+	var sessionSecret []byte
+	var githubOAuth *auth.ProviderConfig
+	var gitlabOAuth *auth.ProviderConfig
+	oauthConfigured := cfg.GitHubOAuthClientID != "" || cfg.GitLabOAuthClientID != ""
+	if cfg.ExternalURL != "" && (oauthConfigured || !isAuto) {
 		secret, err := hexDecode(settings.SessionSecret)
 		if err != nil {
 			return nil, fmt.Errorf("decode session secret: %w", err)
@@ -476,12 +487,18 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 			return nil, fmt.Errorf("open users store: %w", err)
 		}
 		authStore = store
+		// For auto mode, RedirectURI is resolved at request time from the
+		// locked host. Pass empty externalURL so configs are built without it.
+		extURL := cfg.ExternalURL
+		if isAuto {
+			extURL = ""
+		}
 		if cfg.GitHubOAuthClientID != "" && cfg.GitHubOAuthClientSecret != "" {
-			c := auth.GitHubConfig(cfg.GitHubOAuthClientID, cfg.GitHubOAuthClientSecret, cfg.ExternalURL)
+			c := auth.GitHubConfig(cfg.GitHubOAuthClientID, cfg.GitHubOAuthClientSecret, extURL)
 			githubOAuth = &c
 		}
 		if cfg.GitLabOAuthClientID != "" && cfg.GitLabOAuthClientSecret != "" {
-			c := auth.GitLabConfig(cfg.GitLabOAuthClientID, cfg.GitLabOAuthClientSecret, cfg.GitLabURL, cfg.ExternalURL)
+			c := auth.GitLabConfig(cfg.GitLabOAuthClientID, cfg.GitLabOAuthClientSecret, cfg.GitLabURL, extURL)
 			gitlabOAuth = &c
 		}
 	}
@@ -518,6 +535,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		githubAllowedUsers:   githubAllowedUsers,
 		gitlabAllowedUsers:   gitlabAllowedUsers,
 		allowedHost:          allowedHost,
+		autoHostLock:         autoLock,
 		usage:                newUsageFetcher(ctx),
 		geminiAPIKey:         cfg.GeminiAPIKey,
 		githubToken:          cfg.GitHubToken,
@@ -737,8 +755,11 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	inner = compressMiddleware(inner)
 	inner = decompressMiddleware(inner)
 	inner = auth.Middleware(s.authStore, s.sessionSecret)(inner)
-	if s.allowedHost != "" {
+	switch {
+	case s.allowedHost != "":
 		inner = hostCheckMiddleware(s.allowedHost, inner)
+	case s.autoHostLock != nil:
+		inner = autoHostCheckMiddleware(s.autoHostLock, inner)
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

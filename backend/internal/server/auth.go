@@ -231,19 +231,36 @@ func (s *Server) allowedUsersFor(provider string) map[string]struct{} {
 }
 
 // oauthConfigFor returns the ProviderConfig for the named provider, or nil.
+// In auto-host mode, it resolves the RedirectURI from the locked external URL.
 func (s *Server) oauthConfigFor(provider string) *auth.ProviderConfig {
+	var src *auth.ProviderConfig
 	switch provider {
 	case "github":
-		return s.githubOAuth
+		src = s.githubOAuth
 	case "gitlab":
-		return s.gitlabOAuth
+		src = s.gitlabOAuth
 	}
-	return nil
+	if src == nil {
+		return nil
+	}
+	if s.autoHostLock == nil || src.RedirectURI != "" {
+		return src
+	}
+	extURL := s.autoHostLock.ExternalURL()
+	if extURL == "" {
+		return nil // host not locked yet; caller gets 404
+	}
+	c := *src
+	c.RedirectURI = extURL + "/api/v1/auth/" + provider + "/callback"
+	return &c
 }
 
 // useSecureCookies reports whether to set the Secure flag on cookies.
 // True when the external URL starts with "https://".
 func (s *Server) useSecureCookies() bool {
+	if s.autoHostLock != nil {
+		return strings.HasPrefix(s.autoHostLock.ExternalURL(), "https://")
+	}
 	if s.githubOAuth != nil {
 		ru := s.githubOAuth.RedirectURI
 		if idx := strings.Index(ru, "/api/v1/"); idx >= 0 {
