@@ -149,6 +149,24 @@ describe("groupMessages", () => {
     expect(groups[0].events.some((e) => e.kind === "thinkingDelta")).toBe(true);
   });
 
+  it("thinking before text after tool group is moved into the tool group", () => {
+    // Regression: thinking-2 between a tool group and text was absorbed into
+    // the text group by the initial pass, then rendered as a standalone
+    // ThinkingCard outside the tool group. The merge pass should extract
+    // thinking events from the text group into the preceding tool group.
+    const groups = groupMessages([
+      toolUseEvent("t1", "Read"),
+      usageEvent(),
+      { kind: "thinking", ts: 0, thinking: { text: "reflecting" } },
+      textDeltaEvent("The result is..."),
+    ]);
+    expect(groups).toHaveLength(2); // [tool group, text group]
+    const toolGroup = groups.find((g) => g.kind === "action");
+    const textGroup = groups.find((g) => g.kind === "text");
+    expect(toolGroup?.events.some((e) => e.kind === "thinking")).toBe(true);
+    expect(textGroup?.events.some((e) => e.kind === "thinking")).toBe(false);
+  });
+
   it("thinking followed by text is absorbed into the text group", () => {
     // Standalone thinking before text commentary (no tools) must not produce a
     // separate Thinking block; it should be inside the text group instead.

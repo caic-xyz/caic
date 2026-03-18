@@ -362,6 +362,20 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
                 last.events.addAll(g.events)
                 continue
             }
+        } else if (g.kind == GroupKind.TEXT) {
+            // Text group with embedded thinking (from initial-pass absorption) following
+            // a tool-call group: move thinking events into the tool group so they render
+            // inside the collapsed tool block, not as a standalone ThinkingCard.
+            val last = merged.lastOrNull()
+            if (last != null && last.kind == GroupKind.ACTION && last.toolCalls.isNotEmpty()) {
+                val thinkingEvs = g.events.filter {
+                    it.kind == EventKinds.Thinking || it.kind == EventKinds.ThinkingDelta
+                }
+                if (thinkingEvs.isNotEmpty()) {
+                    last.events.addAll(thinkingEvs)
+                    g.events.removeAll { it.kind == EventKinds.Thinking || it.kind == EventKinds.ThinkingDelta }
+                }
+            }
         }
         merged.add(g)
     }

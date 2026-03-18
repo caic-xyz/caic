@@ -399,6 +399,34 @@ class GroupingTest {
             assertTrue(groups[0].events.any { it.kind == EventKinds.ThinkingDelta })
         }
 
+        t.run("thinking before text after tool group is moved into the tool group") {
+            // Regression: thinking-2 between a tool group and text was absorbed into
+            // the text group by the initial pass, then rendered as a standalone
+            // ThinkingCard outside the tool group. The merge pass should extract
+            // thinking events from the text group into the preceding tool group.
+            val usage = EventMessage(
+                kind = EventKinds.Usage, ts = 0,
+                usage = EventUsage(
+                    inputTokens = 100, outputTokens = 50,
+                    cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
+                ),
+            )
+            val groups = groupMessages(listOf(
+                toolUseEvent("t1", "Read"),
+                usage,
+                EventMessage(
+                    kind = EventKinds.Thinking, ts = 0,
+                    thinking = EventThinking(text = "reflecting"),
+                ),
+                textDeltaEvent("The result is..."),
+            ))
+            assertEquals(2, groups.size)
+            val toolGroup = groups.first { it.kind == GroupKind.ACTION }
+            val textGroup = groups.first { it.kind == GroupKind.TEXT }
+            assertTrue(toolGroup.events.any { it.kind == EventKinds.Thinking })
+            assertTrue(textGroup.events.none { it.kind == EventKinds.Thinking })
+        }
+
         t.run("thinking followed by text is absorbed into the text group") {
             // Standalone thinking before text commentary must not produce a separate
             // Thinking block; it should be embedded inside the text group instead.

@@ -32,13 +32,21 @@ import com.fghbuild.caic.ui.theme.appColors
 @Composable
 fun ThinkingCard(events: List<EventMessage>, modifier: Modifier = Modifier) {
     val text = run {
-        val finalEv = events.lastOrNull { it.kind == EventKinds.Thinking }
-        if (finalEv?.thinking != null) {
-            finalEv.thinking!!.text
-        } else {
-            events.filter { it.kind == EventKinds.ThinkingDelta && it.thinkingDelta != null }
-                .joinToString("") { it.thinkingDelta!!.text }
+        // Process events sequentially so each thinking block (final or still-streaming
+        // deltas) is collected independently. Multiple thinking blocks can land in the
+        // same group when consecutive tool-call turns are merged by groupMessages.
+        val parts = mutableListOf<String>()
+        val deltaBuffer = StringBuilder()
+        for (ev in events) {
+            if (ev.kind == EventKinds.ThinkingDelta && ev.thinkingDelta != null) {
+                deltaBuffer.append(ev.thinkingDelta!!.text)
+            } else if (ev.kind == EventKinds.Thinking && ev.thinking != null) {
+                deltaBuffer.clear()
+                parts.add(ev.thinking!!.text)
+            }
         }
+        if (deltaBuffer.isNotEmpty()) parts.add(deltaBuffer.toString())
+        parts.joinToString("\n\n")
     }
     if (text.isBlank()) return
 

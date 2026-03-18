@@ -360,6 +360,18 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
         last.events.push(...g.events);
         continue;
       }
+    } else if (g.kind === "text") {
+      // Text group with embedded thinking (from initial-pass absorption) following
+      // a tool-call group: move thinking events into the tool group so they render
+      // inside the collapsed tool block, not as a standalone ThinkingCard.
+      const last = merged[merged.length - 1];
+      if (last && last.kind === "action" && last.toolCalls.length > 0) {
+        const thinkingEvs = g.events.filter((e) => e.kind === "thinking" || e.kind === "thinkingDelta");
+        if (thinkingEvs.length > 0) {
+          last.events.push(...thinkingEvs);
+          g.events = g.events.filter((e) => e.kind !== "thinking" && e.kind !== "thinkingDelta");
+        }
+      }
     }
     merged.push(g);
   }

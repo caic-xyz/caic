@@ -955,12 +955,21 @@ function ToolMessageGroup(props: { toolCalls: ToolCall[]; taskId: string; events
 // Renders a thinking group, collapsed by default like a ToolCallCard.
 function ThinkingCard(props: { events: EventMessage[] }) {
   const text = createMemo(() => {
-    const finalEv = props.events.findLast((e) => e.kind === "thinking");
-    if (finalEv?.thinking) return finalEv.thinking.text;
-    return props.events
-      .filter((e): e is EventMessage & { thinkingDelta: NonNullable<EventMessage["thinkingDelta"]> } => e.kind === "thinkingDelta" && !!e.thinkingDelta)
-      .map((e) => e.thinkingDelta.text)
-      .join("");
+    // Process events sequentially so each thinking block (final or still-streaming
+    // deltas) is collected independently. Multiple thinking blocks can land in the
+    // same group when consecutive tool-call turns are merged by groupMessages.
+    const parts: string[] = [];
+    let deltaBuffer: string[] = [];
+    for (const ev of props.events) {
+      if (ev.kind === "thinkingDelta" && ev.thinkingDelta) {
+        deltaBuffer.push(ev.thinkingDelta.text);
+      } else if (ev.kind === "thinking" && ev.thinking) {
+        deltaBuffer = [];
+        parts.push(ev.thinking.text);
+      }
+    }
+    if (deltaBuffer.length > 0) parts.push(deltaBuffer.join(""));
+    return parts.join("\n\n");
   });
   const key = () => "thinking:" + (props.events[0]?.ts ?? 0);
   const isOpen = () => detailsOpenState.get(key()) ?? false;

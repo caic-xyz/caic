@@ -175,6 +175,28 @@ describe("SSE connection", () => {
     expect(created).toHaveLength(2);
   });
 
+  it("multiple thinking blocks across tool calls are both visible", () => {
+    // Regression: ThinkingCard used findLast, so when thinking-1 → tool-1 → thinking-2 → tool-2
+    // merged into one action group, only thinking-2 was rendered and thinking-1 was dropped.
+    const created: FakeES[] = [];
+    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
+    makeSyncReadyMock(created, capturedCb);
+
+    render(() => <TaskDetail {...baseProps} />);
+    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+
+    const cb = capturedCb.value;
+    cb({ kind: "thinking", ts: 1, thinking: { text: "planning tool 1" } });
+    cb({ kind: "toolUse", ts: 2, toolUse: { toolUseID: "t1", name: "Read", input: {} } });
+    cb({ kind: "usage", ts: 3, usage: { inputTokens: 10, outputTokens: 5, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, model: "m" } });
+    cb({ kind: "thinking", ts: 4, thinking: { text: "planning tool 2" } });
+    cb({ kind: "toolUse", ts: 5, toolUse: { toolUseID: "t2", name: "Bash", input: {} } });
+    vi.advanceTimersByTime(20);
+
+    expect(document.body.textContent).toContain("planning tool 1");
+    expect(document.body.textContent).toContain("planning tool 2");
+  });
+
   it("live textDelta events appear in the message list after SSE fires them", () => {
     // Verifies the rAF-batched streaming path: events pushed via the SSE
     // callback surface in the DOM after the animation frame is flushed.
