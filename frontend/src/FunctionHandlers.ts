@@ -66,7 +66,11 @@ function diffStatSummary(t: Task): string {
 
 function taskSummaryLine(num: number, t: Task): string {
   const name = t.title || t.id;
-  const base = `${num}. **${name}** — ${t.state}, ${formatElapsed(t.duration * 1000)}, ${formatCost(t.costUSD)}, ${t.harness}${diffStatSummary(t)}`;
+  const extras: string[] = [];
+  if (t.forgePR) extras.push(`PR #${t.forgePR}`);
+  if (t.ciStatus) extras.push(`CI: ${t.ciStatus}`);
+  const extrasStr = extras.length > 0 ? `, ${extras.join(", ")}` : "";
+  const base = `${num}. **${name}** — ${t.state}, ${formatElapsed(t.duration * 1000)}, ${formatCost(t.costUSD)}, ${t.harness}${diffStatSummary(t)}${extrasStr}`;
   if (t.state === "purged" && t.result) return `${base} — ${t.result.slice(0, RESULT_SNIPPET_MAX)}`;
   if (t.state === "stopped") return `${base} — container died`;
   if (t.state === "failed" && t.error) return `${base} — ${t.error}`;

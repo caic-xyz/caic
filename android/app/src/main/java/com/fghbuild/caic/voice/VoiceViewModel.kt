@@ -30,6 +30,7 @@ class VoiceViewModel @Inject constructor(
         get() = voiceSessionManager.taskNumberMap
 
     private var previousTaskStates: Map<String, String> = emptyMap()
+    private var previousCIStatuses: Map<String, String?> = emptyMap()
 
     /** Task IDs that were already purged/failed when the voice session connected. */
     private var prePurgedIds: Set<String> = emptySet()
@@ -58,6 +59,7 @@ class VoiceViewModel @Inject constructor(
                         val defaultModel = prefs?.harness?.let { h -> prefs.models?.get(h) }?.ifBlank { null }
                         voiceSessionManager.injectText(buildSnapshot(active, recentRepo, defaultHarness, defaultModel))
                         previousTaskStates = tasks.associate { it.id to it.state }
+                        previousCIStatuses = tasks.associate { it.id to it.ciStatus }
                     }
                 }
         }
@@ -69,6 +71,7 @@ class VoiceViewModel @Inject constructor(
                     notifyTaskChanges(tasks)
                 }
                 previousTaskStates = tasks.associate { it.id to it.state }
+                previousCIStatuses = tasks.associate { it.id to it.ciStatus }
             }
         }
     }
@@ -94,17 +97,18 @@ class VoiceViewModel @Inject constructor(
     }
 
     private fun notifyTaskChanges(tasks: List<Task>) {
-        tasks
-            .filter { task ->
-                val prev = previousTaskStates[task.id]
-                prev != null && prev != task.state
-            }
-            .forEach { task ->
+        for (task in tasks) {
+            val prev = previousTaskStates[task.id]
+            if (prev != null && prev != task.state) {
                 val notification = buildNotification(task)
-                if (notification != null) {
-                    voiceSessionManager.injectText(notification)
-                }
+                if (notification != null) voiceSessionManager.injectText(notification)
             }
+            val prevCI = previousCIStatuses[task.id]
+            if (prevCI != null && prevCI != "failure" && task.ciStatus == "failure") {
+                val notification = buildCIFailureNotification(task)
+                if (notification != null) voiceSessionManager.injectText(notification)
+            }
+        }
     }
 
     private fun buildSnapshot(
@@ -129,6 +133,13 @@ class VoiceViewModel @Inject constructor(
             return "[No active tasks]"
         }
         return parts.joinToString("\n")
+    }
+
+    private fun buildCIFailureNotification(task: Task): String? {
+        val num = taskNumberMap.toNumber(task.id) ?: return null
+        val shortName = task.title.ifBlank { task.id }
+        val pr = task.forgePR?.takeIf { it > 0 }?.let { " PR #$it" } ?: ""
+        return "[Task #$num ($shortName)$pr — CI: failure]"
     }
 
     private fun buildNotification(task: Task): String? {

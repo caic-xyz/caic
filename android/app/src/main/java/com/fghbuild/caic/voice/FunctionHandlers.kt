@@ -286,8 +286,14 @@ private fun diffStatSummary(t: Task): String {
 
 private fun taskSummaryLine(num: Int, t: Task): String {
     val name = t.title.ifBlank { t.id }
+    val extras = buildList {
+        val pr = t.forgePR
+        if (pr != null && pr > 0) add("PR #$pr")
+        if (!t.ciStatus.isNullOrBlank()) add("CI: ${t.ciStatus}")
+    }
+    val extrasStr = if (extras.isNotEmpty()) ", ${extras.joinToString(", ")}" else ""
     val base = "$num. **$name** — ${t.state}, ${formatElapsed(t.duration)}, " +
-        "${formatCost(t.costUSD)}, ${t.harness}${diffStatSummary(t)}"
+        "${formatCost(t.costUSD)}, ${t.harness}${diffStatSummary(t)}$extrasStr"
     return when {
         t.state == "purged" && !t.result.isNullOrBlank() ->
             "$base — ${t.result!!.take(RESULT_SNIPPET_MAX)}"

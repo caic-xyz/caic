@@ -28,8 +28,9 @@ export default function VoiceOverlay(props: Props) {
   // Track pre-purged task IDs to exclude from notifications.
   const [prePurgedIds, setPreTerminatedIds] = createSignal(new Set<string>());
 
-  // Previous task states for detecting transitions.
+  // Previous task states and CI statuses for detecting transitions.
   let prevStates = new Map<string, string>();
+  let prevCIStatuses = new Map<string, string | undefined>();
 
   // Detect connected→true transition and build snapshot.
   let wasConnected = false;
@@ -44,6 +45,7 @@ export default function VoiceOverlay(props: Props) {
       );
       setPreTerminatedIds(prePurged);
       prevStates = new Map(tasks.map((t) => [t.id, t.state]));
+      prevCIStatuses = new Map(tasks.map((t) => [t.id, t.ciStatus]));
     }
     wasConnected = connected;
   });
@@ -60,9 +62,15 @@ export default function VoiceOverlay(props: Props) {
           const notification = buildNotification(task, session);
           if (notification !== null) session.injectText(notification);
         }
+        const prevCI = prevCIStatuses.get(task.id);
+        if (prevCI !== undefined && prevCI !== "failure" && task.ciStatus === "failure") {
+          const notification = buildCIFailureNotification(task, session);
+          if (notification !== null) session.injectText(notification);
+        }
       }
     }
     prevStates = new Map(currentTasks.map((t) => [t.id, t.state]));
+    prevCIStatuses = new Map(currentTasks.map((t) => [t.id, t.ciStatus]));
   });
 
   // Suppress browser notifications while voice is connected.
@@ -313,7 +321,15 @@ function TranscriptLog(props: { transcript: TranscriptEntry[]; onClear: () => vo
   );
 }
 
-// Notification builder (mirrors VoiceViewModel.buildNotification)
+// Notification builders (mirror VoiceViewModel.buildNotification / buildCIFailureNotification)
+
+function buildCIFailureNotification(task: Task, session: VoiceSession): string | null {
+  const num = session.taskNumberMap.toNumber(task.id);
+  if (num === undefined) return null;
+  const shortName = task.title || task.id;
+  const pr = task.forgePR ? ` PR #${task.forgePR}` : "";
+  return `[Task #${num} (${shortName})${pr} — CI: failure]`;
+}
 
 function buildNotification(task: Task, session: VoiceSession): string | null {
   const num = session.taskNumberMap.toNumber(task.id);
