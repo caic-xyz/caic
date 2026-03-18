@@ -533,9 +533,12 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	}
 
 	// 2. Reconnect to the agent (attach relay or --resume).
+	// skipSideEffects=true: the relay replays all historical messages on
+	// attach and each would trigger fetch+diff+title if side effects were
+	// enabled. Instead we do a single BranchDiffStat at the end.
 	t.SetState(StateStarting)
 	tlog.Info("reconnecting after revive", "sess", t.GetSessionID())
-	h, err := r.Reconnect(ctx, t, false)
+	h, err := r.Reconnect(ctx, t, true)
 	if err != nil {
 		t.SetState(StateFailed)
 		return nil, fmt.Errorf("reconnect after revive: %w", err)
@@ -547,6 +550,11 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	if err != nil {
 		t.SetState(StateFailed)
 		return nil, err
+	}
+
+	// 4. Compute host-side diff stat once, covering all replayed messages.
+	if ds := r.BranchDiffStat(ctx, primaryBranch, t.ExtraMDRepos()); len(ds) > 0 {
+		t.SetLiveDiffStat(ds)
 	}
 	tlog.Info("agent ready after revive", "state", t.GetState())
 	return h, nil

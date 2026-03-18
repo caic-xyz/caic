@@ -546,6 +546,34 @@ func TestRunner(t *testing.T) {
 			close(msgCh)
 		})
 
+		t.Run("SkipSideEffects", func(t *testing.T) {
+			stub := &stubContainer{}
+			r := &Runner{Container: stub, Dir: "/repo"}
+			r.initDefaults()
+
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
+			tk.SetState(StateRunning)
+			_, ch, unsub := tk.Subscribe(t.Context())
+			defer unsub()
+
+			msgCh, done := r.startMessageDispatch(t.Context(), tk, true)
+
+			// Send a mutating tool use + result and a ResultMessage.
+			toolID := "tool_edit_1"
+			msgCh <- &agent.ToolUseMessage{ToolUseID: toolID, Name: "Edit", Input: json.RawMessage(`{}`)}
+			recvMsg(t, ch)
+			msgCh <- &agent.ToolResultMessage{ToolUseID: toolID}
+			recvMsg(t, ch)
+			msgCh <- &agent.ResultMessage{MessageType: "result"}
+			recvMsg(t, ch)
+			close(msgCh)
+			<-done
+
+			if stub.fetched {
+				t.Error("Fetch was called despite skipSideEffects=true")
+			}
+		})
+
 		t.Run("DispatchDrainBeforeClose", func(t *testing.T) {
 			r := &Runner{}
 			r.initDefaults()
