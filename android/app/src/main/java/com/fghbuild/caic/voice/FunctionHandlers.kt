@@ -18,6 +18,7 @@ import com.fghbuild.caic.data.TaskSSEEvent
 import com.fghbuild.caic.util.formatCost
 import com.fghbuild.caic.util.formatElapsed
 import kotlinx.coroutines.flow.takeWhile
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -74,14 +75,18 @@ class FunctionHandlers(
 
     private suspend fun handleCreateTask(args: JsonObject): JsonElement {
         val prompt = args.requireString("prompt")
-        val repo = args.requireString("repo")
-            ?: return errorResult("Unknown repo: ${args.requireString("repo")}")
+        val reposArg = args["repos"]
+        val repoNames = when (reposArg) {
+            is JsonArray -> reposArg.mapNotNull { (it as? JsonPrimitive)?.content?.ifBlank { null } }
+            is JsonPrimitive -> listOf(reposArg.content)
+            else -> emptyList()
+        }
         val model = args.optString("model") ?: defaultModel.ifBlank { null }
         val harness = args.optString("harness") ?: defaultHarness
         val resp = apiClient.createTask(
             CreateTaskReq(
                 initialPrompt = Prompt(text = prompt),
-                repos = listOf(RepoSpec(name = repo)),
+                repos = repoNames.map { RepoSpec(name = it) },
                 model = model,
                 harness = harness,
             )

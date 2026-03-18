@@ -68,6 +68,14 @@ private fun boolProp(description: String): JsonElement = JsonObject(
     )
 )
 
+private fun arrayProp(description: String, items: JsonElement): JsonElement = JsonObject(
+    mapOf(
+        "type" to JsonPrimitive("array"),
+        "description" to JsonPrimitive(description),
+        "items" to items,
+    )
+)
+
 private fun objectSchema(
     vararg properties: Pair<String, JsonElement>,
     required: List<String> = emptyList(),
@@ -97,7 +105,7 @@ fun buildFunctionDeclarations(
         name = "tasks_list",
         description = "List all current coding tasks with their status, cost, and duration.",
         parameters = emptyObjectSchema,
-        behavior = "NON_BLOCKING",
+        behavior = "BLOCKING",
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
@@ -105,20 +113,23 @@ fun buildFunctionDeclarations(
         description = "Create a new coding task. Confirm repo and prompt with the user before calling.",
         parameters = objectSchema(
             "prompt" to stringProp("The task description/prompt for the coding agent"),
-            "repo" to if (repos.isNotEmpty()) {
-                enumProp("Repository to work in", repos)
-            } else {
-                stringProp("Repository path to work in")
-            },
+            "repos" to arrayProp(
+                "Repositories to work in (one or more)",
+                if (repos.isNotEmpty()) {
+                    JsonObject(mapOf("type" to JsonPrimitive("string"), "enum" to JsonArray(repos.map { JsonPrimitive(it) })))
+                } else {
+                    JsonObject(mapOf("type" to JsonPrimitive("string")))
+                },
+            ),
             "model" to stringProp("Model to use (optional)"),
             "harness" to if (harnesses.isNotEmpty()) {
                 enumProp(harnessDesc, harnesses)
             } else {
                 stringProp(harnessDesc)
             },
-            required = listOf("prompt", "repo"),
+            required = listOf("prompt", "repos"),
         ),
-        behavior = "NON_BLOCKING",
+        behavior = "BLOCKING",
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
@@ -128,7 +139,7 @@ fun buildFunctionDeclarations(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
             required = listOf("task_number"),
         ),
-        behavior = "NON_BLOCKING",
+        behavior = "BLOCKING",
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
@@ -139,7 +150,7 @@ fun buildFunctionDeclarations(
             "message" to stringProp("The message to send to the agent"),
             required = listOf("task_number", "message"),
         ),
-        behavior = "NON_BLOCKING",
+        behavior = "BLOCKING",
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
@@ -150,7 +161,7 @@ fun buildFunctionDeclarations(
             "answer" to stringProp("The answer to the agent's question"),
             required = listOf("task_number", "answer"),
         ),
-        behavior = "NON_BLOCKING",
+        behavior = "BLOCKING",
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
@@ -176,7 +187,7 @@ fun buildFunctionDeclarations(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
             required = listOf("task_number"),
         ),
-        behavior = "NON_BLOCKING",
+        behavior = "BLOCKING",
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
@@ -186,7 +197,7 @@ fun buildFunctionDeclarations(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
             required = listOf("task_number"),
         ),
-        behavior = "NON_BLOCKING",
+        behavior = "BLOCKING",
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
@@ -196,14 +207,14 @@ fun buildFunctionDeclarations(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
             required = listOf("task_number"),
         ),
-        behavior = "NON_BLOCKING",
+        behavior = "BLOCKING",
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "get_usage",
         description = "Check current task cost and token usage for rolling 5-hour and 7-day windows.",
         parameters = emptyObjectSchema,
-        behavior = "NON_BLOCKING",
+        behavior = "BLOCKING",
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
@@ -254,7 +265,7 @@ fun buildFunctionDeclarations(
             "task_number" to intProp("The task number whose PR CI should be fixed"),
             required = listOf("task_number"),
         ),
-        behavior = "NON_BLOCKING",
+        behavior = "BLOCKING",
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
@@ -268,7 +279,7 @@ fun buildFunctionDeclarations(
             },
             required = listOf("repo"),
         ),
-        behavior = "NON_BLOCKING",
+        behavior = "BLOCKING",
         scheduling = "INTERRUPT",
     ),
     )

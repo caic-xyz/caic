@@ -134,12 +134,17 @@ export class FunctionHandlers {
 
   private async handleCreateTask(args: FunctionArgs): Promise<Record<string, unknown>> {
     const prompt = requireString(args, "prompt");
-    const repo = requireString(args, "repo");
+    const reposArg = args["repos"];
+    const repoNames = Array.isArray(reposArg)
+      ? reposArg.filter((r): r is string => typeof r === "string")
+      : typeof reposArg === "string"
+        ? [reposArg]
+        : [];
     const model = optString(args, "model") ?? (this.defaultModel || undefined);
     const harness = optString(args, "harness") ?? this.defaultHarness;
     const resp = await createTask({
       initialPrompt: { text: prompt },
-      repos: repo ? [{ name: repo }] : undefined,
+      repos: repoNames.length > 0 ? repoNames.map((r) => ({ name: r })) : undefined,
       harness,
       ...(model ? { model } : {}),
     });

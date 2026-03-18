@@ -19,6 +19,10 @@ function boolProp(description: string): JsonSchema {
   return { type: "boolean", description };
 }
 
+function arrayProp(description: string, items: JsonSchema): JsonSchema {
+  return { type: "array", description, items };
+}
+
 function objectSchema(properties: Record<string, JsonSchema>, required?: string[]): JsonSchema {
   const schema: JsonSchema = { type: "object", properties };
   if (required?.length) schema.required = required;
@@ -49,7 +53,7 @@ export function buildFunctionDeclarations(
       name: "tasks_list",
       description: "List all current coding tasks with their status, cost, and duration.",
       parameters: emptyObjectSchema,
-      behavior: "NON_BLOCKING",
+      behavior: "BLOCKING",
       scheduling: "INTERRUPT",
     },
     {
@@ -59,19 +63,21 @@ export function buildFunctionDeclarations(
       parameters: objectSchema(
         {
           prompt: stringProp("The task description/prompt for the coding agent"),
-          repo:
+          repos: arrayProp(
+            "Repositories to work in (one or more)",
             repos.length > 0
-              ? enumProp("Repository to work in", repos)
-              : stringProp("Repository path to work in"),
+              ? { type: "string", enum: repos }
+              : { type: "string" },
+          ),
           model: stringProp("Model to use (optional)"),
           harness:
             harnesses.length > 0
               ? enumProp(harnessDesc, harnesses)
               : stringProp(harnessDesc),
         },
-        ["prompt", "repo"],
+        ["prompt", "repos"],
       ),
-      behavior: "NON_BLOCKING",
+      behavior: "BLOCKING",
       scheduling: "INTERRUPT",
     },
     {
@@ -81,7 +87,7 @@ export function buildFunctionDeclarations(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],
       ),
-      behavior: "NON_BLOCKING",
+      behavior: "BLOCKING",
       scheduling: "INTERRUPT",
     },
     {
@@ -94,7 +100,7 @@ export function buildFunctionDeclarations(
         },
         ["task_number", "message"],
       ),
-      behavior: "NON_BLOCKING",
+      behavior: "BLOCKING",
       scheduling: "INTERRUPT",
     },
     {
@@ -107,7 +113,7 @@ export function buildFunctionDeclarations(
         },
         ["task_number", "answer"],
       ),
-      behavior: "NON_BLOCKING",
+      behavior: "BLOCKING",
       scheduling: "INTERRUPT",
     },
     {
@@ -137,7 +143,7 @@ export function buildFunctionDeclarations(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],
       ),
-      behavior: "NON_BLOCKING",
+      behavior: "BLOCKING",
       scheduling: "INTERRUPT",
     },
     {
@@ -147,7 +153,7 @@ export function buildFunctionDeclarations(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],
       ),
-      behavior: "NON_BLOCKING",
+      behavior: "BLOCKING",
       scheduling: "INTERRUPT",
     },
     {
@@ -157,14 +163,14 @@ export function buildFunctionDeclarations(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],
       ),
-      behavior: "NON_BLOCKING",
+      behavior: "BLOCKING",
       scheduling: "INTERRUPT",
     },
     {
       name: "get_usage",
       description: "Check current API quota utilization and limits.",
       parameters: emptyObjectSchema,
-      behavior: "NON_BLOCKING",
+      behavior: "BLOCKING",
       scheduling: "INTERRUPT",
     },
     {
@@ -217,7 +223,7 @@ export function buildFunctionDeclarations(
         { task_number: intProp("The task number whose PR CI should be fixed") },
         ["task_number"],
       ),
-      behavior: "NON_BLOCKING",
+      behavior: "BLOCKING",
       scheduling: "INTERRUPT",
     },
     {
@@ -232,7 +238,7 @@ export function buildFunctionDeclarations(
         },
         ["repo"],
       ),
-      behavior: "NON_BLOCKING",
+      behavior: "BLOCKING",
       scheduling: "INTERRUPT",
     },
   ];
