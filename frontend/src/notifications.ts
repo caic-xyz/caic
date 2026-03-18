@@ -14,12 +14,19 @@ function canNotify(): boolean {
 
 const activeNotifications = new Map<string, Notification>();
 
+let voiceActive = false;
+
+/** Set whether the voice agent is active. Suppresses browser notifications while true. */
+export function setVoiceActive(active: boolean): void {
+  voiceActive = active;
+}
+
 /**
  * Show a browser notification that an agent is waiting for input.
  * Only fires if the page is not currently visible (user tabbed away).
  */
 export function notifyWaiting(taskId: string, taskName: string): void {
-  if (!canNotify() || document.visibilityState === "visible") return;
+  if (!canNotify() || document.visibilityState === "visible" || voiceActive) return;
   const n = new Notification(`${taskName} is ready`, {
     tag: `caic-waiting-${taskId}`,
   });

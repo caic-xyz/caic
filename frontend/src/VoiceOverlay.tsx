@@ -3,6 +3,7 @@ import { createEffect, createSignal, For, Show, untrack, onCleanup } from "solid
 import type { Task } from "@sdk/types.gen";
 import { VoiceSession } from "./VoiceSession";
 import type { VoiceState, TranscriptEntry } from "./VoiceSession";
+import { setVoiceActive } from "./notifications";
 import styles from "./VoiceOverlay.module.css";
 import MicIcon from "@material-symbols/svg-400/outlined/mic.svg?solid";
 import MicOffIcon from "@material-symbols/svg-400/outlined/mic_off.svg?solid";
@@ -64,8 +65,14 @@ export default function VoiceOverlay(props: Props) {
     prevStates = new Map(currentTasks.map((t) => [t.id, t.state]));
   });
 
+  // Suppress browser notifications while voice is connected.
+  createEffect(() => setVoiceActive(session.state.connected));
+
   // Disconnect on component cleanup.
-  onCleanup(() => session.disconnect());
+  onCleanup(() => {
+    setVoiceActive(false);
+    session.disconnect();
+  });
 
   // -----------------------------------------------------------------------
   // Panel state

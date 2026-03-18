@@ -10,6 +10,7 @@ import androidx.core.app.NotificationCompat
 import com.caic.sdk.v1.Task
 import com.fghbuild.caic.MainActivity
 import com.fghbuild.caic.R
+import com.fghbuild.caic.voice.VoiceSession
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -23,6 +24,7 @@ private val ATTENTION_STATES = setOf("waiting", "asking", "has_plan")
 class TaskNotifier @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val taskRepository: TaskRepository,
+    private val voiceSession: VoiceSession,
 ) {
     private val nm = context.getSystemService(NotificationManager::class.java)
     private var job: Job? = null
@@ -40,7 +42,7 @@ class TaskNotifier @Inject constructor(
                         val needsInput = task.state in ATTENTION_STATES
                         val prevNeedsInput = prevStates[task.id] in ATTENTION_STATES
                         when {
-                            needsInput && prevStates[task.id] == "running" -> postNotification(task)
+                            needsInput && prevStates[task.id] == "running" && !voiceSession.state.value.connected -> postNotification(task)
                             !needsInput && prevNeedsInput -> nm.cancel(notificationId(task.id))
                         }
                     }
