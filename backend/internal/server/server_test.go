@@ -709,15 +709,15 @@ func TestLoadPurgedTasks(t *testing.T) {
 		trailer0 := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, "recent.jsonl", meta0, trailer0)
 
-		// task 1: old (purged, > 7 days)
+		// task 1: old (purged, > 14 days)
 		meta1 := mustJSON(t, agent.MetaMessage{
-			MessageType: "caic_meta", Version: 1, Prompt: "old task", Harness: agent.Claude, StartedAt: time.Now().Add(-10 * 24 * time.Hour),
+			MessageType: "caic_meta", Version: 1, Prompt: "old task", Harness: agent.Claude, StartedAt: time.Now().Add(-20 * 24 * time.Hour),
 		})
 		trailer1 := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		oldPath := filepath.Join(logDir, "old.jsonl")
 		writeLogFile(t, logDir, "old.jsonl", meta1, trailer1)
-		// Set mtime to 8 days ago.
-		oldTime := time.Now().Add(-8 * 24 * time.Hour)
+		// Set mtime to 15 days ago.
+		oldTime := time.Now().Add(-15 * 24 * time.Hour)
 		if err := os.Chtimes(oldPath, oldTime, oldTime); err != nil {
 			t.Fatal(err)
 		}
