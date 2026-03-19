@@ -231,6 +231,8 @@ export default function TaskList(props: TaskListProps) {
             const repoMeta = () => props.repos().find((r) => r.path === group.repo);
             const stoppedKey = `stopped-${group.repo}`;
             const purgedKey = `purged-${group.repo}`;
+            const selectedInStopped = () => !!props.selectedId && group.stopped.some((t) => t.id === props.selectedId);
+            const selectedInPurged = () => !!props.selectedId && group.purged.some((t) => t.id === props.selectedId);
             return (
             <div class={styles.repoGroup}>
               <div class={styles.repoGroupHeader}>
@@ -255,20 +257,20 @@ export default function TaskList(props: TaskListProps) {
               
               <Show when={group.stopped.length > 0}>
                 <button class={styles.subGroupHeader} onClick={() => toggleExpanded(stoppedKey)}>
-                  {expanded().has(stoppedKey) ? <ArrowDropDown width={18} height={18} /> : <ArrowRight width={18} height={18} />}
+                  {expanded().has(stoppedKey) || selectedInStopped() ? <ArrowDropDown width={18} height={18} /> : <ArrowRight width={18} height={18} />}
                   Stopped ({group.stopped.length})
                 </button>
-                <Show when={expanded().has(stoppedKey)}>
+                <Show when={expanded().has(stoppedKey) || selectedInStopped()}>
                   <Index each={group.stopped}>{renderTask}</Index>
                 </Show>
               </Show>
 
               <Show when={group.purged.length > 0}>
                 <button class={styles.subGroupHeader} onClick={() => toggleExpanded(purgedKey)}>
-                  {expanded().has(purgedKey) ? <ArrowDropDown width={18} height={18} /> : <ArrowRight width={18} height={18} />}
+                  {expanded().has(purgedKey) || selectedInPurged() ? <ArrowDropDown width={18} height={18} /> : <ArrowRight width={18} height={18} />}
                   Purged ({group.purged.length})
                 </button>
-                <Show when={expanded().has(purgedKey)}>
+                <Show when={expanded().has(purgedKey) || selectedInPurged()}>
                   <Index each={group.purged}>{renderTask}</Index>
                 </Show>
               </Show>
