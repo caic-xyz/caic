@@ -37,9 +37,24 @@ import com.fghbuild.caic.util.formatDuration
 import com.fghbuild.caic.util.formatTokens
 import java.util.Locale
 
+// Color for CPU/MEM bars: ratio is 0–1 of a hard limit.
 private fun barColor(ratio: Float): Color = when {
     ratio >= 0.85f -> Color(0xFFDC3545)
     ratio >= 0.5f -> Color(0xFF856404)
+    else -> Color(0xFF28A745)
+}
+
+// Color for NET bar: absolute thresholds on cumulative bytes.
+private fun netColor(bytes: Long): Color = when {
+    bytes >= 1_000_000_000L -> Color(0xFFDC3545) // ≥ 1 GB
+    bytes >= 100_000_000L -> Color(0xFF856404)    // ≥ 100 MB
+    else -> Color(0xFF28A745)
+}
+
+// Color for DISK bar: absolute thresholds on writable layer size.
+private fun diskColor(bytes: Long): Color = when {
+    bytes >= 10_000_000_000L -> Color(0xFFDC3545) // ≥ 10 GB
+    bytes >= 5_000_000_000L -> Color(0xFF856404)   // ≥ 5 GB
     else -> Color(0xFF28A745)
 }
 
@@ -66,6 +81,8 @@ private fun BarChartIcon(
     memRatio: Float,
     netRatio: Float,
     diskRatio: Float,
+    netBarColor: Color,
+    diskBarColor: Color,
     modifier: Modifier = Modifier,
 ) {
     val inactive = MaterialTheme.colorScheme.outlineVariant
@@ -101,7 +118,7 @@ private fun BarChartIcon(
                 // Bottom-left: NET
                 val netH = halfH * netRatio.coerceIn(0f, 1f)
                 drawRoundRect(
-                    color = if (netRatio > 0f) barColor(netRatio) else inactive,
+                    color = if (netRatio > 0f) netBarColor else inactive,
                     topLeft = Offset(0f, rowTop + halfH - netH),
                     size = Size(barW, netH.coerceAtLeast(1.dp.toPx())),
                     cornerRadius = cornerR,
@@ -109,7 +126,7 @@ private fun BarChartIcon(
                 // Bottom-right: DISK
                 val diskH = halfH * diskRatio.coerceIn(0f, 1f)
                 drawRoundRect(
-                    color = if (diskRatio > 0f) barColor(diskRatio) else inactive,
+                    color = if (diskRatio > 0f) diskBarColor else inactive,
                     topLeft = Offset(barW + gap, rowTop + halfH - diskH),
                     size = Size(barW, diskH.coerceAtLeast(1.dp.toPx())),
                     cornerRadius = cornerR,
@@ -161,7 +178,14 @@ fun StatsIcon(
 
     Box(modifier = modifier) {
         IconButton(onClick = { expanded = !expanded }, modifier = Modifier.size(32.dp)) {
-            BarChartIcon(cpuRatio = cpuRatio, memRatio = memRatio, netRatio = netRatio, diskRatio = diskRatio)
+            BarChartIcon(
+                cpuRatio = cpuRatio,
+                memRatio = memRatio,
+                netRatio = netRatio,
+                diskRatio = diskRatio,
+                netBarColor = netColor((latest?.netRx ?: 0L) + (latest?.netTx ?: 0L)),
+                diskBarColor = diskColor(latest?.diskUsed?.coerceAtLeast(0L) ?: 0L),
+            )
         }
         DropdownMenu(
             expanded = expanded,
@@ -182,7 +206,13 @@ fun StatsIcon(
                     )
                 } else {
                     val recentStats = stats.takeLast(5)
-                    data class StatRow(val label: String, val ratio: Float, val value: String, val history: List<Float>)
+                    data class StatRow(
+                        val label: String,
+                        val ratio: Float,
+                        val value: String,
+                        val history: List<Float>,
+                        val historyColors: List<Color>? = null,
+                    )
                     val rows = listOf(
                         StatRow(
                             "CPU",
@@ -203,6 +233,7 @@ fun StatsIcon(
                             recentStats.map {
                                 ((it.netRx + it.netTx).toFloat() / maxNet.toFloat()).coerceIn(0f, 1f)
                             },
+                            recentStats.map { netColor(it.netRx + it.netTx) },
                         ),
                         StatRow(
                             "DISK",
@@ -211,6 +242,7 @@ fun StatsIcon(
                             recentStats.map {
                                 (it.diskUsed.coerceAtLeast(0L).toFloat() / maxDisk.toFloat()).coerceIn(0f, 1f)
                             },
+                            recentStats.map { diskColor(it.diskUsed.coerceAtLeast(0L)) },
                         ),
                     )
                     rows.forEach { row ->
@@ -236,8 +268,12 @@ fun StatsIcon(
                                 verticalAlignment = Alignment.Bottom,
                                 modifier = Modifier.height(12.dp),
                             ) {
-                                row.history.forEach { ratio ->
-                                    val color = if (ratio > 0f) barColor(ratio) else Color.LightGray
+                                row.history.forEachIndexed { i, ratio ->
+                                    val color = if (ratio > 0f) {
+                                        row.historyColors?.getOrNull(i) ?: barColor(ratio)
+                                    } else {
+                                        Color.LightGray
+                                    }
                                     Box(
                                         modifier = Modifier
                                             .width(6.dp)

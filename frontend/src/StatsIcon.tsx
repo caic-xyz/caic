@@ -14,15 +14,31 @@ function formatBytes(bytes: number): string {
   return `${val < 10 ? val.toFixed(1) : Math.round(val)} ${units[i]}`;
 }
 
+// Color for CPU/MEM bars: ratio is 0–1 of a hard limit.
 function barColor(ratio: number): string {
   if (ratio >= 0.85) return "var(--color-danger)";
   if (ratio >= 0.5) return "var(--color-warning-text)";
   return "var(--color-success)";
 }
 
+// Color for NET bar: absolute thresholds on total bytes (cumulative).
+function netColor(bytes: number): string {
+  if (bytes >= 1e9) return "var(--color-danger)";      // ≥ 1 GB
+  if (bytes >= 100e6) return "var(--color-warning-text)"; // ≥ 100 MB
+  return "var(--color-success)";
+}
+
+// Color for DISK bar: absolute thresholds on writable layer size.
+function diskColor(bytes: number): string {
+  if (bytes >= 10e9) return "var(--color-danger)";       // ≥ 10 GB
+  if (bytes >= 5e9) return "var(--color-warning-text)";  // ≥ 5 GB
+  return "var(--color-success)";
+}
+
 interface MiniBar {
   ratio: number;
   label: string;
+  color?: string;
 }
 
 function MiniBarGroup(props: { bars: MiniBar[] }) {
@@ -33,7 +49,7 @@ function MiniBarGroup(props: { bars: MiniBar[] }) {
           <div class={styles.miniBar} title={b.label}>
             <div
               class={styles.miniBarFill}
-              style={{ height: `${Math.round(b.ratio * 100)}%`, background: barColor(b.ratio) }}
+              style={{ height: `${Math.round(b.ratio * 100)}%`, background: b.color ?? barColor(b.ratio) }}
             />
           </div>
         )}
@@ -107,10 +123,10 @@ export default function StatsIcon(props: { stats: EventStats[]; sessions: Sessio
             fill={hasStats() ? barColor(memRatio()) : "var(--color-border)"} />
           {/* Bottom-left: NET */}
           <rect x="0" y={9 + (8 - Math.round(netRatio() * 8))} width="6" height={Math.round(netRatio() * 8)} rx="1"
-            fill={hasStats() ? barColor(netRatio()) : "var(--color-border)"} />
+            fill={hasStats() ? netColor((latest()?.netRx ?? 0) + (latest()?.netTx ?? 0)) : "var(--color-border)"} />
           {/* Bottom-right: DISK */}
           <rect x="10" y={9 + (8 - Math.round(diskRatio() * 8))} width="6" height={Math.round(diskRatio() * 8)} rx="1"
-            fill={hasStats() ? barColor(diskRatio()) : "var(--color-border)"} />
+            fill={hasStats() ? diskColor(latest()?.diskUsed ?? 0) : "var(--color-border)"} />
         </svg>
       </button>
       <Show when={open()}>
@@ -145,14 +161,14 @@ export default function StatsIcon(props: { stats: EventStats[]; sessions: Sessio
                           <span title="Transmitted">{formatBytes(s.netTx)}</span>
                         </td>
                         <td class={styles.statBars}>
-                          <MiniBarGroup bars={recent.map((r) => ({ ratio: Math.min(1, (r.netRx + r.netTx) / maxNet()), label: formatBytes(r.netRx + r.netTx) }))} />
+                          <MiniBarGroup bars={recent.map((r) => ({ ratio: Math.min(1, (r.netRx + r.netTx) / maxNet()), label: formatBytes(r.netRx + r.netTx), color: netColor(r.netRx + r.netTx) }))} />
                         </td>
                       </tr>
                       <tr>
                         <td class={styles.statLabel}>DISK</td>
                         <td class={styles.statValue}>{s.diskUsed >= 0 ? formatBytes(s.diskUsed) : "—"}</td>
                         <td class={styles.statBars}>
-                          <MiniBarGroup bars={recent.map((r) => ({ ratio: Math.min(1, Math.max(0, r.diskUsed) / maxDisk()), label: r.diskUsed >= 0 ? formatBytes(r.diskUsed) : "—" }))} />
+                          <MiniBarGroup bars={recent.map((r) => ({ ratio: Math.min(1, Math.max(0, r.diskUsed) / maxDisk()), label: r.diskUsed >= 0 ? formatBytes(r.diskUsed) : "—", color: diskColor(Math.max(0, r.diskUsed)) }))} />
                         </td>
                       </tr>
                     </tbody>
