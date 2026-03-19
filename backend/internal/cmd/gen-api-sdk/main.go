@@ -346,6 +346,7 @@ var kotlinAliases = []kotlinTypeAlias{
 			{"Claude", string(v1.HarnessClaude)},
 			{"Codex", string(v1.HarnessCodex)},
 			{"Gemini", string(v1.HarnessGemini)},
+			{"OpenCode", string(v1.HarnessOpenCode)},
 		},
 	},
 	{
@@ -1220,6 +1221,7 @@ var swiftAliases = []kotlinTypeAlias{
 			{"Claude", string(v1.HarnessClaude)},
 			{"Codex", string(v1.HarnessCodex)},
 			{"Gemini", string(v1.HarnessGemini)},
+			{"OpenCode", string(v1.HarnessOpenCode)},
 		},
 	},
 	{

@@ -237,10 +237,11 @@ type mdBackend struct {
 
 func (b *mdBackend) mdStartOpts(labels []string, opts *task.StartOptions) (client *md.Client, mdOpts *md.StartOpts) {
 	harnessMap := map[agent.Harness]md.Harness{
-		agent.Claude: md.HarnessClaude,
-		agent.Codex:  md.HarnessCodex,
-		agent.Gemini: md.HarnessGemini,
-		agent.Kilo:   md.HarnessKilo,
+		agent.Claude:   md.HarnessClaude,
+		agent.Codex:    md.HarnessCodex,
+		agent.Gemini:   md.HarnessGemini,
+		agent.Kilo:     md.HarnessKilo,
+		agent.OpenCode: md.HarnessOpencode,
 	}
 	mdHarness := harnessMap[opts.Harness]
 	harnessPaths := md.HarnessMounts[mdHarness]
@@ -268,10 +269,11 @@ func (b *mdBackend) Launch(ctx context.Context, repos []md.Repo, labels []string
 		slog.Info("md", "phase", "launch", "hns", opts.Harness)
 	}
 	if _, ok := map[agent.Harness]md.Harness{
-		agent.Claude: md.HarnessClaude,
-		agent.Codex:  md.HarnessCodex,
-		agent.Gemini: md.HarnessGemini,
-		agent.Kilo:   md.HarnessKilo,
+		agent.Claude:   md.HarnessClaude,
+		agent.Codex:    md.HarnessCodex,
+		agent.Gemini:   md.HarnessGemini,
+		agent.Kilo:     md.HarnessKilo,
+		agent.OpenCode: md.HarnessOpencode,
 	}[opts.Harness]; !ok {
 		return fmt.Errorf("unknown harness %q", opts.Harness)
 	}

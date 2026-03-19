@@ -19,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claude"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
+	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/gitutil"
 	"golang.org/x/sync/errgroup"
@@ -118,8 +119,9 @@ func (r *Runner) initDefaults() {
 	r.initOnce.Do(func() {
 		if r.Backends == nil {
 			r.Backends = map[agent.Harness]agent.Backend{
-				agent.Claude: claude.New(),
-				agent.Codex:  codex.New(),
+				agent.Claude:   claude.New(),
+				agent.Codex:    codex.New(),
+				agent.OpenCode: opencode.New(),
 			}
 		}
 		if r.GitTimeout == 0 {

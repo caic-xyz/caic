@@ -12,10 +12,11 @@ type Harness string
 
 // Supported agent harnesses.
 const (
-	Claude Harness = "claude"
-	Codex  Harness = "codex"
-	Gemini Harness = "gemini"
-	Kilo   Harness = "kilo"
+	Claude   Harness = "claude"
+	Codex    Harness = "codex"
+	Gemini   Harness = "gemini"
+	Kilo     Harness = "kilo"
+	OpenCode Harness = "opencode"
 )
 
 // DiffFileStat describes changes to a single file.

@@ -11,6 +11,7 @@ object Harnesses {
     const val Claude: Harness = "claude"
     const val Codex: Harness = "codex"
     const val Gemini: Harness = "gemini"
+    const val OpenCode: Harness = "opencode"
 }
 
 typealias EventKind = String

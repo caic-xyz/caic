@@ -40,6 +40,7 @@ public enum Harnesses {
     public static let Claude: Harness = "claude"
     public static let Codex: Harness = "codex"
     public static let Gemini: Harness = "gemini"
+    public static let OpenCode: Harness = "opencode"
 }
 
 public typealias EventKind = String

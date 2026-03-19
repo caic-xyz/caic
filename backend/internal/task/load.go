@@ -19,6 +19,7 @@ import (
 	agentcodex "github.com/caic-xyz/caic/backend/internal/agent/codex"
 	agentgemini "github.com/caic-xyz/caic/backend/internal/agent/gemini"
 	agentkilo "github.com/caic-xyz/caic/backend/internal/agent/kilo"
+	agentopencode "github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
@@ -392,6 +393,8 @@ func parseFnForHarness(h agent.Harness) func([]byte) ([]agent.Message, error) {
 		return agentgemini.ParseMessage
 	case agent.Kilo:
 		return agentkilo.ParseMessage
+	case agent.OpenCode:
+		return agentopencode.ParseMessage
 	default:
 		return agentclaude.ParseMessage
 	}
