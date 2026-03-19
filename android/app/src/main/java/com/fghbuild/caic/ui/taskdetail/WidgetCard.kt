@@ -9,11 +9,17 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -30,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.fghbuild.caic.ui.theme.appColors
 import com.fghbuild.caic.util.MessageGroup
 
@@ -106,6 +114,7 @@ fun WidgetCard(group: MessageGroup) {
     var webViewReady by remember { mutableStateOf(false) }
     var lastPostedHTML by remember { mutableStateOf("") }
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
+    var showFullscreen by remember { mutableStateOf(false) }
 
     val borderColor = MaterialTheme.appColors.widgetBorder
     val bgColor = MaterialTheme.appColors.widgetBg
@@ -161,6 +170,14 @@ fun WidgetCard(group: MessageGroup) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Spacer(modifier = Modifier.weight(1f))
+                IconButton(onClick = { showFullscreen = true }) {
+                    Icon(
+                        imageVector = Icons.Default.Fullscreen,
+                        contentDescription = "Fullscreen",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             // WebView
             AndroidView(
@@ -204,6 +221,128 @@ fun WidgetCard(group: MessageGroup) {
                     }
                 },
             )
+        }
+    }
+
+    if (showFullscreen) {
+        WidgetFullscreenDialog(
+            group = group,
+            onDismiss = { showFullscreen = false },
+        )
+    }
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun WidgetFullscreenDialog(group: MessageGroup, onDismiss: () -> Unit) {
+    val density = LocalDensity.current
+    var fsWebViewReady by remember { mutableStateOf(false) }
+    var fsLastPostedHTML by remember { mutableStateOf("") }
+    val fsWebViewRef = remember { mutableStateOf<WebView?>(null) }
+
+    val bgColor = MaterialTheme.appColors.widgetBg
+
+    LaunchedEffect(group.widgetHTML, group.widgetDone, fsWebViewReady) {
+        val html = group.widgetHTML ?: return@LaunchedEffect
+        if (!fsWebViewReady) return@LaunchedEffect
+        if (html != fsLastPostedHTML) {
+            fsLastPostedHTML = html
+            val escaped = escapeForJsString(html)
+            fsWebViewRef.value?.evaluateJavascript("window._setContent('$escaped')", null)
+            if (group.widgetDone) {
+                fsWebViewRef.value?.evaluateJavascript("window._runScripts()", null)
+            }
+        } else if (group.widgetDone) {
+            fsWebViewRef.value?.evaluateJavascript("window._runScripts()", null)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            fsWebViewRef.value?.destroy()
+            fsWebViewRef.value = null
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = bgColor,
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = group.widgetTitle ?: "Widget",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (group.widgetDone) "\u2713" else "\u25CF streaming",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close fullscreen",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                AndroidView(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                    factory = { context ->
+                        WebView(context).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            addJavascriptInterface(object {
+                                @JavascriptInterface
+                                @Suppress("unused")
+                                fun onResize(@Suppress("UNUSED_PARAMETER") heightPx: Int) {
+                                    // Fullscreen — no height adjustment needed.
+                                }
+
+                                @JavascriptInterface
+                                @Suppress("unused")
+                                fun onError(@Suppress("UNUSED_PARAMETER") message: String) {
+                                    // Widget script error — logged for debugging.
+                                }
+                            }, "_Android")
+                            webViewClient = object : WebViewClient() {
+                                override fun onPageFinished(view: WebView?, url: String?) {
+                                    fsWebViewReady = true
+                                    val html = group.widgetHTML
+                                    if (html != null) {
+                                        fsLastPostedHTML = html
+                                        val escaped = escapeForJsString(html)
+                                        view?.evaluateJavascript(
+                                            "window._setContent('$escaped')",
+                                            null,
+                                        )
+                                        if (group.widgetDone) {
+                                            view?.evaluateJavascript("window._runScripts()", null)
+                                        }
+                                    }
+                                }
+                            }
+                            loadDataWithBaseURL(null, SHELL_HTML, "text/html", "utf-8", null)
+                            fsWebViewRef.value = this
+                        }
+                    },
+                )
+            }
         }
     }
 }
