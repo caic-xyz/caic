@@ -66,6 +66,7 @@ public enum EventKinds {
     public static let ToolOutputDelta: EventKind = "toolOutputDelta"
     public static let Widget: EventKind = "widget"
     public static let WidgetDelta: EventKind = "widgetDelta"
+    public static let RateLimit: EventKind = "rateLimit"
 }
 
 public enum ErrorCodes {
@@ -510,6 +511,18 @@ public struct EventWidgetDelta: Codable {
     public let delta: String
 }
 
+/// EventRateLimit is emitted when the agent's rate limit status changes.
+public struct EventRateLimit: Codable {
+    /// "allowed", "allowed_warning", "rejected".
+    public let status: String
+    /// Unix epoch seconds; 0 if unknown.
+    public let resetsAt: Double
+    /// "five_hour", "seven_day", etc.
+    public let rateLimitType: String
+    /// 0.0–1.0.
+    public let utilization: Double
+}
+
 // Backend-neutral event types
 
 /// EventMessage is a single SSE event in the backend-neutral stream
@@ -538,6 +551,7 @@ public struct EventMessage: Codable {
     public let toolOutputDelta: EventToolOutputDelta?
     public let widget: EventWidget?
     public let widgetDelta: EventWidgetDelta?
+    public let rateLimit: EventRateLimit?
 }
 
 /// InputReq is the request body for POST /api/v1/tasks/{id}/input.

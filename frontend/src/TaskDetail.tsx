@@ -788,9 +788,36 @@ function SessionBoundaryItem(props: { event: EventMessage }) {
   );
 }
 
+function RateLimitBanner(props: { ev: EventMessage }) {
+  const rl = () => props.ev.rateLimit;
+  const resetsLabel = () => {
+    const r = rl()?.resetsAt;
+    if (!r) return "";
+    const d = new Date(r * 1000);
+    return ` · resets ${d.toLocaleTimeString()}`;
+  };
+  return (
+    <Switch>
+      <Match when={rl()?.status === "rejected"}>
+        <div class={styles.rateLimitRejected}>
+          Rate limited ({rl()?.rateLimitType || "unknown"}){resetsLabel()}
+        </div>
+      </Match>
+      <Match when={rl()?.status === "allowed_warning"}>
+        <div class={styles.rateLimitWarning}>
+          Rate limit warning: {Math.round((rl()?.utilization ?? 0) * 100)}% of {rl()?.rateLimitType || "quota"} used{resetsLabel()}
+        </div>
+      </Match>
+    </Switch>
+  );
+}
+
 function MessageItem(props: { ev: EventMessage }) {
   return (
     <Switch>
+      <Match when={props.ev.rateLimit}>
+        <RateLimitBanner ev={props.ev} />
+      </Match>
       <Match when={props.ev.system?.subtype === "context_cleared"}>
         <div class={styles.contextCleared}>Context cleared</div>
       </Match>

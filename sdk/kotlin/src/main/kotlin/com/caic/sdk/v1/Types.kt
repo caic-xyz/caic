@@ -37,6 +37,7 @@ object EventKinds {
     const val ToolOutputDelta: EventKind = "toolOutputDelta"
     const val Widget: EventKind = "widget"
     const val WidgetDelta: EventKind = "widgetDelta"
+    const val RateLimit: EventKind = "rateLimit"
 }
 
 object ErrorCodes {
@@ -442,6 +443,15 @@ data class EventWidgetDelta(
     val delta: String,
 )
 
+/** EventRateLimit is emitted when the agent's rate limit status changes. */
+@Serializable
+data class EventRateLimit(
+    val status: String,
+    val resetsAt: Double,
+    val rateLimitType: String,
+    val utilization: Double,
+)
+
 // Backend-neutral event types
 
 /**
@@ -473,6 +483,7 @@ data class EventMessage(
     val toolOutputDelta: EventToolOutputDelta? = null,
     val widget: EventWidget? = null,
     val widgetDelta: EventWidgetDelta? = null,
+    val rateLimit: EventRateLimit? = null,
 )
 
 /** InputReq is the request body for POST /api/v1/tasks/{id}/input. */

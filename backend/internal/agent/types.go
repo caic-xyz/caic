@@ -308,6 +308,17 @@ type WidgetDeltaMessage struct {
 // Type implements Message.
 func (m *WidgetDeltaMessage) Type() string { return "widget_delta" }
 
+// RateLimitMessage is emitted when the CLI reports a rate limit status change.
+type RateLimitMessage struct {
+	Status        string  `json:"status"`          // "allowed", "allowed_warning", "rejected".
+	ResetsAt      float64 `json:"resets_at"`       // Unix epoch seconds; 0 if unknown.
+	RateLimitType string  `json:"rate_limit_type"` // "five_hour", "seven_day", etc.; empty if unknown.
+	Utilization   float64 `json:"utilization"`     // 0.0–1.0; 0 if unknown.
+}
+
+// Type implements Message.
+func (m *RateLimitMessage) Type() string { return "rate_limit" }
+
 // RawMessage is a pass-through for message types we don't need to inspect
 // (tool_progress, etc.).
 type RawMessage struct {

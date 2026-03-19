@@ -262,6 +262,17 @@ func (tt *toolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 			}}
 		}
 		return nil
+	case *agent.RateLimitMessage:
+		return []v1.EventMessage{{
+			Kind: v1.EventKindRateLimit,
+			Ts:   ts,
+			RateLimit: &v1.EventRateLimit{
+				Status:        m.Status,
+				ResetsAt:      m.ResetsAt,
+				RateLimitType: m.RateLimitType,
+				Utilization:   m.Utilization,
+			},
+		}}
 	default:
 		return nil
 	}

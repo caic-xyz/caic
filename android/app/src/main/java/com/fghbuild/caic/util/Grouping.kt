@@ -311,6 +311,13 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
                     ))
                 }
             }
+            EventKinds.RateLimit -> {
+                // Only surface warning/rejected statuses; "allowed" is not interesting.
+                val status = ev.rateLimit?.status
+                if (status != null && status != "allowed") {
+                    groups.add(MutableGroup(kind = GroupKind.OTHER, events = mutableListOf(ev)))
+                }
+            }
             // Subagent lifecycle events are not rendered. Explicitly listed to
             // avoid creating OTHER groups that act as hard barriers.
             EventKinds.SubagentStart, EventKinds.SubagentEnd -> {}

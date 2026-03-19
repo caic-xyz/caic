@@ -165,6 +165,26 @@ a.headerPR:hover {
   word-break: break-all;
 }
 
+.rateLimitWarning {
+  color: var(--color-warning-text);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+  margin-bottom: 0.25rem;
+}
+
+.rateLimitRejected {
+  color: var(--color-danger-text);
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+  margin-bottom: 0.25rem;
+}
+
 .userInputMsg {
   margin-bottom: 0.5rem;
   padding: 0.4rem 0.6rem;

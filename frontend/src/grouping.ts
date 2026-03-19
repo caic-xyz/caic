@@ -306,6 +306,12 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
         }
         break;
       }
+      case "rateLimit":
+        // Only surface warning/rejected statuses; "allowed" is not interesting.
+        if (ev.rateLimit && ev.rateLimit.status !== "allowed") {
+          groups.push({ kind: "other", events: [ev], toolCalls: [] });
+        }
+        break;
       case "subagentStart":
       case "subagentEnd":
         // Skip: subagent lifecycle events are not rendered yet. Explicitly

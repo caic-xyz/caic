@@ -159,13 +159,16 @@ func ParseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, e
 	case "stream_event":
 		return parseStreamEvent(line, wt)
 	case "rate_limit_event":
-		// Unmarshal to validate and suppress unknown-field warnings;
-		// rate limit events are not surfaced to the UI.
 		var w rateLimitEventWire
 		if err := json.Unmarshal(line, &w); err != nil {
 			return nil, err
 		}
-		return nil, nil
+		return []agent.Message{&agent.RateLimitMessage{
+			Status:        w.RateLimitInfo.Status,
+			ResetsAt:      jsonFloat64(w.RateLimitInfo.ResetsAt),
+			RateLimitType: jsonString(w.RateLimitInfo.RateLimitType),
+			Utilization:   jsonFloat64(w.RateLimitInfo.Utilization),
+		}}, nil
 	case "caic_diff_stat":
 		var m agent.DiffStatMessage
 		if err := json.Unmarshal(line, &m); err != nil {
@@ -481,4 +484,13 @@ func jsonString(raw json.RawMessage) string {
 		_ = json.Unmarshal(raw, &s)
 	}
 	return s
+}
+
+// jsonFloat64 extracts a JSON number value from a json.RawMessage.
+func jsonFloat64(raw json.RawMessage) float64 {
+	var f float64
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &f)
+	}
+	return f
 }

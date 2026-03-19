@@ -36,6 +36,7 @@ const (
 	EventKindToolOutputDelta EventKind = "toolOutputDelta"
 	EventKindWidget          EventKind = "widget"
 	EventKindWidgetDelta     EventKind = "widgetDelta"
+	EventKindRateLimit       EventKind = "rateLimit"
 )
 
 // EventMessage is a single SSE event in the backend-neutral stream
@@ -64,6 +65,7 @@ type EventMessage struct {
 	ToolOutputDelta *EventToolOutputDelta `json:"toolOutputDelta,omitempty"`
 	Widget          *EventWidget          `json:"widget,omitempty"`
 	WidgetDelta     *EventWidgetDelta     `json:"widgetDelta,omitempty"`
+	RateLimit       *EventRateLimit       `json:"rateLimit,omitempty"`
 }
 
 // EventInit is emitted once at the start of a session. It includes a Harness
@@ -230,4 +232,12 @@ type EventWidget struct {
 type EventWidgetDelta struct {
 	ToolUseID string `json:"toolUseID"`
 	Delta     string `json:"delta"`
+}
+
+// EventRateLimit is emitted when the agent's rate limit status changes.
+type EventRateLimit struct {
+	Status        string  `json:"status"`        // "allowed", "allowed_warning", "rejected".
+	ResetsAt      float64 `json:"resetsAt"`      // Unix epoch seconds; 0 if unknown.
+	RateLimitType string  `json:"rateLimitType"` // "five_hour", "seven_day", etc.
+	Utilization   float64 `json:"utilization"`   // 0.0–1.0.
 }

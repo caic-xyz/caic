@@ -372,6 +372,7 @@ var kotlinAliases = []kotlinTypeAlias{
 			{"ToolOutputDelta", string(v1.EventKindToolOutputDelta)},
 			{"Widget", string(v1.EventKindWidget)},
 			{"WidgetDelta", string(v1.EventKindWidgetDelta)},
+			{"RateLimit", string(v1.EventKindRateLimit)},
 		},
 	},
 }
@@ -1247,6 +1248,7 @@ var swiftAliases = []kotlinTypeAlias{
 			{"ToolOutputDelta", string(v1.EventKindToolOutputDelta)},
 			{"Widget", string(v1.EventKindWidget)},
 			{"WidgetDelta", string(v1.EventKindWidgetDelta)},
+			{"RateLimit", string(v1.EventKindRateLimit)},
 		},
 	},
 }

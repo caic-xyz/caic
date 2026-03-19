@@ -162,6 +162,41 @@ fun MessageGroupContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                event?.kind == EventKinds.RateLimit -> {
+                    val rl = event.rateLimit
+                    if (rl != null) {
+                        val resetsLabel = if (rl.resetsAt > 0) {
+                            val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+                            " · resets ${fmt.format(java.util.Date((rl.resetsAt * 1000).toLong()))}"
+                        } else ""
+                        val isRejected = rl.status == "rejected"
+                        val text = if (isRejected) {
+                            "Rate limited (${rl.rateLimitType.ifBlank { "unknown" }})$resetsLabel"
+                        } else {
+                            val pct = (rl.utilization * 100).toInt()
+                            "Rate limit warning: $pct% of ${rl.rateLimitType.ifBlank { "quota" }} used$resetsLabel"
+                        }
+                        val bgColor = if (isRejected) {
+                            MaterialTheme.colorScheme.errorContainer
+                        } else {
+                            MaterialTheme.appColors.warningBg
+                        }
+                        val fgColor = if (isRejected) {
+                            MaterialTheme.colorScheme.onErrorContainer
+                        } else {
+                            MaterialTheme.appColors.warningText
+                        }
+                        Text(
+                            text = text,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = fgColor,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(color = bgColor, shape = MaterialTheme.shapes.small)
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                }
                 event?.kind == EventKinds.System -> {
                     val subtype = event.system?.subtype
                     if (!subtype.isNullOrBlank()) {

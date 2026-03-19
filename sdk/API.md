@@ -631,6 +631,17 @@ EventWidgetDelta is a streaming HTML fragment for progressive widget rendering.
 | `toolUseID` | `string` |  | yes |
 | `delta` | `string` |  | yes |
 
+### EventRateLimit
+
+EventRateLimit is emitted when the agent's rate limit status changes.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `status` | `string` | "allowed", "allowed_warning", "rejected". | yes |
+| `resetsAt` | `number` | Unix epoch seconds; 0 if unknown. | yes |
+| `rateLimitType` | `string` | "five_hour", "seven_day", etc. | yes |
+| `utilization` | `number` | 0.0–1.0. | yes |
+
 ### EventMessage
 
 EventMessage is a single SSE event in the backend-neutral stream
@@ -661,6 +672,7 @@ EventMessage is a single SSE event in the backend-neutral stream
 | `toolOutputDelta` | `EventToolOutputDelta` |  |  |
 | `widget` | `EventWidget` |  |  |
 | `widgetDelta` | `EventWidgetDelta` |  |  |
+| `rateLimit` | `EventRateLimit` |  |  |
 
 ### InputReq
 

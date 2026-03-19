@@ -102,6 +102,10 @@ export const EventKindWidget: EventKind = "widget";
  */
 export const EventKindWidgetDelta: EventKind = "widgetDelta";
 /**
+ * Event kind constants.
+ */
+export const EventKindRateLimit: EventKind = "rateLimit";
+/**
  * EventMessage is a single SSE event in the backend-neutral stream
  * (/api/v1/tasks/{id}/events). All backends produce these events.
  */
@@ -129,6 +133,7 @@ export interface EventMessage {
   toolOutputDelta?: EventToolOutputDelta;
   widget?: EventWidget;
   widgetDelta?: EventWidgetDelta;
+  rateLimit?: EventRateLimit;
 }
 /**
  * EventInit is emitted once at the start of a session. It includes a Harness
@@ -319,6 +324,15 @@ export interface EventWidget {
 export interface EventWidgetDelta {
   toolUseID: string;
   delta: string;
+}
+/**
+ * EventRateLimit is emitted when the agent's rate limit status changes.
+ */
+export interface EventRateLimit {
+  status: string; // "allowed", "allowed_warning", "rejected".
+  resetsAt: number /* float64 */; // Unix epoch seconds; 0 if unknown.
+  rateLimitType: string; // "five_hour", "seven_day", etc.
+  utilization: number /* float64 */; // 0.0–1.0.
 }
 
 //////////
