@@ -158,6 +158,14 @@ func ParseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, e
 		}}, nil
 	case "stream_event":
 		return parseStreamEvent(line, wt)
+	case "rate_limit_event":
+		// Unmarshal to validate and suppress unknown-field warnings;
+		// rate limit events are not surfaced to the UI.
+		var w rateLimitEventWire
+		if err := json.Unmarshal(line, &w); err != nil {
+			return nil, err
+		}
+		return nil, nil
 	case "caic_diff_stat":
 		var m agent.DiffStatMessage
 		if err := json.Unmarshal(line, &m); err != nil {
