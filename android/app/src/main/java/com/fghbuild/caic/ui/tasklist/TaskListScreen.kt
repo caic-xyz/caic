@@ -258,6 +258,24 @@ private fun MainContent(
 ) {
     val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
 
+    // Auto-expand the stopped section for a repo when a task newly enters it.
+    val prevStoppedIds = remember { mutableSetOf<String>() }
+    LaunchedEffect(state.groups) {
+        for (group in state.groups) {
+            for (task in group.stopped) {
+                if (task.id !in prevStoppedIds) {
+                    expandedGroups["stopped_${group.repo}"] = true
+                }
+            }
+        }
+        prevStoppedIds.clear()
+        for (group in state.groups) {
+            for (task in group.stopped) {
+                prevStoppedIds.add(task.id)
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             modifier = Modifier

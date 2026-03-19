@@ -1,5 +1,5 @@
 // Sidebar task list with collapsible panel, grouped by repo for active tasks.
-import { For, Index, Show, createSignal } from "solid-js";
+import { For, Index, Show, createEffect, createSignal } from "solid-js";
 import type { Accessor } from "solid-js";
 import type { CIStatus, Repo, Task } from "@sdk/types.gen";
 import TaskCard from "./TaskCard";
@@ -144,6 +144,30 @@ export default function TaskList(props: TaskListProps) {
 
     return sortedGroups;
   };
+
+  // Auto-expand the stopped section for a repo when a task newly enters it.
+  let prevStoppedIds = new Set<string>();
+  createEffect(() => {
+    const g = grouped();
+    const currentStoppedIds = new Set<string>();
+    const reposWithNewStopped: string[] = [];
+    for (const group of g) {
+      for (const t of group.stopped) {
+        currentStoppedIds.add(t.id);
+        if (!prevStoppedIds.has(t.id)) {
+          reposWithNewStopped.push(group.repo);
+        }
+      }
+    }
+    prevStoppedIds = currentStoppedIds;
+    if (reposWithNewStopped.length > 0) {
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        for (const repo of reposWithNewStopped) next.add(`stopped-${repo}`);
+        return next;
+      });
+    }
+  });
 
   const renderTask = (t: () => Task) => (
     <TaskCard
