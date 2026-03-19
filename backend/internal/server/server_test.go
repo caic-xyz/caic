@@ -82,6 +82,7 @@ func newTestServer(t *testing.T) *Server {
 		changed:      make(chan struct{}),
 		prefs:        newTestPrefs(t),
 		ipgeoChecker: checker,
+		forge:        newForgeManager("", "", nil),
 	}
 }
 
@@ -1949,8 +1950,8 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 func TestForgeFor(t *testing.T) {
 	t.Run("PAT", func(t *testing.T) {
 		s := newTestServer(t)
-		s.githubToken = "pat-token"
-		f := s.forgeFor(t.Context(), forge.KindGitHub)
+		s.forge.githubToken = "pat-token"
+		f := s.forge.forgeFor(t.Context(), forge.KindGitHub)
 		if f == nil {
 			t.Fatal("forgeFor returned nil with PAT set")
 		}
@@ -1958,7 +1959,7 @@ func TestForgeFor(t *testing.T) {
 
 	t.Run("no token returns nil", func(t *testing.T) {
 		s := newTestServer(t)
-		f := s.forgeFor(t.Context(), forge.KindGitHub)
+		f := s.forge.forgeFor(t.Context(), forge.KindGitHub)
 		if f != nil {
 			t.Fatal("forgeFor should return nil when no tokens available")
 		}
@@ -1974,7 +1975,7 @@ func TestForgeFor(t *testing.T) {
 		s.authStore = store
 		// OAuth mode but no user in context and no PAT — returns nil.
 		// CI polling is driven by SSE handlers which have user context.
-		f := s.forgeFor(t.Context(), forge.KindGitHub)
+		f := s.forge.forgeFor(t.Context(), forge.KindGitHub)
 		if f != nil {
 			t.Fatal("forgeFor should return nil without user context or PAT")
 		}

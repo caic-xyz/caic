@@ -159,7 +159,7 @@ func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 // webhookOnCI handles a CI completion event from a forge webhook by fetching
 // the current check-run state and updating affected tasks and repos.
 func (s *Server) webhookOnCI(ctx context.Context, kind forge.Kind, owner, repo, sha string) {
-	f := s.forgeFor(ctx, kind)
+	f := s.forge.forgeFor(ctx, kind)
 	if f == nil {
 		return
 	}
@@ -255,7 +255,7 @@ func (s *Server) handleIssuesEvent(ctx context.Context, ev *github.IssuesEvent) 
 		Body:          ev.Issue.Body,
 		HTMLURL:       ev.Issue.HTMLURL,
 		Labels:        labels,
-	}, s.commenterFor(ev.Installation.ID))
+	}, s.forge.commenterFor(ev.Installation.ID))
 }
 
 // handlePullRequestEvent creates a task when a PR is opened or reopened,
@@ -324,7 +324,7 @@ func (s *Server) handlePRForExistingTask(ctx context.Context, ev *github.PullReq
 			// Start CI monitoring.
 			ri := s.repoByForge(owner + "/" + repo)
 			if ri != nil {
-				f := s.forgeFor(ctx, ri.ForgeKind)
+				f := s.forge.forgeFor(ctx, ri.ForgeKind)
 				if f != nil {
 					s.mu.Lock()
 					entry.monitorBranch = branch
@@ -338,7 +338,7 @@ func (s *Server) handlePRForExistingTask(ctx context.Context, ev *github.PullReq
 				"task", entry.task.ID, "repo", owner+"/"+repo, "br", branch, "pr", prNumber, "sha", sha[:min(7, len(sha))])
 			ri := s.repoByForge(owner + "/" + repo)
 			if ri != nil {
-				go s.monitorCI(ctx, entry, s.forgeFor(ctx, ri.ForgeKind), owner, repo, sha)
+				go s.monitorCI(ctx, entry, s.forge.forgeFor(ctx, ri.ForgeKind), owner, repo, sha)
 			}
 		}
 	}
@@ -357,7 +357,7 @@ func (s *Server) handleIssueCommentEvent(ctx context.Context, ev *github.IssueCo
 		IssueTitle:    ev.Issue.Title,
 		CommentBody:   ev.Comment.Body,
 		CommentURL:    ev.Comment.HTMLURL,
-	}, s.commenterFor(ev.Installation.ID))
+	}, s.forge.commenterFor(ev.Installation.ID))
 }
 
 // handleInstallationEvent enforces the owner allowlist on new installs.
@@ -369,15 +369,15 @@ func (s *Server) handleInstallationEvent(ctx context.Context, ev *github.Install
 	}
 	login := ev.Installation.Account.Login
 	if s.githubAppAllowedOwners == nil {
-		s.storeInstallationID(login, ev.Installation.ID)
+		s.forge.storeInstallationID(login, ev.Installation.ID)
 		return
 	}
 	if _, ok := s.githubAppAllowedOwners[strings.ToLower(login)]; ok {
-		s.storeInstallationID(login, ev.Installation.ID)
+		s.forge.storeInstallationID(login, ev.Installation.ID)
 		return
 	}
 	slog.Warn("github app: rejecting installation from non-allowed owner", "owner", login, "installation_id", ev.Installation.ID)
-	if err := s.githubApp.DeleteInstallation(ctx, ev.Installation.ID); err != nil {
+	if err := s.forge.githubApp.DeleteInstallation(ctx, ev.Installation.ID); err != nil {
 		slog.Warn("github app: delete installation failed", "owner", login, "err", err)
 	}
 }
@@ -396,7 +396,7 @@ func (s *Server) handleCheckSuiteEvent(ctx context.Context, ev *github.CheckSuit
 	s.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
 
 	sha := ev.CheckSuite.HeadSHA
-	client, err := s.githubApp.ForgeClient(ctx, ev.Installation.ID)
+	client, err := s.forge.githubApp.ForgeClient(ctx, ev.Installation.ID)
 	if err != nil {
 		slog.Warn("handleCheckSuiteEvent: forge client", "err", err)
 		return
@@ -456,7 +456,7 @@ func (s *Server) handleCheckSuiteEvent(ctx context.Context, ev *github.CheckSuit
 func (s *Server) storeInstallationIDFromFullName(fullName string, id int64) {
 	owner, _, ok := strings.Cut(fullName, "/")
 	if ok {
-		s.storeInstallationID(owner, id)
+		s.forge.storeInstallationID(owner, id)
 	}
 }
 
@@ -471,19 +471,6 @@ func (s *Server) repoByForge(fullName string) *repoInfo {
 		if strings.EqualFold(r.ForgeOwner, owner) && strings.EqualFold(r.ForgeRepo, repo) {
 			return r
 		}
-	}
-	return nil
-}
-
-// commenterFor returns a bot.Commenter for posting comments via the GitHub App
-// (when installationID is non-zero) or the configured PAT, or nil if neither
-// is available.
-func (s *Server) commenterFor(installationID int64) bot.Commenter {
-	if s.githubApp != nil && installationID != 0 {
-		return &appInstallCommenter{app: s.githubApp, installationID: installationID}
-	}
-	if s.githubToken != "" {
-		return github.NewClient(s.githubToken, s.githubPATThrottle)
 	}
 	return nil
 }

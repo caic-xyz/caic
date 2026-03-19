@@ -36,7 +36,7 @@ type repoCIState struct {
 // Without an App, it polls every 15 s.
 func (s *Server) monitorCI(ctx context.Context, entry *taskEntry, f forge.Forge, owner, repo, sha string) {
 	t := entry.task
-	slog.Info("monitorCI: start", "task", t.ID, "owner", owner, "repo", repo, "sha", sha, "hasApp", s.githubApp != nil)
+	slog.Info("monitorCI: start", "task", t.ID, "owner", owner, "repo", repo, "sha", sha, "hasApp", s.forge.githubApp != nil)
 
 	// Fast path: result already cached (e.g. after a server restart).
 	if cached, ok := s.ciCache.Get(owner, repo, sha); ok {
@@ -47,7 +47,7 @@ func (s *Server) monitorCI(ctx context.Context, entry *taskEntry, f forge.Forge,
 
 	// With GitHub App: do one initial check to seed pending state, then rely on
 	// check_suite webhook events for the terminal result.
-	if s.githubApp != nil {
+	if s.forge.githubApp != nil {
 		runs, err := f.GetCheckRuns(ctx, owner, repo, sha)
 		if err != nil {
 			if !errors.Is(err, forge.ErrNotFound) {
@@ -328,7 +328,7 @@ func (s *Server) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, dto.BadRequest("no repo info found"))
 		return
 	}
-	f := s.forgeForInfo(r.Context(), info)
+	f := s.forge.forgeForInfo(r.Context(), info)
 	if f == nil {
 		writeError(w, dto.BadRequest("no forge token configured for this repo"))
 		return
@@ -380,7 +380,7 @@ func (s *Server) botFixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateT
 	if info == nil {
 		return nil, dto.BadRequest("repo not found")
 	}
-	f := s.forgeForInfo(ctx, info)
+	f := s.forge.forgeForInfo(ctx, info)
 	if f == nil {
 		return nil, dto.BadRequest("no forge token configured for this repo")
 	}
@@ -451,7 +451,7 @@ func (s *Server) botFixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.StatusR
 	if info == nil {
 		return nil, dto.BadRequest("repo not found")
 	}
-	f := s.forgeForInfo(ctx, info)
+	f := s.forge.forgeForInfo(ctx, info)
 	if f == nil {
 		return nil, dto.BadRequest("no forge token configured for this repo")
 	}
@@ -548,7 +548,7 @@ func (s *Server) pollCIForActiveRepos(ctx context.Context) {
 	defer cancel()
 
 	for _, i := range activeIdx {
-		f := s.forgeForInfo(ctx, &s.repos[i])
+		f := s.forge.forgeForInfo(ctx, &s.repos[i])
 		if f == nil {
 			continue
 		}

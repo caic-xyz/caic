@@ -90,7 +90,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 		s := minimalServer(t)
 		s.repos = []repoInfo{{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}}
 		s.repoCIStatus = make(map[string]repoCIState)
-		s.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}}
+		s.forge.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}}
 
 		s.handleCheckSuiteEvent(context.Background(), &github.CheckSuiteEvent{
 			Action: "completed",
@@ -116,7 +116,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 		s.repos = []repoInfo{{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}}
 		s.repoCIStatus = make(map[string]repoCIState)
 		// HEAD is now "newsha"; the webhook carries "oldsha".
-		s.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}}
+		s.forge.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}}
 
 		s.handleCheckSuiteEvent(context.Background(), &github.CheckSuiteEvent{
 			Action: "completed",
@@ -359,11 +359,11 @@ func minimalServer(t *testing.T) *Server {
 	}
 	ctx := context.Background()
 	return &Server{
-		ctx:                 ctx,
-		ciCache:             cache,
-		tasks:               make(map[string]*taskEntry),
-		repoCIStatus:        make(map[string]repoCIState),
-		changed:             make(chan struct{}, 1),
-		githubInstallations: make(map[string]int64),
+		ctx:          ctx,
+		ciCache:      cache,
+		tasks:        make(map[string]*taskEntry),
+		repoCIStatus: make(map[string]repoCIState),
+		changed:      make(chan struct{}, 1),
+		forge:        newForgeManager("", "", nil),
 	}
 }

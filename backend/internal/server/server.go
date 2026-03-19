@@ -182,25 +182,16 @@ type Server struct {
 	// Agent backends.
 	geminiAPIKey string
 
-	// Throttle transports for forge API calls. GitHub OAuth, PAT, and App tokens
-	// each have separate GitHub-side rate-limit buckets and must not share a throttle.
-	// OAuth is per-user (separate buckets per authenticated user); guarded by mu.
-	githubOAuthThrottles map[string]http.RoundTripper // keyed by user ID
-	githubPATThrottle    http.RoundTripper
-	githubAppThrottle    http.RoundTripper
-	gitlabOAuthThrottles map[string]http.RoundTripper // keyed by user ID
-	gitlabPATThrottle    http.RoundTripper
+	// Forge client management (throttles, App client, installation cache).
+	forge *forgeManager
 
 	// GitHub.
-	githubToken            string
 	githubOAuth            *auth.ProviderConfig // nil if not configured
 	githubAllowedUsers     map[string]struct{}  // nil if GitHub OAuth not configured
 	githubWebhookSecret    []byte               // nil when webhook not configured
-	githubApp              githubAppClient      // nil when app not configured
 	githubAppAllowedOwners map[string]struct{}  // nil = allow all; rejects installs from other owners
 
 	// GitLab.
-	gitlabToken         string
 	gitlabWebhookSecret []byte               // nil when GitLab webhook not configured
 	gitlabOAuth         *auth.ProviderConfig // nil if not configured
 	gitlabAllowedUsers  map[string]struct{}  // nil if GitLab OAuth not configured
@@ -219,11 +210,10 @@ type Server struct {
 	prefs *preferences.Store
 
 	// Guarded by mu.
-	mu                  sync.Mutex
-	tasks               map[string]*taskEntry
-	repoCIStatus        map[string]repoCIState // keyed by repoInfo.RelPath
-	changed             chan struct{}          // closed on task mutation; replaced under mu
-	githubInstallations map[string]int64       // owner (lowercase) → installation ID
+	mu           sync.Mutex
+	tasks        map[string]*taskEntry
+	repoCIStatus map[string]repoCIState // keyed by repoInfo.RelPath
+	changed      chan struct{}          // closed on task mutation; replaced under mu
 }
 
 // mdBackend adapts *md.Client to task.ContainerBackend.
@@ -524,45 +514,38 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		ctx:                  ctx,
-		absRoot:              absRoot,
-		runners:              make(map[string]*task.Runner, len(repoRes.paths)),
-		mdClient:             mdClient,
-		logDir:               logDir,
-		prefs:                prefsStore,
-		authStore:            authStore,
-		sessionSecret:        sessionSecret,
-		githubOAuth:          githubOAuth,
-		gitlabOAuth:          gitlabOAuth,
-		githubAllowedUsers:   githubAllowedUsers,
-		gitlabAllowedUsers:   gitlabAllowedUsers,
-		allowedHost:          allowedHost,
-		autoHostLock:         autoLock,
-		usage:                newUsageFetcher(ctx),
-		geminiAPIKey:         cfg.GeminiAPIKey,
-		githubToken:          cfg.GitHubToken,
-		gitlabToken:          cfg.GitLabToken,
-		githubOAuthThrottles: make(map[string]http.RoundTripper),
-		githubPATThrottle:    newThrottle(),
-		githubAppThrottle:    newThrottle(),
-		gitlabOAuthThrottles: make(map[string]http.RoundTripper),
-		gitlabPATThrottle:    newThrottle(),
-		ciCache:              cache,
-		backend:              backend,
-		tasks:                make(map[string]*taskEntry),
-		repoCIStatus:         make(map[string]repoCIState),
-		changed:              make(chan struct{}),
-		githubInstallations:  make(map[string]int64),
+		ctx:                ctx,
+		absRoot:            absRoot,
+		runners:            make(map[string]*task.Runner, len(repoRes.paths)),
+		mdClient:           mdClient,
+		logDir:             logDir,
+		prefs:              prefsStore,
+		authStore:          authStore,
+		sessionSecret:      sessionSecret,
+		githubOAuth:        githubOAuth,
+		gitlabOAuth:        gitlabOAuth,
+		githubAllowedUsers: githubAllowedUsers,
+		gitlabAllowedUsers: gitlabAllowedUsers,
+		allowedHost:        allowedHost,
+		autoHostLock:       autoLock,
+		usage:              newUsageFetcher(ctx),
+		geminiAPIKey:       cfg.GeminiAPIKey,
+		forge:              newForgeManager(cfg.GitHubToken, cfg.GitLabToken, nil),
+		ciCache:            cache,
+		backend:            backend,
+		tasks:              make(map[string]*taskEntry),
+		repoCIStatus:       make(map[string]repoCIState),
+		changed:            make(chan struct{}),
 	}
 	s.githubWebhookSecret = cfg.GitHubWebhookSecret
 	s.gitlabWebhookSecret = cfg.GitLabWebhookSecret
 
 	if cfg.GitHubAppID != 0 && len(cfg.GitHubAppPrivateKeyPEM) > 0 {
-		app, err := github.NewAppClient(cfg.GitHubAppID, cfg.GitHubAppPrivateKeyPEM, s.githubAppThrottle)
+		app, err := github.NewAppClient(cfg.GitHubAppID, cfg.GitHubAppPrivateKeyPEM, s.forge.githubAppThrottle)
 		if err != nil {
 			return nil, fmt.Errorf("github app: %w", err)
 		}
-		s.githubApp = app
+		s.forge.githubApp = app
 		if cfg.GitHubAppAllowedOwners != "" {
 			s.githubAppAllowedOwners = parseAllowedUsers(cfg.GitHubAppAllowedOwners)
 		}
@@ -829,7 +812,7 @@ func (s *Server) getConfig(_ context.Context, _ *dto.EmptyReq) (*v1.Config, erro
 		TailscaleAvailable: s.mdClient.TailscaleAPIKey != "",
 		USBAvailable:       runtime.GOOS == "linux",
 		DisplayAvailable:   true,
-		GitHubAppEnabled:   s.githubApp != nil,
+		GitHubAppEnabled:   s.forge.githubApp != nil,
 	}
 	if s.authEnabled() {
 		cfg.AuthProviders = s.authProviders()
@@ -1330,7 +1313,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	// With GitHub App configured, CI updates arrive via check_suite webhooks;
 	// use a nil channel so the ticker case is never selected.
 	var ciTickerC <-chan time.Time
-	if s.githubApp == nil {
+	if s.forge.githubApp == nil {
 		t := time.NewTicker(5 * time.Minute)
 		defer t.Stop()
 		ciTickerC = t.C
@@ -1699,7 +1682,7 @@ func (s *Server) syncTask(ctx context.Context, entry *taskEntry, req *v1.SyncReq
 	resp := &v1.SyncResp{Status: status, Branch: syncPrimaryBranch, DiffStat: toV1DiffStat(ds), SafetyIssues: toV1SafetyIssues(issues)}
 	if status != "blocked" {
 		if info := s.repoInfoFor(syncPrimaryName); info != nil {
-			if f := s.forgeForInfo(ctx, info); f != nil {
+			if f := s.forge.forgeForInfo(ctx, info); f != nil {
 				prNumber, err := s.startPRFlow(ctx, entry, f, info, syncPrimaryBranch, s.effectiveBaseBranch(t))
 				if err != nil {
 					slog.Warn("sync: create PR", "repo", info.ForgeRepo, "branch", syncPrimaryBranch, "err", err)
@@ -2217,10 +2200,10 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		t.SetPR(ri.ForgeOwner, ri.ForgeRepo, 0)
 	case ri.ForgeOwner != "" && branch != "" && ri.ForgeKind != "":
 		// Query the forge for an existing PR created outside of caic.
-		f := s.forgeForInfo(ctx, &ri)
+		f := s.forge.forgeForInfo(ctx, &ri)
 		if f == nil && s.authStore != nil {
 			if u, ok := s.authStore.FindByProvider(ri.ForgeKind); ok {
-				f = s.forgeFor(auth.NewContext(ctx, &u), ri.ForgeKind)
+				f = s.forge.forgeFor(auth.NewContext(ctx, &u), ri.ForgeKind)
 			}
 		}
 		if f != nil {
@@ -2299,10 +2282,10 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		// lookup first (PAT / GitHub App), then fall back to a stored
 		// OAuth token from the auth store (most recently seen user for
 		// this forge provider).
-		f := s.forgeForInfo(ctx, &ri)
+		f := s.forge.forgeForInfo(ctx, &ri)
 		if f == nil && s.authStore != nil {
 			if u, ok := s.authStore.FindByProvider(ri.ForgeKind); ok {
-				f = s.forgeFor(auth.NewContext(ctx, &u), ri.ForgeKind)
+				f = s.forge.forgeFor(auth.NewContext(ctx, &u), ri.ForgeKind)
 			}
 		}
 		slog.Info("adopt: CI monitoring", "task", t.ID, "pr", t.GetPR(), "forgeKind", ri.ForgeKind, "forgeOwner", ri.ForgeOwner, "hasForge", f != nil)
