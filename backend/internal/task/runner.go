@@ -929,7 +929,11 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 // backend matching agentName to parse messages.
 func (r *Runner) ReadRelayOutput(ctx context.Context, container string, agentName agent.Harness) ([]agent.Message, int64, error) {
 	r.initDefaults()
-	return r.backend(agentName).ReadRelayOutput(ctx, container)
+	b := r.backend(agentName)
+	if b == nil {
+		return nil, 0, fmt.Errorf("unknown harness %q", agentName)
+	}
+	return b.ReadRelayOutput(ctx, container)
 }
 
 // DiffContent returns the unified diff for the given branch, optionally

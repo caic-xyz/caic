@@ -753,6 +753,17 @@ func TestRunner(t *testing.T) {
 			t.Errorf("BranchDiffStat = %+v, want [{main.go +5 -1}]", ds)
 		}
 	})
+	t.Run("ReadRelayOutput_UnknownHarness", func(t *testing.T) {
+		r := &Runner{
+			Backends: map[agent.Harness]agent.Backend{
+				"test": &testBackend{},
+			},
+		}
+		_, _, err := r.ReadRelayOutput(t.Context(), "ctr", "nonexistent")
+		if err == nil {
+			t.Fatal("expected error for unknown harness, got nil")
+		}
+	})
 }
 
 // stubContainer implements ContainerBackend for testing. Diff returns a fixed
