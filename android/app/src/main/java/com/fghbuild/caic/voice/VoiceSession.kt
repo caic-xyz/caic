@@ -45,12 +45,24 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import com.caic.sdk.v1.VoiceRTCOfferReq
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
+import org.webrtc.DataChannel
+import org.webrtc.IceCandidate
+import org.webrtc.MediaConstraints
+import org.webrtc.MediaStream
+import org.webrtc.PeerConnection
+import org.webrtc.PeerConnectionFactory
+import org.webrtc.RtpReceiver
+import org.webrtc.SdpObserver
+import org.webrtc.SessionDescription
+import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -85,6 +97,10 @@ class VoiceSession @Inject constructor(
         .build()
 
     private var webSocket: WebSocket? = null
+    private var peerConnection: PeerConnection? = null
+    private var dataChannel: DataChannel? = null
+    private var rtcSessionID: String? = null
+    private var pcFactory: PeerConnectionFactory? = null
     private var audioRecord: AudioRecord? = null
     private var audioTrack: AudioTrack? = null
     private var recordingJob: Job? = null
@@ -214,6 +230,159 @@ class VoiceSession @Inject constructor(
         }
     }
 
+    /**
+     * Connect via WebRTC data channel through the caic backend bridge.
+     * The data channel carries the same Gemini protocol as the direct WebSocket;
+     * audio I/O still uses AudioRecord/AudioTrack via PCM over the data channel.
+     */
+    @Suppress("TooGenericExceptionCaught") // Error boundary: surface all failures to UI.
+    fun connectWebRTC() {
+        webSocket?.close(WS_CLOSE_NORMAL, "Switching to WebRTC")
+        webSocket = null
+        clearTranscript()
+        setStatus("Setting up WebRTC…")
+
+        scope.launch {
+            try {
+                val settings = settingsRepository.settings.value
+                if (settings.serverURL.isBlank()) {
+                    setError("Server URL is not configured")
+                    return@launch
+                }
+
+                val apiClient = ApiClient(
+                    settings.serverURL,
+                    tokenProvider = { settingsRepository.settings.value.authToken },
+                )
+                availableHarnesses = apiClient.listHarnesses().map { it.name }
+                availableRepos = apiClient.listRepos().map { it.path }
+                val prefs = settingsRepository.serverPreferences.value
+                defaultHarness = prefs?.harness?.ifBlank { null }
+                    ?: availableHarnesses.firstOrNull() ?: ""
+                defaultModel = prefs?.harness?.let { h -> prefs.models?.get(h) }?.ifBlank { null } ?: ""
+                functionHandlers = FunctionHandlers(
+                    apiClient, taskRepository, settings.serverURL, taskNumberMap,
+                    { excludedTaskIds }, defaultHarness, defaultModel,
+                )
+
+                // Initialize WebRTC factory.
+                if (pcFactory == null) {
+                    PeerConnectionFactory.initialize(
+                        PeerConnectionFactory.InitializationOptions.builder(appContext)
+                            .setEnableInternalTracer(false)
+                            .createInitializationOptions()
+                    )
+                    pcFactory = PeerConnectionFactory.builder().createPeerConnectionFactory()
+                }
+                val factory = pcFactory ?: run {
+                    setError("WebRTC factory init failed")
+                    return@launch
+                }
+
+                val iceServers = listOf(
+                    PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer()
+                )
+                val rtcConfig = PeerConnection.RTCConfiguration(iceServers)
+
+                val pc = factory.createPeerConnection(rtcConfig, createPeerConnectionObserver()) ?: run {
+                    setError("Failed to create PeerConnection")
+                    return@launch
+                }
+                peerConnection = pc
+
+                val dcInit = DataChannel.Init().apply { ordered = true }
+                val dc = pc.createDataChannel("gemini", dcInit) ?: run {
+                    setError("Failed to create data channel")
+                    pc.dispose()
+                    return@launch
+                }
+                dataChannel = dc
+
+                dc.registerObserver(object : DataChannel.Observer {
+                    override fun onBufferedAmountChange(amount: Long) = Unit
+                    override fun onStateChange() {
+                        Log.d(TAG, "DC state: ${dc.state()}")
+                        if (dc.state() == DataChannel.State.OPEN) {
+                            setStatus("Waiting for server…")
+                            val voiceName = settingsRepository.settings.value.voiceName
+                            sendSetupMessage(voiceName)
+                        }
+                    }
+                    override fun onMessage(buffer: DataChannel.Buffer) {
+                        val data = ByteArray(buffer.data.remaining())
+                        buffer.data.get(data)
+                        val text = String(data, StandardCharsets.UTF_8)
+                        scope.launch { handleServerMessage(text) }
+                    }
+                })
+
+                // SDP offer/answer exchange.
+                setStatus("Signaling…")
+                pc.createOffer(object : SdpObserver {
+                    override fun onCreateSuccess(desc: SessionDescription) {
+                        pc.setLocalDescription(noOpSdpObserver(), desc)
+                        scope.launch {
+                            try {
+                                val resp = apiClient.voiceRTCOffer(VoiceRTCOfferReq(sdp = desc.description))
+                                rtcSessionID = resp.sessionID
+                                val answer = SessionDescription(SessionDescription.Type.ANSWER, resp.sdp)
+                                pc.setRemoteDescription(noOpSdpObserver(), answer)
+                                Log.i(TAG, "WebRTC signaling complete, session=${resp.sessionID}")
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                setError("SDP exchange failed: ${e.message}")
+                            }
+                        }
+                    }
+                    override fun onCreateFailure(error: String) {
+                        setError("Create offer failed: $error")
+                    }
+                    override fun onSetSuccess() = Unit
+                    override fun onSetFailure(p0: String) = Unit
+                }, MediaConstraints())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                setError("WebRTC connection failed: ${e.message}")
+            }
+        }
+    }
+
+    @Suppress("TooManyFunctions") // PeerConnection.Observer has many required overrides.
+    private fun createPeerConnectionObserver() = object : PeerConnection.Observer {
+        override fun onIceCandidate(candidate: IceCandidate) = Unit
+        override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
+            Log.d(TAG, "ICE state: $state")
+            when (state) {
+                PeerConnection.IceConnectionState.FAILED,
+                PeerConnection.IceConnectionState.DISCONNECTED,
+                PeerConnection.IceConnectionState.CLOSED -> setError("WebRTC ICE $state")
+                else -> Unit
+            }
+        }
+        override fun onSignalingChange(state: PeerConnection.SignalingState) = Unit
+        override fun onIceConnectionReceivingChange(receiving: Boolean) = Unit
+        override fun onIceGatheringChange(state: PeerConnection.IceGatheringState) = Unit
+        override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>) = Unit
+        override fun onAddStream(stream: MediaStream) = Unit
+        override fun onRemoveStream(stream: MediaStream) = Unit
+        override fun onDataChannel(dc: DataChannel) = Unit
+        override fun onRenegotiationNeeded() = Unit
+        override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) = Unit
+    }
+
+    private fun noOpSdpObserver() = object : SdpObserver {
+        override fun onCreateSuccess(p0: SessionDescription) = Unit
+        override fun onSetSuccess() = Unit
+        override fun onCreateFailure(p0: String) {
+            Log.w(TAG, "SDP failure: $p0")
+        }
+        override fun onSetFailure(p0: String) {
+            Log.w(TAG, "SDP failure: $p0")
+        }
+    }
+
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all failures to UI.
     private fun startAudio() {
         try {
@@ -291,6 +460,13 @@ class VoiceSession @Inject constructor(
         releaseAudio()
         webSocket?.close(WS_CLOSE_NORMAL, "User disconnected")
         webSocket = null
+        dataChannel?.close()
+        dataChannel?.dispose()
+        dataChannel = null
+        peerConnection?.close()
+        peerConnection?.dispose()
+        peerConnection = null
+        rtcSessionID = null
         functionHandlers = null
         // Preserve transcript so the user can review it after disconnecting.
         _state.value = VoiceState(transcript = _state.value.transcript.map { it.copy(final = true) })
@@ -308,6 +484,17 @@ class VoiceSession @Inject constructor(
         sendClientContent(text)
     }
 
+    /** Send a message via whichever transport is active (data channel or WebSocket). */
+    private fun send(text: String) {
+        val dc = dataChannel
+        if (dc != null && dc.state() == DataChannel.State.OPEN) {
+            val buf = ByteBuffer.wrap(text.toByteArray(StandardCharsets.UTF_8))
+            dc.send(DataChannel.Buffer(buf, false))
+        } else {
+            webSocket?.send(text)
+        }
+    }
+
     private fun sendClientContent(text: String) {
         val clientContent = BidiGenerateContentClientContent(
             turns = listOf(
@@ -318,7 +505,7 @@ class VoiceSession @Inject constructor(
             ),
             turnComplete = true,
         )
-        webSocket?.send(json.encodeToString(BidiGenerateContentClientContent.serializer(), clientContent)
+        send(json.encodeToString(BidiGenerateContentClientContent.serializer(), clientContent)
             .wrapTopLevel("clientContent"))
     }
 
@@ -332,7 +519,7 @@ class VoiceSession @Inject constructor(
     private fun sendSetupMessage(voiceName: String) {
         val setup = buildSetupMessage(voiceName, availableHarnesses, availableRepos)
         Log.i(TAG, "sending setup message")
-        webSocket?.send(setup)
+        send(setup)
     }
 
     private fun buildSetupMessage(voiceName: String, harnesses: List<String>, repos: List<String>): String {
@@ -562,7 +749,7 @@ class VoiceSession @Inject constructor(
             }
         }
         val toolResponse = BidiGenerateContentToolResponse(functionResponses = responses)
-        webSocket?.send(
+        send(
             json.encodeToString(BidiGenerateContentToolResponse.serializer(), toolResponse)
                 .wrapTopLevel("toolResponse")
         )
@@ -824,7 +1011,7 @@ class VoiceSession @Inject constructor(
                 data = encoded,
             )
         )
-        webSocket?.send(
+        send(
             json.encodeToString(BidiGenerateContentRealtimeInput.serializer(), realtimeInput)
                 .wrapTopLevel("realtimeInput")
         )

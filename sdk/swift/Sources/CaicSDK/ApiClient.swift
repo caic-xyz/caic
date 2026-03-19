@@ -211,6 +211,10 @@ public final class ApiClient {
     public func webFetch(req: WebFetchReq) async throws -> WebFetchResp {
         try await request("POST", path: "/api/v1/web/fetch", body: try encoder.encode(req))
     }
+    /// Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session.
+    public func voiceRTCOffer(req: VoiceRTCOfferReq) async throws -> VoiceRTCAnswerResp {
+        try await request("POST", path: "/api/v1/voice/rtc/offer", body: try encoder.encode(req))
+    }
 
     // SSE endpoints
     /// Streams raw backend-specific task events via SSE.

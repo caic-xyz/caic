@@ -80,6 +80,10 @@ class VoiceViewModel @Inject constructor(
         voiceSessionManager.connect()
     }
 
+    fun connectWebRTC() {
+        voiceSessionManager.connectWebRTC()
+    }
+
     fun disconnect() {
         voiceSessionManager.disconnect()
     }

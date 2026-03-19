@@ -62,6 +62,7 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
 | GET | `/api/v1/voice/token` | Returns a short-lived voice API token. |  | `VoiceTokenResp` |
+| POST | `/api/v1/voice/rtc/offer` | Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session. | `VoiceRTCOfferReq` | `VoiceRTCAnswerResp` |
 
 ## Web
 
@@ -826,4 +827,21 @@ WebFetchResp is the response for POST /api/v1/web/fetch.
 |-------|------|-------------|----------|
 | `title` | `string` |  | yes |
 | `content` | `string` |  | yes |
+
+### VoiceRTCOfferReq
+
+VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `sdp` | `string` |  | yes |
+
+### VoiceRTCAnswerResp
+
+VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `sdp` | `string` |  | yes |
+| `sessionID` | `string` |  | yes |
 

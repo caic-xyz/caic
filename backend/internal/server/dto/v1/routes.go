@@ -278,4 +278,12 @@ var Routes = []Route{
 		Req:    reflect.TypeFor[WebFetchReq](),
 		Resp:   reflect.TypeFor[WebFetchResp](),
 	},
+	{
+		Name:   "voiceRTCOffer",
+		Doc:    "Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session.",
+		Method: "POST",
+		Path:   "/api/v1/voice/rtc/offer",
+		Req:    reflect.TypeFor[VoiceRTCOfferReq](),
+		Resp:   reflect.TypeFor[VoiceRTCAnswerResp](),
+	},
 }

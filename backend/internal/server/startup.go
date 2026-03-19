@@ -23,6 +23,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
+	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/gitutil"
@@ -174,6 +175,14 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		cache, _ = forgecache.Open("")
 	}
 
+	var voiceBridge *voicertc.Bridge
+	if cfg.WebRTCPort > 0 {
+		voiceBridge, err = voicertc.NewBridge(cfg.GeminiAPIKey, cfg.WebRTCPort)
+		if err != nil {
+			return nil, fmt.Errorf("voice bridge: %w", err)
+		}
+	}
+
 	s := &Server{
 		ctx:                ctx,
 		absRoot:            absRoot,
@@ -192,6 +201,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		usage:              newUsageFetcher(ctx),
 		pprof:              cfg.Pprof,
 		geminiAPIKey:       cfg.GeminiAPIKey,
+		voiceBridge:        voiceBridge,
 		forge:              newForgeManager(cfg.GitHubToken, cfg.GitLabToken, nil),
 		ciCache:            cache,
 		backend:            backend,

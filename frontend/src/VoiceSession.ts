@@ -1,6 +1,6 @@
 // Core Gemini Live voice session manager for the web frontend. Keep in sync with android/app/src/main/java/com/fghbuild/caic/voice/VoiceSession.kt
 import { createStore, produce } from "solid-js/store";
-import { getVoiceToken, listHarnesses, listRepos } from "./api";
+import { getVoiceToken, voiceRTCOffer, listHarnesses, listRepos } from "./api";
 import type { Task } from "@sdk/types.gen";
 import { FunctionHandlers } from "./FunctionHandlers";
 import { TaskNumberMap } from "./TaskNumberMap";
@@ -122,6 +122,7 @@ export interface VoiceState {
   transcript: TranscriptEntry[];
   micLevel: number;
   error: string | null;
+  transport: "websocket" | "webrtc";
 }
 
 // VoiceSession
@@ -136,6 +137,9 @@ export class VoiceSession {
   excludedTaskIds: Set<string> = new Set();
 
   private _ws: WebSocket | null = null;
+  private _pc: RTCPeerConnection | null = null;
+  private _dc: RTCDataChannel | null = null;
+  private _rtcSessionID: string | null = null;
   private _audioContext: AudioContext | null = null;
   private _micStream: MediaStream | null = null;
   private _workletNode: AudioWorkletNode | null = null;
@@ -160,6 +164,7 @@ export class VoiceSession {
       transcript: [],
       micLevel: 0,
       error: null,
+      transport: "websocket",
     });
     // eslint-disable-next-line solid/reactivity
     this.state = state;
@@ -172,11 +177,9 @@ export class VoiceSession {
 
   /** Start a new voice session with current task context. */
   async connect(tasks: Task[], recentRepo: string, defaultHarness = "", defaultModel = ""): Promise<void> {
-    this._ws?.close(1000, "Reconnecting");
-    this._ws = null;
-    // Release audio before any await so we can recreate AudioContext while still
+    // Release all transports before any await so we can recreate AudioContext while still
     // within the user gesture handler (Chrome requires gesture context for running state).
-    this._releaseAudio();
+    this._releaseAll();
     // Create AudioContext now — synchronously within the user gesture, before any await.
     // After an await, Chrome may start the context suspended and refuse to resume it.
     this._audioContext = new AudioContext({ sampleRate: 16000 });
@@ -279,6 +282,145 @@ export class VoiceSession {
     }
   }
 
+  /** Start a new voice session via WebRTC data channel through the caic backend. */
+  async connectWebRTC(tasks: Task[], recentRepo: string, defaultHarness = "", defaultModel = ""): Promise<void> {
+    this._releaseAll();
+    this._audioContext = new AudioContext({ sampleRate: 16000 });
+    this._clearTranscript();
+    this._setStatus("Setting up WebRTC…");
+
+    try {
+      const [harnesses, repos] = await Promise.all([
+        listHarnesses().catch(() => []),
+        listRepos().catch(() => []),
+      ]);
+      const harnessNames = harnesses.map((h) => h.name);
+      const repoPaths = repos.map((r) => r.path);
+
+      // Build task snapshot (same as connect()).
+      const prePurged = new Set(
+        tasks
+          .filter((t) => t.state === "purged" || t.state === "failed" || t.state === "stopped" || t.state === "stopping")
+          .map((t) => t.id),
+      );
+      this.excludedTaskIds = prePurged;
+      const active = tasks
+        .filter((t) => !prePurged.has(t.id))
+        .sort((a, b) => {
+          const lc = a.id.length - b.id.length;
+          if (lc !== 0) return lc;
+          return a.id > b.id ? 1 : a.id < b.id ? -1 : 0;
+        });
+      this.taskNumberMap.reset();
+      this.taskNumberMap.update(active);
+      this._pendingSnapshot = buildSnapshot(active, recentRepo, this.taskNumberMap, defaultHarness, defaultModel);
+      this._functions = new FunctionHandlers(this.taskNumberMap, () => this.excludedTaskIds, defaultHarness, defaultModel);
+
+      // Create PeerConnection.
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      });
+      this._pc = pc;
+
+      // Mic audio → RTP track (browser handles Opus encoding + AEC).
+      this._micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      for (const t of this._micStream.getAudioTracks()) {
+        pc.addTrack(t, this._micStream);
+      }
+
+      // Mic level via AnalyserNode (replaces AudioWorklet RMS in WebRTC mode).
+      if (this._audioContext) {
+        const analyser = this._audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        const source = this._audioContext.createMediaStreamSource(this._micStream);
+        source.connect(analyser);
+        const buf = new Uint8Array(analyser.frequencyBinCount);
+        const pollMicLevel = () => {
+          if (!this._pc || this._pc !== pc) return;
+          analyser.getByteTimeDomainData(buf);
+          let sumSq = 0;
+          for (let i = 0; i < buf.length; i++) {
+            const v = (buf[i] - 128) / 128;
+            sumSq += v * v;
+          }
+          const rms = Math.sqrt(sumSq / buf.length);
+          if (!this.state.muted && !this._speakerActive) {
+            this._update((s) => {
+              s.micLevel = Math.min(1, Math.sqrt(rms));
+            });
+          }
+          requestAnimationFrame(pollMicLevel);
+        };
+        requestAnimationFrame(pollMicLevel);
+      }
+
+      // Speaker audio from remote RTP track.
+      pc.ontrack = (evt) => {
+        const audio = new Audio();
+        audio.srcObject = evt.streams[0];
+        audio.play().catch(() => {
+          // Autoplay may be blocked; user interaction will resume.
+        });
+      };
+
+      // Create data channel carrying the Gemini control protocol (audio stripped).
+      const dc = pc.createDataChannel("gemini", { ordered: true });
+      this._dc = dc;
+
+      dc.onmessage = (evt: MessageEvent<string>) => {
+        this._handleMessage(evt.data).catch((err: unknown) => {
+          this._setError(err instanceof Error ? err.message : "Message handling failed");
+        });
+      };
+
+      dc.onopen = () => {
+        this._setStatus("Waiting for server…");
+        this._sendSetup(harnessNames, repoPaths, defaultHarness);
+      };
+
+      dc.onclose = () => {
+        if (this._dc !== dc) return;
+        if (this.state.connected) {
+          this._update((s) => {
+            s.connected = false;
+            s.listening = false;
+            s.speaking = false;
+          });
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        const st = pc.iceConnectionState;
+        if (st === "failed" || st === "disconnected" || st === "closed") {
+          this._setError(`WebRTC ICE ${st}`);
+        }
+      };
+
+      // Setup timeout.
+      if (this._setupTimer !== null) clearTimeout(this._setupTimer);
+      this._setupTimer = setTimeout(() => {
+        if (this._pc === pc && !this.state.connected) {
+          this._setError("Connection timed out — server did not respond");
+        }
+      }, SETUP_TIMEOUT_MS);
+
+      // SDP offer/answer exchange.
+      this._setStatus("Signaling…");
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      const resp = await voiceRTCOffer({ sdp: offer.sdp ?? "" });
+      this._rtcSessionID = resp.sessionID;
+      await pc.setRemoteDescription({ type: "answer", sdp: resp.sdp });
+
+      this._update((s) => {
+        s.transport = "webrtc";
+        s.listening = true;
+      });
+    } catch (e: unknown) {
+      this._setError(e instanceof Error ? e.message : "WebRTC connection failed");
+    }
+  }
+
   disconnect(): void {
     if (this._setupTimer !== null) {
       clearTimeout(this._setupTimer);
@@ -287,6 +429,11 @@ export class VoiceSession {
     this._releaseAudio();
     this._ws?.close(1000, "User disconnected");
     this._ws = null;
+    this._dc?.close();
+    this._dc = null;
+    this._pc?.close();
+    this._pc = null;
+    this._rtcSessionID = null;
     this._functions = null;
     this._pendingSnapshot = null;
     // Preserve transcript for review; mark all entries final.
@@ -316,8 +463,7 @@ export class VoiceSession {
       this._pendingNotifications.push(text);
       return;
     }
-    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return;
-    this._ws.send(
+    this._send(
       JSON.stringify({
         clientContent: {
           turns: [{ role: "user", parts: [{ text }] }],
@@ -341,6 +487,27 @@ export class VoiceSession {
   // -----------------------------------------------------------------------
   // Private helpers
   // -----------------------------------------------------------------------
+
+  /** Send a message via whichever transport is active (data channel or WebSocket). */
+  private _send(msg: string): void {
+    if (this._dc && this._dc.readyState === "open") {
+      this._dc.send(msg);
+    } else if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+      this._ws.send(msg);
+    }
+  }
+
+  /** Release all transports and audio resources. */
+  private _releaseAll(): void {
+    this._ws?.close(1000, "Reconnecting");
+    this._ws = null;
+    this._dc?.close();
+    this._dc = null;
+    this._pc?.close();
+    this._pc = null;
+    this._rtcSessionID = null;
+    this._releaseAudio();
+  }
 
   private _setStatus(status: string): void {
     this._update((s) => {
@@ -375,7 +542,6 @@ export class VoiceSession {
   // -----------------------------------------------------------------------
 
   private _sendSetup(harnesses: string[], repos: string[], defaultHarness: string): void {
-    if (!this._ws) return;
     const decls = buildFunctionDeclarations(harnesses, repos, defaultHarness || undefined);
     const setup = {
       setup: {
@@ -404,7 +570,7 @@ export class VoiceSession {
         outputAudioTranscription: {},
       },
     };
-    this._ws.send(JSON.stringify(setup));
+    this._send(JSON.stringify(setup));
   }
 
   // -----------------------------------------------------------------------
@@ -429,8 +595,10 @@ export class VoiceSession {
         s.connected = true;
         s.error = null;
       });
-      // Start audio capture.
-      await this._startAudio();
+      // Start audio capture (WebSocket mode only — WebRTC uses RTP tracks).
+      if (!this._pc) {
+        await this._startAudio();
+      }
       // Inject snapshot so Gemini knows current task state.
       if (this._pendingSnapshot) {
         this.injectText(this._pendingSnapshot);
@@ -556,9 +724,7 @@ export class VoiceSession {
       }
     }
 
-    if (this._ws?.readyState === WebSocket.OPEN) {
-      this._ws.send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
-    }
+    this._send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
   }
 
   // -----------------------------------------------------------------------
@@ -632,9 +798,8 @@ export class VoiceSession {
   // -----------------------------------------------------------------------
 
   private _sendAudio(int16: Int16Array): void {
-    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return;
     const base64 = arrayBufferToBase64(int16.buffer as ArrayBuffer);
-    this._ws.send(
+    this._send(
       JSON.stringify({
         realtimeInput: {
           audio: { mimeType: "audio/pcm;rate=16000", data: base64 },

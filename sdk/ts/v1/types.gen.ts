@@ -868,6 +868,19 @@ export interface WellKnownCachesResp {
   wellKnown: WellKnownCache[];
 }
 /**
+ * VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer.
+ */
+export interface VoiceRTCOfferReq {
+  sdp: string;
+}
+/**
+ * VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer.
+ */
+export interface VoiceRTCAnswerResp {
+  sdp: string;
+  sessionID: string;
+}
+/**
  * EmptyReq is used for endpoints that take no request body.
  */
 export type EmptyReq = any /* dto.EmptyReq */;

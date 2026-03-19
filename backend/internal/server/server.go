@@ -22,6 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
+	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/md"
 	"github.com/maruel/genai"
@@ -83,6 +84,9 @@ type Config struct {
 	// "auto" (the default) locks the hostname from the first FQDN request.
 	// Required for OAuth login and webhook delivery.
 	ExternalURL string
+
+	// WebRTC voice bridge (optional).
+	WebRTCPort int // UDP port for ICE; 0 disables WebRTC
 
 	// Profiling.
 	Pprof bool // expose /debug/pprof/* endpoints
@@ -169,6 +173,7 @@ type Server struct {
 
 	// Agent backends.
 	geminiAPIKey string
+	voiceBridge  *voicertc.Bridge
 
 	// Forge client management (throttles, App client, installation cache).
 	forge *forgeManager
@@ -252,6 +257,8 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("GET /api/v1/tasks/{id}/tool/{toolUseID}", s.handleTaskToolInput)
 	apiMux.HandleFunc("GET /api/v1/usage", s.handleGetUsage)
 	apiMux.HandleFunc("GET /api/v1/voice/token", handle(s.getVoiceToken))
+	apiMux.HandleFunc("POST /api/v1/voice/rtc/offer", handle(s.voiceRTCOffer))
+	apiMux.HandleFunc("DELETE /api/v1/voice/rtc/{sessionID}", s.handleVoiceRTCClose)
 	apiMux.HandleFunc("POST /api/v1/web/fetch", handle(s.webFetch))
 	apiMux.HandleFunc("GET /api/v1/server/tasks/events", s.handleTaskListEvents)
 	apiMux.HandleFunc("GET /api/v1/server/usage/events", s.handleUsageEvents)
@@ -340,6 +347,9 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	go func() { //nolint:gosec // G118: goroutine intentionally uses Background; parent ctx is already cancelled at shutdown
 		defer close(shutdownDone)
 		<-ctx.Done()
+		if s.voiceBridge != nil {
+			s.voiceBridge.CloseAll()
+		}
 		// Use Background because the parent ctx is already cancelled.
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = srv.Shutdown(shutdownCtx) //nolint:contextcheck // parent ctx is already cancelled at shutdown time

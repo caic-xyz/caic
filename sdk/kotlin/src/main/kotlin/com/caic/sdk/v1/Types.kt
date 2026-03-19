@@ -598,6 +598,17 @@ data class WebFetchReq(val url: String)
 @Serializable
 data class WebFetchResp(val title: String, val content: String)
 
+/** VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer. */
+@Serializable
+data class VoiceRTCOfferReq(val sdp: String)
+
+/** VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer. */
+@Serializable
+data class VoiceRTCAnswerResp(
+    val sdp: String,
+    @SerialName("sessionID") val sessionID: String,
+)
+
 @Serializable
 data class ErrorDetails(val code: String, val message: String)
 

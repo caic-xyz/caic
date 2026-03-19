@@ -428,5 +428,16 @@ type WellKnownCachesResp struct {
 	WellKnown     []WellKnownCache `json:"wellKnown"`
 }
 
+// VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer.
+type VoiceRTCOfferReq struct {
+	SDP string `json:"sdp"`
+}
+
+// VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer.
+type VoiceRTCAnswerResp struct {
+	SDP       string `json:"sdp"`
+	SessionID string `json:"sessionID"`
+}
+
 // EmptyReq is used for endpoints that take no request body.
 type EmptyReq = dto.EmptyReq

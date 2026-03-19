@@ -668,6 +668,17 @@ public struct WebFetchResp: Codable {
     public let content: String
 }
 
+/// VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer.
+public struct VoiceRTCOfferReq: Codable {
+    public let sdp: String
+}
+
+/// VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer.
+public struct VoiceRTCAnswerResp: Codable {
+    public let sdp: String
+    public let sessionID: String
+}
+
 public struct ErrorDetails: Codable {
     public let code: String
     public let message: String

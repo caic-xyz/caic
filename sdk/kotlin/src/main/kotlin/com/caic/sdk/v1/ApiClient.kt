@@ -136,6 +136,8 @@ class ApiClient(
     suspend fun getVoiceToken(): VoiceTokenResp = request("GET", "/api/v1/voice/token")
     /** Fetches a URL and returns its text content. */
     suspend fun webFetch(req: WebFetchReq): WebFetchResp = request("POST", "/api/v1/web/fetch", json.encodeToString(req))
+    /** Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session. */
+    suspend fun voiceRTCOffer(req: VoiceRTCOfferReq): VoiceRTCAnswerResp = request("POST", "/api/v1/voice/rtc/offer", json.encodeToString(req))
 
     // SSE endpoints
     /** Streams raw backend-specific task events via SSE. */

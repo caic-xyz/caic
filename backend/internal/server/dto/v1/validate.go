@@ -133,6 +133,14 @@ func (r *BotFixPRReq) Validate() error {
 // Validate is a no-op; all settings values are accepted.
 func (r *UpdatePreferencesReq) Validate() error { return nil }
 
+// Validate checks that the SDP offer is provided.
+func (r *VoiceRTCOfferReq) Validate() error {
+	if r.SDP == "" {
+		return dto.BadRequest("sdp is required")
+	}
+	return nil
+}
+
 // validateImages checks that each ImageData entry has a valid media type and non-empty data.
 func validateImages(images []ImageData) error {
 	for _, img := range images {

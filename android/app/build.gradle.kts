@@ -98,6 +98,9 @@ dependencies {
     implementation(libs.okhttp.sse)
     implementation(libs.kotlinx.serialization.json)
 
+    // WebRTC (voice bridge transport)
+    implementation(libs.stream.webrtc)
+
     // Core
     implementation(libs.androidx.core.ktx)
 

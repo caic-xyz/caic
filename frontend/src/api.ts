@@ -34,5 +34,6 @@ export const {
   globalUsageEvents,
   getUsage,
   getVoiceToken,
+  voiceRTCOffer,
   webFetch,
 } = api;

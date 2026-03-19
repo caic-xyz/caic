@@ -109,6 +109,7 @@ Environment variables (flags take precedence when set):
   Agents:
     GEMINI_API_KEY              Gemini API key for the Gemini Live voice agent
     TAILSCALE_API_KEY           Tailscale API key for Tailscale ephemeral node
+    CAIC_WEBRTC_PORT            UDP port for WebRTC ICE (e.g. 3478); unset disables WebRTC
 
   Profiling:
     CAIC_PPROF                  Set to any value to expose /debug/pprof/* endpoints
@@ -205,6 +206,7 @@ See contrib/caic.env for a template with all variables and documentation.
 		GitLabWebhookSecret:     []byte(os.Getenv("GITLAB_WEBHOOK_SECRET")),
 		IPGeoDB:                 resolvePathFromEnv("CAIC_IPGEO_DB"),
 		IPGeoAllowlist:          envDefault("CAIC_IPGEO_ALLOWLIST", "local,tailscale,github"),
+		WebRTCPort:              parseInt(os.Getenv("CAIC_WEBRTC_PORT")),
 		Pprof:                   *pprofFlag,
 	}
 
@@ -393,6 +395,18 @@ func resolveGitHubToken() string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func parseInt(s string) int {
+	if s == "" {
+		return 0
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		slog.Warn("invalid int env value", "val", s) //nolint:gosec // G706: config value from env, not user input
+		return 0
+	}
+	return v
 }
 
 func parseInt64(s string) int64 {
