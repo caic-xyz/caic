@@ -235,6 +235,29 @@ describe("groupMessages", () => {
     const askGroup = groups.find((g) => g.kind === "ask");
     expect(askGroup?.answerText).toBe("A");
   });
+
+  it("rateLimit warning creates other group", () => {
+    const groups = groupMessages([
+      { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed_warning", resetsAt: 0, rateLimitType: "five_hour", utilization: 0.8 } },
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].kind).toBe("other");
+  });
+
+  it("rateLimit allowed is filtered out", () => {
+    const groups = groupMessages([
+      { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed", resetsAt: 0, rateLimitType: "five_hour", utilization: 0.3 } },
+    ]);
+    expect(groups).toHaveLength(0);
+  });
+
+  it("rateLimit rejected creates other group", () => {
+    const groups = groupMessages([
+      { kind: "rateLimit", ts: 1, rateLimit: { status: "rejected", resetsAt: 1711000000, rateLimitType: "seven_day", utilization: 1.0 } },
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].kind).toBe("other");
+  });
 });
 
 describe("groupSessions", () => {

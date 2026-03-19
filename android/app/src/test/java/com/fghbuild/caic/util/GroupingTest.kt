@@ -16,6 +16,7 @@ import com.caic.sdk.v1.EventKinds
 import com.caic.sdk.v1.EventThinking
 import com.caic.sdk.v1.EventThinkingDelta
 import com.caic.sdk.v1.EventWidget
+import com.caic.sdk.v1.EventRateLimit
 import com.caic.sdk.v1.EventWidgetDelta
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
@@ -197,6 +198,41 @@ class GroupingTest {
             assertEquals(2, groups.size)
             assertTrue(groups[0].toolCalls[0].done)
             assertTrue(groups[0].toolCalls[1].done)
+        }
+
+        t.run("rateLimit warning creates OTHER group") {
+            val groups = groupMessages(listOf(EventMessage(
+                kind = EventKinds.RateLimit, ts = 1,
+                rateLimit = EventRateLimit(
+                    status = "allowed_warning", resetsAt = 0.0,
+                    rateLimitType = "five_hour", utilization = 0.8,
+                ),
+            )))
+            assertEquals(1, groups.size)
+            assertEquals(GroupKind.OTHER, groups[0].kind)
+        }
+
+        t.run("rateLimit allowed is filtered out") {
+            val groups = groupMessages(listOf(EventMessage(
+                kind = EventKinds.RateLimit, ts = 1,
+                rateLimit = EventRateLimit(
+                    status = "allowed", resetsAt = 0.0,
+                    rateLimitType = "five_hour", utilization = 0.3,
+                ),
+            )))
+            assertEquals(0, groups.size)
+        }
+
+        t.run("rateLimit rejected creates OTHER group") {
+            val groups = groupMessages(listOf(EventMessage(
+                kind = EventKinds.RateLimit, ts = 1,
+                rateLimit = EventRateLimit(
+                    status = "rejected", resetsAt = 1711000000.0,
+                    rateLimitType = "seven_day", utilization = 1.0,
+                ),
+            )))
+            assertEquals(1, groups.size)
+            assertEquals(GroupKind.OTHER, groups[0].kind)
         }
     }
 
