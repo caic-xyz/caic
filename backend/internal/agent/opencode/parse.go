@@ -23,9 +23,11 @@ import (
 //   - ThinkingDeltaMessage — agent_thought_chunk
 //   - ToolUseMessage       — tool_call
 //   - ToolResultMessage    — tool_call_update (completed/failed)
+//   - ToolOutputDeltaMessage — tool_call_update (in_progress with output)
 //   - TodoMessage          — plan update
 //   - UserInputMessage     — user_message_chunk
-//   - SystemMessage        — current_mode_update, session_info_update
+//   - UsageMessage         — usage_update
+//   - SystemMessage        — current_mode_update
 //   - DiffStatMessage      — caic_diff_stat injection
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
 func ParseMessage(line []byte) ([]agent.Message, error) {
@@ -126,9 +128,18 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, e
 		}}, nil
 
 	case UpdateCurrentModeUpdate:
+		var u CurrentModeUpdate
+		if err := json.Unmarshal(sup.Update, &u); err != nil {
+			return nil, fmt.Errorf("current_mode_update: %w", err)
+		}
+		detail := u.ModeName
+		if detail == "" {
+			detail = u.ModeID
+		}
 		return []agent.Message{&agent.SystemMessage{
 			MessageType: "system",
 			Subtype:     "mode_update",
+			Detail:      detail,
 		}}, nil
 
 	case UpdateSessionInfoUpdate:
@@ -172,28 +183,48 @@ func parseToolCallUpdate(data json.RawMessage) ([]agent.Message, error) {
 	case StatusCompleted:
 		return []agent.Message{&agent.ToolResultMessage{ToolUseID: u.ToolCallID}}, nil
 	case StatusFailed:
-		errMsg := "tool call failed"
-		for i := range u.Content {
-			if u.Content[i].Type == "content" && u.Content[i].Content.Text != "" {
-				errMsg = u.Content[i].Content.Text
-				break
-			}
-		}
+		errMsg := extractToolError(&u)
 		return []agent.Message{&agent.ToolResultMessage{ToolUseID: u.ToolCallID, Error: errMsg}}, nil
 	case StatusInProgress:
 		// Emit output delta if content is available.
-		for i := range u.Content {
-			if u.Content[i].Type == "content" && u.Content[i].Content.Text != "" {
-				return []agent.Message{&agent.ToolOutputDeltaMessage{
-					ToolUseID: u.ToolCallID,
-					Delta:     u.Content[i].Content.Text,
-				}}, nil
-			}
+		if delta := extractToolOutputDelta(&u); delta != "" {
+			return []agent.Message{&agent.ToolOutputDeltaMessage{
+				ToolUseID: u.ToolCallID,
+				Delta:     delta,
+			}}, nil
 		}
 		return nil, nil
 	default:
 		return nil, nil
 	}
+}
+
+// extractToolError extracts the error message from a failed tool call update.
+// It checks rawOutput.error first (structured), then falls back to content text.
+func extractToolError(u *ToolCallUpdateUpdate) string {
+	if u.RawOutput != nil && u.RawOutput.Error != "" {
+		return u.RawOutput.Error
+	}
+	for i := range u.Content {
+		if u.Content[i].Type == "content" && u.Content[i].Content.Text != "" {
+			return u.Content[i].Content.Text
+		}
+	}
+	return "tool call failed"
+}
+
+// extractToolOutputDelta extracts streaming output from an in-progress tool call.
+// It checks rawOutput.output first (structured), then falls back to content text.
+func extractToolOutputDelta(u *ToolCallUpdateUpdate) string {
+	if u.RawOutput != nil && u.RawOutput.Output != "" {
+		return u.RawOutput.Output
+	}
+	for i := range u.Content {
+		if u.Content[i].Type == "content" && u.Content[i].Content.Text != "" {
+			return u.Content[i].Content.Text
+		}
+	}
+	return ""
 }
 
 // parsePlanUpdate converts a plan update to a TodoMessage.
@@ -244,6 +275,8 @@ func normalizeToolName(title, kind string) string {
 		return "TodoWrite"
 	case "task":
 		return "Agent"
+	case "patch":
+		return "Edit"
 	}
 
 	// Fall back to kind-based mapping.
@@ -256,6 +289,8 @@ func normalizeToolName(title, kind string) string {
 		return "Read"
 	case KindSearch:
 		return "Grep"
+	case KindFetch:
+		return "WebFetch"
 	}
 
 	// Return original title as-is.

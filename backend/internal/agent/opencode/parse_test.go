@@ -398,6 +398,98 @@ func TestParseMessage(t *testing.T) {
 		}
 	})
 
+	t.Run("ToolCallFailedWithRawOutput", func(t *testing.T) {
+		input := mustJSON(t, map[string]any{
+			"jsonrpc": "2.0",
+			"method":  "session/update",
+			"params": map[string]any{
+				"sessionId": "ses_1",
+				"update": map[string]any{
+					"sessionUpdate": "tool_call_update",
+					"toolCallId":    "call_3",
+					"status":        "failed",
+					"rawOutput":     map[string]any{"error": "access denied", "output": ""},
+				},
+			},
+		})
+		msgs, err := ParseMessage(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		tr, ok := msgs[0].(*agent.ToolResultMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.ToolResultMessage", msgs[0])
+		}
+		if tr.Error != "access denied" {
+			t.Errorf("Error = %q, want %q", tr.Error, "access denied")
+		}
+	})
+
+	t.Run("ToolCallInProgressWithRawOutput", func(t *testing.T) {
+		input := mustJSON(t, map[string]any{
+			"jsonrpc": "2.0",
+			"method":  "session/update",
+			"params": map[string]any{
+				"sessionId": "ses_1",
+				"update": map[string]any{
+					"sessionUpdate": "tool_call_update",
+					"toolCallId":    "call_4",
+					"status":        "in_progress",
+					"rawOutput":     map[string]any{"output": "streaming output"},
+				},
+			},
+		})
+		msgs, err := ParseMessage(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		td, ok := msgs[0].(*agent.ToolOutputDeltaMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.ToolOutputDeltaMessage", msgs[0])
+		}
+		if td.Delta != "streaming output" {
+			t.Errorf("Delta = %q, want %q", td.Delta, "streaming output")
+		}
+	})
+
+	t.Run("CurrentModeUpdateWithDetail", func(t *testing.T) {
+		input := mustJSON(t, map[string]any{
+			"jsonrpc": "2.0",
+			"method":  "session/update",
+			"params": map[string]any{
+				"sessionId": "ses_1",
+				"update": map[string]any{
+					"sessionUpdate": "current_mode_update",
+					"modeId":        "ask",
+					"modeName":      "Ask Mode",
+				},
+			},
+		})
+		msgs, err := ParseMessage(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		sm, ok := msgs[0].(*agent.SystemMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.SystemMessage", msgs[0])
+		}
+		if sm.Subtype != "mode_update" {
+			t.Errorf("Subtype = %q", sm.Subtype)
+		}
+		if sm.Detail != "Ask Mode" {
+			t.Errorf("Detail = %q, want %q", sm.Detail, "Ask Mode")
+		}
+	})
+
 	t.Run("UnknownUpdateType", func(t *testing.T) {
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
@@ -443,11 +535,14 @@ func TestNormalizeToolName(t *testing.T) {
 		{"websearch", "search", "WebSearch"},
 		{"todowrite", "other", "TodoWrite"},
 		{"task", "other", "Agent"},
+		// Additional name mappings.
+		{"patch", "edit", "Edit"},
 		// Kind-based fallback.
 		{"unknown_tool", "execute", "Bash"},
 		{"unknown_tool", "edit", "Edit"},
 		{"unknown_tool", "read", "Read"},
 		{"unknown_tool", "search", "Grep"},
+		{"unknown_tool", "fetch", "WebFetch"},
 		// Passthrough.
 		{"custom_mcp_tool", "other", "custom_mcp_tool"},
 	}

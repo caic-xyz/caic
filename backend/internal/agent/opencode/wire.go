@@ -11,6 +11,9 @@ import (
 const (
 	MethodSessionUpdate            = "session/update"
 	MethodSessionRequestPermission = "session/request_permission"
+	MethodSessionCancel            = "session/cancel"
+	MethodSessionSetModel          = "session/set_model"
+	MethodSessionSetMode           = "session/set_mode"
 )
 
 // Session update type discriminators (sessionUpdate field).
@@ -48,6 +51,14 @@ const (
 	KindFetch      = "fetch"
 	KindSwitchMode = "switch_mode"
 	KindOther      = "other"
+)
+
+// Plan entry status constants.
+const (
+	PlanStatusPending    = "pending"
+	PlanStatusInProgress = "in_progress"
+	PlanStatusCompleted  = "completed"
+	PlanStatusCancelled  = "cancelled"
 )
 
 // ---------- JSON-RPC envelope ----------
@@ -99,9 +110,15 @@ type updateProbe struct {
 	SessionUpdate string `json:"sessionUpdate"`
 }
 
-// ---------- Session update types ----------
+// ---------- Content types ----------
 
-// ContentBlock is a content block in message chunks.
+// ContentBlock is a content block in message chunks. This is a flat union:
+// fields are populated depending on Type.
+//
+//   - "text":          Text, Annotations
+//   - "image":         Data, MimeType, URI
+//   - "resource":      Resource
+//   - "resource_link": URI, Name, MimeType
 type ContentBlock struct {
 	Type        string          `json:"type"`
 	Text        string          `json:"text,omitzero"`
@@ -111,24 +128,62 @@ type ContentBlock struct {
 	Name        string          `json:"name,omitzero"`
 	Resource    json.RawMessage `json:"resource,omitzero"`
 	Annotations json.RawMessage `json:"annotations,omitzero"`
+	jsonutil.Overflow
 }
+
+var contentBlockKnown = jsonutil.KnownFields(ContentBlock{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (b *ContentBlock) UnmarshalJSON(data []byte) error {
+	type Alias ContentBlock
+	return jsonutil.UnmarshalRecord(data, (*Alias)(b), &b.Overflow, contentBlockKnown, "ContentBlock")
+}
+
+// ---------- Session update types ----------
 
 // AgentMessageChunkUpdate is a streaming text chunk from the agent.
 type AgentMessageChunkUpdate struct {
 	SessionUpdate string       `json:"sessionUpdate"`
 	Content       ContentBlock `json:"content"`
+	jsonutil.Overflow
+}
+
+var agentMessageChunkUpdateKnown = jsonutil.KnownFields(AgentMessageChunkUpdate{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (u *AgentMessageChunkUpdate) UnmarshalJSON(data []byte) error {
+	type Alias AgentMessageChunkUpdate
+	return jsonutil.UnmarshalRecord(data, (*Alias)(u), &u.Overflow, agentMessageChunkUpdateKnown, "AgentMessageChunkUpdate")
 }
 
 // AgentThoughtChunkUpdate is a streaming reasoning chunk from the agent.
 type AgentThoughtChunkUpdate struct {
 	SessionUpdate string       `json:"sessionUpdate"`
 	Content       ContentBlock `json:"content"`
+	jsonutil.Overflow
+}
+
+var agentThoughtChunkUpdateKnown = jsonutil.KnownFields(AgentThoughtChunkUpdate{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (u *AgentThoughtChunkUpdate) UnmarshalJSON(data []byte) error {
+	type Alias AgentThoughtChunkUpdate
+	return jsonutil.UnmarshalRecord(data, (*Alias)(u), &u.Overflow, agentThoughtChunkUpdateKnown, "AgentThoughtChunkUpdate")
 }
 
 // UserMessageChunkUpdate is a replayed user message (during session/load).
 type UserMessageChunkUpdate struct {
 	SessionUpdate string       `json:"sessionUpdate"`
 	Content       ContentBlock `json:"content"`
+	jsonutil.Overflow
+}
+
+var userMessageChunkUpdateKnown = jsonutil.KnownFields(UserMessageChunkUpdate{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (u *UserMessageChunkUpdate) UnmarshalJSON(data []byte) error {
+	type Alias UserMessageChunkUpdate
+	return jsonutil.UnmarshalRecord(data, (*Alias)(u), &u.Overflow, userMessageChunkUpdateKnown, "UserMessageChunkUpdate")
 }
 
 // ToolCallLocation is a file location associated with a tool call.
@@ -146,9 +201,25 @@ type ToolCallUpdate struct {
 	Status        string             `json:"status,omitzero"`
 	Locations     []ToolCallLocation `json:"locations,omitzero"`
 	RawInput      json.RawMessage    `json:"rawInput,omitzero"`
+	jsonutil.Overflow
 }
 
-// ToolCallContent is a content entry in a tool call update result.
+var toolCallUpdateKnown = jsonutil.KnownFields(ToolCallUpdate{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (u *ToolCallUpdate) UnmarshalJSON(data []byte) error {
+	type Alias ToolCallUpdate
+	return jsonutil.UnmarshalRecord(data, (*Alias)(u), &u.Overflow, toolCallUpdateKnown, "ToolCallUpdate")
+}
+
+// ToolCallContent is a content entry in a tool call update result. This is a
+// flat union discriminated by Type:
+//
+//   - "content":       Content (text block)
+//   - "diff":          Path, OldText, NewText
+//   - "image":         Content.Data, Content.MimeType
+//   - "resource":      Content.Resource
+//   - "resource_link": Content.URI, Content.Name, Content.MimeType
 type ToolCallContent struct {
 	Type    string       `json:"type"`
 	Content ContentBlock `json:"content,omitzero"`
@@ -156,6 +227,31 @@ type ToolCallContent struct {
 	Path    string `json:"path,omitzero"`
 	OldText string `json:"oldText,omitzero"`
 	NewText string `json:"newText,omitzero"`
+	jsonutil.Overflow
+}
+
+var toolCallContentKnown = jsonutil.KnownFields(ToolCallContent{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (c *ToolCallContent) UnmarshalJSON(data []byte) error {
+	type Alias ToolCallContent
+	return jsonutil.UnmarshalRecord(data, (*Alias)(c), &c.Overflow, toolCallContentKnown, "ToolCallContent")
+}
+
+// ToolCallRawOutput is the structured raw output from a tool call.
+type ToolCallRawOutput struct {
+	Output   string          `json:"output,omitzero"`
+	Error    string          `json:"error,omitzero"`
+	Metadata json.RawMessage `json:"metadata,omitzero"`
+	jsonutil.Overflow
+}
+
+var toolCallRawOutputKnown = jsonutil.KnownFields(ToolCallRawOutput{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (o *ToolCallRawOutput) UnmarshalJSON(data []byte) error {
+	type Alias ToolCallRawOutput
+	return jsonutil.UnmarshalRecord(data, (*Alias)(o), &o.Overflow, toolCallRawOutputKnown, "ToolCallRawOutput")
 }
 
 // ToolCallUpdateUpdate is a tool call progress/completion update.
@@ -167,8 +263,17 @@ type ToolCallUpdateUpdate struct {
 	Status        string             `json:"status,omitzero"`
 	Locations     []ToolCallLocation `json:"locations,omitzero"`
 	RawInput      json.RawMessage    `json:"rawInput,omitzero"`
-	RawOutput     json.RawMessage    `json:"rawOutput,omitzero"`
+	RawOutput     *ToolCallRawOutput `json:"rawOutput,omitzero"`
 	Content       []ToolCallContent  `json:"content,omitzero"`
+	jsonutil.Overflow
+}
+
+var toolCallUpdateUpdateKnown = jsonutil.KnownFields(ToolCallUpdateUpdate{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (u *ToolCallUpdateUpdate) UnmarshalJSON(data []byte) error {
+	type Alias ToolCallUpdateUpdate
+	return jsonutil.UnmarshalRecord(data, (*Alias)(u), &u.Overflow, toolCallUpdateUpdateKnown, "ToolCallUpdateUpdate")
 }
 
 // PlanEntry is a single entry in a plan update.
@@ -176,12 +281,30 @@ type PlanEntry struct {
 	Priority string `json:"priority,omitzero"`
 	Status   string `json:"status"`
 	Content  string `json:"content"`
+	jsonutil.Overflow
+}
+
+var planEntryKnown = jsonutil.KnownFields(PlanEntry{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (e *PlanEntry) UnmarshalJSON(data []byte) error {
+	type Alias PlanEntry
+	return jsonutil.UnmarshalRecord(data, (*Alias)(e), &e.Overflow, planEntryKnown, "PlanEntry")
 }
 
 // PlanUpdate is a todo/plan update from the agent.
 type PlanUpdate struct {
 	SessionUpdate string      `json:"sessionUpdate"`
 	Entries       []PlanEntry `json:"entries"`
+	jsonutil.Overflow
+}
+
+var planUpdateKnown = jsonutil.KnownFields(PlanUpdate{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (u *PlanUpdate) UnmarshalJSON(data []byte) error {
+	type Alias PlanUpdate
+	return jsonutil.UnmarshalRecord(data, (*Alias)(u), &u.Overflow, planUpdateKnown, "PlanUpdate")
 }
 
 // UsageCost describes the cost of usage.
@@ -196,6 +319,52 @@ type UsageUpdateUpdate struct {
 	Used          int       `json:"used"`
 	Size          int       `json:"size"`
 	Cost          UsageCost `json:"cost,omitzero"`
+	jsonutil.Overflow
+}
+
+var usageUpdateUpdateKnown = jsonutil.KnownFields(UsageUpdateUpdate{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (u *UsageUpdateUpdate) UnmarshalJSON(data []byte) error {
+	type Alias UsageUpdateUpdate
+	return jsonutil.UnmarshalRecord(data, (*Alias)(u), &u.Overflow, usageUpdateUpdateKnown, "UsageUpdateUpdate")
+}
+
+// CurrentModeUpdate is a mode change notification.
+type CurrentModeUpdate struct {
+	SessionUpdate string `json:"sessionUpdate"`
+	ModeID        string `json:"modeId,omitzero"`
+	ModeName      string `json:"modeName,omitzero"`
+	jsonutil.Overflow
+}
+
+var currentModeUpdateKnown = jsonutil.KnownFields(CurrentModeUpdate{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (u *CurrentModeUpdate) UnmarshalJSON(data []byte) error {
+	type Alias CurrentModeUpdate
+	return jsonutil.UnmarshalRecord(data, (*Alias)(u), &u.Overflow, currentModeUpdateKnown, "CurrentModeUpdate")
+}
+
+// AvailableCommand is a single command in an available_commands_update.
+type AvailableCommand struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitzero"`
+}
+
+// AvailableCommandsUpdate lists commands available in the current session.
+type AvailableCommandsUpdate struct {
+	SessionUpdate     string             `json:"sessionUpdate"`
+	AvailableCommands []AvailableCommand `json:"availableCommands"`
+	jsonutil.Overflow
+}
+
+var availableCommandsUpdateKnown = jsonutil.KnownFields(AvailableCommandsUpdate{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (u *AvailableCommandsUpdate) UnmarshalJSON(data []byte) error {
+	type Alias AvailableCommandsUpdate
+	return jsonutil.UnmarshalRecord(data, (*Alias)(u), &u.Overflow, availableCommandsUpdateKnown, "AvailableCommandsUpdate")
 }
 
 // ---------- Permission request ----------
@@ -208,6 +377,15 @@ type PermissionToolCall struct {
 	Kind       string             `json:"kind,omitzero"`
 	RawInput   json.RawMessage    `json:"rawInput,omitzero"`
 	Locations  []ToolCallLocation `json:"locations,omitzero"`
+	jsonutil.Overflow
+}
+
+var permissionToolCallKnown = jsonutil.KnownFields(PermissionToolCall{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (p *PermissionToolCall) UnmarshalJSON(data []byte) error {
+	type Alias PermissionToolCall
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, permissionToolCallKnown, "PermissionToolCall")
 }
 
 // PermissionOption is a single option in a permission request.
@@ -215,6 +393,15 @@ type PermissionOption struct {
 	OptionID string `json:"optionId"`
 	Kind     string `json:"kind"` // "allow_once", "allow_always", "reject_once".
 	Name     string `json:"name"`
+	jsonutil.Overflow
+}
+
+var permissionOptionKnown = jsonutil.KnownFields(PermissionOption{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (o *PermissionOption) UnmarshalJSON(data []byte) error {
+	type Alias PermissionOption
+	return jsonutil.UnmarshalRecord(data, (*Alias)(o), &o.Overflow, permissionOptionKnown, "PermissionOption")
 }
 
 // PermissionRequestParams holds params for session/request_permission.
@@ -222,6 +409,15 @@ type PermissionRequestParams struct {
 	SessionID string             `json:"sessionId"`
 	ToolCall  PermissionToolCall `json:"toolCall"`
 	Options   []PermissionOption `json:"options"`
+	jsonutil.Overflow
+}
+
+var permissionRequestParamsKnown = jsonutil.KnownFields(PermissionRequestParams{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (p *PermissionRequestParams) UnmarshalJSON(data []byte) error {
+	type Alias PermissionRequestParams
+	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, permissionRequestParamsKnown, "PermissionRequestParams")
 }
 
 // ---------- Outbound request types ----------
@@ -288,11 +484,20 @@ type httpHeader struct {
 }
 
 // promptContent is a single item in the session/prompt content array.
+// This is a flat union discriminated by Type:
+//
+//   - "text":          Text
+//   - "image":         Data (base64), MimeType
+//   - "resource":      Resource (embedded resource)
+//   - "resource_link": URI, Name, MimeType
 type promptContent struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitzero"`
-	Data     string `json:"data,omitzero"`     // Base64 image data.
-	MimeType string `json:"mimeType,omitzero"` // e.g. "image/png".
+	Type     string          `json:"type"`
+	Text     string          `json:"text,omitzero"`
+	Data     string          `json:"data,omitzero"`     // Base64 image data.
+	MimeType string          `json:"mimeType,omitzero"` // e.g. "image/png".
+	URI      string          `json:"uri,omitzero"`
+	Name     string          `json:"name,omitzero"`
+	Resource json.RawMessage `json:"resource,omitzero"` // Embedded resource object.
 }
 
 // sessionPromptParams holds the params for session/prompt.
@@ -337,7 +542,8 @@ func (c *agentCapabilities) UnmarshalJSON(data []byte) error {
 }
 
 type promptCapabilities struct {
-	Image bool `json:"image,omitzero"`
+	Image           bool `json:"image,omitzero"`
+	EmbeddedContext bool `json:"embeddedContext,omitzero"`
 }
 
 type agentInfo struct {
@@ -386,6 +592,15 @@ type modeInfo struct {
 type promptResult struct {
 	StopReason string       `json:"stopReason,omitzero"` // "end_turn", "max_tokens", "cancelled", "refusal".
 	Usage      *promptUsage `json:"usage,omitzero"`
+	jsonutil.Overflow
+}
+
+var promptResultKnown = jsonutil.KnownFields(promptResult{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (r *promptResult) UnmarshalJSON(data []byte) error {
+	type Alias promptResult
+	return jsonutil.UnmarshalRecord(data, (*Alias)(r), &r.Overflow, promptResultKnown, "promptResult")
 }
 
 // promptUsage holds the token usage from a session/prompt response.
@@ -396,4 +611,13 @@ type promptUsage struct {
 	ThoughtTokens     int `json:"thoughtTokens,omitzero"`
 	CachedReadTokens  int `json:"cachedReadTokens,omitzero"`
 	CachedWriteTokens int `json:"cachedWriteTokens,omitzero"`
+	jsonutil.Overflow
+}
+
+var promptUsageKnown = jsonutil.KnownFields(promptUsage{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (u *promptUsage) UnmarshalJSON(data []byte) error {
+	type Alias promptUsage
+	return jsonutil.UnmarshalRecord(data, (*Alias)(u), &u.Overflow, promptUsageKnown, "promptUsage")
 }

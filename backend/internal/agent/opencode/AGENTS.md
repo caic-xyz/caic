@@ -6,12 +6,14 @@ JSON-RPC 2.0 over stdin/stdout, analogous to the Codex harness.
 ## Architecture
 
 - `opencode.go` — Backend lifecycle, handshake, `wireFormat` state machine
-- `wire.go` — ACP JSON-RPC 2.0 type definitions
+- `wire.go` — ACP JSON-RPC 2.0 type definitions with forward-compatible overflow tracking
+- `wire_test.go` — Wire type unmarshaling and overflow detection tests
 - `parse.go` — Stateless parser: `session/update` notifications → `agent.Message`
+- `parse_test.go` — Parser tests including wireFormat prompt response handling
 
-`wireFormat` wraps the stateless parser to accumulate usage and auto-handle
-permission requests. The handshake performs `initialize` → `session/new` (or
-`session/load` for resume), extracting session ID and model list.
+All inbound wire types embed `jsonutil.Overflow` + custom `UnmarshalJSON()`
+to track unknown fields (matching the forward-compatibility pattern used by
+the Claude and Codex harnesses).
 
 ## ACP Handshake
 
@@ -31,19 +33,40 @@ permission requests. The handshake performs `initialize` → `session/new` (or
 |-------------------------|----------------------|
 | `agent_message_chunk`   | TextDeltaMessage     |
 | `agent_thought_chunk`   | ThinkingDeltaMessage |
-| `tool_call`             | ToolUseMessage       |
+| `tool_call`             | ToolUseMessage / WidgetMessage |
 | `tool_call_update` (completed/failed) | ToolResultMessage |
 | `tool_call_update` (in_progress) | ToolOutputDeltaMessage |
 | `plan`                  | TodoMessage          |
 | `usage_update`          | UsageMessage         |
 | `user_message_chunk`    | UserInputMessage     |
-| `current_mode_update`   | SystemMessage        |
+| `current_mode_update`   | SystemMessage (with mode detail) |
+| `session_info_update`   | (skipped)            |
+| `available_commands_update` | (skipped)        |
+| `config_option_update`  | (skipped)            |
+
+## Content Block Types
+
+Content blocks (`ContentBlock`) support all ACP content types:
+
+| Type | Fields |
+|------|--------|
+| `text` | Text, Annotations |
+| `image` | Data (base64), MimeType, URI |
+| `resource` | Resource (embedded resource JSON) |
+| `resource_link` | URI, Name, MimeType |
+
+## Tool Call Output
+
+`ToolCallUpdateUpdate` supports two error/output paths (checked in order):
+1. `rawOutput` — Structured output (`ToolCallRawOutput.Error` / `.Output`)
+2. `content` — Array of `ToolCallContent` blocks (text, diff, image, resource)
 
 ## Tool Name Normalization
 
 `normalizeToolName()` maps OpenCode tool titles to caic canonical names:
-`bash` → `Bash`, `edit` → `Edit`, `write` → `Write`, etc. Falls back to
-kind-based mapping (`execute` → `Bash`, `edit` → `Edit`), then passthrough.
+`bash` → `Bash`, `edit`/`patch` → `Edit`, `write` → `Write`, etc. Falls back to
+kind-based mapping (`execute` → `Bash`, `edit` → `Edit`, `fetch` → `WebFetch`),
+then passthrough.
 
 ## Key Design Decisions
 
@@ -58,6 +81,8 @@ kind-based mapping (`execute` → `Bash`, `edit` → `Edit`), then passthrough.
   `opencode.json` config.
 - **`--no-log-stdin`**: relay flag to avoid logging JSON-RPC requests to
   `output.jsonl` (they contain large prompt content).
+- **Forward compatibility**: All inbound types use `jsonutil.Overflow` to
+  capture and warn about unknown fields from future ACP versions.
 
 ## References
 
