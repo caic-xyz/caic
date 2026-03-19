@@ -19,6 +19,29 @@ import (
 	"github.com/maruel/ksid"
 )
 
+const statsRingSize = 60
+
+// ContainerStats is a snapshot of container resource usage.
+type ContainerStats struct {
+	Ts         time.Time
+	CPUPerc    float64
+	MemUsed    uint64
+	MemLimit   uint64
+	MemPerc    float64
+	NetRx      uint64
+	NetTx      uint64
+	BlockRead  uint64
+	BlockWrite uint64
+	DiskUsed   int64
+}
+
+type statsSub struct {
+	ch   chan ContainerStats
+	once sync.Once
+}
+
+func (s *statsSub) close() { s.once.Do(func() { close(s.ch) }) }
+
 // State represents the lifecycle state of a task.
 type State int
 
@@ -129,6 +152,10 @@ type Task struct {
 
 	// mu protects all fields below.
 	mu                    sync.Mutex
+	statsRing             [statsRingSize]ContainerStats
+	statsLen              int
+	statsHead             int
+	statsSubs             []*statsSub
 	state                 State
 	stateUpdatedAt        time.Time // UTC timestamp of the last state transition.
 	sessionID             string    // Agent session ID, captured from SystemInitMessage.
@@ -916,6 +943,57 @@ func (t *Task) Subscribe(ctx context.Context) (history []agent.Message, live <-c
 		s.close()
 	}()
 
+	return history, s.ch, unsub
+}
+
+// PushStats records a container stats snapshot and notifies live subscribers.
+func (t *Task) PushStats(s *ContainerStats) {
+	t.mu.Lock()
+	idx := (t.statsHead + t.statsLen) % statsRingSize
+	t.statsRing[idx] = *s
+	if t.statsLen < statsRingSize {
+		t.statsLen++
+	} else {
+		t.statsHead = (t.statsHead + 1) % statsRingSize
+	}
+	subs := append([]*statsSub(nil), t.statsSubs...)
+	val := *s
+	t.mu.Unlock()
+	for _, sub := range subs {
+		select {
+		case sub.ch <- val:
+		default:
+		}
+	}
+}
+
+// SubscribeStats returns a snapshot of the stats ring buffer and a channel that
+// receives only live stats arriving after the snapshot. The context cancellation
+// closes the channel and removes the subscriber.
+func (t *Task) SubscribeStats(ctx context.Context) (history []ContainerStats, live <-chan ContainerStats, unsubFn func()) {
+	s := &statsSub{ch: make(chan ContainerStats, 64)}
+	t.mu.Lock()
+	history = make([]ContainerStats, t.statsLen)
+	for i := range t.statsLen {
+		history[i] = t.statsRing[(t.statsHead+i)%statsRingSize]
+	}
+	t.statsSubs = append(t.statsSubs, s)
+	t.mu.Unlock()
+	unsub := func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		for i, ss := range t.statsSubs {
+			if ss == s {
+				t.statsSubs = append(t.statsSubs[:i], t.statsSubs[i+1:]...)
+				break
+			}
+		}
+	}
+	go func() {
+		<-ctx.Done()
+		unsub()
+		s.close()
+	}()
 	return history, s.ch, unsub
 }
 

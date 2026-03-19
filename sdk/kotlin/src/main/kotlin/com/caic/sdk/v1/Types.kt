@@ -452,6 +452,21 @@ data class EventRateLimit(
     val utilization: Double,
 )
 
+/** EventStats is a container resource usage snapshot emitted periodically. */
+@Serializable
+data class EventStats(
+    val ts: Long,
+    val cpuPerc: Double,
+    val memUsed: Long,
+    val memLimit: Long,
+    val memPerc: Double,
+    val netRx: Long,
+    val netTx: Long,
+    val blockRead: Long,
+    val blockWrite: Long,
+    val diskUsed: Long,
+)
+
 // Backend-neutral event types
 
 /**
@@ -484,6 +499,7 @@ data class EventMessage(
     val widget: EventWidget? = null,
     val widgetDelta: EventWidgetDelta? = null,
     val rateLimit: EventRateLimit? = null,
+    val stats: EventStats? = null,
 )
 
 /** InputReq is the request body for POST /api/v1/tasks/{id}/input. */

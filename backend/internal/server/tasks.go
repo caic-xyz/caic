@@ -218,6 +218,8 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 
 	history, live, unsub := entry.task.Subscribe(r.Context())
 	defer unsub()
+	statsHistory, statsLive, statsUnsub := entry.task.SubscribeStats(r.Context())
+	defer statsUnsub()
 
 	tracker := newToolTimingTracker(entry.task.Harness)
 	idx := 0
@@ -238,6 +240,14 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	for _, msg := range filterHistoryForReplay(history) {
 		writeEvents(tracker.convertMessage(msg, now))
 	}
+	for i := range statsHistory {
+		ev := statsToEvent(&statsHistory[i])
+		data, err := marshalEvent(&ev)
+		if err == nil {
+			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
+			idx++
+		}
+	}
 	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
 	flusher.Flush()
 
@@ -246,9 +256,30 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for msg := range live {
-		writeEvents(tracker.convertMessage(msg, time.Now()))
-		flusher.Flush()
+	liveCh := live
+	statsCh := statsLive
+	for liveCh != nil || statsCh != nil {
+		select {
+		case msg, ok := <-liveCh:
+			if !ok {
+				liveCh = nil
+				continue
+			}
+			writeEvents(tracker.convertMessage(msg, time.Now()))
+			flusher.Flush()
+		case cs, ok := <-statsCh:
+			if !ok {
+				statsCh = nil
+				continue
+			}
+			ev := statsToEvent(&cs)
+			data, err := marshalEvent(&ev)
+			if err == nil {
+				_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
+				idx++
+			}
+			flusher.Flush()
+		}
 	}
 }
 

@@ -340,6 +340,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 
 	s.watchContainerEvents(ctx)
 	go s.warmupImages()
+	go s.pollStats(s.ctx) //nolint:contextcheck // server-lifetime context is intentional
 	return s, nil
 }
 

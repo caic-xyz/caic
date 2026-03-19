@@ -643,6 +643,23 @@ EventRateLimit is emitted when the agent's rate limit status changes.
 | `rateLimitType` | `string` | "five_hour", "seven_day", etc. | yes |
 | `utilization` | `number` | 0.0–1.0. | yes |
 
+### EventStats
+
+EventStats is a container resource usage snapshot emitted periodically.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `ts` | `number` |  | yes |
+| `cpuPerc` | `number` |  | yes |
+| `memUsed` | `uint64` |  | yes |
+| `memLimit` | `uint64` |  | yes |
+| `memPerc` | `number` |  | yes |
+| `netRx` | `uint64` |  | yes |
+| `netTx` | `uint64` |  | yes |
+| `blockRead` | `uint64` |  | yes |
+| `blockWrite` | `uint64` |  | yes |
+| `diskUsed` | `number` |  | yes |
+
 ### EventMessage
 
 EventMessage is a single SSE event in the backend-neutral stream
@@ -674,6 +691,7 @@ EventMessage is a single SSE event in the backend-neutral stream
 | `widget` | `EventWidget` |  |  |
 | `widgetDelta` | `EventWidgetDelta` |  |  |
 | `rateLimit` | `EventRateLimit` |  |  |
+| `stats` | `EventStats` |  |  |
 
 ### InputReq
 

@@ -2,7 +2,7 @@
 import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents, getTaskToolInput, botFixPR } from "./api";
-import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck } from "@sdk/types.gen";
+import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats } from "@sdk/types.gen";
 import { groupMessages, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "./grouping";
 import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "./formatting";
 import type { ToolCall } from "./grouping";
@@ -13,6 +13,7 @@ import PromptInput from "./PromptInput";
 import Button from "./Button";
 import { requestNotificationPermission } from "./notifications";
 import ProgressPanel from "./ProgressPanel";
+import StatsIcon from "./StatsIcon";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import SyncIcon from "@material-symbols/svg-400/outlined/sync.svg?solid";
@@ -217,6 +218,9 @@ export default function TaskDetail(props: Props) {
       setCompletedMsgs(msgs.slice(0, idx));
     }
   });
+
+  // Extract stats events from the full message stream for StatsIcon.
+  const statsHistory = createMemo<EventStats[]>(() => messages().filter((m) => m.kind === "stats" && m.stats !== undefined).map((m) => m.stats as EventStats));
 
   // Sessions from completed messages: stable during streaming (only updates on turn completion).
   // groupSessions extracts init/compact_boundary events as session headers, not message groups.
@@ -571,6 +575,7 @@ export default function TaskDetail(props: Props) {
         <Show when={props.inPlanMode}>
           <span class={styles.planIndicator} title="Agent is in plan mode">Plan Mode</span>
         </Show>
+        <StatsIcon stats={statsHistory()} sessions={allCompletedSessions()} />
       </div>
       <div class={styles.messageArea} ref={messageAreaRef} onScroll={handleScroll}>
         <Index each={items()}>

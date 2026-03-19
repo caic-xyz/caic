@@ -21,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -219,6 +220,7 @@ type taskEntry struct {
 	monitorBranch string // branch being monitored (e.g. "caic-123"); empty when no CI monitoring active
 }
 
+// buildHandler assembles the full HTTP handler. Extracted from ListenAndServe
 // so that route registration can be tested without a listener.
 func (s *Server) buildHandler() (http.Handler, error) {
 	// Auth routes (exempt from RequireUser).
@@ -362,4 +364,89 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 		return nil
 	}
 	return err
+}
+
+// pollStats polls container resource stats every 5 seconds for all active tasks.
+func (s *Server) pollStats(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.pushStats(ctx)
+		}
+	}
+}
+
+func (s *Server) pushStats(ctx context.Context) {
+	s.mu.Lock()
+	type entry struct {
+		task *task.Task
+		name string
+	}
+	var active []entry
+	for _, e := range s.tasks {
+		t := e.task
+		name := t.Container
+		if name == "" {
+			continue
+		}
+		st := t.GetState()
+		if st == task.StatePurged || st == task.StateFailed || st == task.StateStopped || st == task.StateStopping {
+			continue
+		}
+		active = append(active, entry{task: t, name: name})
+	}
+	s.mu.Unlock()
+	if len(active) == 0 {
+		return
+	}
+	names := make([]string, len(active))
+	for i, e := range active {
+		names[i] = e.name
+	}
+	statsMap, err := md.StatsAll(ctx, s.mdClient.Runtime, names)
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	for _, e := range active {
+		cs, ok := statsMap[e.name]
+		if !ok {
+			continue
+		}
+		e.task.PushStats(&task.ContainerStats{
+			Ts:         now,
+			CPUPerc:    cs.CPUPerc,
+			MemUsed:    cs.MemUsed,
+			MemLimit:   cs.MemLimit,
+			MemPerc:    cs.MemPerc,
+			NetRx:      cs.NetRx,
+			NetTx:      cs.NetTx,
+			BlockRead:  cs.BlockRead,
+			BlockWrite: cs.BlockWrite,
+			DiskUsed:   cs.DiskUsed,
+		})
+	}
+}
+
+func statsToEvent(cs *task.ContainerStats) v1.EventMessage {
+	return v1.EventMessage{
+		Kind: v1.EventKindStats,
+		Ts:   cs.Ts.UnixMilli(),
+		Stats: &v1.EventStats{
+			Ts:         cs.Ts.UnixMilli(),
+			CPUPerc:    cs.CPUPerc,
+			MemUsed:    cs.MemUsed,
+			MemLimit:   cs.MemLimit,
+			MemPerc:    cs.MemPerc,
+			NetRx:      cs.NetRx,
+			NetTx:      cs.NetTx,
+			BlockRead:  cs.BlockRead,
+			BlockWrite: cs.BlockWrite,
+			DiskUsed:   cs.DiskUsed,
+		},
+	}
 }

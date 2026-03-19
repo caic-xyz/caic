@@ -510,6 +510,8 @@ func goTypeToKotlin(t reflect.Type) string {
 		return "Int"
 	case reflect.Int64:
 		return "Long"
+	case reflect.Uint64:
+		return "Long" // JSON numbers; unsigned semantics not enforced at wire level.
 	case reflect.Float64:
 		return "Double"
 	case reflect.Bool:

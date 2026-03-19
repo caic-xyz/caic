@@ -4,6 +4,7 @@ package com.fghbuild.caic.util
 import androidx.compose.runtime.Immutable
 import com.caic.sdk.v1.EventAsk
 import com.caic.sdk.v1.EventMessage
+import com.caic.sdk.v1.EventResult
 import com.caic.sdk.v1.EventToolResult
 import com.caic.sdk.v1.EventToolUse
 import com.caic.sdk.v1.TodoItem
@@ -39,6 +40,8 @@ data class Turn(
     val textCount: Int,
     // Duration of the turn in milliseconds (last event ts minus first event ts).
     val durationMs: Long,
+    // The result event payload for this turn, if the turn has completed.
+    val result: EventResult? = null,
 )
 
 // A session is a segment of the event stream opened by an init or compact_boundary event.
@@ -422,6 +425,7 @@ fun groupTurns(groups: List<MessageGroup>): List<Turn> {
     // True when a result event has been seen for this turn (even if duration == 0).
     // Completed turns don't fall back to ts-based, which would inflate with idle time.
     var hasResultEvent = false
+    var resultPayload: EventResult? = null
 
     fun flush() {
         if (current.isNotEmpty()) {
@@ -431,6 +435,7 @@ fun groupTurns(groups: List<MessageGroup>): List<Turn> {
                 toolCount = toolCount,
                 textCount = textCount,
                 durationMs = durationMs,
+                result = resultPayload,
             ))
             current = mutableListOf()
             toolCount = 0
@@ -440,6 +445,7 @@ fun groupTurns(groups: List<MessageGroup>): List<Turn> {
             hasTs = false
             resultDurationMs = null
             hasResultEvent = false
+            resultPayload = null
         }
     }
 
@@ -455,6 +461,7 @@ fun groupTurns(groups: List<MessageGroup>): List<Turn> {
             lastTs = ev.ts
             if (ev.kind == EventKinds.Result) {
                 hasResultEvent = true
+                resultPayload = ev.result
                 val durationMs = ((ev.result?.duration ?: 0.0) * 1000).toLong()
                 if (durationMs > 0L) {
                     resultDurationMs = durationMs

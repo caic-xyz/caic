@@ -517,6 +517,13 @@ fun TaskDetailScreen(
                         }
                     }
                 },
+                actions = {
+                    StatsIcon(
+                        stats = state.statsHistory,
+                        completedSessions = state.completedSessions,
+                        currentSessionTurns = state.currentSessionCompletedTurns,
+                    )
+                },
             )
         },
         bottomBar = {

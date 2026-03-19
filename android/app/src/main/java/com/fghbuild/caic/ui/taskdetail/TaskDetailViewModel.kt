@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.caic.sdk.v1.ApiClient
 import com.caic.sdk.v1.BotFixPRReq
 import com.caic.sdk.v1.EventMessage
+import com.caic.sdk.v1.EventStats
 import kotlinx.serialization.json.JsonElement
 import com.caic.sdk.v1.TodoItem
 import com.caic.sdk.v1.HarnessInfo
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -49,6 +51,7 @@ data class TaskDetailState(
     val currentSessionCompletedTurns: List<Turn> = emptyList(),
     val liveTurn: Turn? = null,
     val todos: List<TodoItem> = emptyList(),
+    val statsHistory: List<EventStats> = emptyList(),
     val activeAgentDescriptions: List<String> = emptyList(),
     val isReady: Boolean = false,
     val sending: Boolean = false,
@@ -92,12 +95,17 @@ class TaskDetailViewModel @Inject constructor(
         .scan(IncrementalGrouped()) { prev, msgs -> nextGrouped(prev, msgs) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), IncrementalGrouped())
 
+    /** Last 60 container resource snapshots extracted from the stats event stream. */
+    private val _statsHistory: StateFlow<List<EventStats>> = _messages
+        .map { msgs -> msgs.mapNotNull { if (it.kind == "stats") it.stats else null }.takeLast(60) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     @Suppress("UNCHECKED_CAST")
     val state: StateFlow<TaskDetailState> = combine(
         listOf(
             taskRepository.tasks, _grouped, _isReady, _sending,
             _pendingAction, _actionError, _safetyIssues, _inputDraft,
-            _pendingImages, _harnesses,
+            _pendingImages, _harnesses, _statsHistory,
         )
     ) { values ->
         val tasks = values[0] as List<Task>
@@ -110,6 +118,8 @@ class TaskDetailViewModel @Inject constructor(
         val draft = values[7] as String
         val images = values[8] as List<ImageData>
         val harnesses = values[9] as List<HarnessInfo>
+        @Suppress("UNCHECKED_CAST")
+        val statsHist = values[10] as List<EventStats>
         val task = tasks.firstOrNull { it.id == taskId }
         val imgSupport = task != null &&
             harnesses.any { it.name == task.harness && it.supportsImages }
@@ -123,6 +133,7 @@ class TaskDetailViewModel @Inject constructor(
             currentSessionCompletedTurns = grouped.currentSessionCompletedTurns,
             liveTurn = grouped.currentTurn,
             todos = grouped.todos,
+            statsHistory = statsHist,
             activeAgentDescriptions = grouped.activeAgents.values.toList(),
             isReady = ready,
             sending = sending,

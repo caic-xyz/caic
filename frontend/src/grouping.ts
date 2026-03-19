@@ -1,5 +1,5 @@
 // Pure grouping and turn-splitting logic for agent event streams.
-import type { EventMessage, EventToolUse, EventToolResult, EventAsk } from "@sdk/types.gen";
+import type { EventMessage, EventToolUse, EventToolResult, EventAsk, EventResult } from "@sdk/types.gen";
 import { formatElapsed } from "./formatting";
 
 export interface MessageGroup {
@@ -35,6 +35,8 @@ export interface Turn {
   textCount: number;
   // Duration of the turn in milliseconds (last event ts minus first event ts).
   durationMs: number;
+  // The result event payload for this turn, if the turn has completed.
+  result?: EventResult;
 }
 
 // A session is a segment of the event stream opened by an init or compact_boundary event.
@@ -207,6 +209,9 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
         break;
       case "diffStat":
         // Metadata-only; live diff stat shown in the task list via Task.diffStat.
+        break;
+      case "stats":
+        // Metadata-only; stats are handled by StatsIcon component.
         break;
       case "thinking": {
         // A final thinking event replaces any preceding thinkingDelta in the same action group.
@@ -414,11 +419,12 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
   // True when a result event has been seen for this turn (even if duration == 0).
   // Completed turns don't fall back to ts-based, which would inflate with idle time.
   let hasResultEvent = false;
+  let resultPayload: EventResult | undefined;
 
   function flush() {
     if (current.length > 0) {
       const durationMs = hasResultEvent ? (resultDurationMs ?? 0) : Math.max(0, lastTs - firstTs);
-      turns.push({ groups: current, toolCount, textCount, durationMs });
+      turns.push({ groups: current, toolCount, textCount, durationMs, result: resultPayload });
       current = [];
       toolCount = 0;
       textCount = 0;
@@ -427,6 +433,7 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
       hasTs = false;
       resultDurationMs = undefined;
       hasResultEvent = false;
+      resultPayload = undefined;
     }
   }
 
@@ -442,6 +449,7 @@ export function groupTurns(groups: MessageGroup[]): Turn[] {
       lastTs = ev.ts;
       if (ev.kind === "result" && ev.result !== undefined) {
         hasResultEvent = true;
+        resultPayload = ev.result;
         const durationMs = Math.round((ev.result.duration ?? 0) * 1000);
         if (durationMs > 0) {
           resultDurationMs = durationMs;

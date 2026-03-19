@@ -37,6 +37,7 @@ const (
 	EventKindWidget          EventKind = "widget"
 	EventKindWidgetDelta     EventKind = "widgetDelta"
 	EventKindRateLimit       EventKind = "rateLimit"
+	EventKindStats           EventKind = "stats"
 )
 
 // EventMessage is a single SSE event in the backend-neutral stream
@@ -66,6 +67,7 @@ type EventMessage struct {
 	Widget          *EventWidget          `json:"widget,omitempty"`
 	WidgetDelta     *EventWidgetDelta     `json:"widgetDelta,omitempty"`
 	RateLimit       *EventRateLimit       `json:"rateLimit,omitempty"`
+	Stats           *EventStats           `json:"stats,omitempty"`
 }
 
 // EventInit is emitted once at the start of a session. It includes a Harness
@@ -240,4 +242,18 @@ type EventRateLimit struct {
 	ResetsAt      float64 `json:"resetsAt"`      // Unix epoch seconds; 0 if unknown.
 	RateLimitType string  `json:"rateLimitType"` // "five_hour", "seven_day", etc.
 	Utilization   float64 `json:"utilization"`   // 0.0–1.0.
+}
+
+// EventStats is a container resource usage snapshot emitted periodically.
+type EventStats struct {
+	Ts         int64   `json:"ts"`
+	CPUPerc    float64 `json:"cpuPerc"`
+	MemUsed    uint64  `json:"memUsed"`
+	MemLimit   uint64  `json:"memLimit"`
+	MemPerc    float64 `json:"memPerc"`
+	NetRx      uint64  `json:"netRx"`
+	NetTx      uint64  `json:"netTx"`
+	BlockRead  uint64  `json:"blockRead"`
+	BlockWrite uint64  `json:"blockWrite"`
+	DiskUsed   int64   `json:"diskUsed"`
 }

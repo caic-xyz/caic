@@ -523,6 +523,20 @@ public struct EventRateLimit: Codable {
     public let utilization: Double
 }
 
+/// EventStats is a container resource usage snapshot emitted periodically.
+public struct EventStats: Codable {
+    public let ts: Int
+    public let cpuPerc: Double
+    public let memUsed: uint64
+    public let memLimit: uint64
+    public let memPerc: Double
+    public let netRx: uint64
+    public let netTx: uint64
+    public let blockRead: uint64
+    public let blockWrite: uint64
+    public let diskUsed: Int
+}
+
 // Backend-neutral event types
 
 /// EventMessage is a single SSE event in the backend-neutral stream
@@ -552,6 +566,7 @@ public struct EventMessage: Codable {
     public let widget: EventWidget?
     public let widgetDelta: EventWidgetDelta?
     public let rateLimit: EventRateLimit?
+    public let stats: EventStats?
 }
 
 /// InputReq is the request body for POST /api/v1/tasks/{id}/input.

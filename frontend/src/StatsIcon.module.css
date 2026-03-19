@@ -1,0 +1,149 @@
+/* Styles for the StatsIcon component: 2×2 bar chart icon and popup panel. */
+
+.wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.iconBtn:hover {
+  background: var(--color-bg-hover);
+}
+
+.iconBtnActive {
+  background: var(--color-bg-hover);
+}
+
+.popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 100;
+  min-width: 260px;
+  background: #fff;
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 0.5rem 0;
+  font-size: 0.8rem;
+}
+
+.popupSection {
+  padding: 0.4rem 0.75rem;
+}
+
+.popupSection + .popupSection {
+  border-top: 1px solid var(--color-border-light);
+}
+
+.popupSectionTitle {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-tertiary);
+  margin-bottom: 0.4rem;
+}
+
+.noData {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+
+/* Resource stats table */
+.statsTable {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.statsTable tr {
+  vertical-align: middle;
+}
+
+.statLabel {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-tertiary);
+  padding: 0.15rem 0.4rem 0.15rem 0;
+  width: 2.5rem;
+}
+
+.statValue {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  padding: 0.15rem 0.5rem 0.15rem 0;
+  white-space: nowrap;
+}
+
+.statSub {
+  color: var(--color-text-muted);
+}
+
+.statBars {
+  width: 5rem;
+  padding-left: 0.25rem;
+}
+
+.miniBarGroup {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 16px;
+}
+
+.miniBar {
+  flex: 1;
+  height: 100%;
+  background: var(--color-border-light);
+  border-radius: 1px;
+  display: flex;
+  align-items: flex-end;
+}
+
+.miniBarFill {
+  width: 100%;
+  border-radius: 1px;
+  transition: height 0.15s ease;
+}
+
+/* Perf table */
+.perfTable {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.perfTh {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--color-text-tertiary);
+  text-align: left;
+  padding: 0 0.3rem 0.25rem 0;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.perfTd {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+  padding: 0.1rem 0.3rem 0.1rem 0;
+  vertical-align: baseline;
+}
