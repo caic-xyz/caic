@@ -84,6 +84,9 @@ type Config struct {
 	// Required for OAuth login and webhook delivery.
 	ExternalURL string
 
+	// Profiling.
+	Pprof bool // expose /debug/pprof/* endpoints
+
 	// IP geolocation (optional).
 	// IPGeoDB is the path to a MaxMind MMDB file (e.g. GeoLite2-Country.mmdb).
 	// When set, country codes are resolved and logged for every request.
@@ -160,6 +163,9 @@ type Server struct {
 	ciCache  *forgecache.Cache
 	provider genai.Provider // nil if LLM not configured
 	bot      *bot.Bot       // handles forge event-driven task automation
+
+	// Profiling.
+	pprof bool
 
 	// Agent backends.
 	geminiAPIKey string
@@ -262,6 +268,12 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	mux.HandleFunc("POST /webhooks/github", s.handleGitHubWebhook)
 	mux.HandleFunc("POST /webhooks/gitlab", s.handleGitLabWebhook)
 	mux.Handle("/api/v1/", protectedAPI)
+
+	// Profiling (opt-in via -pprof / CAIC_PPROF).
+	if s.pprof {
+		registerPprof(mux)
+		slog.Info("pprof enabled", "url", "/debug/pprof/")
+	}
 
 	// Serve embedded frontend with SPA fallback and precompressed variants.
 	dist, err := fs.Sub(frontend.Files, "dist")

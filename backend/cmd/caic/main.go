@@ -12,6 +12,9 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"runtime/pprof"
+	"runtime/trace"
 	"strconv"
 	"strings"
 	"time"
@@ -107,6 +110,9 @@ Environment variables (flags take precedence when set):
     GEMINI_API_KEY              Gemini API key for the Gemini Live voice agent
     TAILSCALE_API_KEY           Tailscale API key for Tailscale ephemeral node
 
+  Profiling:
+    CAIC_PPROF                  Set to any value to expose /debug/pprof/* endpoints
+
   IP geolocation (optional):
     CAIC_IPGEO_DB               Path to a MaxMind MMDB file; relative paths resolve against ~/.config/caic/ (e.g. GeoLite2-Country.mmdb)
     CAIC_IPGEO_ALLOWLIST        Comma-separated allowlist (default: "local,tailscale,github"): ISO country codes (e.g. CA,US), "local", "tailscale", "github", or CIDR ranges (e.g. 34.74.90.64/28); requires CAIC_IPGEO_DB when country codes are present
@@ -118,9 +124,55 @@ See contrib/caic.env for a template with all variables and documentation.
 	addr := flag.String("http", envDefault("CAIC_HTTP", ":8080"), "start web UI on this address (e.g. :8080)")
 	root := flag.String("root", envDefault("CAIC_ROOT", "."), "parent directory containing git repos")
 	logLevel := flag.String("log-level", envDefault("CAIC_LOG_LEVEL", "info"), "log level (debug, info, warn, error)")
+	pprofFlag := flag.Bool("pprof", os.Getenv("CAIC_PPROF") != "", "expose /debug/pprof/* profiling endpoints")
+	cpuProfile := flag.String("cpuprofile", "", "write CPU profile to file")
+	memProfile := flag.String("memprofile", "", "write heap profile to file on shutdown")
+	traceFile := flag.String("trace", "", "write execution trace to file")
 	flag.Parse()
 	if args := flag.Args(); len(args) > 0 {
 		return fmt.Errorf("unexpected arguments: %v", args)
+	}
+
+	// File-based profiling: CPU, heap, and execution trace.
+	if *cpuProfile != "" {
+		f, err := os.Create(*cpuProfile)
+		if err != nil {
+			return fmt.Errorf("create CPU profile: %w", err)
+		}
+		defer func() { _ = f.Close() }()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			return fmt.Errorf("start CPU profile: %w", err)
+		}
+		defer pprof.StopCPUProfile()
+		slog.Info("CPU profiling enabled", "file", *cpuProfile)
+	}
+	if *traceFile != "" {
+		f, err := os.Create(*traceFile)
+		if err != nil {
+			return fmt.Errorf("create trace: %w", err)
+		}
+		defer func() { _ = f.Close() }()
+		if err := trace.Start(f); err != nil {
+			return fmt.Errorf("start trace: %w", err)
+		}
+		defer trace.Stop()
+		slog.Info("execution trace enabled", "file", *traceFile)
+	}
+	if *memProfile != "" {
+		defer func() {
+			runtime.GC()
+			f, err := os.Create(*memProfile)
+			if err != nil {
+				slog.Error("create heap profile", "err", err)
+				return
+			}
+			if err := pprof.WriteHeapProfile(f); err != nil {
+				slog.Error("write heap profile", "err", err)
+			} else {
+				slog.Info("heap profile written", "file", *memProfile)
+			}
+			_ = f.Close()
+		}()
 	}
 	var err error
 	if *root, err = expandTilde(*root); err != nil {
@@ -153,6 +205,7 @@ See contrib/caic.env for a template with all variables and documentation.
 		GitLabWebhookSecret:     []byte(os.Getenv("GITLAB_WEBHOOK_SECRET")),
 		IPGeoDB:                 resolvePathFromEnv("CAIC_IPGEO_DB"),
 		IPGeoAllowlist:          envDefault("CAIC_IPGEO_ALLOWLIST", "local,tailscale,github"),
+		Pprof:                   *pprofFlag,
 	}
 
 	slog.Info("gemini", "apikey", maskedToken(cfg.GeminiAPIKey))                                            //nolint:gosec // G706: value from env, not user input

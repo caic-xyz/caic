@@ -190,6 +190,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		allowedHost:        allowedHost,
 		autoHostLock:       autoLock,
 		usage:              newUsageFetcher(ctx),
+		pprof:              cfg.Pprof,
 		geminiAPIKey:       cfg.GeminiAPIKey,
 		forge:              newForgeManager(cfg.GitHubToken, cfg.GitLabToken, nil),
 		ciCache:            cache,
