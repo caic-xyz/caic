@@ -12,6 +12,8 @@ opencode acp                              # launch long-lived process
 → initialized       (notification, no response)
 → session/new       (cwd)
 ← session result    (sessionId, models, modes)
+→ unstable_setSessionModel (sessionId, modelId)  [optional: if model requested]
+← set model result
 → session/prompt    (sessionId, prompt content blocks)
 ← session/update    (streaming notifications)
 ← session/prompt result (stopReason, usage)
@@ -31,6 +33,7 @@ opencode acp                              # launch long-lived process
 | `session/cancel` | Cancel current operation (notification) |
 | `session/set_model` | Change model at runtime |
 | `session/set_mode` | Switch agent mode (code/ask) |
+| `unstable_setSessionModel` | Switch model after session creation (unstable) |
 
 ## Session Update Notifications
 

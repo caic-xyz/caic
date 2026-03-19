@@ -14,6 +14,7 @@ const (
 	MethodSessionCancel            = "session/cancel"
 	MethodSessionSetModel          = "session/set_model"
 	MethodSessionSetMode           = "session/set_mode"
+	MethodUnstableSetSessionModel  = "unstable_setSessionModel"
 )
 
 // Session update type discriminators (sessionUpdate field).
@@ -80,6 +81,17 @@ func (m *JSONRPCMessage) IsResponse() bool { return m.ID != nil }
 type JSONRPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+// ---------- caic-injected synthetic lines ----------
+
+// caicInit is written to output.jsonl during handshake so replay can
+// reconstruct an InitMessage (handshake responses aren't otherwise logged).
+type caicInit struct {
+	Type      string `json:"type"` // always "caic_init"
+	SessionID string `json:"session_id"`
+	Model     string `json:"model,omitzero"`
+	Version   string `json:"version,omitzero"`
 }
 
 // ---------- Routing probes ----------
@@ -504,6 +516,12 @@ type promptContent struct {
 type sessionPromptParams struct {
 	SessionID string          `json:"sessionId"`
 	Prompt    []promptContent `json:"prompt"`
+}
+
+// setSessionModelParams holds the params for unstable_setSessionModel.
+type setSessionModelParams struct {
+	SessionID string `json:"sessionId"`
+	ModelID   string `json:"modelId"`
 }
 
 // ---------- Response types ----------

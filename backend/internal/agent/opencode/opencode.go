@@ -84,20 +84,41 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	// without losing buffered bytes for the session's readMessages goroutine.
 	br := bufio.NewReaderSize(stdout, 1<<16)
 
-	wire, models, err := handshake(ctx, stdin, br, opts)
+	hs, err := handshake(ctx, stdin, br, opts)
 	if err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		return nil, fmt.Errorf("opencode handshake: %w", err)
 	}
-	if len(models) > 0 {
+	if len(hs.models) > 0 {
 		b.mu.Lock()
-		b.ModelList = models
+		b.ModelList = hs.models
 		b.mu.Unlock()
 	}
 
 	log := slog.With("ctr", opts.Container)
-	s := agent.NewSession(cmd, stdin, br, msgCh, logW, wire, log)
+	s := agent.NewSession(cmd, stdin, br, msgCh, logW, hs.wire, log)
+
+	// Emit InitMessage so the task captures session ID, model, and version.
+	initMsg := &agent.InitMessage{
+		SessionID: hs.wire.sessionID,
+		Model:     hs.currentModel,
+		Version:   hs.agentVersion,
+	}
+	msgCh <- initMsg
+	// Persist a synthetic caic_init line to output.jsonl so replay
+	// reconstructs the InitMessage (handshake responses aren't logged).
+	if logW != nil {
+		if data, err := json.Marshal(caicInit{
+			Type:      "caic_init",
+			SessionID: initMsg.SessionID,
+			Model:     initMsg.Model,
+			Version:   initMsg.Version,
+		}); err == nil {
+			_, _ = logW.Write(append(data, '\n'))
+		}
+	}
+
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.Send(opts.InitialPrompt); err != nil {
 			s.Close()
@@ -294,13 +315,22 @@ func (w *wireFormat) handlePromptResponseLocked(line []byte) ([]agent.Message, e
 	return msgs, nil
 }
 
+// handshakeResult bundles everything returned by a successful handshake.
+type handshakeResult struct {
+	wire         *wireFormat
+	models       []string // All available model IDs (current first).
+	currentModel string   // Model ID the session is using.
+	agentVersion string   // Agent version string from initialize.
+}
+
 // handshake performs the ACP initialize → session/new sequence and returns
-// a wireFormat with the session ID set, plus model IDs (may be nil).
-func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*wireFormat, []string, error) {
+// a handshakeResult with the wireFormat, model list, and agent metadata.
+func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*handshakeResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	w := &wireFormat{}
+	res := &handshakeResult{wire: w}
 
 	// 1. Send initialize request.
 	initReq := jsonrpcRequest{
@@ -316,22 +346,23 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		},
 	}
 	if err := writeJSON(stdin, initReq); err != nil {
-		return nil, nil, fmt.Errorf("write initialize: %w", err)
+		return nil, fmt.Errorf("write initialize: %w", err)
 	}
 
 	// Read initialize response.
 	initResp, err := readJSONRPCResponse(ctx, stdout)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read initialize response: %w", err)
+		return nil, fmt.Errorf("read initialize response: %w", err)
 	}
 
-	// Check if images are supported.
+	// Extract capabilities and agent info.
 	var initResult initializeResult
 	if initResp.Result != nil {
 		if json.Unmarshal(initResp.Result, &initResult) == nil {
 			if initResult.AgentCapabilities.PromptCapabilities != nil {
 				w.supportsImage = initResult.AgentCapabilities.PromptCapabilities.Image
 			}
+			res.agentVersion = initResult.AgentInfo.Version
 		}
 	}
 
@@ -353,20 +384,19 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		}
 	}
 	if err := writeJSON(stdin, sessionReq); err != nil {
-		return nil, nil, fmt.Errorf("write session/new: %w", err)
+		return nil, fmt.Errorf("write session/new: %w", err)
 	}
 
 	// Read session response.
 	resp, err := readJSONRPCResponse(ctx, stdout)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read session response: %w", err)
+		return nil, fmt.Errorf("read session response: %w", err)
 	}
 
 	// Extract session ID and models from result.
-	var models []string
 	var snResult sessionNewResult
 	if err := json.Unmarshal(resp.Result, &snResult); err != nil {
-		return nil, nil, fmt.Errorf("parse session result: %w", err)
+		return nil, fmt.Errorf("parse session result: %w", err)
 	}
 	if snResult.SessionID != "" {
 		w.sessionID = snResult.SessionID
@@ -375,17 +405,44 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		w.sessionID = opts.ResumeSessionID
 	}
 	if w.sessionID == "" {
-		return nil, nil, errors.New("session response missing sessionId")
+		return nil, errors.New("session response missing sessionId")
 	}
 	if snResult.Models != nil {
+		// Put the current model first so the frontend shows it as default.
+		res.currentModel = snResult.Models.CurrentModelID
+		if res.currentModel != "" {
+			res.models = append(res.models, res.currentModel)
+		}
 		for _, m := range snResult.Models.AvailableModels {
-			if m.ModelID != "" {
-				models = append(models, m.ModelID)
+			if m.ModelID != "" && m.ModelID != res.currentModel {
+				res.models = append(res.models, m.ModelID)
 			}
 		}
 	}
 
-	return w, models, nil
+	// 3. Switch model if the caller requested a specific one.
+	if opts.Model != "" {
+		setModelReq := jsonrpcRequest{
+			JSONRPC: "2.0",
+			ID:      w.allocIDLocked(),
+			Method:  MethodUnstableSetSessionModel,
+			Params:  setSessionModelParams{SessionID: w.sessionID, ModelID: opts.Model},
+		}
+		if err := writeJSON(stdin, setModelReq); err != nil {
+			return nil, fmt.Errorf("write unstable_setSessionModel: %w", err)
+		}
+		resp, err := readJSONRPCResponse(ctx, stdout)
+		if err != nil {
+			// Log and continue — model switch is best-effort. The agent
+			// may not support the unstable method yet.
+			slog.Warn("opencode: unstable_setSessionModel failed, using default model", "err", err, "model", opts.Model)
+		} else {
+			_ = resp // success; model has been switched
+			res.currentModel = opts.Model
+		}
+	}
+
+	return res, nil
 }
 
 // writeJSON marshals v as JSON and writes it followed by a newline.

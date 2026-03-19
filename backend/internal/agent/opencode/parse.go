@@ -19,6 +19,7 @@ import (
 //   - A JSON-RPC 2.0 response (has "id").
 //
 // Emitted agent.Message types:
+//   - InitMessage          — caic_init injection
 //   - TextDeltaMessage     — agent_message_chunk
 //   - ThinkingDeltaMessage — agent_thought_chunk
 //   - ToolUseMessage       — tool_call
@@ -39,6 +40,16 @@ func ParseMessage(line []byte) ([]agent.Message, error) {
 	// caic-injected lines have a "type" field.
 	if probe.Type != "" {
 		switch probe.Type {
+		case "caic_init":
+			var ci caicInit
+			if err := json.Unmarshal(line, &ci); err != nil {
+				return nil, err
+			}
+			return []agent.Message{&agent.InitMessage{
+				SessionID: ci.SessionID,
+				Model:     ci.Model,
+				Version:   ci.Version,
+			}}, nil
 		case "caic_diff_stat":
 			var m agent.DiffStatMessage
 			if err := json.Unmarshal(line, &m); err != nil {

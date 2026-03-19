@@ -294,6 +294,35 @@ func TestParseMessage(t *testing.T) {
 		}
 	})
 
+	t.Run("CaicInit", func(t *testing.T) {
+		input := mustJSON(t, map[string]any{
+			"type":       "caic_init",
+			"session_id": "ses_abc",
+			"model":      "anthropic/claude-sonnet-4",
+			"version":    "0.5.0",
+		})
+		msgs, err := ParseMessage(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		init, ok := msgs[0].(*agent.InitMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.InitMessage", msgs[0])
+		}
+		if init.SessionID != "ses_abc" {
+			t.Errorf("SessionID = %q, want %q", init.SessionID, "ses_abc")
+		}
+		if init.Model != "anthropic/claude-sonnet-4" {
+			t.Errorf("Model = %q, want %q", init.Model, "anthropic/claude-sonnet-4")
+		}
+		if init.Version != "0.5.0" {
+			t.Errorf("Version = %q, want %q", init.Version, "0.5.0")
+		}
+	})
+
 	t.Run("CaicDiffStat", func(t *testing.T) {
 		input := mustJSON(t, map[string]any{
 			"type": "caic_diff_stat",

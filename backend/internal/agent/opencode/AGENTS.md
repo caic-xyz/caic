@@ -22,6 +22,8 @@ the Claude and Codex harnesses).
 ← initialize result (agentCapabilities, agentInfo)
 → session/new (cwd: "/repo", mcpServers: []) or session/load (sessionId, cwd, mcpServers: [])
 ← session result (sessionId, models, modes)
+→ unstable_setSessionModel (sessionId, modelId)   [if model requested]
+← set model result
 → session/prompt (sessionId, prompt:[{type:"text",text:"..."}])
 ← session/update notifications (streaming)
 ← session/prompt result (stopReason, usage)
@@ -73,7 +75,9 @@ then passthrough.
 - **ACP over run mode**: `opencode run` is single-turn per process (no stdin
   loop). ACP provides long-lived JSON-RPC over stdin/stdout with multi-turn.
 - **Dynamic model list**: initial `["anthropic/claude-sonnet-4"]` replaced after
-  handshake with the live list from `session/new`.
+  handshake with the live list from `session/new`. Current model listed first.
+- **Model selection**: If `opts.Model` is set, sends `unstable_setSessionModel`
+  after session creation. Best-effort — logs a warning if the method fails.
 - **Image support**: detected from `agentCapabilities.promptCapabilities.image`
   in the initialize response.
 - **Permission auto-approve**: `session/request_permission` requests are passed
