@@ -32,8 +32,8 @@ type StartOptions struct {
 	Tailscale   bool
 	USB         bool
 	Display     bool
-	// LogWriter receives provisioning log lines. When non-nil, the container
-	// backend should set Quiet=false and write its progress messages here.
+	// LogWriter receives provisioning log lines from the container backend.
+	// Must not be nil.
 	LogWriter io.Writer
 }
 

@@ -4,7 +4,7 @@ go 1.25.7
 
 require (
 	github.com/andybalholm/brotli v1.2.0
-	github.com/caic-xyz/md v0.10.1-0.20260319193153-e77bbd201bfc
+	github.com/caic-xyz/md v0.10.1-0.20260320003541-72b7aae57689
 	github.com/coder/websocket v1.8.14
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/klauspost/compress v1.18.4
@@ -24,7 +24,7 @@ require (
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
-	github.com/buger/jsonparser v1.1.1 // indirect
+	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gzuidhof/tygo v0.2.21 // indirect

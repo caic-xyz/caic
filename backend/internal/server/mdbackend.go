@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/md"
 	"github.com/maruel/genai"
@@ -41,7 +42,6 @@ func (b *mdBackend) mdStartOpts(labels []string, opts *task.StartOptions) (clien
 	}
 	client = b.client
 	mdOpts = &md.StartOpts{
-		Quiet:      opts.LogWriter == nil,
 		BaseImage:  image,
 		Labels:     labels,
 		AgentPaths: []md.AgentPaths{harnessPaths},
@@ -69,10 +69,8 @@ func (b *mdBackend) Launch(ctx context.Context, repos []md.Repo, labels []string
 	}
 	client, mdOpts := b.mdStartOpts(labels, opts)
 	c := client.Container(repos...)
-	if opts.LogWriter != nil {
-		c.W = opts.LogWriter
-	}
-	if err := c.Launch(ctx, mdOpts); err != nil {
+	stdout, stderr := logWriters(opts.LogWriter, "launch")
+	if err := c.Launch(ctx, stdout, stderr, mdOpts); err != nil {
 		return err
 	}
 	b.mu.Lock()
@@ -98,7 +96,8 @@ func (b *mdBackend) Connect(ctx context.Context, repos []md.Repo, opts *task.Sta
 	}
 	b.mu.Unlock()
 	_, mdOpts := b.mdStartOpts(nil, opts)
-	sr, err := c.Connect(ctx, mdOpts)
+	stdout, stderr := logWriters(opts.LogWriter, "connect")
+	sr, err := c.Connect(ctx, stdout, stderr, mdOpts)
 	if err != nil {
 		return "", "", err
 	}
@@ -108,7 +107,7 @@ func (b *mdBackend) Connect(ctx context.Context, repos []md.Repo, opts *task.Sta
 func (b *mdBackend) Diff(ctx context.Context, repo md.Repo, args ...string) (string, error) {
 	slog.Info("md diff", "dir", repo.GitRoot, "br", repo.Branch, "args", args)
 	var stdout bytes.Buffer
-	if err := b.client.Container(repo).Diff(ctx, 0, &stdout, io.Discard, args); err != nil {
+	if err := b.client.Container(repo).Diff(ctx, &stdout, &container.SlogWriter{Phase: "diff"}, 0, args); err != nil {
 		return "", err
 	}
 	return stdout.String(), nil
@@ -120,7 +119,7 @@ func (b *mdBackend) Fetch(ctx context.Context, repos []md.Repo) error {
 	}
 	ct := b.client.Container(repos...)
 	for i := range repos {
-		if err := ct.Fetch(ctx, i, b.provider); err != nil {
+		if err := ct.Fetch(ctx, &container.SlogWriter{Phase: "fetch"}, &container.SlogWriter{Phase: "fetch"}, i, b.provider); err != nil {
 			return err
 		}
 	}
@@ -144,7 +143,7 @@ func (b *mdBackend) Purge(ctx context.Context, name string, repos []md.Repo) err
 	if len(repos) == 0 {
 		ct.Name = name
 	}
-	return ct.Purge(ctx)
+	return ct.Purge(ctx, &container.SlogWriter{Phase: "purge"}, &container.SlogWriter{Phase: "purge"})
 }
 
 func (b *mdBackend) Revive(ctx context.Context, name string, repos []md.Repo) error {
@@ -157,5 +156,10 @@ func (b *mdBackend) Revive(ctx context.Context, name string, repos []md.Repo) er
 	if len(repos) == 0 {
 		ct.Name = name
 	}
-	return ct.Revive(ctx)
+	return ct.Revive(ctx, &container.SlogWriter{Phase: "revive"}, &container.SlogWriter{Phase: "revive"})
+}
+
+// logWriters returns stdout and stderr writers for md task operations.
+func logWriters(w io.Writer, phase string) (stdout, stderr io.Writer) {
+	return w, &container.SlogWriter{Phase: phase}
 }

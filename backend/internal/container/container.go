@@ -3,10 +3,11 @@ package container
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
+	"log/slog"
 	"os/exec"
 	"strings"
 
@@ -15,13 +16,36 @@ import (
 
 // New creates an md.Client for container operations.
 func New(tailscaleAPIKey string) (*md.Client, error) {
-	c, err := md.New()
+	c, err := md.New(&SlogWriter{Phase: "init"})
 	if err != nil {
 		return nil, err
 	}
-	c.W = os.Stderr
 	c.TailscaleAPIKey = tailscaleAPIKey
 	return c, nil
+}
+
+// SlogWriter is an io.Writer that logs each complete line via slog.Info.
+// Use it instead of io.Discard so md output is captured in structured logs.
+type SlogWriter struct {
+	// Phase labels the log entries (e.g. "launch", "warmup").
+	Phase string
+	buf   []byte
+}
+
+func (w *SlogWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := string(bytes.TrimSpace(w.buf[:i]))
+		w.buf = w.buf[i+1:]
+		if line != "" {
+			slog.Info("md", "phase", w.Phase, "msg", line)
+		}
+	}
+	return len(p), nil
 }
 
 // LabelValue returns the value of a Docker label on a running container.

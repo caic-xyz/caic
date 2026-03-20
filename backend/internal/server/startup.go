@@ -939,7 +939,8 @@ func (s *Server) warmupImages() {
 			}
 		}
 		for _, img := range images {
-			built, err := s.mdClient.Warmup(s.ctx, &md.WarmupOpts{
+			w := &container.SlogWriter{Phase: "warmup"}
+			built, err := s.mdClient.Warmup(s.ctx, w, w, &md.WarmupOpts{
 				BaseImage: img,
 				Quiet:     true,
 			})
