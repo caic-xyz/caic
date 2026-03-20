@@ -4,12 +4,12 @@ go 1.25.7
 
 require (
 	github.com/andybalholm/brotli v1.2.0
-	github.com/caic-xyz/md v0.10.1-0.20260320003541-72b7aae57689
+	github.com/caic-xyz/md v0.10.1-0.20260320210618-695e7db9edf3
 	github.com/coder/websocket v1.8.14
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/klauspost/compress v1.18.4
 	github.com/lmittmann/tint v1.1.3
-	github.com/maruel/genai v0.3.1-0.20260319164307-cf39d1f3f4e1
+	github.com/maruel/genai v0.3.1-0.20260320212049-ad2fcf4bc938
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/roundtrippers v0.5.0
 	github.com/mattn/go-colorable v0.1.14
