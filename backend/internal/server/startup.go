@@ -166,7 +166,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("open preferences: %w", err)
 	}
 
-	backend := &mdBackend{client: mdClient}
+	backend := &container.Backend{Client: mdClient}
 
 	cachePath := filepath.Join(cfg.CacheDir, "ci_results.json")
 	cache, err := forgecache.Open(cachePath)
@@ -238,7 +238,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 			} else {
 				slog.Info("title", "prov", p.Name(), "mdl", p.ModelID())
 				s.provider = p
-				backend.provider = p
+				backend.Provider = p
 			}
 		}
 	}

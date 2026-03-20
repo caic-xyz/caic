@@ -18,6 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/frontend"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
+	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
@@ -163,7 +164,7 @@ type Server struct {
 	repos    []repoInfo
 	runners  map[string]*task.Runner // keyed by RelPath
 	mdClient *md.Client
-	backend  *mdBackend // container backend for runner creation
+	backend  *container.Backend // container backend for runner creation
 	logDir   string
 	ciCache  *forgecache.Cache
 	provider genai.Provider // nil if LLM not configured
