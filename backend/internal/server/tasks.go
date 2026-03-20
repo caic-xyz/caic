@@ -111,13 +111,16 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		mounts[i] = task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir}
 	}
 
+	// Resolve docker image from user preferences.
+	dockerImage := s.prefs.Get(userIDFromCtx(ctx)).Settings.BaseImage
+
 	t := &task.Task{
 		ID:            ksid.NewID(),
 		InitialPrompt: v1PromptToAgent(req.InitialPrompt),
 		Repos:         mounts,
 		Harness:       harness,
 		Model:         req.Model,
-		DockerImage:   req.Image,
+		DockerImage:   dockerImage,
 		Tailscale:     req.Tailscale,
 		USB:           req.USB,
 		Display:       req.Display,
@@ -172,7 +175,6 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 				BaseBranch: req.Repos[0].BaseBranch,
 				Harness:    string(req.Harness),
 				Model:      req.Model,
-				BaseImage:  req.Image,
 			})
 			// When the user selects the default model (empty string),
 			// TouchRepo won't clear the old value because empty means

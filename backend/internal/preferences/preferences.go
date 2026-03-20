@@ -94,9 +94,6 @@ func (p *Preferences) TouchRepo(repoPath string, overrides *RepoPrefs) {
 	if overrides.Model != "" {
 		r.Model = overrides.Model
 	}
-	if overrides.BaseImage != "" {
-		r.BaseImage = overrides.BaseImage
-	}
 	p.Repositories[0] = r
 
 	// Update global defaults.
@@ -108,9 +105,6 @@ func (p *Preferences) TouchRepo(repoPath string, overrides *RepoPrefs) {
 			p.Models = make(map[string]string)
 		}
 		p.Models[overrides.Harness] = overrides.Model
-	}
-	if overrides.BaseImage != "" {
-		p.Settings.BaseImage = overrides.BaseImage
 	}
 }
 
@@ -169,8 +163,6 @@ type RepoPrefs struct {
 	Harness string `json:"harness,omitempty"`
 	// Model is the preferred model for this repo's harness.
 	Model string `json:"model,omitempty"`
-	// BaseImage overrides the default container base image for this repo.
-	BaseImage string `json:"baseImage,omitempty"`
 	// LastUsed is the Unix timestamp (seconds) of the last task created for
 	// this repo.
 	LastUsed int64 `json:"lastUsed,omitempty"`
@@ -270,7 +262,7 @@ type usersFile struct {
 }
 
 // BaseImages returns all distinct non-empty base images configured across all
-// users' global and per-repo preferences.
+// users' global preferences.
 func (s *Store) BaseImages() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -278,11 +270,6 @@ func (s *Store) BaseImages() []string {
 	for _, p := range s.cached {
 		if p.Settings.BaseImage != "" {
 			seen[p.Settings.BaseImage] = struct{}{}
-		}
-		for _, r := range p.Repositories {
-			if r.BaseImage != "" {
-				seen[r.BaseImage] = struct{}{}
-			}
 		}
 	}
 	return slices.Sorted(maps.Keys(seen))

@@ -650,7 +650,6 @@ export interface CreateTaskReq {
   repos?: RepoSpec[];
   model?: string;
   harness: Harness;
-  image?: string;
   tailscale?: boolean;
   usb?: boolean;
   display?: boolean;
@@ -786,7 +785,6 @@ export interface RepoPrefsResp {
   baseBranch?: string;
   harness?: string;
   model?: string;
-  baseImage?: string;
 }
 /**
  * CacheMappingResp represents a directory mapping for cache/state sharing.

@@ -234,7 +234,6 @@ type CreateTaskReq struct {
 	Repos         []RepoSpec `json:"repos,omitempty"`
 	Model         string     `json:"model,omitempty"`
 	Harness       Harness    `json:"harness"`
-	Image         string     `json:"image,omitempty"`
 	Tailscale     bool       `json:"tailscale,omitempty"`
 	USB           bool       `json:"usb,omitempty"`
 	Display       bool       `json:"display,omitempty"`
@@ -348,7 +347,6 @@ type RepoPrefsResp struct {
 	BaseBranch string `json:"baseBranch,omitempty"`
 	Harness    string `json:"harness,omitempty"`
 	Model      string `json:"model,omitempty"`
-	BaseImage  string `json:"baseImage,omitempty"`
 }
 
 // CacheMappingResp represents a directory mapping for cache/state sharing.

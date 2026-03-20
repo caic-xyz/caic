@@ -77,7 +77,6 @@ data class RepoPrefsResp(
     val baseBranch: String? = null,
     val harness: String? = null,
     val model: String? = null,
-    val baseImage: String? = null,
 )
 
 /** CacheMappingResp represents a directory mapping for cache/state sharing. */
@@ -265,7 +264,6 @@ data class CreateTaskReq(
     val repos: List<RepoSpec>? = null,
     val model: String? = null,
     val harness: Harness,
-    val image: String? = null,
     val tailscale: Boolean? = null,
     val usb: Boolean? = null,
     val display: Boolean? = null,

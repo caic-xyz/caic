@@ -410,12 +410,12 @@ func TestTouchRepo(t *testing.T) {
 		p := &Preferences{
 			Version: 1,
 			Repositories: []RepoPrefs{
-				{Path: "github/a", Harness: "codex", Model: "o3", BaseImage: "custom:v1", BaseBranch: "dev"},
+				{Path: "github/a", Harness: "codex", Model: "o3", BaseBranch: "dev"},
 			},
 		}
 		p.TouchRepo("github/a", &RepoPrefs{})
 		r := p.Repositories[0]
-		if r.Harness != "codex" || r.Model != "o3" || r.BaseImage != "custom:v1" || r.BaseBranch != "dev" {
+		if r.Harness != "codex" || r.Model != "o3" || r.BaseBranch != "dev" {
 			t.Fatalf("fields clobbered: %+v", r)
 		}
 	})

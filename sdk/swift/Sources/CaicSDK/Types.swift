@@ -105,7 +105,6 @@ public struct RepoPrefsResp: Codable {
     public let baseBranch: String?
     public let harness: String?
     public let model: String?
-    public let baseImage: String?
 }
 
 /// CacheMappingResp represents a directory mapping for cache/state sharing.
@@ -331,7 +330,6 @@ public struct CreateTaskReq: Codable {
     public let repos: [RepoSpec]?
     public let model: String?
     public let harness: Harness
-    public let image: String?
     public let tailscale: Bool?
     public let usb: Bool?
     public let display: Bool?

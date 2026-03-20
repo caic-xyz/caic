@@ -131,7 +131,6 @@ RepoPrefsResp holds per-repository preferences.
 | `baseBranch` | `string` |  |  |
 | `harness` | `string` |  |  |
 | `model` | `string` |  |  |
-| `baseImage` | `string` |  |  |
 
 ### CacheMappingResp
 
@@ -389,7 +388,6 @@ CreateTaskReq is the request body for POST /api/v1/tasks.
 | `repos` | `RepoSpec[]` |  |  |
 | `model` | `string` |  |  |
 | `harness` | `string` |  | yes |
-| `image` | `string` |  |  |
 | `tailscale` | `boolean` |  |  |
 | `usb` | `boolean` |  |  |
 | `display` | `boolean` |  |  |

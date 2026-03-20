@@ -52,7 +52,6 @@ func (s *Server) getPreferences(ctx context.Context, _ *dto.EmptyReq) (*v1.Prefe
 			BaseBranch: r.BaseBranch,
 			Harness:    r.Harness,
 			Model:      r.Model,
-			BaseImage:  r.BaseImage,
 		}
 	}
 	cacheMappings := make([]v1.CacheMappingResp, len(prefs.Settings.CacheMappings))

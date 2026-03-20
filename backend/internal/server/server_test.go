@@ -494,7 +494,14 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 		handler := handle(s.createTask)
 
-		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude","image":"ghcr.io/my/image:v1"}`)
+		// Set docker image in user preferences.
+		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
+			p.Settings.BaseImage = "ghcr.io/my/image:v1"
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude"}`)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
@@ -510,7 +517,7 @@ func TestHandleCreateTask(t *testing.T) {
 			t.Error("response has zero 'id' field")
 		}
 
-		// Verify the task has the image set.
+		// Verify the task uses the image from preferences.
 		s.mu.Lock()
 		entry := s.tasks[resp.ID.String()]
 		s.mu.Unlock()

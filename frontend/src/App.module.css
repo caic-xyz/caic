@@ -145,8 +145,7 @@
   transition: max-height 150ms ease-out, opacity 150ms ease-out, margin-bottom 150ms ease-out;
 }
 
-.modelSelect,
-.imageInput {
+.modelSelect {
   padding: 0.35rem 0.5rem;
   font: inherit;
   font-size: 0.9rem;
@@ -157,10 +156,6 @@
   color: inherit;
   cursor: pointer;
   min-width: 0;
-}
-
-.imageInput {
-  width: 14rem;
 }
 
 .repoChips {
@@ -338,19 +333,16 @@
   cursor: not-allowed;
 }
 
-.modelSelect:hover:not(:disabled),
-.imageInput:hover:not(:disabled) {
+.modelSelect:hover:not(:disabled) {
   background: var(--color-bg-input-hover);
 }
 
-.modelSelect:focus,
-.imageInput:focus {
+.modelSelect:focus {
   outline: none;
   box-shadow: 0 0 0 2px var(--color-primary-ring);
 }
 
-.modelSelect:disabled,
-.imageInput:disabled {
+.modelSelect:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -591,8 +583,7 @@
     overflow: hidden;
   }
 
-  .modelSelect,
-  .imageInput {
+  .modelSelect {
     box-sizing: border-box;
     flex: 1 1 auto;
     min-width: 0;
