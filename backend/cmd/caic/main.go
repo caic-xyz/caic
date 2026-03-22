@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/fsnotify/fsnotify"
 	"github.com/lmittmann/tint"
@@ -129,7 +130,12 @@ See contrib/caic.env for a template with all variables and documentation.
 	cpuProfile := flag.String("cpuprofile", "", "write CPU profile to file")
 	memProfile := flag.String("memprofile", "", "write heap profile to file on shutdown")
 	traceFile := flag.String("trace", "", "write execution trace to file")
+	versionFlag := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+	if *versionFlag {
+		fmt.Println(autoupdate.Version)
+		return nil
+	}
 	if args := flag.Args(); len(args) > 0 {
 		return fmt.Errorf("unexpected arguments: %v", args)
 	}

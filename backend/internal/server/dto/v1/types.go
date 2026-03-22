@@ -56,6 +56,7 @@ type Prompt struct {
 
 // Config reports server capabilities to the frontend.
 type Config struct {
+	Version            string   `json:"version,omitempty"`
 	TailscaleAvailable bool     `json:"tailscaleAvailable"`
 	USBAvailable       bool     `json:"usbAvailable"`
 	DisplayAvailable   bool     `json:"displayAvailable"`

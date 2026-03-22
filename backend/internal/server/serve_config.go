@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
@@ -31,6 +32,7 @@ import (
 
 func (s *Server) getConfig(_ context.Context, _ *dto.EmptyReq) (*v1.Config, error) {
 	cfg := &v1.Config{
+		Version:            autoupdate.Version,
 		TailscaleAvailable: s.mdClient.TailscaleAPIKey != "",
 		USBAvailable:       runtime.GOOS == "linux",
 		DisplayAvailable:   true,
