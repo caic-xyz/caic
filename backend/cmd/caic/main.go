@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
+	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/fsnotify/fsnotify"
 	"github.com/lmittmann/tint"
@@ -111,6 +112,9 @@ Environment variables (flags take precedence when set):
     GEMINI_API_KEY              Gemini API key for the Gemini Live voice agent
     TAILSCALE_API_KEY           Tailscale API key for Tailscale ephemeral node
     CAIC_WEBRTC_PORT            UDP port for WebRTC ICE (e.g. 3478); unset disables WebRTC
+
+  Auto-update:
+    CAIC_AUTO_UPDATE            Set to "0" to disable nightly auto-update (default: enabled)
 
   Profiling:
     CAIC_PPROF                  Set to any value to expose /debug/pprof/* endpoints
@@ -239,6 +243,10 @@ See contrib/caic.env for a template with all variables and documentation.
 	// Exit when executable is rebuilt (systemd restarts the service).
 	if err := watchExecutable(ctx, cancel); err != nil {
 		slog.Warn("failed to watch executable", "err", err)
+	}
+	// Nightly auto-update: checks GitHub Releases and replaces the binary.
+	if v := autoupdate.Version; v != "" && !strings.HasPrefix(v, "devel-") && os.Getenv("CAIC_AUTO_UPDATE") != "0" {
+		go autoupdate.Run(ctx, github.NewClient(cfg.GitHubToken, http.DefaultTransport))
 	}
 	return serveHTTP(ctx, *addr, *root, cfg)
 }

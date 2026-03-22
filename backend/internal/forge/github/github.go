@@ -41,17 +41,21 @@ func (c *Client) apiBase() string {
 
 // NewClient returns a Client that authenticates with token and throttles/retries
 // via throttle. The transport chain is: Header → Retry → throttle.
+// When token is empty, requests are unauthenticated (lower rate limits).
 func NewClient(token string, throttle http.RoundTripper) *Client {
+	h := http.Header{
+		"Accept":               {"application/vnd.github+json"},
+		"X-GitHub-Api-Version": {"2026-03-10"},
+		"Content-Type":         {"application/json"},
+	}
+	if token != "" {
+		h.Set("Authorization", "Bearer "+token)
+	}
 	return &Client{
 		HTTPClient: &http.Client{
 			Transport: &roundtrippers.Header{
 				Transport: &roundtrippers.Retry{Transport: throttle},
-				Header: http.Header{
-					"Authorization":        {"Bearer " + token},
-					"Accept":               {"application/vnd.github+json"},
-					"X-GitHub-Api-Version": {"2026-03-10"},
-					"Content-Type":         {"application/json"},
-				},
+				Header:    h,
 			},
 		},
 	}
