@@ -51,6 +51,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	// prevByID tracks the last marshalled JSON for each task ID.
 	prevByID := map[string][]byte{}
 	var prevReposJSON []byte
+	var lastWarnSeq uint64
 	first := true
 
 	for {
@@ -60,6 +61,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 			out = append(out, s.toJSON(e))
 		}
 		repos := s.reposLocked()
+		newWarnings := s.warningsSince(lastWarnSeq)
 		ch := s.changed
 		s.mu.Unlock()
 
@@ -132,6 +134,15 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
+		}
+
+		// Emit any new warnings.
+		for _, warn := range newWarnings {
+			if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "warning", Warning: warn.msg}); err != nil {
+				slog.Warn("marshal warning", "err", err)
+				return
+			}
+			lastWarnSeq = warn.seq
 		}
 
 		select {

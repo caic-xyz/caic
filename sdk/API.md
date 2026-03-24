@@ -96,6 +96,7 @@ Config reports server capabilities to the frontend.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `version` | `string` |  |  |
 | `tailscaleAvailable` | `boolean` |  | yes |
 | `usbAvailable` | `boolean` |  | yes |
 | `displayAvailable` | `boolean` |  | yes |
@@ -774,6 +775,7 @@ kind=="upsert":   Task holds a newly created task.
 kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
 kind=="delete":   ID holds the string ID of the removed task.
 kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
+kind=="warning":  Warning holds a transient server warning message for the user.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
@@ -783,6 +785,7 @@ kind=="repos":    Repos holds the updated repo list (emitted when default-branch
 | `patch` | `Record<string, unknown>` |  |  |
 | `id` | `string` |  |  |
 | `repos` | `Repo[]` |  |  |
+| `warning` | `string` |  |  |
 
 ### UsageWindow
 

@@ -425,6 +425,7 @@ export interface Prompt {
  * Config reports server capabilities to the frontend.
  */
 export interface Config {
+  version?: string;
   tailscaleAvailable: boolean;
   usbAvailable: boolean;
   displayAvailable: boolean;
@@ -604,6 +605,7 @@ export interface Task {
  * kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
  * kind=="delete":   ID holds the string ID of the removed task.
  * kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
+ * kind=="warning":  Warning holds a transient server warning message for the user.
  */
 export interface TaskListEvent {
   kind: string;
@@ -612,6 +614,7 @@ export interface TaskListEvent {
   patch?: { [key: string]: any /* json.RawMessage */};
   id?: string;
   repos?: Repo[];
+  warning?: string;
 }
 /**
  * TaskToolInputResp is the response for GET /api/v1/tasks/{id}/tool/{toolUseID}.

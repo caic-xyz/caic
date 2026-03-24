@@ -492,6 +492,7 @@ func (s *Server) pollRepoCIOnce(ctx context.Context, info repoInfo, f forge.Forg
 	if err != nil {
 		if !errors.Is(err, forge.ErrNotFound) {
 			slog.Warn("pollRepoCIOnce: get SHA", "repo", info.RelPath, "err", err)
+			s.emitWarning(fmt.Sprintf("CI poll failed for %s: %v", info.RelPath, err))
 		}
 		return
 	}
@@ -505,6 +506,7 @@ func (s *Server) pollRepoCIOnce(ctx context.Context, info repoInfo, f forge.Forg
 	if err != nil {
 		if !errors.Is(err, forge.ErrNotFound) {
 			slog.Warn("pollRepoCIOnce: get check-runs", "repo", info.RelPath, "err", err)
+			s.emitWarning(fmt.Sprintf("CI poll failed for %s: %v", info.RelPath, err))
 		}
 		return
 	}

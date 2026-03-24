@@ -209,6 +209,8 @@ type Server struct {
 	tasks        map[string]*taskEntry
 	repoCIStatus map[string]repoCIState // keyed by repoInfo.RelPath
 	changed      chan struct{}          // closed on task mutation; replaced under mu
+	warnings     []serverWarning        // append-only ring buffer; capped at maxWarnings
+	warningSeq   uint64                 // monotonic sequence counter for warnings
 }
 
 type taskEntry struct {

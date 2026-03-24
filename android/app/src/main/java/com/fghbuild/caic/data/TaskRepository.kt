@@ -10,8 +10,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -64,6 +67,9 @@ class TaskRepository @Inject constructor(
 
     private val _usage = MutableStateFlow<UsageResp?>(null)
     val usage: StateFlow<UsageResp?> = _usage.asStateFlow()
+
+    private val _warnings = MutableSharedFlow<String>(extraBufferCapacity = 10)
+    val warnings: SharedFlow<String> = _warnings.asSharedFlow()
 
     private val client = OkHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
@@ -188,6 +194,10 @@ class TaskRepository @Inject constructor(
                             taskMap[id] = applyPatch(taskMap[id] ?: return@let, patch)
                         }
                         "delete" -> event.id?.let { taskMap.remove(it) }
+                        "warning" -> {
+                            event.warning?.let { _warnings.tryEmit(it) }
+                            return
+                        }
                     }
                     trySend(taskMap.values.toList())
                 } catch (_: Exception) {

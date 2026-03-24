@@ -82,6 +82,12 @@ fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
         snackbarHostState.showSnackbar(error)
     }
 
+    LaunchedEffect(Unit) {
+        voiceViewModel.serverWarnings.collect { message ->
+            snackbarHostState.showSnackbar(message)
+        }
+    }
+
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = {

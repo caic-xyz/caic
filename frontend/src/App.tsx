@@ -139,6 +139,15 @@ export default function App() {
   // Per-task image drafts survive task switching.
   const [inputImageDrafts, setInputImageDrafts] = createSignal<Map<string, APIImageData[]>>(new Map());
 
+  // Transient server warnings shown as auto-dismissing toasts.
+  const [warnings, setWarnings] = createSignal<{ id: number; message: string }[]>([]);
+  let nextWarningId = 0;
+  function showWarning(message: string) {
+    const id = nextWarningId++;
+    setWarnings((prev) => [...prev, { id, message }]);
+    setTimeout(() => setWarnings((prev) => prev.filter((w) => w.id !== id)), 8000);
+  }
+
   const harnessSupportsImages = () => harnesses().find((h) => h.name === selectedHarness())?.supportsImages ?? false;
 
   // Ref to the main prompt textarea for focusing after Escape.
@@ -419,6 +428,8 @@ export default function App() {
               const byPath = new Map(updatedRepos.map((r) => [r.path, r]));
               return prev.map((r) => byPath.get(r.path) ?? r);
             });
+          } else if (event.kind === "warning" && event.warning) {
+            showWarning(event.warning);
           }
         } catch {
           // Ignore unparseable messages.
@@ -1156,6 +1167,18 @@ export default function App() {
         </div>
       </Show>
       <VoiceOverlay tasks={tasks} recentRepo={() => repos()[0]?.path ?? ""} selectedHarness={selectedHarness} selectedModel={selectedModel} />
+      <Portal>
+        <div class={styles.toastContainer}>
+          <For each={warnings()}>
+            {(w) => (
+              <div class={styles.toast}>
+                <span>{w.message}</span>
+                <button class={styles.toastDismiss} onClick={() => setWarnings((prev) => prev.filter((x) => x.id !== w.id))}>×</button>
+              </div>
+            )}
+          </For>
+        </div>
+      </Portal>
     </div>
     </Show>
   );

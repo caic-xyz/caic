@@ -78,6 +78,7 @@ public enum ErrorCodes {
 
 /// Config reports server capabilities to the frontend.
 public struct Config: Codable {
+    public let version: String?
     public let tailscaleAvailable: Bool
     public let usbAvailable: Bool
     public let displayAvailable: Bool
@@ -628,6 +629,7 @@ public struct TaskToolInputResp: Codable {
 /// kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
 /// kind=="delete":   ID holds the string ID of the removed task.
 /// kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
+/// kind=="warning":  Warning holds a transient server warning message for the user.
 public struct TaskListEvent: Codable {
     public let kind: String
     public let tasks: [Task]?
@@ -635,6 +637,7 @@ public struct TaskListEvent: Codable {
     public let patch: [String: JSONValue]?
     public let id: String?
     public let repos: [Repo]?
+    public let warning: String?
 }
 
 /// UsageWindow represents a single quota window (5-hour or 7-day).

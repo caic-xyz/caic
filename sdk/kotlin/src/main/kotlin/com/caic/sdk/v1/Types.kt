@@ -50,6 +50,7 @@ object ErrorCodes {
 /** Config reports server capabilities to the frontend. */
 @Serializable
 data class Config(
+    val version: String? = null,
     val tailscaleAvailable: Boolean,
     val usbAvailable: Boolean,
     val displayAvailable: Boolean,
@@ -558,6 +559,7 @@ data class TaskToolInputResp(
  * kind=="patch":    Patch holds only the changed fields (always includes "id") for an existing task.
  * kind=="delete":   ID holds the string ID of the removed task.
  * kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
+ * kind=="warning":  Warning holds a transient server warning message for the user.
  */
 @Serializable
 data class TaskListEvent(
@@ -567,6 +569,7 @@ data class TaskListEvent(
     val patch: Map<String, JsonElement>? = null,
     val id: String? = null,
     val repos: List<Repo>? = null,
+    val warning: String? = null,
 )
 
 /** UsageWindow represents a single quota window (5-hour or 7-day). */

@@ -26,6 +26,8 @@ class VoiceViewModel @Inject constructor(
 
     val settings = settingsRepository.settings
 
+    val serverWarnings = taskRepository.warnings
+
     private val taskNumberMap: TaskNumberMap
         get() = voiceSessionManager.taskNumberMap
 

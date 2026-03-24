@@ -171,6 +171,57 @@ func emitTaskListEvent(w http.ResponseWriter, flusher http.Flusher, ev v1.TaskLi
 	return nil
 }
 
+// serverWarning is a timestamped warning message stored in the Server's ring buffer.
+type serverWarning struct {
+	seq uint64
+	msg string
+	ts  time.Time
+}
+
+const (
+	// maxWarnings caps the warning ring buffer.
+	maxWarnings = 100
+	// warningDedup suppresses duplicate messages within this window.
+	warningDedup = 5 * time.Minute
+)
+
+// emitWarning appends a user-visible warning to the ring buffer and wakes SSE
+// clients. Duplicate messages within warningDedup are suppressed. Must NOT be
+// called with s.mu held.
+func (s *Server) emitWarning(msg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	// Deduplicate: skip if the same message was emitted recently.
+	for i := len(s.warnings) - 1; i >= 0; i-- {
+		w := s.warnings[i]
+		if now.Sub(w.ts) > warningDedup {
+			break
+		}
+		if w.msg == msg {
+			return
+		}
+	}
+	s.warningSeq++
+	s.warnings = append(s.warnings, serverWarning{seq: s.warningSeq, msg: msg, ts: now})
+	// Trim to cap.
+	if len(s.warnings) > maxWarnings {
+		s.warnings = s.warnings[len(s.warnings)-maxWarnings:]
+	}
+	s.taskChanged()
+}
+
+// warningsSince returns all warnings with seq > after.
+func (s *Server) warningsSince(after uint64) []serverWarning {
+	var out []serverWarning
+	for _, w := range s.warnings {
+		if w.seq > after {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
 // tailscaleURL returns the Tailscale URL for the task, or "true" if enabled
 // but FQDN not yet known, or "" if disabled.
 func tailscaleURL(t *task.Task) string {
