@@ -5,7 +5,8 @@
 version: 2
 
 builds:
-  - main: ./backend/cmd/caic
+  - id: caic
+    main: ./backend/cmd/caic
     binary: caic
     goos:
       - linux
@@ -21,9 +22,26 @@ builds:
       - -s -w
     env:
       - CGO_ENABLED=0
+  - id: webrtc-relay
+    main: ./backend/cmd/webrtc-relay
+    binary: webrtc-relay
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+    env:
+      - CGO_ENABLED=0
 
 universal_binaries:
-  - replace: true
+  - id: caic
+    replace: true
+  - id: webrtc-relay
+    replace: true
 
 archives:
   - formats:
