@@ -817,6 +817,11 @@ export interface UserSettings {
    */
   baseImage?: string;
   /**
+   * GitHubTokenAccess controls the GitHub token injected into containers.
+   * "none" (default): no token. "read-write": passes the parent token.
+   */
+  gitHubTokenAccess?: string;
+  /**
    * UseDefaultCaches controls whether default harness caches are mounted.
    * When false, only custom CacheMappings are used.
    */

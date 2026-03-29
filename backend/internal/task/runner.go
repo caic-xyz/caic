@@ -32,6 +32,9 @@ type StartOptions struct {
 	Tailscale   bool
 	USB         bool
 	Display     bool
+	// GitHubToken is the resolved GitHub token to inject into the container's
+	// environment. Empty means no token is injected.
+	GitHubToken string
 	// LogWriter receives provisioning log lines from the container backend.
 	// Must not be nil.
 	LogWriter io.Writer
@@ -751,7 +754,8 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResu
 
 	opts := &StartOptions{
 		DockerImage: t.DockerImage, Harness: t.Harness, Tailscale: t.Tailscale, USB: t.USB, Display: t.Display,
-		LogWriter: &provisioningWriter{ctx: ctx, t: t},
+		GitHubToken: t.GitHubToken,
+		LogWriter:   &provisioningWriter{ctx: ctx, t: t},
 	}
 
 	// Phase A: docker run + SSH config. Branch creation runs concurrently so

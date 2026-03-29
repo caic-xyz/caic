@@ -90,6 +90,7 @@ data class UserSettings(
     @SerialName("autoFixOnCIFailure") val autoFixOnCIFailure: Boolean,
     @SerialName("autoFixOnPROpen") val autoFixOnPROpen: Boolean,
     val baseImage: String? = null,
+    val gitHubTokenAccess: String? = null,
     val useDefaultCaches: Boolean? = null,
     val wellKnownCaches: Map<String, Boolean>? = null,
     val cacheMappings: List<CacheMappingResp>? = null,

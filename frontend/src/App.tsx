@@ -106,6 +106,7 @@ export default function App() {
 
   const [autoFixCI, setAutoFixCI] = createSignal(false);
   const [autoFixPR, setAutoFixPR] = createSignal(false);
+  const [gitHubTokenAccess, setGitHubTokenAccess] = createSignal("");
   const [useDefaultCaches, setUseDefaultCaches] = createSignal(true);
   const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
   const [wellKnownCachesList, setWellKnownCachesList] = createSignal<WellKnownCachesResp["wellKnown"]>([]);
@@ -118,6 +119,7 @@ export default function App() {
       autoFixOnCIFailure: autoFixCI(),
       autoFixOnPROpen: autoFixPR(),
       baseImage: selectedImage() || "",
+      gitHubTokenAccess: gitHubTokenAccess() || undefined,
       useDefaultCaches: useDefaultCaches(),
       wellKnownCaches: wellKnownCaches() as Record<string, boolean>,
       cacheMappings: cacheMappings(),
@@ -310,6 +312,7 @@ export default function App() {
         if (prefs?.settings) {
           setAutoFixCI(prefs.settings.autoFixOnCIFailure);
           setAutoFixPR(prefs.settings.autoFixOnPROpen);
+          setGitHubTokenAccess(prefs.settings.gitHubTokenAccess ?? "");
           setUseDefaultCaches(prefs.settings.useDefaultCaches ?? true);
           setWellKnownCaches(prefs.settings.wellKnownCaches ?? {});
           setCacheMappings(prefs.settings.cacheMappings ?? []);
@@ -1043,6 +1046,22 @@ export default function App() {
                   }}
                 />
               </label>
+              <label class={styles.settingsLabel}>
+                GitHub token access
+                <select
+                  class={styles.settingsInput}
+                  value={gitHubTokenAccess() || "none"}
+                  onChange={async (e) => {
+                    const val = e.currentTarget.value;
+                    setGitHubTokenAccess(val);
+                    await updatePreferences(currentSettings({ gitHubTokenAccess: val }));
+                  }}
+                >
+                  <option value="none">None (default)</option>
+                  <option value="read-write">Read-write</option>
+                </select>
+              </label>
+              <p class={styles.settingsDescription}>Controls whether the GitHub token is injected into containers.</p>
             </div>
             <div class={styles.settingsSection}>
               <h3 class={styles.settingsSectionTitle}>Well-known caches</h3>

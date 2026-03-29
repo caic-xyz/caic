@@ -40,6 +40,10 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) (client 
 		image = md.DefaultBaseImage + ":latest"
 	}
 	client = b.Client
+	var extraEnv []string
+	if opts.GitHubToken != "" {
+		extraEnv = append(extraEnv, "GITHUB_TOKEN="+opts.GitHubToken)
+	}
 	mdOpts = &md.StartOpts{
 		BaseImage:  image,
 		Labels:     labels,
@@ -47,6 +51,7 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) (client 
 		USB:        opts.USB,
 		Tailscale:  opts.Tailscale,
 		Display:    opts.Display,
+		ExtraEnv:   extraEnv,
 	}
 	return client, mdOpts
 }

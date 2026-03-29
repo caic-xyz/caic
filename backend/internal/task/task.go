@@ -137,6 +137,7 @@ type Task struct {
 	Harness       agent.Harness // Agent harness ("claude", "gemini", etc.).
 	Model         string        // User-requested model; passed to agent CLI.
 	DockerImage   string        // Custom Docker base image; empty means use the default.
+	GitHubToken   string        // GitHub token to inject into the container; empty means none.
 	Tailscale     bool          // Enable Tailscale networking in the container.
 	USB           bool          // Enable USB passthrough in the container.
 	Display       bool          // Enable Xvfb display in the container.

@@ -53,6 +53,11 @@ func (p *Preferences) Validate() error {
 		}
 		seen[r.Path] = struct{}{}
 	}
+	switch p.Settings.GitHubTokenAccess {
+	case "", GitHubTokenReadWrite, GitHubTokenNone:
+	default:
+		return fmt.Errorf("invalid gitHubTokenAccess: %q", p.Settings.GitHubTokenAccess)
+	}
 	for i, m := range p.Settings.CacheMappings {
 		if m.HostPath == "" {
 			return fmt.Errorf("cacheMappings[%d]: empty hostPath", i)
@@ -131,6 +136,17 @@ func (p *Preferences) clone() Preferences {
 	return c
 }
 
+// GitHubTokenAccess controls which GitHub token, if any, is injected into
+// containers at runtime. Valid values are "" or "none" (default) and
+// "read-write".
+type GitHubTokenAccess string
+
+// GitHubTokenAccess values.
+const (
+	GitHubTokenNone      GitHubTokenAccess = "none"
+	GitHubTokenReadWrite GitHubTokenAccess = "read-write"
+)
+
 // Settings holds user-configurable behavioral settings.
 type Settings struct {
 	// AutoFixOnCIFailure automatically starts a new task to fix CI when a
@@ -142,6 +158,10 @@ type Settings struct {
 	// BaseImage overrides the default container base image. Empty means use
 	// the default.
 	BaseImage string `json:"baseImage,omitempty"`
+	// GitHubTokenAccess controls the GitHub token injected into containers.
+	// Default ("" or "none") injects no token.
+	// "read-write" passes the parent token.
+	GitHubTokenAccess GitHubTokenAccess `json:"gitHubTokenAccess,omitempty"`
 	// UseDefaultCaches controls whether default harness caches are mounted.
 	// When false, only custom CacheMappings are used.
 	UseDefaultCaches bool `json:"useDefaultCaches,omitempty"`
@@ -267,9 +287,9 @@ func (s *Store) BaseImages() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	seen := make(map[string]struct{})
-	for _, p := range s.cached {
-		if p.Settings.BaseImage != "" {
-			seen[p.Settings.BaseImage] = struct{}{}
+	for k := range s.cached {
+		if s.cached[k].Settings.BaseImage != "" {
+			seen[s.cached[k].Settings.BaseImage] = struct{}{}
 		}
 	}
 	return slices.Sorted(maps.Keys(seen))
@@ -277,10 +297,11 @@ func (s *Store) BaseImages() []string {
 
 // Validate checks that the on-disk format is well-formed.
 func (f *usersFile) Validate() error {
-	for id, p := range f.Users {
+	for id := range f.Users {
 		if id == "" {
 			return errors.New("users: empty user ID key")
 		}
+		p := f.Users[id]
 		if err := p.Validate(); err != nil {
 			return fmt.Errorf("users[%q]: %w", id, err)
 		}

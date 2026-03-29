@@ -272,11 +272,15 @@ func (s *Server) CreateTask(ctx context.Context, req bot.TaskRequest) (string, e
 	if harness == "" {
 		return "", fmt.Errorf("no backend available for repo %s", req.Repo)
 	}
+	// Resolve GitHub container token from the task owner's preferences.
+	ownerPrefs := s.prefs.Get(req.OwnerID)
+	ghToken := s.resolveGitHubContainerToken(ctx, ownerPrefs.Settings.GitHubTokenAccess)
 	t := &task.Task{
 		ID:            ksid.NewID(),
 		InitialPrompt: agent.Prompt{Text: req.Prompt},
 		Repos:         []task.RepoMount{{Name: req.Repo, GitRoot: runner.Dir}},
 		Harness:       harness,
+		GitHubToken:   ghToken,
 		StartedAt:     time.Now().UTC(),
 		Provider:      s.provider,
 		OwnerID:       req.OwnerID,

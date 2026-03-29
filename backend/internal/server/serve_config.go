@@ -71,6 +71,7 @@ func (s *Server) getPreferences(ctx context.Context, _ *dto.EmptyReq) (*v1.Prefe
 			AutoFixOnCIFailure: prefs.Settings.AutoFixOnCIFailure,
 			AutoFixOnPROpen:    prefs.Settings.AutoFixOnPROpen,
 			BaseImage:          prefs.Settings.BaseImage,
+			GitHubTokenAccess:  string(prefs.Settings.GitHubTokenAccess),
 			UseDefaultCaches:   prefs.Settings.UseDefaultCaches,
 			WellKnownCaches:    prefs.Settings.WellKnownCaches,
 			CacheMappings:      cacheMappings,
@@ -83,6 +84,7 @@ func (s *Server) updatePreferences(ctx context.Context, req *v1.UpdatePreference
 		p.Settings.AutoFixOnCIFailure = req.Settings.AutoFixOnCIFailure
 		p.Settings.AutoFixOnPROpen = req.Settings.AutoFixOnPROpen
 		p.Settings.BaseImage = req.Settings.BaseImage
+		p.Settings.GitHubTokenAccess = preferences.GitHubTokenAccess(req.Settings.GitHubTokenAccess)
 		p.Settings.UseDefaultCaches = req.Settings.UseDefaultCaches
 		p.Settings.WellKnownCaches = req.Settings.WellKnownCaches
 		if req.Settings.CacheMappings != nil {

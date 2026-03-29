@@ -55,7 +55,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	}
 
 	// container.New is instant; run it serially to simplify.
-	mdClient, err := container.New(cfg.TailscaleAPIKey)
+	mdClient, err := container.New(cfg.TailscaleAPIKey, cfg.GitHubToken)
 	if err != nil {
 		return nil, fmt.Errorf("init container library: %w", err)
 	}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
@@ -111,8 +112,10 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		mounts[i] = task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir}
 	}
 
-	// Resolve docker image from user preferences.
-	dockerImage := s.prefs.Get(userIDFromCtx(ctx)).Settings.BaseImage
+	// Resolve docker image and GitHub token access from user preferences.
+	prefs := s.prefs.Get(userIDFromCtx(ctx))
+	dockerImage := prefs.Settings.BaseImage
+	ghToken := s.resolveGitHubContainerToken(ctx, prefs.Settings.GitHubTokenAccess)
 
 	t := &task.Task{
 		ID:            ksid.NewID(),
@@ -121,6 +124,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		Harness:       harness,
 		Model:         req.Model,
 		DockerImage:   dockerImage,
+		GitHubToken:   ghToken,
 		Tailscale:     req.Tailscale,
 		USB:           req.USB,
 		Display:       req.Display,
@@ -632,6 +636,24 @@ func (s *Server) cleanupTask(entry *taskEntry, runner *task.Runner, reason task.
 		s.mu.Unlock()
 		close(entry.done)
 	})
+}
+
+// resolveGitHubContainerToken returns the GitHub token to inject into a
+// container based on the user's access preference. Default ("" or "none")
+// returns empty. "read-write" passes the parent token.
+func (s *Server) resolveGitHubContainerToken(ctx context.Context, access preferences.GitHubTokenAccess) string {
+	if access != preferences.GitHubTokenReadWrite {
+		return ""
+	}
+	// Resolve the parent token: prefer the OAuth user's token, fall back to
+	// the server-level PAT.
+	if u, ok := auth.UserFromContext(ctx); ok && u.Provider == forge.KindGitHub && u.AccessToken != "" {
+		return u.AccessToken
+	}
+	if s.forge != nil {
+		return s.forge.githubToken
+	}
+	return ""
 }
 
 // getTask looks up a task by the {id} path parameter.

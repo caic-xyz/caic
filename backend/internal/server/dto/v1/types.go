@@ -370,6 +370,9 @@ type UserSettings struct {
 	// BaseImage overrides the default container base image. Empty means use
 	// the default.
 	BaseImage string `json:"baseImage,omitempty"`
+	// GitHubTokenAccess controls the GitHub token injected into containers.
+	// "none" (default): no token. "read-write": passes the parent token.
+	GitHubTokenAccess string `json:"gitHubTokenAccess,omitempty"`
 	// UseDefaultCaches controls whether default harness caches are mounted.
 	// When false, only custom CacheMappings are used.
 	UseDefaultCaches bool `json:"useDefaultCaches,omitempty"`

@@ -15,12 +15,13 @@ import (
 )
 
 // New creates an md.Client for container operations.
-func New(tailscaleAPIKey string) (*md.Client, error) {
+func New(tailscaleAPIKey, githubToken string) (*md.Client, error) {
 	c, err := md.New(&SlogWriter{Phase: "init"})
 	if err != nil {
 		return nil, err
 	}
 	c.TailscaleAPIKey = tailscaleAPIKey
+	c.GithubToken = githubToken
 	return c, nil
 }
 

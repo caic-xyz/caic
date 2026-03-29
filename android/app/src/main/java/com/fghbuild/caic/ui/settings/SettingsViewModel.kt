@@ -30,6 +30,7 @@ data class SettingsScreenState(
     val autoFixCI: Boolean = false,
     val autoFixPR: Boolean = false,
     val baseImage: String = "",
+    val gitHubTokenAccess: String = "",
     val useDefaultCaches: Boolean = true,
     val wellKnownCaches: Map<String, Boolean> = emptyMap(),
     val wellKnownCachesList: List<WellKnownCache> = emptyList(),
@@ -152,6 +153,7 @@ class SettingsViewModel @Inject constructor(
                         autoFixCI = prefs.settings.autoFixOnCIFailure,
                         autoFixPR = prefs.settings.autoFixOnPROpen ?: false,
                         baseImage = prefs.settings.baseImage ?: "",
+                        gitHubTokenAccess = prefs.settings.gitHubTokenAccess ?: "",
                         useDefaultCaches = prefs.settings.useDefaultCaches ?: true,
                         wellKnownCaches = prefs.settings.wellKnownCaches ?: emptyMap(),
                         wellKnownCachesList = caches?.wellKnown ?: emptyList(),
@@ -180,6 +182,11 @@ class SettingsViewModel @Inject constructor(
 
     fun saveBaseImage() {
         saveSettings { it.copy(baseImage = _state.value.baseImage.ifBlank { null }) }
+    }
+
+    fun updateGitHubTokenAccess(access: String) {
+        _state.update { it.copy(gitHubTokenAccess = access) }
+        saveSettings { it.copy(gitHubTokenAccess = access.ifEmpty { null }) }
     }
 
     fun updateUseDefaultCaches(enabled: Boolean) {
@@ -235,6 +242,7 @@ class SettingsViewModel @Inject constructor(
                     autoFixOnCIFailure = snapshot.autoFixCI,
                     autoFixOnPROpen = snapshot.autoFixPR,
                     baseImage = snapshot.baseImage.ifBlank { null },
+                    gitHubTokenAccess = snapshot.gitHubTokenAccess.ifEmpty { null },
                     useDefaultCaches = snapshot.useDefaultCaches,
                     wellKnownCaches = snapshot.wellKnownCaches.ifEmpty { null },
                     cacheMappings = snapshot.cacheMappings.ifEmpty { null },
@@ -247,6 +255,7 @@ class SettingsViewModel @Inject constructor(
                         autoFixCI = snapshot.autoFixCI,
                         autoFixPR = snapshot.autoFixPR,
                         baseImage = snapshot.baseImage,
+                        gitHubTokenAccess = snapshot.gitHubTokenAccess,
                         useDefaultCaches = snapshot.useDefaultCaches,
                         wellKnownCaches = snapshot.wellKnownCaches,
                         cacheMappings = snapshot.cacheMappings,
