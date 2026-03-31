@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/server"
@@ -220,11 +221,9 @@ See contrib/caic.env for a template with all variables and documentation.
 		Pprof:                   *pprofFlag,
 	}
 
-	slog.Info("gemini", "apikey", maskedToken(cfg.GeminiAPIKey))                                            //nolint:gosec // G706: value from env, not user input
-	slog.Info("tailscale", "apikey", maskedToken(cfg.TailscaleAPIKey))                                      //nolint:gosec // G706: value from env, not user input
-	slog.Info("LLM", "provider", cfg.LLMProvider, "model", cfg.LLMModel)                                    //nolint:gosec // G706: value from env, not user input
-	slog.Info("github", "pat", maskedToken(cfg.GitHubToken), "oauth", maskedToken(cfg.GitHubOAuthClientID)) //nolint:gosec // G706: value from env, not user input
-	slog.Info("gitlab", "pat", maskedToken(cfg.GitLabToken), "oauth", maskedToken(cfg.GitLabOAuthClientID)) //nolint:gosec // G706: value from env, not user input
+	slog.Info("gemini", "apikey", auth.MaskedToken(cfg.GeminiAPIKey))       //nolint:gosec // G706
+	slog.Info("tailscale", "apikey", auth.MaskedToken(cfg.TailscaleAPIKey)) //nolint:gosec // G706
+	slog.Info("LLM", "provider", cfg.LLMProvider, "model", cfg.LLMModel)    //nolint:gosec // G706
 
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -369,22 +368,6 @@ func configDir() string {
 		base = filepath.Join(home, ".config")
 	}
 	return filepath.Join(base, "caic")
-}
-
-// maskedToken is a credential string that logs as "xxx...1234" (last 4 chars
-// visible, remainder replaced with "x"). Implements slog.LogValuer so the
-// masking happens inside the type and no nolint directives are needed.
-type maskedToken string
-
-func (m maskedToken) LogValue() slog.Value {
-	s := string(m)
-	if s == "" {
-		return slog.StringValue("")
-	}
-	if len(s) <= 4 {
-		return slog.StringValue(s)
-	}
-	return slog.StringValue(strings.Repeat("x", len(s)-4) + s[len(s)-4:])
 }
 
 // resolveGitHubToken returns the GitHub token to use. It returns GITHUB_TOKEN

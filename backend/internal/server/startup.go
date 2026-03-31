@@ -124,6 +124,9 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		allowedHost = u.Hostname()
 	}
 
+	slog.Info("github", "pat", auth.MaskedToken(cfg.GitHubToken), "oauth", auth.MaskedToken(cfg.GitHubOAuthClientID))
+	slog.Info("gitlab", "pat", auth.MaskedToken(cfg.GitLabToken), "oauth", auth.MaskedToken(cfg.GitLabOAuthClientID))
+
 	// Initialize auth store and OAuth providers when auth is configured.
 	var authStore *auth.Store
 	var sessionSecret []byte
