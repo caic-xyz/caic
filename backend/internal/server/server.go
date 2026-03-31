@@ -124,6 +124,8 @@ func (c *Config) Validate() error {
 		if u.Path != "" && u.Path != "/" {
 			return fmt.Errorf("CAIC_EXTERNAL_URL must not contain a path: %q", c.ExternalURL)
 		}
+		// Normalize: strip trailing slash to avoid double-slash in redirect URIs.
+		c.ExternalURL = strings.TrimRight(c.ExternalURL, "/")
 		if oauthConfigured && u.Scheme != "https" {
 			return errors.New("CAIC_EXTERNAL_URL must use https:// when OAuth login is configured")
 		}
@@ -192,10 +194,9 @@ type Server struct {
 	gitlabAllowedUsers  map[string]struct{}  // nil if GitLab OAuth not configured
 
 	// Auth / session.
-	authStore     *auth.Store    // nil when auth disabled
-	sessionSecret []byte         // nil when auth disabled
-	allowedHost   string         // hostname from ExternalURL; empty disables static host checking
-	autoHostLock  *autoHostState // non-nil when ExternalURL is "auto"
+	authStore     *auth.Store     // nil when auth disabled
+	sessionSecret []byte          // nil when auth disabled
+	hostState     *auth.HostState // non-nil when ExternalURL is set (static or auto)
 	usage         *usageFetcher
 
 	// IP geolocation.
@@ -299,11 +300,8 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	inner = compressMiddleware(inner)
 	inner = decompressMiddleware(inner)
 	inner = auth.Middleware(s.authStore, s.sessionSecret)(inner)
-	switch {
-	case s.allowedHost != "":
-		inner = hostCheckMiddleware(s.allowedHost, inner)
-	case s.autoHostLock != nil:
-		inner = autoHostCheckMiddleware(s.autoHostLock, inner)
+	if s.hostState != nil {
+		inner = s.hostState.Middleware(inner)
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

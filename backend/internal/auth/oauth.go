@@ -1,4 +1,5 @@
 // Provider-agnostic OAuth 2.0 Authorization Code exchange using net/http only.
+
 package auth
 
 import (
@@ -23,12 +24,24 @@ type ProviderConfig struct {
 	TokenURL     string // e.g. "https://github.com/login/oauth/access_token"
 	UserInfoURL  string // e.g. "https://api.github.com/user"
 	Scopes       []string
-	RedirectURI  string // "{CAIC_EXTERNAL_URL}/api/v1/auth/{provider}/callback"
+	Provider     string // "github" or "gitlab"
+	Host         *HostState
+}
+
+// RedirectURI returns the OAuth redirect URI built from the external URL and
+// provider name. Returns "" if the external URL is not yet known (auto mode
+// before the first FQDN request).
+func (c *ProviderConfig) RedirectURI() string {
+	extURL := c.Host.ExternalURL()
+	if extURL == "" {
+		return ""
+	}
+	return extURL + "/api/v1/auth/" + c.Provider + "/callback"
 }
 
 // GitHubConfig returns a ProviderConfig for github.com.
 // Scopes: ["repo", "read:user"].
-func GitHubConfig(clientID, secret, externalURL string) ProviderConfig {
+func GitHubConfig(clientID, secret string, host *HostState) ProviderConfig {
 	return ProviderConfig{ //nolint:gosec // G101: ClientSecret is a function parameter, not a hardcoded credential
 		ClientID:     clientID,
 		ClientSecret: secret,
@@ -36,14 +49,15 @@ func GitHubConfig(clientID, secret, externalURL string) ProviderConfig {
 		TokenURL:     "https://github.com/login/oauth/access_token",
 		UserInfoURL:  "https://api.github.com/user",
 		Scopes:       []string{"repo", "read:user"},
-		RedirectURI:  externalURL + "/api/v1/auth/github/callback",
+		Provider:     "github",
+		Host:         host,
 	}
 }
 
 // GitLabConfig returns a ProviderConfig for a GitLab instance.
 // Scopes: ["api", "read_user"].
 // gitlabURL defaults to "https://gitlab.com".
-func GitLabConfig(clientID, secret, gitlabURL, externalURL string) ProviderConfig {
+func GitLabConfig(clientID, secret, gitlabURL string, host *HostState) ProviderConfig {
 	if gitlabURL == "" {
 		gitlabURL = "https://gitlab.com"
 	}
@@ -55,7 +69,8 @@ func GitLabConfig(clientID, secret, gitlabURL, externalURL string) ProviderConfi
 		TokenURL:     gitlabURL + "/oauth/token",
 		UserInfoURL:  gitlabURL + "/api/v4/user",
 		Scopes:       []string{"api", "read_user"},
-		RedirectURI:  externalURL + "/api/v1/auth/gitlab/callback",
+		Provider:     "gitlab",
+		Host:         host,
 	}
 }
 
@@ -63,7 +78,7 @@ func GitLabConfig(clientID, secret, gitlabURL, externalURL string) ProviderConfi
 func (c *ProviderConfig) AuthURL(state string) string {
 	v := url.Values{}
 	v.Set("client_id", c.ClientID)
-	v.Set("redirect_uri", c.RedirectURI)
+	v.Set("redirect_uri", c.RedirectURI())
 	v.Set("scope", strings.Join(c.Scopes, " "))
 	v.Set("state", state)
 	v.Set("response_type", "code")
@@ -85,7 +100,7 @@ func ExchangeCode(ctx context.Context, cfg *ProviderConfig, code string) (access
 	body := url.Values{}
 	body.Set("grant_type", "authorization_code")
 	body.Set("code", code)
-	body.Set("redirect_uri", cfg.RedirectURI)
+	body.Set("redirect_uri", cfg.RedirectURI())
 	body.Set("client_id", cfg.ClientID)
 	body.Set("client_secret", cfg.ClientSecret)
 

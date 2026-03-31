@@ -1,4 +1,5 @@
 // User store: reads and writes ~/.config/caic/users.json with atomic rename.
+
 package auth
 
 import (

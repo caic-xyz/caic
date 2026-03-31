@@ -1523,10 +1523,13 @@ func TestConfigValidate(t *testing.T) {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
-	t.Run("ExternalURL with trailing slash is valid", func(t *testing.T) {
+	t.Run("ExternalURL with trailing slash is valid and stripped", func(t *testing.T) {
 		c := &Config{ExternalURL: "https://caic.example.com/"}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
+		}
+		if c.ExternalURL != "https://caic.example.com" {
+			t.Fatalf("ExternalURL trailing slash not stripped: %q", c.ExternalURL)
 		}
 	})
 	t.Run("invalid GitLabURL is invalid", func(t *testing.T) {
@@ -1620,9 +1623,9 @@ func TestBuildHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("host check rejects wrong host", func(t *testing.T) {
+	t.Run("static host check rejects wrong host", func(t *testing.T) {
 		s := newTestServer(t)
-		s.allowedHost = "caic.example.com"
+		s.hostState = auth.NewHostState("https://caic.example.com")
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -1637,9 +1640,9 @@ func TestBuildHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("host check allows matching host", func(t *testing.T) {
+	t.Run("static host check allows matching host", func(t *testing.T) {
 		s := newTestServer(t)
-		s.allowedHost = "caic.example.com"
+		s.hostState = auth.NewHostState("https://caic.example.com")
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -1654,26 +1657,9 @@ func TestBuildHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("host check strips port", func(t *testing.T) {
+	t.Run("static host check is case insensitive", func(t *testing.T) {
 		s := newTestServer(t)
-		s.allowedHost = "caic.example.com"
-		h, err := s.buildHandler()
-		if err != nil {
-			t.Fatalf("buildHandler() error = %v", err)
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
-		req.Host = "caic.example.com:8080"
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		if w.Code == http.StatusForbidden {
-			t.Errorf("matching host with port should not be forbidden")
-		}
-	})
-
-	t.Run("host check is case insensitive", func(t *testing.T) {
-		s := newTestServer(t)
-		s.allowedHost = "caic.example.com"
+		s.hostState = auth.NewHostState("https://caic.example.com")
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -1688,9 +1674,8 @@ func TestBuildHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("no host check when allowedHost empty", func(t *testing.T) {
+	t.Run("no host check when hostState nil", func(t *testing.T) {
 		s := newTestServer(t)
-		// allowedHost is empty by default
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -1707,7 +1692,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auto host check locks first FQDN", func(t *testing.T) {
 		s := newTestServer(t)
-		s.autoHostLock = &autoHostState{}
+		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -1741,9 +1726,45 @@ func TestBuildHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("auto host check rejects same host on different port", func(t *testing.T) {
+		s := newTestServer(t)
+		s.hostState = &auth.HostState{}
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+
+		// Lock on port 8080.
+		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "caic.example.com:8080"
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code == http.StatusForbidden {
+			t.Errorf("first FQDN request should not be forbidden")
+		}
+
+		// Same host, different port is rejected.
+		req = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "caic.example.com:9090"
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("different port: status = %d, want %d", w.Code, http.StatusForbidden)
+		}
+
+		// Same host without port is also rejected.
+		req = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req.Host = "caic.example.com"
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("missing port: status = %d, want %d", w.Code, http.StatusForbidden)
+		}
+	})
+
 	t.Run("auto host check allows IP before and after lock", func(t *testing.T) {
 		s := newTestServer(t)
-		s.autoHostLock = &autoHostState{}
+		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -1776,7 +1797,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auto host check allows localhost", func(t *testing.T) {
 		s := newTestServer(t)
-		s.autoHostLock = &autoHostState{}
+		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -1793,7 +1814,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auto host check is case insensitive", func(t *testing.T) {
 		s := newTestServer(t)
-		s.autoHostLock = &autoHostState{}
+		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -1813,68 +1834,6 @@ func TestBuildHandler(t *testing.T) {
 		h.ServeHTTP(w, req)
 		if w.Code == http.StatusForbidden {
 			t.Errorf("case-insensitive match should not be forbidden")
-		}
-	})
-
-	for _, tc := range []struct {
-		name string
-		host string
-		xfp  string // X-Forwarded-Proto
-		want string
-	}{
-		{"non-default HTTP port", "caic.example.com:8080", "", "http://caic.example.com:8080"},
-		{"default HTTP port omitted", "caic.example.com:80", "", "http://caic.example.com"},
-		{"default HTTPS port omitted", "caic.example.com:443", "https", "https://caic.example.com"},
-		{"non-default HTTPS port", "quick.giraffe-cobra.ts.net:8443", "https", "https://quick.giraffe-cobra.ts.net:8443"},
-		{"HTTPS without port", "caic.example.com", "https", "https://caic.example.com"},
-		{"HTTP without port", "caic.example.com", "", "http://caic.example.com"},
-	} {
-		t.Run("auto host lock "+tc.name, func(t *testing.T) {
-			state := &autoHostState{}
-			r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
-			r.Host = tc.host
-			if tc.xfp != "" {
-				r.Header.Set("X-Forwarded-Proto", tc.xfp)
-			}
-			state.lock(r)
-			if got := state.ExternalURL(); got != tc.want {
-				t.Errorf("ExternalURL = %q, want %q", got, tc.want)
-			}
-		})
-	}
-
-	t.Run("auto host oauth config resolves redirect URI", func(t *testing.T) {
-		s := newTestServer(t)
-		s.autoHostLock = &autoHostState{}
-		s.githubOAuth = &auth.ProviderConfig{
-			ClientID:     "id",
-			ClientSecret: "sec",
-		}
-
-		// Before lock, oauthConfigFor returns nil.
-		if cfg := s.oauthConfigFor("github"); cfg != nil {
-			t.Fatal("oauthConfigFor should return nil before lock")
-		}
-
-		// Lock via a request.
-		r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
-		r.Host = "caic.example.com"
-		r.Header.Set("X-Forwarded-Proto", "https")
-		s.autoHostLock.lock(r)
-
-		// After lock, redirect URI is resolved.
-		cfg := s.oauthConfigFor("github")
-		if cfg == nil {
-			t.Fatal("oauthConfigFor should not return nil after lock")
-		}
-		want := "https://caic.example.com/api/v1/auth/github/callback"
-		if cfg.RedirectURI != want {
-			t.Errorf("RedirectURI = %q, want %q", cfg.RedirectURI, want)
-		}
-
-		// Original config is not modified.
-		if s.githubOAuth.RedirectURI != "" {
-			t.Errorf("original config should not be modified, got RedirectURI = %q", s.githubOAuth.RedirectURI)
 		}
 	})
 }
@@ -1900,9 +1859,11 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 		t.Fatalf("open auth store: %v", err)
 	}
 
+	host := auth.NewHostState("http://localhost")
 	s := newTestServer(t)
 	s.sessionSecret = secret
 	s.authStore = store
+	s.hostState = host
 	s.githubOAuth = &auth.ProviderConfig{
 		ClientID:     "cid",
 		ClientSecret: "csec",
@@ -1910,7 +1871,8 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 		TokenURL:     tokenServer.URL,
 		UserInfoURL:  userServer.URL,
 		Scopes:       []string{"repo"},
-		RedirectURI:  "http://localhost/api/v1/auth/github/callback",
+		Provider:     "github",
+		Host:         host,
 	}
 
 	t.Run("valid state round-trip succeeds", func(t *testing.T) {

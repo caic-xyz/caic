@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -106,18 +105,13 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("load settings: %w", err)
 	}
 
-	// Initialize host checking.
-	var allowedHost string
-	var autoLock *autoHostState
+	// Initialize host checking and external URL state.
+	var hostState *auth.HostState
 	isAuto := strings.EqualFold(cfg.ExternalURL, "auto")
 	if isAuto {
-		autoLock = &autoHostState{}
+		hostState = &auth.HostState{}
 	} else if cfg.ExternalURL != "" {
-		u, err := url.Parse(cfg.ExternalURL)
-		if err != nil {
-			return nil, fmt.Errorf("parse ExternalURL: %w", err)
-		}
-		allowedHost = u.Hostname()
+		hostState = auth.NewHostState(cfg.ExternalURL)
 	}
 
 	slog.Info("github", "pat", auth.MaskedToken(cfg.GitHubToken), "oauth", auth.MaskedToken(cfg.GitHubOAuthClientID))
@@ -140,18 +134,12 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 			return nil, fmt.Errorf("open users store: %w", err)
 		}
 		authStore = store
-		// For auto mode, RedirectURI is resolved at request time from the
-		// locked host. Pass empty externalURL so configs are built without it.
-		extURL := cfg.ExternalURL
-		if isAuto {
-			extURL = ""
-		}
 		if cfg.GitHubOAuthClientID != "" && cfg.GitHubOAuthClientSecret != "" {
-			c := auth.GitHubConfig(cfg.GitHubOAuthClientID, cfg.GitHubOAuthClientSecret, extURL)
+			c := auth.GitHubConfig(cfg.GitHubOAuthClientID, cfg.GitHubOAuthClientSecret, hostState)
 			githubOAuth = &c
 		}
 		if cfg.GitLabOAuthClientID != "" && cfg.GitLabOAuthClientSecret != "" {
-			c := auth.GitLabConfig(cfg.GitLabOAuthClientID, cfg.GitLabOAuthClientSecret, cfg.GitLabURL, extURL)
+			c := auth.GitLabConfig(cfg.GitLabOAuthClientID, cfg.GitLabOAuthClientSecret, cfg.GitLabURL, hostState)
 			gitlabOAuth = &c
 		}
 	}
@@ -195,8 +183,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		gitlabOAuth:        gitlabOAuth,
 		githubAllowedUsers: githubAllowedUsers,
 		gitlabAllowedUsers: gitlabAllowedUsers,
-		allowedHost:        allowedHost,
-		autoHostLock:       autoLock,
+		hostState:          hostState,
 		usage:              newUsageFetcher(ctx),
 		pprof:              cfg.Pprof,
 		geminiAPIKey:       cfg.GeminiAPIKey,

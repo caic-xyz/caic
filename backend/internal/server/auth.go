@@ -24,8 +24,8 @@ const (
 // Accepts ?return=app to redirect to caic://auth after callback.
 func (s *Server) handleAuthStart(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		cfg := s.oauthConfigFor(provider)
-		if cfg == nil {
+		cfg := s.providerConfig(provider)
+		if cfg == nil || cfg.RedirectURI() == "" {
 			writeError(w, dto.NotFound("provider"))
 			return
 		}
@@ -66,8 +66,8 @@ func (s *Server) handleAuthStart(provider string) http.HandlerFunc {
 // fetches user info, upserts the user, issues a JWT, and redirects.
 func (s *Server) handleAuthCallback(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		cfg := s.oauthConfigFor(provider)
-		if cfg == nil {
+		cfg := s.providerConfig(provider)
+		if cfg == nil || cfg.RedirectURI() == "" {
 			writeError(w, dto.NotFound("provider"))
 			return
 		}
@@ -230,48 +230,19 @@ func (s *Server) allowedUsersFor(provider string) map[string]struct{} {
 	return nil
 }
 
-// oauthConfigFor returns the ProviderConfig for the named provider, or nil.
-// In auto-host mode, it resolves the RedirectURI from the locked external URL.
-func (s *Server) oauthConfigFor(provider string) *auth.ProviderConfig {
-	var src *auth.ProviderConfig
+// providerConfig returns the ProviderConfig for the named provider, or nil.
+func (s *Server) providerConfig(provider string) *auth.ProviderConfig {
 	switch provider {
 	case "github":
-		src = s.githubOAuth
+		return s.githubOAuth
 	case "gitlab":
-		src = s.gitlabOAuth
+		return s.gitlabOAuth
 	}
-	if src == nil {
-		return nil
-	}
-	if s.autoHostLock == nil || src.RedirectURI != "" {
-		return src
-	}
-	extURL := s.autoHostLock.ExternalURL()
-	if extURL == "" {
-		return nil // host not locked yet; caller gets 404
-	}
-	c := *src
-	c.RedirectURI = extURL + "/api/v1/auth/" + provider + "/callback"
-	return &c
+	return nil
 }
 
 // useSecureCookies reports whether to set the Secure flag on cookies.
 // True when the external URL starts with "https://".
 func (s *Server) useSecureCookies() bool {
-	if s.autoHostLock != nil {
-		return strings.HasPrefix(s.autoHostLock.ExternalURL(), "https://")
-	}
-	if s.githubOAuth != nil {
-		ru := s.githubOAuth.RedirectURI
-		if idx := strings.Index(ru, "/api/v1/"); idx >= 0 {
-			return strings.HasPrefix(ru[:idx], "https://")
-		}
-	}
-	if s.gitlabOAuth != nil {
-		ru := s.gitlabOAuth.RedirectURI
-		if idx := strings.Index(ru, "/api/v1/"); idx >= 0 {
-			return strings.HasPrefix(ru[:idx], "https://")
-		}
-	}
-	return false
+	return s.hostState != nil && strings.HasPrefix(s.hostState.ExternalURL(), "https://")
 }

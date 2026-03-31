@@ -1,4 +1,5 @@
 // JWT session management: issue and validate HS256 tokens using stdlib only.
+
 package auth
 
 import (

@@ -1,4 +1,5 @@
 // HTTP middleware for JWT session validation and user context injection.
+
 package auth
 
 import (

@@ -1,4 +1,5 @@
 // CSRF state cookie helpers for the OAuth 2.0 flow.
+
 package auth
 
 import (
