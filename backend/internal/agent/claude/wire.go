@@ -128,6 +128,7 @@ type assistantMessageBody struct {
 	Usage        agent.Usage        `json:"usage"`
 	StopReason   string             `json:"stop_reason"`
 	StopSequence *string            `json:"stop_sequence"`
+	StopDetails  json.RawMessage    `json:"stop_details,omitempty"`
 
 	Container         json.RawMessage `json:"container,omitempty"`
 	ContextManagement json.RawMessage `json:"context_management,omitempty"`
