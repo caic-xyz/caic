@@ -174,6 +174,12 @@ public struct WellKnownCachesResp: Codable {
     public let wellKnown: [WellKnownCache]
 }
 
+/// BranchInfo describes a single branch with its origin.
+public struct BranchInfo: Codable {
+    public let name: String
+    public let remote: String?
+}
+
 /// ForgeCheck describes a CI check run with its status, conclusion, and timing.
 public struct ForgeCheck: Codable {
     public let name: String
@@ -198,7 +204,7 @@ public struct ForgeCheck: Codable {
 /// Repo is the JSON representation of a discovered repo.
 public struct Repo: Codable {
     public let path: String
-    public let baseBranch: String
+    public let baseBranch: BranchInfo
     public let remoteURL: String?
     /// "github", "gitlab", or empty if unknown.
     public let forge: String?
@@ -217,7 +223,7 @@ public struct CloneRepoReq: Codable {
 
 /// RepoBranchesResp is the response for GET /api/v1/server/repos/branches.
 public struct RepoBranchesResp: Codable {
-    public let branches: [String]
+    public let branches: [BranchInfo]
 }
 
 /// BotFixCIReq is the request body for POST /api/v1/bot/fix-ci.

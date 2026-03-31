@@ -211,6 +211,15 @@ WellKnownCachesResp is the response for GET /api/v1/server/caches.
 | `harnessMounts` | `string[]` | e.g. "~/.claude", "~/.codex" | yes |
 | `wellKnown` | `WellKnownCache[]` |  | yes |
 
+### BranchInfo
+
+BranchInfo describes a single branch with its origin.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `remote` | `string` |  |  |
+
 ### ForgeCheck
 
 ForgeCheck describes a CI check run with its status, conclusion, and timing.
@@ -235,7 +244,7 @@ Repo is the JSON representation of a discovered repo.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `path` | `string` |  | yes |
-| `baseBranch` | `string` |  | yes |
+| `baseBranch` | `BranchInfo` |  | yes |
 | `remoteURL` | `string` |  |  |
 | `forge` | `string` | "github", "gitlab", or empty if unknown. |  |
 | `defaultBranchCIStatus` | `string` |  |  |
@@ -257,7 +266,7 @@ RepoBranchesResp is the response for GET /api/v1/server/repos/branches.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `branches` | `string[]` |  | yes |
+| `branches` | `BranchInfo[]` |  | yes |
 
 ### BotFixCIReq
 

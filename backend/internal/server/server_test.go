@@ -625,8 +625,8 @@ func TestHandleListRepos(t *testing.T) {
 	if repos[0].Path != "org/repoA" {
 		t.Errorf("repos[0].Path = %q, want %q", repos[0].Path, "org/repoA")
 	}
-	if repos[1].BaseBranch != "develop" {
-		t.Errorf("repos[1].BaseBranch = %q, want %q", repos[1].BaseBranch, "develop")
+	if repos[1].BaseBranch.Name != "develop" {
+		t.Errorf("repos[1].BaseBranch.Name = %q, want %q", repos[1].BaseBranch.Name, "develop")
 	}
 }
 

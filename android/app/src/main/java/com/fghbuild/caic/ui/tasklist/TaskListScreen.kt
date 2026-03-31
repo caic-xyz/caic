@@ -81,6 +81,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.caic.sdk.v1.BranchInfo
 import com.caic.sdk.v1.ImageData
 import com.caic.sdk.v1.Repo
 import kotlinx.coroutines.Dispatchers
@@ -553,7 +554,7 @@ private fun RepoChipStrip(
         state.selectedRepos.forEach { entry ->
             RepoChip(
                 entry = entry,
-                baseBranch = state.repos.find { it.path == entry.path }?.baseBranch ?: "",
+                baseBranch = state.repos.find { it.path == entry.path }?.baseBranch ?: BranchInfo("main"),
                 editingBranches = state.editingBranches,
                 enabled = !state.submitting,
                 onRemove = { viewModel.removeRepo(entry.path) },
@@ -605,8 +606,8 @@ private fun RepoChipStrip(
 @Composable
 private fun RepoChip(
     entry: RepoEntry,
-    baseBranch: String,
-    editingBranches: List<String>,
+    baseBranch: BranchInfo,
+    editingBranches: List<BranchInfo>,
     enabled: Boolean,
     onRemove: () -> Unit,
     onSetBranch: (String) -> Unit,
@@ -671,23 +672,33 @@ private fun RepoChip(
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Default ", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("($baseBranch)")
+                            val prefix = if (!baseBranch.remote.isNullOrEmpty()) "${baseBranch.remote}/" else ""
+                            Text("($prefix${baseBranch.name})")
                         }
                     },
                     onClick = { onSetBranch(""); branchOpen = false },
                 )
             }
             val filterLower = branchFilter.lowercase()
-            editingBranches.filter { filterLower.isEmpty() || it.lowercase().contains(filterLower) }
+            editingBranches.filter { filterLower.isEmpty() || it.name.lowercase().contains(filterLower) }
                 .forEach { branch ->
                     DropdownMenuItem(
                         text = {
-                            Text(
-                                branch,
-                                fontWeight = if (branch == entry.branch) FontWeight.Bold else FontWeight.Normal,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    branch.name,
+                                    fontWeight = if (branch.name == entry.branch) FontWeight.Bold else FontWeight.Normal,
+                                )
+                                if (!branch.remote.isNullOrEmpty()) {
+                                    Text(
+                                        " (${branch.remote})",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
                         },
-                        onClick = { onSetBranch(branch); branchOpen = false },
+                        onClick = { onSetBranch(branch.name); branchOpen = false },
                     )
                 }
         }

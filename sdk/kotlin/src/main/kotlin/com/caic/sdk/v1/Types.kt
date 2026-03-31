@@ -129,6 +129,10 @@ data class WellKnownCache(
 @Serializable
 data class WellKnownCachesResp(val harnessMounts: List<String>, val wellKnown: List<WellKnownCache>)
 
+/** BranchInfo describes a single branch with its origin. */
+@Serializable
+data class BranchInfo(val name: String, val remote: String? = null)
+
 /** ForgeCheck describes a CI check run with its status, conclusion, and timing. */
 @Serializable
 data class ForgeCheck(
@@ -148,7 +152,7 @@ data class ForgeCheck(
 @Serializable
 data class Repo(
     val path: String,
-    val baseBranch: String,
+    val baseBranch: BranchInfo,
     @SerialName("remoteURL") val remoteURL: String? = null,
     val forge: String? = null,
     @SerialName("defaultBranchCIStatus") val defaultBranchCIStatus: String? = null,
@@ -165,7 +169,7 @@ data class CloneRepoReq(
 
 /** RepoBranchesResp is the response for GET /api/v1/server/repos/branches. */
 @Serializable
-data class RepoBranchesResp(val branches: List<String>)
+data class RepoBranchesResp(val branches: List<BranchInfo>)
 
 /**
  * BotFixCIReq is the request body for POST /api/v1/bot/fix-ci.

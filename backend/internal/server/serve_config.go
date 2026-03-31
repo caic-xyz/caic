@@ -170,15 +170,40 @@ func (s *Server) handleListRepoBranches(w http.ResponseWriter, r *http.Request) 
 		writeError(w, dto.NotFound("repo not found"))
 		return
 	}
-	pairs, err := gitutil.ListBranches(r.Context(), absPath, "origin")
+	ctx := r.Context()
+	// Fetch local branches.
+	localPairs, err := gitutil.ListBranches(ctx, absPath, "")
 	if err != nil {
-		slog.WarnContext(r.Context(), "list branches failed", "repo", repo, "err", err)
+		slog.WarnContext(ctx, "list local branches failed", "repo", repo, "err", err)
 	}
-	names := make([]string, len(pairs))
-	for i, p := range pairs {
-		names[i] = p[0]
+	seen := make(map[string]struct{}, len(localPairs))
+	branches := make([]v1.BranchInfo, 0, len(localPairs))
+	for _, p := range localPairs {
+		seen[p[0]] = struct{}{}
+		branches = append(branches, v1.BranchInfo{Name: p[0]})
 	}
-	writeJSONResponse(w, &v1.RepoBranchesResp{Branches: names}, nil)
+	// Fetch remote branches from all remotes.
+	remoteList, err := gitutil.RunGit(ctx, absPath, "remote")
+	if err != nil {
+		slog.WarnContext(ctx, "list remotes failed", "repo", repo, "err", err)
+	}
+	for _, remote := range strings.Split(remoteList, "\n") {
+		if remote == "" {
+			continue
+		}
+		remotePairs, err := gitutil.ListBranches(ctx, absPath, remote)
+		if err != nil {
+			slog.WarnContext(ctx, "list remote branches failed", "repo", repo, "remote", remote, "err", err)
+			continue
+		}
+		for _, p := range remotePairs {
+			if _, ok := seen[p[0]]; !ok {
+				seen[p[0]] = struct{}{}
+				branches = append(branches, v1.BranchInfo{Name: p[0], Remote: remote})
+			}
+		}
+	}
+	writeJSONResponse(w, &v1.RepoBranchesResp{Branches: branches}, nil)
 }
 
 func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo, error) {
@@ -229,7 +254,12 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 	}
 
 	// Discover repo info.
-	branch, err := gitutil.DefaultBranch(ctx, absTarget, "origin")
+	remoteName, err := gitutil.DefaultRemote(ctx, absTarget)
+	if err != nil {
+		_ = os.RemoveAll(absTarget)
+		return nil, dto.InternalError("cannot determine default remote: " + err.Error())
+	}
+	branch, err := gitutil.DefaultBranch(ctx, absTarget, remoteName)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
 		return nil, dto.InternalError("cannot determine default branch: " + err.Error())
@@ -253,12 +283,12 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 	if rawURL, err := forge.RemoteURL(ctx, absTarget); err == nil {
 		cloneForgeKind, cloneForgeOwner, cloneForgeRepo, _ = forge.ParseRemoteURL(rawURL)
 	}
-	info := repoInfo{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, Remote: remote, ForgeKind: cloneForgeKind, ForgeOwner: cloneForgeOwner, ForgeRepo: cloneForgeRepo}
+	info := repoInfo{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote, ForgeKind: cloneForgeKind, ForgeOwner: cloneForgeOwner, ForgeRepo: cloneForgeRepo}
 	s.repos = append(s.repos, info)
 	s.runners[targetPath] = runner
 	slog.Info("cloned repo", "url", req.URL, "path", targetPath)
 
-	return &v1.Repo{Path: targetPath, BaseBranch: branch, RemoteURL: gitutil.RemoteToHTTPS(remote), Forge: v1.Forge(cloneForgeKind)}, nil
+	return &v1.Repo{Path: targetPath, BaseBranch: v1.BranchInfo{Name: branch, Remote: remoteName}, RemoteURL: gitutil.RemoteToHTTPS(remote), Forge: v1.Forge(cloneForgeKind)}, nil
 }
 
 // getVoiceToken returns a Gemini API credential for the Android voice client.

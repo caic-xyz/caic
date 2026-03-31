@@ -264,7 +264,7 @@ export class FunctionHandlers {
     const url = requireString(args, "url");
     const path = optString(args, "path");
     const repo = await cloneRepo({ url, ...(path ? { path } : {}) });
-    return textResult(`Cloned **${repo.path}** (base: ${repo.baseBranch}).`);
+    return textResult(`Cloned **${repo.path}** (base: ${repo.baseBranch.remote ? `${repo.baseBranch.remote}/` : ""}${repo.baseBranch.name}).`);
   }
 
   private async handleWebSearch(args: FunctionArgs): Promise<Record<string, unknown>> {

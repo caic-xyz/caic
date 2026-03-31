@@ -242,7 +242,12 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 			if err != nil {
 				rel = filepath.Base(abs)
 			}
-			branch, err := gitutil.DefaultBranch(ctx, abs, "origin")
+			remoteName, err := gitutil.DefaultRemote(ctx, abs)
+			if err != nil {
+				slog.Warn("skipping repo, cannot determine default remote", "path", abs, "err", err)
+				return
+			}
+			branch, err := gitutil.DefaultBranch(ctx, abs, remoteName)
 			if err != nil {
 				slog.Warn("skipping repo, cannot determine default branch", "path", abs, "err", err)
 				return
@@ -264,7 +269,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 			}
 			results[i] = repoResult{
 				info: repoInfo{
-					RelPath: rel, AbsPath: abs, BaseBranch: branch, Remote: remote,
+					RelPath: rel, AbsPath: abs, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote,
 					ForgeKind: forgeKind, ForgeOwner: forgeOwner, ForgeRepo: forgeRepo,
 				},
 				runner: runner,
@@ -273,12 +278,12 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		})
 	}
 	wg.Wait()
-	for _, r := range results {
-		if r.runner == nil {
+	for i := range results {
+		if results[i].runner == nil {
 			continue
 		}
-		s.repos = append(s.repos, r.info)
-		s.runners[r.info.RelPath] = r.runner
+		s.repos = append(s.repos, results[i].info)
+		s.runners[results[i].info.RelPath] = results[i].runner
 	}
 
 	// Wire the bot with the server as its client.
@@ -487,7 +492,8 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 	var errs []error
 	claimed := make(map[string]bool, len(containers))
 
-	for _, ri := range s.repos {
+	for i := range s.repos {
+		ri := &s.repos[i]
 		repoName := filepath.Base(ri.AbsPath)
 		runner := s.runners[ri.RelPath]
 		for _, c := range containers {
@@ -497,7 +503,7 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 			}
 			claimed[c.Name] = true
 			wg.Go(func() {
-				if err := s.adoptOne(ctx, ri, runner, c, branch, branchIDs, allLogs); err != nil {
+				if err := s.adoptOne(ctx, *ri, runner, c, branch, branchIDs, allLogs); err != nil {
 					mu.Lock()
 					errs = append(errs, err)
 					mu.Unlock()

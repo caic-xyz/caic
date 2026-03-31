@@ -261,7 +261,9 @@ class FunctionHandlers(
         val url = args.requireString("url")
         val path = args.optString("path")
         val repo = apiClient.cloneRepo(CloneRepoReq(url = url, path = path))
-        return textResult("Cloned **${repo.path}** (base: ${repo.baseBranch}).")
+        val base = repo.baseBranch
+        val prefix = if (!base.remote.isNullOrEmpty()) "${base.remote}/" else ""
+        return textResult("Cloned **${repo.path}** (base: $prefix${base.name}).")
     }
 
     /** Resolve task_number from args to a real task ID via the map. */

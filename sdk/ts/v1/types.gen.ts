@@ -529,7 +529,7 @@ export interface ForgeCheck {
  */
 export interface Repo {
   path: string;
-  baseBranch: string;
+  baseBranch: BranchInfo;
   remoteURL?: string;
   forge?: Forge; // "github", "gitlab", or empty if unknown.
   defaultBranchCIStatus?: CIStatus;
@@ -873,10 +873,17 @@ export interface WebFetchResp {
   content: string;
 }
 /**
+ * BranchInfo describes a single branch with its origin.
+ */
+export interface BranchInfo {
+  name: string;
+  remote?: string;
+}
+/**
  * RepoBranchesResp is the response for GET /api/v1/server/repos/branches.
  */
 export interface RepoBranchesResp {
-  branches: string[];
+  branches: BranchInfo[];
 }
 /**
  * WellKnownCache describes a single well-known cache.

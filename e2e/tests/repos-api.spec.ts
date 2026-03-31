@@ -6,7 +6,7 @@ test("list repos returns the fake repo", async ({ api }) => {
   expect(repos.length).toBeGreaterThan(0);
   const repo = repos[0];
   expect(repo.path).toBeTruthy();
-  expect(repo.baseBranch).toBe("main");
+  expect(repo.baseBranch.name).toBe("main");
 });
 
 test("list harnesses returns the fake harness", async ({ api }) => {

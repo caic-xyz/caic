@@ -2,7 +2,7 @@
 import { createEffect, createSignal, For, Show, Switch, Match, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useNavigate, useLocation } from "@solidjs/router";
-import type { HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp } from "@sdk/types.gen";
+import type { BranchInfo, HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp } from "@sdk/types.gen";
 import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, listRepoBranches, createTask, cloneRepo, getUsage, stopTask, purgeTask, reviveTask, botFixCI } from "./api";
 import { useAuth } from "./AuthContext";
 import Login from "./Login";
@@ -84,7 +84,7 @@ export default function App() {
   const [selectedRepos, setSelectedRepos] = createSignal<RepoEntry[]>([]);
   // Branch dropdown state: which chip is open, its fetched branch list, and the trigger's rect.
   const [editingPath, setEditingPath] = createSignal<string | null>(null);
-  const [editingBranches, setEditingBranches] = createSignal<string[]>([]);
+  const [editingBranches, setEditingBranches] = createSignal<BranchInfo[]>([]);
   const [branchTriggerRect, setBranchTriggerRect] = createSignal<DOMRect | null>(null);
   const [branchFilter, setBranchFilter] = createSignal("");
   // Add-repo dropdown open state.
@@ -746,18 +746,22 @@ export default function App() {
                       <button type="button" class={styles.dropdownOption}
                         onClick={() => commitBranch("")}
                       >
-                        <span class={styles.dropdownOptionMuted}>Default</span>
-                        {" "}({repos().find((r) => r.path === editingPath())?.baseBranch ?? "base"})
+                        {(() => {
+                          const base = repos().find((r) => r.path === editingPath())?.baseBranch;
+                          const remote = base?.remote;
+                          const branch = base?.name ?? "main";
+                          return <><span class={styles.dropdownOptionMuted}>Default</span>{" "}({remote ? `${remote}/` : ""}{branch})</>;
+                        })()}
                       </button>
                     </Show>
                     <For each={editingBranches().filter((b) => {
                       const f = branchFilter().toLowerCase();
-                      return !f || b.toLowerCase().includes(f);
+                      return !f || b.name.toLowerCase().includes(f);
                     })}>
                       {(b) => (
-                        <button type="button" class={`${styles.dropdownOption}${selectedRepos().find((r) => r.path === editingPath())?.branch === b ? ` ${styles.dropdownOptionActive}` : ""}`}
-                          onClick={() => commitBranch(b)}
-                        >{b}</button>
+                        <button type="button" class={`${styles.dropdownOption}${selectedRepos().find((r) => r.path === editingPath())?.branch === b.name ? ` ${styles.dropdownOptionActive}` : ""}`}
+                          onClick={() => commitBranch(b.name)}
+                        >{b.name}{b.remote && <span class={styles.dropdownOptionMuted}> ({b.remote})</span>}</button>
                       )}
                     </For>
                   </div>

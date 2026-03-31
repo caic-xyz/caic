@@ -28,8 +28,9 @@ import (
 // Must be called with s.mu held.
 func (s *Server) reposLocked() *[]v1.Repo {
 	out := make([]v1.Repo, len(s.repos))
-	for i, r := range s.repos {
-		repo := v1.Repo{Path: r.RelPath, BaseBranch: r.BaseBranch, RemoteURL: gitutil.RemoteToHTTPS(r.Remote), Forge: v1.Forge(r.ForgeKind)}
+	for i := range s.repos {
+		r := &s.repos[i]
+		repo := v1.Repo{Path: r.RelPath, BaseBranch: v1.BranchInfo{Name: r.BaseBranch, Remote: r.BaseBranchRemote}, RemoteURL: gitutil.RemoteToHTTPS(r.Remote), Forge: v1.Forge(r.ForgeKind)}
 		if ci, ok := s.repoCIStatus[r.RelPath]; ok {
 			repo.DefaultBranchCIStatus = v1.CIStatus(ci.Status)
 			repo.DefaultBranchChecks = ci.Checks

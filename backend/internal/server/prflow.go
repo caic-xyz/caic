@@ -239,13 +239,13 @@ func (s *Server) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 	if !ok {
 		return nil
 	}
-	for _, ri := range s.repos {
-		if strings.EqualFold(ri.ForgeOwner, owner) && strings.EqualFold(ri.ForgeRepo, repo) {
+	for i := range s.repos {
+		if strings.EqualFold(s.repos[i].ForgeOwner, owner) && strings.EqualFold(s.repos[i].ForgeRepo, repo) {
 			return &bot.RepoInfo{
-				RelPath:    ri.RelPath,
-				ForgeKind:  ri.ForgeKind,
-				ForgeOwner: ri.ForgeOwner,
-				ForgeRepo:  ri.ForgeRepo,
+				RelPath:    s.repos[i].RelPath,
+				ForgeKind:  s.repos[i].ForgeKind,
+				ForgeOwner: s.repos[i].ForgeOwner,
+				ForgeRepo:  s.repos[i].ForgeRepo,
 			}
 		}
 	}
@@ -288,9 +288,9 @@ func (s *Server) CreateTask(ctx context.Context, req bot.TaskRequest) (string, e
 	}
 	if req.IssueNumber > 0 {
 		// Set forge owner/repo so ListPendingBotTasks can resolve the commenter.
-		for _, ri := range s.repos {
-			if ri.RelPath == req.Repo && ri.ForgeOwner != "" {
-				t.SetPR(ri.ForgeOwner, ri.ForgeRepo, 0)
+		for i := range s.repos {
+			if s.repos[i].RelPath == req.Repo && s.repos[i].ForgeOwner != "" {
+				t.SetPR(s.repos[i].ForgeOwner, s.repos[i].ForgeRepo, 0)
 				break
 			}
 		}

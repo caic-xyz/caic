@@ -60,9 +60,9 @@ function dispatchSSE(data: unknown) {
 import App from "./App";
 import * as api from "./api";
 
-const repoA: Repo = { path: "repos/a", baseBranch: "main", remoteURL: "" };
-const repoB: Repo = { path: "repos/b", baseBranch: "main", remoteURL: "" };
-const newRepo: Repo = { path: "repos/new", baseBranch: "main", remoteURL: "" };
+const repoA: Repo = { path: "repos/a", baseBranch: { name: "main" }, remoteURL: "" };
+const repoB: Repo = { path: "repos/b", baseBranch: { name: "main" }, remoteURL: "" };
+const newRepo: Repo = { path: "repos/new", baseBranch: { name: "main" }, remoteURL: "" };
 
 function chipPathValues(): string[] {
   const btns = screen.queryAllByTestId("repo-chips")[0]
@@ -86,7 +86,7 @@ beforeEach(() => {
   ] as HarnessInfo[]);
   vi.mocked(api.getConfig).mockRejectedValue(new Error("no config"));
   vi.mocked(api.getUsage).mockRejectedValue(new Error("no usage"));
-  vi.mocked(api.listRepoBranches).mockResolvedValue({ branches: ["main", "dev"] });
+  vi.mocked(api.listRepoBranches).mockResolvedValue({ branches: [{ name: "main" }, { name: "dev", remote: "origin" }] });
   vi.mocked(api.cloneRepo).mockResolvedValue(newRepo);
   vi.mocked(api.createTask).mockResolvedValue({ id: "task1" });
 });
@@ -120,7 +120,7 @@ describe("App repo chips: No repository", () => {
     expect(chipPathValues()).toHaveLength(0);
 
     // Simulate a "repos" SSE event (e.g. CI status update) which triggers setRepos.
-    const repoAUpdated: Repo = { path: "repos/a", baseBranch: "main", remoteURL: "", defaultBranchCIStatus: "success" as const };
+    const repoAUpdated: Repo = { path: "repos/a", baseBranch: { name: "main" }, remoteURL: "", defaultBranchCIStatus: "success" as const };
     dispatchSSE({ kind: "repos", repos: [repoAUpdated] });
 
     await waitFor(() => {

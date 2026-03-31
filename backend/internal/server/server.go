@@ -31,13 +31,14 @@ import (
 )
 
 type repoInfo struct {
-	RelPath    string // e.g. "github/caic" — used as API ID.
-	AbsPath    string
-	BaseBranch string
-	Remote     string     // Raw git remote URL (origin).
-	ForgeKind  forge.Kind // empty if remote is not a recognized forge
-	ForgeOwner string     // empty if remote is not a recognized forge
-	ForgeRepo  string     // empty if remote is not a recognized forge
+	RelPath          string // e.g. "github/caic" — used as API ID.
+	AbsPath          string
+	BaseBranch       string
+	BaseBranchRemote string     // Git remote name (e.g. "origin") used to determine BaseBranch.
+	Remote           string     // Raw git remote URL (origin).
+	ForgeKind        forge.Kind // empty if remote is not a recognized forge
+	ForgeOwner       string     // empty if remote is not a recognized forge
+	ForgeRepo        string     // empty if remote is not a recognized forge
 }
 
 // githubAppClient is the interface used by the server to interact with a GitHub App.

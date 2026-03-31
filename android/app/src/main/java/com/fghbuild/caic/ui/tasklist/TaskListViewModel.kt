@@ -15,6 +15,7 @@ import com.caic.sdk.v1.Repo
 import com.caic.sdk.v1.RepoSpec
 import com.caic.sdk.v1.Task
 import com.caic.sdk.v1.UserResp
+import com.caic.sdk.v1.BranchInfo
 import com.caic.sdk.v1.UsageResp
 import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.data.TaskNotifier
@@ -61,7 +62,7 @@ data class TaskListState(
     val config: Config? = null,
     val usage: UsageResp? = null,
     val selectedRepos: List<RepoEntry> = emptyList(),
-    val editingBranches: List<String> = emptyList(),
+    val editingBranches: List<BranchInfo> = emptyList(),
     val selectedHarness: String = "",
     val selectedModel: String = "",
     val prompt: String = "",
@@ -445,7 +446,7 @@ class TaskListViewModel @Inject constructor(
         val config: Config? = null,
         val recentRepoCount: Int = 0,
         val selectedRepos: List<RepoEntry> = emptyList(),
-        val editingBranches: List<String> = emptyList(),
+        val editingBranches: List<BranchInfo> = emptyList(),
         val selectedHarness: String = "",
         val selectedModel: String = "",
         val prompt: String = "",

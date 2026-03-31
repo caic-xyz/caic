@@ -290,27 +290,27 @@ func (s *Server) authProviders() []string {
 }
 
 func (s *Server) repoURL(rel string) string {
-	for _, r := range s.repos {
-		if r.RelPath == rel {
-			return gitutil.RemoteToHTTPS(r.Remote)
+	for i := range s.repos {
+		if s.repos[i].RelPath == rel {
+			return gitutil.RemoteToHTTPS(s.repos[i].Remote)
 		}
 	}
 	return ""
 }
 
 func (s *Server) repoForge(rel string) v1.Forge {
-	for _, r := range s.repos {
-		if r.RelPath == rel {
-			return v1.Forge(r.ForgeKind)
+	for i := range s.repos {
+		if s.repos[i].RelPath == rel {
+			return v1.Forge(s.repos[i].ForgeKind)
 		}
 	}
 	return ""
 }
 
 func (s *Server) repoAbsPath(rel string) (string, bool) {
-	for _, r := range s.repos {
-		if r.RelPath == rel {
-			return r.AbsPath, true
+	for i := range s.repos {
+		if s.repos[i].RelPath == rel {
+			return s.repos[i].AbsPath, true
 		}
 	}
 	return "", false

@@ -124,7 +124,7 @@ type ForgeCheck struct {
 // Repo is the JSON representation of a discovered repo.
 type Repo struct {
 	Path                  string       `json:"path"`
-	BaseBranch            string       `json:"baseBranch"`
+	BaseBranch            BranchInfo   `json:"baseBranch"`
 	RemoteURL             string       `json:"remoteURL,omitempty"`
 	Forge                 Forge        `json:"forge,omitempty"` // "github", "gitlab", or empty if unknown.
 	DefaultBranchCIStatus CIStatus     `json:"defaultBranchCIStatus,omitempty"`
@@ -414,9 +414,15 @@ type WebFetchResp struct {
 	Content string `json:"content"`
 }
 
+// BranchInfo describes a single branch with its origin.
+type BranchInfo struct {
+	Name   string `json:"name"`
+	Remote string `json:"remote,omitempty"`
+}
+
 // RepoBranchesResp is the response for GET /api/v1/server/repos/branches.
 type RepoBranchesResp struct {
-	Branches []string `json:"branches"`
+	Branches []BranchInfo `json:"branches"`
 }
 
 // WellKnownCache describes a single well-known cache.
