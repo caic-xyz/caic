@@ -100,10 +100,6 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	if repoRes.err != nil {
 		return nil, fmt.Errorf("discover repos: %w", repoRes.err)
 	}
-	if len(repoRes.paths) == 0 {
-		return nil, fmt.Errorf("no git repos found under %s", rootDir)
-	}
-
 	// Load persistent settings (generates sessionSecret on first run).
 	settings, err := loadSettings(filepath.Join(cfg.ConfigDir, "settings.json"))
 	if err != nil {
@@ -296,10 +292,6 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		}
 		s.repos = append(s.repos, r.info)
 		s.runners[r.info.RelPath] = r.runner
-	}
-
-	if len(s.repos) == 0 {
-		return nil, fmt.Errorf("no usable git repos found under %s", rootDir)
 	}
 
 	// Wire the bot with the server as its client.

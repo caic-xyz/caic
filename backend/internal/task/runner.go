@@ -44,10 +44,11 @@ type StartOptions struct {
 type ContainerBackend interface {
 	// Launch starts the container (image check/build + docker run) and
 	// writes SSH config. Does NOT wait for SSH. Repos must have branches set.
-	Launch(ctx context.Context, repos []md.Repo, labels []string, opts *StartOptions) error
-	// Connect waits for SSH and pushes repos into the container.
-	// Returns the container name and optional Tailscale FQDN.
-	Connect(ctx context.Context, repos []md.Repo, opts *StartOptions) (name, tailscaleFQDN string, err error)
+	// Returns the container name assigned during launch.
+	Launch(ctx context.Context, repos []md.Repo, labels []string, opts *StartOptions) (name string, err error)
+	// Connect waits for SSH and pushes repos into the container identified
+	// by name (returned by Launch). Returns the optional Tailscale FQDN.
+	Connect(ctx context.Context, name string, repos []md.Repo, opts *StartOptions) (tailscaleFQDN string, err error)
 	Diff(ctx context.Context, repo md.Repo, args ...string) (string, error)
 	Fetch(ctx context.Context, repos []md.Repo) error
 	// Stop gracefully stops the container without removing it. The container
@@ -764,9 +765,15 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResu
 	if r.Dir != "" {
 		repos = t.MDRepos()
 	}
+	var containerName string
 	eg, egCtx := errgroup.WithContext(startCtx)
 	eg.Go(func() error {
-		return r.Container.Launch(egCtx, repos, labels, opts)
+		name, err := r.Container.Launch(egCtx, repos, labels, opts)
+		if err != nil {
+			return err
+		}
+		containerName = name
+		return nil
 	})
 	if r.Dir != "" {
 		eg.Go(func() error {
@@ -778,12 +785,12 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResu
 	}
 
 	// Phase B: wait for SSH + push (branch now exists locally).
-	name, tailscaleFQDN, err := r.Container.Connect(startCtx, repos, opts)
+	tailscaleFQDN, err := r.Container.Connect(startCtx, containerName, repos, opts)
 	if err != nil {
 		return setupResult{}, fmt.Errorf("start container: %w", err)
 	}
 	r.log.Info("container started", "br", primaryBranch, "dur", time.Since(tContainer))
-	return setupResult{Container: name, TailscaleFQDN: tailscaleFQDN}, nil
+	return setupResult{Container: containerName, TailscaleFQDN: tailscaleFQDN}, nil
 }
 
 // SyncToOrigin fetches changes from the container, runs safety checks, and

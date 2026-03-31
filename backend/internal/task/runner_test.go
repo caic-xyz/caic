@@ -773,12 +773,12 @@ type stubContainer struct {
 	fetchErr error // If set, Fetch returns this error.
 }
 
-func (s *stubContainer) Launch(_ context.Context, _ []md.Repo, _ []string, _ *StartOptions) error {
-	return nil
+func (s *stubContainer) Launch(_ context.Context, _ []md.Repo, _ []string, _ *StartOptions) (string, error) {
+	return "stub", nil
 }
 
-func (s *stubContainer) Connect(_ context.Context, _ []md.Repo, _ *StartOptions) (_, _ string, _ error) {
-	return "stub", "", nil
+func (s *stubContainer) Connect(_ context.Context, _ string, _ []md.Repo, _ *StartOptions) (string, error) {
+	return "", nil
 }
 
 func (s *stubContainer) Diff(_ context.Context, _ md.Repo, _ ...string) (string, error) {

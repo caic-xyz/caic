@@ -129,15 +129,15 @@ type fakeContainer struct{}
 
 var _ task.ContainerBackend = (*fakeContainer)(nil)
 
-func (*fakeContainer) Launch(_ context.Context, _ []md.Repo, _ []string, _ *task.StartOptions) error {
-	return nil
+func (*fakeContainer) Launch(_ context.Context, repos []md.Repo, _ []string, _ *task.StartOptions) (string, error) {
+	if len(repos) == 0 {
+		return "md-test-no-repo", nil
+	}
+	return "md-test-" + strings.ReplaceAll(repos[0].Branch, "/", "-"), nil
 }
 
-func (*fakeContainer) Connect(_ context.Context, repos []md.Repo, _ *task.StartOptions) (_, _ string, _ error) {
-	if len(repos) == 0 {
-		return "md-test-no-repo", "", nil
-	}
-	return "md-test-" + strings.ReplaceAll(repos[0].Branch, "/", "-"), "", nil
+func (*fakeContainer) Connect(_ context.Context, _ string, _ []md.Repo, _ *task.StartOptions) (string, error) {
+	return "", nil
 }
 
 func (*fakeContainer) Diff(_ context.Context, _ md.Repo, _ ...string) (string, error) {

@@ -57,7 +57,7 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) (client 
 }
 
 // Launch implements task.ContainerBackend.
-func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, opts *task.StartOptions) error {
+func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, opts *task.StartOptions) (string, error) {
 	if len(repos) > 0 {
 		slog.Info("md", "phase", "launch", "dir", repos[0].GitRoot, "br", repos[0].Branch, "hns", opts.Harness)
 	} else {
@@ -70,13 +70,13 @@ func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, 
 		agent.Kilo:     md.HarnessKilo,
 		agent.OpenCode: md.HarnessOpencode,
 	}[opts.Harness]; !ok {
-		return fmt.Errorf("unknown harness %q", opts.Harness)
+		return "", fmt.Errorf("unknown harness %q", opts.Harness)
 	}
 	client, mdOpts := b.mdStartOpts(labels, opts)
 	c := client.Container(repos...)
 	stdout, stderr := logWriters(opts.LogWriter, "launch")
 	if err := c.Launch(ctx, stdout, stderr, mdOpts); err != nil {
-		return err
+		return "", err
 	}
 	b.mu.Lock()
 	if b.pendingContainers == nil {
@@ -84,30 +84,30 @@ func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, 
 	}
 	b.pendingContainers[c.Name] = c
 	b.mu.Unlock()
-	return nil
+	return c.Name, nil
 }
 
 // Connect implements task.ContainerBackend.
-func (b *Backend) Connect(ctx context.Context, repos []md.Repo, opts *task.StartOptions) (name, tailscaleFQDN string, err error) {
+func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opts *task.StartOptions) (tailscaleFQDN string, err error) {
 	if len(repos) > 0 {
 		slog.Info("md", "phase", "connect", "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	}
-	// Derive container name from repos (deterministic, same as Launch used).
-	tmpClient := b.Client
-	c := tmpClient.Container(repos...)
 	b.mu.Lock()
-	if stored, ok := b.pendingContainers[c.Name]; ok {
-		c = stored
-		delete(b.pendingContainers, c.Name)
+	c, ok := b.pendingContainers[name]
+	if ok {
+		delete(b.pendingContainers, name)
 	}
 	b.mu.Unlock()
+	if !ok {
+		return "", fmt.Errorf("no pending container %q", name)
+	}
 	_, mdOpts := b.mdStartOpts(nil, opts)
 	stdout, stderr := logWriters(opts.LogWriter, "connect")
 	sr, err := c.Connect(ctx, stdout, stderr, mdOpts)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
-	return c.Name, sr.TailscaleFQDN, nil
+	return sr.TailscaleFQDN, nil
 }
 
 // Diff implements task.ContainerBackend.
