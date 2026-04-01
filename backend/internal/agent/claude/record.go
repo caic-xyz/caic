@@ -30,11 +30,11 @@ type Record struct {
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (r *Record) UnmarshalJSON(data []byte) error {
-	var probe typeProbe
+	var probe outputTypeProbe
 	if err := json.Unmarshal(data, &probe); err != nil {
 		return fmt.Errorf("Record: %w", err)
 	}
-	r.Type = probe.Type
+	r.Type = string(probe.Type)
 	r.raw = append(r.raw[:0], data...)
 	return nil
 }

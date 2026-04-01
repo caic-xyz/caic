@@ -20,7 +20,7 @@ func TestWritePrompt(t *testing.T) {
 		if buf.String() != logBuf.String() {
 			t.Errorf("stdin and log differ:\nstdin: %q\nlog:   %q", buf.String(), logBuf.String())
 		}
-		if !strings.Contains(buf.String(), `"content":"hello"`) {
+		if !strings.Contains(buf.String(), `"content":[{"type":"text","text":"hello"}]`) {
 			t.Errorf("unexpected output: %s", buf.String())
 		}
 	})

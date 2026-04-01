@@ -57,56 +57,26 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	return agent.StartRelay(ctx, opts, buildArgs(opts), msgCh, logW, b)
 }
 
-// userInputMessage is the NDJSON message sent to Claude Code via stdin.
-type userInputMessage struct {
-	Type    string           `json:"type"`
-	Message userInputContent `json:"message"`
-}
-
-type userInputContent struct {
-	Role    string `json:"role"`
-	Content any    `json:"content"` // string or []contentBlock
-}
-
-// contentBlock is a single block in the content array sent to Claude Code.
-type contentBlock struct {
-	Type   string       `json:"type"`
-	Source *imageSource `json:"source,omitempty"`
-	Text   string       `json:"text,omitempty"`
-}
-
-type imageSource struct {
-	Type      string `json:"type"`
-	MediaType string `json:"media_type"`
-	Data      string `json:"data"`
-}
-
 // WritePrompt writes a single user message in Claude Code's stdin format.
 // When images are provided, content is emitted as an array of content blocks.
 func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
-	var content any
-	if len(p.Images) == 0 {
-		content = p.Text
-	} else {
-		blocks := make([]contentBlock, 0, len(p.Images)+1)
-		for _, img := range p.Images {
-			blocks = append(blocks, contentBlock{
-				Type: "image",
-				Source: &imageSource{
-					Type:      "base64",
-					MediaType: img.MediaType,
-					Data:      img.Data,
-				},
-			})
-		}
-		if p.Text != "" {
-			blocks = append(blocks, contentBlock{Type: "text", Text: p.Text})
-		}
-		content = blocks
+	var blocks []inputContentBlock
+	for _, img := range p.Images {
+		blocks = append(blocks, inputContentBlock{
+			Type: "image",
+			Source: inputImageSource{
+				Type:      "base64",
+				MediaType: img.MediaType,
+				Data:      img.Data,
+			},
+		})
 	}
-	msg := userInputMessage{
-		Type:    "user",
-		Message: userInputContent{Role: "user", Content: content},
+	if p.Text != "" {
+		blocks = append(blocks, inputContentBlock{Type: "text", Text: p.Text})
+	}
+	msg := inputUser{
+		Type:    InputUser,
+		Message: inputUserContent{Role: "user", Content: blocks},
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {

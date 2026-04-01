@@ -5,13 +5,35 @@ package claude
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
-// parseEnvelope is a local alias for typeProbe used by ParseMessage.
-type parseEnvelope = typeProbe
+// outputKnownFields caches the known field sets for output wire types,
+// built on first use. Uses sync.Map: few writes (once per type), many reads.
+var outputKnownFields sync.Map
+
+// unmarshalOutput unmarshals data into v and logs a warning for any unknown
+// JSON fields. The name identifies the type for logging.
+func unmarshalOutput(data []byte, v any, name string) error {
+	if err := json.Unmarshal(data, v); err != nil {
+		return err
+	}
+	val, ok := outputKnownFields.Load(name)
+	if !ok {
+		val, _ = outputKnownFields.LoadOrStore(name, jsonutil.KnownFields(reflect.ValueOf(v).Elem().Interface()))
+	}
+	known := val.(map[string]struct{})
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(data, &raw) == nil {
+		jsonutil.WarnUnknown(name, jsonutil.CollectUnknown(raw, known))
+	}
+	return nil
+}
 
 // WidgetTracker tracks which content block indices are widget tools during
 // streaming, enabling input_json_delta events to be emitted as WidgetDeltaMessage.
@@ -44,10 +66,10 @@ func NewWidgetTracker() *WidgetTracker {
 // handleStreamEvent processes a stream event and returns widget messages if
 // the event belongs to a tracked widget block. Returns (nil, false) if the
 // event is not widget-related and should be handled by the normal path.
-func (wt *WidgetTracker) handleStreamEvent(w *streamEventWire) ([]agent.Message, bool) {
+func (wt *WidgetTracker) handleStreamEvent(w *outputStreamEvent) ([]agent.Message, bool) {
 	switch w.Event.Type {
 	case "content_block_start":
-		var cb contentBlockStartWire
+		var cb contentBlockStart
 		if json.Unmarshal(w.Event.ContentBlock, &cb) == nil &&
 			cb.Type == "tool_use" && agent.WidgetToolNames[cb.Name] {
 			wt.activeWidgets[w.Event.Index] = cb.ID
@@ -127,24 +149,24 @@ func ParseMessage(line []byte) ([]agent.Message, error) {
 // optional widget tracking. When wt is non-nil, content_block_start and
 // input_json_delta events for widget tools produce WidgetDeltaMessage.
 func ParseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, error) {
-	var env parseEnvelope
+	var env outputTypeProbe
 	if err := json.Unmarshal(line, &env); err != nil {
 		return nil, fmt.Errorf("unmarshal envelope: %w", err)
 	}
 	switch env.Type {
-	case "system":
+	case OutputSystem:
 		return parseSystem(line, env.Subtype)
-	case "assistant":
+	case OutputAssistant:
 		return parseAssistant(line)
-	case "user":
+	case OutputUser:
 		return parseUser(line)
-	case "result":
-		var w resultWire
-		if err := json.Unmarshal(line, &w); err != nil {
+	case OutputResult:
+		var w outputResult
+		if err := unmarshalOutput(line, &w, "outputResult"); err != nil {
 			return nil, err
 		}
 		return []agent.Message{&agent.ResultMessage{
-			MessageType:   w.Type,
+			MessageType:   string(w.Type),
 			Subtype:       w.Subtype,
 			IsError:       w.IsError,
 			DurationMs:    w.DurationMs,
@@ -156,11 +178,11 @@ func ParseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, e
 			Usage:         w.Usage,
 			UUID:          w.UUID,
 		}}, nil
-	case "stream_event":
+	case OutputStreamEvent:
 		return parseStreamEvent(line, wt)
-	case "rate_limit_event":
-		var w rateLimitEventWire
-		if err := json.Unmarshal(line, &w); err != nil {
+	case OutputRateLimitEvent:
+		var w outputRateLimitEvent
+		if err := unmarshalOutput(line, &w, "outputRateLimitEvent"); err != nil {
 			return nil, err
 		}
 		return []agent.Message{&agent.RateLimitMessage{
@@ -176,14 +198,14 @@ func ParseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, e
 		}
 		return []agent.Message{&m}, nil
 	default:
-		return []agent.Message{&agent.RawMessage{MessageType: env.Type, Raw: append([]byte(nil), line...)}}, nil
+		return []agent.Message{&agent.RawMessage{MessageType: string(env.Type), Raw: append([]byte(nil), line...)}}, nil
 	}
 }
 
 func parseSystem(line []byte, subtype string) ([]agent.Message, error) {
-	if subtype == "init" {
-		var w initWire
-		if err := json.Unmarshal(line, &w); err != nil {
+	if SystemSubtype(subtype) == SystemInit {
+		var w outputInit
+		if err := unmarshalOutput(line, &w, "outputInit"); err != nil {
 			return nil, err
 		}
 		return []agent.Message{&agent.InitMessage{
@@ -194,27 +216,27 @@ func parseSystem(line []byte, subtype string) ([]agent.Message, error) {
 			Version:   w.Version,
 		}}, nil
 	}
-	var w systemWire
-	if err := json.Unmarshal(line, &w); err != nil {
+	var w outputSystem
+	if err := unmarshalOutput(line, &w, "outputSystem"); err != nil {
 		return nil, err
 	}
-	switch subtype {
-	case "task_started":
+	switch w.Subtype {
+	case SystemTaskStarted:
 		return []agent.Message{&agent.SubagentStartMessage{
 			TaskID:      jsonString(w.TaskID),
 			Description: jsonString(w.Description),
 		}}, nil
-	case "task_notification":
+	case SystemTaskNotification:
 		return []agent.Message{&agent.SubagentEndMessage{
 			TaskID: jsonString(w.TaskID),
 			Status: jsonString(w.Status),
 		}}, nil
-	case "status", "task_progress", "turn_duration":
+	case SystemStatus, SystemTaskProgress, "turn_duration":
 		return nil, nil
 	default:
 		return []agent.Message{&agent.SystemMessage{
-			MessageType: w.Type,
-			Subtype:     w.Subtype,
+			MessageType: string(w.Type),
+			Subtype:     string(w.Subtype),
 			SessionID:   w.SessionID,
 			UUID:        w.UUID,
 		}}, nil
@@ -222,8 +244,8 @@ func parseSystem(line []byte, subtype string) ([]agent.Message, error) {
 }
 
 func parseAssistant(line []byte) ([]agent.Message, error) {
-	var w assistantWire
-	if err := json.Unmarshal(line, &w); err != nil {
+	var w outputAssistant
+	if err := unmarshalOutput(line, &w, "outputAssistant"); err != nil {
 		return nil, err
 	}
 	var msgs []agent.Message
@@ -258,7 +280,7 @@ func parseAssistant(line []byte) ([]agent.Message, error) {
 	return msgs, nil
 }
 
-func parseToolUseBlock(b *contentBlockWire) []agent.Message {
+func parseToolUseBlock(b *outputContentBlock) []agent.Message {
 	switch {
 	case b.Name == "Skill":
 		// Skill is a Claude Code built-in that loads plugin skills into
@@ -292,8 +314,8 @@ func parseToolUseBlock(b *contentBlockWire) []agent.Message {
 }
 
 func parseUser(line []byte) ([]agent.Message, error) {
-	var w userWire
-	if err := json.Unmarshal(line, &w); err != nil {
+	var w outputUser
+	if err := unmarshalOutput(line, &w, "outputUser"); err != nil {
 		return nil, err
 	}
 	// Claude Code sets isSynthetic on user messages injected by the runtime
@@ -320,12 +342,12 @@ func parseUserMessage(raw json.RawMessage) []agent.Message {
 		return []agent.Message{&agent.UserInputMessage{}}
 	}
 	// Try plain text content first ("content": "hello").
-	var textMsg userTextMessage
+	var textMsg outputUserText
 	if json.Unmarshal(raw, &textMsg) == nil && textMsg.Role == "user" && textMsg.Content != "" {
 		return []agent.Message{&agent.UserInputMessage{Text: textMsg.Content}}
 	}
 	// Block-style content ("content": [...]).
-	var blockMsg userBlockMessage
+	var blockMsg outputUserBlock
 	if json.Unmarshal(raw, &blockMsg) != nil || blockMsg.Role != "user" {
 		return []agent.Message{&agent.UserInputMessage{}}
 	}
@@ -354,7 +376,7 @@ func parseUserMessage(raw json.RawMessage) []agent.Message {
 }
 
 // toolResultFromBlock converts an inline tool_result content block to a ToolResultMessage.
-func toolResultFromBlock(b *userContentBlock) *agent.ToolResultMessage {
+func toolResultFromBlock(b *outputUserContentBlock) *agent.ToolResultMessage {
 	m := &agent.ToolResultMessage{ToolUseID: b.ToolUseID}
 	if b.IsError {
 		for _, c := range b.Content {
@@ -374,7 +396,7 @@ func extractToolResult(toolUseID string, raw json.RawMessage) *agent.ToolResultM
 	if len(raw) == 0 {
 		return m
 	}
-	var msg toolResultWire
+	var msg outputToolResult
 	if json.Unmarshal(raw, &msg) == nil && msg.IsError {
 		for _, c := range msg.Content {
 			if c.Type == "text" && c.Text != "" {
@@ -387,8 +409,8 @@ func extractToolResult(toolUseID string, raw json.RawMessage) *agent.ToolResultM
 }
 
 func parseStreamEvent(line []byte, wt *WidgetTracker) ([]agent.Message, error) {
-	var w streamEventWire
-	if err := json.Unmarshal(line, &w); err != nil {
+	var w outputStreamEvent
+	if err := unmarshalOutput(line, &w, "outputStreamEvent"); err != nil {
 		return nil, err
 	}
 
