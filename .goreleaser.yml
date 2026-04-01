@@ -43,8 +43,10 @@ builds:
 universal_binaries:
   - id: caic
     replace: true
+    name_template: caic
   - id: webrtc-relay
     replace: true
+    name_template: webrtc-relay
 
 archives:
   - formats:
