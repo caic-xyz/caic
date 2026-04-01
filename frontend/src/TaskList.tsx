@@ -175,10 +175,7 @@ export default function TaskList(props: TaskListProps) {
       title={t().title}
       state={t().state}
       stateUpdatedAt={t().stateUpdatedAt}
-      repo={t().repos?.[0]?.name ?? ""}
-      remoteURL={t().repos?.[0]?.remoteURL}
-      baseBranch={t().repos?.[0]?.baseBranch}
-      branch={t().repos?.[0]?.branch ?? ""}
+      repos={t().repos}
       harness={t().harness}
       model={t().model}
       costUSD={t().costUSD}

@@ -1,7 +1,7 @@
 // Compact card for a single task, used in the sidebar task list.
-import { Show, createSignal, onMount, onCleanup } from "solid-js";
+import { For, Show, createSignal, onMount, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
-import type { DiffStat, CIStatus, ForgeCheck } from "@sdk/types.gen";
+import type { DiffStat, CIStatus, ForgeCheck, TaskRepo } from "@sdk/types.gen";
 import CIDot from "./CIDot";
 import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
@@ -18,10 +18,7 @@ export interface TaskCardProps {
   title: string;
   state: string;
   stateUpdatedAt: number;
-  repo: string;
-  remoteURL?: string;
-  baseBranch?: string;
-  branch: string;
+  repos?: TaskRepo[];
   harness?: string;
   model?: string;
   costUSD: number;
@@ -123,7 +120,7 @@ export default function TaskCard(props: TaskCardProps) {
                 <button
                   class={styles.purgeIcon}
                   disabled={props.actionLoading}
-                  onClick={(e) => { e.stopPropagation(); if (window.confirm(`Purge container?\n\n${props.title}\nrepo: ${props.repo}\nbranch: ${props.branch}`)) props.onPurge?.(); }}
+                  onClick={(e) => { e.stopPropagation(); if (window.confirm(`Purge container?\n\n${props.title}\nbranch: ${props.repos?.[0]?.branch ?? ""}`)) props.onPurge?.(); }}
                   title="Purge"
                   data-testid="purge-task"
                 >
@@ -141,16 +138,16 @@ export default function TaskCard(props: TaskCardProps) {
                 onClick={(e) => {
                   e.stopPropagation();
                   if (e.shiftKey && props.onPurge) {
-                    if (window.confirm(`Purge container?\n\n${props.title}\nrepo: ${props.repo}\nbranch: ${props.branch}`)) props.onPurge();
+                    if (window.confirm(`Purge container?\n\n${props.title}\nbranch: ${props.repos?.[0]?.branch ?? ""}`)) props.onPurge();
                   } else if (props.state === "running") {
-                    if (window.confirm(`Stop container?\n\n${props.title}\nrepo: ${props.repo}\nbranch: ${props.branch}`)) props.onStop?.();
+                    if (window.confirm(`Stop container?\n\n${props.title}\nbranch: ${props.repos?.[0]?.branch ?? ""}`)) props.onStop?.();
                   } else {
                     props.onStop?.();
                   }
                 }}
                 onDblClick={(e) => {
                   e.stopPropagation();
-                  if (props.onPurge && window.confirm(`Purge container?\n\n${props.title}\nrepo: ${props.repo}\nbranch: ${props.branch}`)) props.onPurge();
+                  if (props.onPurge && window.confirm(`Purge container?\n\n${props.title}\nbranch: ${props.repos?.[0]?.branch ?? ""}`)) props.onPurge();
                 }}
                 title="Stop (shift-click or double-click to purge)"
                 data-testid="stop-task"
@@ -167,18 +164,10 @@ export default function TaskCard(props: TaskCardProps) {
         </span>
       </div>
 
-      {/* Line 2: base→branch | [timer times] [state badge] */}
-      <div class={styles.metaRow}>
-        <span class={styles.meta}>
-          <Show when={props.branch}>
-            <Show when={props.baseBranch && props.branch}>
-              <span class={styles.baseBranch}>{props.baseBranch}</span>
-              <span class={styles.branchArrow}>→</span>
-            </Show>
-            <span class={styles.branchName}>{props.branch}</span>
-          </Show>
-        </span>
-        <span class={styles.stateGroup}>
+      {/* Line 2: base→branch | [timer times] [PR] [CI] [state badge] */}
+      {(() => {
+        const multiRepo = (props.repos?.length ?? 0) > 1;
+        const timePair = () => (
           <Show when={(!isTerminal() && props.stateUpdatedAt > 0) || props.duration > 0}>
             <span class={styles.timePair}>
               <TimerIcon width="0.65rem" height="0.65rem" class={styles.timerIcon} />
@@ -193,6 +182,8 @@ export default function TaskCard(props: TaskCardProps) {
               </Show>
             </span>
           </Show>
+        );
+        const statusBadges = () => <>
           <Show when={props.forgePR}>
             <span class={styles.prBadge} title={`PR #${props.forgePR}`}>PR</span>
           </Show>
@@ -205,8 +196,64 @@ export default function TaskCard(props: TaskCardProps) {
           <span class={styles.badge} style={{ background: stateColor(props.state) }}>
             {props.state}
           </span>
-        </span>
-      </div>
+        </>;
+        const repoSpan = (r: { baseBranch?: string; branch: string; name: string }, showName: boolean) => <>
+          <Show when={r.baseBranch && r.branch}>
+            <span class={styles.baseBranch}>{r.baseBranch}</span>
+            <span class={styles.branchArrow}>→</span>
+          </Show>
+          <span class={styles.branchName}>{r.branch}</span>
+          <Show when={showName}>
+            <span class={styles.repoName}>{r.name}</span>
+          </Show>
+        </>;
+        return <>
+          <Show when={!multiRepo}>
+            {/* Single repo: branch + timing + badges on same row */}
+            <div class={styles.metaRow}>
+              <span class={styles.branchMeta}>
+                <Show when={props.repos?.[0]} keyed>
+                  {(primary) => repoSpan(primary, false)}
+                </Show>
+              </span>
+              <span class={styles.stateGroup}>
+                {timePair()}
+                {statusBadges()}
+              </span>
+            </div>
+          </Show>
+          <Show when={multiRepo}>
+            {/* Multi repo: first repo + badges, middle repos plain, last repo + timing */}
+            <div class={styles.metaRow}>
+              <span class={styles.branchMeta}>
+                <Show when={props.repos?.[0]} keyed>
+                  {(primary) => repoSpan(primary, true)}
+                </Show>
+              </span>
+              <span class={styles.stateGroup}>
+                {statusBadges()}
+              </span>
+            </div>
+            <For each={props.repos?.slice(1)}>
+              {(r, i) => {
+                const isLast = () => i() === (props.repos?.length ?? 0) - 2;
+                return (
+                  <div class={styles.metaRow}>
+                    <span class={styles.branchMeta}>
+                      {repoSpan(r, true)}
+                    </span>
+                    <Show when={isLast()}>
+                      <span class={styles.stateGroup}>
+                        {timePair()}
+                      </span>
+                    </Show>
+                  </div>
+                );
+              }}
+            </For>
+          </Show>
+        </>;
+      })()}
 
       {/* Line 3: model · tokens · cost */}
       <Show when={props.harness || props.model}>

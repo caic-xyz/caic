@@ -115,22 +115,28 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
                 }
             }
 
-            // Line 2: base→branch | [timer times] [state badge]
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                val primaryBranch = task.repos?.firstOrNull()?.branch ?: ""
-                val primaryBaseBranch = task.repos?.firstOrNull()?.baseBranch
-                if (primaryBranch.isNotBlank()) {
+            // Line 2+: repo branches and status/timing
+            val repos = task.repos.orEmpty()
+            val multiRepo = repos.size > 1
+            val repoNameColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            if (multiRepo) {
+                // Multi-repo: first repo + status badges, extra repos, then timing
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
                         text = buildAnnotatedString {
-                            if (!primaryBaseBranch.isNullOrBlank()) {
-                                append("${primaryBaseBranch}\u2192")
+                            val r = repos[0]
+                            if (!r.baseBranch.isNullOrBlank()) {
+                                append("${r.baseBranch}\u2192")
                             }
                             withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                                append(primaryBranch)
+                                append(r.branch)
+                            }
+                            withStyle(SpanStyle(fontWeight = FontWeight.Normal, color = repoNameColor)) {
+                                append(" ${r.name}")
                             }
                         },
                         style = MaterialTheme.typography.bodySmall,
@@ -139,56 +145,87 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
-                } else {
-                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.weight(1f))
+                    StatusBadges(task = task, autoFixPR = autoFixPR)
                 }
+                val extraRepos = repos.drop(1)
+                extraRepos.forEachIndexed { i, repo ->
+                    val isLast = i == extraRepos.size - 1
+                    if (isLast) {
+                        // Last extra repo row: repo left, timing right
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = buildAnnotatedString {
+                                    if (!repo.baseBranch.isNullOrBlank()) {
+                                        append("${repo.baseBranch}\u2192")
+                                    }
+                                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                                        append(repo.branch)
+                                    }
+                                    withStyle(SpanStyle(fontWeight = FontWeight.Normal, color = repoNameColor)) {
+                                        append(" ${repo.name}")
+                                    }
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TimingIndicator(task = task)
+                        }
+                    } else {
+                        Text(
+                            text = buildAnnotatedString {
+                                if (!repo.baseBranch.isNullOrBlank()) {
+                                    append("${repo.baseBranch}\u2192")
+                                }
+                                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append(repo.branch)
+                                }
+                                withStyle(SpanStyle(fontWeight = FontWeight.Normal, color = repoNameColor)) {
+                                    append(" ${repo.name}")
+                                }
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            } else {
+                // Single repo: branch + timing + badges on same row
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    val showTimes = (task.state !in TerminalStates && task.stateUpdatedAt > 0) || task.duration > 0
-                    if (showTimes) {
-                        Icon(
-                            Icons.Outlined.Timer,
-                            contentDescription = null,
-                            modifier = Modifier.size(11.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (task.state !in TerminalStates && task.stateUpdatedAt > 0) {
-                            TickingElapsed(stateUpdatedAt = task.stateUpdatedAt)
-                            if (task.duration > 0 || task.state == "running") {
-                                Text(
-                                    "/",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                )
-                            }
-                        }
-                        if (task.duration > 0 || task.state == "running") {
-                            TickingThinkTime(
-                                duration = task.duration,
-                                state = task.state,
-                                stateUpdatedAt = task.stateUpdatedAt,
-                                turnStartedAt = task.turnStartedAt ?: 0.0,
-                            )
-                        }
-                    }
-                    if (task.forgePR != null) {
-                        PrBadge()
-                    }
-                    if (autoFixPR && task.forgePR != null) {
-                        AutoBadge()
-                    }
-                    if (task.forgePR != null && task.ciStatus != null) {
-                        CiDot(task.ciStatus)
-                    }
-                    Surface(shape = RoundedCornerShape(4.dp), color = stateColor(task.state)) {
+                    val primaryBranch = repos.firstOrNull()?.branch ?: ""
+                    val primaryBaseBranch = repos.firstOrNull()?.baseBranch
+                    if (primaryBranch.isNotBlank()) {
                         Text(
-                            text = task.state,
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                            text = buildAnnotatedString {
+                                if (!primaryBaseBranch.isNullOrBlank()) {
+                                    append("${primaryBaseBranch}\u2192")
+                                }
+                                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append(primaryBranch)
+                                }
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
                         )
+                    } else {
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.weight(1f))
                     }
+                    TimingBadges(task = task, autoFixPR = autoFixPR)
                 }
             }
 
@@ -292,6 +329,119 @@ private fun FeatureBadge(label: String, url: String? = null) {
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
         )
+    }
+}
+
+@Composable
+private fun TimingBadges(task: Task, autoFixPR: Boolean) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val showTimes = (task.state !in TerminalStates && task.stateUpdatedAt > 0) || task.duration > 0
+        if (showTimes) {
+            Icon(
+                Icons.Outlined.Timer,
+                contentDescription = null,
+                modifier = Modifier.size(11.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (task.state !in TerminalStates && task.stateUpdatedAt > 0) {
+                TickingElapsed(stateUpdatedAt = task.stateUpdatedAt)
+                if (task.duration > 0 || task.state == "running") {
+                    Text(
+                        "/",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    )
+                }
+            }
+            if (task.duration > 0 || task.state == "running") {
+                TickingThinkTime(
+                    duration = task.duration,
+                    state = task.state,
+                    stateUpdatedAt = task.stateUpdatedAt,
+                    turnStartedAt = task.turnStartedAt ?: 0.0,
+                )
+            }
+        }
+        if (task.forgePR != null) {
+            PrBadge()
+        }
+        if (autoFixPR && task.forgePR != null) {
+            AutoBadge()
+        }
+        if (task.forgePR != null && task.ciStatus != null) {
+            CiDot(task.ciStatus)
+        }
+        Surface(shape = RoundedCornerShape(4.dp), color = stateColor(task.state)) {
+            Text(
+                text = task.state,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatusBadges(task: Task, autoFixPR: Boolean) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (task.forgePR != null) {
+            PrBadge()
+        }
+        if (autoFixPR && task.forgePR != null) {
+            AutoBadge()
+        }
+        if (task.forgePR != null && task.ciStatus != null) {
+            CiDot(task.ciStatus)
+        }
+        Surface(shape = RoundedCornerShape(4.dp), color = stateColor(task.state)) {
+            Text(
+                text = task.state,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TimingIndicator(task: Task) {
+    val showTimes = (task.state !in TerminalStates && task.stateUpdatedAt > 0) || task.duration > 0
+    if (showTimes) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Outlined.Timer,
+                contentDescription = null,
+                modifier = Modifier.size(11.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (task.state !in TerminalStates && task.stateUpdatedAt > 0) {
+                TickingElapsed(stateUpdatedAt = task.stateUpdatedAt)
+                if (task.duration > 0 || task.state == "running") {
+                    Text(
+                        "/",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    )
+                }
+            }
+            if (task.duration > 0 || task.state == "running") {
+                TickingThinkTime(
+                    duration = task.duration,
+                    state = task.state,
+                    stateUpdatedAt = task.stateUpdatedAt,
+                    turnStartedAt = task.turnStartedAt ?: 0.0,
+                )
+            }
+        }
     }
 }
 

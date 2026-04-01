@@ -102,6 +102,15 @@
   color: var(--color-text-meta);
 }
 
+.branchMeta {
+  font-size: 0.75rem;
+  color: var(--color-text-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
 .baseBranch {
   opacity: 0.65;
 }
@@ -114,6 +123,12 @@
 
 .branchName {
   font-weight: 600;
+}
+
+.repoName {
+  opacity: 0.5;
+  margin-left: 0.4em;
+  font-weight: 400;
 }
 
 .diffClickable {
