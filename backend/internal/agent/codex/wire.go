@@ -1,64 +1,95 @@
 // Wire types for the Codex CLI app-server JSON-RPC 2.0 protocol.
+//
+// Type names match the upstream Rust definitions in the Codex repository:
+//
+//	codex-rs/app-server-protocol/src/protocol/v2.rs     — notification and item structs
+//	codex-rs/app-server-protocol/src/protocol/common.rs — method string ↔ struct mapping
+//
+// Source: https://github.com/openai/codex
 package codex
 
-import (
-	"encoding/json"
+import "encoding/json"
 
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
-)
+// ============================================================
+// Shared types: enums, JSON-RPC envelope, routing probes.
+// ============================================================
+
+// Method is a JSON-RPC notification method string for the codex app-server protocol.
+type Method string
 
 // JSON-RPC notification method constants for codex app-server.
 const (
-	MethodThreadStarted     = "thread/started"
-	MethodTurnStarted       = "turn/started"
-	MethodTurnCompleted     = "turn/completed"
-	MethodItemStarted       = "item/started"
-	MethodItemCompleted     = "item/completed"
-	MethodItemUpdated       = "item/updated"
-	MethodItemDelta         = "item/agentMessage/delta"
-	MethodTokenUsageUpdated = "thread/tokenUsage/updated"
+	MethodThreadStarted     Method = "thread/started"
+	MethodTurnStarted       Method = "turn/started"
+	MethodTurnCompleted     Method = "turn/completed"
+	MethodItemStarted       Method = "item/started"
+	MethodItemCompleted     Method = "item/completed"
+	MethodItemUpdated       Method = "item/updated"
+	MethodItemDelta         Method = "item/agentMessage/delta"
+	MethodTokenUsageUpdated Method = "thread/tokenUsage/updated"
 
-	MethodCommandOutputDelta        = "item/commandExecution/outputDelta"
-	MethodCommandTerminalInteract   = "item/commandExecution/terminalInteraction"
-	MethodFileChangeOutputDelta     = "item/fileChange/outputDelta"
-	MethodReasoningSummaryTextDelta = "item/reasoning/summaryTextDelta"
-	MethodReasoningSummaryPartAdded = "item/reasoning/summaryPartAdded"
-	MethodReasoningTextDelta        = "item/reasoning/textDelta"
-	MethodPlanDelta                 = "item/plan/delta"
-	MethodMcpToolCallProgress       = "item/mcpToolCall/progress"
-	MethodTurnDiffUpdated           = "turn/diff/updated"
-	MethodTurnPlanUpdated           = "turn/plan/updated"
-	MethodThreadStatusChanged       = "thread/status/changed"
-	MethodThreadNameUpdated         = "thread/name/updated"
-	MethodModelRerouted             = "model/rerouted"
-	MethodErrorNotification         = "error"
+	MethodCommandOutputDelta        Method = "item/commandExecution/outputDelta"
+	MethodCommandTerminalInteract   Method = "item/commandExecution/terminalInteraction"
+	MethodFileChangeOutputDelta     Method = "item/fileChange/outputDelta"
+	MethodReasoningSummaryTextDelta Method = "item/reasoning/summaryTextDelta"
+	MethodReasoningSummaryPartAdded Method = "item/reasoning/summaryPartAdded"
+	MethodReasoningTextDelta        Method = "item/reasoning/textDelta"
+	MethodPlanDelta                 Method = "item/plan/delta"
+	MethodMcpToolCallProgress       Method = "item/mcpToolCall/progress"
+	MethodTurnDiffUpdated           Method = "turn/diff/updated"
+	MethodTurnPlanUpdated           Method = "turn/plan/updated"
+	MethodThreadStatusChanged       Method = "thread/status/changed"
+	MethodThreadNameUpdated         Method = "thread/name/updated"
+	MethodModelRerouted             Method = "model/rerouted"
+	MethodErrorNotification         Method = "error"
+
+	// Hook lifecycle notifications.
+	MethodHookStarted   Method = "hook/started"
+	MethodHookCompleted Method = "hook/completed"
+
+	// Server-to-client approval requests (requires permission mode).
+	MethodCommandRequestApproval    Method = "item/commandExecution/requestApproval"
+	MethodFileChangeRequestApproval Method = "item/fileChange/requestApproval"
+	MethodToolRequestUserInput      Method = "item/tool/requestUserInput"
+	MethodMcpElicitationRequest     Method = "mcpServer/elicitation/request"
+	MethodServerRequestResolved     Method = "serverRequest/resolved"
+
+	// Account and configuration notifications.
+	MethodAccountUpdated         Method = "account/updated"
+	MethodConfigWarning          Method = "configWarning"
+	MethodDeprecationNotice      Method = "deprecationNotice"
+	MethodSkillsChanged          Method = "skills/changed"
+	MethodMcpStartupStatusUpdate Method = "mcpServer/startupStatus/updated"
 )
+
+// ItemType is the item type discriminator for codex app-server items (camelCase).
+type ItemType string
 
 // Item type constants (camelCase as emitted by Codex v2).
 const (
-	ItemTypeUserMessage         = "userMessage"
-	ItemTypeAgentMessage        = "agentMessage"
-	ItemTypePlan                = "plan"
-	ItemTypeReasoning           = "reasoning"
-	ItemTypeCommandExecution    = "commandExecution"
-	ItemTypeFileChange          = "fileChange"
-	ItemTypeMCPToolCall         = "mcpToolCall"
-	ItemTypeWebSearch           = "webSearch"
-	ItemTypeImageView           = "imageView"
-	ItemTypeContextCompaction   = "contextCompaction"
-	ItemTypeDynamicToolCall     = "dynamicToolCall"
-	ItemTypeCollabAgentToolCall = "collabAgentToolCall"
-	ItemTypeEnteredReviewMode   = "enteredReviewMode"
-	ItemTypeExitedReviewMode    = "exitedReviewMode"
+	ItemTypeUserMessage         ItemType = "userMessage"
+	ItemTypeAgentMessage        ItemType = "agentMessage"
+	ItemTypePlan                ItemType = "plan"
+	ItemTypeReasoning           ItemType = "reasoning"
+	ItemTypeCommandExecution    ItemType = "commandExecution"
+	ItemTypeFileChange          ItemType = "fileChange"
+	ItemTypeMCPToolCall         ItemType = "mcpToolCall"
+	ItemTypeWebSearch           ItemType = "webSearch"
+	ItemTypeImageView           ItemType = "imageView"
+	ItemTypeImageGeneration     ItemType = "imageGeneration"
+	ItemTypeContextCompaction   ItemType = "contextCompaction"
+	ItemTypeDynamicToolCall     ItemType = "dynamicToolCall"
+	ItemTypeCollabAgentToolCall ItemType = "collabAgentToolCall"
+	ItemTypeHookPrompt          ItemType = "hookPrompt"
+	ItemTypeEnteredReviewMode   ItemType = "enteredReviewMode"
+	ItemTypeExitedReviewMode    ItemType = "exitedReviewMode"
 )
-
-// ---------- JSON-RPC envelope ----------
 
 // JSONRPCMessage is the JSON-RPC 2.0 envelope for codex app-server messages.
 // Notifications have Method set and ID nil. Responses have ID set.
 type JSONRPCMessage struct {
 	JSONRPC string           `json:"jsonrpc"`
-	Method  string           `json:"method,omitzero"`
+	Method  Method           `json:"method,omitzero"`
 	ID      *json.RawMessage `json:"id,omitzero"`
 	Params  json.RawMessage  `json:"params,omitzero"`
 	Result  json.RawMessage  `json:"result,omitzero"`
@@ -74,22 +105,66 @@ type JSONRPCError struct {
 	Message string `json:"message"`
 }
 
-// ---------- Routing probes ----------
-
 // messageProbe extracts routing fields from a codex app-server line to
 // distinguish caic-injected JSON (has "type") from JSON-RPC (has "method"/"id").
 type messageProbe struct {
 	Type   string           `json:"type,omitzero"`
-	Method string           `json:"method,omitzero"`
+	Method Method           `json:"method,omitzero"`
 	ID     *json.RawMessage `json:"id,omitzero"`
 }
 
 // methodProbe extracts the method field from a JSON-RPC message.
 type methodProbe struct {
-	Method string `json:"method,omitzero"`
+	Method Method `json:"method,omitzero"`
 }
 
-// ---------- Handshake types ----------
+// ============================================================
+// Input types: requests sent to the codex app-server (stdin).
+// ============================================================
+
+// jsonrpcRequest is the envelope for all JSON-RPC 2.0 requests sent to codex.
+type jsonrpcRequest struct {
+	JSONRPC string `json:"jsonrpc"`
+	ID      int64  `json:"id,omitzero"`
+	Method  string `json:"method"`
+	Params  any    `json:"params,omitzero"`
+}
+
+// jsonrpcNotification is a JSON-RPC 2.0 notification (no id, no response expected).
+type jsonrpcNotification struct {
+	JSONRPC string `json:"jsonrpc"`
+	Method  string `json:"method"`
+}
+
+// Handshake request params.
+
+// initializeParams holds the params for the initialize request.
+type initializeParams struct {
+	ClientInfo   clientInfo   `json:"clientInfo"`
+	Capabilities capabilities `json:"capabilities"`
+}
+
+type clientInfo struct {
+	Name    string `json:"name"`
+	Title   string `json:"title"`
+	Version string `json:"version"`
+}
+
+type capabilities struct {
+	OptOutNotificationMethods []Method `json:"optOutNotificationMethods"`
+}
+
+// Thread management request params.
+
+// threadStartParams holds the params for thread/start.
+type threadStartParams struct {
+	Model string `json:"model,omitzero"`
+}
+
+// threadResumeParams holds the params for thread/resume.
+type threadResumeParams struct {
+	ThreadID string `json:"threadId"`
+}
 
 // threadStartResult is the result object from a thread/start JSON-RPC response.
 type threadStartResult struct {
@@ -101,24 +176,67 @@ type threadStartThread struct {
 	ID string `json:"id"`
 }
 
-// ---------- Thread lifecycle ----------
+// Turn request params.
 
-// ThreadStartedParams holds the params for thread/started notifications.
-type ThreadStartedParams struct {
-	Thread ThreadInfo `json:"thread"`
-	jsonutil.Overflow
+// turnStartParams holds the params for turn/start.
+type turnStartParams struct {
+	ThreadID string      `json:"threadId"`
+	Input    []turnInput `json:"input"`
 }
 
-var threadStartedParamsKnown = jsonutil.KnownFields(ThreadStartedParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *ThreadStartedParams) UnmarshalJSON(data []byte) error {
-	type Alias ThreadStartedParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, threadStartedParamsKnown, "ThreadStartedParams")
+// turnInput is a single item in the turn/start input array.
+// Type is "text", "image" (with URL as data URI), "localImage" (with Path),
+// "skill" (with Name + Path), or "mention" (with Name + Path).
+type turnInput struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitzero"`
+	URL  string `json:"url,omitzero"`
+	Path string `json:"path,omitzero"`
+	Name string `json:"name,omitzero"`
 }
 
-// ThreadInfo describes a thread in thread/started params.
-type ThreadInfo struct {
+// Future outbound request params — not yet used but documented for
+// upcoming features (see docs/MORE.md).
+
+// TurnInterruptParams holds the params for turn/interrupt.
+type TurnInterruptParams struct {
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId"`
+}
+
+// TurnSteerParams holds the params for turn/steer.
+type TurnSteerParams struct {
+	ThreadID       string      `json:"threadId"`
+	Input          []turnInput `json:"input"`
+	ExpectedTurnID string      `json:"expectedTurnId"`
+}
+
+// ThreadCompactStartParams holds the params for thread/compact/start.
+type ThreadCompactStartParams struct {
+	ThreadID string `json:"threadId"`
+}
+
+// ThreadRollbackParams holds the params for thread/rollback.
+type ThreadRollbackParams struct {
+	ThreadID string `json:"threadId"`
+}
+
+// ============================================================
+// Output types: notifications received from the codex app-server (stdout).
+//
+// Unknown field detection is centralized in unmarshalNotification
+// (parse.go) rather than per-struct UnmarshalJSON methods.
+// ============================================================
+
+// Thread lifecycle.
+
+// ThreadStartedNotification holds the params for thread/started notifications.
+type ThreadStartedNotification struct {
+	Thread Thread `json:"thread"`
+}
+
+// Thread describes a thread in thread/started params.
+type Thread struct {
 	ID            string          `json:"id"`
 	CLIVersion    string          `json:"cliVersion,omitzero"`
 	CreatedAt     int64           `json:"createdAt,omitzero"`
@@ -135,7 +253,6 @@ type ThreadInfo struct {
 	AgentNickname string          `json:"agentNickname,omitzero"`
 	AgentRole     string          `json:"agentRole,omitzero"`
 	Turns         json.RawMessage `json:"turns,omitzero"`
-	jsonutil.Overflow
 }
 
 // ThreadStatus is a tagged union representing thread lifecycle state.
@@ -145,61 +262,38 @@ type ThreadStatus struct {
 	ActiveFlags []string `json:"activeFlags,omitzero"`
 }
 
-var threadInfoKnown = jsonutil.KnownFields(ThreadInfo{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (t *ThreadInfo) UnmarshalJSON(data []byte) error {
-	type Alias ThreadInfo
-	return jsonutil.UnmarshalRecord(data, (*Alias)(t), &t.Overflow, threadInfoKnown, "ThreadInfo")
+// ThreadStatusChangedNotification holds params for thread/status/changed.
+type ThreadStatusChangedNotification struct {
+	ThreadID string       `json:"threadId"`
+	Status   ThreadStatus `json:"status"`
 }
 
-// ---------- Turn lifecycle ----------
-
-// TurnStartedParams holds the params for turn/started notifications.
-type TurnStartedParams struct {
-	ThreadID string   `json:"threadId"`
-	Turn     TurnInfo `json:"turn"`
-	jsonutil.Overflow
+// ThreadNameUpdatedNotification holds params for thread/name/updated.
+type ThreadNameUpdatedNotification struct {
+	ThreadID   string `json:"threadId"`
+	ThreadName string `json:"threadName"`
 }
 
-var turnStartedParamsKnown = jsonutil.KnownFields(TurnStartedParams{})
+// Turn lifecycle.
 
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *TurnStartedParams) UnmarshalJSON(data []byte) error {
-	type Alias TurnStartedParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, turnStartedParamsKnown, "TurnStartedParams")
+// TurnStartedNotification holds the params for turn/started notifications.
+type TurnStartedNotification struct {
+	ThreadID string `json:"threadId"`
+	Turn     Turn   `json:"turn"`
 }
 
-// TurnCompletedParams holds the params for turn/completed notifications.
-type TurnCompletedParams struct {
-	ThreadID string   `json:"threadId"`
-	Turn     TurnInfo `json:"turn"`
-	jsonutil.Overflow
+// TurnCompletedNotification holds the params for turn/completed notifications.
+type TurnCompletedNotification struct {
+	ThreadID string `json:"threadId"`
+	Turn     Turn   `json:"turn"`
 }
 
-var turnCompletedParamsKnown = jsonutil.KnownFields(TurnCompletedParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *TurnCompletedParams) UnmarshalJSON(data []byte) error {
-	type Alias TurnCompletedParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, turnCompletedParamsKnown, "TurnCompletedParams")
-}
-
-// TurnInfo describes a turn in turn/started and turn/completed params.
-type TurnInfo struct {
+// Turn describes a turn in turn/started and turn/completed params.
+type Turn struct {
 	ID     string          `json:"id"`
 	Status string          `json:"status"`
 	Error  *TurnError      `json:"error,omitzero"`
 	Items  json.RawMessage `json:"items,omitzero"`
-	jsonutil.Overflow
-}
-
-var turnInfoKnown = jsonutil.KnownFields(TurnInfo{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (t *TurnInfo) UnmarshalJSON(data []byte) error {
-	type Alias TurnInfo
-	return jsonutil.UnmarshalRecord(data, (*Alias)(t), &t.Overflow, turnInfoKnown, "TurnInfo")
 }
 
 // TurnError describes a turn failure.
@@ -207,158 +301,105 @@ type TurnError struct {
 	Message           string          `json:"message"`
 	CodexErrorInfo    json.RawMessage `json:"codexErrorInfo,omitzero"`
 	AdditionalDetails string          `json:"additionalDetails,omitzero"`
-	jsonutil.Overflow
 }
 
-var turnErrorKnown = jsonutil.KnownFields(TurnError{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (e *TurnError) UnmarshalJSON(data []byte) error {
-	type Alias TurnError
-	return jsonutil.UnmarshalRecord(data, (*Alias)(e), &e.Overflow, turnErrorKnown, "TurnError")
+// TurnDiffUpdatedNotification holds params for turn/diff/updated.
+type TurnDiffUpdatedNotification struct {
+	ThreadID string          `json:"threadId"`
+	TurnID   string          `json:"turnId"`
+	Diff     json.RawMessage `json:"diff"`
 }
 
-// ---------- Item envelope ----------
+// TurnPlanUpdatedNotification holds params for turn/plan/updated.
+type TurnPlanUpdatedNotification struct {
+	ThreadID    string          `json:"threadId"`
+	TurnID      string          `json:"turnId"`
+	Explanation string          `json:"explanation,omitzero"`
+	Plan        json.RawMessage `json:"plan,omitzero"`
+}
 
-// ItemParams holds the params for item/started, item/completed, and
+// Item envelope and dispatch.
+
+// ItemNotification holds the params for item/started, item/completed, and
 // item/updated notifications. Item is raw JSON dispatched by ItemHeader.Type.
-type ItemParams struct {
+type ItemNotification struct {
 	Item     json.RawMessage `json:"item"`
 	ThreadID string          `json:"threadId"`
 	TurnID   string          `json:"turnId"`
-	jsonutil.Overflow
-}
-
-var itemParamsKnown = jsonutil.KnownFields(ItemParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *ItemParams) UnmarshalJSON(data []byte) error {
-	type Alias ItemParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, itemParamsKnown, "ItemParams")
 }
 
 // ItemHeader extracts the discriminant fields from a raw item for dispatch.
 type ItemHeader struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
+	ID   string   `json:"id"`
+	Type ItemType `json:"type"`
 }
 
-// ItemDeltaParams holds the params for item/agentMessage/delta notifications.
-type ItemDeltaParams struct {
+// AgentMessageDeltaNotification holds the params for item/agentMessage/delta notifications.
+type AgentMessageDeltaNotification struct {
 	ThreadID string `json:"threadId"`
 	TurnID   string `json:"turnId"`
 	ItemID   string `json:"itemId"`
 	Delta    string `json:"delta"`
-	jsonutil.Overflow
 }
 
-var itemDeltaParamsKnown = jsonutil.KnownFields(ItemDeltaParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *ItemDeltaParams) UnmarshalJSON(data []byte) error {
-	type Alias ItemDeltaParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, itemDeltaParamsKnown, "ItemDeltaParams")
-}
-
-// ---------- Per-item-type structs ----------
+// Per-item-type structs.
 
 // AgentMessageItem is an agent text response item.
 type AgentMessageItem struct {
-	ID     string `json:"id"`
-	Type   string `json:"type"`
-	Text   string `json:"text,omitzero"`
-	Phase  string `json:"phase,omitzero"`
-	Status string `json:"status,omitzero"`
-	jsonutil.Overflow
-}
-
-var agentMessageItemKnown = jsonutil.KnownFields(AgentMessageItem{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (item *AgentMessageItem) UnmarshalJSON(data []byte) error {
-	type Alias AgentMessageItem
-	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, agentMessageItemKnown, "AgentMessageItem")
+	ID             string          `json:"id"`
+	Type           ItemType        `json:"type"`
+	Text           string          `json:"text,omitzero"`
+	Phase          string          `json:"phase,omitzero"`
+	Status         string          `json:"status,omitzero"`
+	MemoryCitation json.RawMessage `json:"memoryCitation,omitzero"`
 }
 
 // PlanItem is an agent plan item.
 type PlanItem struct {
-	ID     string `json:"id"`
-	Type   string `json:"type"`
-	Text   string `json:"text,omitzero"`
-	Status string `json:"status,omitzero"`
-	jsonutil.Overflow
-}
-
-var planItemKnown = jsonutil.KnownFields(PlanItem{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (item *PlanItem) UnmarshalJSON(data []byte) error {
-	type Alias PlanItem
-	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, planItemKnown, "PlanItem")
+	ID     string   `json:"id"`
+	Type   ItemType `json:"type"`
+	Text   string   `json:"text,omitzero"`
+	Status string   `json:"status,omitzero"`
 }
 
 // ReasoningItem is an agent reasoning/thinking item.
 type ReasoningItem struct {
 	ID      string          `json:"id"`
-	Type    string          `json:"type"`
+	Type    ItemType        `json:"type"`
 	Summary []string        `json:"summary,omitzero"`
 	Content json.RawMessage `json:"content,omitzero"`
 	Status  string          `json:"status,omitzero"`
-	jsonutil.Overflow
-}
-
-var reasoningItemKnown = jsonutil.KnownFields(ReasoningItem{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (item *ReasoningItem) UnmarshalJSON(data []byte) error {
-	type Alias ReasoningItem
-	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, reasoningItemKnown, "ReasoningItem")
 }
 
 // CommandExecutionItem is a shell command execution item.
+// Source indicates the origin: "agent" (default), "userShell",
+// "unifiedExecStartup", or "unifiedExecInteraction".
 type CommandExecutionItem struct {
 	ID               string          `json:"id"`
-	Type             string          `json:"type"`
+	Type             ItemType        `json:"type"`
 	Command          string          `json:"command,omitzero"`
 	Cwd              string          `json:"cwd,omitzero"`
 	ProcessID        string          `json:"processId,omitzero"`
+	Source           string          `json:"source,omitzero"`
 	Status           string          `json:"status,omitzero"`
 	CommandActions   json.RawMessage `json:"commandActions,omitzero"`
 	AggregatedOutput *string         `json:"aggregatedOutput,omitzero"`
 	ExitCode         *int            `json:"exitCode,omitzero"`
 	DurationMs       *int64          `json:"durationMs,omitzero"`
-	jsonutil.Overflow
-}
-
-var commandExecutionItemKnown = jsonutil.KnownFields(CommandExecutionItem{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (item *CommandExecutionItem) UnmarshalJSON(data []byte) error {
-	type Alias CommandExecutionItem
-	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, commandExecutionItemKnown, "CommandExecutionItem")
 }
 
 // FileChangeItem is a file creation/modification/deletion item.
 type FileChangeItem struct {
 	ID      string             `json:"id"`
-	Type    string             `json:"type"`
+	Type    ItemType           `json:"type"`
 	Changes []FileUpdateChange `json:"changes,omitzero"`
 	Status  string             `json:"status,omitzero"`
-	jsonutil.Overflow
-}
-
-var fileChangeItemKnown = jsonutil.KnownFields(FileChangeItem{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (item *FileChangeItem) UnmarshalJSON(data []byte) error {
-	type Alias FileChangeItem
-	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, fileChangeItemKnown, "FileChangeItem")
 }
 
 // McpToolCallItem is an MCP tool call item.
 type McpToolCallItem struct {
 	ID         string             `json:"id"`
-	Type       string             `json:"type"`
+	Type       ItemType           `json:"type"`
 	Server     string             `json:"server,omitzero"`
 	Tool       string             `json:"tool,omitzero"`
 	Status     string             `json:"status,omitzero"`
@@ -366,175 +407,97 @@ type McpToolCallItem struct {
 	Result     *McpToolCallResult `json:"result,omitzero"`
 	Error      *McpToolCallError  `json:"error,omitzero"`
 	DurationMs *int64             `json:"durationMs,omitzero"`
-	jsonutil.Overflow
-}
-
-var mcpToolCallItemKnown = jsonutil.KnownFields(McpToolCallItem{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (item *McpToolCallItem) UnmarshalJSON(data []byte) error {
-	type Alias McpToolCallItem
-	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, mcpToolCallItemKnown, "McpToolCallItem")
 }
 
 // DynamicToolCallItem is a dynamically registered tool call item.
 type DynamicToolCallItem struct {
 	ID           string          `json:"id"`
-	Type         string          `json:"type"`
+	Type         ItemType        `json:"type"`
 	Tool         string          `json:"tool,omitzero"`
 	Arguments    json.RawMessage `json:"arguments,omitzero"`
 	Status       string          `json:"status,omitzero"`
 	ContentItems json.RawMessage `json:"contentItems,omitzero"`
 	Success      *bool           `json:"success,omitzero"`
 	DurationMs   *int64          `json:"durationMs,omitzero"`
-	jsonutil.Overflow
-}
-
-var dynamicToolCallItemKnown = jsonutil.KnownFields(DynamicToolCallItem{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (item *DynamicToolCallItem) UnmarshalJSON(data []byte) error {
-	type Alias DynamicToolCallItem
-	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, dynamicToolCallItemKnown, "DynamicToolCallItem")
 }
 
 // CollabAgentToolCallItem is a collaborative multi-agent tool call item.
 type CollabAgentToolCallItem struct {
 	ID                string          `json:"id"`
-	Type              string          `json:"type"`
+	Type              ItemType        `json:"type"`
 	Tool              string          `json:"tool,omitzero"`
 	Status            string          `json:"status,omitzero"`
 	SenderThreadID    string          `json:"senderThreadId,omitzero"`
 	ReceiverThreadIDs json.RawMessage `json:"receiverThreadIds,omitzero"`
 	Prompt            string          `json:"prompt,omitzero"`
+	Model             string          `json:"model,omitzero"`
+	ReasoningEffort   string          `json:"reasoningEffort,omitzero"`
 	AgentsStates      json.RawMessage `json:"agentsStates,omitzero"`
-	jsonutil.Overflow
-}
-
-var collabAgentToolCallItemKnown = jsonutil.KnownFields(CollabAgentToolCallItem{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (item *CollabAgentToolCallItem) UnmarshalJSON(data []byte) error {
-	type Alias CollabAgentToolCallItem
-	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, collabAgentToolCallItemKnown, "CollabAgentToolCallItem")
-}
-
-// WebSearchAction is the action object within a webSearch item.
-type WebSearchAction struct {
-	Type    string `json:"type"`
-	URL     string `json:"url,omitzero"`
-	Pattern string `json:"pattern,omitzero"`
-	jsonutil.Overflow
-}
-
-var webSearchActionKnown = jsonutil.KnownFields(WebSearchAction{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (a *WebSearchAction) UnmarshalJSON(data []byte) error {
-	type Alias WebSearchAction
-	return jsonutil.UnmarshalRecord(data, (*Alias)(a), &a.Overflow, webSearchActionKnown, "WebSearchAction")
 }
 
 // WebSearchItem is a web search item.
 type WebSearchItem struct {
 	ID     string           `json:"id"`
-	Type   string           `json:"type"`
+	Type   ItemType         `json:"type"`
 	Query  string           `json:"query,omitzero"`
 	Action *WebSearchAction `json:"action,omitzero"`
 	Status string           `json:"status,omitzero"`
-	jsonutil.Overflow
-}
-
-var webSearchItemKnown = jsonutil.KnownFields(WebSearchItem{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (item *WebSearchItem) UnmarshalJSON(data []byte) error {
-	type Alias WebSearchItem
-	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, webSearchItemKnown, "WebSearchItem")
 }
 
 // ImageViewItem is an image viewing item.
 type ImageViewItem struct {
-	ID     string `json:"id"`
-	Type   string `json:"type"`
-	Path   string `json:"path,omitzero"`
-	Status string `json:"status,omitzero"`
-	jsonutil.Overflow
+	ID     string   `json:"id"`
+	Type   ItemType `json:"type"`
+	Path   string   `json:"path,omitzero"`
+	Status string   `json:"status,omitzero"`
 }
 
-var imageViewItemKnown = jsonutil.KnownFields(ImageViewItem{})
+// ImageGenerationItem is an image generation item.
+type ImageGenerationItem struct {
+	ID            string   `json:"id"`
+	Type          ItemType `json:"type"`
+	Status        string   `json:"status,omitzero"`
+	RevisedPrompt string   `json:"revisedPrompt,omitzero"`
+	Result        string   `json:"result,omitzero"`
+	SavedPath     string   `json:"savedPath,omitzero"`
+}
 
-// UnmarshalJSON implements json.Unmarshaler.
-func (item *ImageViewItem) UnmarshalJSON(data []byte) error {
-	type Alias ImageViewItem
-	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, imageViewItemKnown, "ImageViewItem")
+// HookPromptItem is a hook execution prompt item.
+type HookPromptItem struct {
+	ID        string          `json:"id"`
+	Type      ItemType        `json:"type"`
+	Fragments json.RawMessage `json:"fragments,omitzero"`
 }
 
 // EnteredReviewModeItem signals the agent entered review mode.
 type EnteredReviewModeItem struct {
 	ID     string          `json:"id"`
-	Type   string          `json:"type"`
+	Type   ItemType        `json:"type"`
 	Review json.RawMessage `json:"review,omitzero"`
-	jsonutil.Overflow
-}
-
-var enteredReviewModeItemKnown = jsonutil.KnownFields(EnteredReviewModeItem{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (item *EnteredReviewModeItem) UnmarshalJSON(data []byte) error {
-	type Alias EnteredReviewModeItem
-	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, enteredReviewModeItemKnown, "EnteredReviewModeItem")
 }
 
 // ExitedReviewModeItem signals the agent exited review mode.
 type ExitedReviewModeItem struct {
 	ID     string          `json:"id"`
-	Type   string          `json:"type"`
+	Type   ItemType        `json:"type"`
 	Review json.RawMessage `json:"review,omitzero"`
-	jsonutil.Overflow
-}
-
-var exitedReviewModeItemKnown = jsonutil.KnownFields(ExitedReviewModeItem{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (item *ExitedReviewModeItem) UnmarshalJSON(data []byte) error {
-	type Alias ExitedReviewModeItem
-	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, exitedReviewModeItemKnown, "ExitedReviewModeItem")
 }
 
 // ContextCompactionItem signals a context window compaction.
 type ContextCompactionItem struct {
-	ID   string `json:"id"`
-	Type string `json:"type"`
-	jsonutil.Overflow
-}
-
-var contextCompactionItemKnown = jsonutil.KnownFields(ContextCompactionItem{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (item *ContextCompactionItem) UnmarshalJSON(data []byte) error {
-	type Alias ContextCompactionItem
-	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, contextCompactionItemKnown, "ContextCompactionItem")
+	ID   string   `json:"id"`
+	Type ItemType `json:"type"`
 }
 
 // UserMessageItem is a user-submitted message item.
 type UserMessageItem struct {
 	ID      string          `json:"id"`
-	Type    string          `json:"type"`
+	Type    ItemType        `json:"type"`
 	Content json.RawMessage `json:"content,omitzero"`
 	Status  string          `json:"status,omitzero"`
-	jsonutil.Overflow
 }
 
-var userMessageItemKnown = jsonutil.KnownFields(UserMessageItem{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (item *UserMessageItem) UnmarshalJSON(data []byte) error {
-	type Alias UserMessageItem
-	return jsonutil.UnmarshalRecord(data, (*Alias)(item), &item.Overflow, userMessageItemKnown, "UserMessageItem")
-}
-
-// ---------- Item field types ----------
+// Item field types.
 
 // FileUpdateChange describes a single file change within a fileChange item.
 type FileUpdateChange struct {
@@ -549,6 +512,13 @@ type PatchChangeKind struct {
 	MovePath *string `json:"movePath,omitzero"`
 }
 
+// WebSearchAction is the action object within a webSearch item.
+type WebSearchAction struct {
+	Type    string `json:"type"`
+	URL     string `json:"url,omitzero"`
+	Pattern string `json:"pattern,omitzero"`
+}
+
 // McpToolCallResult holds the result of a successful MCP tool call.
 type McpToolCallResult struct {
 	Content           []json.RawMessage `json:"content"`
@@ -560,22 +530,13 @@ type McpToolCallError struct {
 	Message string `json:"message"`
 }
 
-// ---------- Token usage ----------
+// Token usage.
 
-// TokenUsageUpdatedParams holds params for thread/tokenUsage/updated notifications.
-type TokenUsageUpdatedParams struct {
+// ThreadTokenUsageUpdatedNotification holds params for thread/tokenUsage/updated notifications.
+type ThreadTokenUsageUpdatedNotification struct {
 	ThreadID   string           `json:"threadId"`
 	TurnID     string           `json:"turnId"`
 	TokenUsage ThreadTokenUsage `json:"tokenUsage"`
-	jsonutil.Overflow
-}
-
-var tokenUsageUpdatedParamsKnown = jsonutil.KnownFields(TokenUsageUpdatedParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *TokenUsageUpdatedParams) UnmarshalJSON(data []byte) error {
-	type Alias TokenUsageUpdatedParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, tokenUsageUpdatedParamsKnown, "TokenUsageUpdatedParams")
 }
 
 // ThreadTokenUsage holds cumulative and per-turn token usage for a thread.
@@ -594,286 +555,87 @@ type TokenUsageBreakdown struct {
 	ReasoningOutputTokens int64 `json:"reasoningOutputTokens"`
 }
 
-// ---------- Delta notification params ----------
+// Delta notification params.
 
-// CommandOutputDeltaParams holds params for item/commandExecution/outputDelta.
-type CommandOutputDeltaParams struct {
+// CommandExecutionOutputDeltaNotification holds params for item/commandExecution/outputDelta.
+type CommandExecutionOutputDeltaNotification struct {
 	ThreadID string `json:"threadId"`
 	TurnID   string `json:"turnId"`
 	ItemID   string `json:"itemId"`
 	Delta    string `json:"delta"`
-	jsonutil.Overflow
 }
 
-var commandOutputDeltaParamsKnown = jsonutil.KnownFields(CommandOutputDeltaParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *CommandOutputDeltaParams) UnmarshalJSON(data []byte) error {
-	type Alias CommandOutputDeltaParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, commandOutputDeltaParamsKnown, "CommandOutputDeltaParams")
-}
-
-// TerminalInteractionParams holds params for item/commandExecution/terminalInteraction.
-type TerminalInteractionParams struct {
+// TerminalInteractionNotification holds params for item/commandExecution/terminalInteraction.
+type TerminalInteractionNotification struct {
 	ThreadID  string `json:"threadId"`
 	TurnID    string `json:"turnId"`
 	ItemID    string `json:"itemId"`
 	ProcessID string `json:"processId"`
 	Stdin     string `json:"stdin"`
-	jsonutil.Overflow
 }
 
-var terminalInteractionParamsKnown = jsonutil.KnownFields(TerminalInteractionParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *TerminalInteractionParams) UnmarshalJSON(data []byte) error {
-	type Alias TerminalInteractionParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, terminalInteractionParamsKnown, "TerminalInteractionParams")
-}
-
-// FileChangeOutputDeltaParams holds params for item/fileChange/outputDelta.
-type FileChangeOutputDeltaParams struct {
+// FileChangeOutputDeltaNotification holds params for item/fileChange/outputDelta.
+type FileChangeOutputDeltaNotification struct {
 	ThreadID string `json:"threadId"`
 	TurnID   string `json:"turnId"`
 	ItemID   string `json:"itemId"`
 	Delta    string `json:"delta"`
-	jsonutil.Overflow
 }
 
-var fileChangeOutputDeltaParamsKnown = jsonutil.KnownFields(FileChangeOutputDeltaParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *FileChangeOutputDeltaParams) UnmarshalJSON(data []byte) error {
-	type Alias FileChangeOutputDeltaParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, fileChangeOutputDeltaParamsKnown, "FileChangeOutputDeltaParams")
-}
-
-// ReasoningSummaryTextDeltaParams holds params for item/reasoning/summaryTextDelta.
-type ReasoningSummaryTextDeltaParams struct {
+// ReasoningSummaryTextDeltaNotification holds params for item/reasoning/summaryTextDelta.
+type ReasoningSummaryTextDeltaNotification struct {
 	ThreadID     string `json:"threadId"`
 	TurnID       string `json:"turnId"`
 	ItemID       string `json:"itemId"`
 	Delta        string `json:"delta"`
 	SummaryIndex int    `json:"summaryIndex"`
-	jsonutil.Overflow
 }
 
-var reasoningSummaryTextDeltaParamsKnown = jsonutil.KnownFields(ReasoningSummaryTextDeltaParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *ReasoningSummaryTextDeltaParams) UnmarshalJSON(data []byte) error {
-	type Alias ReasoningSummaryTextDeltaParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, reasoningSummaryTextDeltaParamsKnown, "ReasoningSummaryTextDeltaParams")
-}
-
-// ReasoningSummaryPartAddedParams holds params for item/reasoning/summaryPartAdded.
-type ReasoningSummaryPartAddedParams struct {
+// ReasoningSummaryPartAddedNotification holds params for item/reasoning/summaryPartAdded.
+type ReasoningSummaryPartAddedNotification struct {
 	ThreadID     string `json:"threadId"`
 	TurnID       string `json:"turnId"`
 	ItemID       string `json:"itemId"`
 	SummaryIndex int    `json:"summaryIndex"`
-	jsonutil.Overflow
 }
 
-var reasoningSummaryPartAddedParamsKnown = jsonutil.KnownFields(ReasoningSummaryPartAddedParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *ReasoningSummaryPartAddedParams) UnmarshalJSON(data []byte) error {
-	type Alias ReasoningSummaryPartAddedParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, reasoningSummaryPartAddedParamsKnown, "ReasoningSummaryPartAddedParams")
-}
-
-// ReasoningTextDeltaParams holds params for item/reasoning/textDelta.
-type ReasoningTextDeltaParams struct {
+// ReasoningTextDeltaNotification holds params for item/reasoning/textDelta.
+type ReasoningTextDeltaNotification struct {
 	ThreadID     string `json:"threadId"`
 	TurnID       string `json:"turnId"`
 	ItemID       string `json:"itemId"`
 	Delta        string `json:"delta"`
 	ContentIndex int    `json:"contentIndex"`
-	jsonutil.Overflow
 }
 
-var reasoningTextDeltaParamsKnown = jsonutil.KnownFields(ReasoningTextDeltaParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *ReasoningTextDeltaParams) UnmarshalJSON(data []byte) error {
-	type Alias ReasoningTextDeltaParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, reasoningTextDeltaParamsKnown, "ReasoningTextDeltaParams")
-}
-
-// PlanDeltaParams holds params for item/plan/delta.
-type PlanDeltaParams struct {
+// PlanDeltaNotification holds params for item/plan/delta.
+type PlanDeltaNotification struct {
 	ThreadID string `json:"threadId"`
 	TurnID   string `json:"turnId"`
 	ItemID   string `json:"itemId"`
 	Delta    string `json:"delta"`
-	jsonutil.Overflow
 }
 
-var planDeltaParamsKnown = jsonutil.KnownFields(PlanDeltaParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *PlanDeltaParams) UnmarshalJSON(data []byte) error {
-	type Alias PlanDeltaParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, planDeltaParamsKnown, "PlanDeltaParams")
-}
-
-// McpToolCallProgressParams holds params for item/mcpToolCall/progress.
-type McpToolCallProgressParams struct {
+// McpToolCallProgressNotification holds params for item/mcpToolCall/progress.
+type McpToolCallProgressNotification struct {
 	ThreadID string `json:"threadId"`
 	TurnID   string `json:"turnId"`
 	ItemID   string `json:"itemId"`
 	Message  string `json:"message"`
-	jsonutil.Overflow
 }
 
-var mcpToolCallProgressParamsKnown = jsonutil.KnownFields(McpToolCallProgressParams{})
+// Model rerouting.
 
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *McpToolCallProgressParams) UnmarshalJSON(data []byte) error {
-	type Alias McpToolCallProgressParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, mcpToolCallProgressParamsKnown, "McpToolCallProgressParams")
-}
-
-// ---------- Other notification params ----------
-
-// TurnDiffUpdatedParams holds params for turn/diff/updated.
-type TurnDiffUpdatedParams struct {
-	ThreadID string          `json:"threadId"`
-	TurnID   string          `json:"turnId"`
-	Diff     json.RawMessage `json:"diff"`
-	jsonutil.Overflow
-}
-
-var turnDiffUpdatedParamsKnown = jsonutil.KnownFields(TurnDiffUpdatedParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *TurnDiffUpdatedParams) UnmarshalJSON(data []byte) error {
-	type Alias TurnDiffUpdatedParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, turnDiffUpdatedParamsKnown, "TurnDiffUpdatedParams")
-}
-
-// TurnPlanUpdatedParams holds params for turn/plan/updated.
-type TurnPlanUpdatedParams struct {
-	ThreadID    string          `json:"threadId"`
-	TurnID      string          `json:"turnId"`
-	Explanation string          `json:"explanation,omitzero"`
-	Plan        json.RawMessage `json:"plan,omitzero"`
-	jsonutil.Overflow
-}
-
-var turnPlanUpdatedParamsKnown = jsonutil.KnownFields(TurnPlanUpdatedParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *TurnPlanUpdatedParams) UnmarshalJSON(data []byte) error {
-	type Alias TurnPlanUpdatedParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, turnPlanUpdatedParamsKnown, "TurnPlanUpdatedParams")
-}
-
-// ThreadStatusChangedParams holds params for thread/status/changed.
-type ThreadStatusChangedParams struct {
-	ThreadID string       `json:"threadId"`
-	Status   ThreadStatus `json:"status"`
-	jsonutil.Overflow
-}
-
-var threadStatusChangedParamsKnown = jsonutil.KnownFields(ThreadStatusChangedParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *ThreadStatusChangedParams) UnmarshalJSON(data []byte) error {
-	type Alias ThreadStatusChangedParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, threadStatusChangedParamsKnown, "ThreadStatusChangedParams")
-}
-
-// ThreadNameUpdatedParams holds params for thread/name/updated.
-type ThreadNameUpdatedParams struct {
-	ThreadID   string `json:"threadId"`
-	ThreadName string `json:"threadName"`
-	jsonutil.Overflow
-}
-
-var threadNameUpdatedParamsKnown = jsonutil.KnownFields(ThreadNameUpdatedParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *ThreadNameUpdatedParams) UnmarshalJSON(data []byte) error {
-	type Alias ThreadNameUpdatedParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, threadNameUpdatedParamsKnown, "ThreadNameUpdatedParams")
-}
-
-// ModelReroutedParams holds params for model/rerouted.
-type ModelReroutedParams struct {
+// ModelReroutedNotification holds params for model/rerouted.
+type ModelReroutedNotification struct {
 	ThreadID  string `json:"threadId"`
 	TurnID    string `json:"turnId"`
 	FromModel string `json:"fromModel"`
 	ToModel   string `json:"toModel"`
 	Reason    string `json:"reason,omitzero"`
-	jsonutil.Overflow
 }
 
-var modelReroutedParamsKnown = jsonutil.KnownFields(ModelReroutedParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *ModelReroutedParams) UnmarshalJSON(data []byte) error {
-	type Alias ModelReroutedParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, modelReroutedParamsKnown, "ModelReroutedParams")
-}
-
-// ---------- Outbound request types ----------
-
-// jsonrpcRequest is the envelope for all JSON-RPC 2.0 requests sent to codex.
-type jsonrpcRequest struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      int64  `json:"id,omitzero"`
-	Method  string `json:"method"`
-	Params  any    `json:"params,omitzero"`
-}
-
-// jsonrpcNotification is a JSON-RPC 2.0 notification (no id, no response expected).
-type jsonrpcNotification struct {
-	JSONRPC string `json:"jsonrpc"`
-	Method  string `json:"method"`
-}
-
-// initializeParams holds the params for the initialize request.
-type initializeParams struct {
-	ClientInfo   clientInfo   `json:"clientInfo"`
-	Capabilities capabilities `json:"capabilities"`
-}
-
-type clientInfo struct {
-	Name    string `json:"name"`
-	Title   string `json:"title"`
-	Version string `json:"version"`
-}
-
-type capabilities struct {
-	OptOutNotificationMethods []string `json:"optOutNotificationMethods"`
-}
-
-// threadStartParams holds the params for thread/start.
-type threadStartParams struct {
-	Model string `json:"model,omitzero"`
-}
-
-// threadResumeParams holds the params for thread/resume.
-type threadResumeParams struct {
-	ThreadID string `json:"threadId"`
-}
-
-// turnStartParams holds the params for turn/start.
-type turnStartParams struct {
-	ThreadID string      `json:"threadId"`
-	Input    []turnInput `json:"input"`
-}
-
-// turnInput is a single item in the turn/start input array.
-type turnInput struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitzero"`
-	URL  string `json:"url,omitzero"`
-}
-
-// ---------- model/list ----------
+// Model list (handshake response).
 
 // ModelListResult is the result of a model/list request.
 type ModelListResult struct {
@@ -886,21 +648,12 @@ type ModelInfo struct {
 	Name string `json:"name,omitzero"`
 }
 
-// ---------- Error notification ----------
+// Error notification.
 
-// ErrorNotificationParams holds params for error notifications.
-type ErrorNotificationParams struct {
+// ErrorNotification holds params for error notifications.
+type ErrorNotification struct {
 	Error     *TurnError `json:"error"`
 	WillRetry bool       `json:"willRetry,omitzero"`
 	ThreadID  string     `json:"threadId,omitzero"`
 	TurnID    string     `json:"turnId,omitzero"`
-	jsonutil.Overflow
-}
-
-var errorNotificationParamsKnown = jsonutil.KnownFields(ErrorNotificationParams{})
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *ErrorNotificationParams) UnmarshalJSON(data []byte) error {
-	type Alias ErrorNotificationParams
-	return jsonutil.UnmarshalRecord(data, (*Alias)(p), &p.Overflow, errorNotificationParamsKnown, "ErrorNotificationParams")
 }

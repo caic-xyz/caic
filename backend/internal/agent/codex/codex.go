@@ -182,8 +182,8 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		if err := json.Unmarshal(line, &msg); err != nil {
 			return nil, fmt.Errorf("tokenUsage/updated: %w", err)
 		}
-		var p TokenUsageUpdatedParams
-		if err := json.Unmarshal(msg.Params, &p); err != nil {
+		var p ThreadTokenUsageUpdatedNotification
+		if err := unmarshalNotification(msg.Params, &p, "ThreadTokenUsageUpdatedNotification"); err != nil {
 			return nil, fmt.Errorf("tokenUsage/updated params: %w", err)
 		}
 		incremental := agent.Usage{
@@ -244,7 +244,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		Params: initializeParams{
 			ClientInfo: clientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
 			Capabilities: capabilities{
-				OptOutNotificationMethods: []string{
+				OptOutNotificationMethods: []Method{
 					// Interactive terminal prompts (e.g. sudo password, interactive stdin);
 					// caic does not forward interactive terminal I/O to the agent.
 					MethodCommandTerminalInteract,

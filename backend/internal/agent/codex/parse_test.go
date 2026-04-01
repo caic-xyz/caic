@@ -492,7 +492,7 @@ func TestParseMessage(t *testing.T) {
 		if !ok {
 			t.Fatalf("type = %T, want *agent.RawMessage", msgs[0])
 		}
-		if raw.Type() != MethodItemUpdated {
+		if raw.Type() != string(MethodItemUpdated) {
 			t.Errorf("Type() = %q", raw.Type())
 		}
 	})

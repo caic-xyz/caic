@@ -326,28 +326,36 @@ var (
 
 // ---------- slash commands in -p mode ----------
 //
-// In -p (print/headless) mode, slash commands sent as user message content
-// (e.g. "/compact") are intercepted if:
-//   - type="prompt" (skills) — always available unless disableNonInteractive
-//   - type="local" with supportsNonInteractive=true
+// Slash commands can be sent as user message content (e.g. "/compact").
+// In -p (print/headless) mode, only a subset is available:
+//   - type="prompt" (skills like /review, /commit) — always intercepted
+//   - type="local" with supportsNonInteractive=true — listed below
+//
+// Unrecognized commands (disabled or not in the filtered list) are passed
+// through to the model as plain text, which typically fails with
+// "Unknown skill: <name>".
 //
 // Available local commands in -p mode:
-//   /compact    — shrink context (clear history, keep summary)
-//   /context    — show context window usage breakdown
-//   /cost       — show session cost
-//   /advisor    — configure advisor model
-//   /version    — print running version (ant-only)
-//   /files      — list files in context (ant-only)
-//   /heapdump   — dump JS heap (hidden, debug)
-//   /extra-usage — extra usage info
+//   /compact       — shrink context (clear history, keep summary)
+//   /context       — show context window usage breakdown
+//   /cost          — show session cost (subscription users only)
+//   /advisor       — configure advisor model (when available)
 //   /release-notes — view changelog
+//   /extra-usage   — extra usage info (subscription users only)
+//
+// Anthropic-internal only (USER_TYPE=ant):
+//   /version       — print running version
+//   /files         — list files in context
+//   /heapdump      — dump JS heap (hidden)
 //
 // NOT available in -p mode (supportsNonInteractive=false or local-jsx):
 //   /model, /clear, /config, /permissions, /help, /voice, /rewind,
 //   /reload-plugins, /vim, /stickers, /install-slack-app, /bridge-kick
 //
-// Alternative: some operations have dedicated control request subtypes
-// (set_model, mcp_reconnect, etc.) that bypass slash command restrictions.
+// For unavailable commands, use control request subtypes instead:
+//   /model          → ControlSetModel
+//   /reload-plugins → ControlReloadPlugins
+//   (no equivalent for /clear — start a new session instead)
 
 // ============================================================================
 // Output types (received FROM the agent via stdout)

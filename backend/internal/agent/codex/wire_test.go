@@ -50,23 +50,20 @@ func TestJSONRPCMessage(t *testing.T) {
 	})
 }
 
-func TestThreadStartedParams(t *testing.T) {
+func TestThreadStartedNotification(t *testing.T) {
 	t.Run("Basic", func(t *testing.T) {
 		const input = `{"thread":{"id":"0199a213-81c0-7800-8aa1-bbab2a035a53"}}`
-		var p ThreadStartedParams
+		var p ThreadStartedNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
 		if p.Thread.ID != "0199a213-81c0-7800-8aa1-bbab2a035a53" {
 			t.Errorf("Thread.ID = %q", p.Thread.ID)
 		}
-		if len(p.Extra) != 0 {
-			t.Errorf("unexpected extra fields: %v", p.Extra)
-		}
 	})
-	t.Run("KnownThreadInfoFields", func(t *testing.T) {
+	t.Run("KnownThreadFields", func(t *testing.T) {
 		const input = `{"thread":{"id":"t1","cliVersion":"0.1.0","createdAt":1771690198,"cwd":"/repo","ephemeral":false,"gitInfo":{"branch":"main"},"modelProvider":"openai","path":"/repo","preview":"fix the bug","source":"user","status":{"type":"idle"},"turns":[],"updatedAt":1771690200}}`
-		var p ThreadStartedParams
+		var p ThreadStartedNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
@@ -76,13 +73,10 @@ func TestThreadStartedParams(t *testing.T) {
 		if p.Thread.Status.Type != "idle" {
 			t.Errorf("Thread.Status.Type = %q, want idle", p.Thread.Status.Type)
 		}
-		if len(p.Thread.Extra) != 0 {
-			t.Errorf("unexpected extra fields in ThreadInfo: %v", p.Thread.Extra)
-		}
 	})
 	t.Run("ThreadStatusActive", func(t *testing.T) {
 		const input = `{"thread":{"id":"t1","status":{"type":"active","activeFlags":["waitingOnApproval"]}}}`
-		var p ThreadStartedParams
+		var p ThreadStartedNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
@@ -93,25 +87,12 @@ func TestThreadStartedParams(t *testing.T) {
 			t.Errorf("Thread.Status.ActiveFlags = %v", p.Thread.Status.ActiveFlags)
 		}
 	})
-	t.Run("UnknownFields", func(t *testing.T) {
-		const input = `{"thread":{"id":"t1"},"new_field":"surprise"}`
-		var p ThreadStartedParams
-		if err := json.Unmarshal([]byte(input), &p); err != nil {
-			t.Fatal(err)
-		}
-		if len(p.Extra) != 1 {
-			t.Fatalf("Extra = %v, want 1 unknown field", p.Extra)
-		}
-		if _, ok := p.Extra["new_field"]; !ok {
-			t.Error("expected 'new_field' in Extra")
-		}
-	})
 }
 
-func TestTurnCompletedParams(t *testing.T) {
+func TestTurnCompletedNotification(t *testing.T) {
 	t.Run("Completed", func(t *testing.T) {
 		const input = `{"threadId":"t1","turn":{"id":"turn_1","status":"completed"}}`
-		var p TurnCompletedParams
+		var p TurnCompletedNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
@@ -130,7 +111,7 @@ func TestTurnCompletedParams(t *testing.T) {
 	})
 	t.Run("Failed", func(t *testing.T) {
 		const input = `{"threadId":"t1","turn":{"id":"turn_1","status":"failed","error":{"message":"something went wrong"}}}`
-		var p TurnCompletedParams
+		var p TurnCompletedNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
@@ -146,10 +127,10 @@ func TestTurnCompletedParams(t *testing.T) {
 	})
 }
 
-func TestItemParams(t *testing.T) {
+func TestItemNotification(t *testing.T) {
 	t.Run("RawItem", func(t *testing.T) {
 		const input = `{"item":{"id":"item_1","type":"commandExecution","command":"ls"},"threadId":"t1","turnId":"turn_1"}`
-		var p ItemParams
+		var p ItemNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
@@ -173,25 +154,12 @@ func TestItemParams(t *testing.T) {
 			t.Errorf("ItemHeader.Type = %q", h.Type)
 		}
 	})
-	t.Run("UnknownFields", func(t *testing.T) {
-		const input = `{"item":{"id":"x","type":"agentMessage"},"threadId":"t1","turnId":"turn_1","surprise":true}`
-		var p ItemParams
-		if err := json.Unmarshal([]byte(input), &p); err != nil {
-			t.Fatal(err)
-		}
-		if len(p.Extra) != 1 {
-			t.Fatalf("Extra = %v, want 1 unknown field", p.Extra)
-		}
-		if _, ok := p.Extra["surprise"]; !ok {
-			t.Error("expected 'surprise' in Extra")
-		}
-	})
 }
 
-func TestItemDeltaParams(t *testing.T) {
+func TestAgentMessageDeltaNotification(t *testing.T) {
 	t.Run("Basic", func(t *testing.T) {
 		const input = `{"threadId":"t1","turnId":"turn_1","itemId":"item_3","delta":"Hello "}`
-		var p ItemDeltaParams
+		var p AgentMessageDeltaNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
@@ -206,16 +174,6 @@ func TestItemDeltaParams(t *testing.T) {
 		}
 		if p.TurnID != "turn_1" {
 			t.Errorf("TurnID = %q", p.TurnID)
-		}
-	})
-	t.Run("UnknownFields", func(t *testing.T) {
-		const input = `{"threadId":"t1","turnId":"turn_1","itemId":"x","delta":"y","new_field":42}`
-		var p ItemDeltaParams
-		if err := json.Unmarshal([]byte(input), &p); err != nil {
-			t.Fatal(err)
-		}
-		if len(p.Extra) != 1 {
-			t.Fatalf("Extra = %v, want 1 unknown field", p.Extra)
 		}
 	})
 }
@@ -241,22 +199,6 @@ func TestPerItemTypeStructs(t *testing.T) {
 		}
 		if item.Status != "completed" {
 			t.Errorf("Status = %q", item.Status)
-		}
-		if len(item.Extra) != 0 {
-			t.Errorf("unexpected extra: %v", item.Extra)
-		}
-	})
-	t.Run("AgentMessageUnknown", func(t *testing.T) {
-		const input = `{"id":"x","type":"agentMessage","text":"hi","query":"oops"}`
-		var item AgentMessageItem
-		if err := json.Unmarshal([]byte(input), &item); err != nil {
-			t.Fatal(err)
-		}
-		if len(item.Extra) != 1 {
-			t.Fatalf("Extra = %v, want 1 field", item.Extra)
-		}
-		if _, ok := item.Extra["query"]; !ok {
-			t.Error("expected 'query' in Extra")
 		}
 	})
 	t.Run("Plan", func(t *testing.T) {
@@ -299,22 +241,6 @@ func TestPerItemTypeStructs(t *testing.T) {
 		}
 		if item.DurationMs == nil || *item.DurationMs != 150 {
 			t.Errorf("DurationMs = %v", item.DurationMs)
-		}
-		if len(item.Extra) != 0 {
-			t.Errorf("unexpected extra: %v", item.Extra)
-		}
-	})
-	t.Run("CommandExecutionUnknown", func(t *testing.T) {
-		const input = `{"id":"x","type":"commandExecution","command":"ls","text":"wrong field"}`
-		var item CommandExecutionItem
-		if err := json.Unmarshal([]byte(input), &item); err != nil {
-			t.Fatal(err)
-		}
-		if len(item.Extra) != 1 {
-			t.Fatalf("Extra = %v, want 1 field", item.Extra)
-		}
-		if _, ok := item.Extra["text"]; !ok {
-			t.Error("expected 'text' in Extra")
 		}
 	})
 	t.Run("FileChange", func(t *testing.T) {
@@ -400,9 +326,6 @@ func TestPerItemTypeStructs(t *testing.T) {
 		if item.ID != "cc1" {
 			t.Errorf("ID = %q", item.ID)
 		}
-		if len(item.Extra) != 0 {
-			t.Errorf("unexpected extra: %v", item.Extra)
-		}
 	})
 	t.Run("UserMessage", func(t *testing.T) {
 		const input = `{"id":"u1","type":"userMessage","content":[{"type":"text","text":"hello"}],"status":"completed"}`
@@ -460,12 +383,71 @@ func TestPerItemTypeStructs(t *testing.T) {
 			t.Fatal("Review = nil")
 		}
 	})
+	t.Run("ImageGeneration", func(t *testing.T) {
+		const input = `{"id":"ig1","type":"imageGeneration","status":"completed","revisedPrompt":"a cat","result":"data:image/png;base64,abc","savedPath":"/tmp/cat.png"}`
+		var item ImageGenerationItem
+		if err := json.Unmarshal([]byte(input), &item); err != nil {
+			t.Fatal(err)
+		}
+		if item.RevisedPrompt != "a cat" {
+			t.Errorf("RevisedPrompt = %q", item.RevisedPrompt)
+		}
+		if item.Result != "data:image/png;base64,abc" {
+			t.Errorf("Result = %q", item.Result)
+		}
+		if item.SavedPath != "/tmp/cat.png" {
+			t.Errorf("SavedPath = %q", item.SavedPath)
+		}
+	})
+	t.Run("HookPrompt", func(t *testing.T) {
+		const input = `{"id":"hp1","type":"hookPrompt","fragments":[{"text":"approve?"}]}`
+		var item HookPromptItem
+		if err := json.Unmarshal([]byte(input), &item); err != nil {
+			t.Fatal(err)
+		}
+		if item.Fragments == nil {
+			t.Fatal("Fragments = nil")
+		}
+	})
+	t.Run("CommandExecutionSource", func(t *testing.T) {
+		const input = `{"id":"ce1","type":"commandExecution","command":"ls","source":"userShell","status":"completed"}`
+		var item CommandExecutionItem
+		if err := json.Unmarshal([]byte(input), &item); err != nil {
+			t.Fatal(err)
+		}
+		if item.Source != "userShell" {
+			t.Errorf("Source = %q", item.Source)
+		}
+	})
+	t.Run("AgentMessageMemoryCitation", func(t *testing.T) {
+		const input = `{"id":"am1","type":"agentMessage","text":"hello","memoryCitation":{"entries":[{"path":"/m","lineStart":1,"lineEnd":2,"note":"n"}],"threadIds":["t1"]}}`
+		var item AgentMessageItem
+		if err := json.Unmarshal([]byte(input), &item); err != nil {
+			t.Fatal(err)
+		}
+		if item.MemoryCitation == nil {
+			t.Fatal("MemoryCitation = nil")
+		}
+	})
+	t.Run("CollabAgentModelEffort", func(t *testing.T) {
+		const input = `{"id":"ca2","type":"collabAgentToolCall","tool":"ask","status":"inProgress","model":"gpt-5.4","reasoningEffort":"high","senderThreadId":"s1","prompt":"help"}`
+		var item CollabAgentToolCallItem
+		if err := json.Unmarshal([]byte(input), &item); err != nil {
+			t.Fatal(err)
+		}
+		if item.Model != "gpt-5.4" {
+			t.Errorf("Model = %q", item.Model)
+		}
+		if item.ReasoningEffort != "high" {
+			t.Errorf("ReasoningEffort = %q", item.ReasoningEffort)
+		}
+	})
 }
 
-func TestDeltaNotificationParams(t *testing.T) {
+func TestDeltaNotifications(t *testing.T) {
 	t.Run("CommandOutputDelta", func(t *testing.T) {
 		const input = `{"threadId":"t1","turnId":"turn_1","itemId":"i1","delta":"output line\n"}`
-		var p CommandOutputDeltaParams
+		var p CommandExecutionOutputDeltaNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
@@ -475,7 +457,7 @@ func TestDeltaNotificationParams(t *testing.T) {
 	})
 	t.Run("TerminalInteraction", func(t *testing.T) {
 		const input = `{"threadId":"t1","turnId":"turn_1","itemId":"i1","processId":"p1","stdin":"yes\n"}`
-		var p TerminalInteractionParams
+		var p TerminalInteractionNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
@@ -488,7 +470,7 @@ func TestDeltaNotificationParams(t *testing.T) {
 	})
 	t.Run("ReasoningSummaryTextDelta", func(t *testing.T) {
 		const input = `{"threadId":"t1","turnId":"turn_1","itemId":"i1","delta":"thinking...","summaryIndex":0}`
-		var p ReasoningSummaryTextDeltaParams
+		var p ReasoningSummaryTextDeltaNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
@@ -498,7 +480,7 @@ func TestDeltaNotificationParams(t *testing.T) {
 	})
 	t.Run("McpToolCallProgress", func(t *testing.T) {
 		const input = `{"threadId":"t1","turnId":"turn_1","itemId":"i1","message":"processing..."}`
-		var p McpToolCallProgressParams
+		var p McpToolCallProgressNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
@@ -508,7 +490,7 @@ func TestDeltaNotificationParams(t *testing.T) {
 	})
 	t.Run("ThreadStatusChanged", func(t *testing.T) {
 		const input = `{"threadId":"t1","status":{"type":"idle"}}`
-		var p ThreadStatusChangedParams
+		var p ThreadStatusChangedNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
@@ -518,7 +500,7 @@ func TestDeltaNotificationParams(t *testing.T) {
 	})
 	t.Run("ModelRerouted", func(t *testing.T) {
 		const input = `{"threadId":"t1","turnId":"turn_1","fromModel":"gpt-4","toModel":"gpt-3.5","reason":"rate limit"}`
-		var p ModelReroutedParams
+		var p ModelReroutedNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
@@ -531,7 +513,7 @@ func TestDeltaNotificationParams(t *testing.T) {
 	})
 	t.Run("ErrorNotification", func(t *testing.T) {
 		const input = `{"error":{"message":"rate limit"},"willRetry":true,"threadId":"t1","turnId":"turn_1"}`
-		var p ErrorNotificationParams
+		var p ErrorNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
@@ -540,16 +522,6 @@ func TestDeltaNotificationParams(t *testing.T) {
 		}
 		if !p.WillRetry {
 			t.Error("WillRetry = false")
-		}
-	})
-	t.Run("UnknownField", func(t *testing.T) {
-		const input = `{"threadId":"t1","status":{"type":"idle"},"surprise":1}`
-		var p ThreadStatusChangedParams
-		if err := json.Unmarshal([]byte(input), &p); err != nil {
-			t.Fatal(err)
-		}
-		if len(p.Extra) != 1 {
-			t.Fatalf("Extra = %v, want 1 field", p.Extra)
 		}
 	})
 }
