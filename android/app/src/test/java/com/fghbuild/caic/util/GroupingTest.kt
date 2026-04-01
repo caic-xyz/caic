@@ -664,6 +664,25 @@ class GroupingTest {
             assertTrue(liveTurn.groups.any { g -> g.events.any { it.kind == EventKinds.UserInput } })
         }
 
+        t.run("completed turn and live turn coexist after user reply") {
+            // When the agent completes turn 1 and the user sends a reply that starts
+            // turn 2, both currentSessionCompletedTurns and currentTurn are populated.
+            // The UI must use different key prefixes for these to avoid LazyColumn key
+            // collisions (regression: crash "Key g:0 was already used").
+            val turn1 = listOf(textDeltaEvent("agent output", ts = 1), resultEvent(ts = 2))
+            val state1 = nextGrouped(IncrementalGrouped(), turn1)
+
+            val withReply = turn1 + listOf(
+                userInputEvent("user reply", ts = 3),
+                textDeltaEvent("second agent output", ts = 4),
+                toolUseEvent("t1", "Read", ts = 5),
+            )
+            val state2 = nextGrouped(state1, withReply)
+            // Both must be non-empty — this is the precondition for the key collision.
+            assertTrue("must have completed turns", state2.currentSessionCompletedTurns.isNotEmpty())
+            assertNotNull("must have a live turn", state2.currentTurn)
+        }
+
         t.run("last completed turn has correct content after multi-turn conversation") {
             // Two full turns. After the second result the last completed turn must have
             // the second turn's content (not the first) and currentTurn must be null.

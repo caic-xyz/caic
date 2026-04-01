@@ -96,6 +96,7 @@ private enum class Indent { Session, Turn }
 //   "e:<turnKey>"                 — Elided past turn
 //   "th:<turnKey>"                — Header of an expanded past turn
 //   "g:j"  / "s{si}t{ti}g{j}"   — Group item (live turn / other)
+//   "lg:j"                        — Last completed turn group (when live turn coexists)
 //   "<base>h"                     — Tool-group header item
 //   "<base>:<k>"                  — Individual ToolCallItem within expanded tool group
 //   "<base>thinking"              — Thinking block within expanded tool group
@@ -231,11 +232,16 @@ private fun emitTurns(
 // Builds flat items for the live (current) turn. Rebuilds on every message batch.
 // When isLiveTurn is false the groups are shown expanded but without interactive
 // actions (used for the last completed turn when there is no active live turn).
-private fun buildLiveItems(liveTurn: Turn?, expandedToolGroups: Set<String>, isLiveTurn: Boolean = true): List<MsgItem> {
+private fun buildLiveItems(
+    liveTurn: Turn?,
+    expandedToolGroups: Set<String>,
+    isLiveTurn: Boolean = true,
+    keyPrefix: String = "g",
+): List<MsgItem> {
     val turn = liveTurn ?: return emptyList()
     val result = mutableListOf<MsgItem>()
     turn.groups.forEachIndexed { j, group ->
-        val base = "g:$j"
+        val base = "$keyPrefix:$j"
         if (group.kind == GroupKind.ACTION && group.toolCalls.size > 1) {
             val toolGroupKey = group.toolCalls.first().use.toolUseID
             result.add(MsgItem.ToolGroupHeader(group.toolCalls, toolGroupKey, "${base}h"))
@@ -707,10 +713,12 @@ private fun MessageList(
         )
     }
     // Last completed turn shown expanded (no interactive actions) when there is no live turn.
-    // Uses the same key prefix as liveItems ("g:j") so the LazyColumn can reuse composables
-    // as the turn transitions between live and last-expanded states.
-    val lastTurnItems = remember(lastExpandedTurn, expandedToolGroups) {
-        buildLiveItems(lastExpandedTurn, expandedToolGroups, isLiveTurn = false)
+    // Uses "g:" prefix when there is no live turn so the LazyColumn can reuse composables
+    // as the turn transitions between live and last-expanded states. When a live turn exists,
+    // uses "lg:" to avoid key collisions.
+    val hasLiveTurn = liveTurn != null
+    val lastTurnItems = remember(lastExpandedTurn, expandedToolGroups, hasLiveTurn) {
+        buildLiveItems(lastExpandedTurn, expandedToolGroups, isLiveTurn = false, keyPrefix = if (hasLiveTurn) "lg" else "g")
     }
     // Live items rebuild on every message batch, but only cover the current turn.
     val liveItems = remember(liveTurn, expandedToolGroups) {
