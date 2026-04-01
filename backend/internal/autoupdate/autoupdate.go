@@ -75,8 +75,8 @@ func checkAndUpdate(ctx context.Context, gh *github.Client) error {
 	latest := strings.TrimPrefix(rel.TagName, "v")
 	current := strings.TrimPrefix(Version, "v")
 	if !isNewer(latest, current) {
-		slog.Debug("autoupdate: up to date", "current", current, "latest", latest)
-		return fmt.Errorf("already up to date (%s)", current)
+		slog.Info("autoupdate: up to date", "current", current, "latest", latest)
+		return nil
 	}
 	slog.Info("autoupdate: new version available", "current", current, "latest", latest)
 	return downloadAndInstall(ctx, gh, rel)
