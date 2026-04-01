@@ -27,17 +27,6 @@ to guide the summary. Available in `-p` mode.
 - Surface context usage by sending `ControlGetContextUsage` control requests
   and displaying the breakdown in the UI.
 
-**Cross-provider design:** Define an `agent.CompactCommand` interface:
-```go
-type CompactCommand interface {
-    WriteCompact(w io.Writer, instructions string, logW io.Writer) error
-}
-```
-- Claude Code: sends `/compact <instructions>` as user message content.
-- Other providers: implement provider-specific compaction or no-op.
-- The server checks if the backend implements `CompactCommand` before showing
-  the button in the UI.
-
 ### 2. Context Usage Display: /context
 
 **Problem:** Users don't know how full the context window is until it auto-compacts
@@ -50,11 +39,6 @@ token counts by category, percentage used, and auto-compact threshold.
 - Add a context usage indicator to the task detail view (e.g. progress bar
   showing percentage, tooltip with breakdown).
 - Poll periodically or after each assistant turn.
-
-**Cross-provider design:** Define an `agent.ContextUsage` message type in
-`agent/types.go` with common fields (total tokens, max tokens, percentage).
-Each backend emits this after parsing provider-specific data. The server
-forwards it to the frontend via SSE.
 
 ### 3. Model Switching: ControlSetModel
 
@@ -69,15 +53,6 @@ next turn.
   `WriteControlRequest` method on the session.
 - Update the task's `reportedModel` field when the agent confirms.
 
-**Cross-provider design:** This requires extending `WireFormat`:
-```go
-type ModelSwitcher interface {
-    WriteSetModel(w io.Writer, model string, logW io.Writer) error
-}
-```
-Not all providers support mid-session model switching. The UI should only
-show the selector when the backend implements `ModelSwitcher`.
-
 ### 4. Interrupt/Cancel: ControlInterrupt
 
 **Problem:** Users can stop a task, but stopping kills the entire session.
@@ -91,13 +66,6 @@ current turn; the session remains open for follow-up messages.
   current turn; Stop terminates the session.
 - Requires extending the session to support writing control requests
   alongside user messages.
-
-**Cross-provider design:**
-```go
-type Interruptable interface {
-    WriteInterrupt(w io.Writer, logW io.Writer) error
-}
-```
 
 ### 5. Session Cost: /cost
 
@@ -137,72 +105,6 @@ fixed at container creation time.
 
 ## Cross-Provider Architecture
 
-The key design principle: **capabilities should be interfaces, not
-assumptions**. Each enhancement above is gated behind an optional interface
-that backends can implement.
-
-### Extending WireFormat
-
-The current `WireFormat` interface has two methods: `WritePrompt` and
-`ParseMessage`. Rather than adding methods to `WireFormat` (which would
-break all backends), use optional interfaces:
-
-```go
-// In agent/agent.go:
-
-type CompactCommand interface {
-    WriteCompact(w io.Writer, instructions string, logW io.Writer) error
-}
-
-type ModelSwitcher interface {
-    WriteSetModel(w io.Writer, model string, logW io.Writer) error
-}
-
-type Interruptable interface {
-    WriteInterrupt(w io.Writer, logW io.Writer) error
-}
-
-type ContextQuerier interface {
-    WriteGetContextUsage(w io.Writer, logW io.Writer) error
-}
-```
-
-### Server-Side Capability Discovery
-
-The server can check which capabilities a backend supports:
-
-```go
-func hasCapability[T any](wire WireFormat) bool {
-    _, ok := wire.(T)
-    return ok
-}
-```
-
-The frontend queries available capabilities via the existing harness metadata
-endpoint and conditionally renders UI controls.
-
-### Provider Mapping
-
-| Feature | Claude Code | Codex | Gemini | Kilo | OpenCode |
-|---------|------------|-------|--------|------|----------|
-| Compact | `/compact` msg | ? | N/A | ? | ? |
-| Context usage | `ControlGetContextUsage` | N/A | N/A | ? | ? |
-| Model switch | `ControlSetModel` | N/A | N/A | ? | ? |
-| Interrupt | `ControlInterrupt` | ? | N/A | ? | ? |
-| Cost | `/cost` msg | N/A | N/A | N/A | N/A |
-| Env vars | `InputUpdateEnvVars` | N/A | N/A | N/A | N/A |
-| Keep-alive | `InputKeepAlive` | N/A | N/A | N/A | N/A |
-
-`?` = needs investigation. `N/A` = not supported by provider.
-
-## Implementation Priority
-
-1. **Context usage display** — low effort, high value. Just parse the
-   existing `outputResult.Usage` more prominently.
-2. **Compact button** — low effort, sends `/compact` as user message.
-   No wire protocol changes needed.
-3. **Interrupt** — medium effort, needs `WriteControlRequest` on Session.
-   High value for long-running turns.
-4. **Model switching** — medium effort, needs UI + control request plumbing.
-5. **Keep-alive** — low effort, prevents spurious disconnects.
-6. **Environment variables** — low priority, niche use cases.
+See [`agent/docs/MORE.md`](../../docs/MORE.md) for the shared cross-provider
+architecture: optional capability interfaces, server-side discovery, provider
+mapping table, and implementation priority.

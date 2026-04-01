@@ -5,10 +5,35 @@ package opencode
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
+	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
+
+// notificationKnownFields caches the known field sets for output wire types,
+// built on first use. Uses sync.Map: few writes (once per type), many reads.
+var notificationKnownFields sync.Map
+
+// unmarshalNotification unmarshals data into v and logs a warning for any
+// unknown JSON fields. The name identifies the type for logging.
+func unmarshalNotification(data []byte, v any, name string) error {
+	if err := json.Unmarshal(data, v); err != nil {
+		return err
+	}
+	val, ok := notificationKnownFields.Load(name)
+	if !ok {
+		val, _ = notificationKnownFields.LoadOrStore(name, jsonutil.KnownFields(reflect.ValueOf(v).Elem().Interface()))
+	}
+	known := val.(map[string]struct{})
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(data, &raw) == nil {
+		jsonutil.WarnUnknown(name, jsonutil.CollectUnknown(raw, known))
+	}
+	return nil
+}
 
 // ParseMessage decodes a single line from the OpenCode ACP output into one or
 // more typed agent.Messages.
@@ -79,10 +104,10 @@ func ParseMessage(line []byte) ([]agent.Message, error) {
 	case MethodSessionRequestPermission:
 		// Permission requests are handled by wireFormat (auto-approve).
 		// In the stateless parser, emit as RawMessage.
-		return []agent.Message{&agent.RawMessage{MessageType: msg.Method, Raw: append([]byte(nil), line...)}}, nil
+		return []agent.Message{&agent.RawMessage{MessageType: string(msg.Method), Raw: append([]byte(nil), line...)}}, nil
 
 	default:
-		return []agent.Message{&agent.RawMessage{MessageType: msg.Method, Raw: append([]byte(nil), line...)}}, nil
+		return []agent.Message{&agent.RawMessage{MessageType: string(msg.Method), Raw: append([]byte(nil), line...)}}, nil
 	}
 }
 
@@ -101,21 +126,21 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, e
 	switch probe.SessionUpdate {
 	case UpdateAgentMessageChunk:
 		var u AgentMessageChunkUpdate
-		if err := json.Unmarshal(sup.Update, &u); err != nil {
+		if err := unmarshalNotification(sup.Update, &u, "AgentMessageChunkUpdate"); err != nil {
 			return nil, fmt.Errorf("agent_message_chunk: %w", err)
 		}
 		return []agent.Message{&agent.TextDeltaMessage{Text: u.Content.Text}}, nil
 
 	case UpdateAgentThoughtChunk:
 		var u AgentThoughtChunkUpdate
-		if err := json.Unmarshal(sup.Update, &u); err != nil {
+		if err := unmarshalNotification(sup.Update, &u, "AgentThoughtChunkUpdate"); err != nil {
 			return nil, fmt.Errorf("agent_thought_chunk: %w", err)
 		}
 		return []agent.Message{&agent.ThinkingDeltaMessage{Text: u.Content.Text}}, nil
 
 	case UpdateUserMessageChunk:
 		var u UserMessageChunkUpdate
-		if err := json.Unmarshal(sup.Update, &u); err != nil {
+		if err := unmarshalNotification(sup.Update, &u, "UserMessageChunkUpdate"); err != nil {
 			return nil, fmt.Errorf("user_message_chunk: %w", err)
 		}
 		return []agent.Message{&agent.UserInputMessage{Text: u.Content.Text}}, nil
@@ -131,7 +156,7 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, e
 
 	case UpdateUsageUpdate:
 		var u UsageUpdateUpdate
-		if err := json.Unmarshal(sup.Update, &u); err != nil {
+		if err := unmarshalNotification(sup.Update, &u, "UsageUpdateUpdate"); err != nil {
 			return nil, fmt.Errorf("usage_update: %w", err)
 		}
 		return []agent.Message{&agent.UsageMessage{
@@ -140,7 +165,7 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, e
 
 	case UpdateCurrentModeUpdate:
 		var u CurrentModeUpdate
-		if err := json.Unmarshal(sup.Update, &u); err != nil {
+		if err := unmarshalNotification(sup.Update, &u, "CurrentModeUpdate"); err != nil {
 			return nil, fmt.Errorf("current_mode_update: %w", err)
 		}
 		detail := u.ModeName
@@ -160,14 +185,14 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, e
 		return nil, nil // internal, skip
 
 	default:
-		return []agent.Message{&agent.RawMessage{MessageType: "session/update:" + probe.SessionUpdate, Raw: append([]byte(nil), line...)}}, nil
+		return []agent.Message{&agent.RawMessage{MessageType: "session/update:" + string(probe.SessionUpdate), Raw: append([]byte(nil), line...)}}, nil
 	}
 }
 
 // parseToolCall handles tool_call session updates (initial tool announcement).
 func parseToolCall(data json.RawMessage) ([]agent.Message, error) {
 	var u ToolCallUpdate
-	if err := json.Unmarshal(data, &u); err != nil {
+	if err := unmarshalNotification(data, &u, "ToolCallUpdate"); err != nil {
 		return nil, fmt.Errorf("tool_call: %w", err)
 	}
 
@@ -186,7 +211,7 @@ func parseToolCall(data json.RawMessage) ([]agent.Message, error) {
 // parseToolCallUpdate handles tool_call_update session updates (progress/completion).
 func parseToolCallUpdate(data json.RawMessage) ([]agent.Message, error) {
 	var u ToolCallUpdateUpdate
-	if err := json.Unmarshal(data, &u); err != nil {
+	if err := unmarshalNotification(data, &u, "ToolCallUpdateUpdate"); err != nil {
 		return nil, fmt.Errorf("tool_call_update: %w", err)
 	}
 
@@ -241,14 +266,14 @@ func extractToolOutputDelta(u *ToolCallUpdateUpdate) string {
 // parsePlanUpdate converts a plan update to a TodoMessage.
 func parsePlanUpdate(data json.RawMessage) ([]agent.Message, error) {
 	var u PlanUpdate
-	if err := json.Unmarshal(data, &u); err != nil {
+	if err := unmarshalNotification(data, &u, "PlanUpdate"); err != nil {
 		return nil, fmt.Errorf("plan: %w", err)
 	}
 	todos := make([]agent.TodoItem, len(u.Entries))
 	for i, e := range u.Entries {
 		todos[i] = agent.TodoItem{
 			Content: e.Content,
-			Status:  e.Status,
+			Status:  string(e.Status),
 		}
 	}
 	return []agent.Message{&agent.TodoMessage{
@@ -258,7 +283,7 @@ func parsePlanUpdate(data json.RawMessage) ([]agent.Message, error) {
 }
 
 // normalizeToolName maps OpenCode tool titles and kinds to caic canonical names.
-func normalizeToolName(title, kind string) string {
+func normalizeToolName(title string, kind ToolKind) string {
 	// Normalize to lowercase for matching.
 	lower := strings.ToLower(title)
 
@@ -302,6 +327,8 @@ func normalizeToolName(title, kind string) string {
 		return "Grep"
 	case KindFetch:
 		return "WebFetch"
+	case KindDelete, KindMove, KindThink, KindSwitchMode, KindOther:
+		// No mapping; fall through to passthrough.
 	}
 
 	// Return original title as-is.

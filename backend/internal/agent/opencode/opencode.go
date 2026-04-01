@@ -183,7 +183,7 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 	req := jsonrpcRequest{
 		JSONRPC: "2.0",
 		ID:      id,
-		Method:  "session/prompt",
+		Method:  MethodSessionPrompt,
 		Params:  sessionPromptParams{SessionID: w.sessionID, Prompt: content},
 	}
 	// Don't log to logW — stdin is not logged with --no-log-stdin.
@@ -206,7 +206,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	// Intercept session/prompt response → ResultMessage.
 	if probe.ID != nil {
 		var id int64
-		if json.Unmarshal(*probe.ID, &id) == nil {
+		if json.Unmarshal(probe.ID, &id) == nil {
 			w.mu.Lock()
 			isPromptResp := id == w.promptReqID
 			w.mu.Unlock()
@@ -284,14 +284,12 @@ func (w *wireFormat) handlePromptResponseLocked(line []byte) ([]agent.Message, e
 				rm.IsError = true
 				rm.Result = pr.StopReason
 			}
-			if pr.Usage != nil {
-				rm.Usage = agent.Usage{
-					InputTokens:              pr.Usage.InputTokens,
-					OutputTokens:             pr.Usage.OutputTokens,
-					CacheReadInputTokens:     pr.Usage.CachedReadTokens,
-					CacheCreationInputTokens: pr.Usage.CachedWriteTokens,
-					ReasoningOutputTokens:    pr.Usage.ThoughtTokens,
-				}
+			rm.Usage = agent.Usage{
+				InputTokens:              pr.Usage.InputTokens,
+				OutputTokens:             pr.Usage.OutputTokens,
+				CacheReadInputTokens:     pr.Usage.CachedReadTokens,
+				CacheCreationInputTokens: pr.Usage.CachedWriteTokens,
+				ReasoningOutputTokens:    pr.Usage.ThoughtTokens,
 			}
 		}
 	}
@@ -336,7 +334,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	initReq := jsonrpcRequest{
 		JSONRPC: "2.0",
 		ID:      w.allocIDLocked(),
-		Method:  "initialize",
+		Method:  MethodInitialize,
 		Params: initializeParams{
 			ProtocolVersion: 1,
 			ClientCapabilities: clientCapabilities{
@@ -359,9 +357,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	var initResult initializeResult
 	if initResp.Result != nil {
 		if json.Unmarshal(initResp.Result, &initResult) == nil {
-			if initResult.AgentCapabilities.PromptCapabilities != nil {
-				w.supportsImage = initResult.AgentCapabilities.PromptCapabilities.Image
-			}
+			w.supportsImage = initResult.AgentCapabilities.PromptCapabilities.Image
 			res.agentVersion = initResult.AgentInfo.Version
 		}
 	}
@@ -372,14 +368,14 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 		sessionReq = jsonrpcRequest{
 			JSONRPC: "2.0",
 			ID:      w.allocIDLocked(),
-			Method:  "session/load",
+			Method:  MethodSessionLoad,
 			Params:  sessionLoadParams{SessionID: opts.ResumeSessionID, Cwd: opts.Dir, McpServers: []mcpServer{}},
 		}
 	} else {
 		sessionReq = jsonrpcRequest{
 			JSONRPC: "2.0",
 			ID:      w.allocIDLocked(),
-			Method:  "session/new",
+			Method:  MethodSessionNew,
 			Params:  sessionNewParams{Cwd: opts.Dir, McpServers: []mcpServer{}},
 		}
 	}
@@ -407,16 +403,14 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	if w.sessionID == "" {
 		return nil, errors.New("session response missing sessionId")
 	}
-	if snResult.Models != nil {
-		// Put the current model first so the frontend shows it as default.
-		res.currentModel = snResult.Models.CurrentModelID
-		if res.currentModel != "" {
-			res.models = append(res.models, res.currentModel)
-		}
-		for _, m := range snResult.Models.AvailableModels {
-			if m.ModelID != "" && m.ModelID != res.currentModel {
-				res.models = append(res.models, m.ModelID)
-			}
+	// Put the current model first so the frontend shows it as default.
+	res.currentModel = snResult.Models.CurrentModelID
+	if res.currentModel != "" {
+		res.models = append(res.models, res.currentModel)
+	}
+	for _, m := range snResult.Models.AvailableModels {
+		if m.ModelID != "" && m.ModelID != res.currentModel {
+			res.models = append(res.models, m.ModelID)
 		}
 	}
 

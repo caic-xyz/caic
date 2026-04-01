@@ -550,33 +550,33 @@ func TestParseMessage(t *testing.T) {
 func TestNormalizeToolName(t *testing.T) {
 	tests := []struct {
 		title string
-		kind  string
+		kind  ToolKind
 		want  string
 	}{
-		{"bash", "execute", "Bash"},
-		{"edit", "edit", "Edit"},
-		{"write", "edit", "Write"},
-		{"read", "read", "Read"},
-		{"glob", "search", "Glob"},
-		{"grep", "search", "Grep"},
-		{"list", "read", "ListDirectory"},
-		{"webfetch", "fetch", "WebFetch"},
-		{"websearch", "search", "WebSearch"},
-		{"todowrite", "other", "TodoWrite"},
-		{"task", "other", "Agent"},
+		{"bash", KindExecute, "Bash"},
+		{"edit", KindEdit, "Edit"},
+		{"write", KindEdit, "Write"},
+		{"read", KindRead, "Read"},
+		{"glob", KindSearch, "Glob"},
+		{"grep", KindSearch, "Grep"},
+		{"list", KindRead, "ListDirectory"},
+		{"webfetch", KindFetch, "WebFetch"},
+		{"websearch", KindSearch, "WebSearch"},
+		{"todowrite", KindOther, "TodoWrite"},
+		{"task", KindOther, "Agent"},
 		// Additional name mappings.
-		{"patch", "edit", "Edit"},
+		{"patch", KindEdit, "Edit"},
 		// Kind-based fallback.
-		{"unknown_tool", "execute", "Bash"},
-		{"unknown_tool", "edit", "Edit"},
-		{"unknown_tool", "read", "Read"},
-		{"unknown_tool", "search", "Grep"},
-		{"unknown_tool", "fetch", "WebFetch"},
+		{"unknown_tool", KindExecute, "Bash"},
+		{"unknown_tool", KindEdit, "Edit"},
+		{"unknown_tool", KindRead, "Read"},
+		{"unknown_tool", KindSearch, "Grep"},
+		{"unknown_tool", KindFetch, "WebFetch"},
 		// Passthrough.
-		{"custom_mcp_tool", "other", "custom_mcp_tool"},
+		{"custom_mcp_tool", KindOther, "custom_mcp_tool"},
 	}
 	for _, tt := range tests {
-		t.Run(tt.title+"_"+tt.kind, func(t *testing.T) {
+		t.Run(tt.title+"_"+string(tt.kind), func(t *testing.T) {
 			got := normalizeToolName(tt.title, tt.kind)
 			if got != tt.want {
 				t.Errorf("normalizeToolName(%q, %q) = %q, want %q", tt.title, tt.kind, got, tt.want)

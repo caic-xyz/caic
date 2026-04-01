@@ -60,25 +60,6 @@ func TestAgentMessageChunkUpdate(t *testing.T) {
 		if u.Content.Text != "hello" {
 			t.Errorf("Content.Text = %q", u.Content.Text)
 		}
-		if len(u.Extra) != 0 {
-			t.Errorf("unexpected extra fields: %v", u.Extra)
-		}
-	})
-	t.Run("Overflow", func(t *testing.T) {
-		const input = `{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"},"new_field":"surprise"}`
-		var u AgentMessageChunkUpdate
-		if err := json.Unmarshal([]byte(input), &u); err != nil {
-			t.Fatal(err)
-		}
-		if u.Content.Text != "hi" {
-			t.Errorf("Content.Text = %q", u.Content.Text)
-		}
-		if len(u.Extra) != 1 {
-			t.Errorf("Extra = %v, want 1 entry", u.Extra)
-		}
-		if _, ok := u.Extra["new_field"]; !ok {
-			t.Error("Extra missing new_field")
-		}
 	})
 }
 
@@ -101,19 +82,6 @@ func TestToolCallUpdate(t *testing.T) {
 		if len(u.Locations) != 1 || u.Locations[0].Path != "/tmp/a.go" || u.Locations[0].Line != 10 {
 			t.Errorf("Locations = %+v", u.Locations)
 		}
-		if len(u.Extra) != 0 {
-			t.Errorf("unexpected extra: %v", u.Extra)
-		}
-	})
-	t.Run("Overflow", func(t *testing.T) {
-		const input = `{"sessionUpdate":"tool_call","toolCallId":"c1","title":"bash","future_field":42}`
-		var u ToolCallUpdate
-		if err := json.Unmarshal([]byte(input), &u); err != nil {
-			t.Fatal(err)
-		}
-		if _, ok := u.Extra["future_field"]; !ok {
-			t.Error("Extra missing future_field")
-		}
 	})
 }
 
@@ -129,9 +97,6 @@ func TestToolCallUpdateUpdate(t *testing.T) {
 		}
 		if len(u.Content) != 1 || u.Content[0].Content.Text != "done" {
 			t.Errorf("Content = %+v", u.Content)
-		}
-		if len(u.Extra) != 0 {
-			t.Errorf("unexpected extra: %v", u.Extra)
 		}
 	})
 	t.Run("WithRawOutput", func(t *testing.T) {
@@ -159,16 +124,6 @@ func TestToolCallUpdateUpdate(t *testing.T) {
 		c := u.Content[0]
 		if c.Type != "diff" || c.Path != "main.go" || c.OldText != "old" || c.NewText != "new" {
 			t.Errorf("Content[0] = %+v", c)
-		}
-	})
-	t.Run("Overflow", func(t *testing.T) {
-		const input = `{"sessionUpdate":"tool_call_update","toolCallId":"c1","status":"completed","future":true}`
-		var u ToolCallUpdateUpdate
-		if err := json.Unmarshal([]byte(input), &u); err != nil {
-			t.Fatal(err)
-		}
-		if _, ok := u.Extra["future"]; !ok {
-			t.Error("Extra missing future")
 		}
 	})
 }
@@ -203,16 +158,6 @@ func TestPlanUpdate(t *testing.T) {
 			t.Errorf("Status = %q, want cancelled", u.Entries[0].Status)
 		}
 	})
-	t.Run("Overflow", func(t *testing.T) {
-		const input = `{"sessionUpdate":"plan","entries":[],"extra_flag":true}`
-		var u PlanUpdate
-		if err := json.Unmarshal([]byte(input), &u); err != nil {
-			t.Fatal(err)
-		}
-		if _, ok := u.Extra["extra_flag"]; !ok {
-			t.Error("Extra missing extra_flag")
-		}
-	})
 }
 
 func TestUsageUpdateUpdate(t *testing.T) {
@@ -233,19 +178,6 @@ func TestUsageUpdateUpdate(t *testing.T) {
 		}
 		if u.Cost.Currency != "USD" {
 			t.Errorf("Cost.Currency = %q", u.Cost.Currency)
-		}
-		if len(u.Extra) != 0 {
-			t.Errorf("unexpected extra: %v", u.Extra)
-		}
-	})
-	t.Run("Overflow", func(t *testing.T) {
-		const input = `{"sessionUpdate":"usage_update","used":100,"size":200,"new_metric":99}`
-		var u UsageUpdateUpdate
-		if err := json.Unmarshal([]byte(input), &u); err != nil {
-			t.Fatal(err)
-		}
-		if _, ok := u.Extra["new_metric"]; !ok {
-			t.Error("Extra missing new_metric")
 		}
 	})
 }
@@ -281,16 +213,6 @@ func TestContentBlock(t *testing.T) {
 			t.Errorf("block = %+v", b)
 		}
 	})
-	t.Run("Overflow", func(t *testing.T) {
-		const input = `{"type":"text","text":"hi","priority":5}`
-		var b ContentBlock
-		if err := json.Unmarshal([]byte(input), &b); err != nil {
-			t.Fatal(err)
-		}
-		if _, ok := b.Extra["priority"]; !ok {
-			t.Error("Extra missing priority")
-		}
-	})
 }
 
 func TestInitializeResult(t *testing.T) {
@@ -302,9 +224,6 @@ func TestInitializeResult(t *testing.T) {
 		}
 		if r.ProtocolVersion != 1 {
 			t.Errorf("ProtocolVersion = %d", r.ProtocolVersion)
-		}
-		if r.AgentCapabilities.PromptCapabilities == nil {
-			t.Fatal("PromptCapabilities = nil")
 		}
 		if !r.AgentCapabilities.PromptCapabilities.Image {
 			t.Error("PromptCapabilities.Image = false")
@@ -319,16 +238,6 @@ func TestInitializeResult(t *testing.T) {
 			t.Errorf("AgentInfo.Name = %q", r.AgentInfo.Name)
 		}
 	})
-	t.Run("Overflow", func(t *testing.T) {
-		const input = `{"protocolVersion":2,"future_cap":"x"}`
-		var r initializeResult
-		if err := json.Unmarshal([]byte(input), &r); err != nil {
-			t.Fatal(err)
-		}
-		if _, ok := r.Extra["future_cap"]; !ok {
-			t.Error("Extra missing future_cap")
-		}
-	})
 }
 
 func TestPromptResult(t *testing.T) {
@@ -341,9 +250,6 @@ func TestPromptResult(t *testing.T) {
 		if r.StopReason != "end_turn" {
 			t.Errorf("StopReason = %q", r.StopReason)
 		}
-		if r.Usage == nil {
-			t.Fatal("Usage = nil")
-		}
 		if r.Usage.InputTokens != 3000 {
 			t.Errorf("InputTokens = %d", r.Usage.InputTokens)
 		}
@@ -352,22 +258,6 @@ func TestPromptResult(t *testing.T) {
 		}
 		if r.Usage.CachedReadTokens != 100 {
 			t.Errorf("CachedReadTokens = %d", r.Usage.CachedReadTokens)
-		}
-		if len(r.Extra) != 0 {
-			t.Errorf("unexpected extra: %v", r.Extra)
-		}
-	})
-	t.Run("UsageOverflow", func(t *testing.T) {
-		const input = `{"stopReason":"end_turn","usage":{"inputTokens":10,"new_metric":99}}`
-		var r promptResult
-		if err := json.Unmarshal([]byte(input), &r); err != nil {
-			t.Fatal(err)
-		}
-		if r.Usage == nil {
-			t.Fatal("Usage = nil")
-		}
-		if _, ok := r.Usage.Extra["new_metric"]; !ok {
-			t.Error("Usage.Extra missing new_metric")
 		}
 	})
 }
@@ -405,16 +295,6 @@ func TestCurrentModeUpdate(t *testing.T) {
 			t.Errorf("ModeName = %q", u.ModeName)
 		}
 	})
-	t.Run("Overflow", func(t *testing.T) {
-		const input = `{"sessionUpdate":"current_mode_update","modeId":"ask","future":true}`
-		var u CurrentModeUpdate
-		if err := json.Unmarshal([]byte(input), &u); err != nil {
-			t.Fatal(err)
-		}
-		if _, ok := u.Extra["future"]; !ok {
-			t.Error("Extra missing future")
-		}
-	})
 }
 
 func TestToolCallRawOutput(t *testing.T) {
@@ -426,16 +306,6 @@ func TestToolCallRawOutput(t *testing.T) {
 		}
 		if o.Output != "success" {
 			t.Errorf("Output = %q", o.Output)
-		}
-	})
-	t.Run("Overflow", func(t *testing.T) {
-		const input = `{"output":"ok","timing_ms":42}`
-		var o ToolCallRawOutput
-		if err := json.Unmarshal([]byte(input), &o); err != nil {
-			t.Fatal(err)
-		}
-		if _, ok := o.Extra["timing_ms"]; !ok {
-			t.Error("Extra missing timing_ms")
 		}
 	})
 }

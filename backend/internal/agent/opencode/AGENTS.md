@@ -6,14 +6,14 @@ JSON-RPC 2.0 over stdin/stdout, analogous to the Codex harness.
 ## Architecture
 
 - `opencode.go` — Backend lifecycle, handshake, `wireFormat` state machine
-- `wire.go` — ACP JSON-RPC 2.0 type definitions with forward-compatible overflow tracking
-- `wire_test.go` — Wire type unmarshaling and overflow detection tests
+- `wire.go` — ACP JSON-RPC 2.0 type definitions, organized as: shared → input → output
+- `wire_test.go` — Wire type unmarshaling tests
 - `parse.go` — Stateless parser: `session/update` notifications → `agent.Message`
 - `parse_test.go` — Parser tests including wireFormat prompt response handling
+- `docs/MORE.md` — Future enhancement opportunities (cancel, fork, resume, compact, modes, etc.)
 
-All inbound wire types embed `jsonutil.Overflow` + custom `UnmarshalJSON()`
-to track unknown fields (matching the forward-compatibility pattern used by
-the Claude and Codex harnesses).
+Unknown field detection is centralized in `unmarshalNotification` (parse.go)
+using `sync.Map` caching, matching the pattern used by the Codex harness.
 
 ## ACP Handshake
 
@@ -70,8 +70,21 @@ Content blocks (`ContentBlock`) support all ACP content types:
 kind-based mapping (`execute` → `Bash`, `edit` → `Edit`, `fetch` → `WebFetch`),
 then passthrough.
 
+## Upstream Source
+
+Type names in `wire.go` follow the upstream ACP SDK definitions:
+
+- `packages/opencode/src/acp/agent.ts` — session update types and request/response handling
+
+When updating wire types, clone https://github.com/anomalyco/opencode and diff
+against `agent.ts` to find new session update types or fields.
+
 ## Key Design Decisions
 
+- **Upstream naming**: Go types mirror ACP SDK naming (e.g. `AgentMessageChunkUpdate`,
+  `ToolCallUpdate`) to simplify syncing with the OpenCode source.
+- **Typed enums**: `Method`, `UpdateType`, `ToolStatus`, `ToolKind`, `PlanStatus`
+  are typed string enums for compile-time safety.
 - **ACP over run mode**: `opencode run` is single-turn per process (no stdin
   loop). ACP provides long-lived JSON-RPC over stdin/stdout with multi-turn.
 - **Dynamic model list**: initial `["anthropic/claude-sonnet-4"]` replaced after
@@ -85,8 +98,8 @@ then passthrough.
   `opencode.json` config.
 - **`--no-log-stdin`**: relay flag to avoid logging JSON-RPC requests to
   `output.jsonl` (they contain large prompt content).
-- **Forward compatibility**: All inbound types use `jsonutil.Overflow` to
-  capture and warn about unknown fields from future ACP versions.
+- **Forward compatibility**: Unknown fields are detected via centralized
+  `unmarshalNotification` (logs warnings, no per-struct `UnmarshalJSON`).
 
 ## References
 
