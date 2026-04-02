@@ -453,8 +453,11 @@ const (
 
 // outputTypeProbe extracts the type discriminator from a Claude Code JSONL record.
 type outputTypeProbe struct {
-	Type    OutputType `json:"type"`
-	Subtype string     `json:"subtype"`
+	Type OutputType `json:"type"`
+	// Subtype is untyped because its meaning varies by Type: SystemSubtype for
+	// system messages, but free-form strings like "success" or "error_max_turns"
+	// for result messages.
+	Subtype string `json:"subtype"`
 }
 
 // ---------- system/init ----------
