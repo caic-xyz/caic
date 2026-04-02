@@ -91,6 +91,17 @@ const (
 	PlanStatusCancelled  PlanStatus = "cancelled"
 )
 
+// ContentType is the type discriminator for content blocks and prompt items.
+type ContentType string
+
+// Content type constants.
+const (
+	ContentText         ContentType = "text"
+	ContentImage        ContentType = "image"
+	ContentResource     ContentType = "resource"
+	ContentResourceLink ContentType = "resource_link"
+)
+
 // ---------- JSON-RPC envelope ----------
 
 // JSONRPCMessage is the JSON-RPC 2.0 envelope for ACP messages.
@@ -219,12 +230,12 @@ type httpHeader struct {
 // promptContent is a single item in the session/prompt content array.
 // This is a flat union discriminated by Type:
 //
-//   - "text":          Text
-//   - "image":         Data (base64), MimeType
-//   - "resource":      Resource (embedded resource)
-//   - "resource_link": URI, Name, MimeType
+//   - ContentText:         Text
+//   - ContentImage:        Data (base64), MimeType
+//   - ContentResource:     Resource (embedded resource)
+//   - ContentResourceLink: URI, Name, MimeType
 type promptContent struct {
-	Type     string          `json:"type"`
+	Type     ContentType     `json:"type"`
 	Text     string          `json:"text,omitzero"`
 	Data     string          `json:"data,omitzero"`     // Base64 image data.
 	MimeType string          `json:"mimeType,omitzero"` // e.g. "image/png".
@@ -267,12 +278,12 @@ type SessionUpdateParams struct {
 // ContentBlock is a content block in message chunks. This is a flat union:
 // fields are populated depending on Type.
 //
-//   - "text":          Text, Annotations
-//   - "image":         Data, MimeType, URI
-//   - "resource":      Resource
-//   - "resource_link": URI, Name, MimeType
+//   - ContentText:         Text, Annotations
+//   - ContentImage:        Data, MimeType, URI
+//   - ContentResource:     Resource
+//   - ContentResourceLink: URI, Name, MimeType
 type ContentBlock struct {
-	Type        string          `json:"type"`
+	Type        ContentType     `json:"type"`
 	Text        string          `json:"text,omitzero"`
 	Data        string          `json:"data,omitzero"` // Base64 image data.
 	MimeType    string          `json:"mimeType,omitzero"`

@@ -170,11 +170,11 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 	w.textAccum.Reset()
 	w.thinkAccum.Reset()
 	content := make([]promptContent, 0, 1+len(p.Images))
-	content = append(content, promptContent{Type: "text", Text: p.Text})
+	content = append(content, promptContent{Type: ContentText, Text: p.Text})
 	if w.supportsImage {
 		for _, img := range p.Images {
 			content = append(content, promptContent{
-				Type:     "image",
+				Type:     ContentImage,
 				Data:     img.Data,
 				MimeType: img.MediaType,
 			})
