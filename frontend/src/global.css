@@ -38,6 +38,10 @@
   --color-plan-surface: #f5f3ff;
   --color-plan-border: #ddd6fe;
 
+  /* Feature badges (blue) */
+  --color-feature-badge-bg: #dfeefa;
+  --color-feature-badge-fg: #2563eb;
+
   /* Text scale (dark → light) */
   --color-text-secondary: #555;
   --color-text-tertiary: #666;

@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
@@ -109,9 +110,9 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
                             )
                         }
                     }
-                    if (task.tailscale != null) FeatureBadge("TS", url = task.tailscale)
+                    if (task.tailscale != null) TailscaleIconBadge(url = task.tailscale)
                     if (task.usb == true) FeatureBadge("USB")
-                    if (task.display == true) FeatureBadge("D")
+                    if (task.display == true) FeatureIconBadge(com.fghbuild.caic.R.drawable.ic_display, "Display")
                 }
             }
 
@@ -310,6 +311,29 @@ private fun tokenColor(current: Int, limit: Int): Color {
         ratio >= 0.9f -> Color(0xFFDC3545)
         ratio >= 0.75f -> Color(0xFFD4A017)
         else -> Color.Unspecified
+    }
+}
+
+@Composable
+private fun TailscaleIconBadge(url: String?) {
+    val uriHandler = LocalUriHandler.current
+    val clickMod = if (url?.startsWith("https://") == true) {
+        Modifier.clickable(onClick = { uriHandler.openUri(url) })
+    } else {
+        Modifier
+    }
+    FeatureIconBadge(com.fghbuild.caic.R.drawable.ic_tailscale, "Tailscale", clickMod)
+}
+
+@Composable
+private fun FeatureIconBadge(iconRes: Int, contentDescription: String, modifier: Modifier = Modifier) {
+    Surface(modifier = modifier, shape = RoundedCornerShape(4.dp), color = MaterialTheme.appColors.featureBadgeBg) {
+        Icon(
+            painter = painterResource(id = iconRes),
+            contentDescription = contentDescription,
+            modifier = Modifier.padding(3.dp).size(12.dp),
+            tint = MaterialTheme.appColors.featureBadgeFg,
+        )
     }
 }
 

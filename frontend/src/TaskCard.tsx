@@ -5,7 +5,6 @@ import type { DiffStat, CIStatus, ForgeCheck, TaskRepo } from "@sdk/types.gen";
 import CIDot from "./CIDot";
 import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
-import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
 import RestoreIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
@@ -88,15 +87,15 @@ export default function TaskCard(props: TaskCardProps) {
         <span class={styles.stateGroup}>
           <Show when={props.tailscale} keyed>
             {(ts) => ts.startsWith("https://")
-              ? <a class={styles.featureIcon} href={ts} target="_blank" rel="noopener" title="Tailscale" onClick={(e) => e.stopPropagation()}><TailscaleIcon width="0.75rem" height="0.75rem" /></a>
-              : <span class={styles.featureIcon} title="Tailscale"><TailscaleIcon width="0.75rem" height="0.75rem" /></span>
+              ? <a class={styles.featureIconBadge} href={ts} target="_blank" rel="noopener" title="Tailscale" onClick={(e) => e.stopPropagation()}><TailscaleIcon width="0.7rem" height="0.7rem" /></a>
+              : <span class={styles.featureIconBadge} title="Tailscale"><TailscaleIcon width="0.7rem" height="0.7rem" /></span>
             }
           </Show>
           <Show when={props.usb}>
-            <span class={styles.featureIcon} title="USB"><USBIcon width="0.75rem" height="0.75rem" /></span>
+            <span class={styles.featureBadge} title="USB">USB</span>
           </Show>
           <Show when={props.display}>
-            <span class={styles.featureIcon} title="Display"><DisplayIcon width="0.75rem" height="0.75rem" /></span>
+            <span class={styles.featureIconBadge} title="Display"><DisplayIcon width="0.7rem" height="0.7rem" /></span>
           </Show>
           {/* Stopped: revive + purge buttons */}
           <Show when={props.state === "stopped"}>

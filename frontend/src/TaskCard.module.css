@@ -47,14 +47,33 @@
   line-height: 1.4;
 }
 
-.featureIcon {
+.featureIconBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 0.85rem;
-  height: 0.85rem;
-  color: var(--color-text-faint);
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-feature-badge-bg);
+  color: var(--color-feature-badge-fg);
   flex-shrink: 0;
+  text-decoration: none;
+}
+
+.featureBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.3rem;
+  height: 1.2rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-feature-badge-bg);
+  color: var(--color-feature-badge-fg);
+  font-size: 0.65rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  line-height: 1;
+  text-decoration: none;
 }
 
 .planBadge {
