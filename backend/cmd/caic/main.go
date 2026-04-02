@@ -135,6 +135,7 @@ See contrib/caic.env for a template with all variables and documentation.
 	cpuProfile := flag.String("cpuprofile", "", "write CPU profile to file")
 	memProfile := flag.String("memprofile", "", "write heap profile to file on shutdown")
 	traceFile := flag.String("trace", "", "write execution trace to file")
+	noLogTime := flag.Bool("no-log-time", false, "omit timestamps from log output")
 	versionFlag := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *versionFlag {
@@ -191,7 +192,7 @@ See contrib/caic.env for a template with all variables and documentation.
 		return err
 	}
 
-	initLogging(*logLevel)
+	initLogging(*logLevel, *noLogTime)
 
 	cfg := &server.Config{
 		GeminiAPIKey:            os.Getenv("GEMINI_API_KEY"),
@@ -264,9 +265,9 @@ func roundDur(d time.Duration) time.Duration {
 }
 
 // initLogging configures slog with tint for colored, concise output.
-// Timestamps are omitted under systemd (JOURNAL_STREAM), and zero-value
+// Timestamps are omitted when noLogTime is true, and zero-value
 // attributes are dropped.
-func initLogging(level string) {
+func initLogging(level string, noLogTime bool) {
 	ll := &slog.LevelVar{}
 	switch level {
 	case "debug":
@@ -278,15 +279,13 @@ func initLogging(level string) {
 	case "error":
 		ll.Set(slog.LevelError)
 	}
-	// Skip timestamps when running under systemd (it adds its own).
-	underSystemd := os.Getenv("JOURNAL_STREAM") != ""
 	homeDir, _ := os.UserHomeDir()
 	slog.SetDefault(slog.New(tint.NewHandler(colorable.NewColorable(os.Stderr), &tint.Options{
 		Level:      ll,
 		TimeFormat: "15:04:05.000",
 		NoColor:    !isatty.IsTerminal(os.Stderr.Fd()),
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			if underSystemd && a.Key == slog.TimeKey && len(groups) == 0 {
+			if noLogTime && a.Key == slog.TimeKey && len(groups) == 0 {
 				return slog.Attr{}
 			}
 			val := a.Value.Any()
