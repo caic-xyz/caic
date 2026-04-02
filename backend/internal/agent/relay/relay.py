@@ -54,6 +54,15 @@ BUF_SIZE = 65536
 # Interval between diff stat polls (seconds).
 
 
+def _has_oauth():
+    """Check if Claude Code has an OAuth session in ~/.claude/claude.json."""
+    try:
+        with open(os.path.expanduser("~/.claude/claude.json")) as f:
+            return "oauthAccount" in json.load(f)
+    except Exception:
+        return False
+
+
 def _parse_numstat(numstat):
     """Parse git diff --numstat output into a list of file stat dicts.
 
@@ -165,9 +174,18 @@ def serve(cmd_args, work_dir, log_stdin=True):
 
     # Start the subprocess in the working directory that contains the git
     # repository so the harness (claude, gemini) picks up the right project.
+    #
+    # Strip ANTHROPIC_API_KEY so Claude Code uses OAuth (subscription) instead
+    # of API key billing. The key is typically set in the container for
+    # HTTP-based providers, not for the CLI. Only strip when OAuth is
+    # configured, so we don't break API-key-only setups.
+    env = os.environ.copy()
+    if "ANTHROPIC_API_KEY" in env and _has_oauth():
+        del env["ANTHROPIC_API_KEY"]
     proc = subprocess.Popen(
         cmd_args,
         cwd=work_dir,
+        env=env,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

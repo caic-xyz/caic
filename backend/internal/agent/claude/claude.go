@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
@@ -54,7 +55,28 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	if err := agent.DeployEmbeddedDir(ctx, opts.Container, pluginFS, agent.WidgetPluginDir); err != nil {
 		return nil, err
 	}
-	return agent.StartRelay(ctx, opts, buildArgs(opts), msgCh, logW, b)
+	sess, err := agent.StartRelay(ctx, opts, buildArgs(opts), msgCh, logW, b)
+	if err != nil {
+		return nil, err
+	}
+	// The relay strips ANTHROPIC_API_KEY from the subprocess environment so
+	// Claude Code authenticates via OAuth. Re-inject it after auth completes
+	// so tools (Bash, MCP servers) can still use it.
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		msg := inputUpdateEnvVars{
+			Type:      InputUpdateEnvVars,
+			Variables: map[string]string{"ANTHROPIC_API_KEY": key},
+		}
+		data, err := json.Marshal(msg)
+		if err != nil {
+			return nil, fmt.Errorf("marshal env vars: %w", err)
+		}
+		data = append(data, '\n')
+		if err := sess.SendRaw(data); err != nil {
+			return nil, fmt.Errorf("send env vars: %w", err)
+		}
+	}
+	return sess, nil
 }
 
 // WritePrompt writes a single user message in Claude Code's stdin format.

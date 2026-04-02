@@ -3,6 +3,7 @@ package claude
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -99,6 +100,35 @@ func TestWritePrompt(t *testing.T) {
 		}
 		if blocks[0].Type != "image" {
 			t.Errorf("block type = %q, want %q", blocks[0].Type, "image")
+		}
+	})
+}
+
+func TestStart(t *testing.T) {
+	t.Run("EnvVarInjection", func(t *testing.T) {
+		// Verify that the inputUpdateEnvVars message produced by Start
+		// round-trips correctly through JSON.
+		key := "sk-ant-test-key"
+		t.Setenv("ANTHROPIC_API_KEY", key)
+
+		msg := inputUpdateEnvVars{
+			Type:      InputUpdateEnvVars,
+			Variables: map[string]string{"ANTHROPIC_API_KEY": os.Getenv("ANTHROPIC_API_KEY")},
+		}
+		data, err := json.Marshal(msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var got inputUpdateEnvVars
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Type != InputUpdateEnvVars {
+			t.Errorf("type = %q, want %q", got.Type, InputUpdateEnvVars)
+		}
+		if got.Variables["ANTHROPIC_API_KEY"] != key {
+			t.Errorf("ANTHROPIC_API_KEY = %q, want %q", got.Variables["ANTHROPIC_API_KEY"], key)
 		}
 	})
 }

@@ -588,6 +588,7 @@ type outputUser struct {
 	ParentToolUseID *string         `json:"parent_tool_use_id"`
 	ToolUseResult   json.RawMessage `json:"tool_use_result,omitempty"`
 	IsSynthetic     bool            `json:"isSynthetic,omitempty"`
+	IsReplay        bool            `json:"isReplay,omitempty"`
 }
 
 // ---------- result ----------

@@ -154,6 +154,20 @@ func (s *Session) Send(p Prompt) error {
 	return s.wire.WritePrompt(s.stdin, p, s.logW)
 }
 
+// SendRaw writes pre-encoded NDJSON bytes to the agent's stdin. It is safe for
+// concurrent use. Use this for control messages that bypass WritePrompt.
+func (s *Session) SendRaw(data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.stdin.Write(data); err != nil {
+		return err
+	}
+	if s.logW != nil {
+		_, _ = s.logW.Write(data)
+	}
+	return nil
+}
+
 // Close sends the null-byte sentinel to the relay daemon (triggering graceful
 // subprocess shutdown) and then closes stdin. Idempotent.
 //

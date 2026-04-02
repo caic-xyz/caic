@@ -207,6 +207,50 @@ func TestSession(t *testing.T) {
 			t.Errorf("message count = %d, want 1", count)
 		}
 	})
+	t.Run("SendRaw", func(t *testing.T) {
+		t.Run("valid", func(t *testing.T) {
+			stdinR, stdinW := io.Pipe()
+			var logBuf bytes.Buffer
+			s := &Session{
+				stdin: stdinW,
+				wire:  testWire{},
+				logW:  &logBuf,
+				done:  make(chan struct{}),
+			}
+
+			stdinBuf := make(chan string, 1)
+			go func() {
+				data, _ := io.ReadAll(stdinR)
+				stdinBuf <- string(data)
+			}()
+
+			payload := []byte(`{"type":"update_environment_variables","variables":{"FOO":"bar"}}` + "\n")
+			if err := s.SendRaw(payload); err != nil {
+				t.Fatal(err)
+			}
+			s.Close()
+
+			got := <-stdinBuf
+			if !strings.Contains(got, `"FOO":"bar"`) {
+				t.Errorf("stdin missing payload: %s", got)
+			}
+			if !strings.Contains(logBuf.String(), `"FOO":"bar"`) {
+				t.Errorf("log missing payload: %s", logBuf.String())
+			}
+		})
+		t.Run("error", func(t *testing.T) {
+			stdinR, stdinW := io.Pipe()
+			_ = stdinR.Close()
+			s := &Session{
+				stdin: stdinW,
+				wire:  testWire{},
+				done:  make(chan struct{}),
+			}
+			if err := s.SendRaw([]byte("data\n")); err == nil {
+				t.Error("expected error writing to closed pipe")
+			}
+		})
+	})
 	t.Run("CloseIdempotent", func(t *testing.T) {
 		stdinR, stdinW := io.Pipe()
 		go func() { _, _ = io.Copy(io.Discard, stdinR) }()
