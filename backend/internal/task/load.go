@@ -46,6 +46,9 @@ type LoadedTask struct {
 	ForgeOwner        string
 	ForgeRepo         string
 	ForgePR           int // PR number created during the task; 0 if none.
+	Tailscale         bool
+	USB               bool
+	Display           bool
 	Msgs              []agent.Message
 	Result            *Result
 
@@ -203,6 +206,9 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 		LastStateUpdateAt: info.ModTime().UTC(),
 		State:             StateRunning, // sentinel: overridden by caic_result trailer or loadPurgedTasksFrom
 		ForgeIssue:        meta.ForgeIssue,
+		Tailscale:         meta.Tailscale,
+		USB:               meta.USB,
+		Display:           meta.Display,
 	}
 
 	// Read the tail of the file to find caic_pr and caic_result records.

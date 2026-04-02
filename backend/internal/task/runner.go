@@ -1130,6 +1130,9 @@ func (r *Runner) openLog(t *Task) (io.WriteCloser, error) {
 		Model:       t.Model,
 		StartedAt:   t.StartedAt,
 		ForgeIssue:  t.ForgeIssue,
+		Tailscale:   t.Tailscale,
+		USB:         t.USB,
+		Display:     t.Display,
 	}
 	if data, err := json.Marshal(meta); err == nil {
 		_, _ = f.Write(append(data, '\n'))

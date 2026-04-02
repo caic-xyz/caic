@@ -144,6 +144,83 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("tasks[1].Msgs len = %d, want 2", len(tasks[1].Msgs))
 		}
 	})
+	t.Run("FeatureFlagsAllSet", func(t *testing.T) {
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "feat task",
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude",
+			Tailscale: true, USB: true, Display: true,
+		})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		writeLogFile(t, dir, "feat.jsonl", meta, trailer)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("len = %d, want 1", len(tasks))
+		}
+		lt := tasks[0]
+		if !lt.Tailscale {
+			t.Error("Tailscale = false, want true")
+		}
+		if !lt.USB {
+			t.Error("USB = false, want true")
+		}
+		if !lt.Display {
+			t.Error("Display = false, want true")
+		}
+	})
+	t.Run("FeatureFlagsOmitted", func(t *testing.T) {
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "plain task",
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude",
+		})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		writeLogFile(t, dir, "plain.jsonl", meta, trailer)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lt := tasks[0]
+		if lt.Tailscale {
+			t.Error("Tailscale = true, want false")
+		}
+		if lt.USB {
+			t.Error("USB = true, want false")
+		}
+		if lt.Display {
+			t.Error("Display = true, want false")
+		}
+	})
+	t.Run("FeatureFlagsPartial", func(t *testing.T) {
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "usb only",
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude",
+			USB: true,
+		})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		writeLogFile(t, dir, "partial.jsonl", meta, trailer)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lt := tasks[0]
+		if lt.Tailscale {
+			t.Error("Tailscale = true, want false")
+		}
+		if !lt.USB {
+			t.Error("USB = false, want true")
+		}
+		if lt.Display {
+			t.Error("Display = true, want false")
+		}
+	})
 	t.Run("ContextClearedResetsPlanState", func(t *testing.T) {
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "plan task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
@@ -185,10 +262,7 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("PlanContent = %q, want empty", snap.PlanContent)
 		}
 	})
-}
-
-func TestLoadLogs_PRPersistence(t *testing.T) {
-	t.Run("HeaderOnly", func(t *testing.T) {
+	t.Run("PRHeaderOnly", func(t *testing.T) {
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "pr task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-1"}}, Harness: "claude"})
 		prMsg := mustJSON(t, agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "octocat", ForgeRepo: "hello", ForgePR: 42})
@@ -213,7 +287,7 @@ func TestLoadLogs_PRPersistence(t *testing.T) {
 			t.Errorf("ForgePR = %d, want 42", lt.ForgePR)
 		}
 	})
-	t.Run("FullParse", func(t *testing.T) {
+	t.Run("PRFullParse", func(t *testing.T) {
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "pr task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-2"}}, Harness: "claude"})
 		asst := claudeAssistant(t, map[string]any{"type": "text", "text": "done"})
@@ -238,7 +312,7 @@ func TestLoadLogs_PRPersistence(t *testing.T) {
 			t.Errorf("ForgePR = %d, want 99 (full parse)", lt.ForgePR)
 		}
 	})
-	t.Run("OutsideTailWindow", func(t *testing.T) {
+	t.Run("PROutsideTailWindow", func(t *testing.T) {
 		// caic_pr early in the file, followed by >64 KiB of messages,
 		// so the header-only tail scan cannot see it.
 		dir := t.TempDir()

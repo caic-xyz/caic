@@ -376,6 +376,9 @@ type MetaMessage struct {
 	Model       string     `json:"model,omitempty"`
 	StartedAt   time.Time  `json:"started_at"`
 	ForgeIssue  int        `json:"forge_issue,omitempty"` // Originating issue/PR number for bot comment callbacks.
+	Tailscale   bool       `json:"tailscale,omitempty"`
+	USB         bool       `json:"usb,omitempty"`
+	Display     bool       `json:"display,omitempty"`
 }
 
 // Type implements Message.

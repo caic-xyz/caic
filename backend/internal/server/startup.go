@@ -406,6 +406,9 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 			Repos:         lt.Repos, // GitRoot is empty for purged tasks
 			Harness:       lt.Harness,
 			StartedAt:     lt.StartedAt,
+			Tailscale:     lt.Tailscale,
+			USB:           lt.USB,
+			Display:       lt.Display,
 		}
 		t.SetStateAt(lt.State, lt.LastStateUpdateAt)
 		if lt.Title != "" {

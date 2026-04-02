@@ -1185,6 +1185,44 @@ func TestLoadPurgedTasks(t *testing.T) {
 			t.Errorf("purged task state = %q, want \"purged\"", got)
 		}
 	})
+	t.Run("FeatureFlags", func(t *testing.T) {
+		logDir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "feat task",
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.Claude,
+			StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Tailscale: true, USB: true, Display: true,
+		})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+		writeLogFile(t, logDir, "feat.jsonl", meta, trailer)
+
+		s := &Server{
+			runners: map[string]*task.Runner{},
+			tasks:   make(map[string]*taskEntry),
+			changed: make(chan struct{}),
+			logDir:  logDir,
+		}
+		if err := s.loadPurgedTasks(); err != nil {
+			t.Fatal(err)
+		}
+
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if len(s.tasks) != 1 {
+			t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
+		}
+		for _, e := range s.tasks {
+			if !e.task.Tailscale {
+				t.Error("Tailscale = false, want true")
+			}
+			if !e.task.USB {
+				t.Error("USB = false, want true")
+			}
+			if !e.task.Display {
+				t.Error("Display = false, want true")
+			}
+		}
+	})
 }
 
 // parseSSEEvents extracts message-type SSE events from a response body.
