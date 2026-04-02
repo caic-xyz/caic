@@ -583,6 +583,11 @@ func (r *Runner) EnsureSession(ctx context.Context, t *Task, h *SessionHandle, t
 			sub = result.Subtype
 		}
 		tlog.Info("resumed session exited, starting fresh relay", "result", sub)
+		// Don't start a fresh session if the task is being stopped or
+		// is already terminal — the container may be shutting down.
+		if s := t.GetState(); s == StateStopping || s == StateStopped || s == StatePurged {
+			return nil, fmt.Errorf("task is %s", s)
+		}
 		t.SetStateIf(StateRunning, StateWaiting)
 		return r.StartSession(ctx, t, agent.Prompt{})
 	case <-time.After(10 * time.Second):
