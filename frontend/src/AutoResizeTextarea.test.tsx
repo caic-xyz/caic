@@ -6,10 +6,10 @@ import AutoResizeTextarea from "./AutoResizeTextarea";
 
 describe("AutoResizeTextarea", () => {
   it("renders with placeholder", () => {
-    const { getByPlaceholderText } = render(() => (
+    const { getByRole } = render(() => (
       <AutoResizeTextarea value="" onInput={() => {}} placeholder="Type here" />
     ));
-    expect(getByPlaceholderText("Type here")).toBeInTheDocument();
+    expect(getByRole("textbox")).toHaveAttribute("data-placeholder", "Type here");
   });
 
   it("calls onInput when typing", async () => {
@@ -18,7 +18,8 @@ describe("AutoResizeTextarea", () => {
     const { getByRole } = render(() => (
       <AutoResizeTextarea value="" onInput={onInput} />
     ));
-    await user.type(getByRole("textbox"), "a");
+    await user.click(getByRole("textbox"));
+    await user.keyboard("a");
     expect(onInput).toHaveBeenCalledWith("a");
   });
 
@@ -44,10 +45,10 @@ describe("AutoResizeTextarea", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("renders as disabled when disabled prop is set", () => {
+  it("is not editable when disabled", () => {
     const { getByRole } = render(() => (
       <AutoResizeTextarea value="" onInput={() => {}} disabled={true} />
     ));
-    expect(getByRole("textbox")).toBeDisabled();
+    expect(getByRole("textbox")).toHaveAttribute("contenteditable", "false");
   });
 });

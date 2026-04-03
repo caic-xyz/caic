@@ -48,6 +48,24 @@ export const test = base.extend<{ api: APIClient }>({
 });
 
 export { expect, APIError };
+export type { Page } from "@playwright/test";
+
+// ---------------------------------------------------------------------------
+// Utility: fill a contenteditable element (Playwright's fill() doesn't
+// reliably fire input events on contenteditable divs).
+// ---------------------------------------------------------------------------
+
+export async function fillContentEditable(
+  locator: import("@playwright/test").Locator,
+  text: string,
+): Promise<void> {
+  await locator.click();
+  await locator.evaluate((el) => {
+    el.textContent = "";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await locator.pressSequentially(text, { delay: 0 });
+}
 
 // ---------------------------------------------------------------------------
 // Utility: create a task via API and return its ID.

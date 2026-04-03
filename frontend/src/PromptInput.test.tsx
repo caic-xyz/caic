@@ -9,10 +9,10 @@ const fakeImage: APIImageData = { mediaType: "image/png", data: "iVBOR" };
 
 describe("PromptInput", () => {
   it("renders textarea with placeholder", () => {
-    const { getByPlaceholderText } = render(() => (
+    const { getByRole } = render(() => (
       <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} placeholder="Describe a task..." />
     ));
-    expect(getByPlaceholderText("Describe a task...")).toBeInTheDocument();
+    expect(getByRole("textbox")).toHaveAttribute("data-placeholder", "Describe a task...");
   });
 
   it("calls onSubmit on Enter", async () => {

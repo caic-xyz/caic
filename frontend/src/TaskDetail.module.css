@@ -102,10 +102,7 @@ a.headerPR:hover {
 }
 
 .inputForm {
-  display: flex;
-  gap: 0.5rem;
   margin-top: 0.5rem;
-  align-items: flex-start;
 }
 
 .textInput {
@@ -118,6 +115,7 @@ a.headerPR:hover {
   max-height: 10rem;
   overflow-y: auto;
 }
+
 
 
 .actionError {

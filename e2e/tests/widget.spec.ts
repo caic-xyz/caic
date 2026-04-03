@@ -1,5 +1,5 @@
 // E2E tests for generative UI widget rendering.
-import { test, expect } from "../helpers";
+import { test, expect, fillContentEditable } from "../helpers";
 
 test("FAKE_WIDGET renders a widget card with iframe", async ({ page }) => {
   await page.goto("/");
@@ -10,11 +10,11 @@ test("FAKE_WIDGET renders a widget card with iframe", async ({ page }) => {
   const prompt = `FAKE_WIDGET ${Date.now()}`;
 
   // Create task.
-  await page.getByTestId("prompt-input").fill(prompt);
+  await fillContentEditable(page.getByTestId("prompt-input"), prompt);
   await page.getByTestId("submit-task").click();
 
-  // Open task detail.
-  await page.getByText(prompt).first().click();
+  // Open task detail (scope to task list card, not the prompt input).
+  await page.locator(`div[class*="card"]:has-text("${prompt.replace(/"/g, '\\"')}")`).first().click();
 
   // The widget card should appear with the title.
   await expect(page.getByText("light_refraction_in_water").first()).toBeVisible({ timeout: 15_000 });

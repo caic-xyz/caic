@@ -128,7 +128,7 @@ export default function TaskDetail(props: Props) {
   const [contextMenuOpen, setContextMenuOpen] = createSignal(false);
   const [fixingPR, setFixingPR] = createSignal(false);
 
-  let promptRef: HTMLTextAreaElement | undefined;
+  let promptRef: HTMLElement | undefined;
 
   onMount(() => {
     // Skip autofocus on touch-primary devices (mobile) to avoid the soft keyboard
@@ -683,8 +683,8 @@ export default function TaskDetail(props: Props) {
             supportsImages={props.supportsImages}
             images={props.inputImages}
             onImagesChange={props.onInputImages}
+            sendButton={<Button type="submit" disabled={sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)} title="Send" data-testid="send-input"><SendIcon width="1.1em" height="1.1em" /></Button>}
           >
-            <Button type="submit" disabled={sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)} title="Send" data-testid="send-input"><SendIcon width="1.1em" height="1.1em" /></Button>
             <div class={styles.syncButtonGroup}>
               <Button type="button" variant="gray" loading={pendingAction() === "sync"} disabled={!!pendingAction() || props.taskState === "purging"} onClick={() => doSync(false)} title={`Push to ${props.branch}`}>
                 <Switch fallback={<SyncIcon width="1.1em" height="1.1em" />}>

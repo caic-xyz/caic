@@ -1,5 +1,5 @@
 // E2E tests for image attachment: API image support and screenshot capture UI flow.
-import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, fillContentEditable } from "../helpers";
 
 // Minimal 1×1 transparent PNG encoded as base64, used as a lightweight test fixture
 // when we need valid image bytes to send via the API.
@@ -98,7 +98,7 @@ test("UI: screenshot capture attaches a thumbnail which is sent and cleared on s
   await expect(thumbnail).toBeVisible({ timeout: 5_000 });
 
   // Send the screenshot together with a text message.
-  await detailForm.getByPlaceholder("Send message to agent...").fill("here is a screenshot");
+  await fillContentEditable(detailForm.getByRole("textbox", { name: "Send message to agent..." }), "here is a screenshot");
   await detailForm.getByTestId("send-input").click();
 
   // After a successful send the input images are cleared, so the preview-strip

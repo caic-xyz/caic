@@ -1,5 +1,5 @@
 // E2E tests for ExitPlanMode "Clear and execute plan" button and AskUserQuestion card.
-import { test, expect, waitForTaskState, type APIClient } from "../helpers";
+import { test, expect, waitForTaskState, fillContentEditable, type APIClient } from "../helpers";
 
 // Submit a task via the UI and poll until the task ID is available via the API.
 async function submitAndGetId(
@@ -7,7 +7,7 @@ async function submitAndGetId(
   api: APIClient,
   prompt: string,
 ): Promise<string> {
-  await page.getByTestId("prompt-input").fill(prompt);
+  await fillContentEditable(page.getByTestId("prompt-input"), prompt);
   await page.getByTestId("submit-task").click();
   let taskId = "";
   await expect(async () => {
@@ -31,7 +31,7 @@ test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, ap
   const taskId = await submitAndGetId(page, api, prompt);
 
   // Open task detail.
-  await page.getByText(prompt).first().click();
+  await page.locator(`div[class*="card"]:has-text("${prompt.replace(/"/g, '\\"')}")`).first().click();
 
   // Wait for the task to reach has_plan state.
   await waitForTaskState(api, taskId, "has_plan", 20_000);
@@ -44,7 +44,7 @@ test("FAKE_PLAN: clear-plan button appears and restarts task", async ({ page, ap
   await expect(page.getByTestId("plan-content")).toBeVisible();
 
   // Fill in a non-empty prompt so restart doesn't try to read the container plan file.
-  await page.getByTestId("task-detail-form").getByPlaceholder("Send message to agent...").fill("execute now");
+  await fillContentEditable(page.getByTestId("task-detail-form").getByRole("textbox", { name: "Send message to agent..." }), "execute now");
 
   // Click the button; the task restarts and settles back to waiting.
   await clearBtn.click();
@@ -63,7 +63,7 @@ test("FAKE_ASK: AskUserQuestion card renders, accepts answer, submits", async ({
   const taskId = await submitAndGetId(page, api, prompt);
 
   // Open task detail.
-  await page.getByText(prompt).first().click();
+  await page.locator(`div[class*="card"]:has-text("${prompt.replace(/"/g, '\\"')}")`).first().click();
 
   // Wait for the task to reach asking state.
   await waitForTaskState(api, taskId, "asking", 20_000);
