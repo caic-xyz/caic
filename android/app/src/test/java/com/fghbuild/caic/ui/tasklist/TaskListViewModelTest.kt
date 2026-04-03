@@ -76,8 +76,8 @@ class TaskListViewModelTest {
                     )
                     "/api/v1/server/harnesses" -> jsonResponse(
                         """[
-                            {"name":"claude-code","models":["sonnet","opus"],"supportsImages":true},
-                            {"name":"codex","models":["o3"],"supportsImages":false}
+                            {"name":"claude-code","models":["sonnet","opus"],"supportsImages":true,"supportsCompact":true},
+                            {"name":"codex","models":["o3"],"supportsImages":false,"supportsCompact":false}
                         ]"""
                     )
                     "/api/v1/server/preferences" -> jsonResponse(
@@ -162,8 +162,8 @@ class TaskListViewModelTest {
                     )
                     "/api/v1/server/harnesses" -> jsonResponse(
                         """[
-                            {"name":"claude-code","models":["sonnet","opus"],"supportsImages":true},
-                            {"name":"codex","models":["o3"],"supportsImages":false}
+                            {"name":"claude-code","models":["sonnet","opus"],"supportsImages":true,"supportsCompact":true},
+                            {"name":"codex","models":["o3"],"supportsImages":false,"supportsCompact":false}
                         ]"""
                     )
                     "/api/v1/server/preferences" -> jsonResponse(
