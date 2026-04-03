@@ -37,7 +37,7 @@ fi
 
 if [ ! -f /tmp/caic-e2e ]; then
 	echo "Building caic e2e binary..."
-	cd "$CAIC_DIR" && go build -tags e2e,nolibopusfile -o /tmp/caic-e2e ./backend/cmd/caic
+	cd "$CAIC_DIR" && go build -tags e2e -o /tmp/caic-e2e ./backend/cmd/caic
 fi
 
 # Start fake backend.

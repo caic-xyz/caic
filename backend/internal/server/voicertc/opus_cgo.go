@@ -1,13 +1,13 @@
 // Opus codec wrappers using libopus via CGo. Built only when CGo is enabled.
 
-//go:build cgo
+//go:build cgo && !windows
 
 package voicertc
 
 import (
 	"fmt"
 
-	"gopkg.in/hraban/opus.v2"
+	"github.com/caic-xyz/caic/backend/internal/opus"
 )
 
 const codecAvailable = true
@@ -20,7 +20,7 @@ const (
 	maxOpusPacketSize = 4000
 )
 
-// opusDecoder wraps libopus for Opus→PCM (16kHz mono output).
+// opusDecoder wraps libopus for Opus->PCM (16kHz mono output).
 type opusDecoder struct {
 	dec *opus.Decoder
 }
@@ -43,7 +43,7 @@ func (d *opusDecoder) Decode(pkt []byte) ([]int16, error) {
 	return pcm[:n], nil
 }
 
-// opusEncoder wraps libopus for PCM→Opus (16kHz mono, AppVoIP).
+// opusEncoder wraps libopus for PCM->Opus (16kHz mono, AppVoIP).
 type opusEncoder struct {
 	enc *opus.Encoder
 }

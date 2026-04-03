@@ -1,6 +1,6 @@
 // Stub codec when CGo is disabled. WebRTC bridge falls back to data-channel-only passthrough.
 
-//go:build !cgo
+//go:build !cgo || windows
 
 package voicertc
 

@@ -4,6 +4,7 @@ FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:8080
 
 # Enable CGo only when libopus is available (for WebRTC Opus codec).
+# Requires: libopus-dev (apt) or opus (brew).
 CGO_ENABLED?=$(shell pkg-config --exists opus 2>/dev/null && echo 1 || echo 0)
 export CGO_ENABLED
 
@@ -41,7 +42,7 @@ types:
 
 build: $(FRONTEND_STAMP) types docs
 	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm build
-	@go install -trimpath -tags nolibopusfile -ldflags="-s -w -buildid=" ./backend/cmd/...
+	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
 
 docs:
 	@./scripts/update_agents_file_index.py
@@ -50,12 +51,12 @@ dev: build
 	@caic -http $(HTTP)
 
 test: $(FRONTEND_STAMP)
-	@go test -tags nolibopusfile -cover ./...
+	@go test -cover ./...
 	@pnpm test
 	@find . -name 'test_*.py' -exec python3 {} \;
 
 coverage:
-	@go test -tags nolibopusfile -coverprofile=coverage.out ./...
+	@go test -coverprofile=coverage.out ./...
 
 lint: lint-go lint-frontend lint-python lint-binaries
 lint-all: lint-go lint-frontend lint-python lint-binaries lint-android
