@@ -507,34 +507,38 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
             maxLines = 6,
             enabled = !state.submitting,
             trailingIcon = {
-                if (state.submitting) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                } else {
-                    IconButton(
-                        onClick = { requestNotificationPermission(); viewModel.createTask() },
-                        enabled = hasContent,
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Create task")
+                Column(verticalArrangement = Arrangement.Top) {
+                    Row {
+                        if (state.supportsImages) {
+                            AttachMenu(
+                                enabled = !state.submitting,
+                                onCamera = {
+                                    val uri = createCameraPhotoUri(context)
+                                    cameraUri = uri
+                                    cameraLauncher.launch(uri)
+                                },
+                                onScreenshot = { screenshotLauncher.launch(mpm.createScreenCaptureIntent()) },
+                                onGallery = {
+                                    photoPicker.launch(
+                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                                    )
+                                },
+                            )
+                        }
+                        if (state.submitting) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        } else {
+                            IconButton(
+                                onClick = { requestNotificationPermission(); viewModel.createTask() },
+                                enabled = hasContent,
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Create task")
+                            }
+                        }
                     }
                 }
             },
         )
-        if (state.supportsImages) {
-            AttachMenu(
-                enabled = !state.submitting,
-                onCamera = {
-                    val uri = createCameraPhotoUri(context)
-                    cameraUri = uri
-                    cameraLauncher.launch(uri)
-                },
-                onScreenshot = { screenshotLauncher.launch(mpm.createScreenCaptureIntent()) },
-                onGallery = {
-                    photoPicker.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
-                },
-            )
-        }
     }
 }
 

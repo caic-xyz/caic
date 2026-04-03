@@ -28,7 +28,7 @@
 .spacer::before {
   content: "";
   float: right;
-  /* Match trailing buttons size; updated if button count changes. */
+  /* Match trailing buttons size + gap. */
   width: 5rem;
   height: 2rem;
 }

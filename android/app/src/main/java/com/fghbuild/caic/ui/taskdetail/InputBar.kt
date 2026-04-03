@@ -158,26 +158,31 @@ fun InputBar(
             maxLines = 6,
             enabled = !busy,
             trailingIcon = {
-                if (sending) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                } else {
-                    IconButton(onClick = onSend, enabled = hasContent && !busy) {
-                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                Column(verticalArrangement = Arrangement.Top) {
+                    Row {
+                        if (supportsImages) {
+                            AttachMenu(
+                                enabled = !busy,
+                                onGallery = onAttachGallery,
+                                onCamera = onAttachCamera,
+                                onScreenshot = onScreenshot,
+                            )
+                        }
+                        if (sending) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        } else {
+                            IconButton(onClick = onSend, enabled = hasContent && !busy) {
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                            }
+                        }
                     }
                 }
             },
         )
         Row(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (supportsImages) {
-                AttachMenu(
-                    enabled = !busy,
-                    onGallery = onAttachGallery,
-                    onCamera = onAttachCamera,
-                    onScreenshot = onScreenshot,
-                )
-            }
             if (pendingAction == "sync") {
                 CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(8.dp))
             } else {

@@ -2,7 +2,7 @@
 //
 // Run with: pnpm exec playwright test --config e2e/playwright.config.ts gen-screenshots
 // Output: e2e/screenshots/
-import { test, expect, createTaskAPI, waitForTaskState } from "../helpers";
+import { test, expect, createTaskAPI, waitForTaskState, convertPngsToWebp } from "../helpers";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -183,27 +183,5 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Restore desktop viewport.
   await page.setViewportSize({ width: 1280, height: 800 });
 
-  // Convert remaining PNG screenshots to lossless AVIF (skip if AVIF already exists, e.g. animation).
-  const fs2 = await import("fs");
-  const { execSync: exec2 } = await import("child_process");
-  const pngs = fs2
-    .readdirSync(screenshotDir)
-    .filter((f: string) => f.endsWith(".png"));
-  for (const png of pngs) {
-    const src = path.join(screenshotDir, png);
-    const dst = path.join(screenshotDir, png.replace(/\.png$/, ".avif"));
-    if (fs2.existsSync(dst)) {
-      fs2.unlinkSync(src);
-      continue;
-    }
-    try {
-      exec2(
-        `ffmpeg -y -i "${src}" -c:v libaom-av1 -still-picture 1 -crf 0 -b:v 0 "${dst}"`,
-        { stdio: "pipe", timeout: 60_000 },
-      );
-      fs2.unlinkSync(src);
-    } catch (e) {
-      console.error(`AVIF conversion failed for ${png}:`, (e as Error).message);
-    }
-  }
+  await convertPngsToWebp(screenshotDir);
 });

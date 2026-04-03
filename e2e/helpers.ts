@@ -106,3 +106,24 @@ export async function waitForTaskState(
   }).toPass({ timeout: timeoutMs, intervals: [500] });
   return task!;
 }
+
+// ---------------------------------------------------------------------------
+// Utility: convert all PNGs in a directory to lossless WebP, removing originals.
+// ---------------------------------------------------------------------------
+
+export async function convertPngsToWebp(dir: string): Promise<void> {
+  const fs = await import("fs");
+  const { execSync } = await import("child_process");
+  const path = await import("path");
+  const pngs = fs.readdirSync(dir).filter((f: string) => f.endsWith(".png"));
+  for (const png of pngs) {
+    const src = path.join(dir, png);
+    const dst = path.join(dir, png.replace(/\.png$/, ".webp"));
+    try {
+      execSync(`ffmpeg -y -i "${src}" -lossless 1 "${dst}"`, { stdio: "pipe", timeout: 60_000 });
+      fs.unlinkSync(src);
+    } catch (e) {
+      console.error(`WebP conversion failed for ${png}:`, (e as Error).message);
+    }
+  }
+}
