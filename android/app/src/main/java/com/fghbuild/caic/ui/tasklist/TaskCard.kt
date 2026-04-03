@@ -25,6 +25,7 @@ import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
@@ -33,16 +34,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import android.content.ClipData
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -58,6 +61,7 @@ import com.fghbuild.caic.util.formatCost
 import com.fghbuild.caic.util.formatElapsed
 import com.fghbuild.caic.util.formatTokens
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val TerminalStates = setOf("purged", "failed")
 
@@ -65,7 +69,8 @@ private val TerminalStates = setOf("purged", "failed")
 @Composable
 fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = false, onClick: () -> Unit = {}) {
     var showMenu by remember { mutableStateOf(false) }
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
     val appColors = MaterialTheme.appColors
 
     Card(
@@ -85,7 +90,7 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
             ) {
                 var titleTruncated by remember { mutableStateOf(false) }
                 TooltipBox(
-                    positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                    positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
                     tooltip = { PlainTooltip { Text(task.title) } },
                     state = rememberTooltipState(),
                     enableUserInput = titleTruncated,
@@ -290,14 +295,22 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
                 DropdownMenuItem(
                     text = { Text("Copy branch name") },
                     onClick = {
-                        clipboard.setText(AnnotatedString(task.repos?.firstOrNull()?.branch ?: ""))
+                        scope.launch {
+                            clipboard.setClipEntry(
+                                ClipEntry(ClipData.newPlainText("branch", task.repos?.firstOrNull()?.branch ?: "")),
+                            )
+                        }
                         showMenu = false
                     },
                 )
                 DropdownMenuItem(
                     text = { Text("Copy task ID") },
                     onClick = {
-                        clipboard.setText(AnnotatedString(task.id))
+                        scope.launch {
+                            clipboard.setClipEntry(
+                                ClipEntry(ClipData.newPlainText("task ID", task.id)),
+                            )
+                        }
                         showMenu = false
                     },
                 )
@@ -532,7 +545,7 @@ private fun StateBadge(task: Task) {
     val stale = isCacheStale(task.state, task.stateUpdatedAt)
     val color = if (stale) staleStateColor(task.state) else stateColor(task.state)
     TooltipBox(
-        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
         tooltip = { PlainTooltip { Text("Prompt cache likely expired — continuing may use more tokens") } },
         state = rememberTooltipState(),
         enableUserInput = stale,
