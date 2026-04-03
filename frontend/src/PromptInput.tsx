@@ -19,18 +19,22 @@ interface Props {
   disabled?: boolean;
   class?: string;
   tabIndex?: number;
-  ref?: (el: HTMLTextAreaElement) => void;
+  ref?: (el: HTMLDivElement) => void;
   "data-testid"?: string;
   // Image support
   supportsImages?: boolean;
   images: APIImageData[];
   onImagesChange: (imgs: APIImageData[]) => void;
+  /** Element rendered inside the text field (trailing icon, like Android). */
+  sendButton?: JSX.Element;
+  /** Elements rendered outside the text field row (action buttons). */
   children?: JSX.Element;
 }
 
 export default function PromptInput(props: Props) {
   const [dragging, setDragging] = createSignal(false);
   const [menuOpen, setMenuOpen] = createSignal(false);
+  const [menuFlipped, setMenuFlipped] = createSignal(false);
   const [cameraOpen, setCameraOpen] = createSignal(false);
 
   function handlePaste(e: ClipboardEvent) {
@@ -136,42 +140,57 @@ export default function PromptInput(props: Props) {
           class={props.class}
           tabIndex={props.tabIndex}
           data-testid={props["data-testid"]}
+          spacerClass={styles.spacer}
         />
-        <Show when={props.supportsImages}>
-          <input
-            ref={(el) => { fileInputRef = el; }}
-            type="file"
-            multiple
-            accept="image/png,image/jpeg,image/gif,image/webp"
-            class={styles.hiddenFileInput}
-            onChange={handleFileChange}
-          />
-          <div class={styles.attachWrap}>
-            <Button type="button" variant="gray" disabled={props.disabled} title="Attach images" onClick={handleAttachClick} data-testid="attach-images">
-              <AttachIcon width="1.2em" height="1.2em" />
-            </Button>
-            <Show when={menuOpen()}>
-              <div class={styles.attachMenu} role="menu">
-                <button class={styles.menuItem} role="menuitem" onClick={handleTakePhoto}>
-                  <CameraIcon width="1.1em" height="1.1em" />
-                  Take photo
-                </button>
-                <Show when={!!navigator.mediaDevices?.getDisplayMedia}>
-                  <button class={styles.menuItem} role="menuitem" onClick={handleScreenshot} data-testid="screenshot-menu-item">
-                    <ScreenshotIcon width="1.1em" height="1.1em" />
-                    Screenshot
+        <div class={styles.trailing}>
+          <Show when={props.supportsImages}>
+            <input
+              ref={(el) => { fileInputRef = el; }}
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              class={styles.hiddenFileInput}
+              onChange={handleFileChange}
+            />
+            <div class={styles.attachWrap}>
+              <Button type="button" variant="gray" disabled={props.disabled} title="Attach images" onClick={handleAttachClick} data-testid="attach-images">
+                <AttachIcon width="1.2em" height="1.2em" />
+              </Button>
+              <Show when={menuOpen()}>
+                <div
+                  class={`${styles.attachMenu}${menuFlipped() ? ` ${styles.attachMenuFlipped}` : ""}`}
+                  role="menu"
+                  ref={(el) => {
+                    requestAnimationFrame(() => {
+                      const rect = el.getBoundingClientRect();
+                      setMenuFlipped(rect.top < 0);
+                    });
+                  }}
+                >
+                  <button class={styles.menuItem} role="menuitem" onClick={handleTakePhoto}>
+                    <CameraIcon width="1.1em" height="1.1em" />
+                    Take photo
                   </button>
-                </Show>
-                <button class={styles.menuItem} role="menuitem" onClick={handleChooseFile}>
-                  <ImageIcon width="1.1em" height="1.1em" />
-                  Choose file
-                </button>
-              </div>
-            </Show>
-          </div>
-        </Show>
-        {props.children}
+                  <Show when={!!navigator.mediaDevices?.getDisplayMedia}>
+                    <button class={styles.menuItem} role="menuitem" onClick={handleScreenshot} data-testid="screenshot-menu-item">
+                      <ScreenshotIcon width="1.1em" height="1.1em" />
+                      Screenshot
+                    </button>
+                  </Show>
+                  <button class={styles.menuItem} role="menuitem" onClick={handleChooseFile}>
+                    <ImageIcon width="1.1em" height="1.1em" />
+                    Choose file
+                  </button>
+                </div>
+              </Show>
+            </div>
+          </Show>
+          {props.sendButton}
+        </div>
       </div>
+      <Show when={props.children}>
+        <div class={styles.actionRow}>{props.children}</div>
+      </Show>
       <Show when={props.images.length > 0}>
         <div class={styles.imagePreviewRow}>
           <For each={props.images}>

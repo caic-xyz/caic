@@ -14,10 +14,43 @@
 }
 
 .row {
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--color-border-medium);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-input);
+}
+
+/* Invisible float inside the contenteditable that reserves space so text
+   wraps around the absolutely positioned trailing buttons. */
+.spacer {
+  float: right;
+  /* Match trailing buttons size; updated if button count changes. */
+  width: 4.5rem;
+  height: 2rem;
+  pointer-events: none;
+}
+
+.row:focus-within {
+  border-color: var(--color-primary-ring);
+  box-shadow: 0 0 0 1px var(--color-primary-ring);
+}
+
+.trailing {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+  z-index: 1;
+}
+
+.actionRow {
   display: flex;
   gap: 0.5rem;
   align-items: center;
-  min-width: 0;
+  margin-top: 0.5rem;
 }
 
 /* Use opacity+position instead of display:none so mobile browsers
@@ -84,6 +117,11 @@
   z-index: 10;
 }
 
+.attachMenuFlipped {
+  bottom: auto;
+  top: calc(100% + 4px);
+}
+
 .menuItem {
   display: flex;
   align-items: center;
@@ -106,8 +144,3 @@
   flex-shrink: 0;
 }
 
-@media (max-width: 768px) {
-  .row {
-    flex-wrap: wrap;
-  }
-}

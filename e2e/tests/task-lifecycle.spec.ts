@@ -1,5 +1,5 @@
 // End-to-end tests for the task lifecycle using a fake backend.
-import { test, expect, waitForTaskState } from "../helpers";
+import { test, expect, waitForTaskState, fillContentEditable } from "../helpers";
 
 test("create task, verify streaming text and result, then purge", async ({ page, api }) => {
   await page.goto("/");
@@ -11,11 +11,11 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   const prompt = `e2e lifecycle ${Date.now()}`;
 
   // Fill prompt and submit.
-  await page.getByTestId("prompt-input").fill(prompt);
+  await fillContentEditable(page.getByTestId("prompt-input"), prompt);
   await page.getByTestId("submit-task").click();
 
-  // Click the task card to open TaskDetail.
-  await page.getByText(prompt).first().click();
+  // Click the task card to open TaskDetail (scope to task list, not the prompt input).
+  await page.locator(`div[class*="card"]:has-text("${prompt.replace(/"/g, '\\"')}")`).first().click();
 
   // Wait for the assistant message from the fake agent. The fake backend emits
   // streaming text deltas followed by the final assistant message containing a

@@ -1,0 +1,14 @@
+/* Styles for the contenteditable AutoResizeTextarea component. */
+
+.editable {
+  min-height: 1.4em;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.editable.empty::before {
+  content: attr(data-placeholder);
+  color: var(--color-text-muted);
+  pointer-events: none;
+}

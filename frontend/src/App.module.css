@@ -375,14 +375,6 @@
   line-height: 1.4;
   max-height: 10rem;
   overflow-y: auto;
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--color-bg-input);
-}
-
-.promptInput:focus {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--color-primary-ring);
 }
 
 .layout {

@@ -153,7 +153,7 @@ export default function App() {
   const harnessSupportsImages = () => harnesses().find((h) => h.name === selectedHarness())?.supportsImages ?? false;
 
   // Ref to the main prompt textarea for focusing after Escape.
-  let promptRef: HTMLTextAreaElement | undefined;
+  let promptRef: HTMLElement | undefined;
 
   // Sort tasks the same way TaskList does: active by repo/branch, then terminal by ID.
   const sortedTasks = () => sortTasks(tasks());
@@ -917,11 +917,12 @@ export default function App() {
           supportsImages={harnessSupportsImages()}
           images={pendingImages()}
           onImagesChange={setPendingImages}
-        >
-          <Button type="submit" disabled={initializing() || submitting() || (!prompt().trim() && pendingImages().length === 0)} loading={initializing() || submitting()} title="Start a new container with this prompt" data-testid="submit-task">
-            <SendIcon width="1.2em" height="1.2em" />
-          </Button>
-        </PromptInput>
+          sendButton={
+            <Button type="submit" disabled={initializing() || submitting() || (!prompt().trim() && pendingImages().length === 0)} loading={initializing() || submitting()} title="Start a new container with this prompt" data-testid="submit-task">
+              <SendIcon width="1.2em" height="1.2em" />
+            </Button>
+          }
+        />
       </form>
 
       <Show when={cloneOpen()}>
