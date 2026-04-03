@@ -15,6 +15,8 @@ const screenshotDir = path.join(
 test.describe.configure({ mode: "serial" });
 
 test("generate documentation screenshots", async ({ page, api }) => {
+  // AVIF encoding via ffmpeg is slow; the default 60s is too tight.
+  test.setTimeout(90_000);
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
 
@@ -118,7 +120,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
     });
 
     // Animate the angle slider and capture frames for AVIF animation.
-    const frame = page.frameLocator("iframe[title='light_refraction_in_water']");
+    const frame = page.frameLocator(
+      "iframe[title='light_refraction_in_water']",
+    );
     const slider = frame.locator("#slider");
     if ((await slider.count()) > 0) {
       const fs = await import("fs");
@@ -126,7 +130,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
       fs.mkdirSync(tmpDir, { recursive: true });
 
       // Sweep angle from 5° to 85° in steps, capturing each frame.
-      const angles = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85];
+      const angles = [
+        5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85,
+      ];
       for (let i = 0; i < angles.length; i++) {
         await slider.fill(String(angles[i]));
         await page.waitForTimeout(80);
@@ -139,7 +145,10 @@ test("generate documentation screenshots", async ({ page, api }) => {
         await slider.fill(String(angles[i]));
         await page.waitForTimeout(80);
         await page.screenshot({
-          path: path.join(tmpDir, `frame-${String(angles.length + (angles.length - 2 - i)).padStart(3, "0")}.png`),
+          path: path.join(
+            tmpDir,
+            `frame-${String(angles.length + (angles.length - 2 - i)).padStart(3, "0")}.png`,
+          ),
         });
       }
 
@@ -148,8 +157,8 @@ test("generate documentation screenshots", async ({ page, api }) => {
       try {
         execSync(
           `ffmpeg -y -framerate 10 -i "${tmpDir}/frame-%03d.png" ` +
-          `-c:v libaom-av1 -crf 30 -b:v 0 -pix_fmt yuv420p ` +
-          `"${path.join(screenshotDir, "task-widget.avif")}"`,
+            `-c:v libaom-av1 -crf 30 -b:v 0 -pix_fmt yuv420p ` +
+            `"${path.join(screenshotDir, "task-widget.avif")}"`,
           { stdio: "pipe", timeout: 60_000 },
         );
       } catch (e) {
@@ -177,7 +186,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
   // Convert remaining PNG screenshots to lossless AVIF (skip if AVIF already exists, e.g. animation).
   const fs2 = await import("fs");
   const { execSync: exec2 } = await import("child_process");
-  const pngs = fs2.readdirSync(screenshotDir).filter((f: string) => f.endsWith(".png"));
+  const pngs = fs2
+    .readdirSync(screenshotDir)
+    .filter((f: string) => f.endsWith(".png"));
   for (const png of pngs) {
     const src = path.join(screenshotDir, png);
     const dst = path.join(screenshotDir, png.replace(/\.png$/, ".avif"));

@@ -99,7 +99,7 @@ See `docs/app-design.md` § "Audio gotchas" and the
 
 ## Development Notes
 
-- `minSdk = 34`, `targetSdk = 36`, `compileSdk = 36`
+- `minSdk = 33`, `targetSdk = 36`, `compileSdk = 36`
 - Version catalog at `gradle/libs.versions.toml`
 - detekt config at `detekt.yml`
 - The web frontend (SolidJS) in `../frontend/` is the reference implementation for
