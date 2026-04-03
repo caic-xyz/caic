@@ -42,7 +42,8 @@ private const val STALE_THRESHOLD_SEC = 3600.0
 
 /** True when the last state change is older than 1 hour. */
 fun isCacheStale(state: String, stateUpdatedAt: Double): Boolean =
-    state != "running" && stateUpdatedAt > 0 && System.currentTimeMillis() / 1000.0 - stateUpdatedAt > STALE_THRESHOLD_SEC
+    state !in terminalStates && state != "stopped" && state != "stopping" && state != "purging" && state != "running" &&
+        stateUpdatedAt > 0 && System.currentTimeMillis() / 1000.0 - stateUpdatedAt > STALE_THRESHOLD_SEC
 
 val activeStates = setOf(
     "running", "branching", "provisioning", "starting",

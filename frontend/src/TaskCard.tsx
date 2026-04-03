@@ -57,7 +57,7 @@ const terminalStates = new Set(["stopping", "stopped", "purging", "purged", "fai
 
 export default function TaskCard(props: TaskCardProps) {
   const isTerminal = () => terminalStates.has(props.state);
-  const stale = () => props.state !== "running" && isCacheStale(props.stateUpdatedAt, props.now());
+  const stale = () => !terminalStates.has(props.state) && props.state !== "running" && isCacheStale(props.stateUpdatedAt, props.now());
   const [titleTruncated, setTitleTruncated] = createSignal(false);
   let titleRef: HTMLElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
 
