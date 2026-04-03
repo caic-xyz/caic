@@ -35,10 +35,12 @@ export default function AutoResizeTextarea(props: Props) {
     const v = props.value;
     if (getText(editable) !== v) {
       // Remove all user content, then re-insert spacer + text.
+      // The spacer must be the first child so its float affects
+      // subsequent text nodes (floats only apply to later siblings).
       editable.textContent = "";
       if (spacer) editable.appendChild(spacer);
       if (v) {
-        editable.insertBefore(document.createTextNode(v), editable.firstChild);
+        editable.appendChild(document.createTextNode(v));
       }
       editable.classList.toggle(emptyClass, v.length === 0);
     }
@@ -47,7 +49,11 @@ export default function AutoResizeTextarea(props: Props) {
   function handleInput() {
     // Re-insert spacer if it was destroyed (e.g. by Playwright fill()).
     if (spacer && !editable.contains(spacer)) {
-      editable.appendChild(spacer);
+      editable.insertBefore(spacer, editable.firstChild);
+    } else if (spacer && spacer !== editable.firstChild) {
+      // Browser may insert typed text before the spacer; keep it first
+      // so its float affects all subsequent text.
+      editable.insertBefore(spacer, editable.firstChild);
     }
     const text = getText(editable);
     editable.classList.toggle(emptyClass, text.length === 0);

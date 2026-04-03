@@ -140,6 +140,7 @@ export default function PromptInput(props: Props) {
           class={props.class}
           tabIndex={props.tabIndex}
           data-testid={props["data-testid"]}
+          spacerClass={styles.spacer}
         />
         <div class={styles.trailing}>
           <Show when={props.supportsImages}>
