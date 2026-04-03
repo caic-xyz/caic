@@ -9,6 +9,7 @@
 
 .editable.empty::before {
   content: attr(data-placeholder);
+  float: none;
   color: var(--color-text-muted);
   pointer-events: none;
 }

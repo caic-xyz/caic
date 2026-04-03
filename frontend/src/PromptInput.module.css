@@ -21,14 +21,16 @@
   background: var(--color-bg-input);
 }
 
-/* Invisible float inside the contenteditable that reserves space so text
-   wraps around the absolutely positioned trailing buttons. */
-.spacer {
+/* When .spacer is applied to the contenteditable, ::before generates an
+   invisible float that reserves space so text wraps around the absolutely
+   positioned trailing buttons.  A pseudo-element is always the first child
+   in the formatting context, so the float reliably affects all text. */
+.spacer::before {
+  content: "";
   float: right;
   /* Match trailing buttons size; updated if button count changes. */
-  width: 4.5rem;
+  width: 5rem;
   height: 2rem;
-  pointer-events: none;
 }
 
 .row:focus-within {

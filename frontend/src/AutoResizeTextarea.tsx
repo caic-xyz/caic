@@ -1,6 +1,6 @@
 // Auto-resizing editable div that starts as a single line and expands vertically.
-// Uses contenteditable so children (e.g. floated buttons) can sit inside the
-// editable area and text wraps around them.
+// Uses contenteditable with an optional CSS ::before float spacer so text wraps
+// around absolutely positioned trailing buttons.
 // Enter submits (via onSubmit), Shift+Enter inserts a newline.
 import { createEffect } from "solid-js";
 import styles from "./AutoResizeTextarea.module.css";
@@ -17,28 +17,20 @@ interface Props {
   ref?: (el: HTMLDivElement) => void;
   tabIndex?: number;
   "data-testid"?: string;
-  /** CSS class for the float spacer inside the editable. When set, a spacer
-   *  div is created and maintained even if external code (e.g. Playwright fill)
-   *  replaces all innerHTML. */
+  /** CSS class added to the editable that activates a ::before float spacer
+   *  so text wraps around trailing buttons. */
   spacerClass?: string;
 }
 
 export default function AutoResizeTextarea(props: Props) {
   let editable!: HTMLDivElement;
-  // Spacer element created once and re-inserted if destroyed (e.g. by
-  // Playwright's fill() which replaces all innerHTML).
-  let spacer: HTMLDivElement | undefined;
 
   // Sync external value changes (e.g. cleared after submit) into the DOM
   // without disrupting in-progress typing.
   createEffect(() => {
     const v = props.value;
     if (getText(editable) !== v) {
-      // Remove all user content, then re-insert spacer + text.
-      // The spacer must be the first child so its float affects
-      // subsequent text nodes (floats only apply to later siblings).
       editable.textContent = "";
-      if (spacer) editable.appendChild(spacer);
       if (v) {
         editable.appendChild(document.createTextNode(v));
       }
@@ -47,14 +39,6 @@ export default function AutoResizeTextarea(props: Props) {
   });
 
   function handleInput() {
-    // Re-insert spacer if it was destroyed (e.g. by Playwright fill()).
-    if (spacer && !editable.contains(spacer)) {
-      editable.insertBefore(spacer, editable.firstChild);
-    } else if (spacer && spacer !== editable.firstChild) {
-      // Browser may insert typed text before the spacer; keep it first
-      // so its float affects all subsequent text.
-      editable.insertBefore(spacer, editable.firstChild);
-    }
     const text = getText(editable);
     editable.classList.toggle(emptyClass, text.length === 0);
     props.onInput(text);
@@ -81,12 +65,6 @@ export default function AutoResizeTextarea(props: Props) {
     <div
       ref={(el) => {
         editable = el;
-        if (props.spacerClass) {
-          spacer = document.createElement("div");
-          spacer.className = props.spacerClass;
-          spacer.contentEditable = "false";
-          el.appendChild(spacer);
-        }
         el.addEventListener("input", handleInput);
         props.ref?.(el);
       }}
@@ -97,7 +75,7 @@ export default function AutoResizeTextarea(props: Props) {
       aria-placeholder={props.placeholder}
       aria-disabled={props.disabled || undefined}
       data-placeholder={props.placeholder}
-      class={`${styles.editable}${props.value ? "" : ` ${emptyClass}`}${props.class ? ` ${props.class}` : ""}`}
+      class={`${styles.editable}${props.value ? "" : ` ${emptyClass}`}${props.spacerClass ? ` ${props.spacerClass}` : ""}${props.class ? ` ${props.class}` : ""}`}
       tabIndex={props.tabIndex ?? 0}
       data-testid={props["data-testid"]}
       onKeyDown={handleKeyDown}
@@ -107,7 +85,7 @@ export default function AutoResizeTextarea(props: Props) {
   );
 }
 
-/** Get text from the editable div, ignoring child elements (float buttons). */
+/** Get text from the editable div, ignoring child elements. */
 function getText(el: HTMLElement): string {
   let text = "";
   for (const node of el.childNodes) {
@@ -115,7 +93,7 @@ function getText(el: HTMLElement): string {
       text += node.textContent;
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       const elem = node as HTMLElement;
-      // Skip non-editable children (trailing buttons).
+      // Skip non-editable children.
       if (elem.contentEditable === "false") continue;
       // Handle <br> as newline.
       if (elem.tagName === "BR") {
