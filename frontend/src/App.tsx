@@ -8,7 +8,7 @@ import { useAuth } from "./AuthContext";
 import Login from "./Login";
 import TaskDetail from "./TaskDetail";
 import DiffDetail from "./DiffDetail";
-import TaskList, { sortTasks } from "./TaskList";
+import TaskList from "./TaskList";
 import PromptInput from "./PromptInput";
 import Button from "./Button";
 import { requestNotificationPermission, notifyWaiting, dismissNotification } from "./notifications";
@@ -155,9 +155,6 @@ export default function App() {
   // Ref to the main prompt textarea for focusing after Escape.
   let promptRef: HTMLElement | undefined;
 
-  // Sort tasks the same way TaskList does: active by repo/branch, then terminal by ID.
-  const sortedTasks = () => sortTasks(tasks());
-
   // Global keyboard shortcuts:
   // - Escape: from diff view, return to task detail; from task detail, dismiss and focus prompt
   // - ArrowUp/ArrowDown: switch to previous/next task in sidebar order
@@ -176,19 +173,23 @@ export default function App() {
       // Don't intercept when typing in an input/textarea.
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      const list = sortedTasks();
-      if (list.length === 0) return;
-      const curIdx = list.findIndex((task) => task.id === selectedId());
+      // Query visible task cards in DOM (visual) order to match the grouped sidebar layout.
+      const cards = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
+      if (cards.length === 0) return;
+      const curIdx = cards.findIndex((el) => el.dataset.taskId === selectedId());
       let nextIdx: number;
       if (e.key === "ArrowUp") {
-        nextIdx = curIdx <= 0 ? list.length - 1 : curIdx - 1;
+        nextIdx = curIdx <= 0 ? cards.length - 1 : curIdx - 1;
       } else {
-        nextIdx = curIdx === -1 || curIdx >= list.length - 1 ? 0 : curIdx + 1;
+        nextIdx = curIdx === -1 || curIdx >= cards.length - 1 ? 0 : curIdx + 1;
       }
-      const next = list[nextIdx];
-      navigate(taskPath(next.id, next.repos?.[0]?.name ?? "", next.repos?.[0]?.branch ?? "", next.title));
-      const card = document.querySelector<HTMLElement>(`[data-task-id="${next.id}"]`);
-      card?.focus();
+      const card = cards[nextIdx];
+      const id = card.dataset.taskId;
+      if (!id) return;
+      const task = tasks().find((t) => t.id === id);
+      if (!task) return;
+      navigate(taskPath(task.id, task.repos?.[0]?.name ?? "", task.repos?.[0]?.branch ?? "", task.title));
+      card.focus();
       e.preventDefault();
     };
     document.addEventListener("keydown", onKey);
