@@ -1025,6 +1025,35 @@ a.ciStatus:hover {
   border-radius: 0 0 4px 4px;
 }
 
+.contextMenuToggle {
+  border: 1px solid var(--color-border-medium);
+  background: var(--color-bg-input);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  line-height: 1;
+}
+
+.contextMenuToggle:hover:not(:disabled) {
+  background: #e0e0e0;
+}
+
+.contextMenuToggle:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.syncDropdownItemDisabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.syncDropdownItemDisabled:hover {
+  background: none;
+}
+
 /* Mobile: <=768px */
 @media (max-width: 768px) {
   .container {

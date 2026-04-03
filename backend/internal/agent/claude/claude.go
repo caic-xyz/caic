@@ -114,6 +114,16 @@ func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
 	return nil
 }
 
+// WriteCompact implements agent.CompactCommand by sending /compact as a user
+// message. Claude Code recognizes this as a slash command in -p mode.
+func (b *Backend) WriteCompact(w io.Writer, instructions string, logW io.Writer) error {
+	text := "/compact"
+	if instructions != "" {
+		text = "/compact " + instructions
+	}
+	return b.WritePrompt(w, agent.Prompt{Text: text}, logW)
+}
+
 // buildArgs constructs the Claude Code CLI arguments.
 func buildArgs(opts *agent.Options) []string {
 	args := []string{

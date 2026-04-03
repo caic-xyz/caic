@@ -23,6 +23,8 @@ export const {
   sendInput,
   taskFixPR,
   restartTask,
+  clearContext,
+  compactContext,
   stopTask,
   purgeTask,
   reviveTask,

@@ -1,7 +1,7 @@
 // TaskDetail renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
-import { sendInput as apiSendInput, restartTask as apiRestartTask, syncTask as apiSyncTask, taskEvents, getTaskToolInput, botFixPR } from "./api";
+import { sendInput as apiSendInput, restartTask as apiRestartTask, clearContext as apiClearContext, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEvents, getTaskToolInput, botFixPR } from "./api";
 import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats } from "@sdk/types.gen";
 import { groupMessages, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "./grouping";
 import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "./formatting";
@@ -59,6 +59,7 @@ interface Props {
   model?: string;
   diffStat?: DiffFileStat[];
   supportsImages?: boolean;
+  supportsCompact?: boolean;
   onClose: () => void;
   inputDraft: string;
   onInputDraft: (value: string) => void;
@@ -120,10 +121,11 @@ export default function TaskDetail(props: Props) {
   const location = useLocation();
   const [messages, setMessages] = createSignal<EventMessage[]>([]);
   const [sending, setSending] = createSignal(false);
-  const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | null>(null);
+  const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "clear-context" | "compact" | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
   const [syncMenuOpen, setSyncMenuOpen] = createSignal(false);
+  const [contextMenuOpen, setContextMenuOpen] = createSignal(false);
   const [fixingPR, setFixingPR] = createSignal(false);
 
   let promptRef: HTMLTextAreaElement | undefined;
@@ -447,6 +449,16 @@ export default function TaskDetail(props: Props) {
     });
   }
 
+  function doClearContext() {
+    // eslint-disable-next-line solid/reactivity -- only called from onClick
+    runAction("clear-context", () => apiClearContext(props.taskId));
+  }
+
+  function doCompact() {
+    // eslint-disable-next-line solid/reactivity -- only called from onClick
+    runAction("compact", () => apiCompactContext(props.taskId, {}));
+  }
+
   async function doSync(force: boolean, target?: SyncTarget) {
     if (pendingAction()) return;
     setPendingAction("sync");
@@ -482,7 +494,7 @@ export default function TaskDetail(props: Props) {
     }
   }
 
-  async function runAction(name: "sync" | "restart", fn: () => Promise<unknown>) {
+  async function runAction(name: "sync" | "restart" | "clear-context" | "compact", fn: () => Promise<unknown>) {
     if (pendingAction()) return;
     setPendingAction(name);
     setActionError(null);
@@ -689,6 +701,21 @@ export default function TaskDetail(props: Props) {
               <Show when={syncMenuOpen()}>
                 <div class={styles.syncDropdown}>
                   <button type="button" class={styles.syncDropdownItem} onClick={() => doSync(false, SyncTargetDefault)}>Push to {props.baseBranch}</button>
+                </div>
+              </Show>
+            </div>
+            <div class={styles.syncButtonGroup}>
+              <Show when={pendingAction() === "clear-context" || pendingAction() === "compact"} fallback={
+                <button type="button" class={styles.contextMenuToggle} disabled={!!pendingAction()} onClick={() => setContextMenuOpen((v) => !v)} aria-label="Context actions" title="Context actions">&#8942;</button>
+              }>
+                <button type="button" class={styles.contextMenuToggle} disabled>&#8987;</button>
+              </Show>
+              <Show when={contextMenuOpen()}>
+                <div class={styles.syncDropdown}>
+                  <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDisabled}`} disabled onClick={() => { setContextMenuOpen(false); doClearContext(); }}>Clear context</button>
+                  <Show when={props.supportsCompact}>
+                    <button type="button" class={`${styles.syncDropdownItem} ${!isWaiting() ? styles.syncDropdownItemDisabled : ""}`} disabled={!isWaiting()} onClick={() => { setContextMenuOpen(false); doCompact(); }}>Compact context</button>
+                  </Show>
                 </div>
               </Show>
             </div>

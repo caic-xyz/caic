@@ -1056,6 +1056,30 @@ func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
 	return h.Session.Send(p)
 }
 
+// SendCompact sends a compact command to the running agent without changing
+// the task state. Returns an error if no session is active or the backend
+// does not support compaction.
+func (t *Task) SendCompact(ctx context.Context, instructions string) error {
+	_ = ctx
+	t.mu.Lock()
+	h := t.handle
+	sessionStatus := SessionNone
+	if h != nil {
+		select {
+		case <-h.Session.Done():
+			sessionStatus = SessionExited
+			h = nil
+		default:
+		}
+	}
+	state := t.state
+	t.mu.Unlock()
+	if h == nil {
+		return fmt.Errorf("no active session (state=%s session=%s)", state, sessionStatus)
+	}
+	return h.Session.SendCompact(instructions)
+}
+
 // computeCost returns the true USD cost for a Claude API result by adding the
 // cache-read surcharge that TotalCostUSD omits.
 //

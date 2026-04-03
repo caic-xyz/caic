@@ -113,7 +113,7 @@ func (s *Server) listHarnesses(_ context.Context, _ *dto.EmptyReq) (*[]v1.Harnes
 	}
 	out := make([]v1.HarnessInfo, 0, len(seen))
 	for h, b := range seen {
-		out = append(out, v1.HarnessInfo{Name: string(h), Models: b.Models(), SupportsImages: b.SupportsImages()})
+		out = append(out, v1.HarnessInfo{Name: string(h), Models: b.Models(), SupportsImages: b.SupportsImages(), SupportsCompact: b.SupportsCompact()})
 	}
 	slices.SortFunc(out, func(a, b v1.HarnessInfo) int {
 		return strings.Compare(a.Name, b.Name)

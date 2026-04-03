@@ -190,6 +190,12 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 	return writeJSON(wr, req)
 }
 
+// WriteCompact implements agent.CompactCommand by sending /compact as a prompt.
+// OpenCode recognizes this as a slash command via session/prompt.
+func (w *wireFormat) WriteCompact(wr io.Writer, _ string, logW io.Writer) error {
+	return w.WritePrompt(wr, agent.Prompt{Text: "/compact"}, logW)
+}
+
 // ParseMessage wraps the package-level ParseMessage with interceptions:
 //
 //   - usage_update → emits UsageMessage and accumulates into totalUsage.

@@ -55,6 +55,8 @@ func (b *testBackend) Models() []string { return []string{"test-model"} }
 // SupportsImages always returns false in the test backend.
 func (b *testBackend) SupportsImages() bool { return false }
 
+func (b *testBackend) SupportsCompact() bool { return false }
+
 func (b *testBackend) ContextWindowLimit(string) int { return 180_000 }
 
 // testWire implements agent.WireFormat for testing.

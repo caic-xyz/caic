@@ -41,6 +41,9 @@ type Backend interface {
 	// SupportsImages reports whether this backend accepts image content blocks.
 	SupportsImages() bool
 
+	// SupportsCompact reports whether this backend supports context compaction.
+	SupportsCompact() bool
+
 	// ContextWindowLimit returns the API prompt token limit for the given model.
 	// The model parameter is the model name reported by the agent at runtime.
 	ContextWindowLimit(model string) int
@@ -66,6 +69,12 @@ func (b *Base) Models() []string { return b.ModelList }
 
 // SupportsImages implements Backend.
 func (b *Base) SupportsImages() bool { return b.Images }
+
+// SupportsCompact implements Backend by checking if Wire implements CompactCommand.
+func (b *Base) SupportsCompact() bool {
+	_, ok := b.Wire.(CompactCommand)
+	return ok
+}
 
 // ContextWindowLimit implements Backend.
 func (b *Base) ContextWindowLimit(string) int { return b.ContextWindow }

@@ -21,6 +21,9 @@ func (r *InputReq) Validate() error {
 // Validate is a no-op; prompt is optional (read from container plan file if empty).
 func (r *RestartReq) Validate() error { return nil }
 
+// Validate is a no-op; instructions are optional.
+func (r *CompactReq) Validate() error { return nil }
+
 // Validate checks that the sync target is valid.
 func (r SyncReq) Validate() error {
 	switch r.Target {

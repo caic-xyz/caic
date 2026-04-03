@@ -157,6 +157,7 @@ public struct HarnessInfo: Codable {
     public let name: String
     public let models: [String]
     public let supportsImages: Bool
+    public let supportsCompact: Bool
 }
 
 /// WellKnownCache describes a single well-known cache.
@@ -585,6 +586,11 @@ public struct InputReq: Codable {
 /// RestartReq is the request body for POST /api/v1/tasks/{id}/restart.
 public struct RestartReq: Codable {
     public let prompt: Prompt
+}
+
+/// CompactReq is the request body for POST /api/v1/tasks/{id}/compact.
+public struct CompactReq: Codable {
+    public let instructions: String?
 }
 
 /// CILogResp is the response for GET /api/v1/tasks/{id}/ci-log.

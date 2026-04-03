@@ -61,6 +61,7 @@ data class TaskDetailState(
     val inputDraft: String = "",
     val pendingImages: List<ImageData> = emptyList(),
     val supportsImages: Boolean = false,
+    val supportsCompact: Boolean = false,
 )
 
 private val TerminalStates = setOf("stopping", "stopped", "purging", "purged", "failed")
@@ -121,8 +122,9 @@ class TaskDetailViewModel @Inject constructor(
         @Suppress("UNCHECKED_CAST")
         val statsHist = values[10] as List<EventStats>
         val task = tasks.firstOrNull { it.id == taskId }
-        val imgSupport = task != null &&
-            harnesses.any { it.name == task.harness && it.supportsImages }
+        val taskHarness = harnesses.firstOrNull { it.name == task?.harness }
+        val imgSupport = task != null && taskHarness?.supportsImages == true
+        val compactSupport = task != null && taskHarness?.supportsCompact == true
         val msgCount = _messages.value.size
         TaskDetailState(
             task = task,
@@ -143,6 +145,7 @@ class TaskDetailViewModel @Inject constructor(
             inputDraft = draft,
             pendingImages = images,
             supportsImages = imgSupport,
+            supportsCompact = compactSupport,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskDetailState())
 
@@ -368,6 +371,34 @@ class TaskDetailViewModel @Inject constructor(
                 client.restartTask(taskId, RestartReq(prompt = Prompt(text = prompt)))
             } catch (e: Exception) {
                 showActionError("restart failed: ${e.message}")
+            } finally {
+                _pendingAction.value = null
+            }
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
+    fun clearContext() {
+        _pendingAction.value = "clear-context"
+        viewModelScope.launch {
+            try {
+                apiClient().clearContext(taskId)
+            } catch (e: Exception) {
+                showActionError("clear context failed: ${e.message}")
+            } finally {
+                _pendingAction.value = null
+            }
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
+    fun compactContext() {
+        _pendingAction.value = "compact"
+        viewModelScope.launch {
+            try {
+                apiClient().compactContext(taskId, com.caic.sdk.v1.CompactReq())
+            } catch (e: Exception) {
+                showActionError("compact failed: ${e.message}")
             } finally {
                 _pendingAction.value = null
             }

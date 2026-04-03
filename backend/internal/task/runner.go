@@ -943,6 +943,70 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	return h, nil
 }
 
+// ClearContextSession closes the current agent session and starts a fresh one
+// in the same container without a prompt. The task transitions to StateWaiting
+// so the user can send a new message when ready.
+func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHandle, error) {
+	r.initDefaults()
+
+	state := t.GetState()
+	if state != StateWaiting && state != StateAsking && state != StateHasPlan {
+		return nil, fmt.Errorf("cannot clear context in state %s", state)
+	}
+
+	// 1. Close current session and persist context_cleared marker.
+	oldH := t.CloseAndDetachSession()
+	if oldH != nil {
+		oldH.CloseMsgCh()
+		<-oldH.DispatchDone
+		if oldH.LogW != nil {
+			writeContextCleared(oldH.LogW)
+			_ = oldH.LogW.Close()
+		}
+	}
+
+	// 2. Clear in-memory messages.
+	t.ClearMessages(ctx)
+
+	// 3. Open new log segment.
+	logW, err := r.openLog(t)
+	if err != nil {
+		t.SetState(StateFailed)
+		return nil, fmt.Errorf("open log: %w", err)
+	}
+
+	// 4. Start new session with no initial prompt.
+	t.SetState(StateStarting)
+
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
+
+	var clearBranch string
+	if p := t.Primary(); p != nil {
+		clearBranch = p.Branch
+	}
+	tlog := r.log.With("br", clearBranch, "ctr", t.Container)
+	tlog.Info("clearing context", "hns", t.Harness)
+	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
+		Container: t.Container,
+		Dir:       r.containerDir(),
+		Model:     t.Model,
+	}, msgCh, logW)
+	if err != nil {
+		_ = logW.Close()
+		close(msgCh)
+		<-dispatchDone
+		t.SetState(StateFailed)
+		return nil, fmt.Errorf("start session: %w", err)
+	}
+
+	// 5. Store new handle. Task goes to Waiting (no prompt to run).
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
+	t.AttachSession(h)
+	t.SetState(StateWaiting)
+	tlog.Info("context cleared")
+	return h, nil
+}
+
 // ReadRelayOutput reads the relay output.jsonl from the container using the
 // backend matching agentName to parse messages.
 func (r *Runner) ReadRelayOutput(ctx context.Context, container string, agentName agent.Harness) ([]agent.Message, int64, error) {

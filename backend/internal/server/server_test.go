@@ -51,6 +51,8 @@ func (stubBackend) Models() []string { return []string{"m1", "m2"} }
 
 func (stubBackend) SupportsImages() bool { return false }
 
+func (stubBackend) SupportsCompact() bool { return false }
+
 func (stubBackend) ContextWindowLimit(string) int { return 180_000 }
 
 func decodeError(t *testing.T, w *httptest.ResponseRecorder) dto.ErrorDetails {

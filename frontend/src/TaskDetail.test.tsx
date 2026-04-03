@@ -43,6 +43,8 @@ vi.mock("./api", () => ({
   }),
   sendInput: vi.fn(),
   restartTask: vi.fn(),
+  clearContext: vi.fn(() => Promise.resolve({ status: "cleared" })),
+  compactContext: vi.fn(() => Promise.resolve({ status: "compacting" })),
   syncTask: vi.fn(),
   getTaskDiff: vi.fn(),
 }));
@@ -223,5 +225,70 @@ describe("SSE connection", () => {
     vi.advanceTimersByTime(20);
 
     expect(document.body.textContent).toContain("agent reply");
+  });
+
+  it("context menu button is visible in waiting state and opens menu with actions", async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    const created: FakeES[] = [];
+    makeSyncReadyMock(created);
+
+    const { getByLabelText, getByText, queryByText } = render(() => (
+      <TaskDetail {...baseProps} taskState="waiting" supportsCompact={true} />
+    ));
+
+    // The overflow menu toggle should be present.
+    const toggle = getByLabelText("Context actions");
+    expect(toggle).toBeInTheDocument();
+
+    // Menu items should not be visible before clicking.
+    expect(queryByText("Clear context")).not.toBeInTheDocument();
+    expect(queryByText("Compact context")).not.toBeInTheDocument();
+
+    // Click the toggle to open the menu.
+    await user.click(toggle);
+
+    // Both menu items should now be visible.
+    expect(getByText("Clear context")).toBeInTheDocument();
+    expect(getByText("Compact context")).toBeInTheDocument();
+  });
+
+  it("context menu is visible but items are disabled when task is running", async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    const created: FakeES[] = [];
+    makeSyncReadyMock(created);
+
+    const { getByLabelText, getByText } = render(() => (
+      <TaskDetail {...baseProps} taskState="running" supportsCompact={true} />
+    ));
+
+    // Toggle is present even when running.
+    const toggle = getByLabelText("Context actions");
+    expect(toggle).toBeInTheDocument();
+
+    await user.click(toggle);
+
+    // Menu items are visible but disabled.
+    const clearBtn = getByText("Clear context");
+    const compactBtn = getByText("Compact context");
+    expect(clearBtn).toBeDisabled();
+    expect(compactBtn).toBeDisabled();
+  });
+
+  it("compact item is hidden when supportsCompact is false", async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    const created: FakeES[] = [];
+    makeSyncReadyMock(created);
+
+    const { getByLabelText, getByText, queryByText } = render(() => (
+      <TaskDetail {...baseProps} taskState="waiting" supportsCompact={false} />
+    ));
+
+    await user.click(getByLabelText("Context actions"));
+
+    expect(getByText("Clear context")).toBeInTheDocument();
+    expect(queryByText("Compact context")).not.toBeInTheDocument();
   });
 });

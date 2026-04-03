@@ -116,6 +116,10 @@ class ApiClient(
     suspend fun sendInput(id: String, req: InputReq): StatusResp = request("POST", "/api/v1/tasks/$id/input", json.encodeToString(req))
     /** Restarts a completed or errored task with a new prompt. */
     suspend fun restartTask(id: String, req: RestartReq): StatusResp = request("POST", "/api/v1/tasks/$id/restart", json.encodeToString(req))
+    /** Clears context and restarts the agent session without a prompt. */
+    suspend fun clearContext(id: String): StatusResp = request("POST", "/api/v1/tasks/$id/clear-context")
+    /** Sends a compact command to reduce the agent's context window usage. */
+    suspend fun compactContext(id: String, req: CompactReq): StatusResp = request("POST", "/api/v1/tasks/$id/compact", json.encodeToString(req))
     /** Requests graceful stop of a running task. */
     suspend fun stopTask(id: String): StatusResp = request("POST", "/api/v1/tasks/$id/stop")
     /** Permanently deletes a task and its container. */

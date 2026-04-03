@@ -115,6 +115,7 @@ data class HarnessInfo(
     val name: String,
     val models: List<String>,
     val supportsImages: Boolean,
+    val supportsCompact: Boolean,
 )
 
 /** WellKnownCache describes a single well-known cache. */
@@ -513,6 +514,10 @@ data class InputReq(val prompt: Prompt)
 /** RestartReq is the request body for POST /api/v1/tasks/{id}/restart. */
 @Serializable
 data class RestartReq(val prompt: Prompt)
+
+/** CompactReq is the request body for POST /api/v1/tasks/{id}/compact. */
+@Serializable
+data class CompactReq(val instructions: String? = null)
 
 /**
  * CILogResp is the response for GET /api/v1/tasks/{id}/ci-log.

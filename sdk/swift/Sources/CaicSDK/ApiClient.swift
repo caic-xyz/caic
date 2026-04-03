@@ -171,6 +171,14 @@ public final class ApiClient {
     public func restartTask(id: String, req: RestartReq) async throws -> StatusResp {
         try await request("POST", path: "/api/v1/tasks/\(id)/restart", body: try encoder.encode(req))
     }
+    /// Clears context and restarts the agent session without a prompt.
+    public func clearContext(id: String) async throws -> StatusResp {
+        try await request("POST", path: "/api/v1/tasks/\(id)/clear-context")
+    }
+    /// Sends a compact command to reduce the agent's context window usage.
+    public func compactContext(id: String, req: CompactReq) async throws -> StatusResp {
+        try await request("POST", path: "/api/v1/tasks/\(id)/compact", body: try encoder.encode(req))
+    }
     /// Requests graceful stop of a running task.
     public func stopTask(id: String) async throws -> StatusResp {
         try await request("POST", path: "/api/v1/tasks/\(id)/stop")

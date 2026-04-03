@@ -37,9 +37,10 @@ const (
 
 // HarnessInfo is the JSON representation of an available harness.
 type HarnessInfo struct {
-	Name           string   `json:"name"`
-	Models         []string `json:"models"`
-	SupportsImages bool     `json:"supportsImages"`
+	Name            string   `json:"name"`
+	Models          []string `json:"models"`
+	SupportsImages  bool     `json:"supportsImages"`
+	SupportsCompact bool     `json:"supportsCompact"`
 }
 
 // ImageData carries a single base64-encoded image.
@@ -262,6 +263,11 @@ type InputReq struct {
 // RestartReq is the request body for POST /api/v1/tasks/{id}/restart.
 type RestartReq struct {
 	Prompt Prompt `json:"prompt"`
+}
+
+// CompactReq is the request body for POST /api/v1/tasks/{id}/compact.
+type CompactReq struct {
+	Instructions string `json:"instructions,omitempty"`
 }
 
 // DiffFileStat describes changes to a single file.

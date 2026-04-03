@@ -1,4 +1,4 @@
-// Bottom input bar with send, sync, stop, purge, revive, and optional image attach actions.
+// Bottom input bar with send, sync, stop, purge, revive, clear context, compact, and optional image attach actions.
 package com.fghbuild.caic.ui.taskdetail
 
 import androidx.compose.foundation.Image
@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
@@ -92,6 +93,9 @@ fun InputBar(
     onAttachCamera: () -> Unit = {},
     onScreenshot: () -> Unit = {},
     onRemoveImage: (Int) -> Unit = {},
+    onClearContext: () -> Unit = {},
+    onCompact: () -> Unit = {},
+    supportsCompact: Boolean = false,
     safetyIssues: List<SafetyIssue> = emptyList(),
     onForceSync: () -> Unit = {},
 ) {
@@ -222,9 +226,11 @@ fun InputBar(
                     }
                 }
             }
+            val waitingStates = setOf("waiting", "asking", "has_plan")
             val activeStates = setOf("waiting", "running", "asking", "has_plan")
             val isStopped = taskState == "stopped"
             val isActive = taskState in activeStates
+            val isWaiting = taskState in waitingStates
             if (pendingAction == "stop" || pendingAction == "purge" || pendingAction == "revive") {
                 CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(8.dp))
             } else if (isStopped) {
@@ -324,6 +330,35 @@ fun InputBar(
                             }
                         },
                     )
+                }
+            }
+            if (pendingAction == "clear-context" || pendingAction == "compact") {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(8.dp))
+            } else {
+                var contextMenuExpanded by remember { mutableStateOf(false) }
+                Box {
+                    Tip("Context actions") {
+                        IconButton(onClick = { contextMenuExpanded = true }, enabled = !busy) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Context actions")
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = contextMenuExpanded,
+                        onDismissRequest = { contextMenuExpanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Clear context") },
+                            enabled = false,
+                            onClick = { contextMenuExpanded = false; onClearContext() },
+                        )
+                        if (supportsCompact) {
+                            DropdownMenuItem(
+                                text = { Text("Compact context") },
+                                enabled = isWaiting,
+                                onClick = { contextMenuExpanded = false; onCompact() },
+                            )
+                        }
+                    }
                 }
             }
         }

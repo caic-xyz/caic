@@ -163,6 +163,23 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 	return writeJSON(wr, req)
 }
 
+// WriteCompact implements agent.CompactCommand by sending a thread/compact/start
+// JSON-RPC request. Codex compacts the context window for the current thread.
+func (w *wireFormat) WriteCompact(wr io.Writer, _ string, _ io.Writer) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.threadID == "" {
+		return errors.New("codex: no thread ID (handshake not completed)")
+	}
+	req := jsonrpcRequest{
+		JSONRPC: "2.0",
+		ID:      w.nextID.Add(1),
+		Method:  "thread/compact/start",
+		Params:  ThreadCompactStartParams{ThreadID: w.threadID},
+	}
+	return writeJSON(wr, req)
+}
+
 // ParseMessage wraps the package-level ParseMessage with two interceptions:
 //
 //   - thread/tokenUsage/updated → emits UsageMessage (incremental Last

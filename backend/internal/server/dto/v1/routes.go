@@ -190,6 +190,21 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[StatusResp](),
 	},
 	{
+		Name:   "clearContext",
+		Doc:    "Clears context and restarts the agent session without a prompt.",
+		Method: "POST",
+		Path:   "/api/v1/tasks/{id}/clear-context",
+		Resp:   reflect.TypeFor[StatusResp](),
+	},
+	{
+		Name:   "compactContext",
+		Doc:    "Sends a compact command to reduce the agent's context window usage.",
+		Method: "POST",
+		Path:   "/api/v1/tasks/{id}/compact",
+		Req:    reflect.TypeFor[CompactReq](),
+		Resp:   reflect.TypeFor[StatusResp](),
+	},
+	{
 		Name:   "stopTask",
 		Doc:    "Requests graceful stop of a running task.",
 		Method: "POST",

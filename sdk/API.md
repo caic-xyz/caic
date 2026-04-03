@@ -43,6 +43,8 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | GET | `/api/v1/tasks/{id}/events` | Streams backend-neutral task events via SSE. |  | `EventMessage` SSE |
 | POST | `/api/v1/tasks/{id}/input` | Sends user input to a running task. | `InputReq` | `StatusResp` |
 | POST | `/api/v1/tasks/{id}/restart` | Restarts a completed or errored task with a new prompt. | `RestartReq` | `StatusResp` |
+| POST | `/api/v1/tasks/{id}/clear-context` | Clears context and restarts the agent session without a prompt. |  | `StatusResp` |
+| POST | `/api/v1/tasks/{id}/compact` | Sends a compact command to reduce the agent's context window usage. | `CompactReq` | `StatusResp` |
 | POST | `/api/v1/tasks/{id}/stop` | Requests graceful stop of a running task. |  | `StatusResp` |
 | POST | `/api/v1/tasks/{id}/purge` | Permanently deletes a task and its container. |  | `StatusResp` |
 | POST | `/api/v1/tasks/{id}/revive` | Reconnects to an orphaned task container. |  | `StatusResp` |
@@ -191,6 +193,7 @@ HarnessInfo is the JSON representation of an available harness.
 | `name` | `string` |  | yes |
 | `models` | `string[]` |  | yes |
 | `supportsImages` | `boolean` |  | yes |
+| `supportsCompact` | `boolean` |  | yes |
 
 ### WellKnownCache
 
@@ -718,6 +721,14 @@ RestartReq is the request body for POST /api/v1/tasks/{id}/restart.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `prompt` | `Prompt` |  | yes |
+
+### CompactReq
+
+CompactReq is the request body for POST /api/v1/tasks/{id}/compact.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `instructions` | `string` |  |  |
 
 ### CILogResp
 

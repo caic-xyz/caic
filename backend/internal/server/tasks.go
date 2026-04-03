@@ -400,6 +400,35 @@ func (s *Server) restartTask(_ context.Context, entry *taskEntry, req *v1.Restar
 	return &v1.StatusResp{Status: "restarted"}, nil
 }
 
+func (s *Server) clearContext(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
+	t := entry.task
+	if state := t.GetState(); state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan {
+		return nil, dto.Conflict("task is not waiting or asking")
+	}
+	primaryName := ""
+	if p := t.Primary(); p != nil {
+		primaryName = p.Name
+	}
+	runner := s.runners[primaryName]
+	// Use the server-lifetime context, not the HTTP request context.
+	h, err := runner.ClearContextSession(s.ctx, t) //nolint:contextcheck // intentionally using server context
+	if err != nil {
+		return nil, dto.InternalError(err.Error())
+	}
+	s.watchSession(entry, runner, h)
+	s.mu.Lock()
+	s.taskChanged()
+	s.mu.Unlock()
+	return &v1.StatusResp{Status: "cleared"}, nil
+}
+
+func (s *Server) compactContext(ctx context.Context, entry *taskEntry, req *v1.CompactReq) (*v1.StatusResp, error) {
+	if err := entry.task.SendCompact(ctx, req.Instructions); err != nil {
+		return nil, dto.Conflict(err.Error())
+	}
+	return &v1.StatusResp{Status: "compacting"}, nil
+}
+
 func (s *Server) stopTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
 	state := entry.task.GetState()
 	if state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan && state != task.StateRunning {

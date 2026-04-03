@@ -160,6 +160,20 @@ test("generate documentation screenshots", async ({ page, api }) => {
     }
   }
 
+  // Screenshot 6: Mobile — task detail at phone viewport.
+  await bugFixCard.first().click();
+  await page.waitForTimeout(500);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(300);
+  // Verify the context menu toggle is visible at mobile width.
+  const contextToggle = page.locator("[aria-label='Context actions']");
+  await expect(contextToggle).toBeVisible({ timeout: 3_000 });
+  await page.screenshot({
+    path: path.join(screenshotDir, "task-detail-mobile.png"),
+  });
+  // Restore desktop viewport.
+  await page.setViewportSize({ width: 1280, height: 800 });
+
   // Convert remaining PNG screenshots to lossless AVIF (skip if AVIF already exists, e.g. animation).
   const fs2 = await import("fs");
   const { execSync: exec2 } = await import("child_process");

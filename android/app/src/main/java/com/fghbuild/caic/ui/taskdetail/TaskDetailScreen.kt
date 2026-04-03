@@ -579,6 +579,9 @@ fun TaskDetailScreen(
                             screenshotLauncher.launch(mpm.createScreenCaptureIntent())
                         },
                         onRemoveImage = viewModel::removeImage,
+                        onClearContext = viewModel::clearContext,
+                        onCompact = viewModel::compactContext,
+                        supportsCompact = state.supportsCompact,
                         safetyIssues = state.safetyIssues,
                         onForceSync = {
                             viewModel.dismissSafetyIssues()

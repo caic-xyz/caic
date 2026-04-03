@@ -200,4 +200,6 @@ func (*fakeBackend) Models() []string { return []string{"fake-model"} }
 
 func (*fakeBackend) SupportsImages() bool { return true }
 
+func (*fakeBackend) SupportsCompact() bool { return true }
+
 func (*fakeBackend) ContextWindowLimit(string) int { return 180_000 }

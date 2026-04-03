@@ -77,6 +77,13 @@ type WireFormat interface {
 	ParseMessage(line []byte) ([]Message, error)
 }
 
+// CompactCommand is an optional interface for WireFormat implementations that
+// support context compaction. The server checks for this capability to
+// conditionally enable the compact button in the UI.
+type CompactCommand interface {
+	WriteCompact(w io.Writer, instructions string, logW io.Writer) error
+}
+
 // Session manages a running agent process.
 type Session struct {
 	cmd       *exec.Cmd
@@ -166,6 +173,18 @@ func (s *Session) SendRaw(data []byte) error {
 		_, _ = s.logW.Write(data)
 	}
 	return nil
+}
+
+// SendCompact sends a compact command to the agent. Returns an error if the
+// backend's wire format does not implement CompactCommand.
+func (s *Session) SendCompact(instructions string) error {
+	cc, ok := s.wire.(CompactCommand)
+	if !ok {
+		return errors.New("compact not supported by this backend")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cc.WriteCompact(s.stdin, instructions, s.logW)
 }
 
 // Close sends the null-byte sentinel to the relay daemon (triggering graceful

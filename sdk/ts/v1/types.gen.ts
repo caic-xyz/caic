@@ -406,6 +406,7 @@ export interface HarnessInfo {
   name: string;
   models: string[];
   supportsImages: boolean;
+  supportsCompact: boolean;
 }
 /**
  * ImageData carries a single base64-encoded image.
@@ -682,6 +683,12 @@ export interface InputReq {
  */
 export interface RestartReq {
   prompt: Prompt;
+}
+/**
+ * CompactReq is the request body for POST /api/v1/tasks/{id}/compact.
+ */
+export interface CompactReq {
+  instructions?: string;
 }
 /**
  * DiffFileStat describes changes to a single file.
