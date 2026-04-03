@@ -58,6 +58,28 @@ export function stateColor(state: string): string {
   }
 }
 
+const STALE_THRESHOLD_MS = 3_600_000; // 1 hour
+
+/** True when the last state change is older than 1 hour. */
+export function isCacheStale(stateUpdatedAtSec: number, nowMs: number): boolean {
+  return stateUpdatedAtSec > 0 && nowMs - stateUpdatedAtSec * 1000 > STALE_THRESHOLD_MS;
+}
+
+/** Blend a hex color toward a target hex by `amount` (0–1). */
+function blendHex(hex: string, target: string, amount: number): string {
+  const ch = (s: string, i: number) => parseInt(s.slice(i, i + 2), 16);
+  const mix = (a: number, t: number) => Math.round(a + (t - a) * amount);
+  const r = mix(ch(hex, 1), ch(target, 1));
+  const g = mix(ch(hex, 3), ch(target, 3));
+  const bl = mix(ch(hex, 5), ch(target, 5));
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${bl.toString(16).padStart(2, "0")}`;
+}
+
+/** Returns a redder variant of the state color when the cache is stale. */
+export function staleStateColor(state: string): string {
+  return blendHex(stateColor(state), "#dc3545", 0.25);
+}
+
 export function toolCallDetail(name: string, input: Record<string, unknown>): string {
   switch (name.toLowerCase()) {
     case "read":

@@ -64,6 +64,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.caic.ui.theme.appColors
+import com.fghbuild.caic.ui.theme.isCacheStale
+import com.fghbuild.caic.ui.theme.staleStateColor
 import com.fghbuild.caic.ui.theme.stateColor
 import com.fghbuild.caic.ui.theme.waitingStates
 import com.fghbuild.caic.util.createCameraPhotoUri
@@ -375,9 +377,11 @@ fun TaskDetailScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                                val detailStale = isCacheStale(it.state, it.stateUpdatedAt)
+                                val badgeColor = if (detailStale) staleStateColor(it.state) else stateColor(it.state)
                                 Surface(
                                     shape = RoundedCornerShape(4.dp),
-                                    color = stateColor(it.state),
+                                    color = badgeColor,
                                 ) {
                                     Text(
                                         text = it.state,

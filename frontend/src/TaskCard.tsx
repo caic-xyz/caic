@@ -10,7 +10,7 @@ import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
 import RestoreIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
 import TimerIcon from "@material-symbols/svg-400/outlined/timer.svg?solid";
 import styles from "./TaskCard.module.css";
-import { formatElapsed, formatTokens, tokenColor, stateColor } from "./formatting";
+import { formatElapsed, formatTokens, tokenColor, stateColor, staleStateColor, isCacheStale } from "./formatting";
 
 export interface TaskCardProps {
   id: string;
@@ -57,6 +57,7 @@ const terminalStates = new Set(["stopping", "stopped", "purging", "purged", "fai
 
 export default function TaskCard(props: TaskCardProps) {
   const isTerminal = () => terminalStates.has(props.state);
+  const stale = () => props.state !== "running" && isCacheStale(props.stateUpdatedAt, props.now());
   const [titleTruncated, setTitleTruncated] = createSignal(false);
   let titleRef: HTMLElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
 
@@ -192,9 +193,11 @@ export default function TaskCard(props: TaskCardProps) {
           <Show when={props.forgePR && props.ciStatus} keyed>
             {(status) => <CIDot status={status as CIStatus} checks={props.ciChecks} />}
           </Show>
-          <span class={styles.badge} style={{ background: stateColor(props.state) }}>
-            {props.state}
-          </span>
+          <Tooltip text="Prompt cache likely expired — continuing may use more tokens" disabled={!stale()}>
+            <span class={styles.badge} style={{ background: stale() ? staleStateColor(props.state) : stateColor(props.state) }}>
+              {props.state}
+            </span>
+          </Tooltip>
         </>;
         const repoSpan = (r: { baseBranch?: string; branch: string; name: string }, showName: boolean) => <>
           <Show when={r.baseBranch && r.branch}>

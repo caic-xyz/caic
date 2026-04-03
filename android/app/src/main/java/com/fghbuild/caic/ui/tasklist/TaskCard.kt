@@ -51,6 +51,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.Task
 import com.fghbuild.caic.ui.theme.appColors
+import com.fghbuild.caic.ui.theme.isCacheStale
+import com.fghbuild.caic.ui.theme.staleStateColor
 import com.fghbuild.caic.ui.theme.stateColor
 import com.fghbuild.caic.util.formatCost
 import com.fghbuild.caic.util.formatElapsed
@@ -398,13 +400,7 @@ private fun TimingBadges(task: Task, autoFixPR: Boolean) {
         if (task.forgePR != null && task.ciStatus != null) {
             CiDot(task.ciStatus)
         }
-        Surface(shape = RoundedCornerShape(4.dp), color = stateColor(task.state)) {
-            Text(
-                text = task.state,
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-            )
-        }
+        StateBadge(task)
     }
 }
 
@@ -423,13 +419,7 @@ private fun StatusBadges(task: Task, autoFixPR: Boolean) {
         if (task.forgePR != null && task.ciStatus != null) {
             CiDot(task.ciStatus)
         }
-        Surface(shape = RoundedCornerShape(4.dp), color = stateColor(task.state)) {
-            Text(
-                text = task.state,
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-            )
-        }
+        StateBadge(task)
     }
 }
 
@@ -533,6 +523,27 @@ private fun AutoBadge() {
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StateBadge(task: Task) {
+    val stale = isCacheStale(task.state, task.stateUpdatedAt)
+    val color = if (stale) staleStateColor(task.state) else stateColor(task.state)
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text("Prompt cache likely expired — continuing may use more tokens") } },
+        state = rememberTooltipState(),
+        enableUserInput = stale,
+    ) {
+        Surface(shape = RoundedCornerShape(4.dp), color = color) {
+            Text(
+                text = task.state,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+            )
+        }
     }
 }
 

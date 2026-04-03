@@ -25,6 +25,25 @@ fun stateColor(state: String): Color = when (state) {
     else -> Color(0xFFFFF3CD)
 }
 
+private val RedTarget = Color(0xFFDC3545)
+private const val STALE_BLEND = 0.25f
+
+/** Returns a redder variant of the state color when the prompt cache is stale. */
+fun staleStateColor(state: String): Color {
+    val base = stateColor(state)
+    return Color(
+        red = base.red + (RedTarget.red - base.red) * STALE_BLEND,
+        green = base.green + (RedTarget.green - base.green) * STALE_BLEND,
+        blue = base.blue + (RedTarget.blue - base.blue) * STALE_BLEND,
+    )
+}
+
+private const val STALE_THRESHOLD_SEC = 3600.0
+
+/** True when the last state change is older than 1 hour. */
+fun isCacheStale(state: String, stateUpdatedAt: Double): Boolean =
+    state != "running" && stateUpdatedAt > 0 && System.currentTimeMillis() / 1000.0 - stateUpdatedAt > STALE_THRESHOLD_SEC
+
 val activeStates = setOf(
     "running", "branching", "provisioning", "starting",
     "waiting", "asking", "has_plan", "stopping", "purging",
