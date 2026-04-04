@@ -8,6 +8,7 @@ import {
   stopTask,
   purgeTask,
   reviveTask,
+  forkTask,
   getUsage,
   cloneRepo,
   taskEvents,
@@ -106,6 +107,8 @@ export class FunctionHandlers {
           return await this.handlePurgeTask(args);
         case "task_revive":
           return await this.handleReviveTask(args);
+        case "task_fork":
+          return await this.handleForkTask(args);
         case "get_usage":
           return await this.handleGetUsage();
         case "clone_repo":
@@ -243,6 +246,21 @@ export class FunctionHandlers {
     if (!taskId) return errorResult("Unknown task number");
     await reviveTask(taskId);
     return textResult(`Reviving task #${num}.`);
+  }
+
+  private async handleForkTask(args: FunctionArgs): Promise<Record<string, unknown>> {
+    const num = requireInt(args, "task_number");
+    const taskId = this.taskNumberMap.toId(num);
+    if (!taskId) return errorResult("Unknown task number");
+    const prompt = requireString(args, "prompt");
+    const harness = optString(args, "harness");
+    const model = optString(args, "model");
+    const resp = await forkTask(taskId, {
+      prompt: { text: prompt },
+      ...(harness ? { harness } : {}),
+      ...(model ? { model } : {}),
+    });
+    return textResult(`Forked task #${num}. New task ID: ${resp.id}`);
   }
 
   private async handleGetUsage(): Promise<Record<string, unknown>> {

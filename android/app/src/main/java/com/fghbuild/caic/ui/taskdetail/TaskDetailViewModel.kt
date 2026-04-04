@@ -14,6 +14,9 @@ import com.caic.sdk.v1.HarnessInfo
 import com.caic.sdk.v1.ImageData
 import com.caic.sdk.v1.InputReq
 import com.caic.sdk.v1.Prompt
+import com.caic.sdk.v1.ForkTaskReq
+import com.caic.sdk.v1.Repo
+import com.caic.sdk.v1.RepoSpec
 import com.caic.sdk.v1.RestartReq
 import com.caic.sdk.v1.SafetyIssue
 import com.caic.sdk.v1.SyncReq
@@ -62,6 +65,8 @@ data class TaskDetailState(
     val pendingImages: List<ImageData> = emptyList(),
     val supportsImages: Boolean = false,
     val supportsCompact: Boolean = false,
+    val harnesses: List<HarnessInfo> = emptyList(),
+    val allRepos: List<Repo> = emptyList(),
 )
 
 private val TerminalStates = setOf("stopping", "stopped", "purging", "purged", "failed")
@@ -85,6 +90,7 @@ class TaskDetailViewModel @Inject constructor(
     private val _inputDraft = MutableStateFlow(draftStore.get(taskId).text)
     private val _pendingImages = MutableStateFlow(draftStore.get(taskId).images)
     private val _harnesses = MutableStateFlow<List<HarnessInfo>>(emptyList())
+    private val _repos = MutableStateFlow<List<Repo>>(emptyList())
 
     private var sseJob: Job? = null
 
@@ -106,7 +112,7 @@ class TaskDetailViewModel @Inject constructor(
         listOf(
             taskRepository.tasks, _grouped, _isReady, _sending,
             _pendingAction, _actionError, _safetyIssues, _inputDraft,
-            _pendingImages, _harnesses, _statsHistory,
+            _pendingImages, _harnesses, _statsHistory, _repos,
         )
     ) { values ->
         val tasks = values[0] as List<Task>
@@ -121,6 +127,7 @@ class TaskDetailViewModel @Inject constructor(
         val harnesses = values[9] as List<HarnessInfo>
         @Suppress("UNCHECKED_CAST")
         val statsHist = values[10] as List<EventStats>
+        val repos = values[11] as List<Repo>
         val task = tasks.firstOrNull { it.id == taskId }
         val taskHarness = harnesses.firstOrNull { it.name == task?.harness }
         val imgSupport = task != null && taskHarness?.supportsImages == true
@@ -146,12 +153,15 @@ class TaskDetailViewModel @Inject constructor(
             pendingImages = images,
             supportsImages = imgSupport,
             supportsCompact = compactSupport,
+            harnesses = harnesses,
+            allRepos = repos,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskDetailState())
 
     init {
         connectSSE()
         loadHarnesses()
+        loadRepos()
     }
 
     private fun apiClient(): ApiClient =
@@ -165,6 +175,18 @@ class TaskDetailViewModel @Inject constructor(
                 _harnesses.value = apiClient().listHarnesses()
             } catch (_: Exception) {
                 // Non-critical; attach button will just stay hidden.
+            }
+        }
+    }
+
+    private fun loadRepos() {
+        viewModelScope.launch {
+            val url = taskRepository.serverURL()
+            if (url.isBlank()) return@launch
+            try {
+                _repos.value = apiClient().listRepos()
+            } catch (_: Exception) {
+                // Non-critical; fork dialog will just show no extra repos.
             }
         }
     }
@@ -356,6 +378,29 @@ class TaskDetailViewModel @Inject constructor(
                 client.reviveTask(taskId)
             } catch (e: Exception) {
                 showActionError("revive failed: ${e.message}")
+            } finally {
+                _pendingAction.value = null
+            }
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
+    fun forkTask(prompt: String, harness: String? = null, model: String? = null, extraRepos: List<RepoSpec>? = null) {
+        _pendingAction.value = "fork"
+        viewModelScope.launch {
+            try {
+                val client = apiClient()
+                client.forkTask(
+                    taskId,
+                    ForkTaskReq(
+                        prompt = Prompt(text = prompt),
+                        harness = harness,
+                        model = model?.ifBlank { null },
+                        extraRepos = extraRepos,
+                    ),
+                )
+            } catch (e: Exception) {
+                showActionError("fork failed: ${e.message}")
             } finally {
                 _pendingAction.value = null
             }

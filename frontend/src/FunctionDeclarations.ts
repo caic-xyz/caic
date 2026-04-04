@@ -167,6 +167,24 @@ export function buildFunctionDeclarations(
       scheduling: "INTERRUPT",
     },
     {
+      name: "task_fork",
+      description: "Fork a running or waiting task, creating a snapshot of its container on a new branch. The prompt describes what the forked task should do. Optionally override the harness and model.",
+      parameters: objectSchema(
+        {
+          task_number: intProp("The task number to fork, e.g. 1 for task #1"),
+          prompt: stringProp("The initial prompt for the forked task"),
+          harness:
+            harnesses.length > 0
+              ? enumProp("Override harness (optional, inherits from source if omitted)", harnesses)
+              : stringProp("Override harness (optional)"),
+          model: stringProp("Override model (optional, inherits from source if omitted)"),
+        },
+        ["task_number", "prompt"],
+      ),
+      behavior: "BLOCKING",
+      scheduling: "INTERRUPT",
+    },
+    {
       name: "get_usage",
       description: "Check current API quota utilization and limits.",
       parameters: emptyObjectSchema,

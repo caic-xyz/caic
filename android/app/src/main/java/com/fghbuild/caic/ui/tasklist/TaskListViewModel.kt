@@ -20,6 +20,7 @@ import com.caic.sdk.v1.UsageResp
 import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.data.TaskNotifier
 import com.fghbuild.caic.data.TaskRepository
+import com.fghbuild.caic.ui.common.RepoEntry
 import com.fghbuild.caic.ui.theme.terminalStates
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,8 +43,6 @@ private val taskIdDesc = compareByDescending<Task> { it.id?.length ?: 0 }
 
 // Compare by last state change time descending (most recently active first).
 private val taskStateUpdatedDesc = compareByDescending<Task> { it.stateUpdatedAt }
-
-data class RepoEntry(val path: String, val branch: String)
 
 data class TaskGroup(
     val repo: String,

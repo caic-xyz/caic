@@ -1,7 +1,8 @@
-// Bottom input bar with send, sync, stop, purge, revive, clear context, compact, and optional image attach actions.
+// Bottom input bar with send, sync, fork, stop, purge, revive, clear context, compact, and optional image attach actions.
 package com.fghbuild.caic.ui.taskdetail
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.res.painterResource
@@ -38,12 +39,12 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberTooltipState
-import com.fghbuild.caic.ui.theme.appColors
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +52,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.key.Key
@@ -62,10 +65,15 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.caic.sdk.v1.HarnessInfo
 import com.caic.sdk.v1.ImageData
+import com.caic.sdk.v1.Repo
+import com.caic.sdk.v1.RepoSpec
 import com.caic.sdk.v1.SafetyIssue
-import com.fghbuild.caic.ui.theme.appColors
 import com.fghbuild.caic.ui.common.AttachMenu
+import com.fghbuild.caic.ui.common.RepoChipStrip
+import com.fghbuild.caic.ui.common.RepoEntry
+import com.fghbuild.caic.ui.theme.appColors
 import com.fghbuild.caic.util.imageDataToBitmap
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -79,11 +87,18 @@ fun InputBar(
     onStop: () -> Unit,
     onPurge: () -> Unit,
     onRevive: () -> Unit,
+    onFork: (prompt: String, harness: String?, model: String?, extraRepos: List<RepoSpec>?) -> Unit = { _, _, _, _ -> },
     taskState: String = "",
     taskTitle: String = "",
     taskRepo: String = "",
     taskBranch: String = "",
     taskBaseBranch: String = "",
+    taskHarness: String = "",
+    taskModel: String = "",
+    harnesses: List<HarnessInfo> = emptyList(),
+    allRepos: List<Repo> = emptyList(),
+    forkAvailableRecent: List<Repo> = emptyList(),
+    forkAvailableRest: List<Repo> = emptyList(),
     sending: Boolean,
     pendingAction: String?,
     forge: String? = null,
@@ -237,7 +252,7 @@ fun InputBar(
             val isStopped = taskState == "stopped"
             val isActive = taskState in activeStates
             val isWaiting = taskState in waitingStates
-            if (pendingAction == "stop" || pendingAction == "purge" || pendingAction == "revive") {
+            if (pendingAction == "stop" || pendingAction == "purge" || pendingAction == "revive" || pendingAction == "fork") {
                 CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(8.dp))
             } else if (isStopped) {
                 Tip("Revive") {
@@ -342,6 +357,8 @@ fun InputBar(
                 CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(8.dp))
             } else {
                 var contextMenuExpanded by remember { mutableStateOf(false) }
+                var showForkDialog by remember { mutableStateOf(false) }
+                var forkPrompt by remember { mutableStateOf("") }
                 Box {
                     Tip("Context actions") {
                         IconButton(onClick = { contextMenuExpanded = true }, enabled = !busy) {
@@ -364,7 +381,100 @@ fun InputBar(
                                 onClick = { contextMenuExpanded = false; onCompact() },
                             )
                         }
+                        if (taskRepo.isNotEmpty()) {
+                            DropdownMenuItem(
+                                text = { Text("Fork") },
+                                onClick = { contextMenuExpanded = false; showForkDialog = true },
+                            )
+                        }
                     }
+                }
+                if (showForkDialog) {
+                    val forkFocus = remember { FocusRequester() }
+                    var forkSelectedHarness by remember { mutableStateOf(taskHarness) }
+                    var forkSelectedModel by remember { mutableStateOf(taskModel) }
+                    var forkExtraRepos by remember { mutableStateOf(emptyList<RepoEntry>()) }
+                    val forkExtraPaths = forkExtraRepos.map { it.path }.toSet()
+                    AlertDialog(
+                        onDismissRequest = { showForkDialog = false },
+                        title = { Text("Fork task") },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = forkPrompt,
+                                    onValueChange = { forkPrompt = it },
+                                    label = { Text("Prompt for forked task") },
+                                    modifier = Modifier.fillMaxWidth().focusRequester(forkFocus),
+                                )
+                                if (forkAvailableRecent.isNotEmpty() || forkAvailableRest.isNotEmpty() ||
+                                    forkExtraRepos.isNotEmpty()
+                                ) {
+                                    RepoChipStrip(
+                                        selectedRepos = forkExtraRepos,
+                                        repos = allRepos,
+                                        availableRecent = forkAvailableRecent.filter { it.path !in forkExtraPaths },
+                                        availableRest = forkAvailableRest.filter { it.path !in forkExtraPaths },
+                                        editingBranches = emptyList(),
+                                        enabled = true,
+                                        onAdd = { path ->
+                                            forkExtraRepos = forkExtraRepos + RepoEntry(path, "")
+                                        },
+                                        onRemove = { path ->
+                                            forkExtraRepos = forkExtraRepos.filter { it.path != path }
+                                        },
+                                        onSetBranch = { path, branch ->
+                                            forkExtraRepos = forkExtraRepos.map {
+                                                if (it.path == path) it.copy(branch = branch) else it
+                                            }
+                                        },
+                                        onLoadBranches = {},
+                                    )
+                                }
+                                if (harnesses.size > 1) {
+                                    ForkDropdown(
+                                        label = "Harness",
+                                        selected = forkSelectedHarness,
+                                        options = harnesses.map { it.name },
+                                        onSelect = { h ->
+                                            forkSelectedHarness = h
+                                            val models = harnesses.firstOrNull { it.name == h }?.models.orEmpty()
+                                            if (forkSelectedModel !in models) forkSelectedModel = ""
+                                        },
+                                    )
+                                }
+                                val models =
+                                    harnesses.firstOrNull { it.name == forkSelectedHarness }?.models.orEmpty()
+                                if (models.isNotEmpty()) {
+                                    ForkDropdown(
+                                        label = "Model",
+                                        selected = forkSelectedModel.ifBlank { "Default" },
+                                        options = listOf("Default") + models,
+                                        onSelect = { m ->
+                                            forkSelectedModel = if (m == "Default") "" else m
+                                        },
+                                    )
+                                }
+                                LaunchedEffect(Unit) { forkFocus.requestFocus() }
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    showForkDialog = false
+                                    val h = forkSelectedHarness.takeIf { it != taskHarness }
+                                    val m = forkSelectedModel.takeIf { it != taskModel }
+                                    val extras = forkExtraRepos.takeIf { it.isNotEmpty() }?.map {
+                                        RepoSpec(name = it.path, baseBranch = it.branch.ifBlank { null })
+                                    }
+                                    onFork(forkPrompt.trim(), h, m, extras)
+                                },
+                                enabled = forkPrompt.isNotBlank(),
+                            ) { Text("Fork") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showForkDialog = false }) { Text("Cancel") }
+                        },
+                    )
                 }
             }
         }
@@ -380,6 +490,41 @@ private fun Tip(text: String, content: @Composable () -> Unit) {
         state = rememberTooltipState(),
         content = content,
     )
+}
+
+@Composable
+private fun ForkDropdown(label: String, selected: String, options: List<String>, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Box {
+            Row(
+                modifier = Modifier
+                    .clip(MaterialTheme.shapes.small)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable { expanded = true }
+                    .padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(selected, style = MaterialTheme.typography.bodyMedium)
+                Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { option ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                option,
+                                fontWeight = if (option == selected) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        },
+                        onClick = { onSelect(option); expanded = false },
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable

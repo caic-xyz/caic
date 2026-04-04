@@ -25,6 +25,7 @@ export const {
   restartTask,
   clearContext,
   compactContext,
+  forkTask,
   stopTask,
   purgeTask,
   reviveTask,

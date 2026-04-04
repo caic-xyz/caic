@@ -6,6 +6,7 @@ import com.caic.sdk.v1.BotFixCIReq
 import com.caic.sdk.v1.BotFixPRReq
 import com.caic.sdk.v1.CloneRepoReq
 import com.caic.sdk.v1.CreateTaskReq
+import com.caic.sdk.v1.ForkTaskReq
 import com.caic.sdk.v1.EventKinds
 import com.caic.sdk.v1.InputReq
 import com.caic.sdk.v1.Prompt
@@ -48,6 +49,7 @@ class FunctionHandlers(
                 "task_stop" -> handleStopTask(args)
                 "task_purge" -> handlePurgeTask(args)
                 "task_revive" -> handleReviveTask(args)
+                "task_fork" -> handleForkTask(args)
                 "get_usage" -> handleGetUsage()
                 "clone_repo" -> handleCloneRepo(args)
                 "task_get_last_message_from_assistant" -> handleGetLastMessage(args)
@@ -184,6 +186,19 @@ class FunctionHandlers(
         val num = args.requireInt("task_number")
         apiClient.reviveTask(taskId)
         return textResult("Reviving task #$num.")
+    }
+
+    private suspend fun handleForkTask(args: JsonObject): JsonElement {
+        val taskId = resolveTaskNumber(args) ?: return errorResult("Unknown task number")
+        val num = args.requireInt("task_number")
+        val prompt = args.requireString("prompt")
+        val harness = args.optString("harness")
+        val model = args.optString("model")
+        val resp = apiClient.forkTask(
+            taskId,
+            ForkTaskReq(prompt = Prompt(text = prompt), harness = harness, model = model),
+        )
+        return textResult("Forked task #$num. New task ID: ${resp.id}")
     }
 
     private suspend fun handleGetUsage(): JsonElement {

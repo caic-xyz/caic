@@ -2,8 +2,10 @@
 import { createEffect, createSignal, For, Show, Switch, Match, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useNavigate, useLocation } from "@solidjs/router";
-import type { BranchInfo, HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp } from "@sdk/types.gen";
-import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, listRepoBranches, createTask, cloneRepo, getUsage, stopTask, purgeTask, reviveTask, botFixCI } from "./api";
+import type { Harness, HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp } from "@sdk/types.gen";
+import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI } from "./api";
+import RepoChipStrip from "./RepoChipStrip";
+import type { RepoEntry } from "./RepoChipStrip";
 import { useAuth } from "./AuthContext";
 import Login from "./Login";
 import TaskDetail from "./TaskDetail";
@@ -81,15 +83,7 @@ export default function App() {
   const [submitting, setSubmitting] = createSignal(false);
   const [initializing, setInitializing] = createSignal(true);
   const [repos, setRepos] = createSignal<Repo[]>([]);
-  type RepoEntry = { path: string; branch: string };
   const [selectedRepos, setSelectedRepos] = createSignal<RepoEntry[]>([]);
-  // Branch dropdown state: which chip is open, its fetched branch list, and the trigger's rect.
-  const [editingPath, setEditingPath] = createSignal<string | null>(null);
-  const [editingBranches, setEditingBranches] = createSignal<BranchInfo[]>([]);
-  const [branchTriggerRect, setBranchTriggerRect] = createSignal<DOMRect | null>(null);
-  const [branchFilter, setBranchFilter] = createSignal("");
-  // Add-repo dropdown open state.
-  const [addOpen, setAddOpen] = createSignal(false);
   const [selectedModel, setSelectedModel] = createSignal("");
   const [selectedImage, setSelectedImage] = createSignal("");
   const [harnesses, setHarnesses] = createSignal<HarnessInfo[]>([]);
@@ -241,33 +235,6 @@ export default function App() {
   // Repos available to add (not already selected).
   const availableRecent = () => repos().slice(0, recentCount()).filter((r) => !selectedRepos().some((s) => s.path === r.path));
   const availableRest = () => repos().slice(recentCount()).filter((r) => !selectedRepos().some((s) => s.path === r.path));
-
-  function addRepo(path: string) {
-    if (selectedRepos().some((r) => r.path === path)) return;
-    setSelectedRepos((prev) => [...prev, { path, branch: "" }]);
-    setAddOpen(false);
-  }
-
-  function removeRepo(path: string) {
-    setSelectedRepos((prev) => prev.filter((r) => r.path !== path));
-    if (editingPath() === path) setEditingPath(null);
-  }
-
-  function startEditBranch(path: string, triggerRect: DOMRect) {
-    if (editingPath() === path) { setEditingPath(null); return; }
-    setEditingPath(path);
-    setBranchTriggerRect(triggerRect);
-    setBranchFilter(selectedRepos().find((r) => r.path === path)?.branch ?? "");
-    setEditingBranches([]);
-    listRepoBranches(path).then((r) => setEditingBranches(r.branches)).catch(() => {});
-  }
-
-  function commitBranch(branch: string) {
-    const path = editingPath();
-    if (!path) return;
-    setSelectedRepos((prev) => prev.map((r) => r.path === path ? { ...r, branch } : r));
-    setEditingPath(null);
-  }
 
   // In-memory per-harness model preferences from the server.
   let prefModels: Record<string, string> = {};
@@ -583,6 +550,54 @@ export default function App() {
     }
   }
 
+  // Fork dialog state.
+  const [forkTaskId, setForkTaskId] = createSignal<string | null>(null);
+  const [forkPrompt, setForkPrompt] = createSignal("");
+  const [forkHarness, setForkHarness] = createSignal("");
+  const [forkModel, setForkModel] = createSignal("");
+  const [forkExtraRepos, setForkExtraRepos] = createSignal<RepoEntry[]>([]);
+
+  // Repos available to add in the fork dialog (exclude already-selected extras and source task repos).
+  const forkSourceRepoPaths = () => {
+    const id = forkTaskId();
+    if (!id) return new Set<string>();
+    const task = tasks().find((t) => t.id === id);
+    return new Set((task?.repos ?? []).map((r) => r.name));
+  };
+  const forkAvailableRecent = () => repos().slice(0, recentCount()).filter((r) => !forkSourceRepoPaths().has(r.path) && !forkExtraRepos().some((s) => s.path === r.path));
+  const forkAvailableRest = () => repos().slice(recentCount()).filter((r) => !forkSourceRepoPaths().has(r.path) && !forkExtraRepos().some((s) => s.path === r.path));
+
+  function handleFork(id: string) {
+    const task = tasks().find((t) => t.id === id);
+    setForkTaskId(id);
+    setForkPrompt("");
+    setForkHarness(task?.harness ?? selectedHarness());
+    setForkModel(task?.model ?? "");
+    setForkExtraRepos([]);
+  }
+
+  async function submitFork() {
+    const id = forkTaskId();
+    const text = forkPrompt().trim();
+    if (!id || !text) return;
+    setForkTaskId(null);
+    try {
+      const h = forkHarness();
+      const m = forkModel();
+      const extras = forkExtraRepos();
+      const sourceTask = tasks().find((t) => t.id === id);
+      const resp = await forkTask(id, {
+        prompt: { text },
+        harness: h !== (sourceTask?.harness ?? "") ? h as Harness : undefined,
+        model: m !== (sourceTask?.model ?? "") ? m : undefined,
+        extraRepos: extras.length > 0 ? extras.map((r) => ({ name: r.path, ...(r.branch ? { baseBranch: r.branch } : {}) })) : undefined,
+      });
+      navigate(`/task/${resp.id}`);
+    } catch {
+      // Fork failed — no state to clean up.
+    }
+  }
+
   async function submitTask() {
     const p = prompt().trim();
     const imgs = pendingImages();
@@ -691,171 +706,17 @@ export default function App() {
       </div>
 
       <form onSubmit={(e) => { e.preventDefault(); submitTask(); }} class={`${styles.submitForm} ${selectedId() ? styles.hidden : ""}`}>
-        {/* Repo chip strip */}
-        {(() => {
-          let addRef: HTMLButtonElement | undefined;
-          let dropdownRef: HTMLDivElement | undefined;
-          let branchDropdownRef: HTMLDivElement | undefined;
-          const onAddClickOutside = (e: MouseEvent) => {
-            const inTrigger = addRef?.contains(e.target as Node) ?? false;
-            const inDropdown = dropdownRef?.contains(e.target as Node) ?? false;
-            if (!inTrigger && !inDropdown) setAddOpen(false);
-          };
-          createEffect(() => {
-            if (addOpen()) document.addEventListener("click", onAddClickOutside, true);
-            else document.removeEventListener("click", onAddClickOutside, true);
-            onCleanup(() => document.removeEventListener("click", onAddClickOutside, true));
-          });
-          // Position the add-repo portal dropdown below its trigger button.
-          createEffect(() => {
-            if (!addOpen() || !dropdownRef || !addRef) return;
-            const r = addRef.getBoundingClientRect();
-            const gap = 4;
-            const margin = 8;
-            const available = window.innerHeight - r.bottom - gap - margin;
-            dropdownRef.style.top = `${r.bottom + gap}px`;
-            dropdownRef.style.left = `${r.left}px`;
-            dropdownRef.style.maxHeight = `${Math.min(available, 480)}px`;
-          });
-          // Close branch dropdown on outside click.
-          const onBranchClickOutside = (e: MouseEvent) => {
-            if (branchDropdownRef?.contains(e.target as Node)) return;
-            setEditingPath(null);
-          };
-          createEffect(() => {
-            if (editingPath()) document.addEventListener("click", onBranchClickOutside, true);
-            else document.removeEventListener("click", onBranchClickOutside, true);
-            onCleanup(() => document.removeEventListener("click", onBranchClickOutside, true));
-          });
-          // Position the branch portal dropdown below the clicked chip.
-          createEffect(() => {
-            if (!editingPath() || !branchDropdownRef) return;
-            const r = branchTriggerRect();
-            if (!r) return;
-            const gap = 4;
-            const margin = 8;
-            const available = window.innerHeight - r.bottom - gap - margin;
-            branchDropdownRef.style.top = `${r.bottom + gap}px`;
-            branchDropdownRef.style.left = `${r.left}px`;
-            branchDropdownRef.style.maxHeight = `${Math.min(available, 360)}px`;
-          });
-          return (
-            <div class={styles.repoChips} data-testid="repo-chips">
-              <Show when={editingPath()}>
-                <Portal>
-                  <div ref={(el) => { branchDropdownRef = el; }} class={styles.branchDropdown}>
-                    <input
-                      ref={(el) => setTimeout(() => el.focus(), 0)}
-                      type="text"
-                      class={styles.branchInput}
-                      placeholder="Branch name…"
-                      value={branchFilter()}
-                      onInput={(e) => setBranchFilter(e.currentTarget.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") { commitBranch(branchFilter()); e.preventDefault(); }
-                        if (e.key === "Escape") { setEditingPath(null); e.preventDefault(); }
-                      }}
-                    />
-                    <Show when={!branchFilter()}>
-                      <button type="button" class={styles.dropdownOption}
-                        onClick={() => commitBranch("")}
-                      >
-                        {(() => {
-                          const base = repos().find((r) => r.path === editingPath())?.baseBranch;
-                          const remote = base?.remote;
-                          const branch = base?.name ?? "main";
-                          return <><span class={styles.dropdownOptionMuted}>Default</span>{" "}({remote ? `${remote}/` : ""}{branch})</>;
-                        })()}
-                      </button>
-                    </Show>
-                    <For each={editingBranches().filter((b) => {
-                      const f = branchFilter().toLowerCase();
-                      return !f || b.name.toLowerCase().includes(f);
-                    })}>
-                      {(b) => (
-                        <button type="button" class={`${styles.dropdownOption}${selectedRepos().find((r) => r.path === editingPath())?.branch === b.name ? ` ${styles.dropdownOptionActive}` : ""}`}
-                          onClick={() => commitBranch(b.name)}
-                        >{b.name}{b.remote && <span class={styles.dropdownOptionMuted}> ({b.remote})</span>}</button>
-                      )}
-                    </For>
-                  </div>
-                </Portal>
-              </Show>
-              <For each={selectedRepos()}>
-                {(entry) => (
-                  <span class={styles.repoChip}>
-                    <button
-                      type="button"
-                      class={`${styles.chipLabel} ${editingPath() === entry.path ? styles.chipLabelActive : ""}`}
-                      onClick={(e) => startEditBranch(entry.path, (e.currentTarget as HTMLButtonElement).getBoundingClientRect())}
-                      title="Click to set branch"
-                      data-testid={`chip-label-${entry.path}`}
-                    >
-                      {entry.path.split("/").pop()}
-                      <Show when={entry.branch}>
-                        <span class={styles.chipBranch}> · {entry.branch}</span>
-                      </Show>
-                    </button>
-                    <button
-                      type="button"
-                      class={styles.chipRemove}
-                      onClick={() => removeRepo(entry.path)}
-                      aria-label={`Remove ${entry.path}`}
-                      data-testid={`chip-remove-${entry.path}`}
-                    >×</button>
-                  </span>
-                )}
-              </For>
-              <Show when={availableRecent().length > 0 || availableRest().length > 0}>
-                <div class={styles.addRepoWrap}>
-                  <button
-                    ref={(el) => { addRef = el; }}
-                    type="button"
-                    class={styles.addRepoBtn}
-                    onClick={() => setAddOpen((v) => !v)}
-                    data-testid="add-repo-button"
-                    title="Add a repository"
-                  >+</button>
-                  <Show when={addOpen()}>
-                    <Portal>
-                    <div ref={(el) => { dropdownRef = el; }} class={styles.addRepoDropdown} data-testid="add-repo-dropdown">
-                      <Show when={availableRecent().length > 0}>
-                        <div class={styles.dropdownGroupLabel}>Recent</div>
-                        <For each={[...availableRecent()].sort((a, b) => a.path < b.path ? -1 : 1)}>
-                          {(r) => (
-                            <button type="button" class={styles.dropdownOption} onClick={() => addRepo(r.path)}>
-                              {r.path}
-                            </button>
-                          )}
-                        </For>
-                      </Show>
-                      <Show when={availableRest().length > 0}>
-                        <Show when={availableRecent().length > 0}>
-                          <div class={styles.dropdownGroupLabel}>All repositories</div>
-                        </Show>
-                        <For each={availableRest()}>
-                          {(r) => (
-                            <button type="button" class={styles.dropdownOption} onClick={() => addRepo(r.path)}>
-                              {r.path}
-                            </button>
-                          )}
-                        </For>
-                      </Show>
-                    </div>
-                    </Portal>
-                  </Show>
-                </div>
-              </Show>
-              <button
-                type="button"
-                class={styles.cloneButton}
-                onClick={() => { setCloneOpen(true); setCloneError(""); }}
-                title="Clone a repository"
-                data-testid="clone-toggle"
-              >⎘</button>
-            </div>
-          );
-        })()}
+        <RepoChipStrip
+          repos={repos}
+          selectedRepos={selectedRepos}
+          onAdd={(path) => { if (!selectedRepos().some((r) => r.path === path)) setSelectedRepos((prev) => [...prev, { path, branch: "" }]); }}
+          onRemove={(path) => setSelectedRepos((prev) => prev.filter((r) => r.path !== path))}
+          onSetBranch={(path, branch) => setSelectedRepos((prev) => prev.map((r) => r.path === path ? { ...r, branch } : r))}
+          availableRecent={availableRecent}
+          availableRest={availableRest}
+          onClone={() => { setCloneOpen(true); setCloneError(""); }}
+          data-testid="repo-chips"
+        />
         <Show when={harnesses().length > 1}>
           <select
             value={selectedHarness()}
@@ -1022,6 +883,7 @@ export default function App() {
                   diffStat={selectedTask()?.diffStat}
                   supportsImages={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsImages}
                   supportsCompact={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsCompact}
+                  onFork={handleFork}
                   onClose={() => navigate("/")}
                   inputDraft={inputDrafts().get(id) ?? ""}
                   onInputDraft={(v) => setInputDrafts((prev) => { const next = new Map(prev); next.set(id, v); return next; })}
@@ -1033,6 +895,69 @@ export default function App() {
           </Match>
         </Switch>
       </div>
+      <Show when={forkTaskId()}>
+        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events -- backdrop dismiss is supplementary to Cancel button */}
+        <div class={styles.forkOverlay} onClick={(e) => { if (e.target === e.currentTarget) setForkTaskId(null); }}>
+          <div class={styles.forkDialog} role="dialog" aria-modal="true">
+            <h2 class={styles.forkTitle}>Fork task</h2>
+            <input
+              type="text"
+              value={forkPrompt()}
+              onInput={(e) => setForkPrompt(e.currentTarget.value)}
+              placeholder="Prompt for forked task"
+              class={styles.forkInput}
+              autofocus
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitFork(); } if (e.key === "Escape") setForkTaskId(null); }}
+            />
+            <Show when={forkAvailableRecent().length > 0 || forkAvailableRest().length > 0 || forkExtraRepos().length > 0}>
+              <RepoChipStrip
+                repos={repos}
+                selectedRepos={forkExtraRepos}
+                onAdd={(path) => setForkExtraRepos((prev) => [...prev, { path, branch: "" }])}
+                onRemove={(path) => setForkExtraRepos((prev) => prev.filter((r) => r.path !== path))}
+                onSetBranch={(path, branch) => setForkExtraRepos((prev) => prev.map((r) => r.path === path ? { ...r, branch } : r))}
+                availableRecent={forkAvailableRecent}
+                availableRest={forkAvailableRest}
+                showClone={false}
+              />
+            </Show>
+            <div class={styles.forkRow}>
+              <Show when={harnesses().length > 1}>
+                <select
+                  value={forkHarness()}
+                  onChange={(e) => {
+                    const h = e.currentTarget.value;
+                    setForkHarness(h);
+                    const models = harnesses().find((x) => x.name === h)?.models ?? [];
+                    setForkModel(models.includes(forkModel()) ? forkModel() : "");
+                  }}
+                  class={styles.modelSelect}
+                >
+                  <For each={harnesses()}>
+                    {(h) => <option value={h.name}>{h.name}</option>}
+                  </For>
+                </select>
+              </Show>
+              <Show when={(harnesses().find((h) => h.name === forkHarness())?.models ?? []).length > 0}>
+                <select
+                  value={forkModel()}
+                  onChange={(e) => setForkModel(e.currentTarget.value)}
+                  class={styles.modelSelect}
+                >
+                  <option value="">Default model</option>
+                  <For each={harnesses().find((h) => h.name === forkHarness())?.models ?? []}>
+                    {(m) => <option value={m}>{m}</option>}
+                  </For>
+                </select>
+              </Show>
+            </div>
+            <div class={styles.forkActions}>
+              <button type="button" class={styles.forkCancel} onClick={() => setForkTaskId(null)}>Cancel</button>
+              <Button type="button" onClick={submitFork} disabled={!forkPrompt().trim()}>Fork</Button>
+            </div>
+          </div>
+        </div>
+      </Show>
       <Show when={settingsOpen()}>
         <div
           class={styles.settingsOverlay}

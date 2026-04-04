@@ -211,6 +211,25 @@ fun buildFunctionDeclarations(
         scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
+        name = "task_fork",
+        description = "Fork a running or waiting task, snapshotting its container on a new branch." +
+            " The prompt describes what the forked task should do." +
+            " Optionally override the harness and model.",
+        parameters = objectSchema(
+            "task_number" to intProp("The task number to fork, e.g. 1 for task #1"),
+            "prompt" to stringProp("The initial prompt for the forked task"),
+            "harness" to if (harnesses.isNotEmpty()) {
+                enumProp("Override harness (optional, inherits from source if omitted)", harnesses)
+            } else {
+                stringProp("Override harness (optional)")
+            },
+            "model" to stringProp("Override model (optional, inherits from source if omitted)"),
+            required = listOf("task_number", "prompt"),
+        ),
+        behavior = "BLOCKING",
+        scheduling = "INTERRUPT",
+    ),
+    FunctionDeclaration(
         name = "get_usage",
         description = "Check current task cost and token usage for rolling 5-hour and 7-day windows.",
         parameters = emptyObjectSchema,

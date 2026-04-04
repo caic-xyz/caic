@@ -61,6 +61,7 @@ interface Props {
   diffStat?: DiffFileStat[];
   supportsImages?: boolean;
   supportsCompact?: boolean;
+  onFork?: (id: string) => void;
   onClose: () => void;
   inputDraft: string;
   onInputDraft: (value: string) => void;
@@ -716,6 +717,9 @@ export default function TaskDetail(props: Props) {
                   <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDisabled}`} disabled onClick={() => { setContextMenuOpen(false); doClearContext(); }}>Clear context</button>
                   <Show when={props.supportsCompact}>
                     <button type="button" class={`${styles.syncDropdownItem} ${!isWaiting() ? styles.syncDropdownItemDisabled : ""}`} disabled={!isWaiting()} onClick={() => { setContextMenuOpen(false); doCompact(); }}>Compact context</button>
+                  </Show>
+                  <Show when={props.onFork && props.repo}>
+                    <button type="button" class={styles.syncDropdownItem} onClick={() => { setContextMenuOpen(false); props.onFork?.(props.taskId); }}>Fork</button>
                   </Show>
                 </div>
               </Show>

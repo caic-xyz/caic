@@ -1,0 +1,178 @@
+/* Styles for the RepoChipStrip component. */
+
+.repoChips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.repoChip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-input);
+  overflow: hidden;
+}
+
+.chipLabel {
+  padding: 0.35rem 0.4rem 0.35rem 0.6rem;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chipLabel:hover {
+  background: var(--color-bg-input-hover);
+}
+
+.chipLabelActive {
+  background: var(--color-bg-input-hover);
+}
+
+.chipBranch {
+  color: var(--color-text-secondary);
+}
+
+.chipRemove {
+  padding: 0.35rem 0.45rem 0.35rem 0.2rem;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.chipRemove:hover {
+  color: inherit;
+  background: var(--color-bg-input-hover);
+}
+
+.addRepoWrap {
+  display: contents;
+}
+
+.addRepoBtn {
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-input);
+  color: inherit;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.addRepoBtn:hover {
+  background: var(--color-bg-input-hover);
+}
+
+.addRepoDropdown {
+  position: fixed;
+  min-width: 12rem;
+  overflow-y: auto;
+  padding: 0.25rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 1100;
+}
+
+.dropdownGroupLabel {
+  padding: 0.25rem 0.75rem 0.15rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dropdownOption {
+  display: block;
+  width: 100%;
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dropdownOption:hover {
+  background: var(--color-bg-hover);
+}
+
+.branchDropdown {
+  position: fixed;
+  width: max-content;
+  min-width: 10rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0.25rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  z-index: 1100;
+}
+
+.branchInput {
+  display: block;
+  width: calc(100% - 1rem);
+  margin: 0.25rem 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  font-size: 0.85rem;
+  outline: none;
+}
+
+.branchInput:focus {
+  border-color: var(--color-primary);
+}
+
+.dropdownOptionMuted {
+  color: var(--color-text-muted);
+}
+
+.dropdownOptionActive {
+  font-weight: 600;
+}
+
+.cloneButton {
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-input);
+  color: inherit;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.cloneButton:hover:not(:disabled) {
+  background: var(--color-bg-input-hover);
+}
+
+.cloneButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

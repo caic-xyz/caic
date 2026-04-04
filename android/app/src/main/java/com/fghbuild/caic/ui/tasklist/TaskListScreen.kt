@@ -54,8 +54,8 @@ import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberTooltipState
@@ -88,6 +88,7 @@ import com.caic.sdk.v1.Repo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.fghbuild.caic.ui.common.AttachMenu
+import com.fghbuild.caic.ui.common.RepoChipStrip
 import com.fghbuild.caic.ui.login.LoginScreen
 import com.fghbuild.caic.util.ScreenshotService
 import com.fghbuild.caic.util.bitmapToImageData
@@ -477,7 +478,7 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
     val models = state.harnesses.firstOrNull { it.name == state.selectedHarness }?.models.orEmpty()
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        RepoChipStrip(
+        TaskCreationRepoStrip(
             state = state,
             viewModel = viewModel,
             onShowCloneDialog = { showCloneDialog = true },
@@ -543,37 +544,26 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RepoChipStrip(
+private fun TaskCreationRepoStrip(
     state: TaskListState,
     viewModel: TaskListViewModel,
     onShowCloneDialog: () -> Unit,
     models: List<String>,
 ) {
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-        modifier = Modifier.fillMaxWidth(),
+    RepoChipStrip(
+        selectedRepos = state.selectedRepos,
+        repos = state.repos,
+        availableRecent = state.availableRecent,
+        availableRest = state.availableRest,
+        editingBranches = state.editingBranches,
+        enabled = !state.submitting,
+        onAdd = viewModel::addRepo,
+        onRemove = viewModel::removeRepo,
+        onSetBranch = viewModel::setBranch,
+        onLoadBranches = viewModel::loadBranchesForPath,
     ) {
-        state.selectedRepos.forEach { entry ->
-            RepoChip(
-                entry = entry,
-                baseBranch = state.repos.find { it.path == entry.path }?.baseBranch ?: BranchInfo("main"),
-                editingBranches = state.editingBranches,
-                enabled = !state.submitting,
-                onRemove = { viewModel.removeRepo(entry.path) },
-                onSetBranch = { branch -> viewModel.setBranch(entry.path, branch) },
-                onLoadBranches = { viewModel.loadBranchesForPath(entry.path) },
-            )
-        }
-        if (state.availableRecent.isNotEmpty() || state.availableRest.isNotEmpty()) {
-            AddRepoChip(
-                availableRecent = state.availableRecent,
-                availableRest = state.availableRest,
-                onAdd = viewModel::addRepo,
-            )
-        }
         TooltipBox(
             positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
             tooltip = { PlainTooltip { Text("Clone repository") } },
@@ -604,163 +594,6 @@ private fun RepoChipStrip(
                 options = models,
                 onSelect = viewModel::selectModel,
             )
-        }
-    }
-}
-
-@Composable
-private fun RepoChip(
-    entry: RepoEntry,
-    baseBranch: BranchInfo,
-    editingBranches: List<BranchInfo>,
-    enabled: Boolean,
-    onRemove: () -> Unit,
-    onSetBranch: (String) -> Unit,
-    onLoadBranches: () -> Unit,
-) {
-    var branchOpen by remember { mutableStateOf(false) }
-    var branchFilter by remember { mutableStateOf("") }
-    val shortName = entry.path.substringAfterLast("/")
-    Box {
-        Row(
-            modifier = Modifier
-                .clip(MaterialTheme.shapes.small)
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .clickable(enabled = enabled) {
-                        branchOpen = !branchOpen
-                        if (branchOpen) {
-                            branchFilter = entry.branch
-                            onLoadBranches()
-                        }
-                    }
-                    .padding(start = 10.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(shortName, style = MaterialTheme.typography.bodyMedium)
-                    if (entry.branch.isNotEmpty()) {
-                        Text(
-                            " · ${entry.branch}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-            Box(
-                modifier = Modifier
-                    .clickable(enabled = enabled, onClick = onRemove)
-                    .padding(start = 4.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
-            ) {
-                Text("×", style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-        DropdownMenu(expanded = branchOpen, onDismissRequest = { branchOpen = false }) {
-            OutlinedTextField(
-                value = branchFilter,
-                onValueChange = { branchFilter = it },
-                placeholder = { Text("Branch name…", style = MaterialTheme.typography.bodySmall) },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp).widthIn(min = 180.dp),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = {
-                    onSetBranch(branchFilter)
-                    branchOpen = false
-                }),
-            )
-            if (branchFilter.isEmpty()) {
-                DropdownMenuItem(
-                    text = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("Default ", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            val prefix = if (!baseBranch.remote.isNullOrEmpty()) "${baseBranch.remote}/" else ""
-                            Text("($prefix${baseBranch.name})")
-                        }
-                    },
-                    onClick = { onSetBranch(""); branchOpen = false },
-                )
-            }
-            val filterLower = branchFilter.lowercase()
-            editingBranches.filter { filterLower.isEmpty() || it.name.lowercase().contains(filterLower) }
-                .forEach { branch ->
-                    DropdownMenuItem(
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    branch.name,
-                                    fontWeight = if (branch.name == entry.branch) FontWeight.Bold else FontWeight.Normal,
-                                )
-                                if (!branch.remote.isNullOrEmpty()) {
-                                    Text(
-                                        " (${branch.remote})",
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                            }
-                        },
-                        onClick = { onSetBranch(branch.name); branchOpen = false },
-                    )
-                }
-        }
-    }
-}
-
-@Composable
-private fun AddRepoChip(
-    availableRecent: List<Repo>,
-    availableRest: List<Repo>,
-    onAdd: (String) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        Box(
-            modifier = Modifier
-                .clip(MaterialTheme.shapes.small)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .clickable { expanded = true }
-                .padding(horizontal = 10.dp, vertical = 6.dp),
-        ) {
-            Text("+", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (availableRecent.isNotEmpty()) {
-                Text(
-                    text = "Recent",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-                )
-                availableRecent.sortedBy { it.path }.forEach { repo ->
-                    DropdownMenuItem(
-                        text = { Text(repo.path, style = MaterialTheme.typography.bodyMedium) },
-                        onClick = { onAdd(repo.path); expanded = false },
-                    )
-                }
-            }
-            if (availableRecent.isNotEmpty() && availableRest.isNotEmpty()) {
-                HorizontalDivider()
-            }
-            if (availableRest.isNotEmpty()) {
-                if (availableRecent.isNotEmpty()) {
-                    Text(
-                        text = "All repositories",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-                    )
-                }
-                availableRest.forEach { repo ->
-                    DropdownMenuItem(
-                        text = { Text(repo.path, style = MaterialTheme.typography.bodyMedium) },
-                        onClick = { onAdd(repo.path); expanded = false },
-                    )
-                }
-            }
         }
     }
 }

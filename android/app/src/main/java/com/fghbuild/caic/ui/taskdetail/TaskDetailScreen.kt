@@ -39,8 +39,8 @@ import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberTooltipState
@@ -559,11 +559,23 @@ fun TaskDetailScreen(
                         onStop = viewModel::stopTask,
                         onPurge = viewModel::purgeTask,
                         onRevive = viewModel::reviveTask,
+                        onFork = { prompt, harness, model, extraRepos ->
+                            viewModel.forkTask(prompt, harness, model, extraRepos)
+                        },
                         taskState = task?.state ?: "",
                         taskTitle = task?.title ?: "",
                         taskRepo = task?.repos?.firstOrNull()?.name ?: "",
                         taskBranch = task?.repos?.firstOrNull()?.branch ?: "",
                         taskBaseBranch = task?.repos?.firstOrNull()?.baseBranch ?: "",
+                        taskHarness = task?.harness ?: "",
+                        taskModel = task?.model ?: "",
+                        harnesses = state.harnesses,
+                        allRepos = state.allRepos,
+                        forkAvailableRecent = run {
+                            val taskRepoPaths = (task?.repos ?: emptyList()).map { it.name }.toSet()
+                            state.allRepos.filter { it.path !in taskRepoPaths }
+                        },
+                        forkAvailableRest = emptyList(),
                         sending = state.sending,
                         pendingAction = state.pendingAction,
                         forge = task?.repos?.firstOrNull()?.forge,
