@@ -82,6 +82,10 @@ def run_tests(port):
 
 def pull_screenshots():
     """Pull screenshots from device, convert to webp, clean up."""
+    has_ffmpeg = shutil.which("ffmpeg") is not None
+    if not has_ffmpeg:
+        print("WARNING: ffmpeg not found; screenshots will be kept as PNG", file=sys.stderr)
+
     device_dir = "/sdcard/Pictures/caic-screenshots"
     result = subprocess.run(
         ["adb", "shell", "ls", f"{device_dir}/"],
@@ -103,13 +107,16 @@ def pull_screenshots():
         local_png = os.path.join(SCREENSHOT_DIR, f"{name}.png")
         local_webp = os.path.join(SCREENSHOT_DIR, f"{name}.webp")
         subprocess.run(["adb", "pull", remote, local_png], capture_output=True)
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", local_png, "-lossless", "1", local_webp],
-            capture_output=True,
-        )
-        if os.path.exists(local_png):
-            os.remove(local_png)
-        print(f"  {name}.webp")
+        if has_ffmpeg:
+            subprocess.check_call(
+                ["ffmpeg", "-y", "-i", local_png, "-lossless", "1", local_webp],
+                capture_output=True,
+            )
+            if os.path.exists(local_png):
+                os.remove(local_png)
+            print(f"  {name}.webp")
+        else:
+            print(f"  {name}.png")
 
     subprocess.run(
         ["adb", "shell", "rm", "-rf", device_dir],
