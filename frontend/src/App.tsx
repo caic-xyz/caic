@@ -9,6 +9,7 @@ import Login from "./Login";
 import TaskDetail from "./TaskDetail";
 import DiffDetail from "./DiffDetail";
 import TaskList from "./TaskList";
+import { confirmTaskAction } from "./TaskCard";
 import PromptInput from "./PromptInput";
 import Button from "./Button";
 import { requestNotificationPermission, notifyWaiting, dismissNotification } from "./notifications";
@@ -166,7 +167,7 @@ export default function App() {
         if (t) {
           e.preventDefault();
           const terminalPurge = new Set(["stopping", "purging", "purged", "failed"]);
-          if (!terminalPurge.has(t.state) && window.confirm(`Purge container?\n\n${t.title}\nbranch: ${t.repos?.[0]?.branch ?? ""}`)) {
+          if (!terminalPurge.has(t.state) && confirmTaskAction("Purge", t.title, t.repos?.[0]?.branch ?? "")) {
             handlePurge(t.id);
           }
         }

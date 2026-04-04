@@ -54,6 +54,11 @@ export interface TaskCardProps {
 
 const terminalStates = new Set(["stopping", "stopped", "purging", "purged", "failed"]);
 
+/** Confirm a destructive task action (purge or stop) with a dialog. */
+export function confirmTaskAction(action: "Purge" | "Stop", title: string, branch: string): boolean {
+  return window.confirm(`${action} container?\n\n${title}\nbranch: ${branch}`);
+}
+
 
 export default function TaskCard(props: TaskCardProps) {
   const isTerminal = () => terminalStates.has(props.state);
@@ -120,7 +125,7 @@ export default function TaskCard(props: TaskCardProps) {
                 <button
                   class={styles.purgeIcon}
                   disabled={props.actionLoading}
-                  onClick={(e) => { e.stopPropagation(); if (window.confirm(`Purge container?\n\n${props.title}\nbranch: ${props.repos?.[0]?.branch ?? ""}`)) props.onPurge?.(); }}
+                  onClick={(e) => { e.stopPropagation(); if (confirmTaskAction("Purge", props.title, props.repos?.[0]?.branch ?? "")) props.onPurge?.(); }}
                   title="Purge"
                   data-testid="purge-task"
                 >
@@ -138,16 +143,16 @@ export default function TaskCard(props: TaskCardProps) {
                 onClick={(e) => {
                   e.stopPropagation();
                   if (e.shiftKey && props.onPurge) {
-                    if (window.confirm(`Purge container?\n\n${props.title}\nbranch: ${props.repos?.[0]?.branch ?? ""}`)) props.onPurge();
+                    if (confirmTaskAction("Purge", props.title, props.repos?.[0]?.branch ?? "")) props.onPurge();
                   } else if (props.state === "running") {
-                    if (window.confirm(`Stop container?\n\n${props.title}\nbranch: ${props.repos?.[0]?.branch ?? ""}`)) props.onStop?.();
+                    if (confirmTaskAction("Stop", props.title, props.repos?.[0]?.branch ?? "")) props.onStop?.();
                   } else {
                     props.onStop?.();
                   }
                 }}
                 onDblClick={(e) => {
                   e.stopPropagation();
-                  if (props.onPurge && window.confirm(`Purge container?\n\n${props.title}\nbranch: ${props.repos?.[0]?.branch ?? ""}`)) props.onPurge();
+                  if (props.onPurge && confirmTaskAction("Purge", props.title, props.repos?.[0]?.branch ?? "")) props.onPurge();
                 }}
                 title="Stop (shift-click or double-click to purge)"
                 data-testid="stop-task"
