@@ -650,7 +650,8 @@ func TestParseMessage(t *testing.T) {
 		}
 	})
 	t.Run("RateLimitEvent", func(t *testing.T) {
-		line := `{"type":"rate_limit_event","uuid":"u1","session_id":"s1","rate_limit_info":{"status":"allowed_warning","resets_at":1711000000,"rate_limit_type":"five_hour","utilization":0.85}}`
+		// Wire format uses camelCase (matches Claude Code CLI JSON output).
+		line := `{"type":"rate_limit_event","uuid":"u1","session_id":"s1","rate_limit_info":{"status":"allowed_warning","resetsAt":1711000000,"rateLimitType":"five_hour","utilization":0.85,"isUsingOverage":false}}`
 		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
@@ -673,6 +674,34 @@ func TestParseMessage(t *testing.T) {
 		}
 		if rl.Utilization != 0.85 {
 			t.Errorf("utilization = %v, want 0.85", rl.Utilization)
+		}
+		if rl.IsUsingOverage {
+			t.Error("is_using_overage = true, want false")
+		}
+	})
+	t.Run("RateLimitEventOverage", func(t *testing.T) {
+		// When the plan limit is hit but overage is allowed, status is "rejected"
+		// with isUsingOverage=true and overageResetsAt set.
+		line := `{"type":"rate_limit_event","uuid":"u1","session_id":"s1","rate_limit_info":{"status":"rejected","resetsAt":1775340000,"rateLimitType":"five_hour","overageStatus":"allowed","overageResetsAt":1777593600,"isUsingOverage":true}}`
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		rl := msgs[0].(*agent.RateLimitMessage)
+		if rl.Status != "rejected" {
+			t.Errorf("status = %q, want %q", rl.Status, "rejected")
+		}
+		if rl.RateLimitType != "five_hour" {
+			t.Errorf("rate_limit_type = %q, want %q", rl.RateLimitType, "five_hour")
+		}
+		if !rl.IsUsingOverage {
+			t.Error("is_using_overage = false, want true")
+		}
+		if rl.OverageResetsAt != 1777593600 {
+			t.Errorf("overage_resets_at = %v, want 1777593600", rl.OverageResetsAt)
 		}
 	})
 	t.Run("RateLimitEventMinimal", func(t *testing.T) {

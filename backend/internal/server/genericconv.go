@@ -281,10 +281,12 @@ func (tt *toolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 			Kind: v1.EventKindRateLimit,
 			Ts:   ts,
 			RateLimit: &v1.EventRateLimit{
-				Status:        m.Status,
-				ResetsAt:      m.ResetsAt,
-				RateLimitType: m.RateLimitType,
-				Utilization:   m.Utilization,
+				Status:          m.Status,
+				ResetsAt:        m.ResetsAt,
+				RateLimitType:   m.RateLimitType,
+				Utilization:     m.Utilization,
+				IsUsingOverage:  m.IsUsingOverage,
+				OverageResetsAt: m.OverageResetsAt,
 			},
 		}}
 	default:

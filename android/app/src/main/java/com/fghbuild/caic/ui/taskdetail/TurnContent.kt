@@ -165,26 +165,35 @@ fun MessageGroupContent(
                 event?.kind == EventKinds.RateLimit -> {
                     val rl = event.rateLimit
                     if (rl != null) {
-                        val resetsLabel = if (rl.resetsAt > 0) {
+                        val usingOverage = rl.isUsingOverage == true
+                        val resetsEpoch = if (usingOverage && (rl.overageResetsAt ?: 0.0) > 0) {
+                            rl.overageResetsAt ?: 0.0
+                        } else {
+                            rl.resetsAt
+                        }
+                        val resetsLabel = if (resetsEpoch > 0) {
                             val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-                            " · resets ${fmt.format(java.util.Date((rl.resetsAt * 1000).toLong()))}"
+                            " · resets ${fmt.format(java.util.Date((resetsEpoch * 1000).toLong()))}"
                         } else ""
                         val isRejected = rl.status == "rejected"
-                        val text = if (isRejected) {
+                        val text = if (isRejected && usingOverage) {
+                            "Using extra usage (${rl.rateLimitType.ifBlank { "plan" }} limit reached)$resetsLabel"
+                        } else if (isRejected) {
                             "Rate limited (${rl.rateLimitType.ifBlank { "unknown" }})$resetsLabel"
                         } else {
                             val pct = (rl.utilization * 100).toInt()
                             "Rate limit warning: $pct% of ${rl.rateLimitType.ifBlank { "quota" }} used$resetsLabel"
                         }
-                        val bgColor = if (isRejected) {
-                            MaterialTheme.colorScheme.errorContainer
-                        } else {
+                        val showAsWarning = !isRejected || usingOverage
+                        val bgColor = if (showAsWarning) {
                             MaterialTheme.appColors.warningBg
-                        }
-                        val fgColor = if (isRejected) {
-                            MaterialTheme.colorScheme.onErrorContainer
                         } else {
+                            MaterialTheme.colorScheme.errorContainer
+                        }
+                        val fgColor = if (showAsWarning) {
                             MaterialTheme.appColors.warningText
+                        } else {
+                            MaterialTheme.colorScheme.onErrorContainer
                         }
                         Text(
                             text = text,

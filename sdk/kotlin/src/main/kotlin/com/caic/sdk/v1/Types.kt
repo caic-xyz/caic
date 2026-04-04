@@ -456,6 +456,8 @@ data class EventRateLimit(
     val resetsAt: Double,
     val rateLimitType: String,
     val utilization: Double,
+    val isUsingOverage: Boolean? = null,
+    val overageResetsAt: Double? = null,
 )
 
 /** EventStats is a container resource usage snapshot emitted periodically. */

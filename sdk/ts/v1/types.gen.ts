@@ -339,6 +339,8 @@ export interface EventRateLimit {
   resetsAt: number /* float64 */; // Unix epoch seconds; 0 if unknown.
   rateLimitType: string; // "five_hour", "seven_day", etc.
   utilization: number /* float64 */; // 0.0–1.0.
+  isUsingOverage?: boolean; // True when extra/overage usage is active.
+  overageResetsAt?: number /* float64 */; // Unix epoch seconds; 0 if not using overage.
 }
 /**
  * EventStats is a container resource usage snapshot emitted periodically.

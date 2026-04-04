@@ -664,14 +664,16 @@ type outputRateLimitEvent struct {
 }
 
 // rateLimitInfo is the nested rate limit info inside a rate_limit_event.
+// Wire format uses camelCase (matches Claude Code CLI JSON output).
 type rateLimitInfo struct {
-	Status                string          `json:"status"`
-	ResetsAt              json.RawMessage `json:"resets_at,omitempty"`
-	RateLimitType         json.RawMessage `json:"rate_limit_type,omitempty"`
-	Utilization           json.RawMessage `json:"utilization,omitempty"`
-	OverageStatus         json.RawMessage `json:"overage_status,omitempty"`
-	OverageResetsAt       json.RawMessage `json:"overage_resets_at,omitempty"`
-	OverageDisabledReason json.RawMessage `json:"overage_disabled_reason,omitempty"`
+	Status                string  `json:"status"`
+	ResetsAt              float64 `json:"resetsAt,omitempty"`
+	RateLimitType         string  `json:"rateLimitType,omitempty"`
+	Utilization           float64 `json:"utilization,omitempty"`
+	OverageStatus         string  `json:"overageStatus,omitempty"`
+	OverageResetsAt       float64 `json:"overageResetsAt,omitempty"`
+	OverageDisabledReason string  `json:"overageDisabledReason,omitempty"`
+	IsUsingOverage        bool    `json:"isUsingOverage,omitempty"`
 }
 
 // ---------- documentation-only output types ----------

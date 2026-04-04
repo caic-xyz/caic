@@ -828,16 +828,21 @@ function SessionBoundaryItem(props: { event: EventMessage }) {
 function RateLimitBanner(props: { ev: EventMessage }) {
   const rl = () => props.ev.rateLimit;
   const resetsLabel = () => {
-    const r = rl()?.resetsAt;
+    const r = rl()?.isUsingOverage ? rl()?.overageResetsAt : rl()?.resetsAt;
     if (!r) return "";
     const d = new Date(r * 1000);
     return ` · resets ${d.toLocaleTimeString()}`;
   };
+  const rejectedLabel = () => {
+    const r = rl();
+    if (r?.isUsingOverage) return `Using extra usage (${r.rateLimitType || "plan"} limit reached)`;
+    return `Rate limited (${r?.rateLimitType || "unknown"})`;
+  };
   return (
     <Switch>
       <Match when={rl()?.status === "rejected"}>
-        <div class={styles.rateLimitRejected}>
-          Rate limited ({rl()?.rateLimitType || "unknown"}){resetsLabel()}
+        <div class={rl()?.isUsingOverage ? styles.rateLimitWarning : styles.rateLimitRejected}>
+          {rejectedLabel()}{resetsLabel()}
         </div>
       </Match>
       <Match when={rl()?.status === "allowed_warning"}>

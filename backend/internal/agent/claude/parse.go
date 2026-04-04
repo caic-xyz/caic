@@ -187,10 +187,12 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker, fw *jsonutil.FieldW
 			return nil, err
 		}
 		return []agent.Message{&agent.RateLimitMessage{
-			Status:        w.RateLimitInfo.Status,
-			ResetsAt:      jsonFloat64(w.RateLimitInfo.ResetsAt),
-			RateLimitType: jsonString(w.RateLimitInfo.RateLimitType),
-			Utilization:   jsonFloat64(w.RateLimitInfo.Utilization),
+			Status:          w.RateLimitInfo.Status,
+			ResetsAt:        w.RateLimitInfo.ResetsAt,
+			RateLimitType:   w.RateLimitInfo.RateLimitType,
+			Utilization:     w.RateLimitInfo.Utilization,
+			IsUsingOverage:  w.RateLimitInfo.IsUsingOverage,
+			OverageResetsAt: w.RateLimitInfo.OverageResetsAt,
 		}}, nil
 	case "caic_diff_stat":
 		var m agent.DiffStatMessage
@@ -507,13 +509,4 @@ func jsonString(raw json.RawMessage) string {
 		_ = json.Unmarshal(raw, &s)
 	}
 	return s
-}
-
-// jsonFloat64 extracts a JSON number value from a json.RawMessage.
-func jsonFloat64(raw json.RawMessage) float64 {
-	var f float64
-	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &f)
-	}
-	return f
 }

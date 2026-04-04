@@ -657,6 +657,8 @@ EventRateLimit is emitted when the agent's rate limit status changes.
 | `resetsAt` | `number` | Unix epoch seconds; 0 if unknown. | yes |
 | `rateLimitType` | `string` | "five_hour", "seven_day", etc. | yes |
 | `utilization` | `number` | 0.0–1.0. | yes |
+| `isUsingOverage` | `boolean` | True when extra/overage usage is active. |  |
+| `overageResetsAt` | `number` | Unix epoch seconds; 0 if not using overage. |  |
 
 ### EventStats
 

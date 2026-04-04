@@ -239,10 +239,12 @@ type EventWidgetDelta struct {
 
 // EventRateLimit is emitted when the agent's rate limit status changes.
 type EventRateLimit struct {
-	Status        string  `json:"status"`        // "allowed", "allowed_warning", "rejected".
-	ResetsAt      float64 `json:"resetsAt"`      // Unix epoch seconds; 0 if unknown.
-	RateLimitType string  `json:"rateLimitType"` // "five_hour", "seven_day", etc.
-	Utilization   float64 `json:"utilization"`   // 0.0–1.0.
+	Status          string  `json:"status"`                    // "allowed", "allowed_warning", "rejected".
+	ResetsAt        float64 `json:"resetsAt"`                  // Unix epoch seconds; 0 if unknown.
+	RateLimitType   string  `json:"rateLimitType"`             // "five_hour", "seven_day", etc.
+	Utilization     float64 `json:"utilization"`               // 0.0–1.0.
+	IsUsingOverage  bool    `json:"isUsingOverage,omitempty"`  // True when extra/overage usage is active.
+	OverageResetsAt float64 `json:"overageResetsAt,omitempty"` // Unix epoch seconds; 0 if not using overage.
 }
 
 // EventStats is a container resource usage snapshot emitted periodically.

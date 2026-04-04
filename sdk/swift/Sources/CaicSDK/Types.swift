@@ -532,6 +532,10 @@ public struct EventRateLimit: Codable {
     public let rateLimitType: String
     /// 0.0–1.0.
     public let utilization: Double
+    /// True when extra/overage usage is active.
+    public let isUsingOverage: Bool?
+    /// Unix epoch seconds; 0 if not using overage.
+    public let overageResetsAt: Double?
 }
 
 /// EventStats is a container resource usage snapshot emitted periodically.
