@@ -449,6 +449,7 @@ EventToolUse is emitted when the assistant invokes a tool.
 | `input` | `object` |  | yes |
 | `planContent` | `string` | Snapshot of plan content for ExitPlanMode events. |  |
 | `inputTruncated` | `boolean` | True when Input was omitted due to size; fetch via GET /api/v1/tasks/{id}/tool/{toolUseID}. |  |
+| `background` | `boolean` | True when the tool runs in the background (Bash/Agent run_in_background). |  |
 
 ### EventToolResult
 

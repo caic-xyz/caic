@@ -376,6 +376,8 @@ public struct EventToolUse: Codable {
     public let planContent: String?
     /// True when Input was omitted due to size; fetch via GET /api/v1/tasks/{id}/tool/{toolUseID}.
     public let inputTruncated: Bool?
+    /// True when the tool runs in the background (Bash/Agent run_in_background).
+    public let background: Bool?
 }
 
 /// EventToolResult is emitted when a tool call completes.

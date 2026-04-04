@@ -306,6 +306,7 @@ data class EventToolUse(
     val input: JsonElement,
     val planContent: String? = null,
     val inputTruncated: Boolean? = null,
+    val background: Boolean? = null,
 )
 
 /** EventToolResult is emitted when a tool call completes. */

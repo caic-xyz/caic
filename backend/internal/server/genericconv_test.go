@@ -332,6 +332,36 @@ func TestToolInputTruncation(t *testing.T) {
 			t.Error("truncated input should be nil")
 		}
 	})
+	t.Run("BackgroundTrue", func(t *testing.T) {
+		msg := &agent.ToolUseMessage{ToolUseID: "t3", Name: "Bash", Input: json.RawMessage(`{"command":"sleep 60","run_in_background":true}`)}
+		events := gt.convertMessage(msg, time.Now())
+		if len(events) != 1 {
+			t.Fatalf("got %d events, want 1", len(events))
+		}
+		if !events[0].ToolUse.Background {
+			t.Error("background should be true")
+		}
+	})
+	t.Run("BackgroundAbsent", func(t *testing.T) {
+		msg := &agent.ToolUseMessage{ToolUseID: "t4", Name: "Bash", Input: json.RawMessage(`{"command":"ls"}`)}
+		events := gt.convertMessage(msg, time.Now())
+		if len(events) != 1 {
+			t.Fatalf("got %d events, want 1", len(events))
+		}
+		if events[0].ToolUse.Background {
+			t.Error("background should be false when absent")
+		}
+	})
+	t.Run("BackgroundAgentTool", func(t *testing.T) {
+		msg := &agent.ToolUseMessage{ToolUseID: "t5", Name: "Agent", Input: json.RawMessage(`{"prompt":"search","run_in_background":true}`)}
+		events := gt.convertMessage(msg, time.Now())
+		if len(events) != 1 {
+			t.Fatalf("got %d events, want 1", len(events))
+		}
+		if !events[0].ToolUse.Background {
+			t.Error("background should be true for Agent tool")
+		}
+	})
 }
 
 func TestGenericConvertWidget(t *testing.T) {

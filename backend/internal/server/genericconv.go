@@ -17,6 +17,11 @@ import (
 // GET /api/v1/tasks/{id}/tool/{toolUseID}.
 const inputTruncateThreshold = 4096
 
+// toolInputProbe extracts run_in_background from a tool's raw JSON input.
+type toolInputProbe struct {
+	RunInBackground bool `json:"run_in_background"`
+}
+
 // toolTimingTracker computes per-tool-call duration by recording the timestamp
 // when each tool_use is seen and computing the delta when the corresponding
 // ToolResultMessage arrives.
@@ -70,6 +75,14 @@ func (tt *toolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 			input = nil
 			truncated = true
 		}
+		// Extract run_in_background from tools that support it (Bash, Agent).
+		var bg bool
+		if len(m.Input) > 0 {
+			var probe toolInputProbe
+			if json.Unmarshal(m.Input, &probe) == nil {
+				bg = probe.RunInBackground
+			}
+		}
 		return []v1.EventMessage{{
 			Kind: v1.EventKindToolUse,
 			Ts:   ts,
@@ -79,6 +92,7 @@ func (tt *toolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 				Input:          input,
 				PlanContent:    m.PlanContent,
 				InputTruncated: truncated,
+				Background:     bg,
 			},
 		}}
 	case *agent.AskMessage:

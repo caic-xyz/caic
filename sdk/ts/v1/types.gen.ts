@@ -173,6 +173,7 @@ export interface EventToolUse {
   input: any /* json.RawMessage */;
   planContent?: string; // Snapshot of plan content for ExitPlanMode events.
   inputTruncated?: boolean; // True when Input was omitted due to size; fetch via GET /api/v1/tasks/{id}/tool/{toolUseID}.
+  background?: boolean; // True when the tool runs in the background (Bash/Agent run_in_background).
 }
 /**
  * EventToolResult is emitted when a tool call completes.

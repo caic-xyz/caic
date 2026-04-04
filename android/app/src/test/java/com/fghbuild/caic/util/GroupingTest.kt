@@ -169,16 +169,15 @@ class GroupingTest {
             assertEquals(2, groups[0].toolCalls.size)
         }
 
-        t.run("synchronous tools in last group are marked done immediately") {
-            // Bash is async (emits toolResult); Read is synchronous (no toolResult).
-            // Even before Bash's result arrives, Read should show as done.
+        t.run("non-last tool calls in last group are marked done") {
+            // First call is done (agent moved to second); last call is still pending.
             val groups = groupMessages(listOf(
                 toolUseEvent("t1", "Bash"),
                 toolUseEvent("t2", "Read"),
             ))
             assertEquals(1, groups.size)
-            assertTrue(!groups[0].toolCalls[0].done) // Bash: async, pending
-            assertTrue(groups[0].toolCalls[1].done)  // Read: sync, already done
+            assertTrue(groups[0].toolCalls[0].done)
+            assertTrue(!groups[0].toolCalls[1].done)
         }
 
         t.run("non-last tool groups are implicitly marked done") {

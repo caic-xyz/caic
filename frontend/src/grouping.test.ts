@@ -42,16 +42,15 @@ describe("groupMessages", () => {
     expect(groups[0].toolCalls).toHaveLength(2);
   });
 
-  it("synchronous tools in last group are done immediately", () => {
-    // Bash is async (emits toolResult); Read is synchronous (no toolResult).
-    // Even before Bash's result arrives, Read should show as done.
+  it("non-last tool calls in last group are marked done", () => {
+    // First call is done (agent moved to second); last call is still pending.
     const groups = groupMessages([toolUseEvent("t1", "Bash"), toolUseEvent("t2", "Read")]);
     expect(groups).toHaveLength(1);
-    expect(groups[0].toolCalls[0].done).toBe(false); // Bash: async, pending
-    expect(groups[0].toolCalls[1].done).toBe(true);  // Read: sync, already done
+    expect(groups[0].toolCalls[0].done).toBe(true);
+    expect(groups[0].toolCalls[1].done).toBe(false);
   });
 
-  it("async tool is marked done when its toolResult arrives", () => {
+  it("tool is marked done when its toolResult arrives", () => {
     const groups = groupMessages([
       toolUseEvent("t1", "Bash"),
       toolResultEvent("t1"),

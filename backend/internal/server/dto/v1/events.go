@@ -98,6 +98,7 @@ type EventToolUse struct {
 	Input          json.RawMessage `json:"input"`
 	PlanContent    string          `json:"planContent,omitempty"`    // Snapshot of plan content for ExitPlanMode events.
 	InputTruncated bool            `json:"inputTruncated,omitempty"` // True when Input was omitted due to size; fetch via GET /api/v1/tasks/{id}/tool/{toolUseID}.
+	Background     bool            `json:"background,omitempty"`     // True when the tool runs in the background (Bash/Agent run_in_background).
 }
 
 // EventToolResult is emitted when a tool call completes.

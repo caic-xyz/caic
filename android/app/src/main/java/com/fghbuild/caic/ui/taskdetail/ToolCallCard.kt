@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -70,7 +71,7 @@ fun ToolCallCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    ToolStatusIcon(done = call.done, hasError = hasError)
+                    ToolStatusIcon(done = call.done, hasError = hasError, background = call.use.background == true)
                     Text(
                         text = call.use.name,
                         style = MaterialTheme.typography.labelMedium,
@@ -150,12 +151,18 @@ fun ToolCallCard(
 }
 
 @Composable
-private fun ToolStatusIcon(done: Boolean, hasError: Boolean) {
+private fun ToolStatusIcon(done: Boolean, hasError: Boolean, background: Boolean = false) {
     when {
         hasError -> Icon(
             Icons.Default.Close,
             contentDescription = "Error",
             tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(16.dp),
+        )
+        done && background -> Icon(
+            Icons.Default.MoreVert,
+            contentDescription = "Running in background",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(16.dp),
         )
         done -> Icon(

@@ -1171,7 +1171,11 @@ function ToolCallCard(props: { call: ToolCall; taskId: string; open: boolean; on
       <details class={styles.toolBlock} open={props.open}
         onToggle={(e) => props.onToggle(e.currentTarget.open)}>
         <summary>
-          <Show when={!props.call.done} fallback={<span class={styles.toolDone}>&#10003;</span>}>
+          <Show when={!props.call.done} fallback={
+            <Show when={props.call.use.background} fallback={<span class={styles.toolDone}>&#10003;</span>}>
+              <span class={styles.toolBackground} title="Running in background">&#8943;</span>
+            </Show>
+          }>
             <span class={styles.toolPending} />
           </Show>
           {props.call.use.name}

@@ -57,10 +57,6 @@ data class Session(
     val textCount: Int,
 )
 
-// Tool names (lowercase) that are async and emit explicit toolResult events.
-// All other Claude Code tools complete synchronously and are done as soon as
-// their toolUse event is emitted.
-private val ASYNC_TOOLS = setOf("bash", "task", "show_widget")
 
 /** Returns true if this event starts a new session. */
 fun EventMessage.isSessionBoundary() =
@@ -149,7 +145,8 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
             }
             EventKinds.ToolUse -> {
                 val toolUse = ev.toolUse ?: continue
-                val call = MutableToolCall(use = toolUse, done = toolUse.name.lowercase() !in ASYNC_TOOLS)
+                // All tool calls start as pending; done is set by toolResult or implicit-done pass.
+                val call = MutableToolCall(use = toolUse, done = false)
                 val last = lastGroup()
                 if (last != null && last.kind == GroupKind.ACTION &&
                     last.toolCalls.isNotEmpty() && !usageSinceLastTool
@@ -390,13 +387,20 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
         merged.add(g)
     }
 
-    // Mark tool calls as implicitly done when later events exist.
+    // Mark tool calls as implicitly done when later events prove completion.
+    // Within a group, every non-last non-background call is done (the agent
+    // moved on to the next call). Entire non-last groups are fully done.
     val lastToolIdx = merged.indexOfLast { it.kind == GroupKind.ACTION && it.toolCalls.isNotEmpty() }
     for (i in merged.indices) {
         val g = merged[i]
         if (g.kind != GroupKind.ACTION || g.toolCalls.isEmpty()) continue
         if (i < lastToolIdx || i < merged.size - 1) {
             for (tc in g.toolCalls) tc.done = true
+        } else {
+            // Last action group: mark all but the final non-background call as done.
+            for (j in 0 until g.toolCalls.size - 1) {
+                if (g.toolCalls[j].use.background != true) g.toolCalls[j].done = true
+            }
         }
     }
 

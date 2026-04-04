@@ -51,10 +51,6 @@ export interface Session {
   textCount: number;
 }
 
-// Tool names (case-insensitive) that are async and emit explicit toolResult
-// events. All other Claude Code tools complete synchronously and are done
-// as soon as their toolUse event is emitted.
-const ASYNC_TOOLS = new Set(["bash", "task", "show_widget"]);
 
 // Returns true if ev starts a new session.
 export function isSessionBoundary(ev: EventMessage): boolean {
@@ -102,9 +98,9 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
       }
       case "toolUse": {
         if (ev.toolUse) {
-          // Synchronous tools complete before the next event; only async tools
-          // (Bash, Task) emit an explicit toolResult later.
-          const call: ToolCall = { use: ev.toolUse, done: !ASYNC_TOOLS.has(ev.toolUse.name.toLowerCase()) };
+          // All tool calls start as pending; they become done when a toolResult
+          // arrives or when later events prove the agent moved on (implicit done).
+          const call: ToolCall = { use: ev.toolUse, done: false };
           const last = lastGroup();
           if (last && last.kind === "action" && last.toolCalls.length > 0 && !usageSinceLastTool) {
             // Consecutive toolUse in the same AssistantMessage — merge.
@@ -387,17 +383,20 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
     merged.push(g);
   }
 
-  // Mark tool calls as implicitly done when later events exist.
-  // Claude Code doesn't emit explicit toolResult events for synchronous
-  // tools (Read, Edit, Grep, etc.), so any tool call followed by a later
-  // group is implicitly complete — only the very last tool group may have
-  // genuinely pending calls.
+  // Mark tool calls as implicitly done when later events prove completion.
+  // Within a group, every non-last non-background call is done (the agent
+  // moved on to the next call). Entire non-last groups are fully done.
   const lastActionGroupIdx = merged.findLastIndex((g) => g.kind === "action" && g.toolCalls.length > 0);
   for (let i = 0; i < merged.length; i++) {
     const g = merged[i];
     if (g.kind !== "action" || g.toolCalls.length === 0) continue;
     if (i < lastActionGroupIdx || i < merged.length - 1) {
       for (const tc of g.toolCalls) tc.done = true;
+    } else {
+      // Last action group: mark all but the final non-background call as done.
+      for (let j = 0; j < g.toolCalls.length - 1; j++) {
+        if (!g.toolCalls[j].use.background) g.toolCalls[j].done = true;
+      }
     }
   }
   return merged;
