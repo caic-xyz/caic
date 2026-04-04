@@ -1,6 +1,6 @@
 // Generate documentation screenshots using the fake backend. Replaces scripts/gen-android-screenshots.sh.
 //
-// Run with: make android-screenshots
+// Run with: make android-e2e
 // Output: screenshots saved to device /sdcard/Pictures/caic-screenshots/, then pulled and converted.
 package com.fghbuild.caic.e2e
 

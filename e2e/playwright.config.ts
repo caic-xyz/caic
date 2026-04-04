@@ -5,7 +5,7 @@ export default defineConfig({
   timeout: 60_000,
   webServer: {
     command: "go run -tags e2e ../backend/cmd/caic -http localhost:8090",
-    url: "http://localhost:8090/api/v1/server/repos",
+    url: "http://localhost:8090/api/v1/server/config",
     reuseExistingServer: false,
     timeout: 30_000,
   },

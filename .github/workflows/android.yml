@@ -4,14 +4,16 @@ on:
   push:
     branches: [main]
     paths:
-      - 'android/**'
-      - 'sdk/kotlin/**'
       - '.github/workflows/android.yml'
+      - 'android/**'
+      - 'scripts/android_e2e.py'
+      - 'sdk/kotlin/**'
   pull_request:
     paths:
-      - 'android/**'
-      - 'sdk/kotlin/**'
       - '.github/workflows/android.yml'
+      - 'android/**'
+      - 'scripts/android_e2e.py'
+      - 'sdk/kotlin/**'
 permissions:
   contents: read
 

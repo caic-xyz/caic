@@ -1,4 +1,4 @@
-.PHONY: help build dev test coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix docs types git-hooks frontend-dev upgrade frontend-e2e android-build android-push android-test android-e2e android-screenshots android-setup-emulator android-start-emulator android-stop-emulator
+.PHONY: help build dev test coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix docs types git-hooks frontend-dev upgrade frontend-e2e android-build android-push android-test android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:8080
@@ -23,8 +23,7 @@ help:
 	@echo "  make android-build  - Build Android app (debug APK)"
 	@echo "  make android-push   - Build, install, and start APK on connected device"
 	@echo "  make android-test   - Run Android unit tests"
-	@echo "  make android-e2e    - Run Android instrumented tests (starts fake backend)"
-	@echo "  make android-screenshots - Generate Android documentation screenshots"
+	@echo "  make android-e2e    - Run Android instrumented tests and generate screenshots"
 	@echo "  make android-setup-emulator - Install emulator image and create AVD"
 	@echo "  make android-start-emulator - Start the headless Android emulator"
 	@echo "  make android-stop-emulator  - Stop the running Android emulator"
@@ -113,27 +112,7 @@ android-test:
 	@cd android && ./gradlew --no-daemon test
 
 android-e2e:
-	@go build -tags e2e -o /tmp/caic-e2e ./backend/cmd/caic
-	@/tmp/caic-e2e -http :8090 &>/tmp/caic-e2e.log & echo $$! > /tmp/caic-e2e.pid; \
-		sleep 2; \
-		adb reverse tcp:8090 tcp:8090; \
-		cd android && ./gradlew --no-daemon connectedAndroidTest; \
-		ret=$$?; \
-		kill $$(cat /tmp/caic-e2e.pid) 2>/dev/null; rm -f /tmp/caic-e2e.pid; \
-		exit $$ret
-
-android-screenshots: android-e2e
-	@adb shell "ls /sdcard/Pictures/caic-screenshots/*.png" >/dev/null 2>&1 || \
-		{ echo "No screenshots found on device"; exit 1; }
-	@mkdir -p e2e/screenshots/android
-	@for name in task-list task-detail task-plan task-ask; do \
-		adb pull "/sdcard/Pictures/caic-screenshots/$$name.png" "e2e/screenshots/android/$$name.png" >/dev/null 2>&1; \
-		ffmpeg -y -i "e2e/screenshots/android/$$name.png" -lossless 1 \
-			"e2e/screenshots/android/$$name.webp" 2>/dev/null; \
-		rm -f "e2e/screenshots/android/$$name.png"; \
-		echo "  $$name.webp"; \
-	done
-	@adb shell "rm -rf /sdcard/Pictures/caic-screenshots"
+	@python3 scripts/android_e2e.py
 
 lint-fix: $(FRONTEND_STAMP)
 	@golangci-lint run ./... --fix || true
