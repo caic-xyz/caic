@@ -88,6 +88,15 @@ abstract class E2eTestBase {
         }
     }
 
+    /** Poll until a condition is true. Throws on timeout. */
+    suspend fun waitForCondition(timeoutMs: Long = DEFAULT_TIMEOUT_MS, condition: suspend () -> Boolean) {
+        withTimeout(timeoutMs) {
+            while (!condition()) {
+                delay(POLL_INTERVAL_MS)
+            }
+        }
+    }
+
     companion object {
         const val DEFAULT_BASE_URL = "http://localhost:8090"
         const val DEFAULT_TIMEOUT_MS = 15_000L
