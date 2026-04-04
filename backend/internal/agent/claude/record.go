@@ -130,7 +130,7 @@ func (q *QueueOperation) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("QueueOperation: %w", err)
 	}
 	q.Extra = jsonutil.CollectUnknown(raw, queueOperationKnown)
-	jsonutil.WarnUnknown("QueueOperation", q.Extra)
+
 	return nil
 }
 
@@ -183,7 +183,7 @@ func (u *UserRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("UserRecord: %w", err)
 	}
 	u.Extra = jsonutil.CollectUnknown(raw, userRecordKnown)
-	jsonutil.WarnUnknown("UserRecord", u.Extra)
+
 	return nil
 }
 
@@ -239,7 +239,7 @@ func (a *AssistantRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("AssistantRecord: %w", err)
 	}
 	a.Extra = jsonutil.CollectUnknown(raw, assistantRecordKnown)
-	jsonutil.WarnUnknown("AssistantRecord", a.Extra)
+
 	return nil
 }
 
@@ -284,7 +284,7 @@ func (s *SystemRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("SystemRecord: %w", err)
 	}
 	s.Extra = jsonutil.CollectUnknown(raw, systemRecordKnown)
-	jsonutil.WarnUnknown("SystemRecord", s.Extra)
+
 	return nil
 }
 
@@ -310,7 +310,7 @@ func (c *CompactMetadata) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("CompactMetadata: %w", err)
 	}
 	c.Extra = jsonutil.CollectUnknown(raw, compactMetadataKnown)
-	jsonutil.WarnUnknown("CompactMetadata", c.Extra)
+
 	return nil
 }
 
@@ -337,7 +337,7 @@ func (s *SummaryRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("SummaryRecord: %w", err)
 	}
 	s.Extra = jsonutil.CollectUnknown(raw, summaryRecordKnown)
-	jsonutil.WarnUnknown("SummaryRecord", s.Extra)
+
 	return nil
 }
 
@@ -365,7 +365,7 @@ func (f *FileHistorySnapshotRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("FileHistorySnapshotRecord: %w", err)
 	}
 	f.Extra = jsonutil.CollectUnknown(raw, fileHistorySnapshotKnown)
-	jsonutil.WarnUnknown("FileHistorySnapshotRecord", f.Extra)
+
 	return nil
 }
 
@@ -392,7 +392,7 @@ func (s *Snapshot) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("Snapshot: %w", err)
 	}
 	s.Extra = jsonutil.CollectUnknown(raw, snapshotKnown)
-	jsonutil.WarnUnknown("Snapshot", s.Extra)
+
 	return nil
 }
 
@@ -419,6 +419,6 @@ func (f *FileBackup) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("FileBackup: %w", err)
 	}
 	f.Extra = jsonutil.CollectUnknown(raw, fileBackupKnown)
-	jsonutil.WarnUnknown("FileBackup", f.Extra)
+
 	return nil
 }

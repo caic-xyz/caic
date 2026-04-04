@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/claude"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
@@ -43,8 +44,8 @@ func (stubBackend) ReadRelayOutput(context.Context, string) ([]agent.Message, in
 	return nil, 0, errors.New("stub")
 }
 
-func (stubBackend) ParseMessage([]byte) ([]agent.Message, error) {
-	return nil, errors.New("stub")
+func (stubBackend) NewParser() func([]byte) ([]agent.Message, error) {
+	return claude.New().NewParser()
 }
 
 func (stubBackend) Models() []string { return []string{"m1", "m2"} }
@@ -605,7 +606,7 @@ func TestHandleListRepos(t *testing.T) {
 			{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"},
 			{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"},
 		},
-		runners: map[string]*task.Runner{},
+		runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 		tasks:   make(map[string]*taskEntry),
 		changed: make(chan struct{}),
 	}
@@ -665,7 +666,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := &Server{
-			runners: map[string]*task.Runner{},
+			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
 			logDir:  logDir,
@@ -733,7 +734,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := &Server{
-			runners: map[string]*task.Runner{},
+			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
 			logDir:  logDir,
@@ -776,7 +777,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := &Server{
-			runners: map[string]*task.Runner{},
+			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
 			logDir:  logDir,
@@ -830,7 +831,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
 		s := &Server{
-			runners: map[string]*task.Runner{},
+			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
 			logDir:  logDir,
@@ -888,7 +889,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
 		s := &Server{
-			runners: map[string]*task.Runner{},
+			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
 			logDir:  logDir,
@@ -946,7 +947,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "b.jsonl", metaB, trailerB)
 
 		s := &Server{
-			runners: map[string]*task.Runner{},
+			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
 			logDir:  logDir,
@@ -997,7 +998,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 
 	t.Run("EmptyDir", func(t *testing.T) {
 		s := &Server{
-			runners: map[string]*task.Runner{},
+			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
 			logDir:  t.TempDir(),
@@ -1040,7 +1041,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", lines...)
 
 		s := &Server{
-			runners: map[string]*task.Runner{},
+			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
 			logDir:  logDir,
@@ -1098,7 +1099,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := &Server{
-			runners: map[string]*task.Runner{},
+			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
 			logDir:  logDir,
@@ -1158,7 +1159,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "purged.jsonl", meta("purged task"), trailer)
 
 		s := &Server{
-			runners: map[string]*task.Runner{},
+			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
 			logDir:  logDir,
@@ -1199,7 +1200,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "feat.jsonl", meta, trailer)
 
 		s := &Server{
-			runners: map[string]*task.Runner{},
+			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
 			logDir:  logDir,
@@ -1349,7 +1350,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, assistant, result, trailer)
 
 		s := &Server{
-			runners: map[string]*task.Runner{},
+			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
 			logDir:  logDir,
@@ -1445,7 +1446,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, msgStart, delta1, delta2, assistant, result, trailer)
 
 		s := &Server{
-			runners: map[string]*task.Runner{},
+			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 			tasks:   make(map[string]*taskEntry),
 			changed: make(chan struct{}),
 			logDir:  logDir,

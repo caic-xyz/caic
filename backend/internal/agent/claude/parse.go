@@ -17,9 +17,9 @@ import (
 // built on first use. Uses sync.Map: few writes (once per type), many reads.
 var outputKnownFields sync.Map
 
-// unmarshalOutput unmarshals data into v and logs a warning for any unknown
+// unmarshalOutput unmarshals data into v and warns via fw for any unknown
 // JSON fields. The name identifies the type for logging.
-func unmarshalOutput(data []byte, v any, name string) error {
+func unmarshalOutput(data []byte, v any, name string, fw *jsonutil.FieldWarner) error {
 	if err := json.Unmarshal(data, v); err != nil {
 		return err
 	}
@@ -30,8 +30,9 @@ func unmarshalOutput(data []byte, v any, name string) error {
 	known := val.(map[string]struct{})
 	var raw map[string]json.RawMessage
 	if json.Unmarshal(data, &raw) == nil {
-		jsonutil.WarnUnknown(name, jsonutil.CollectUnknown(raw, known))
+		fw.Warn(name, jsonutil.CollectUnknown(raw, known))
 	}
+	fw.WarnOverflows(name, v)
 	return nil
 }
 
@@ -115,7 +116,7 @@ func (wt *WidgetTracker) handleStreamEvent(w *outputStreamEvent) ([]agent.Messag
 	return nil, false
 }
 
-// ParseMessage decodes a single Claude Code NDJSON line into one or more
+// parseMessage decodes a single Claude Code NDJSON line into one or more
 // typed agent.Messages. A single "assistant" line may contain multiple
 // content blocks (text + tool_use + usage), each producing a separate message.
 //
@@ -138,31 +139,31 @@ func (wt *WidgetTracker) handleStreamEvent(w *outputStreamEvent) ([]agent.Messag
 //   - DiffStatMessage      — caic_diff_stat injection
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
 //
-// ParseMessage decodes a single Claude Code NDJSON line without widget
-// tracking. Use ParseMessageWithTracker for streaming sessions that need
+// parseMessage decodes a single Claude Code NDJSON line without widget
+// tracking. Use parseMessageWithTracker for streaming sessions that need
 // progressive widget rendering.
-func ParseMessage(line []byte) ([]agent.Message, error) {
-	return ParseMessageWithTracker(line, nil)
+func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
+	return parseMessageWithTracker(line, nil, fw)
 }
 
-// ParseMessageWithTracker decodes a single Claude Code NDJSON line with
+// parseMessageWithTracker decodes a single Claude Code NDJSON line with
 // optional widget tracking. When wt is non-nil, content_block_start and
 // input_json_delta events for widget tools produce WidgetDeltaMessage.
-func ParseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, error) {
+func parseMessageWithTracker(line []byte, wt *WidgetTracker, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	var env outputTypeProbe
 	if err := json.Unmarshal(line, &env); err != nil {
 		return nil, fmt.Errorf("unmarshal envelope: %w", err)
 	}
 	switch env.Type {
 	case OutputSystem:
-		return parseSystem(line, env.Subtype)
+		return parseSystem(line, env.Subtype, fw)
 	case OutputAssistant:
-		return parseAssistant(line)
+		return parseAssistant(line, fw)
 	case OutputUser:
-		return parseUser(line)
+		return parseUser(line, fw)
 	case OutputResult:
 		var w outputResult
-		if err := unmarshalOutput(line, &w, "outputResult"); err != nil {
+		if err := unmarshalOutput(line, &w, "outputResult", fw); err != nil {
 			return nil, err
 		}
 		return []agent.Message{&agent.ResultMessage{
@@ -179,10 +180,10 @@ func ParseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, e
 			UUID:          w.UUID,
 		}}, nil
 	case OutputStreamEvent:
-		return parseStreamEvent(line, wt)
+		return parseStreamEvent(line, wt, fw)
 	case OutputRateLimitEvent:
 		var w outputRateLimitEvent
-		if err := unmarshalOutput(line, &w, "outputRateLimitEvent"); err != nil {
+		if err := unmarshalOutput(line, &w, "outputRateLimitEvent", fw); err != nil {
 			return nil, err
 		}
 		return []agent.Message{&agent.RateLimitMessage{
@@ -202,10 +203,10 @@ func ParseMessageWithTracker(line []byte, wt *WidgetTracker) ([]agent.Message, e
 	}
 }
 
-func parseSystem(line []byte, subtype string) ([]agent.Message, error) {
+func parseSystem(line []byte, subtype string, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	if SystemSubtype(subtype) == SystemInit {
 		var w outputInit
-		if err := unmarshalOutput(line, &w, "outputInit"); err != nil {
+		if err := unmarshalOutput(line, &w, "outputInit", fw); err != nil {
 			return nil, err
 		}
 		return []agent.Message{&agent.InitMessage{
@@ -217,7 +218,7 @@ func parseSystem(line []byte, subtype string) ([]agent.Message, error) {
 		}}, nil
 	}
 	var w outputSystem
-	if err := unmarshalOutput(line, &w, "outputSystem"); err != nil {
+	if err := unmarshalOutput(line, &w, "outputSystem", fw); err != nil {
 		return nil, err
 	}
 	switch w.Subtype {
@@ -243,9 +244,9 @@ func parseSystem(line []byte, subtype string) ([]agent.Message, error) {
 	}
 }
 
-func parseAssistant(line []byte) ([]agent.Message, error) {
+func parseAssistant(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	var w outputAssistant
-	if err := unmarshalOutput(line, &w, "outputAssistant"); err != nil {
+	if err := unmarshalOutput(line, &w, "outputAssistant", fw); err != nil {
 		return nil, err
 	}
 	var msgs []agent.Message
@@ -313,9 +314,9 @@ func parseToolUseBlock(b *outputContentBlock) []agent.Message {
 	}}
 }
 
-func parseUser(line []byte) ([]agent.Message, error) {
+func parseUser(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	var w outputUser
-	if err := unmarshalOutput(line, &w, "outputUser"); err != nil {
+	if err := unmarshalOutput(line, &w, "outputUser", fw); err != nil {
 		return nil, err
 	}
 	// Claude Code sets isSynthetic on user messages injected by the runtime
@@ -408,9 +409,9 @@ func extractToolResult(toolUseID string, raw json.RawMessage) *agent.ToolResultM
 	return m
 }
 
-func parseStreamEvent(line []byte, wt *WidgetTracker) ([]agent.Message, error) {
+func parseStreamEvent(line []byte, wt *WidgetTracker, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	var w outputStreamEvent
-	if err := unmarshalOutput(line, &w, "outputStreamEvent"); err != nil {
+	if err := unmarshalOutput(line, &w, "outputStreamEvent", fw); err != nil {
 		return nil, err
 	}
 

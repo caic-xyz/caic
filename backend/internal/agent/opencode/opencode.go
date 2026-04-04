@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // Backend implements agent.Backend for OpenCode using the ACP JSON-RPC 2.0
@@ -28,6 +29,12 @@ type Backend struct {
 
 var _ agent.Backend = (*Backend)(nil)
 
+// NewParser implements agent.Backend.
+func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
+	fw := &jsonutil.FieldWarner{}
+	return func(line []byte) ([]agent.Message, error) { return parseMessage(line, fw) }
+}
+
 // New creates an OpenCode backend with parser configured.
 // ModelList starts with common defaults; it is replaced with the live list
 // returned by session/new on the first successful handshake.
@@ -37,7 +44,6 @@ func New() *Backend {
 		ModelList:     []string{"anthropic/claude-sonnet-4"},
 		Images:        true,
 		ContextWindow: 200_000,
-		Parse:         ParseMessage,
 	}}
 }
 
@@ -128,11 +134,15 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	return s, nil
 }
 
+// ReadRelayOutput reads relay output using a fresh wireFormat.
+func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agent.Message, int64, error) {
+	wire := &wireFormat{fw: &jsonutil.FieldWarner{}}
+	return agent.ReadRelayOutput(ctx, container, wire.ParseMessage)
+}
+
 // AttachRelay connects to an already-running relay in the container.
-// opts.ResumeSessionID is used to pre-populate the session ID so that
-// WritePrompt works immediately without waiting for replay.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
-	wire := &wireFormat{sessionID: opts.ResumeSessionID}
+	wire := &wireFormat{sessionID: opts.ResumeSessionID, fw: &jsonutil.FieldWarner{}}
 	return agent.AttachRelaySession(ctx, opts.Container, opts.RelayOffset, msgCh, logW, wire)
 }
 
@@ -149,6 +159,7 @@ type wireFormat struct {
 	totalUsage  agent.Usage
 	textAccum   strings.Builder // Accumulated text from agent_message_chunk.
 	thinkAccum  strings.Builder // Accumulated text from agent_thought_chunk.
+	fw          *jsonutil.FieldWarner
 }
 
 // allocID returns the next JSON-RPC request ID. Not thread-safe; callers
@@ -196,7 +207,7 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, logW io.Writer) error 
 	return w.WritePrompt(wr, agent.Prompt{Text: "/compact"}, logW)
 }
 
-// ParseMessage wraps the package-level ParseMessage with interceptions:
+// ParseMessage wraps the package-level parseMessage with interceptions:
 //
 //   - usage_update → emits UsageMessage and accumulates into totalUsage.
 //   - session/request_permission → auto-approves with "allow_once".
@@ -247,7 +258,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 	}
 
-	msgs, err := ParseMessage(line)
+	msgs, err := parseMessage(line, w.fw)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +344,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	w := &wireFormat{}
+	w := &wireFormat{fw: &jsonutil.FieldWarner{}}
 	res := &handshakeResult{wire: w}
 
 	// 1. Send initialize request.

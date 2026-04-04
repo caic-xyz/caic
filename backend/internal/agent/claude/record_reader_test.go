@@ -447,12 +447,6 @@ func TestDecodeRecord(t *testing.T) {
 
 func TestUnknownFields(t *testing.T) {
 	t.Run("TopLevel", func(t *testing.T) {
-		var buf bytes.Buffer
-		handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})
-		old := slog.Default()
-		slog.SetDefault(slog.New(handler))
-		defer slog.SetDefault(old)
-
 		input := `{"type":"queue-operation","operation":"enqueue","timestamp":"2026-01-01T00:00:00Z","sessionId":"s1","newField":"surprise","anotherNew":42}` + "\n"
 		records, err := ReadRecords(strings.NewReader(input))
 		if err != nil {
@@ -474,22 +468,9 @@ func TestUnknownFields(t *testing.T) {
 		if _, ok := qo.Extra["anotherNew"]; !ok {
 			t.Error("missing anotherNew in Extra")
 		}
-		logged := buf.String()
-		if !strings.Contains(logged, "unknown fields") {
-			t.Errorf("expected warning log, got: %s", logged)
-		}
-		if !strings.Contains(logged, "anotherNew") {
-			t.Errorf("expected field name in log, got: %s", logged)
-		}
 	})
 
 	t.Run("Nested", func(t *testing.T) {
-		var buf bytes.Buffer
-		handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})
-		old := slog.Default()
-		slog.SetDefault(slog.New(handler))
-		defer slog.SetDefault(old)
-
 		input := `{"type":"assistant","message":{"id":"m1","type":"message","model":"test","role":"assistant","content":[{"type":"text","text":"hi","futureField":true}],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"service_tier":"standard","newMetric":99}},"uuid":"a1","timestamp":"2026-01-01T00:00:00Z","sessionId":"s1","parentUuid":"p1"}` + "\n"
 		records, err := ReadRecords(strings.NewReader(input))
 		if err != nil {
@@ -504,13 +485,6 @@ func TestUnknownFields(t *testing.T) {
 		}
 		if len(a.Message.Usage.Extra) != 1 {
 			t.Errorf("expected 1 extra in Usage, got %d", len(a.Message.Usage.Extra))
-		}
-		logged := buf.String()
-		if !strings.Contains(logged, "futureField") {
-			t.Errorf("expected futureField warning, got: %s", logged)
-		}
-		if !strings.Contains(logged, "newMetric") {
-			t.Errorf("expected newMetric warning, got: %s", logged)
 		}
 	})
 

@@ -19,7 +19,7 @@ var notificationKnownFields sync.Map
 
 // unmarshalNotification unmarshals data into v and logs a warning for any
 // unknown JSON fields. The name identifies the type for logging.
-func unmarshalNotification(data []byte, v any, name string) error {
+func unmarshalNotification(data []byte, v any, name string, fw *jsonutil.FieldWarner) error {
 	if err := json.Unmarshal(data, v); err != nil {
 		return err
 	}
@@ -30,12 +30,12 @@ func unmarshalNotification(data []byte, v any, name string) error {
 	known := val.(map[string]struct{})
 	var raw map[string]json.RawMessage
 	if json.Unmarshal(data, &raw) == nil {
-		jsonutil.WarnUnknown(name, jsonutil.CollectUnknown(raw, known))
+		fw.Warn(name, jsonutil.CollectUnknown(raw, known))
 	}
 	return nil
 }
 
-// ParseMessage decodes a single line from the OpenCode ACP output into one or
+// parseMessage decodes a single line from the OpenCode ACP output into one or
 // more typed agent.Messages.
 //
 // The line is one of:
@@ -56,7 +56,7 @@ func unmarshalNotification(data []byte, v any, name string) error {
 //   - SystemMessage        — current_mode_update
 //   - DiffStatMessage      — caic_diff_stat injection
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
-func ParseMessage(line []byte) ([]agent.Message, error) {
+func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	var probe messageProbe
 	if err := json.Unmarshal(line, &probe); err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
@@ -99,7 +99,7 @@ func ParseMessage(line []byte) ([]agent.Message, error) {
 
 	switch msg.Method {
 	case MethodSessionUpdate:
-		return parseSessionUpdate(msg.Params, line)
+		return parseSessionUpdate(msg.Params, line, fw)
 
 	case MethodSessionRequestPermission:
 		// Permission requests are handled by wireFormat (auto-approve).
@@ -112,7 +112,7 @@ func ParseMessage(line []byte) ([]agent.Message, error) {
 }
 
 // parseSessionUpdate dispatches on the sessionUpdate discriminator.
-func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, error) {
+func parseSessionUpdate(params json.RawMessage, line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	var sup SessionUpdateParams
 	if err := json.Unmarshal(params, &sup); err != nil {
 		return nil, fmt.Errorf("session/update params: %w", err)
@@ -126,37 +126,37 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, e
 	switch probe.SessionUpdate {
 	case UpdateAgentMessageChunk:
 		var u AgentMessageChunkUpdate
-		if err := unmarshalNotification(sup.Update, &u, "AgentMessageChunkUpdate"); err != nil {
+		if err := unmarshalNotification(sup.Update, &u, "AgentMessageChunkUpdate", fw); err != nil {
 			return nil, fmt.Errorf("agent_message_chunk: %w", err)
 		}
 		return []agent.Message{&agent.TextDeltaMessage{Text: u.Content.Text}}, nil
 
 	case UpdateAgentThoughtChunk:
 		var u AgentThoughtChunkUpdate
-		if err := unmarshalNotification(sup.Update, &u, "AgentThoughtChunkUpdate"); err != nil {
+		if err := unmarshalNotification(sup.Update, &u, "AgentThoughtChunkUpdate", fw); err != nil {
 			return nil, fmt.Errorf("agent_thought_chunk: %w", err)
 		}
 		return []agent.Message{&agent.ThinkingDeltaMessage{Text: u.Content.Text}}, nil
 
 	case UpdateUserMessageChunk:
 		var u UserMessageChunkUpdate
-		if err := unmarshalNotification(sup.Update, &u, "UserMessageChunkUpdate"); err != nil {
+		if err := unmarshalNotification(sup.Update, &u, "UserMessageChunkUpdate", fw); err != nil {
 			return nil, fmt.Errorf("user_message_chunk: %w", err)
 		}
 		return []agent.Message{&agent.UserInputMessage{Text: u.Content.Text}}, nil
 
 	case UpdateToolCall:
-		return parseToolCall(sup.Update)
+		return parseToolCall(sup.Update, fw)
 
 	case UpdateToolCallUpdate:
-		return parseToolCallUpdate(sup.Update)
+		return parseToolCallUpdate(sup.Update, fw)
 
 	case UpdatePlan:
-		return parsePlanUpdate(sup.Update)
+		return parsePlanUpdate(sup.Update, fw)
 
 	case UpdateUsageUpdate:
 		var u UsageUpdateUpdate
-		if err := unmarshalNotification(sup.Update, &u, "UsageUpdateUpdate"); err != nil {
+		if err := unmarshalNotification(sup.Update, &u, "UsageUpdateUpdate", fw); err != nil {
 			return nil, fmt.Errorf("usage_update: %w", err)
 		}
 		return []agent.Message{&agent.UsageMessage{
@@ -165,7 +165,7 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, e
 
 	case UpdateCurrentModeUpdate:
 		var u CurrentModeUpdate
-		if err := unmarshalNotification(sup.Update, &u, "CurrentModeUpdate"); err != nil {
+		if err := unmarshalNotification(sup.Update, &u, "CurrentModeUpdate", fw); err != nil {
 			return nil, fmt.Errorf("current_mode_update: %w", err)
 		}
 		detail := u.ModeName
@@ -190,9 +190,9 @@ func parseSessionUpdate(params json.RawMessage, line []byte) ([]agent.Message, e
 }
 
 // parseToolCall handles tool_call session updates (initial tool announcement).
-func parseToolCall(data json.RawMessage) ([]agent.Message, error) {
+func parseToolCall(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	var u ToolCallUpdate
-	if err := unmarshalNotification(data, &u, "ToolCallUpdate"); err != nil {
+	if err := unmarshalNotification(data, &u, "ToolCallUpdate", fw); err != nil {
 		return nil, fmt.Errorf("tool_call: %w", err)
 	}
 
@@ -209,9 +209,9 @@ func parseToolCall(data json.RawMessage) ([]agent.Message, error) {
 }
 
 // parseToolCallUpdate handles tool_call_update session updates (progress/completion).
-func parseToolCallUpdate(data json.RawMessage) ([]agent.Message, error) {
+func parseToolCallUpdate(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	var u ToolCallUpdateUpdate
-	if err := unmarshalNotification(data, &u, "ToolCallUpdateUpdate"); err != nil {
+	if err := unmarshalNotification(data, &u, "ToolCallUpdateUpdate", fw); err != nil {
 		return nil, fmt.Errorf("tool_call_update: %w", err)
 	}
 
@@ -264,9 +264,9 @@ func extractToolOutputDelta(u *ToolCallUpdateUpdate) string {
 }
 
 // parsePlanUpdate converts a plan update to a TodoMessage.
-func parsePlanUpdate(data json.RawMessage) ([]agent.Message, error) {
+func parsePlanUpdate(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	var u PlanUpdate
-	if err := unmarshalNotification(data, &u, "PlanUpdate"); err != nil {
+	if err := unmarshalNotification(data, &u, "PlanUpdate", fw); err != nil {
 		return nil, fmt.Errorf("plan: %w", err)
 	}
 	todos := make([]agent.TodoItem, len(u.Entries))

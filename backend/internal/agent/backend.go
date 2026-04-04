@@ -27,11 +27,6 @@ type Backend interface {
 	// use as an offset in AttachRelay.
 	ReadRelayOutput(ctx context.Context, container string) ([]Message, int64, error)
 
-	// ParseMessage decodes a single wire-format line into one or more
-	// normalized Messages. A single wire line (e.g. Claude content blocks)
-	// may produce multiple semantic messages.
-	ParseMessage(line []byte) ([]Message, error)
-
 	// Harness returns the harness identifier ("claude", "gemini", etc.)
 	Harness() Harness
 
@@ -47,6 +42,10 @@ type Backend interface {
 	// ContextWindowLimit returns the API prompt token limit for the given model.
 	// The model parameter is the model name reported by the agent at runtime.
 	ContextWindowLimit(model string) int
+
+	// NewParser returns a fresh parse function for offline log replay.
+	// Each call creates independent dedup state.
+	NewParser() func([]byte) ([]Message, error)
 }
 
 // Base provides default implementations for most Backend methods. Embed it in
@@ -57,8 +56,7 @@ type Base struct {
 	ModelList     []string
 	Images        bool
 	ContextWindow int
-	Wire          WireFormat                      // Used by StartRelay and AttachRelay.
-	Parse         func([]byte) ([]Message, error) // Used by ParseMessage and ReadRelayOutput.
+	Wire          WireFormat // Used by StartRelay, AttachRelay, ReadRelayOutput.
 }
 
 // Harness implements Backend.
@@ -79,12 +77,9 @@ func (b *Base) SupportsCompact() bool {
 // ContextWindowLimit implements Backend.
 func (b *Base) ContextWindowLimit(string) int { return b.ContextWindow }
 
-// ParseMessage implements Backend by delegating to Parse.
-func (b *Base) ParseMessage(line []byte) ([]Message, error) { return b.Parse(line) }
-
-// ReadRelayOutput implements Backend.
+// ReadRelayOutput implements Backend using Wire.ParseMessage.
 func (b *Base) ReadRelayOutput(ctx context.Context, container string) ([]Message, int64, error) {
-	return ReadRelayOutput(ctx, container, b.Parse)
+	return ReadRelayOutput(ctx, container, b.Wire.ParseMessage)
 }
 
 // AttachRelay implements Backend.

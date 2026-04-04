@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 func TestParseMessage(t *testing.T) {
 	t.Run("Init", func(t *testing.T) {
 		const input = `{"type":"system","subtype":"init","session_id":"ses_abc","model":"anthropic/claude-sonnet-4-20250514"}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -30,7 +31,7 @@ func TestParseMessage(t *testing.T) {
 
 	t.Run("TextCompleted", func(t *testing.T) {
 		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_1","sessionID":"ses_abc","messageID":"msg_1","type":"text","text":"Hello world","time":{"start":1234567889000,"end":1234567890000}}}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -48,7 +49,7 @@ func TestParseMessage(t *testing.T) {
 
 	t.Run("ToolRunning", func(t *testing.T) {
 		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_2","sessionID":"ses_abc","messageID":"msg_1","type":"tool","callID":"call_1","tool":"bash","state":{"status":"running","input":{"command":"ls"}}}}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +70,7 @@ func TestParseMessage(t *testing.T) {
 
 	t.Run("ToolCompleted", func(t *testing.T) {
 		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_2","sessionID":"ses_abc","messageID":"msg_1","type":"tool","callID":"call_1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file1.txt\nfile2.txt"}}}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -90,7 +91,7 @@ func TestParseMessage(t *testing.T) {
 
 	t.Run("ToolError", func(t *testing.T) {
 		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_3","sessionID":"ses_abc","messageID":"msg_1","type":"tool","callID":"call_2","tool":"read","state":{"status":"error","input":{"file_path":"/etc/shadow"},"error":"Permission denied"}}}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -111,7 +112,7 @@ func TestParseMessage(t *testing.T) {
 
 	t.Run("StepFinish", func(t *testing.T) {
 		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_4","sessionID":"ses_abc","messageID":"msg_1","type":"step-finish","cost":0.003,"tokens":{"total":1500,"input":500,"output":1000,"reasoning":75,"cache":{"read":100,"write":50}}}}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -147,7 +148,7 @@ func TestParseMessage(t *testing.T) {
 
 	t.Run("Reasoning", func(t *testing.T) {
 		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_5","sessionID":"ses_abc","messageID":"msg_1","type":"reasoning","text":"Let me think...","time":{"start":1234567889000,"end":1234567890000}}}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -165,7 +166,7 @@ func TestParseMessage(t *testing.T) {
 
 	t.Run("StepStart", func(t *testing.T) {
 		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_6","sessionID":"ses_abc","messageID":"msg_1","type":"step-start","snapshot":"..."}}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -183,7 +184,7 @@ func TestParseMessage(t *testing.T) {
 
 	t.Run("Delta", func(t *testing.T) {
 		const input = `{"type":"message.part.delta","properties":{"sessionID":"ses_abc","messageID":"msg_1","partID":"prt_1","field":"text","delta":"Hello"}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -201,7 +202,7 @@ func TestParseMessage(t *testing.T) {
 
 	t.Run("SessionError", func(t *testing.T) {
 		const input = `{"type":"session.error","properties":{"sessionID":"ses_abc","error":{"name":"UnknownError","data":{"message":"Model not found: google/gemini-3.1-flash-lite-preview."}}}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -222,7 +223,7 @@ func TestParseMessage(t *testing.T) {
 
 	t.Run("SessionErrorNoMessage", func(t *testing.T) {
 		const input = `{"type":"session.error","properties":{"sessionID":"ses_abc","error":{"name":"ProviderAuthError","data":{}}}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -241,7 +242,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("TurnCloseError", func(t *testing.T) {
 		// Error details come from session.error; turn.close is passed through as raw.
 		const input = `{"type":"session.turn.close","properties":{"sessionID":"ses_abc","reason":"error"}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -259,7 +260,7 @@ func TestParseMessage(t *testing.T) {
 
 	t.Run("TurnCloseCompleted", func(t *testing.T) {
 		const input = `{"type":"session.turn.close","properties":{"sessionID":"ses_abc","reason":"completed"}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -277,7 +278,7 @@ func TestParseMessage(t *testing.T) {
 
 	t.Run("DiffStat", func(t *testing.T) {
 		const input = `{"type":"caic_diff_stat","diff_stat":[{"path":"main.go","added":10,"deleted":2}],"ts":1719500000.5}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -298,7 +299,7 @@ func TestParseMessage(t *testing.T) {
 
 	t.Run("UnknownType", func(t *testing.T) {
 		const input = `{"type":"session.turn.open","properties":{"sessionID":"ses_abc"}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}

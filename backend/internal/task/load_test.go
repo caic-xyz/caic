@@ -8,7 +8,14 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/claude"
 )
+
+func setClaudeParser(tasks []*LoadedTask) {
+	for _, lt := range tasks {
+		lt.SetParser(claude.New().NewParser())
+	}
+}
 
 func writeLogFile(t *testing.T, dir, name string, lines ...string) {
 	data := make([]byte, 0, len(lines)*64)
@@ -129,6 +136,7 @@ func TestLoadLogs(t *testing.T) {
 		if tasks[0].Msgs != nil {
 			t.Error("tasks[0].Msgs should be nil before LoadMessages")
 		}
+		setClaudeParser(tasks)
 		for _, lt := range tasks {
 			if err := lt.LoadMessages(); err != nil {
 				t.Fatal(err)
@@ -247,6 +255,7 @@ func TestLoadLogs(t *testing.T) {
 			t.Fatalf("len = %d, want 1", len(tasks))
 		}
 		lt := tasks[0]
+		setClaudeParser(tasks)
 		if err := lt.LoadMessages(); err != nil {
 			t.Fatal(err)
 		}
@@ -305,6 +314,7 @@ func TestLoadLogs(t *testing.T) {
 			t.Errorf("ForgePR = %d, want 99 (header parse)", lt.ForgePR)
 		}
 		// Full parse via LoadMessages should also find it.
+		setClaudeParser(tasks)
 		if err := lt.LoadMessages(); err != nil {
 			t.Fatal(err)
 		}
@@ -343,6 +353,7 @@ func TestLoadLogs(t *testing.T) {
 			t.Fatalf("expected header-only parse to miss caic_pr outside tail window, got ForgePR=%d", lt.ForgePR)
 		}
 		// Full parse via LoadMessages must recover the PR.
+		setClaudeParser(tasks)
 		if err := lt.LoadMessages(); err != nil {
 			t.Fatal(err)
 		}

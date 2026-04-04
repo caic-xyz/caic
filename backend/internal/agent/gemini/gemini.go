@@ -6,26 +6,40 @@ import (
 	"io"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // Backend implements agent.Backend for Gemini CLI.
 type Backend struct {
 	agent.Base
+	fw *jsonutil.FieldWarner
 }
 
 var _ agent.Backend = (*Backend)(nil)
 
+// NewParser implements agent.Backend.
+func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
+	fw := &jsonutil.FieldWarner{}
+	return func(line []byte) ([]agent.Message, error) { return parseMessage(line, fw) }
+}
+
 // New creates a Gemini CLI backend with wire format and parser configured.
 func New() *Backend {
-	b := &Backend{}
+	b := &Backend{
+		fw: &jsonutil.FieldWarner{},
+	}
 	b.Base = agent.Base{
 		HarnessID:     agent.Gemini,
 		ModelList:     []string{"gemini-3.1-pro", "gemini-3-flash"},
 		ContextWindow: 1_000_000,
-		Parse:         ParseMessage,
 	}
 	b.Wire = b
 	return b
+}
+
+// ParseMessage implements agent.WireFormat.
+func (b *Backend) ParseMessage(line []byte) ([]agent.Message, error) {
+	return parseMessage(line, b.fw)
 }
 
 // Start launches a Gemini CLI process via the relay daemon.

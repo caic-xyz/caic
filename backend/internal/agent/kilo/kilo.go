@@ -3,10 +3,10 @@
 // Kilo Code exposes an HTTP+SSE API via `kilo serve`. A Python bridge script
 // (bridge.py) runs as the relay subprocess, handling process management, SSE
 // I/O, permission auto-approval, and deduplication. It emits native kilo SSE
-// event JSON on stdout, which ParseMessage translates into agent.Message types.
+// event JSON on stdout, which parseMessage translates into agent.Message types.
 //
 // Per-session state (accumulated step cost/usage, turn-close terminal event)
-// is managed by kiloWireFormat, which wraps the stateless ParseMessage function.
+// is managed by kiloWireFormat, which wraps the stateless parseMessage function.
 // A fresh kiloWireFormat is created for every Start, AttachRelay, and
 // ReadRelayOutput call so that accumulators reset between sessions and replays.
 package kilo
@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 const bridgeScriptPath = agent.RelayDir + "/kilo_bridge.py"
@@ -32,6 +33,12 @@ type Backend struct {
 }
 
 var _ agent.Backend = (*Backend)(nil)
+
+// NewParser implements agent.Backend.
+func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
+	fw := &jsonutil.FieldWarner{}
+	return func(line []byte) ([]agent.Message, error) { return parseMessage(line, fw) }
+}
 
 var defaultModels = []string{
 	"anthropic/claude-opus-4.6",
@@ -50,7 +57,6 @@ func New() *Backend {
 		HarnessID:     agent.Kilo,
 		ModelList:     defaultModels,
 		ContextWindow: 200_000,
-		Parse:         ParseMessage,
 	}
 	return b
 }
@@ -75,20 +81,20 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	if err := deployBridge(ctx, opts.Container); err != nil {
 		return nil, err
 	}
-	return agent.StartRelay(ctx, opts, buildBridgeArgs(opts), msgCh, logW, &kiloWireFormat{})
+	return agent.StartRelay(ctx, opts, buildBridgeArgs(opts), msgCh, logW, &kiloWireFormat{fw: &jsonutil.FieldWarner{}})
 }
 
 // AttachRelay connects to an already-running relay using a fresh kiloWireFormat
 // so that accumulated state from a prior session does not bleed in.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
-	return agent.AttachRelaySession(ctx, opts.Container, opts.RelayOffset, msgCh, logW, &kiloWireFormat{})
+	return agent.AttachRelaySession(ctx, opts.Container, opts.RelayOffset, msgCh, logW, &kiloWireFormat{fw: &jsonutil.FieldWarner{}})
 }
 
 // ReadRelayOutput reads output.jsonl using a fresh kiloWireFormat so that
 // step-finish messages are correctly converted to UsageMessages and the
 // turn.close event produces the terminal ResultMessage.
 func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agent.Message, int64, error) {
-	return agent.ReadRelayOutput(ctx, container, (&kiloWireFormat{}).ParseMessage)
+	return agent.ReadRelayOutput(ctx, container, (&kiloWireFormat{fw: &jsonutil.FieldWarner{}}).ParseMessage)
 }
 
 // WritePrompt writes a single user message to the bridge's stdin.
@@ -118,7 +124,7 @@ func buildBridgeArgs(opts *agent.Options) []string {
 }
 
 // kiloWireFormat is a stateful WireFormat for kilo sessions. It wraps the
-// stateless ParseMessage function, intercepting three event types:
+// stateless parseMessage function, intercepting three event types:
 //
 //   - message.part.updated: records partID → partType so that subsequent deltas
 //     for reasoning parts can be routed to ThinkingDeltaMessage.
@@ -142,6 +148,7 @@ type kiloWireFormat struct {
 	totalUsage   agent.Usage
 	errorSeen    bool              // true after a session.error ResultMessage
 	partTypes    map[string]string // partID → partType for delta routing
+	fw           *jsonutil.FieldWarner
 }
 
 // WritePrompt implements agent.WireFormat.
@@ -150,7 +157,7 @@ func (w *kiloWireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Write
 }
 
 // ParseMessage implements agent.WireFormat. It delegates to the stateless
-// ParseMessage function and post-processes step-finish, turn-close, and
+// parseMessage function and post-processes step-finish, turn-close, and
 // reasoning delta events.
 func (w *kiloWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	// Pre-pass: record part types from message.part.updated so deltas can be
@@ -182,7 +189,7 @@ func (w *kiloWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 	}
 
-	msgs, err := ParseMessage(line)
+	msgs, err := parseMessage(line, w.fw)
 	if err != nil {
 		return nil, err
 	}

@@ -33,7 +33,6 @@ func (p *ProgressRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("ProgressRecord: %w", err)
 	}
 	p.Extra = jsonutil.CollectUnknown(raw, progressRecordKnown)
-	jsonutil.WarnUnknown("ProgressRecord", p.Extra)
 	return nil
 }
 
@@ -96,6 +95,5 @@ func (p *ProgressPayload) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("ProgressPayload: %w", err)
 	}
 	p.Extra = jsonutil.CollectUnknown(raw, progressPayloadKnown)
-	jsonutil.WarnUnknown("ProgressPayload("+p.Type+")", p.Extra)
 	return nil
 }

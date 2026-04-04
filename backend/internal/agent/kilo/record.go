@@ -113,7 +113,6 @@ func (r *InitRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("InitRecord: %w", err)
 	}
 	r.Extra = jsonutil.CollectUnknown(raw, initRecordKnown)
-	jsonutil.WarnUnknown("InitRecord", r.Extra)
 	return nil
 }
 
@@ -143,7 +142,6 @@ func (r *PartUpdatedRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("PartUpdatedRecord: %w", err)
 	}
 	r.Extra = jsonutil.CollectUnknown(raw, partUpdatedRecordKnown)
-	jsonutil.WarnUnknown("PartUpdatedRecord", r.Extra)
 	return nil
 }
 
@@ -195,7 +193,6 @@ func (p *Part) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("Part: %w", err)
 	}
 	p.Extra = jsonutil.CollectUnknown(raw, partKnown)
-	jsonutil.WarnUnknown("Part("+p.Type+")", p.Extra)
 	return nil
 }
 
@@ -232,7 +229,6 @@ func (s *ToolState) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("ToolState: %w", err)
 	}
 	s.Extra = jsonutil.CollectUnknown(raw, toolStateKnown)
-	jsonutil.WarnUnknown("ToolState("+s.Status+")", s.Extra)
 	return nil
 }
 
@@ -261,7 +257,6 @@ func (t *StepTokens) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("StepTokens: %w", err)
 	}
 	t.Extra = jsonutil.CollectUnknown(raw, stepTokensKnown)
-	jsonutil.WarnUnknown("StepTokens", t.Extra)
 	return nil
 }
 
@@ -287,7 +282,6 @@ func (c *TokenCache) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("TokenCache: %w", err)
 	}
 	c.Extra = jsonutil.CollectUnknown(raw, tokenCacheKnown)
-	jsonutil.WarnUnknown("TokenCache", c.Extra)
 	return nil
 }
 
@@ -317,7 +311,6 @@ func (r *PartDeltaRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("PartDeltaRecord: %w", err)
 	}
 	r.Extra = jsonutil.CollectUnknown(raw, partDeltaRecordKnown)
-	jsonutil.WarnUnknown("PartDeltaRecord", r.Extra)
 	return nil
 }
 
@@ -395,7 +388,6 @@ func (r *TurnCloseRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("TurnCloseRecord: %w", err)
 	}
 	r.Extra = jsonutil.CollectUnknown(raw, turnCloseRecordKnown)
-	jsonutil.WarnUnknown("TurnCloseRecord", r.Extra)
 	return nil
 }
 

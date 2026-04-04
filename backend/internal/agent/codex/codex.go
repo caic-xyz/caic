@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // TODO: re-enable once widget plugin is fixed for codex
@@ -31,6 +32,12 @@ type Backend struct {
 
 var _ agent.Backend = (*Backend)(nil)
 
+// NewParser implements agent.Backend.
+func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
+	fw := &jsonutil.FieldWarner{}
+	return func(line []byte) ([]agent.Message, error) { return parseMessage(line, fw) }
+}
+
 // New creates a Codex CLI backend with parser configured.
 // ModelList starts with a single known-good model; it is replaced with the
 // live list returned by model/list on the first successful handshake.
@@ -40,7 +47,6 @@ func New() *Backend {
 		ModelList:     []string{"gpt-5.4"},
 		Images:        true,
 		ContextWindow: 200_000,
-		Parse:         ParseMessage,
 	}}
 }
 
@@ -115,6 +121,12 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	return s, nil
 }
 
+// ReadRelayOutput reads relay output using a fresh wireFormat.
+func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agent.Message, int64, error) {
+	wire := &wireFormat{fw: &jsonutil.FieldWarner{}}
+	return agent.ReadRelayOutput(ctx, container, wire.ParseMessage)
+}
+
 // AttachRelay connects to an already-running relay in the container.
 // opts.ResumeSessionID is used to pre-populate the thread ID so that
 // WritePrompt works immediately without waiting for thread/started replay.
@@ -122,7 +134,7 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options, msgCh ch
 	// Pre-populate thread ID from the known session so WritePrompt works
 	// immediately. wireFormat.process() will update it again if thread/started
 	// appears in the replayed output.
-	wire := &wireFormat{threadID: opts.ResumeSessionID}
+	wire := &wireFormat{threadID: opts.ResumeSessionID, fw: &jsonutil.FieldWarner{}}
 	return agent.AttachRelaySession(ctx, opts.Container, opts.RelayOffset, msgCh, logW, wire)
 }
 
@@ -134,6 +146,7 @@ type wireFormat struct {
 	nextID     atomic.Int64
 	mu         sync.Mutex
 	totalUsage agent.Usage // accumulated per-turn from thread/tokenUsage/updated
+	fw         *jsonutil.FieldWarner
 }
 
 // WritePrompt sends a turn/start JSON-RPC request to begin a new turn with
@@ -180,11 +193,11 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, _ io.Writer) error {
 	return writeJSON(wr, req)
 }
 
-// ParseMessage wraps the package-level ParseMessage with two interceptions:
+// ParseMessage wraps the package-level parseMessage with two interceptions:
 //
 //   - thread/tokenUsage/updated → emits UsageMessage (incremental Last
 //     breakdown); values are also accumulated into totalUsage. Not forwarded
-//     to the package-level ParseMessage.
+//     to the package-level parseMessage.
 //   - ResultMessage (from turn/completed) has Usage populated from totalUsage,
 //     then totalUsage is reset for the next turn.
 //
@@ -200,7 +213,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			return nil, fmt.Errorf("tokenUsage/updated: %w", err)
 		}
 		var p ThreadTokenUsageUpdatedNotification
-		if err := unmarshalNotification(msg.Params, &p, "ThreadTokenUsageUpdatedNotification"); err != nil {
+		if err := unmarshalNotification(msg.Params, &p, "ThreadTokenUsageUpdatedNotification", w.fw); err != nil {
 			return nil, fmt.Errorf("tokenUsage/updated params: %w", err)
 		}
 		incremental := agent.Usage{
@@ -222,7 +235,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		return []agent.Message{usageMsg}, nil
 	}
 
-	msgs, err := ParseMessage(line)
+	msgs, err := parseMessage(line, w.fw)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +264,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	w := &wireFormat{}
+	w := &wireFormat{fw: &jsonutil.FieldWarner{}}
 
 	// 1. Send initialize request.
 	initReq := jsonrpcRequest{

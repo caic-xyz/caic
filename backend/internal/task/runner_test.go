@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	agentclaude "github.com/caic-xyz/caic/backend/internal/agent/claude"
+	"github.com/caic-xyz/caic/backend/internal/agent/claude"
 	"github.com/caic-xyz/md"
 	"github.com/maruel/ksid"
 )
@@ -35,7 +35,7 @@ func (b *testBackend) Start(ctx context.Context, _ *agent.Options, msgCh chan<- 
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, stdin, stdout, msgCh, nil, &testWire{}, nil), nil
+	return agent.NewSession(cmd, stdin, stdout, msgCh, nil, &testWire{parse: claude.New().NewParser()}, nil), nil
 }
 
 func (b *testBackend) AttachRelay(context.Context, *agent.Options, chan<- agent.Message, io.Writer) (*agent.Session, error) {
@@ -46,8 +46,8 @@ func (b *testBackend) ReadRelayOutput(context.Context, string) ([]agent.Message,
 	return nil, 0, errors.New("test backend does not support relay")
 }
 
-func (b *testBackend) ParseMessage(line []byte) ([]agent.Message, error) {
-	return agentclaude.ParseMessage(line)
+func (b *testBackend) NewParser() func([]byte) ([]agent.Message, error) {
+	return claude.New().NewParser()
 }
 
 func (b *testBackend) Models() []string { return []string{"test-model"} }
@@ -60,7 +60,9 @@ func (b *testBackend) SupportsCompact() bool { return false }
 func (b *testBackend) ContextWindowLimit(string) int { return 180_000 }
 
 // testWire implements agent.WireFormat for testing.
-type testWire struct{}
+type testWire struct {
+	parse func([]byte) ([]agent.Message, error)
+}
 
 func (*testWire) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
 	msg := struct {
@@ -86,8 +88,8 @@ func (*testWire) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error 
 	return nil
 }
 
-func (*testWire) ParseMessage(line []byte) ([]agent.Message, error) {
-	return agentclaude.ParseMessage(line)
+func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
+	return w.parse(line)
 }
 
 func TestRunner(t *testing.T) {

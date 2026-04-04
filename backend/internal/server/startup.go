@@ -341,6 +341,17 @@ func (s *Server) loadPurgedTasks() error {
 	return s.loadPurgedTasksFrom(all)
 }
 
+// setParser sets the parse function on a LoadedTask from the first runner
+// that has a backend for the task's harness.
+func (s *Server) setParser(lt *task.LoadedTask) {
+	for _, r := range s.runners {
+		if b := r.Backends[lt.Harness]; b != nil {
+			lt.SetParser(b.NewParser())
+			return
+		}
+	}
+}
+
 // loadPurgedTasksFrom populates s.tasks from pre-loaded log data.
 //
 // It keeps tasks updated within the last few days and limits the result to the N most recent per repository.
@@ -416,6 +427,7 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 		} else {
 			t.SetTitle(lt.Prompt)
 		}
+		s.setParser(lt)
 		if err := lt.LoadMessages(); err != nil {
 			ltPrimary := lt.Primary()
 			ltRepo, ltBranch := "", ""
@@ -708,6 +720,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		t.RelayOffset = relaySize
 		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(relayMsgs))
 	} else if lt != nil {
+		s.setParser(lt)
 		if err := lt.LoadMessages(); err != nil {
 			slog.Warn("load messages failed", "repo", ri.RelPath, "br", branch, "err", err)
 		}

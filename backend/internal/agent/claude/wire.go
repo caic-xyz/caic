@@ -613,6 +613,7 @@ type outputResult struct {
 	ModelUsage        json.RawMessage `json:"modelUsage,omitempty"`
 	PermissionDenials json.RawMessage `json:"permission_denials,omitempty"`
 	StopReason        json.RawMessage `json:"stop_reason,omitempty"`
+	TerminalReason    json.RawMessage `json:"terminal_reason,omitempty"`
 }
 
 // ---------- stream_event ----------

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // toolNameMap maps kilo lowercase tool names to normalized (PascalCase) names
@@ -32,7 +33,7 @@ func normalizeToolName(name string) string {
 	return name
 }
 
-// ParseMessage decodes a single kilo bridge NDJSON line into one or more
+// parseMessage decodes a single kilo bridge NDJSON line into one or more
 // typed agent.Messages.
 //
 // Emitted agent.Message types:
@@ -48,22 +49,22 @@ func normalizeToolName(name string) string {
 //   - ResultMessage     — message.part.updated part.type=step_finish, session.error
 //   - DiffStatMessage   — caic_diff_stat injection
 //   - RawMessage        — unrecognised wire types (preserved verbatim)
-func ParseMessage(line []byte) ([]agent.Message, error) {
+func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	var rec Record
 	if err := json.Unmarshal(line, &rec); err != nil {
 		return nil, fmt.Errorf("unmarshal record: %w", err)
 	}
 	switch rec.Type {
 	case TypeSystem:
-		return parseSystem(&rec)
+		return parseSystem(&rec, fw)
 	case TypePartUpdated:
-		return parsePartUpdated(&rec)
+		return parsePartUpdated(&rec, fw)
 	case TypePartDelta:
-		return parsePartDelta(&rec)
+		return parsePartDelta(&rec, fw)
 	case TypeSessionError:
 		return parseSessionError(&rec)
 	case TypeTurnClose:
-		return parseTurnClose(&rec)
+		return parseTurnClose(&rec, fw)
 	case "caic_diff_stat":
 		var m agent.DiffStatMessage
 		if err := json.Unmarshal(line, &m); err != nil {
@@ -76,11 +77,12 @@ func ParseMessage(line []byte) ([]agent.Message, error) {
 }
 
 // parseSystem handles type=system records (init or generic).
-func parseSystem(rec *Record) ([]agent.Message, error) {
+func parseSystem(rec *Record, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	r, err := rec.AsInit()
 	if err != nil {
 		return nil, err
 	}
+	fw.WarnOverflows("InitRecord", r)
 	if r.Subtype == "init" {
 		return []agent.Message{&agent.InitMessage{
 			SessionID: r.SessionID,
@@ -94,11 +96,12 @@ func parseSystem(rec *Record) ([]agent.Message, error) {
 }
 
 // parsePartUpdated dispatches on part type within a message.part.updated event.
-func parsePartUpdated(rec *Record) ([]agent.Message, error) {
+func parsePartUpdated(rec *Record, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	r, err := rec.AsPartUpdated()
 	if err != nil {
 		return nil, err
 	}
+	fw.WarnOverflows("PartUpdatedRecord", r)
 	part := &r.Properties.Part
 
 	switch part.Type {
@@ -196,11 +199,12 @@ func parseStepFinish(part *Part) ([]agent.Message, error) {
 }
 
 // parsePartDelta converts a message.part.delta event into a TextDeltaMessage.
-func parsePartDelta(rec *Record) ([]agent.Message, error) {
+func parsePartDelta(rec *Record, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	r, err := rec.AsPartDelta()
 	if err != nil {
 		return nil, err
 	}
+	fw.WarnOverflows("PartDeltaRecord", r)
 	if r.Properties.Delta != "" {
 		return []agent.Message{&agent.TextDeltaMessage{Text: r.Properties.Delta}}, nil
 	}
@@ -231,11 +235,12 @@ func parseSessionError(rec *Record) ([]agent.Message, error) {
 
 // parseTurnClose converts a session.turn.close event. Error details come from
 // the preceding session.error event, so error turns are passed through as raw.
-func parseTurnClose(rec *Record) ([]agent.Message, error) {
-	_, err := rec.AsTurnClose()
+func parseTurnClose(rec *Record, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
+	r, err := rec.AsTurnClose()
 	if err != nil {
 		return nil, err
 	}
+	fw.WarnOverflows("TurnCloseRecord", r)
 	return []agent.Message{&agent.RawMessage{
 		MessageType: TypeTurnClose,
 		Raw:         append([]byte(nil), rec.Raw()...),

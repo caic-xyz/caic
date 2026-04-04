@@ -196,8 +196,8 @@ func (*fakeBackend) ReadRelayOutput(context.Context, string) ([]agent.Message, i
 	return nil, 0, errors.New("fake backend does not support relay")
 }
 
-func (*fakeBackend) ParseMessage(line []byte) ([]agent.Message, error) {
-	return claude.ParseMessage(line)
+func (*fakeBackend) NewParser() func([]byte) ([]agent.Message, error) {
+	return claude.New().NewParser()
 }
 
 func (*fakeBackend) Models() []string { return []string{"fake-model"} }

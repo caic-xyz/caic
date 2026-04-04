@@ -10,32 +10,40 @@ import (
 	"os"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // Backend implements agent.Backend for Claude Code.
 type Backend struct {
 	agent.Base
 	widgetTracker *WidgetTracker
+	fieldWarner   *jsonutil.FieldWarner
 }
 
-// parseMessage wraps ParseMessage with widget tracking for streaming deltas.
-func (b *Backend) parseMessage(line []byte) ([]agent.Message, error) {
-	return ParseMessageWithTracker(line, b.widgetTracker)
+// ParseMessage wraps ParseMessage with widget tracking for streaming deltas.
+func (b *Backend) ParseMessage(line []byte) ([]agent.Message, error) {
+	return parseMessageWithTracker(line, b.widgetTracker, b.fieldWarner)
 }
 
 var _ agent.Backend = (*Backend)(nil)
+
+// NewParser implements agent.Backend.
+func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
+	fw := &jsonutil.FieldWarner{}
+	return func(line []byte) ([]agent.Message, error) { return parseMessage(line, fw) }
+}
 
 // New creates a Claude Code backend with wire format and parser configured.
 func New() *Backend {
 	b := &Backend{
 		widgetTracker: NewWidgetTracker(),
+		fieldWarner:   &jsonutil.FieldWarner{},
 	}
 	b.Base = agent.Base{
 		HarnessID:     agent.Claude,
 		ModelList:     []string{"opus", "sonnet", "haiku"},
 		Images:        true,
 		ContextWindow: 180_000,
-		Parse:         b.parseMessage,
 	}
 	b.Wire = b
 	return b

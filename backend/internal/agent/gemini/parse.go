@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // toolNameMap maps Gemini CLI tool names to normalized (Claude Code) names
@@ -34,7 +35,7 @@ func normalizeToolName(name string) string {
 	return name
 }
 
-// ParseMessage decodes a single Gemini CLI stream-json line into one or more
+// parseMessage decodes a single Gemini CLI stream-json line into one or more
 // typed agent.Messages.
 //
 // Emitted agent.Message types:
@@ -48,7 +49,7 @@ func normalizeToolName(name string) string {
 //   - ResultMessage     — type=result
 //   - DiffStatMessage   — caic_diff_stat injection
 //   - RawMessage        — unrecognised wire types (preserved verbatim)
-func ParseMessage(line []byte) ([]agent.Message, error) {
+func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	var rec Record
 	if err := json.Unmarshal(line, &rec); err != nil {
 		return nil, fmt.Errorf("unmarshal record: %w", err)
@@ -59,6 +60,7 @@ func ParseMessage(line []byte) ([]agent.Message, error) {
 		if err != nil {
 			return nil, err
 		}
+		fw.WarnOverflows("InitRecord", r)
 		return []agent.Message{&agent.InitMessage{
 			SessionID: r.SessionID,
 			Model:     r.Model,
@@ -69,6 +71,7 @@ func ParseMessage(line []byte) ([]agent.Message, error) {
 		if err != nil {
 			return nil, err
 		}
+		fw.WarnOverflows("MessageRecord", r)
 		switch r.Role {
 		case "assistant":
 			return []agent.Message{&agent.TextMessage{Text: r.Content}}, nil
@@ -83,6 +86,7 @@ func ParseMessage(line []byte) ([]agent.Message, error) {
 		if err != nil {
 			return nil, err
 		}
+		fw.WarnOverflows("ToolUseRecord", r)
 		return []agent.Message{dispatchToolUse(r.ToolID, normalizeToolName(r.ToolName), r.Parameters)}, nil
 
 	case TypeToolResult:
@@ -90,6 +94,7 @@ func ParseMessage(line []byte) ([]agent.Message, error) {
 		if err != nil {
 			return nil, err
 		}
+		fw.WarnOverflows("ToolResultRecord", r)
 		m := &agent.ToolResultMessage{ToolUseID: r.ToolID}
 		if r.Status == "error" && r.Error != nil {
 			m.Error = r.Error.Message
@@ -101,6 +106,7 @@ func ParseMessage(line []byte) ([]agent.Message, error) {
 		if err != nil {
 			return nil, err
 		}
+		fw.WarnOverflows("ResultRecord", r)
 		msg := &agent.ResultMessage{
 			MessageType: "result",
 			Subtype:     "result",

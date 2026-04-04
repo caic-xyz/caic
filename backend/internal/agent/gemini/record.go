@@ -113,7 +113,6 @@ func (r *InitRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("InitRecord: %w", err)
 	}
 	r.Extra = jsonutil.CollectUnknown(raw, initRecordKnown)
-	jsonutil.WarnUnknown("InitRecord", r.Extra)
 	return nil
 }
 
@@ -148,7 +147,6 @@ func (r *MessageRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("MessageRecord: %w", err)
 	}
 	r.Extra = jsonutil.CollectUnknown(raw, messageRecordKnown)
-	jsonutil.WarnUnknown("MessageRecord("+r.Role+")", r.Extra)
 	return nil
 }
 
@@ -182,7 +180,6 @@ func (r *ToolUseRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("ToolUseRecord: %w", err)
 	}
 	r.Extra = jsonutil.CollectUnknown(raw, toolUseRecordKnown)
-	jsonutil.WarnUnknown("ToolUseRecord("+r.ToolName+")", r.Extra)
 	return nil
 }
 
@@ -221,7 +218,6 @@ func (r *ToolResultRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("ToolResultRecord: %w", err)
 	}
 	r.Extra = jsonutil.CollectUnknown(raw, toolResultRecordKnown)
-	jsonutil.WarnUnknown("ToolResultRecord", r.Extra)
 	return nil
 }
 
@@ -247,7 +243,6 @@ func (e *ToolResultError) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("ToolResultError: %w", err)
 	}
 	e.Extra = jsonutil.CollectUnknown(raw, toolResultErrorKnown)
-	jsonutil.WarnUnknown("ToolResultError", e.Extra)
 	return nil
 }
 
@@ -281,7 +276,6 @@ func (r *ResultRecord) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("ResultRecord: %w", err)
 	}
 	r.Extra = jsonutil.CollectUnknown(raw, resultRecordKnown)
-	jsonutil.WarnUnknown("ResultRecord", r.Extra)
 	return nil
 }
 
@@ -312,6 +306,5 @@ func (s *ResultStats) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("ResultStats: %w", err)
 	}
 	s.Extra = jsonutil.CollectUnknown(raw, resultStatsKnown)
-	jsonutil.WarnUnknown("ResultStats", s.Extra)
 	return nil
 }

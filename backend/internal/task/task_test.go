@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/claude"
 )
 
 func TestTask(t *testing.T) {
@@ -167,7 +168,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, stdin, stdout, nil, nil, &testWire{}, nil)
+			s := agent.NewSession(cmd, stdin, stdout, nil, nil, &testWire{parse: claude.New().NewParser()}, nil)
 			tk.AttachSession(&SessionHandle{Session: s})
 			defer func() { _ = stdin.Close(); _ = cmd.Wait() }()
 
@@ -266,7 +267,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, stdin, stdout, nil, nil, &testWire{}, nil)
+			s := agent.NewSession(cmd, stdin, stdout, nil, nil, &testWire{parse: claude.New().NewParser()}, nil)
 			tk.AttachSession(&SessionHandle{Session: s})
 			defer func() { _ = stdin.Close(); _ = cmd.Wait() }()
 
@@ -321,7 +322,7 @@ func TestTask(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			s := agent.NewSession(cmd, stdin, stdout, nil, nil, &testWire{}, nil)
+			s := agent.NewSession(cmd, stdin, stdout, nil, nil, &testWire{parse: claude.New().NewParser()}, nil)
 			<-s.Done()
 			tk.AttachSession(&SessionHandle{Session: s})
 			err = tk.SendInput(t.Context(), agent.Prompt{Text: "hello"})
@@ -353,7 +354,7 @@ func TestTask(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatal(err)
 		}
-		s := agent.NewSession(cmd, stdin, stdout, nil, nil, &testWire{}, nil)
+		s := agent.NewSession(cmd, stdin, stdout, nil, nil, &testWire{parse: claude.New().NewParser()}, nil)
 		h := &SessionHandle{Session: s}
 		tk.AttachSession(h)
 

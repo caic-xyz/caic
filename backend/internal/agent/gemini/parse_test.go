@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 func TestParseMessage(t *testing.T) {
 	t.Run("Init", func(t *testing.T) {
 		const input = `{"type":"init","timestamp":"2026-02-13T19:00:05.416Z","session_id":"abc","model":"auto-gemini-3"}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -29,7 +30,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("AssistantText", func(t *testing.T) {
 		const input = `{"type":"message","timestamp":"2026-02-13T19:00:10.729Z","role":"assistant","content":"Hello.","delta":true}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -46,7 +47,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("UserMessage", func(t *testing.T) {
 		const input = `{"type":"message","timestamp":"2026-02-13T19:00:05.418Z","role":"user","content":"Say hello"}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -63,7 +64,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("ToolUse", func(t *testing.T) {
 		const input = `{"type":"tool_use","timestamp":"2026-02-13T19:00:22.912Z","tool_name":"read_file","tool_id":"read_file-123","parameters":{"file_path":"/etc/hostname"}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -83,7 +84,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("ToolResult", func(t *testing.T) {
 		const input = `{"type":"tool_result","timestamp":"2026-02-13T19:00:26.397Z","tool_id":"run_shell_command-123","status":"success","output":"md-caic-0"}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -100,7 +101,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("ResultSuccess", func(t *testing.T) {
 		const input = `{"type":"result","timestamp":"2026-02-13T19:00:10.738Z","status":"success","stats":{"total_tokens":12359,"input_tokens":11744,"output_tokens":47,"cached":0,"input":11744,"duration_ms":5322,"tool_calls":2}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,7 +130,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("ResultError", func(t *testing.T) {
 		const input = `{"type":"result","timestamp":"2026-02-13T19:00:10.738Z","status":"error","stats":{"total_tokens":0,"input_tokens":0,"output_tokens":0,"cached":0,"input":0,"duration_ms":100,"tool_calls":0}}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -146,7 +147,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("UnknownType", func(t *testing.T) {
 		const input = `{"type":"unknown_event","data":"something"}`
-		msgs, err := ParseMessage([]byte(input))
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}

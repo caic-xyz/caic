@@ -15,11 +15,6 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	agentclaude "github.com/caic-xyz/caic/backend/internal/agent/claude"
-	agentcodex "github.com/caic-xyz/caic/backend/internal/agent/codex"
-	agentgemini "github.com/caic-xyz/caic/backend/internal/agent/gemini"
-	agentkilo "github.com/caic-xyz/caic/backend/internal/agent/kilo"
-	agentopencode "github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
@@ -52,7 +47,8 @@ type LoadedTask struct {
 	Msgs              []agent.Message
 	Result            *Result
 
-	path string // Absolute path for lazy message loading via LoadMessages.
+	path    string                                // Absolute path for lazy message loading via LoadMessages.
+	parseFn func([]byte) ([]agent.Message, error) // Parser for this harness; set by LoadLogs.
 }
 
 // Primary returns a pointer to the primary RepoMount (Repos[0]), or nil for no-repo tasks.
@@ -64,10 +60,8 @@ func (lt *LoadedTask) Primary() *RepoMount {
 }
 
 // LoadLogs scans logDir for *.jsonl files and loads task metadata.
-// Only the header (first line) and result trailer (last line) are parsed;
-// individual messages are NOT loaded. Call LoadMessages on specific tasks
-// that need their conversation history. Returns one LoadedTask per file,
-// sorted by StartedAt ascending.
+// Only the header and result trailer are parsed; call LoadMessages for
+// full conversation history. Call SetParser on each task before LoadMessages.
 func LoadLogs(logDir string) ([]*LoadedTask, error) {
 	entries, err := os.ReadDir(logDir)
 	if err != nil {
@@ -119,13 +113,22 @@ func LoadLogs(logDir string) ([]*LoadedTask, error) {
 	return tasks, nil
 }
 
+// SetParser sets the parse function for lazy message loading.
+func (lt *LoadedTask) SetParser(fn func([]byte) ([]agent.Message, error)) {
+	lt.parseFn = fn
+}
+
 // LoadMessages lazily loads the full conversation messages from the log file.
-// This is a no-op if messages are already loaded.
+// This is a no-op if messages are already loaded. Requires parseFn to be set
+// via LoadLogs backends or SetParser.
 func (lt *LoadedTask) LoadMessages() error {
 	if lt.Msgs != nil || lt.path == "" {
 		return nil
 	}
-	full, err := loadLogFile(lt.path)
+	if lt.parseFn == nil {
+		return fmt.Errorf("no parser set for harness %q; call SetParser first", lt.Harness)
+	}
+	full, err := loadLogFile(lt.path, lt.parseFn)
 	if err != nil {
 		return err
 	}
@@ -140,13 +143,13 @@ func (lt *LoadedTask) LoadMessages() error {
 
 // unmarshalMeta decodes a MetaMessage from JSON and warns about any unrecognised
 // fields (e.g. fields from an older log format that have since been removed).
-func unmarshalMeta(data []byte, m *agent.MetaMessage) error {
+func unmarshalMeta(data []byte, m *agent.MetaMessage, fw *jsonutil.FieldWarner) error {
 	if err := json.Unmarshal(data, m); err != nil {
 		return err
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err == nil {
-		jsonutil.WarnUnknown("caic_meta", jsonutil.CollectUnknown(raw, metaKnown))
+		fw.Warn("caic_meta", jsonutil.CollectUnknown(raw, metaKnown))
 	}
 	return nil
 }
@@ -166,13 +169,14 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 	}()
 
 	// Read first line: metadata header.
+	fw := &jsonutil.FieldWarner{}
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 4096), 32<<20)
 	if !scanner.Scan() {
 		return nil, errNotLogFile
 	}
 	var meta agent.MetaMessage
-	if err := unmarshalMeta(scanner.Bytes(), &meta); err != nil {
+	if err := unmarshalMeta(scanner.Bytes(), &meta, fw); err != nil {
 		return nil, errNotLogFile
 	}
 	if err := meta.Validate(); err != nil {
@@ -246,7 +250,7 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 				if err := json.Unmarshal(line, &mr); err == nil {
 					var raw map[string]json.RawMessage
 					if json.Unmarshal(line, &raw) == nil {
-						jsonutil.WarnUnknown("caic_result", jsonutil.CollectUnknown(raw, resultKnown))
+						fw.Warn("caic_result", jsonutil.CollectUnknown(raw, resultKnown))
 					}
 					lt.State = parseState(mr.State)
 					if mr.Title != "" {
@@ -279,7 +283,7 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 
 // loadLogFile parses a single JSONL log file. Returns nil if the file has no
 // valid caic_meta header.
-func loadLogFile(path string) (_ *LoadedTask, retErr error) {
+func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ *LoadedTask, retErr error) {
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, err
@@ -294,12 +298,14 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 	// 32 MiB max line: user input with base64 images can produce very long NDJSON lines.
 	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
 
+	fw := &jsonutil.FieldWarner{}
+
 	// First line must be the metadata header.
 	if !scanner.Scan() {
 		return nil, errNotLogFile
 	}
 	var meta agent.MetaMessage
-	if err := unmarshalMeta(scanner.Bytes(), &meta); err != nil {
+	if err := unmarshalMeta(scanner.Bytes(), &meta, fw); err != nil {
 		return nil, errNotLogFile
 	}
 	if err := meta.Validate(); err != nil {
@@ -327,8 +333,6 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 		State:             StateRunning, // sentinel: overridden by caic_result trailer or loadPurgedTasksFrom
 		ForgeIssue:        meta.ForgeIssue,
 	}
-
-	parseFn := parseFnForHarness(meta.Harness)
 
 	// Parse remaining lines as agent messages or the result trailer.
 	var envelope struct {
@@ -371,7 +375,7 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 			}
 			var raw map[string]json.RawMessage
 			if json.Unmarshal(line, &raw) == nil {
-				jsonutil.WarnUnknown("caic_result", jsonutil.CollectUnknown(raw, resultKnown))
+				fw.Warn("caic_result", jsonutil.CollectUnknown(raw, resultKnown))
 			}
 			lt.State = parseState(mr.State)
 			if mr.Title != "" {
@@ -406,24 +410,6 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 	}
 
 	return lt, scanner.Err()
-}
-
-// parseFnForHarness returns the message parser for the given harness.
-//
-// TODO: This is a layering violation, let's fix this eventually.
-func parseFnForHarness(h agent.Harness) func([]byte) ([]agent.Message, error) {
-	switch h {
-	case agent.Codex:
-		return agentcodex.ParseMessage
-	case agent.Gemini:
-		return agentgemini.ParseMessage
-	case agent.Kilo:
-		return agentkilo.ParseMessage
-	case agent.OpenCode:
-		return agentopencode.ParseMessage
-	default:
-		return agentclaude.ParseMessage
-	}
 }
 
 // tsToTime converts a Unix epoch float64 (seconds with sub-second precision)

@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 func TestParseMessage(t *testing.T) {
 	t.Run("SystemInit", func(t *testing.T) {
 		line := `{"type":"system","subtype":"init","cwd":"/home/user","session_id":"abc-123","tools":["Bash","Read"],"model":"claude-opus-4-6","claude_code_version":"2.1.34","uuid":"uuid-1"}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -29,7 +30,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("AssistantTextAndUsage", func(t *testing.T) {
 		line := `{"type":"assistant","message":{"model":"claude-opus-4-6","id":"msg_01","role":"assistant","content":[{"type":"text","text":"hello world"}],"usage":{"input_tokens":10,"output_tokens":5}},"session_id":"abc","uuid":"u1"}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -56,7 +57,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("AssistantToolUse", func(t *testing.T) {
 		line := `{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"tu_1","name":"Bash","input":{"command":"ls"}}],"usage":{}}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -76,7 +77,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("AssistantAskUserQuestion", func(t *testing.T) {
 		line := `{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"ask_1","name":"AskUserQuestion","input":{"questions":[{"question":"Which?","header":"Pick","options":[{"label":"A"},{"label":"B"}]}]}}],"usage":{}}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +100,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("AssistantTodoWrite", func(t *testing.T) {
 		line := `{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"td_1","name":"TodoWrite","input":{"todos":[{"content":"Fix bug","status":"pending","activeForm":"Fixing bug"}]}}],"usage":{}}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,7 +120,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("AssistantMultiBlock", func(t *testing.T) {
 		line := `{"type":"assistant","message":{"model":"m","content":[{"type":"text","text":"thinking..."},{"type":"tool_use","id":"tu_1","name":"Read","input":{"file":"x.go"}}],"usage":{"input_tokens":100,"output_tokens":50}}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -139,7 +140,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("UserInput", func(t *testing.T) {
 		line := `{"type":"user","message":{"role":"user","content":"hello"}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,7 +157,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("ToolResult", func(t *testing.T) {
 		line := `{"type":"user","message":{"content":[{"type":"text","text":"ok"}],"is_error":false},"parent_tool_use_id":"tu_1"}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -176,7 +177,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("ToolResultError", func(t *testing.T) {
 		line := `{"type":"user","message":{"content":[{"type":"text","text":"file not found"}],"is_error":true},"parent_tool_use_id":"tu_2"}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -195,7 +196,7 @@ func TestParseMessage(t *testing.T) {
 		// MCP tool results arrive as user messages without parent_tool_use_id,
 		// but with a tool_result content block carrying the tool_use_id inline.
 		line := `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_abc123","type":"tool_result","content":[{"type":"text","text":"Widget rendered."}]}]},"parent_tool_use_id":null}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -215,7 +216,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("InlineToolResultError", func(t *testing.T) {
 		line := `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_err","type":"tool_result","is_error":true,"content":[{"type":"text","text":"tool failed"}]}]},"parent_tool_use_id":null}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -235,7 +236,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("Result", func(t *testing.T) {
 		line := `{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"num_turns":3,"result":"done","total_cost_usd":0.05,"usage":{"input_tokens":100,"output_tokens":50}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -252,7 +253,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("StreamEventTextDelta", func(t *testing.T) {
 		line := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -269,7 +270,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("DiffStat", func(t *testing.T) {
 		line := `{"type":"caic_diff_stat","diff_stat":[{"path":"main.go","added":10,"deleted":3}],"ts":1719500000.123}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -289,7 +290,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("RawFallback", func(t *testing.T) {
 		line := `{"type":"tool_progress","data":"some progress"}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -303,7 +304,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("SystemNoiseDropped", func(t *testing.T) {
 		for _, subtype := range []string{"status", "task_progress", "turn_duration"} {
 			line := `{"type":"system","subtype":"` + subtype + `","session_id":"s1","uuid":"u1"}`
-			msgs, err := ParseMessage([]byte(line))
+			msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 			if err != nil {
 				t.Fatalf("subtype %q: %v", subtype, err)
 			}
@@ -315,7 +316,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("SystemUsefulSubtypes", func(t *testing.T) {
 		for _, subtype := range []string{"compact_boundary", "context_cleared", "api_error"} {
 			line := `{"type":"system","subtype":"` + subtype + `","session_id":"s1","uuid":"u1"}`
-			msgs, err := ParseMessage([]byte(line))
+			msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 			if err != nil {
 				t.Fatalf("subtype %q: %v", subtype, err)
 			}
@@ -333,7 +334,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("SystemTaskStarted", func(t *testing.T) {
 		line := `{"type":"system","subtype":"task_started","session_id":"s1","uuid":"u1","task_id":"task-abc","description":"Explore codebase"}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -353,7 +354,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("SystemTaskNotification", func(t *testing.T) {
 		line := `{"type":"system","subtype":"task_notification","session_id":"s1","uuid":"u1","task_id":"task-abc","status":"completed"}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -373,7 +374,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("AssistantThinking", func(t *testing.T) {
 		line := `{"type":"assistant","message":{"model":"claude-opus-4-6","id":"msg_01","role":"assistant","content":[{"type":"thinking","thinking":"let me think..."},{"type":"text","text":"hello"}],"usage":{"input_tokens":10,"output_tokens":5}},"session_id":"abc","uuid":"u1"}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -396,7 +397,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("AssistantServerToolUseSkipped", func(t *testing.T) {
 		line := `{"type":"assistant","message":{"model":"m","id":"msg_01","role":"assistant","content":[{"type":"server_tool_use","id":"stu_1","name":"web_search"},{"type":"text","text":"result"}],"usage":{"input_tokens":10,"output_tokens":5}},"session_id":"abc","uuid":"u1"}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -412,7 +413,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("AssistantOnlyThinking", func(t *testing.T) {
 		line := `{"type":"assistant","message":{"model":"m","id":"msg_01","role":"assistant","content":[{"type":"thinking","thinking":"deep thought"}],"usage":{}},"session_id":"abc","uuid":"u1"}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -429,7 +430,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("StreamEventThinkingDelta", func(t *testing.T) {
 		line := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"partial thought"}}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -456,7 +457,7 @@ func TestParseMessage(t *testing.T) {
 			`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","text":"sig"}}}`,
 		}
 		for _, line := range noiseLines {
-			msgs, err := ParseMessage([]byte(line))
+			msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 			if err != nil {
 				t.Fatalf("line %s: %v", line, err)
 			}
@@ -467,7 +468,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("StreamEventError", func(t *testing.T) {
 		line := `{"type":"stream_event","event":{"type":"error","index":0}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -484,7 +485,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("AssistantWidgetToolUse", func(t *testing.T) {
 		line := `{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"wid_1","name":"show_widget","input":{"widget_code":"<h1>Hello</h1>","title":"My Widget"}}],"usage":{}}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -508,7 +509,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("WidgetStreamStart", func(t *testing.T) {
 		wt := NewWidgetTracker()
 		line := `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"wid_2","name":"show_widget"}}}`
-		msgs, err := ParseMessageWithTracker([]byte(line), wt)
+		msgs, err := parseMessageWithTracker([]byte(line), wt, &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -523,12 +524,12 @@ func TestParseMessage(t *testing.T) {
 		wt := NewWidgetTracker()
 		// Register a widget block.
 		start := `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"wid_3","name":"show_widget"}}}`
-		if _, err := ParseMessageWithTracker([]byte(start), wt); err != nil {
+		if _, err := parseMessageWithTracker([]byte(start), wt, &jsonutil.FieldWarner{}); err != nil {
 			t.Fatal(err)
 		}
 		// Send partial JSON with widget_code.
 		delta := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"widget_code\":\"<h1>Hi"}}}`
-		msgs, err := ParseMessageWithTracker([]byte(delta), wt)
+		msgs, err := parseMessageWithTracker([]byte(delta), wt, &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -549,7 +550,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("NonWidgetInputDeltaIgnored", func(t *testing.T) {
 		// Without tracker, input_json_delta should be dropped (normal parse path).
 		line := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{"}}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -560,11 +561,11 @@ func TestParseMessage(t *testing.T) {
 	t.Run("WidgetBlockStop", func(t *testing.T) {
 		wt := NewWidgetTracker()
 		start := `{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"wid_4","name":"show_widget"}}}`
-		if _, err := ParseMessageWithTracker([]byte(start), wt); err != nil {
+		if _, err := parseMessageWithTracker([]byte(start), wt, &jsonutil.FieldWarner{}); err != nil {
 			t.Fatal(err)
 		}
 		stop := `{"type":"stream_event","event":{"type":"content_block_stop","index":0}}`
-		msgs, err := ParseMessageWithTracker([]byte(stop), wt)
+		msgs, err := parseMessageWithTracker([]byte(stop), wt, &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -598,7 +599,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("SkillToolUseSuppressed", func(t *testing.T) {
 		line := `{"type":"assistant","message":{"model":"m","content":[{"type":"tool_use","id":"sk_1","name":"Skill","input":{"skill":"widget-plugin:widget"}}],"usage":{}}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -612,7 +613,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("SyntheticUserSuppressed", func(t *testing.T) {
 		// Claude Code sets isSynthetic:true on skill context injections.
 		line := `{"type":"user","isSynthetic":true,"message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /tmp/widget-plugin/skills/widget\n\n# Widget Rendering"}]}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -622,7 +623,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("SyntheticFalseNotSuppressed", func(t *testing.T) {
 		line := `{"type":"user","isSynthetic":false,"message":{"role":"user","content":"hello"}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -636,7 +637,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("NormalUserInputNotSuppressed", func(t *testing.T) {
 		line := `{"type":"user","message":{"role":"user","content":"explain this code"}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -650,7 +651,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("RateLimitEvent", func(t *testing.T) {
 		line := `{"type":"rate_limit_event","uuid":"u1","session_id":"s1","rate_limit_info":{"status":"allowed_warning","resets_at":1711000000,"rate_limit_type":"five_hour","utilization":0.85}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -677,7 +678,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("RateLimitEventMinimal", func(t *testing.T) {
 		// Only status is required; other fields may be absent.
 		line := `{"type":"rate_limit_event","uuid":"u1","session_id":"s1","rate_limit_info":{"status":"rejected"}}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -696,7 +697,7 @@ func TestParseMessage(t *testing.T) {
 		// An init record with an extra unknown field should parse successfully
 		// (forward compatibility). The known fields must still be extracted.
 		line := `{"type":"system","subtype":"init","cwd":"/tmp","session_id":"s1","tools":[],"model":"m","claude_code_version":"1.0","uuid":"u1","brand_new_field":"surprise"}`
-		msgs, err := ParseMessage([]byte(line))
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatalf("unknown field caused error: %v", err)
 		}

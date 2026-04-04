@@ -47,7 +47,6 @@ func (c *ContentBlock) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("ContentBlock: %w", err)
 	}
 	c.Extra = jsonutil.CollectUnknown(raw, contentBlockKnown)
-	jsonutil.WarnUnknown("ContentBlock("+c.Type+")", c.Extra)
 	return nil
 }
 
@@ -81,7 +80,6 @@ func (u *Usage) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("Usage: %w", err)
 	}
 	u.Extra = jsonutil.CollectUnknown(raw, usageKnown)
-	jsonutil.WarnUnknown("Usage", u.Extra)
 	return nil
 }
 
@@ -107,7 +105,6 @@ func (s *ServerToolUse) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("ServerToolUse: %w", err)
 	}
 	s.Extra = jsonutil.CollectUnknown(raw, serverToolUseKnown)
-	jsonutil.WarnUnknown("ServerToolUse", s.Extra)
 	return nil
 }
 
@@ -133,7 +130,6 @@ func (c *CacheCreation) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("CacheCreation: %w", err)
 	}
 	c.Extra = jsonutil.CollectUnknown(raw, cacheCreationKnown)
-	jsonutil.WarnUnknown("CacheCreation", c.Extra)
 	return nil
 }
 
@@ -167,7 +163,6 @@ func (m *APIMessage) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("APIMessage: %w", err)
 	}
 	m.Extra = jsonutil.CollectUnknown(raw, apiMessageKnown)
-	jsonutil.WarnUnknown("APIMessage", m.Extra)
 	return nil
 }
 
@@ -194,7 +189,6 @@ func (m *UserMessage) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("UserMessage: %w", err)
 	}
 	m.Extra = jsonutil.CollectUnknown(raw, userMessageKnown)
-	jsonutil.WarnUnknown("UserMessage", m.Extra)
 	return nil
 }
 
@@ -241,7 +235,6 @@ func (t *Todo) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("Todo: %w", err)
 	}
 	t.Extra = jsonutil.CollectUnknown(raw, todoKnown)
-	jsonutil.WarnUnknown("Todo", t.Extra)
 	return nil
 }
 
@@ -269,7 +262,6 @@ func (t *ThinkingMetadata) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("ThinkingMetadata: %w", err)
 	}
 	t.Extra = jsonutil.CollectUnknown(raw, thinkingMetadataKnown)
-	jsonutil.WarnUnknown("ThinkingMetadata", t.Extra)
 	return nil
 }
 
@@ -301,6 +293,5 @@ func (t *ToolUseResult) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("ToolUseResult: %w", err)
 	}
 	t.Extra = jsonutil.CollectUnknown(raw, toolUseResultKnown)
-	jsonutil.WarnUnknown("ToolUseResult", t.Extra)
 	return nil
 }
