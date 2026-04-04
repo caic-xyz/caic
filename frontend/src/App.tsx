@@ -158,8 +158,20 @@ export default function App() {
   // Global keyboard shortcuts:
   // - Escape: from diff view, return to task detail; from task detail, dismiss and focus prompt
   // - ArrowUp/ArrowDown: switch to previous/next task in sidebar order
+  // - Shift+Delete: purge the currently selected task
   {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Delete" && e.shiftKey && selectedId() !== null) {
+        const t = selectedTask();
+        if (t) {
+          e.preventDefault();
+          const terminalPurge = new Set(["stopping", "purging", "purged", "failed"]);
+          if (!terminalPurge.has(t.state) && window.confirm(`Purge container?\n\n${t.title}\nbranch: ${t.repos?.[0]?.branch ?? ""}`)) {
+            handlePurge(t.id);
+          }
+        }
+        return;
+      }
       if (e.key === "Escape" && selectedId() !== null) {
         if (isDiffPath(location.pathname)) {
           navigate(location.pathname.replace(/\/diff$/, ""));
