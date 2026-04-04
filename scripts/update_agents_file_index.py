@@ -108,6 +108,22 @@ def get_file_comment(filepath):
                 if not sline:
                     continue
 
+                # Python docstring: extract first line of a triple-quoted string
+                if ext == ".py" and (sline.startswith('"""') or sline.startswith("'''")):
+                    quote = sline[:3]
+                    # Single-line docstring: """text"""
+                    if sline.endswith(quote) and len(sline) > 6:
+                        return sline[3:-3].strip()
+                    # Multi-line docstring: return the first line
+                    content = sline[3:].strip()
+                    if content:
+                        return content
+                    # Opening quotes on their own line; use next non-empty line
+                    for j in range(i + 1, len(lines)):
+                        if lines[j] and lines[j].strip():
+                            return lines[j].strip()
+                    return None
+
                 # Skip common directives/metadata that aren't descriptions
                 if sline.startswith(f"{prefix}go:"):
                     continue
