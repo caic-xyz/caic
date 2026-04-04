@@ -15,6 +15,7 @@ import { requestNotificationPermission } from "./notifications";
 import ProgressPanel from "./ProgressPanel";
 import StatsIcon from "./StatsIcon";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
+import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import SyncIcon from "@material-symbols/svg-400/outlined/sync.svg?solid";
 import GitHubIcon from "./github.svg?solid";
@@ -1220,8 +1221,27 @@ const marked = new Marked({
 
 function Markdown(props: { text: string }) {
   const html = createMemo(() => marked.parse(props.text) as string);
-  // eslint-disable-next-line solid/no-innerhtml -- rendering trusted marked output
-  return <div class={styles.markdown} innerHTML={html()} />;
+  const [raw, setRaw] = createSignal(false);
+  return (
+    <div class={styles.markdownWrap}>
+      <div class={styles.rawToolbar}>
+        <button class={styles.rawToolbarBtn} onClick={() => setRaw(!raw())} title={raw() ? "Show rendered" : "Show raw"}>
+          {raw() ? "rendered" : "raw"}
+        </button>
+        <Show when={raw()}>
+          <button class={styles.rawToolbarBtn} onClick={() => navigator.clipboard.writeText(props.text)} title="Copy to clipboard">
+            <CopyIcon width={14} height={14} />
+          </button>
+        </Show>
+      </div>
+      <Show when={raw()} fallback={
+        // eslint-disable-next-line solid/no-innerhtml -- rendering trusted marked output
+        <div class={styles.markdown} innerHTML={html()} />
+      }>
+        <pre class={styles.rawText}>{props.text}</pre>
+      </Show>
+    </div>
+  );
 }
 
 // Answers submitted locally but not yet confirmed via SSE userInput event.

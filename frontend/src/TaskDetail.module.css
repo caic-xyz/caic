@@ -196,6 +196,54 @@ a.headerPR:hover {
   margin-bottom: 0.5rem;
 }
 
+.markdownWrap {
+  position: relative;
+}
+
+.rawToolbar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  gap: 0.2em;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 1;
+}
+
+.markdownWrap:hover .rawToolbar {
+  opacity: 1;
+}
+
+.rawToolbarBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.4em;
+  font-size: 0.7rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.rawToolbarBtn svg {
+  fill: var(--color-text-secondary);
+}
+
+.rawText {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  margin: 0;
+  padding: 0.5em;
+  background: var(--color-bg-code);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+
 .markdown {
   margin-bottom: 0.25rem;
   line-height: 1.5;

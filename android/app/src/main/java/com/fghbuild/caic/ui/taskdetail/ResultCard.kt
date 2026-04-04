@@ -17,8 +17,6 @@ import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.DiffFileStat
 import com.caic.sdk.v1.EventResult
 import com.fghbuild.caic.ui.theme.appColors
-import com.fghbuild.caic.ui.theme.markdownTypography
-import com.mikepenz.markdown.m3.Markdown
 import java.util.Locale
 
 @Composable
@@ -40,14 +38,7 @@ fun ResultCard(result: EventResult, onNavigateToDiff: (() -> Unit)? = null) {
                 fontWeight = FontWeight.Bold,
             )
             if (result.result.isNotBlank()) {
-                Markdown(
-                    content = result.result,
-                    modifier = Modifier.fillMaxWidth(),
-                    typography = markdownTypography(),
-                    colors = com.mikepenz.markdown.m3.markdownColor(
-                        codeBackground = MaterialTheme.colorScheme.surfaceVariant,
-                    ),
-                )
+                MarkdownWithRawToggle(text = result.result, modifier = Modifier.fillMaxWidth())
             }
 
             result.diffStat?.let { stats ->
