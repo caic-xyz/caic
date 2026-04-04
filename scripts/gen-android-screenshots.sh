@@ -13,13 +13,13 @@
 #   2. Configures the Android app via adb UI automation
 #   3. Creates tasks via the API
 #   4. Takes screenshots
-#   5. Saves them to e2e/screenshots/ (same dir as Playwright screenshots)
+#   5. Saves them to e2e/screenshots/android/
 
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CAIC_DIR="$(dirname "$SCRIPT_DIR")"
-SCREENSHOT_DIR="$CAIC_DIR/e2e/screenshots"
+SCREENSHOT_DIR="$CAIC_DIR/e2e/screenshots/android"
 API="http://localhost:8090"
 
 cleanup() {
@@ -138,13 +138,13 @@ sleep 4
 # Screenshot 1: Task list.
 echo "Taking screenshots..."
 mkdir -p "$SCREENSHOT_DIR"
-adb exec-out screencap -p > "$SCREENSHOT_DIR/android-task-list.png"
-echo "  android-task-list.png"
+adb exec-out screencap -p > "$SCREENSHOT_DIR/task-list.png"
+echo "  task-list.png"
 
 # Convert to AVIF.
-ffmpeg -y -i "$SCREENSHOT_DIR/android-task-list.png" -c:v libaom-av1 -still-picture 1 -crf 0 -b:v 0 \
-	"$SCREENSHOT_DIR/android-task-list.avif"
-rm "$SCREENSHOT_DIR/android-task-list.png"
+ffmpeg -y -i "$SCREENSHOT_DIR/task-list.png" -c:v libaom-av1 -still-picture 1 -crf 0 -b:v 0 \
+	"$SCREENSHOT_DIR/task-list.avif"
+rm "$SCREENSHOT_DIR/task-list.png"
 
 # Tap the first task to open detail view.
 adb shell uiautomator dump /sdcard/window_dump.xml 2>/dev/null
@@ -152,12 +152,12 @@ tap_node text "Fix token expiry bug in auth middleware"
 sleep 2
 
 # Screenshot 2: Task detail.
-adb exec-out screencap -p > "$SCREENSHOT_DIR/android-task-detail.png"
-echo "  android-task-detail.png"
+adb exec-out screencap -p > "$SCREENSHOT_DIR/task-detail.png"
+echo "  task-detail.png"
 
 # Convert to AVIF.
-ffmpeg -y -i "$SCREENSHOT_DIR/android-task-detail.png" -c:v libaom-av1 -still-picture 1 -crf 0 -b:v 0 \
-	"$SCREENSHOT_DIR/android-task-detail.avif"
-rm "$SCREENSHOT_DIR/android-task-detail.png"
+ffmpeg -y -i "$SCREENSHOT_DIR/task-detail.png" -c:v libaom-av1 -still-picture 1 -crf 0 -b:v 0 \
+	"$SCREENSHOT_DIR/task-detail.avif"
+rm "$SCREENSHOT_DIR/task-detail.png"
 
 echo "Done."

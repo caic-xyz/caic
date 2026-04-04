@@ -1,7 +1,7 @@
 // Generate screenshots for the documentation site.
 //
 // Run with: pnpm exec playwright test --config e2e/playwright.config.ts gen-screenshots
-// Output: e2e/screenshots/
+// Output: e2e/screenshots/frontend/
 import { test, expect, createTaskAPI, waitForTaskState, convertPngsToWebp } from "../helpers";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -10,6 +10,7 @@ const screenshotDir = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "screenshots",
+  "frontend",
 );
 
 test.describe.configure({ mode: "serial" });

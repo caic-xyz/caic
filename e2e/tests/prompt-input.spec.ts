@@ -7,6 +7,7 @@ const screenshotDir = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "screenshots",
+  "frontend",
 );
 
 test.describe.configure({ mode: "serial" });
