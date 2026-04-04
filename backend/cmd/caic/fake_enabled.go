@@ -149,6 +149,10 @@ func (*fakeContainer) Stop(_ context.Context, _ string) error                { r
 func (*fakeContainer) Purge(_ context.Context, _ string, _ []md.Repo) error  { return nil }
 func (*fakeContainer) Revive(_ context.Context, _ string, _ []md.Repo) error { return nil }
 
+func (*fakeContainer) Fork(_ context.Context, _ string, _ []md.Repo, _ *task.ForkOptions) (string, []md.Repo, error) {
+	return "fake-fork", nil, fmt.Errorf("fork not supported in fake mode")
+}
+
 // fakeBackend implements agent.Backend with a shell process that emits
 // streaming text deltas followed by complete messages, simulating
 // --include-partial-messages output. It supports multiple turns: each

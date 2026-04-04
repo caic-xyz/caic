@@ -799,6 +799,10 @@ func (s *stubContainer) Stop(_ context.Context, _ string) error                {
 func (s *stubContainer) Purge(_ context.Context, _ string, _ []md.Repo) error  { return nil }
 func (s *stubContainer) Revive(_ context.Context, _ string, _ []md.Repo) error { return nil }
 
+func (s *stubContainer) Fork(_ context.Context, _ string, _ []md.Repo, _ *ForkOptions) (string, []md.Repo, error) {
+	return "stub-fork", nil, nil
+}
+
 // recvMsg reads a single message from ch, respecting the test context and a
 // 1-second safety timeout.
 func recvMsg(t *testing.T, ch <-chan agent.Message) agent.Message {

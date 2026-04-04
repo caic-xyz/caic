@@ -130,6 +130,8 @@ class ApiClient(
     suspend fun getTaskCILog(id: String, jobID: String): CILogResp = request("GET", "/api/v1/tasks/$id/ci-log?jobID=$jobID")
     /** Pushes task changes to the remote repository. */
     suspend fun syncTask(id: String, req: SyncReq): SyncResp = request("POST", "/api/v1/tasks/$id/sync", json.encodeToString(req))
+    /** Forks a task by snapshotting its container and creating a new task on a derived branch. */
+    suspend fun forkTask(id: String, req: ForkTaskReq): CreateTaskResp = request("POST", "/api/v1/tasks/$id/fork", json.encodeToString(req))
     /** Returns the unified diff for a task's branch. */
     suspend fun getTaskDiff(id: String): DiffResp = request("GET", "/api/v1/tasks/$id/diff")
     /** Returns the full (untruncated) input for a tool call. */

@@ -626,6 +626,18 @@ public struct SyncResp: Codable {
     public let prNumber: Int?
 }
 
+/// ForkTaskReq is the request body for POST /api/v1/tasks/{id}/fork.
+public struct ForkTaskReq: Codable {
+    /// Initial prompt for the forked task.
+    public let prompt: Prompt
+    /// Override harness; empty means inherit from source.
+    public let harness: Harness?
+    /// Override model; empty means inherit from source.
+    public let model: String?
+    /// Additional repos to map into the fork.
+    public let extraRepos: [RepoSpec]?
+}
+
 /// DiffResp is the response for GET /api/v1/tasks/{id}/diff.
 public struct DiffResp: Codable {
     public let diff: String

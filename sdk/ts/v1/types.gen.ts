@@ -659,6 +659,15 @@ export interface CreateTaskReq {
   display?: boolean;
 }
 /**
+ * ForkTaskReq is the request body for POST /api/v1/tasks/{id}/fork.
+ */
+export interface ForkTaskReq {
+  prompt: Prompt; // Initial prompt for the forked task.
+  harness?: Harness; // Override harness; empty means inherit from source.
+  model?: string; // Override model; empty means inherit from source.
+  extraRepos?: RepoSpec[]; // Additional repos to map into the fork.
+}
+/**
  * BotFixCIReq is the request body for POST /api/v1/bot/fix-ci.
  * The server fetches CI logs, builds a prompt, and creates a fix task.
  */

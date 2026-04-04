@@ -43,15 +43,8 @@ func (r *CreateTaskReq) Validate() error {
 	if r.Harness == "" {
 		return dto.BadRequest("harness is required")
 	}
-	seen := make(map[string]struct{}, len(r.Repos))
-	for _, rs := range r.Repos {
-		if rs.Name == "" {
-			return dto.BadRequest("repos contains entry with empty name")
-		}
-		if _, dup := seen[rs.Name]; dup {
-			return dto.BadRequest("repos contains duplicate name: " + rs.Name)
-		}
-		seen[rs.Name] = struct{}{}
+	if err := validateRepoSpecs(r.Repos, "repos"); err != nil {
+		return err
 	}
 	return validateImages(r.InitialPrompt.Images)
 }
@@ -133,6 +126,17 @@ func (r *BotFixPRReq) Validate() error {
 	return nil
 }
 
+// Validate checks that a prompt is provided, images are valid, and extra repos have no duplicates.
+func (r *ForkTaskReq) Validate() error {
+	if r.Prompt.Text == "" && len(r.Prompt.Images) == 0 {
+		return dto.BadRequest("prompt or images required")
+	}
+	if err := validateRepoSpecs(r.ExtraRepos, "extraRepos"); err != nil {
+		return err
+	}
+	return validateImages(r.Prompt.Images)
+}
+
 // Validate is a no-op; all settings values are accepted.
 func (r *UpdatePreferencesReq) Validate() error { return nil }
 
@@ -140,6 +144,21 @@ func (r *UpdatePreferencesReq) Validate() error { return nil }
 func (r *VoiceRTCOfferReq) Validate() error {
 	if r.SDP == "" {
 		return dto.BadRequest("sdp is required")
+	}
+	return nil
+}
+
+// validateRepoSpecs checks that each RepoSpec has a non-empty name and no duplicates.
+func validateRepoSpecs(specs []RepoSpec, field string) error {
+	seen := make(map[string]struct{}, len(specs))
+	for _, rs := range specs {
+		if rs.Name == "" {
+			return dto.BadRequest(field + " contains entry with empty name")
+		}
+		if _, dup := seen[rs.Name]; dup {
+			return dto.BadRequest(field + " contains duplicate name: " + rs.Name)
+		}
+		seen[rs.Name] = struct{}{}
 	}
 	return nil
 }

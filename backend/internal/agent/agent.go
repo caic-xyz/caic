@@ -332,6 +332,14 @@ func DeployEmbeddedDir(ctx context.Context, container string, fsys fs.FS, target
 	return nil
 }
 
+// CleanRelayState removes the relay state directory in the container so that
+// a subsequent StartRelay begins with a clean output.jsonl. Used by fork to
+// prevent the source task's message history from leaking into the forked task.
+func CleanRelayState(ctx context.Context, container string) error {
+	cmd := exec.CommandContext(ctx, "ssh", container, "rm", "-rf", RelayDir) //nolint:gosec // container is not user-controlled
+	return cmd.Run()
+}
+
 // HasRelayDir checks whether the caic relay directory exists in the container.
 // Its presence proves caic deployed the relay at some point.
 func HasRelayDir(ctx context.Context, container string) (bool, error) {

@@ -242,6 +242,14 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[SyncResp](),
 	},
 	{
+		Name:   "forkTask",
+		Doc:    "Forks a task by snapshotting its container and creating a new task on a derived branch.",
+		Method: "POST",
+		Path:   "/api/v1/tasks/{id}/fork",
+		Req:    reflect.TypeFor[ForkTaskReq](),
+		Resp:   reflect.TypeFor[CreateTaskResp](),
+	},
+	{
 		Name:   "getTaskDiff",
 		Doc:    "Returns the unified diff for a task's branch.",
 		Method: "GET",

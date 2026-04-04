@@ -170,6 +170,42 @@ func (b *Backend) Revive(ctx context.Context, name string, repos []md.Repo) erro
 	return ct.Revive(ctx, &SlogWriter{Phase: "revive"}, &SlogWriter{Phase: "revive"})
 }
 
+// Fork implements task.ContainerBackend.
+func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *task.ForkOptions) (string, []md.Repo, error) {
+	if len(repos) > 0 {
+		slog.Info("md", "phase", "fork", "src", name, "dir", repos[0].GitRoot, "br", repos[0].Branch)
+	}
+	ct := b.Client.Container(repos...)
+	ct.Name = name
+	ct.State = "running"
+	harnessMap := map[agent.Harness]md.Harness{
+		agent.Claude:   md.HarnessClaude,
+		agent.Codex:    md.HarnessCodex,
+		agent.Gemini:   md.HarnessGemini,
+		agent.Kilo:     md.HarnessKilo,
+		agent.OpenCode: md.HarnessOpencode,
+	}
+	var agentPaths []md.AgentPaths
+	if mdH, ok := harnessMap[opts.Harness]; ok {
+		agentPaths = []md.AgentPaths{md.HarnessMounts[mdH]}
+	}
+	forkOpts := &md.ForkOpts{
+		ExtraRepos: opts.ExtraRepos,
+		Display:    opts.Display,
+		Tailscale:  opts.Tailscale,
+		USB:        opts.USB,
+		Labels:     opts.Labels,
+		AgentPaths: agentPaths,
+		ExtraEnv:   opts.ExtraEnv,
+	}
+	stdout, stderr := logWriters(opts.LogWriter, "fork")
+	forked, err := ct.Fork(ctx, stdout, stderr, forkOpts)
+	if err != nil {
+		return "", nil, err
+	}
+	return forked.Name, forked.Repos, nil
+}
+
 // logWriters returns stdout and stderr writers for md task operations.
 func logWriters(w io.Writer, phase string) (stdout, stderr io.Writer) {
 	return w, &SlogWriter{Phase: phase}

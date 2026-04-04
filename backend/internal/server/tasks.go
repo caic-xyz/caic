@@ -20,6 +20,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/gitutil"
 	"github.com/maruel/ksid"
 )
@@ -497,6 +498,139 @@ func (s *Server) reviveTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq
 		s.watchSession(entry, runner, h)
 	}()
 	return &v1.StatusResp{Status: "provisioning"}, nil
+}
+
+func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTaskReq) (*v1.CreateTaskResp, error) {
+	source := entry.task
+	state := source.GetState()
+	switch state {
+	case task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan:
+	default:
+		return nil, dto.Conflict("task must be running or waiting to fork")
+	}
+	if source.Container == "" {
+		return nil, dto.Conflict("task has no container")
+	}
+	if len(source.Repos) == 0 {
+		return nil, dto.BadRequest("cannot fork a no-repo task")
+	}
+
+	primaryName := source.Primary().Name
+	runner := s.runners[primaryName]
+
+	// Resolve harness and model: use overrides from the request, falling back to source.
+	forkHarness := source.Harness
+	forkModel := source.Model
+	if req.Harness != "" {
+		forkHarness = toAgentHarness(req.Harness)
+		backend, ok := runner.Backends[forkHarness]
+		if !ok {
+			return nil, dto.BadRequest("unknown harness: " + string(req.Harness))
+		}
+		if req.Model != "" && !slices.Contains(backend.Models(), req.Model) {
+			return nil, dto.BadRequest("unsupported model for " + string(req.Harness) + ": " + req.Model)
+		}
+		forkModel = req.Model
+	} else if req.Model != "" {
+		// Model override without harness override: validate against source harness.
+		backend, ok := runner.Backends[forkHarness]
+		if !ok {
+			return nil, dto.BadRequest("unknown harness: " + string(source.Harness))
+		}
+		if !slices.Contains(backend.Models(), req.Model) {
+			return nil, dto.BadRequest("unsupported model for " + string(source.Harness) + ": " + req.Model)
+		}
+		forkModel = req.Model
+	}
+
+	var ownerID string
+	if u, ok := auth.UserFromContext(ctx); ok {
+		ownerID = u.ID
+	}
+
+	// Validate and resolve extra repos.
+	sourceRepoNames := make(map[string]struct{}, len(source.Repos))
+	for _, r := range source.Repos {
+		sourceRepoNames[r.Name] = struct{}{}
+	}
+	var extraRepos []md.Repo
+	var extraMounts []task.RepoMount
+	for _, rs := range req.ExtraRepos {
+		if _, overlap := sourceRepoNames[rs.Name]; overlap {
+			return nil, dto.BadRequest("extraRepos contains repo already in source task: " + rs.Name)
+		}
+		er, ok := s.runners[rs.Name]
+		if !ok {
+			return nil, dto.BadRequest("unknown extra repo: " + rs.Name)
+		}
+		extraRepos = append(extraRepos, md.Repo{GitRoot: er.Dir, Branch: rs.BaseBranch})
+		extraMounts = append(extraMounts, task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir})
+	}
+
+	// Build the fork task, copying config from source.
+	mounts := make([]task.RepoMount, len(source.Repos), len(source.Repos)+len(extraMounts))
+	for i, r := range source.Repos {
+		mounts[i] = task.RepoMount{Name: r.Name, BaseBranch: r.BaseBranch, GitRoot: r.GitRoot}
+	}
+	mounts = append(mounts, extraMounts...)
+
+	prefs := s.prefs.Get(userIDFromCtx(ctx))
+	ghToken := s.resolveGitHubContainerToken(ctx, prefs.Settings.GitHubTokenAccess)
+
+	prompt := v1PromptToAgent(req.Prompt)
+	t := &task.Task{
+		ID:            ksid.NewID(),
+		InitialPrompt: prompt,
+		Repos:         mounts,
+		Harness:       forkHarness,
+		Model:         forkModel,
+		DockerImage:   source.DockerImage,
+		GitHubToken:   ghToken,
+		Tailscale:     source.Tailscale,
+		USB:           source.USB,
+		Display:       source.Display,
+		StartedAt:     time.Now().UTC(),
+		OwnerID:       ownerID,
+		Provider:      s.provider,
+	}
+	t.SetTitle(req.Prompt.Text)
+	go t.GenerateTitle(s.ctx) //nolint:contextcheck // fire-and-forget; must outlive request
+	forkEntry := &taskEntry{task: t, done: make(chan struct{})}
+
+	s.mu.Lock()
+	s.tasks[t.ID.String()] = forkEntry
+	s.taskChanged()
+	s.mu.Unlock()
+
+	var extraEnv []string
+	if ghToken != "" {
+		extraEnv = append(extraEnv, "GITHUB_TOKEN="+ghToken)
+	}
+
+	go func() {
+		forkOpts := &task.ForkOptions{
+			ExtraRepos: extraRepos,
+			Display:    source.Display,
+			Tailscale:  source.Tailscale,
+			USB:        source.USB,
+			Labels:     []string{"caic=" + t.ID.String(), "harness=" + string(forkHarness)},
+			Harness:    forkHarness,
+			ExtraEnv:   extraEnv,
+		}
+		h, err := runner.ForkTask(s.ctx, source, t, forkOpts)
+		if err != nil {
+			result := task.Result{State: task.StateFailed, Err: err}
+			s.mu.Lock()
+			forkEntry.result = &result
+			s.taskChanged()
+			s.mu.Unlock()
+			close(forkEntry.done)
+			return
+		}
+		s.watchSession(forkEntry, runner, h)
+	}()
+
+	return &v1.CreateTaskResp{Status: "accepted", ID: t.ID}, nil
 }
 
 func (s *Server) syncTask(ctx context.Context, entry *taskEntry, req *v1.SyncReq) (*v1.SyncResp, error) {

@@ -257,6 +257,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("POST /api/v1/tasks/{id}/restart", handleWithTask(s, s.restartTask))
 	apiMux.HandleFunc("POST /api/v1/tasks/{id}/clear-context", handleWithTask(s, s.clearContext))
 	apiMux.HandleFunc("POST /api/v1/tasks/{id}/compact", handleWithTask(s, s.compactContext))
+	apiMux.HandleFunc("POST /api/v1/tasks/{id}/fork", handleWithTask(s, s.forkTask))
 	apiMux.HandleFunc("POST /api/v1/tasks/{id}/stop", handleWithTask(s, s.stopTask))
 	apiMux.HandleFunc("POST /api/v1/tasks/{id}/purge", handleWithTask(s, s.purgeTask))
 	apiMux.HandleFunc("POST /api/v1/tasks/{id}/revive", handleWithTask(s, s.reviveTask))

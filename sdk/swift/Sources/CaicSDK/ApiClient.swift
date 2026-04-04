@@ -199,6 +199,10 @@ public final class ApiClient {
     public func syncTask(id: String, req: SyncReq) async throws -> SyncResp {
         try await request("POST", path: "/api/v1/tasks/\(id)/sync", body: try encoder.encode(req))
     }
+    /// Forks a task by snapshotting its container and creating a new task on a derived branch.
+    public func forkTask(id: String, req: ForkTaskReq) async throws -> CreateTaskResp {
+        try await request("POST", path: "/api/v1/tasks/\(id)/fork", body: try encoder.encode(req))
+    }
     /// Returns the unified diff for a task's branch.
     public func getTaskDiff(id: String) async throws -> DiffResp {
         try await request("GET", path: "/api/v1/tasks/\(id)/diff")

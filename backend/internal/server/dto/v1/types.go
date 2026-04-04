@@ -243,6 +243,14 @@ type CreateTaskReq struct {
 	Display       bool       `json:"display,omitempty"`
 }
 
+// ForkTaskReq is the request body for POST /api/v1/tasks/{id}/fork.
+type ForkTaskReq struct {
+	Prompt     Prompt     `json:"prompt"`               // Initial prompt for the forked task.
+	Harness    Harness    `json:"harness,omitempty"`    // Override harness; empty means inherit from source.
+	Model      string     `json:"model,omitempty"`      // Override model; empty means inherit from source.
+	ExtraRepos []RepoSpec `json:"extraRepos,omitempty"` // Additional repos to map into the fork.
+}
+
 // BotFixCIReq is the request body for POST /api/v1/bot/fix-ci.
 // The server fetches CI logs, builds a prompt, and creates a fix task.
 type BotFixCIReq struct {

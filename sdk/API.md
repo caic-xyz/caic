@@ -50,6 +50,7 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | POST | `/api/v1/tasks/{id}/revive` | Reconnects to an orphaned task container. |  | `StatusResp` |
 | GET | `/api/v1/tasks/{id}/ci-log` | Returns the log tail of a failed CI check run. |  | `CILogResp` |
 | POST | `/api/v1/tasks/{id}/sync` | Pushes task changes to the remote repository. | `SyncReq` | `SyncResp` |
+| POST | `/api/v1/tasks/{id}/fork` | Forks a task by snapshotting its container and creating a new task on a derived branch. | `ForkTaskReq` | `CreateTaskResp` |
 | GET | `/api/v1/tasks/{id}/diff` | Returns the unified diff for a task's branch. |  | `DiffResp` |
 | GET | `/api/v1/tasks/{id}/tool/{toolUseID}` | Returns the full (untruncated) input for a tool call. |  | `TaskToolInputResp` |
 
@@ -770,6 +771,17 @@ SyncResp is the response for POST /api/v1/tasks/{id}/sync.
 | `diffStat` | `DiffFileStat[]` |  |  |
 | `safetyIssues` | `SafetyIssue[]` |  |  |
 | `prNumber` | `number` | non-zero if a PR/MR was created |  |
+
+### ForkTaskReq
+
+ForkTaskReq is the request body for POST /api/v1/tasks/{id}/fork.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `prompt` | `Prompt` | Initial prompt for the forked task. | yes |
+| `harness` | `string` | Override harness; empty means inherit from source. |  |
+| `model` | `string` | Override model; empty means inherit from source. |  |
+| `extraRepos` | `RepoSpec[]` | Additional repos to map into the fork. |  |
 
 ### DiffResp
 

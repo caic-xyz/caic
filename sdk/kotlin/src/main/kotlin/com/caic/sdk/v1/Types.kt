@@ -548,6 +548,15 @@ data class SyncResp(
     val prNumber: Int? = null,
 )
 
+/** ForkTaskReq is the request body for POST /api/v1/tasks/{id}/fork. */
+@Serializable
+data class ForkTaskReq(
+    val prompt: Prompt,
+    val harness: Harness? = null,
+    val model: String? = null,
+    val extraRepos: List<RepoSpec>? = null,
+)
+
 /** DiffResp is the response for GET /api/v1/tasks/{id}/diff. */
 @Serializable
 data class DiffResp(val diff: String)
