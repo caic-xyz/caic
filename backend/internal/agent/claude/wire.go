@@ -464,59 +464,85 @@ type outputTypeProbe struct {
 
 // outputInit is the wire representation of a system/init record.
 type outputInit struct {
-	Type      OutputType      `json:"type"`
-	Subtype   SystemSubtype   `json:"subtype"`
-	Cwd       string          `json:"cwd"`
-	SessionID string          `json:"session_id"`
-	Tools     []string        `json:"tools"`
-	Model     string          `json:"model"`
-	Version   string          `json:"claude_code_version"`
-	UUID      string          `json:"uuid"`
-	Timestamp json.RawMessage `json:"timestamp,omitempty"`
+	Type      OutputType    `json:"type"`
+	Subtype   SystemSubtype `json:"subtype"`
+	Cwd       string        `json:"cwd"`
+	SessionID string        `json:"session_id"`
+	Tools     []string      `json:"tools"`
+	Model     string        `json:"model"`
+	Version   string        `json:"claude_code_version"`
+	UUID      string        `json:"uuid"`
+	Timestamp string        `json:"timestamp,omitempty"`
 
-	Agents         json.RawMessage `json:"agents,omitempty"`
-	APIKeySource   json.RawMessage `json:"apiKeySource,omitempty"`
-	FastModeState  json.RawMessage `json:"fast_mode_state,omitempty"`
-	MCPServers     json.RawMessage `json:"mcp_servers,omitempty"`
-	OutputStyle    json.RawMessage `json:"output_style,omitempty"`
-	PermissionMode json.RawMessage `json:"permissionMode,omitempty"`
-	Plugins        json.RawMessage `json:"plugins,omitempty"`
-	Skills         json.RawMessage `json:"skills,omitempty"`
-	SlashCommands  json.RawMessage `json:"slash_commands,omitempty"`
+	Agents         []string        `json:"agents,omitempty"`
+	APIKeySource   string          `json:"apiKeySource,omitempty"`
+	FastModeState  string          `json:"fast_mode_state,omitempty"`
+	MCPServers     []initMCPServer `json:"mcp_servers,omitempty"`
+	OutputStyle    string          `json:"output_style,omitempty"`
+	PermissionMode string          `json:"permissionMode,omitempty"`
+	Plugins        []initPlugin    `json:"plugins,omitempty"`
+	Skills         []string        `json:"skills,omitempty"`
+	SlashCommands  []string        `json:"slash_commands,omitempty"`
+}
+
+// initMCPServer is an MCP server entry in the system/init message.
+type initMCPServer struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+// initPlugin is a plugin entry in the system/init message.
+type initPlugin struct {
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Source string `json:"source"`
 }
 
 // ---------- system (non-init) ----------
 
 // outputSystem is the wire representation of a non-init system record.
 type outputSystem struct {
-	Type      OutputType      `json:"type"`
-	Subtype   SystemSubtype   `json:"subtype"`
-	SessionID string          `json:"session_id"`
-	UUID      string          `json:"uuid"`
-	Timestamp json.RawMessage `json:"timestamp,omitempty"`
+	Type      OutputType    `json:"type"`
+	Subtype   SystemSubtype `json:"subtype"`
+	SessionID string        `json:"session_id"`
+	UUID      string        `json:"uuid"`
+	Timestamp string        `json:"timestamp,omitempty"`
 
 	// task_started / task_progress / task_notification fields.
-	Description  json.RawMessage `json:"description,omitempty"`
-	TaskID       json.RawMessage `json:"task_id,omitempty"`
-	TaskType     json.RawMessage `json:"task_type,omitempty"`
-	ToolUseID    json.RawMessage `json:"tool_use_id,omitempty"`
-	LastToolName json.RawMessage `json:"last_tool_name,omitempty"`
-	Status       json.RawMessage `json:"status,omitempty"`
-	UsageExtra   json.RawMessage `json:"usage,omitempty"`
-	OutputFile   json.RawMessage `json:"output_file,omitempty"`
-	Summary      json.RawMessage `json:"summary,omitempty"`
+	Description  string        `json:"description,omitempty"`
+	TaskID       string        `json:"task_id,omitempty"`
+	TaskType     string        `json:"task_type,omitempty"`
+	ToolUseID    string        `json:"tool_use_id,omitempty"`
+	LastToolName string        `json:"last_tool_name,omitempty"`
+	Status       string        `json:"status,omitempty"`
+	UsageExtra   taskUsageWire `json:"usage,omitempty"`
+	OutputFile   string        `json:"output_file,omitempty"`
+	Summary      string        `json:"summary,omitempty"`
 
 	// api_retry fields.
-	Attempt      json.RawMessage `json:"attempt,omitempty"`
-	MaxRetries   json.RawMessage `json:"max_retries,omitempty"`
-	RetryDelayMs json.RawMessage `json:"retry_delay_ms,omitempty"`
-	ErrorStatus  json.RawMessage `json:"error_status,omitempty"`
+	Attempt      int             `json:"attempt,omitempty"`
+	MaxRetries   int             `json:"max_retries,omitempty"`
+	RetryDelayMs int             `json:"retry_delay_ms,omitempty"`
+	ErrorStatus  int             `json:"error_status,omitempty"`
 	Error        json.RawMessage `json:"error,omitempty"`
 
 	// Other optional fields.
-	PermissionMode  json.RawMessage `json:"permissionMode,omitempty"`
-	CompactMetadata json.RawMessage `json:"compact_metadata,omitempty"`
-	Prompt          json.RawMessage `json:"prompt,omitempty"`
+	PermissionMode  string              `json:"permissionMode,omitempty"`
+	CompactMetadata compactMetadataWire `json:"compact_metadata,omitempty"`
+	Prompt          json.RawMessage     `json:"prompt,omitempty"`
+}
+
+// compactMetadataWire is the compact_metadata object on compact_boundary system messages.
+type compactMetadataWire struct {
+	Trigger   string `json:"trigger"`    // "auto" or "manual".
+	PreTokens int    `json:"pre_tokens"` // Token count before compaction.
+}
+
+// taskUsageWire is the usage object on task_progress/task_notification system messages.
+type taskUsageWire struct {
+	TotalTokens int `json:"total_tokens"`
+	ToolUses    int `json:"tool_uses"`
+	DurationMs  int `json:"duration_ms"`
 }
 
 // ---------- assistant ----------
@@ -526,7 +552,7 @@ type outputAssistant struct {
 	Type            OutputType           `json:"type"`
 	SessionID       string               `json:"session_id"`
 	UUID            string               `json:"uuid"`
-	Timestamp       json.RawMessage      `json:"timestamp,omitempty"`
+	Timestamp       string               `json:"timestamp,omitempty"`
 	Message         assistantMessageBody `json:"message"`
 	ParentToolUseID string               `json:"parent_tool_use_id"`
 	Error           string               `json:"error"`
@@ -583,9 +609,9 @@ type outputUser struct {
 	Type            OutputType      `json:"type"`
 	UUID            string          `json:"uuid"`
 	SessionID       string          `json:"session_id,omitempty"`
-	Timestamp       json.RawMessage `json:"timestamp,omitempty"`
+	Timestamp       string          `json:"timestamp,omitempty"`
 	Message         json.RawMessage `json:"message"`
-	ParentToolUseID *string         `json:"parent_tool_use_id"`
+	ParentToolUseID string          `json:"parent_tool_use_id"`
 	ToolUseResult   json.RawMessage `json:"tool_use_result,omitempty"`
 	IsSynthetic     bool            `json:"isSynthetic,omitempty"`
 	IsReplay        bool            `json:"isReplay,omitempty"`
@@ -595,25 +621,37 @@ type outputUser struct {
 
 // outputResult is the wire representation of a result record.
 type outputResult struct {
-	Type             OutputType      `json:"type"`
-	Subtype          string          `json:"subtype"`
-	IsError          bool            `json:"is_error"`
-	DurationMs       int64           `json:"duration_ms"`
-	DurationAPIMs    int64           `json:"duration_api_ms"`
-	NumTurns         int             `json:"num_turns"`
-	Result           string          `json:"result"`
-	SessionID        string          `json:"session_id"`
-	TotalCostUSD     float64         `json:"total_cost_usd"`
-	Usage            agent.Usage     `json:"usage"`
-	UUID             string          `json:"uuid"`
-	StructuredOutput *string         `json:"structured_output"`
-	Timestamp        json.RawMessage `json:"timestamp,omitempty"`
+	Type             OutputType  `json:"type"`
+	Subtype          string      `json:"subtype"`
+	IsError          bool        `json:"is_error"`
+	DurationMs       int64       `json:"duration_ms"`
+	DurationAPIMs    int64       `json:"duration_api_ms"`
+	NumTurns         int         `json:"num_turns"`
+	Result           string      `json:"result"`
+	SessionID        string      `json:"session_id"`
+	TotalCostUSD     float64     `json:"total_cost_usd"`
+	Usage            agent.Usage `json:"usage"`
+	UUID             string      `json:"uuid"`
+	StructuredOutput string      `json:"structured_output"`
+	Timestamp        string      `json:"timestamp,omitempty"`
 
-	FastModeState     json.RawMessage `json:"fast_mode_state,omitempty"`
-	ModelUsage        json.RawMessage `json:"modelUsage,omitempty"`
-	PermissionDenials json.RawMessage `json:"permission_denials,omitempty"`
-	StopReason        json.RawMessage `json:"stop_reason,omitempty"`
-	TerminalReason    json.RawMessage `json:"terminal_reason,omitempty"`
+	FastModeState     string                     `json:"fast_mode_state,omitempty"`
+	ModelUsage        map[string]modelUsageEntry `json:"modelUsage,omitempty"`
+	PermissionDenials []json.RawMessage          `json:"permission_denials,omitempty"`
+	StopReason        string                     `json:"stop_reason,omitempty"`
+	TerminalReason    string                     `json:"terminal_reason,omitempty"`
+}
+
+// modelUsageEntry is per-model usage stats in the result message.
+type modelUsageEntry struct {
+	InputTokens              int     `json:"inputTokens"`
+	OutputTokens             int     `json:"outputTokens"`
+	CacheReadInputTokens     int     `json:"cacheReadInputTokens"`
+	CacheCreationInputTokens int     `json:"cacheCreationInputTokens"`
+	WebSearchRequests        int     `json:"webSearchRequests"`
+	CostUSD                  float64 `json:"costUSD"`
+	ContextWindow            int     `json:"contextWindow"`
+	MaxOutputTokens          int     `json:"maxOutputTokens"`
 }
 
 // ---------- stream_event ----------
@@ -623,7 +661,7 @@ type outputStreamEvent struct {
 	Type            OutputType      `json:"type"`
 	UUID            string          `json:"uuid"`
 	SessionID       string          `json:"session_id"`
-	Timestamp       json.RawMessage `json:"timestamp,omitempty"`
+	Timestamp       string          `json:"timestamp,omitempty"`
 	ParentToolUseID string          `json:"parent_tool_use_id"`
 	Event           streamEventData `json:"event"`
 }
@@ -656,11 +694,11 @@ type streamDelta struct {
 // outputRateLimitEvent is the wire representation of a rate_limit_event record.
 // Emitted when the CLI's rate limit status transitions (e.g. allowed → allowed_warning).
 type outputRateLimitEvent struct {
-	Type          OutputType      `json:"type"`
-	UUID          string          `json:"uuid"`
-	SessionID     string          `json:"session_id"`
-	Timestamp     json.RawMessage `json:"timestamp,omitempty"`
-	RateLimitInfo rateLimitInfo   `json:"rate_limit_info"`
+	Type          OutputType    `json:"type"`
+	UUID          string        `json:"uuid"`
+	SessionID     string        `json:"session_id"`
+	Timestamp     string        `json:"timestamp,omitempty"`
+	RateLimitInfo rateLimitInfo `json:"rate_limit_info"`
 }
 
 // rateLimitInfo is the nested rate limit info inside a rate_limit_event.

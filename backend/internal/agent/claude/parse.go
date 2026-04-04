@@ -226,13 +226,13 @@ func parseSystem(line []byte, subtype string, fw *jsonutil.FieldWarner) ([]agent
 	switch w.Subtype {
 	case SystemTaskStarted:
 		return []agent.Message{&agent.SubagentStartMessage{
-			TaskID:      jsonString(w.TaskID),
-			Description: jsonString(w.Description),
+			TaskID:      w.TaskID,
+			Description: w.Description,
 		}}, nil
 	case SystemTaskNotification:
 		return []agent.Message{&agent.SubagentEndMessage{
-			TaskID: jsonString(w.TaskID),
-			Status: jsonString(w.Status),
+			TaskID: w.TaskID,
+			Status: w.Status,
 		}}, nil
 	case SystemStatus, SystemTaskProgress, "turn_duration":
 		return nil, nil
@@ -329,8 +329,8 @@ func parseUser(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	}
 
 	// Standard tool result: parent_tool_use_id set at the top level.
-	if w.ParentToolUseID != nil {
-		return []agent.Message{extractToolResult(*w.ParentToolUseID, w.Message)}, nil
+	if w.ParentToolUseID != "" {
+		return []agent.Message{extractToolResult(w.ParentToolUseID, w.Message)}, nil
 	}
 
 	// Parse the message body once to handle all remaining cases.
@@ -500,13 +500,4 @@ func extractPartialWidgetCode(partial string) string {
 	}
 	// Unterminated — return what we have so far.
 	return sb.String()
-}
-
-// jsonString extracts a JSON string value from a json.RawMessage.
-func jsonString(raw json.RawMessage) string {
-	var s string
-	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &s)
-	}
-	return s
 }
