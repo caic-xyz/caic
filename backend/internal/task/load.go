@@ -40,7 +40,7 @@ type LoadedTask struct {
 	Repos             []RepoMount // GitRoot will be empty for purged tasks loaded from logs.
 	Harness           agent.Harness
 	StartedAt         time.Time
-	LastStateUpdateAt time.Time // Derived from log file mtime; best-effort for adopt.
+	LastStateUpdateAt time.Time // Latest relay ts from caic_diff_stat records, falling back to log file mtime.
 	State             State
 	ForgeIssue        int // Originating issue number for bot comment callbacks.
 	ForgeOwner        string
@@ -211,7 +211,9 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 		Display:           meta.Display,
 	}
 
-	// Read the tail of the file to find caic_pr and caic_result records.
+	// Read the tail of the file to find caic_pr, caic_result, and
+	// caic_diff_stat records. The latest caic_diff_stat "ts" field provides
+	// a more accurate LastStateUpdateAt than file mtime.
 	const tailSize = 65536 // 64 KiB — sufficient for any realistic trailer.
 	size := info.Size()
 	offset := max(int64(0), size-tailSize)
@@ -229,6 +231,14 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 					lt.ForgeOwner = mp.ForgeOwner
 					lt.ForgeRepo = mp.ForgeRepo
 					lt.ForgePR = mp.ForgePR
+				}
+			}
+			if bytes.Contains(line, []byte(`"caic_diff_stat"`)) {
+				var ds agent.DiffStatMessage
+				if json.Unmarshal(line, &ds) == nil && ds.Ts > 0 {
+					if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
+						lt.LastStateUpdateAt = t
+					}
 				}
 			}
 			if bytes.Contains(line, []byte(`"caic_result"`)) {
@@ -344,6 +354,16 @@ func loadLogFile(path string) (_ *LoadedTask, retErr error) {
 			continue
 		}
 
+		if envelope.Type == "caic_diff_stat" {
+			var ds agent.DiffStatMessage
+			if json.Unmarshal(line, &ds) == nil && ds.Ts > 0 {
+				if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
+					lt.LastStateUpdateAt = t
+				}
+			}
+			// Also parse as a regular message so it appears in lt.Msgs.
+		}
+
 		if envelope.Type == "caic_result" {
 			var mr agent.MetaResultMessage
 			if err := json.Unmarshal(line, &mr); err != nil {
@@ -404,6 +424,14 @@ func parseFnForHarness(h agent.Harness) func([]byte) ([]agent.Message, error) {
 	default:
 		return agentclaude.ParseMessage
 	}
+}
+
+// tsToTime converts a Unix epoch float64 (seconds with sub-second precision)
+// to a time.Time in UTC.
+func tsToTime(ts float64) time.Time {
+	sec := int64(ts)
+	nsec := int64((ts - float64(sec)) * 1e9)
+	return time.Unix(sec, nsec).UTC()
 }
 
 // parseState converts a state string back to a State value.

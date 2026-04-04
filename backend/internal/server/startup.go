@@ -716,6 +716,11 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 			slog.Warn("relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(lt.Msgs))
 		}
 	}
+	// RestoreMessages may infer a new state (e.g. waiting) from trailing
+	// messages, but setState stamps time.Now(). Re-apply the original
+	// timestamp so the UI timer reflects when the agent actually stopped
+	// producing output, not when the server restarted.
+	t.SetStateAt(t.GetState(), stateUpdatedAt)
 
 	// The header-only tail scan may miss caic_pr when the record is beyond
 	// the 64 KiB window. If the PR is still unset, do a full parse of the
@@ -750,7 +755,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 			slog.Warn("relay", "msg", "log from dead relay", "ctr", c.Name, "br", branch, "diag", relayDiag, "log", relayLog)
 		}
 		if t.GetState() == task.StateRunning {
-			t.SetState(task.StateWaiting)
+			t.SetStateAt(task.StateWaiting, stateUpdatedAt)
 			slog.Warn("relay", "msg", "dead, marking waiting",
 				"repo", ri.RelPath, "br", branch, "ctr", c.Name,
 				"sess", t.GetSessionID(), "msgs", len(t.Messages()))

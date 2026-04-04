@@ -268,7 +268,7 @@ func TestParseMessage(t *testing.T) {
 		}
 	})
 	t.Run("DiffStat", func(t *testing.T) {
-		line := `{"type":"caic_diff_stat","diff_stat":[{"path":"main.go","added":10,"deleted":3}]}`
+		line := `{"type":"caic_diff_stat","diff_stat":[{"path":"main.go","added":10,"deleted":3}],"ts":1719500000.123}`
 		msgs, err := ParseMessage([]byte(line))
 		if err != nil {
 			t.Fatal(err)
@@ -282,6 +282,9 @@ func TestParseMessage(t *testing.T) {
 		}
 		if len(m.DiffStat) != 1 {
 			t.Fatalf("diff_stat len = %d, want 1", len(m.DiffStat))
+		}
+		if m.Ts != 1719500000.123 {
+			t.Fatalf("ts = %f, want 1719500000.123", m.Ts)
 		}
 	})
 	t.Run("RawFallback", func(t *testing.T) {

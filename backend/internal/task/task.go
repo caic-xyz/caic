@@ -238,6 +238,9 @@ func (t *Task) SetState(s State) {
 // Used during adoption to preserve the original transition time.
 func (t *Task) SetStateAt(s State, at time.Time) {
 	t.mu.Lock()
+	if s != StateRunning {
+		t.turnStartedAt = time.Time{}
+	}
 	t.state = s
 	t.stateUpdatedAt = at
 	t.mu.Unlock()

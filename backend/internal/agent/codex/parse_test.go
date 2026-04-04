@@ -549,7 +549,7 @@ func TestParseMessage(t *testing.T) {
 		}
 	})
 	t.Run("DiffStat", func(t *testing.T) {
-		const input = `{"type":"caic_diff_stat","diff_stat":[{"path":"foo.go","added":10,"deleted":2}]}`
+		const input = `{"type":"caic_diff_stat","diff_stat":[{"path":"foo.go","added":10,"deleted":2}],"ts":1719500000.5}`
 		msgs, err := ParseMessage([]byte(input))
 		if err != nil {
 			t.Fatal(err)

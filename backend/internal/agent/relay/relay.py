@@ -354,7 +354,7 @@ def serve(cmd_args, work_dir, log_stdin=True):
                 continue
             prev_raw = raw
             diff_stat = _parse_numstat(raw)
-            line = json.dumps({"type": "caic_diff_stat", "diff_stat": diff_stat}) + "\n"
+            line = json.dumps({"type": "caic_diff_stat", "diff_stat": diff_stat, "ts": time.time()}) + "\n"
             data = line.encode()
             try:
                 with output_lock:

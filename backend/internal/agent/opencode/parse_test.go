@@ -326,6 +326,7 @@ func TestParseMessage(t *testing.T) {
 	t.Run("CaicDiffStat", func(t *testing.T) {
 		input := mustJSON(t, map[string]any{
 			"type": "caic_diff_stat",
+			"ts":   1719500000.5,
 			"diff_stat": []any{
 				map[string]any{"path": "main.go", "added": 10, "deleted": 3},
 			},

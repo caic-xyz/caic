@@ -352,6 +352,7 @@ func (m *LogMessage) Type() string { return "log" }
 type DiffStatMessage struct {
 	MessageType string   `json:"type"`
 	DiffStat    DiffStat `json:"diff_stat"`
+	Ts          float64  `json:"ts,omitempty"` // Unix epoch seconds (ms precision) when the relay emitted this record.
 }
 
 // Type implements Message.
