@@ -1,7 +1,6 @@
 .env
 .env.*.local
 .env.local
-.npmrc
 coverage.out
 node_modules/
 /emulator*.log
