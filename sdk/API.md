@@ -824,21 +824,22 @@ kind=="warning":  Warning holds a transient server warning message for the user.
 | `repos` | `Repo[]` |  |  |
 | `warning` | `string` |  |  |
 
-### UsageWindow
+### ClaudeUsageWindow
 
-UsageWindow represents a single quota window (5-hour or 7-day).
+ClaudeUsageWindow represents a single Claude usage window (5-hour or 7-day)
+combining local task cost with OAuth rate-limit quota.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `utilization` | `number` | From Claude OAuth API (rate-limit quota); zero when OAuth unavailable. | yes |
-| `resetsAt` | `string` |  | yes |
-| `costUSD` | `number` | From local task streaming data (always populated). | yes |
+| `costUSD` | `number` | Local task cost (always populated). | yes |
 | `inputTokens` | `number` |  | yes |
 | `outputTokens` | `number` |  | yes |
+| `utilization` | `number` | OAuth rate-limit quota; zero when OAuth unavailable. | yes |
+| `resetsAt` | `string` |  | yes |
 
-### ExtraUsage
+### ClaudeExtraUsage
 
-ExtraUsage represents the extra (pay-as-you-go) usage state.
+ClaudeExtraUsage represents the Claude extra (pay-as-you-go) usage state.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
@@ -847,15 +848,56 @@ ExtraUsage represents the extra (pay-as-you-go) usage state.
 | `usedCredits` | `number` |  | yes |
 | `utilization` | `number` |  | yes |
 
+### ClaudeUsage
+
+ClaudeUsage holds local task cost and rate-limit quota data for Claude.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `fiveHour` | `ClaudeUsageWindow` |  | yes |
+| `sevenDay` | `ClaudeUsageWindow` |  | yes |
+| `extraUsage` | `ClaudeExtraUsage` |  | yes |
+
+### CodexRateLimitWindow
+
+CodexRateLimitWindow represents a single Codex rate-limit window snapshot.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `usedPercent` | `number` |  | yes |
+| `limitWindowSeconds` | `number` |  | yes |
+| `resetAfterSeconds` | `number` |  | yes |
+| `resetAt` | `number` | unix timestamp | yes |
+
+### CodexCredits
+
+CodexCredits represents Codex credit/balance information.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `hasCredits` | `boolean` |  | yes |
+| `unlimited` | `boolean` |  | yes |
+| `balance` | `string` |  | yes |
+
+### CodexUsage
+
+CodexUsage holds rate-limit quota data from the Codex usage API.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `planType` | `string` |  | yes |
+| `primary` | `CodexRateLimitWindow` |  |  |
+| `secondary` | `CodexRateLimitWindow` |  |  |
+| `credits` | `CodexCredits` |  | yes |
+
 ### UsageResp
 
 UsageResp is the response for GET /api/v1/usage.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `fiveHour` | `UsageWindow` |  | yes |
-| `sevenDay` | `UsageWindow` |  | yes |
-| `extraUsage` | `ExtraUsage` |  | yes |
+| `claude` | `ClaudeUsage` |  |  |
+| `codex` | `CodexUsage` |  |  |
 
 ### VoiceTokenResp
 

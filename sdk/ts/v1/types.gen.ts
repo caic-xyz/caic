@@ -753,37 +753,71 @@ export interface SyncResp {
   prNumber?: number /* int */; // non-zero if a PR/MR was created
 }
 /**
- * UsageWindow represents a single quota window (5-hour or 7-day).
+ * ClaudeUsage holds local task cost and rate-limit quota data for Claude.
  */
-export interface UsageWindow {
+export interface ClaudeUsage {
+  fiveHour: ClaudeUsageWindow;
+  sevenDay: ClaudeUsageWindow;
+  extraUsage: ClaudeExtraUsage;
+}
+/**
+ * ClaudeUsageWindow represents a single Claude usage window (5-hour or 7-day)
+ * combining local task cost with OAuth rate-limit quota.
+ */
+export interface ClaudeUsageWindow {
   /**
-   * From Claude OAuth API (rate-limit quota); zero when OAuth unavailable.
-   */
-  utilization: number /* float64 */;
-  resetsAt: string;
-  /**
-   * From local task streaming data (always populated).
+   * Local task cost (always populated).
    */
   costUSD: number /* float64 */;
   inputTokens: number /* int */;
   outputTokens: number /* int */;
+  /**
+   * OAuth rate-limit quota; zero when OAuth unavailable.
+   */
+  utilization: number /* float64 */;
+  resetsAt: string;
 }
 /**
- * ExtraUsage represents the extra (pay-as-you-go) usage state.
+ * ClaudeExtraUsage represents the Claude extra (pay-as-you-go) usage state.
  */
-export interface ExtraUsage {
+export interface ClaudeExtraUsage {
   isEnabled: boolean;
   monthlyLimit: number /* float64 */;
   usedCredits: number /* float64 */;
   utilization: number /* float64 */;
 }
 /**
+ * CodexRateLimitWindow represents a single Codex rate-limit window snapshot.
+ */
+export interface CodexRateLimitWindow {
+  usedPercent: number /* int */;
+  limitWindowSeconds: number /* int */;
+  resetAfterSeconds: number /* int */;
+  resetAt: number /* int */; // unix timestamp
+}
+/**
+ * CodexCredits represents Codex credit/balance information.
+ */
+export interface CodexCredits {
+  hasCredits: boolean;
+  unlimited: boolean;
+  balance: string;
+}
+/**
+ * CodexUsage holds rate-limit quota data from the Codex usage API.
+ */
+export interface CodexUsage {
+  planType: string;
+  primary?: CodexRateLimitWindow;
+  secondary?: CodexRateLimitWindow;
+  credits: CodexCredits;
+}
+/**
  * UsageResp is the response for GET /api/v1/usage.
  */
 export interface UsageResp {
-  fiveHour: UsageWindow;
-  sevenDay: UsageWindow;
-  extraUsage: ExtraUsage;
+  claude?: ClaudeUsage;
+  codex?: CodexUsage;
 }
 /**
  * VoiceTokenResp is the response for GET /api/v1/voice/token.

@@ -266,15 +266,19 @@ export class FunctionHandlers {
   private async handleGetUsage(): Promise<Record<string, unknown>> {
     const usage = await getUsage();
     const pct = (v: number) => `${Math.floor(v)}%`;
-    const lines = [
-      `5-hour window: ${pct(usage.fiveHour.utilization)} used, resets ${usage.fiveHour.resetsAt}`,
-      `7-day window: ${pct(usage.sevenDay.utilization)} used, resets ${usage.sevenDay.resetsAt}`,
-    ];
-    if (usage.extraUsage.isEnabled) {
-      const usedDollars = Math.floor(usage.extraUsage.usedCredits / 100);
-      const limitDollars = Math.floor(usage.extraUsage.monthlyLimit / 100);
-      lines.push(`Extra usage: $${usedDollars} of $${limitDollars} monthly limit used`);
+    const lines: string[] = [];
+    if (usage.claude) {
+      lines.push(
+        `5-hour window: ${pct(usage.claude.fiveHour.utilization)} used, resets ${usage.claude.fiveHour.resetsAt}`,
+        `7-day window: ${pct(usage.claude.sevenDay.utilization)} used, resets ${usage.claude.sevenDay.resetsAt}`,
+      );
+      if (usage.claude.extraUsage.isEnabled) {
+        const usedDollars = Math.floor(usage.claude.extraUsage.usedCredits / 100);
+        const limitDollars = Math.floor(usage.claude.extraUsage.monthlyLimit / 100);
+        lines.push(`Extra usage: $${usedDollars} of $${limitDollars} monthly limit used`);
+      }
     }
+    if (lines.length === 0) lines.push("No Claude usage data available.");
     return textResult(lines.join("\n"));
   }
 

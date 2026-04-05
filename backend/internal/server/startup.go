@@ -25,6 +25,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/gitutil"
 	"github.com/maruel/genai"
@@ -186,7 +187,8 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		githubAllowedUsers: githubAllowedUsers,
 		gitlabAllowedUsers: gitlabAllowedUsers,
 		hostState:          hostState,
-		usage:              newUsageFetcher(ctx),
+		usage:              usage.NewClaudeFetcher(ctx),
+		codexUsage:         usage.NewCodexFetcher(ctx),
 		pprof:              cfg.Pprof,
 		geminiAPIKey:       cfg.GeminiAPIKey,
 		voiceBridge:        voiceBridge,

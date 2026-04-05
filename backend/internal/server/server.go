@@ -26,6 +26,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/md"
 	"github.com/maruel/genai"
 )
@@ -198,7 +199,8 @@ type Server struct {
 	authStore     *auth.Store     // nil when auth disabled
 	sessionSecret []byte          // nil when auth disabled
 	hostState     *auth.HostState // non-nil when ExternalURL is set (static or auto)
-	usage         *usageFetcher
+	usage         *usage.ClaudeFetcher
+	codexUsage    *usage.CodexFetcher
 
 	// IP geolocation.
 	ipgeoChecker *ipgeo.Checker

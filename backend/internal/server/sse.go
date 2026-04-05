@@ -13,6 +13,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
+	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
 // handleTaskListEvents streams patch events for the task list as SSE. On first
@@ -171,25 +172,30 @@ func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	flusher.Flush()
 
-	ticker := time.NewTicker(usageCacheTTL)
+	ticker := time.NewTicker(usage.CacheTTL)
 	defer ticker.Stop()
 
 	var prev []byte
 
 	for {
 		s.mu.Lock()
-		resp := computeUsage(s.tasks, time.Now())
+		claude := computeClaudeUsage(s.tasks, time.Now())
 		ch := s.changed
 		s.mu.Unlock()
 
 		if s.usage != nil {
-			if oauth := s.usage.get(); oauth != nil {
-				resp.FiveHour.Utilization = oauth.FiveHour.Utilization
-				resp.FiveHour.ResetsAt = oauth.FiveHour.ResetsAt
-				resp.SevenDay.Utilization = oauth.SevenDay.Utilization
-				resp.SevenDay.ResetsAt = oauth.SevenDay.ResetsAt
-				resp.ExtraUsage = oauth.ExtraUsage
+			if oauth := s.usage.Get(r.Context()); oauth != nil {
+				claude.FiveHour.Utilization = oauth.FiveHour.Utilization
+				claude.FiveHour.ResetsAt = oauth.FiveHour.ResetsAt
+				claude.SevenDay.Utilization = oauth.SevenDay.Utilization
+				claude.SevenDay.ResetsAt = oauth.SevenDay.ResetsAt
+				claude.ExtraUsage = oauth.ExtraUsage
 			}
+		}
+
+		resp := v1.UsageResp{Claude: &claude}
+		if s.codexUsage != nil {
+			resp.Codex = s.codexUsage.Get(r.Context())
 		}
 
 		data, err := json.Marshal(resp)
@@ -209,19 +215,24 @@ func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetUsage returns a one-shot usage snapshot as JSON.
-func (s *Server) handleGetUsage(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	resp := computeUsage(s.tasks, time.Now())
+	claude := computeClaudeUsage(s.tasks, time.Now())
 	s.mu.Unlock()
 
 	if s.usage != nil {
-		if oauth := s.usage.get(); oauth != nil {
-			resp.FiveHour.Utilization = oauth.FiveHour.Utilization
-			resp.FiveHour.ResetsAt = oauth.FiveHour.ResetsAt
-			resp.SevenDay.Utilization = oauth.SevenDay.Utilization
-			resp.SevenDay.ResetsAt = oauth.SevenDay.ResetsAt
-			resp.ExtraUsage = oauth.ExtraUsage
+		if oauth := s.usage.Get(r.Context()); oauth != nil {
+			claude.FiveHour.Utilization = oauth.FiveHour.Utilization
+			claude.FiveHour.ResetsAt = oauth.FiveHour.ResetsAt
+			claude.SevenDay.Utilization = oauth.SevenDay.Utilization
+			claude.SevenDay.ResetsAt = oauth.SevenDay.ResetsAt
+			claude.ExtraUsage = oauth.ExtraUsage
 		}
+	}
+
+	resp := v1.UsageResp{Claude: &claude}
+	if s.codexUsage != nil {
+		resp.Codex = s.codexUsage.Get(r.Context())
 	}
 
 	w.Header().Set("Content-Type", "application/json")

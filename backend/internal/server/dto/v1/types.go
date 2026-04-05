@@ -320,30 +320,60 @@ type SyncResp struct {
 	PRNumber     int           `json:"prNumber,omitempty"` // non-zero if a PR/MR was created
 }
 
-// UsageWindow represents a single quota window (5-hour or 7-day).
-type UsageWindow struct {
-	// From Claude OAuth API (rate-limit quota); zero when OAuth unavailable.
-	Utilization float64 `json:"utilization"`
-	ResetsAt    string  `json:"resetsAt"`
-	// From local task streaming data (always populated).
+// ClaudeUsage holds local task cost and rate-limit quota data for Claude.
+type ClaudeUsage struct {
+	FiveHour   ClaudeUsageWindow `json:"fiveHour"`
+	SevenDay   ClaudeUsageWindow `json:"sevenDay"`
+	ExtraUsage ClaudeExtraUsage  `json:"extraUsage"`
+}
+
+// ClaudeUsageWindow represents a single Claude usage window (5-hour or 7-day)
+// combining local task cost with OAuth rate-limit quota.
+type ClaudeUsageWindow struct {
+	// Local task cost (always populated).
 	CostUSD      float64 `json:"costUSD"`
 	InputTokens  int     `json:"inputTokens"`
 	OutputTokens int     `json:"outputTokens"`
+	// OAuth rate-limit quota; zero when OAuth unavailable.
+	Utilization float64 `json:"utilization"`
+	ResetsAt    string  `json:"resetsAt"`
 }
 
-// ExtraUsage represents the extra (pay-as-you-go) usage state.
-type ExtraUsage struct {
+// ClaudeExtraUsage represents the Claude extra (pay-as-you-go) usage state.
+type ClaudeExtraUsage struct {
 	IsEnabled    bool    `json:"isEnabled"`
 	MonthlyLimit float64 `json:"monthlyLimit"`
 	UsedCredits  float64 `json:"usedCredits"`
 	Utilization  float64 `json:"utilization"`
 }
 
+// CodexRateLimitWindow represents a single Codex rate-limit window snapshot.
+type CodexRateLimitWindow struct {
+	UsedPercent        int `json:"usedPercent"`
+	LimitWindowSeconds int `json:"limitWindowSeconds"`
+	ResetAfterSeconds  int `json:"resetAfterSeconds"`
+	ResetAt            int `json:"resetAt"` // unix timestamp
+}
+
+// CodexCredits represents Codex credit/balance information.
+type CodexCredits struct {
+	HasCredits bool   `json:"hasCredits"`
+	Unlimited  bool   `json:"unlimited"`
+	Balance    string `json:"balance"`
+}
+
+// CodexUsage holds rate-limit quota data from the Codex usage API.
+type CodexUsage struct {
+	PlanType  string                `json:"planType"`
+	Primary   *CodexRateLimitWindow `json:"primary,omitempty"`
+	Secondary *CodexRateLimitWindow `json:"secondary,omitempty"`
+	Credits   CodexCredits          `json:"credits"`
+}
+
 // UsageResp is the response for GET /api/v1/usage.
 type UsageResp struct {
-	FiveHour   UsageWindow `json:"fiveHour"`
-	SevenDay   UsageWindow `json:"sevenDay"`
-	ExtraUsage ExtraUsage  `json:"extraUsage"`
+	Claude *ClaudeUsage `json:"claude,omitempty"`
+	Codex  *CodexUsage  `json:"codex,omitempty"`
 }
 
 // VoiceTokenResp is the response for GET /api/v1/voice/token.

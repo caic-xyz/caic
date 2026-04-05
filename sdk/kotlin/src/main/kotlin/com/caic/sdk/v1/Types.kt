@@ -594,32 +594,65 @@ data class TaskListEvent(
     val warning: String? = null,
 )
 
-/** UsageWindow represents a single quota window (5-hour or 7-day). */
+/**
+ * ClaudeUsageWindow represents a single Claude usage window (5-hour or 7-day)
+ * combining local task cost with OAuth rate-limit quota.
+ */
 @Serializable
-data class UsageWindow(
-    val utilization: Double,
-    val resetsAt: String,
+data class ClaudeUsageWindow(
     @SerialName("costUSD") val costUSD: Double,
     val inputTokens: Int,
     val outputTokens: Int,
+    val utilization: Double,
+    val resetsAt: String,
 )
 
-/** ExtraUsage represents the extra (pay-as-you-go) usage state. */
+/** ClaudeExtraUsage represents the Claude extra (pay-as-you-go) usage state. */
 @Serializable
-data class ExtraUsage(
+data class ClaudeExtraUsage(
     val isEnabled: Boolean,
     val monthlyLimit: Double,
     val usedCredits: Double,
     val utilization: Double,
 )
 
+/** ClaudeUsage holds local task cost and rate-limit quota data for Claude. */
+@Serializable
+data class ClaudeUsage(
+    val fiveHour: ClaudeUsageWindow,
+    val sevenDay: ClaudeUsageWindow,
+    val extraUsage: ClaudeExtraUsage,
+)
+
+/** CodexRateLimitWindow represents a single Codex rate-limit window snapshot. */
+@Serializable
+data class CodexRateLimitWindow(
+    val usedPercent: Int,
+    val limitWindowSeconds: Int,
+    val resetAfterSeconds: Int,
+    val resetAt: Int,
+)
+
+/** CodexCredits represents Codex credit/balance information. */
+@Serializable
+data class CodexCredits(
+    val hasCredits: Boolean,
+    val unlimited: Boolean,
+    val balance: String,
+)
+
+/** CodexUsage holds rate-limit quota data from the Codex usage API. */
+@Serializable
+data class CodexUsage(
+    val planType: String,
+    val primary: CodexRateLimitWindow? = null,
+    val secondary: CodexRateLimitWindow? = null,
+    val credits: CodexCredits,
+)
+
 /** UsageResp is the response for GET /api/v1/usage. */
 @Serializable
-data class UsageResp(
-    val fiveHour: UsageWindow,
-    val sevenDay: UsageWindow,
-    val extraUsage: ExtraUsage,
-)
+data class UsageResp(val claude: ClaudeUsage? = null, val codex: CodexUsage? = null)
 
 /** VoiceTokenResp is the response for GET /api/v1/voice/token. */
 @Serializable

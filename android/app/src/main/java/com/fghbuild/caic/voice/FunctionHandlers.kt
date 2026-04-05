@@ -208,12 +208,17 @@ class FunctionHandlers(
         } else {
             "\$${String.format(java.util.Locale.US, "%.2f", cost)}"
         }
-        fun tokens(w: com.caic.sdk.v1.UsageWindow) = w.inputTokens + w.outputTokens
-        val summary = buildString {
-            appendLine("5-hour cost: ${fmt(usage.fiveHour.costUSD)} (${tokens(usage.fiveHour)} tokens)")
-            append("7-day cost: ${fmt(usage.sevenDay.costUSD)} (${tokens(usage.sevenDay)} tokens)")
+        fun tokens(w: com.caic.sdk.v1.ClaudeUsageWindow) = w.inputTokens + w.outputTokens
+        val parts = mutableListOf<String>()
+        usage.claude?.let { claude ->
+            parts.add("5-hour cost: ${fmt(claude.fiveHour.costUSD)} (${tokens(claude.fiveHour)} tokens)")
+            parts.add("7-day cost: ${fmt(claude.sevenDay.costUSD)} (${tokens(claude.sevenDay)} tokens)")
         }
-        return textResult(summary)
+        usage.codex?.let { codex ->
+            parts.add("Codex plan: ${codex.planType}, balance: \$${codex.credits.balance}")
+        }
+        if (parts.isEmpty()) parts.add("No usage data available.")
+        return textResult(parts.joinToString("\n"))
     }
 
     private suspend fun handleGetLastMessage(args: JsonObject): JsonElement {
