@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -43,10 +44,11 @@ import (
 //  4. Adopt containers using pre-fetched list and logs. If a container's relay
 //     is alive, auto-attach to resume streaming.
 func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
-	logDir := cfg.CacheDir
-	if logDir == "" {
+	if cfg.CacheDir == "" {
 		return nil, errors.New("CacheDir is required")
 	}
+	logDir := filepath.Join(cfg.CacheDir, "tasks")
+	migrateTaskLogs(cfg.CacheDir, logDir)
 
 	absRoot, err := filepath.Abs(rootDir)
 	if err != nil {
@@ -329,6 +331,38 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	go s.warmupImages()
 	go s.pollStats(s.ctx) //nolint:contextcheck // server-lifetime context is intentional
 	return s, nil
+}
+
+// migrateTaskLogs moves *.jsonl files from cacheDir into the tasks
+// subdirectory. This is a one-time migration for installations that stored
+// task logs directly in CacheDir.
+// TODO: Remove after 2026-05-01.
+func migrateTaskLogs(cacheDir, tasksDir string) {
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return
+	}
+	var jsonlFiles []os.DirEntry
+	for _, e := range entries {
+		if !e.IsDir() && filepath.Ext(e.Name()) == ".jsonl" {
+			jsonlFiles = append(jsonlFiles, e)
+		}
+	}
+	if len(jsonlFiles) == 0 {
+		return
+	}
+	if err := os.MkdirAll(tasksDir, 0o750); err != nil {
+		slog.Warn("migrate: cannot create tasks dir", "path", tasksDir, "err", err)
+		return
+	}
+	for _, e := range jsonlFiles {
+		src := filepath.Join(cacheDir, e.Name())
+		dst := filepath.Join(tasksDir, e.Name())
+		if err := os.Rename(src, dst); err != nil {
+			slog.Warn("migrate: cannot move log", "file", e.Name(), "err", err)
+		}
+	}
+	slog.Info("migrated task logs", "n", len(jsonlFiles), "dst", tasksDir)
 }
 
 // loadPurgedTasks loads the last 5 purged tasks per repository from JSONL logs on disk.
