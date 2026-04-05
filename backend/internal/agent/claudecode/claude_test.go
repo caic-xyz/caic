@@ -106,12 +106,12 @@ func TestWritePrompt(t *testing.T) {
 
 func TestStart(t *testing.T) {
 	t.Run("EnvVarInjection", func(t *testing.T) {
-		// Verify that the inputUpdateEnvVars message produced by Start
+		// Verify that the InputUpdateEnvVarsMsg message produced by Start
 		// round-trips correctly through JSON.
 		key := "sk-ant-test-key"
 		t.Setenv("ANTHROPIC_API_KEY", key)
 
-		msg := inputUpdateEnvVars{
+		msg := InputUpdateEnvVarsMsg{
 			Type:      InputUpdateEnvVars,
 			Variables: map[string]string{"ANTHROPIC_API_KEY": os.Getenv("ANTHROPIC_API_KEY")},
 		}
@@ -120,7 +120,7 @@ func TestStart(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		var got inputUpdateEnvVars
+		var got InputUpdateEnvVarsMsg
 		if err := json.Unmarshal(data, &got); err != nil {
 			t.Fatal(err)
 		}

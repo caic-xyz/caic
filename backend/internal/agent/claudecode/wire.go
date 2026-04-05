@@ -34,10 +34,10 @@ const (
 
 // ---------- user message ----------
 
-// inputUser sends a user turn to Claude Code (type:"user").
-type inputUser struct {
+// InputUserMsg sends a user turn to Claude Code (type:"user").
+type InputUserMsg struct {
 	Type            InputType        `json:"type"` // InputUser
-	Message         inputUserContent `json:"message"`
+	Message         InputUserContent `json:"message"`
 	UUID            string           `json:"uuid,omitempty"`
 	SessionID       string           `json:"session_id,omitempty"`
 	ParentToolUseID string           `json:"parent_tool_use_id,omitempty"`
@@ -47,19 +47,21 @@ type inputUser struct {
 	Timestamp       string           `json:"timestamp,omitempty"`
 }
 
-type inputUserContent struct {
+// InputUserContent is the message body within an InputUserMsg.
+type InputUserContent struct {
 	Role    string              `json:"role"` // always "user"
-	Content []inputContentBlock `json:"content"`
+	Content []InputContentBlock `json:"content"`
 }
 
-// inputContentBlock is a single block in the content array sent to Claude Code.
-type inputContentBlock struct {
+// InputContentBlock is a single block in the content array sent to Claude Code.
+type InputContentBlock struct {
 	Type   string           `json:"type"`
-	Source inputImageSource `json:"source,omitzero"`
+	Source InputImageSource `json:"source,omitzero"`
 	Text   string           `json:"text,omitempty"`
 }
 
-type inputImageSource struct {
+// InputImageSource is an image source block sent to Claude Code.
+type InputImageSource struct {
 	Type      string `json:"type"`
 	MediaType string `json:"media_type"`
 	Data      string `json:"data"`
@@ -67,10 +69,10 @@ type inputImageSource struct {
 
 // ---------- control request ----------
 
-// inputControlRequest sends a control request to Claude Code (type:"control_request").
+// InputControlRequestMsg sends a control request to Claude Code (type:"control_request").
 // The Request field is a JSON object whose "subtype" discriminator determines
 // its schema. Use one of the controlReq* structs below as the Request value.
-type inputControlRequest struct {
+type InputControlRequestMsg struct {
 	Type      InputType `json:"type"` // InputControlRequest
 	RequestID string    `json:"request_id"`
 	Request   any       `json:"request"`
@@ -104,8 +106,8 @@ const (
 	ControlElicitation        ControlSubtype = "elicitation"
 )
 
-// controlReqInitialize initializes the SDK session.
-type controlReqInitialize struct {
+// ControlReqInitialize initializes the SDK session.
+type ControlReqInitialize struct {
 	Subtype                ControlSubtype  `json:"subtype"` // ControlInitialize
 	Hooks                  json.RawMessage `json:"hooks,omitempty"`
 	SDKMcpServers          []string        `json:"sdkMcpServers,omitempty"`
@@ -117,13 +119,13 @@ type controlReqInitialize struct {
 	AgentProgressSummaries bool            `json:"agentProgressSummaries,omitempty"`
 }
 
-// controlReqInterrupt interrupts the currently running conversation turn.
-type controlReqInterrupt struct {
+// ControlReqInterrupt interrupts the currently running conversation turn.
+type ControlReqInterrupt struct {
 	Subtype ControlSubtype `json:"subtype"` // ControlInterrupt
 }
 
-// controlReqCanUseTool requests permission to use a tool.
-type controlReqCanUseTool struct {
+// ControlReqCanUseTool requests permission to use a tool.
+type ControlReqCanUseTool struct {
 	Subtype               ControlSubtype  `json:"subtype"` // ControlCanUseTool
 	ToolName              string          `json:"tool_name"`
 	Input                 json.RawMessage `json:"input"`
@@ -137,115 +139,115 @@ type controlReqCanUseTool struct {
 	Description           string          `json:"description,omitempty"`
 }
 
-// controlReqSetPermissionMode changes the tool permission mode.
-type controlReqSetPermissionMode struct {
+// ControlReqSetPermissionMode changes the tool permission mode.
+type ControlReqSetPermissionMode struct {
 	Subtype   ControlSubtype `json:"subtype"` // ControlSetPermissionMode
 	Mode      string         `json:"mode"`
 	Ultraplan bool           `json:"ultraplan,omitempty"`
 }
 
-// controlReqSetModel switches the model for subsequent turns.
-type controlReqSetModel struct {
+// ControlReqSetModel switches the model for subsequent turns.
+type ControlReqSetModel struct {
 	Subtype ControlSubtype `json:"subtype"`         // ControlSetModel
 	Model   string         `json:"model,omitempty"` // empty = reset to default
 }
 
-// controlReqSetMaxThinkingTokens configures extended thinking token limit.
-type controlReqSetMaxThinkingTokens struct {
+// ControlReqSetMaxThinkingTokens configures extended thinking token limit.
+type ControlReqSetMaxThinkingTokens struct {
 	Subtype           ControlSubtype `json:"subtype"`             // ControlSetMaxThinking
 	MaxThinkingTokens *int           `json:"max_thinking_tokens"` // null = unlimited
 }
 
-// controlReqMcpStatus queries status of all MCP server connections.
-type controlReqMcpStatus struct {
+// ControlReqMcpStatus queries status of all MCP server connections.
+type ControlReqMcpStatus struct {
 	Subtype ControlSubtype `json:"subtype"` // ControlMcpStatus
 }
 
-// controlReqGetContextUsage returns a context window usage breakdown.
-type controlReqGetContextUsage struct {
+// ControlReqGetContextUsage returns a context window usage breakdown.
+type ControlReqGetContextUsage struct {
 	Subtype ControlSubtype `json:"subtype"` // ControlGetContextUsage
 }
 
-// controlReqHookCallback delivers a hook callback with its input data.
-type controlReqHookCallback struct {
+// ControlReqHookCallback delivers a hook callback with its input data.
+type ControlReqHookCallback struct {
 	Subtype    ControlSubtype  `json:"subtype"` // ControlHookCallback
 	CallbackID string          `json:"callback_id"`
 	Input      json.RawMessage `json:"input"`
 	ToolUseID  string          `json:"tool_use_id,omitempty"`
 }
 
-// controlReqMcpMessage sends a JSON-RPC message to a specific MCP server.
-type controlReqMcpMessage struct {
+// ControlReqMcpMessage sends a JSON-RPC message to a specific MCP server.
+type ControlReqMcpMessage struct {
 	Subtype    ControlSubtype  `json:"subtype"` // ControlMcpMessage
 	ServerName string          `json:"server_name"`
 	Message    json.RawMessage `json:"message"`
 }
 
-// controlReqRewindFiles reverts file changes since a given user message.
-type controlReqRewindFiles struct {
+// ControlReqRewindFiles reverts file changes since a given user message.
+type ControlReqRewindFiles struct {
 	Subtype       ControlSubtype `json:"subtype"` // ControlRewindFiles
 	UserMessageID string         `json:"user_message_id"`
 	DryRun        bool           `json:"dry_run,omitempty"`
 }
 
-// controlReqCancelAsyncMessage drops a pending async user message from
+// ControlReqCancelAsyncMessage drops a pending async user message from
 // the command queue by UUID.
-type controlReqCancelAsyncMessage struct {
+type ControlReqCancelAsyncMessage struct {
 	Subtype     ControlSubtype `json:"subtype"` // ControlCancelAsyncMessage
 	MessageUUID string         `json:"message_uuid"`
 }
 
-// controlReqSeedReadState seeds the readFileState cache with a path+mtime
+// ControlReqSeedReadState seeds the readFileState cache with a path+mtime
 // entry so Edit validation succeeds after a prior Read was removed from context.
-type controlReqSeedReadState struct {
+type ControlReqSeedReadState struct {
 	Subtype ControlSubtype `json:"subtype"` // ControlSeedReadState
 	Path    string         `json:"path"`
 	Mtime   int64          `json:"mtime"`
 }
 
-// controlReqMcpSetServers replaces the set of dynamically managed MCP servers.
-type controlReqMcpSetServers struct {
+// ControlReqMcpSetServers replaces the set of dynamically managed MCP servers.
+type ControlReqMcpSetServers struct {
 	Subtype ControlSubtype  `json:"subtype"` // ControlMcpSetServers
 	Servers json.RawMessage `json:"servers"`
 }
 
-// controlReqReloadPlugins reloads plugins from disk.
-type controlReqReloadPlugins struct {
+// ControlReqReloadPlugins reloads plugins from disk.
+type ControlReqReloadPlugins struct {
 	Subtype ControlSubtype `json:"subtype"` // ControlReloadPlugins
 }
 
-// controlReqMcpReconnect reconnects a disconnected or failed MCP server.
-type controlReqMcpReconnect struct {
+// ControlReqMcpReconnect reconnects a disconnected or failed MCP server.
+type ControlReqMcpReconnect struct {
 	Subtype    ControlSubtype `json:"subtype"` // ControlMcpReconnect
 	ServerName string         `json:"serverName"`
 }
 
-// controlReqMcpToggle enables or disables an MCP server.
-type controlReqMcpToggle struct {
+// ControlReqMcpToggle enables or disables an MCP server.
+type ControlReqMcpToggle struct {
 	Subtype    ControlSubtype `json:"subtype"` // ControlMcpToggle
 	ServerName string         `json:"serverName"`
 	Enabled    bool           `json:"enabled"`
 }
 
-// controlReqStopTask stops a running background task.
-type controlReqStopTask struct {
+// ControlReqStopTask stops a running background task.
+type ControlReqStopTask struct {
 	Subtype ControlSubtype `json:"subtype"` // ControlStopTask
 	TaskID  string         `json:"task_id"`
 }
 
-// controlReqApplyFlagSettings merges settings into the flag settings layer.
-type controlReqApplyFlagSettings struct {
+// ControlReqApplyFlagSettings merges settings into the flag settings layer.
+type ControlReqApplyFlagSettings struct {
 	Subtype  ControlSubtype  `json:"subtype"` // ControlApplyFlagSettings
 	Settings json.RawMessage `json:"settings"`
 }
 
-// controlReqGetSettings returns the effective and per-source settings.
-type controlReqGetSettings struct {
+// ControlReqGetSettings returns the effective and per-source settings.
+type ControlReqGetSettings struct {
 	Subtype ControlSubtype `json:"subtype"` // ControlGetSettings
 }
 
-// controlReqElicitation requests the SDK consumer to handle an MCP elicitation.
-type controlReqElicitation struct {
+// ControlReqElicitation requests the SDK consumer to handle an MCP elicitation.
+type ControlReqElicitation struct {
 	Subtype         ControlSubtype  `json:"subtype"` // ControlElicitation
 	MCPServerName   string          `json:"mcp_server_name"`
 	Message         string          `json:"message"`
@@ -266,14 +268,14 @@ const (
 	ControlResponseError   ControlResponseSubtype = "error"
 )
 
-// inputControlResponse responds to a control request from Claude Code (type:"control_response").
-type inputControlResponse struct {
+// InputControlResponseMsg responds to a control request from Claude Code (type:"control_response").
+type InputControlResponseMsg struct {
 	Type     InputType       `json:"type"` // InputControlResponse
-	Response controlResponse `json:"response"`
+	Response ControlResponse `json:"response"`
 }
 
-// controlResponse is the inner response, either success or error.
-type controlResponse struct {
+// ControlResponse is the inner response, either success or error.
+type ControlResponse struct {
 	Subtype                   ControlResponseSubtype `json:"subtype"` // ControlResponseSuccess or ControlResponseError
 	RequestID                 string                 `json:"request_id"`
 	Response                  json.RawMessage        `json:"response,omitempty"`                    // success only
@@ -283,46 +285,16 @@ type controlResponse struct {
 
 // ---------- keep alive / env vars ----------
 
-// inputKeepAlive is a heartbeat (type:"keep_alive").
-type inputKeepAlive struct {
+// InputKeepAliveMsg is a heartbeat (type:"keep_alive").
+type InputKeepAliveMsg struct {
 	Type InputType `json:"type"` // InputKeepAlive
 }
 
-// inputUpdateEnvVars pushes env vars at runtime (type:"update_environment_variables").
-type inputUpdateEnvVars struct {
+// InputUpdateEnvVarsMsg pushes env vars at runtime (type:"update_environment_variables").
+type InputUpdateEnvVarsMsg struct {
 	Type      InputType         `json:"type"` // InputUpdateEnvVars
 	Variables map[string]string `json:"variables"`
 }
-
-// Compile-time assertions for input wire types.
-var (
-	_ = inputControlRequest{}
-	_ = inputControlResponse{}
-	_ = inputKeepAlive{}
-	_ = inputUpdateEnvVars{}
-
-	_ = controlReqInitialize{}
-	_ = controlReqInterrupt{}
-	_ = controlReqCanUseTool{}
-	_ = controlReqSetPermissionMode{}
-	_ = controlReqSetModel{}
-	_ = controlReqSetMaxThinkingTokens{}
-	_ = controlReqMcpStatus{}
-	_ = controlReqGetContextUsage{}
-	_ = controlReqHookCallback{}
-	_ = controlReqMcpMessage{}
-	_ = controlReqRewindFiles{}
-	_ = controlReqCancelAsyncMessage{}
-	_ = controlReqSeedReadState{}
-	_ = controlReqMcpSetServers{}
-	_ = controlReqReloadPlugins{}
-	_ = controlReqMcpReconnect{}
-	_ = controlReqMcpToggle{}
-	_ = controlReqStopTask{}
-	_ = controlReqApplyFlagSettings{}
-	_ = controlReqGetSettings{}
-	_ = controlReqElicitation{}
-)
 
 // ---------- slash commands in -p mode ----------
 //
@@ -451,8 +423,8 @@ const (
 
 // ---------- envelope probe ----------
 
-// outputTypeProbe extracts the type discriminator from a Claude Code JSONL record.
-type outputTypeProbe struct {
+// OutputTypeProbe extracts the type discriminator from a Claude Code JSONL record.
+type OutputTypeProbe struct {
 	Type OutputType `json:"type"`
 	// Subtype is untyped because its meaning varies by Type: SystemSubtype for
 	// system messages, but free-form strings like "success" or "error_max_turns"
@@ -462,8 +434,8 @@ type outputTypeProbe struct {
 
 // ---------- system/init ----------
 
-// outputInit is the wire representation of a system/init record.
-type outputInit struct {
+// OutputInitMsg is the wire representation of a system/init record.
+type OutputInitMsg struct {
 	Type      OutputType    `json:"type"`
 	Subtype   SystemSubtype `json:"subtype"`
 	Cwd       string        `json:"cwd"`
@@ -477,22 +449,22 @@ type outputInit struct {
 	Agents         []string        `json:"agents,omitempty"`
 	APIKeySource   string          `json:"apiKeySource,omitempty"`
 	FastModeState  string          `json:"fast_mode_state,omitempty"`
-	MCPServers     []initMCPServer `json:"mcp_servers,omitempty"`
+	MCPServers     []InitMCPServer `json:"mcp_servers,omitempty"`
 	OutputStyle    string          `json:"output_style,omitempty"`
 	PermissionMode string          `json:"permissionMode,omitempty"`
-	Plugins        []initPlugin    `json:"plugins,omitempty"`
+	Plugins        []InitPlugin    `json:"plugins,omitempty"`
 	Skills         []string        `json:"skills,omitempty"`
 	SlashCommands  []string        `json:"slash_commands,omitempty"`
 }
 
-// initMCPServer is an MCP server entry in the system/init message.
-type initMCPServer struct {
+// InitMCPServer is an MCP server entry in the system/init message.
+type InitMCPServer struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
 }
 
-// initPlugin is a plugin entry in the system/init message.
-type initPlugin struct {
+// InitPlugin is a plugin entry in the system/init message.
+type InitPlugin struct {
 	Name   string `json:"name"`
 	Path   string `json:"path"`
 	Source string `json:"source"`
@@ -500,8 +472,8 @@ type initPlugin struct {
 
 // ---------- system (non-init) ----------
 
-// outputSystem is the wire representation of a non-init system record.
-type outputSystem struct {
+// OutputSystemMsg is the wire representation of a non-init system record.
+type OutputSystemMsg struct {
 	Type      OutputType    `json:"type"`
 	Subtype   SystemSubtype `json:"subtype"`
 	SessionID string        `json:"session_id"`
@@ -515,7 +487,7 @@ type outputSystem struct {
 	ToolUseID    string        `json:"tool_use_id,omitempty"`
 	LastToolName string        `json:"last_tool_name,omitempty"`
 	Status       string        `json:"status,omitempty"`
-	UsageExtra   taskUsageWire `json:"usage,omitempty"`
+	UsageExtra   TaskUsageWire `json:"usage,omitempty"`
 	OutputFile   string        `json:"output_file,omitempty"`
 	Summary      string        `json:"summary,omitempty"`
 
@@ -528,18 +500,18 @@ type outputSystem struct {
 
 	// Other optional fields.
 	PermissionMode  string              `json:"permissionMode,omitempty"`
-	CompactMetadata compactMetadataWire `json:"compact_metadata,omitempty"`
+	CompactMetadata CompactMetadataWire `json:"compact_metadata,omitempty"`
 	Prompt          json.RawMessage     `json:"prompt,omitempty"`
 }
 
-// compactMetadataWire is the compact_metadata object on compact_boundary system messages.
-type compactMetadataWire struct {
+// CompactMetadataWire is the compact_metadata object on compact_boundary system messages.
+type CompactMetadataWire struct {
 	Trigger   string `json:"trigger"`    // "auto" or "manual".
 	PreTokens int    `json:"pre_tokens"` // Token count before compaction.
 }
 
-// taskUsageWire is the usage object on task_progress/task_notification system messages.
-type taskUsageWire struct {
+// TaskUsageWire is the usage object on task_progress/task_notification system messages.
+type TaskUsageWire struct {
 	TotalTokens int `json:"total_tokens"`
 	ToolUses    int `json:"tool_uses"`
 	DurationMs  int `json:"duration_ms"`
@@ -547,24 +519,24 @@ type taskUsageWire struct {
 
 // ---------- assistant ----------
 
-// outputAssistant is the wire representation of an assistant record.
-type outputAssistant struct {
+// OutputAssistantMsg is the wire representation of an assistant record.
+type OutputAssistantMsg struct {
 	Type            OutputType           `json:"type"`
 	SessionID       string               `json:"session_id"`
 	UUID            string               `json:"uuid"`
 	Timestamp       string               `json:"timestamp,omitempty"`
-	Message         assistantMessageBody `json:"message"`
+	Message         AssistantMessageBody `json:"message"`
 	ParentToolUseID string               `json:"parent_tool_use_id"`
 	Error           string               `json:"error"`
 }
 
-// assistantMessageBody is the inner message object within an assistant record.
-type assistantMessageBody struct {
+// AssistantMessageBody is the inner message object within an assistant record.
+type AssistantMessageBody struct {
 	ID           string               `json:"id"`
 	Type         string               `json:"type,omitempty"`
 	Role         string               `json:"role"`
 	Model        string               `json:"model"`
-	Content      []outputContentBlock `json:"content"`
+	Content      []OutputContentBlock `json:"content"`
 	Usage        agent.Usage          `json:"usage"`
 	StopReason   string               `json:"stop_reason"`
 	StopSequence string               `json:"stop_sequence"`
@@ -574,21 +546,21 @@ type assistantMessageBody struct {
 	ContextManagement json.RawMessage `json:"context_management,omitempty"`
 }
 
-// contentBlockStart is the content_block field in a content_block_start streaming event.
-type contentBlockStart struct {
+// ContentBlockStart is the content_block field in a content_block_start streaming event.
+type ContentBlockStart struct {
 	Type string `json:"type"`
 	ID   string `json:"id,omitempty"`
 	Name string `json:"name,omitempty"`
 }
 
-// outputContentBlock is a single content block inside an assistant message.
+// OutputContentBlock is a single content block inside an assistant message.
 // This is a flat union: fields are populated depending on Type.
 //
 //   - "text":        Text
 //   - "thinking":    Thinking, Signature
 //   - "tool_use":    ID, Name, Input
 //   - "tool_result": ToolUseID, Content, IsError
-type outputContentBlock struct {
+type OutputContentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text,omitempty"`
 	ID        string          `json:"id,omitempty"`
@@ -604,8 +576,8 @@ type outputContentBlock struct {
 
 // ---------- user (echoed) ----------
 
-// outputUser is the wire representation of a user record.
-type outputUser struct {
+// OutputUserMsg is the wire representation of a user record.
+type OutputUserMsg struct {
 	Type            OutputType      `json:"type"`
 	UUID            string          `json:"uuid"`
 	SessionID       string          `json:"session_id,omitempty"`
@@ -619,8 +591,8 @@ type outputUser struct {
 
 // ---------- result ----------
 
-// outputResult is the wire representation of a result record.
-type outputResult struct {
+// OutputResultMsg is the wire representation of a result record.
+type OutputResultMsg struct {
 	Type             OutputType  `json:"type"`
 	Subtype          string      `json:"subtype"`
 	IsError          bool        `json:"is_error"`
@@ -636,14 +608,14 @@ type outputResult struct {
 	Timestamp        string      `json:"timestamp,omitempty"`
 
 	FastModeState     string                     `json:"fast_mode_state,omitempty"`
-	ModelUsage        map[string]modelUsageEntry `json:"modelUsage,omitempty"`
+	ModelUsage        map[string]ModelUsageEntry `json:"modelUsage,omitempty"`
 	PermissionDenials []json.RawMessage          `json:"permission_denials,omitempty"`
 	StopReason        string                     `json:"stop_reason,omitempty"`
 	TerminalReason    string                     `json:"terminal_reason,omitempty"`
 }
 
-// modelUsageEntry is per-model usage stats in the result message.
-type modelUsageEntry struct {
+// ModelUsageEntry is per-model usage stats in the result message.
+type ModelUsageEntry struct {
 	InputTokens              int     `json:"inputTokens"`
 	OutputTokens             int     `json:"outputTokens"`
 	CacheReadInputTokens     int     `json:"cacheReadInputTokens"`
@@ -656,21 +628,21 @@ type modelUsageEntry struct {
 
 // ---------- stream_event ----------
 
-// outputStreamEvent is the wire representation of a stream_event record.
-type outputStreamEvent struct {
+// OutputStreamEventMsg is the wire representation of a stream_event record.
+type OutputStreamEventMsg struct {
 	Type            OutputType      `json:"type"`
 	UUID            string          `json:"uuid"`
 	SessionID       string          `json:"session_id"`
 	Timestamp       string          `json:"timestamp,omitempty"`
 	ParentToolUseID string          `json:"parent_tool_use_id"`
-	Event           streamEventData `json:"event"`
+	Event           StreamEventData `json:"event"`
 }
 
-// streamEventData is the nested event body inside a stream_event record.
-type streamEventData struct {
+// StreamEventData is the nested event body inside a stream_event record.
+type StreamEventData struct {
 	Type         string          `json:"type"`
 	Index        int             `json:"index"`
-	Delta        *streamDelta    `json:"delta,omitempty"`
+	Delta        *StreamDelta    `json:"delta,omitempty"`
 	ContentBlock json.RawMessage `json:"content_block,omitempty"`
 	// message_start carries the full message object; message_delta carries
 	// stop_reason and usage in a delta wrapper.
@@ -678,8 +650,8 @@ type streamEventData struct {
 	Usage   json.RawMessage `json:"usage,omitempty"`
 }
 
-// streamDelta is a delta object inside a stream event.
-type streamDelta struct {
+// StreamDelta is a delta object inside a stream event.
+type StreamDelta struct {
 	Type        string `json:"type"`
 	Text        string `json:"text"`
 	PartialJSON string `json:"partial_json"`
@@ -691,19 +663,19 @@ type streamDelta struct {
 
 // ---------- rate_limit_event ----------
 
-// outputRateLimitEvent is the wire representation of a rate_limit_event record.
+// OutputRateLimitEventMsg is the wire representation of a rate_limit_event record.
 // Emitted when the CLI's rate limit status transitions (e.g. allowed → allowed_warning).
-type outputRateLimitEvent struct {
+type OutputRateLimitEventMsg struct {
 	Type          OutputType    `json:"type"`
 	UUID          string        `json:"uuid"`
 	SessionID     string        `json:"session_id"`
 	Timestamp     string        `json:"timestamp,omitempty"`
-	RateLimitInfo rateLimitInfo `json:"rate_limit_info"`
+	RateLimitInfo RateLimitInfo `json:"rate_limit_info"`
 }
 
-// rateLimitInfo is the nested rate limit info inside a rate_limit_event.
+// RateLimitInfo is the nested rate limit info inside a rate_limit_event.
 // Wire format uses camelCase (matches Claude Code CLI JSON output).
-type rateLimitInfo struct {
+type RateLimitInfo struct {
 	Status                string  `json:"status"`
 	ResetsAt              float64 `json:"resetsAt,omitempty"`
 	RateLimitType         string  `json:"rateLimitType,omitempty"`
@@ -719,8 +691,8 @@ type rateLimitInfo struct {
 // These types are not yet parsed by ParseMessage (they fall through to
 // RawMessage) but document the full stdout wire protocol.
 
-// outputToolProgress is emitted periodically while a tool is running.
-type outputToolProgress struct {
+// OutputToolProgressMsg is emitted periodically while a tool is running.
+type OutputToolProgressMsg struct {
 	Type               OutputType `json:"type"` // OutputToolProgress
 	ToolUseID          string     `json:"tool_use_id"`
 	ToolName           string     `json:"tool_name"`
@@ -731,8 +703,8 @@ type outputToolProgress struct {
 	SessionID          string     `json:"session_id"`
 }
 
-// outputAuthStatus reports authentication state changes.
-type outputAuthStatus struct {
+// OutputAuthStatusMsg reports authentication state changes.
+type OutputAuthStatusMsg struct {
 	Type             OutputType `json:"type"` // OutputAuthStatus
 	IsAuthenticating bool       `json:"isAuthenticating"`
 	Output           []string   `json:"output"`
@@ -741,8 +713,8 @@ type outputAuthStatus struct {
 	SessionID        string     `json:"session_id"`
 }
 
-// outputToolUseSummary summarizes a group of preceding tool calls.
-type outputToolUseSummary struct {
+// OutputToolUseSummaryMsg summarizes a group of preceding tool calls.
+type OutputToolUseSummaryMsg struct {
 	Type                OutputType `json:"type"` // OutputToolUseSummary
 	Summary             string     `json:"summary"`
 	PrecedingToolUseIDs []string   `json:"preceding_tool_use_ids"`
@@ -750,40 +722,40 @@ type outputToolUseSummary struct {
 	SessionID           string     `json:"session_id"`
 }
 
-// outputPromptSuggestion is a predicted next user prompt.
-type outputPromptSuggestion struct {
+// OutputPromptSuggestionMsg is a predicted next user prompt.
+type OutputPromptSuggestionMsg struct {
 	Type       OutputType `json:"type"` // OutputPromptSuggestion
 	Suggestion string     `json:"suggestion"`
 	UUID       string     `json:"uuid"`
 	SessionID  string     `json:"session_id"`
 }
 
-// outputStreamlinedText replaces assistant messages in streamlined output mode.
-type outputStreamlinedText struct {
+// OutputStreamlinedTextMsg replaces assistant messages in streamlined output mode.
+type OutputStreamlinedTextMsg struct {
 	Type      OutputType `json:"type"` // OutputStreamlinedText
 	Text      string     `json:"text"`
 	SessionID string     `json:"session_id"`
 	UUID      string     `json:"uuid"`
 }
 
-// outputStreamlinedToolUseSummary replaces tool_use blocks in streamlined output.
-type outputStreamlinedToolUseSummary struct {
+// OutputStreamlinedToolUseSummaryMsg replaces tool_use blocks in streamlined output.
+type OutputStreamlinedToolUseSummaryMsg struct {
 	Type        OutputType `json:"type"` // OutputStreamlinedToolUseSummary
 	ToolSummary string     `json:"tool_summary"`
 	SessionID   string     `json:"session_id"`
 	UUID        string     `json:"uuid"`
 }
 
-// outputControlCancelRequest cancels a pending control request.
-type outputControlCancelRequest struct {
+// OutputControlCancelRequestMsg cancels a pending control request.
+type OutputControlCancelRequestMsg struct {
 	Type      OutputType `json:"type"` // OutputControlCancelRequest
 	RequestID string     `json:"request_id"`
 }
 
 // --- system subtype wire types ---
 
-// outputSessionStateChanged reports idle/running/requires_action transitions.
-type outputSessionStateChanged struct {
+// OutputSessionStateChangedMsg reports idle/running/requires_action transitions.
+type OutputSessionStateChangedMsg struct {
 	Type      OutputType    `json:"type"`    // OutputSystem
 	Subtype   SystemSubtype `json:"subtype"` // SystemSessionStateChanged
 	State     string        `json:"state"`   // "idle", "running", "requires_action"
@@ -791,8 +763,8 @@ type outputSessionStateChanged struct {
 	SessionID string        `json:"session_id"`
 }
 
-// outputPostTurnSummary is an AI-generated summary after each assistant turn.
-type outputPostTurnSummary struct {
+// OutputPostTurnSummaryMsg is an AI-generated summary after each assistant turn.
+type OutputPostTurnSummaryMsg struct {
 	Type           OutputType    `json:"type"`    // OutputSystem
 	Subtype        SystemSubtype `json:"subtype"` // SystemPostTurnSummary
 	SummarizesUUID string        `json:"summarizes_uuid"`
@@ -808,8 +780,8 @@ type outputPostTurnSummary struct {
 	SessionID      string        `json:"session_id"`
 }
 
-// outputLocalCommandOutput is output from a local slash command (e.g. /cost).
-type outputLocalCommandOutput struct {
+// OutputLocalCommandOutputMsg is output from a local slash command (e.g. /cost).
+type OutputLocalCommandOutputMsg struct {
 	Type      OutputType    `json:"type"`    // OutputSystem
 	Subtype   SystemSubtype `json:"subtype"` // SystemLocalCommandOutput
 	Content   string        `json:"content"`
@@ -817,8 +789,8 @@ type outputLocalCommandOutput struct {
 	SessionID string        `json:"session_id"`
 }
 
-// outputHookStarted signals a hook has started executing.
-type outputHookStarted struct {
+// OutputHookStartedMsg signals a hook has started executing.
+type OutputHookStartedMsg struct {
 	Type      OutputType    `json:"type"`    // OutputSystem
 	Subtype   SystemSubtype `json:"subtype"` // SystemHookStarted
 	HookID    string        `json:"hook_id"`
@@ -828,8 +800,8 @@ type outputHookStarted struct {
 	SessionID string        `json:"session_id"`
 }
 
-// outputHookProgress reports partial output from a running hook.
-type outputHookProgress struct {
+// OutputHookProgressMsg reports partial output from a running hook.
+type OutputHookProgressMsg struct {
 	Type      OutputType    `json:"type"`    // OutputSystem
 	Subtype   SystemSubtype `json:"subtype"` // SystemHookProgress
 	HookID    string        `json:"hook_id"`
@@ -842,8 +814,8 @@ type outputHookProgress struct {
 	SessionID string        `json:"session_id"`
 }
 
-// outputHookResponse reports a hook's final result.
-type outputHookResponse struct {
+// OutputHookResponseMsg reports a hook's final result.
+type OutputHookResponseMsg struct {
 	Type      OutputType    `json:"type"`    // OutputSystem
 	Subtype   SystemSubtype `json:"subtype"` // SystemHookResponse
 	HookID    string        `json:"hook_id"`
@@ -858,8 +830,8 @@ type outputHookResponse struct {
 	SessionID string        `json:"session_id"`
 }
 
-// outputFilesPersisted reports files uploaded to cloud storage.
-type outputFilesPersisted struct {
+// OutputFilesPersistedMsg reports files uploaded to cloud storage.
+type OutputFilesPersistedMsg struct {
 	Type    OutputType    `json:"type"`    // OutputSystem
 	Subtype SystemSubtype `json:"subtype"` // SystemFilesPersisted
 	Files   []struct {
@@ -875,8 +847,8 @@ type outputFilesPersisted struct {
 	SessionID   string `json:"session_id"`
 }
 
-// outputElicitationComplete signals an MCP URL-mode elicitation is done.
-type outputElicitationComplete struct {
+// OutputElicitationCompleteMsg signals an MCP URL-mode elicitation is done.
+type OutputElicitationCompleteMsg struct {
 	Type          OutputType    `json:"type"`    // OutputSystem
 	Subtype       SystemSubtype `json:"subtype"` // SystemElicitationComplete
 	MCPServerName string        `json:"mcp_server_name"`
@@ -885,69 +857,57 @@ type outputElicitationComplete struct {
 	SessionID     string        `json:"session_id"`
 }
 
-// Compile-time assertions for documentation-only output wire types.
-var (
-	_ = outputToolProgress{}
-	_ = outputAuthStatus{}
-	_ = outputToolUseSummary{}
-	_ = outputPromptSuggestion{}
-	_ = outputStreamlinedText{}
-	_ = outputStreamlinedToolUseSummary{}
-	_ = outputControlCancelRequest{}
-	_ = outputSessionStateChanged{}
-	_ = outputPostTurnSummary{}
-	_ = outputLocalCommandOutput{}
-	_ = outputHookStarted{}
-	_ = outputHookProgress{}
-	_ = outputHookResponse{}
-	_ = outputFilesPersisted{}
-	_ = outputElicitationComplete{}
-)
-
 // ---------- output helper types ----------
 
-type askInput struct {
+// AskInput is the parsed input for the AskUserQuestion tool.
+type AskInput struct {
 	Questions []agent.AskQuestion `json:"questions"`
 }
 
-type todoInput struct {
+// TodoInput is the parsed input for the TodoWrite tool.
+type TodoInput struct {
 	Todos []agent.TodoItem `json:"todos"`
 }
 
-type outputUserText struct {
+// OutputUserText is a plain-text user message body.
+type OutputUserText struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-type outputUserBlock struct {
+// OutputUserBlock is a block-style user message body.
+type OutputUserBlock struct {
 	Role    string                   `json:"role"`
-	Content []outputUserContentBlock `json:"content"`
+	Content []OutputUserContentBlock `json:"content"`
 }
 
-type outputUserContentBlock struct {
+// OutputUserContentBlock is a single content block in a user message.
+type OutputUserContentBlock struct {
 	Type      string             `json:"type"`
 	Text      string             `json:"text,omitempty"`
-	Source    *outputImageSource `json:"source,omitempty"`
+	Source    *OutputImageSource `json:"source,omitempty"`
 	ToolUseID string             `json:"tool_use_id,omitempty"`
 	// Nested content and error flag for inline tool_result blocks (MCP tools).
-	Content []toolResultContent `json:"content,omitempty"`
+	Content []ToolResultContent `json:"content,omitempty"`
 	IsError bool                `json:"is_error,omitempty"`
 }
 
-type outputImageSource struct {
+// OutputImageSource is an image source in an output user content block.
+type OutputImageSource struct {
 	Type      string `json:"type"`
 	MediaType string `json:"media_type"`
 	Data      string `json:"data"`
 }
 
-// outputToolResult is the message body format for tool results delivered via
+// OutputToolResult is the message body format for tool results delivered via
 // the top-level parent_tool_use_id path (standard Claude Code tools).
-type outputToolResult struct {
-	Content []toolResultContent `json:"content"`
+type OutputToolResult struct {
+	Content []ToolResultContent `json:"content"`
 	IsError bool                `json:"is_error"`
 }
 
-type toolResultContent struct {
+// ToolResultContent is a content entry in a tool result.
+type ToolResultContent struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
 }

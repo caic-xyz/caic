@@ -71,7 +71,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	// Claude Code authenticates via OAuth. Re-inject it after auth completes
 	// so tools (Bash, MCP servers) can still use it.
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		msg := inputUpdateEnvVars{
+		msg := InputUpdateEnvVarsMsg{
 			Type:      InputUpdateEnvVars,
 			Variables: map[string]string{"ANTHROPIC_API_KEY": key},
 		}
@@ -90,11 +90,11 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 // WritePrompt writes a single user message in Claude Code's stdin format.
 // When images are provided, content is emitted as an array of content blocks.
 func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
-	var blocks []inputContentBlock
+	var blocks []InputContentBlock
 	for _, img := range p.Images {
-		blocks = append(blocks, inputContentBlock{
+		blocks = append(blocks, InputContentBlock{
 			Type: "image",
-			Source: inputImageSource{
+			Source: InputImageSource{
 				Type:      "base64",
 				MediaType: img.MediaType,
 				Data:      img.Data,
@@ -102,11 +102,11 @@ func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
 		})
 	}
 	if p.Text != "" {
-		blocks = append(blocks, inputContentBlock{Type: "text", Text: p.Text})
+		blocks = append(blocks, InputContentBlock{Type: "text", Text: p.Text})
 	}
-	msg := inputUser{
+	msg := InputUserMsg{
 		Type:    InputUser,
-		Message: inputUserContent{Role: "user", Content: blocks},
+		Message: InputUserContent{Role: "user", Content: blocks},
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
