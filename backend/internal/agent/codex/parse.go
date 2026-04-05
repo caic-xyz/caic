@@ -56,7 +56,7 @@ func unmarshalNotification(data []byte, v any, name string, fw *jsonutil.FieldWa
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
 func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	// Fast probe: check for "type" (caic-injected) vs "method"/"id" (JSON-RPC).
-	var probe messageProbe
+	var probe MessageProbe
 	if err := json.Unmarshal(line, &probe); err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}

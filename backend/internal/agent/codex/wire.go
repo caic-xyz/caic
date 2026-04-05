@@ -105,16 +105,16 @@ type JSONRPCError struct {
 	Message string `json:"message"`
 }
 
-// messageProbe extracts routing fields from a codex app-server line to
+// MessageProbe extracts routing fields from a codex app-server line to
 // distinguish caic-injected JSON (has "type") from JSON-RPC (has "method"/"id").
-type messageProbe struct {
+type MessageProbe struct {
 	Type   string           `json:"type,omitzero"`
 	Method Method           `json:"method,omitzero"`
 	ID     *json.RawMessage `json:"id,omitzero"`
 }
 
-// methodProbe extracts the method field from a JSON-RPC message.
-type methodProbe struct {
+// MethodProbe extracts the method field from a JSON-RPC message.
+type MethodProbe struct {
 	Method Method `json:"method,omitzero"`
 }
 
@@ -122,72 +122,74 @@ type methodProbe struct {
 // Input types: requests sent to the codex app-server (stdin).
 // ============================================================
 
-// jsonrpcRequest is the envelope for all JSON-RPC 2.0 requests sent to codex.
-type jsonrpcRequest struct {
+// JSONRPCRequest is the envelope for all JSON-RPC 2.0 requests sent to codex.
+type JSONRPCRequest struct {
 	JSONRPC string `json:"jsonrpc"`
 	ID      int64  `json:"id,omitzero"`
 	Method  string `json:"method"`
 	Params  any    `json:"params,omitzero"`
 }
 
-// jsonrpcNotification is a JSON-RPC 2.0 notification (no id, no response expected).
-type jsonrpcNotification struct {
+// JSONRPCNotification is a JSON-RPC 2.0 notification (no id, no response expected).
+type JSONRPCNotification struct {
 	JSONRPC string `json:"jsonrpc"`
 	Method  string `json:"method"`
 }
 
 // Handshake request params.
 
-// initializeParams holds the params for the initialize request.
-type initializeParams struct {
-	ClientInfo   clientInfo   `json:"clientInfo"`
-	Capabilities capabilities `json:"capabilities"`
+// InitializeParams holds the params for the initialize request.
+type InitializeParams struct {
+	ClientInfo   ClientInfo   `json:"clientInfo"`
+	Capabilities Capabilities `json:"capabilities"`
 }
 
-type clientInfo struct {
+// ClientInfo identifies the client in the initialize handshake.
+type ClientInfo struct {
 	Name    string `json:"name"`
 	Title   string `json:"title"`
 	Version string `json:"version"`
 }
 
-type capabilities struct {
+// Capabilities declares client capabilities in the initialize handshake.
+type Capabilities struct {
 	OptOutNotificationMethods []Method `json:"optOutNotificationMethods"`
 }
 
 // Thread management request params.
 
-// threadStartParams holds the params for thread/start.
-type threadStartParams struct {
+// ThreadStartParams holds the params for thread/start.
+type ThreadStartParams struct {
 	Model string `json:"model,omitzero"`
 }
 
-// threadResumeParams holds the params for thread/resume.
-type threadResumeParams struct {
+// ThreadResumeParams holds the params for thread/resume.
+type ThreadResumeParams struct {
 	ThreadID string `json:"threadId"`
 }
 
-// threadStartResult is the result object from a thread/start JSON-RPC response.
-type threadStartResult struct {
-	Thread threadStartThread `json:"thread"`
+// ThreadStartResult is the result object from a thread/start JSON-RPC response.
+type ThreadStartResult struct {
+	Thread ThreadStartThread `json:"thread"`
 }
 
-// threadStartThread is the thread object inside a threadStartResult.
-type threadStartThread struct {
+// ThreadStartThread is the thread object inside a ThreadStartResult.
+type ThreadStartThread struct {
 	ID string `json:"id"`
 }
 
 // Turn request params.
 
-// turnStartParams holds the params for turn/start.
-type turnStartParams struct {
+// TurnStartParams holds the params for turn/start.
+type TurnStartParams struct {
 	ThreadID string      `json:"threadId"`
-	Input    []turnInput `json:"input"`
+	Input    []TurnInput `json:"input"`
 }
 
-// turnInput is a single item in the turn/start input array.
+// TurnInput is a single item in the turn/start input array.
 // Type is "text", "image" (with URL as data URI), "localImage" (with Path),
 // "skill" (with Name + Path), or "mention" (with Name + Path).
-type turnInput struct {
+type TurnInput struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitzero"`
 	URL  string `json:"url,omitzero"`
@@ -207,7 +209,7 @@ type TurnInterruptParams struct {
 // TurnSteerParams holds the params for turn/steer.
 type TurnSteerParams struct {
 	ThreadID       string      `json:"threadId"`
-	Input          []turnInput `json:"input"`
+	Input          []TurnInput `json:"input"`
 	ExpectedTurnID string      `json:"expectedTurnId"`
 }
 

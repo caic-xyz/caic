@@ -158,19 +158,19 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 		return errors.New("codex: no thread ID (handshake not completed)")
 	}
 	id := w.nextID.Add(1)
-	input := make([]turnInput, 0, 1+len(p.Images))
-	input = append(input, turnInput{Type: "text", Text: p.Text})
+	input := make([]TurnInput, 0, 1+len(p.Images))
+	input = append(input, TurnInput{Type: "text", Text: p.Text})
 	for _, img := range p.Images {
-		input = append(input, turnInput{
+		input = append(input, TurnInput{
 			Type: "image",
 			URL:  "data:" + img.MediaType + ";base64," + img.Data,
 		})
 	}
-	req := jsonrpcRequest{
+	req := JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  "turn/start",
-		Params:  turnStartParams{ThreadID: w.threadID, Input: input},
+		Params:  TurnStartParams{ThreadID: w.threadID, Input: input},
 	}
 	// Don't log to logW — stdin is not logged with --no-log-stdin.
 	return writeJSON(wr, req)
@@ -184,7 +184,7 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, _ io.Writer) error {
 	if w.threadID == "" {
 		return errors.New("codex: no thread ID (handshake not completed)")
 	}
-	req := jsonrpcRequest{
+	req := JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      w.nextID.Add(1),
 		Method:  "thread/compact/start",
@@ -205,7 +205,7 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, _ io.Writer) error {
 func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	// Intercept thread/tokenUsage/updated: emit a UsageMessage with the
 	// incremental (Last) usage and accumulate into totalUsage.
-	var probe methodProbe
+	var probe MethodProbe
 	_ = json.Unmarshal(line, &probe)
 	if probe.Method == MethodTokenUsageUpdated {
 		var msg JSONRPCMessage
@@ -267,13 +267,13 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	w := &wireFormat{fw: &jsonutil.FieldWarner{}}
 
 	// 1. Send initialize request.
-	initReq := jsonrpcRequest{
+	initReq := JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      w.nextID.Add(1),
 		Method:  "initialize",
-		Params: initializeParams{
-			ClientInfo: clientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
-			Capabilities: capabilities{
+		Params: InitializeParams{
+			ClientInfo: ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
+			Capabilities: Capabilities{
 				OptOutNotificationMethods: []Method{
 					// Interactive terminal prompts (e.g. sudo password, interactive stdin);
 					// caic does not forward interactive terminal I/O to the agent.
@@ -313,13 +313,13 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 
 	// 2. Send initialized notification.
-	if err := writeJSON(stdin, jsonrpcNotification{JSONRPC: "2.0", Method: "initialized"}); err != nil {
+	if err := writeJSON(stdin, JSONRPCNotification{JSONRPC: "2.0", Method: "initialized"}); err != nil {
 		return nil, nil, fmt.Errorf("write initialized: %w", err)
 	}
 
 	// 3. Fetch model list so the UI offers only valid model IDs.
 	var models []string
-	if err := writeJSON(stdin, jsonrpcRequest{JSONRPC: "2.0", ID: w.nextID.Add(1), Method: "model/list"}); err != nil {
+	if err := writeJSON(stdin, JSONRPCRequest{JSONRPC: "2.0", ID: w.nextID.Add(1), Method: "model/list"}); err != nil {
 		return nil, nil, fmt.Errorf("write model/list: %w", err)
 	}
 	if mlResp, err := readJSONRPCResponse(ctx, stdout); err == nil && mlResp.Result != nil {
@@ -334,20 +334,20 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 
 	// 4. Send thread/start or thread/resume.
-	var threadReq jsonrpcRequest
+	var threadReq JSONRPCRequest
 	if opts.ResumeSessionID != "" {
-		threadReq = jsonrpcRequest{
+		threadReq = JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.nextID.Add(1),
 			Method:  "thread/resume",
-			Params:  threadResumeParams{ThreadID: opts.ResumeSessionID},
+			Params:  ThreadResumeParams{ThreadID: opts.ResumeSessionID},
 		}
 	} else {
-		threadReq = jsonrpcRequest{
+		threadReq = JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.nextID.Add(1),
 			Method:  "thread/start",
-			Params:  threadStartParams{Model: opts.Model},
+			Params:  ThreadStartParams{Model: opts.Model},
 		}
 	}
 	if err := writeJSON(stdin, threadReq); err != nil {
@@ -361,7 +361,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 
 	// Extract thread ID from the response result.
-	var result threadStartResult
+	var result ThreadStartResult
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
 		return nil, nil, fmt.Errorf("parse thread/start result: %w", err)
 	}
