@@ -217,8 +217,8 @@ func TestContentBlock(t *testing.T) {
 
 func TestInitializeResult(t *testing.T) {
 	t.Run("WithCapabilities", func(t *testing.T) {
-		const input = `{"protocolVersion":1,"agentCapabilities":{"promptCapabilities":{"image":true,"embeddedContext":true},"loadSession":true},"agentInfo":{"name":"opencode","version":"0.5.0"}}`
-		var r initializeResult
+		const input = `{"protocolVersion":1,"AgentCapabilities":{"PromptCapabilities":{"image":true,"embeddedContext":true},"loadSession":true},"AgentInfo":{"name":"opencode","version":"0.5.0"}}`
+		var r InitializeResult
 		if err := json.Unmarshal([]byte(input), &r); err != nil {
 			t.Fatal(err)
 		}
@@ -243,7 +243,7 @@ func TestInitializeResult(t *testing.T) {
 func TestPromptResult(t *testing.T) {
 	t.Run("WithUsage", func(t *testing.T) {
 		const input = `{"stopReason":"end_turn","usage":{"totalTokens":5000,"inputTokens":3000,"outputTokens":500,"thoughtTokens":200,"cachedReadTokens":100,"cachedWriteTokens":50}}`
-		var r promptResult
+		var r PromptResult
 		if err := json.Unmarshal([]byte(input), &r); err != nil {
 			t.Fatal(err)
 		}

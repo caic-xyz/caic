@@ -57,7 +57,7 @@ func unmarshalNotification(data []byte, v any, name string, fw *jsonutil.FieldWa
 //   - DiffStatMessage      — caic_diff_stat injection
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
 func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
-	var probe messageProbe
+	var probe MessageProbe
 	if err := json.Unmarshal(line, &probe); err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
@@ -118,7 +118,7 @@ func parseSessionUpdate(params json.RawMessage, line []byte, fw *jsonutil.FieldW
 		return nil, fmt.Errorf("session/update params: %w", err)
 	}
 
-	var probe updateProbe
+	var probe UpdateProbe
 	if err := json.Unmarshal(sup.Update, &probe); err != nil {
 		return nil, fmt.Errorf("session/update probe: %w", err)
 	}

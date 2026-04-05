@@ -125,21 +125,21 @@ type JSONRPCError struct {
 
 // ---------- Routing probes ----------
 
-// messageProbe extracts routing fields from an ACP line to distinguish
+// MessageProbe extracts routing fields from an ACP line to distinguish
 // caic-injected JSON (has "type") from JSON-RPC (has "method"/"id").
-type messageProbe struct {
+type MessageProbe struct {
 	Type   string          `json:"type,omitzero"`
 	Method Method          `json:"method,omitzero"`
 	ID     json.RawMessage `json:"id,omitzero"`
 }
 
-// paramsProbe extracts the raw params field from a JSON-RPC message.
-type paramsProbe struct {
+// ParamsProbe extracts the raw params field from a JSON-RPC message.
+type ParamsProbe struct {
 	Params json.RawMessage `json:"params,omitzero"`
 }
 
-// updateProbe extracts the discriminator from a session update.
-type updateProbe struct {
+// UpdateProbe extracts the discriminator from a session update.
+type UpdateProbe struct {
 	SessionUpdate UpdateType `json:"sessionUpdate"`
 }
 
@@ -147,21 +147,10 @@ type updateProbe struct {
 // Input types: requests sent to OpenCode (stdin).
 // ============================================================
 
-// ---------- caic-injected synthetic lines ----------
-
-// caicInit is written to output.jsonl during handshake so replay can
-// reconstruct an InitMessage (handshake responses aren't otherwise logged).
-type caicInit struct {
-	Type      string `json:"type"` // always "caic_init"
-	SessionID string `json:"session_id"`
-	Model     string `json:"model,omitzero"`
-	Version   string `json:"version,omitzero"`
-}
-
 // ---------- JSON-RPC request envelope ----------
 
-// jsonrpcRequest is the envelope for all JSON-RPC 2.0 requests sent to OpenCode.
-type jsonrpcRequest struct {
+// JSONRPCRequest is the envelope for all JSON-RPC 2.0 requests sent to OpenCode.
+type JSONRPCRequest struct {
 	JSONRPC string `json:"jsonrpc"`
 	ID      int64  `json:"id,omitzero"`
 	Method  Method `json:"method"`
@@ -170,18 +159,20 @@ type jsonrpcRequest struct {
 
 // ---------- Handshake request params ----------
 
-// initializeParams holds the params for the initialize request.
-type initializeParams struct {
+// InitializeParams holds the params for the initialize request.
+type InitializeParams struct {
 	ProtocolVersion    int                `json:"protocolVersion"`
-	ClientCapabilities clientCapabilities `json:"clientCapabilities"`
-	ClientInfo         clientInfo         `json:"clientInfo"`
+	ClientCapabilities ClientCapabilities `json:"clientCapabilities"`
+	ClientInfo         ClientInfo         `json:"clientInfo"`
 }
 
-type clientCapabilities struct {
+// ClientCapabilities holds the client capability flags for the initialize request.
+type ClientCapabilities struct {
 	Terminal bool `json:"terminal"`
 }
 
-type clientInfo struct {
+// ClientInfo identifies the client in the initialize request.
+type ClientInfo struct {
 	Name    string `json:"name"`
 	Title   string `json:"title"`
 	Version string `json:"version"`
@@ -189,52 +180,54 @@ type clientInfo struct {
 
 // ---------- Session management request params ----------
 
-// sessionNewParams holds the params for session/new.
-type sessionNewParams struct {
+// SessionNewParams holds the params for session/new.
+type SessionNewParams struct {
 	Cwd        string      `json:"cwd"`
-	McpServers []mcpServer `json:"mcpServers"`
+	McpServers []MCPServer `json:"mcpServers"`
 }
 
-// sessionLoadParams holds the params for session/load.
-type sessionLoadParams struct {
+// SessionLoadParams holds the params for session/load.
+type SessionLoadParams struct {
 	SessionID  string      `json:"sessionId"`
 	Cwd        string      `json:"cwd"`
-	McpServers []mcpServer `json:"mcpServers"`
+	McpServers []MCPServer `json:"mcpServers"`
 }
 
-// mcpServer describes an MCP server to register with the session.
+// MCPServer describes an MCP server to register with the session.
 // ACP supports three variants (stdio, http, sse) discriminated by the Type
 // field. Only stdio is used by caic (for the widget MCP server).
-type mcpServer struct {
+type MCPServer struct {
 	Type    string        `json:"type,omitzero"` // "http", "sse", or empty for stdio.
 	Name    string        `json:"name"`
 	Command string        `json:"command,omitzero"` // Stdio only.
 	Args    []string      `json:"args,omitzero"`    // Stdio only.
-	Env     []envVariable `json:"env,omitzero"`     // Stdio only.
+	Env     []EnvVariable `json:"env,omitzero"`     // Stdio only.
 	URL     string        `json:"url,omitzero"`     // HTTP/SSE only.
-	Headers []httpHeader  `json:"headers,omitzero"` // HTTP/SSE only.
+	Headers []HTTPHeader  `json:"headers,omitzero"` // HTTP/SSE only.
 }
 
-type envVariable struct {
+// EnvVariable is a name-value pair for MCP server environment variables.
+type EnvVariable struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
 }
 
-type httpHeader struct {
+// HTTPHeader is a name-value pair for MCP server HTTP headers.
+type HTTPHeader struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
 }
 
 // ---------- Prompt request params ----------
 
-// promptContent is a single item in the session/prompt content array.
+// PromptContent is a single item in the session/prompt content array.
 // This is a flat union discriminated by Type:
 //
 //   - ContentText:         Text
 //   - ContentImage:        Data (base64), MimeType
 //   - ContentResource:     Resource (embedded resource)
 //   - ContentResourceLink: URI, Name, MimeType
-type promptContent struct {
+type PromptContent struct {
 	Type     ContentType     `json:"type"`
 	Text     string          `json:"text,omitzero"`
 	Data     string          `json:"data,omitzero"`     // Base64 image data.
@@ -244,16 +237,16 @@ type promptContent struct {
 	Resource json.RawMessage `json:"resource,omitzero"` // Embedded resource object.
 }
 
-// sessionPromptParams holds the params for session/prompt.
-type sessionPromptParams struct {
+// SessionPromptParams holds the params for session/prompt.
+type SessionPromptParams struct {
 	SessionID string          `json:"sessionId"`
-	Prompt    []promptContent `json:"prompt"`
+	Prompt    []PromptContent `json:"prompt"`
 }
 
 // ---------- Model switching ----------
 
-// setSessionModelParams holds the params for unstable_setSessionModel.
-type setSessionModelParams struct {
+// SetSessionModelParams holds the params for unstable_setSessionModel.
+type SetSessionModelParams struct {
 	SessionID string `json:"sessionId"`
 	ModelID   string `json:"modelId"`
 }
@@ -441,67 +434,74 @@ type PermissionRequestParams struct {
 
 // ---------- Response types ----------
 
-// initializeResult is the result of an initialize request.
-type initializeResult struct {
+// InitializeResult is the result of an initialize request.
+type InitializeResult struct {
 	ProtocolVersion   int               `json:"protocolVersion"`
-	AgentCapabilities agentCapabilities `json:"agentCapabilities,omitzero"`
-	AgentInfo         agentInfo         `json:"agentInfo,omitzero"`
+	AgentCapabilities AgentCapabilities `json:"agentCapabilities,omitzero"`
+	AgentInfo         AgentInfo         `json:"agentInfo,omitzero"`
 	AuthMethods       json.RawMessage   `json:"authMethods,omitzero"`
 }
 
-type agentCapabilities struct {
-	PromptCapabilities  promptCapabilities `json:"promptCapabilities,omitzero"`
+// AgentCapabilities holds the agent's declared capabilities from the initialize response.
+type AgentCapabilities struct {
+	PromptCapabilities  PromptCapabilities `json:"promptCapabilities,omitzero"`
 	LoadSession         bool               `json:"loadSession,omitzero"`
 	McpCapabilities     json.RawMessage    `json:"mcpCapabilities,omitzero"`
 	SessionCapabilities json.RawMessage    `json:"sessionCapabilities,omitzero"`
 }
 
-type promptCapabilities struct {
+// PromptCapabilities describes prompt content types the agent supports.
+type PromptCapabilities struct {
 	Image           bool `json:"image,omitzero"`
 	EmbeddedContext bool `json:"embeddedContext,omitzero"`
 }
 
-type agentInfo struct {
+// AgentInfo identifies the agent in the initialize response.
+type AgentInfo struct {
 	Name    string `json:"name,omitzero"`
 	Version string `json:"version,omitzero"`
 }
 
-// sessionNewResult is the result of a session/new request.
-type sessionNewResult struct {
+// SessionNewResult is the result of a session/new request.
+type SessionNewResult struct {
 	SessionID string          `json:"sessionId"`
-	Models    modelsInfo      `json:"models,omitzero"`
-	Modes     modesInfo       `json:"modes,omitzero"`
+	Models    ModelsInfo      `json:"models,omitzero"`
+	Modes     ModesInfo       `json:"modes,omitzero"`
 	Meta      json.RawMessage `json:"_meta,omitzero"`
 }
 
-type modelsInfo struct {
+// ModelsInfo holds the current and available models from a session response.
+type ModelsInfo struct {
 	CurrentModelID  string      `json:"currentModelId,omitzero"`
-	AvailableModels []modelInfo `json:"availableModels,omitzero"`
+	AvailableModels []ModelInfo `json:"availableModels,omitzero"`
 }
 
-type modelInfo struct {
+// ModelInfo describes a single available model.
+type ModelInfo struct {
 	ModelID string `json:"modelId"`
 	Name    string `json:"name,omitzero"`
 }
 
-type modesInfo struct {
+// ModesInfo holds the current and available modes from a session response.
+type ModesInfo struct {
 	CurrentModeID  string     `json:"currentModeId,omitzero"`
-	AvailableModes []modeInfo `json:"availableModes,omitzero"`
+	AvailableModes []ModeInfo `json:"availableModes,omitzero"`
 }
 
-type modeInfo struct {
+// ModeInfo describes a single available mode.
+type ModeInfo struct {
 	ID   string `json:"id"`
 	Name string `json:"name,omitzero"`
 }
 
-// promptResult is the result of a session/prompt response.
-type promptResult struct {
+// PromptResult is the result of a session/prompt response.
+type PromptResult struct {
 	StopReason string      `json:"stopReason,omitzero"` // "end_turn", "max_tokens", "cancelled", "refusal".
-	Usage      promptUsage `json:"usage,omitzero"`
+	Usage      PromptUsage `json:"usage,omitzero"`
 }
 
-// promptUsage holds the token usage from a session/prompt response.
-type promptUsage struct {
+// PromptUsage holds the token usage from a session/prompt response.
+type PromptUsage struct {
 	TotalTokens       int `json:"totalTokens,omitzero"`
 	InputTokens       int `json:"inputTokens,omitzero"`
 	OutputTokens      int `json:"outputTokens,omitzero"`

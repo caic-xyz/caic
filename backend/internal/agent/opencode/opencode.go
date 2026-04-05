@@ -146,6 +146,15 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options, msgCh ch
 	return agent.AttachRelaySession(ctx, opts.Container, opts.RelayOffset, msgCh, logW, wire)
 }
 
+// caicInit is written to output.jsonl during handshake so replay can
+// reconstruct an InitMessage (handshake responses aren't otherwise logged).
+type caicInit struct {
+	Type      string `json:"type"` // always "caic_init"
+	SessionID string `json:"session_id"`
+	Model     string `json:"model,omitzero"`
+	Version   string `json:"version,omitzero"`
+}
+
 // wireFormat implements agent.WireFormat for the ACP JSON-RPC protocol.
 // It holds per-session state: the session ID, a request ID counter,
 // accumulated token usage, and image support flag.
@@ -180,22 +189,22 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 	w.promptReqID = id
 	w.textAccum.Reset()
 	w.thinkAccum.Reset()
-	content := make([]promptContent, 0, 1+len(p.Images))
-	content = append(content, promptContent{Type: ContentText, Text: p.Text})
+	content := make([]PromptContent, 0, 1+len(p.Images))
+	content = append(content, PromptContent{Type: ContentText, Text: p.Text})
 	if w.supportsImage {
 		for _, img := range p.Images {
-			content = append(content, promptContent{
+			content = append(content, PromptContent{
 				Type:     ContentImage,
 				Data:     img.Data,
 				MimeType: img.MediaType,
 			})
 		}
 	}
-	req := jsonrpcRequest{
+	req := JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  MethodSessionPrompt,
-		Params:  sessionPromptParams{SessionID: w.sessionID, Prompt: content},
+		Params:  SessionPromptParams{SessionID: w.sessionID, Prompt: content},
 	}
 	// Don't log to logW — stdin is not logged with --no-log-stdin.
 	return writeJSON(wr, req)
@@ -215,7 +224,7 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, logW io.Writer) error 
 //
 // It also captures the session ID from InitMessage if present.
 func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
-	var probe messageProbe
+	var probe MessageProbe
 	if err := json.Unmarshal(line, &probe); err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
@@ -243,7 +252,7 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 		var sup SessionUpdateParams
 		if err := json.Unmarshal(params, &sup); err == nil {
-			var uprobe updateProbe
+			var uprobe UpdateProbe
 			if err := json.Unmarshal(sup.Update, &uprobe); err == nil && uprobe.SessionUpdate == UpdateUsageUpdate {
 				var u UsageUpdateUpdate
 				if err := json.Unmarshal(sup.Update, &u); err == nil {
@@ -295,7 +304,7 @@ func (w *wireFormat) handlePromptResponseLocked(line []byte) ([]agent.Message, e
 		rm.IsError = true
 		rm.Result = resp.Error.Message
 	} else if resp.Result != nil {
-		var pr promptResult
+		var pr PromptResult
 		if err := json.Unmarshal(resp.Result, &pr); err == nil {
 			if pr.StopReason == "cancelled" || pr.StopReason == "refusal" {
 				rm.IsError = true
@@ -348,16 +357,16 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	res := &handshakeResult{wire: w}
 
 	// 1. Send initialize request.
-	initReq := jsonrpcRequest{
+	initReq := JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      w.allocIDLocked(),
 		Method:  MethodInitialize,
-		Params: initializeParams{
+		Params: InitializeParams{
 			ProtocolVersion: 1,
-			ClientCapabilities: clientCapabilities{
+			ClientCapabilities: ClientCapabilities{
 				Terminal: false,
 			},
-			ClientInfo: clientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
+			ClientInfo: ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
 		},
 	}
 	if err := writeJSON(stdin, initReq); err != nil {
@@ -371,7 +380,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 
 	// Extract capabilities and agent info.
-	var initResult initializeResult
+	var initResult InitializeResult
 	if initResp.Result != nil {
 		if json.Unmarshal(initResp.Result, &initResult) == nil {
 			w.supportsImage = initResult.AgentCapabilities.PromptCapabilities.Image
@@ -380,20 +389,20 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 
 	// 2. Create or resume session.
-	var sessionReq jsonrpcRequest
+	var sessionReq JSONRPCRequest
 	if opts.ResumeSessionID != "" {
-		sessionReq = jsonrpcRequest{
+		sessionReq = JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.allocIDLocked(),
 			Method:  MethodSessionLoad,
-			Params:  sessionLoadParams{SessionID: opts.ResumeSessionID, Cwd: opts.Dir, McpServers: []mcpServer{}},
+			Params:  SessionLoadParams{SessionID: opts.ResumeSessionID, Cwd: opts.Dir, McpServers: []MCPServer{}},
 		}
 	} else {
-		sessionReq = jsonrpcRequest{
+		sessionReq = JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.allocIDLocked(),
 			Method:  MethodSessionNew,
-			Params:  sessionNewParams{Cwd: opts.Dir, McpServers: []mcpServer{}},
+			Params:  SessionNewParams{Cwd: opts.Dir, McpServers: []MCPServer{}},
 		}
 	}
 	if err := writeJSON(stdin, sessionReq); err != nil {
@@ -407,7 +416,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 
 	// Extract session ID and models from result.
-	var snResult sessionNewResult
+	var snResult SessionNewResult
 	if err := json.Unmarshal(resp.Result, &snResult); err != nil {
 		return nil, fmt.Errorf("parse session result: %w", err)
 	}
@@ -433,11 +442,11 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 
 	// 3. Switch model if the caller requested a specific one.
 	if opts.Model != "" {
-		setModelReq := jsonrpcRequest{
+		setModelReq := JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.allocIDLocked(),
 			Method:  MethodUnstableSetSessionModel,
-			Params:  setSessionModelParams{SessionID: w.sessionID, ModelID: opts.Model},
+			Params:  SetSessionModelParams{SessionID: w.sessionID, ModelID: opts.Model},
 		}
 		if err := writeJSON(stdin, setModelReq); err != nil {
 			return nil, fmt.Errorf("write unstable_setSessionModel: %w", err)
@@ -514,7 +523,7 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*JSONRPCMessage,
 
 // extractParams extracts the raw "params" field from a JSON-RPC message.
 func extractParams(line []byte) (json.RawMessage, error) {
-	var p paramsProbe
+	var p ParamsProbe
 	if err := json.Unmarshal(line, &p); err != nil {
 		return nil, err
 	}

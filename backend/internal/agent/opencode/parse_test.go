@@ -295,7 +295,7 @@ func TestParseMessage(t *testing.T) {
 		}
 	})
 
-	t.Run("CaicInit", func(t *testing.T) {
+	t.Run("caicInit", func(t *testing.T) {
 		input := mustJSON(t, map[string]any{
 			"type":       "caic_init",
 			"session_id": "ses_abc",
