@@ -90,6 +90,7 @@ export default function App() {
   const [selectedHarness, setSelectedHarness] = createSignal("");
   const [sidebarOpen, setSidebarOpen] = createSignal(true);
   const [usage, setUsage] = createSignal<UsageResp | null>(null);
+  const [serverVersion, setServerVersion] = createSignal("");
   const [tailscaleAvailable, setTailscaleAvailable] = createSignal(false);
   const [tailscaleEnabled, setTailscaleEnabled] = createSignal(false);
   const [usbAvailable, setUSBAvailable] = createSignal(false);
@@ -286,6 +287,7 @@ export default function App() {
         }
         if (prefs?.settings?.baseImage) setSelectedImage(prefs.settings.baseImage);
         if (config) {
+          if (config.version) setServerVersion(config.version);
           setTailscaleAvailable(config.tailscaleAvailable);
           setUSBAvailable(config.usbAvailable);
           setDisplayAvailable(config.displayAvailable);
@@ -1127,6 +1129,9 @@ export default function App() {
               </label>
               <p class={styles.settingsDescription}>When a pull request is opened or reopened, automatically start a task to review and fix it.</p>
             </div>
+            <Show when={serverVersion()}>
+              <p class={styles.settingsVersion}>caic v{serverVersion()}</p>
+            </Show>
           </div>
         </div>
       </Show>

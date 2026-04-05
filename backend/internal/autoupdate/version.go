@@ -26,12 +26,15 @@ func initVersion() string {
 			dirty = s.Value == "true"
 		}
 	}
+	return formatVersion(bi.Main.Version, revision, dirty)
+}
+
+func formatVersion(moduleVersion, revision string, dirty bool) string {
 	suffix := ""
 	if dirty {
-		suffix = "-dirty"
+		suffix = "+dirty"
 	}
-	v := bi.Main.Version
-	if v == "" || v == "(devel)" {
+	if moduleVersion == "" || moduleVersion == "(devel)" {
 		if revision == "" {
 			return ""
 		}
@@ -41,5 +44,9 @@ func initVersion() string {
 		}
 		return "devel-" + short + suffix
 	}
-	return strings.TrimPrefix(v, "v") + suffix
+	v := strings.TrimPrefix(moduleVersion, "v")
+	if strings.HasSuffix(v, "+dirty") {
+		return v
+	}
+	return v + suffix
 }

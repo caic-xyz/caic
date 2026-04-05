@@ -44,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -256,6 +257,17 @@ fun SettingsScreen(
                 Text("Add mapping")
             }
 
+            if (screenState.serverVersion.isNotEmpty()) {
+                Text(
+                    "caic v${screenState.serverVersion}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 16.dp),
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 }

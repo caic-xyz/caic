@@ -35,6 +35,7 @@ data class SettingsScreenState(
     val wellKnownCaches: Map<String, Boolean> = emptyMap(),
     val wellKnownCachesList: List<WellKnownCache> = emptyList(),
     val cacheMappings: List<CacheMappingResp> = emptyList(),
+    val serverVersion: String = "",
 )
 
 private const val DEBOUNCE_MS = 500L
@@ -148,6 +149,7 @@ class SettingsViewModel @Inject constructor(
                 val client = ApiClient(serverURL, tokenProvider = { authToken })
                 val prefs = client.getPreferences()
                 val caches = try { client.listCaches() } catch (_: Exception) { null }
+                val config = try { client.getConfig() } catch (_: Exception) { null }
                 _state.update { prev ->
                     prev.copy(
                         autoFixCI = prefs.settings.autoFixOnCIFailure,
@@ -158,6 +160,7 @@ class SettingsViewModel @Inject constructor(
                         wellKnownCaches = prefs.settings.wellKnownCaches ?: emptyMap(),
                         wellKnownCachesList = caches?.wellKnown ?: emptyList(),
                         cacheMappings = prefs.settings.cacheMappings ?: emptyList(),
+                        serverVersion = config?.version ?: "",
                     )
                 }
             } catch (_: Exception) {

@@ -336,6 +336,14 @@
   color: var(--color-text-secondary);
 }
 
+.settingsVersion {
+  margin: 0;
+  padding-top: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
 .settingsSection {
   margin-bottom: 1.25rem;
 }
