@@ -234,54 +234,29 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 		return nil, err
 	}
 
-	// Prefer attaching to a live relay (agent process still running).
-	relayAlive, relayErr := agent.IsRelayRunning(ctx, t.Container)
+	// Attach to the live relay. If the relay is dead, the session is lost.
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	if relayErr != nil {
-		r.log.Warn("relay check failed, using --resume", "br", primaryBranch, "ctr", t.Container, "err", relayErr)
-	}
-
-	var session *agent.Session
-	if relayAlive {
-		// Only transition to StateRunning if the restored messages indicate
-		// the agent was still producing output (no trailing ResultMessage).
-		// If the agent had already completed its turn, keep the inferred
-		// StateWaiting/StateAsking so the UI shows the correct status.
-		if prevState != StateWaiting && prevState != StateAsking {
-			t.SetState(StateRunning)
-		}
-		session, err = r.backend(t.Harness).AttachRelay(ctx, &agent.Options{
-			Container:       t.Container,
-			RelayOffset:     t.RelayOffset,
-			ResumeSessionID: t.GetSessionID(),
-		}, msgCh, logW)
-		if err != nil {
-			// Relay died between the IsRelayRunning check and the attach
-			// attempt. This is a known race; fall back to --resume.
-			r.log.Warn("attach relay failed, using --resume", "br", primaryBranch, "ctr", t.Container, "err", err)
-			relayAlive = false
-		}
-	}
-	if !relayAlive {
-		// Starting a new session via --resume always re-engages the agent.
+	// Only transition to StateRunning if the restored messages indicate
+	// the agent was still producing output (no trailing ResultMessage).
+	// If the agent had already completed its turn, keep the inferred
+	// StateWaiting/StateAsking so the UI shows the correct status.
+	if prevState != StateWaiting && prevState != StateAsking {
 		t.SetState(StateRunning)
-		session, err = r.backend(t.Harness).Start(ctx, &agent.Options{
-			Container:       t.Container,
-			Dir:             r.containerDir(),
-			Model:           t.Model,
-			ResumeSessionID: t.GetSessionID(),
-		}, msgCh, logW)
 	}
+	session, err := r.backend(t.Harness).AttachRelay(ctx, &agent.Options{
+		Container:       t.Container,
+		RelayOffset:     t.RelayOffset,
+		ResumeSessionID: t.GetSessionID(),
+	}, msgCh, logW)
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)
 		<-dispatchDone
-		// Both attach and --resume failed. Revert to StateWaiting so the
-		// user can try again (restart) or purge.
 		t.SetState(StateWaiting)
+		r.log.Error("attach relay failed", "br", primaryBranch, "ctr", t.Container, "err", err)
 		return nil, fmt.Errorf("reconnect: %w", err)
 	}
 
@@ -529,10 +504,10 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	}
 }
 
-// ReviveTask restarts a stopped container and reconnects to the agent.
+// ReviveTask restarts a stopped container and resumes the agent session.
 // The container's filesystem is preserved from the previous run. After
-// docker-start + SSH, Reconnect attaches to the relay (if alive) or
-// resumes the session via --resume, landing in StateWaiting.
+// docker-start + SSH, a new relay is started with --resume to continue
+// the previous session.
 func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error) {
 	r.initDefaults()
 	if r.Container == nil {
@@ -556,27 +531,49 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 		return nil, fmt.Errorf("revive container: %w", err)
 	}
 
-	// 2. Reconnect to the agent (attach relay or --resume).
-	// skipSideEffects=true: the relay replays all historical messages on
-	// attach and each would trigger fetch+diff+title if side effects were
-	// enabled. Instead we do a single BranchDiffStat at the end.
+	// 2. Start a new relay with --resume to continue the previous session.
+	// skipSideEffects=true: --resume replays all historical messages and
+	// each would trigger fetch+diff+title if side effects were enabled.
+	// Instead we do a single BranchDiffStat at the end.
 	t.SetState(StateStarting)
-	tlog.Info("reconnecting after revive", "sess", t.GetSessionID())
-	h, err := r.Reconnect(ctx, t, true)
+	tlog.Info("resuming session after revive", "sess", t.GetSessionID())
+
+	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, true)
+	logW, err := r.openLog(t)
 	if err != nil {
+		close(msgCh)
+		<-dispatchDone
 		t.SetState(StateFailed)
-		return nil, fmt.Errorf("reconnect after revive: %w", err)
+		return nil, fmt.Errorf("open log: %w", err)
 	}
 
-	// 3. If --resume caused the session to exit immediately (e.g. previous
-	// session was already complete), start a fresh idle session.
+	t.SetState(StateRunning)
+	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
+		Container:       t.Container,
+		Dir:             r.containerDir(),
+		Model:           t.Model,
+		ResumeSessionID: t.GetSessionID(),
+	}, msgCh, logW)
+	if err != nil {
+		_ = logW.Close()
+		close(msgCh)
+		<-dispatchDone
+		t.SetState(StateFailed)
+		return nil, fmt.Errorf("resume session after revive: %w", err)
+	}
+
+	h := &SessionHandle{Session: session, MsgCh: msgCh, DispatchDone: dispatchDone, LogW: logW}
+	t.AttachSession(h)
+
+	// 3. If --resume exits immediately (previous session was complete),
+	// start a fresh idle relay so the task can accept new prompts.
 	h, err = r.EnsureSession(ctx, t, h, tlog)
 	if err != nil {
 		t.SetState(StateFailed)
 		return nil, err
 	}
 
-	// 4. Compute host-side diff stat once, covering all replayed messages.
+	// 4. Compute host-side diff stat once.
 	if ds := r.BranchDiffStat(ctx, primaryBranch, t.ExtraMDRepos()); len(ds) > 0 {
 		t.SetLiveDiffStat(ds)
 	}
@@ -585,12 +582,12 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 }
 
 // EnsureSession waits briefly for h to confirm it's alive. If the session
-// exits within 10 seconds (e.g. --resume found a completed session), it
+// exits within 10 seconds (agent had already finished), it detaches and
 // starts a fresh idle relay so the task can accept new prompts.
 func (r *Runner) EnsureSession(ctx context.Context, t *Task, h *SessionHandle, tlog *slog.Logger) (*SessionHandle, error) {
 	select {
 	case <-h.Session.Done():
-		// Session exited immediately. Detach and start fresh.
+		// Session exited immediately (agent was already done).
 		t.DetachSession()
 		result, _ := h.Session.Wait()
 		h.CloseMsgCh()
@@ -600,13 +597,11 @@ func (r *Runner) EnsureSession(ctx context.Context, t *Task, h *SessionHandle, t
 		if result != nil {
 			sub = result.Subtype
 		}
-		tlog.Info("resumed session exited, starting fresh relay", "result", sub)
-		// Don't start a fresh session if the task is being stopped or
-		// is already terminal — the container may be shutting down.
+		tlog.Info("attached session exited, starting idle relay", "result", sub)
 		if s := t.GetState(); s == StateStopping || s == StateStopped || s == StatePurged {
 			return nil, fmt.Errorf("task is %s", s)
 		}
-		t.SetStateIf(StateRunning, StateWaiting)
+		t.SetState(StateWaiting)
 		return r.StartSession(ctx, t, agent.Prompt{})
 	case <-time.After(10 * time.Second):
 		// Session is alive — all good.

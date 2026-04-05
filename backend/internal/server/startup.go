@@ -880,25 +880,19 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		go t.GenerateTitle(s.ctx) //nolint:contextcheck // fire-and-forget; must outlive adoption
 	}
 
-	// Auto-reconnect in background: relay alive → attach; relay dead
-	// → restart relay via --resume (requires a session ID).
+	// Auto-reconnect in background: attach to the live relay.
+	// If the relay is dead, the session is lost — no resume attempt.
 	// Skip reconnect for stopped tasks — container is not running.
-	if t.GetState() != task.StateStopped && (relayAlive || t.GetSessionID() != "") {
-		strategy := "attach"
-		if !relayAlive {
-			strategy = "resume"
-		}
-		slog.Debug("container", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "st", strategy)
+	if t.GetState() != task.StateStopped && relayAlive {
+		slog.Debug("container", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "ctr", c.Name)
 		go func() {
 			tlog := slog.With("repo", ri.RelPath, "br", branch, "ctr", t.Container)
 			h, err := runner.Reconnect(ctx, t, true)
 			if err != nil {
-				tlog.Warn("auto-reconnect failed", "st", strategy, "err", err)
+				tlog.Warn("auto-reconnect failed", "err", err)
 				s.notifyTaskChange()
 				return
 			}
-			// If --resume exits immediately (previous session complete),
-			// start a fresh idle relay so the task can accept prompts.
 			h, err = runner.EnsureSession(ctx, t, h, tlog)
 			if err != nil {
 				tlog.Warn("ensure session failed", "err", err)
@@ -906,7 +900,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 				s.notifyTaskChange()
 				return
 			}
-			tlog.Debug("auto-reconnect succeeded", "st", strategy)
+			tlog.Debug("auto-reconnect succeeded")
 			// Compute host-side diff stat after reconnect. Reconnect
 			// replays relay messages which may include stale
 			// DiffStatMessages (old relay code diffs against HEAD, not
@@ -922,9 +916,14 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 			s.watchSession(entry, runner, h)
 		}()
 	} else if !relayAlive && t.GetState() != task.StateStopped {
-		slog.Warn("adopted orphaned task",
+		slog.Error("relay dead, stopping container",
 			"repo", ri.RelPath, "br", branch, "ctr", c.Name,
 			"state", t.GetState())
+		t.SetState(task.StateStopping)
+		if err := runner.Container.Stop(ctx, c.Name); err != nil {
+			slog.Error("stop failed", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", err)
+		}
+		t.SetState(task.StateStopped)
 	}
 	return nil
 }
