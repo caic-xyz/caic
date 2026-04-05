@@ -1,5 +1,5 @@
 // Package agent defines shared types and infrastructure for coding agent
-// backends. Backend implementations live in sub-packages (e.g. agent/claude).
+// backends. Backend implementations live in sub-packages (e.g. agent/claudecode).
 //
 // # Relay shutdown protocol
 //

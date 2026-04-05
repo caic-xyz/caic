@@ -1,5 +1,5 @@
-// Package claude implements agent.Backend for Claude Code.
-package claude
+// Package claudecode implements agent.Backend for Claude Code.
+package claudecode
 
 import (
 	"context"

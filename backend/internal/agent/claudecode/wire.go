@@ -1,6 +1,6 @@
 // Wire types for the Claude Code NDJSON streaming protocol.
 
-package claude
+package claudecode
 
 import (
 	"encoding/json"

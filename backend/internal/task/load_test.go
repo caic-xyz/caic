@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/claude"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 )
 
 func setClaudeParser(tasks []*LoadedTask) {
 	for _, lt := range tasks {
-		lt.SetParser(claude.New().NewParser())
+		lt.SetParser(claudecode.New().NewParser())
 	}
 }
 

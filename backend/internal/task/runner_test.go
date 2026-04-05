@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/claude"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/md"
 	"github.com/maruel/ksid"
 )
@@ -35,7 +35,7 @@ func (b *testBackend) Start(ctx context.Context, _ *agent.Options, msgCh chan<- 
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, stdin, stdout, msgCh, nil, &testWire{parse: claude.New().NewParser()}, nil), nil
+	return agent.NewSession(cmd, stdin, stdout, msgCh, nil, &testWire{parse: claudecode.New().NewParser()}, nil), nil
 }
 
 func (b *testBackend) AttachRelay(context.Context, *agent.Options, chan<- agent.Message, io.Writer) (*agent.Session, error) {
@@ -47,7 +47,7 @@ func (b *testBackend) ReadRelayOutput(context.Context, string) ([]agent.Message,
 }
 
 func (b *testBackend) NewParser() func([]byte) ([]agent.Message, error) {
-	return claude.New().NewParser()
+	return claudecode.New().NewParser()
 }
 
 func (b *testBackend) Models() []string { return []string{"test-model"} }

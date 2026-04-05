@@ -1,5 +1,5 @@
-// Package claude embeds the widget plugin deployed to containers.
-package claude
+// Package claudecode embeds the widget plugin deployed to containers.
+package claudecode
 
 import "embed"
 

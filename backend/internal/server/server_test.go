@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/claude"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
@@ -45,7 +45,7 @@ func (stubBackend) ReadRelayOutput(context.Context, string) ([]agent.Message, in
 }
 
 func (stubBackend) NewParser() func([]byte) ([]agent.Message, error) {
-	return claude.New().NewParser()
+	return claudecode.New().NewParser()
 }
 
 func (stubBackend) Models() []string { return []string{"m1", "m2"} }

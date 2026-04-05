@@ -7,5 +7,5 @@ import _ "embed"
 // show_widget tool. It is deployed to containers by backends that support
 // widget rendering (claude, codex).
 //
-//go:embed claude/widget-plugin/mcp_server.py
+//go:embed claudecode/widget-plugin/mcp_server.py
 var WidgetMCPServerScript []byte

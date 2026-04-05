@@ -1,6 +1,6 @@
 // Claude Code stream-json parser. Converts Claude's wire format into
 // backend-neutral agent.Message types.
-package claude
+package claudecode
 
 import (
 	"encoding/json"

@@ -14,7 +14,7 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/claude"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/fake"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -178,7 +178,7 @@ func (*fakeBackend) Start(_ context.Context, opts *agent.Options, msgCh chan<- a
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	s := agent.NewSession(cmd, stdin, stdout, msgCh, logW, claude.Wire, nil)
+	s := agent.NewSession(cmd, stdin, stdout, msgCh, logW, claudecode.Wire, nil)
 	if opts.InitialPrompt.Text != "" {
 		if err := s.Send(opts.InitialPrompt); err != nil {
 			s.Close()
@@ -197,7 +197,7 @@ func (*fakeBackend) ReadRelayOutput(context.Context, string) ([]agent.Message, i
 }
 
 func (*fakeBackend) NewParser() func([]byte) ([]agent.Message, error) {
-	return claude.New().NewParser()
+	return claudecode.New().NewParser()
 }
 
 func (*fakeBackend) Models() []string { return []string{"fake-model"} }
