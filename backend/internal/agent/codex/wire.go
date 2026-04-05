@@ -180,10 +180,24 @@ type ThreadStartThread struct {
 
 // Turn request params.
 
+// ReasoningEffort controls how much reasoning the model performs.
+type ReasoningEffort string
+
+// Reasoning effort levels, from least to most compute.
+const (
+	ReasoningEffortNone    ReasoningEffort = "none"
+	ReasoningEffortMinimal ReasoningEffort = "minimal"
+	ReasoningEffortLow     ReasoningEffort = "low"
+	ReasoningEffortMedium  ReasoningEffort = "medium"
+	ReasoningEffortHigh    ReasoningEffort = "high"
+	ReasoningEffortXHigh   ReasoningEffort = "xhigh"
+)
+
 // TurnStartParams holds the params for turn/start.
 type TurnStartParams struct {
-	ThreadID string      `json:"threadId"`
-	Input    []TurnInput `json:"input"`
+	ThreadID string          `json:"threadId"`
+	Input    []TurnInput     `json:"input"`
+	Effort   ReasoningEffort `json:"effort,omitzero"`
 }
 
 // TurnInput is a single item in the turn/start input array.
@@ -641,13 +655,13 @@ type ModelReroutedNotification struct {
 
 // ModelListResult is the result of a model/list request.
 type ModelListResult struct {
-	Models []ModelInfo `json:"models"`
+	Data []ModelInfo `json:"data"`
 }
 
 // ModelInfo describes a single model in a model/list result.
 type ModelInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name,omitzero"`
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName,omitzero"`
 }
 
 // Error notification.

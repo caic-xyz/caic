@@ -325,7 +325,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	if mlResp, err := readJSONRPCResponse(ctx, stdout); err == nil && mlResp.Result != nil {
 		var mlResult ModelListResult
 		if json.Unmarshal(mlResp.Result, &mlResult) == nil {
-			for _, m := range mlResult.Models {
+			for _, m := range mlResult.Data {
 				if m.ID != "" {
 					models = append(models, m.ID)
 				}
