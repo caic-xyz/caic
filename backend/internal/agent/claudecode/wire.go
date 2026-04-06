@@ -4,8 +4,9 @@ package claudecode
 
 import (
 	"encoding/json"
+	"fmt"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // ============================================================================
@@ -62,16 +63,17 @@ type InputContentBlock struct {
 
 // InputImageSource is an image source block sent to Claude Code.
 type InputImageSource struct {
-	Type      string `json:"type"`
-	MediaType string `json:"media_type"`
-	Data      string `json:"data"`
+	Type      string `json:"type"`                 // "base64" or "url"
+	MediaType string `json:"media_type,omitempty"` // e.g. "image/png"
+	Data      string `json:"data,omitempty"`       // base64-encoded bytes
+	URL       string `json:"url,omitempty"`        // Type == "url"
 }
 
 // ---------- control request ----------
 
 // InputControlRequestMsg sends a control request to Claude Code (type:"control_request").
 // The Request field is a JSON object whose "subtype" discriminator determines
-// its schema. Use one of the controlReq* structs below as the Request value.
+// its schema. Use one of the ControlReq* structs below as the Request value.
 type InputControlRequestMsg struct {
 	Type      InputType `json:"type"` // InputControlRequest
 	RequestID string    `json:"request_id"`
@@ -537,7 +539,7 @@ type AssistantMessageBody struct {
 	Role         string               `json:"role"`
 	Model        string               `json:"model"`
 	Content      []OutputContentBlock `json:"content"`
-	Usage        agent.Usage          `json:"usage"`
+	Usage        Usage                `json:"usage"`
 	StopReason   string               `json:"stop_reason"`
 	StopSequence string               `json:"stop_sequence"`
 	StopDetails  json.RawMessage      `json:"stop_details,omitempty"`
@@ -593,19 +595,20 @@ type OutputUserMsg struct {
 
 // OutputResultMsg is the wire representation of a result record.
 type OutputResultMsg struct {
-	Type             OutputType  `json:"type"`
-	Subtype          string      `json:"subtype"`
-	IsError          bool        `json:"is_error"`
-	DurationMs       int64       `json:"duration_ms"`
-	DurationAPIMs    int64       `json:"duration_api_ms"`
-	NumTurns         int         `json:"num_turns"`
-	Result           string      `json:"result"`
-	SessionID        string      `json:"session_id"`
-	TotalCostUSD     float64     `json:"total_cost_usd"`
-	Usage            agent.Usage `json:"usage"`
-	UUID             string      `json:"uuid"`
-	StructuredOutput string      `json:"structured_output"`
-	Timestamp        string      `json:"timestamp,omitempty"`
+	Type             OutputType `json:"type"`
+	Subtype          string     `json:"subtype"`
+	IsError          bool       `json:"is_error"`
+	DurationMs       int64      `json:"duration_ms"`
+	DurationAPIMs    int64      `json:"duration_api_ms"`
+	NumTurns         int        `json:"num_turns"`
+	Result           string     `json:"result"`
+	Errors           []string   `json:"errors,omitempty"`
+	SessionID        string     `json:"session_id"`
+	TotalCostUSD     float64    `json:"total_cost_usd"`
+	Usage            Usage      `json:"usage"`
+	UUID             string     `json:"uuid"`
+	StructuredOutput string     `json:"structured_output"`
+	Timestamp        string     `json:"timestamp,omitempty"`
 
 	FastModeState     string                     `json:"fast_mode_state,omitempty"`
 	ModelUsage        map[string]ModelUsageEntry `json:"modelUsage,omitempty"`
@@ -624,6 +627,91 @@ type ModelUsageEntry struct {
 	CostUSD                  float64 `json:"costUSD"`
 	ContextWindow            int     `json:"contextWindow"`
 	MaxOutputTokens          int     `json:"maxOutputTokens"`
+}
+
+// ---------- Token usage ----------
+
+// Usage tracks token consumption for an API call.
+type Usage struct {
+	InputTokens              int             `json:"input_tokens"`
+	OutputTokens             int             `json:"output_tokens"`
+	CacheCreationInputTokens int             `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int             `json:"cache_read_input_tokens"`
+	ServiceTier              string          `json:"service_tier"`
+	InferenceGeo             string          `json:"inference_geo,omitempty"`
+	Iterations               json.RawMessage `json:"iterations,omitempty"` // int or array
+
+	ServerToolUse *ServerToolUse `json:"server_tool_use,omitempty"`
+	CacheCreation *CacheCreation `json:"cache_creation,omitempty"`
+
+	jsonutil.Overflow
+}
+
+var usageKnown = jsonutil.KnownFields(Usage{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (u *Usage) UnmarshalJSON(data []byte) error {
+	type Alias Usage
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("Usage: %w", err)
+	}
+	alias := (*Alias)(u)
+	if err := json.Unmarshal(data, alias); err != nil {
+		return fmt.Errorf("Usage: %w", err)
+	}
+	u.Extra = jsonutil.CollectUnknown(raw, usageKnown)
+	return nil
+}
+
+// ServerToolUse tracks server-side tool use counts.
+type ServerToolUse struct {
+	WebSearchRequests int `json:"web_search_requests"`
+	WebFetchRequests  int `json:"web_fetch_requests"`
+
+	jsonutil.Overflow
+}
+
+var serverToolUseKnown = jsonutil.KnownFields(ServerToolUse{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (s *ServerToolUse) UnmarshalJSON(data []byte) error {
+	type Alias ServerToolUse
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("ServerToolUse: %w", err)
+	}
+	alias := (*Alias)(s)
+	if err := json.Unmarshal(data, alias); err != nil {
+		return fmt.Errorf("ServerToolUse: %w", err)
+	}
+	s.Extra = jsonutil.CollectUnknown(raw, serverToolUseKnown)
+	return nil
+}
+
+// CacheCreation breaks down cache creation by time bucket.
+type CacheCreation struct {
+	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
+	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+
+	jsonutil.Overflow
+}
+
+var cacheCreationKnown = jsonutil.KnownFields(CacheCreation{})
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (c *CacheCreation) UnmarshalJSON(data []byte) error {
+	type Alias CacheCreation
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("CacheCreation: %w", err)
+	}
+	alias := (*Alias)(c)
+	if err := json.Unmarshal(data, alias); err != nil {
+		return fmt.Errorf("CacheCreation: %w", err)
+	}
+	c.Extra = jsonutil.CollectUnknown(raw, cacheCreationKnown)
+	return nil
 }
 
 // ---------- stream_event ----------
@@ -686,10 +774,7 @@ type RateLimitInfo struct {
 	IsUsingOverage        bool    `json:"isUsingOverage,omitempty"`
 }
 
-// ---------- documentation-only output types ----------
-//
-// These types are not yet parsed by ParseMessage (they fall through to
-// RawMessage) but document the full stdout wire protocol.
+// ---------- tool_progress ----------
 
 // OutputToolProgressMsg is emitted periodically while a tool is running.
 type OutputToolProgressMsg struct {
@@ -703,6 +788,8 @@ type OutputToolProgressMsg struct {
 	SessionID          string     `json:"session_id"`
 }
 
+// ---------- auth_status ----------
+
 // OutputAuthStatusMsg reports authentication state changes.
 type OutputAuthStatusMsg struct {
 	Type             OutputType `json:"type"` // OutputAuthStatus
@@ -713,6 +800,8 @@ type OutputAuthStatusMsg struct {
 	SessionID        string     `json:"session_id"`
 }
 
+// ---------- tool_use_summary ----------
+
 // OutputToolUseSummaryMsg summarizes a group of preceding tool calls.
 type OutputToolUseSummaryMsg struct {
 	Type                OutputType `json:"type"` // OutputToolUseSummary
@@ -722,6 +811,8 @@ type OutputToolUseSummaryMsg struct {
 	SessionID           string     `json:"session_id"`
 }
 
+// ---------- prompt_suggestion ----------
+
 // OutputPromptSuggestionMsg is a predicted next user prompt.
 type OutputPromptSuggestionMsg struct {
 	Type       OutputType `json:"type"` // OutputPromptSuggestion
@@ -729,6 +820,8 @@ type OutputPromptSuggestionMsg struct {
 	UUID       string     `json:"uuid"`
 	SessionID  string     `json:"session_id"`
 }
+
+// ---------- streamlined output ----------
 
 // OutputStreamlinedTextMsg replaces assistant messages in streamlined output mode.
 type OutputStreamlinedTextMsg struct {
@@ -746,13 +839,15 @@ type OutputStreamlinedToolUseSummaryMsg struct {
 	UUID        string     `json:"uuid"`
 }
 
+// ---------- control_cancel_request ----------
+
 // OutputControlCancelRequestMsg cancels a pending control request.
 type OutputControlCancelRequestMsg struct {
 	Type      OutputType `json:"type"` // OutputControlCancelRequest
 	RequestID string     `json:"request_id"`
 }
 
-// --- system subtype wire types ---
+// ---------- system subtype output types ----------
 
 // OutputSessionStateChangedMsg reports idle/running/requires_action transitions.
 type OutputSessionStateChangedMsg struct {
@@ -858,16 +953,6 @@ type OutputElicitationCompleteMsg struct {
 }
 
 // ---------- output helper types ----------
-
-// AskInput is the parsed input for the AskUserQuestion tool.
-type AskInput struct {
-	Questions []agent.AskQuestion `json:"questions"`
-}
-
-// TodoInput is the parsed input for the TodoWrite tool.
-type TodoInput struct {
-	Todos []agent.TodoItem `json:"todos"`
-}
 
 // OutputUserText is a plain-text user message body.
 type OutputUserText struct {

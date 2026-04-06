@@ -13,6 +13,26 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
+// toAgentUsage converts the wire Usage to the backend-neutral agent.Usage.
+func toAgentUsage(u *Usage) agent.Usage {
+	return agent.Usage{
+		InputTokens:              u.InputTokens,
+		OutputTokens:             u.OutputTokens,
+		CacheCreationInputTokens: u.CacheCreationInputTokens,
+		CacheReadInputTokens:     u.CacheReadInputTokens,
+	}
+}
+
+// AskInput is the parsed input for the AskUserQuestion tool.
+type AskInput struct {
+	Questions []agent.AskQuestion `json:"questions"`
+}
+
+// TodoInput is the parsed input for the TodoWrite tool.
+type TodoInput struct {
+	Todos []agent.TodoItem `json:"todos"`
+}
+
 // outputKnownFields caches the known field sets for output wire types,
 // built on first use. Uses sync.Map: few writes (once per type), many reads.
 var outputKnownFields sync.Map
@@ -176,7 +196,7 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker, fw *jsonutil.FieldW
 			Result:        w.Result,
 			SessionID:     w.SessionID,
 			TotalCostUSD:  w.TotalCostUSD,
-			Usage:         w.Usage,
+			Usage:         toAgentUsage(&w.Usage),
 			UUID:          w.UUID,
 		}}, nil
 	case OutputStreamEvent:
@@ -272,7 +292,7 @@ func parseAssistant(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, err
 	u := w.Message.Usage
 	if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheCreationInputTokens > 0 || u.CacheReadInputTokens > 0 {
 		msgs = append(msgs, &agent.UsageMessage{
-			Usage: u,
+			Usage: toAgentUsage(&u),
 			Model: w.Message.Model,
 		})
 	}
