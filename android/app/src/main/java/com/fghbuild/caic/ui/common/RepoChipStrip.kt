@@ -17,11 +17,11 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,6 +29,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -189,6 +194,13 @@ private fun AddRepoChip(
     onAdd: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var repoFilter by remember { mutableStateOf("") }
+    LaunchedEffect(expanded) { if (!expanded) repoFilter = "" }
+    val filterLower = repoFilter.lowercase()
+    val filteredRecent = availableRecent.sortedBy { it.path }
+        .filter { filterLower.isEmpty() || it.path.lowercase().contains(filterLower) }
+    val filteredRest = availableRest
+        .filter { filterLower.isEmpty() || it.path.lowercase().contains(filterLower) }
     Box {
         Box(
             modifier = Modifier
@@ -200,25 +212,42 @@ private fun AddRepoChip(
             Text("+", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (availableRecent.isNotEmpty()) {
+            OutlinedTextField(
+                value = repoFilter,
+                onValueChange = { repoFilter = it },
+                placeholder = { Text("Filter repositories…", style = MaterialTheme.typography.bodySmall) },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall,
+                modifier = Modifier
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .widthIn(min = 180.dp)
+                    .onKeyEvent { keyEvent ->
+                        if (keyEvent.key == Key.Escape && keyEvent.type == KeyEventType.KeyDown) {
+                            expanded = false
+                            true
+                        } else {
+                            false
+                        }
+                    },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = {}),
+            )
+            if (filteredRecent.isNotEmpty()) {
                 Text(
                     text = "Recent",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
                 )
-                availableRecent.sortedBy { it.path }.forEach { repo ->
+                filteredRecent.forEach { repo ->
                     DropdownMenuItem(
                         text = { Text(repo.path, style = MaterialTheme.typography.bodyMedium) },
                         onClick = { onAdd(repo.path); expanded = false },
                     )
                 }
             }
-            if (availableRecent.isNotEmpty() && availableRest.isNotEmpty()) {
-                HorizontalDivider()
-            }
-            if (availableRest.isNotEmpty()) {
-                if (availableRecent.isNotEmpty()) {
+            if (filteredRest.isNotEmpty()) {
+                if (filteredRecent.isNotEmpty()) {
                     Text(
                         text = "All repositories",
                         style = MaterialTheme.typography.labelSmall,
@@ -226,12 +255,20 @@ private fun AddRepoChip(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
                     )
                 }
-                availableRest.forEach { repo ->
+                filteredRest.forEach { repo ->
                     DropdownMenuItem(
                         text = { Text(repo.path, style = MaterialTheme.typography.bodyMedium) },
                         onClick = { onAdd(repo.path); expanded = false },
                     )
                 }
+            }
+            if (filteredRecent.isEmpty() && filteredRest.isEmpty()) {
+                Text(
+                    text = "No matches",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                )
             }
         }
     }

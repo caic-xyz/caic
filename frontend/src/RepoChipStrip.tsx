@@ -29,6 +29,7 @@ export default function RepoChipStrip(props: Props) {
   const [branchFilter, setBranchFilter] = createSignal("");
   // Add-repo dropdown open state.
   const [addOpen, setAddOpen] = createSignal(false);
+  const [repoFilter, setRepoFilter] = createSignal("");
 
   let addRef: HTMLButtonElement | undefined;
   let dropdownRef: HTMLDivElement | undefined;
@@ -49,6 +50,29 @@ export default function RepoChipStrip(props: Props) {
     props.onSetBranch(path, branch);
     setEditingPath(null);
   }
+
+  const filteredRecent = () => {
+    const f = repoFilter().toLowerCase();
+    const all = [...props.availableRecent()].sort((a, b) => a.path < b.path ? -1 : 1);
+    return f ? all.filter((r) => r.path.toLowerCase().includes(f)) : all;
+  };
+  const filteredRest = () => {
+    const f = repoFilter().toLowerCase();
+    return f ? props.availableRest().filter((r) => r.path.toLowerCase().includes(f)) : props.availableRest();
+  };
+
+  // Reset filter when dropdown closes.
+  createEffect(() => { if (!addOpen()) setRepoFilter(""); });
+
+  // Close add-repo dropdown on Escape.
+  const onAddKeyDown = (e: KeyboardEvent) => {
+    if (e.key === "Escape") { setAddOpen(false); e.stopPropagation(); }
+  };
+  createEffect(() => {
+    if (addOpen()) document.addEventListener("keydown", onAddKeyDown, true);
+    else document.removeEventListener("keydown", onAddKeyDown, true);
+    onCleanup(() => document.removeEventListener("keydown", onAddKeyDown, true));
+  });
 
   // Close add-repo dropdown on outside click.
   const onAddClickOutside = (e: MouseEvent) => {
@@ -175,9 +199,17 @@ export default function RepoChipStrip(props: Props) {
           <Show when={addOpen()}>
             <Portal>
             <div ref={(el) => { dropdownRef = el; }} class={styles.addRepoDropdown} data-testid="add-repo-dropdown">
-              <Show when={props.availableRecent().length > 0}>
+              <input
+                ref={(el) => setTimeout(() => el.focus(), 0)}
+                type="text"
+                class={styles.branchInput}
+                placeholder="Filter repositories…"
+                value={repoFilter()}
+                onInput={(e) => setRepoFilter(e.currentTarget.value)}
+              />
+              <Show when={filteredRecent().length > 0}>
                 <div class={styles.dropdownGroupLabel}>Recent</div>
-                <For each={[...props.availableRecent()].sort((a, b) => a.path < b.path ? -1 : 1)}>
+                <For each={filteredRecent()}>
                   {(r) => (
                     <button type="button" class={styles.dropdownOption} onClick={() => { props.onAdd(r.path); setAddOpen(false); }}>
                       {r.path}
@@ -185,17 +217,20 @@ export default function RepoChipStrip(props: Props) {
                   )}
                 </For>
               </Show>
-              <Show when={props.availableRest().length > 0}>
-                <Show when={props.availableRecent().length > 0}>
+              <Show when={filteredRest().length > 0}>
+                <Show when={filteredRecent().length > 0}>
                   <div class={styles.dropdownGroupLabel}>All repositories</div>
                 </Show>
-                <For each={props.availableRest()}>
+                <For each={filteredRest()}>
                   {(r) => (
                     <button type="button" class={styles.dropdownOption} onClick={() => { props.onAdd(r.path); setAddOpen(false); }}>
                       {r.path}
                     </button>
                   )}
                 </For>
+              </Show>
+              <Show when={filteredRecent().length === 0 && filteredRest().length === 0}>
+                <div class={styles.dropdownGroupLabel}>No matches</div>
               </Show>
             </div>
             </Portal>
