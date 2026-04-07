@@ -11,6 +11,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
+	oc "github.com/maruel/genai/providers/opencode"
 )
 
 // notificationKnownFields caches the known field sets for output wire types,
@@ -57,7 +58,7 @@ func unmarshalNotification(data []byte, v any, name string, fw *jsonutil.FieldWa
 //   - DiffStatMessage      — caic_diff_stat injection
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
 func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
-	var probe MessageProbe
+	var probe oc.MessageProbe
 	if err := json.Unmarshal(line, &probe); err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
@@ -92,16 +93,16 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 	}
 
 	// JSON-RPC notification — dispatch on method.
-	var msg JSONRPCMessage
+	var msg oc.JSONRPCMessage
 	if err := json.Unmarshal(line, &msg); err != nil {
 		return nil, fmt.Errorf("unmarshal jsonrpc: %w", err)
 	}
 
 	switch msg.Method {
-	case MethodSessionUpdate:
+	case oc.MethodSessionUpdate:
 		return parseSessionUpdate(msg.Params, line, fw)
 
-	case MethodSessionRequestPermission:
+	case oc.MethodSessionRequestPermission:
 		// Permission requests are handled by wireFormat (auto-approve).
 		// In the stateless parser, emit as RawMessage.
 		return []agent.Message{&agent.RawMessage{MessageType: string(msg.Method), Raw: append([]byte(nil), line...)}}, nil
@@ -113,49 +114,49 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 
 // parseSessionUpdate dispatches on the sessionUpdate discriminator.
 func parseSessionUpdate(params json.RawMessage, line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
-	var sup SessionUpdateParams
+	var sup oc.SessionUpdateParams
 	if err := json.Unmarshal(params, &sup); err != nil {
 		return nil, fmt.Errorf("session/update params: %w", err)
 	}
 
-	var probe UpdateProbe
+	var probe oc.UpdateProbe
 	if err := json.Unmarshal(sup.Update, &probe); err != nil {
 		return nil, fmt.Errorf("session/update probe: %w", err)
 	}
 
 	switch probe.SessionUpdate {
-	case UpdateAgentMessageChunk:
-		var u AgentMessageChunkUpdate
+	case oc.UpdateAgentMessageChunk:
+		var u oc.AgentMessageChunkUpdate
 		if err := unmarshalNotification(sup.Update, &u, "AgentMessageChunkUpdate", fw); err != nil {
 			return nil, fmt.Errorf("agent_message_chunk: %w", err)
 		}
 		return []agent.Message{&agent.TextDeltaMessage{Text: u.Content.Text}}, nil
 
-	case UpdateAgentThoughtChunk:
-		var u AgentThoughtChunkUpdate
+	case oc.UpdateAgentThoughtChunk:
+		var u oc.AgentThoughtChunkUpdate
 		if err := unmarshalNotification(sup.Update, &u, "AgentThoughtChunkUpdate", fw); err != nil {
 			return nil, fmt.Errorf("agent_thought_chunk: %w", err)
 		}
 		return []agent.Message{&agent.ThinkingDeltaMessage{Text: u.Content.Text}}, nil
 
-	case UpdateUserMessageChunk:
-		var u UserMessageChunkUpdate
+	case oc.UpdateUserMessageChunk:
+		var u oc.UserMessageChunkUpdate
 		if err := unmarshalNotification(sup.Update, &u, "UserMessageChunkUpdate", fw); err != nil {
 			return nil, fmt.Errorf("user_message_chunk: %w", err)
 		}
 		return []agent.Message{&agent.UserInputMessage{Text: u.Content.Text}}, nil
 
-	case UpdateToolCall:
+	case oc.UpdateToolCall:
 		return parseToolCall(sup.Update, fw)
 
-	case UpdateToolCallUpdate:
+	case oc.UpdateToolCallUpdate:
 		return parseToolCallUpdate(sup.Update, fw)
 
-	case UpdatePlan:
+	case oc.UpdatePlan:
 		return parsePlanUpdate(sup.Update, fw)
 
-	case UpdateUsageUpdate:
-		var u UsageUpdateUpdate
+	case oc.UpdateUsageUpdate:
+		var u oc.UsageUpdateUpdate
 		if err := unmarshalNotification(sup.Update, &u, "UsageUpdateUpdate", fw); err != nil {
 			return nil, fmt.Errorf("usage_update: %w", err)
 		}
@@ -163,8 +164,8 @@ func parseSessionUpdate(params json.RawMessage, line []byte, fw *jsonutil.FieldW
 			ContextWindow: u.Size,
 		}}, nil
 
-	case UpdateCurrentModeUpdate:
-		var u CurrentModeUpdate
+	case oc.UpdateCurrentModeUpdate:
+		var u oc.CurrentModeUpdate
 		if err := unmarshalNotification(sup.Update, &u, "CurrentModeUpdate", fw); err != nil {
 			return nil, fmt.Errorf("current_mode_update: %w", err)
 		}
@@ -178,10 +179,10 @@ func parseSessionUpdate(params json.RawMessage, line []byte, fw *jsonutil.FieldW
 			Detail:      detail,
 		}}, nil
 
-	case UpdateSessionInfoUpdate:
+	case oc.UpdateSessionInfoUpdate:
 		return nil, nil // cosmetic, skip
 
-	case UpdateAvailableCommandsUpdate, UpdateConfigOptionUpdate:
+	case oc.UpdateAvailableCommandsUpdate, oc.UpdateConfigOptionUpdate:
 		return nil, nil // internal, skip
 
 	default:
@@ -191,7 +192,7 @@ func parseSessionUpdate(params json.RawMessage, line []byte, fw *jsonutil.FieldW
 
 // parseToolCall handles tool_call session updates (initial tool announcement).
 func parseToolCall(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
-	var u ToolCallUpdate
+	var u oc.ToolCallUpdate
 	if err := unmarshalNotification(data, &u, "ToolCallUpdate", fw); err != nil {
 		return nil, fmt.Errorf("tool_call: %w", err)
 	}
@@ -210,18 +211,18 @@ func parseToolCall(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Mess
 
 // parseToolCallUpdate handles tool_call_update session updates (progress/completion).
 func parseToolCallUpdate(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
-	var u ToolCallUpdateUpdate
+	var u oc.ToolCallUpdateUpdate
 	if err := unmarshalNotification(data, &u, "ToolCallUpdateUpdate", fw); err != nil {
 		return nil, fmt.Errorf("tool_call_update: %w", err)
 	}
 
 	switch u.Status {
-	case StatusCompleted:
+	case oc.StatusCompleted:
 		return []agent.Message{&agent.ToolResultMessage{ToolUseID: u.ToolCallID}}, nil
-	case StatusFailed:
+	case oc.StatusFailed:
 		errMsg := extractToolError(&u)
 		return []agent.Message{&agent.ToolResultMessage{ToolUseID: u.ToolCallID, Error: errMsg}}, nil
-	case StatusInProgress:
+	case oc.StatusInProgress:
 		// Emit output delta if content is available.
 		if delta := extractToolOutputDelta(&u); delta != "" {
 			return []agent.Message{&agent.ToolOutputDeltaMessage{
@@ -237,7 +238,7 @@ func parseToolCallUpdate(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agen
 
 // extractToolError extracts the error message from a failed tool call update.
 // It checks rawOutput.error first (structured), then falls back to content text.
-func extractToolError(u *ToolCallUpdateUpdate) string {
+func extractToolError(u *oc.ToolCallUpdateUpdate) string {
 	if u.RawOutput != nil && u.RawOutput.Error != "" {
 		return u.RawOutput.Error
 	}
@@ -251,7 +252,7 @@ func extractToolError(u *ToolCallUpdateUpdate) string {
 
 // extractToolOutputDelta extracts streaming output from an in-progress tool call.
 // It checks rawOutput.output first (structured), then falls back to content text.
-func extractToolOutputDelta(u *ToolCallUpdateUpdate) string {
+func extractToolOutputDelta(u *oc.ToolCallUpdateUpdate) string {
 	if u.RawOutput != nil && u.RawOutput.Output != "" {
 		return u.RawOutput.Output
 	}
@@ -265,7 +266,7 @@ func extractToolOutputDelta(u *ToolCallUpdateUpdate) string {
 
 // parsePlanUpdate converts a plan update to a TodoMessage.
 func parsePlanUpdate(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
-	var u PlanUpdate
+	var u oc.PlanUpdate
 	if err := unmarshalNotification(data, &u, "PlanUpdate", fw); err != nil {
 		return nil, fmt.Errorf("plan: %w", err)
 	}
@@ -283,7 +284,7 @@ func parsePlanUpdate(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Me
 }
 
 // normalizeToolName maps OpenCode tool titles and kinds to caic canonical names.
-func normalizeToolName(title string, kind ToolKind) string {
+func normalizeToolName(title string, kind oc.ToolKind) string {
 	// Normalize to lowercase for matching.
 	lower := strings.ToLower(title)
 
@@ -317,17 +318,17 @@ func normalizeToolName(title string, kind ToolKind) string {
 
 	// Fall back to kind-based mapping.
 	switch kind {
-	case KindExecute:
+	case oc.KindExecute:
 		return "Bash"
-	case KindEdit:
+	case oc.KindEdit:
 		return "Edit"
-	case KindRead:
+	case oc.KindRead:
 		return "Read"
-	case KindSearch:
+	case oc.KindSearch:
 		return "Grep"
-	case KindFetch:
+	case oc.KindFetch:
 		return "WebFetch"
-	case KindDelete, KindMove, KindThink, KindSwitchMode, KindOther:
+	case oc.KindDelete, oc.KindMove, oc.KindThink, oc.KindSwitchMode, oc.KindOther:
 		// No mapping; fall through to passthrough.
 	}
 

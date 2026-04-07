@@ -11,6 +11,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
+	cc "github.com/maruel/genai/providers/claudecode"
 )
 
 // Backend implements agent.Backend for Claude Code.
@@ -71,8 +72,8 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	// Claude Code authenticates via OAuth. Re-inject it after auth completes
 	// so tools (Bash, MCP servers) can still use it.
 	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		msg := InputUpdateEnvVarsMsg{
-			Type:      InputUpdateEnvVars,
+		msg := cc.InputUpdateEnvVarsMsg{
+			Type:      cc.InputUpdateEnvVars,
 			Variables: map[string]string{"ANTHROPIC_API_KEY": key},
 		}
 		data, err := json.Marshal(msg)
@@ -90,11 +91,11 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 // WritePrompt writes a single user message in Claude Code's stdin format.
 // When images are provided, content is emitted as an array of content blocks.
 func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
-	var blocks []InputContentBlock
+	var blocks []cc.InputContentBlock
 	for _, img := range p.Images {
-		blocks = append(blocks, InputContentBlock{
+		blocks = append(blocks, cc.InputContentBlock{
 			Type: "image",
-			Source: InputImageSource{
+			Source: cc.InputImageSource{
 				Type:      "base64",
 				MediaType: img.MediaType,
 				Data:      img.Data,
@@ -102,11 +103,11 @@ func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
 		})
 	}
 	if p.Text != "" {
-		blocks = append(blocks, InputContentBlock{Type: "text", Text: p.Text})
+		blocks = append(blocks, cc.InputContentBlock{Type: "text", Text: p.Text})
 	}
-	msg := InputUserMsg{
-		Type:    InputUser,
-		Message: InputUserContent{Role: "user", Content: blocks},
+	msg := cc.InputUserMsg{
+		Type:    cc.InputUser,
+		Message: cc.InputUserContent{Role: "user", Content: blocks},
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {

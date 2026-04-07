@@ -25,7 +25,7 @@ prompts.
 **caic integration:**
 - Add an "Interrupt" button distinct from "Stop". Interrupt cancels the
   current turn; Stop terminates the session.
-- Already have the `MethodSessionCancel` constant in wire.go.
+- Already have the `MethodSessionCancel` constant in `github.com/maruel/genai/providers/opencode`.
 
 ### 2. Session Fork: unstable_forkSession
 

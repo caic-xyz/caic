@@ -6,6 +6,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
+	oc "github.com/maruel/genai/providers/opencode"
 )
 
 func TestParseMessage(t *testing.T) {
@@ -552,30 +553,30 @@ func TestParseMessage(t *testing.T) {
 func TestNormalizeToolName(t *testing.T) {
 	tests := []struct {
 		title string
-		kind  ToolKind
+		kind  oc.ToolKind
 		want  string
 	}{
-		{"bash", KindExecute, "Bash"},
-		{"edit", KindEdit, "Edit"},
-		{"write", KindEdit, "Write"},
-		{"read", KindRead, "Read"},
-		{"glob", KindSearch, "Glob"},
-		{"grep", KindSearch, "Grep"},
-		{"list", KindRead, "ListDirectory"},
-		{"webfetch", KindFetch, "WebFetch"},
-		{"websearch", KindSearch, "WebSearch"},
-		{"todowrite", KindOther, "TodoWrite"},
-		{"task", KindOther, "Agent"},
+		{"bash", oc.KindExecute, "Bash"},
+		{"edit", oc.KindEdit, "Edit"},
+		{"write", oc.KindEdit, "Write"},
+		{"read", oc.KindRead, "Read"},
+		{"glob", oc.KindSearch, "Glob"},
+		{"grep", oc.KindSearch, "Grep"},
+		{"list", oc.KindRead, "ListDirectory"},
+		{"webfetch", oc.KindFetch, "WebFetch"},
+		{"websearch", oc.KindSearch, "WebSearch"},
+		{"todowrite", oc.KindOther, "TodoWrite"},
+		{"task", oc.KindOther, "Agent"},
 		// Additional name mappings.
-		{"patch", KindEdit, "Edit"},
+		{"patch", oc.KindEdit, "Edit"},
 		// Kind-based fallback.
-		{"unknown_tool", KindExecute, "Bash"},
-		{"unknown_tool", KindEdit, "Edit"},
-		{"unknown_tool", KindRead, "Read"},
-		{"unknown_tool", KindSearch, "Grep"},
-		{"unknown_tool", KindFetch, "WebFetch"},
+		{"unknown_tool", oc.KindExecute, "Bash"},
+		{"unknown_tool", oc.KindEdit, "Edit"},
+		{"unknown_tool", oc.KindRead, "Read"},
+		{"unknown_tool", oc.KindSearch, "Grep"},
+		{"unknown_tool", oc.KindFetch, "WebFetch"},
 		// Passthrough.
-		{"custom_mcp_tool", KindOther, "custom_mcp_tool"},
+		{"custom_mcp_tool", oc.KindOther, "custom_mcp_tool"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.title+"_"+string(tt.kind), func(t *testing.T) {

@@ -2,10 +2,10 @@ package claudecode
 
 import (
 	"encoding/json"
-
 	"fmt"
 
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
+	cc "github.com/maruel/genai/providers/claudecode"
 )
 
 // ContentBlock is a single block within a message's content array.
@@ -59,7 +59,7 @@ type APIMessage struct {
 	Content           []ContentBlock  `json:"content"`
 	StopReason        *string         `json:"stop_reason"`
 	StopSequence      *string         `json:"stop_sequence"`
-	Usage             *Usage          `json:"usage,omitempty"`
+	Usage             *cc.MsgUsage    `json:"usage,omitempty"`
 	Container         json.RawMessage `json:"container,omitempty"`
 	ContextManagement json.RawMessage `json:"context_management,omitempty"`
 
@@ -191,7 +191,7 @@ type ToolUseResult struct {
 	TotalDurationMs   int64           `json:"totalDurationMs"`
 	TotalTokens       int             `json:"totalTokens"`
 	TotalToolUseCount int             `json:"totalToolUseCount"`
-	Usage             *Usage          `json:"usage,omitempty"`
+	Usage             *cc.MsgUsage    `json:"usage,omitempty"`
 
 	jsonutil.Overflow
 }

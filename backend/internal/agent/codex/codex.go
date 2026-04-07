@@ -17,6 +17,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
+	cx "github.com/maruel/genai/providers/codex"
 )
 
 // TODO: re-enable once widget plugin is fixed for codex
@@ -158,19 +159,19 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 		return errors.New("codex: no thread ID (handshake not completed)")
 	}
 	id := w.nextID.Add(1)
-	input := make([]TurnInput, 0, 1+len(p.Images))
-	input = append(input, TurnInput{Type: "text", Text: p.Text})
+	input := make([]cx.TurnInput, 0, 1+len(p.Images))
+	input = append(input, cx.TurnInput{Type: "text", Text: p.Text})
 	for _, img := range p.Images {
-		input = append(input, TurnInput{
+		input = append(input, cx.TurnInput{
 			Type: "image",
 			URL:  "data:" + img.MediaType + ";base64," + img.Data,
 		})
 	}
-	req := JSONRPCRequest{
+	req := cx.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  "turn/start",
-		Params:  TurnStartParams{ThreadID: w.threadID, Input: input},
+		Params:  cx.TurnStartParams{ThreadID: w.threadID, Input: input},
 	}
 	// Don't log to logW — stdin is not logged with --no-log-stdin.
 	return writeJSON(wr, req)
@@ -184,11 +185,11 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, _ io.Writer) error {
 	if w.threadID == "" {
 		return errors.New("codex: no thread ID (handshake not completed)")
 	}
-	req := JSONRPCRequest{
+	req := cx.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      w.nextID.Add(1),
 		Method:  "thread/compact/start",
-		Params:  ThreadCompactStartParams{ThreadID: w.threadID},
+		Params:  cx.ThreadCompactStartParams{ThreadID: w.threadID},
 	}
 	return writeJSON(wr, req)
 }
@@ -205,14 +206,14 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, _ io.Writer) error {
 func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	// Intercept thread/tokenUsage/updated: emit a UsageMessage with the
 	// incremental (Last) usage and accumulate into totalUsage.
-	var probe MethodProbe
+	var probe cx.MethodProbe
 	_ = json.Unmarshal(line, &probe)
-	if probe.Method == MethodTokenUsageUpdated {
-		var msg JSONRPCMessage
+	if probe.Method == cx.MethodTokenUsageUpdated {
+		var msg cx.JSONRPCMessage
 		if err := json.Unmarshal(line, &msg); err != nil {
 			return nil, fmt.Errorf("tokenUsage/updated: %w", err)
 		}
-		var p ThreadTokenUsageUpdatedNotification
+		var p cx.ThreadTokenUsageUpdatedNotification
 		if err := unmarshalNotification(msg.Params, &p, "ThreadTokenUsageUpdatedNotification", w.fw); err != nil {
 			return nil, fmt.Errorf("tokenUsage/updated params: %w", err)
 		}
@@ -267,38 +268,38 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	w := &wireFormat{fw: &jsonutil.FieldWarner{}}
 
 	// 1. Send initialize request.
-	initReq := JSONRPCRequest{
+	initReq := cx.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      w.nextID.Add(1),
 		Method:  "initialize",
-		Params: InitializeParams{
-			ClientInfo: ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
-			Capabilities: Capabilities{
-				OptOutNotificationMethods: []Method{
+		Params: cx.InitializeParams{
+			ClientInfo: cx.ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
+			Capabilities: cx.Capabilities{
+				OptOutNotificationMethods: []cx.Method{
 					// Interactive terminal prompts (e.g. sudo password, interactive stdin);
 					// caic does not forward interactive terminal I/O to the agent.
-					MethodCommandTerminalInteract,
+					cx.MethodCommandTerminalInteract,
 					// Incremental diff of a file being written; we surface the completed
 					// diff via item/completed fileChange instead.
-					MethodFileChangeOutputDelta,
+					cx.MethodFileChangeOutputDelta,
 					// Streaming pre-summary reasoning part markers; we prefer the
 					// incremental text via item/reasoning/summaryTextDelta.
-					MethodReasoningSummaryPartAdded,
+					cx.MethodReasoningSummaryPartAdded,
 					// Raw token-by-token reasoning text; we prefer the summarised form via
 					// item/reasoning/summaryTextDelta which is more readable.
-					MethodReasoningTextDelta,
+					cx.MethodReasoningTextDelta,
 					// Incremental plan text delta; we surface the final plan text via
 					// item/completed plan instead.
-					MethodPlanDelta,
+					cx.MethodPlanDelta,
 					// Coarse git diff snapshot repeated on every file change; we use the
 					// caic-injected caic_diff_stat from the relay watcher instead.
-					MethodTurnDiffUpdated,
+					cx.MethodTurnDiffUpdated,
 					// High-level plan snapshot updated on each tool call; redundant with
 					// item/plan which gives us the final plan text.
-					MethodTurnPlanUpdated,
+					cx.MethodTurnPlanUpdated,
 					// Thread name set by the agent (cosmetic label); caic uses the user's
 					// initial prompt as the task title instead.
-					MethodThreadNameUpdated,
+					cx.MethodThreadNameUpdated,
 				},
 			},
 		},
@@ -313,41 +314,41 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 
 	// 2. Send initialized notification.
-	if err := writeJSON(stdin, JSONRPCNotification{JSONRPC: "2.0", Method: "initialized"}); err != nil {
+	if err := writeJSON(stdin, cx.JSONRPCNotification{JSONRPC: "2.0", Method: "initialized"}); err != nil {
 		return nil, nil, fmt.Errorf("write initialized: %w", err)
 	}
 
 	// 3. Fetch model list so the UI offers only valid model IDs.
 	var models []string
-	if err := writeJSON(stdin, JSONRPCRequest{JSONRPC: "2.0", ID: w.nextID.Add(1), Method: "model/list"}); err != nil {
+	if err := writeJSON(stdin, cx.JSONRPCRequest{JSONRPC: "2.0", ID: w.nextID.Add(1), Method: "model/list"}); err != nil {
 		return nil, nil, fmt.Errorf("write model/list: %w", err)
 	}
 	if mlResp, err := readJSONRPCResponse(ctx, stdout); err == nil && mlResp.Result != nil {
-		var mlResult ModelListResult
+		var mlResult cx.ModelListResult
 		if json.Unmarshal(mlResp.Result, &mlResult) == nil {
-			for _, m := range mlResult.Data {
-				if m.ID != "" {
-					models = append(models, m.ID)
+			for i := range mlResult.Data {
+				if mlResult.Data[i].ID != "" {
+					models = append(models, mlResult.Data[i].ID)
 				}
 			}
 		}
 	}
 
 	// 4. Send thread/start or thread/resume.
-	var threadReq JSONRPCRequest
+	var threadReq cx.JSONRPCRequest
 	if opts.ResumeSessionID != "" {
-		threadReq = JSONRPCRequest{
+		threadReq = cx.JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.nextID.Add(1),
 			Method:  "thread/resume",
-			Params:  ThreadResumeParams{ThreadID: opts.ResumeSessionID},
+			Params:  cx.ThreadResumeParams{ThreadID: opts.ResumeSessionID},
 		}
 	} else {
-		threadReq = JSONRPCRequest{
+		threadReq = cx.JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.nextID.Add(1),
 			Method:  "thread/start",
-			Params:  ThreadStartParams{Model: opts.Model},
+			Params:  cx.ThreadStartParams{Model: opts.Model},
 		}
 	}
 	if err := writeJSON(stdin, threadReq); err != nil {
@@ -361,7 +362,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 
 	// Extract thread ID from the response result.
-	var result ThreadStartResult
+	var result cx.ThreadStartResult
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
 		return nil, nil, fmt.Errorf("parse thread/start result: %w", err)
 	}
@@ -386,9 +387,9 @@ func writeJSON(w io.Writer, v any) error {
 // readJSONRPCResponse reads lines from r until it finds a JSON-RPC response
 // (has "id" field). Notifications encountered during the handshake are logged
 // and skipped. It returns an error if ctx is cancelled before a response arrives.
-func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*JSONRPCMessage, error) {
+func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*cx.JSONRPCMessage, error) {
 	type result struct {
-		msg *JSONRPCMessage
+		msg *cx.JSONRPCMessage
 		err error
 	}
 	ch := make(chan result, 1)
@@ -403,7 +404,7 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*JSONRPCMessage,
 			if len(line) == 0 {
 				continue
 			}
-			var msg JSONRPCMessage
+			var msg cx.JSONRPCMessage
 			if err := json.Unmarshal(line, &msg); err != nil {
 				ch <- result{nil, fmt.Errorf("unmarshal response: %w", err)}
 				return

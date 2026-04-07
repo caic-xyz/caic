@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	cc "github.com/maruel/genai/providers/claudecode"
 )
 
 func TestWritePrompt(t *testing.T) {
@@ -111,8 +112,8 @@ func TestStart(t *testing.T) {
 		key := "sk-ant-test-key"
 		t.Setenv("ANTHROPIC_API_KEY", key)
 
-		msg := InputUpdateEnvVarsMsg{
-			Type:      InputUpdateEnvVars,
+		msg := cc.InputUpdateEnvVarsMsg{
+			Type:      cc.InputUpdateEnvVars,
 			Variables: map[string]string{"ANTHROPIC_API_KEY": os.Getenv("ANTHROPIC_API_KEY")},
 		}
 		data, err := json.Marshal(msg)
@@ -120,12 +121,12 @@ func TestStart(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		var got InputUpdateEnvVarsMsg
+		var got cc.InputUpdateEnvVarsMsg
 		if err := json.Unmarshal(data, &got); err != nil {
 			t.Fatal(err)
 		}
-		if got.Type != InputUpdateEnvVars {
-			t.Errorf("type = %q, want %q", got.Type, InputUpdateEnvVars)
+		if got.Type != cc.InputUpdateEnvVars {
+			t.Errorf("type = %q, want %q", got.Type, cc.InputUpdateEnvVars)
 		}
 		if got.Variables["ANTHROPIC_API_KEY"] != key {
 			t.Errorf("ANTHROPIC_API_KEY = %q, want %q", got.Variables["ANTHROPIC_API_KEY"], key)

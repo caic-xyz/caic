@@ -7,6 +7,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
+	cx "github.com/maruel/genai/providers/codex"
 )
 
 func TestParseMessage(t *testing.T) {
@@ -493,7 +494,7 @@ func TestParseMessage(t *testing.T) {
 		if !ok {
 			t.Fatalf("type = %T, want *agent.RawMessage", msgs[0])
 		}
-		if raw.Type() != string(MethodItemUpdated) {
+		if raw.Type() != string(cx.MethodItemUpdated) {
 			t.Errorf("Type() = %q", raw.Type())
 		}
 	})

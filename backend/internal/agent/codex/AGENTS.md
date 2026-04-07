@@ -21,9 +21,10 @@ Codex CLI runs in **app-server mode** — a JSON-RPC 2.0 NDJSON protocol over st
 ## Architecture
 
 - `codex.go` — Backend lifecycle, handshake, `wireFormat` state machine
-- `wire.go` — JSON-RPC 2.0 type definitions, organized as: shared → input → output
 - `parse.go` — Stateless parser: JSON-RPC notifications → `agent.Message`
 - `docs/MORE.md` — Future enhancement opportunities (interrupt, steer, compact, review, etc.)
+
+Wire types are provided by `github.com/maruel/genai/providers/codex` (imported as `cx`).
 
 `wireFormat` wraps the stateless parser to accumulate per-turn token usage
 from `thread/tokenUsage/updated` notifications, emitting a final `ResultMessage`
@@ -31,13 +32,13 @@ with totals on `turn/completed`.
 
 ## Upstream Source
 
-Type names in `wire.go` match the upstream Rust definitions:
+Wire type names in the genai package match the upstream Rust definitions:
 
 - `codex-rs/app-server-protocol/src/protocol/v2.rs` — notification and item structs
 - `codex-rs/app-server-protocol/src/protocol/common.rs` — method string ↔ struct mapping
 
-When updating wire types, clone https://github.com/openai/codex and diff
-against these files to find new fields, item types, or notification methods.
+When updating wire types, update `github.com/maruel/genai` and diff against
+the upstream Rust definitions to find new fields, item types, or notification methods.
 
 ## References
 

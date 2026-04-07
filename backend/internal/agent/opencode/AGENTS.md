@@ -6,11 +6,12 @@ JSON-RPC 2.0 over stdin/stdout, analogous to the Codex harness.
 ## Architecture
 
 - `opencode.go` — Backend lifecycle, handshake, `wireFormat` state machine
-- `wire.go` — ACP JSON-RPC 2.0 type definitions, organized as: shared → input → output
-- `wire_test.go` — Wire type unmarshaling tests
+- `wire_test.go` — Wire type unmarshaling tests (types from `github.com/maruel/genai/providers/opencode`)
 - `parse.go` — Stateless parser: `session/update` notifications → `agent.Message`
 - `parse_test.go` — Parser tests including wireFormat prompt response handling
 - `docs/MORE.md` — Future enhancement opportunities (cancel, fork, resume, compact, modes, etc.)
+
+Wire types are provided by `github.com/maruel/genai/providers/opencode` (imported as `oc`).
 
 Unknown field detection is centralized in `unmarshalNotification` (parse.go)
 using `sync.Map` caching, matching the pattern used by the Codex harness.
@@ -72,12 +73,12 @@ then passthrough.
 
 ## Upstream Source
 
-Type names in `wire.go` follow the upstream ACP SDK definitions:
+Type names in `github.com/maruel/genai/providers/opencode` follow the upstream ACP SDK definitions:
 
 - `packages/opencode/src/acp/agent.ts` — session update types and request/response handling
 
-When updating wire types, clone https://github.com/anomalyco/opencode and diff
-against `agent.ts` to find new session update types or fields.
+When updating wire types, update `github.com/maruel/genai` and diff against
+`agent.ts` to find new session update types or fields.
 
 ## Key Design Decisions
 
