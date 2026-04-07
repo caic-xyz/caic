@@ -32,7 +32,11 @@ export default function AutoResizeTextarea(props: Props) {
     if (getText(editable) !== v) {
       editable.textContent = "";
       if (v) {
-        editable.appendChild(document.createTextNode(v));
+        const lines = v.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          if (i > 0) editable.appendChild(document.createElement("br"));
+          if (lines[i]) editable.appendChild(document.createTextNode(lines[i]));
+        }
       }
       editable.classList.toggle(emptyClass, v.length === 0);
     }

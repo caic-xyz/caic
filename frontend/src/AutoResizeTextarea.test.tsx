@@ -45,6 +45,22 @@ describe("AutoResizeTextarea", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("preserves newlines when value is restored", () => {
+    const { getByRole } = render(() => (
+      <AutoResizeTextarea value={"line1\nline2\nline3"} onInput={() => {}} />
+    ));
+    const el = getByRole("textbox");
+    // The contentEditable should contain <br> elements for newlines.
+    const brs = el.querySelectorAll("br");
+    expect(brs.length).toBe(2);
+    // getText should round-trip back to the original value.
+    expect(el.textContent?.replace(/\n/g, "")).toBe("line1line2line3");
+    // Verify the DOM structure preserves newlines by checking innerHTML.
+    expect(el.innerHTML).toContain("line1");
+    expect(el.innerHTML).toContain("line2");
+    expect(el.innerHTML).toContain("<br>");
+  });
+
   it("is not editable when disabled", () => {
     const { getByRole } = render(() => (
       <AutoResizeTextarea value="" onInput={() => {}} disabled={true} />
