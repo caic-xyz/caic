@@ -61,6 +61,18 @@ describe("AutoResizeTextarea", () => {
     expect(el.innerHTML).toContain("<br>");
   });
 
+  it("extracts newlines from div-wrapped lines", async () => {
+    const onInput = vi.fn();
+    const { getByRole } = render(() => (
+      <AutoResizeTextarea value="" onInput={onInput} />
+    ));
+    const el = getByRole("textbox");
+    // Simulate Chrome's contentEditable behaviour: wrapping lines in <div>.
+    el.innerHTML = "line1<div>line2</div><div>line3</div>";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(onInput).toHaveBeenCalledWith("line1\nline2\nline3");
+  });
+
   it("is not editable when disabled", () => {
     const { getByRole } = render(() => (
       <AutoResizeTextarea value="" onInput={() => {}} disabled={true} />

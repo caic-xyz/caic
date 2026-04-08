@@ -89,7 +89,10 @@ export default function AutoResizeTextarea(props: Props) {
   );
 }
 
-/** Get text from the editable div, ignoring child elements. */
+/** Block-level tags that browsers inject inside contentEditable divs. */
+const blockTags = new Set(["DIV", "P", "BLOCKQUOTE", "LI", "PRE"]);
+
+/** Get text from the editable div, converting browser markup back to plain text. */
 function getText(el: HTMLElement): string {
   let text = "";
   for (const node of el.childNodes) {
@@ -99,9 +102,12 @@ function getText(el: HTMLElement): string {
       const elem = node as HTMLElement;
       // Skip non-editable children.
       if (elem.contentEditable === "false") continue;
-      // Handle <br> as newline.
       if (elem.tagName === "BR") {
         text += "\n";
+      } else if (blockTags.has(elem.tagName)) {
+        // Chrome/Firefox wrap lines in <div> or <p> — treat as newline-delimited blocks.
+        if (text.length > 0 && !text.endsWith("\n")) text += "\n";
+        text += elem.textContent;
       } else {
         text += elem.textContent;
       }
