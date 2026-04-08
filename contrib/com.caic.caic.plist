@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- caic macOS launchd user agent -->
+<!-- Install: cp contrib/com.caic.caic.plist ~/Library/LaunchAgents/ -->
+<!--          mkdir -p ~/.config/caic && cp contrib/caic.env ~/.config/caic/caic.env -->
+<!--          Edit ~/.config/caic/caic.env to set CAIC_HTTP, CAIC_ROOT, and API keys. -->
+<!-- Enable:  launchctl load ~/Library/LaunchAgents/com.caic.caic.plist -->
+<!-- Disable: launchctl unload ~/Library/LaunchAgents/com.caic.caic.plist -->
+<!-- Logs:    tail -f ~/Library/Logs/caic.log -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.caic.caic</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>bash</string>
+		<string>-c</string>
+		<string>set -a; [ -f ~/.config/caic/caic.env ] &amp;&amp; . ~/.config/caic/caic.env; set +a; exec ~/.local/bin/caic</string>
+	</array>
+
+	<key>RunAtLoad</key>
+	<true/>
+
+	<key>KeepAlive</key>
+	<true/>
+
+	<key>StandardOutPath</key>
+	<string>/tmp/caic.log</string>
+
+	<key>StandardErrorPath</key>
+	<string>/tmp/caic.log</string>
+
+	<key>ProcessType</key>
+	<string>Background</string>
+
+	<key>SoftResourceLimits</key>
+	<dict>
+		<key>NumberOfFiles</key>
+		<integer>4096</integer>
+	</dict>
+</dict>
+</plist>
