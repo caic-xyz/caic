@@ -104,7 +104,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	}
 
 	log := slog.With("ctr", opts.Container)
-	s := agent.NewSession(cmd, stdin, br, msgCh, logW, hs.wire, log)
+	s := agent.NewSession(cmd, stdin, br, agent.ChanDispatch(msgCh), logW, hs.wire, log)
 
 	// Emit InitMessage so the task captures session ID, model, and version.
 	initMsg := &agent.InitMessage{
@@ -144,7 +144,7 @@ func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agen
 // AttachRelay connects to an already-running relay in the container.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
 	wire := &wireFormat{sessionID: opts.ResumeSessionID, fw: &jsonutil.FieldWarner{}}
-	return agent.AttachRelaySession(ctx, opts.Container, opts.RelayOffset, msgCh, logW, wire)
+	return agent.AttachRelaySession(ctx, opts.Container, opts.RelayOffset, agent.ChanDispatch(msgCh), logW, wire)
 }
 
 // caicInit is written to output.jsonl during handshake so replay can

@@ -98,9 +98,14 @@ type Session struct {
 	err       error
 }
 
+// ChanDispatch returns a dispatch function that sends messages to ch.
+func ChanDispatch(ch chan<- Message) func(Message) {
+	return func(m Message) { ch <- m }
+}
+
 // NewSession creates a Session from an already-started command. Messages read
-// from stdout are parsed and sent to msgCh. logW receives raw NDJSON lines
-// (may be nil). wire defines the backend's wire protocol.
+// from stdout are parsed and forwarded via dispatch. logW receives raw NDJSON
+// lines (may be nil). wire defines the backend's wire protocol.
 //
 // A background goroutine reads stdout until EOF, then waits for the process to
 // exit. The done channel is closed when both are complete. Callers should use
@@ -110,7 +115,7 @@ type Session struct {
 // parse error indicates corrupted output while the process may still exit 0.
 // If neither parse nor wait errors occur but no ResultMessage was seen, the
 // session reports "agent exited without a result message".
-func NewSession(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, msgCh chan<- Message, logW io.Writer, wire WireFormat, log *slog.Logger) *Session {
+func NewSession(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, dispatch func(Message), logW io.Writer, wire WireFormat, log *slog.Logger) *Session {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -125,7 +130,7 @@ func NewSession(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, msgCh cha
 
 	go func() {
 		defer close(s.done)
-		result, parseErr := readMessages(stdout, msgCh, logW, wire.ParseMessage)
+		result, parseErr := readMessages(stdout, dispatch, logW, wire.ParseMessage)
 		waitErr := cmd.Wait()
 		// Store the result and first non-nil error.
 		s.result = result
@@ -223,9 +228,10 @@ func (s *Session) Wait() (*ResultMessage, error) {
 	return s.result, s.err
 }
 
-// readMessages reads NDJSON lines from r, dispatches to msgCh, and returns
-// the terminal ResultMessage. If logW is non-nil, each raw line is written to it.
-func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer, parseFn func([]byte) ([]Message, error)) (*ResultMessage, error) {
+// readMessages reads NDJSON lines from r, forwards parsed messages via
+// dispatch, and returns the terminal ResultMessage. If logW is non-nil, each
+// raw line is written to it.
+func readMessages(r io.Reader, dispatch func(Message), logW io.Writer, parseFn func([]byte) ([]Message, error)) (*ResultMessage, error) {
 	scanner := bufio.NewScanner(r)
 	// 32 MiB max line: user input with base64 images can produce very long NDJSON lines.
 	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
@@ -246,18 +252,14 @@ func readMessages(r io.Reader, msgCh chan<- Message, logW io.Writer, parseFn fun
 		msgs, err := parseFn(line)
 		if err != nil {
 			slog.Warn("unparseable message", "err", err, "line", string(line))
-			if msgCh != nil {
-				msgCh <- &ParseErrorMessage{Err: err.Error(), Line: string(line)}
-			}
+			dispatch(&ParseErrorMessage{Err: err.Error(), Line: string(line)})
 			continue
 		}
 		for _, msg := range msgs {
 			if n <= 3 {
 				slog.Debug("parsed message", "n", n, "type", fmt.Sprintf("%T", msg))
 			}
-			if msgCh != nil {
-				msgCh <- msg
-			}
+			dispatch(msg)
 			if rm, ok := msg.(*ResultMessage); ok {
 				result = rm
 			}
@@ -440,9 +442,9 @@ func (w *SlogWriter) Write(p []byte) (int, error) {
 }
 
 // StartRelay deploys the relay, launches an agent via relay serve-attach with
-// the given CLI args, and sends the initial prompt. Used by backends that
-// follow the standard relay protocol (claude, gemini, kilo).
-func StartRelay(ctx context.Context, opts *Options, agentArgs []string, msgCh chan<- Message, logW io.Writer, wire WireFormat) (*Session, error) {
+// the given CLI args, and sends the initial prompt. dispatch receives parsed
+// messages; use ChanDispatch to bridge a channel.
+func StartRelay(ctx context.Context, opts *Options, agentArgs []string, dispatch func(Message), logW io.Writer, wire WireFormat) (*Session, error) {
 	if opts.Dir == "" {
 		return nil, errors.New("opts.Dir is required")
 	}
@@ -473,7 +475,7 @@ func StartRelay(ctx context.Context, opts *Options, agentArgs []string, msgCh ch
 	slog.Info("startup", "phase", "relay_started", "ctr", opts.Container, "dur", time.Since(tStart))
 
 	log := slog.With("ctr", opts.Container)
-	s := NewSession(cmd, stdin, stdout, msgCh, logW, wire, log)
+	s := NewSession(cmd, stdin, stdout, dispatch, logW, wire, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.Send(opts.InitialPrompt); err != nil {
 			s.Close()
@@ -514,7 +516,7 @@ func ReadRelayOutput(ctx context.Context, container string, parseFn func([]byte)
 // and returns a new Session. It waits briefly for the attach process to
 // confirm connectivity; if the process exits immediately (e.g. relay socket
 // is stale), an error is returned so the caller can fall back to --resume.
-func AttachRelaySession(ctx context.Context, container string, offset int64, msgCh chan<- Message, logW io.Writer, wire WireFormat) (*Session, error) {
+func AttachRelaySession(ctx context.Context, container string, offset int64, dispatch func(Message), logW io.Writer, wire WireFormat) (*Session, error) {
 	sshArgs := []string{
 		container, "python3", RelayScriptPath, "attach",
 		"--offset", strconv.FormatInt(offset, 10),
@@ -534,7 +536,7 @@ func AttachRelaySession(ctx context.Context, container string, offset int64, msg
 	}
 
 	log := slog.With("ctr", container)
-	return NewSession(cmd, stdin, stdout, msgCh, logW, wire, log), nil
+	return NewSession(cmd, stdin, stdout, dispatch, logW, wire, log), nil
 }
 
 // PlainTextWritePrompt writes a user prompt as a plain text line on stdin

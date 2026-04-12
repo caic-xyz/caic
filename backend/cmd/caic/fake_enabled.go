@@ -178,7 +178,7 @@ func (*fakeBackend) Start(_ context.Context, opts *agent.Options, msgCh chan<- a
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	s := agent.NewSession(cmd, stdin, stdout, msgCh, logW, claudecode.Wire, nil)
+	s := agent.NewSession(cmd, stdin, stdout, agent.ChanDispatch(msgCh), logW, claudecode.Wire, nil)
 	if opts.InitialPrompt.Text != "" {
 		if err := s.Send(opts.InitialPrompt); err != nil {
 			s.Close()

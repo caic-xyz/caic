@@ -112,7 +112,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	}
 
 	log := slog.With("container", opts.Container)
-	s := agent.NewSession(cmd, stdin, br, msgCh, logW, wire, log)
+	s := agent.NewSession(cmd, stdin, br, agent.ChanDispatch(msgCh), logW, wire, log)
 	if opts.InitialPrompt.Text != "" {
 		if err := s.Send(opts.InitialPrompt); err != nil {
 			s.Close()
@@ -136,7 +136,7 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options, msgCh ch
 	// immediately. wireFormat.process() will update it again if thread/started
 	// appears in the replayed output.
 	wire := &wireFormat{threadID: opts.ResumeSessionID, fw: &jsonutil.FieldWarner{}}
-	return agent.AttachRelaySession(ctx, opts.Container, opts.RelayOffset, msgCh, logW, wire)
+	return agent.AttachRelaySession(ctx, opts.Container, opts.RelayOffset, agent.ChanDispatch(msgCh), logW, wire)
 }
 
 // wireFormat implements agent.WireFormat for the codex app-server JSON-RPC

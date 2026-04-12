@@ -84,5 +84,5 @@ func (b *Base) ReadRelayOutput(ctx context.Context, container string) ([]Message
 
 // AttachRelay implements Backend.
 func (b *Base) AttachRelay(ctx context.Context, opts *Options, msgCh chan<- Message, logW io.Writer) (*Session, error) {
-	return AttachRelaySession(ctx, opts.Container, opts.RelayOffset, msgCh, logW, b.Wire)
+	return AttachRelaySession(ctx, opts.Container, opts.RelayOffset, ChanDispatch(msgCh), logW, b.Wire)
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -64,26 +65,37 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	if err := agent.DeployEmbeddedDir(ctx, opts.Container, pluginFS, agent.WidgetPluginDir); err != nil {
 		return nil, err
 	}
-	sess, err := agent.StartRelay(ctx, opts, buildArgs(opts), msgCh, logW, b)
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		return agent.StartRelay(ctx, opts, buildArgs(opts), agent.ChanDispatch(msgCh), logW, b)
+	}
+	// The relay strips ANTHROPIC_API_KEY when OAuth is configured so Claude
+	// Code authenticates via OAuth. Re-inject it via InputUpdateEnvVars after
+	// the first message — at that point OAuth authentication is complete — so
+	// tools and MCP servers can use the key without affecting Claude Code's
+	// own billing method.
+	envMsg, err := json.Marshal(cc.InputUpdateEnvVarsMsg{
+		Type:      cc.InputUpdateEnvVars,
+		Variables: map[string]string{"ANTHROPIC_API_KEY": apiKey},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal env vars: %w", err)
+	}
+	envMsg = append(envMsg, '\n')
+	var sess *agent.Session
+	first := true
+	dispatch := func(m agent.Message) {
+		if first {
+			first = false
+			if err := sess.SendRaw(envMsg); err != nil {
+				slog.Warn("inject ANTHROPIC_API_KEY", "err", err)
+			}
+		}
+		msgCh <- m
+	}
+	sess, err = agent.StartRelay(ctx, opts, buildArgs(opts), dispatch, logW, b)
 	if err != nil {
 		return nil, err
-	}
-	// The relay strips ANTHROPIC_API_KEY from the subprocess environment so
-	// Claude Code authenticates via OAuth. Re-inject it after auth completes
-	// so tools (Bash, MCP servers) can still use it.
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		msg := cc.InputUpdateEnvVarsMsg{
-			Type:      cc.InputUpdateEnvVars,
-			Variables: map[string]string{"ANTHROPIC_API_KEY": key},
-		}
-		data, err := json.Marshal(msg)
-		if err != nil {
-			return nil, fmt.Errorf("marshal env vars: %w", err)
-		}
-		data = append(data, '\n')
-		if err := sess.SendRaw(data); err != nil {
-			return nil, fmt.Errorf("send env vars: %w", err)
-		}
 	}
 	return sess, nil
 }

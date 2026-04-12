@@ -35,7 +35,7 @@ func (b *testBackend) Start(ctx context.Context, _ *agent.Options, msgCh chan<- 
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, stdin, stdout, msgCh, nil, &testWire{parse: claudecode.New().NewParser()}, nil), nil
+	return agent.NewSession(cmd, stdin, stdout, agent.ChanDispatch(msgCh), nil, &testWire{parse: claudecode.New().NewParser()}, nil), nil
 }
 
 func (b *testBackend) AttachRelay(context.Context, *agent.Options, chan<- agent.Message, io.Writer) (*agent.Session, error) {
