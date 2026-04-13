@@ -481,7 +481,7 @@ func watchExecutable(ctx context.Context, stop context.CancelFunc) error {
 				if !ok {
 					return
 				}
-				if event.Has(fsnotify.Write) {
+				if event.Has(fsnotify.Write) || event.Has(fsnotify.Chmod) {
 					slog.Info("executable modified, shutting down")
 					stop()
 					return
