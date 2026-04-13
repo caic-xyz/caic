@@ -797,8 +797,10 @@ func (t *Task) CloseAndDetachSession(ctx context.Context) *SessionHandle {
 	// Graceful: send stop sentinel, wait for exit with timeout.
 	stopCtx, stopCancel := context.WithTimeout(ctx, 10*time.Second)
 	_, _ = h.Session.Stop(stopCtx)
-	_ = h.Session.Close()
 	stopCancel()
+	_ = h.Session.Close()
+	// Wait for ReadMessages to finish so callers can safely close MsgCh.
+	_, _ = h.Session.Wait()
 	return h
 }
 

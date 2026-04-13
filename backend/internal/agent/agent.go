@@ -169,7 +169,7 @@ func (c *conn) SendStop(ctx context.Context) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = c.stdin.Write([]byte{0})
+		_, _ = c.stdin.Write([]byte{0, '\n'})
 	}()
 	select {
 	case <-done:

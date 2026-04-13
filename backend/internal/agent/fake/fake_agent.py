@@ -596,6 +596,11 @@ def main() -> None:
 
     turns = 0
     for line in sys.stdin:
+        # The server sends a null byte as the stop sentinel (see relay
+        # shutdown protocol in agent.go). Without a relay, the sentinel
+        # arrives on our stdin directly — exit cleanly.
+        if "\x00" in line:
+            break
         line = line.rstrip("\n")
         if not line:
             continue
