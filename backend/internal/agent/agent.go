@@ -77,6 +77,7 @@ type Options struct {
 	RelayOffset     int64          // Byte offset into relay output.jsonl for AttachRelay.
 	MsgCh           chan<- Message // Receives parsed messages from the agent.
 	LogW            io.Writer      // Raw wire-format log; use io.Discard if unused.
+	StripEnv        []string       // Env var names for relay to strip from subprocess and emit as caic_stripped_env.
 }
 
 // WireFormat defines the wire protocol for a backend's stdin/stdout
@@ -509,8 +510,12 @@ func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*Rela
 	}
 	slog.Debug("startup", "phase", "deploy_relay", "ctr", opts.Container, "dur", time.Since(tStart))
 
-	sshArgs := make([]string, 0, 7+len(agentArgs))
-	sshArgs = append(sshArgs, opts.Container, "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--")
+	sshArgs := make([]string, 0, 7+2*len(opts.StripEnv)+len(agentArgs))
+	sshArgs = append(sshArgs, opts.Container, "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir)
+	for _, key := range opts.StripEnv {
+		sshArgs = append(sshArgs, "--strip-env", key)
+	}
+	sshArgs = append(sshArgs, "--")
 	sshArgs = append(sshArgs, agentArgs...)
 
 	slog.Debug("relay", "msg", "launch", "ctr", opts.Container, "args", agentArgs)

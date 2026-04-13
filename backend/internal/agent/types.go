@@ -350,6 +350,17 @@ type LogMessage struct {
 // Type implements Message.
 func (m *LogMessage) Type() string { return "log" }
 
+// StrippedEnvMessage is emitted by the relay when it strips environment
+// variables (e.g. ANTHROPIC_API_KEY) before spawning the agent subprocess.
+// The backend uses these values to re-inject them after auth completes.
+type StrippedEnvMessage struct {
+	MessageType string            `json:"type"`
+	Variables   map[string]string `json:"variables"`
+}
+
+// Type implements Message.
+func (m *StrippedEnvMessage) Type() string { return "caic_stripped_env" }
+
 // DiffStatMessage is emitted periodically by the relay's diff watcher thread
 // with the current in-container git diff stats.
 type DiffStatMessage struct {

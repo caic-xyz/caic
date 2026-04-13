@@ -233,6 +233,12 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker, fw *jsonutil.FieldW
 			return nil, err
 		}
 		return []agent.Message{&m}, nil
+	case "caic_stripped_env":
+		var m agent.StrippedEnvMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, err
+		}
+		return []agent.Message{&m}, nil
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: string(env.Type), Raw: append([]byte(nil), line...)}}, nil
 	}

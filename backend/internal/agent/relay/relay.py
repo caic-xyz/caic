@@ -34,6 +34,7 @@
 #   6. Server calls relay.py attach --offset N to reconnect
 #   7. Task resumes seamlessly with zero message loss
 
+import argparse
 import json
 import logging
 import os
@@ -52,15 +53,8 @@ PID_PATH = os.path.join(RELAY_DIR, "pid")
 BUF_SIZE = 65536
 
 # Interval between diff stat polls (seconds).
-
-
-def _has_oauth():
-    """Check if Claude Code has an OAuth session in ~/.claude/claude.json."""
-    try:
-        with open(os.path.expanduser("~/.claude/claude.json")) as f:
-            return "oauthAccount" in json.load(f)
-    except Exception:
-        return False
+_DIFF_THROTTLE = 10  # minimum seconds between diff runs
+_DIFF_DEBOUNCE = 2  # seconds of quiet before running diff
 
 
 def _parse_numstat(numstat):
@@ -94,7 +88,279 @@ def _parse_numstat(numstat):
     return result
 
 
-def serve(cmd_args, work_dir, log_stdin=True):
+class _Daemon:
+    """Relay daemon state and thread entry points.
+
+    Encapsulates shared mutable state that was previously captured via
+    closures inside serve(). Each thread method operates on explicit
+    ``self`` attributes instead.
+    """
+
+    def __init__(self, proc, output_file, work_dir, log_stdin, env_event):
+        self.proc = proc
+        self.output_file = output_file
+        self.work_dir = work_dir
+        self.log_stdin = log_stdin
+        self.env_event = env_event  # Pre-encoded caic_stripped_env NDJSON; b"" when nothing was stripped.
+
+        self.output_lock = threading.Lock()
+        self.client_lock = threading.Lock()
+        self.client_conn = None
+        self.client_id = 0
+        self.stdin_closed = False
+        self.diff_activity = threading.Event()
+
+    def set_client(self, conn, reason=""):
+        with self.client_lock:
+            old = self.client_conn
+            self.client_conn = conn
+            if old is not None:
+                logging.info("client #%d disconnected reason=%s", self.client_id, reason)
+                try:
+                    old.close()
+                except OSError:
+                    pass
+
+    def send_to_client(self, data):
+        with self.client_lock:
+            c = self.client_conn
+            if c is None:
+                return
+            try:
+                c.sendall(data)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                self.client_conn = None
+
+    def write_output(self, *chunks):
+        """Write one or more byte chunks to output.jsonl under the lock."""
+        with self.output_lock:
+            for chunk in chunks:
+                self.output_file.write(chunk)
+            self.output_file.flush()
+
+    # -- threads -------------------------------------------------------------
+
+    def reader_thread(self):
+        """Read subprocess stdout → output.jsonl + connected client."""
+        try:
+            while True:
+                data = self.proc.stdout.read1(BUF_SIZE)
+                if not data:
+                    break
+                # Inject caic_stripped_env after the first subprocess output
+                # (system/init) which confirms auth succeeded.
+                ev = self.env_event
+                self.env_event = b""
+                if ev:
+                    self.write_output(data, ev)
+                else:
+                    self.write_output(data)
+                self.send_to_client(data)
+                if ev:
+                    self.send_to_client(ev)
+                self.diff_activity.set()
+        except (OSError, ValueError) as e:
+            logging.warning("reader_thread error: %s", e)
+        finally:
+            sz = self.output_file.tell() if not self.output_file.closed else -1
+            self.output_file.close()
+            self.set_client(None, "subprocess_eof")
+            self.diff_activity.set()
+            logging.info("reader_thread exited output_bytes=%d", sz)
+
+    def diff_watcher_thread(self):
+        """Poll git diff on activity, with throttle + debounce.
+
+        Uses a temporary index to include untracked files without mutating
+        the real index. Diffs against "base" (merge-base ref set by md
+        start); falls back to HEAD if "base" doesn't exist.
+        """
+        tmp_index = os.path.join(RELAY_DIR, "diff.index")
+        diff_env = {**os.environ, "GIT_INDEX_FILE": tmp_index}
+        prev_raw = None
+        last_run = 0.0
+        diff_ref = "base"
+        try:
+            cp = subprocess.run(
+                ["git", "rev-parse", "--verify", "base"],
+                cwd=self.work_dir,
+                capture_output=True,
+                timeout=5,
+            )
+            if cp.returncode != 0:
+                diff_ref = "HEAD"
+        except (subprocess.TimeoutExpired, OSError):
+            diff_ref = "HEAD"
+        while self.proc.poll() is None:
+            if not self.diff_activity.wait(timeout=30):
+                continue
+            self.diff_activity.clear()
+            if self.proc.poll() is not None:
+                break
+            # Debounce: wait for quiet period (no new activity).
+            while True:
+                if self.diff_activity.wait(timeout=_DIFF_DEBOUNCE):
+                    self.diff_activity.clear()
+                    if self.proc.poll() is not None:
+                        break
+                else:
+                    break
+            if self.proc.poll() is not None:
+                break
+            # Throttle: enforce minimum interval.
+            now = time.monotonic()
+            wait = _DIFF_THROTTLE - (now - last_run)
+            if wait > 0:
+                time.sleep(wait)
+                if self.proc.poll() is not None:
+                    break
+            last_run = time.monotonic()
+            try:
+                subprocess.run(
+                    ["git", "read-tree", diff_ref],
+                    cwd=self.work_dir,
+                    env=diff_env,
+                    capture_output=True,
+                    timeout=5,
+                )
+                subprocess.run(
+                    ["git", "add", "--intent-to-add", "--all"],
+                    cwd=self.work_dir,
+                    env=diff_env,
+                    capture_output=True,
+                    timeout=5,
+                )
+                cp = subprocess.run(
+                    ["git", "diff", "--numstat", diff_ref],
+                    cwd=self.work_dir,
+                    env=diff_env,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                raw = cp.stdout
+            except (subprocess.TimeoutExpired, OSError):
+                continue
+            if raw == prev_raw:
+                continue
+            prev_raw = raw
+            diff_stat = _parse_numstat(raw)
+            line = json.dumps({"type": "caic_diff_stat", "diff_stat": diff_stat, "ts": time.time()}) + "\n"
+            encoded = line.encode()
+            try:
+                self.write_output(encoded)
+            except (OSError, ValueError):
+                pass
+            self.send_to_client(encoded)
+
+    def accept_thread(self, srv):
+        """Accept client connections on the Unix socket."""
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                break
+
+            # Read handshake: {"offset": N}\n
+            try:
+                hdr = _read_line(conn)
+                hs = json.loads(hdr)
+                offset = hs.get("offset", 0)
+            except (json.JSONDecodeError, OSError, ValueError):
+                conn.close()
+                continue
+
+            # Replay output from offset.
+            try:
+                with open(OUTPUT_PATH, "rb") as f:
+                    f.seek(offset)
+                    while True:
+                        chunk = f.read(BUF_SIZE)
+                        if not chunk:
+                            break
+                        conn.sendall(chunk)
+            except (OSError, BrokenPipeError):
+                conn.close()
+                continue
+
+            self.client_id += 1
+            cid = self.client_id
+            self.set_client(conn, "replaced")
+            logging.info(
+                "client #%d connected offset=%d stdin_closed=%s proc_alive=%s",
+                cid,
+                offset,
+                self.stdin_closed,
+                self.proc.poll() is None,
+            )
+
+            ct = threading.Thread(target=self._client_reader, args=(conn, cid), daemon=True)
+            ct.start()
+
+    def _client_reader(self, c, cid):
+        """Read client stdin → subprocess stdin + output log.
+
+        User input is NDJSON: each message is a single JSON line ending
+        with newline. Large messages (e.g. base64 images) may span multiple
+        recv() calls. We buffer incoming data and only write complete lines
+        to output_file (under output_lock) so that concurrent subprocess
+        stdout writes can't interleave mid-line and corrupt the replay log.
+        Data is forwarded to proc.stdin immediately (the subprocess handles
+        its own framing).
+        """
+        close_stdin = False
+        line_buf = b""
+        try:
+            while True:
+                data = c.recv(BUF_SIZE)
+                if not data:
+                    logging.info("client #%d recv returned empty (EOF/disconnect)", cid)
+                    break
+                # A null byte signals the client wants proc.stdin closed
+                # (graceful shutdown). Strip it and set the flag.
+                if b"\x00" in data:
+                    data = data.replace(b"\x00", b"")
+                    close_stdin = True
+                    if data:
+                        self.proc.stdin.write(data)
+                        self.proc.stdin.flush()
+                        if self.log_stdin:
+                            line_buf += data
+                    break
+                self.proc.stdin.write(data)
+                self.proc.stdin.flush()
+                if self.log_stdin:
+                    line_buf += data
+                    while b"\n" in line_buf:
+                        line, line_buf = line_buf.split(b"\n", 1)
+                        self.write_output(line + b"\n")
+        except (OSError, BrokenPipeError, ValueError) as e:
+            logging.info("client #%d reader error: %s", cid, e)
+        # Flush any remaining buffered data (incomplete line).
+        if self.log_stdin and line_buf:
+            self.write_output(line_buf)
+        if close_stdin:
+            if self.stdin_closed:
+                logging.warning("client #%d requested stdin close but stdin already closed", cid)
+            else:
+                self.stdin_closed = True
+                logging.info("client #%d requested stdin close", cid)
+                try:
+                    self.proc.stdin.close()
+                except OSError:
+                    pass
+        else:
+            with self.client_lock:
+                if self.client_conn is c:
+                    self.client_conn = None
+                    logging.info("client #%d disconnected reason=client_eof", cid)
+            try:
+                c.close()
+            except OSError:
+                pass
+
+
+def serve(cmd_args, work_dir, log_stdin=True, strip_env=()):
     """Start the relay server as a daemon, then attach as the first client.
 
     Architecture:
@@ -113,6 +379,9 @@ def serve(cmd_args, work_dir, log_stdin=True):
       log_stdin: When False, client_reader forwards stdin to the subprocess
         but does NOT write it to output.jsonl. This keeps the log clean for
         protocols like JSON-RPC where stdin contains handshake/request noise.
+      strip_env: List of environment variable names to strip from the
+        subprocess environment. Stripped values are emitted as a
+        caic_stripped_env event after the first subprocess output.
 
     Failure modes handled:
       - SSH drops: client disconnects, subprocess keeps running. Next
@@ -172,16 +441,15 @@ def serve(cmd_args, work_dir, log_stdin=True):
     logging.info("relay daemon started pid=%d cmd=%s cwd=%s", os.getpid(), cmd_args, work_dir)
     _start_time = time.monotonic()
 
-    # Start the subprocess in the working directory that contains the git
-    # repository so the harness (claude, gemini) picks up the right project.
-    #
-    # Strip ANTHROPIC_API_KEY so Claude Code uses OAuth (subscription) instead
-    # of API key billing. The key is typically set in the container for
-    # HTTP-based providers, not for the CLI. Only strip when OAuth is
-    # configured, so we don't break API-key-only setups.
+    # Strip requested env vars from the subprocess so it authenticates via
+    # OAuth. Stripped values are emitted as a caic_stripped_env event so the
+    # backend can re-inject them after auth completes.
     env = os.environ.copy()
-    if "ANTHROPIC_API_KEY" in env and _has_oauth():
-        del env["ANTHROPIC_API_KEY"]
+    pending_env = [k for k in strip_env if k in env]
+    stripped_vars = {k: env.pop(k) for k in pending_env}
+    if stripped_vars:
+        logging.info("stripped env vars: %s", pending_env)
+
     proc = subprocess.Popen(
         cmd_args,
         cwd=work_dir,
@@ -201,299 +469,25 @@ def serve(cmd_args, work_dir, log_stdin=True):
 
     threading.Thread(target=_drain_stderr, daemon=True).start()
 
-    # Open output log (append-only).
     output_file = open(OUTPUT_PATH, "ab", buffering=0)
+    env_event = b""
+    if stripped_vars:
+        env_event = (json.dumps({"type": "caic_stripped_env", "variables": stripped_vars}) + "\n").encode()
+    d = _Daemon(proc, output_file, work_dir, log_stdin, env_event)
 
-    # Lock protecting all output_file writes.  Three threads write to
-    # output_file (reader_thread, client_reader, diff_watcher_thread).
-    # Without the lock, large writes from client_reader (e.g. base64
-    # image data spanning multiple recv chunks) can be interleaved with
-    # subprocess stdout, corrupting NDJSON lines in the replay log.
-    output_lock = threading.Lock()
-
-    # Track connected client (at most one at a time).
-    client_lock = threading.Lock()
-    client_conn = [None]  # mutable ref in list
-    client_id = [0]  # monotonic client counter
-    stdin_closed = [False]  # True once proc.stdin has been closed
-
-    def set_client(conn, reason=""):
-        with client_lock:
-            old = client_conn[0]
-            client_conn[0] = conn
-            if old is not None:
-                logging.info("client #%d disconnected reason=%s", client_id[0], reason)
-                try:
-                    old.close()
-                except OSError:
-                    pass
-
-    def send_to_client(data):
-        with client_lock:
-            c = client_conn[0]
-            if c is None:
-                return
-            try:
-                c.sendall(data)
-            except (BrokenPipeError, ConnectionResetError, OSError):
-                client_conn[0] = None
-
-    # Event signalled by reader_thread on each stdout chunk to wake the diff
-    # watcher.  The watcher debounces (waits for a quiet period) and throttles
-    # (enforces a minimum interval) so git commands aren't run too often.
-    diff_activity = threading.Event()
-
-    # Thread: read subprocess stdout → log + forward to client.
-    def reader_thread():
-        try:
-            while True:
-                data = proc.stdout.read1(BUF_SIZE)
-                if not data:
-                    break
-                with output_lock:
-                    output_file.write(data)
-                    output_file.flush()
-                send_to_client(data)
-                diff_activity.set()
-        except (OSError, ValueError) as e:
-            logging.warning("reader_thread error: %s", e)
-        finally:
-            sz = output_file.tell() if not output_file.closed else -1
-            output_file.close()
-            # Process exited — close client.
-            set_client(None, "subprocess_eof")
-            # Wake diff watcher so it can exit.
-            diff_activity.set()
-            logging.info("reader_thread exited output_bytes=%d", sz)
-
-    t = threading.Thread(target=reader_thread, daemon=True)
-    t.start()
-
-    # Thread: run git diff --numstat on activity, with throttle + debounce.
-    # Uses a temporary index to include untracked files without mutating
-    # the real index (which the agent may be using concurrently).
-    #
-    # Diffs against "base" (the merge-base ref set by md start), not HEAD.
-    # HEAD only shows uncommitted changes, which becomes empty after the
-    # agent commits. "base" captures the full branch diff — committed and
-    # uncommitted — relative to the original branch point.
-    DIFF_THROTTLE = 10  # minimum seconds between diff runs
-    DIFF_DEBOUNCE = 2  # seconds of quiet before running diff
-
-    def diff_watcher_thread():
-        tmp_index = os.path.join(RELAY_DIR, "diff.index")
-        diff_env = {**os.environ, "GIT_INDEX_FILE": tmp_index}
-        prev_raw = None
-        last_run = 0.0
-        # Check if the "base" ref exists; fall back to HEAD if it doesn't
-        # (e.g. container created outside of md).
-        diff_ref = "base"
-        try:
-            cp = subprocess.run(
-                ["git", "rev-parse", "--verify", "base"],
-                cwd=work_dir,
-                capture_output=True,
-                timeout=5,
-            )
-            if cp.returncode != 0:
-                diff_ref = "HEAD"
-        except (subprocess.TimeoutExpired, OSError):
-            diff_ref = "HEAD"
-        while proc.poll() is None:
-            # Wait for activity signal.
-            if not diff_activity.wait(timeout=30):
-                continue
-            diff_activity.clear()
-            if proc.poll() is not None:
-                break
-            # Debounce: wait for quiet period (no new activity).
-            while True:
-                if diff_activity.wait(timeout=DIFF_DEBOUNCE):
-                    diff_activity.clear()
-                    if proc.poll() is not None:
-                        break
-                else:
-                    break  # quiet period elapsed
-            if proc.poll() is not None:
-                break
-            # Throttle: enforce minimum interval.
-            now = time.monotonic()
-            wait = DIFF_THROTTLE - (now - last_run)
-            if wait > 0:
-                time.sleep(wait)
-                if proc.poll() is not None:
-                    break
-            last_run = time.monotonic()
-            try:
-                subprocess.run(
-                    ["git", "read-tree", diff_ref],
-                    cwd=work_dir,
-                    env=diff_env,
-                    capture_output=True,
-                    timeout=5,
-                )
-                subprocess.run(
-                    ["git", "add", "--intent-to-add", "--all"],
-                    cwd=work_dir,
-                    env=diff_env,
-                    capture_output=True,
-                    timeout=5,
-                )
-                cp = subprocess.run(
-                    ["git", "diff", "--numstat", diff_ref],
-                    cwd=work_dir,
-                    env=diff_env,
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                raw = cp.stdout
-            except (subprocess.TimeoutExpired, OSError):
-                continue
-            if raw == prev_raw:
-                continue
-            prev_raw = raw
-            diff_stat = _parse_numstat(raw)
-            line = json.dumps({"type": "caic_diff_stat", "diff_stat": diff_stat, "ts": time.time()}) + "\n"
-            data = line.encode()
-            try:
-                with output_lock:
-                    output_file.write(data)
-                    output_file.flush()
-            except (OSError, ValueError):
-                pass
-            send_to_client(data)
-
-    dw = threading.Thread(target=diff_watcher_thread, daemon=True)
-    dw.start()
+    threading.Thread(target=d.reader_thread, daemon=True).start()
+    threading.Thread(target=d.diff_watcher_thread, daemon=True).start()
 
     # Listen on Unix socket for client connections.
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(SOCK_PATH)
     srv.listen(1)
-
-    # Thread: accept client connections.
-    def accept_thread():
-        while True:
-            try:
-                conn, _ = srv.accept()
-            except OSError:
-                break
-
-            # Read handshake: {"offset": N}\n
-            try:
-                hdr = _read_line(conn)
-                hs = json.loads(hdr)
-                offset = hs.get("offset", 0)
-            except (json.JSONDecodeError, OSError, ValueError):
-                conn.close()
-                continue
-
-            # Replay output from offset.
-            try:
-                with open(OUTPUT_PATH, "rb") as f:
-                    f.seek(offset)
-                    while True:
-                        chunk = f.read(BUF_SIZE)
-                        if not chunk:
-                            break
-                        conn.sendall(chunk)
-            except (OSError, BrokenPipeError):
-                conn.close()
-                continue
-
-            client_id[0] += 1
-            cid = client_id[0]
-            set_client(conn, "replaced")
-            logging.info(
-                "client #%d connected offset=%d stdin_closed=%s proc_alive=%s",
-                cid,
-                offset,
-                stdin_closed[0],
-                proc.poll() is None,
-            )
-
-            # Thread: read client stdin → subprocess stdin + log.
-            #
-            # User input is NDJSON: each message is a single JSON line ending
-            # with \n.  Large messages (e.g. base64 images) may span multiple
-            # recv() calls.  We buffer incoming data and only write complete
-            # lines to output_file (under output_lock) so that concurrent
-            # subprocess stdout writes can't interleave mid-line and corrupt
-            # the replay log.  Data is forwarded to proc.stdin immediately
-            # (the subprocess handles its own framing).
-            def client_reader(c, cid=cid):
-                close_stdin = False
-                line_buf = b""
-                try:
-                    while True:
-                        data = c.recv(BUF_SIZE)
-                        if not data:
-                            logging.info("client #%d recv returned empty (EOF/disconnect)", cid)
-                            break
-                        # A null byte signals the client wants proc.stdin closed
-                        # (graceful shutdown). Strip it and set the flag.
-                        if b"\x00" in data:
-                            data = data.replace(b"\x00", b"")
-                            close_stdin = True
-                            if data:
-                                proc.stdin.write(data)
-                                proc.stdin.flush()
-                                if log_stdin:
-                                    line_buf += data
-                            break
-                        proc.stdin.write(data)
-                        proc.stdin.flush()
-                        # Buffer data and write complete lines to output_file.
-                        if log_stdin:
-                            line_buf += data
-                            while b"\n" in line_buf:
-                                line, line_buf = line_buf.split(b"\n", 1)
-                                line += b"\n"
-                                with output_lock:
-                                    output_file.write(line)
-                                    output_file.flush()
-                except (OSError, BrokenPipeError, ValueError) as e:
-                    logging.info("client #%d reader error: %s", cid, e)
-                # Flush any remaining buffered data (incomplete line).
-                if log_stdin and line_buf:
-                    with output_lock:
-                        output_file.write(line_buf)
-                        output_file.flush()
-                if close_stdin:
-                    if stdin_closed[0]:
-                        logging.warning("client #%d requested stdin close but stdin already closed", cid)
-                    else:
-                        stdin_closed[0] = True
-                        logging.info("client #%d requested stdin close", cid)
-                        try:
-                            proc.stdin.close()
-                        except OSError:
-                            pass
-                else:
-                    # Client disconnected (SSH drop / stdin EOF) without
-                    # requesting shutdown. Release the client slot so the
-                    # attach_client's relay_to_stdout sees EOF and exits.
-                    with client_lock:
-                        if client_conn[0] is c:
-                            client_conn[0] = None
-                            logging.info("client #%d disconnected reason=client_eof", cid)
-                    try:
-                        c.close()
-                    except OSError:
-                        pass
-
-            ct = threading.Thread(target=client_reader, args=(conn,), daemon=True)
-            ct.start()
-
-    at = threading.Thread(target=accept_thread, daemon=True)
-    at.start()
+    threading.Thread(target=d.accept_thread, args=(srv,), daemon=True).start()
 
     # Wait for subprocess to exit.
     proc.wait()
     elapsed = time.monotonic() - _start_time
-    logging.info("subprocess exited code=%d stdin_closed=%s elapsed=%.0fs", proc.returncode, stdin_closed[0], elapsed)
-    t.join(timeout=5)
+    logging.info("subprocess exited code=%d stdin_closed=%s elapsed=%.0fs", proc.returncode, d.stdin_closed, elapsed)
 
     # Clean up.
     srv.close()
@@ -614,54 +608,34 @@ def read_plan(path):
         sys.stdout.write(f.read())
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("usage: relay.py serve-attach --dir <path> -- <cmd...>", file=sys.stderr)
-        print("       relay.py attach [--offset N]", file=sys.stderr)
-        print("       relay.py read-plan [path]", file=sys.stderr)
-        sys.exit(1)
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="relay.py")
+    sub = parser.add_subparsers(dest="mode")
 
-    mode = sys.argv[1]
+    sa = sub.add_parser("serve-attach")
+    sa.add_argument("--dir", required=True, dest="work_dir")
+    sa.add_argument("--no-log-stdin", action="store_true")
+    sa.add_argument("--strip-env", action="append", default=[], metavar="KEY")
+    sa.add_argument("cmd", nargs="+")
 
-    if mode == "serve-attach":
-        # Parse required --dir flag and optional --no-log-stdin.
-        rest = sys.argv[2:]
-        if len(rest) < 2 or rest[0] != "--dir":
-            print("relay.py serve-attach: --dir <path> is required", file=sys.stderr)
-            sys.exit(1)
-        work_dir = rest[1]
-        rest = rest[2:]
-        log_stdin = True
-        if rest and rest[0] == "--no-log-stdin":
-            log_stdin = False
-            rest = rest[1:]
-        # Find "--" separator.
-        try:
-            sep = rest.index("--")
-        except ValueError:
-            print("relay.py serve-attach: missing '--' separator", file=sys.stderr)
-            sys.exit(1)
-        cmd_args = rest[sep + 1 :]
-        if not cmd_args:
-            print("relay.py serve-attach: no command after '--'", file=sys.stderr)
-            sys.exit(1)
-        serve(cmd_args, work_dir, log_stdin=log_stdin)
+    at = sub.add_parser("attach")
+    at.add_argument("--offset", type=int, default=0)
 
-    elif mode == "attach":
-        offset = 0
-        if "--offset" in sys.argv:
-            idx = sys.argv.index("--offset")
-            if idx + 1 < len(sys.argv):
-                offset = int(sys.argv[idx + 1])
-        attach_client(offset)
+    rp = sub.add_parser("read-plan")
+    rp.add_argument("path", nargs="?")
 
-    elif mode == "read-plan":
-        read_plan(sys.argv[2] if len(sys.argv) > 2 else None)
-
+    args = parser.parse_args()
+    if args.mode == "serve-attach":
+        serve(args.cmd, args.work_dir, log_stdin=not args.no_log_stdin, strip_env=args.strip_env)
+    elif args.mode == "attach":
+        attach_client(args.offset)
+    elif args.mode == "read-plan":
+        read_plan(args.path)
     else:
-        print(f"relay.py: unknown mode {mode!r}", file=sys.stderr)
-        sys.exit(1)
+        parser.print_help(sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

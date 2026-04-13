@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"os"
 	"strings"
 	"testing"
 
@@ -106,31 +105,85 @@ func TestWritePrompt(t *testing.T) {
 	})
 }
 
-func TestStart(t *testing.T) {
-	t.Run("EnvVarInjection", func(t *testing.T) {
-		// Verify that the InputUpdateEnvVarsMsg message produced by Start
-		// round-trips correctly through JSON.
-		key := "sk-ant-test-key"
-		t.Setenv("ANTHROPIC_API_KEY", key)
+// fakeConn is a test double for agent.Conn that records SendRaw calls and
+// feeds pre-canned messages through ReadMessages.
+type fakeConn struct {
+	agent.Conn // embed to satisfy interface; unused methods will panic
+	messages   []agent.Message
+	sent       [][]byte
+}
 
-		msg := cc.InputUpdateEnvVarsMsg{
-			Type:      cc.InputUpdateEnvVars,
-			Variables: map[string]string{"ANTHROPIC_API_KEY": os.Getenv("ANTHROPIC_API_KEY")},
+func (f *fakeConn) SendRaw(data []byte) error {
+	f.sent = append(f.sent, append([]byte(nil), data...))
+	return nil
+}
+
+func (f *fakeConn) ReadMessages(_ io.Reader, msgCh chan<- agent.Message) (*agent.ResultMessage, error) {
+	for _, m := range f.messages {
+		msgCh <- m
+	}
+	return &agent.ResultMessage{}, nil
+}
+
+func TestEnvInjectorConn(t *testing.T) {
+	t.Run("InjectsOnStrippedEnv", func(t *testing.T) {
+		key := "sk-ant-container-key"
+		inner := &fakeConn{
+			// The relay emits caic_stripped_env after system/init.
+			messages: []agent.Message{
+				&agent.InitMessage{SessionID: "sess-1", Model: "opus"},
+				&agent.StrippedEnvMessage{
+					MessageType: "caic_stripped_env",
+					Variables:   map[string]string{"ANTHROPIC_API_KEY": key},
+				},
+				&agent.TextMessage{Text: "hello"},
+			},
 		}
-		data, err := json.Marshal(msg)
-		if err != nil {
-			t.Fatal(err)
+		c := &envInjectorConn{Conn: inner}
+
+		msgCh := make(chan agent.Message, 10)
+		_, _ = c.ReadMessages(nil, msgCh)
+		close(msgCh)
+		var forwarded []agent.Message
+		for m := range msgCh {
+			forwarded = append(forwarded, m)
 		}
 
+		// StrippedEnvMessage must not be forwarded.
+		for _, m := range forwarded {
+			if _, ok := m.(*agent.StrippedEnvMessage); ok {
+				t.Error("StrippedEnvMessage was forwarded to consumer")
+			}
+		}
+
+		// SendRaw must have been called once with the correct key.
+		if len(inner.sent) != 1 {
+			t.Fatalf("SendRaw called %d times, want 1", len(inner.sent))
+		}
 		var got cc.InputUpdateEnvVarsMsg
-		if err := json.Unmarshal(data, &got); err != nil {
+		if err := json.Unmarshal(bytes.TrimSpace(inner.sent[0]), &got); err != nil {
 			t.Fatal(err)
-		}
-		if got.Type != cc.InputUpdateEnvVars {
-			t.Errorf("type = %q, want %q", got.Type, cc.InputUpdateEnvVars)
 		}
 		if got.Variables["ANTHROPIC_API_KEY"] != key {
-			t.Errorf("ANTHROPIC_API_KEY = %q, want %q", got.Variables["ANTHROPIC_API_KEY"], key)
+			t.Errorf("injected key = %q, want %q", got.Variables["ANTHROPIC_API_KEY"], key)
+		}
+	})
+
+	t.Run("NoStrippedEnv", func(t *testing.T) {
+		// When no StrippedEnvMessage arrives, no injection occurs.
+		inner := &fakeConn{
+			messages: []agent.Message{
+				&agent.InitMessage{SessionID: "sess-2", Model: "sonnet"},
+			},
+		}
+		c := &envInjectorConn{Conn: inner}
+		msgCh := make(chan agent.Message, 10)
+		_, _ = c.ReadMessages(nil, msgCh)
+		close(msgCh)
+		for range msgCh {
+		}
+		if len(inner.sent) != 0 {
+			t.Errorf("SendRaw called %d times, want 0", len(inner.sent))
 		}
 	})
 }

@@ -4,11 +4,12 @@ package claudecode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
-	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
@@ -20,8 +21,6 @@ type Backend struct {
 	agent.Base
 	widgetTracker *WidgetTracker
 	fieldWarner   *jsonutil.FieldWarner
-
-	envVarPayload []byte // Pre-marshaled InputUpdateEnvVars NDJSON; nil when no API key.
 }
 
 // ParseMessage wraps ParseMessage with widget tracking for streaming deltas.
@@ -50,18 +49,6 @@ func New() *Backend {
 		ContextWindow: 180_000,
 	}
 	b.Wire = b
-	// Pre-marshal the env var injection payload for OnSessionInit. The relay
-	// strips ANTHROPIC_API_KEY when OAuth is configured so Claude Code
-	// authenticates via OAuth; OnSessionInit re-injects it after the first
-	// message confirms auth is complete.
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		envMsg, _ := json.Marshal(cc.InputUpdateEnvVarsMsg{
-			Type:      cc.InputUpdateEnvVars,
-			Variables: map[string]string{"ANTHROPIC_API_KEY": key},
-		})
-		envMsg = append(envMsg, '\n')
-		b.envVarPayload = envMsg
-	}
 	return b
 }
 
@@ -79,14 +66,15 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err := agent.DeployEmbeddedDir(ctx, opts.Container, pluginFS, agent.WidgetPluginDir); err != nil {
 		return nil, err
 	}
+	if hasOAuth() {
+		opts.StripEnv = []string{"ANTHROPIC_API_KEY"}
+	}
 	rp, err := agent.PrepareRelay(ctx, opts, buildArgs(opts))
 	if err != nil {
 		return nil, err
 	}
 	c := agent.NewConn(rp.Stdin, opts.LogW, b)
-	if b.envVarPayload != nil {
-		c = &envInjectorConn{Conn: c, payload: b.envVarPayload}
-	}
+	c = &envInjectorConn{Conn: c}
 	return agent.StartSession(rp, c, opts)
 }
 
@@ -143,36 +131,64 @@ func (b *Backend) WriteCompact(w io.Writer, instructions string, logW io.Writer)
 	return b.WritePrompt(w, agent.Prompt{Text: text}, logW)
 }
 
-// envInjectorConn wraps a Conn to inject ANTHROPIC_API_KEY via
-// InputUpdateEnvVars before dispatching the first message. The relay strips
-// the key when OAuth is configured so Claude Code authenticates via OAuth;
-// re-injecting it after the first message confirms auth is complete lets
-// tools and MCP servers use the key without affecting billing.
+// envInjectorConn wraps a Conn to re-inject environment variables that the
+// relay stripped for OAuth authentication. The relay emits a
+// caic_stripped_env event after the first subprocess output (system/init)
+// which confirms auth succeeded. This conn intercepts the event and
+// immediately sends an InputUpdateEnvVars message so tools and MCP servers
+// can use the key.
 type envInjectorConn struct {
 	agent.Conn
-	payload []byte
 }
 
 func (c *envInjectorConn) ReadMessages(r io.Reader, msgCh chan<- agent.Message) (*agent.ResultMessage, error) {
 	proxy := make(chan agent.Message, 1)
-	done := make(chan struct{})
+	errc := make(chan error, 1)
 	go func() {
-		defer close(done)
-		first := true
+		defer close(errc)
 		for m := range proxy {
-			if first {
-				first = false
-				if err := c.SendRaw(c.payload); err != nil {
-					slog.Warn("inject ANTHROPIC_API_KEY", "err", err)
+			if v, ok := m.(*agent.StrippedEnvMessage); ok {
+				payload, err := json.Marshal(cc.InputUpdateEnvVarsMsg{
+					Type:      cc.InputUpdateEnvVars,
+					Variables: v.Variables,
+				})
+				if err != nil {
+					errc <- fmt.Errorf("marshal InputUpdateEnvVars: %w", err)
+					return
 				}
+				payload = append(payload, '\n')
+				if err := c.SendRaw(payload); err != nil {
+					errc <- fmt.Errorf("inject stripped env vars: %w", err)
+					return
+				}
+				continue // Don't forward to consumer.
 			}
 			msgCh <- m
 		}
 	}()
 	result, err := c.Conn.ReadMessages(r, proxy)
 	close(proxy)
-	<-done
+	if injErr := <-errc; injErr != nil {
+		return result, errors.Join(err, injErr)
+	}
 	return result, err
+}
+
+// hasOAuth reports whether Claude Code has an OAuth session configured
+// in ~/.claude/claude.json. When true, ANTHROPIC_API_KEY should be
+// stripped so Claude Code authenticates via OAuth instead of API key.
+func hasOAuth() bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".claude", "claude.json")) //nolint:gosec // Path components are hardcoded.
+	if err != nil {
+		return false
+	}
+	// Quick key check avoids unmarshaling the full config.
+	var m map[string]json.RawMessage
+	return json.Unmarshal(data, &m) == nil && m["oauthAccount"] != nil
 }
 
 // buildArgs constructs the Claude Code CLI arguments.
