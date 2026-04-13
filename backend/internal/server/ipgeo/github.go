@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+
+	"github.com/maruel/roundtrippers"
 )
 
 // githubMetaResponse is the minimal shape of https://api.github.com/meta.
@@ -25,12 +27,15 @@ func fetchGitHubHookCIDRs(ctx context.Context) ([]netip.Prefix, error) {
 }
 
 func fetchGitHubHookCIDRsFrom(ctx context.Context, url string) ([]netip.Prefix, error) {
+	client := &http.Client{
+		Transport: &roundtrippers.Retry{Transport: http.DefaultTransport},
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
