@@ -27,7 +27,7 @@ type testBackend struct {
 
 func (b *testBackend) Harness() agent.Harness { return "test" }
 
-func (b *testBackend) Start(ctx context.Context, _ *agent.Options, msgCh chan<- agent.Message, _ io.Writer) (*agent.Session, error) {
+func (b *testBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	b.capturedCtx = ctx
 	cmd := exec.CommandContext(ctx, "cat")
 	stdin, _ := cmd.StdinPipe()
@@ -35,10 +35,10 @@ func (b *testBackend) Start(ctx context.Context, _ *agent.Options, msgCh chan<- 
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, stdin, stdout, agent.ChanDispatch(msgCh), nil, &testWire{parse: claudecode.New().NewParser()}, nil), nil
+	return agent.NewSession(cmd, stdin, stdout, opts.Dispatch, opts.LogW, &testWire{parse: claudecode.New().NewParser()}, nil), nil
 }
 
-func (b *testBackend) AttachRelay(context.Context, *agent.Options, chan<- agent.Message, io.Writer) (*agent.Session, error) {
+func (b *testBackend) AttachRelay(context.Context, *agent.Options) (*agent.Session, error) {
 	return nil, errors.New("test backend does not support relay")
 }
 
@@ -697,7 +697,7 @@ func TestRunner(t *testing.T) {
 			t.Fatal(err)
 		}
 		msgCh := make(chan agent.Message, 16)
-		session, err := backend.Start(t.Context(), nil, msgCh, logW)
+		session, err := backend.Start(t.Context(), &agent.Options{Dispatch: agent.ChanDispatch(msgCh), LogW: logW})
 		if err != nil {
 			t.Fatal(err)
 		}

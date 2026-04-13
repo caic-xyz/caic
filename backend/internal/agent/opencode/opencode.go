@@ -58,7 +58,7 @@ func (b *Backend) Models() []string {
 // Start launches an OpenCode ACP process via the relay daemon in the given
 // container. It performs the JSON-RPC handshake (initialize → session/new)
 // before returning a Session.
-func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
+func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	if opts.Dir == "" {
 		return nil, errors.New("opts.Dir is required")
 	}
@@ -104,7 +104,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	}
 
 	log := slog.With("ctr", opts.Container)
-	s := agent.NewSession(cmd, stdin, br, agent.ChanDispatch(msgCh), logW, hs.wire, log)
+	s := agent.NewSession(cmd, stdin, br, opts.Dispatch, opts.LogW, hs.wire, log)
 
 	// Emit InitMessage so the task captures session ID, model, and version.
 	initMsg := &agent.InitMessage{
@@ -112,18 +112,20 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 		Model:     hs.currentModel,
 		Version:   hs.agentVersion,
 	}
-	msgCh <- initMsg
+	opts.Dispatch(initMsg)
 	// Persist a synthetic caic_init line to output.jsonl so replay
 	// reconstructs the InitMessage (handshake responses aren't logged).
-	if logW != nil {
-		if data, err := json.Marshal(caicInit{
-			Type:      "caic_init",
-			SessionID: initMsg.SessionID,
-			Model:     initMsg.Model,
-			Version:   initMsg.Version,
-		}); err == nil {
-			_, _ = logW.Write(append(data, '\n'))
-		}
+	data, err := json.Marshal(caicInit{
+		Type:      "caic_init",
+		SessionID: initMsg.SessionID,
+		Model:     initMsg.Model,
+		Version:   initMsg.Version,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal caic_init: %w", err)
+	}
+	if _, err := opts.LogW.Write(append(data, '\n')); err != nil {
+		return nil, fmt.Errorf("write log: %w", err)
 	}
 
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
@@ -142,9 +144,9 @@ func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agen
 }
 
 // AttachRelay connects to an already-running relay in the container.
-func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
+func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	wire := &wireFormat{sessionID: opts.ResumeSessionID, fw: &jsonutil.FieldWarner{}}
-	return agent.AttachRelaySession(ctx, opts.Container, opts.RelayOffset, agent.ChanDispatch(msgCh), logW, wire)
+	return agent.AttachRelaySession(ctx, opts, wire)
 }
 
 // caicInit is written to output.jsonl during handshake so replay can

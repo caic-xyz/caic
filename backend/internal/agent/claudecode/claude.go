@@ -57,7 +57,7 @@ var Wire agent.WireFormat = New()
 // Start launches a Claude Code process via the relay daemon. It deploys the
 // widget plugin to the container before starting the relay so Claude Code
 // picks up the show_widget MCP tool and the widget design skill.
-func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
+func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	pluginFS, err := fs.Sub(WidgetPlugin, "widget-plugin")
 	if err != nil {
 		return nil, fmt.Errorf("widget plugin fs: %w", err)
@@ -67,7 +67,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	}
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if apiKey == "" {
-		return agent.StartRelay(ctx, opts, buildArgs(opts), agent.ChanDispatch(msgCh), logW, b)
+		return agent.StartRelay(ctx, opts, buildArgs(opts), b)
 	}
 	// The relay strips ANTHROPIC_API_KEY when OAuth is configured so Claude
 	// Code authenticates via OAuth. Re-inject it via InputUpdateEnvVars after
@@ -83,17 +83,19 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	}
 	envMsg = append(envMsg, '\n')
 	var sess *agent.Session
+	startOpts := *opts
+	origDispatch := opts.Dispatch
 	first := true
-	dispatch := func(m agent.Message) {
+	startOpts.Dispatch = func(m agent.Message) {
 		if first {
 			first = false
 			if err := sess.SendRaw(envMsg); err != nil {
 				slog.Warn("inject ANTHROPIC_API_KEY", "err", err)
 			}
 		}
-		msgCh <- m
+		origDispatch(m)
 	}
-	sess, err = agent.StartRelay(ctx, opts, buildArgs(opts), dispatch, logW, b)
+	sess, err = agent.StartRelay(ctx, &startOpts, buildArgs(opts), b)
 	if err != nil {
 		return nil, err
 	}
@@ -129,10 +131,18 @@ func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	if logW != nil {
-		_, _ = logW.Write(data)
-	}
-	return nil
+	_, err = logW.Write(data)
+	return err
+}
+
+// AttachRelay implements agent.Backend.
+func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	return agent.AttachRelaySession(ctx, opts, b)
+}
+
+// ReadRelayOutput implements agent.Backend.
+func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agent.Message, int64, error) {
+	return agent.ReadRelayOutput(ctx, container, b.ParseMessage)
 }
 
 // WriteCompact implements agent.CompactCommand by sending /compact as a user

@@ -61,7 +61,9 @@ type Options struct {
 	Model           string // Model alias ("opus", "sonnet", "haiku") or full ID. Empty = default.
 	InitialPrompt   Prompt // Initial prompt; never mutated after creation.
 	ResumeSessionID string
-	RelayOffset     int64 // Byte offset into relay output.jsonl for AttachRelay.
+	RelayOffset     int64         // Byte offset into relay output.jsonl for AttachRelay.
+	Dispatch        func(Message) // Receives parsed messages from the agent.
+	LogW            io.Writer     // Raw wire-format log; use io.Discard if unused.
 }
 
 // WireFormat defines the wire protocol for a backend's stdin/stdout
@@ -69,7 +71,7 @@ type Options struct {
 // for the same protocol.
 type WireFormat interface {
 	// WritePrompt writes a user prompt to the agent's stdin in the
-	// backend's wire format. logW receives a copy (may be nil).
+	// backend's wire format. logW receives a copy.
 	WritePrompt(w io.Writer, p Prompt, logW io.Writer) error
 
 	// ParseMessage decodes a single NDJSON line into one or more typed
@@ -105,7 +107,7 @@ func ChanDispatch(ch chan<- Message) func(Message) {
 
 // NewSession creates a Session from an already-started command. Messages read
 // from stdout are parsed and forwarded via dispatch. logW receives raw NDJSON
-// lines (may be nil). wire defines the backend's wire protocol.
+// lines. wire defines the backend's wire protocol.
 //
 // A background goroutine reads stdout until EOF, then waits for the process to
 // exit. The done channel is closed when both are complete. Callers should use
@@ -174,10 +176,8 @@ func (s *Session) SendRaw(data []byte) error {
 	if _, err := s.stdin.Write(data); err != nil {
 		return err
 	}
-	if s.logW != nil {
-		_, _ = s.logW.Write(data)
-	}
-	return nil
+	_, err := s.logW.Write(data)
+	return err
 }
 
 // SendCompact sends a compact command to the agent. Returns an error if the
@@ -229,8 +229,8 @@ func (s *Session) Wait() (*ResultMessage, error) {
 }
 
 // readMessages reads NDJSON lines from r, forwards parsed messages via
-// dispatch, and returns the terminal ResultMessage. If logW is non-nil, each
-// raw line is written to it.
+// dispatch, and returns the terminal ResultMessage. Each raw line is also
+// written to logW.
 func readMessages(r io.Reader, dispatch func(Message), logW io.Writer, parseFn func([]byte) ([]Message, error)) (*ResultMessage, error) {
 	scanner := bufio.NewScanner(r)
 	// 32 MiB max line: user input with base64 images can produce very long NDJSON lines.
@@ -245,9 +245,11 @@ func readMessages(r io.Reader, dispatch func(Message), logW io.Writer, parseFn f
 			continue
 		}
 		n++
-		if logW != nil {
-			_, _ = logW.Write(line)
-			_, _ = logW.Write([]byte{'\n'})
+		if _, err := logW.Write(line); err != nil {
+			return result, fmt.Errorf("write log: %w", err)
+		}
+		if _, err := logW.Write([]byte{'\n'}); err != nil {
+			return result, fmt.Errorf("write log: %w", err)
 		}
 		msgs, err := parseFn(line)
 		if err != nil {
@@ -442,9 +444,9 @@ func (w *SlogWriter) Write(p []byte) (int, error) {
 }
 
 // StartRelay deploys the relay, launches an agent via relay serve-attach with
-// the given CLI args, and sends the initial prompt. dispatch receives parsed
-// messages; use ChanDispatch to bridge a channel.
-func StartRelay(ctx context.Context, opts *Options, agentArgs []string, dispatch func(Message), logW io.Writer, wire WireFormat) (*Session, error) {
+// the given CLI args, and sends the initial prompt. opts.Dispatch receives
+// parsed messages; opts.LogW receives raw wire lines.
+func StartRelay(ctx context.Context, opts *Options, agentArgs []string, wire WireFormat) (*Session, error) {
 	if opts.Dir == "" {
 		return nil, errors.New("opts.Dir is required")
 	}
@@ -475,7 +477,7 @@ func StartRelay(ctx context.Context, opts *Options, agentArgs []string, dispatch
 	slog.Info("startup", "phase", "relay_started", "ctr", opts.Container, "dur", time.Since(tStart))
 
 	log := slog.With("ctr", opts.Container)
-	s := NewSession(cmd, stdin, stdout, dispatch, logW, wire, log)
+	s := NewSession(cmd, stdin, stdout, opts.Dispatch, opts.LogW, wire, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.Send(opts.InitialPrompt); err != nil {
 			s.Close()
@@ -516,10 +518,10 @@ func ReadRelayOutput(ctx context.Context, container string, parseFn func([]byte)
 // and returns a new Session. It waits briefly for the attach process to
 // confirm connectivity; if the process exits immediately (e.g. relay socket
 // is stale), an error is returned so the caller can fall back to --resume.
-func AttachRelaySession(ctx context.Context, container string, offset int64, dispatch func(Message), logW io.Writer, wire WireFormat) (*Session, error) {
+func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat) (*Session, error) {
 	sshArgs := []string{
-		container, "python3", RelayScriptPath, "attach",
-		"--offset", strconv.FormatInt(offset, 10),
+		opts.Container, "python3", RelayScriptPath, "attach",
+		"--offset", strconv.FormatInt(opts.RelayOffset, 10),
 	}
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
 	stdin, err := cmd.StdinPipe()
@@ -530,13 +532,13 @@ func AttachRelaySession(ctx context.Context, container string, offset int64, dis
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = &SlogWriter{Prefix: "relay attach", Container: container}
+	cmd.Stderr = &SlogWriter{Prefix: "relay attach", Container: opts.Container}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("attach relay: %w", err)
 	}
 
-	log := slog.With("ctr", container)
-	return NewSession(cmd, stdin, stdout, dispatch, logW, wire, log), nil
+	log := slog.With("ctr", opts.Container)
+	return NewSession(cmd, stdin, stdout, opts.Dispatch, opts.LogW, wire, log), nil
 }
 
 // PlainTextWritePrompt writes a user prompt as a plain text line on stdin
@@ -547,14 +549,12 @@ func PlainTextWritePrompt(w io.Writer, p Prompt, logW io.Writer) error {
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	if logW != nil {
-		entry, _ := json.Marshal(map[string]string{
-			"type":    "user_input",
-			"content": p.Text,
-		})
-		_, _ = logW.Write(append(entry, '\n'))
-	}
-	return nil
+	entry, _ := json.Marshal(map[string]string{
+		"type":    "user_input",
+		"content": p.Text,
+	})
+	_, err := logW.Write(append(entry, '\n'))
+	return err
 }
 
 // isSignalExit reports whether err indicates the process was killed by a

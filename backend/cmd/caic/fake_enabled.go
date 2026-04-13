@@ -164,7 +164,7 @@ var _ agent.Backend = (*fakeBackend)(nil)
 
 func (*fakeBackend) Harness() agent.Harness { return "fake" }
 
-func (*fakeBackend) Start(_ context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
+func (*fakeBackend) Start(_ context.Context, opts *agent.Options) (*agent.Session, error) {
 	cmd := exec.Command("python3", "-u", "-c", string(fake.Script)) //nolint:gosec // fake.Script is an embedded constant
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -178,7 +178,7 @@ func (*fakeBackend) Start(_ context.Context, opts *agent.Options, msgCh chan<- a
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	s := agent.NewSession(cmd, stdin, stdout, agent.ChanDispatch(msgCh), logW, claudecode.Wire, nil)
+	s := agent.NewSession(cmd, stdin, stdout, opts.Dispatch, opts.LogW, claudecode.Wire, nil)
 	if opts.InitialPrompt.Text != "" {
 		if err := s.Send(opts.InitialPrompt); err != nil {
 			s.Close()
@@ -188,7 +188,7 @@ func (*fakeBackend) Start(_ context.Context, opts *agent.Options, msgCh chan<- a
 	return s, nil
 }
 
-func (*fakeBackend) AttachRelay(context.Context, *agent.Options, chan<- agent.Message, io.Writer) (*agent.Session, error) {
+func (*fakeBackend) AttachRelay(context.Context, *agent.Options) (*agent.Session, error) {
 	return nil, errors.New("fake backend does not support relay")
 }
 

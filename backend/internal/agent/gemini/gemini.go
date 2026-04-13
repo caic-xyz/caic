@@ -43,8 +43,18 @@ func (b *Backend) ParseMessage(line []byte) ([]agent.Message, error) {
 }
 
 // Start launches a Gemini CLI process via the relay daemon.
-func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
-	return agent.StartRelay(ctx, opts, buildArgs(opts), agent.ChanDispatch(msgCh), logW, b)
+func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	return agent.StartRelay(ctx, opts, buildArgs(opts), b)
+}
+
+// AttachRelay implements agent.Backend.
+func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	return agent.AttachRelaySession(ctx, opts, b)
+}
+
+// ReadRelayOutput implements agent.Backend.
+func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agent.Message, int64, error) {
+	return agent.ReadRelayOutput(ctx, container, b.ParseMessage)
 }
 
 // WritePrompt writes a single user message to Gemini CLI's stdin.

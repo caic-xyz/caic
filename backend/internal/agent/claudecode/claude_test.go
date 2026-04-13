@@ -3,6 +3,7 @@ package claudecode
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -33,7 +34,7 @@ func TestWritePrompt(t *testing.T) {
 		images := []agent.ImageData{
 			{MediaType: "image/png", Data: "iVBOR..."},
 		}
-		if err := b.WritePrompt(&buf, agent.Prompt{Text: "describe this", Images: images}, nil); err != nil {
+		if err := b.WritePrompt(&buf, agent.Prompt{Text: "describe this", Images: images}, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		// Content must be an array of content blocks, not a string.
@@ -78,7 +79,7 @@ func TestWritePrompt(t *testing.T) {
 		images := []agent.ImageData{
 			{MediaType: "image/jpeg", Data: "/9j/..."},
 		}
-		if err := b.WritePrompt(&buf, agent.Prompt{Images: images}, nil); err != nil {
+		if err := b.WritePrompt(&buf, agent.Prompt{Images: images}, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 		var msg struct {

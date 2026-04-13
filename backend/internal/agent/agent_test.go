@@ -33,10 +33,8 @@ func (testWire) WritePrompt(w io.Writer, p Prompt, logW io.Writer) error {
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	if logW != nil {
-		_, _ = logW.Write(data)
-	}
-	return nil
+	_, err = logW.Write(data)
+	return err
 }
 
 // testParseFn is a minimal Claude-format parser for testing. It avoids
@@ -133,6 +131,7 @@ func TestSession(t *testing.T) {
 
 		s := &Session{
 			stdin: stdinW,
+			logW:  io.Discard,
 			wire:  testWire{},
 			done:  make(chan struct{}),
 		}
@@ -141,7 +140,7 @@ func TestSession(t *testing.T) {
 
 		go func() {
 			defer close(s.done)
-			result, parseErr := readMessages(stdoutR, ChanDispatch(msgCh), nil, testParseFn)
+			result, parseErr := readMessages(stdoutR, ChanDispatch(msgCh), io.Discard, testParseFn)
 			s.result = result
 			if parseErr != nil {
 				s.err = parseErr
@@ -256,6 +255,7 @@ func TestSession(t *testing.T) {
 		go func() { _, _ = io.Copy(io.Discard, stdinR) }()
 		s := &Session{
 			stdin: stdinW,
+			logW:  io.Discard,
 			wire:  testWire{},
 			done:  make(chan struct{}),
 		}
@@ -282,7 +282,7 @@ func TestSession(t *testing.T) {
 		defer slog.SetDefault(oldDefault)
 
 		msgCh := make(chan Message, 16)
-		s := NewSession(cmd, stdin, stdout, ChanDispatch(msgCh), nil, testWire{}, nil)
+		s := NewSession(cmd, stdin, stdout, ChanDispatch(msgCh), io.Discard, testWire{}, nil)
 
 		if err := cmd.Process.Kill(); err != nil {
 			t.Fatal(err)
@@ -313,7 +313,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n")
 
 		ch := make(chan Message, 16)
-		result, err := readMessages(strings.NewReader(input), ChanDispatch(ch), nil, testParseFn)
+		result, err := readMessages(strings.NewReader(input), ChanDispatch(ch), io.Discard, testParseFn)
 		close(ch)
 		if err != nil {
 			t.Fatal(err)
@@ -345,7 +345,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n")
 
 		ch := make(chan Message, 16)
-		result, err := readMessages(strings.NewReader(input), ChanDispatch(ch), nil, testParseFn)
+		result, err := readMessages(strings.NewReader(input), ChanDispatch(ch), io.Discard, testParseFn)
 		close(ch)
 		if err != nil {
 			t.Fatal(err)

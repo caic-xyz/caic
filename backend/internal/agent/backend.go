@@ -1,26 +1,22 @@
 package agent
 
-import (
-	"context"
-	"io"
-)
+import "context"
 
 // Backend launches and communicates with a coding agent process.
 // Each implementation translates its native wire format into the shared
 // Message types so the rest of the system (task, eventconv, SSE, frontend)
 // remains agent-agnostic.
 type Backend interface {
-	// Start launches the agent in the given container. Messages are emitted
-	// to msgCh as normalized agent.Message values. logW receives raw
-	// wire-format lines for debugging/replay.
-	Start(ctx context.Context, opts *Options, msgCh chan<- Message, logW io.Writer) (*Session, error)
+	// Start launches the agent in the given container. Parsed messages are
+	// forwarded via opts.Dispatch; opts.LogW receives raw wire-format lines.
+	Start(ctx context.Context, opts *Options) (*Session, error)
 
 	// AttachRelay connects to an already-running relay daemon in the
 	// container. opts.RelayOffset specifies the byte offset into
 	// output.jsonl to replay from (use 0 for full replay).
 	// opts.ResumeSessionID is the known agent session ID, used by stateful
 	// wire formats (e.g. codex) that need it before the first replay message.
-	AttachRelay(ctx context.Context, opts *Options, msgCh chan<- Message, logW io.Writer) (*Session, error)
+	AttachRelay(ctx context.Context, opts *Options) (*Session, error)
 
 	// ReadRelayOutput reads the complete output.jsonl from the container's
 	// relay and parses it into Messages. Also returns the byte count for
@@ -48,15 +44,16 @@ type Backend interface {
 	NewParser() func([]byte) ([]Message, error)
 }
 
-// Base provides default implementations for most Backend methods. Embed it in
-// backend-specific types to inherit the boilerplate. Each backend must provide
-// its own Start method.
+// Base provides default implementations for metadata-only Backend methods.
+// Embed it in backend-specific types to inherit the boilerplate. Each backend
+// must implement Start, AttachRelay, and ReadRelayOutput itself using the
+// package-level helpers (StartRelay, AttachRelaySession, ReadRelayOutput).
 type Base struct {
 	HarnessID     Harness
 	ModelList     []string
 	Images        bool
 	ContextWindow int
-	Wire          WireFormat // Used by StartRelay, AttachRelay, ReadRelayOutput.
+	Wire          WireFormat // Used by SupportsCompact.
 }
 
 // Harness implements Backend.
@@ -76,13 +73,3 @@ func (b *Base) SupportsCompact() bool {
 
 // ContextWindowLimit implements Backend.
 func (b *Base) ContextWindowLimit(string) int { return b.ContextWindow }
-
-// ReadRelayOutput implements Backend using Wire.ParseMessage.
-func (b *Base) ReadRelayOutput(ctx context.Context, container string) ([]Message, int64, error) {
-	return ReadRelayOutput(ctx, container, b.Wire.ParseMessage)
-}
-
-// AttachRelay implements Backend.
-func (b *Base) AttachRelay(ctx context.Context, opts *Options, msgCh chan<- Message, logW io.Writer) (*Session, error) {
-	return AttachRelaySession(ctx, opts.Container, opts.RelayOffset, ChanDispatch(msgCh), logW, b.Wire)
-}

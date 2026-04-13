@@ -250,7 +250,9 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 		Container:       t.Container,
 		RelayOffset:     t.RelayOffset,
 		ResumeSessionID: t.GetSessionID(),
-	}, msgCh, logW)
+		Dispatch:        agent.ChanDispatch(msgCh),
+		LogW:            logW,
+	})
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)
@@ -322,7 +324,9 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 		Dir:           r.containerDir(),
 		Model:         t.Model,
 		InitialPrompt: t.InitialPrompt,
-	}, msgCh, logW)
+		Dispatch:      agent.ChanDispatch(msgCh),
+		LogW:          logW,
+	})
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)
@@ -553,7 +557,9 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 		Dir:             r.containerDir(),
 		Model:           t.Model,
 		ResumeSessionID: t.GetSessionID(),
-	}, msgCh, logW)
+		Dispatch:        agent.ChanDispatch(msgCh),
+		LogW:            logW,
+	})
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)
@@ -640,7 +646,9 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 		Dir:           r.containerDir(),
 		Model:         t.Model,
 		InitialPrompt: prompt,
-	}, msgCh, logW)
+		Dispatch:      agent.ChanDispatch(msgCh),
+		LogW:          logW,
+	})
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)
@@ -990,7 +998,9 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 		Dir:           r.containerDir(),
 		Model:         t.Model,
 		InitialPrompt: prompt,
-	}, msgCh, logW)
+		Dispatch:      agent.ChanDispatch(msgCh),
+		LogW:          logW,
+	})
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)
@@ -1057,7 +1067,9 @@ func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHand
 		Container: t.Container,
 		Dir:       r.containerDir(),
 		Model:     t.Model,
-	}, msgCh, logW)
+		Dispatch:  agent.ChanDispatch(msgCh),
+		LogW:      logW,
+	})
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)

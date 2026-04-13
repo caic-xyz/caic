@@ -61,7 +61,7 @@ func (b *Backend) Models() []string {
 // Start launches a Codex CLI app-server process via the relay daemon in the
 // given container. It performs the JSON-RPC handshake (initialize →
 // initialized → thread/start) before returning a Session.
-func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
+func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	if opts.Dir == "" {
 		return nil, errors.New("opts.Dir is required")
 	}
@@ -112,7 +112,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- a
 	}
 
 	log := slog.With("container", opts.Container)
-	s := agent.NewSession(cmd, stdin, br, agent.ChanDispatch(msgCh), logW, wire, log)
+	s := agent.NewSession(cmd, stdin, br, opts.Dispatch, opts.LogW, wire, log)
 	if opts.InitialPrompt.Text != "" {
 		if err := s.Send(opts.InitialPrompt); err != nil {
 			s.Close()
@@ -131,12 +131,12 @@ func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agen
 // AttachRelay connects to an already-running relay in the container.
 // opts.ResumeSessionID is used to pre-populate the thread ID so that
 // WritePrompt works immediately without waiting for thread/started replay.
-func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
+func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	// Pre-populate thread ID from the known session so WritePrompt works
 	// immediately. wireFormat.process() will update it again if thread/started
 	// appears in the replayed output.
 	wire := &wireFormat{threadID: opts.ResumeSessionID, fw: &jsonutil.FieldWarner{}}
-	return agent.AttachRelaySession(ctx, opts.Container, opts.RelayOffset, agent.ChanDispatch(msgCh), logW, wire)
+	return agent.AttachRelaySession(ctx, opts, wire)
 }
 
 // wireFormat implements agent.WireFormat for the codex app-server JSON-RPC

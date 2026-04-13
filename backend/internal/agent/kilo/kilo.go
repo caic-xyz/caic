@@ -77,17 +77,17 @@ func (b *Backend) SetModels(models []string) {
 
 // Start deploys relay and bridge scripts, then launches via relay serve-attach.
 // A fresh kiloWireFormat is used so per-session accumulators start at zero.
-func (b *Backend) Start(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
+func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	if err := deployBridge(ctx, opts.Container); err != nil {
 		return nil, err
 	}
-	return agent.StartRelay(ctx, opts, buildBridgeArgs(opts), agent.ChanDispatch(msgCh), logW, &kiloWireFormat{fw: &jsonutil.FieldWarner{}})
+	return agent.StartRelay(ctx, opts, buildBridgeArgs(opts), &kiloWireFormat{fw: &jsonutil.FieldWarner{}})
 }
 
 // AttachRelay connects to an already-running relay using a fresh kiloWireFormat
 // so that accumulated state from a prior session does not bleed in.
-func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options, msgCh chan<- agent.Message, logW io.Writer) (*agent.Session, error) {
-	return agent.AttachRelaySession(ctx, opts.Container, opts.RelayOffset, agent.ChanDispatch(msgCh), logW, &kiloWireFormat{fw: &jsonutil.FieldWarner{}})
+func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	return agent.AttachRelaySession(ctx, opts, &kiloWireFormat{fw: &jsonutil.FieldWarner{}})
 }
 
 // ReadRelayOutput reads output.jsonl using a fresh kiloWireFormat so that
