@@ -577,6 +577,8 @@ export interface Task {
   cumulativeCacheReadInputTokens: number /* int */;
   activeInputTokens: number /* int */; // Last turn's non-cached input tokens (including cache creation).
   activeCacheReadTokens: number /* int */; // Last turn's cache-read input tokens.
+  cacheTTLSeconds?: number /* int */; // Effective cache TTL from last API call (seconds); 0 = unknown.
+  cacheExpiresAt?: number /* float64 */; // Unix epoch seconds when the prompt cache expires; 0 = unknown.
   contextWindowLimit: number /* int */; // Model context window limit (tokens).
   error?: string;
   result?: string;

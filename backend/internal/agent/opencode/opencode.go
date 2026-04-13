@@ -313,12 +313,16 @@ func (w *wireFormat) handlePromptResponseLocked(line []byte) ([]agent.Message, e
 				rm.IsError = true
 				rm.Result = pr.StopReason
 			}
-			rm.Usage = agent.Usage{
-				InputTokens:              pr.Usage.InputTokens,
-				OutputTokens:             pr.Usage.OutputTokens,
-				CacheReadInputTokens:     pr.Usage.CachedReadTokens,
-				CacheCreationInputTokens: pr.Usage.CachedWriteTokens,
-				ReasoningOutputTokens:    pr.Usage.ThoughtTokens,
+			// OpenCode doesn't report cache TTL; default to 5 minutes.
+			if pr.Usage.InputTokens > 0 || pr.Usage.OutputTokens > 0 {
+				rm.Usage = agent.Usage{
+					InputTokens:              pr.Usage.InputTokens,
+					OutputTokens:             pr.Usage.OutputTokens,
+					CacheReadInputTokens:     pr.Usage.CachedReadTokens,
+					CacheCreationInputTokens: pr.Usage.CachedWriteTokens,
+					ReasoningOutputTokens:    pr.Usage.ThoughtTokens,
+					CacheTTLSeconds:          300,
+				}
 			}
 		}
 	}

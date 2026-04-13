@@ -286,6 +286,10 @@ public struct Task: Codable {
     public let activeInputTokens: Int
     /// Last turn's cache-read input tokens.
     public let activeCacheReadTokens: Int
+    /// Effective cache TTL from last API call (seconds); 0 = unknown.
+    public let cacheTTLSeconds: Int?
+    /// Unix epoch seconds when the prompt cache expires; 0 = unknown.
+    public let cacheExpiresAt: Double?
     /// Model context window limit (tokens).
     public let contextWindowLimit: Int
     public let error: String?

@@ -22,9 +22,9 @@ export function formatElapsed(ms: number): string {
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
+  if (m < 60) return s % 60 ? `${m}m ${s % 60}s` : `${m}m`;
   const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
+  return m % 60 ? `${h}h ${m % 60}m` : `${h}h`;
 }
 
 export function tokenColor(current: number, limit: number): string {
@@ -58,11 +58,9 @@ export function stateColor(state: string): string {
   }
 }
 
-const STALE_THRESHOLD_MS = 3_600_000; // 1 hour
-
-/** True when the last state change is older than 1 hour. */
-export function isCacheStale(stateUpdatedAtSec: number, nowMs: number): boolean {
-  return stateUpdatedAtSec > 0 && nowMs - stateUpdatedAtSec * 1000 > STALE_THRESHOLD_MS;
+/** True when the prompt cache has expired. Returns false when cacheExpiresAt is unset (no data from backend). */
+export function isCacheStale(nowMs: number, cacheExpiresAtSec?: number): boolean {
+  return cacheExpiresAtSec !== undefined && cacheExpiresAtSec > 0 && nowMs > cacheExpiresAtSec * 1000;
 }
 
 /** Blend a hex color toward a target hex by `amount` (0–1). */

@@ -38,12 +38,11 @@ fun staleStateColor(state: String): Color {
     )
 }
 
-private const val STALE_THRESHOLD_SEC = 3600.0
-
-/** True when the last state change is older than 1 hour. */
-fun isCacheStale(state: String, stateUpdatedAt: Double): Boolean =
-    state !in terminalStates && state != "stopped" && state != "stopping" && state != "purging" && state != "running" &&
-        stateUpdatedAt > 0 && System.currentTimeMillis() / 1000.0 - stateUpdatedAt > STALE_THRESHOLD_SEC
+/** True when the prompt cache has expired. Returns false when cacheExpiresAt is unset (no data from backend). */
+fun isCacheStale(state: String, cacheExpiresAt: Double): Boolean {
+    if (state in terminalStates || state in setOf("stopped", "stopping", "purging", "running")) return false
+    return cacheExpiresAt > 0 && System.currentTimeMillis() / 1000.0 > cacheExpiresAt
+}
 
 val activeStates = setOf(
     "running", "branching", "provisioning", "starting",

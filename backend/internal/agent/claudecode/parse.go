@@ -16,12 +16,24 @@ import (
 
 // toAgentUsage converts the wire MsgUsage to the backend-neutral agent.Usage.
 func toAgentUsage(u *cc.MsgUsage) agent.Usage {
-	return agent.Usage{
+	usage := agent.Usage{
 		InputTokens:              int(u.InputTokens),
 		OutputTokens:             int(u.OutputTokens),
 		CacheCreationInputTokens: int(u.CacheCreationInputTokens),
 		CacheReadInputTokens:     int(u.CacheReadInputTokens),
 	}
+	// Anthropic prompt cache has a 5-minute TTL by default.
+	// See https://platform.claude.com/docs/en/build-with-claude/prompt-caching
+	usage.CacheTTLSeconds = 300
+	if u.CacheCreation != nil {
+		if u.CacheCreation.Ephemeral5mInputTokens > 0 &&
+			u.CacheCreation.Ephemeral5mInputTokens >= u.CacheCreation.Ephemeral1hInputTokens {
+			usage.CacheTTLSeconds = 300
+		} else if u.CacheCreation.Ephemeral1hInputTokens > 0 {
+			usage.CacheTTLSeconds = 3600
+		}
+	}
+	return usage
 }
 
 // AskInput is the parsed input for the AskUserQuestion tool.

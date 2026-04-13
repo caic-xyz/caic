@@ -115,10 +115,13 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 		if r.Stats != nil {
 			msg.DurationMs = r.Stats.DurationMs
 			msg.NumTurns = r.Stats.ToolCalls
+			// Gemini doesn't report cache TTL; default to 5 minutes.
+			// See https://ai.google.dev/gemini-api/docs/caching
 			msg.Usage = agent.Usage{
 				InputTokens:          r.Stats.InputTokens,
 				OutputTokens:         r.Stats.OutputTokens,
 				CacheReadInputTokens: r.Stats.Cached,
+				CacheTTLSeconds:      300,
 			}
 		}
 		return []agent.Message{msg}, nil

@@ -164,9 +164,11 @@ type Task struct {
 	CumulativeOutputTokens             int          `json:"cumulativeOutputTokens"`
 	CumulativeCacheCreationInputTokens int          `json:"cumulativeCacheCreationInputTokens"`
 	CumulativeCacheReadInputTokens     int          `json:"cumulativeCacheReadInputTokens"`
-	ActiveInputTokens                  int          `json:"activeInputTokens"`     // Last turn's non-cached input tokens (including cache creation).
-	ActiveCacheReadTokens              int          `json:"activeCacheReadTokens"` // Last turn's cache-read input tokens.
-	ContextWindowLimit                 int          `json:"contextWindowLimit"`    // Model context window limit (tokens).
+	ActiveInputTokens                  int          `json:"activeInputTokens"`         // Last turn's non-cached input tokens (including cache creation).
+	ActiveCacheReadTokens              int          `json:"activeCacheReadTokens"`     // Last turn's cache-read input tokens.
+	CacheTTLSeconds                    int          `json:"cacheTTLSeconds,omitempty"` // Effective cache TTL from last API call (seconds); 0 = unknown.
+	CacheExpiresAt                     float64      `json:"cacheExpiresAt,omitempty"`  // Unix epoch seconds when the prompt cache expires; 0 = unknown.
+	ContextWindowLimit                 int          `json:"contextWindowLimit"`        // Model context window limit (tokens).
 	Error                              string       `json:"error,omitempty"`
 	Result                             string       `json:"result,omitempty"`
 	ForgeOwner                         string       `json:"forgeOwner,omitempty"`

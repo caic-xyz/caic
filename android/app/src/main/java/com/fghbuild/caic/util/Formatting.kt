@@ -21,8 +21,8 @@ fun formatCost(usd: Double): String = when {
 fun formatElapsed(seconds: Double): String {
     val s = seconds.toLong()
     return when {
-        s >= 3600 -> "${s / 3600}h ${(s % 3600) / 60}m"
-        s >= 60 -> "${s / 60}m ${s % 60}s"
+        s >= 3600 -> if ((s % 3600) / 60 == 0L) "${s / 3600}h" else "${s / 3600}h ${(s % 3600) / 60}m"
+        s >= 60 -> if (s % 60 == 0L) "${s / 60}m" else "${s / 60}m ${s % 60}s"
         else -> "${s}s"
     }
 }

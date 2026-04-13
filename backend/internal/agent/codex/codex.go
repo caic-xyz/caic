@@ -217,11 +217,17 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		if err := unmarshalNotification(msg.Params, &p, "ThreadTokenUsageUpdatedNotification", w.fw); err != nil {
 			return nil, fmt.Errorf("tokenUsage/updated params: %w", err)
 		}
+		// Codex reports cached token counts but not cache TTL. OpenAI's
+		// default in-memory prompt cache lasts 5–10 min of inactivity,
+		// up to 1 hour. If Codex starts using
+		// prompt_cache_retention:"24h", set CacheTTLSeconds = 86400.
+		// See https://developers.openai.com/api/docs/guides/prompt-caching
 		incremental := agent.Usage{
 			InputTokens:           int(p.TokenUsage.Last.InputTokens),
 			CacheReadInputTokens:  int(p.TokenUsage.Last.CachedInputTokens),
 			OutputTokens:          int(p.TokenUsage.Last.OutputTokens),
 			ReasoningOutputTokens: int(p.TokenUsage.Last.ReasoningOutputTokens),
+			CacheTTLSeconds:       300,
 		}
 		w.mu.Lock()
 		w.totalUsage.InputTokens += incremental.InputTokens

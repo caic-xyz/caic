@@ -181,6 +181,7 @@ type Task struct {
 	liveUsage             agent.Usage
 	lastUsage             agent.Usage    // Most recent ResultMessage usage (active context).
 	lastAPIUsage          agent.Usage    // Most recent per-API-call usage from AssistantMessage (context window fill).
+	cacheExpiresAt        time.Time      // When the prompt cache from the last API call expires.
 	liveDiffStat          agent.DiffStat // Updated by DiffStatMessage from relay.
 	forgeOwner            string
 	forgeRepo             string
@@ -401,6 +402,7 @@ type Snapshot struct {
 	Usage              agent.Usage
 	LastUsage          agent.Usage
 	LastAPIUsage       agent.Usage
+	CacheExpiresAt     time.Time
 	DiffStat           agent.DiffStat
 	ForgeOwner         string
 	ForgeRepo          string
@@ -436,6 +438,7 @@ func (t *Task) Snapshot() Snapshot {
 		Usage:              t.liveUsage,
 		LastUsage:          t.lastUsage,
 		LastAPIUsage:       t.lastAPIUsage,
+		CacheExpiresAt:     t.cacheExpiresAt,
 		DiffStat:           t.liveDiffStat,
 		ForgeOwner:         t.forgeOwner,
 		ForgeRepo:          t.forgeRepo,
@@ -514,6 +517,9 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 		}
 		if u, ok := m.(*agent.UsageMessage); ok {
 			t.lastAPIUsage = u.Usage
+			if u.Usage.CacheTTLSeconds > 0 {
+				t.cacheExpiresAt = time.Now().Add(time.Duration(u.Usage.CacheTTLSeconds) * time.Second)
+			}
 			if u.ContextWindow > 0 {
 				t.reportedContextWindow = u.ContextWindow
 			}
@@ -611,6 +617,11 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 	}
 	if u, ok := m.(*agent.UsageMessage); ok {
 		t.lastAPIUsage = u.Usage
+		ttl := u.Usage.CacheTTLSeconds
+		if ttl <= 0 {
+			ttl = 3600
+		}
+		t.cacheExpiresAt = time.Now().Add(time.Duration(ttl) * time.Second)
 		if u.ContextWindow > 0 {
 			t.reportedContextWindow = u.ContextWindow
 		}

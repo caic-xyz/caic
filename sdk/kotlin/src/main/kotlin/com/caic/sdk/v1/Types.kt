@@ -229,6 +229,8 @@ data class Task(
     val cumulativeCacheReadInputTokens: Int,
     val activeInputTokens: Int,
     val activeCacheReadTokens: Int,
+    @SerialName("cacheTTLSeconds") val cacheTTLSeconds: Int? = null,
+    val cacheExpiresAt: Double? = null,
     val contextWindowLimit: Int,
     val error: String? = null,
     val result: String? = null,

@@ -185,10 +185,12 @@ func parseStepFinish(part *Part) ([]agent.Message, error) {
 		TotalCostUSD: part.Cost,
 	}
 	if part.Tokens != nil {
+		// Kilo is multi-provider and doesn't report cache TTL; default to 5 minutes.
 		msg.Usage = agent.Usage{
 			InputTokens:           part.Tokens.Input,
 			OutputTokens:          part.Tokens.Output,
 			ReasoningOutputTokens: part.Tokens.Reasoning,
+			CacheTTLSeconds:       300,
 		}
 		if part.Tokens.Cache != nil {
 			msg.Usage.CacheReadInputTokens = part.Tokens.Cache.Read

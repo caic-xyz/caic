@@ -345,6 +345,8 @@ Task is the JSON representation sent to the frontend.
 | `cumulativeCacheReadInputTokens` | `number` |  | yes |
 | `activeInputTokens` | `number` | Last turn's non-cached input tokens (including cache creation). | yes |
 | `activeCacheReadTokens` | `number` | Last turn's cache-read input tokens. | yes |
+| `cacheTTLSeconds` | `number` | Effective cache TTL from last API call (seconds); 0 = unknown. |  |
+| `cacheExpiresAt` | `number` | Unix epoch seconds when the prompt cache expires; 0 = unknown. |  |
 | `contextWindowLimit` | `number` | Model context window limit (tokens). | yes |
 | `error` | `string` |  |  |
 | `result` | `string` |  |  |

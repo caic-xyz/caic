@@ -170,6 +170,7 @@ type Usage struct {
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	ReasoningOutputTokens    int `json:"reasoning_output_tokens,omitempty"`
+	CacheTTLSeconds          int `json:"cache_ttl_seconds,omitempty"` // Effective cache TTL from last API call; 0 = unknown.
 }
 
 // ResultMessage is the terminal message for a query.

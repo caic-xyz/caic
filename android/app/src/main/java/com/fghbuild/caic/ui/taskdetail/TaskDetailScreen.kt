@@ -378,7 +378,7 @@ fun TaskDetailScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                val detailStale = isCacheStale(it.state, it.stateUpdatedAt)
+                                val detailStale = isCacheStale(it.state, it.cacheExpiresAt ?: 0.0)
                                 val badgeColor = if (detailStale) staleStateColor(it.state) else stateColor(it.state)
                                 Surface(
                                     shape = RoundedCornerShape(4.dp),

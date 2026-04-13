@@ -30,6 +30,8 @@ export interface TaskCardProps {
   cumulativeCacheReadInputTokens: number;
   cumulativeOutputTokens: number;
   contextWindowLimit: number;
+  cacheTTLSeconds?: number;
+  cacheExpiresAt?: number;
   startedAt?: number;
   turnStartedAt?: number;
   diffStat?: DiffStat;
@@ -62,7 +64,7 @@ export function confirmTaskAction(action: "Purge" | "Stop", title: string, branc
 
 export default function TaskCard(props: TaskCardProps) {
   const isTerminal = () => terminalStates.has(props.state);
-  const stale = () => !terminalStates.has(props.state) && props.state !== "running" && isCacheStale(props.stateUpdatedAt, props.now());
+  const stale = () => !terminalStates.has(props.state) && props.state !== "running" && isCacheStale(props.now(), props.cacheExpiresAt);
   const [titleTruncated, setTitleTruncated] = createSignal(false);
   let titleRef: HTMLElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
 
@@ -198,7 +200,7 @@ export default function TaskCard(props: TaskCardProps) {
           <Show when={props.forgePR && props.ciStatus} keyed>
             {(status) => <CIDot status={status as CIStatus} checks={props.ciChecks} />}
           </Show>
-          <Tooltip text="Prompt cache likely expired — continuing may use more tokens" disabled={!stale()}>
+          <Tooltip text={`Prompt cache likely expired (${formatElapsed((props.cacheTTLSeconds ?? 3600) * 1000)} TTL) — continuing may use more tokens`} disabled={!stale()}>
             <span class={styles.badge} style={{ background: stale() ? staleStateColor(props.state) : stateColor(props.state) }}>
               {props.state}
             </span>

@@ -542,11 +542,14 @@ private fun AutoBadge() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StateBadge(task: Task) {
-    val stale = isCacheStale(task.state, task.stateUpdatedAt)
+    val stale = isCacheStale(task.state, task.cacheExpiresAt ?: 0.0)
     val color = if (stale) staleStateColor(task.state) else stateColor(task.state)
     TooltipBox(
         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
-        tooltip = { PlainTooltip { Text("Prompt cache likely expired — continuing may use more tokens") } },
+        tooltip = {
+            val ttlLabel = formatElapsed((task.cacheTTLSeconds ?: 3600).toDouble())
+            PlainTooltip { Text("Prompt cache likely expired ($ttlLabel TTL) — continuing may use more tokens") }
+        },
         state = rememberTooltipState(),
         enableUserInput = stale,
     ) {
