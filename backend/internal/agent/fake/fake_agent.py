@@ -1,8 +1,12 @@
-# Fake agent that cycles through jokes, emitting Claude Code streaming JSON.
+# Fake agent that cycles through jokes, emitting flat NDJSON messages.
 #
-# Reads NDJSON from stdin (one prompt per line), responds with streaming text
-# deltas followed by complete assistant and result messages. Exits on EOF.
-# Used by the caic -tags e2e server for e2e testing.
+# Each output line is a JSON object whose "type" field maps directly to an
+# agent.Message type (init, text, text_delta, tool_use, ask, widget,
+# widget_delta, tool_result, result).  No nested envelopes.
+#
+# Reads plain text from stdin (one prompt per line), responds with streaming
+# text deltas followed by complete messages.  Exits on EOF or null-byte
+# sentinel.  Used by the caic -tags e2e server for e2e testing.
 
 import json
 import sys
@@ -424,7 +428,7 @@ def emit(obj: dict) -> None:
 
 
 def emit_text(text: str) -> None:
-    """Emit streaming text deltas followed by the complete assistant message."""
+    """Emit streaming text deltas followed by the complete text message."""
     # Split roughly in half for two streaming deltas.
     mid = len(text) // 2
     sp = text.find(" ", mid)
@@ -432,48 +436,14 @@ def emit_text(text: str) -> None:
         sp = mid
     part1 = text[: sp + 1]
     part2 = text[sp + 1 :]
-    emit(
-        {
-            "type": "stream_event",
-            "event": {
-                "type": "content_block_delta",
-                "index": 0,
-                "delta": {"type": "text_delta", "text": part1},
-            },
-        }
-    )
+    emit({"type": "text_delta", "text": part1})
     time.sleep(0.05)
-    emit(
-        {
-            "type": "stream_event",
-            "event": {
-                "type": "content_block_delta",
-                "index": 0,
-                "delta": {"type": "text_delta", "text": part2},
-            },
-        }
-    )
-    emit(
-        {
-            "type": "assistant",
-            "message": {
-                "role": "assistant",
-                "content": [{"type": "text", "text": text}],
-            },
-        }
-    )
+    emit({"type": "text_delta", "text": part2})
+    emit({"type": "text", "text": text})
 
 
 def emit_tool_use(tool_id: str, name: str, input_obj: dict) -> None:
-    emit(
-        {
-            "type": "assistant",
-            "message": {
-                "role": "assistant",
-                "content": [{"type": "tool_use", "id": tool_id, "name": name, "input": input_obj}],
-            },
-        }
-    )
+    emit({"type": "tool_use", "id": tool_id, "name": name, "input": input_obj})
 
 
 def emit_result(turns: int, result: str, cost: float = 0.01, duration: int = 500) -> None:
@@ -501,69 +471,22 @@ def emit_plan_turn(turns: int) -> None:
 
 
 def emit_widget_turn(turns: int) -> None:
-    """Emit show_widget streaming (content_block_start + input_json_delta + content_block_stop) + final + result."""
-    widget_input = json.dumps({"widget_code": WIDGET_HTML, "title": WIDGET_TITLE})
-    # Stream content_block_start
-    emit(
-        {
-            "type": "stream_event",
-            "event": {
-                "type": "content_block_start",
-                "index": 0,
-                "content_block": {"type": "tool_use", "id": "toolu_widget", "name": "show_widget"},
-            },
-        }
-    )
-    # Stream partial JSON deltas
-    mid = len(widget_input) // 2
-    emit(
-        {
-            "type": "stream_event",
-            "event": {
-                "type": "content_block_delta",
-                "index": 0,
-                "delta": {"type": "input_json_delta", "partial_json": widget_input[:mid]},
-            },
-        }
-    )
+    """Emit streaming widget deltas, final widget message, tool result, and result."""
+    # Stream partial HTML deltas.
+    mid = len(WIDGET_HTML) // 2
+    emit({"type": "widget_delta", "id": "toolu_widget", "delta": WIDGET_HTML[:mid]})
     time.sleep(0.05)
-    emit(
-        {
-            "type": "stream_event",
-            "event": {
-                "type": "content_block_delta",
-                "index": 0,
-                "delta": {"type": "input_json_delta", "partial_json": widget_input[mid:]},
-            },
-        }
-    )
-    # Stream content_block_stop
-    emit(
-        {
-            "type": "stream_event",
-            "event": {"type": "content_block_stop", "index": 0},
-        }
-    )
-    # Final assistant message with the widget tool_use block.
-    emit_tool_use("toolu_widget", "show_widget", {"widget_code": WIDGET_HTML, "title": WIDGET_TITLE})
-    # Tool result (widget rendering is async).
-    emit(
-        {
-            "type": "user",
-            "message": {"content": [{"type": "text", "text": "Widget rendered"}], "is_error": False},
-            "parent_tool_use_id": "toolu_widget",
-        }
-    )
+    emit({"type": "widget_delta", "id": "toolu_widget", "delta": WIDGET_HTML[mid:]})
+    # Final complete widget.
+    emit({"type": "widget", "id": "toolu_widget", "title": WIDGET_TITLE, "html": WIDGET_HTML})
+    # Tool result.
+    emit({"type": "tool_result", "tool_use_id": "toolu_widget"})
     emit_result(turns, "Widget displayed")
 
 
 def emit_ask_turn(turns: int) -> None:
     """Emit AskUserQuestion + result."""
-    emit_tool_use(
-        "toolu_ask",
-        "AskUserQuestion",
-        {"questions": [ASK_QUESTION]},
-    )
+    emit({"type": "ask", "id": "toolu_ask", "questions": [ASK_QUESTION]})
     emit_result(turns, "Asking user")
 
 
@@ -582,15 +505,12 @@ def emit_demo_turn(turns: int) -> None:
 
 
 def main() -> None:
-    # System init before first prompt.
     emit(
         {
-            "type": "system",
-            "subtype": "init",
+            "type": "init",
             "session_id": "test-session",
             "cwd": "/workspace",
             "model": "fake-model",
-            "claude_code_version": "0.0.0-test",
         }
     )
 

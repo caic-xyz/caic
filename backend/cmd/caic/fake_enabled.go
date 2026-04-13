@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/fake"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -61,7 +60,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
-	fb := &fakeBackend{}
+	fb := fake.New()
 	srv.SetRunnerOps(&fakeContainer{}, map[agent.Harness]agent.Backend{fb.Harness(): fb})
 
 	err = srv.ListenAndServe(ctx, addr)
@@ -152,57 +151,3 @@ func (*fakeContainer) Fork(_ context.Context, _ string, _ []md.Repo, _ *task.For
 	return "fake-fork", nil, fmt.Errorf("fork not supported in fake mode")
 }
 
-// fakeBackend implements agent.Backend with a shell process that emits
-// streaming text deltas followed by complete messages, simulating
-// --include-partial-messages output. It supports multiple turns: each
-// line read from stdin triggers the next joke response, cycling through
-// a fixed list.
-type fakeBackend struct{}
-
-var _ agent.Backend = (*fakeBackend)(nil)
-
-func (*fakeBackend) Harness() agent.Harness { return "fake" }
-
-func (*fakeBackend) Start(_ context.Context, opts *agent.Options) (*agent.Session, error) {
-	cmd := exec.Command("python3", "-u", "-c", string(fake.Script)) //nolint:gosec // fake.Script is an embedded constant
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return nil, err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	cmd.Stderr = nil
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	s := agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, claudecode.Wire), stdout, opts.MsgCh, nil)
-	if opts.InitialPrompt.Text != "" {
-		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
-			_ = s.Close()
-			return nil, fmt.Errorf("write prompt: %w", err)
-		}
-	}
-	return s, nil
-}
-
-func (*fakeBackend) AttachRelay(context.Context, *agent.Options) (*agent.Session, error) {
-	return nil, errors.New("fake backend does not support relay")
-}
-
-func (*fakeBackend) ReadRelayOutput(context.Context, string) ([]agent.Message, int64, error) {
-	return nil, 0, errors.New("fake backend does not support relay")
-}
-
-func (*fakeBackend) NewParser() func([]byte) ([]agent.Message, error) {
-	return claudecode.New().NewParser()
-}
-
-func (*fakeBackend) Models() []string { return []string{"fake-model"} }
-
-func (*fakeBackend) SupportsImages() bool { return true }
-
-func (*fakeBackend) SupportsCompact() bool { return true }
-
-func (*fakeBackend) ContextWindowLimit(string) int { return 180_000 }

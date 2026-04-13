@@ -5,12 +5,14 @@ behind `//go:build e2e` — excluded from production binaries.
 
 ## Architecture
 
+- `fake.go` — `agent.Backend` implementation: spawns the Python script, owns the wire format
 - `embed.go` — Embeds `fake_agent.py` into the Go binary (e2e build tag only)
 - `fake_agent.py` — Python script emitting Claude Code NDJSON wire format
 
-The Go side (`cmd/caic/fake_enabled.go`) spawns the Python script as a
-subprocess. Responses are parsed by `claude.ParseMessage()` — same parser
-as the real Claude backend — so the full message pipeline is exercised.
+`fake.Backend` implements `agent.WireFormat` directly: prompts are written
+as plain text (the Python script reads lines and matches keywords), output
+is parsed by `parse.go` — a flat NDJSON parser with no claudecode dependency.
+Each JSON line's `type` field maps directly to an `agent.Message` type.
 
 ## Magic Keywords
 
