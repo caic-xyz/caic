@@ -66,7 +66,12 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err := agent.DeployEmbeddedDir(ctx, opts.Container, pluginFS, agent.WidgetPluginDir); err != nil {
 		return nil, err
 	}
-	if hasOAuth() {
+	// Temporarily disabled; I look at the traces and claude code switches midway authentication when it
+	// receives the key. What a monster.
+	// The only way to fix this is to open claude code while it's running and to manually deny it the use of the
+	// API key.
+	stripAndInject := false && hasOAuth()
+	if stripAndInject {
 		opts.StripEnv = []string{"ANTHROPIC_API_KEY"}
 	}
 	rp, err := agent.PrepareRelay(ctx, opts, buildArgs(opts))
@@ -74,7 +79,9 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		return nil, err
 	}
 	c := agent.NewConn(rp.Stdin, opts.LogW, b)
-	c = &envInjectorConn{Conn: c}
+	if stripAndInject {
+		c = &envInjectorConn{Conn: c}
+	}
 	return agent.StartSession(rp, c, opts)
 }
 
