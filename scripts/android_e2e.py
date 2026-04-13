@@ -13,6 +13,7 @@ Steps:
 
 import argparse
 import os
+import re
 import shutil
 import signal
 import socket
@@ -101,6 +102,16 @@ def pull_screenshots():
         print("No screenshots found on device", file=sys.stderr)
         return 1
 
+    def image_identity(a: str, b: str) -> float:
+        """Return identity score (1.0 = identical) between two images."""
+        r = subprocess.run(
+            ["ffmpeg", "-i", a, "-i", b, "-lavfi", "identity", "-f", "null", "-"],
+            capture_output=True,
+            text=True,
+        )
+        m = re.search(r"average:([\d.]+)", r.stderr)
+        return float(m.group(1)) if m else 0.0
+
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     for name in names:
         remote = f"{device_dir}/{name}.png"
@@ -108,14 +119,24 @@ def pull_screenshots():
         local_webp = os.path.join(SCREENSHOT_DIR, f"{name}.webp")
         subprocess.run(["adb", "pull", remote, local_png], capture_output=True)
         if has_ffmpeg:
+            # Lossless encoding preserves pixels exactly, so we can compare
+            # the source PNG against the existing webp without a temp file.
+            if os.path.exists(local_webp):
+                score = image_identity(local_png, local_webp)
+                pct = (1 - score) * 100
+                if pct < 1:
+                    os.remove(local_png)
+                    print(f"  {name}.webp ({pct:.1f}% different, keeping)")
+                    continue
+                print(f"  {name}.webp ({pct:.1f}% different, updating)")
+            else:
+                print(f"  {name}.webp (new)")
             subprocess.check_call(
                 ["ffmpeg", "-y", "-i", local_png, "-lossless", "1", local_webp],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            if os.path.exists(local_png):
-                os.remove(local_png)
-            print(f"  {name}.webp")
+            os.remove(local_png)
         else:
             print(f"  {name}.png")
 
