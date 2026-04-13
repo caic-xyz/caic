@@ -16,7 +16,7 @@ export interface TaskCardProps {
   id: string;
   title: string;
   state: string;
-  stateUpdatedAt: number;
+  stateUpdatedAt: string;
   repos?: TaskRepo[];
   harness?: string;
   model?: string;
@@ -31,9 +31,9 @@ export interface TaskCardProps {
   cumulativeOutputTokens: number;
   contextWindowLimit: number;
   cacheTTLSeconds?: number;
-  cacheExpiresAt?: number;
-  startedAt?: number;
-  turnStartedAt?: number;
+  cacheExpiresAt?: string;
+  startedAt?: string;
+  turnStartedAt?: string;
   diffStat?: DiffStat;
   error?: string;
   inPlanMode?: boolean;
@@ -175,10 +175,10 @@ export default function TaskCard(props: TaskCardProps) {
       {(() => {
         const multiRepo = (props.repos?.length ?? 0) > 1;
         const timePair = () => (
-          <Show when={(!isTerminal() && props.stateUpdatedAt > 0) || props.duration > 0}>
+          <Show when={(!isTerminal() && props.stateUpdatedAt) || props.duration > 0}>
             <span class={styles.timePair}>
               <TimerIcon width="0.65rem" height="0.65rem" class={styles.timerIcon} />
-              <Show when={!isTerminal() && props.stateUpdatedAt > 0}>
+              <Show when={!isTerminal() && props.stateUpdatedAt}>
                 <StateDuration stateUpdatedAt={props.stateUpdatedAt} now={props.now} />
                 <Show when={props.duration > 0 || props.state === "running"}>
                   <span class={styles.timeSep}>/</span>
@@ -318,17 +318,18 @@ export default function TaskCard(props: TaskCardProps) {
   );
 }
 
-function StateDuration(props: { stateUpdatedAt: number; now: Accessor<number> }) {
-  const elapsed = () => Math.max(0, props.now() - props.stateUpdatedAt * 1000);
+function StateDuration(props: { stateUpdatedAt: string; now: Accessor<number> }) {
+  const elapsed = () => Math.max(0, props.now() - new Date(props.stateUpdatedAt).getTime());
   return <span>{formatElapsed(elapsed())}</span>;
 }
 
-function ThinkTime(props: { duration: number; state: string; stateUpdatedAt: number; turnStartedAt?: number; now: Accessor<number> }) {
+function ThinkTime(props: { duration: number; state: string; stateUpdatedAt: string; turnStartedAt?: string; now: Accessor<number> }) {
   const thinkMs = () => {
     const base = props.duration * 1000;
     if (props.state === "running") {
-      const turnStart = (props.turnStartedAt ?? 0) > 0 ? (props.turnStartedAt as number) : props.stateUpdatedAt;
-      return base + Math.max(0, props.now() - turnStart * 1000);
+      const turnMs = props.turnStartedAt ? new Date(props.turnStartedAt).getTime() : 0;
+      const start = turnMs > 0 ? turnMs : new Date(props.stateUpdatedAt).getTime();
+      return base + Math.max(0, props.now() - start);
     }
     return base;
   };

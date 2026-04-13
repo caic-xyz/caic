@@ -155,7 +155,7 @@ type Task struct {
 	Repos                              []TaskRepo   `json:"repos,omitempty"`
 	Container                          string       `json:"container"`
 	State                              string       `json:"state"`
-	StateUpdatedAt                     float64      `json:"stateUpdatedAt"` // Unix epoch seconds (ms precision) of last state change.
+	StateUpdatedAt                     time.Time    `json:"stateUpdatedAt"` // When the task state last changed.
 	DiffStat                           DiffStat     `json:"diffStat,omitzero"`
 	CostUSD                            float64      `json:"costUSD"`
 	Duration                           float64      `json:"duration"` // Seconds.
@@ -167,7 +167,7 @@ type Task struct {
 	ActiveInputTokens                  int          `json:"activeInputTokens"`         // Last turn's non-cached input tokens (including cache creation).
 	ActiveCacheReadTokens              int          `json:"activeCacheReadTokens"`     // Last turn's cache-read input tokens.
 	CacheTTLSeconds                    int          `json:"cacheTTLSeconds,omitempty"` // Effective cache TTL from last API call (seconds); 0 = unknown.
-	CacheExpiresAt                     float64      `json:"cacheExpiresAt,omitempty"`  // Unix epoch seconds when the prompt cache expires; 0 = unknown.
+	CacheExpiresAt                     time.Time    `json:"cacheExpiresAt,omitzero"`   // When the prompt cache expires.
 	ContextWindowLimit                 int          `json:"contextWindowLimit"`        // Model context window limit (tokens).
 	Error                              string       `json:"error,omitempty"`
 	Result                             string       `json:"result,omitempty"`
@@ -179,17 +179,17 @@ type Task struct {
 	CIChecks                           []ForgeCheck `json:"ciChecks,omitempty"`
 	Owner                              string       `json:"owner,omitempty"` // username of creator; omitted in no-auth mode
 	// Per-task harness/container metadata.
-	Harness       Harness `json:"harness"`
-	Model         string  `json:"model,omitempty"`
-	AgentVersion  string  `json:"agentVersion,omitempty"`
-	SessionID     string  `json:"sessionID,omitempty"`
-	StartedAt     float64 `json:"startedAt,omitempty"`     // Unix epoch seconds (ms precision) when the container started.
-	TurnStartedAt float64 `json:"turnStartedAt,omitempty"` // Unix epoch seconds; non-zero only while state is "running".
-	InPlanMode    bool    `json:"inPlanMode,omitempty"`
-	PlanContent   string  `json:"planContent,omitempty"`
-	Tailscale     string  `json:"tailscale,omitempty"` // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
-	USB           bool    `json:"usb,omitempty"`
-	Display       bool    `json:"display,omitempty"`
+	Harness       Harness   `json:"harness"`
+	Model         string    `json:"model,omitempty"`
+	AgentVersion  string    `json:"agentVersion,omitempty"`
+	SessionID     string    `json:"sessionID,omitempty"`
+	StartedAt     time.Time `json:"startedAt,omitzero"`     // When the container started.
+	TurnStartedAt time.Time `json:"turnStartedAt,omitzero"` // When the current turn started; zero when not running.
+	InPlanMode    bool      `json:"inPlanMode,omitempty"`
+	PlanContent   string    `json:"planContent,omitempty"`
+	Tailscale     string    `json:"tailscale,omitempty"` // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
+	USB           bool      `json:"usb,omitempty"`
+	Display       bool      `json:"display,omitempty"`
 }
 
 // TaskListEvent is a discriminated-union event for the task list SSE stream.

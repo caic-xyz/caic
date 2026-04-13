@@ -881,7 +881,7 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 		Repos:          taskRepos,
 		Container:      e.task.Container,
 		State:          snap.State.String(),
-		StateUpdatedAt: float64(snap.StateUpdatedAt.UnixMilli()) / 1e3,
+		StateUpdatedAt: snap.StateUpdatedAt,
 		Harness:        toV1Harness(e.task.Harness),
 		Model:          snap.Model,
 		AgentVersion:   snap.AgentVersion,
@@ -895,12 +895,8 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 		NumTurns:       snap.NumTurns,
 		Duration:       snap.Duration.Seconds(),
 	}
-	if !e.task.StartedAt.IsZero() {
-		j.StartedAt = float64(e.task.StartedAt.UnixMilli()) / 1e3
-	}
-	if !snap.TurnStartedAt.IsZero() {
-		j.TurnStartedAt = float64(snap.TurnStartedAt.UnixMilli()) / 1e3
-	}
+	j.StartedAt = e.task.StartedAt
+	j.TurnStartedAt = snap.TurnStartedAt
 	j.CumulativeInputTokens = snap.Usage.InputTokens
 	j.CumulativeOutputTokens = snap.Usage.OutputTokens
 	j.CumulativeCacheCreationInputTokens = snap.Usage.CacheCreationInputTokens
@@ -909,9 +905,7 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 	j.ActiveInputTokens = snap.LastAPIUsage.InputTokens + snap.LastAPIUsage.CacheCreationInputTokens
 	j.ActiveCacheReadTokens = snap.LastAPIUsage.CacheReadInputTokens
 	j.CacheTTLSeconds = snap.LastAPIUsage.CacheTTLSeconds
-	if !snap.CacheExpiresAt.IsZero() {
-		j.CacheExpiresAt = float64(snap.CacheExpiresAt.UnixMilli()) / 1e3
-	}
+	j.CacheExpiresAt = snap.CacheExpiresAt
 	if snap.ContextWindowLimit > 0 {
 		j.ContextWindowLimit = snap.ContextWindowLimit
 	} else if primaryName != "" {

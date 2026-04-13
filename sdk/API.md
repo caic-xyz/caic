@@ -237,9 +237,9 @@ ForgeCheck describes a CI check run with its status, conclusion, and timing.
 | `jobID` | `number` | Check run / job ID. | yes |
 | `status` | `string` | queued, in_progress, completed. | yes |
 | `conclusion` | `string` | Empty when not completed. | yes |
-| `queuedAt` | `string` | When the check was created/queued. |  |
-| `startedAt` | `string` | When execution began. |  |
-| `completedAt` | `string` | When execution finished. |  |
+| `queuedAt` | `ISOTimestamp` | When the check was created/queued. |  |
+| `startedAt` | `ISOTimestamp` | When execution began. |  |
+| `completedAt` | `ISOTimestamp` | When execution finished. |  |
 
 ### Repo
 
@@ -334,7 +334,7 @@ Task is the JSON representation sent to the frontend.
 | `repos` | `TaskRepo[]` |  |  |
 | `container` | `string` |  | yes |
 | `state` | `string` |  | yes |
-| `stateUpdatedAt` | `number` | Unix epoch seconds (ms precision) of last state change. | yes |
+| `stateUpdatedAt` | `ISOTimestamp` | When the task state last changed. | yes |
 | `diffStat` | `DiffFileStat[]` |  |  |
 | `costUSD` | `number` |  | yes |
 | `duration` | `number` | Seconds. | yes |
@@ -346,7 +346,7 @@ Task is the JSON representation sent to the frontend.
 | `activeInputTokens` | `number` | Last turn's non-cached input tokens (including cache creation). | yes |
 | `activeCacheReadTokens` | `number` | Last turn's cache-read input tokens. | yes |
 | `cacheTTLSeconds` | `number` | Effective cache TTL from last API call (seconds); 0 = unknown. |  |
-| `cacheExpiresAt` | `number` | Unix epoch seconds when the prompt cache expires; 0 = unknown. |  |
+| `cacheExpiresAt` | `ISOTimestamp` | When the prompt cache expires. |  |
 | `contextWindowLimit` | `number` | Model context window limit (tokens). | yes |
 | `error` | `string` |  |  |
 | `result` | `string` |  |  |
@@ -361,8 +361,8 @@ Task is the JSON representation sent to the frontend.
 | `model` | `string` |  |  |
 | `agentVersion` | `string` |  |  |
 | `sessionID` | `string` |  |  |
-| `startedAt` | `number` | Unix epoch seconds (ms precision) when the container started. |  |
-| `turnStartedAt` | `number` | Unix epoch seconds; non-zero only while state is "running". |  |
+| `startedAt` | `ISOTimestamp` | When the container started. |  |
+| `turnStartedAt` | `ISOTimestamp` | When the current turn started; zero when not running. |  |
 | `inPlanMode` | `boolean` |  |  |
 | `planContent` | `string` |  |  |
 | `tailscale` | `string` | Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. |  |

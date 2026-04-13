@@ -59,8 +59,10 @@ export function stateColor(state: string): string {
 }
 
 /** True when the prompt cache has expired. Returns false when cacheExpiresAt is unset (no data from backend). */
-export function isCacheStale(nowMs: number, cacheExpiresAtSec?: number): boolean {
-  return cacheExpiresAtSec !== undefined && cacheExpiresAtSec > 0 && nowMs > cacheExpiresAtSec * 1000;
+export function isCacheStale(nowMs: number, cacheExpiresAt?: string): boolean {
+  if (!cacheExpiresAt) return false;
+  const expiresMs = new Date(cacheExpiresAt).getTime();
+  return expiresMs > 0 && nowMs > expiresMs;
 }
 
 /** Blend a hex color toward a target hex by `amount` (0–1). */

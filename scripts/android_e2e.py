@@ -110,7 +110,8 @@ def pull_screenshots():
         if has_ffmpeg:
             subprocess.check_call(
                 ["ffmpeg", "-y", "-i", local_png, "-lossless", "1", local_webp],
-                capture_output=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
             if os.path.exists(local_png):
                 os.remove(local_png)

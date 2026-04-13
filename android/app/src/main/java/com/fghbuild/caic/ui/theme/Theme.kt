@@ -39,9 +39,10 @@ fun staleStateColor(state: String): Color {
 }
 
 /** True when the prompt cache has expired. Returns false when cacheExpiresAt is unset (no data from backend). */
-fun isCacheStale(state: String, cacheExpiresAt: Double): Boolean {
+fun isCacheStale(state: String, cacheExpiresAt: java.time.Instant?): Boolean {
+    if (cacheExpiresAt == null) return false
     if (state in terminalStates || state in setOf("stopped", "stopping", "purging", "running")) return false
-    return cacheExpiresAt > 0 && System.currentTimeMillis() / 1000.0 > cacheExpiresAt
+    return System.currentTimeMillis() > cacheExpiresAt.toEpochMilli()
 }
 
 val activeStates = setOf(

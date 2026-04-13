@@ -378,7 +378,7 @@ fun TaskDetailScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                val detailStale = isCacheStale(it.state, it.cacheExpiresAt ?: 0.0)
+                                val detailStale = isCacheStale(it.state, it.cacheExpiresAt)
                                 val badgeColor = if (detailStale) staleStateColor(it.state) else stateColor(it.state)
                                 Surface(
                                     shape = RoundedCornerShape(4.dp),
@@ -979,21 +979,8 @@ private fun checkStatusLabel(c: ForgeCheck): String = when {
 
 /** Elapsed duration string for a CI check, from startedAt (or queuedAt) to completedAt (or now). */
 private fun checkDuration(c: ForgeCheck): String {
-    val startStr = c.startedAt ?: c.queuedAt ?: return ""
-    val start = try {
-        Instant.parse(startStr)
-    } catch (_: Exception) {
-        return ""
-    }
-    val end = if (c.completedAt != null) {
-        try {
-            Instant.parse(c.completedAt)
-        } catch (_: Exception) {
-            Instant.now()
-        }
-    } else {
-        Instant.now()
-    }
+    val start = c.startedAt ?: c.queuedAt ?: return ""
+    val end = c.completedAt ?: Instant.now()
     val seconds = java.time.Duration.between(start, end).seconds.toDouble()
     return formatElapsed(seconds)
 }

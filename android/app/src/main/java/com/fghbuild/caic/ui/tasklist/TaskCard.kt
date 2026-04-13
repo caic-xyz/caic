@@ -60,6 +60,7 @@ import com.fghbuild.caic.ui.theme.stateColor
 import com.fghbuild.caic.util.formatCost
 import com.fghbuild.caic.util.formatElapsed
 import com.fghbuild.caic.util.formatTokens
+import java.time.Instant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -377,7 +378,7 @@ private fun TimingBadges(task: Task, autoFixPR: Boolean) {
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        val showTimes = (task.state !in TerminalStates && task.stateUpdatedAt > 0) || task.duration > 0
+        val showTimes = (task.state !in TerminalStates) || task.duration > 0
         if (showTimes) {
             Icon(
                 Icons.Outlined.Timer,
@@ -385,7 +386,7 @@ private fun TimingBadges(task: Task, autoFixPR: Boolean) {
                 modifier = Modifier.size(11.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (task.state !in TerminalStates && task.stateUpdatedAt > 0) {
+            if (task.state !in TerminalStates) {
                 TickingElapsed(stateUpdatedAt = task.stateUpdatedAt)
                 if (task.duration > 0 || task.state == "running") {
                     Text(
@@ -400,7 +401,7 @@ private fun TimingBadges(task: Task, autoFixPR: Boolean) {
                     duration = task.duration,
                     state = task.state,
                     stateUpdatedAt = task.stateUpdatedAt,
-                    turnStartedAt = task.turnStartedAt ?: 0.0,
+                    turnStartedAt = task.turnStartedAt,
                 )
             }
         }
@@ -438,7 +439,7 @@ private fun StatusBadges(task: Task, autoFixPR: Boolean) {
 
 @Composable
 private fun TimingIndicator(task: Task) {
-    val showTimes = (task.state !in TerminalStates && task.stateUpdatedAt > 0) || task.duration > 0
+    val showTimes = (task.state !in TerminalStates) || task.duration > 0
     if (showTimes) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -450,7 +451,7 @@ private fun TimingIndicator(task: Task) {
                 modifier = Modifier.size(11.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (task.state !in TerminalStates && task.stateUpdatedAt > 0) {
+            if (task.state !in TerminalStates) {
                 TickingElapsed(stateUpdatedAt = task.stateUpdatedAt)
                 if (task.duration > 0 || task.state == "running") {
                     Text(
@@ -465,7 +466,7 @@ private fun TimingIndicator(task: Task) {
                     duration = task.duration,
                     state = task.state,
                     stateUpdatedAt = task.stateUpdatedAt,
-                    turnStartedAt = task.turnStartedAt ?: 0.0,
+                    turnStartedAt = task.turnStartedAt,
                 )
             }
         }
@@ -473,7 +474,8 @@ private fun TimingIndicator(task: Task) {
 }
 
 @Composable
-private fun TickingElapsed(stateUpdatedAt: Double) {
+private fun TickingElapsed(stateUpdatedAt: Instant) {
+    val stateMs = remember(stateUpdatedAt) { stateUpdatedAt.toEpochMilli() }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -481,7 +483,7 @@ private fun TickingElapsed(stateUpdatedAt: Double) {
             now = System.currentTimeMillis()
         }
     }
-    val elapsedSec = (now - (stateUpdatedAt * 1000).toLong()).coerceAtLeast(0) / 1000.0
+    val elapsedSec = (now - stateMs).coerceAtLeast(0) / 1000.0
     Text(
         text = formatElapsed(elapsedSec),
         style = MaterialTheme.typography.bodySmall,
@@ -490,7 +492,9 @@ private fun TickingElapsed(stateUpdatedAt: Double) {
 }
 
 @Composable
-private fun TickingThinkTime(duration: Double, state: String, stateUpdatedAt: Double, turnStartedAt: Double) {
+private fun TickingThinkTime(duration: Double, state: String, stateUpdatedAt: Instant, turnStartedAt: Instant?) {
+    val stateMs = remember(stateUpdatedAt) { stateUpdatedAt.toEpochMilli() }
+    val turnMs = remember(turnStartedAt) { turnStartedAt?.toEpochMilli() ?: 0L }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(state) {
         if (state == "running") {
@@ -501,8 +505,8 @@ private fun TickingThinkTime(duration: Double, state: String, stateUpdatedAt: Do
         }
     }
     val totalSec = if (state == "running") {
-        val turnStart = if (turnStartedAt > 0) turnStartedAt else stateUpdatedAt
-        duration + (now - (turnStart * 1000).toLong()).coerceAtLeast(0) / 1000.0
+        val start = if (turnMs > 0) turnMs else stateMs
+        duration + (now - start).coerceAtLeast(0) / 1000.0
     } else {
         duration
     }
@@ -542,7 +546,7 @@ private fun AutoBadge() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StateBadge(task: Task) {
-    val stale = isCacheStale(task.state, task.cacheExpiresAt ?: 0.0)
+    val stale = isCacheStale(task.state, task.cacheExpiresAt)
     val color = if (stale) staleStateColor(task.state) else stateColor(task.state)
     TooltipBox(
         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),

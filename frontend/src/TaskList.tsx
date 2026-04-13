@@ -45,7 +45,7 @@ export function sortTasks(tasks: Task[]): Task[] {
     if (lc !== 0) return lc;
     return b.id > a.id ? 1 : b.id < a.id ? -1 : 0;
   };
-  const stateUpdatedDesc = (a: Task, b: Task) => b.stateUpdatedAt - a.stateUpdatedAt;
+  const stateUpdatedDesc = (a: Task, b: Task) => b.stateUpdatedAt > a.stateUpdatedAt ? 1 : b.stateUpdatedAt < a.stateUpdatedAt ? -1 : 0;
   active.sort(idDesc);
   stopped.sort(stateUpdatedDesc);
   purged.sort(stateUpdatedDesc);
@@ -127,7 +127,7 @@ export default function TaskList(props: TaskListProps) {
       if (lc !== 0) return lc;
       return b.id > a.id ? 1 : b.id < a.id ? -1 : 0;
     };
-    const stateUpdatedDesc = (a: Task, b: Task) => b.stateUpdatedAt - a.stateUpdatedAt;
+    const stateUpdatedDesc = (a: Task, b: Task) => b.stateUpdatedAt > a.stateUpdatedAt ? 1 : b.stateUpdatedAt < a.stateUpdatedAt ? -1 : 0;
     const sortedGroups = Object.values(groups).sort((a, b) => naturalCompare(a.repo, b.repo));
     for (const g of sortedGroups) {
       g.active.sort(idDesc);
