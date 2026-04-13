@@ -63,6 +63,7 @@ func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, 
 	} else {
 		slog.Info("md", "phase", "launch", "hns", opts.Harness)
 	}
+	slog.Debug("container", "msg", "Launch starting", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "repos_count", len(repos))
 	if _, ok := map[agent.Harness]md.Harness{
 		agent.Claude:   md.HarnessClaude,
 		agent.Codex:    md.HarnessCodex,
@@ -72,18 +73,24 @@ func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, 
 	}[opts.Harness]; !ok {
 		return "", fmt.Errorf("unknown harness %q", opts.Harness)
 	}
+	slog.Debug("container", "msg", "harness verified", "harness", opts.Harness)
 	client, mdOpts := b.mdStartOpts(labels, opts)
+	slog.Debug("container", "msg", "creating container object", "repos_count", len(repos))
 	c := client.Container(repos...)
 	stdout, stderr := logWriters(opts.LogWriter, "launch")
+	slog.Debug("container", "msg", "calling c.Launch")
 	if err := c.Launch(ctx, stdout, stderr, mdOpts); err != nil {
+		slog.Error("container", "msg", "c.Launch failed", "err", err)
 		return "", err
 	}
+	slog.Debug("container", "msg", "c.Launch succeeded", "container", c.Name)
 	b.mu.Lock()
 	if b.pendingContainers == nil {
 		b.pendingContainers = make(map[string]*md.Container)
 	}
 	b.pendingContainers[c.Name] = c
 	b.mu.Unlock()
+	slog.Debug("container", "msg", "Launch returning", "container", c.Name)
 	return c.Name, nil
 }
 
@@ -92,6 +99,7 @@ func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opt
 	if len(repos) > 0 {
 		slog.Info("md", "phase", "connect", "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	}
+	slog.Debug("container", "msg", "Connect starting", "container", name, "repos_count", len(repos))
 	b.mu.Lock()
 	c, ok := b.pendingContainers[name]
 	if ok {
@@ -99,14 +107,19 @@ func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opt
 	}
 	b.mu.Unlock()
 	if !ok {
+		slog.Debug("container", "msg", "no pending container", "container", name)
 		return "", fmt.Errorf("no pending container %q", name)
 	}
+	slog.Debug("container", "msg", "found pending container", "container", name)
 	_, mdOpts := b.mdStartOpts(nil, opts)
 	stdout, stderr := logWriters(opts.LogWriter, "connect")
+	slog.Debug("container", "msg", "calling c.Connect", "container", name)
 	sr, err := c.Connect(ctx, stdout, stderr, mdOpts)
 	if err != nil {
+		slog.Error("container", "msg", "c.Connect failed", "container", name, "err", err)
 		return "", err
 	}
+	slog.Debug("container", "msg", "c.Connect succeeded", "container", name, "fqdn", sr.TailscaleFQDN)
 	return sr.TailscaleFQDN, nil
 }
 
@@ -163,11 +176,19 @@ func (b *Backend) Revive(ctx context.Context, name string, repos []md.Repo) erro
 	} else {
 		slog.Info("md revive", "name", name)
 	}
+	slog.Debug("container", "msg", "Revive starting", "container", name, "repos_count", len(repos))
 	ct := b.Client.Container(repos...)
 	if len(repos) == 0 {
 		ct.Name = name
 	}
-	return ct.Revive(ctx, &SlogWriter{Phase: "revive"}, &SlogWriter{Phase: "revive"})
+	slog.Debug("container", "msg", "calling ct.Revive", "container", name)
+	err := ct.Revive(ctx, &SlogWriter{Phase: "revive"}, &SlogWriter{Phase: "revive"})
+	if err != nil {
+		slog.Error("container", "msg", "ct.Revive failed", "container", name, "err", err)
+		return err
+	}
+	slog.Debug("container", "msg", "Revive succeeded", "container", name)
+	return nil
 }
 
 // Fork implements task.ContainerBackend.
@@ -175,6 +196,7 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 	if len(repos) > 0 {
 		slog.Info("md", "phase", "fork", "src", name, "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	}
+	slog.Debug("container", "msg", "Fork starting", "source", name, "repos_count", len(repos))
 	ct := b.Client.Container(repos...)
 	ct.Name = name
 	ct.State = "running"
@@ -189,6 +211,7 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 	if mdH, ok := harnessMap[opts.Harness]; ok {
 		agentPaths = []md.AgentPaths{md.HarnessMounts[mdH]}
 	}
+	slog.Debug("container", "msg", "building fork options", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display)
 	forkOpts := &md.ForkOpts{
 		ExtraRepos: opts.ExtraRepos,
 		Display:    opts.Display,
@@ -199,10 +222,13 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 		ExtraEnv:   opts.ExtraEnv,
 	}
 	stdout, stderr := logWriters(opts.LogWriter, "fork")
+	slog.Debug("container", "msg", "calling ct.Fork", "source", name)
 	forked, err := ct.Fork(ctx, stdout, stderr, forkOpts)
 	if err != nil {
+		slog.Error("container", "msg", "ct.Fork failed", "source", name, "err", err)
 		return "", nil, err
 	}
+	slog.Debug("container", "msg", "Fork succeeded", "source", name, "fork", forked.Name)
 	return forked.Name, forked.Repos, nil
 }
 
