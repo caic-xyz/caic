@@ -130,17 +130,15 @@ func TestSession(t *testing.T) {
 		stdoutR, stdoutW := io.Pipe()
 
 		s := &Session{
-			stdin: stdinW,
-			logW:  io.Discard,
-			wire:  testWire{},
-			done:  make(chan struct{}),
+			Conn: NewConn(stdinW, io.Discard, testWire{}),
+			done: make(chan struct{}),
 		}
 
 		msgCh := make(chan Message, 16)
 
 		go func() {
 			defer close(s.done)
-			result, parseErr := readMessages(stdoutR, ChanDispatch(msgCh), io.Discard, testParseFn)
+			result, parseErr := DefaultReadMessages(stdoutR, func(m Message) { msgCh <- m }, io.Discard, testParseFn)
 			s.result = result
 			if parseErr != nil {
 				s.err = parseErr
@@ -155,7 +153,7 @@ func TestSession(t *testing.T) {
 			stdinBuf <- string(data)
 		}()
 
-		if err := s.Send(Prompt{Text: "test prompt"}); err != nil {
+		if err := s.SendPrompt(Prompt{Text: "test prompt"}); err != nil {
 			t.Fatal(err)
 		}
 
@@ -170,11 +168,11 @@ func TestSession(t *testing.T) {
 		case <-time.After(50 * time.Millisecond):
 		}
 
-		if err := s.Send(Prompt{Text: "follow-up"}); err != nil {
+		if err := s.SendPrompt(Prompt{Text: "follow-up"}); err != nil {
 			t.Fatal(err)
 		}
 
-		s.Close()
+		_ = s.Close()
 
 		got := <-stdinBuf
 		if !strings.Contains(got, `"content":"test prompt"`) {
@@ -211,10 +209,8 @@ func TestSession(t *testing.T) {
 			stdinR, stdinW := io.Pipe()
 			var logBuf bytes.Buffer
 			s := &Session{
-				stdin: stdinW,
-				wire:  testWire{},
-				logW:  &logBuf,
-				done:  make(chan struct{}),
+				Conn: NewConn(stdinW, &logBuf, testWire{}),
+				done: make(chan struct{}),
 			}
 
 			stdinBuf := make(chan string, 1)
@@ -227,7 +223,7 @@ func TestSession(t *testing.T) {
 			if err := s.SendRaw(payload); err != nil {
 				t.Fatal(err)
 			}
-			s.Close()
+			_ = s.Close()
 
 			got := <-stdinBuf
 			if !strings.Contains(got, `"FOO":"bar"`) {
@@ -241,9 +237,8 @@ func TestSession(t *testing.T) {
 			stdinR, stdinW := io.Pipe()
 			_ = stdinR.Close()
 			s := &Session{
-				stdin: stdinW,
-				wire:  testWire{},
-				done:  make(chan struct{}),
+				Conn: NewConn(stdinW, io.Discard, testWire{}),
+				done: make(chan struct{}),
 			}
 			if err := s.SendRaw([]byte("data\n")); err == nil {
 				t.Error("expected error writing to closed pipe")
@@ -254,13 +249,10 @@ func TestSession(t *testing.T) {
 		stdinR, stdinW := io.Pipe()
 		go func() { _, _ = io.Copy(io.Discard, stdinR) }()
 		s := &Session{
-			stdin: stdinW,
-			logW:  io.Discard,
-			wire:  testWire{},
-			done:  make(chan struct{}),
+			Conn: NewConn(stdinW, io.Discard, testWire{}),
+			done: make(chan struct{}),
 		}
-		s.Close()
-		s.Close()
+		_ = s.Close()
 	})
 	t.Run("SignalKillNotError", func(t *testing.T) {
 		cmd := exec.Command("sleep", "60")
@@ -282,7 +274,7 @@ func TestSession(t *testing.T) {
 		defer slog.SetDefault(oldDefault)
 
 		msgCh := make(chan Message, 16)
-		s := NewSession(cmd, stdin, stdout, ChanDispatch(msgCh), io.Discard, testWire{}, nil)
+		s := NewSession(cmd, NewConn(stdin, io.Discard, testWire{}), stdout, msgCh, nil)
 
 		if err := cmd.Process.Kill(); err != nil {
 			t.Fatal(err)
@@ -313,7 +305,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n")
 
 		ch := make(chan Message, 16)
-		result, err := readMessages(strings.NewReader(input), ChanDispatch(ch), io.Discard, testParseFn)
+		result, err := DefaultReadMessages(strings.NewReader(input), func(m Message) { ch <- m }, io.Discard, testParseFn)
 		close(ch)
 		if err != nil {
 			t.Fatal(err)
@@ -345,7 +337,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n")
 
 		ch := make(chan Message, 16)
-		result, err := readMessages(strings.NewReader(input), ChanDispatch(ch), io.Discard, testParseFn)
+		result, err := DefaultReadMessages(strings.NewReader(input), func(m Message) { ch <- m }, io.Discard, testParseFn)
 		close(ch)
 		if err != nil {
 			t.Fatal(err)
@@ -377,7 +369,7 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n")
 
 		var buf bytes.Buffer
-		result, err := readMessages(strings.NewReader(input), func(Message) {}, &buf, testParseFn)
+		result, err := DefaultReadMessages(strings.NewReader(input), func(Message) {}, &buf, testParseFn)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -250,7 +250,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 		Container:       t.Container,
 		RelayOffset:     t.RelayOffset,
 		ResumeSessionID: t.GetSessionID(),
-		Dispatch:        agent.ChanDispatch(msgCh),
+		MsgCh:           msgCh,
 		LogW:            logW,
 	})
 	if err != nil {
@@ -324,7 +324,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 		Dir:           r.containerDir(),
 		Model:         t.Model,
 		InitialPrompt: t.InitialPrompt,
-		Dispatch:      agent.ChanDispatch(msgCh),
+		MsgCh:         msgCh,
 		LogW:          logW,
 	})
 	if err != nil {
@@ -356,7 +356,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 //
 // Steps:
 //  1. Detach the session handle from the task.
-//  2. If a session exists: Session.Close sends \x00 + closes stdin, wait up to 10s.
+//  2. If a session exists: Stop (sends \x00, waits up to 20s), then Close.
 //  3. Set task state to reason (StatePurged or StateFailed).
 //  4. Kill the container.
 //  5. If graceful wait timed out, drain session now (container dead, SSH severed).
@@ -368,7 +368,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 
 	name := t.Container
 
-	// Graceful shutdown: close stdin so the agent can emit a final
+	// Graceful shutdown: send stop sentinel so the agent can emit a final
 	// ResultMessage with accurate cost/turns stats, then force-kill.
 	var result *agent.ResultMessage
 	var primaryBranch string
@@ -377,13 +377,12 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	}
 	tlog := r.log.With("br", primaryBranch, "ctr", name)
 	if h != nil {
-		h.Session.Close()
-		timer := time.NewTimer(20 * time.Second)
-		select {
-		case <-h.Session.Done():
-			timer.Stop()
-			result, _ = h.Session.Wait()
-		case <-timer.C:
+		var err error
+		stopCtx, stopCancel := context.WithTimeout(ctx, 20*time.Second)
+		result, err = h.Session.Stop(stopCtx)
+		stopCancel()
+		_ = h.Session.Close()
+		if err != nil {
 			tlog.Warn("session timeout, killing")
 		}
 	}
@@ -467,14 +466,13 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	}
 	tlog := r.log.With("br", primaryBranch, "ctr", name)
 
-	// Graceful shutdown: close stdin so the agent can emit a final result.
+	// Graceful shutdown: send stop sentinel so the agent can emit a final result.
 	if h != nil {
-		h.Session.Close()
-		timer := time.NewTimer(20 * time.Second)
-		select {
-		case <-h.Session.Done():
-			timer.Stop()
-		case <-timer.C:
+		stopCtx, stopCancel := context.WithTimeout(ctx, 20*time.Second)
+		_, err := h.Session.Stop(stopCtx)
+		stopCancel()
+		_ = h.Session.Close()
+		if err != nil {
 			tlog.Warn("session timeout during stop")
 		}
 	}
@@ -557,7 +555,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 		Dir:             r.containerDir(),
 		Model:           t.Model,
 		ResumeSessionID: t.GetSessionID(),
-		Dispatch:        agent.ChanDispatch(msgCh),
+		MsgCh:           msgCh,
 		LogW:            logW,
 	})
 	if err != nil {
@@ -646,7 +644,7 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 		Dir:           r.containerDir(),
 		Model:         t.Model,
 		InitialPrompt: prompt,
-		Dispatch:      agent.ChanDispatch(msgCh),
+		MsgCh:         msgCh,
 		LogW:          logW,
 	})
 	if err != nil {
@@ -962,7 +960,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	// 1. Close current session gracefully and persist a context_cleared
 	// marker to the log so that RestoreMessages can reset plan state on
 	// server restart. The marker must be written before closing the log.
-	oldH := t.CloseAndDetachSession()
+	oldH := t.CloseAndDetachSession(ctx)
 	if oldH != nil {
 		oldH.CloseMsgCh()
 		<-oldH.DispatchDone
@@ -998,7 +996,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 		Dir:           r.containerDir(),
 		Model:         t.Model,
 		InitialPrompt: prompt,
-		Dispatch:      agent.ChanDispatch(msgCh),
+		MsgCh:         msgCh,
 		LogW:          logW,
 	})
 	if err != nil {
@@ -1032,7 +1030,7 @@ func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHand
 	}
 
 	// 1. Close current session and persist context_cleared marker.
-	oldH := t.CloseAndDetachSession()
+	oldH := t.CloseAndDetachSession(ctx)
 	if oldH != nil {
 		oldH.CloseMsgCh()
 		<-oldH.DispatchDone
@@ -1067,7 +1065,7 @@ func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHand
 		Container: t.Container,
 		Dir:       r.containerDir(),
 		Model:     t.Model,
-		Dispatch:  agent.ChanDispatch(msgCh),
+		MsgCh:     msgCh,
 		LogW:      logW,
 	})
 	if err != nil {

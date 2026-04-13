@@ -785,25 +785,20 @@ func (t *Task) SessionDone() <-chan struct{} {
 	return t.handle.Session.Done()
 }
 
-// CloseAndDetachSession gracefully shuts down the current agent session
-// (close stdin, wait up to 10s for exit) and returns the detached handle.
-// Returns nil if no session was attached. Used by RestartSession which needs
-// the graceful drain before starting a new session.
-func (t *Task) CloseAndDetachSession() *SessionHandle {
+// CloseAndDetachSession gracefully shuts down the current agent session and
+// returns the detached handle. Returns nil if no session was attached. Used by
+// RestartSession which needs the graceful drain before starting a new session.
+func (t *Task) CloseAndDetachSession(ctx context.Context) *SessionHandle {
 	h := t.DetachSession()
 	if h == nil {
 		return nil
 	}
 
-	// Graceful: close stdin, wait for exit with timeout.
-	h.Session.Close()
-	timer := time.NewTimer(10 * time.Second)
-	select {
-	case <-h.Session.Done():
-		timer.Stop()
-		_, _ = h.Session.Wait()
-	case <-timer.C:
-	}
+	// Graceful: send stop sentinel, wait for exit with timeout.
+	stopCtx, stopCancel := context.WithTimeout(ctx, 10*time.Second)
+	_, _ = h.Session.Stop(stopCtx)
+	_ = h.Session.Close()
+	stopCancel()
 	return h
 }
 
@@ -1067,7 +1062,7 @@ func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
 		return fmt.Errorf("no active session (state=%s session=%s)", state, sessionStatus)
 	}
 	t.addMessage(ctx, syntheticUserInput(p), false)
-	return h.Session.Send(p)
+	return h.Session.SendPrompt(p)
 }
 
 // SendCompact sends a compact command to the running agent without changing

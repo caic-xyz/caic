@@ -177,10 +177,10 @@ func (*fakeBackend) Start(_ context.Context, opts *agent.Options) (*agent.Sessio
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	s := agent.NewSession(cmd, stdin, stdout, opts.Dispatch, opts.LogW, claudecode.Wire, nil)
+	s := agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, claudecode.Wire), stdout, opts.MsgCh, nil)
 	if opts.InitialPrompt.Text != "" {
-		if err := s.Send(opts.InitialPrompt); err != nil {
-			s.Close()
+		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
+			_ = s.Close()
 			return nil, fmt.Errorf("write prompt: %w", err)
 		}
 	}

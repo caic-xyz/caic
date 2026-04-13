@@ -20,6 +20,8 @@ type Backend struct {
 	agent.Base
 	widgetTracker *WidgetTracker
 	fieldWarner   *jsonutil.FieldWarner
+
+	envVarPayload []byte // Pre-marshaled InputUpdateEnvVars NDJSON; nil when no API key.
 }
 
 // ParseMessage wraps ParseMessage with widget tracking for streaming deltas.
@@ -48,6 +50,18 @@ func New() *Backend {
 		ContextWindow: 180_000,
 	}
 	b.Wire = b
+	// Pre-marshal the env var injection payload for OnSessionInit. The relay
+	// strips ANTHROPIC_API_KEY when OAuth is configured so Claude Code
+	// authenticates via OAuth; OnSessionInit re-injects it after the first
+	// message confirms auth is complete.
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		envMsg, _ := json.Marshal(cc.InputUpdateEnvVarsMsg{
+			Type:      cc.InputUpdateEnvVars,
+			Variables: map[string]string{"ANTHROPIC_API_KEY": key},
+		})
+		envMsg = append(envMsg, '\n')
+		b.envVarPayload = envMsg
+	}
 	return b
 }
 
@@ -65,41 +79,15 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err := agent.DeployEmbeddedDir(ctx, opts.Container, pluginFS, agent.WidgetPluginDir); err != nil {
 		return nil, err
 	}
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		return agent.StartRelay(ctx, opts, buildArgs(opts), b)
-	}
-	// The relay strips ANTHROPIC_API_KEY when OAuth is configured so Claude
-	// Code authenticates via OAuth. Re-inject it via InputUpdateEnvVars after
-	// the first message — at that point OAuth authentication is complete — so
-	// tools and MCP servers can use the key without affecting Claude Code's
-	// own billing method.
-	envMsg, err := json.Marshal(cc.InputUpdateEnvVarsMsg{
-		Type:      cc.InputUpdateEnvVars,
-		Variables: map[string]string{"ANTHROPIC_API_KEY": apiKey},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("marshal env vars: %w", err)
-	}
-	envMsg = append(envMsg, '\n')
-	var sess *agent.Session
-	startOpts := *opts
-	origDispatch := opts.Dispatch
-	first := true
-	startOpts.Dispatch = func(m agent.Message) {
-		if first {
-			first = false
-			if err := sess.SendRaw(envMsg); err != nil {
-				slog.Warn("inject ANTHROPIC_API_KEY", "err", err)
-			}
-		}
-		origDispatch(m)
-	}
-	sess, err = agent.StartRelay(ctx, &startOpts, buildArgs(opts), b)
+	rp, err := agent.PrepareRelay(ctx, opts, buildArgs(opts))
 	if err != nil {
 		return nil, err
 	}
-	return sess, nil
+	c := agent.NewConn(rp.Stdin, opts.LogW, b)
+	if b.envVarPayload != nil {
+		c = &envInjectorConn{Conn: c, payload: b.envVarPayload}
+	}
+	return agent.StartSession(rp, c, opts)
 }
 
 // WritePrompt writes a single user message in Claude Code's stdin format.
@@ -153,6 +141,38 @@ func (b *Backend) WriteCompact(w io.Writer, instructions string, logW io.Writer)
 		text = "/compact " + instructions
 	}
 	return b.WritePrompt(w, agent.Prompt{Text: text}, logW)
+}
+
+// envInjectorConn wraps a Conn to inject ANTHROPIC_API_KEY via
+// InputUpdateEnvVars before dispatching the first message. The relay strips
+// the key when OAuth is configured so Claude Code authenticates via OAuth;
+// re-injecting it after the first message confirms auth is complete lets
+// tools and MCP servers use the key without affecting billing.
+type envInjectorConn struct {
+	agent.Conn
+	payload []byte
+}
+
+func (c *envInjectorConn) ReadMessages(r io.Reader, msgCh chan<- agent.Message) (*agent.ResultMessage, error) {
+	proxy := make(chan agent.Message, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		first := true
+		for m := range proxy {
+			if first {
+				first = false
+				if err := c.SendRaw(c.payload); err != nil {
+					slog.Warn("inject ANTHROPIC_API_KEY", "err", err)
+				}
+			}
+			msgCh <- m
+		}
+	}()
+	result, err := c.Conn.ReadMessages(r, proxy)
+	close(proxy)
+	<-done
+	return result, err
 }
 
 // buildArgs constructs the Claude Code CLI arguments.

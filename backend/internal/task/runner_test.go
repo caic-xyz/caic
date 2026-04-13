@@ -35,7 +35,7 @@ func (b *testBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Se
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, stdin, stdout, opts.Dispatch, opts.LogW, &testWire{parse: claudecode.New().NewParser()}, nil), nil
+	return agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, &testWire{parse: claudecode.New().NewParser()}), stdout, opts.MsgCh, nil), nil
 }
 
 func (b *testBackend) AttachRelay(context.Context, *agent.Options) (*agent.Session, error) {
@@ -668,7 +668,7 @@ func TestRunner(t *testing.T) {
 				}
 
 				// Clean up: close the session.
-				tk.CloseAndDetachSession()
+				tk.CloseAndDetachSession(t.Context())
 			})
 		}
 	})
@@ -697,7 +697,7 @@ func TestRunner(t *testing.T) {
 			t.Fatal(err)
 		}
 		msgCh := make(chan agent.Message, 16)
-		session, err := backend.Start(t.Context(), &agent.Options{Dispatch: agent.ChanDispatch(msgCh), LogW: logW})
+		session, err := backend.Start(t.Context(), &agent.Options{MsgCh: msgCh, LogW: logW})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -717,8 +717,10 @@ func TestRunner(t *testing.T) {
 		}
 
 		// Gracefully end the first session so we can restart.
-		h1.Session.Close()
-		<-h1.Session.Done()
+		stopCtx, stopCancel := context.WithTimeout(t.Context(), 5*time.Second)
+		_, _ = h1.Session.Stop(stopCtx)
+		_ = h1.Session.Close()
+		stopCancel()
 		tk.SetState(StateWaiting)
 
 		// Restart: should write context_cleared to the log before closing it.
@@ -726,7 +728,7 @@ func TestRunner(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer tk.CloseAndDetachSession()
+		defer tk.CloseAndDetachSession(t.Context())
 		_ = h2
 
 		// Read the raw log file and verify context_cleared is present.

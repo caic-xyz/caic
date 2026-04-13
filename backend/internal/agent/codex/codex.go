@@ -112,10 +112,10 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 
 	log := slog.With("container", opts.Container)
-	s := agent.NewSession(cmd, stdin, br, opts.Dispatch, opts.LogW, wire, log)
+	s := agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, wire), br, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" {
-		if err := s.Send(opts.InitialPrompt); err != nil {
-			s.Close()
+		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
+			_ = s.Close()
 			return nil, fmt.Errorf("write prompt: %w", err)
 		}
 	}

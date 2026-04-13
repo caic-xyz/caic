@@ -8,7 +8,7 @@ import "context"
 // remains agent-agnostic.
 type Backend interface {
 	// Start launches the agent in the given container. Parsed messages are
-	// forwarded via opts.Dispatch; opts.LogW receives raw wire-format lines.
+	// forwarded to opts.MsgCh; opts.LogW receives raw wire-format lines.
 	Start(ctx context.Context, opts *Options) (*Session, error)
 
 	// AttachRelay connects to an already-running relay daemon in the

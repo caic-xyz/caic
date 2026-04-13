@@ -1,6 +1,19 @@
 // Package agent defines shared types and infrastructure for coding agent
 // backends. Backend implementations live in sub-packages (e.g. agent/claudecode).
 //
+// # Message dispatch
+//
+// Conn.ReadMessages reads agent stdout and forwards parsed messages to
+// Options.MsgCh. The task runner drains this channel in a separate
+// goroutine (startMessageDispatch) that performs blocking side-effects: git
+// fetch, diff stat, branch locking. The channel decouples the fast reader
+// from these slow operations — without it, a blocked git fetch would
+// backpressure the agent's stdout pipe and risk deadlock.
+//
+// Conn is an interface. Backends that need to intercept messages (e.g.
+// injecting control commands after initialization) wrap the default Conn
+// returned by NewConn to override ReadMessages.
+//
 // # Relay shutdown protocol
 //
 // Each agent runs inside a container behind a relay daemon (relay.py) that
@@ -61,9 +74,9 @@ type Options struct {
 	Model           string // Model alias ("opus", "sonnet", "haiku") or full ID. Empty = default.
 	InitialPrompt   Prompt // Initial prompt; never mutated after creation.
 	ResumeSessionID string
-	RelayOffset     int64         // Byte offset into relay output.jsonl for AttachRelay.
-	Dispatch        func(Message) // Receives parsed messages from the agent.
-	LogW            io.Writer     // Raw wire-format log; use io.Discard if unused.
+	RelayOffset     int64          // Byte offset into relay output.jsonl for AttachRelay.
+	MsgCh           chan<- Message // Receives parsed messages from the agent.
+	LogW            io.Writer      // Raw wire-format log; use io.Discard if unused.
 }
 
 // WireFormat defines the wire protocol for a backend's stdin/stdout
@@ -86,28 +99,101 @@ type CompactCommand interface {
 	WriteCompact(w io.Writer, instructions string, logW io.Writer) error
 }
 
-// Session manages a running agent process.
-type Session struct {
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	logW      io.Writer
-	wire      WireFormat
-	log       *slog.Logger
-	mu        sync.Mutex // serializes stdin writes
-	closeOnce sync.Once
-	done      chan struct{} // closed when readMessages goroutine exits
-	result    *ResultMessage
-	err       error
+// Conn handles wire-format I/O for a single agent session. It is safe for
+// concurrent use. Backends can wrap a Conn to intercept messages (e.g.
+// injecting control commands after initialization).
+type Conn interface {
+	// SendPrompt writes a user message to the agent's stdin.
+	SendPrompt(p Prompt) error
+	// SendRaw writes pre-encoded NDJSON bytes to the agent's stdin.
+	SendRaw(data []byte) error
+	// SendCompact sends a compact/context-reduction command.
+	SendCompact(instructions string) error
+	// ReadMessages runs the message read loop: reads NDJSON lines from r,
+	// parses them, writes raw lines to the log, and forwards parsed messages
+	// to msgCh. Returns the terminal ResultMessage.
+	ReadMessages(r io.Reader, msgCh chan<- Message) (*ResultMessage, error)
+	// SendStop sends the null-byte sentinel to trigger graceful agent shutdown.
+	// Best-effort: returns when ctx is done if the write blocks.
+	SendStop(ctx context.Context)
+	// Close closes the stdin pipe.
+	Close() error
 }
 
-// ChanDispatch returns a dispatch function that sends messages to ch.
-func ChanDispatch(ch chan<- Message) func(Message) {
-	return func(m Message) { ch <- m }
+// conn is the default Conn implementation.
+type conn struct {
+	stdin io.WriteCloser
+	logW  io.Writer
+	wire  WireFormat
+	mu    sync.Mutex // serializes stdin writes
+}
+
+// NewConn creates a Conn from an stdin pipe, log writer, and wire format.
+func NewConn(stdin io.WriteCloser, logW io.Writer, wire WireFormat) Conn {
+	return &conn{stdin: stdin, logW: logW, wire: wire}
+}
+
+func (c *conn) SendPrompt(p Prompt) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.wire.WritePrompt(c.stdin, p, c.logW)
+}
+
+func (c *conn) SendRaw(data []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, err := c.stdin.Write(data); err != nil {
+		return err
+	}
+	_, err := c.logW.Write(data)
+	return err
+}
+
+func (c *conn) SendCompact(instructions string) error {
+	cc, ok := c.wire.(CompactCommand)
+	if !ok {
+		return errors.New("compact not supported by this backend")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return cc.WriteCompact(c.stdin, instructions, c.logW)
+}
+
+func (c *conn) ReadMessages(r io.Reader, msgCh chan<- Message) (*ResultMessage, error) {
+	return DefaultReadMessages(r, func(m Message) { msgCh <- m }, c.logW, c.wire.ParseMessage)
+}
+
+func (c *conn) SendStop(ctx context.Context) {
+	// Best-effort — the pipe may be broken or blocked (e.g. the SSH
+	// process is gone). Returns when ctx is done if the write blocks.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = c.stdin.Write([]byte{0})
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+func (c *conn) Close() error {
+	return c.stdin.Close()
+}
+
+// Session manages a running agent process. It embeds Conn for wire I/O.
+type Session struct {
+	Conn
+	cmd    *exec.Cmd
+	log    *slog.Logger
+	done   chan struct{} // closed when readMessages goroutine exits
+	result *ResultMessage
+	err    error
 }
 
 // NewSession creates a Session from an already-started command. Messages read
-// from stdout are parsed and forwarded via dispatch. logW receives raw NDJSON
-// lines. wire defines the backend's wire protocol.
+// from stdout are parsed and forwarded to msgCh through the Conn's
+// ReadMessages method.
 //
 // A background goroutine reads stdout until EOF, then waits for the process to
 // exit. The done channel is closed when both are complete. Callers should use
@@ -117,22 +203,20 @@ func ChanDispatch(ch chan<- Message) func(Message) {
 // parse error indicates corrupted output while the process may still exit 0.
 // If neither parse nor wait errors occur but no ResultMessage was seen, the
 // session reports "agent exited without a result message".
-func NewSession(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, dispatch func(Message), logW io.Writer, wire WireFormat, log *slog.Logger) *Session {
+func NewSession(cmd *exec.Cmd, c Conn, stdout io.Reader, msgCh chan<- Message, log *slog.Logger) *Session {
 	if log == nil {
 		log = slog.Default()
 	}
 	s := &Session{
-		cmd:   cmd,
-		stdin: stdin,
-		logW:  logW,
-		wire:  wire,
-		log:   log,
-		done:  make(chan struct{}),
+		Conn: c,
+		cmd:  cmd,
+		log:  log,
+		done: make(chan struct{}),
 	}
 
 	go func() {
 		defer close(s.done)
-		result, parseErr := readMessages(stdout, dispatch, logW, wire.ParseMessage)
+		result, parseErr := s.ReadMessages(stdout, msgCh)
 		waitErr := cmd.Wait()
 		// Store the result and first non-nil error.
 		s.result = result
@@ -160,61 +244,21 @@ func NewSession(cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, dispatch 
 	return s
 }
 
-// Send writes a user message to the agent's stdin. It is safe for concurrent
-// use. The first call typically provides the initial task prompt.
-func (s *Session) Send(p Prompt) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.wire.WritePrompt(s.stdin, p, s.logW)
-}
-
-// SendRaw writes pre-encoded NDJSON bytes to the agent's stdin. It is safe for
-// concurrent use. Use this for control messages that bypass WritePrompt.
-func (s *Session) SendRaw(data []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, err := s.stdin.Write(data); err != nil {
-		return err
-	}
-	_, err := s.logW.Write(data)
-	return err
-}
-
-// SendCompact sends a compact command to the agent. Returns an error if the
-// backend's wire format does not implement CompactCommand.
-func (s *Session) SendCompact(instructions string) error {
-	cc, ok := s.wire.(CompactCommand)
-	if !ok {
-		return errors.New("compact not supported by this backend")
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return cc.WriteCompact(s.stdin, instructions, s.logW)
-}
-
-// Close sends the null-byte sentinel to the relay daemon (triggering graceful
-// subprocess shutdown) and then closes stdin. Idempotent.
+// Stop sends the null-byte sentinel and waits for the agent process to exit
+// or the context to expire. The caller must call Close separately to release
+// the stdin pipe.
 //
-// The sentinel must be written explicitly here rather than inferred from stdin
-// EOF in the attach client, because EOF also occurs on SSH drops and backend
+// The sentinel must be written explicitly rather than inferred from stdin EOF
+// in the attach client, because EOF also occurs on SSH drops and backend
 // restarts where the container should keep running.
-func (s *Session) Close() {
-	s.closeOnce.Do(func() {
-		// Best-effort write with timeout — the pipe may already be broken
-		// or blocked (e.g. the SSH process is gone).
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			_, _ = s.stdin.Write([]byte{0})
-		}()
-		t := time.NewTimer(2 * time.Second)
-		select {
-		case <-done:
-			t.Stop()
-		case <-t.C:
-		}
-		_ = s.stdin.Close()
-	})
+func (s *Session) Stop(ctx context.Context) (*ResultMessage, error) {
+	s.SendStop(ctx)
+	select {
+	case <-s.done:
+		return s.result, s.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 // Done returns a channel that is closed when the agent process exits.
@@ -228,10 +272,13 @@ func (s *Session) Wait() (*ResultMessage, error) {
 	return s.result, s.err
 }
 
-// readMessages reads NDJSON lines from r, forwards parsed messages via
-// dispatch, and returns the terminal ResultMessage. Each raw line is also
-// written to logW.
-func readMessages(r io.Reader, dispatch func(Message), logW io.Writer, parseFn func([]byte) ([]Message, error)) (*ResultMessage, error) {
+// DefaultReadMessages is the standard message read loop. It reads NDJSON lines
+// from r, parses them via parseFn, writes each raw line to logW, and forwards
+// parsed messages via dispatch. Returns the terminal ResultMessage.
+//
+// Conn wrappers that override ReadMessages can call this for delegation with a
+// custom dispatch function.
+func DefaultReadMessages(r io.Reader, dispatch func(Message), logW io.Writer, parseFn func([]byte) ([]Message, error)) (*ResultMessage, error) {
 	scanner := bufio.NewScanner(r)
 	// 32 MiB max line: user input with base64 images can produce very long NDJSON lines.
 	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
@@ -443,10 +490,16 @@ func (w *SlogWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// StartRelay deploys the relay, launches an agent via relay serve-attach with
-// the given CLI args, and sends the initial prompt. opts.Dispatch receives
-// parsed messages; opts.LogW receives raw wire lines.
-func StartRelay(ctx context.Context, opts *Options, agentArgs []string, wire WireFormat) (*Session, error) {
+// RelayProcess holds the started relay SSH command and its I/O pipes.
+type RelayProcess struct {
+	Cmd    *exec.Cmd
+	Stdin  io.WriteCloser
+	Stdout io.Reader
+}
+
+// PrepareRelay deploys the relay script and starts the SSH serve-attach
+// process. The caller creates a Conn and Session from the returned process.
+func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*RelayProcess, error) {
 	if opts.Dir == "" {
 		return nil, errors.New("opts.Dir is required")
 	}
@@ -475,12 +528,27 @@ func StartRelay(ctx context.Context, opts *Options, agentArgs []string, wire Wir
 		return nil, fmt.Errorf("start relay: %w", err)
 	}
 	slog.Info("startup", "phase", "relay_started", "ctr", opts.Container, "dur", time.Since(tStart))
+	return &RelayProcess{Cmd: cmd, Stdin: stdin, Stdout: stdout}, nil
+}
 
+// StartRelay is a convenience that calls PrepareRelay, creates a default Conn,
+// and sends the initial prompt.
+func StartRelay(ctx context.Context, opts *Options, agentArgs []string, wire WireFormat) (*Session, error) {
+	rp, err := PrepareRelay(ctx, opts, agentArgs)
+	if err != nil {
+		return nil, err
+	}
+	return StartSession(rp, NewConn(rp.Stdin, opts.LogW, wire), opts)
+}
+
+// StartSession creates a Session from a RelayProcess and Conn, sends the
+// initial prompt if present, and returns the session.
+func StartSession(rp *RelayProcess, c Conn, opts *Options) (*Session, error) {
 	log := slog.With("ctr", opts.Container)
-	s := NewSession(cmd, stdin, stdout, opts.Dispatch, opts.LogW, wire, log)
+	s := NewSession(rp.Cmd, c, rp.Stdout, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
-		if err := s.Send(opts.InitialPrompt); err != nil {
-			s.Close()
+		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
+			_ = s.Close()
 			return nil, fmt.Errorf("write prompt: %w", err)
 		}
 	}
@@ -538,7 +606,7 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat) (*S
 	}
 
 	log := slog.With("ctr", opts.Container)
-	return NewSession(cmd, stdin, stdout, opts.Dispatch, opts.LogW, wire, log), nil
+	return NewSession(cmd, NewConn(stdin, opts.LogW, wire), stdout, opts.MsgCh, log), nil
 }
 
 // PlainTextWritePrompt writes a user prompt as a plain text line on stdin

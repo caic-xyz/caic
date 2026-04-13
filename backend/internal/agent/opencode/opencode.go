@@ -104,7 +104,8 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 
 	log := slog.With("ctr", opts.Container)
-	s := agent.NewSession(cmd, stdin, br, opts.Dispatch, opts.LogW, hs.wire, log)
+	c := agent.NewConn(stdin, opts.LogW, hs.wire)
+	s := agent.NewSession(cmd, c, br, opts.MsgCh, log)
 
 	// Emit InitMessage so the task captures session ID, model, and version.
 	initMsg := &agent.InitMessage{
@@ -112,7 +113,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		Model:     hs.currentModel,
 		Version:   hs.agentVersion,
 	}
-	opts.Dispatch(initMsg)
+	opts.MsgCh <- initMsg
 	// Persist a synthetic caic_init line to output.jsonl so replay
 	// reconstructs the InitMessage (handshake responses aren't logged).
 	data, err := json.Marshal(caicInit{
@@ -129,8 +130,8 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
-		if err := s.Send(opts.InitialPrompt); err != nil {
-			s.Close()
+		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
+			_ = s.Close()
 			return nil, fmt.Errorf("write prompt: %w", err)
 		}
 	}
