@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/netip"
+	"time"
 
 	"github.com/maruel/roundtrippers"
 )
@@ -14,6 +16,23 @@ import (
 // githubMetaResponse is the minimal shape of https://api.github.com/meta.
 type githubMetaResponse struct {
 	Hooks []string `json:"hooks"`
+}
+
+// retryPolicy403 retries on 403, 429, and 5xx errors with exponential backoff.
+type retryPolicy403 struct{}
+
+func (p *retryPolicy403) ShouldRetry(ctx context.Context, start time.Time, try int, err error, resp *http.Response) bool {
+	if err != nil {
+		return try < 3
+	}
+	if resp == nil {
+		return false
+	}
+	return resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
+}
+
+func (p *retryPolicy403) Backoff(start time.Time, try int) time.Duration {
+	return time.Duration(math.Pow(2, float64(try))) * time.Second
 }
 
 // githubMetaURL is the URL of the GitHub meta API. It is a variable so tests
@@ -28,7 +47,10 @@ func fetchGitHubHookCIDRs(ctx context.Context) ([]netip.Prefix, error) {
 
 func fetchGitHubHookCIDRsFrom(ctx context.Context, url string) ([]netip.Prefix, error) {
 	client := &http.Client{
-		Transport: &roundtrippers.Retry{Transport: http.DefaultTransport},
+		Transport: &roundtrippers.Retry{
+			Transport: http.DefaultTransport,
+			Policy:    &retryPolicy403{},
+		},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
