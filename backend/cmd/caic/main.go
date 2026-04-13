@@ -481,7 +481,7 @@ func watchExecutable(ctx context.Context, stop context.CancelFunc) error {
 				if !ok {
 					return
 				}
-				if runtime.GOOS == "Darwin" {
+				if runtime.GOOS == "darwin" {
 					// What a PoS
 					slog.Info("fsnotify", "ev", event)
 					continue
