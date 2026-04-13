@@ -242,7 +242,7 @@ See contrib/caic.env for a template with all variables and documentation.
 
 	// Exit when executable is rebuilt (systemd restarts the service).
 	if err := watchExecutable(ctx, cancel); err != nil {
-		slog.Warn("failed to watch executable", "err", err)
+		return fmt.Errorf("failed to watch executable: %w", err)
 	}
 	// Nightly auto-update: checks GitHub Releases and replaces the binary.
 	if v := autoupdate.Version; v != "" && !strings.HasPrefix(v, "devel-") && os.Getenv("CAIC_AUTO_UPDATE") != "0" {
@@ -481,8 +481,14 @@ func watchExecutable(ctx context.Context, stop context.CancelFunc) error {
 				if !ok {
 					return
 				}
+				if runtime.GOOS == "Darwin" {
+					// What a PoS
+					slog.Info("fsnotify", "ev", event)
+					continue
+				}
+				slog.Debug("fsnotify", "ev", event)
 				if event.Has(fsnotify.Write) || event.Has(fsnotify.Chmod) {
-					slog.Info("executable modified, shutting down")
+					slog.Info("fsnotify", "ev", event)
 					stop()
 					return
 				}
@@ -490,7 +496,7 @@ func watchExecutable(ctx context.Context, stop context.CancelFunc) error {
 				if !ok {
 					return
 				}
-				slog.Warn("error watching executable", "err", err)
+				slog.Warn("fsnotify", "err", err)
 			}
 		}
 	}()
