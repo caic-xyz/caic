@@ -7,7 +7,7 @@ Coding Agents in Containers. Manage multiple coding agents locally in isolated D
 ## Installation
 
 ```bash
-curl caic.xyz/install.sh | bash
+curl -fsSL https://caic.xyz/install.sh | bash
 ```
 
 ### From source
