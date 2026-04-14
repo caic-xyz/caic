@@ -27,6 +27,9 @@ var metaKnown = jsonutil.KnownFields(agent.MetaMessage{})
 // resultKnown is the set of JSON field names recognised by agent.MetaResultMessage.
 var resultKnown = jsonutil.KnownFields(agent.MetaResultMessage{})
 
+// typeEnvelope extracts just the "type" field from a JSON line.
+type typeEnvelope struct{ Type string }
+
 // LoadedTask holds the data reconstructed from a single JSONL log file.
 type LoadedTask struct {
 	TaskID            string // Task ID parsed from log filename; empty if unparseable.
@@ -227,49 +230,53 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 			if len(line) == 0 {
 				continue
 			}
-			if bytes.Contains(line, []byte(`"caic_pr"`)) {
-				var mp agent.MetaPRMessage
-				if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
-					lt.ForgeOwner = mp.ForgeOwner
-					lt.ForgeRepo = mp.ForgeRepo
-					lt.ForgePR = mp.ForgePR
-				}
-			}
-			if bytes.Contains(line, []byte(`"caic_diff_stat"`)) {
-				var ds agent.DiffStatMessage
-				if json.Unmarshal(line, &ds) == nil && ds.Ts > 0 {
-					if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
-						lt.LastStateUpdateAt = t
+			// Match caic-internal messages by type field, not substring,
+			// to avoid false positives from harness messages.
+			var typeEnv typeEnvelope
+			if json.Unmarshal(line, &typeEnv) == nil {
+				switch typeEnv.Type {
+				case "caic_pr":
+					var mp agent.MetaPRMessage
+					if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
+						lt.ForgeOwner = mp.ForgeOwner
+						lt.ForgeRepo = mp.ForgeRepo
+						lt.ForgePR = mp.ForgePR
 					}
-				}
-			}
-			if bytes.Contains(line, []byte(`"caic_result"`)) {
-				var mr agent.MetaResultMessage
-				if err := json.Unmarshal(line, &mr); err == nil {
-					var raw map[string]json.RawMessage
-					if json.Unmarshal(line, &raw) == nil {
-						fw.Warn("caic_result", jsonutil.CollectUnknown(raw, resultKnown))
+				case "caic_diff_stat":
+					var ds agent.DiffStatMessage
+					if json.Unmarshal(line, &ds) == nil && ds.Ts > 0 {
+						if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
+							lt.LastStateUpdateAt = t
+						}
 					}
-					lt.State = parseState(mr.State)
-					if mr.Title != "" {
-						lt.Title = mr.Title
-					}
-					lt.Result = &Result{
-						State:    lt.State,
-						CostUSD:  mr.CostUSD,
-						Duration: time.Duration(mr.Duration * float64(time.Second)),
-						NumTurns: mr.NumTurns,
-						Usage: agent.Usage{
-							InputTokens:              mr.InputTokens,
-							OutputTokens:             mr.OutputTokens,
-							CacheCreationInputTokens: mr.CacheCreationInputTokens,
-							CacheReadInputTokens:     mr.CacheReadInputTokens,
-						},
-						DiffStat:    mr.DiffStat,
-						AgentResult: mr.AgentResult,
-					}
-					if mr.Error != "" {
-						lt.Result.Err = errors.New(mr.Error)
+				case "caic_result":
+					var mr agent.MetaResultMessage
+					if err := json.Unmarshal(line, &mr); err == nil {
+						var raw map[string]json.RawMessage
+						if json.Unmarshal(line, &raw) == nil {
+							fw.Warn("caic_result", jsonutil.CollectUnknown(raw, resultKnown))
+						}
+						lt.State = parseState(mr.State)
+						if mr.Title != "" {
+							lt.Title = mr.Title
+						}
+						lt.Result = &Result{
+							State:    lt.State,
+							CostUSD:  mr.CostUSD,
+							Duration: time.Duration(mr.Duration * float64(time.Second)),
+							NumTurns: mr.NumTurns,
+							Usage: agent.Usage{
+								InputTokens:              mr.InputTokens,
+								OutputTokens:             mr.OutputTokens,
+								CacheCreationInputTokens: mr.CacheCreationInputTokens,
+								CacheReadInputTokens:     mr.CacheReadInputTokens,
+							},
+							DiffStat:    mr.DiffStat,
+							AgentResult: mr.AgentResult,
+						}
+						if mr.Error != "" {
+							lt.Result.Err = errors.New(mr.Error)
+						}
 					}
 				}
 			}
@@ -423,6 +430,8 @@ func parseState(s string) State {
 	switch s {
 	case "failed":
 		return StateFailed
+	case "stopped":
+		return StateStopped
 	case "purged", "terminated": // "terminated" is for backward compat with pre-rename logs; remove once old logs age out
 		return StatePurged
 	default:

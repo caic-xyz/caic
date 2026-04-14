@@ -118,11 +118,11 @@ func (f *fakeConn) SendRaw(data []byte) error {
 	return nil
 }
 
-func (f *fakeConn) ReadMessages(_ io.Reader, msgCh chan<- agent.Message) (*agent.ResultMessage, error) {
+func (f *fakeConn) ReadMessages(_ io.Reader, msgCh chan<- agent.Message) error {
 	for _, m := range f.messages {
 		msgCh <- m
 	}
-	return &agent.ResultMessage{}, nil
+	return nil
 }
 
 func TestEnvInjectorConn(t *testing.T) {
@@ -142,7 +142,7 @@ func TestEnvInjectorConn(t *testing.T) {
 		c := &envInjectorConn{Conn: inner}
 
 		msgCh := make(chan agent.Message, 10)
-		_, _ = c.ReadMessages(nil, msgCh)
+		_ = c.ReadMessages(nil, msgCh)
 		close(msgCh)
 		var forwarded []agent.Message
 		for m := range msgCh {
@@ -178,7 +178,7 @@ func TestEnvInjectorConn(t *testing.T) {
 		}
 		c := &envInjectorConn{Conn: inner}
 		msgCh := make(chan agent.Message, 10)
-		_, _ = c.ReadMessages(nil, msgCh)
+		_ = c.ReadMessages(nil, msgCh)
 		close(msgCh)
 		for range msgCh {
 		}

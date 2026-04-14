@@ -148,7 +148,7 @@ type envInjectorConn struct {
 	agent.Conn
 }
 
-func (c *envInjectorConn) ReadMessages(r io.Reader, msgCh chan<- agent.Message) (*agent.ResultMessage, error) {
+func (c *envInjectorConn) ReadMessages(r io.Reader, msgCh chan<- agent.Message) error {
 	proxy := make(chan agent.Message, 1)
 	errc := make(chan error, 1)
 	go func() {
@@ -173,12 +173,12 @@ func (c *envInjectorConn) ReadMessages(r io.Reader, msgCh chan<- agent.Message) 
 			msgCh <- m
 		}
 	}()
-	result, err := c.Conn.ReadMessages(r, proxy)
+	err := c.Conn.ReadMessages(r, proxy)
 	close(proxy)
 	if injErr := <-errc; injErr != nil {
-		return result, errors.Join(err, injErr)
+		return errors.Join(err, injErr)
 	}
-	return result, err
+	return err
 }
 
 // hasOAuth reports whether Claude Code has an OAuth session configured

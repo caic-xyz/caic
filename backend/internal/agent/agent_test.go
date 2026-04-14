@@ -138,12 +138,8 @@ func TestSession(t *testing.T) {
 
 		go func() {
 			defer close(s.done)
-			result, parseErr := DefaultReadMessages(stdoutR, func(m Message) { msgCh <- m }, io.Discard, testParseFn)
-			s.result = result
-			if parseErr != nil {
+			if parseErr := DefaultReadMessages(stdoutR, func(m Message) { msgCh <- m }, io.Discard, testParseFn); parseErr != nil {
 				s.err = parseErr
-			} else if result == nil {
-				s.err = io.ErrUnexpectedEOF
 			}
 		}()
 
@@ -184,24 +180,27 @@ func TestSession(t *testing.T) {
 
 		_ = stdoutW.Close()
 
-		rm, err := s.Wait()
-		if err != nil {
+		if err := s.Wait(); err != nil {
 			t.Fatal(err)
-		}
-		if rm == nil {
-			t.Fatal("expected result, got nil")
-		}
-		if rm.Result != "ok" {
-			t.Errorf("result = %q, want %q", rm.Result, "ok")
 		}
 
 		close(msgCh)
 		var count int
-		for range msgCh {
+		var gotResult *ResultMessage
+		for m := range msgCh {
 			count++
+			if rm, ok := m.(*ResultMessage); ok {
+				gotResult = rm
+			}
 		}
 		if count != 1 {
 			t.Errorf("message count = %d, want 1", count)
+		}
+		if gotResult == nil {
+			t.Fatal("expected ResultMessage in msgCh, got none")
+		}
+		if gotResult.Result != "ok" {
+			t.Errorf("result = %q, want %q", gotResult.Result, "ok")
 		}
 	})
 	t.Run("SendRaw", func(t *testing.T) {
@@ -280,7 +279,7 @@ func TestSession(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, err = s.Wait()
+		err = s.Wait()
 		if err == nil {
 			t.Fatal("expected error from killed process")
 		}
@@ -305,17 +304,10 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n")
 
 		ch := make(chan Message, 16)
-		result, err := DefaultReadMessages(strings.NewReader(input), func(m Message) { ch <- m }, io.Discard, testParseFn)
-		close(ch)
-		if err != nil {
+		if err := DefaultReadMessages(strings.NewReader(input), func(m Message) { ch <- m }, io.Discard, testParseFn); err != nil {
 			t.Fatal(err)
 		}
-		if result == nil {
-			t.Fatal("expected result, got nil")
-		}
-		if result.Result != "hi" {
-			t.Errorf("result = %q, want %q", result.Result, "hi")
-		}
+		close(ch)
 
 		// init(1) + text(1) + result(1) = 3
 		var count int
@@ -337,14 +329,10 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n")
 
 		ch := make(chan Message, 16)
-		result, err := DefaultReadMessages(strings.NewReader(input), func(m Message) { ch <- m }, io.Discard, testParseFn)
-		close(ch)
-		if err != nil {
+		if err := DefaultReadMessages(strings.NewReader(input), func(m Message) { ch <- m }, io.Discard, testParseFn); err != nil {
 			t.Fatal(err)
 		}
-		if result == nil {
-			t.Fatal("expected result, got nil")
-		}
+		close(ch)
 
 		var msgs []Message
 		for m := range ch {
@@ -369,12 +357,8 @@ func TestReadMessages(t *testing.T) {
 		input := strings.Join(lines, "\n")
 
 		var buf bytes.Buffer
-		result, err := DefaultReadMessages(strings.NewReader(input), func(Message) {}, &buf, testParseFn)
-		if err != nil {
+		if err := DefaultReadMessages(strings.NewReader(input), func(Message) {}, &buf, testParseFn); err != nil {
 			t.Fatal(err)
-		}
-		if result == nil {
-			t.Fatal("expected result")
 		}
 
 		logged := buf.String()

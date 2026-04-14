@@ -114,8 +114,8 @@ type Conn interface {
 	SendCompact(instructions string) error
 	// ReadMessages runs the message read loop: reads NDJSON lines from r,
 	// parses them, writes raw lines to the log, and forwards parsed messages
-	// to msgCh. Returns the terminal ResultMessage.
-	ReadMessages(r io.Reader, msgCh chan<- Message) (*ResultMessage, error)
+	// to msgCh.
+	ReadMessages(r io.Reader, msgCh chan<- Message) error
 	// SendStop sends the null-byte sentinel to trigger graceful agent shutdown.
 	// Best-effort: returns when ctx is done if the write blocks.
 	SendStop(ctx context.Context)
@@ -162,7 +162,7 @@ func (c *conn) SendCompact(instructions string) error {
 	return cc.WriteCompact(c.stdin, instructions, c.logW)
 }
 
-func (c *conn) ReadMessages(r io.Reader, msgCh chan<- Message) (*ResultMessage, error) {
+func (c *conn) ReadMessages(r io.Reader, msgCh chan<- Message) error {
 	return DefaultReadMessages(r, func(m Message) { msgCh <- m }, c.logW, c.wire.ParseMessage)
 }
 
@@ -187,11 +187,10 @@ func (c *conn) Close() error {
 // Session manages a running agent process. It embeds Conn for wire I/O.
 type Session struct {
 	Conn
-	cmd    *exec.Cmd
-	log    *slog.Logger
-	done   chan struct{} // closed when readMessages goroutine exits
-	result *ResultMessage
-	err    error
+	cmd  *exec.Cmd
+	log  *slog.Logger
+	done chan struct{} // closed when readMessages goroutine exits
+	err  error
 }
 
 // NewSession creates a Session from an already-started command. Messages read
@@ -200,12 +199,10 @@ type Session struct {
 //
 // A background goroutine reads stdout until EOF, then waits for the process to
 // exit. The done channel is closed when both are complete. Callers should use
-// Done() to detect session end and Wait() to retrieve the result.
+// Done() to detect session end and Wait() to retrieve the error.
 //
 // Error priority: parse errors take precedence over wait errors, since a
 // parse error indicates corrupted output while the process may still exit 0.
-// If neither parse nor wait errors occur but no ResultMessage was seen, the
-// session reports "agent exited without a result message".
 func NewSession(cmd *exec.Cmd, c Conn, stdout io.Reader, msgCh chan<- Message, log *slog.Logger) *Session {
 	if log == nil {
 		log = slog.Default()
@@ -219,13 +216,9 @@ func NewSession(cmd *exec.Cmd, c Conn, stdout io.Reader, msgCh chan<- Message, l
 
 	go func() {
 		defer close(s.done)
-		result, parseErr := s.ReadMessages(stdout, msgCh)
+		parseErr := s.ReadMessages(stdout, msgCh)
 		waitErr := cmd.Wait()
-		// Store the result and first non-nil error.
-		s.result = result
 		switch {
-		case result != nil:
-			log.Info("session done", "result", result.Subtype)
 		case parseErr != nil:
 			s.err = fmt.Errorf("parse: %w", parseErr)
 			log.Error("session parse error", "err", parseErr)
@@ -239,8 +232,7 @@ func NewSession(cmd *exec.Cmd, c Conn, stdout io.Reader, msgCh chan<- Message, l
 				log.Warn("session exit error", "err", waitErr)
 			}
 		default:
-			s.err = errors.New("agent exited without a result message")
-			log.Error("session no result")
+			log.Info("session done")
 		}
 	}()
 
@@ -248,7 +240,8 @@ func NewSession(cmd *exec.Cmd, c Conn, stdout io.Reader, msgCh chan<- Message, l
 }
 
 // Stop sends the null-byte sentinel, closes stdin, and waits for the agent
-// process to exit or the context to expire.
+// process to exit or the context to expire. Returns nil on clean exit, the
+// process exit error on abnormal exit, or the context error on timeout.
 //
 // Closing stdin after the sentinel is critical: the attach_client's main
 // thread is blocked on stdin.read1(). Without the close, attach_client never
@@ -257,7 +250,7 @@ func NewSession(cmd *exec.Cmd, c Conn, stdout io.Reader, msgCh chan<- Message, l
 // The sentinel must be written explicitly rather than inferred from stdin EOF
 // in the attach client, because EOF also occurs on SSH drops and backend
 // restarts where the container should keep running.
-func (s *Session) Stop(ctx context.Context) (*ResultMessage, error) {
+func (s *Session) Stop(ctx context.Context) error {
 	s.log.Debug("session: sending stop sentinel")
 	s.SendStop(ctx)
 	// Close stdin so attach_client sees EOF and exits. The sentinel is
@@ -267,10 +260,10 @@ func (s *Session) Stop(ctx context.Context) (*ResultMessage, error) {
 	select {
 	case <-s.done:
 		s.log.Debug("session: process exited", "err", s.err)
-		return s.result, s.err
+		return s.err
 	case <-ctx.Done():
 		s.log.Debug("session: context timeout while waiting for process exit", "err", ctx.Err())
-		return nil, ctx.Err()
+		return ctx.Err()
 	}
 }
 
@@ -279,26 +272,25 @@ func (s *Session) Done() <-chan struct{} {
 	return s.done
 }
 
-// Wait blocks until the agent process exits and returns the result.
-func (s *Session) Wait() (*ResultMessage, error) {
+// Wait blocks until the agent process exits.
+func (s *Session) Wait() error {
 	<-s.done
-	return s.result, s.err
+	return s.err
 }
 
 // DefaultReadMessages is the standard message read loop. It reads NDJSON lines
 // from r, parses them via parseFn, writes each raw line to logW, and forwards
-// parsed messages via dispatch. Returns the terminal ResultMessage.
+// parsed messages via dispatch.
 //
 // Conn wrappers that override ReadMessages can call this for delegation with a
 // custom dispatch function.
-func DefaultReadMessages(r io.Reader, dispatch func(Message), logW io.Writer, parseFn func([]byte) ([]Message, error)) (*ResultMessage, error) {
+func DefaultReadMessages(r io.Reader, dispatch func(Message), logW io.Writer, parseFn func([]byte) ([]Message, error)) error {
 	scanner := bufio.NewScanner(r)
 	// 32 MiB max line: user input with base64 images can produce very long NDJSON lines.
 	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
 
 	slog.Debug("reading agent stdout")
 	var n int
-	var result *ResultMessage
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -306,10 +298,10 @@ func DefaultReadMessages(r io.Reader, dispatch func(Message), logW io.Writer, pa
 		}
 		n++
 		if _, err := logW.Write(line); err != nil {
-			return result, fmt.Errorf("write log: %w", err)
+			return fmt.Errorf("write log: %w", err)
 		}
 		if _, err := logW.Write([]byte{'\n'}); err != nil {
-			return result, fmt.Errorf("write log: %w", err)
+			return fmt.Errorf("write log: %w", err)
 		}
 		msgs, err := parseFn(line)
 		if err != nil {
@@ -322,13 +314,10 @@ func DefaultReadMessages(r io.Reader, dispatch func(Message), logW io.Writer, pa
 				slog.Debug("parsed message", "n", n, "type", fmt.Sprintf("%T", msg))
 			}
 			dispatch(msg)
-			if rm, ok := msg.(*ResultMessage); ok {
-				result = rm
-			}
 		}
 	}
-	slog.Debug("read loop done", "n", n, "result", result != nil, "err", scanner.Err())
-	return result, scanner.Err()
+	slog.Debug("read loop done", "n", n, "err", scanner.Err())
+	return scanner.Err()
 }
 
 // Relay paths inside the container.

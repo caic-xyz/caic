@@ -368,19 +368,16 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 
 	name := t.Container
 
-	// Graceful shutdown: send stop sentinel so the agent can emit a final
-	// ResultMessage with accurate cost/turns stats, then force-kill.
-	var result *agent.ResultMessage
+	// Graceful shutdown: send stop sentinel so the relay sends SIGINT.
+	// Stats come from live accumulators updated by startMessageDispatch.
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
 	tlog := r.log.With("br", primaryBranch, "ctr", name)
 	if h != nil {
-		t0 := time.Now()
-		result = h.GracefulStop(ctx, 20*time.Second)
-		if result == nil {
-			tlog.Warn("session timeout, killing", "dur", time.Since(t0))
+		if err := h.GracefulStop(ctx, 20*time.Second); err != nil {
+			tlog.Warn("graceful stop timed out", "err", err)
 			r.logRelayDiag(ctx, tlog, name)
 		}
 	}
@@ -394,36 +391,22 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 		}
 	}
 
-	// Drain the session: if graceful stop succeeded this returns immediately;
-	// if it timed out, the container kill above severed SSH so this unblocks.
+	// Drain the session: if graceful stop timed out, the container kill
+	// above severed SSH so this unblocks.
 	if h != nil {
-		if r := h.Drain(); result == nil {
-			result = r
-		}
+		h.Drain()
 	}
 
 	res := Result{
-		State: reason,
+		State:       reason,
+		AgentResult: t.LastAgentResult(),
 	}
-	if result != nil {
-		res.CostUSD = result.TotalCostUSD
-		res.Duration = time.Duration(result.DurationMs) * time.Millisecond
-		res.NumTurns = result.NumTurns
-		res.Usage = result.Usage
-		res.AgentResult = result.Result
-	}
-	// Use accumulated live stats when they exceed the session result
-	// (e.g. adopted container after restart where the session only
-	// reflects the reconnected portion, not the full run).
-	if liveCost, liveTurns, liveDur, liveUsage, _ := t.LiveStats(); liveCost > res.CostUSD {
+	if liveCost, liveTurns, liveDur, liveUsage, _ := t.LiveStats(); liveCost > 0 {
 		res.CostUSD = liveCost
 		res.NumTurns = liveTurns
 		res.Duration = liveDur
 		res.Usage = liveUsage
 	}
-	// Use the relay's live diff stat. The ResultMessage.DiffStat is set
-	// by startMessageDispatch during normal flow, but Cleanup may run
-	// without a ResultMessage (e.g. user-initiated purge).
 	if ds := t.LiveDiffStat(); len(ds) > 0 {
 		res.DiffStat = ds
 	}
@@ -462,11 +445,10 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	}
 	tlog := r.log.With("br", primaryBranch, "ctr", name)
 
-	// Graceful shutdown: send stop sentinel so the agent can emit a final result.
+	// Graceful shutdown: send stop sentinel so the relay sends SIGINT.
 	if h != nil {
-		t0 := time.Now()
-		if result := h.GracefulStop(ctx, 20*time.Second); result == nil {
-			tlog.Warn("session timeout during stop", "dur", time.Since(t0))
+		if err := h.GracefulStop(ctx, 20*time.Second); err != nil {
+			tlog.Warn("graceful stop timed out", "err", err)
 			r.logRelayDiag(ctx, tlog, name)
 		}
 	}
@@ -489,10 +471,23 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 
 	t.SetState(StateStopped)
 
+	// Write log trailer so the task reloads as "stopped" (not "failed")
+	// after a server restart, preserving live stats for the UI.
+	res := Result{State: StateStopped, AgentResult: t.LastAgentResult()}
+	if liveCost, liveTurns, liveDur, liveUsage, _ := t.LiveStats(); liveCost > 0 {
+		res.CostUSD = liveCost
+		res.NumTurns = liveTurns
+		res.Duration = liveDur
+		res.Usage = liveUsage
+	}
+	if ds := t.LiveDiffStat(); len(ds) > 0 {
+		res.DiffStat = ds
+	}
 	var logW io.WriteCloser
 	if h != nil {
 		logW = h.LogW
 	}
+	writeLogTrailer(logW, t.Title(), &res)
 	if logW != nil {
 		_ = logW.Close()
 	}
@@ -588,15 +583,11 @@ func (r *Runner) EnsureSession(ctx context.Context, t *Task, h *SessionHandle, t
 	case <-h.Session.Done():
 		// Session exited immediately (agent was already done).
 		t.DetachSession()
-		result, _ := h.Session.Wait()
+		err := h.Session.Wait()
 		h.CloseMsgCh()
 		<-h.DispatchDone
 		_ = h.LogW.Close()
-		sub := ""
-		if result != nil {
-			sub = result.Subtype
-		}
-		tlog.Info("attached session exited, starting idle relay", "result", sub)
+		tlog.Info("attached session exited, starting idle relay", "err", err)
 		if s := t.GetState(); s == StateStopping || s == StateStopped || s == StatePurged {
 			return nil, fmt.Errorf("task is %s", s)
 		}
@@ -1149,9 +1140,7 @@ var mutatingTools = map[string]struct{}{
 }
 
 // logRelayDiag reads the relay daemon's relay.log from the container and logs
-// its tail. Called when graceful shutdown times out to capture relay-side
-// diagnostics (sentinel received? SIGINT sent? escalation?) without reading
-// the full conversation output.
+// its tail. Called when GracefulStop times out to capture relay-side diagnostics.
 func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, container string) {
 	if r.Container == nil || container == "" {
 		return

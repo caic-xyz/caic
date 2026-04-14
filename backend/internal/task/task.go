@@ -119,29 +119,29 @@ func (h *SessionHandle) CloseMsgCh() {
 	h.closeMsgCh.Do(func() { close(h.MsgCh) })
 }
 
-// GracefulStop sends the shutdown sentinel, waits for the agent to exit (up to
-// timeout), then drains the message dispatch goroutine. Returns the
-// ResultMessage if the agent produced one.
+// GracefulStop sends the shutdown sentinel and waits for the agent to exit
+// (up to timeout). Returns nil on success or the context error on timeout.
 //
-// On timeout, the session is still drained after the caller kills the
-// container/SSH — call GracefulStop before killing so the sentinel has a
-// chance to arrive.
-func (h *SessionHandle) GracefulStop(ctx context.Context, timeout time.Duration) *agent.ResultMessage {
-	var result *agent.ResultMessage
+// The relay consumes the sentinel and sends SIGINT to the subprocess, so the
+// agent never produces a ResultMessage in this path — callers should use
+// live stats from the Task instead.
+//
+// On timeout, the caller should kill the container/SSH, then call Drain to
+// unblock the read loop.
+func (h *SessionHandle) GracefulStop(ctx context.Context, timeout time.Duration) error {
 	stopCtx, stopCancel := context.WithTimeout(ctx, timeout)
-	result, _ = h.Session.Stop(stopCtx)
+	err := h.Session.Stop(stopCtx)
 	stopCancel()
-	return result
+	return err
 }
 
 // Drain waits for the session read loop to finish (useful after a timeout
 // where the container was killed externally), then closes the message channel
 // and waits for the dispatch goroutine to complete.
-func (h *SessionHandle) Drain() *agent.ResultMessage {
-	result, _ := h.Session.Wait()
+func (h *SessionHandle) Drain() {
+	_ = h.Session.Wait()
 	h.CloseMsgCh()
 	<-h.DispatchDone
-	return result
 }
 
 // RepoMount describes one repository in a task.
@@ -339,6 +339,20 @@ func (t *Task) LiveStats() (costUSD float64, numTurns int, duration time.Duratio
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.liveCostUSD, t.liveNumTurns, t.liveDuration, t.liveUsage, t.lastUsage
+}
+
+// LastAgentResult returns the result text from the most recent ResultMessage,
+// or "" if none was received. Used by Cleanup/StopTask for the log trailer.
+func (t *Task) LastAgentResult() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	// Walk messages in reverse to find the last ResultMessage.
+	for i := len(t.msgs) - 1; i >= 0; i-- {
+		if rm, ok := t.msgs[i].(*agent.ResultMessage); ok {
+			return rm.Result
+		}
+	}
+	return ""
 }
 
 // LiveDiffStat returns the latest diff stat from the relay's periodic polling.
@@ -818,9 +832,9 @@ func (t *Task) CloseAndDetachSession(ctx context.Context) *SessionHandle {
 	if h == nil {
 		return nil
 	}
-	h.GracefulStop(ctx, 10*time.Second)
+	_ = h.GracefulStop(ctx, 10*time.Second)
 	// Wait for ReadMessages to finish so callers can safely close MsgCh.
-	_, _ = h.Session.Wait()
+	_ = h.Session.Wait()
 	return h
 }
 

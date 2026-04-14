@@ -374,7 +374,7 @@ func TestTask(t *testing.T) {
 		// Cleanup: close stdin so the process exits, then wait via Session
 		// (which owns cmd.Wait) to avoid a double-Wait race.
 		_ = stdin.Close()
-		_, _ = s.Wait()
+		_ = s.Wait()
 	})
 
 	t.Run("addMessage", func(t *testing.T) {

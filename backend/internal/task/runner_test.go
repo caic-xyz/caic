@@ -719,7 +719,7 @@ func TestRunner(t *testing.T) {
 		}
 
 		// Gracefully end the first session so we can restart.
-		h1.GracefulStop(t.Context(), 5*time.Second)
+		_ = h1.GracefulStop(t.Context(), 5*time.Second)
 		tk.SetState(StateWaiting)
 
 		// Restart: should write context_cleared to the log before closing it.

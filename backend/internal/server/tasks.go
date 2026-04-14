@@ -755,7 +755,7 @@ func (s *Server) watchSession(entry *taskEntry, runner *task.Runner, h *task.Ses
 			}
 			t := entry.task
 			t.DetachSession()
-			result, sessionErr := h.Session.Wait()
+			sessionErr := h.Session.Wait()
 			// Close the dispatch goroutine. CloseMsgCh is idempotent so this
 			// is safe even if StopTask races and closes MsgCh concurrently.
 			h.CloseMsgCh()
@@ -770,9 +770,6 @@ func (s *Server) watchSession(entry *taskEntry, runner *task.Runner, h *task.Ses
 				watchPrimaryBranch = p.Branch
 			}
 			attrs := []any{"repo", watchPrimaryName, "br", watchPrimaryBranch, "ctr", t.Container}
-			if result != nil {
-				attrs = append(attrs, "result", result.Subtype)
-			}
 			if sessionErr != nil {
 				attrs = append(attrs, "err", sessionErr)
 				slog.Warn("session exited with error", attrs...)
