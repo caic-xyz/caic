@@ -116,68 +116,124 @@ pprof = true
 }
 
 func TestTomlToServerConfig(t *testing.T) {
-	dir := t.TempDir()
-	// Write a fake PEM file.
-	pemPath := filepath.Join(dir, "key.pem")
-	if err := os.WriteFile(pemPath, []byte("PEM-DATA"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	t.Run("reads config values", func(t *testing.T) {
+		dir := t.TempDir()
+		// Write a fake PEM file.
+		pemPath := filepath.Join(dir, "key.pem")
+		if err := os.WriteFile(pemPath, []byte("PEM-DATA"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 
-	tc := &tomlConfig{
-		Core: tomlCore{
-			Root: "/repos",
-		},
-		Debug: tomlDebug{
-			LogLevel: "warn",
-		},
-		Server: tomlServer{
-			HTTP:         ":8080",
-			GeoDB:        "geo.mmdb",
-			AllowOrigins: []string{"local", "tailscale"},
-		},
-		GitHub: tomlGitHub{
-			Token:             "ghp_abc",
-			OAuthAllowedUsers: []string{"alice", "bob"},
-			AppPrivateKeyPEM:  "key.pem", // relative path
-			AppAllowedOwners:  []string{"org1", "org2"},
-			WebhookSecret:     "hmac",
-		},
-	}
+		tc := &tomlConfig{
+			Core: tomlCore{
+				Root: "/repos",
+			},
+			Debug: tomlDebug{
+				LogLevel: "warn",
+			},
+			Server: tomlServer{
+				HTTP:         ":8080",
+				GeoDB:        "geo.mmdb",
+				AllowOrigins: []string{"local", "tailscale"},
+			},
+			GitHub: tomlGitHub{
+				Token:             "ghp_abc",
+				OAuthAllowedUsers: []string{"alice", "bob"},
+				AppPrivateKeyPEM:  "key.pem", // relative path
+				AppAllowedOwners:  []string{"org1", "org2"},
+				WebhookSecret:     "hmac",
+			},
+		}
 
-	cfg, addr, root, logLevel, err := tomlToServerConfig(tc, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if addr != ":8080" {
-		t.Errorf("addr = %q", addr)
-	}
-	if root != "/repos" {
-		t.Errorf("root = %q", root)
-	}
-	if logLevel != "warn" {
-		t.Errorf("logLevel = %q", logLevel)
-	}
-	if cfg.GitHubToken != "ghp_abc" {
-		t.Errorf("GitHubToken = %q", cfg.GitHubToken)
-	}
-	if cfg.GitHubOAuthAllowedUsers != "alice,bob" {
-		t.Errorf("GitHubOAuthAllowedUsers = %q", cfg.GitHubOAuthAllowedUsers)
-	}
-	if cfg.GitHubAppAllowedOwners != "org1,org2" {
-		t.Errorf("GitHubAppAllowedOwners = %q", cfg.GitHubAppAllowedOwners)
-	}
-	if string(cfg.GitHubAppPrivateKeyPEM) != "PEM-DATA" {
-		t.Errorf("GitHubAppPrivateKeyPEM = %q", cfg.GitHubAppPrivateKeyPEM)
-	}
-	if string(cfg.GitHubWebhookSecret) != "hmac" {
-		t.Errorf("GitHubWebhookSecret = %q", cfg.GitHubWebhookSecret)
-	}
-	if cfg.IPGeoDB != filepath.Join(dir, "geo.mmdb") {
-		t.Errorf("IPGeoDB = %q", cfg.IPGeoDB)
-	}
-	if cfg.IPGeoAllowlist != "local,tailscale" {
-		t.Errorf("IPGeoAllowlist = %q", cfg.IPGeoAllowlist)
-	}
+		cfg, addr, root, logLevel, err := tomlToServerConfig(tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if addr != ":8080" {
+			t.Errorf("addr = %q", addr)
+		}
+		if root != "/repos" {
+			t.Errorf("root = %q", root)
+		}
+		if logLevel != "warn" {
+			t.Errorf("logLevel = %q", logLevel)
+		}
+		if cfg.GitHubToken != "ghp_abc" {
+			t.Errorf("GitHubToken = %q", cfg.GitHubToken)
+		}
+		if cfg.GitHubOAuthAllowedUsers != "alice,bob" {
+			t.Errorf("GitHubOAuthAllowedUsers = %q", cfg.GitHubOAuthAllowedUsers)
+		}
+		if cfg.GitHubAppAllowedOwners != "org1,org2" {
+			t.Errorf("GitHubAppAllowedOwners = %q", cfg.GitHubAppAllowedOwners)
+		}
+		if string(cfg.GitHubAppPrivateKeyPEM) != "PEM-DATA" {
+			t.Errorf("GitHubAppPrivateKeyPEM = %q", cfg.GitHubAppPrivateKeyPEM)
+		}
+		if string(cfg.GitHubWebhookSecret) != "hmac" {
+			t.Errorf("GitHubWebhookSecret = %q", cfg.GitHubWebhookSecret)
+		}
+		if cfg.IPGeoDB != filepath.Join(dir, "geo.mmdb") {
+			t.Errorf("IPGeoDB = %q", cfg.IPGeoDB)
+		}
+		if cfg.IPGeoAllowlist != "local,tailscale" {
+			t.Errorf("IPGeoAllowlist = %q", cfg.IPGeoAllowlist)
+		}
+	})
+
+	t.Run("gemini_api_key from config file", func(t *testing.T) {
+		dir := t.TempDir()
+		wantKey := "AIza_from_config"
+		tc := &tomlConfig{
+			AI: tomlAI{
+				GeminiAPIKey: wantKey,
+			},
+		}
+		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.GeminiAPIKey != wantKey {
+			t.Errorf("GeminiAPIKey = %q, want %q", cfg.GeminiAPIKey, wantKey)
+		}
+	})
+
+	t.Run("gemini_api_key from env variable fallback", func(t *testing.T) {
+		dir := t.TempDir()
+		oldEnv := os.Getenv("GEMINI_API_KEY")
+		envKey := "AIza_from_env"
+		defer os.Setenv("GEMINI_API_KEY", oldEnv) //nolint:errcheck // os.Setenv never returns error
+		_ = os.Setenv("GEMINI_API_KEY", envKey)
+		tc := &tomlConfig{} // empty config, no gemini_api_key set
+		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.GeminiAPIKey != envKey {
+			t.Errorf("GeminiAPIKey = %q, want %q", cfg.GeminiAPIKey, envKey)
+		}
+	})
+
+	t.Run("gemini_api_key config takes precedence over env", func(t *testing.T) {
+		dir := t.TempDir()
+		oldEnv := os.Getenv("GEMINI_API_KEY")
+		envKey := "AIza_from_env"
+		configKey := "AIza_from_config"
+		defer os.Setenv("GEMINI_API_KEY", oldEnv) //nolint:errcheck // os.Setenv never returns error
+		_ = os.Setenv("GEMINI_API_KEY", envKey)
+		tc := &tomlConfig{
+			AI: tomlAI{
+				GeminiAPIKey: configKey,
+			},
+		}
+		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.GeminiAPIKey != configKey {
+			t.Errorf("GeminiAPIKey = %q, want %q", cfg.GeminiAPIKey, configKey)
+		}
+	})
 }
 
 func TestAutoUpdateSchedule(t *testing.T) {

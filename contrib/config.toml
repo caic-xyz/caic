@@ -53,8 +53,9 @@
 #provider = ""
 #model = ""
 
-# Gemini API key — required for the Gemini Live voice agent.
-# Obtain from https://aistudio.google.com/app/apikey
+# Gemini API key — required for Gemini Live voice agent and title generation
+# when provider is "gemini". Falls back to GEMINI_API_KEY environment variable
+# if not set. Obtain from https://aistudio.google.com/app/apikey
 #gemini_api_key = ""
 
 # ── GitHub ───────────────────────────────────────────────────────────────────

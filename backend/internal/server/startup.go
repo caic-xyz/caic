@@ -223,6 +223,10 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 			} else {
 				opts = append(opts, genai.ModelCheap)
 			}
+			// Pass API key if configured for the provider.
+			if cfg.LLMProvider == "gemini" && cfg.GeminiAPIKey != "" {
+				opts = append(opts, genai.ProviderOptionAPIKey(cfg.GeminiAPIKey))
+			}
 			if p, err := c.Factory(ctx, opts...); err != nil {
 				slog.Warn("LLM provider init failed", "prov", cfg.LLMProvider, "err", err)
 			} else {

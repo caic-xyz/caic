@@ -134,10 +134,15 @@ func tomlToServerConfig(tc *tomlConfig, cfgDir string) (cfg *server.Config, addr
 	if ghToken == "" && tc.GitHub.OAuthClientID == "" {
 		ghToken = resolveGitHubTokenFromGH()
 	}
+	// Gemini API key fallback: if not set in config, use environment variable.
+	geminiAPIKey := tc.AI.GeminiAPIKey
+	if geminiAPIKey == "" {
+		geminiAPIKey = os.Getenv("GEMINI_API_KEY")
+	}
 	cfg = &server.Config{
 		ConfigDir:               cfgDir,
 		CacheDir:                cacheDir(),
-		GeminiAPIKey:            tc.AI.GeminiAPIKey,
+		GeminiAPIKey:            geminiAPIKey,
 		TailscaleAPIKey:         tc.Core.TailscaleAPIKey,
 		LLMProvider:             tc.AI.Provider,
 		LLMModel:                tc.AI.Model,
