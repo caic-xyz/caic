@@ -371,9 +371,10 @@ func TestTask(t *testing.T) {
 			t.Error("SessionDone() should be nil after DetachSession")
 		}
 
-		// Cleanup.
+		// Cleanup: close stdin so the process exits, then wait via Session
+		// (which owns cmd.Wait) to avoid a double-Wait race.
 		_ = stdin.Close()
-		_ = cmd.Wait()
+		_, _ = s.Wait()
 	})
 
 	t.Run("addMessage", func(t *testing.T) {

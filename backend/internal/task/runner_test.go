@@ -18,8 +18,8 @@ import (
 	"github.com/maruel/ksid"
 )
 
-// testBackend implements agent.Backend for tests. It launches a "cat" process
-// that blocks until stdin is closed. capturedCtx records the context passed
+// testBackend implements agent.Backend for tests. It launches a process that
+// reads one line from stdin then exits. capturedCtx records the context passed
 // to Start so tests can assert context lifetime.
 type testBackend struct {
 	capturedCtx context.Context
@@ -29,7 +29,9 @@ func (b *testBackend) Harness() agent.Harness { return "test" }
 
 func (b *testBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	b.capturedCtx = ctx
-	cmd := exec.CommandContext(ctx, "cat")
+	// Read one line from stdin then exit. Session.Stop writes \x00\n which
+	// satisfies the read, making Stop return immediately instead of timing out.
+	cmd := exec.CommandContext(ctx, "python3", "-c", "input()")
 	stdin, _ := cmd.StdinPipe()
 	stdout, _ := cmd.StdoutPipe()
 	if err := cmd.Start(); err != nil {
@@ -717,10 +719,7 @@ func TestRunner(t *testing.T) {
 		}
 
 		// Gracefully end the first session so we can restart.
-		stopCtx, stopCancel := context.WithTimeout(t.Context(), 5*time.Second)
-		_, _ = h1.Session.Stop(stopCtx)
-		_ = h1.Session.Close()
-		stopCancel()
+		h1.GracefulStop(t.Context(), 5*time.Second)
 		tk.SetState(StateWaiting)
 
 		// Restart: should write context_cleared to the log before closing it.

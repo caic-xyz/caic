@@ -119,6 +119,31 @@ func (h *SessionHandle) CloseMsgCh() {
 	h.closeMsgCh.Do(func() { close(h.MsgCh) })
 }
 
+// GracefulStop sends the shutdown sentinel, waits for the agent to exit (up to
+// timeout), then drains the message dispatch goroutine. Returns the
+// ResultMessage if the agent produced one.
+//
+// On timeout, the session is still drained after the caller kills the
+// container/SSH — call GracefulStop before killing so the sentinel has a
+// chance to arrive.
+func (h *SessionHandle) GracefulStop(ctx context.Context, timeout time.Duration) *agent.ResultMessage {
+	var result *agent.ResultMessage
+	stopCtx, stopCancel := context.WithTimeout(ctx, timeout)
+	result, _ = h.Session.Stop(stopCtx)
+	stopCancel()
+	return result
+}
+
+// Drain waits for the session read loop to finish (useful after a timeout
+// where the container was killed externally), then closes the message channel
+// and waits for the dispatch goroutine to complete.
+func (h *SessionHandle) Drain() *agent.ResultMessage {
+	result, _ := h.Session.Wait()
+	h.CloseMsgCh()
+	<-h.DispatchDone
+	return result
+}
+
 // RepoMount describes one repository in a task.
 // Repos[0] is primary; empty slice means no-repo task.
 type RepoMount struct {
@@ -793,12 +818,7 @@ func (t *Task) CloseAndDetachSession(ctx context.Context) *SessionHandle {
 	if h == nil {
 		return nil
 	}
-
-	// Graceful: send stop sentinel, wait for exit with timeout.
-	stopCtx, stopCancel := context.WithTimeout(ctx, 10*time.Second)
-	_, _ = h.Session.Stop(stopCtx)
-	stopCancel()
-	_ = h.Session.Close()
+	h.GracefulStop(ctx, 10*time.Second)
 	// Wait for ReadMessages to finish so callers can safely close MsgCh.
 	_, _ = h.Session.Wait()
 	return h

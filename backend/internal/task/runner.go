@@ -377,13 +377,11 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	}
 	tlog := r.log.With("br", primaryBranch, "ctr", name)
 	if h != nil {
-		var err error
-		stopCtx, stopCancel := context.WithTimeout(ctx, 20*time.Second)
-		result, err = h.Session.Stop(stopCtx)
-		stopCancel()
-		_ = h.Session.Close()
-		if err != nil {
-			tlog.Warn("session timeout, killing")
+		t0 := time.Now()
+		result = h.GracefulStop(ctx, 20*time.Second)
+		if result == nil {
+			tlog.Warn("session timeout, killing", "dur", time.Since(t0))
+			r.logRelayDiag(ctx, tlog, name)
 		}
 	}
 
@@ -396,14 +394,12 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 		}
 	}
 
-	// If the graceful wait timed out, wait for the session to drain now
-	// that the container is dead and the SSH connection is severed.
-	if h != nil && result == nil {
-		result, _ = h.Session.Wait()
-	}
+	// Drain the session: if graceful stop succeeded this returns immediately;
+	// if it timed out, the container kill above severed SSH so this unblocks.
 	if h != nil {
-		h.CloseMsgCh()
-		<-h.DispatchDone
+		if r := h.Drain(); result == nil {
+			result = r
+		}
 	}
 
 	res := Result{
@@ -468,12 +464,10 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 
 	// Graceful shutdown: send stop sentinel so the agent can emit a final result.
 	if h != nil {
-		stopCtx, stopCancel := context.WithTimeout(ctx, 20*time.Second)
-		_, err := h.Session.Stop(stopCtx)
-		stopCancel()
-		_ = h.Session.Close()
-		if err != nil {
-			tlog.Warn("session timeout during stop")
+		t0 := time.Now()
+		if result := h.GracefulStop(ctx, 20*time.Second); result == nil {
+			tlog.Warn("session timeout during stop", "dur", time.Since(t0))
+			r.logRelayDiag(ctx, tlog, name)
 		}
 	}
 
@@ -490,9 +484,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	// goroutine to finish processing all buffered messages so that t.msgs
 	// is complete before the state transitions to StateStopped.
 	if h != nil {
-		_, _ = h.Session.Wait()
-		h.CloseMsgCh()
-		<-h.DispatchDone
+		h.Drain()
 	}
 
 	t.SetState(StateStopped)
@@ -1154,6 +1146,22 @@ var mutatingTools = map[string]struct{}{
 	"Edit":         {},
 	"Write":        {},
 	"NotebookEdit": {},
+}
+
+// logRelayDiag reads the relay daemon's relay.log from the container and logs
+// its tail. Called when graceful shutdown times out to capture relay-side
+// diagnostics (sentinel received? SIGINT sent? escalation?) without reading
+// the full conversation output.
+func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, container string) {
+	if r.Container == nil || container == "" {
+		return
+	}
+	tail := agent.ReadRelayLog(ctx, container, 4096)
+	if tail == "" {
+		tlog.Warn("relay.log empty or unreadable")
+		return
+	}
+	tlog.Warn("relay.log tail on shutdown timeout", "log", tail)
 }
 
 // startMessageDispatch starts a goroutine that reads from msgCh and dispatches

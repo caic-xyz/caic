@@ -22,9 +22,11 @@
 //
 // Flow 1 — One task is purged (user action or container death):
 //
-//	Server calls Runner.Cleanup → Session.Close writes \x00 → attach_client
-//	forwards it through the Unix socket → relay daemon closes proc.stdin →
-//	agent exits → server kills the container.
+//	Server calls Runner.Cleanup → Session.Stop writes \x00\n then closes
+//	stdin → attach_client forwards sentinel through Unix socket, sees stdin
+//	EOF, exits → _client_reader sets shutdown_event → _shutdown_watchdog
+//	closes proc.stdin, sends SIGINT, escalates to SIGTERM/SIGKILL →
+//	reader_thread sees stdout EOF → server kills container.
 //
 // Flow 2 — Backend restarts (upgrade, crash):
 //
@@ -245,19 +247,29 @@ func NewSession(cmd *exec.Cmd, c Conn, stdout io.Reader, msgCh chan<- Message, l
 	return s
 }
 
-// Stop sends the null-byte sentinel and waits for the agent process to exit
-// or the context to expire. The caller must call Close separately to release
-// the stdin pipe.
+// Stop sends the null-byte sentinel, closes stdin, and waits for the agent
+// process to exit or the context to expire.
+//
+// Closing stdin after the sentinel is critical: the attach_client's main
+// thread is blocked on stdin.read1(). Without the close, attach_client never
+// exits, SSH never exits, and cmd.Wait() never returns — deadlocking Stop.
 //
 // The sentinel must be written explicitly rather than inferred from stdin EOF
 // in the attach client, because EOF also occurs on SSH drops and backend
 // restarts where the container should keep running.
 func (s *Session) Stop(ctx context.Context) (*ResultMessage, error) {
+	s.log.Debug("session: sending stop sentinel")
 	s.SendStop(ctx)
+	// Close stdin so attach_client sees EOF and exits. The sentinel is
+	// already in the pipe buffer; the OS delivers it before the EOF.
+	_ = s.Close()
+	s.log.Debug("session: waiting for process exit")
 	select {
 	case <-s.done:
+		s.log.Debug("session: process exited", "err", s.err)
 		return s.result, s.err
 	case <-ctx.Done():
+		s.log.Debug("session: context timeout while waiting for process exit", "err", ctx.Err())
 		return nil, ctx.Err()
 	}
 }

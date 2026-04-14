@@ -9,21 +9,27 @@
 # The relay daemon owns the subprocess stdin/stdout, logs all I/O to
 # output.jsonl, and accepts one client at a time via a Unix socket.
 #
-# Shutdown protocol — null-byte sentinel:
-#   The Go backend (Session.Close) writes a \x00 byte to stdin *before*
-#   closing it. The attach_client forwards this through the socket to the
-#   daemon, which closes proc.stdin, letting the agent exit gracefully.
+# Shutdown protocol — null-byte sentinel line:
+#   The Go backend (Session.SendStop) writes \x00\n to stdin. The
+#   attach_client forwards this through the socket to the daemon, whose
+#   _client_reader detects the sentinel and sets shutdown_event. The
+#   _shutdown_watchdog thread waits on this event, then closes proc.stdin,
+#   sends SIGINT, and escalates to SIGTERM/SIGKILL after --shutdown-grace.
+#   reader_thread is the authoritative "done" signal: it blocks on
+#   subprocess stdout until EOF, then closes the client socket.
+#   serve() joins reader_thread and cleans up.
 #
 #   Crucially, stdin EOF alone does NOT trigger shutdown. This is what
 #   distinguishes the two flows below.
 #
 # Flow 1 — One task is purged (user clicks "purge"):
-#   1. Server calls Runner.Cleanup → Session.Close
-#   2. Session.Close writes \x00 then closes stdin
-#   3. attach_client forwards \x00 through the socket, then disconnects
-#   4. Relay daemon receives \x00, closes proc.stdin
-#   5. Agent emits final ResultMessage and exits (code=0)
-#   6. Server waits up to 10s for exit, then kills the container
+#   1. Server calls Runner.Cleanup → Session.Stop writes \x00\n
+#   2. attach_client forwards \x00\n through the socket
+#   3. _client_reader detects sentinel, sets shutdown_event
+#   4. _shutdown_watchdog closes proc.stdin, sends SIGINT; if subprocess
+#      doesn't exit within --shutdown-grace, escalates to SIGTERM/SIGKILL
+#   5. reader_thread sees stdout EOF, closes client socket
+#   6. Server kills the container
 #
 # Flow 2 — Backend restarts (upgrade, crash):
 #   1. SSH connections are severed, attach_client sees stdin EOF
@@ -38,6 +44,7 @@ import argparse
 import json
 import logging
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -55,6 +62,10 @@ BUF_SIZE = 65536
 # Interval between diff stat polls (seconds).
 _DIFF_THROTTLE = 10  # minimum seconds between diff runs
 _DIFF_DEBOUNCE = 2  # seconds of quiet before running diff
+
+# Default grace period (seconds) after SIGINT before escalating to
+# SIGTERM/SIGKILL. Overridable via --shutdown-grace.
+_DEFAULT_SHUTDOWN_GRACE = 10
 
 
 def _parse_numstat(numstat):
@@ -107,7 +118,7 @@ class _Daemon:
         self.client_lock = threading.Lock()
         self.client_conn = None
         self.client_id = 0
-        self.stdin_closed = False
+        self.shutdown_event = threading.Event()
         self.diff_activity = threading.Event()
 
     def set_client(self, conn, reason=""):
@@ -166,7 +177,7 @@ class _Daemon:
             self.output_file.close()
             self.set_client(None, "subprocess_eof")
             self.diff_activity.set()
-            logging.info("reader_thread exited output_bytes=%d", sz)
+            logging.info("reader_thread exited output_bytes=%d proc_poll=%s", sz, self.proc.poll())
 
     def diff_watcher_thread(self):
         """Poll git diff on activity, with throttle + debounce.
@@ -287,10 +298,10 @@ class _Daemon:
             cid = self.client_id
             self.set_client(conn, "replaced")
             logging.info(
-                "client #%d connected offset=%d stdin_closed=%s proc_alive=%s",
+                "client #%d connected offset=%d shutting_down=%s proc_alive=%s",
                 cid,
                 offset,
-                self.stdin_closed,
+                self.shutdown_event.is_set(),
                 self.proc.poll() is None,
             )
 
@@ -302,54 +313,41 @@ class _Daemon:
 
         User input is NDJSON: each message is a single JSON line ending
         with newline. Large messages (e.g. base64 images) may span multiple
-        recv() calls. We buffer incoming data and only write complete lines
-        to output_file (under output_lock) so that concurrent subprocess
-        stdout writes can't interleave mid-line and corrupt the replay log.
-        Data is forwarded to proc.stdin immediately (the subprocess handles
-        its own framing).
+        recv() calls. We buffer incoming data and process complete lines:
+        each line is forwarded to proc.stdin and logged to output_file.
+        Incomplete trailing data is held until the next recv completes it.
+
+        A line consisting of a single null byte (``\\x00\\n``, sent by
+        Session.SendStop) is the graceful-shutdown sentinel. It is consumed
+        here and never forwarded to the subprocess.
         """
         close_stdin = False
-        line_buf = b""
+        buf = bytearray()
         try:
-            while True:
+            while not close_stdin:
                 data = c.recv(BUF_SIZE)
                 if not data:
-                    logging.info("client #%d recv returned empty (EOF/disconnect)", cid)
+                    logging.info("client #%d recv EOF", cid)
                     break
-                # A null byte signals the client wants proc.stdin closed
-                # (graceful shutdown). Strip it and set the flag.
-                if b"\x00" in data:
-                    data = data.replace(b"\x00", b"")
-                    close_stdin = True
-                    if data:
-                        self.proc.stdin.write(data)
-                        self.proc.stdin.flush()
-                        if self.log_stdin:
-                            line_buf += data
-                    break
-                self.proc.stdin.write(data)
-                self.proc.stdin.flush()
-                if self.log_stdin:
-                    line_buf += data
-                    while b"\n" in line_buf:
-                        line, line_buf = line_buf.split(b"\n", 1)
-                        self.write_output(line + b"\n")
+                buf += data
+                while (nl := buf.find(b"\n")) >= 0:
+                    line = bytes(buf[:nl])
+                    del buf[: nl + 1]
+                    if line == b"\x00":
+                        logging.info("client #%d received shutdown sentinel", cid)
+                        close_stdin = True
+                        break
+                    payload = line + b"\n"
+                    self.proc.stdin.write(payload)
+                    self.proc.stdin.flush()
+                    if self.log_stdin:
+                        self.write_output(payload)
         except (OSError, BrokenPipeError, ValueError) as e:
             logging.info("client #%d reader error: %s", cid, e)
-        # Flush any remaining buffered data (incomplete line).
-        if self.log_stdin and line_buf:
-            self.write_output(line_buf)
-        if close_stdin:
-            if self.stdin_closed:
-                logging.warning("client #%d requested stdin close but stdin already closed", cid)
-            else:
-                self.stdin_closed = True
-                logging.info("client #%d requested stdin close", cid)
-                try:
-                    self.proc.stdin.close()
-                except OSError:
-                    pass
-        else:
+        finally:
+            if buf:
+                logging.warning("client #%d dropping %d bytes of incomplete trailing data", cid, len(buf))
+        if not close_stdin:
             with self.client_lock:
                 if self.client_conn is c:
                     self.client_conn = None
@@ -358,9 +356,13 @@ class _Daemon:
                 c.close()
             except OSError:
                 pass
+            return
+
+        # Signal the shutdown watchdog to close stdin and kill the subprocess.
+        self.shutdown_event.set()
 
 
-def serve(cmd_args, work_dir, log_stdin=True, strip_env=()):
+def serve(cmd_args, work_dir, log_stdin=True, strip_env=(), shutdown_grace=_DEFAULT_SHUTDOWN_GRACE):
     """Start the relay server as a daemon, then attach as the first client.
 
     Architecture:
@@ -382,13 +384,16 @@ def serve(cmd_args, work_dir, log_stdin=True, strip_env=()):
       strip_env: List of environment variable names to strip from the
         subprocess environment. Stripped values are emitted as a
         caic_stripped_env event after the first subprocess output.
+      shutdown_grace: Seconds to wait after SIGINT before escalating to
+        SIGTERM, then SIGKILL.
 
     Failure modes handled:
       - SSH drops: client disconnects, subprocess keeps running. Next
         attach reconnects from the offset where the client left off.
       - Subprocess crash: reader_thread exits, client sees EOF.
         Socket is cleaned up so IsRelayRunning returns false.
-      - Graceful shutdown: client sends null byte → relay closes proc.stdin.
+      - Graceful shutdown: client sends \\x00\\n sentinel → relay closes
+        proc.stdin, sends SIGINT, escalates to SIGTERM/SIGKILL.
     """
     os.makedirs(RELAY_DIR, exist_ok=True)
 
@@ -469,25 +474,71 @@ def serve(cmd_args, work_dir, log_stdin=True, strip_env=()):
 
     threading.Thread(target=_drain_stderr, daemon=True).start()
 
+    # Listen on Unix socket for client connections.
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(SOCK_PATH)
+    srv.listen(1)
+
     output_file = open(OUTPUT_PATH, "ab", buffering=0)
     env_event = b""
     if stripped_vars:
         env_event = (json.dumps({"type": "caic_stripped_env", "variables": stripped_vars}) + "\n").encode()
     d = _Daemon(proc, output_file, work_dir, log_stdin, env_event)
 
-    threading.Thread(target=d.reader_thread, daemon=True).start()
+    # reader_thread is the authoritative "done" signal: it reads stdout
+    # until EOF (which implies the subprocess exited), flushes output.jsonl,
+    # and closes the client socket so attach_client sees a clean EOF.
+    # We join it instead of proc.wait() to avoid a race where the main
+    # thread exits (killing daemon threads) before reader_thread has
+    # delivered the last chunk to the client.
+    reader_t = threading.Thread(target=d.reader_thread)
     threading.Thread(target=d.diff_watcher_thread, daemon=True).start()
-
-    # Listen on Unix socket for client connections.
-    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    srv.bind(SOCK_PATH)
-    srv.listen(1)
     threading.Thread(target=d.accept_thread, args=(srv,), daemon=True).start()
 
-    # Wait for subprocess to exit.
-    proc.wait()
+    # Shutdown watchdog: waits for _client_reader to set shutdown_event,
+    # then closes stdin + sends SIGINT, and escalates if the subprocess
+    # doesn't exit (which makes reader_thread see stdout EOF).
+    def _shutdown_watchdog():
+        d.shutdown_event.wait()
+        if not reader_t.is_alive():
+            return  # Subprocess already exited naturally.
+        logging.info("shutdown: closing stdin, sending SIGINT to pid=%d", proc.pid)
+        try:
+            proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            proc.send_signal(signal.SIGINT)
+        except OSError:
+            pass
+        reader_t.join(timeout=shutdown_grace)
+        if not reader_t.is_alive():
+            logging.info("shutdown: subprocess exited after SIGINT, proc_poll=%s", proc.poll())
+            return
+        logging.warning("shutdown: no exit after %ds, sending SIGTERM (proc_poll=%s)", shutdown_grace, proc.poll())
+        try:
+            proc.terminate()
+        except OSError:
+            pass
+        reader_t.join(timeout=2)
+        if not reader_t.is_alive():
+            logging.info("shutdown: subprocess exited after SIGTERM, proc_poll=%s", proc.poll())
+            return
+        logging.warning("shutdown: subprocess did not exit after SIGTERM, sending SIGKILL (proc_poll=%s)", proc.poll())
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+    watchdog_t = threading.Thread(target=_shutdown_watchdog)
+    watchdog_t.start()
+    reader_t.start()
+    reader_t.join()
+    # Unblock watchdog if subprocess exited naturally (no sentinel received).
+    d.shutdown_event.set()
+    watchdog_t.join()
     elapsed = time.monotonic() - _start_time
-    logging.info("subprocess exited code=%d stdin_closed=%s elapsed=%.0fs", proc.returncode, d.stdin_closed, elapsed)
+    logging.info("relay exiting code=%d elapsed=%.0fs", proc.returncode, elapsed)
 
     # Clean up.
     srv.close()
@@ -572,8 +623,7 @@ def _wait_for_socket(timeout):
             except OSError:
                 pass
         time.sleep(0.05)
-    print("relay: timed out waiting for socket", file=sys.stderr)
-    sys.exit(1)
+    raise TimeoutError("relay: timed out waiting for socket")
 
 
 def _read_line(conn):
@@ -596,16 +646,17 @@ def read_plan(path):
     if path:
         with open(path) as f:
             sys.stdout.write(f.read())
-        return
+        return 0
     plans_dir = os.path.expanduser("~/.claude/plans")
     if not os.path.isdir(plans_dir):
-        sys.exit(1)
+        return 1
     files = [os.path.join(plans_dir, f) for f in os.listdir(plans_dir) if f.endswith(".md")]
     if not files:
-        sys.exit(1)
+        return 1
     latest = max(files, key=os.path.getmtime)
     with open(latest) as f:
         sys.stdout.write(f.read())
+    return 0
 
 
 def main() -> int:
@@ -616,6 +667,13 @@ def main() -> int:
     sa.add_argument("--dir", required=True, dest="work_dir")
     sa.add_argument("--no-log-stdin", action="store_true")
     sa.add_argument("--strip-env", action="append", default=[], metavar="KEY")
+    sa.add_argument(
+        "--shutdown-grace",
+        type=int,
+        default=_DEFAULT_SHUTDOWN_GRACE,
+        metavar="SEC",
+        help="seconds to wait after SIGINT before SIGTERM (default: %(default)s)",
+    )
     sa.add_argument("cmd", nargs="+")
 
     at = sub.add_parser("attach")
@@ -626,11 +684,17 @@ def main() -> int:
 
     args = parser.parse_args()
     if args.mode == "serve-attach":
-        serve(args.cmd, args.work_dir, log_stdin=not args.no_log_stdin, strip_env=args.strip_env)
+        serve(
+            args.cmd,
+            args.work_dir,
+            log_stdin=not args.no_log_stdin,
+            strip_env=args.strip_env,
+            shutdown_grace=args.shutdown_grace,
+        )
     elif args.mode == "attach":
         attach_client(args.offset)
     elif args.mode == "read-plan":
-        read_plan(args.path)
+        return read_plan(args.path)
     else:
         parser.print_help(sys.stderr)
         return 1
