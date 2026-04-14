@@ -69,6 +69,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -160,6 +161,7 @@ private fun ConnectionDot(connected: Boolean) {
             .size(10.dp)
             .clip(CircleShape)
             .background(color)
+            .testTag("connection-dot"),
     )
 }
 
@@ -499,6 +501,7 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
             label = { Text("Prompt") },
             modifier = Modifier
                 .fillMaxWidth()
+                .testTag("prompt-input")
                 .onKeyEvent {
                     if (it.key == Key.Enter && it.type == KeyEventType.KeyUp &&
                         hasContent && !state.submitting
@@ -533,6 +536,7 @@ private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel)
                             IconButton(
                                 onClick = { requestNotificationPermission(); viewModel.createTask() },
                                 enabled = hasContent,
+                                modifier = Modifier.testTag("submit-task"),
                             ) {
                                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Create task")
                             }

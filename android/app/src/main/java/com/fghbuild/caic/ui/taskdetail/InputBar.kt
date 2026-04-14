@@ -187,7 +187,7 @@ fun InputBar(
                         if (sending) {
                             CircularProgressIndicator(modifier = Modifier.size(24.dp))
                         } else {
-                            IconButton(onClick = onSend, enabled = hasContent && !busy) {
+                            IconButton(onClick = onSend, enabled = hasContent && !busy, modifier = Modifier.testTag("send-input")) {
                                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
                             }
                         }
@@ -536,7 +536,8 @@ private fun ImageThumbnail(img: ImageData, onRemove: () -> Unit) {
             contentDescription = "Attached image",
             modifier = Modifier
                 .size(48.dp)
-                .clip(RoundedCornerShape(4.dp)),
+                .clip(RoundedCornerShape(4.dp))
+                .testTag("attached-image"),
             contentScale = ContentScale.Crop,
         )
         Icon(
@@ -544,7 +545,8 @@ private fun ImageThumbnail(img: ImageData, onRemove: () -> Unit) {
             contentDescription = "Remove",
             modifier = Modifier
                 .size(16.dp)
-                .clickable(onClick = onRemove),
+                .clickable(onClick = onRemove)
+                .testTag("remove-image"),
         )
     }
 }

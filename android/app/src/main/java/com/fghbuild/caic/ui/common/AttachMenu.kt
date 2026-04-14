@@ -23,6 +23,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -39,7 +41,7 @@ fun AttachMenu(
             tooltip = { PlainTooltip { Text("Attach image") } },
             state = rememberTooltipState(),
         ) {
-            IconButton(onClick = { expanded = true }, enabled = enabled) {
+            IconButton(onClick = { expanded = true }, enabled = enabled, modifier = Modifier.testTag("attach-images")) {
                 Icon(Icons.Default.AttachFile, contentDescription = "Attach image")
             }
         }

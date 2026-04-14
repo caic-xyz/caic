@@ -6,8 +6,9 @@ package com.fghbuild.caic.e2e
 
 import android.os.Environment
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onAllNodesWithContentDescription
-import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.onAllNodes
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -66,16 +67,15 @@ class GenScreenshotsTest : E2eTestBase() {
 
         // Wait for the task list to load in the UI.
         composeTestRule.waitUntil(LOAD_TIMEOUT_MS) {
-            composeTestRule.onAllNodesWithText("Fix token expiry", substring = true)
+            composeTestRule.onAllNodes(hasTestTag("task-$id1"))
                 .fetchSemanticsNodes().isNotEmpty()
         }
 
         // Screenshot 1: Task list.
         takeScreenshot("task-list")
 
-        // Tap the first task to open detail view.
-        // Use onAllNodes to handle duplicates from other tests sharing the same backend.
-        composeTestRule.onAllNodesWithText("Fix token expiry bug in auth middleware")[0].performClick()
+        // Tap the first task to open detail view via testTag (immune to title changes).
+        composeTestRule.onNodeWithTag("task-$id1").performClick()
         composeTestRule.waitForIdle()
         Thread.sleep(SETTLE_DELAY_MS)
 
@@ -83,11 +83,11 @@ class GenScreenshotsTest : E2eTestBase() {
         takeScreenshot("task-detail")
 
         // Go back to task list.
-        composeTestRule.onAllNodesWithContentDescription("Back")[0].performClick()
+        composeTestRule.onNodeWithTag("navigate-back").performClick()
         composeTestRule.waitForIdle()
 
         // Tap the plan task.
-        composeTestRule.onAllNodesWithText("Plan the rate limiting", substring = true)[0].performClick()
+        composeTestRule.onNodeWithTag("task-$id2").performClick()
         composeTestRule.waitForIdle()
         Thread.sleep(SETTLE_DELAY_MS)
 
@@ -95,11 +95,11 @@ class GenScreenshotsTest : E2eTestBase() {
         takeScreenshot("task-plan")
 
         // Go back.
-        composeTestRule.onAllNodesWithContentDescription("Back")[0].performClick()
+        composeTestRule.onNodeWithTag("navigate-back").performClick()
         composeTestRule.waitForIdle()
 
         // Tap the ask task.
-        composeTestRule.onAllNodesWithText("Which storage backend", substring = true)[0].performClick()
+        composeTestRule.onNodeWithTag("task-$id3").performClick()
         composeTestRule.waitForIdle()
         Thread.sleep(SETTLE_DELAY_MS)
 

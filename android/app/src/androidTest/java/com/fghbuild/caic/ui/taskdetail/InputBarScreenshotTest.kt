@@ -2,9 +2,10 @@
 package com.fghbuild.caic.ui.taskdetail
 
 import android.graphics.Bitmap
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -63,19 +64,19 @@ class InputBarScreenshotTest {
     @Test
     fun attachButton_visible_whenSupportsImages() {
         setContent(supportsImages = true)
-        composeTestRule.onNodeWithContentDescription("Attach image").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("attach-images").assertIsDisplayed()
     }
 
     @Test
     fun attachButton_absent_whenSupportsImagesFalse() {
         setContent(supportsImages = false)
-        composeTestRule.onNodeWithContentDescription("Attach image").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("attach-images").assertDoesNotExist()
     }
 
     @Test
     fun attachMenu_containsScreenshotOption() {
         setContent()
-        composeTestRule.onNodeWithContentDescription("Attach image").performClick()
+        composeTestRule.onNodeWithTag("attach-images").performClick()
         composeTestRule.onNodeWithText("Screenshot").assertIsDisplayed()
     }
 
@@ -83,7 +84,7 @@ class InputBarScreenshotTest {
     fun screenshotItem_click_invokesOnScreenshot() {
         var called = false
         setContent(onScreenshot = { called = true })
-        composeTestRule.onNodeWithContentDescription("Attach image").performClick()
+        composeTestRule.onNodeWithTag("attach-images").performClick()
         composeTestRule.onNodeWithText("Screenshot").performClick()
         assertTrue("onScreenshot must be invoked when Screenshot is tapped", called)
     }
@@ -91,7 +92,7 @@ class InputBarScreenshotTest {
     @Test
     fun pendingImage_thumbnailVisible() {
         setContent(pendingImages = listOf(makeTestImage()))
-        composeTestRule.onNodeWithContentDescription("Attached image").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("attached-image").assertIsDisplayed()
     }
 
     @Test
@@ -101,7 +102,7 @@ class InputBarScreenshotTest {
             pendingImages = listOf(makeTestImage()),
             onRemoveImage = { removedIndex = it },
         )
-        composeTestRule.onNodeWithContentDescription("Remove").performClick()
+        composeTestRule.onNodeWithTag("remove-image").performClick()
         assertEquals(0, removedIndex)
     }
 }

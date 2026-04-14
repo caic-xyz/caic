@@ -19,6 +19,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
 import com.caic.sdk.v1.AskQuestion
@@ -114,6 +115,7 @@ fun AskQuestionCard(
                                     toggleOption(selections, qIdx, option.label, q.multiSelect == true)
                                 }
                             },
+                            modifier = Modifier.testTag("ask-option-${option.label}"),
                             label = {
                                 Column {
                                     Text(option.label)
@@ -159,6 +161,7 @@ fun AskQuestionCard(
                         val answer = formatAnswer(ask.questions, selections, otherTexts)
                         if (answer.isNotBlank()) onAnswer(answer)
                     },
+                    modifier = Modifier.testTag("ask-submit"),
                 ) {
                     Text("Submit")
                 }

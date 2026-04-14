@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.asImageBitmap
@@ -301,6 +302,7 @@ fun PlanApprovalSection(planContent: String, onExecute: () -> Unit) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
+                .testTag("plan-content")
                 .border(1.dp, MaterialTheme.appColors.planBorder, RoundedCornerShape(6.dp)),
             shape = RoundedCornerShape(6.dp),
             color = MaterialTheme.appColors.planSurface,
@@ -316,6 +318,7 @@ fun PlanApprovalSection(planContent: String, onExecute: () -> Unit) {
         }
         Button(
             onClick = onExecute,
+            modifier = Modifier.testTag("clear-and-execute-plan"),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.secondary,
                 contentColor = MaterialTheme.colorScheme.onSecondary,

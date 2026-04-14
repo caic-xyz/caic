@@ -52,6 +52,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -523,7 +524,7 @@ fun TaskDetailScreen(
                         tooltip = { PlainTooltip { Text("Back") } },
                         state = rememberTooltipState(),
                     ) {
-                        IconButton(onClick = onNavigateBack) {
+                        IconButton(onClick = onNavigateBack, modifier = Modifier.testTag("navigate-back")) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
                     }
