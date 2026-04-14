@@ -15,6 +15,7 @@ require (
 	github.com/mattn/go-colorable v0.1.14
 	github.com/mattn/go-isatty v0.0.20
 	github.com/oschwald/maxminddb-golang/v2 v2.1.1
+	github.com/pelletier/go-toml/v2 v2.3.0
 	github.com/pion/ice/v4 v4.2.2
 	github.com/pion/webrtc/v4 v4.2.11
 	golang.org/x/net v0.52.0

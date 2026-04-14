@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestIsNewer(t *testing.T) {
@@ -55,6 +56,70 @@ func TestParseSemver(t *testing.T) {
 					tc.input, maj, mnr, pat, ok, tc.major, tc.minor, tc.patch, tc.ok)
 			}
 		})
+	}
+}
+
+func TestParseSchedule(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		s, err := ParseSchedule("50 4 * * *")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(s.Minute) != 1 || s.Minute[0] != 50 {
+			t.Errorf("Minute = %v, want [50]", s.Minute)
+		}
+		if len(s.Hour) != 1 || s.Hour[0] != 4 {
+			t.Errorf("Hour = %v, want [4]", s.Hour)
+		}
+		if s.DayOfMonth != nil || s.Month != nil || s.DayOfWeek != nil {
+			t.Error("wildcards should be nil")
+		}
+	})
+
+	t.Run("comma list", func(t *testing.T) {
+		s, err := ParseSchedule("0,30 * * * *")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(s.Minute) != 2 || s.Minute[0] != 0 || s.Minute[1] != 30 {
+			t.Errorf("Minute = %v, want [0 30]", s.Minute)
+		}
+	})
+
+	t.Run("wrong field count", func(t *testing.T) {
+		_, err := ParseSchedule("50 4 *")
+		if err == nil {
+			t.Error("expected error")
+		}
+	})
+
+	t.Run("out of range", func(t *testing.T) {
+		_, err := ParseSchedule("60 4 * * *")
+		if err == nil {
+			t.Error("expected error for minute=60")
+		}
+	})
+}
+
+func TestScheduleNext(t *testing.T) {
+	s, err := ParseSchedule("50 4 * * *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 2026-04-09 03:00 → next should be 2026-04-09 04:50.
+	now := time.Date(2026, 4, 9, 3, 0, 0, 0, time.Local)
+	next := s.Next(now)
+	want := time.Date(2026, 4, 9, 4, 50, 0, 0, time.Local)
+	if !next.Equal(want) {
+		t.Errorf("Next(%v) = %v, want %v", now, next, want)
+	}
+
+	// 2026-04-09 05:00 → next should be 2026-04-10 04:50.
+	now = time.Date(2026, 4, 9, 5, 0, 0, 0, time.Local)
+	next = s.Next(now)
+	want = time.Date(2026, 4, 10, 4, 50, 0, 0, time.Local)
+	if !next.Equal(want) {
+		t.Errorf("Next(%v) = %v, want %v", now, next, want)
 	}
 }
 

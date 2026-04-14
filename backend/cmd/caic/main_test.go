@@ -6,52 +6,6 @@ import (
 	"testing"
 )
 
-func TestReadFileFromEnv(t *testing.T) {
-	const envVar = "TEST_READ_FILE_OR_ENV"
-
-	t.Run("empty", func(t *testing.T) {
-		t.Setenv(envVar, "")
-		if got := readFileFromEnv(envVar); got != "" {
-			t.Fatalf("want empty, got %q", got)
-		}
-	})
-
-	t.Run("absolute path", func(t *testing.T) {
-		f := filepath.Join(t.TempDir(), "key.pem")
-		if err := os.WriteFile(f, []byte("ABS-PEM"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv(envVar, f)
-		if got := readFileFromEnv(envVar); got != "ABS-PEM" {
-			t.Fatalf("want ABS-PEM, got %q", got)
-		}
-	})
-
-	t.Run("relative path resolves to config dir", func(t *testing.T) {
-		cfgDir := t.TempDir()
-		t.Setenv("XDG_CONFIG_HOME", cfgDir)
-		caicDir := filepath.Join(cfgDir, "caic")
-		if err := os.MkdirAll(caicDir, 0o750); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(caicDir, "key.pem"), []byte("REL-PEM"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-
-		t.Setenv(envVar, "key.pem")
-		if got := readFileFromEnv(envVar); got != "REL-PEM" {
-			t.Fatalf("want REL-PEM, got %q", got)
-		}
-	})
-
-	t.Run("missing file returns empty", func(t *testing.T) {
-		t.Setenv(envVar, "/nonexistent/path/key.pem")
-		if got := readFileFromEnv(envVar); got != "" {
-			t.Fatalf("want empty, got %q", got)
-		}
-	})
-}
-
 func TestExpandTilde(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {

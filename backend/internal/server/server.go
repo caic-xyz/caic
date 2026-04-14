@@ -51,8 +51,8 @@ type githubAppClient interface {
 	PostComment(ctx context.Context, installationID int64, owner, repo string, issueNumber int, body string) error
 }
 
-// Config bundles environment-derived values read once at startup and threaded
-// into the server instead of calling os.Getenv at runtime.
+// Config bundles values read once at startup from config.toml, environment
+// variables, and CLI flags, then threaded into the server.
 type Config struct {
 	// Directories.
 	ConfigDir string // persistent server state, e.g. ~/.config/caic
@@ -109,51 +109,51 @@ type Config struct {
 // Validate returns an error if the configuration is invalid.
 func (c *Config) Validate() error {
 	if (c.GitHubOAuthClientID == "") != (c.GitHubOAuthClientSecret == "") {
-		return errors.New("GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET must both be set or both be unset")
+		return errors.New("github.oauth_client_id and github.oauth_client_secret must both be set or both be unset")
 	}
 	if (c.GitLabOAuthClientID == "") != (c.GitLabOAuthClientSecret == "") {
-		return errors.New("GITLAB_OAUTH_CLIENT_ID and GITLAB_OAUTH_CLIENT_SECRET must both be set or both be unset")
+		return errors.New("gitlab.oauth_client_id and gitlab.oauth_client_secret must both be set or both be unset")
 	}
 	oauthConfigured := c.GitHubOAuthClientID != "" || c.GitLabOAuthClientID != ""
 	if oauthConfigured && c.ExternalURL == "" {
-		return errors.New("CAIC_EXTERNAL_URL is required when OAuth login is configured")
+		return errors.New("external_url is required when OAuth login is configured")
 	}
 	if c.ExternalURL != "" && !strings.EqualFold(c.ExternalURL, "auto") {
 		u, err := url.Parse(c.ExternalURL)
 		if err != nil || u.Host == "" {
-			return fmt.Errorf("CAIC_EXTERNAL_URL is not a valid URL: %q", c.ExternalURL)
+			return fmt.Errorf("external_url is not a valid URL: %q", c.ExternalURL)
 		}
 		if u.Path != "" && u.Path != "/" {
-			return fmt.Errorf("CAIC_EXTERNAL_URL must not contain a path: %q", c.ExternalURL)
+			return fmt.Errorf("external_url must not contain a path: %q", c.ExternalURL)
 		}
 		// Normalize: strip trailing slash to avoid double-slash in redirect URIs.
 		c.ExternalURL = strings.TrimRight(c.ExternalURL, "/")
 		if oauthConfigured && u.Scheme != "https" {
-			return errors.New("CAIC_EXTERNAL_URL must use https:// when OAuth login is configured")
+			return errors.New("external_url must use https:// when OAuth login is configured")
 		}
 	}
 	if c.GitLabURL != "" {
 		u, err := url.Parse(c.GitLabURL)
 		if err != nil || u.Host == "" {
-			return fmt.Errorf("GITLAB_URL is not a valid URL: %q", c.GitLabURL)
+			return fmt.Errorf("gitlab.url is not a valid URL: %q", c.GitLabURL)
 		}
 		if u.Path != "" && u.Path != "/" {
-			return fmt.Errorf("GITLAB_URL must not contain a path: %q", c.GitLabURL)
+			return fmt.Errorf("gitlab.url must not contain a path: %q", c.GitLabURL)
 		}
 	}
 	if c.GitHubToken != "" && c.GitHubOAuthClientID != "" {
-		return errors.New("GITHUB_TOKEN and GITHUB_OAUTH_CLIENT_ID are mutually exclusive: " +
-			"remove GITHUB_TOKEN when using GitHub OAuth login")
+		return errors.New("github.token and github.oauth_client_id are mutually exclusive: " +
+			"remove github.token when using GitHub OAuth login")
 	}
 	if c.GitLabToken != "" && c.GitLabOAuthClientID != "" {
-		return errors.New("GITLAB_TOKEN and GITLAB_OAUTH_CLIENT_ID are mutually exclusive: " +
-			"remove GITLAB_TOKEN when using GitLab OAuth login")
+		return errors.New("gitlab.token and gitlab.oauth_client_id are mutually exclusive: " +
+			"remove gitlab.token when using GitLab OAuth login")
 	}
 	if c.GitHubOAuthClientID != "" && c.GitHubOAuthAllowedUsers == "" {
-		return errors.New("GITHUB_OAUTH_ALLOWED_USERS is required when GitHub OAuth login is configured")
+		return errors.New("github.oauth_allowed_users is required when GitHub OAuth login is configured")
 	}
 	if c.GitLabOAuthClientID != "" && c.GitLabOAuthAllowedUsers == "" {
-		return errors.New("GITLAB_OAUTH_ALLOWED_USERS is required when GitLab OAuth login is configured")
+		return errors.New("gitlab.oauth_allowed_users is required when GitLab OAuth login is configured")
 	}
 	return nil
 }

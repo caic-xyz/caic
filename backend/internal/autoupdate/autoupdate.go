@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -27,27 +28,120 @@ import (
 )
 
 const (
-	owner     = "caic-xyz"
-	repo      = "caic"
-	targetHr  = 4
-	targetMin = 50
+	owner = "caic-xyz"
+	repo  = "caic"
+	// maxJitter spreads update checks to avoid thundering-herd on shared hosts.
 	maxJitter = 5 * time.Minute
 	// maxBinarySize caps decompression to prevent zip/gzip bombs.
 	maxBinarySize = 256 << 20 // 256 MiB
 )
 
-// Run starts the nightly auto-update loop. It checks at 04:50 local time
-// (with up to 5 min jitter). On successful update, replaceBinary overwrites
-// the executable; watchExecutable detects the change and triggers a graceful
-// restart. Blocks until ctx is cancelled.
-func Run(ctx context.Context, gh *github.Client) {
+// Schedule holds a parsed cron-style schedule (minute, hour, day-of-month,
+// month, day-of-week). Each field is a sorted slice of allowed values; nil
+// means "any" (wildcard).
+type Schedule struct {
+	Minute     []int // 0–59
+	Hour       []int // 0–23
+	DayOfMonth []int // 1–31
+	Month      []int // 1–12
+	DayOfWeek  []int // 0–6 (0 = Sunday)
+}
+
+// ParseSchedule parses a 5-field cron expression (minute hour dom month dow).
+// Supports integers, comma-separated lists, and "*" (wildcard).
+func ParseSchedule(expr string) (Schedule, error) {
+	fields := strings.Fields(expr)
+	if len(fields) != 5 {
+		return Schedule{}, fmt.Errorf("cron: expected 5 fields, got %d in %q", len(fields), expr)
+	}
+	minute, err := parseCronField(fields[0], 0, 59)
+	if err != nil {
+		return Schedule{}, fmt.Errorf("cron minute: %w", err)
+	}
+	hour, err := parseCronField(fields[1], 0, 23)
+	if err != nil {
+		return Schedule{}, fmt.Errorf("cron hour: %w", err)
+	}
+	dom, err := parseCronField(fields[2], 1, 31)
+	if err != nil {
+		return Schedule{}, fmt.Errorf("cron day-of-month: %w", err)
+	}
+	month, err := parseCronField(fields[3], 1, 12)
+	if err != nil {
+		return Schedule{}, fmt.Errorf("cron month: %w", err)
+	}
+	dow, err := parseCronField(fields[4], 0, 6)
+	if err != nil {
+		return Schedule{}, fmt.Errorf("cron day-of-week: %w", err)
+	}
+	return Schedule{Minute: minute, Hour: hour, DayOfMonth: dom, Month: month, DayOfWeek: dow}, nil
+}
+
+// parseCronField parses a single cron field. Returns nil for "*".
+func parseCronField(field string, lo, hi int) ([]int, error) {
+	if field == "*" {
+		return nil, nil
+	}
+	var vals []int
+	for part := range strings.SplitSeq(field, ",") {
+		v, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil {
+			return nil, fmt.Errorf("invalid value %q", part)
+		}
+		if v < lo || v > hi {
+			return nil, fmt.Errorf("value %d out of range [%d, %d]", v, lo, hi)
+		}
+		vals = append(vals, v)
+	}
+	return vals, nil
+}
+
+// Next returns the next time after now that matches the schedule.
+func (s *Schedule) Next(now time.Time) time.Time {
+	// Start from the next minute.
+	t := now.Truncate(time.Minute).Add(time.Minute)
+	// Search up to 366 days ahead to handle any valid cron pattern.
+	limit := t.Add(366 * 24 * time.Hour)
+	for t.Before(limit) {
+		if !intMatch(s.Month, int(t.Month())) {
+			// Skip to first day of next month.
+			t = time.Date(t.Year(), t.Month()+1, 1, 0, 0, 0, 0, t.Location())
+			continue
+		}
+		if !intMatch(s.DayOfMonth, t.Day()) || !intMatch(s.DayOfWeek, int(t.Weekday())) {
+			t = time.Date(t.Year(), t.Month(), t.Day()+1, 0, 0, 0, 0, t.Location())
+			continue
+		}
+		if !intMatch(s.Hour, t.Hour()) {
+			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour()+1, 0, 0, 0, t.Location())
+			continue
+		}
+		if !intMatch(s.Minute, t.Minute()) {
+			t = t.Add(time.Minute)
+			continue
+		}
+		return t
+	}
+	// Should not happen for valid schedules; fall back to 24h from now.
+	return now.Add(24 * time.Hour)
+}
+
+// intMatch returns true if vals is nil (wildcard) or v is in vals.
+func intMatch(vals []int, v int) bool {
+	if vals == nil {
+		return true
+	}
+	return slices.Contains(vals, v)
+}
+
+// Run starts the auto-update loop on the given schedule. On successful update,
+// replaceBinary overwrites the executable; watchExecutable detects the change
+// and triggers a graceful restart. Blocks until ctx is cancelled.
+func Run(ctx context.Context, gh *github.Client, sched *Schedule) {
 	slog.Info("autoupdate enabled", "version", Version)
 	for {
 		now := time.Now()
-		target := time.Date(now.Year(), now.Month(), now.Day(), targetHr, targetMin, 0, 0, now.Location())
-		if !target.After(now) {
-			target = target.Add(24 * time.Hour)
-		}
+		target := sched.Next(now)
 		jitter := time.Duration(rand.IntN(int(maxJitter))) //nolint:gosec // G404: jitter does not need crypto/rand
 		delay := target.Sub(now) + jitter
 		slog.Debug("autoupdate: next check", "in", delay.Round(time.Second))

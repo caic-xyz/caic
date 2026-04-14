@@ -15,7 +15,6 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"runtime/trace"
-	"strconv"
 	"strings"
 	"time"
 
@@ -40,14 +39,6 @@ func expandTilde(path string) (string, error) {
 		return filepath.Join(home, rest), nil
 	}
 	return filepath.Abs(path)
-}
-
-// envDefault returns the value of the named environment variable, or def if unset/empty.
-func envDefault(name, def string) string {
-	if v := os.Getenv(name); v != "" {
-		return v
-	}
-	return def
 }
 
 // localizeAddr defaults to localhost when the address specifies a port but no
@@ -86,67 +77,15 @@ func mainImpl() error {
 caic manages multiple coding agents in parallel. Each task runs in an isolated
 container with the agent communicating over SSH.
 
+Configuration is loaded from config.toml inside the config directory
+(default: ~/.config/caic/). See contrib/config.toml for a documented template.
+
 Flags:
 `)
 		flag.PrintDefaults()
-		_, _ = fmt.Fprintf(w, `
-Environment variables (flags take precedence when set):
-
-  Core:
-    CAIC_HTTP                   HTTP listen address (e.g. :8080)
-    CAIC_ROOT                   Parent directory containing git repos
-    CAIC_LOG_LEVEL              Log level: debug, info, warn, error (default: info)
-    CAIC_EXTERNAL_URL           Public base URL; "auto" (default) locks hostname from first FQDN request
-
-  LLM features (title generation, commit descriptions):
-    CAIC_LLM_PROVIDER           Provider: anthropic, gemini, openaichat, etc.
-    CAIC_LLM_MODEL              Model name (e.g. claude-haiku-4-5-20251001)
-
-  GitHub — choose one of PAT or OAuth; GitHub App is independent:
-    GITHUB_TOKEN                PAT for PR/CI; single-user (mutually exclusive with GITHUB_OAUTH_CLIENT_ID); auto-detected from gh CLI if unset
-    GITHUB_OAUTH_CLIENT_ID      OAuth app client ID; multi-user login (mutually exclusive with GITHUB_TOKEN)
-    GITHUB_OAUTH_CLIENT_SECRET  OAuth app client secret
-    GITHUB_OAUTH_ALLOWED_USERS  Comma-separated GitHub usernames allowed to log in (required with OAuth)
-    GITHUB_APP_ID               GitHub App ID for org-wide webhooks and installation tokens
-    GITHUB_APP_PRIVATE_KEY_PEM  Path to PEM file (relative to ~/.config/caic/)
-    GITHUB_APP_ALLOWED_OWNERS   Comma-separated owners/orgs allowed to install the app; rejects others
-    GITHUB_WEBHOOK_SECRET       HMAC-SHA256 secret; enables POST /webhooks/github
-
-  GitLab — choose one of PAT or OAuth:
-    GITLAB_TOKEN                PAT for MR/CI; single-user (mutually exclusive with GITLAB_OAUTH_CLIENT_ID)
-    GITLAB_OAUTH_CLIENT_ID      OAuth app client ID; multi-user login (mutually exclusive with GITLAB_TOKEN)
-    GITLAB_OAUTH_CLIENT_SECRET  OAuth app client secret
-    GITLAB_OAUTH_ALLOWED_USERS  Comma-separated GitLab usernames allowed to log in (required with OAuth)
-    GITLAB_URL                  GitLab instance URL (default: https://gitlab.com)
-    GITLAB_WEBHOOK_SECRET       Shared secret; enables POST /webhooks/gitlab
-
-  Agents:
-    GEMINI_API_KEY              Gemini API key for the Gemini Live voice agent
-    TAILSCALE_API_KEY           Tailscale API key for Tailscale ephemeral node
-    CAIC_WEBRTC_PORT            UDP port for WebRTC ICE (e.g. 3478); unset disables WebRTC
-
-  Auto-update:
-    CAIC_AUTO_UPDATE            Set to "0" to disable nightly auto-update (default: enabled)
-
-  Profiling:
-    CAIC_PPROF                  Set to any value to expose /debug/pprof/* endpoints
-
-  IP geolocation (optional):
-    CAIC_IPGEO_DB               Path to a MaxMind MMDB file; relative paths resolve against ~/.config/caic/ (e.g. GeoLite2-Country.mmdb)
-    CAIC_IPGEO_ALLOWLIST        Comma-separated allowlist (default: "local,tailscale,github"): ISO country codes (e.g. CA,US), "local", "tailscale", "github", or CIDR ranges (e.g. 34.74.90.64/28); requires CAIC_IPGEO_DB when country codes are present
-
-See contrib/caic.env for a template with all variables and documentation.
-`)
 	}
 
-	addr := flag.String("http", envDefault("CAIC_HTTP", ":8080"), "start web UI on this address (e.g. :8080)")
-	root := flag.String("root", envDefault("CAIC_ROOT", "."), "parent directory containing git repos")
-	logLevel := flag.String("log-level", envDefault("CAIC_LOG_LEVEL", "info"), "log level (debug, info, warn, error)")
-	pprofFlag := flag.Bool("pprof", os.Getenv("CAIC_PPROF") != "", "expose /debug/pprof/* profiling endpoints")
-	cpuProfile := flag.String("cpuprofile", "", "write CPU profile to file")
-	memProfile := flag.String("memprofile", "", "write heap profile to file on shutdown")
-	traceFile := flag.String("trace", "", "write execution trace to file")
-	noLogTime := flag.Bool("no-log-time", false, "omit timestamps from log output")
+	cfgDirFlag := flag.String("config-dir", "", "config directory (default: ~/.config/caic)")
 	versionFlag := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *versionFlag {
@@ -157,9 +96,48 @@ See contrib/caic.env for a template with all variables and documentation.
 		return fmt.Errorf("unexpected arguments: %v", args)
 	}
 
+	// Resolve config directory: -config-dir flag > XDG default.
+	cfgDir := configDir()
+	if *cfgDirFlag != "" {
+		d, err := expandTilde(*cfgDirFlag)
+		if err != nil {
+			return fmt.Errorf("config-dir: %w", err)
+		}
+		cfgDir = d
+	}
+
+	// Load configuration from TOML file.
+	tc, err := loadTOMLConfig(cfgDir)
+	if err != nil {
+		return err
+	}
+	cfg, addr, root, logLevel, err := tomlToServerConfig(&tc, cfgDir)
+	if err != nil {
+		return err
+	}
+	// Apply defaults for fields not set in TOML.
+	if addr == "" {
+		addr = ":8080"
+	}
+	if root == "" {
+		root = "."
+	}
+	if logLevel == "" {
+		logLevel = "info"
+	}
+	if cfg.ExternalURL == "" {
+		cfg.ExternalURL = "auto"
+	}
+
+	if root, err = expandTilde(root); err != nil {
+		return err
+	}
+
+	initLogging(logLevel, tc.Debug.NoLogTime)
+
 	// File-based profiling: CPU, heap, and execution trace.
-	if *cpuProfile != "" {
-		f, err := os.Create(*cpuProfile)
+	if tc.Debug.CPUProfile != "" {
+		f, err := os.Create(tc.Debug.CPUProfile)
 		if err != nil {
 			return fmt.Errorf("create CPU profile: %w", err)
 		}
@@ -168,10 +146,10 @@ See contrib/caic.env for a template with all variables and documentation.
 			return fmt.Errorf("start CPU profile: %w", err)
 		}
 		defer pprof.StopCPUProfile()
-		slog.Info("CPU profiling enabled", "file", *cpuProfile)
+		slog.Info("CPU profiling enabled", "file", tc.Debug.CPUProfile)
 	}
-	if *traceFile != "" {
-		f, err := os.Create(*traceFile)
+	if tc.Debug.Trace != "" {
+		f, err := os.Create(tc.Debug.Trace)
 		if err != nil {
 			return fmt.Errorf("create trace: %w", err)
 		}
@@ -180,12 +158,12 @@ See contrib/caic.env for a template with all variables and documentation.
 			return fmt.Errorf("start trace: %w", err)
 		}
 		defer trace.Stop()
-		slog.Info("execution trace enabled", "file", *traceFile)
+		slog.Info("execution trace enabled", "file", tc.Debug.Trace)
 	}
-	if *memProfile != "" {
+	if tc.Debug.MemProfile != "" {
 		defer func() {
 			runtime.GC()
-			f, err := os.Create(*memProfile)
+			f, err := os.Create(tc.Debug.MemProfile)
 			if err != nil {
 				slog.Error("create heap profile", "err", err)
 				return
@@ -193,73 +171,45 @@ See contrib/caic.env for a template with all variables and documentation.
 			if err := pprof.WriteHeapProfile(f); err != nil {
 				slog.Error("write heap profile", "err", err)
 			} else {
-				slog.Info("heap profile written", "file", *memProfile)
+				slog.Info("heap profile written", "file", tc.Debug.MemProfile)
 			}
 			_ = f.Close()
 		}()
 	}
-	var err error
-	if *root, err = expandTilde(*root); err != nil {
-		return err
-	}
 
-	initLogging(*logLevel, *noLogTime)
-
-	cfg := &server.Config{
-		GeminiAPIKey:            os.Getenv("GEMINI_API_KEY"),
-		TailscaleAPIKey:         os.Getenv("TAILSCALE_API_KEY"),
-		LLMProvider:             os.Getenv("CAIC_LLM_PROVIDER"),
-		LLMModel:                os.Getenv("CAIC_LLM_MODEL"),
-		ConfigDir:               configDir(),
-		CacheDir:                cacheDir(),
-		GitHubToken:             resolveGitHubToken(),
-		GitLabToken:             os.Getenv("GITLAB_TOKEN"),
-		ExternalURL:             envDefault("CAIC_EXTERNAL_URL", "auto"),
-		GitHubOAuthClientID:     os.Getenv("GITHUB_OAUTH_CLIENT_ID"),
-		GitHubOAuthClientSecret: os.Getenv("GITHUB_OAUTH_CLIENT_SECRET"),
-		GitLabOAuthClientID:     os.Getenv("GITLAB_OAUTH_CLIENT_ID"),
-		GitLabOAuthClientSecret: os.Getenv("GITLAB_OAUTH_CLIENT_SECRET"),
-		GitLabURL:               os.Getenv("GITLAB_URL"),
-		GitHubOAuthAllowedUsers: os.Getenv("GITHUB_OAUTH_ALLOWED_USERS"),
-		GitLabOAuthAllowedUsers: os.Getenv("GITLAB_OAUTH_ALLOWED_USERS"),
-		GitHubWebhookSecret:     []byte(os.Getenv("GITHUB_WEBHOOK_SECRET")),
-		GitHubAppID:             parseInt64(os.Getenv("GITHUB_APP_ID")),
-		GitHubAppPrivateKeyPEM:  []byte(readFileFromEnv("GITHUB_APP_PRIVATE_KEY_PEM")),
-		GitHubAppAllowedOwners:  os.Getenv("GITHUB_APP_ALLOWED_OWNERS"),
-		GitLabWebhookSecret:     []byte(os.Getenv("GITLAB_WEBHOOK_SECRET")),
-		IPGeoDB:                 resolvePathFromEnv("CAIC_IPGEO_DB"),
-		IPGeoAllowlist:          envDefault("CAIC_IPGEO_ALLOWLIST", "local,tailscale,github"),
-		WebRTCPort:              parseInt(os.Getenv("CAIC_WEBRTC_PORT")),
-		Pprof:                   *pprofFlag,
-	}
-
-	slog.Info("gemini", "apikey", auth.MaskedToken(cfg.GeminiAPIKey))       //nolint:gosec // G706
-	slog.Info("tailscale", "apikey", auth.MaskedToken(cfg.TailscaleAPIKey)) //nolint:gosec // G706
-	slog.Info("LLM", "provider", cfg.LLMProvider, "model", cfg.LLMModel)    //nolint:gosec // G706
+	slog.Info("gemini", "apikey", auth.MaskedToken(cfg.GeminiAPIKey))
+	slog.Info("tailscale", "apikey", auth.MaskedToken(cfg.TailscaleAPIKey))
+	slog.Info("LLM", "provider", cfg.LLMProvider, "model", cfg.LLMModel)
 
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
 	if isFakeMode {
-		return serveFake(ctx, *addr, cfg)
+		return serveFake(ctx, addr, cfg)
 	}
-	if *addr == "" {
-		return errors.New("HTTP address is required: set -http flag or CAIC_HTTP env var")
+	if addr == "" {
+		return errors.New("HTTP address is required: set http in config.toml")
 	}
-	*addr = localizeAddr(*addr)
-	if *root == "" {
-		return errors.New("root directory is required: set -root flag or CAIC_ROOT env var")
+	addr = localizeAddr(addr)
+	if root == "" {
+		return errors.New("root directory is required: set root in config.toml")
 	}
 
 	// Exit when executable is rebuilt (systemd restarts the service).
 	if err := watchExecutable(ctx, cancel); err != nil {
 		return fmt.Errorf("failed to watch executable: %w", err)
 	}
-	// Nightly auto-update: checks GitHub Releases and replaces the binary.
-	if v := autoupdate.Version; v != "" && !strings.HasPrefix(v, "devel-") && os.Getenv("CAIC_AUTO_UPDATE") != "0" {
-		go autoupdate.Run(ctx, github.NewClient(cfg.GitHubToken, http.DefaultTransport))
+	// Auto-update: checks GitHub Releases on a cron schedule and replaces the binary.
+	if v := autoupdate.Version; v != "" && !strings.HasPrefix(v, "devel-") {
+		sched, err := autoUpdateSchedule(&tc)
+		if err != nil {
+			return err
+		}
+		if sched != nil {
+			go autoupdate.Run(ctx, github.NewClient(cfg.GitHubToken, http.DefaultTransport), sched)
+		}
 	}
-	return serveHTTP(ctx, *addr, *root, cfg)
+	return serveHTTP(ctx, addr, root, cfg)
 }
 
 // roundDur rounds d to 3 significant digits.
@@ -380,18 +330,9 @@ func configDir() string {
 	return filepath.Join(base, "caic")
 }
 
-// resolveGitHubToken returns the GitHub token to use. It returns GITHUB_TOKEN
-// if set. Otherwise, when OAuth is not configured, it attempts to obtain a
-// token from the gh CLI (gh auth token). Returns "" if neither is available.
-func resolveGitHubToken() string {
-	if t := os.Getenv("GITHUB_TOKEN"); t != "" {
-		return t
-	}
-	// Don't try gh when OAuth is configured — the two modes are mutually
-	// exclusive and mixing them would cause a startup error.
-	if os.Getenv("GITHUB_OAUTH_CLIENT_ID") != "" {
-		return ""
-	}
+// resolveGitHubTokenFromGH attempts to obtain a GitHub token from the gh CLI
+// (gh auth token). Returns "" if the CLI is not available or fails.
+func resolveGitHubTokenFromGH() string {
 	ghPath, err := exec.LookPath("gh")
 	if err != nil {
 		return ""
@@ -402,64 +343,6 @@ func resolveGitHubToken() string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
-}
-
-func parseInt(s string) int {
-	if s == "" {
-		return 0
-	}
-	v, err := strconv.Atoi(s)
-	if err != nil {
-		slog.Warn("invalid int env value", "val", s) //nolint:gosec // G706: config value from env, not user input
-		return 0
-	}
-	return v
-}
-
-func parseInt64(s string) int64 {
-	if s == "" {
-		return 0
-	}
-	id, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		slog.Warn("invalid int64 env value", "val", s) //nolint:gosec // G706: config value, not user input
-		return 0
-	}
-	return id
-}
-
-// resolvePathFromEnv returns the path stored in the given env var, resolving
-// relative paths against the config directory (~/.config/caic/).
-// Returns "" if the env var is unset.
-func resolvePathFromEnv(envVar string) string {
-	v := os.Getenv(envVar)
-	if v == "" {
-		return ""
-	}
-	if !filepath.IsAbs(v) {
-		return filepath.Join(configDir(), v)
-	}
-	return v
-}
-
-// readFileFromEnv reads the file path stored in the given env var and returns its
-// contents. Relative paths are resolved against the config directory
-// (~/.config/caic/).
-func readFileFromEnv(envVar string) string {
-	v := os.Getenv(envVar)
-	if v == "" {
-		return ""
-	}
-	path := v
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(configDir(), path)
-	}
-	data, err := os.ReadFile(path) //nolint:gosec // path from trusted env var
-	if err != nil {
-		slog.Error("failed to read file from env var", "env", envVar, "path", path, "err", err) //nolint:gosec // path from trusted env var
-		return ""
-	}
-	return string(data)
 }
 
 // watchExecutable watches the current executable for modifications and calls

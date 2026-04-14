@@ -1,7 +1,7 @@
 # caic systemd user service
 # Install: mkdir -p ~/.config/systemd/user && cp contrib/caic.service ~/.config/systemd/user/
-#          mkdir -p ~/.config/caic && cp contrib/caic.env ~/.config/caic/caic.env
-#          Edit ~/.config/caic/caic.env to set CAIC_HTTP, CAIC_ROOT, and API keys.
+#          mkdir -p ~/.config/caic && cp contrib/config.toml ~/.config/caic/config.toml
+#          Edit ~/.config/caic/config.toml (see contrib/config.toml for documentation).
 # Enable:  systemctl --user daemon-reload && systemctl --user enable --now caic
 # Logs:    journalctl --user -u caic -f
 
@@ -13,7 +13,6 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-EnvironmentFile=-%h/.config/caic/caic.env
 ExecStart=%h/.local/bin/caic
 WorkingDirectory=%h
 Restart=always
