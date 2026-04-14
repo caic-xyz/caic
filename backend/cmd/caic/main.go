@@ -129,6 +129,13 @@ Flags:
 		cfg.ExternalURL = "auto"
 	}
 
+	// Validate geo_db file exists if explicitly set in config.
+	if tc.Server.GeoDB != nil {
+		if _, err := os.Stat(cfg.IPGeoDB); err != nil {
+			return fmt.Errorf("geo_db file not found at %q: %w", cfg.IPGeoDB, err)
+		}
+	}
+
 	if root, err = expandTilde(root); err != nil {
 		return err
 	}

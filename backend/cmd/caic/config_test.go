@@ -115,6 +115,46 @@ pprof = true
 	})
 }
 
+func TestGeoDBOrDefault(t *testing.T) {
+	t.Run("nil with default file returns default path", func(t *testing.T) {
+		dir := t.TempDir()
+		// Create the default file
+		if err := os.WriteFile(filepath.Join(dir, "GeoLite2-Country.mmdb"), []byte("mmdb"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		got := geoDBOrDefault(nil, dir)
+		want := filepath.Join(dir, "GeoLite2-Country.mmdb")
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+	t.Run("nil without default file returns empty", func(t *testing.T) {
+		dir := t.TempDir()
+		// Don't create the default file
+		got := geoDBOrDefault(nil, dir)
+		if got != "" {
+			t.Errorf("got %q, want empty string", got)
+		}
+	})
+	t.Run("explicit value resolved relative to cfgDir", func(t *testing.T) {
+		dir := t.TempDir()
+		val := "custom.mmdb"
+		got := geoDBOrDefault(&val, dir)
+		want := filepath.Join(dir, "custom.mmdb")
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+	t.Run("explicit absolute path preserved", func(t *testing.T) {
+		dir := t.TempDir()
+		val := "/etc/mmdb/geo.mmdb"
+		got := geoDBOrDefault(&val, dir)
+		if got != val {
+			t.Errorf("got %q, want %q", got, val)
+		}
+	})
+}
+
 func TestTomlToServerConfig(t *testing.T) {
 	t.Run("reads config values", func(t *testing.T) {
 		dir := t.TempDir()
@@ -124,6 +164,7 @@ func TestTomlToServerConfig(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		geoDB := "geo.mmdb"
 		tc := &tomlConfig{
 			Core: tomlCore{
 				Root: "/repos",
@@ -133,7 +174,7 @@ func TestTomlToServerConfig(t *testing.T) {
 			},
 			Server: tomlServer{
 				HTTP:         ":8080",
-				GeoDB:        "geo.mmdb",
+				GeoDB:        &geoDB,
 				AllowOrigins: []string{"local", "tailscale"},
 			},
 			GitHub: tomlGitHub{
@@ -178,6 +219,43 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 		if cfg.IPGeoAllowlist != "local,tailscale" {
 			t.Errorf("IPGeoAllowlist = %q", cfg.IPGeoAllowlist)
+		}
+	})
+
+	t.Run("geo_db defaults to GeoLite2-Country.mmdb if file exists", func(t *testing.T) {
+		dir := t.TempDir()
+		// Create the default file
+		if err := os.WriteFile(filepath.Join(dir, "GeoLite2-Country.mmdb"), []byte("mmdb"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		tc := &tomlConfig{
+			Server: tomlServer{
+				GeoDB: nil, // not set in config
+			},
+		}
+		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantPath := filepath.Join(dir, "GeoLite2-Country.mmdb")
+		if cfg.IPGeoDB != wantPath {
+			t.Errorf("IPGeoDB = %q, want %q", cfg.IPGeoDB, wantPath)
+		}
+	})
+
+	t.Run("geo_db is empty when unset and default file missing", func(t *testing.T) {
+		dir := t.TempDir()
+		tc := &tomlConfig{
+			Server: tomlServer{
+				GeoDB: nil, // not set in config
+			},
+		}
+		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.IPGeoDB != "" {
+			t.Errorf("IPGeoDB = %q, want empty string", cfg.IPGeoDB)
 		}
 	})
 

@@ -15,6 +15,8 @@ import (
 
 // tomlConfig mirrors the TOML file layout at ~/.config/caic/config.toml.
 // Zero values mean "not set in file".
+// IMPORTANT: When adding or modifying configuration fields, update contrib/config.toml
+// accordingly. Document all default values in the example config file.
 type tomlConfig struct {
 	Core   tomlCore   `toml:"core"`
 	Server tomlServer `toml:"server"`
@@ -34,7 +36,7 @@ type tomlServer struct {
 	HTTP         string   `toml:"http"`
 	ExternalURL  string   `toml:"external_url"`
 	WebRTCPort   int      `toml:"webrtc_port"`
-	GeoDB        string   `toml:"geo_db"`
+	GeoDB        *string  `toml:"geo_db"`
 	AllowOrigins []string `toml:"allow_origins"`
 }
 
@@ -162,7 +164,7 @@ func tomlToServerConfig(tc *tomlConfig, cfgDir string) (cfg *server.Config, addr
 		GitLabWebhookSecret:     []byte(tc.GitLab.WebhookSecret),
 		ExternalURL:             tc.Server.ExternalURL,
 		WebRTCPort:              tc.Server.WebRTCPort,
-		IPGeoDB:                 resolvePath(tc.Server.GeoDB, cfgDir),
+		IPGeoDB:                 geoDBOrDefault(tc.Server.GeoDB, cfgDir),
 		IPGeoAllowlist:          strings.Join(allowOriginsOrDefault(tc.Server.AllowOrigins), ","),
 		Pprof:                   tc.Debug.Pprof,
 	}
@@ -178,6 +180,24 @@ func allowOriginsOrDefault(origins []string) []string {
 		return defaultAllowOrigins
 	}
 	return origins
+}
+
+// geoDBOrDefault returns the geo_db path from the config, the default path if it exists, or empty.
+//
+// If geoDB is nil (not set in config), checks for "GeoLite2-Country.mmdb" in cfgDir.
+// Returns the path only if it exists; otherwise returns empty string (geoip disabled).
+// If geoDB is non-nil, returns the configured value (validation happens in main).
+func geoDBOrDefault(geoDB *string, cfgDir string) string {
+	if geoDB == nil {
+		// Try the default, but only if it exists
+		defaultPath := filepath.Join(cfgDir, "GeoLite2-Country.mmdb")
+		if _, err := os.Stat(defaultPath); err == nil {
+			return defaultPath
+		}
+		return ""
+	}
+	// Explicitly set; resolve relative to cfgDir
+	return resolvePath(*geoDB, cfgDir)
 }
 
 // defaultAutoUpdate is the default cron schedule: daily at 04:50 local time.

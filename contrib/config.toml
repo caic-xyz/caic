@@ -35,7 +35,7 @@
 # Path to a MaxMind MMDB file for country-code resolution and logging.
 # Download GeoLite2-Country.mmdb from https://dev.maxmind.com/geoip/geolite2-free-geolocation-data
 # Relative paths are resolved against the config directory.
-#geo_db = ""
+#geo_db = "GeoLite2-Country.mmdb"
 
 # Allowed origins. Requests from IPs that do not match are rejected with
 # HTTP 403.
