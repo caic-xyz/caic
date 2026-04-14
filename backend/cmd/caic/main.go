@@ -65,8 +65,19 @@ func localizeAddr(addr string) string {
 }
 
 func mainImpl() error {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	go func() {
+		select {
+		case s := <-sig:
+			slog.Info("shutdown", "signal", s)
+			cancel()
+		case <-ctx.Done():
+		}
+		signal.Stop(sig)
+	}()
 
 	flag.Usage = func() {
 		w := flag.CommandLine.Output()
@@ -481,17 +492,21 @@ func watchExecutable(ctx context.Context, stop context.CancelFunc) error {
 				if !ok {
 					return
 				}
-				if runtime.GOOS == "darwin" {
-					// What a PoS
-					slog.Info("fsnotify", "ev", event)
-					continue
+				var match bool
+				switch runtime.GOOS {
+				case "darwin":
+					// macOS replaces the binary via CREATE (rename-into-place)
+					// rather than Write/Chmod.
+					match = event.Has(fsnotify.Create)
+				default:
+					match = event.Has(fsnotify.Write) || event.Has(fsnotify.Chmod)
 				}
-				slog.Debug("fsnotify", "ev", event)
-				if event.Has(fsnotify.Write) || event.Has(fsnotify.Chmod) {
-					slog.Info("fsnotify", "ev", event)
+				if match {
+					slog.Info("shutdown", "reason", "executable modified", "ev", event)
 					stop()
 					return
 				}
+				slog.Debug("fsnotify", "ev", event)
 			case err, ok := <-w.Errors:
 				if !ok {
 					return
