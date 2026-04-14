@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
@@ -121,13 +122,7 @@ func (b *Bot) ResumePendingComments() {
 // OnIssueOpened creates a task when an issue with the "caic" label is opened.
 // commenter is used to post a completion comment; may be nil.
 func (b *Bot) OnIssueOpened(ctx context.Context, ev *IssueEvent, commenter Commenter) {
-	hasCaicLabel := false
-	for _, l := range ev.Labels {
-		if l == "caic" {
-			hasCaicLabel = true
-			break
-		}
-	}
+	hasCaicLabel := slices.Contains(ev.Labels, "caic")
 	if !hasCaicLabel {
 		return
 	}

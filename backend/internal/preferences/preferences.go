@@ -35,7 +35,7 @@ type Preferences struct {
 	// Models maps harness name to the last used model for that harness.
 	Models map[string]string `json:"models,omitempty"`
 	// Settings holds user-configurable behavioral settings.
-	Settings Settings `json:"settings,omitempty"`
+	Settings Settings `json:"settings"`
 }
 
 // Validate checks that the preferences are well-formed.

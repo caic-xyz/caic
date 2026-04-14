@@ -189,7 +189,7 @@ func downloadExpectedChecksum(ctx context.Context, gh *github.Client, rel *githu
 	if err != nil {
 		return "", fmt.Errorf("read checksums: %w", err)
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) == 2 && fields[1] == assetName {
 			return fields[0], nil

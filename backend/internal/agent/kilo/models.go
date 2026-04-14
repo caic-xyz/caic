@@ -97,8 +97,8 @@ func SortModels(models []string) []string {
 
 // splitProvider splits "provider/name" into its two parts.
 func splitProvider(id string) (provider, name string) {
-	if i := strings.IndexByte(id, '/'); i >= 0 {
-		return id[:i], id[i+1:]
+	if before, after, ok := strings.Cut(id, "/"); ok {
+		return before, after
 	}
 	return "", id
 }
@@ -217,8 +217,8 @@ func qwenVersion(name string) (float64, bool) {
 	}
 	// Take up to the first dash as the version string.
 	verStr := after
-	if i := strings.IndexByte(after, '-'); i >= 0 {
-		verStr = after[:i]
+	if before, _, ok := strings.Cut(after, "-"); ok {
+		verStr = before
 	}
 	v, err := strconv.ParseFloat(verStr, 64)
 	if err != nil {
@@ -237,19 +237,19 @@ func qwenVersion(name string) (float64, bool) {
 //	"anthropic/claude-opus-4.6"  → ("anthropic/claude-opus-*", 4.6, true)
 //	"mistralai/devstral-medium"  → ("mistralai/devstral-medium", 0, false)
 func parseModelVersion(id string) (key string, version float64, ok bool) {
-	slash := strings.IndexByte(id, '/')
-	if slash < 0 {
+	before, after, ok0 := strings.Cut(id, "/")
+	if !ok0 {
 		return id, 0, false
 	}
-	provider := id[:slash]
-	name := id[slash+1:]
+	provider := before
+	name := after
 
 	parts := strings.Split(name, "-")
 	for i, part := range parts {
 		// Strip colon suffix (e.g. ":free", ":thinking") before parsing.
 		clean := part
-		if idx := strings.IndexByte(part, ':'); idx >= 0 {
-			clean = part[:idx]
+		if before, _, ok0 := strings.Cut(part, ":"); ok0 {
+			clean = before
 		}
 		ver, err := strconv.ParseFloat(clean, 64)
 		if err == nil && ver > 0 {

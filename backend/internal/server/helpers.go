@@ -119,7 +119,7 @@ func parseAllowedUsers(csv string) map[string]struct{} {
 		return nil
 	}
 	m := make(map[string]struct{})
-	for _, u := range strings.Split(csv, ",") {
+	for u := range strings.SplitSeq(csv, ",") {
 		if u = strings.TrimSpace(u); u != "" {
 			m[strings.ToLower(u)] = struct{}{}
 		}

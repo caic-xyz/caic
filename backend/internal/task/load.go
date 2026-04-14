@@ -87,12 +87,10 @@ func LoadLogs(logDir string) ([]*LoadedTask, error) {
 	results := make([]result, len(paths))
 	var wg sync.WaitGroup
 	for i, p := range paths {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			lt, err := loadLogHeader(p)
 			results[i] = result{lt, err}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -191,8 +189,8 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 	// Parse task ID from filename: "<taskID>-<safeRepo>-<safeBranch>.jsonl".
 	base := strings.TrimSuffix(filepath.Base(path), ".jsonl")
 	taskIDStr := base
-	if i := strings.IndexByte(base, '-'); i >= 0 {
-		taskIDStr = base[:i]
+	if before, _, ok := strings.Cut(base, "-"); ok {
+		taskIDStr = before
 	}
 
 	repos := make([]RepoMount, len(meta.Repos))
@@ -224,7 +222,7 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 	buf := make([]byte, size-offset)
 	n, _ := f.ReadAt(buf, offset)
 	if n > 0 {
-		for _, line := range bytes.Split(buf[:n], []byte("\n")) {
+		for line := range bytes.SplitSeq(buf[:n], []byte("\n")) {
 			line = bytes.TrimSpace(line)
 			if len(line) == 0 {
 				continue

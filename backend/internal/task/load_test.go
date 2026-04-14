@@ -331,9 +331,10 @@ func TestLoadLogs(t *testing.T) {
 
 		// Build lines: header, caic_pr, then enough assistant messages
 		// to push caic_pr beyond the 64 KiB tail window.
-		lines := []string{meta, prMsg}
+		lines := make([]string, 0, 83)
+		lines = append(lines, meta, prMsg)
 		bigText := string(make([]byte, 1024)) // 1 KiB of null bytes per message
-		for i := 0; i < 80; i++ {             // 80 KiB of filler
+		for range 80 {                        // 80 KiB of filler
 			lines = append(lines, claudeAssistant(t, map[string]any{"type": "text", "text": bigText}))
 		}
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})

@@ -3,6 +3,7 @@ package codex
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -672,11 +673,8 @@ func TestBuildArgs(t *testing.T) {
 		// Widget MCP is disabled for codex; buildArgs should return only
 		// the base command without any -c flags.
 		args := buildArgs(&agent.Options{})
-		for _, a := range args {
-			if a == "-c" {
-				t.Errorf("unexpected -c flag in args %v; widget MCP is disabled for codex", args)
-				break
-			}
+		if slices.Contains(args, "-c") {
+			t.Errorf("unexpected -c flag in args %v; widget MCP is disabled for codex", args)
 		}
 	})
 }

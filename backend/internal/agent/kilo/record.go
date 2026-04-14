@@ -2,7 +2,6 @@ package kilo
 
 import (
 	"encoding/json"
-
 	"fmt"
 
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
@@ -158,7 +157,7 @@ type Part struct {
 	MessageID string      `json:"messageID"`
 	Type      string      `json:"type"`
 	Text      string      `json:"text,omitempty"`
-	Time      PartTime    `json:"time,omitempty"`
+	Time      PartTime    `json:"time,omitzero"`
 	CallID    string      `json:"callID,omitempty"`
 	Tool      string      `json:"tool,omitempty"`
 	State     *ToolState  `json:"state,omitempty"`

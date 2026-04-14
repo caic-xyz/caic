@@ -449,7 +449,7 @@ func (s *session) encodeAndSendRTP(_ context.Context, pcmBytes []byte, enc *opus
 	samples24 := len(pcmBytes) / 2
 	samples16 := samples24 * 2 / 3
 	pcm16 := make([]int16, 0, samples16)
-	for i := 0; i < samples24; i++ {
+	for i := range samples24 {
 		sample := int16(binary.LittleEndian.Uint16(pcmBytes[i*2:])) //nolint:gosec // PCM uint16→int16 reinterpret is intentional
 		// Keep samples at positions 0,1 of every group of 3; skip position 2.
 		if i%3 != 2 {

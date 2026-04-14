@@ -1232,7 +1232,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 func parseSSEEvents(t *testing.T, body string) []v1.EventMessage {
 	var events []v1.EventMessage
 	eventType := "message"
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		if after, ok := strings.CutPrefix(line, "event: "); ok {
 			eventType = after
 			continue

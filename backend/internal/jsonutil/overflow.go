@@ -51,7 +51,7 @@ func (fw *FieldWarner) Warn(context string, extra map[string]json.RawMessage) {
 }
 
 // overflowType is cached to avoid repeated reflect lookups.
-var overflowType = reflect.TypeOf(Overflow{})
+var overflowType = reflect.TypeFor[Overflow]()
 
 // WarnOverflows walks v (a struct or pointer to struct) and calls Warn for
 // every embedded Overflow.Extra found at any nesting depth — including inside
@@ -63,7 +63,7 @@ func (fw *FieldWarner) WarnOverflows(context string, v any) {
 
 func (fw *FieldWarner) warnValue(ctx string, v reflect.Value) {
 	switch v.Kind() { //nolint:exhaustive // only Ptr and Struct are relevant
-	case reflect.Ptr:
+	case reflect.Pointer:
 		if !v.IsNil() {
 			fw.warnValue(ctx, v.Elem())
 		}
@@ -85,14 +85,14 @@ func (fw *FieldWarner) warnValue(ctx string, v reflect.Value) {
 			case reflect.Struct:
 				// Build a sub-context from the json tag if available.
 				fw.warnValue(ctx+"."+jsonFieldName(&f), fv)
-			case reflect.Ptr:
+			case reflect.Pointer:
 				if !fv.IsNil() && fv.Elem().Kind() == reflect.Struct {
 					fw.warnValue(ctx+"."+jsonFieldName(&f), fv.Elem())
 				}
 			case reflect.Slice:
 				if fv.Len() > 0 {
 					elem := fv.Type().Elem()
-					if elem.Kind() == reflect.Struct || (elem.Kind() == reflect.Ptr && elem.Elem().Kind() == reflect.Struct) {
+					if elem.Kind() == reflect.Struct || (elem.Kind() == reflect.Pointer && elem.Elem().Kind() == reflect.Struct) {
 						for j := range fv.Len() {
 							fw.warnValue(ctx+"."+jsonFieldName(&f), fv.Index(j))
 						}

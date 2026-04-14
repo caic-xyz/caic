@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"os/exec"
@@ -107,9 +108,7 @@ func (s *Server) listHarnesses(_ context.Context, _ *dto.EmptyReq) (*[]v1.Harnes
 	// Collect unique harness backends from all runners.
 	seen := make(map[agent.Harness]agent.Backend)
 	for _, r := range s.runners {
-		for h, b := range r.Backends {
-			seen[h] = b
-		}
+		maps.Copy(seen, r.Backends)
 	}
 	out := make([]v1.HarnessInfo, 0, len(seen))
 	for h, b := range seen {
@@ -187,7 +186,7 @@ func (s *Server) handleListRepoBranches(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		slog.WarnContext(ctx, "list remotes failed", "repo", repo, "err", err)
 	}
-	for _, remote := range strings.Split(remoteList, "\n") {
+	for remote := range strings.SplitSeq(remoteList, "\n") {
 		if remote == "" {
 			continue
 		}

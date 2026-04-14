@@ -407,7 +407,7 @@ func discoverKotlinStructs() []kotlinStruct {
 	// referenced types appear before the types that reference them.
 	var walk func(t reflect.Type)
 	walk = func(t reflect.Type) {
-		if t.Kind() == reflect.Ptr {
+		if t.Kind() == reflect.Pointer {
 			t = t.Elem()
 		}
 		if t.Kind() == reflect.Slice {
@@ -480,7 +480,7 @@ func kotlinPlural(name string) string {
 // goTypeToKotlin maps a Go reflect.Type to its Kotlin type string.
 func goTypeToKotlin(t reflect.Type) string {
 	// Unwrap pointer — nullability is handled by the caller.
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
@@ -546,7 +546,7 @@ func parseStructFields(t reflect.Type) []kotlinField {
 		omit := opts.contains("omitempty") || opts.contains("omitzero")
 
 		ft := sf.Type
-		isPtr := ft.Kind() == reflect.Ptr
+		isPtr := ft.Kind() == reflect.Pointer
 
 		ktType := goTypeToKotlin(ft)
 		nullable := isPtr || (omit && !isPtr)
@@ -1104,7 +1104,7 @@ func discoverDocTypes() []reflect.Type {
 
 	var walk func(t reflect.Type)
 	walk = func(t reflect.Type) {
-		if t.Kind() == reflect.Ptr {
+		if t.Kind() == reflect.Pointer {
 			t = t.Elem()
 		}
 		if t.Kind() == reflect.Slice {
@@ -1158,7 +1158,7 @@ func writeDocType(b *strings.Builder, t reflect.Type, docs *docRegistry) {
 		if jsonName == "" {
 			jsonName = sf.Name
 		}
-		optional := opts.contains("omitempty") || opts.contains("omitzero") || sf.Type.Kind() == reflect.Ptr
+		optional := opts.contains("omitempty") || opts.contains("omitzero") || sf.Type.Kind() == reflect.Pointer
 		typeName := goTypeToDoc(sf.Type)
 		req := "yes"
 		if optional {
@@ -1175,7 +1175,7 @@ func writeDocType(b *strings.Builder, t reflect.Type, docs *docRegistry) {
 
 // goTypeToDoc maps a Go reflect.Type to a TypeScript-style string for docs.
 func goTypeToDoc(t reflect.Type) string {
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		return goTypeToDoc(t.Elem())
 	}
 	switch t {
@@ -1305,7 +1305,7 @@ func swiftEscapeIdent(name string) string {
 
 // goTypeToSwift maps a Go reflect.Type to its Swift type string.
 func goTypeToSwift(t reflect.Type) string {
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	switch t {
@@ -1408,7 +1408,7 @@ func emitSwiftStruct(b *strings.Builder, t reflect.Type, docs *docRegistry) {
 			jsonName = sf.Name
 		}
 		omit := opts.contains("omitempty") || opts.contains("omitzero")
-		isPtr := sf.Type.Kind() == reflect.Ptr
+		isPtr := sf.Type.Kind() == reflect.Pointer
 		swiftType := goTypeToSwift(sf.Type)
 		optional := isPtr || (omit && !isPtr)
 		swiftName := swiftEscapeIdent(jsonName)
@@ -1435,7 +1435,7 @@ func discoverSwiftStructs() []kotlinStruct {
 
 	var walk func(t reflect.Type)
 	walk = func(t reflect.Type) {
-		if t.Kind() == reflect.Ptr {
+		if t.Kind() == reflect.Pointer {
 			t = t.Elem()
 		}
 		if t.Kind() == reflect.Slice {
