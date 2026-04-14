@@ -75,6 +75,16 @@ type tomlGitLab struct {
 	WebhookSecret     string   `toml:"webhook_secret"`
 }
 
+// defaultConfig returns a tomlConfig with sensible defaults pre-populated.
+// TOML decoding overwrites only fields present in the file.
+func defaultConfig() tomlConfig {
+	return tomlConfig{
+		Core:   tomlCore{Root: "."},
+		Server: tomlServer{HTTP: ":8080", ExternalURL: "auto"},
+		Debug:  tomlDebug{LogLevel: "info"},
+	}
+}
+
 // loadTOMLConfig reads and parses config.toml from cfgDir.
 // Returns a zero-value config if the file does not exist.
 // Returns an error if the file exists but is malformed or contains unknown keys.
@@ -83,11 +93,11 @@ func loadTOMLConfig(cfgDir string) (tomlConfig, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // config file from XDG config dir
 	if err != nil {
 		if os.IsNotExist(err) {
-			return tomlConfig{}, nil
+			return defaultConfig(), nil
 		}
 		return tomlConfig{}, fmt.Errorf("read config: %w", err)
 	}
-	var tc tomlConfig
+	tc := defaultConfig()
 	dec := toml.NewDecoder(strings.NewReader(string(data)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&tc); err != nil {

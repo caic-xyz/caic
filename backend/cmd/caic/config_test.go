@@ -8,13 +8,17 @@ import (
 )
 
 func TestLoadTOMLConfig(t *testing.T) {
-	t.Run("missing file returns zero config", func(t *testing.T) {
+	t.Run("missing file returns default config", func(t *testing.T) {
 		tc, err := loadTOMLConfig(t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if tc.Server.HTTP != "" {
-			t.Fatalf("want empty HTTP, got %q", tc.Server.HTTP)
+		want := defaultConfig()
+		if tc.Server.HTTP != want.Server.HTTP {
+			t.Fatalf("want HTTP %q, got %q", want.Server.HTTP, tc.Server.HTTP)
+		}
+		if tc.Core.Root != want.Core.Root {
+			t.Fatalf("want Root %q, got %q", want.Core.Root, tc.Core.Root)
 		}
 	})
 

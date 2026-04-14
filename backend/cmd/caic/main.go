@@ -115,20 +115,6 @@ Flags:
 	if err != nil {
 		return err
 	}
-	// Apply defaults for fields not set in TOML.
-	if addr == "" {
-		addr = ":8080"
-	}
-	if root == "" {
-		root = "."
-	}
-	if logLevel == "" {
-		logLevel = "info"
-	}
-	if cfg.ExternalURL == "" {
-		cfg.ExternalURL = "auto"
-	}
-
 	// Validate geo_db file exists if explicitly set in config.
 	if tc.Server.GeoDB != nil {
 		if _, err := os.Stat(cfg.IPGeoDB); err != nil {
@@ -194,13 +180,7 @@ Flags:
 	if isFakeMode {
 		return serveFake(ctx, addr, cfg)
 	}
-	if addr == "" {
-		return errors.New("HTTP address is required: set http in config.toml")
-	}
 	addr = localizeAddr(addr)
-	if root == "" {
-		return errors.New("root directory is required: set root in config.toml")
-	}
 
 	// Exit when executable is rebuilt (systemd restarts the service).
 	if err := watchExecutable(ctx, cancel); err != nil {
