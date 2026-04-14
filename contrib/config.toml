@@ -49,8 +49,16 @@
 
 [ai]
 # LLM provider for title generation, commit descriptions, etc.
-# See https://pkg.go.dev/github.com/maruel/genai/providers
+# When unset, auto-detects the best available provider in this order:
+#   1. codex (Codex)
+#   2. opencode (OpenCode)
+#   3. claudecode (Claude Code)
+#   4. gemini (Gemini)
+#   5. Any other available provider
+# Available providers: https://pkg.go.dev/github.com/maruel/genai/providers
 #provider = ""
+
+# Model name or alias. When unset, uses the provider's cheapest model.
 #model = ""
 
 # Gemini API key — required for Gemini Live voice agent and title generation

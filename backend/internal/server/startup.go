@@ -213,9 +213,18 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		}
 	}
 
-	if cfg.LLMProvider != "" {
-		if c, ok := providers.All[cfg.LLMProvider]; !ok || c.Factory == nil {
-			slog.Warn("unknown LLM provider for title generation", "prov", cfg.LLMProvider)
+	// Determine LLM provider: use configured value or auto-detect
+	llmProvider := cfg.LLMProvider
+	if llmProvider == "" {
+		llmProvider = autoDetectLLMProvider(ctx, cfg.GeminiAPIKey)
+		if llmProvider != "" {
+			slog.Info("auto-detected LLM provider", "prov", llmProvider)
+		}
+	}
+
+	if llmProvider != "" {
+		if c, ok := providers.All[llmProvider]; !ok || c.Factory == nil {
+			slog.Warn("unknown LLM provider for title generation", "prov", llmProvider)
 		} else {
 			var opts []genai.ProviderOption
 			if cfg.LLMModel != "" {
@@ -224,11 +233,11 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 				opts = append(opts, genai.ModelCheap)
 			}
 			// Pass API key if configured for the provider.
-			if cfg.LLMProvider == "gemini" && cfg.GeminiAPIKey != "" {
+			if llmProvider == "gemini" && cfg.GeminiAPIKey != "" {
 				opts = append(opts, genai.ProviderOptionAPIKey(cfg.GeminiAPIKey))
 			}
 			if p, err := c.Factory(ctx, opts...); err != nil {
-				slog.Warn("LLM provider init failed", "prov", cfg.LLMProvider, "err", err)
+				slog.Warn("LLM provider init failed", "prov", llmProvider, "err", err)
 			} else {
 				slog.Info("title", "prov", p.Name(), "mdl", p.ModelID())
 				s.provider = p
@@ -1039,4 +1048,58 @@ func (s *Server) handleContainerDeath(containerName string) {
 	t.DetachSession()
 	t.SetState(task.StateStopped)
 	s.notifyTaskChange()
+}
+
+// autoDetectLLMProvider detects the best available LLM provider from the
+// genai providers registry by attempting to instantiate and ping each one.
+// It prefers locally-available providers (codex, opencode, claudecode) over
+// remote APIs (gemini). Returns "" if no suitable provider is found.
+func autoDetectLLMProvider(ctx context.Context, geminiAPIKey string) string {
+	// Preferred order: container-local providers first, then others.
+	preferred := []string{
+		"codex",
+		"opencode",
+		"claudecode",
+		"gemini",
+	}
+	for _, name := range preferred {
+		if pingProvider(ctx, name, geminiAPIKey) {
+			return name
+		}
+	}
+	// Fallback: iterate over all providers and pick the first one that responds to ping.
+	for name := range providers.All {
+		if pingProvider(ctx, name, geminiAPIKey) {
+			return name
+		}
+	}
+	return ""
+}
+
+// pingProvider attempts to instantiate and ping a provider, returning true if successful.
+func pingProvider(ctx context.Context, name, geminiAPIKey string) bool {
+	c, ok := providers.All[name]
+	if !ok || c.Factory == nil {
+		return false
+	}
+	var opts []genai.ProviderOption
+	opts = append(opts, genai.ModelCheap)
+	// Pass API key if configured for the provider.
+	if name == "gemini" && geminiAPIKey != "" {
+		opts = append(opts, genai.ProviderOptionAPIKey(geminiAPIKey))
+	}
+	p, err := c.Factory(ctx, opts...)
+	if err != nil {
+		slog.Debug("provider factory failed", "prov", name, "err", err)
+		return false
+	}
+	// If the provider supports pinging, verify it's accessible.
+	if pinger, ok := p.(genai.ProviderPing); ok {
+		if err := pinger.Ping(ctx); err != nil {
+			slog.Debug("provider ping failed", "prov", name, "err", err)
+			return false
+		}
+	}
+	slog.Info("provider detected", "prov", name)
+	return true
 }
