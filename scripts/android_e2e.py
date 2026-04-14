@@ -45,9 +45,15 @@ def build_backend(tmp_dir):
 
 def start_backend(tmp_dir, binary, port):
     log_path = os.path.join(tmp_dir, "caic-e2e.log")
+    config_path = os.path.join(tmp_dir, "config.toml")
+
+    # Create a minimal config.toml with the dynamic port
+    with open(config_path, "w") as f:
+        f.write(f'[server]\nhttp = ":{port}"\n')
+
     log = open(log_path, "w")  # noqa: SIM115
     proc = subprocess.Popen(
-        [binary, "-http", f":{port}"],
+        [binary, "-config-dir", tmp_dir],
         stdout=log,
         stderr=log,
     )

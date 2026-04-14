@@ -1,4 +1,4 @@
-.PHONY: help build dev test coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix docs types git-hooks frontend-dev upgrade frontend-e2e android-build android-push android-test android-e2e android-setup-emulator android-start-emulator android-stop-emulator
+.PHONY: help build dev fake-dev test coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-push android-test android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:8080
@@ -12,8 +12,10 @@ help:
 	@echo "caic - Manage multiple coding agents"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  make build          - Build Go server (auto-generates frontend)"
-	@echo "  make dev            - Run the server in development mode"
+	@echo "  make build          - Build Go server (includes frontend build)"
+	@echo "  make dev            - Run the server in development mode (go run)"
+	@echo "  make fake-dev       - Run the server with fake backend (no containers)"
+	@echo "  make frontend-build - Build frontend assets (TypeScript → JavaScript)"
 	@echo "  make test           - Run unit tests"
 	@echo "  make docs           - Update AGENTS.md file indexes"
 	@echo "  make lint           - Run linters (Go + frontend + Python + binaries)"
@@ -31,8 +33,6 @@ help:
 	@echo "  make lint-android   - Run Android linters (detekt + lint)"
 	@echo "  make upgrade        - Upgrade Go and pnpm dependencies"
 
-	@echo "  make upgrade        - Upgrade Go and pnpm dependencies"
-
 $(FRONTEND_STAMP): pnpm-lock.yaml
 	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm install --frozen-lockfile --silent
 	@touch $@
@@ -40,15 +40,20 @@ $(FRONTEND_STAMP): pnpm-lock.yaml
 types:
 	@go generate ./...
 
-build: $(FRONTEND_STAMP) types docs
+frontend-build: $(FRONTEND_STAMP) types
 	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm build
+
+build: frontend-build docs
 	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
 
 docs:
 	@./scripts/update_agents_file_index.py
 
-dev: build
-	@caic -http $(HTTP)
+dev: frontend-build
+	@./scripts/run-dev.py --http $(HTTP)
+
+fake-dev: frontend-build
+	@./scripts/run-dev.py --http $(HTTP) --fake
 
 test: $(FRONTEND_STAMP)
 	@go test -cover ./...

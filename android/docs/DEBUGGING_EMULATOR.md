@@ -209,7 +209,7 @@ The connection flow succeeds:
 For testing without real containers:
 
 ```bash
-go run ./backend/cmd/caic -fake -http :8080
+make fake-dev
 ```
 
 This starts the server with a fake agent backend and a temp git repo. The voice

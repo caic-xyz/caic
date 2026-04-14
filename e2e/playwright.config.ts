@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: "./tests",
   timeout: 60_000,
   webServer: {
-    command: "go run -tags e2e ../backend/cmd/caic -http localhost:8090",
+    command: "../scripts/run-dev.py --http :8090 --fake",
     url: "http://localhost:8090/api/v1/server/config",
     reuseExistingServer: false,
     timeout: 30_000,

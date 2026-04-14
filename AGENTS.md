@@ -56,6 +56,11 @@ in `e2e/` — Playwright transpiles the TypeScript itself. Do not run `tsc`
 directly on e2e files; use `make frontend-e2e` instead, which starts the fake backend
 server and runs Playwright (type errors surface as test failures).
 
+For Android e2e tests, first set up the emulator with `make android-setup-emulator`,
+then start it with `make android-start-emulator`, then run `make android-e2e`.
+The test script dynamically allocates a port for the fake backend and verifies it
+before running instrumented tests.
+
 ### Make Targets
 
 ```
