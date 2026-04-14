@@ -65,7 +65,7 @@ before running instrumented tests.
 
 ```
 make build          # Build Go server + frontend (runs types, docs, pnpm build, go install)
-make dev            # Build and run server on :8080
+make dev            # Build and run server on :2242
 make frontend-dev   # Run Vite frontend dev server on :5173
 make types          # Generate types (go generate → tygo + gen-api-sdk)
 make docs           # Update AGENTS.md file indexes

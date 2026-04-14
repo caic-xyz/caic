@@ -30,8 +30,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--http",
-        default=":8080",
-        help='HTTP listen address (default: ":8080", use ":0" for dynamic port)',
+        default=":2242",
+        help='HTTP listen address (default: ":2242", use ":0" for dynamic port)',
     )
     parser.add_argument(
         "--fake",

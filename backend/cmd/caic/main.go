@@ -42,7 +42,7 @@ func expandTilde(path string) (string, error) {
 }
 
 // localizeAddr defaults to localhost when the address specifies a port but no
-// host (e.g. ":8080" → "localhost:8080"). This avoids accidentally listening
+// host (e.g. ":2242" → "localhost:2242"). This avoids accidentally listening
 // on all interfaces.
 func localizeAddr(addr string) string {
 	host, port, err := net.SplitHostPort(addr)

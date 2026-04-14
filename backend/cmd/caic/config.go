@@ -80,7 +80,7 @@ type tomlGitLab struct {
 func defaultConfig() tomlConfig {
 	return tomlConfig{
 		Core:   tomlCore{Root: "."},
-		Server: tomlServer{HTTP: ":8080", ExternalURL: "auto"},
+		Server: tomlServer{HTTP: ":2242", ExternalURL: "auto"},
 		Debug:  tomlDebug{LogLevel: "info"},
 	}
 }

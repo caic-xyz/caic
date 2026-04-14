@@ -20,7 +20,7 @@
 
 [server]
 # HTTP listen address for the web UI.
-#http = ":8080"
+#http = ":2242"
 
 # Public base URL. "auto" locks the hostname from the first FQDN request.
 # Set an explicit URL for OAuth login and webhooks.

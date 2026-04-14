@@ -177,7 +177,7 @@ func TestTomlToServerConfig(t *testing.T) {
 				LogLevel: "warn",
 			},
 			Server: tomlServer{
-				HTTP:         ":8080",
+				HTTP:         ":2242",
 				GeoDB:        &geoDB,
 				AllowOrigins: []string{"local", "tailscale"},
 			},
@@ -194,7 +194,7 @@ func TestTomlToServerConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if addr != ":8080" {
+		if addr != ":2242" {
 			t.Errorf("addr = %q", addr)
 		}
 		if root != "/repos" {

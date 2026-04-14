@@ -83,15 +83,15 @@ adb -s <device-id> shell pm grant com.fghbuild.caic android.permission.POST_NOTI
 
 ### 4. Set up port forwarding
 
-The emulator needs to reach the backend. Use `adb reverse` so `localhost:8080`
+The emulator needs to reach the backend. Use `adb reverse` so `localhost:2242`
 inside the emulator maps to the host:
 
 ```bash
-adb -s <device-id> reverse tcp:8080 tcp:8080
+adb -s <device-id> reverse tcp:2242 tcp:2242
 ```
 
 Alternative: the emulator maps `10.0.2.2` to the host, so
-`http://10.0.2.2:8080` also works as a server URL.
+`http://10.0.2.2:2242` also works as a server URL.
 
 ## Build, Install, and Launch
 
@@ -113,7 +113,7 @@ the emulator. Without it, `adb` fails with "more than one device/emulator".
 
 The server URL must be set in Settings before the app is functional.
 
-**Option A — via the UI**: Tap the gear icon, enter `http://localhost:8080`, tap
+**Option A — via the UI**: Tap the gear icon, enter `http://localhost:2242`, tap
 "Test Connection" to verify.
 
 **Option B — via uiautomator** (scriptable):
@@ -125,7 +125,7 @@ adb -s <device-id> shell cat /sdcard/ui.xml | grep -oP 'text="[^"]*"[^>]*bounds=
 
 # Tap elements by their bounds center coordinates
 adb -s <device-id> shell input tap <x> <y>
-adb -s <device-id> shell input text "http://localhost:8080"
+adb -s <device-id> shell input text "http://localhost:2242"
 ```
 
 ## Taking Screenshots
@@ -271,7 +271,7 @@ with the key or network, not the app.
    broadcast receiver that sets the server URL without touching the UI:
    ```bash
    adb shell am broadcast -a com.fghbuild.caic.SET_SERVER_URL \
-       --es url "http://localhost:8080"
+       --es url "http://localhost:2242"
    ```
 
 4. **Instrumented UI tests**: Espresso or Compose UI tests that verify the voice

@@ -38,8 +38,8 @@ or pixel radii. Add new tokens to `:root` in `global.css` when introducing new c
 ## Development
 
 ```bash
-make frontend-dev   # Vite dev server on :5173, proxies /api to :8080
-make dev            # Build + run Go server on :8080
+make frontend-dev   # Vite dev server on :5173, proxies /api to :2242
+make dev            # Build + run Go server on :2242
 ```
 
 <!-- BEGIN FILE INDEX -->

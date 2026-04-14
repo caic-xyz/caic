@@ -1,7 +1,7 @@
 .PHONY: help build dev fake-dev test coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-push android-test android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp
-HTTP?=:8080
+HTTP?=:2242
 
 # Enable CGo only when libopus is available (for WebRTC Opus codec).
 # Requires: libopus-dev (apt) or opus (brew).
