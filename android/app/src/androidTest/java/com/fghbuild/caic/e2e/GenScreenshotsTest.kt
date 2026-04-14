@@ -6,8 +6,7 @@ package com.fghbuild.caic.e2e
 
 import android.os.Environment
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.hasTestTag
-import androidx.compose.ui.test.onAllNodes
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -67,7 +66,7 @@ class GenScreenshotsTest : E2eTestBase() {
 
         // Wait for the task list to load in the UI.
         composeTestRule.waitUntil(LOAD_TIMEOUT_MS) {
-            composeTestRule.onAllNodes(hasTestTag("task-$id1"))
+            composeTestRule.onAllNodesWithTag("task-$id1")
                 .fetchSemanticsNodes().isNotEmpty()
         }
 
