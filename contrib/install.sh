@@ -166,7 +166,17 @@ install_service_launchd() {
     launchctl bootstrap "gui/$(id -u)" "$dest"
 }
 
+preflight() {
+    if ! command -v docker >/dev/null 2>&1; then
+        die "docker is not installed. Install Docker first: https://docs.docker.com/get-docker/"
+    fi
+    if ! docker info >/dev/null 2>&1; then
+        die "docker is not accessible. Is the Docker daemon running? Is your user in the docker group?"
+    fi
+}
+
 main() {
+    preflight
     os="$(detect_os)"
     arch="$(detect_arch)"
     mkdir -p "$INSTALL_DIR"
@@ -205,7 +215,8 @@ main() {
             ;;
     esac
 
-    printf '\nDone. Run "caic -help" to get started.\n'
+    printf '\nDone. The caic web server is accessible at http://localhost:2242\n'
+    printf 'See https://docs.caic.xyz/caic/configuration to get started.\n'
 }
 
 main
