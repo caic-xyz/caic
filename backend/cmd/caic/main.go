@@ -208,13 +208,9 @@ Flags:
 	defer func() { _ = ln.Close() }()
 	slog.Info("port acquired", "addr", ln.Addr())
 
-	// Exit when executable is rebuilt (systemd restarts the service).
-	if err := watchExecutable(ctx, cancel); err != nil {
-		return fmt.Errorf("failed to watch executable: %w", err)
-	}
-	// Exit when config.toml is modified (systemd restarts the service).
-	if err := watchConfig(ctx, cancel, cfgDir); err != nil {
-		slog.Warn("failed to watch config", "err", err)
+	// Exit when executable or config is modified (systemd restarts the service).
+	if err := watchForRestart(ctx, cancel, cfgDir); err != nil {
+		return fmt.Errorf("failed to set up file watcher: %w", err)
 	}
 	// Auto-update: checks GitHub Releases on a cron schedule and replaces the binary.
 	if v := autoupdate.Version; v != "" && !strings.HasPrefix(v, "devel-") {
@@ -358,10 +354,11 @@ func resolveGitHubTokenFromGH() string {
 	return strings.TrimSpace(string(out))
 }
 
-// watchExecutable watches the current executable for modifications and calls
-// stop to trigger graceful shutdown when detected. Combined with systemd's
-// Restart=always, this enables seamless restarts after a rebuild.
-func watchExecutable(ctx context.Context, stop context.CancelFunc) error {
+// watchForRestart watches the executable and config.toml for modifications and
+// calls stop to trigger graceful shutdown when either changes. Combined with
+// systemd's Restart=always, this enables seamless restarts after a rebuild or
+// config change.
+func watchForRestart(ctx context.Context, stop context.CancelFunc, cfgDir string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -378,63 +375,17 @@ func watchExecutable(ctx context.Context, stop context.CancelFunc) error {
 		_ = w.Close()
 		return err
 	}
-	go func() {
-		defer func() { _ = w.Close() }()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case event, ok := <-w.Events:
-				if !ok {
-					return
-				}
-				var match bool
-				switch runtime.GOOS {
-				case "darwin":
-					// macOS replaces the binary via CREATE (rename-into-place)
-					// rather than Write/Chmod.
-					match = event.Has(fsnotify.Create)
-				default:
-					match = event.Has(fsnotify.Write) || event.Has(fsnotify.Chmod)
-				}
-				if match {
-					slog.Info("shutdown", "reason", "executable modified", "ev", event)
-					stop()
-					return
-				}
-				slog.Debug("fsnotify", "ev", event)
-			case err, ok := <-w.Errors:
-				if !ok {
-					return
-				}
-				slog.Warn("fsnotify", "err", err)
-			}
+	// Watch the config directory (not just the file) so we catch
+	// rename-into-place writes (common with editors like vim).
+	configPath := filepath.Join(cfgDir, "config.toml")
+	if _, statErr := os.Stat(configPath); statErr == nil {
+		if err := w.Add(cfgDir); err != nil {
+			_ = w.Close()
+			return err
 		}
-	}()
-	return nil
-}
-
-// watchConfig watches config.toml for modifications and calls stop to trigger
-// graceful shutdown when detected. Combined with systemd's Restart=always,
-// this enables seamless restarts after a config change.
-func watchConfig(ctx context.Context, stop context.CancelFunc, cfgDir string) error {
-	path := filepath.Join(cfgDir, "config.toml")
-	if _, statErr := os.Stat(path); statErr != nil {
-		return nil //nolint:nilerr // no config file to watch is not an error
-	}
-	w, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-	// Watch the directory so we catch rename-into-place writes (common with
-	// editors like vim that write to a temp file then rename).
-	if err := w.Add(cfgDir); err != nil {
-		_ = w.Close()
-		return err
 	}
 	go func() {
 		defer func() { _ = w.Close() }()
-		const base = "config.toml"
 		for {
 			select {
 			case <-ctx.Done():
@@ -443,15 +394,32 @@ func watchConfig(ctx context.Context, stop context.CancelFunc, cfgDir string) er
 				if !ok {
 					return
 				}
-				if filepath.Base(event.Name) != base {
+				var reason string
+				switch {
+				case event.Name == exe:
+					switch runtime.GOOS {
+					case "darwin":
+						// macOS replaces the binary via CREATE (rename-into-place).
+						if !event.Has(fsnotify.Create) {
+							continue
+						}
+					default:
+						if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Chmod) {
+							continue
+						}
+					}
+					reason = "executable modified"
+				case filepath.Base(event.Name) == "config.toml":
+					if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) {
+						continue
+					}
+					reason = "config.toml modified"
+				default:
 					continue
 				}
-				match := event.Has(fsnotify.Write) || event.Has(fsnotify.Create)
-				if match {
-					slog.Info("shutdown", "reason", "config.toml modified", "ev", event)
-					stop()
-					return
-				}
+				slog.Info("shutdown", "reason", reason, "ev", event)
+				stop()
+				return
 			case err, ok := <-w.Errors:
 				if !ok {
 					return
