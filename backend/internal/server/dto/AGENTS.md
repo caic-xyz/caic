@@ -1,4 +1,4 @@
-# DTO Guidelines
+# API Data Transfer Objects
 
 ## Time Fields
 

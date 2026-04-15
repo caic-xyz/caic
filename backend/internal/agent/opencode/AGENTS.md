@@ -1,4 +1,4 @@
-# OpenCode Package
+# OpenCode ACP Agent Backend
 
 Implements `agent.Backend` for OpenCode via ACP (Agent Client Protocol):
 JSON-RPC 2.0 over stdin/stdout, analogous to the Codex harness.

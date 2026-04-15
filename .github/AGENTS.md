@@ -1,4 +1,4 @@
-# .github
+# CI/CD Workflows
 
 GitHub Actions workflows for CI/CD.
 

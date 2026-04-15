@@ -1,4 +1,4 @@
-# Kilo Code Package
+# Kilo Code Agent Backend
 
 Implements `agent.Backend` for Kilo Code via an embedded Python bridge
 that translates between relay stdin/stdout NDJSON and Kilo's HTTP+SSE API.

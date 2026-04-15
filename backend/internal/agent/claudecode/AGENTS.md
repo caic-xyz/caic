@@ -1,4 +1,4 @@
-# Claude Code Package
+# Claude Code Agent Backend
 
 Implements `agent.Backend` for Claude Code. Manages the widget plugin
 (`widget-plugin/`) deployed to containers via `embed.FS`.

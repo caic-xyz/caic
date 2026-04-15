@@ -1,4 +1,4 @@
-# Codex CLI Package
+# Codex CLI Agent Backend
 
 Implements `agent.Backend` for OpenAI Codex CLI in app-server mode.
 Translates Codex's JSON-RPC 2.0 wire protocol into normalized `agent.Message` types.

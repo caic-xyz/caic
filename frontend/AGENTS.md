@@ -1,4 +1,4 @@
-# Frontend Guidelines
+# SolidJS Web Frontend
 
 SolidJS web UI for caic. Built with Vite, outputs to `../backend/frontend/dist/`.
 

@@ -1,4 +1,4 @@
-# Fake Agent Package
+# Fake Agent for E2E Testing
 
 Test harness simulating a Claude Code agent for e2e testing. Build-gated
 behind `//go:build e2e` — excluded from production binaries.

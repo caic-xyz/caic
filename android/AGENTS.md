@@ -1,4 +1,4 @@
-# Android Guidelines
+# Android Compose Client
 
 Kotlin/Compose Android app for caic. Voice-first companion for managing coding agents.
 

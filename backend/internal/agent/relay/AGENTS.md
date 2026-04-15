@@ -1,4 +1,4 @@
-# Relay Package
+# Container Process Relay
 
 Persistent process relay that keeps coding agents alive inside containers
 across SSH disconnections and backend restarts. Python-based, embedded into

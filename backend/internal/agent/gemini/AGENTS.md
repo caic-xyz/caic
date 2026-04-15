@@ -1,4 +1,4 @@
-# Gemini CLI Package
+# Gemini CLI Agent Backend
 
 Implements `agent.Backend` for Google's Gemini CLI.
 Translates Gemini's stream-json NDJSON protocol into normalized `agent.Message` types.

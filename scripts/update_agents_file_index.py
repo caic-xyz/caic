@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Update AGENTS.md with a file index based on first-line comments."""
+"""Update AGENTS.md files (containing a file index marker) with an auto-generated index.
 
+To opt-in a directory, add these two markers to its AGENTS.md:
+
+    <!-- BEGIN FILE INDEX -->
+    <!-- END FILE INDEX -->
+
+The script auto-discovers all AGENTS.md files tracked by git that contain the
+markers, generates a file index from first-line comments, and injects it between
+the markers. It also ensures a CLAUDE.md symlink exists next to every AGENTS.md.
+"""
+
+import fnmatch
 import os
 import re
 import subprocess
 import sys
-
-# One entry per workspace AGENTS.md to update.
-# "exclude_dirs" lists non-workspace directories to skip (e.g. generated files).
-# Sub-workspace exclusions and AGENTS.md inclusion are computed automatically.
-CONFIGS = [
-    {"root_dir": ".github"},
-    {"root_dir": "android"},
-    {"root_dir": "backend"},
-    {"root_dir": "frontend"},
-    {"root_dir": "."},
-]
 
 
 def get_git_files():
@@ -28,149 +28,128 @@ def get_git_files():
 
 
 def get_file_comment(filepath):
-    # Extensions to check and their comment prefixes
-    extensions = {
-        ".cjs": "//",
-        ".go": "//",
-        ".js": "//",
-        ".kt": "//",
-        ".md": "#",
-        ".mjs": "//",
-        ".py": "#",
-        ".sh": "#",
-        ".swift": "//",
-        ".ts": "//",
-        ".tsx": "//",
-        ".yaml": "#",
-        ".yml": "#",
+    # Glob patterns mapping filenames to their comment prefix. None skips the file.
+    comment_prefixes = {
+        "*.css.d.ts": None,
+        "*.cjs": "//",
+        "*.go": "//",
+        "*.js": "//",
+        "*.kt": "//",
+        "*.md": "#",
+        "*.mjs": "//",
+        "*.py": "#",
+        "*.sh": "#",
+        "*.swift": "//",
+        "*.ts": "//",
+        "*.tsx": "//",
+        "*.yaml": "#",
+        "*.yml": "#",
+        "Dockerfile*": "#",
+        "Makefile": "#",
     }
-
+    if os.path.islink(filepath):
+        return None
     fname = os.path.basename(filepath)
-    if fname in ("AGENTS.md", "CLAUDE.md"):
-        return None
-
-    # Skip generated CSS type declarations (*.module.css.d.ts, *.css.d.ts)
-    if filepath.endswith(".css.d.ts"):
-        return None
-    _, ext = os.path.splitext(filepath)
-    prefix = extensions.get(ext)
+    prefix = next((p for pat, p in comment_prefixes.items() if fnmatch.fnmatch(fname, pat)), None)
     if not prefix:
-        if fname == "Makefile":
-            prefix = "#"
-        elif "Dockerfile" in fname:
-            prefix = "#"
-        else:
+        return None
+    with open(filepath, "r", encoding="utf-8") as f:
+        lines = [f.readline() for _ in range(10)]
+    start_idx = 1 if (lines[0] and lines[0].startswith("#!")) else 0
+    for i in range(start_idx, len(lines)):
+        line = lines[i]
+        if not line:
+            break
+        sline = line.strip()
+        if not sline:
+            continue
+        # Python docstring: extract first line of a triple-quoted string
+        if fname.endswith(".py") and (sline.startswith('"""') or sline.startswith("'''")):
+            quote = sline[:3]
+            # Single-line docstring: """text"""
+            if sline.endswith(quote) and len(sline) > 6:
+                return sline[3:-3].strip()
+            # Multi-line docstring: return the first line
+            content = sline[3:].strip()
+            if content:
+                return content
+            # Opening quotes on their own line; use next non-empty line
+            for j in range(i + 1, len(lines)):
+                if lines[j] and lines[j].strip():
+                    return lines[j].strip()
             return None
-
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            lines = [f.readline() for _ in range(10)]
-
-        start_idx = 1 if (lines[0] and lines[0].startswith("#!")) else 0
-
-        for i in range(start_idx, len(lines)):
-            line = lines[i]
-            if not line:
-                break
-            sline = line.strip()
-            if not sline:
+        # Skip common directives/metadata that aren't descriptions
+        if sline.startswith(f"{prefix}go:"):
+            continue
+        if sline.startswith(f"{prefix} +build"):
+            continue
+        if sline.startswith(f"{prefix} nolint"):
+            continue
+        if sline.startswith(f"{prefix} swift-tools-version:"):
+            continue
+        if sline.startswith(prefix):
+            comment = sline[len(prefix) :].strip()
+            if not comment:
                 continue
-
-            # Python docstring: extract first line of a triple-quoted string
-            if ext == ".py" and (sline.startswith('"""') or sline.startswith("'''")):
-                quote = sline[:3]
-                # Single-line docstring: """text"""
-                if sline.endswith(quote) and len(sline) > 6:
-                    return sline[3:-3].strip()
-                # Multi-line docstring: return the first line
-                content = sline[3:].strip()
-                if content:
-                    return content
-                # Opening quotes on their own line; use next non-empty line
-                for j in range(i + 1, len(lines)):
-                    if lines[j] and lines[j].strip():
-                        return lines[j].strip()
-                return None
-
-            # Skip common directives/metadata that aren't descriptions
-            if sline.startswith(f"{prefix}go:"):
-                continue
-            if sline.startswith(f"{prefix} +build"):
-                continue
-            if sline.startswith(f"{prefix} nolint"):
-                continue
-            if sline.startswith(f"{prefix} swift-tools-version:"):
-                continue
-
-            if sline.startswith(prefix):
-                comment = sline[len(prefix) :].strip()
-                if not comment:
-                    continue
-                return comment
-
-            # Hit code before a comment
-            return None
-    except Exception:
+            return comment
+        # Hit code before a comment
         return None
     return None
 
 
-def resolve_configs(configs):
-    """Derive target_file and sub-workspace exclusions for each config."""
-    resolved = []
-    for cfg in configs:
-        root = cfg["root_dir"]
-        target = "AGENTS.md" if root == "." else f"{root}/AGENTS.md"
-        exclude = set(cfg.get("exclude_dirs", set()))
-        resolved.append({"root_dir": root, "target_file": target, "exclude_dirs": exclude})
+def discover_configs(all_files):
+    """Auto-discover workspace roots from AGENTS.md files that contain a file index marker.
 
-    # For each config, find child workspaces (other configs whose root is a
-    # direct subdirectory) and add them to exclude_dirs.
-    for cfg in resolved:
-        root = cfg["root_dir"]
-        prefix = "" if root == "." else root + "/"
-        for other in resolved:
-            oroot = other["root_dir"]
+    Returns a dict mapping target AGENTS.md path to its set of excluded child directories.
+    """
+    candidates = sorted(f for f in all_files if os.path.basename(f) == "AGENTS.md")
+    configs = {}
+    for f in candidates:
+        with open(f, "r", encoding="utf-8") as fh:
+            if "<!-- BEGIN FILE INDEX -->" in fh.read():
+                configs[f] = set()
+    # For each config, find child workspaces and add them to exclude_dirs.
+    for target, exclude in configs.items():
+        root = os.path.dirname(target)
+        prefix = root + "/" if root else ""
+        for other_target in configs:
+            oroot = os.path.dirname(other_target)
             if oroot == root:
                 continue
-            if prefix == "":
+            if not prefix:
                 child_rel = oroot
             elif oroot.startswith(prefix):
                 child_rel = oroot[len(prefix) :]
             else:
                 continue
             if "/" not in child_rel:
-                cfg["exclude_dirs"].add(child_rel)
-    return resolved
+                exclude.add(child_rel)
+    return configs
 
 
-def generate_index(config, all_files, sub_workspace_targets):
-    root_dir = config["root_dir"]
-    exclude = config["exclude_dirs"]
-    target = config["target_file"]
+def generate_index(target, exclude, all_files, all_configs):
+    root_dir = os.path.dirname(target)
     files_found = []
-
     for filepath in all_files:
         # Skip own AGENTS.md
         if filepath == target:
             continue
         # Scope to root_dir
-        if root_dir == ".":
-            relpath = filepath
-        else:
+        if root_dir:
             if not filepath.startswith(root_dir + "/"):
                 continue
             relpath = filepath[len(root_dir) + 1 :]
+        else:
+            relpath = filepath
 
         # Check excluded subdirectories, but let sub-workspace AGENTS.md through
         rel_parts = relpath.replace("\\", "/").split("/")
         if rel_parts[0] in exclude:
-            if filepath not in sub_workspace_targets:
+            if filepath not in all_configs:
                 continue
         comment = get_file_comment(filepath)
         if comment:
             files_found.append((relpath, comment))
-
     desc = "Autogenerated from first-line comments. Run scripts/update_agents_file_index.py to refresh."
     lines = ["## File Index", "", desc, ""]
     for path, comment in sorted(files_found):
@@ -182,12 +161,10 @@ def update_markdown(target_file, content):
     if not os.path.exists(target_file):
         print(f"Warning: {target_file} not found, skipping.")
         return
-
     start = "<!-- BEGIN FILE INDEX -->"
     end = "<!-- END FILE INDEX -->"
     with open(target_file, "r", encoding="utf-8") as f:
         original = f.read()
-
     new_section = f"{start}\n{content}\n{end}"
     if start in original and end in original:
         pattern = re.compile(f"{re.escape(start)}.*?{re.escape(end)}", re.DOTALL)
@@ -201,16 +178,34 @@ def update_markdown(target_file, content):
     print(f"Updated: {target_file}")
 
 
+def ensure_claude_symlinks(all_files):
+    """Ensure every AGENTS.md has a sibling CLAUDE.md symlink pointing to it."""
+    for f in all_files:
+        if os.path.basename(f) != "AGENTS.md":
+            continue
+        d = os.path.dirname(f) or "."
+        link = os.path.join(d, "CLAUDE.md")
+        if os.path.islink(link) and os.readlink(link) == "AGENTS.md":
+            continue
+        if os.path.exists(link):
+            print(f"Error: {link} exists but is not a symlink to AGENTS.md.", file=sys.stderr)
+            return 1
+        os.symlink("AGENTS.md", link)
+        print(f"Created: {link} -> AGENTS.md")
+    return 0
+
+
 def main():
     all_files = get_git_files()
     if not all_files:
         print("No files found in git repository.")
         return 1
-    resolved = resolve_configs(CONFIGS)
-    all_targets = {cfg["target_file"] for cfg in resolved}
-    for config in resolved:
-        content = generate_index(config, all_files, all_targets)
-        update_markdown(config["target_file"], content)
+    ret = ensure_claude_symlinks(all_files)
+    if ret:
+        return ret
+    configs = discover_configs(all_files)
+    for target, exclude in configs.items():
+        update_markdown(target, generate_index(target, exclude, all_files, configs))
     return 0
 
 

@@ -1,4 +1,5 @@
-// Package kilo embeds the bridge script for Kilo Code integration.
+// Embeds the bridge script for Kilo Code integration.
+
 package kilo
 
 import _ "embed"
