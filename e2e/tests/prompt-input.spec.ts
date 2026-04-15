@@ -54,8 +54,8 @@ test("prompt input layout screenshots", async ({ page, api }) => {
   await waitForTaskState(api, id, "waiting", 30_000);
 
   await page.goto("/");
-  await expect(page.locator("[data-task-id]").first()).toBeVisible({ timeout: 10_000 });
   const taskCard = page.locator("[data-task-id]", { hasText: "Fix token expiry" });
+  await expect(taskCard.first()).toBeVisible({ timeout: 10_000 });
   await taskCard.first().click();
   await page.waitForTimeout(500);
 
