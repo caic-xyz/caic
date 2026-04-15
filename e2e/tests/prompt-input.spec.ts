@@ -54,9 +54,9 @@ test("prompt input layout screenshots", async ({ page, api }) => {
   await waitForTaskState(api, id, "waiting", 30_000);
 
   await page.goto("/");
-  const taskCard = page.locator("[data-task-id]", { hasText: "Fix token expiry" });
-  await expect(taskCard.first()).toBeVisible({ timeout: 10_000 });
-  await taskCard.first().click();
+  const taskCard = page.locator(`[data-task-id="${id}"]`);
+  await expect(taskCard).toBeVisible({ timeout: 10_000 });
+  await taskCard.click();
   await page.waitForTimeout(500);
 
   const detailInput = page.getByTestId("task-detail-form").locator("[role='textbox']");

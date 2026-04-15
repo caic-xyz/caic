@@ -73,21 +73,18 @@ test("generate documentation screenshots", async ({ page, api }) => {
   });
 
   // Screenshot 1: Interacting with an agent — task detail with tool uses.
-  const bugFixCard = page.locator("[data-task-id]", {
-    hasText: "Fix token expiry",
-  });
-  await bugFixCard.first().click();
+  const bugFixCard = page.locator(`[data-task-id="${id1}"]`);
+  await expect(bugFixCard).toBeVisible({ timeout: 10_000 });
+  await bugFixCard.click();
   await page.waitForTimeout(500);
   await page.screenshot({
     path: path.join(screenshotDir, "task-detail.png"),
   });
 
   // Screenshot 3: Plan mode.
-  const planCard = page.locator("[data-task-id]", {
-    hasText: "Plan the rate",
-  });
+  const planCard = page.locator(`[data-task-id="${id2}"]`);
   if ((await planCard.count()) > 0) {
-    await planCard.first().click();
+    await planCard.click();
     await page.waitForTimeout(500);
     await page.screenshot({
       path: path.join(screenshotDir, "task-plan.png"),
@@ -95,11 +92,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
   }
 
   // Screenshot 4: Ask mode.
-  const askCard = page.locator("[data-task-id]", {
-    hasText: "Which storage",
-  });
+  const askCard = page.locator(`[data-task-id="${id3}"]`);
   if ((await askCard.count()) > 0) {
-    await askCard.first().click();
+    await askCard.click();
     await page.waitForTimeout(500);
     await page.screenshot({
       path: path.join(screenshotDir, "task-ask.png"),
@@ -107,11 +102,9 @@ test("generate documentation screenshots", async ({ page, api }) => {
   }
 
   // Screenshot 5: Widget — generative UI with interactive SVG diagram.
-  const widgetCard = page.locator("[data-task-id]", {
-    hasText: "Explain light refraction",
-  });
+  const widgetCard = page.locator(`[data-task-id="${id4}"]`);
   if ((await widgetCard.count()) > 0) {
-    await widgetCard.first().click();
+    await widgetCard.click();
     const iframe = page.locator("iframe[title='light_refraction_in_water']");
     await expect(iframe).toBeVisible({ timeout: 10_000 });
     // Wait for iframe content to render (scripts run after widgetDone).
@@ -171,7 +164,7 @@ test("generate documentation screenshots", async ({ page, api }) => {
   }
 
   // Screenshot 6: Mobile — task detail at phone viewport.
-  await bugFixCard.first().click();
+  await bugFixCard.click();
   await page.waitForTimeout(500);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);
