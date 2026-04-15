@@ -212,6 +212,10 @@ Flags:
 	if err := watchExecutable(ctx, cancel); err != nil {
 		return fmt.Errorf("failed to watch executable: %w", err)
 	}
+	// Exit when config.toml is modified (systemd restarts the service).
+	if err := watchConfig(ctx, cancel, cfgDir); err != nil {
+		slog.Warn("failed to watch config", "err", err)
+	}
 	// Auto-update: checks GitHub Releases on a cron schedule and replaces the binary.
 	if v := autoupdate.Version; v != "" && !strings.HasPrefix(v, "devel-") {
 		sched, err := autoUpdateSchedule(&tc)
@@ -399,6 +403,55 @@ func watchExecutable(ctx context.Context, stop context.CancelFunc) error {
 					return
 				}
 				slog.Debug("fsnotify", "ev", event)
+			case err, ok := <-w.Errors:
+				if !ok {
+					return
+				}
+				slog.Warn("fsnotify", "err", err)
+			}
+		}
+	}()
+	return nil
+}
+
+// watchConfig watches config.toml for modifications and calls stop to trigger
+// graceful shutdown when detected. Combined with systemd's Restart=always,
+// this enables seamless restarts after a config change.
+func watchConfig(ctx context.Context, stop context.CancelFunc, cfgDir string) error {
+	path := filepath.Join(cfgDir, "config.toml")
+	if _, statErr := os.Stat(path); statErr != nil {
+		return nil //nolint:nilerr // no config file to watch is not an error
+	}
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return err
+	}
+	// Watch the directory so we catch rename-into-place writes (common with
+	// editors like vim that write to a temp file then rename).
+	if err := w.Add(cfgDir); err != nil {
+		_ = w.Close()
+		return err
+	}
+	go func() {
+		defer func() { _ = w.Close() }()
+		const base = "config.toml"
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case event, ok := <-w.Events:
+				if !ok {
+					return
+				}
+				if filepath.Base(event.Name) != base {
+					continue
+				}
+				match := event.Has(fsnotify.Write) || event.Has(fsnotify.Create)
+				if match {
+					slog.Info("shutdown", "reason", "config.toml modified", "ev", event)
+					stop()
+					return
+				}
 			case err, ok := <-w.Errors:
 				if !ok {
 					return
