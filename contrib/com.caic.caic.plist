@@ -32,6 +32,14 @@
 	<key>ProcessType</key>
 	<string>Background</string>
 
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+		<key>DOCKER_HOST</key>
+		<string>unix:///var/run/docker.sock</string>
+	</dict>
+
 	<key>SoftResourceLimits</key>
 	<dict>
 		<key>NumberOfFiles</key>
