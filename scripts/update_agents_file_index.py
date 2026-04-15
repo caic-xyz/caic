@@ -103,7 +103,7 @@ def discover_configs(all_files):
     Returns a dict mapping target AGENTS.md path to its set of excluded child directories.
     """
     candidates = sorted(f for f in all_files if os.path.basename(f) == "AGENTS.md")
-    configs = {}
+    configs = {"AGENTS.md": set()}
     for f in candidates:
         with open(f, "r", encoding="utf-8") as fh:
             if "<!-- BEGIN FILE INDEX -->" in fh.read():
