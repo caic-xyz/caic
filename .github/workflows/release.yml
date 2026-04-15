@@ -16,14 +16,15 @@ permissions:
   contents: write
 
 jobs:
-  setup:
+  release:
     runs-on: ubuntu-24.04
-    outputs:
-      version: ${{ steps.get_version.outputs.VERSION }}
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0 # Required to fetch tags for version calculation
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
       - name: Determine Version
         id: get_version
         run: |
@@ -53,78 +54,21 @@ jobs:
             echo "error: version '$VERSION' does not match v{major}.{minor}.{patch} format" >&2
             exit 1
           fi
-
-  validate-build:
-    needs: [setup]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-      - name: Build frontend
-        run: make build
-      - uses: goreleaser/goreleaser-action@v6
+      - name: Tag
+        run: git tag "${{ steps.get_version.outputs.VERSION }}"
+      - name: Build
+        uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
-          args: release --snapshot --clean
+          args: release --clean --skip=publish
         env:
-          GORELEASER_CURRENT_TAG: ${{ needs.setup.outputs.version }}
-
-  finalize-release:
-    needs: [setup, validate-build]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v6
-      - name: Tag and Push
-        run: |
-          VERSION="${{ needs.setup.outputs.version }}"
-          git tag $VERSION
-          git push origin $VERSION
-      - name: Create GitHub Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ needs.setup.outputs.version }}"
-          RELEASE_NOTES=$(gh api repos/${{ github.repository }}/releases/generate-notes -f tag_name=$VERSION | jq -r '.body')
-          gh release create "$VERSION" --title "$VERSION" --notes "$RELEASE_NOTES"
-
-  build-binaries:
-    needs: [setup, finalize-release]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "24"
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-      - name: Build frontend
-        run: make build
-      - name: Fetch tag
-        run: git fetch --tags --force
-      - uses: goreleaser/goreleaser-action@v6
+          GORELEASER_CURRENT_TAG: ${{ steps.get_version.outputs.VERSION }}
+      - name: Push tag
+        run: git push origin "${{ steps.get_version.outputs.VERSION }}"
+      - name: Publish
+        uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
-          args: release --clean
+          args: continue
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GORELEASER_CURRENT_TAG: ${{ needs.setup.outputs.version }}
