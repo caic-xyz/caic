@@ -13,12 +13,12 @@ require (
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/roundtrippers v0.5.0
 	github.com/mattn/go-colorable v0.1.14
-	github.com/mattn/go-isatty v0.0.20
+	github.com/mattn/go-isatty v0.0.21
 	github.com/oschwald/maxminddb-golang/v2 v2.1.1
 	github.com/pelletier/go-toml/v2 v2.3.0
-	github.com/pion/ice/v4 v4.2.2
+	github.com/pion/ice/v4 v4.2.4
 	github.com/pion/webrtc/v4 v4.2.11
-	golang.org/x/net v0.52.0
+	golang.org/x/net v0.53.0
 	golang.org/x/sync v0.20.0
 )
 
@@ -50,10 +50,10 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
-	golang.org/x/crypto v0.49.0 // indirect
+	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/mod v0.5.1 // indirect
-	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/term v0.41.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/term v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.1.9 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
