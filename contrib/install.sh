@@ -215,7 +215,15 @@ main() {
             ;;
     esac
 
-    printf '\nDone. The caic web server is accessible at http://localhost:2242\n'
+    print_url_err="$(mktemp)"
+    if server_url="$("${INSTALL_DIR}/caic" -print-url 2>"$print_url_err")"; then
+        printf '\nDone. The caic web server is accessible at %s\n' "$server_url"
+    else
+        printf '\nInstalled, but caic failed to resolve the server URL:\n'
+        sed 's/^/  /' "$print_url_err"
+        printf '\nCheck your configuration and try running: caic -print-url\n'
+    fi
+    rm -f "$print_url_err"
     printf 'See https://docs.caic.xyz/caic/configuration to get started.\n'
 }
 
