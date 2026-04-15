@@ -87,6 +87,7 @@ Flags:
 
 	cfgDirFlag := flag.String("config-dir", "", "config directory (default: ~/.config/caic)")
 	versionFlag := flag.Bool("version", false, "print version and exit")
+	printURLFlag := flag.Bool("print-url", false, "print the server URL and exit")
 	flag.Parse()
 	if *versionFlag {
 		fmt.Println(autoupdate.Version)
@@ -106,6 +107,11 @@ Flags:
 		cfgDir = d
 	}
 
+	// Suppress log noise when only printing the URL.
+	if *printURLFlag {
+		slog.SetLogLoggerLevel(slog.LevelError)
+	}
+
 	// Load configuration from TOML file.
 	tc, err := loadTOMLConfig(cfgDir)
 	if err != nil {
@@ -115,6 +121,17 @@ Flags:
 	if err != nil {
 		return err
 	}
+	if *printURLFlag {
+		a := localizeAddr(addr)
+		ln, err := net.Listen("tcp", a)
+		if err != nil {
+			return fmt.Errorf("port %s is not available (already in use?)", a)
+		}
+		_ = ln.Close()
+		fmt.Printf("http://%s\n", a)
+		return nil
+	}
+
 	// Validate geo_db file exists if explicitly set in config.
 	if tc.Server.GeoDB != nil {
 		if _, err := os.Stat(cfg.IPGeoDB); err != nil {
@@ -182,6 +199,15 @@ Flags:
 	}
 	addr = localizeAddr(addr)
 
+	// Open the listener early to detect port conflicts before lengthy
+	// initialisation (container discovery, repo scanning, etc.).
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", addr, err)
+	}
+	defer func() { _ = ln.Close() }()
+	slog.Info("port acquired", "addr", ln.Addr())
+
 	// Exit when executable is rebuilt (systemd restarts the service).
 	if err := watchExecutable(ctx, cancel); err != nil {
 		return fmt.Errorf("failed to watch executable: %w", err)
@@ -196,7 +222,7 @@ Flags:
 			go autoupdate.Run(ctx, github.NewClient(cfg.GitHubToken, http.DefaultTransport), sched)
 		}
 	}
-	return serveHTTP(ctx, addr, root, cfg)
+	return serveHTTP(ctx, ln, root, cfg)
 }
 
 // roundDur rounds d to 3 significant digits.
@@ -270,16 +296,12 @@ func initLogging(level string, noLogTime bool) {
 	})))
 }
 
-func serveHTTP(ctx context.Context, addr, rootDir string, cfg *server.Config) error {
+func serveHTTP(ctx context.Context, ln net.Listener, rootDir string, cfg *server.Config) error {
 	srv, err := server.New(ctx, rootDir, cfg)
 	if err != nil {
 		return err
 	}
-	err = srv.ListenAndServe(ctx, addr)
-	if errors.Is(err, http.ErrServerClosed) {
-		return nil
-	}
-	return err
+	return srv.Serve(ctx, ln)
 }
 
 func main() {

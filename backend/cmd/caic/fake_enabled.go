@@ -4,9 +4,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,6 +55,12 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 	defer func() { retErr = errors.Join(retErr, os.RemoveAll(fakeConfigDir)) }()
 	cfg.ConfigDir = fakeConfigDir
 	cfg.CacheDir = filepath.Join(os.TempDir(), "caic-e2e-logs")
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", addr, err)
+	}
+	defer ln.Close()
+
 	srv, err := server.New(ctx, rootDir, cfg)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
@@ -63,11 +68,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 	fb := fake.New()
 	srv.SetRunnerOps(&fakeContainer{}, map[agent.Harness]agent.Backend{fb.Harness(): fb})
 
-	err = srv.ListenAndServe(ctx, addr)
-	if errors.Is(err, http.ErrServerClosed) {
-		err = nil
-	}
-	return err
+	return srv.Serve(ctx, ln)
 }
 
 // initFakeRepo creates two fake repos (clone and clone2) in tmpDir so that the

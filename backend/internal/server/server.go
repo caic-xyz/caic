@@ -227,8 +227,8 @@ type taskEntry struct {
 	monitorBranch string // branch being monitored (e.g. "caic-123"); empty when no CI monitoring active
 }
 
-// buildHandler assembles the full HTTP handler. Extracted from ListenAndServe
-// so that route registration can be tested without a listener.
+// buildHandler assembles the full HTTP handler. Extracted from Serve so that
+// route registration can be tested without a listener.
 func (s *Server) buildHandler() (http.Handler, error) {
 	// Auth routes (exempt from RequireUser).
 	authMux := http.NewServeMux()
@@ -337,15 +337,17 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	}), nil
 }
 
-// ListenAndServe starts the HTTP server on addr and blocks until ctx is cancelled.
-func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
+// Serve starts the HTTP server on an already-open listener and blocks until
+// ctx is cancelled. Opening the listener early (before calling New) lets the
+// caller detect port conflicts at startup instead of after lengthy
+// initialisation.
+func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	handler, err := s.buildHandler()
 	if err != nil {
 		return err
 	}
 
 	srv := &http.Server{
-		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		BaseContext: func(_ net.Listener) context.Context {
@@ -364,8 +366,8 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 		_ = srv.Shutdown(shutdownCtx) //nolint:contextcheck // parent ctx is already cancelled at shutdown time
 		shutdownCancel()
 	}()
-	slog.Info("listening", "addr", addr)
-	err = srv.ListenAndServe()
+	slog.Info("listening", "addr", ln.Addr())
+	err = srv.Serve(ln)
 	if errors.Is(err, http.ErrServerClosed) {
 		<-shutdownDone
 		return nil
