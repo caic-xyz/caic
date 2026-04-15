@@ -120,7 +120,7 @@ type toolUse struct {
 }
 
 type askMsg struct {
-	ID        string             `json:"id"`
+	ID        string              `json:"id"`
 	Questions []agent.AskQuestion `json:"questions"`
 }
 

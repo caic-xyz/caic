@@ -27,7 +27,7 @@ func TestLoadTOMLConfig(t *testing.T) {
 		content := `
 [core]
 root = "/srv/repos"
-auto_update = "off"
+auto_update = ""
 tailscale_api_key = "tskey_test"
 
 [server]
@@ -74,8 +74,8 @@ pprof = true
 		if tc.Debug.LogLevel != "debug" {
 			t.Errorf("LogLevel = %q, want debug", tc.Debug.LogLevel)
 		}
-		if tc.Core.AutoUpdate != "off" {
-			t.Errorf("AutoUpdate = %q, want off", tc.Core.AutoUpdate)
+		if tc.Core.AutoUpdate == nil || *tc.Core.AutoUpdate != "" {
+			t.Errorf("AutoUpdate = %v, want empty string", tc.Core.AutoUpdate)
 		}
 		if tc.GitHub.Token != "ghp_test" {
 			t.Errorf("GitHub.Token = %q", tc.GitHub.Token)
@@ -318,6 +318,8 @@ func TestTomlToServerConfig(t *testing.T) {
 	})
 }
 
+func ptr(s string) *string { return &s }
+
 func TestAutoUpdateSchedule(t *testing.T) {
 	t.Run("default schedule", func(t *testing.T) {
 		s, err := autoUpdateSchedule(&tomlConfig{})
@@ -329,28 +331,18 @@ func TestAutoUpdateSchedule(t *testing.T) {
 		}
 	})
 
-	t.Run("off", func(t *testing.T) {
-		s, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: "off"}})
+	t.Run("empty disables", func(t *testing.T) {
+		s, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: ptr("")}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if s != nil {
-			t.Error("expected nil schedule for off")
-		}
-	})
-
-	t.Run("false", func(t *testing.T) {
-		s, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: "false"}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if s != nil {
-			t.Error("expected nil schedule for false")
+			t.Error("expected nil schedule for empty string")
 		}
 	})
 
 	t.Run("custom cron", func(t *testing.T) {
-		s, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: "0 3 * * *"}})
+		s, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: ptr("0 3 * * *")}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -363,7 +355,7 @@ func TestAutoUpdateSchedule(t *testing.T) {
 	})
 
 	t.Run("invalid cron", func(t *testing.T) {
-		_, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: "not a cron"}})
+		_, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: ptr("not a cron")}})
 		if err == nil {
 			t.Error("expected error for invalid cron")
 		}

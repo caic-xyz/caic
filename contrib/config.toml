@@ -8,9 +8,9 @@
 #root = "."
 
 # Auto-update schedule (cron expression, local time). Checks GitHub Releases
-# and replaces the binary on match. Set to "off" to disable.
-# Default: "50 4 * * *" (daily at 04:50).
-#auto_update = "50 4 * * *"
+# and replaces the binary on match. Set to "" to disable.
+# When not set, defaults to daily at 04:50.
+#auto_update = ""
 
 # Tailscale API key — required for Tailscale ephemeral node.
 # Obtain from https://login.tailscale.com/admin/settings/keys

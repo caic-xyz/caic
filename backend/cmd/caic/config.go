@@ -27,9 +27,9 @@ type tomlConfig struct {
 }
 
 type tomlCore struct {
-	Root            string `toml:"root"`
-	AutoUpdate      string `toml:"auto_update"` // cron expression; empty disables
-	TailscaleAPIKey string `toml:"tailscale_api_key"`
+	Root            string  `toml:"root"`
+	AutoUpdate      *string `toml:"auto_update"` // nil = default schedule; "" = disabled; else cron expression
+	TailscaleAPIKey string  `toml:"tailscale_api_key"`
 }
 
 type tomlServer struct {
@@ -214,17 +214,20 @@ func geoDBOrDefault(geoDB *string, cfgDir string) string {
 const defaultAutoUpdate = "50 4 * * *"
 
 // autoUpdateSchedule returns the parsed auto-update schedule, or nil if
-// disabled. The default is "50 4 * * *" (daily at 04:50); set to "false"
-// or "off" to disable.
+// disabled. When auto_update is not set in the config file, the default
+// schedule "50 4 * * *" (daily at 04:50) is used. Set to "" to disable.
 func autoUpdateSchedule(tc *tomlConfig) (*autoupdate.Schedule, error) {
-	expr := tc.Core.AutoUpdate
-	if expr == "" {
-		expr = defaultAutoUpdate
+	if tc.Core.AutoUpdate == nil {
+		s, err := autoupdate.ParseSchedule(defaultAutoUpdate)
+		if err != nil {
+			return nil, fmt.Errorf("core.auto_update: %w", err)
+		}
+		return &s, nil
 	}
-	if expr == "false" || expr == "off" {
+	if *tc.Core.AutoUpdate == "" {
 		return nil, nil //nolint:nilnil // nil schedule means disabled, not an error
 	}
-	s, err := autoupdate.ParseSchedule(expr)
+	s, err := autoupdate.ParseSchedule(*tc.Core.AutoUpdate)
 	if err != nil {
 		return nil, fmt.Errorf("core.auto_update: %w", err)
 	}
