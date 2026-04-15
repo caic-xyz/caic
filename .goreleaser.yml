@@ -22,31 +22,11 @@ builds:
       - -s -w
     env:
       - CGO_ENABLED=0
-  - id: webrtc-relay
-    main: ./backend/cmd/webrtc-relay
-    binary: webrtc-relay
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
-    ldflags:
-      - -s -w
-    env:
-      - CGO_ENABLED=0
 
 universal_binaries:
   - id: caic
     replace: true
     name_template: caic
-  - id: webrtc-relay
-    replace: true
-    name_template: webrtc-relay
 
 archives:
   - formats:
