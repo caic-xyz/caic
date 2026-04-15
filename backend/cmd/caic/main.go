@@ -208,7 +208,7 @@ Flags:
 	defer func() { _ = ln.Close() }()
 	slog.Info("port acquired", "addr", ln.Addr())
 
-	// Exit when executable or config is modified (systemd restarts the service).
+	// Exit when executable or config is modified (systemd/launchd restarts the service).
 	if err := watchForRestart(ctx, cancel, cfgDir); err != nil {
 		return fmt.Errorf("failed to set up file watcher: %w", err)
 	}
@@ -356,8 +356,8 @@ func resolveGitHubTokenFromGH() string {
 
 // watchForRestart watches the executable and config.toml for modifications and
 // calls stop to trigger graceful shutdown when either changes. Combined with
-// systemd's Restart=always, this enables seamless restarts after a rebuild or
-// config change.
+// systemd's Restart=always or launchd's KeepAlive, this enables seamless
+// restarts after a rebuild or config change.
 func watchForRestart(ctx context.Context, stop context.CancelFunc, cfgDir string) error {
 	exe, err := os.Executable()
 	if err != nil {
