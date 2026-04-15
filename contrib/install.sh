@@ -160,10 +160,13 @@ install_service_launchd() {
         mkdir -p "$(dirname "$dest")"
         sed "s|/Users/CHANGEME/.local/bin/caic|${INSTALL_DIR}/caic|" "$src" > "$dest"
         printf '  installed %s\n' "$dest"
+        launchctl bootstrap "gui/$(id -u)" "$dest"
     else
         printf 'Already exists: %s\n' "$dest"
+        # Reload: bootout (ignore failure if not loaded) then bootstrap.
+        launchctl bootout "gui/$(id -u)/com.caic.caic" 2>/dev/null || true
+        launchctl bootstrap "gui/$(id -u)" "$dest"
     fi
-    launchctl bootstrap "gui/$(id -u)" "$dest"
 }
 
 preflight() {
