@@ -54,22 +54,15 @@ jobs:
             echo "error: version '$VERSION' does not match v{major}.{minor}.{patch} format" >&2
             exit 1
           fi
-      - name: Tag
-        run: git tag "${{ steps.get_version.outputs.VERSION }}"
-      - name: Build
+      - name: Tag and push
+        run: |
+          git tag "${{ steps.get_version.outputs.VERSION }}"
+          git push origin "${{ steps.get_version.outputs.VERSION }}"
+      - name: Release
         uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
-          args: release --clean --skip=publish
-        env:
-          GORELEASER_CURRENT_TAG: ${{ steps.get_version.outputs.VERSION }}
-      - name: Push tag
-        run: git push origin "${{ steps.get_version.outputs.VERSION }}"
-      - name: Publish
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: latest
-          args: release --skip=validate,build
+          args: release
         env:
           GORELEASER_CURRENT_TAG: ${{ steps.get_version.outputs.VERSION }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
