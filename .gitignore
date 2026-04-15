@@ -3,6 +3,7 @@
 .env.local
 coverage.out
 node_modules/
+/dist/
 /emulator*.log
 /package-lock.json
 /test-results/
