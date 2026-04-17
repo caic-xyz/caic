@@ -55,6 +55,7 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) (client 
 		Tailscale:  opts.Tailscale,
 		Display:    opts.Display,
 		ExtraEnv:   extraEnv,
+		MaxCPUs:    md.DefaultMaxCPUs(),
 	}
 	return client, mdOpts
 }
@@ -225,6 +226,7 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 		Labels:     opts.Labels,
 		AgentPaths: agentPaths,
 		ExtraEnv:   opts.ExtraEnv,
+		MaxCPUs:    md.DefaultMaxCPUs(),
 	}
 	stdout, stderr := logWriters(opts.LogWriter, "fork")
 	slog.Debug("container", "msg", "calling ct.Fork", "source", name)
