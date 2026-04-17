@@ -716,7 +716,7 @@ export default function TaskDetail(props: Props) {
                   </button>
                 </Show>
                 <Show when={isActive() || props.taskState === "stopped"}>
-                  <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDanger}`} onClick={() => { setContextMenuOpen(false); props.onPurge(props.taskId); }}>
+                  <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDanger}`} onClick={() => { setContextMenuOpen(false); if (confirmTaskAction("Purge", props.title ?? "", props.branch)) props.onPurge(props.taskId); }}>
                     <DeleteIcon width="1em" height="1em" />
                     Purge
                   </button>
