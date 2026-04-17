@@ -17,6 +17,15 @@ import StatsIcon from "./StatsIcon";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
+import SyncIcon from "@material-symbols/svg-400/outlined/sync.svg?solid";
+import StopIcon from "@material-symbols/svg-400/outlined/stop_circle.svg?solid";
+import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
+import RestartIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
+import BlockIcon from "@material-symbols/svg-400/outlined/block.svg?solid";
+import CompressIcon from "@material-symbols/svg-400/outlined/compress.svg?solid";
+import ForkIcon from "@material-symbols/svg-400/outlined/fork_right.svg?solid";
+import GitHubIcon from "./github.svg?solid";
+import GitLabIcon from "./gitlab.svg?solid";
 import WidgetCard from "./WidgetCard";
 import styles from "./TaskDetail.module.css";
 
@@ -682,23 +691,50 @@ export default function TaskDetail(props: Props) {
             </Show>
             <Show when={contextMenuOpen()}>
               <div class={styles.syncDropdown}>
-                <button type="button" class={`${styles.syncDropdownItem} ${props.taskState === "purging" ? styles.syncDropdownItemDisabled : ""}`} disabled={props.taskState === "purging"} onClick={() => { setContextMenuOpen(false); doSync(false); }}>{props.forge ? (props.forgePR ? "Push" : "Create PR") : "Push"}</button>
-                <button type="button" class={`${styles.syncDropdownItem} ${props.taskState === "purging" ? styles.syncDropdownItemDisabled : ""}`} disabled={props.taskState === "purging"} onClick={() => { setContextMenuOpen(false); doSync(false, SyncTargetDefault); }}>Push to {props.baseBranch}</button>
+                <button type="button" class={`${styles.syncDropdownItem} ${props.taskState === "purging" ? styles.syncDropdownItemDisabled : ""}`} disabled={props.taskState === "purging"} onClick={() => { setContextMenuOpen(false); doSync(false); }}>
+                  <Switch fallback={<SyncIcon width="1em" height="1em" />}>
+                    <Match when={props.forge === "github"}><GitHubIcon width="1em" height="1em" /></Match>
+                    <Match when={props.forge === "gitlab"}><GitLabIcon width="1em" height="1em" /></Match>
+                  </Switch>
+                  {props.forge ? (props.forgePR ? "Push" : "Create PR") : "Push"}
+                </button>
+                <button type="button" class={`${styles.syncDropdownItem} ${props.taskState === "purging" ? styles.syncDropdownItemDisabled : ""}`} disabled={props.taskState === "purging"} onClick={() => { setContextMenuOpen(false); doSync(false, SyncTargetDefault); }}>
+                  <SyncIcon width="1em" height="1em" />
+                  Push to {props.baseBranch}
+                </button>
                 <Show when={isActive()}>
-                  <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDanger}`} onClick={() => { setContextMenuOpen(false); props.onStop(props.taskId); }}>Stop</button>
+                  <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDanger}`} onClick={() => { setContextMenuOpen(false); props.onStop(props.taskId); }}>
+                    <StopIcon width="1em" height="1em" />
+                    Stop
+                  </button>
                 </Show>
                 <Show when={props.taskState === "stopped"}>
-                  <button type="button" class={styles.syncDropdownItem} onClick={() => { setContextMenuOpen(false); props.onRevive(props.taskId); }}>Revive</button>
+                  <button type="button" class={styles.syncDropdownItem} onClick={() => { setContextMenuOpen(false); props.onRevive(props.taskId); }}>
+                    <RestartIcon width="1em" height="1em" />
+                    Revive
+                  </button>
                 </Show>
                 <Show when={isActive() || props.taskState === "stopped"}>
-                  <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDanger}`} onClick={() => { setContextMenuOpen(false); props.onPurge(props.taskId); }}>Purge</button>
+                  <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDanger}`} onClick={() => { setContextMenuOpen(false); props.onPurge(props.taskId); }}>
+                    <DeleteIcon width="1em" height="1em" />
+                    Purge
+                  </button>
                 </Show>
-                <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDisabled}`} disabled onClick={() => { setContextMenuOpen(false); doClearContext(); }}>Clear context</button>
+                <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDisabled}`} disabled onClick={() => { setContextMenuOpen(false); doClearContext(); }}>
+                  <BlockIcon width="1em" height="1em" />
+                  Clear context
+                </button>
                 <Show when={props.supportsCompact}>
-                  <button type="button" class={`${styles.syncDropdownItem} ${!isWaiting() ? styles.syncDropdownItemDisabled : ""}`} disabled={!isWaiting()} onClick={() => { setContextMenuOpen(false); doCompact(); }}>Compact context</button>
+                  <button type="button" class={`${styles.syncDropdownItem} ${!isWaiting() ? styles.syncDropdownItemDisabled : ""}`} disabled={!isWaiting()} onClick={() => { setContextMenuOpen(false); doCompact(); }}>
+                    <CompressIcon width="1em" height="1em" />
+                    Compact context
+                  </button>
                 </Show>
                 <Show when={props.onFork && props.repo}>
-                  <button type="button" class={styles.syncDropdownItem} onClick={() => { setContextMenuOpen(false); props.onFork?.(props.taskId); }}>Fork</button>
+                  <button type="button" class={styles.syncDropdownItem} onClick={() => { setContextMenuOpen(false); props.onFork?.(props.taskId); }}>
+                    <ForkIcon width="1em" height="1em" />
+                    Fork
+                  </button>
                 </Show>
               </div>
             </Show>

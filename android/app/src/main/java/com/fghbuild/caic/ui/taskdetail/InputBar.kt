@@ -21,6 +21,13 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.StopCircle
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.outlined.ForkRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
@@ -56,6 +63,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import com.fghbuild.caic.R
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -224,12 +233,20 @@ fun InputBar(
                     ) {
                         DropdownMenuItem(
                             text = { Text(syncLabel) },
+                            leadingIcon = {
+                                when (forge) {
+                                    "github" -> Icon(painterResource(R.drawable.ic_github), contentDescription = null)
+                                    "gitlab" -> Icon(painterResource(R.drawable.ic_gitlab), contentDescription = null)
+                                    else -> Icon(Icons.Default.Sync, contentDescription = null)
+                                }
+                            },
                             enabled = taskState != "purging",
                             onClick = { contextMenuExpanded = false; onSync() },
                         )
                         if (taskBaseBranch.isNotBlank()) {
                             DropdownMenuItem(
                                 text = { Text("Push to $taskBaseBranch") },
+                                leadingIcon = { Icon(Icons.Default.Sync, contentDescription = null) },
                                 enabled = taskState != "purging",
                                 onClick = { contextMenuExpanded = false; onSyncToBaseBranch() },
                             )
@@ -237,6 +254,9 @@ fun InputBar(
                         if (isActive) {
                             DropdownMenuItem(
                                 text = { Text("Stop", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.StopCircle, null, tint = MaterialTheme.colorScheme.error)
+                                },
                                 onClick = {
                                     contextMenuExpanded = false
                                     if (taskState == "running") showStopConfirm = true else onStop()
@@ -247,6 +267,7 @@ fun InputBar(
                         if (isStopped) {
                             DropdownMenuItem(
                                 text = { Text("Revive") },
+                                leadingIcon = { Icon(Icons.Default.RestartAlt, contentDescription = null) },
                                 onClick = { contextMenuExpanded = false; onRevive() },
                                 modifier = Modifier.testTag("revive-task"),
                             )
@@ -254,18 +275,23 @@ fun InputBar(
                         if (isActive || isStopped) {
                             DropdownMenuItem(
                                 text = { Text("Purge", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
+                                },
                                 onClick = { contextMenuExpanded = false; showPurgeConfirm = true },
                                 modifier = Modifier.testTag("purge-task"),
                             )
                         }
                         DropdownMenuItem(
                             text = { Text("Clear context") },
+                            leadingIcon = { Icon(Icons.Default.Block, contentDescription = null) },
                             enabled = false,
                             onClick = { contextMenuExpanded = false; onClearContext() },
                         )
                         if (supportsCompact) {
                             DropdownMenuItem(
                                 text = { Text("Compact context") },
+                                leadingIcon = { Icon(Icons.Default.Compress, contentDescription = null) },
                                 enabled = isWaiting,
                                 onClick = { contextMenuExpanded = false; onCompact() },
                             )
@@ -273,6 +299,7 @@ fun InputBar(
                         if (taskRepo.isNotEmpty()) {
                             DropdownMenuItem(
                                 text = { Text("Fork") },
+                                leadingIcon = { Icon(Icons.Outlined.ForkRight, contentDescription = null) },
                                 onClick = { contextMenuExpanded = false; showForkDialog = true },
                             )
                         }
