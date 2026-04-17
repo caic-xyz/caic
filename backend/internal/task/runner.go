@@ -20,6 +20,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
+	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/gitutil"
 	"golang.org/x/sync/errgroup"
@@ -146,6 +147,7 @@ func (r *Runner) initDefaults() {
 				agent.Claude:   claudecode.New(),
 				agent.Codex:    codex.New(),
 				agent.OpenCode: opencode.New(r.CacheDir, r.HarnessEnv[string(agent.OpenCode)]),
+				agent.Pi:       pi.New(r.CacheDir, r.HarnessEnv[string(agent.Pi)]),
 			}
 		}
 		if r.GitTimeout == 0 {
