@@ -35,6 +35,11 @@ CSS Modules with design tokens defined as CSS custom properties in `src/global.c
 Use `var(--color-*)` and `var(--radius-*)` variables instead of hardcoded hex colors
 or pixel radii. Add new tokens to `:root` in `global.css` when introducing new colors.
 
+## Mobile
+
+No back-navigation button is needed on mobile — the browser's swipe gesture
+and back button handle it. Do not add a back arrow to the task detail header.
+
 ## Development
 
 ```bash
