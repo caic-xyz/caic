@@ -9,6 +9,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -36,6 +38,7 @@ import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
 import java.io.IOException
 import java.net.HttpURLConnection.HTTP_UNAUTHORIZED
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -71,7 +74,10 @@ class TaskRepository @Inject constructor(
     private val _warnings = MutableSharedFlow<String>(extraBufferCapacity = 10)
     val warnings: SharedFlow<String> = _warnings.asSharedFlow()
 
-    private val client = OkHttpClient()
+    // SSE connections are long-lived; disable the read timeout so idle
+    // connections (e.g. per-task events with no activity) don't trigger
+    // SocketTimeoutException and cause constant reconnects.
+    private val client = OkHttpClient.Builder().readTimeout(0, TimeUnit.SECONDS).build()
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
@@ -161,7 +167,7 @@ class TaskRepository @Inject constructor(
             }
         })
         awaitClose { source.cancel() }
-    }
+    }.buffer(Channel.UNLIMITED)
 
     /** Merges patch fields from [TaskListEvent.patch] into an existing [Task] via JSON round-trip. */
     private fun applyPatch(existing: Task, patch: Map<String, kotlinx.serialization.json.JsonElement>): Task {
@@ -214,7 +220,7 @@ class TaskRepository @Inject constructor(
             }
         })
         awaitClose { source.cancel() }
-    }
+    }.buffer(Channel.UNLIMITED)
 
     /** SSE flow for the usage events endpoint. */
     private fun usageEvents(baseURL: String): Flow<UsageResp> = sseFlow("$baseURL/api/v1/server/usage/events")
@@ -245,7 +251,7 @@ class TaskRepository @Inject constructor(
             }
         })
         awaitClose { source.cancel() }
-    }
+    }.buffer(Channel.UNLIMITED)
 
     /** Returns [SseAuthException] for HTTP 401 responses, generic [IOException] otherwise. */
     private fun sseFailureException(t: Throwable?, response: Response?): IOException? {
