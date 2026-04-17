@@ -27,6 +27,7 @@ import ForkIcon from "@material-symbols/svg-400/outlined/fork_right.svg?solid";
 import GitHubIcon from "./github.svg?solid";
 import GitLabIcon from "./gitlab.svg?solid";
 import WidgetCard from "./WidgetCard";
+import { confirmTaskAction } from "./TaskCard";
 import styles from "./TaskDetail.module.css";
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
