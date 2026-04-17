@@ -5,8 +5,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.ui.res.painterResource
-import com.fghbuild.caic.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,10 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
@@ -46,7 +41,6 @@ import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -160,205 +154,64 @@ fun InputBar(
                 }
             }
         }
-        OutlinedTextField(
-            value = draft,
-            onValueChange = onDraftChange,
-            modifier = Modifier
-                .fillMaxWidth()
-                .onKeyEvent {
-                    if (it.key == Key.Enter && it.type == KeyEventType.KeyUp && hasContent && !busy) {
-                        onSend(); true
-                    } else false
-                },
-            placeholder = { Text("Message...") },
-            maxLines = 6,
-            enabled = !busy,
-            trailingIcon = {
-                Column(verticalArrangement = Arrangement.Top) {
-                    Row {
-                        if (supportsImages) {
-                            AttachMenu(
-                                enabled = !busy,
-                                onGallery = onAttachGallery,
-                                onCamera = onAttachCamera,
-                                onScreenshot = onScreenshot,
-                            )
-                        }
-                        if (sending) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                        } else {
-                            IconButton(onClick = onSend, enabled = hasContent && !busy, modifier = Modifier.testTag("send-input")) {
-                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
-                            }
-                        }
-                    }
-                }
-            },
-        )
+        val syncLabel = when {
+            (forge == "github" || forge == "gitlab") && (forgePR == null || forgePR == 0) -> "Create PR"
+            else -> "Push"
+        }
+        val waitingStates = setOf("waiting", "asking", "has_plan")
+        val activeStates = setOf("waiting", "running", "asking", "has_plan")
+        val isStopped = taskState == "stopped"
+        val isActive = taskState in activeStates
+        val isWaiting = taskState in waitingStates
+        var contextMenuExpanded by remember { mutableStateOf(false) }
+        var showForkDialog by remember { mutableStateOf(false) }
+        var forkPrompt by remember { mutableStateOf("") }
+        var showStopConfirm by remember { mutableStateOf(false) }
+        var showPurgeConfirm by remember { mutableStateOf(false) }
         Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            if (pendingAction == "sync") {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(8.dp))
-            } else {
-                val syncLabel = when {
-                    (forge == "github" || forge == "gitlab") && (forgePR == null || forgePR == 0) -> "Create PR"
-                    else -> "Push"
-                }
-                var syncMenuExpanded by remember { mutableStateOf(false) }
-                Box {
-                    Tip(syncLabel) {
-                        IconButton(onClick = onSync, enabled = !busy) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                when (forge) {
-                                    "github" ->
-                                        Icon(painterResource(R.drawable.ic_github), contentDescription = syncLabel)
-                                    "gitlab" ->
-                                        Icon(painterResource(R.drawable.ic_gitlab), contentDescription = syncLabel)
-                                    else ->
-                                        Icon(Icons.Default.Sync, contentDescription = syncLabel)
-                                }
-                                Text(syncLabel, style = MaterialTheme.typography.labelSmall)
+            OutlinedTextField(
+                value = draft,
+                onValueChange = onDraftChange,
+                modifier = Modifier
+                    .weight(1f)
+                    .onKeyEvent {
+                        if (it.key == Key.Enter && it.type == KeyEventType.KeyUp && hasContent && !busy) {
+                            onSend(); true
+                        } else false
+                    },
+                placeholder = { Text("Message...") },
+                maxLines = 6,
+                enabled = !busy,
+                trailingIcon = {
+                    Column(verticalArrangement = Arrangement.Top) {
+                        Row {
+                            if (supportsImages) {
+                                AttachMenu(
+                                    enabled = !busy,
+                                    onGallery = onAttachGallery,
+                                    onCamera = onAttachCamera,
+                                    onScreenshot = onScreenshot,
+                                )
                             }
-                        }
-                    }
-                    if (taskBaseBranch.isNotBlank()) {
-                        IconButton(
-                            onClick = { syncMenuExpanded = true },
-                            enabled = !busy,
-                            modifier = Modifier.size(16.dp).align(Alignment.BottomEnd),
-                        ) {
-                            Icon(
-                                Icons.Default.ArrowDropDown,
-                                contentDescription = "Sync options",
-                                modifier = Modifier.size(12.dp),
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = syncMenuExpanded,
-                            onDismissRequest = { syncMenuExpanded = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Push to $taskBaseBranch") },
-                                onClick = { syncMenuExpanded = false; onSyncToBaseBranch() },
-                            )
-                        }
-                    }
-                }
-            }
-            val waitingStates = setOf("waiting", "asking", "has_plan")
-            val activeStates = setOf("waiting", "running", "asking", "has_plan")
-            val isStopped = taskState == "stopped"
-            val isActive = taskState in activeStates
-            val isWaiting = taskState in waitingStates
-            if (pendingAction == "stop" || pendingAction == "purge" || pendingAction == "revive" || pendingAction == "fork") {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(8.dp))
-            } else if (isStopped) {
-                Tip("Revive") {
-                    IconButton(onClick = onRevive, enabled = !busy, modifier = Modifier.testTag("revive-task")) {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = "Revive",
-                            tint = MaterialTheme.appColors.success,
-                        )
-                    }
-                }
-                var showPurgeConfirm by remember { mutableStateOf(false) }
-                Tip("Purge") {
-                    IconButton(onClick = { showPurgeConfirm = true }, enabled = !busy, modifier = Modifier.testTag("purge-task")) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = "Purge",
-                            tint = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
-                if (showPurgeConfirm) {
-                    AlertDialog(
-                        onDismissRequest = { showPurgeConfirm = false },
-                        title = { Text("Purge container?") },
-                        text = { Text("$taskTitle\nrepo: $taskRepo\nbranch: $taskBranch") },
-                        confirmButton = {
-                            TextButton(onClick = { showPurgeConfirm = false; onPurge() }) {
-                                Text("Purge")
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showPurgeConfirm = false }) {
-                                Text("Cancel")
-                            }
-                        },
-                    )
-                }
-            } else if (isActive) {
-                var showStopConfirm by remember { mutableStateOf(false) }
-                var showPurgeFromActive by remember { mutableStateOf(false) }
-                var lastStopTap by remember { mutableLongStateOf(0L) }
-                Tip("Stop (double-tap to purge)") {
-                    IconButton(
-                        onClick = {
-                            val now = System.currentTimeMillis()
-                            if (now - lastStopTap < 400) {
-                                // Double-tap: skip stop, go straight to purge.
-                                lastStopTap = 0L
-                                showPurgeFromActive = true
+                            if (sending) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
                             } else {
-                                lastStopTap = now
-                                if (taskState == "running") showStopConfirm = true else onStop()
+                                IconButton(onClick = onSend, enabled = hasContent && !busy, modifier = Modifier.testTag("send-input")) {
+                                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                                }
                             }
-                        },
-                        enabled = !busy,
-                        modifier = Modifier.testTag("stop-task"),
-                    ) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = "Stop",
-                            tint = MaterialTheme.colorScheme.error,
-                        )
+                        }
                     }
-                }
-                if (showStopConfirm) {
-                    AlertDialog(
-                        onDismissRequest = { showStopConfirm = false },
-                        title = { Text("Stop task?") },
-                        text = { Text("$taskTitle\nrepo: $taskRepo\nbranch: $taskBranch") },
-                        confirmButton = {
-                            TextButton(onClick = { showStopConfirm = false; onStop() }) {
-                                Text("Stop")
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showStopConfirm = false }) {
-                                Text("Cancel")
-                            }
-                        },
-                    )
-                }
-                if (showPurgeFromActive) {
-                    AlertDialog(
-                        onDismissRequest = { showPurgeFromActive = false },
-                        title = { Text("Purge container?") },
-                        text = { Text("$taskTitle\nrepo: $taskRepo\nbranch: $taskBranch") },
-                        confirmButton = {
-                            TextButton(onClick = { showPurgeFromActive = false; onPurge() }) {
-                                Text("Purge")
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showPurgeFromActive = false }) {
-                                Text("Cancel")
-                            }
-                        },
-                    )
-                }
-            }
-            if (pendingAction == "clear-context" || pendingAction == "compact") {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(8.dp))
+                },
+            )
+            if (pendingAction == "clear-context" || pendingAction == "compact" || pendingAction == "sync" ||
+                pendingAction == "stop" || pendingAction == "purge" || pendingAction == "revive" || pendingAction == "fork"
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(4.dp))
             } else {
-                var contextMenuExpanded by remember { mutableStateOf(false) }
-                var showForkDialog by remember { mutableStateOf(false) }
-                var forkPrompt by remember { mutableStateOf("") }
                 Box {
                     Tip("Context actions") {
                         IconButton(onClick = { contextMenuExpanded = true }, enabled = !busy) {
@@ -369,6 +222,42 @@ fun InputBar(
                         expanded = contextMenuExpanded,
                         onDismissRequest = { contextMenuExpanded = false },
                     ) {
+                        DropdownMenuItem(
+                            text = { Text(syncLabel) },
+                            enabled = taskState != "purging",
+                            onClick = { contextMenuExpanded = false; onSync() },
+                        )
+                        if (taskBaseBranch.isNotBlank()) {
+                            DropdownMenuItem(
+                                text = { Text("Push to $taskBaseBranch") },
+                                enabled = taskState != "purging",
+                                onClick = { contextMenuExpanded = false; onSyncToBaseBranch() },
+                            )
+                        }
+                        if (isActive) {
+                            DropdownMenuItem(
+                                text = { Text("Stop", color = MaterialTheme.colorScheme.error) },
+                                onClick = {
+                                    contextMenuExpanded = false
+                                    if (taskState == "running") showStopConfirm = true else onStop()
+                                },
+                                modifier = Modifier.testTag("stop-task"),
+                            )
+                        }
+                        if (isStopped) {
+                            DropdownMenuItem(
+                                text = { Text("Revive") },
+                                onClick = { contextMenuExpanded = false; onRevive() },
+                                modifier = Modifier.testTag("revive-task"),
+                            )
+                        }
+                        if (isActive || isStopped) {
+                            DropdownMenuItem(
+                                text = { Text("Purge", color = MaterialTheme.colorScheme.error) },
+                                onClick = { contextMenuExpanded = false; showPurgeConfirm = true },
+                                modifier = Modifier.testTag("purge-task"),
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Clear context") },
                             enabled = false,
@@ -389,94 +278,128 @@ fun InputBar(
                         }
                     }
                 }
-                if (showForkDialog) {
-                    val forkFocus = remember { FocusRequester() }
-                    var forkSelectedHarness by remember { mutableStateOf(taskHarness) }
-                    var forkSelectedModel by remember { mutableStateOf(taskModel) }
-                    var forkExtraRepos by remember { mutableStateOf(emptyList<RepoEntry>()) }
-                    val forkExtraPaths = forkExtraRepos.map { it.path }.toSet()
-                    AlertDialog(
-                        onDismissRequest = { showForkDialog = false },
-                        title = { Text("Fork task") },
-                        text = {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(
-                                    value = forkPrompt,
-                                    onValueChange = { forkPrompt = it },
-                                    label = { Text("Prompt for forked task") },
-                                    modifier = Modifier.fillMaxWidth().focusRequester(forkFocus),
-                                )
-                                if (forkAvailableRecent.isNotEmpty() || forkAvailableRest.isNotEmpty() ||
-                                    forkExtraRepos.isNotEmpty()
-                                ) {
-                                    RepoChipStrip(
-                                        selectedRepos = forkExtraRepos,
-                                        repos = allRepos,
-                                        availableRecent = forkAvailableRecent.filter { it.path !in forkExtraPaths },
-                                        availableRest = forkAvailableRest.filter { it.path !in forkExtraPaths },
-                                        editingBranches = emptyList(),
-                                        enabled = true,
-                                        onAdd = { path ->
-                                            forkExtraRepos = forkExtraRepos + RepoEntry(path, "")
-                                        },
-                                        onRemove = { path ->
-                                            forkExtraRepos = forkExtraRepos.filter { it.path != path }
-                                        },
-                                        onSetBranch = { path, branch ->
-                                            forkExtraRepos = forkExtraRepos.map {
-                                                if (it.path == path) it.copy(branch = branch) else it
-                                            }
-                                        },
-                                        onLoadBranches = {},
-                                    )
-                                }
-                                if (harnesses.size > 1) {
-                                    ForkDropdown(
-                                        label = "Harness",
-                                        selected = forkSelectedHarness,
-                                        options = harnesses.map { it.name },
-                                        onSelect = { h ->
-                                            forkSelectedHarness = h
-                                            val models = harnesses.firstOrNull { it.name == h }?.models.orEmpty()
-                                            if (forkSelectedModel !in models) forkSelectedModel = ""
-                                        },
-                                    )
-                                }
-                                val models =
-                                    harnesses.firstOrNull { it.name == forkSelectedHarness }?.models.orEmpty()
-                                if (models.isNotEmpty()) {
-                                    ForkDropdown(
-                                        label = "Model",
-                                        selected = forkSelectedModel.ifBlank { "Default" },
-                                        options = listOf("Default") + models,
-                                        onSelect = { m ->
-                                            forkSelectedModel = if (m == "Default") "" else m
-                                        },
-                                    )
-                                }
-                                LaunchedEffect(Unit) { forkFocus.requestFocus() }
-                            }
-                        },
-                        confirmButton = {
-                            TextButton(
-                                onClick = {
-                                    showForkDialog = false
-                                    val h = forkSelectedHarness.takeIf { it != taskHarness }
-                                    val m = forkSelectedModel.takeIf { it != taskModel }
-                                    val extras = forkExtraRepos.takeIf { it.isNotEmpty() }?.map {
-                                        RepoSpec(name = it.path, baseBranch = it.branch.ifBlank { null })
-                                    }
-                                    onFork(forkPrompt.trim(), h, m, extras)
-                                },
-                                enabled = forkPrompt.isNotBlank(),
-                            ) { Text("Fork") }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { showForkDialog = false }) { Text("Cancel") }
-                        },
-                    )
-                }
             }
+        }
+        if (showStopConfirm) {
+            AlertDialog(
+                onDismissRequest = { showStopConfirm = false },
+                title = { Text("Stop task?") },
+                text = { Text("$taskTitle\nrepo: $taskRepo\nbranch: $taskBranch") },
+                confirmButton = {
+                    TextButton(onClick = { showStopConfirm = false; onStop() }) {
+                        Text("Stop")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showStopConfirm = false }) {
+                        Text("Cancel")
+                    }
+                },
+            )
+        }
+        if (showPurgeConfirm) {
+            AlertDialog(
+                onDismissRequest = { showPurgeConfirm = false },
+                title = { Text("Purge container?") },
+                text = { Text("$taskTitle\nrepo: $taskRepo\nbranch: $taskBranch") },
+                confirmButton = {
+                    TextButton(onClick = { showPurgeConfirm = false; onPurge() }) {
+                        Text("Purge")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showPurgeConfirm = false }) {
+                        Text("Cancel")
+                    }
+                },
+            )
+        }
+        if (showForkDialog) {
+            val forkFocus = remember { FocusRequester() }
+            var forkSelectedHarness by remember { mutableStateOf(taskHarness) }
+            var forkSelectedModel by remember { mutableStateOf(taskModel) }
+            var forkExtraRepos by remember { mutableStateOf(emptyList<RepoEntry>()) }
+            val forkExtraPaths = forkExtraRepos.map { it.path }.toSet()
+            AlertDialog(
+                onDismissRequest = { showForkDialog = false },
+                title = { Text("Fork task") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = forkPrompt,
+                            onValueChange = { forkPrompt = it },
+                            label = { Text("Prompt for forked task") },
+                            modifier = Modifier.fillMaxWidth().focusRequester(forkFocus),
+                        )
+                        if (forkAvailableRecent.isNotEmpty() || forkAvailableRest.isNotEmpty() ||
+                            forkExtraRepos.isNotEmpty()
+                        ) {
+                            RepoChipStrip(
+                                selectedRepos = forkExtraRepos,
+                                repos = allRepos,
+                                availableRecent = forkAvailableRecent.filter { it.path !in forkExtraPaths },
+                                availableRest = forkAvailableRest.filter { it.path !in forkExtraPaths },
+                                editingBranches = emptyList(),
+                                enabled = true,
+                                onAdd = { path ->
+                                    forkExtraRepos = forkExtraRepos + RepoEntry(path, "")
+                                },
+                                onRemove = { path ->
+                                    forkExtraRepos = forkExtraRepos.filter { it.path != path }
+                                },
+                                onSetBranch = { path, branch ->
+                                    forkExtraRepos = forkExtraRepos.map {
+                                        if (it.path == path) it.copy(branch = branch) else it
+                                    }
+                                },
+                                onLoadBranches = {},
+                            )
+                        }
+                        if (harnesses.size > 1) {
+                            ForkDropdown(
+                                label = "Harness",
+                                selected = forkSelectedHarness,
+                                options = harnesses.map { it.name },
+                                onSelect = { h ->
+                                    forkSelectedHarness = h
+                                    val models = harnesses.firstOrNull { it.name == h }?.models.orEmpty()
+                                    if (forkSelectedModel !in models) forkSelectedModel = ""
+                                },
+                            )
+                        }
+                        val models =
+                            harnesses.firstOrNull { it.name == forkSelectedHarness }?.models.orEmpty()
+                        if (models.isNotEmpty()) {
+                            ForkDropdown(
+                                label = "Model",
+                                selected = forkSelectedModel.ifBlank { "Default" },
+                                options = listOf("Default") + models,
+                                onSelect = { m ->
+                                    forkSelectedModel = if (m == "Default") "" else m
+                                },
+                            )
+                        }
+                        LaunchedEffect(Unit) { forkFocus.requestFocus() }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showForkDialog = false
+                            val h = forkSelectedHarness.takeIf { it != taskHarness }
+                            val m = forkSelectedModel.takeIf { it != taskModel }
+                            val extras = forkExtraRepos.takeIf { it.isNotEmpty() }?.map {
+                                RepoSpec(name = it.path, baseBranch = it.branch.ifBlank { null })
+                            }
+                            onFork(forkPrompt.trim(), h, m, extras)
+                        },
+                        enabled = forkPrompt.isNotBlank(),
+                    ) { Text("Fork") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showForkDialog = false }) { Text("Cancel") }
+                },
+            )
         }
     }
 }

@@ -885,6 +885,9 @@ export default function App() {
                   diffStat={selectedTask()?.diffStat}
                   supportsImages={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsImages}
                   supportsCompact={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsCompact}
+                  onStop={handleStop}
+                  onPurge={handlePurge}
+                  onRevive={handleRevive}
                   onFork={handleFork}
                   onClose={() => navigate("/")}
                   inputDraft={inputDrafts().get(id) ?? ""}

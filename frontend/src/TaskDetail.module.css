@@ -102,6 +102,9 @@ a.headerPR:hover {
 }
 
 .inputForm {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.25rem;
   margin-top: 0.5rem;
 }
 
@@ -1021,26 +1024,6 @@ a.ciStatus:hover {
   align-items: stretch;
 }
 
-.syncDropdownToggle {
-  border: 1px solid var(--color-border-medium);
-  border-left: none;
-  background: var(--color-bg-input);
-  cursor: pointer;
-  font-size: 0.75rem;
-  padding: 0 0.5rem;
-  border-radius: 0 4px 4px 0;
-  color: var(--color-text-secondary);
-}
-
-.syncDropdownToggle:hover:not(:disabled) {
-  background: #e0e0e0;
-}
-
-.syncDropdownToggle:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
 .syncDropdown {
   position: absolute;
   bottom: 100%;
@@ -1107,6 +1090,10 @@ a.ciStatus:hover {
   background: none;
 }
 
+.syncDropdownItemDanger {
+  color: var(--color-danger);
+}
+
 /* Mobile: <=768px */
 @media (max-width: 768px) {
   .container {
@@ -1114,7 +1101,6 @@ a.ciStatus:hover {
   }
 
   .inputForm {
-    flex-wrap: wrap;
     padding: 0 0.5rem;
   }
 
@@ -1126,12 +1112,6 @@ a.ciStatus:hover {
     display: block;
   }
 
-  .textInput {
-    width: 100%;
-    flex: none;
-    box-sizing: border-box;
-    min-height: 2.5rem;
-  }
 
   .messageArea {
     min-height: 0;

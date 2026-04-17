@@ -17,9 +17,6 @@ import StatsIcon from "./StatsIcon";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
-import SyncIcon from "@material-symbols/svg-400/outlined/sync.svg?solid";
-import GitHubIcon from "./github.svg?solid";
-import GitLabIcon from "./gitlab.svg?solid";
 import WidgetCard from "./WidgetCard";
 import styles from "./TaskDetail.module.css";
 
@@ -61,6 +58,9 @@ interface Props {
   diffStat?: DiffFileStat[];
   supportsImages?: boolean;
   supportsCompact?: boolean;
+  onStop: (id: string) => void;
+  onPurge: (id: string) => void;
+  onRevive: (id: string) => void;
   onFork?: (id: string) => void;
   onClose: () => void;
   inputDraft: string;
@@ -126,7 +126,6 @@ export default function TaskDetail(props: Props) {
   const [pendingAction, setPendingAction] = createSignal<"sync" | "restart" | "clear-context" | "compact" | null>(null);
   const [actionError, setActionError] = createSignal<string | null>(null);
   const [safetyIssues, setSafetyIssues] = createSignal<SafetyIssue[]>([]);
-  const [syncMenuOpen, setSyncMenuOpen] = createSignal(false);
   const [contextMenuOpen, setContextMenuOpen] = createSignal(false);
   const [fixingPR, setFixingPR] = createSignal(false);
 
@@ -157,18 +156,6 @@ export default function TaskDetail(props: Props) {
     if (messageAreaRef && !userScrolledUp) {
       messageAreaRef.scrollTop = messageAreaRef.scrollHeight;
     }
-  }
-
-  // Close sync dropdown on outside click.
-  {
-    const onOutsideClick = (e: MouseEvent) => {
-      if (!syncMenuOpen()) return;
-      const target = e.target as HTMLElement;
-      if (target.closest(`.${styles.syncButtonGroup}`)) return;
-      setSyncMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onOutsideClick);
-    onCleanup(() => document.removeEventListener("mousedown", onOutsideClick));
   }
 
   // Scroll to bottom whenever messages change, if the user hasn't scrolled up.
@@ -686,45 +673,36 @@ export default function TaskDetail(props: Props) {
             images={props.inputImages}
             onImagesChange={props.onInputImages}
             sendButton={<Button type="submit" disabled={sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)} title="Send" data-testid="send-input"><SendIcon width="1.1em" height="1.1em" /></Button>}
-          >
-            <div class={styles.syncButtonGroup}>
-              <Button type="button" variant="gray" loading={pendingAction() === "sync"} disabled={!!pendingAction() || props.taskState === "purging"} onClick={() => doSync(false)} title={`Push to ${props.branch}`}>
-                <Switch fallback={<SyncIcon width="1.1em" height="1.1em" />}>
-                  <Match when={props.forge === "github"}>
-                    <GitHubIcon width="1.1em" height="1.1em" style={{ color: "black" }} />
-                  </Match>
-                  <Match when={props.forge === "gitlab"}>
-                    <GitLabIcon width="1.1em" height="1.1em" style={{ color: "#e24329" }} />
-                  </Match>
-                </Switch>
-                {props.forge ? (props.forgePR ? " Push" : " Create PR") : " Push"}
-              </Button>
-              <button type="button" class={styles.syncDropdownToggle} disabled={!!pendingAction() || props.taskState === "purging"} onClick={() => setSyncMenuOpen((v) => !v)} aria-label="Sync options">&#9660;</button>
-              <Show when={syncMenuOpen()}>
-                <div class={styles.syncDropdown}>
-                  <button type="button" class={styles.syncDropdownItem} onClick={() => doSync(false, SyncTargetDefault)}>Push to {props.baseBranch}</button>
-                </div>
-              </Show>
-            </div>
-            <div class={styles.syncButtonGroup}>
-              <Show when={pendingAction() === "clear-context" || pendingAction() === "compact"} fallback={
-                <button type="button" class={styles.contextMenuToggle} disabled={!!pendingAction()} onClick={() => setContextMenuOpen((v) => !v)} aria-label="Context actions" title="Context actions">&#8942;</button>
-              }>
-                <button type="button" class={styles.contextMenuToggle} disabled>&#8987;</button>
-              </Show>
-              <Show when={contextMenuOpen()}>
-                <div class={styles.syncDropdown}>
-                  <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDisabled}`} disabled onClick={() => { setContextMenuOpen(false); doClearContext(); }}>Clear context</button>
-                  <Show when={props.supportsCompact}>
-                    <button type="button" class={`${styles.syncDropdownItem} ${!isWaiting() ? styles.syncDropdownItemDisabled : ""}`} disabled={!isWaiting()} onClick={() => { setContextMenuOpen(false); doCompact(); }}>Compact context</button>
-                  </Show>
-                  <Show when={props.onFork && props.repo}>
-                    <button type="button" class={styles.syncDropdownItem} onClick={() => { setContextMenuOpen(false); props.onFork?.(props.taskId); }}>Fork</button>
-                  </Show>
-                </div>
-              </Show>
-            </div>
-          </PromptInput>
+          />
+          <div class={styles.syncButtonGroup}>
+            <Show when={!!pendingAction()} fallback={
+              <button type="button" class={styles.contextMenuToggle} disabled={!!pendingAction()} onClick={() => setContextMenuOpen((v) => !v)} aria-label="Context actions" title="Context actions">&#8942;</button>
+            }>
+              <button type="button" class={styles.contextMenuToggle} disabled>&#8987;</button>
+            </Show>
+            <Show when={contextMenuOpen()}>
+              <div class={styles.syncDropdown}>
+                <button type="button" class={`${styles.syncDropdownItem} ${props.taskState === "purging" ? styles.syncDropdownItemDisabled : ""}`} disabled={props.taskState === "purging"} onClick={() => { setContextMenuOpen(false); doSync(false); }}>{props.forge ? (props.forgePR ? "Push" : "Create PR") : "Push"}</button>
+                <button type="button" class={`${styles.syncDropdownItem} ${props.taskState === "purging" ? styles.syncDropdownItemDisabled : ""}`} disabled={props.taskState === "purging"} onClick={() => { setContextMenuOpen(false); doSync(false, SyncTargetDefault); }}>Push to {props.baseBranch}</button>
+                <Show when={isActive()}>
+                  <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDanger}`} onClick={() => { setContextMenuOpen(false); props.onStop(props.taskId); }}>Stop</button>
+                </Show>
+                <Show when={props.taskState === "stopped"}>
+                  <button type="button" class={styles.syncDropdownItem} onClick={() => { setContextMenuOpen(false); props.onRevive(props.taskId); }}>Revive</button>
+                </Show>
+                <Show when={isActive() || props.taskState === "stopped"}>
+                  <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDanger}`} onClick={() => { setContextMenuOpen(false); props.onPurge(props.taskId); }}>Purge</button>
+                </Show>
+                <button type="button" class={`${styles.syncDropdownItem} ${styles.syncDropdownItemDisabled}`} disabled onClick={() => { setContextMenuOpen(false); doClearContext(); }}>Clear context</button>
+                <Show when={props.supportsCompact}>
+                  <button type="button" class={`${styles.syncDropdownItem} ${!isWaiting() ? styles.syncDropdownItemDisabled : ""}`} disabled={!isWaiting()} onClick={() => { setContextMenuOpen(false); doCompact(); }}>Compact context</button>
+                </Show>
+                <Show when={props.onFork && props.repo}>
+                  <button type="button" class={styles.syncDropdownItem} onClick={() => { setContextMenuOpen(false); props.onFork?.(props.taskId); }}>Fork</button>
+                </Show>
+              </div>
+            </Show>
+          </div>
         </form>
         <Show when={safetyIssues().length > 0}>
           <div class={styles.safetyWarning}>

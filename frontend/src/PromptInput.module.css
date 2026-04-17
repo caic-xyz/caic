@@ -38,6 +38,7 @@
   box-shadow: 0 0 0 1px var(--color-primary-ring);
 }
 
+/* Anchored to the top so that multiline text can flow beneath the buttons. */
 .trailing {
   position: absolute;
   top: 0.25rem;
@@ -145,4 +146,3 @@
 .menuItem svg {
   flex-shrink: 0;
 }
-
