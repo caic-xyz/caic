@@ -48,7 +48,8 @@ func (stubBackend) NewParser() func([]byte) ([]agent.Message, error) {
 	return claudecode.New().NewParser()
 }
 
-func (stubBackend) Models() []string { return []string{"m1", "m2"} }
+func (stubBackend) Models() []string   { return []string{"m1", "m2"} }
+func (stubBackend) SetModels([]string) {}
 
 func (stubBackend) SupportsImages() bool { return false }
 

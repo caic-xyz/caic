@@ -29,6 +29,10 @@ type Backend interface {
 	// Models returns the list of model names supported by this backend.
 	Models() []string
 
+	// SetModels replaces the model list. Used by the server to push
+	// dynamically-fetched models into all runners.
+	SetModels(models []string)
+
 	// SupportsImages reports whether this backend accepts image content blocks.
 	SupportsImages() bool
 
@@ -61,6 +65,9 @@ func (b *Base) Harness() Harness { return b.HarnessID }
 
 // Models implements Backend.
 func (b *Base) Models() []string { return b.ModelList }
+
+// SetModels implements Backend.
+func (b *Base) SetModels(models []string) { b.ModelList = models }
 
 // SupportsImages implements Backend.
 func (b *Base) SupportsImages() bool { return b.Images }

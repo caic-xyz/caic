@@ -52,7 +52,8 @@ func (b *testBackend) NewParser() func([]byte) ([]agent.Message, error) {
 	return claudecode.New().NewParser()
 }
 
-func (b *testBackend) Models() []string { return []string{"test-model"} }
+func (b *testBackend) Models() []string   { return []string{"test-model"} }
+func (b *testBackend) SetModels([]string) {}
 
 // SupportsImages always returns false in the test backend.
 func (b *testBackend) SupportsImages() bool { return false }

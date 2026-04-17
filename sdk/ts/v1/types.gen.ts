@@ -405,6 +405,10 @@ export const HarnessKilo: Harness = "kilo";
  */
 export const HarnessOpenCode: Harness = "opencode";
 /**
+ * Supported agent harnesses.
+ */
+export const HarnessPi: Harness = "pi";
+/**
  * HarnessInfo is the JSON representation of an available harness.
  */
 export interface HarnessInfo {

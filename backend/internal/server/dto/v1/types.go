@@ -33,6 +33,7 @@ const (
 	HarnessGemini   Harness = "gemini"
 	HarnessKilo     Harness = "kilo"
 	HarnessOpenCode Harness = "opencode"
+	HarnessPi       Harness = "pi"
 )
 
 // HarnessInfo is the JSON representation of an available harness.

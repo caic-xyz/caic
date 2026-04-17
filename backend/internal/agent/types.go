@@ -17,6 +17,7 @@ const (
 	Gemini   Harness = "gemini"
 	Kilo     Harness = "kilo"
 	OpenCode Harness = "opencode"
+	Pi       Harness = "pi"
 )
 
 // DiffFileStat describes changes to a single file.

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/container"
@@ -156,7 +157,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("open preferences: %w", err)
 	}
 
-	backend := &container.Backend{Client: mdClient}
+	backend := &container.Backend{Client: mdClient, HarnessEnv: cfg.HarnessEnv}
 
 	cachePath := filepath.Join(cfg.CacheDir, "ci_results.json")
 	cache, err := forgecache.Open(cachePath)
@@ -179,6 +180,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		runners:            make(map[string]*task.Runner, len(repoRes.paths)),
 		mdClient:           mdClient,
 		logDir:             logDir,
+		cacheDir:           cfg.CacheDir,
 		prefs:              prefsStore,
 		authStore:          authStore,
 		sessionSecret:      sessionSecret,
@@ -274,6 +276,8 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 				BaseBranch: branch,
 				Dir:        abs,
 				LogDir:     logDir,
+				CacheDir:   cfg.CacheDir,
+				HarnessEnv: cfg.HarnessEnv,
 				Container:  backend,
 			}
 			if err := runner.Init(ctx); err != nil {
@@ -309,7 +313,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 
 	// Always register a no-repo runner (keyed by "") for tasks that don't
 	// need a git repository.
-	noRepoRunner := &task.Runner{LogDir: logDir, Container: backend}
+	noRepoRunner := &task.Runner{LogDir: logDir, CacheDir: cfg.CacheDir, HarnessEnv: cfg.HarnessEnv, Container: backend}
 	_ = noRepoRunner.Init(ctx) // populates Backends; no-op for no-repo (no branches to scan)
 	s.runners[""] = noRepoRunner
 
@@ -344,7 +348,8 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 
 	s.watchContainerEvents(ctx)
 	go s.warmupImages()
-	go s.pollStats(s.ctx) //nolint:contextcheck // server-lifetime context is intentional
+	go s.refreshHarnessModels() //nolint:contextcheck // server-lifetime goroutine, uses s.ctx internally
+	go s.pollStats(s.ctx)       //nolint:contextcheck // server-lifetime context is intentional
 	return s, nil
 }
 
@@ -1011,6 +1016,64 @@ func (s *Server) warmupImages() {
 		case <-ticker.C:
 		case <-s.ctx.Done():
 			return
+		}
+	}
+}
+
+// refreshHarnessModels checks if any harness caches are stale and refreshes
+// them by launching a temporary container. Runs once at startup.
+func (s *Server) refreshHarnessModels() {
+	cache := agent.OpenHarnessCache(filepath.Join(s.cacheDir, "harnesses.json"))
+
+	type fetchFunc func(ctx context.Context, container string, env []string) ([]string, error)
+	harnesses := []struct {
+		h     agent.Harness
+		fetch fetchFunc
+	}{
+		{agent.OpenCode, opencode.FetchModels},
+	}
+	for _, entry := range harnesses {
+		if _, fresh := cache.Models(entry.h); fresh {
+			continue
+		}
+		s.refreshOneHarness(cache, entry.h, entry.fetch)
+	}
+}
+
+// refreshOneHarness launches a temporary container, fetches models, and
+// updates the cache and all runner backends.
+func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, fetch func(ctx context.Context, container string, env []string) ([]string, error)) {
+	slog.Info("model cache stale, fetching from temporary container", "harness", h)
+	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
+	defer cancel()
+
+	w := &container.SlogWriter{Phase: "model-refresh"}
+	name, err := s.backend.Launch(ctx, nil, []string{"model-refresh"}, &task.StartOptions{
+		Harness:   h,
+		LogWriter: w,
+	})
+	if err != nil {
+		slog.Warn("model refresh: launch failed", "harness", h, "err", err)
+		return
+	}
+	defer func() {
+		_ = s.backend.Purge(context.WithoutCancel(ctx), name, nil)
+	}()
+	if _, err := s.backend.Connect(ctx, name, nil, &task.StartOptions{Harness: h, LogWriter: w}); err != nil {
+		slog.Warn("model refresh: connect failed", "harness", h, "err", err)
+		return
+	}
+	models, err := fetch(ctx, name, s.backend.HarnessEnv[string(h)])
+	if err != nil {
+		slog.Warn("model refresh: fetch failed", "harness", h, "err", err)
+		return
+	}
+	cache.SetModels(h, models)
+	slog.Info("model cache refreshed", "harness", h, "count", len(models))
+
+	for _, r := range s.runners {
+		if b, ok := r.Backends[h]; ok {
+			b.SetModels(models)
 		}
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -25,7 +26,9 @@ import (
 // protocol.
 type Backend struct {
 	agent.Base
-	mu sync.Mutex
+	mu      sync.Mutex
+	cache   *agent.HarnessCache
+	EnvVars []string // KEY=VALUE pairs for FetchModels SSH commands
 }
 
 var _ agent.Backend = (*Backend)(nil)
@@ -36,16 +39,24 @@ func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
 	return func(line []byte) ([]agent.Message, error) { return parseMessage(line, fw) }
 }
 
-// New creates an OpenCode backend with parser configured.
-// ModelList starts with common defaults; it is replaced with the live list
-// returned by session/new on the first successful handshake.
-func New() *Backend {
-	return &Backend{Base: agent.Base{
+// New creates an OpenCode backend with parser configured. If cacheDir is
+// non-empty, the model list is loaded from the on-disk harness cache.
+// envVars are KEY=VALUE pairs passed to FetchModels SSH commands.
+func New(cacheDir string, envVars []string) *Backend {
+	b := &Backend{EnvVars: envVars}
+	b.Base = agent.Base{
 		HarnessID:     agent.OpenCode,
 		ModelList:     []string{"anthropic/claude-sonnet-4"},
 		Images:        true,
 		ContextWindow: 200_000,
-	}}
+	}
+	if cacheDir != "" {
+		b.cache = agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
+		if models, _ := b.cache.Models(agent.OpenCode); len(models) > 0 {
+			b.ModelList = models
+		}
+	}
+	return b
 }
 
 // Models returns the current model list, updated dynamically after each handshake.
@@ -53,6 +64,13 @@ func (b *Backend) Models() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.ModelList
+}
+
+// SetModels replaces the model list. Thread-safe.
+func (b *Backend) SetModels(models []string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.ModelList = models
 }
 
 // Start launches an OpenCode ACP process via the relay daemon in the given
@@ -101,6 +119,9 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		b.mu.Lock()
 		b.ModelList = hs.models
 		b.mu.Unlock()
+		if b.cache != nil {
+			b.cache.SetModels(agent.OpenCode, hs.models)
+		}
 	}
 
 	log := slog.With("ctr", opts.Container)
@@ -527,6 +548,29 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*oc.JSONRPCMessa
 	case <-ctx.Done():
 		return nil, fmt.Errorf("handshake: %w", ctx.Err())
 	}
+}
+
+// FetchModels SSHes into the given container, runs "opencode models", and
+// returns the model ID list (one per line).
+// extraEnv holds KEY=VALUE pairs injected via the env command.
+func FetchModels(ctx context.Context, container string, extraEnv []string) ([]string, error) {
+	args := []string{container}
+	if len(extraEnv) > 0 {
+		args = append(args, "env")
+		args = append(args, extraEnv...)
+	}
+	args = append(args, "opencode", "models")
+	out, err := exec.CommandContext(ctx, "ssh", args...).Output() //nolint:gosec // container is not user-controlled
+	if err != nil {
+		return nil, fmt.Errorf("opencode models: %w", err)
+	}
+	var models []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if m := strings.TrimSpace(line); m != "" {
+			models = append(models, m)
+		}
+	}
+	return models, nil
 }
 
 // extractParams extracts the raw "params" field from a JSON-RPC message.

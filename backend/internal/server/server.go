@@ -59,8 +59,9 @@ type Config struct {
 	CacheDir  string // logs and cache files, e.g. ~/.cache/caic
 
 	// Agent backends.
-	GeminiAPIKey    string // required for Gemini Live audio
-	TailscaleAPIKey string // required for Tailscale networking inside containers
+	HarnessEnv      map[string][]string // per-harness KEY=VALUE env vars for containers
+	GeminiAPIKey    string              // required for Gemini Live audio
+	TailscaleAPIKey string              // required for Tailscale networking inside containers
 
 	// LLM features (title generation, commit descriptions).
 	LLMProvider string
@@ -170,6 +171,7 @@ type Server struct {
 	mdClient *md.Client
 	backend  *container.Backend // container backend for runner creation
 	logDir   string
+	cacheDir string
 	ciCache  *forgecache.Cache
 	provider genai.Provider // nil if LLM not configured
 	bot      *bot.Bot       // handles forge event-driven task automation

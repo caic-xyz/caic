@@ -18,8 +18,9 @@ import (
 
 // Backend adapts *md.Client to task.ContainerBackend.
 type Backend struct {
-	Client   *md.Client
-	Provider genai.Provider // nil if LLM not configured
+	Client     *md.Client
+	Provider   genai.Provider      // nil if LLM not configured
+	HarnessEnv map[string][]string // per-harness KEY=VALUE env vars from config
 
 	mu                sync.Mutex
 	pendingContainers map[string]*md.Container // keyed by container name
@@ -32,6 +33,7 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) (client 
 		agent.Gemini:   md.HarnessGemini,
 		agent.Kilo:     md.HarnessKilo,
 		agent.OpenCode: md.HarnessOpencode,
+		agent.Pi:       md.HarnessPi,
 	}
 	mdHarness := harnessMap[opts.Harness]
 	harnessPaths := md.HarnessMounts[mdHarness]
@@ -41,6 +43,7 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) (client 
 	}
 	client = b.Client
 	var extraEnv []string
+	extraEnv = append(extraEnv, b.HarnessEnv[string(opts.Harness)]...)
 	if opts.GitHubToken != "" {
 		extraEnv = append(extraEnv, "GITHUB_TOKEN="+opts.GitHubToken)
 	}
@@ -70,6 +73,7 @@ func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, 
 		agent.Gemini:   md.HarnessGemini,
 		agent.Kilo:     md.HarnessKilo,
 		agent.OpenCode: md.HarnessOpencode,
+		agent.Pi:       md.HarnessPi,
 	}[opts.Harness]; !ok {
 		return "", fmt.Errorf("unknown harness %q", opts.Harness)
 	}
@@ -206,6 +210,7 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 		agent.Gemini:   md.HarnessGemini,
 		agent.Kilo:     md.HarnessKilo,
 		agent.OpenCode: md.HarnessOpencode,
+		agent.Pi:       md.HarnessPi,
 	}
 	var agentPaths []md.AgentPaths
 	if mdH, ok := harnessMap[opts.Harness]; ok {

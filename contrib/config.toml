@@ -66,6 +66,30 @@
 # if not set. Obtain from https://aistudio.google.com/app/apikey
 #gemini_api_key = ""
 
+# ── Harness ──────────────────────────────────────────────────────────────────
+# Per-harness environment variables injected into containers. Each harness
+# section supports an [env] table of KEY = "VALUE" pairs. These supplement the
+# automatic *_API_KEY forwarding from the host environment and are also used
+# when fetching the model list at startup.
+[harness.claude.env]
+# Warning: setting this environment variable will cause Claude Code to use API costs and ignore your
+# subscription.
+#ANTHROPIC_API_KEY = "sk-..."
+
+[harness.codex.env]
+# Most of codex configuration is via its configuration described at
+# https://developers.openai.com/codex/config-reference
+
+[harness.opencode.env]
+# Most of opencode configuration is via its configuration described at
+# https://opencode.ai/docs/config/
+
+[harness.pi.env]
+# See https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md
+#GEMINI_API_KEY = "AIza..."
+#OPENROUTER_API_KEY = "sk-or-..."
+#OPENAI_API_KEY = "sk-..."
+
 # ── GitHub ───────────────────────────────────────────────────────────────────
 # Choose one of PAT (token) or OAuth; GitHub App is independent.
 

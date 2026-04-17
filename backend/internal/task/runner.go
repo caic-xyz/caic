@@ -95,10 +95,12 @@ type Result struct {
 // Runner manages the serialization of setup and push operations.
 type Runner struct {
 	BaseBranch            string
-	Dir                   string        // Absolute path to the git repository.
-	GitTimeout            time.Duration // Timeout for git/container ops; defaults to 1 minute.
-	ContainerStartTimeout time.Duration // Timeout for container start (image pull); defaults to 1 hour.
-	LogDir                string        // Directory for raw JSONL session logs (required).
+	Dir                   string              // Absolute path to the git repository.
+	GitTimeout            time.Duration       // Timeout for git/container ops; defaults to 1 minute.
+	ContainerStartTimeout time.Duration       // Timeout for container start (image pull); defaults to 1 hour.
+	LogDir                string              // Directory for raw JSONL session logs (required).
+	CacheDir              string              // Cache directory (e.g. ~/.cache/caic) for harness model lists.
+	HarnessEnv            map[string][]string // Per-harness KEY=VALUE env vars for containers.
 
 	// Container provides md container lifecycle operations. Must be set before
 	// calling Start.
@@ -143,7 +145,7 @@ func (r *Runner) initDefaults() {
 			r.Backends = map[agent.Harness]agent.Backend{
 				agent.Claude:   claudecode.New(),
 				agent.Codex:    codex.New(),
-				agent.OpenCode: opencode.New(),
+				agent.OpenCode: opencode.New(r.CacheDir, r.HarnessEnv[string(agent.OpenCode)]),
 			}
 		}
 		if r.GitTimeout == 0 {

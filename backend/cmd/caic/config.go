@@ -18,12 +18,17 @@ import (
 // IMPORTANT: When adding or modifying configuration fields, update contrib/config.toml
 // accordingly. Document all default values in the example config file.
 type tomlConfig struct {
-	Core   tomlCore   `toml:"core"`
-	Server tomlServer `toml:"server"`
-	AI     tomlAI     `toml:"ai"`
-	GitHub tomlGitHub `toml:"github"`
-	GitLab tomlGitLab `toml:"gitlab"`
-	Debug  tomlDebug  `toml:"debug"`
+	Core    tomlCore               `toml:"core"`
+	Server  tomlServer             `toml:"server"`
+	AI      tomlAI                 `toml:"ai"`
+	Harness map[string]tomlHarness `toml:"harness"`
+	GitHub  tomlGitHub             `toml:"github"`
+	GitLab  tomlGitLab             `toml:"gitlab"`
+	Debug   tomlDebug              `toml:"debug"`
+}
+
+type tomlHarness struct {
+	Env map[string]string `toml:"env"`
 }
 
 type tomlCore struct {
@@ -151,9 +156,18 @@ func tomlToServerConfig(tc *tomlConfig, cfgDir string) (cfg *server.Config, addr
 	if geminiAPIKey == "" {
 		geminiAPIKey = os.Getenv("GEMINI_API_KEY")
 	}
+	// Convert per-harness env maps to KEY=VALUE slices.
+	harnessEnv := make(map[string][]string, len(tc.Harness))
+	for name, h := range tc.Harness {
+		for k, v := range h.Env {
+			harnessEnv[name] = append(harnessEnv[name], k+"="+v)
+		}
+	}
+
 	cfg = &server.Config{
 		ConfigDir:               cfgDir,
 		CacheDir:                cacheDir(),
+		HarnessEnv:              harnessEnv,
 		GeminiAPIKey:            geminiAPIKey,
 		TailscaleAPIKey:         tc.Core.TailscaleAPIKey,
 		LLMProvider:             tc.AI.Provider,

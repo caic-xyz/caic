@@ -103,6 +103,55 @@ pprof = true
 		}
 	})
 
+	t.Run("parses harness env", func(t *testing.T) {
+		dir := t.TempDir()
+		content := `
+[harness.pi.env]
+GEMINI_API_KEY = "AIza_test"
+OPENROUTER_API_KEY = "sk-or-test"
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		tc, err := loadTOMLConfig(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.Harness == nil {
+			t.Fatal("Harness is nil")
+		}
+		pi, ok := tc.Harness["pi"]
+		if !ok {
+			t.Fatal("missing harness.pi")
+		}
+		if pi.Env["GEMINI_API_KEY"] != "AIza_test" {
+			t.Errorf("GEMINI_API_KEY = %q", pi.Env["GEMINI_API_KEY"])
+		}
+		if pi.Env["OPENROUTER_API_KEY"] != "sk-or-test" {
+			t.Errorf("OPENROUTER_API_KEY = %q", pi.Env["OPENROUTER_API_KEY"])
+		}
+
+		// Verify tomlToServerConfig converts to KEY=VALUE slices.
+		cfg, _, _, _, err := tomlToServerConfig(&tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		piEnv := cfg.HarnessEnv["pi"]
+		if len(piEnv) != 2 {
+			t.Fatalf("HarnessEnv[pi] = %v, want 2 entries", piEnv)
+		}
+		got := make(map[string]bool)
+		for _, kv := range piEnv {
+			got[kv] = true
+		}
+		if !got["GEMINI_API_KEY=AIza_test"] {
+			t.Errorf("missing GEMINI_API_KEY=AIza_test in %v", piEnv)
+		}
+		if !got["OPENROUTER_API_KEY=sk-or-test"] {
+			t.Errorf("missing OPENROUTER_API_KEY=sk-or-test in %v", piEnv)
+		}
+	})
+
 	t.Run("unknown field error", func(t *testing.T) {
 		dir := t.TempDir()
 		content := `bogus_field = "oops"` + "\n"
