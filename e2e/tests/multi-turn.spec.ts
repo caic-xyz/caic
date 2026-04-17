@@ -7,7 +7,9 @@ test("multi-turn: send input cycles to next joke", async ({ page, api }) => {
 
   // Open the task in the browser to verify streaming output.
   await page.goto("/");
-  await page.getByText("multi-turn test").first().click();
+  const taskCard = page.locator(`[data-task-id="${id}"]`);
+  await expect(taskCard).toBeVisible({ timeout: 10_000 });
+  await taskCard.click();
 
   // First joke should be visible.
   await expect(

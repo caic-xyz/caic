@@ -76,7 +76,9 @@ test("UI: screenshot capture attaches a thumbnail which is sent and cleared on s
   await waitForTaskState(api, id, "waiting");
 
   await page.goto("/");
-  await page.getByText(prompt).first().click();
+  const taskCard = page.locator(`[data-task-id="${id}"]`);
+  await expect(taskCard).toBeVisible({ timeout: 10_000 });
+  await taskCard.click();
 
   // Wait for the agent's first response before touching the input.
   await expect(
