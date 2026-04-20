@@ -25,13 +25,11 @@ func toAgentUsage(u *cc.MsgUsage) agent.Usage {
 	// Anthropic prompt cache has a 5-minute TTL by default.
 	// See https://platform.claude.com/docs/en/build-with-claude/prompt-caching
 	usage.CacheTTLSeconds = 300
-	if u.CacheCreation != nil {
-		if u.CacheCreation.Ephemeral5mInputTokens > 0 &&
-			u.CacheCreation.Ephemeral5mInputTokens >= u.CacheCreation.Ephemeral1hInputTokens {
-			usage.CacheTTLSeconds = 300
-		} else if u.CacheCreation.Ephemeral1hInputTokens > 0 {
-			usage.CacheTTLSeconds = 3600
-		}
+	if u.CacheCreation.Ephemeral5mInputTokens > 0 &&
+		u.CacheCreation.Ephemeral5mInputTokens >= u.CacheCreation.Ephemeral1hInputTokens {
+		usage.CacheTTLSeconds = 300
+	} else if u.CacheCreation.Ephemeral1hInputTokens > 0 {
+		usage.CacheTTLSeconds = 3600
 	}
 	return usage
 }
@@ -110,7 +108,7 @@ func (wt *WidgetTracker) handleStreamEvent(w *cc.OutputStreamEventMsg) ([]agent.
 		}
 		return nil, false
 	case "content_block_delta":
-		if w.Event.Delta != nil && w.Event.Delta.Type == "input_json_delta" {
+		if w.Event.Delta.Type == "input_json_delta" {
 			toolUseID, ok := wt.activeWidgets[w.Event.Index]
 			if !ok {
 				return nil, false
@@ -394,19 +392,21 @@ func parseUserMessage(raw json.RawMessage) []agent.Message {
 		return []agent.Message{&agent.UserInputMessage{}}
 	}
 	// Check for inline tool_result blocks (MCP tools).
-	for _, b := range blockMsg.Content {
+	for i := range blockMsg.Content {
+		b := &blockMsg.Content[i]
 		if b.Type == "tool_result" && b.ToolUseID != "" {
-			return []agent.Message{toolResultFromBlock(&b)}
+			return []agent.Message{toolResultFromBlock(b)}
 		}
 	}
 	// Regular user input with text/image blocks.
 	ui := &agent.UserInputMessage{}
-	for _, b := range blockMsg.Content {
+	for i := range blockMsg.Content {
+		b := &blockMsg.Content[i]
 		switch b.Type {
 		case "text":
 			ui.Text = b.Text
 		case "image":
-			if b.Source != nil {
+			if b.Source.Type != "" {
 				ui.Images = append(ui.Images, agent.ImageData{
 					MediaType: b.Source.MediaType,
 					Data:      b.Source.Data,
@@ -465,7 +465,7 @@ func parseStreamEvent(line []byte, wt *WidgetTracker, fw *jsonutil.FieldWarner) 
 
 	switch w.Event.Type {
 	case "content_block_delta":
-		if w.Event.Delta == nil {
+		if w.Event.Delta.Type == "" {
 			return nil, nil
 		}
 		switch w.Event.Delta.Type {

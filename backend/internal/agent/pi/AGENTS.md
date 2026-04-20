@@ -28,9 +28,8 @@ Wire types and protocol documentation live in `github.com/maruel/genai/providers
 | `message_update` (`toolcall_start`) | ToolUseMessage |
 | `tool_execution_start` | ToolUseMessage |
 | `tool_execution_end` | ToolResultMessage |
-| `message_update` (`done`) | ResultMessage |
-| `agent_end` | ResultMessage (with usage) |
-| `turn_end` | UsageMessage |
+| `agent_end` | ResultMessage (with usage, duration, numTurns) |
+| `turn_end` | UsageMessage (also increments turn counter) |
 | `extension_ui_request` | (auto-respond on stdin) |
 
 ## Tool Name Normalization
@@ -69,3 +68,9 @@ npm package:
   `set_thinking_level` command.
 - **Compaction**: `compact` command available for context management.
 - **Steering**: `steer` and `follow_up` commands for mid-run and post-run messages.
+- **Duration tracking**: `piWireFormat` records `startTime` when `WritePrompt`
+  is called; `handleAgentEnd` computes duration from `startTime` and emits it in
+  the final `ResultMessage`. Pi does not emit `message_update:done` — the stream
+  ends with `message_end → turn_end → agent_end`.
+- **Turn counting**: `handleTurnEnd` increments `numTurns`; `handleAgentEnd`
+  reads and resets it for each `ResultMessage`.

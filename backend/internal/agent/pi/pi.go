@@ -230,19 +230,27 @@ func handleExtensionUI(conn agent.Conn, raw []byte) error {
 
 // piWireFormat implements agent.WireFormat and agent.CompactCommand for Pi's
 // type-dispatched JSONL protocol. It holds per-session state: text/thinking
-// buffers for synthetic final messages.
+// buffers for synthetic final messages, a start time for duration tracking,
+// and a turn counter incremented by handleTurnEnd.
 type piWireFormat struct {
 	mu         sync.Mutex
+	initSent   bool
 	textAccum  strings.Builder
 	thinkAccum strings.Builder
-	fw         *jsonutil.FieldWarner
+	startTime  time.Time // When the prompt was written.
+	numTurns   int       // Incremented by handleTurnEnd; consumed by handleAgentEnd.
+
+	fw *jsonutil.FieldWarner
 }
 
-// WritePrompt sends a prompt command to Pi's stdin.
+// WritePrompt sends a prompt command to Pi's stdin and records the start time
+// for duration tracking.
 func (w *piWireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) error {
 	w.mu.Lock()
 	w.textAccum.Reset()
 	w.thinkAccum.Reset()
+	w.startTime = time.Now()
+	w.numTurns = 0
 	w.mu.Unlock()
 
 	cmd := pi.PromptCmd{
@@ -288,6 +296,16 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	// Intercept turn_end for per-turn usage.
 	if probe.Type == pi.EventTurnEnd {
 		return w.handleTurnEnd(line)
+	}
+
+	// Intercept message_start to report the model on the first turn.
+	if probe.Type == pi.EventMessageStart {
+		return w.handleMessageStart(line)
+	}
+
+	// Intercept message_end with stopReason=error for error ResultMessage.
+	if probe.Type == pi.EventMessageEnd {
+		return w.handleMessageEnd(line)
 	}
 
 	// Intercept message_update with done/error delta for ResultMessage.
@@ -339,8 +357,6 @@ func (w *piWireFormat) handleDone(ev *pi.MessageUpdateEvent) ([]agent.Message, e
 		msgs = append(msgs, &agent.TextMessage{Text: w.textAccum.String()})
 		w.textAccum.Reset()
 	}
-	w.mu.Unlock()
-
 	rm := &agent.ResultMessage{
 		MessageType: "result",
 		Subtype:     "result",
@@ -348,9 +364,55 @@ func (w *piWireFormat) handleDone(ev *pi.MessageUpdateEvent) ([]agent.Message, e
 	if ev.AssistantMessageEvent.Reason == pi.StopReasonError {
 		rm.IsError = true
 	}
-	// Usage comes from agent_end; leave zero here.
+	w.mu.Unlock()
+	// Usage and duration come from agent_end; leave zero here.
 	msgs = append(msgs, rm)
 	return msgs, nil
+}
+
+// handleMessageEnd handles a message_end event, emitting an error ResultMessage
+// when stopReason is "error".
+func (w *piWireFormat) handleMessageEnd(line []byte) ([]agent.Message, error) {
+	var ev pi.MessageEndEvent
+	if err := json.Unmarshal(line, &ev); err != nil {
+		return nil, fmt.Errorf("unmarshal message_end: %w", err)
+	}
+	if ev.Message.StopReason != pi.StopReasonError {
+		return nil, nil
+	}
+	w.mu.Lock()
+	w.textAccum.Reset()
+	w.thinkAccum.Reset()
+	w.mu.Unlock()
+	return []agent.Message{&agent.ResultMessage{
+		MessageType: "result",
+		Subtype:     "error",
+		IsError:     true,
+		Result:      ev.Message.ErrorMessage,
+	}}, nil
+}
+
+// handleMessageStart emits a one-shot InitMessage carrying the model name on
+// the first message_start event that contains a non-empty model field.
+func (w *piWireFormat) handleMessageStart(line []byte) ([]agent.Message, error) {
+	var ev pi.MessageStartEvent
+	if err := json.Unmarshal(line, &ev); err != nil {
+		return nil, fmt.Errorf("unmarshal message_start: %w", err)
+	}
+	if ev.Message.Model == "" {
+		return nil, nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.initSent {
+		return nil, nil
+	}
+	w.initSent = true
+	model := ev.Message.Model
+	if ev.Message.Provider != "" {
+		model = ev.Message.Provider + "/" + model
+	}
+	return []agent.Message{&agent.InitMessage{Model: model}}, nil
 }
 
 // handleError converts an error delta into a ResultMessage.
@@ -372,7 +434,8 @@ func (w *piWireFormat) handleError(ev *pi.MessageUpdateEvent) ([]agent.Message, 
 	}}, nil
 }
 
-// handleAgentEnd extracts final usage from the last assistant message.
+// handleAgentEnd extracts final usage from the last assistant message and
+// emits a ResultMessage with usage and the duration computed by handleDone.
 func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
 	var ev pi.AgentEndEvent
 	if err := json.Unmarshal(line, &ev); err != nil {
@@ -395,19 +458,35 @@ func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
 		break
 	}
 
+	w.mu.Lock()
+	var durationMs int64
+	if !w.startTime.IsZero() {
+		durationMs = time.Since(w.startTime).Milliseconds()
+		w.startTime = time.Time{}
+	}
+	numTurns := w.numTurns
+	w.numTurns = 0
+	w.mu.Unlock()
+
 	return []agent.Message{&agent.ResultMessage{
 		MessageType: "result",
 		Subtype:     "result",
+		DurationMs:  durationMs,
+		NumTurns:    numTurns,
 		Usage:       usage,
 	}}, nil
 }
 
-// handleTurnEnd extracts per-turn usage from the turn's assistant message.
+// handleTurnEnd extracts per-turn usage from the turn's assistant message and
+// increments the turn counter consumed by handleAgentEnd.
 func (w *piWireFormat) handleTurnEnd(line []byte) ([]agent.Message, error) {
 	var ev pi.TurnEndEvent
 	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("unmarshal turn_end: %w", err)
 	}
+	w.mu.Lock()
+	w.numTurns++
+	w.mu.Unlock()
 	if ev.Message.Role == pi.RoleAssistant && ev.Message.Usage.TotalTokens > 0 {
 		return []agent.Message{&agent.UsageMessage{
 			Usage: agent.Usage{
