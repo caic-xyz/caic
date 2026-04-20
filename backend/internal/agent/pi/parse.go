@@ -13,6 +13,11 @@ import (
 	pi "github.com/maruel/genai/providers/pi"
 )
 
+// typeProbe is a minimal routing probe; pi.LineProbe's other fields are unused.
+type typeProbe struct {
+	Type pi.EventType `json:"type"`
+}
+
 // parseMessage decodes a single JSONL line from Pi's stdout into one or more
 // typed agent.Messages.
 //
@@ -30,7 +35,7 @@ import (
 //   - DiffStatMessage      — caic_diff_stat injection
 //   - RawMessage           — unrecognised event types
 func parseMessage(line []byte, _ *jsonutil.FieldWarner) ([]agent.Message, error) {
-	var probe pi.LineProbe
+	var probe typeProbe
 	if err := json.Unmarshal(line, &probe); err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
