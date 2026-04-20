@@ -28,7 +28,9 @@ var metaKnown = jsonutil.KnownFields(agent.MetaMessage{})
 var resultKnown = jsonutil.KnownFields(agent.MetaResultMessage{})
 
 // typeEnvelope extracts just the "type" field from a JSON line.
-type typeEnvelope struct{ Type string }
+type typeEnvelope struct {
+	Type string `json:"type"`
+}
 
 // LoadedTask holds the data reconstructed from a single JSONL log file.
 type LoadedTask struct {
@@ -340,47 +342,38 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 	}
 
 	// Parse remaining lines as agent messages or the result trailer.
-	var envelope struct {
-		Type string `json:"type"`
-	}
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
 		}
-
+		// This confirms the line must be a dict but it's okay to not contain a `type` field.
+		var envelope typeEnvelope
 		if err := json.Unmarshal(line, &envelope); err != nil {
 			continue
 		}
 
-		if envelope.Type == "caic_pr" {
+		switch envelope.Type {
+		case "caic_pr":
 			var mp agent.MetaPRMessage
 			if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
 				lt.ForgeOwner = mp.ForgeOwner
 				lt.ForgeRepo = mp.ForgeRepo
 				lt.ForgePR = mp.ForgePR
 			}
-			continue
-		}
 
-		if envelope.Type == "caic_diff_stat" {
+		case "caic_diff_stat":
 			var ds agent.DiffStatMessage
 			if json.Unmarshal(line, &ds) == nil && ds.Ts > 0 {
 				if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
 					lt.LastStateUpdateAt = t
 				}
 			}
-			// Also parse as a regular message so it appears in lt.Msgs.
-		}
 
-		if envelope.Type == "caic_result" {
+		case "caic_result":
 			var mr agent.MetaResultMessage
 			if err := json.Unmarshal(line, &mr); err != nil {
 				return nil, fmt.Errorf("invalid caic_result: %w", err)
-			}
-			var raw map[string]json.RawMessage
-			if json.Unmarshal(line, &raw) == nil {
-				fw.Warn("caic_result", jsonutil.CollectUnknown(raw, resultKnown))
 			}
 			lt.State = parseState(mr.State)
 			if mr.Title != "" {
@@ -403,15 +396,15 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 			if mr.Error != "" {
 				lt.Result.Err = errors.New(mr.Error)
 			}
-			continue
-		}
 
-		// Parse as a regular agent message using the harness-specific parser.
-		parsed, err := parseFn(line)
-		if err != nil {
-			continue
+		default:
+			parsed, err := parseFn(line)
+			if err != nil {
+				slog.Warn("failed to parse message", "err", err, "path", path)
+				continue
+			}
+			lt.Msgs = append(lt.Msgs, parsed...)
 		}
-		lt.Msgs = append(lt.Msgs, parsed...)
 	}
 
 	return lt, scanner.Err()
