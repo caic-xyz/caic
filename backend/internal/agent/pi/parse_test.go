@@ -1,3 +1,5 @@
+// Tests for Pi CLI message parsing.
+
 package pi
 
 import (

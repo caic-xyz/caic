@@ -1,3 +1,5 @@
+// Tests for utility functions in the main package (path expansion, address formatting, logging setup).
+
 package main
 
 import (

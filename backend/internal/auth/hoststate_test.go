@@ -1,3 +1,5 @@
+// Tests for host authentication state management.
+
 package auth_test
 
 import (

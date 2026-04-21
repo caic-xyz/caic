@@ -1,3 +1,5 @@
+// Parses Codex CLI wire messages into canonical agent events.
+
 package codex
 
 import (

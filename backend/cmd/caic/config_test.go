@@ -1,3 +1,5 @@
+// Tests for TOML config loading, field mapping, and server config derivation.
+
 package main
 
 import (

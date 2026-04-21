@@ -1,3 +1,5 @@
+// Parses git diff --numstat output into structured diff statistics.
+
 package task
 
 import (

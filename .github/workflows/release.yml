@@ -2,6 +2,8 @@
 # source code is governed by the Apache v2 license that can be found in the
 # LICENSE file.
 
+# Release workflow triggered manually to build and publish versioned binaries.
+
 name: Release
 
 on:

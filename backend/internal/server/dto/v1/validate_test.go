@@ -1,3 +1,5 @@
+// Tests for API v1 request validation logic.
+
 package v1
 
 import (

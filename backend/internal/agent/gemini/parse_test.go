@@ -1,3 +1,5 @@
+// Tests for Gemini CLI message parsing.
+
 package gemini
 
 import (

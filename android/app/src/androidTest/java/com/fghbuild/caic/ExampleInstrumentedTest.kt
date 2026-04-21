@@ -1,3 +1,5 @@
+// Verifies the app context package name on a real device or emulator, with accessibility checks enabled.
+
 package com.fghbuild.caic
 
 import androidx.test.espresso.accessibility.AccessibilityChecks

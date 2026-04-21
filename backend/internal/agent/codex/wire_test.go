@@ -1,3 +1,5 @@
+// Tests for Codex CLI wire protocol message types.
+
 package codex
 
 import (

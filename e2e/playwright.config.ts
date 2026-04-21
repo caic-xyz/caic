@@ -1,3 +1,5 @@
+// End-to-end browser test configuration using a fake backend server.
+
 import { defineConfig } from "@playwright/test";
 
 export default defineConfig({

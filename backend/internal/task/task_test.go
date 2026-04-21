@@ -1,3 +1,5 @@
+// Shared test helpers and fixtures for the task package.
+
 package task
 
 import (

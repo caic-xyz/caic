@@ -1,3 +1,5 @@
+// Tests for IP geolocation lookup functionality.
+
 package ipgeo
 
 import (

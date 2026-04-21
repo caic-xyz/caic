@@ -1,3 +1,5 @@
+// Content block types and unmarshalling helpers for Claude Code message payloads.
+
 package claudecode
 
 import (

@@ -1,3 +1,5 @@
+// Tests for the Claude Code backend, verifying prompt writing and message parsing.
+
 package claudecode
 
 import (

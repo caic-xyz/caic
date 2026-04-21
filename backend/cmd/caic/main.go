@@ -1,3 +1,5 @@
+// Entry point for the caic server: parses flags, loads config, and starts the HTTP server.
+
 package main
 
 import (

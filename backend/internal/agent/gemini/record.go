@@ -1,3 +1,5 @@
+// Defines record types for the Gemini CLI stream-json session format.
+
 package gemini
 
 import (

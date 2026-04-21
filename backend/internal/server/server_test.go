@@ -1,3 +1,5 @@
+// Tests for the HTTP server request handling and routing.
+
 package server
 
 import (

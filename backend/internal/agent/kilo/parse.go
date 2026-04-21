@@ -1,3 +1,5 @@
+// Parses Kilo CLI SSE messages into canonical agent events.
+
 package kilo
 
 import (

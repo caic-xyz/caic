@@ -1,3 +1,5 @@
+// Tests for Gemini CLI stream-json record deserialization.
+
 package gemini
 
 import (

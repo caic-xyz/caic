@@ -2,6 +2,8 @@
 # source code is governed by the Apache v2 license that can be found in the
 # LICENSE file.
 
+# Defines cross-platform build targets, archives, and release publishing for the CLI binary.
+
 version: 2
 
 builds:

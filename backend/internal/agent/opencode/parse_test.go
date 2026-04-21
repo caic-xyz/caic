@@ -1,3 +1,5 @@
+// Tests for OpenCode CLI message parsing.
+
 package opencode
 
 import (

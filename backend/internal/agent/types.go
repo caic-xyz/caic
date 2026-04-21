@@ -1,3 +1,5 @@
+// Shared types and message definitions for the agent abstraction layer.
+
 package agent
 
 import (

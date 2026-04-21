@@ -1,3 +1,5 @@
+// Tests for the agent package, covering wire format handling and session lifecycle.
+
 package agent
 
 import (

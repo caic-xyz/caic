@@ -1,3 +1,5 @@
+// Tests for user preferences validation and persistence.
+
 package preferences
 
 import (

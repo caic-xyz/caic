@@ -1,3 +1,5 @@
+// Validates task preconditions to prevent unsafe or unintended agent runs.
+
 package task
 
 import (

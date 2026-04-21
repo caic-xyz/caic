@@ -1,3 +1,5 @@
+// Executes tasks by orchestrating agent runs and recording their results.
+
 package task
 
 import (

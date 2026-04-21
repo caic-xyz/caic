@@ -1,3 +1,5 @@
+# Build, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
+
 .PHONY: help build dev fake-dev test coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-push android-test android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp

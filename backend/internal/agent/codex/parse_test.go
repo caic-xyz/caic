@@ -1,3 +1,5 @@
+// Tests for Codex CLI message parsing.
+
 package codex
 
 import (

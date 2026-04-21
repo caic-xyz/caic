@@ -1,3 +1,5 @@
+// Tests for HTTP response compression middleware.
+
 package server
 
 import (

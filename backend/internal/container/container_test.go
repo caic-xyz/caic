@@ -1,3 +1,5 @@
+// Tests for container configuration initialization and defaults.
+
 package container
 
 import (

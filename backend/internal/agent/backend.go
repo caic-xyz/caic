@@ -1,3 +1,5 @@
+// Defines the Backend interface that all coding-agent implementations must satisfy.
+
 package agent
 
 import "context"

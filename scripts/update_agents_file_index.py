@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Copyright 2025 Marc-Antoine Ruel. All rights reserved.
+# Use of this source code is governed under the Apache License, Version 2.0
+# that can be found in the LICENSE file.
+
 """Update AGENTS.md files (containing a file index marker) with an auto-generated index.
 
 To opt-in a directory, add these two markers to its AGENTS.md:
@@ -27,10 +31,61 @@ def get_git_files():
         return []
 
 
-def get_file_comment(filepath):
+def _skip_frontmatter(lines):
+    """Return the index of the first line after any YAML front-matter, or 0 if none.
+
+    Handles --- delimited front-matter and bare YAML (no delimiters).
+    """
+    if not lines or not lines[0]:
+        return 0
+    first = lines[0].strip()
+    if first == "---":
+        # Standard delimited front-matter: skip until closing ---.
+        for i, line in enumerate(lines[1:], 1):
+            if not line or line.strip() == "---":
+                return i + 1
+        return len(lines)
+    if re.match(r"^[a-z_]+\s*:", first):
+        # Bare YAML: ends at first blank line.
+        for i, line in enumerate(lines):
+            if not line or not line.strip():
+                return i
+        return len(lines)
+    return 0
+
+
+def _py_docstring(lines, i):
+    """Extract the description from a Python triple-quoted docstring starting at lines[i].
+
+    Returns the description string, or "" if none found.
+    """
+    sline = lines[i].strip()
+    quote = sline[:3]
+    # Single-line docstring: """text"""
+    if sline.endswith(quote) and len(sline) > 6:
+        return sline[3:-3].strip()
+    # Multi-line: return the first content line.
+    content = sline[3:].strip()
+    if content:
+        return content
+    # Opening quotes on their own line; use next non-empty line.
+    for j in range(i + 1, len(lines)):
+        if lines[j] and lines[j].strip():
+            return lines[j].strip()
+    return ""
+
+
+def get_file_description(filepath):
+    """Return the description for a file, or None if not applicable.
+
+    Returns None if the file type has no comment convention (or is explicitly
+    excluded). Returns "" if the file supports comments but has no description,
+    which is treated as an error by callers.
+    """
     # Glob patterns mapping filenames to their comment prefix. None skips the file.
     comment_prefixes = {
         "*.css.d.ts": None,
+        "pnpm-lock.yaml": None,
         "*.cjs": "//",
         "*.go": "//",
         "*.js": "//",
@@ -50,12 +105,32 @@ def get_file_comment(filepath):
     if os.path.islink(filepath):
         return None
     fname = os.path.basename(filepath)
-    prefix = next((p for pat, p in comment_prefixes.items() if fnmatch.fnmatch(fname, pat)), None)
+    match = next(((pat, p) for pat, p in comment_prefixes.items() if fnmatch.fnmatch(fname, pat)), None)
+    if match is None:
+        return None  # extension not recognised
+    _, prefix = match
     if not prefix:
-        return None
+        return None  # explicitly excluded pattern
     with open(filepath, "r", encoding="utf-8") as f:
-        lines = [f.readline() for _ in range(10)]
-    start_idx = 1 if (lines[0] and lines[0].startswith("#!")) else 0
+        lines = [f.readline() for _ in range(20)]
+    if fname.endswith(".md"):
+        # Skip front-matter; first # heading after it is the description.
+        start_idx = _skip_frontmatter(lines)
+    else:
+        start_idx = 1 if (lines[0] and lines[0].startswith("#!")) else 0
+    # If the first content line is a copyright header, skip lines until a blank.
+    for i in range(start_idx, len(lines)):
+        if not lines[i]:
+            return ""
+        if not lines[i].strip():
+            continue
+        if "copyright" in lines[i].lower():
+            # Skip the entire copyright block (all lines up to the next blank).
+            i += 1
+            while i < len(lines) and lines[i] and lines[i].strip():
+                i += 1
+            start_idx = i
+        break
     for i in range(start_idx, len(lines)):
         line = lines[i]
         if not line:
@@ -63,22 +138,9 @@ def get_file_comment(filepath):
         sline = line.strip()
         if not sline:
             continue
-        # Python docstring: extract first line of a triple-quoted string
         if fname.endswith(".py") and (sline.startswith('"""') or sline.startswith("'''")):
-            quote = sline[:3]
-            # Single-line docstring: """text"""
-            if sline.endswith(quote) and len(sline) > 6:
-                return sline[3:-3].strip()
-            # Multi-line docstring: return the first line
-            content = sline[3:].strip()
-            if content:
-                return content
-            # Opening quotes on their own line; use next non-empty line
-            for j in range(i + 1, len(lines)):
-                if lines[j] and lines[j].strip():
-                    return lines[j].strip()
-            return None
-        # Skip common directives/metadata that aren't descriptions
+            return _py_docstring(lines, i)
+        # Skip common directives/metadata that aren't descriptions.
         if sline.startswith(f"{prefix}go:"):
             continue
         if sline.startswith(f"{prefix} +build"):
@@ -92,9 +154,9 @@ def get_file_comment(filepath):
             if not comment:
                 continue
             return comment
-        # Hit code before a comment
-        return None
-    return None
+        # Hit code before a comment.
+        return ""
+    return ""
 
 
 def discover_configs(all_files):
@@ -128,33 +190,39 @@ def discover_configs(all_files):
 
 
 def generate_index(target, exclude, all_files, all_configs):
+    """Generate the file index for target, returning (content, missing) where
+    missing is a list of files that support comments but have no description."""
     root_dir = os.path.dirname(target)
     files_found = []
+    missing = []
     for filepath in all_files:
-        # Skip own AGENTS.md
+        # Skip own AGENTS.md.
         if filepath == target:
             continue
-        # Scope to root_dir
+        # Scope to root_dir.
         if root_dir:
             if not filepath.startswith(root_dir + "/"):
                 continue
             relpath = filepath[len(root_dir) + 1 :]
         else:
             relpath = filepath
-
-        # Check excluded subdirectories, but let sub-workspace AGENTS.md through
+        # Check excluded subdirectories, but let sub-workspace AGENTS.md through.
         rel_parts = relpath.replace("\\", "/").split("/")
         if rel_parts[0] in exclude:
             if filepath not in all_configs:
                 continue
-        comment = get_file_comment(filepath)
-        if comment:
-            files_found.append((relpath, comment))
+        desc = get_file_description(filepath)
+        if desc is None:
+            continue  # file type has no comment convention
+        if desc == "":
+            missing.append(relpath)
+        else:
+            files_found.append((relpath, desc))
     desc = "Autogenerated from first-line comments. Run scripts/update_agents_file_index.py to refresh."
     lines = ["## File Index", "", desc, ""]
     for path, comment in sorted(files_found):
         lines.append(f"- `{path}`: {comment}")
-    return "\n".join(lines)
+    return "\n".join(lines), missing
 
 
 def update_markdown(target_file, content):
@@ -204,8 +272,16 @@ def main():
     if ret:
         return ret
     configs = discover_configs(all_files)
+    all_missing = []
     for target, exclude in configs.items():
-        update_markdown(target, generate_index(target, exclude, all_files, configs))
+        content, missing = generate_index(target, exclude, all_files, configs)
+        update_markdown(target, content)
+        all_missing.extend(missing)
+    if all_missing:
+        print("Error: the following files have no description comment:", file=sys.stderr)
+        for f in sorted(all_missing):
+            print(f"  {f}", file=sys.stderr)
+        return 1
     return 0
 
 

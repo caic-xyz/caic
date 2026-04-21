@@ -1,3 +1,5 @@
+// Tests for task loading and configuration resolution.
+
 package task
 
 import (

@@ -1,3 +1,5 @@
+// Placeholder unit test verifying the JVM test harness is functional.
+
 package com.fghbuild.caic
 
 import org.junit.Assert.assertEquals

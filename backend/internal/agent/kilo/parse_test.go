@@ -1,3 +1,5 @@
+// Tests for Kilo CLI message parsing.
+
 package kilo
 
 import (

@@ -1,3 +1,5 @@
+// Tests for Kilo model list sorting.
+
 package kilo
 
 import (

@@ -1,3 +1,5 @@
+# Tygo configuration for generating TypeScript types from Go DTO packages.
+
 packages:
   - path: "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
     output_path: "../../../../../sdk/ts/v1/types.gen.ts"

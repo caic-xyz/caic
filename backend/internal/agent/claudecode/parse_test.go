@@ -1,3 +1,5 @@
+// Tests for the Claude Code wire-format message parser.
+
 package claudecode
 
 import (

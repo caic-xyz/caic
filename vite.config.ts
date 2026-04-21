@@ -1,3 +1,5 @@
+// Bundler configuration for the SolidJS frontend, including plugins and path aliases.
+
 import { resolve } from "path";
 import { defineConfig } from "vite";
 import solidPlugin from "vite-plugin-solid";

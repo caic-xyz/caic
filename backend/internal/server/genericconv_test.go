@@ -1,3 +1,5 @@
+// Tests for generic type conversion utilities used in HTTP handlers.
+
 package server
 
 import (

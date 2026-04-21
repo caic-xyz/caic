@@ -1,3 +1,5 @@
+// Tests for CI check run evaluation logic in the bot.
+
 package bot
 
 import (

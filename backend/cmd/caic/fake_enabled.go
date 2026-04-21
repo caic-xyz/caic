@@ -1,5 +1,7 @@
 //go:build e2e
 
+// Implements fake container and agent backends for e2e testing without real SSH or containers.
+
 package main
 
 import (

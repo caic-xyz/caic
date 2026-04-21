@@ -1,3 +1,5 @@
+// Tests for static file serving middleware.
+
 package server
 
 import (

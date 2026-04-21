@@ -1,3 +1,5 @@
+// Instrumented tests that verify the app launches and renders the task list without unknown translation keys.
+
 package com.fghbuild.caic
 
 import androidx.compose.ui.test.junit4.createAndroidComposeRule

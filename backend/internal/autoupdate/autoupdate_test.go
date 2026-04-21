@@ -1,3 +1,5 @@
+// Tests for the automatic update download and installation logic.
+
 package autoupdate
 
 import (

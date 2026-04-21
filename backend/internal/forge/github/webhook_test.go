@@ -1,3 +1,5 @@
+// Tests for GitHub webhook signature verification.
+
 package github
 
 import (

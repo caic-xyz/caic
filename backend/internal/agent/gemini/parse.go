@@ -1,3 +1,5 @@
+// Parses Gemini CLI wire messages into canonical agent events.
+
 package gemini
 
 import (

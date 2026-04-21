@@ -1,3 +1,4 @@
+// Reusable button component with variant and icon support.
 import { Show, splitProps, type JSX } from "solid-js";
 import styles from "./Button.module.css";
 

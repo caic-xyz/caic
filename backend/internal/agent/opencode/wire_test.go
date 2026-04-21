@@ -1,3 +1,5 @@
+// Tests for OpenCode CLI wire protocol message types.
+
 package opencode
 
 import (

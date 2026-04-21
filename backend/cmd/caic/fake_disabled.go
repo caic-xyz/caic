@@ -1,5 +1,7 @@
 //go:build !e2e
 
+// Stub that disables fake/e2e mode in standard builds.
+
 package main
 
 import (

@@ -1,3 +1,5 @@
+// Tests for HTTP request body decompression middleware.
+
 package server
 
 import (

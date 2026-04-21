@@ -1,3 +1,5 @@
+// Loads task definitions from disk and resolves their configurations.
+
 package task
 
 import (

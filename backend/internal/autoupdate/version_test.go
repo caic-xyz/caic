@@ -1,3 +1,5 @@
+// Tests for build version string parsing and formatting.
+
 package autoupdate
 
 import "testing"

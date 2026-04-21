@@ -1,3 +1,5 @@
+// Defines record types for the Kilo CLI SSE session format.
+
 package kilo
 
 import (

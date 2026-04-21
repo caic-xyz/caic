@@ -1,3 +1,5 @@
+// Unit test runner configuration for the SolidJS frontend using Vitest.
+
 import { resolve } from "path";
 import { defineConfig } from "vitest/config";
 import solidPlugin from "vite-plugin-solid";

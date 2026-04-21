@@ -1,3 +1,5 @@
+// Tests for diff numstat parsing logic.
+
 package task
 
 import (
