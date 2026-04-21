@@ -211,6 +211,9 @@ def generate_index(target, exclude, all_files, all_configs):
         if rel_parts[0] in exclude:
             if filepath not in all_configs:
                 continue
+        # Skip any file in a testdata/ directory.
+        if "testdata" in rel_parts:
+            continue
         desc = get_file_description(filepath)
         if desc is None:
             continue  # file type has no comment convention
