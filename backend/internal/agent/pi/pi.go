@@ -537,9 +537,8 @@ func waitForResponse(r *bufio.Reader, cmd pi.CommandType, logW io.Writer) error 
 // "/" into provider + modelId (e.g. "cerebras/gpt-oss-120b").
 func writeSetModel(w io.Writer, model string, logW io.Writer) error {
 	provider, modelID := "", model
-	if i := strings.IndexByte(model, '/'); i >= 0 {
-		provider = model[:i]
-		modelID = model[i+1:]
+	if p, m, ok := strings.Cut(model, "/"); ok {
+		provider, modelID = p, m
 	}
 	cmd := pi.SetModelCmd{
 		Type:     pi.CmdSetModel,

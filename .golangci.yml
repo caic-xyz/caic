@@ -4,6 +4,7 @@ run:
 linters:
   enable:
     - bodyclose
+    - canonicalheader
     - contextcheck
     - copyloopvar
     - dupword
@@ -11,21 +12,31 @@ linters:
     - errname
     - errorlint
     - exhaustive
+    - fatcontext
+    - forcetypeassert
     - gocritic
     - gosec
     - godot
+    - intrange
+    - mirror
     - misspell
+    - modernize
+    - musttag
+    - nakedret
     - nilerr
     - nilnil
     - nolintlint
     - perfsprint
     - prealloc
+    - recvcheck
     - revive
+    - sloglint
     - sqlclosecheck
     - unconvert
     - unparam
     - unused
     - usestdlibvars
+    - usetesting
     - whitespace
   settings:
     exhaustive:

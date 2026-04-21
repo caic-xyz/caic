@@ -8,6 +8,7 @@ package server
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"io/fs"
 	"mime"
@@ -115,7 +116,12 @@ func serveBrotli(w http.ResponseWriter, r *http.Request, dist fs.FS, clean, ct s
 	w.Header().Set("Content-Length", strconv.FormatInt(stat.Size(), 10))
 	w.Header().Set("Vary", "Accept-Encoding")
 	setStaticCacheControl(w, clean)
-	http.ServeContent(w, r, clean, stat.ModTime(), f.(io.ReadSeeker))
+	rs, ok := f.(io.ReadSeeker)
+	if !ok {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	http.ServeContent(w, r, clean, stat.ModTime(), rs)
 }
 
 // transcode decompresses the .br file and re-compresses to the target
@@ -123,7 +129,10 @@ func serveBrotli(w http.ResponseWriter, r *http.Request, dist fs.FS, clean, ct s
 func transcode(cache *sync.Map, dist fs.FS, clean, enc string) ([]byte, error) {
 	key := clean + "\x00" + enc
 	val, _ := cache.LoadOrStore(key, &transcodeEntry{})
-	entry := val.(*transcodeEntry)
+	entry, ok := val.(*transcodeEntry)
+	if !ok {
+		return nil, fmt.Errorf("transcode cache stored unexpected type %T", val)
+	}
 	entry.once.Do(func() {
 		entry.data, entry.err = doTranscode(dist, clean, enc)
 	})

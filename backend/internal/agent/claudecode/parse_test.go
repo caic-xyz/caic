@@ -630,7 +630,10 @@ func TestParseMessage(t *testing.T) {
 		if len(msgs) != 1 {
 			t.Fatalf("got %d messages, want 1", len(msgs))
 		}
-		ui := msgs[0].(*agent.UserInputMessage)
+		ui, ok := msgs[0].(*agent.UserInputMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.UserInputMessage", msgs[0])
+		}
 		if ui.Text != "hello" {
 			t.Errorf("text = %q, want %q", ui.Text, "hello")
 		}
@@ -644,7 +647,10 @@ func TestParseMessage(t *testing.T) {
 		if len(msgs) != 1 {
 			t.Fatalf("got %d messages, want 1", len(msgs))
 		}
-		ui := msgs[0].(*agent.UserInputMessage)
+		ui, ok := msgs[0].(*agent.UserInputMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.UserInputMessage", msgs[0])
+		}
 		if ui.Text != "explain this code" {
 			t.Errorf("text = %q, want %q", ui.Text, "explain this code")
 		}
@@ -690,7 +696,10 @@ func TestParseMessage(t *testing.T) {
 		if len(msgs) != 1 {
 			t.Fatalf("got %d messages, want 1", len(msgs))
 		}
-		rl := msgs[0].(*agent.RateLimitMessage)
+		rl, ok := msgs[0].(*agent.RateLimitMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.RateLimitMessage", msgs[0])
+		}
 		if rl.Status != "rejected" {
 			t.Errorf("status = %q, want %q", rl.Status, "rejected")
 		}
@@ -714,7 +723,10 @@ func TestParseMessage(t *testing.T) {
 		if len(msgs) != 1 {
 			t.Fatalf("got %d messages, want 1", len(msgs))
 		}
-		rl := msgs[0].(*agent.RateLimitMessage)
+		rl, ok := msgs[0].(*agent.RateLimitMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.RateLimitMessage", msgs[0])
+		}
 		if rl.Status != "rejected" {
 			t.Errorf("status = %q, want %q", rl.Status, "rejected")
 		}

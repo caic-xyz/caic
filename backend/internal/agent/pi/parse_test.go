@@ -92,7 +92,10 @@ func TestWireFormatDurationTracking(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rm := endMsgs[0].(*agent.ResultMessage)
+		rm, ok := endMsgs[0].(*agent.ResultMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.ResultMessage", endMsgs[0])
+		}
 		if rm.DurationMs < 200 || rm.DurationMs > 500 {
 			t.Errorf("DurationMs = %d, want ~300 (second turn)", rm.DurationMs)
 		}

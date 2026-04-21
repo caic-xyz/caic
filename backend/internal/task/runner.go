@@ -1207,7 +1207,7 @@ func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffe
 			t.addMessage(ctx, m, skipSideEffects)
 		}
 	}()
-	return
+	return msgCh, dispatchDone
 }
 
 // fetchDiffStatBranch fetches from the container and emits a DiffStatMessage

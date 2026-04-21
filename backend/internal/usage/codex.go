@@ -168,7 +168,7 @@ func (f *CodexFetcher) fetch(ctx context.Context) (*v1.CodexUsage, error) {
 	req.Header.Set("Authorization", "Bearer "+f.token)
 	req.Header.Set("User-Agent", "caic")
 	if f.accountID != "" {
-		req.Header.Set("ChatGPT-Account-Id", f.accountID)
+		req.Header.Set("Chatgpt-Account-Id", f.accountID)
 	}
 
 	resp, err := f.client.Do(req)

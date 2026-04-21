@@ -147,7 +147,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 
 		body := []byte(`{}`)
 		req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
-		req.Header.Set("X-GitHub-Event", "ping")
+		req.Header.Set("X-Github-Event", "ping")
 		req.Header.Set("X-Hub-Signature-256", signGitHub(body, secret))
 
 		w := httptest.NewRecorder()
@@ -164,7 +164,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 
 		body := []byte(`{}`)
 		req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
-		req.Header.Set("X-GitHub-Event", "ping")
+		req.Header.Set("X-Github-Event", "ping")
 		req.Header.Set("X-Hub-Signature-256", signGitHub(body, []byte("wrong-secret")))
 
 		w := httptest.NewRecorder()
@@ -181,7 +181,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 
 		body := []byte(`{}`)
 		req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
-		req.Header.Set("X-GitHub-Event", "ping")
+		req.Header.Set("X-Github-Event", "ping")
 		// No X-Hub-Signature-256
 
 		w := httptest.NewRecorder()
@@ -204,7 +204,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 		body, _ := json.Marshal(ev)
 
 		req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(body))
-		req.Header.Set("X-GitHub-Event", "check_run")
+		req.Header.Set("X-Github-Event", "check_run")
 		req.Header.Set("X-Hub-Signature-256", signGitHub(body, secret))
 
 		w := httptest.NewRecorder()

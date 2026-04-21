@@ -565,7 +565,7 @@ func FetchModels(ctx context.Context, container string, extraEnv []string) ([]st
 		return nil, fmt.Errorf("opencode models: %w", err)
 	}
 	var models []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		if m := strings.TrimSpace(line); m != "" {
 			models = append(models, m)
 		}

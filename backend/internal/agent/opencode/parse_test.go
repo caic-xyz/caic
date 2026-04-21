@@ -703,7 +703,10 @@ func TestWireFormatPromptResponse(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rm := msgs[0].(*agent.ResultMessage)
+		rm, ok := msgs[0].(*agent.ResultMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.ResultMessage", msgs[0])
+		}
 		if rm.Usage.InputTokens != 1000 {
 			t.Errorf("InputTokens = %d, want 1000 (fallback)", rm.Usage.InputTokens)
 		}

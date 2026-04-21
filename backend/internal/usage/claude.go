@@ -172,7 +172,7 @@ func (f *ClaudeFetcher) fetch(ctx context.Context) (*v1.ClaudeUsage, error) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+f.token)
 	req.Header.Set("User-Agent", "caic")
-	req.Header.Set("anthropic-beta", "oauth-2025-04-20")
+	req.Header.Set("Anthropic-Beta", "oauth-2025-04-20")
 
 	resp, err := f.client.Do(req)
 	if err != nil {

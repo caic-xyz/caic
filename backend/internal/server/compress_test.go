@@ -20,13 +20,18 @@ func jsonHandler() http.HandlerFunc {
 
 // sseHandler mirrors the real SSE handlers: set headers, flush (sends
 // headers to the wire), then write event data and flush again.
-func sseHandler() http.HandlerFunc {
+func sseHandler(t *testing.T) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
-		w.(http.Flusher).Flush()
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Errorf("ResponseWriter %T does not implement http.Flusher", w)
+			return
+		}
+		flusher.Flush()
 		_, _ = w.Write([]byte("event: ping\ndata: {}\n\n"))
-		w.(http.Flusher).Flush()
+		flusher.Flush()
 	}
 }
 
@@ -122,7 +127,7 @@ func TestCompressMiddleware(t *testing.T) {
 	})
 
 	t.Run("CompressesSSE", func(t *testing.T) {
-		h := compressMiddleware(sseHandler())
+		h := compressMiddleware(sseHandler(t))
 		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
 		req.Header.Set("Accept-Encoding", "zstd")
 		w := httptest.NewRecorder()

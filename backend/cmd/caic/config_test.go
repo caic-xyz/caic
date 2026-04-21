@@ -331,10 +331,8 @@ func TestTomlToServerConfig(t *testing.T) {
 
 	t.Run("gemini_api_key from env variable fallback", func(t *testing.T) {
 		dir := t.TempDir()
-		oldEnv := os.Getenv("GEMINI_API_KEY")
 		envKey := "AIza_from_env"
-		defer os.Setenv("GEMINI_API_KEY", oldEnv) //nolint:errcheck // os.Setenv never returns error
-		_ = os.Setenv("GEMINI_API_KEY", envKey)
+		t.Setenv("GEMINI_API_KEY", envKey)
 		tc := &tomlConfig{} // empty config, no gemini_api_key set
 		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
 		if err != nil {
@@ -347,11 +345,9 @@ func TestTomlToServerConfig(t *testing.T) {
 
 	t.Run("gemini_api_key config takes precedence over env", func(t *testing.T) {
 		dir := t.TempDir()
-		oldEnv := os.Getenv("GEMINI_API_KEY")
 		envKey := "AIza_from_env"
 		configKey := "AIza_from_config"
-		defer os.Setenv("GEMINI_API_KEY", oldEnv) //nolint:errcheck // os.Setenv never returns error
-		_ = os.Setenv("GEMINI_API_KEY", envKey)
+		t.Setenv("GEMINI_API_KEY", envKey)
 		tc := &tomlConfig{
 			AI: tomlAI{
 				GeminiAPIKey: configKey,

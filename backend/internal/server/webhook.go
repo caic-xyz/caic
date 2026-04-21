@@ -37,7 +37,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "signature verification failed", http.StatusUnauthorized)
 		return
 	}
-	event := r.Header.Get("X-GitHub-Event")
+	event := r.Header.Get("X-Github-Event")
 	slog.Info("github webhook", "event", event) //nolint:gosec // G706: event name is from GitHub header, not user input
 	switch event {
 	case "issues":

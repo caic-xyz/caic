@@ -348,7 +348,7 @@ func (s *Server) getVoiceTokenEphemeral(ctx context.Context, _ *dto.EmptyReq) (*
 		return nil, dto.InternalError("failed to create token request").Wrap(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", apiKey)
+	req.Header.Set("X-Goog-Api-Key", apiKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
