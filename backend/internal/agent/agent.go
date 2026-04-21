@@ -66,7 +66,7 @@ type ImageData struct {
 // Prompt bundles user text with optional images for a single interaction.
 type Prompt struct {
 	Text   string      `json:"text"`
-	Images []ImageData `json:"images,omitempty"`
+	Images []ImageData `json:"images,omitempty,omitzero"`
 }
 
 // Options configures an agent session launch.
