@@ -254,8 +254,9 @@ func (w *piWireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer)
 	w.mu.Unlock()
 
 	cmd := pi.PromptCmd{
-		Type:    pi.CmdPrompt,
-		Message: p.Text,
+		Type:              pi.CmdPrompt,
+		Message:           p.Text,
+		StreamingBehavior: pi.StreamSteer, // ignored by pi when idle; queues as steer when streaming
 	}
 	for _, img := range p.Images {
 		cmd.Images = append(cmd.Images, pi.ImageContent{
