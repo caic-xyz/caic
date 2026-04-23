@@ -611,56 +611,76 @@ fun TaskDetailScreen(
             }
         },
     ) { padding ->
-        if (!state.isReady && !state.hasMessages) {
-            val prompt = state.task?.initialPrompt
-            if (!prompt.isNullOrBlank()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                        .padding(12.dp),
+        TaskDetailBody(
+            state = state,
+            padding = padding,
+            onAnswer = { viewModel.sendInput() },
+            onClearAndExecutePlan = {
+                viewModel.restartTask(state.inputDraft.trim())
+                viewModel.updateInputDraft("")
+            },
+            onNavigateToDiff = onNavigateToDiff,
+            onLoadToolInput = { toolUseID -> viewModel.loadToolInput(toolUseID) },
+        )
+    }
+}
+
+@Composable
+internal fun TaskDetailBody(
+    state: TaskDetailState,
+    padding: PaddingValues,
+    onAnswer: (String) -> Unit,
+    onClearAndExecutePlan: () -> Unit,
+    onNavigateToDiff: () -> Unit,
+    onLoadToolInput: (suspend (String) -> JsonElement?)? = null,
+) {
+    if (!state.hasMessages) {
+        val prompt = state.task?.initialPrompt
+        if (!prompt.isNullOrBlank()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(12.dp),
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.appColors.userMsgBg,
                 ) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.appColors.userMsgBg,
-                    ) {
-                        Markdown(
-                            content = prompt,
-                            typography = markdownTypography(),
-                            colors = com.mikepenz.markdown.m3.markdownColor(
-                                text = MaterialTheme.colorScheme.onSurface,
-                                codeBackground = MaterialTheme.colorScheme.surfaceVariant,
-                            ),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        )
-                    }
+                    Markdown(
+                        content = prompt,
+                        typography = markdownTypography(),
+                        colors = com.mikepenz.markdown.m3.markdownColor(
+                            text = MaterialTheme.colorScheme.onSurface,
+                            codeBackground = MaterialTheme.colorScheme.surfaceVariant,
+                        ),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+                if (!state.isReady) {
                     CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp))
                 }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
-                }
             }
-        } else {
-            MessageList(
-        state = state,
-        padding = padding,
-        onAnswer = { viewModel.sendInput() },
-        onClearAndExecutePlan = {
-            viewModel.restartTask(state.inputDraft.trim())
-            viewModel.updateInputDraft("")
-        },
-        onNavigateToDiff = onNavigateToDiff,
-        onLoadToolInput = { toolUseID -> viewModel.loadToolInput(toolUseID) },
-    )
-
+        } else if (!state.isReady) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
+            }
         }
+    } else {
+        MessageList(
+            state = state,
+            padding = padding,
+            onAnswer = onAnswer,
+            onClearAndExecutePlan = onClearAndExecutePlan,
+            onNavigateToDiff = onNavigateToDiff,
+            onLoadToolInput = onLoadToolInput,
+        )
     }
 }
 

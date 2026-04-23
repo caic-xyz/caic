@@ -360,7 +360,7 @@ export default function TaskDetail(props: Props) {
         es?.close();
         es = null;
         const st = props.taskState;
-        if (live && messages().length > 0 && (st === "purged" || st === "failed")) {
+        if (live && (st === "purged" || st === "failed")) {
           return;
         }
         // Cancel any pending timer before scheduling a new one. Without this,

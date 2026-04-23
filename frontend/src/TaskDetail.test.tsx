@@ -291,4 +291,55 @@ describe("SSE connection", () => {
     expect(getByText("Clear context")).toBeInTheDocument();
     expect(queryByText("Compact context")).not.toBeInTheDocument();
   });
+
+  it("stops reconnecting for failed task with no messages after ready", () => {
+    // Regression: before the fix, the stop condition required messages().length > 0,
+    // so a failed task that produced no agent output would reconnect indefinitely.
+    const created: FakeES[] = [];
+    makeSyncReadyMock(created);
+
+    render(() => <TaskDetail {...baseProps} taskState="failed" />);
+    expect(created).toHaveLength(1);
+
+    // ready fired synchronously; now simulate SSE close (server closes after ready for failed tasks).
+    const es1 = created[0];
+    if (!es1.onerror) throw new Error("onerror not set");
+    es1.onerror(new Event("error"));
+
+    // Advance well past any reconnect delay — no new connection should be created.
+    vi.advanceTimersByTime(60_000);
+    expect(created).toHaveLength(1);
+  });
+
+  it("stops reconnecting for failed task with messages after ready", () => {
+    // Existing behaviour: with messages this already worked; verify it still does.
+    const created: FakeES[] = [];
+    const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
+    makeSyncReadyMock(created, capturedCb);
+
+    render(() => <TaskDetail {...baseProps} taskState="failed" />);
+    if (!capturedCb.value) throw new Error("taskEvents callback not captured");
+
+    // Deliver a message so messages().length > 0.
+    capturedCb.value({ kind: "textDelta", ts: 1, textDelta: { text: "some output" } });
+    vi.advanceTimersByTime(20);
+
+    const es1 = created[0];
+    if (!es1.onerror) throw new Error("onerror not set");
+    es1.onerror(new Event("error"));
+
+    vi.advanceTimersByTime(60_000);
+    expect(created).toHaveLength(1);
+  });
+
+  it("shows initial prompt for failed task with no messages", () => {
+    const created: FakeES[] = [];
+    makeSyncReadyMock(created);
+
+    const { getByText } = render(() => (
+      <TaskDetail {...baseProps} taskState="failed" initialPrompt="Fix the login bug" />
+    ));
+
+    expect(getByText("Fix the login bug")).toBeInTheDocument();
+  });
 });
