@@ -35,40 +35,13 @@ Field names: use `@SerialName` matching the `json` struct tag.
 
 ## Module Setup
 
-### Gradle
-
-`android/settings.gradle.kts`: add `include(":sdk")`
-
-`sdk/kotlin/build.gradle.kts`: pure Kotlin/JVM module.
+The SDK is a pure Kotlin/JVM module at the repository root (`sdk/kotlin/`).
+The Android app includes it via a project dependency.
 
 Dependencies:
-- `com.squareup.okhttp3:okhttp:4.12.0`
-- `com.squareup.okhttp3:okhttp-sse:4.12.0`
-- `org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3`
-- `org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0`
-
-App module: `implementation(project(":sdk"))`
-
-## Voice Token Design
-
-The `GET /api/v1/voice/token` endpoint returns a Gemini API credential. The
-`ephemeral` flag tells the client which WebSocket endpoint and auth parameter
-to use.
-
-**Current mode: raw key (`ephemeral: false`)**
-
-Returns the raw `GEMINI_API_KEY`. The client connects to
-`v1beta.GenerativeService.BidiGenerateContent` with `?key=`. This produces
-higher-quality voice responses but exposes the API key to the client.
-
-**Ephemeral mode (`ephemeral: true`) — disabled, kept for future use**
-
-Creates a short-lived token via POST `/v1alpha/auth_tokens` with
-`x-goog-api-key` header (ephemeral tokens are **v1alpha only**; `v1beta`
-returns 404). The client must connect to
-`v1alpha.GenerativeService.BidiGenerateContentConstrained` with
-`?access_token=`. This is more secure but currently produces lower-quality
-responses.
+- `com.squareup.okhttp3:okhttp` — HTTP + SSE + WebSocket
+- `org.jetbrains.kotlinx:kotlinx-serialization-json` — JSON (not Gson/Moshi)
+- `org.jetbrains.kotlinx:kotlinx-coroutines-core` — async
 
 ## Testing
 
@@ -79,8 +52,3 @@ JVM unit tests using `MockWebServer` (OkHttp):
 3. **Error handling**: non-200 → `ApiException` with correct code
 4. **SSE**: `taskEvents()` emits `EventMessage` from SSE stream
 5. **Round-trip**: every data class serializes/deserializes correctly
-
-## References
-
-- [Ephemeral tokens docs](https://ai.google.dev/gemini-api/docs/ephemeral-tokens) — token creation API, expiration, constraints
-- [python-genai tokens.py](https://github.com/googleapis/python-genai/blob/main/google/genai/tokens.py) — reference implementation of `auth_tokens.create()`
