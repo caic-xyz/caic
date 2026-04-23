@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pre-commit hook: rejects binary executables.
+# Pre-commit hook: rejects binary executables and checks file index is up to date.
 
 set -e
 
@@ -9,3 +9,5 @@ if [ -n "$binaries" ]; then
 	echo "$binaries"
 	exit 1
 fi
+
+python3 scripts/update_agents_file_index.py --check

@@ -1,6 +1,6 @@
 # Build, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
 
-.PHONY: help build dev fake-dev test coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-push android-test android-e2e android-setup-emulator android-start-emulator android-stop-emulator
+.PHONY: help build dev fake-dev test coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix lint-docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-push android-test android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:2242
@@ -19,9 +19,8 @@ help:
 	@echo "  make fake-dev       - Run the server with fake backend (no containers)"
 	@echo "  make frontend-build - Build frontend assets (TypeScript → JavaScript)"
 	@echo "  make test           - Run unit tests"
-	@echo "  make docs           - Update AGENTS.md file indexes"
-	@echo "  make lint           - Run linters (Go + frontend + Python + binaries)"
-	@echo "  make lint-fix       - Fix linting issues automatically"
+	@echo "  make lint           - Run linters (Go + frontend + Python + binaries + file index check)"
+	@echo "  make lint-fix       - Fix linting issues automatically (includes updating file indexes)"
 	@echo "  make git-hooks      - Install git pre-commit hooks"
 	@echo "  make frontend-dev   - Run frontend dev server (http://localhost:5173)"
 	@echo "  make android-build  - Build Android app (debug APK)"
@@ -45,11 +44,8 @@ types:
 frontend-build: $(FRONTEND_STAMP) types
 	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm build
 
-build: frontend-build docs
+build: frontend-build
 	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
-
-docs:
-	@./scripts/update_agents_file_index.py
 
 dev: frontend-build
 	@./scripts/run-dev.py --http $(HTTP)
@@ -65,8 +61,11 @@ test: $(FRONTEND_STAMP)
 coverage:
 	@go test -coverprofile=coverage.out ./...
 
-lint: lint-go lint-frontend lint-python lint-binaries
-lint-all: lint-go lint-frontend lint-python lint-binaries lint-android
+lint: lint-go lint-frontend lint-python lint-binaries lint-docs
+lint-all: lint-go lint-frontend lint-python lint-binaries lint-android lint-docs
+
+lint-docs:
+	@python3 scripts/update_agents_file_index.py --check
 
 lint-go:
 	@which golangci-lint > /dev/null || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
@@ -126,6 +125,7 @@ lint-fix: $(FRONTEND_STAMP)
 	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm lint:fix
 	@ruff check --fix .
 	@ruff format .
+	@./scripts/update_agents_file_index.py
 
 git-hooks:
 	@mkdir -p .git/hooks
