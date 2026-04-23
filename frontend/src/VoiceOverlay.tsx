@@ -1,5 +1,5 @@
 // Voice overlay component: persistent bottom panel with mic button and voice controls.
-import { createEffect, createSignal, For, Show, untrack, onCleanup } from "solid-js";
+import { createEffect, createSignal, For, Show, untrack, onCleanup, onMount } from "solid-js";
 import type { Task } from "@sdk/types.gen";
 import { VoiceSession } from "./VoiceSession";
 import type { VoiceState, TranscriptEntry } from "./VoiceSession";
@@ -24,6 +24,16 @@ const BAR_MAX_H = 20;
 
 export default function VoiceOverlay(props: Props) {
   const session = new VoiceSession();
+
+  let panelRef: HTMLDivElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
+  const [spacerHeight, setSpacerHeight] = createSignal(0);
+  onMount(() => {
+    const observer = new ResizeObserver(([entry]) => {
+      setSpacerHeight(entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height);
+    });
+    if (panelRef) observer.observe(panelRef);
+    onCleanup(() => observer.disconnect());
+  });
 
   // Track pre-purged task IDs to exclude from notifications.
   const [prePurgedIds, setPreTerminatedIds] = createSignal(new Set<string>());
@@ -108,7 +118,10 @@ export default function VoiceOverlay(props: Props) {
   // -----------------------------------------------------------------------
 
   return (
-    <div class={styles.panel} role="region" aria-label="Voice assistant">
+    <>
+    <div style={{ height: `${spacerHeight()}px`, "flex-shrink": "0" }} aria-hidden="true" />
+    <div class={styles.panel} ref={panelRef} role="region" aria-label="Voice assistant">
+      <div class={styles.panelInner}>
       {/* Idle state: mic button right-aligned */}
       <Show when={!isActive()}>
         <div class={styles.rowEnd}>
@@ -149,7 +162,9 @@ export default function VoiceOverlay(props: Props) {
           onClearTranscript={() => session.clearTranscript()}
         />
       </Show>
+      </div>
     </div>
+    </>
   );
 }
 

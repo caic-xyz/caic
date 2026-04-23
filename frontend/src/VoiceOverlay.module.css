@@ -3,18 +3,26 @@
 /* ---- Full-width bottom panel ---- */
 
 .panel {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
   background: color-mix(in srgb, var(--color-primary) 5%, var(--color-bg-surface));
   border-top: 1px solid var(--color-border);
-  padding: 0.5rem 1rem;
-  margin: 0 -1rem -1rem;
   font-family: system-ui;
   font-size: 0.9rem;
-  flex-shrink: 0;
+}
+
+.panelInner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0.5rem 1rem;
+  box-sizing: border-box;
 }
 
 @media (max-width: 768px) {
-  .panel {
-    margin: 0 -0.5rem -1rem;
+  .panelInner {
     padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
   }
 }
