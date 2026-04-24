@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -82,7 +82,7 @@ class TaskDetailBodyTest {
                 isReady = true,
             ),
         )
-        composeTestRule.onNodeWithContentDescription("Loading").assertIsNotDisplayed()
+        composeTestRule.onNodeWithTag("loading").assertIsNotDisplayed()
     }
 
     @Test
@@ -96,19 +96,19 @@ class TaskDetailBodyTest {
             ),
         )
         composeTestRule.onNodeWithText("Do something").assertIsDisplayed()
-        composeTestRule.onNodeWithContentDescription("Loading").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("loading").assertIsDisplayed()
     }
 
     @Test
     fun showsOnlySpinnerWhenNoPromptAndNotReady() {
         setBody(TaskDetailState(task = makeTask("", state = "running"), hasMessages = false, isReady = false))
-        composeTestRule.onNodeWithContentDescription("Loading").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("loading").assertIsDisplayed()
     }
 
     @Test
     fun showsNothingWhenNoPromptAndReady() {
         // No prompt, loading complete: blank state, no spinner.
         setBody(TaskDetailState(task = makeTask("", state = "failed"), hasMessages = false, isReady = true))
-        composeTestRule.onNodeWithContentDescription("Loading").assertIsNotDisplayed()
+        composeTestRule.onNodeWithTag("loading").assertIsNotDisplayed()
     }
 }

@@ -659,7 +659,11 @@ internal fun TaskDetailBody(
                     )
                 }
                 if (!state.isReady) {
-                    CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp))
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .padding(top = 16.dp)
+                            .testTag("loading"),
+                    )
                 }
             }
         } else if (!state.isReady) {
@@ -669,7 +673,7 @@ internal fun TaskDetailBody(
                     .padding(padding),
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator()
+                CircularProgressIndicator(modifier = Modifier.testTag("loading"))
             }
         }
     } else {
