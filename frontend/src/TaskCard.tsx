@@ -264,11 +264,16 @@ export default function TaskCard(props: TaskCardProps) {
         </>;
       })()}
 
-      {/* Line 3: model · tokens · cost */}
+      {/* Line 3: harness · model · tokens · cost */}
       <Show when={props.harness || props.model}>
         <div class={styles.metaRow}>
           <span class={styles.meta}>
-            {props.harness && props.harness !== "claude" ? props.harness + " · " : ""}{props.model}
+            {(() => {
+              const parts: string[] = [];
+              if (props.harness) parts.push(props.harness);
+              if (props.model) parts.push(props.model);
+              return parts.join(" · ");
+            })()}
             <Show when={props.activeInputTokens + props.activeCacheReadTokens > 0}>
               {" · "}
               <Tooltip text={`Accumulated: ${formatTokens(props.cumulativeCacheReadInputTokens)} cached + ${formatTokens(props.cumulativeInputTokens + props.cumulativeCacheCreationInputTokens)} in + ${formatTokens(props.cumulativeOutputTokens)} out`}>

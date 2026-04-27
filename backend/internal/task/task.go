@@ -516,10 +516,14 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	t.msgs = msgs
 	// Scan forward so later entries (model_rerouted) override earlier ones.
 	for _, m := range msgs {
-		if init, ok := m.(*agent.InitMessage); ok && init.SessionID != "" {
-			t.sessionID = init.SessionID
-			t.reportedModel = init.Model
-			t.agentVersion = init.Version
+		if init, ok := m.(*agent.InitMessage); ok {
+			if init.SessionID != "" {
+				t.sessionID = init.SessionID
+				t.agentVersion = init.Version
+			}
+			if init.Model != "" {
+				t.reportedModel = init.Model
+			}
 		}
 		if sm, ok := m.(*agent.SystemMessage); ok && sm.Subtype == "model_rerouted" && sm.Model != "" {
 			t.reportedModel = sm.Model
@@ -632,10 +636,14 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 	defer t.mu.Unlock()
 	t.msgs = append(t.msgs, m)
 	// Capture metadata from the init message.
-	if init, ok := m.(*agent.InitMessage); ok && init.SessionID != "" {
-		t.sessionID = init.SessionID
-		t.reportedModel = init.Model
-		t.agentVersion = init.Version
+	if init, ok := m.(*agent.InitMessage); ok {
+		if init.SessionID != "" {
+			t.sessionID = init.SessionID
+			t.agentVersion = init.Version
+		}
+		if init.Model != "" {
+			t.reportedModel = init.Model
+		}
 	}
 	// Track model rerouting (codex): update reportedModel to the active model.
 	if sm, ok := m.(*agent.SystemMessage); ok && sm.Subtype == "model_rerouted" && sm.Model != "" {

@@ -240,12 +240,12 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
                 }
             }
 
-            // Line 3: model · harness · tokens · cost
+            // Line 3: harness · model · tokens · cost
             val tokenCount = task.activeInputTokens + task.activeCacheReadTokens
             val tColor = tokenColor(tokenCount, task.contextWindowLimit)
             val metaParts = buildList {
+                if (!task.harness.isNullOrBlank()) add(task.harness to Color.Unspecified)
                 task.model?.let { add(it to Color.Unspecified) }
-                if (task.harness != "claude") add(task.harness to Color.Unspecified)
                 if (tokenCount > 0) {
                     add("${formatTokens(tokenCount)}/${formatTokens(task.contextWindowLimit)}" to tColor)
                 }
