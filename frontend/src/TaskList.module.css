@@ -135,7 +135,7 @@
 /* Mobile: <=768px */
 @media (max-width: 768px) {
   .list {
-    flex: none;
+    flex: 1;
     width: 100%;
   }
 
