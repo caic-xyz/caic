@@ -629,6 +629,8 @@ MCP tool progress messages (item/mcpToolCall/progress).
 |-------|------|-------------|----------|
 | `toolUseID` | `string` |  | yes |
 | `delta` | `string` |  | yes |
+| `contentType` | `string` |  |  |
+| `formatted` | `string` | Pretty-printed JSON or other transformation. |  |
 
 ### EventWidget
 

@@ -243,13 +243,21 @@ func (tt *toolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 		}}
 	case *agent.ToolOutputDeltaMessage:
 		if m.Delta != "" {
+			contentType, formatted := FormatToolOutput(m.Delta)
+			ev := &v1.EventToolOutputDelta{
+				ToolUseID: m.ToolUseID,
+				Delta:     m.Delta,
+			}
+			if contentType != "" {
+				ev.ContentType = contentType
+			}
+			if formatted != "" {
+				ev.Formatted = formatted
+			}
 			return []v1.EventMessage{{
-				Kind: v1.EventKindToolOutputDelta,
-				Ts:   ts,
-				ToolOutputDelta: &v1.EventToolOutputDelta{
-					ToolUseID: m.ToolUseID,
-					Delta:     m.Delta,
-				},
+				Kind:            v1.EventKindToolOutputDelta,
+				Ts:              ts,
+				ToolOutputDelta: ev,
 			}}
 		}
 		return nil

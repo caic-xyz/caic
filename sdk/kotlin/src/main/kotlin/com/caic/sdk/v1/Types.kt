@@ -450,6 +450,8 @@ data class EventLog(val line: String)
 data class EventToolOutputDelta(
     @SerialName("toolUseID") val toolUseID: String,
     val delta: String,
+    val contentType: String? = null,
+    val formatted: String? = null,
 )
 
 /** EventWidget is emitted when the agent produces a complete HTML widget. */

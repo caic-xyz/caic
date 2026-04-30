@@ -317,7 +317,25 @@ export interface EventLog {
 export interface EventToolOutputDelta {
   toolUseID: string;
   delta: string;
+  contentType?: ToolOutputContentType;
+  formatted?: string; // Pretty-printed JSON or other transformation.
 }
+/**
+ * ToolOutputContentType identifies the type of a tool output for rendering.
+ */
+export type ToolOutputContentType = string;
+/**
+ * ToolOutputText indicates plain text output.
+ */
+export const ToolOutputText: ToolOutputContentType = "text";
+/**
+ * ToolOutputJSON indicates JSON output.
+ */
+export const ToolOutputJSON: ToolOutputContentType = "json";
+/**
+ * ToolOutputMarkdown indicates markdown output.
+ */
+export const ToolOutputMarkdown: ToolOutputContentType = "markdown";
 /**
  * EventWidget is emitted when the agent produces a complete HTML widget.
  */

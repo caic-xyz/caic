@@ -514,6 +514,9 @@ public struct EventLog: Codable {
 public struct EventToolOutputDelta: Codable {
     public let toolUseID: String
     public let delta: String
+    public let contentType: String?
+    /// Pretty-printed JSON or other transformation.
+    public let formatted: String?
 }
 
 /// EventWidget is emitted when the agent produces a complete HTML widget.

@@ -220,9 +220,23 @@ type EventLog struct {
 // Codex only: emitted for Bash stdout (item/commandExecution/outputDelta) and
 // MCP tool progress messages (item/mcpToolCall/progress).
 type EventToolOutputDelta struct {
-	ToolUseID string `json:"toolUseID"`
-	Delta     string `json:"delta"`
+	ToolUseID   string                `json:"toolUseID"`
+	Delta       string                `json:"delta"`
+	ContentType ToolOutputContentType `json:"contentType,omitempty"`
+	Formatted   string                `json:"formatted,omitempty"` // Pretty-printed JSON or other transformation.
 }
+
+// ToolOutputContentType identifies the type of a tool output for rendering.
+type ToolOutputContentType string
+
+const (
+	// ToolOutputText indicates plain text output.
+	ToolOutputText ToolOutputContentType = "text"
+	// ToolOutputJSON indicates JSON output.
+	ToolOutputJSON ToolOutputContentType = "json"
+	// ToolOutputMarkdown indicates markdown output.
+	ToolOutputMarkdown ToolOutputContentType = "markdown"
+)
 
 // EventWidget is emitted when the agent produces a complete HTML widget.
 type EventWidget struct {
