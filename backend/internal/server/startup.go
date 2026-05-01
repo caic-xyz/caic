@@ -1315,7 +1315,10 @@ func (s *Server) deregisterReposUnder(ctx context.Context, dir string) {
 
 // collectWatchDirs returns root and all of its subdirectories down to
 // maxDepth levels, for use as mtime-watch targets. Subdirectories that
-// cannot be read are silently skipped.
+// cannot be read are silently skipped. Dot-prefixed entries (e.g. ".git")
+// are skipped to match gitutil.DiscoverRepos's recursion behaviour and to
+// avoid descending into a repo's internal .git directory, which itself
+// looks like a bare repo to the discoverer.
 func collectWatchDirs(ctx context.Context, root string, maxDepth int) []string {
 	dirs := []string{root}
 	if maxDepth <= 0 {
@@ -1327,10 +1330,11 @@ func collectWatchDirs(ctx context.Context, root string, maxDepth int) []string {
 		return dirs
 	}
 	for _, e := range entries {
-		if e.IsDir() {
-			sub := filepath.Join(root, e.Name())
-			dirs = append(dirs, collectWatchDirs(ctx, sub, maxDepth-1)...)
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
 		}
+		sub := filepath.Join(root, e.Name())
+		dirs = append(dirs, collectWatchDirs(ctx, sub, maxDepth-1)...)
 	}
 	return dirs
 }
