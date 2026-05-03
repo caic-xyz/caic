@@ -144,7 +144,7 @@ class VoiceViewModel @Inject constructor(
     private fun buildCIFailureNotification(task: Task): String? {
         val num = taskNumberMap.toNumber(task.id) ?: return null
         val shortName = task.title.ifBlank { task.id }
-        val pr = task.forgePR?.takeIf { it > 0 }?.let { " PR #$it" } ?: ""
+        val pr = task.forgePR?.takeIf { it > 0 && task.forgePRState != "closed" && task.forgePRState != "merged" }?.let { " PR #$it" } ?: ""
         return "[Task #$num ($shortName)$pr — CI: failure]"
     }
 

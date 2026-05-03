@@ -310,7 +310,8 @@ private fun taskSummaryLine(num: Int, t: Task): String {
     val name = t.title.ifBlank { t.id }
     val extras = buildList {
         val pr = t.forgePR
-        if (pr != null && pr > 0) add("PR #$pr")
+        val prState = t.forgePRState
+        if (pr != null && pr > 0 && prState != "closed" && prState != "merged") add("PR #$pr")
         if (!t.ciStatus.isNullOrBlank()) add("CI: ${t.ciStatus}")
     }
     val extrasStr = if (extras.isNotEmpty()) ", ${extras.joinToString(", ")}" else ""

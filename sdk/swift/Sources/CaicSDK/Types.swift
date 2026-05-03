@@ -300,6 +300,7 @@ public struct Task: Codable {
     public let forgeOwner: String?
     public let forgeRepo: String?
     public let forgePR: Int?
+    public let forgePRState: String?
     public let forgeIssue: Int?
     public let ciStatus: String?
     public let ciChecks: [ForgeCheck]?

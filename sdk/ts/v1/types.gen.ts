@@ -522,6 +522,22 @@ export const CheckConclusionActionRequired: CheckConclusion = "action_required";
  */
 export const CheckConclusionStale: CheckConclusion = "stale";
 /**
+ * ForgePRState is the state of a pull/merge request.
+ */
+export type ForgePRState = string;
+/**
+ * Forge PR state values.
+ */
+export const ForgePRStateOpen: ForgePRState = "open";
+/**
+ * Forge PR state values.
+ */
+export const ForgePRStateClosed: ForgePRState = "closed";
+/**
+ * Forge PR state values.
+ */
+export const ForgePRStateMerged: ForgePRState = "merged";
+/**
  * CheckStatus is the status of a CI check run.
  */
 export type CheckStatus = string;
@@ -609,6 +625,7 @@ export interface Task {
   forgeOwner?: string;
   forgeRepo?: string;
   forgePR?: number /* int */;
+  forgePRState?: ForgePRState;
   forgeIssue?: number /* int */;
   ciStatus?: CIStatus;
   ciChecks?: ForgeCheck[];

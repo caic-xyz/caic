@@ -68,7 +68,9 @@ function diffStatSummary(t: Task): string {
 function taskSummaryLine(num: number, t: Task): string {
   const name = t.title || t.id;
   const extras: string[] = [];
-  if (t.forgePR) extras.push(`PR #${t.forgePR}`);
+  if (t.forgePR && t.forgePRState !== "closed" && t.forgePRState !== "merged") {
+    extras.push(`PR #${t.forgePR}`);
+  }
   if (t.ciStatus) extras.push(`CI: ${t.ciStatus}`);
   const extrasStr = extras.length > 0 ? `, ${extras.join(", ")}` : "";
   const base = `${num}. **${name}** — ${t.state}, ${formatElapsed(t.duration * 1000)}, ${formatCost(t.costUSD)}, ${t.harness}${diffStatSummary(t)}${extrasStr}`;

@@ -924,6 +924,7 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 	j.ForgeOwner = snap.ForgeOwner
 	j.ForgeRepo = snap.ForgeRepo
 	j.ForgePR = snap.ForgePR
+	j.ForgePRState = toV1ForgePRState(snap.ForgePRState)
 	j.ForgeIssue = snap.ForgeIssue
 	j.CIStatus = v1.CIStatus(snap.CIStatus)
 	if len(snap.CIChecks) > 0 {

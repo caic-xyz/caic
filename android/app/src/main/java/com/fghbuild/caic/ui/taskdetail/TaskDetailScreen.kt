@@ -394,7 +394,10 @@ fun TaskDetailScreen(
                                 val forgeOwner = it.forgeOwner
                                 val forgeRepo = it.forgeRepo
                                 val forgePR = it.forgePR
-                                if (forgeOwner != null && forgeRepo != null && forgePR != null && forgePR > 0) {
+                                val forgePRState = it.forgePRState
+                                if (forgeOwner != null && forgeRepo != null && forgePR != null &&
+                                    forgePR > 0 && forgePRState != "closed" && forgePRState != "merged"
+                                ) {
                                     val forge = it.repos?.firstOrNull()?.forge
                                     val prURL = if (forge == "gitlab") {
                                         "https://gitlab.com/$forgeOwner/$forgeRepo/-/merge_requests/$forgePR"

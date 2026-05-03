@@ -353,6 +353,7 @@ Task is the JSON representation sent to the frontend.
 | `forgeOwner` | `string` |  |  |
 | `forgeRepo` | `string` |  |  |
 | `forgePR` | `number` |  |  |
+| `forgePRState` | `string` |  |  |
 | `forgeIssue` | `number` |  |  |
 | `ciStatus` | `string` |  |  |
 | `ciChecks` | `ForgeCheck[]` |  |  |

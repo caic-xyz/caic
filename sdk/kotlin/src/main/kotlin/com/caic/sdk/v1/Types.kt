@@ -253,6 +253,7 @@ data class Task(
     val forgeOwner: String? = null,
     val forgeRepo: String? = null,
     @SerialName("forgePR") val forgePR: Int? = null,
+    @SerialName("forgePRState") val forgePRState: String? = null,
     val forgeIssue: Int? = null,
     val ciStatus: String? = null,
     val ciChecks: List<ForgeCheck>? = null,

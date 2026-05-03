@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/forge"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
@@ -355,6 +356,20 @@ func v1PromptToAgent(p v1.Prompt) agent.Prompt {
 // toV1Harness converts agent.Harness to v1.Harness at the server boundary.
 func toV1Harness(h agent.Harness) v1.Harness {
 	return v1.Harness(h)
+}
+
+// toV1ForgePRState converts forge.PRState to v1.ForgePRState at the server boundary.
+func toV1ForgePRState(s forge.PRState) v1.ForgePRState {
+	switch s {
+	case forge.PRStateOpen:
+		return v1.ForgePRStateOpen
+	case forge.PRStateClosed:
+		return v1.ForgePRStateClosed
+	case forge.PRStateMerged:
+		return v1.ForgePRStateMerged
+	default:
+		return ""
+	}
 }
 
 // toAgentHarness converts v1.Harness to agent.Harness at the server boundary.

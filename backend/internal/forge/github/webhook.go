@@ -69,6 +69,8 @@ type WebhookPR struct {
 	Body    string      `json:"body"`
 	User    WebhookUser `json:"user"`
 	HTMLURL string      `json:"html_url"`
+	State   string      `json:"state"` // "open" or "closed"
+	Merged  bool        `json:"merged"`
 	Head    struct {
 		Ref string `json:"ref"` // branch name
 		SHA string `json:"sha"`

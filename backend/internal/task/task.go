@@ -212,6 +212,7 @@ type Task struct {
 	forgeOwner            string
 	forgeRepo             string
 	forgePR               int
+	forgePRState          forge.PRState // "open", "closed", "merged"; empty when no PR.
 	ciStatus              forge.CIStatus
 	ciChecks              []forge.Check
 }
@@ -379,6 +380,14 @@ func (t *Task) SetPR(owner, repo string, pr int) {
 	t.forgeOwner = owner
 	t.forgeRepo = repo
 	t.forgePR = pr
+	t.forgePRState = forge.PRStateOpen
+	t.mu.Unlock()
+}
+
+// SetPRState updates the PR state.
+func (t *Task) SetPRState(state forge.PRState) {
+	t.mu.Lock()
+	t.forgePRState = state
 	t.mu.Unlock()
 }
 
@@ -447,6 +456,7 @@ type Snapshot struct {
 	ForgeOwner         string
 	ForgeRepo          string
 	ForgePR            int
+	ForgePRState       forge.PRState // "open", "closed", "merged"; empty when no PR.
 	ForgeIssue         int
 	CIStatus           forge.CIStatus
 	CIChecks           []forge.Check
@@ -483,6 +493,7 @@ func (t *Task) Snapshot() Snapshot {
 		ForgeOwner:         t.forgeOwner,
 		ForgeRepo:          t.forgeRepo,
 		ForgePR:            t.forgePR,
+		ForgePRState:       t.forgePRState,
 		ForgeIssue:         t.ForgeIssue,
 		CIStatus:           t.ciStatus,
 		CIChecks:           append([]forge.Check(nil), t.ciChecks...),

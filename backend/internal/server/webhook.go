@@ -106,7 +106,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGitLabWebhook verifies the X-Gitlab-Token header and dispatches
-// Pipeline Hook events.
+// Pipeline Hook and Merge Request Hook events.
 func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 	if len(s.gitlabWebhookSecret) == 0 {
 		http.Error(w, "webhooks not configured", http.StatusNotFound)
@@ -129,29 +129,38 @@ func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Header.Get("X-Gitlab-Event") != "Pipeline Hook" {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
+	event := r.Header.Get("X-Gitlab-Event")
 
-	var ev gitlab.PipelineEvent
-	if err := json.Unmarshal(body, &ev); err != nil {
-		http.Error(w, "invalid payload", http.StatusBadRequest)
-		return
-	}
+	switch event {
+	case "Pipeline Hook":
+		var ev gitlab.PipelineEvent
+		if err := json.Unmarshal(body, &ev); err != nil {
+			http.Error(w, "invalid payload", http.StatusBadRequest)
+			return
+		}
 
-	// Only dispatch on terminal pipeline statuses.
-	switch ev.ObjectAttributes.Status {
-	case "success", "failed", "canceled", "skipped":
+		// Only dispatch on terminal pipeline statuses.
+		switch ev.ObjectAttributes.Status {
+		case "success", "failed", "canceled", "skipped":
+		default:
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		sha := ev.ObjectAttributes.SHA
+		owner, repo, _ := strings.Cut(ev.Project.PathWithNamespace, "/")
+		if owner != "" && repo != "" && sha != "" {
+			go s.webhookOnCI(s.ctx, forge.KindGitLab, owner, repo, sha) //nolint:contextcheck // intentionally using server context; webhook dispatch must outlive request
+		}
+	case "Merge Request Hook":
+		var ev gitlab.MergeRequestEvent
+		if err := json.Unmarshal(body, &ev); err != nil {
+			http.Error(w, "invalid payload", http.StatusBadRequest)
+			return
+		}
+		s.handleGitLabMergeRequestEvent(&ev)
 	default:
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-
-	sha := ev.ObjectAttributes.SHA
-	owner, repo, _ := strings.Cut(ev.Project.PathWithNamespace, "/")
-	if owner != "" && repo != "" && sha != "" {
-		go s.webhookOnCI(s.ctx, forge.KindGitLab, owner, repo, sha) //nolint:contextcheck // intentionally using server context; webhook dispatch must outlive request
+		// Unknown event — silently ignore, return 200.
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -259,9 +268,9 @@ func (s *Server) handleIssuesEvent(ctx context.Context, ev *github.IssuesEvent) 
 }
 
 // handlePullRequestEvent creates a task when a PR is opened or reopened,
-// or updates an existing task if a PR is opened for a branch that already
-// has a container/task but no PR yet.
-// Trigger: action=="opened" OR action=="reopened".
+// updates PR state when closed, or updates an existing task if a PR is
+// opened for a branch that already has a container/task but no PR yet.
+// Trigger: action=="opened", "reopened", or "closed".
 func (s *Server) handlePullRequestEvent(ctx context.Context, ev *github.PullRequestEvent) {
 	// Create a new task to review/fix the PR if auto-fix on PR open is enabled.
 	if (ev.Action == "opened" || ev.Action == "reopened") && s.prefs.Get("default").Settings.AutoFixOnPROpen {
@@ -275,6 +284,14 @@ func (s *Server) handlePullRequestEvent(ctx context.Context, ev *github.PullRequ
 			HeadRef:       ev.PullRequest.Head.Ref,
 			BaseRef:       ev.PullRequest.Base.Ref,
 		})
+	}
+
+	// Handle PR closed (merged or closed) or reopened.
+	switch ev.Action {
+	case "closed":
+		s.handlePRClosedEvent(ev)
+	case "reopened":
+		s.handlePRReopenedEvent(ev)
 	}
 
 	// Also check if this PR is for an existing task that doesn't have a PR yet.
@@ -341,6 +358,96 @@ func (s *Server) handlePRForExistingTask(ctx context.Context, ev *github.PullReq
 				go s.monitorCI(ctx, entry, s.forge.forgeFor(ctx, ri.ForgeKind), owner, repo, sha)
 			}
 		}
+	}
+}
+
+// handlePRClosedEvent updates the PR state for tasks whose PR was closed or merged.
+func (s *Server) handlePRClosedEvent(ev *github.PullRequestEvent) {
+	owner, repo, _ := strings.Cut(ev.Repository.FullName, "/")
+	if owner == "" || repo == "" {
+		return
+	}
+	prNumber := ev.PullRequest.Number
+
+	s.mu.Lock()
+	var matchingEntries []*taskEntry
+	for _, e := range s.tasks {
+		snap := e.task.Snapshot()
+		if snap.ForgeOwner == owner && snap.ForgeRepo == repo && snap.ForgePR == prNumber {
+			matchingEntries = append(matchingEntries, e)
+		}
+	}
+	s.mu.Unlock()
+
+	for _, entry := range matchingEntries {
+		// Determine state: "merged" if merged, otherwise "closed".
+		var state forge.PRState
+		if ev.PullRequest.Merged {
+			state = forge.PRStateMerged
+		} else {
+			state = forge.PRStateClosed
+		}
+		slog.Info("webhook: PR closed/merged", "task", entry.task.ID, "repo", owner+"/"+repo, "pr", prNumber, "state", state)
+		entry.task.SetPRState(state)
+		s.notifyTaskChange()
+	}
+}
+
+// handlePRReopenedEvent resets the PR state to "open" when a closed PR is reopened.
+func (s *Server) handlePRReopenedEvent(ev *github.PullRequestEvent) {
+	owner, repo, _ := strings.Cut(ev.Repository.FullName, "/")
+	if owner == "" || repo == "" {
+		return
+	}
+	prNumber := ev.PullRequest.Number
+
+	s.mu.Lock()
+	var matchingEntries []*taskEntry
+	for _, e := range s.tasks {
+		snap := e.task.Snapshot()
+		if snap.ForgeOwner == owner && snap.ForgeRepo == repo && snap.ForgePR == prNumber {
+			matchingEntries = append(matchingEntries, e)
+		}
+	}
+	s.mu.Unlock()
+
+	for _, entry := range matchingEntries {
+		slog.Info("webhook: PR reopened", "task", entry.task.ID, "repo", owner+"/"+repo, "pr", prNumber)
+		entry.task.SetPRState(forge.PRStateOpen)
+		s.notifyTaskChange()
+	}
+}
+
+// handleGitLabMergeRequestEvent handles GitLab merge request state changes.
+func (s *Server) handleGitLabMergeRequestEvent(ev *gitlab.MergeRequestEvent) {
+	owner, repo, _ := strings.Cut(ev.Project.PathWithNamespace, "/")
+	if owner == "" || repo == "" {
+		return
+	}
+	mrIID := ev.ObjectAttributes.IID
+
+	s.mu.Lock()
+	var matchingEntries []*taskEntry
+	for _, e := range s.tasks {
+		snap := e.task.Snapshot()
+		if snap.ForgeOwner == owner && snap.ForgeRepo == repo && snap.ForgePR == mrIID {
+			matchingEntries = append(matchingEntries, e)
+		}
+	}
+	s.mu.Unlock()
+
+	for _, entry := range matchingEntries {
+		state := forge.PRStateOpen
+		if ev.ObjectAttributes.State == "closed" {
+			if ev.ObjectAttributes.Merged {
+				state = forge.PRStateMerged
+			} else {
+				state = forge.PRStateClosed
+			}
+		}
+		slog.Info("webhook: GitLab MR state", "task", entry.task.ID, "repo", owner+"/"+repo, "mr", mrIID, "state", state)
+		entry.task.SetPRState(state)
+		s.notifyTaskChange()
 	}
 }
 

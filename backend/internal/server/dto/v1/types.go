@@ -99,6 +99,16 @@ const (
 	CheckConclusionStale          CheckConclusion = "stale"
 )
 
+// ForgePRState is the state of a pull/merge request.
+type ForgePRState string
+
+// Forge PR state values.
+const (
+	ForgePRStateOpen   ForgePRState = "open"
+	ForgePRStateClosed ForgePRState = "closed"
+	ForgePRStateMerged ForgePRState = "merged"
+)
+
 // CheckStatus is the status of a CI check run.
 type CheckStatus string
 
@@ -175,6 +185,7 @@ type Task struct {
 	ForgeOwner                         string       `json:"forgeOwner,omitempty"`
 	ForgeRepo                          string       `json:"forgeRepo,omitempty"`
 	ForgePR                            int          `json:"forgePR,omitempty"`
+	ForgePRState                       ForgePRState `json:"forgePRState,omitempty"`
 	ForgeIssue                         int          `json:"forgeIssue,omitempty"`
 	CIStatus                           CIStatus     `json:"ciStatus,omitempty"`
 	CIChecks                           []ForgeCheck `json:"ciChecks,omitempty"`

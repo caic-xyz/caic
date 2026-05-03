@@ -125,6 +125,16 @@ const (
 	CIStatusFailure CIStatus = "failure"
 )
 
+// PRState is the state of a pull/merge request.
+type PRState string
+
+// PR state values.
+const (
+	PRStateOpen   PRState = "open"
+	PRStateClosed PRState = "closed"
+	PRStateMerged PRState = "merged"
+)
+
 // Forge is the interface for interacting with a code hosting forge.
 type Forge interface {
 	// CreatePR creates a pull/merge request and returns its metadata.
