@@ -158,10 +158,10 @@
 #pprof = false
 
 # Write CPU profile to file.
-#cpuprofile = ""
+#cpuprofile = "~/.cache/caic/cpu.prof"
 
 # Write heap profile to file on shutdown.
-#memprofile = ""
+#memprofile = "~/.cache/caic/mem.prof"
 
 # Write execution trace to file.
-#trace = ""
+#trace = "~/.cache/caic/trace.out"

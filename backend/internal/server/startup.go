@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/trace"
 	"slices"
 	"strings"
 	"sync"
@@ -70,6 +71,9 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		return nil, err
 	}
 
+	ctx, startTask := trace.NewTask(ctx, "server.startup")
+	defer startTask.End()
+
 	// container.New is instant; run it serially to simplify.
 	mdClient, err := container.New(cfg.TailscaleAPIKey, cfg.GitHubToken)
 	if err != nil {
@@ -96,14 +100,17 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	contCh := make(chan containersResult, 1)
 
 	go func() {
+		defer trace.StartRegion(ctx, "discover-repos").End()
 		paths, err := gitutil.DiscoverRepos(rootDir, repoDiscoveryDepth)
 		repoCh <- reposResult{paths, err}
 	}()
 	go func() {
+		defer trace.StartRegion(ctx, "load-logs").End()
 		logs, err := task.LoadLogs(logDir)
 		logCh <- logsResult{logs, err}
 	}()
 	go func() {
+		defer trace.StartRegion(ctx, "list-containers").End()
 		containers, err := mdClient.List(ctx)
 		contCh <- containersResult{containers, err}
 	}()
@@ -270,6 +277,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	var wg sync.WaitGroup
 	for i, abs := range repoRes.paths {
 		wg.Go(func() {
+			defer trace.StartRegion(ctx, "repo-runner-init").End()
 			rel, err := filepath.Rel(absRoot, abs)
 			if err != nil {
 				rel = filepath.Base(abs)
@@ -331,22 +339,28 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	s.runners[""] = noRepoRunner
 
 	// Phase 3: Load purged tasks from pre-loaded logs.
+	phase3 := trace.StartRegion(ctx, "load-purged-tasks")
 	if logRes.err != nil {
 		slog.Warn("load logs failed", "err", logRes.err)
 	} else {
 		if err := s.loadPurgedTasksFrom(logRes.logs); err != nil {
+			phase3.End()
 			return nil, fmt.Errorf("load purged tasks: %w", err)
 		}
 	}
+	phase3.End()
 
 	// Phase 4: Adopt containers (using pre-fetched list).
+	phase4 := trace.StartRegion(ctx, "adopt-containers")
 	if contRes.err != nil {
 		slog.Warn("list containers failed, skipping adoption", "err", contRes.err)
 	} else {
 		if err := s.adoptContainers(ctx, contRes.containers, logRes.logs); err != nil {
+			phase4.End()
 			return nil, fmt.Errorf("adopt containers: %w", err)
 		}
 	}
+	phase4.End()
 
 	// Resume bot comment watchers for adopted tasks with pending forge issues.
 	s.bot.ResumePendingComments()
@@ -625,9 +639,15 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 // alive, it spawns a background goroutine to reattach. allLogs is the
 // pre-loaded set of JSONL log files (shared across all adoptOne calls).
 func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner, c *md.Container, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) error { //nolint:gocritic // repoInfo size increase from GitHub fields; refactor not worth it
+	ctx, adoptTask := trace.NewTask(ctx, "adopt-container")
+	defer adoptTask.End()
+	trace.Logf(ctx, "container", "%s repo=%s branch=%s", c.Name, ri.RelPath, branch)
+
 	// Only adopt containers that caic started. The caic label is set at
 	// container creation and is the authoritative proof of ownership.
+	caicLabelReg := trace.StartRegion(ctx, "caic-label")
 	labelVal, err := container.LabelValue(ctx, c.Name, "caic")
+	caicLabelReg.End()
 	if err != nil {
 		return fmt.Errorf("label check for %s: %w", c.Name, err)
 	}
@@ -693,13 +713,17 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	var relayDiag string
 	if !isExited {
 		var relayErr error
+		relayStatusReg := trace.StartRegion(ctx, "relay-status")
 		relayAlive, relayDiag, relayErr = agent.RelayStatus(ctx, c.Name)
+		relayStatusReg.End()
 		if relayErr != nil {
 			slog.Warn("relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", relayErr, "diag", relayDiag)
 		}
 		if relayAlive {
 			// Relay is alive — read authoritative output from container.
+			relayReadReg := trace.StartRegion(ctx, "relay-read")
 			relayMsgs, relaySize, relayErr = runner.ReadRelayOutput(ctx, c.Name, harnessName)
+			relayReadReg.End()
 			if relayErr != nil {
 				slog.Warn("relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", relayErr)
 				relayAlive = false
@@ -789,9 +813,11 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(relayMsgs))
 	} else if lt != nil {
 		s.setParser(lt)
+		loadMsgsReg := trace.StartRegion(ctx, "load-messages")
 		if err := lt.LoadMessages(); err != nil {
 			slog.Warn("load messages failed", "repo", ri.RelPath, "br", branch, "err", err)
 		}
+		loadMsgsReg.End()
 		if len(lt.Msgs) > 0 {
 			t.RestoreMessages(lt.Msgs)
 			slog.Warn("relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(lt.Msgs))
