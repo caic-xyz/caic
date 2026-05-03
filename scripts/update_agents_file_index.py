@@ -150,6 +150,14 @@ def get_file_description(filepath):
             continue
         if sline.startswith(f"{prefix} swift-tools-version:"):
             continue
+        if sline.startswith(f"{prefix} ///"):
+            continue
+        # Skip PEP 723 inline script metadata fields (requires-python, dependencies, etc.)
+        # that appear between # /// script and # /// markers.
+        if fname.endswith(".py") and (
+            sline.startswith(f"{prefix} requires-") or sline.startswith(f"{prefix} dependencies")
+        ):
+            continue
         if sline.startswith(prefix):
             comment = sline[len(prefix) :].strip()
             if not comment:
