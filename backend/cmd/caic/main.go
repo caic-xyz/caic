@@ -144,6 +144,14 @@ Flags:
 	if root, err = expandTilde(root); err != nil {
 		return err
 	}
+	for _, p := range []*string{&tc.Debug.CPUProfile, &tc.Debug.Trace, &tc.Debug.MemProfile} {
+		if *p == "" {
+			continue
+		}
+		if *p, err = expandTilde(*p); err != nil {
+			return fmt.Errorf("debug path: %w", err)
+		}
+	}
 
 	initLogging(logLevel, tc.Debug.NoLogTime)
 
