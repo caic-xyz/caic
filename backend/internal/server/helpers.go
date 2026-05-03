@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -193,8 +194,7 @@ func (s *Server) emitWarning(msg string) {
 	defer s.mu.Unlock()
 	now := time.Now()
 	// Deduplicate: skip if the same message was emitted recently.
-	for i := len(s.warnings) - 1; i >= 0; i-- {
-		w := s.warnings[i]
+	for _, w := range slices.Backward(s.warnings) {
 		if now.Sub(w.ts) > warningDedup {
 			break
 		}

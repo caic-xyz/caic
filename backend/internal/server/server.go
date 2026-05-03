@@ -317,7 +317,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 		cc := s.ipgeoChecker.CountryCode(clientIP)
 		if !s.ipgeoChecker.IsAllowed(clientIP) {
 			http.Error(w, "forbidden: country not allowed", http.StatusForbidden)
-			slog.Info("http blocked", "m", r.Method, "p", r.URL.Path, "s", http.StatusForbidden, "ip", clientIP, "cc", cc) //nolint:gosec // G706: request metadata logged for audit; not used in security decisions
+			slog.Info("http blocked", "m", r.Method, "p", r.URL.Path, "s", http.StatusForbidden, "ip", clientIP, "cc", cc)
 			return
 		}
 		start := time.Now()

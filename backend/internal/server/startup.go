@@ -674,8 +674,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	// repo+branch values.
 	taskIDStr := taskID.String()
 	var lt *task.LoadedTask
-	for i := len(allLogs) - 1; i >= 0; i-- {
-		log := allLogs[i]
+	for _, log := range slices.Backward(allLogs) {
 		if branch == "" && ri.RelPath == "" {
 			if log.TaskID == taskIDStr {
 				lt = log

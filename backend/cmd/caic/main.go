@@ -197,7 +197,7 @@ Flags:
 		}()
 	}
 
-	slog.Info("gemini", "apikey", auth.MaskedToken(cfg.GeminiAPIKey)) //nolint:gosec // token is masked
+	slog.Info("gemini", "apikey", auth.MaskedToken(cfg.GeminiAPIKey))
 	slog.Info("tailscale", "apikey", auth.MaskedToken(cfg.TailscaleAPIKey))
 	slog.Info("LLM", "provider", cfg.LLMProvider, "model", cfg.LLMModel)
 

@@ -38,7 +38,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	event := r.Header.Get("X-Github-Event")
-	slog.Info("github webhook", "event", event) //nolint:gosec // G706: event name is from GitHub header, not user input
+	slog.Info("github webhook", "event", event)
 	switch event {
 	case "issues":
 		var ev github.IssuesEvent

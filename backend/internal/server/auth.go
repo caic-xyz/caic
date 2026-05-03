@@ -49,7 +49,7 @@ func (s *Server) handleAuthStart(provider string) http.HandlerFunc {
 		fullState := prefix + state
 		cookieValue := auth.SignState(fullState, s.sessionSecret)
 
-		http.SetCookie(w, &http.Cookie{
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is set dynamically; all required attributes are present
 			Name:     auth.StateCookieName,
 			Value:    cookieValue,
 			MaxAge:   600,
@@ -73,7 +73,7 @@ func (s *Server) handleAuthCallback(provider string) http.HandlerFunc {
 		}
 
 		// Always clear the state cookie.
-		http.SetCookie(w, &http.Cookie{
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is set dynamically; all required attributes are present
 			Name:     auth.StateCookieName,
 			Value:    "",
 			MaxAge:   -1,
@@ -172,7 +172,7 @@ func (s *Server) handleAuthCallback(provider string) http.HandlerFunc {
 		}
 
 		// Set session cookie.
-		http.SetCookie(w, &http.Cookie{
+		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is set dynamically; all required attributes are present
 			Name:     sessionCookieName,
 			Value:    jwt,
 			MaxAge:   sessionMaxAge,
@@ -207,7 +207,7 @@ func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {
 
 // handleLogout handles POST /api/v1/auth/logout.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is set dynamically; all required attributes are present
 		Name:     sessionCookieName,
 		Value:    "",
 		MaxAge:   -1,

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -266,8 +267,8 @@ func (s *Server) applyMonitorCIResult(ctx context.Context, entry *taskEntry, f f
 // the task's message history. Used as the squash-merge commit body.
 func lastResultText(t *task.Task) string {
 	msgs := t.Messages()
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if rm, ok := msgs[i].(*agent.ResultMessage); ok {
+	for _, msg := range slices.Backward(msgs) {
+		if rm, ok := msg.(*agent.ResultMessage); ok {
 			return rm.Result
 		}
 	}

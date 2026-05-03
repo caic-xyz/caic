@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -347,8 +348,8 @@ func (t *Task) LastAgentResult() string {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	// Walk messages in reverse to find the last ResultMessage.
-	for i := len(t.msgs) - 1; i >= 0; i-- {
-		if rm, ok := t.msgs[i].(*agent.ResultMessage); ok {
+	for _, msg := range slices.Backward(t.msgs) {
+		if rm, ok := msg.(*agent.ResultMessage); ok {
 			return rm.Result
 		}
 	}
@@ -574,12 +575,12 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	// Restore live diff stat from the last DiffStatMessage or ResultMessage,
 	// whichever appears later. ResultMessage carries the authoritative
 	// host-side diff stat but a DiffStatMessage from the relay may follow it.
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if ds, ok := msgs[i].(*agent.DiffStatMessage); ok {
+	for _, msg := range slices.Backward(msgs) {
+		if ds, ok := msg.(*agent.DiffStatMessage); ok {
 			t.liveDiffStat = ds.DiffStat
 			break
 		}
-		if rm, ok := msgs[i].(*agent.ResultMessage); ok && len(rm.DiffStat) > 0 {
+		if rm, ok := msg.(*agent.ResultMessage); ok && len(rm.DiffStat) > 0 {
 			t.liveDiffStat = rm.DiffStat
 			break
 		}
@@ -892,8 +893,8 @@ func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
 // result. Returns nil if it is not a ResultMessage (agent still producing
 // output) or msgs is empty.
 func lastAgentMessage(msgs []agent.Message) *agent.ResultMessage {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		switch m := msgs[i].(type) {
+	for _, msg := range slices.Backward(msgs) {
+		switch m := msg.(type) {
 		case *agent.DiffStatMessage:
 			continue // Relay metadata; skip.
 		case *agent.TextDeltaMessage:
@@ -918,8 +919,8 @@ func lastAgentMessage(msgs []agent.Message) *agent.ResultMessage {
 // the first ResultMessage we encounter.
 func lastTurnHasAsk(msgs []agent.Message) bool {
 	skippedResult := false
-	for i := len(msgs) - 1; i >= 0; i-- {
-		switch msgs[i].(type) {
+	for _, msg := range slices.Backward(msgs) {
+		switch msg.(type) {
 		case *agent.AskMessage:
 			return true
 		case *agent.ResultMessage:
@@ -937,8 +938,8 @@ func lastTurnHasAsk(msgs []agent.Message) bool {
 // ResultMessage boundary, mirroring lastTurnHasAsk.
 func lastTurnHasExitPlan(msgs []agent.Message) bool {
 	skippedResult := false
-	for i := len(msgs) - 1; i >= 0; i-- {
-		switch m := msgs[i].(type) {
+	for _, msg := range slices.Backward(msgs) {
+		switch m := msg.(type) {
 		case *agent.ToolUseMessage:
 			if m.Name == "ExitPlanMode" {
 				return true

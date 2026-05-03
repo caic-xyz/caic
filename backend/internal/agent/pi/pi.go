@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -445,7 +446,7 @@ func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
 
 	// Find the last assistant message for usage.
 	var usage agent.Usage
-	for i := len(ev.Messages) - 1; i >= 0; i-- {
+	for i := range slices.Backward(ev.Messages) {
 		msg := &ev.Messages[i]
 		if msg.Role != pi.RoleAssistant {
 			continue
