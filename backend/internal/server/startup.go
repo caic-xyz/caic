@@ -787,21 +787,6 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	case forgeIssue > 0 && ri.ForgeOwner != "":
 		// Ensure forge owner/repo are set so the bot can resolve a commenter.
 		t.SetPR(ri.ForgeOwner, ri.ForgeRepo, 0)
-	case ri.ForgeOwner != "" && branch != "" && ri.ForgeKind != "":
-		// Query the forge for an existing PR created outside of caic.
-		f := s.forge.forgeForInfo(ctx, &ri)
-		if f == nil && s.authStore != nil {
-			if u, ok := s.authStore.FindByProvider(ri.ForgeKind); ok {
-				f = s.forge.forgeFor(auth.NewContext(ctx, &u), ri.ForgeKind)
-			}
-		}
-		if f != nil {
-			pr, err := f.FindPRByBranch(ctx, ri.ForgeOwner, ri.ForgeRepo, branch)
-			if err == nil && pr.Number > 0 {
-				slog.Info("adopt: found external PR", "repo", ri.RelPath, "br", branch, "pr", pr.Number)
-				t.SetPR(ri.ForgeOwner, ri.ForgeRepo, pr.Number)
-			}
-		}
 	}
 
 	// Restore messages from relay or logs.
@@ -869,11 +854,10 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		}
 	}
 
-	// Track whether we've already registered the task entry (happens for external PRs).
 	entryRegistered := false
 	entry := &taskEntry{task: t, done: make(chan struct{})}
 
-	// Register entry and start CI monitoring if a PR was found (either from logs or external).
+	// Register entry and start CI monitoring if a PR was restored from the log.
 	if t.GetPR() > 0 && ri.ForgeOwner != "" && ri.ForgeKind != "" {
 		// The adoption context has no authenticated user. Try the general
 		// lookup first (PAT / GitHub App), then fall back to a stored
@@ -924,6 +908,13 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		s.tasks[t.ID.String()] = entry
 		s.taskChanged()
 		s.mu.Unlock()
+	}
+
+	// External PR lookup: deferred so the forge API call doesn't block startup.
+	// Applies when the log has no PR (log-based PRs are set synchronously above)
+	// and this is not a bot-driven issue task.
+	if forgeIssue == 0 && t.GetPR() == 0 && ri.ForgeOwner != "" && branch != "" && ri.ForgeKind != "" {
+		go s.lookupExternalPR(&ri, branch, t, entry) //nolint:contextcheck // server-lifetime context is intentional; must outlive adoption
 	}
 
 	slog.Info("container", "msg", "adopted",
@@ -984,6 +975,38 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		t.SetState(task.StateStopped)
 	}
 	return nil
+}
+
+// lookupExternalPR queries the forge for a PR matching branch and, if found,
+// updates t, notifies clients, and starts CI monitoring. Runs in a goroutine
+// so the forge API call does not block server startup.
+func (s *Server) lookupExternalPR(ri *repoInfo, branch string, t *task.Task, entry *taskEntry) {
+	f := s.forge.forgeForInfo(s.ctx, ri)
+	if f == nil && s.authStore != nil {
+		if u, ok := s.authStore.FindByProvider(ri.ForgeKind); ok {
+			f = s.forge.forgeFor(auth.NewContext(s.ctx, &u), ri.ForgeKind)
+		}
+	}
+	if f == nil {
+		return
+	}
+	pr, err := f.FindPRByBranch(s.ctx, ri.ForgeOwner, ri.ForgeRepo, branch)
+	if err != nil || pr.Number == 0 {
+		return
+	}
+	slog.Info("adopt: found external PR", "repo", ri.RelPath, "br", branch, "pr", pr.Number)
+	t.SetPR(ri.ForgeOwner, ri.ForgeRepo, pr.Number)
+	s.notifyTaskChange()
+	sha, err := f.GetDefaultBranchSHA(s.ctx, ri.ForgeOwner, ri.ForgeRepo, branch)
+	if err != nil {
+		slog.Warn("adopt: GetDefaultBranchSHA failed", "task", t.ID, "branch", branch, "err", err)
+		return
+	}
+	slog.Info("adopt: starting monitorCI", "task", t.ID, "branch", branch, "sha", sha)
+	s.mu.Lock()
+	entry.monitorBranch = branch
+	s.mu.Unlock()
+	s.monitorCI(s.ctx, entry, f, ri.ForgeOwner, ri.ForgeRepo, sha)
 }
 
 // watchContainerEvents starts a single goroutine that listens for Docker
