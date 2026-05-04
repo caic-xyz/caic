@@ -78,8 +78,6 @@ private const val PLAYBACK_SAMPLE_RATE = 24000
 private const val AUDIO_BUFFER_SIZE = 4096
 private const val WS_CLOSE_NORMAL = 1000
 private const val MODEL_NAME = "models/gemini-2.5-flash-native-audio-preview-12-2025"
-/** Poll interval (ms) when mic is paused during model playback. */
-private const val PAUSE_POLL_MS = 20L
 /** Max time (ms) to wait for setupComplete before timing out. */
 private const val SETUP_TIMEOUT_MS = 15_000L
 
@@ -725,10 +723,9 @@ class VoiceSession @Inject constructor(
                 // WebSocket mode: play PCM from data channel. In WebRTC mode
                 // audio arrives via RTP and the library plays it directly.
                 val pcmBytes = Base64.decode(inlineData.data, Base64.NO_WRAP)
-                // Pause mic while model speaks so speaker output doesn't feed back
-                // into the recording as garbled input. AEC alone is not reliable.
+                // Keep mic live so server-side VAD can detect user speech for barge-in.
+                // AEC (AcousticEchoCanceler + VOICE_COMMUNICATION source) handles echo.
                 speakerActive = true
-                pauseRecording()
                 playAudio(pcmBytes)
                 _state.update { it.copy(speaking = true, micLevel = 0f) }
             }
@@ -740,16 +737,14 @@ class VoiceSession @Inject constructor(
             _state.update { it.copy(transcript = it.transcript.appendChunk(TranscriptSpeaker.ASSISTANT, text)) }
         }
         if (content.interrupted == true) {
-            // User barged in — resume mic immediately.
+            // User barged in — model stopped.
             speakerActive = false
-            resumeRecording()
             flushPendingNotifications()
             _state.update { it.copy(speaking = false) }
         }
         if (content.turnComplete == true) {
-            // Model finished speaking — resume mic so user can reply.
+            // Model finished speaking.
             speakerActive = false
-            resumeRecording()
             flushPendingNotifications()
             _state.update {
                 it.copy(
@@ -1015,16 +1010,11 @@ class VoiceSession @Inject constructor(
     }
 
     /**
-     * Read one chunk from the mic, handling the paused state.
-     * Returns >0 on success, 0 when paused/skipped, -1 on fatal error.
+     * Read one chunk from the mic.
+     * Returns >0 on success, 0 when skipped, -1 on fatal error.
      */
     @Suppress("TooGenericExceptionCaught") // Error boundary: recording failures must not crash.
     private fun readMicChunk(rec: AudioRecord, buffer: ByteArray): Int {
-        // When paused (model speaking), poll instead of reading.
-        if (rec.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-            Thread.sleep(PAUSE_POLL_MS)
-            return 0
-        }
         return try {
             rec.read(buffer, 0, buffer.size)
         } catch (e: IllegalStateException) {
@@ -1065,28 +1055,6 @@ class VoiceSession @Inject constructor(
             json.encodeToString(BidiGenerateContentRealtimeInput.serializer(), realtimeInput)
                 .wrapTopLevel("realtimeInput")
         )
-    }
-
-    /** Pause the microphone to prevent speaker→mic echo feedback. */
-    private fun pauseRecording() {
-        val rec = audioRecord ?: return
-        if (rec.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
-            rec.stop()
-        }
-    }
-
-    /** Resume the microphone after model finishes speaking. */
-    private fun resumeRecording() {
-        val rec = audioRecord ?: return
-        if (rec.recordingState == AudioRecord.RECORDSTATE_STOPPED) {
-            rec.startRecording()
-            // Drain any stale audio from the internal buffer so we only send
-            // fresh samples recorded after the model stopped speaking.
-            val drain = ByteArray(AUDIO_BUFFER_SIZE)
-            while (rec.read(drain, 0, drain.size, AudioRecord.READ_NON_BLOCKING) > 0) {
-                // discard
-            }
-        }
     }
 
     private fun playAudio(pcmBytes: ByteArray) {

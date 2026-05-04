@@ -752,7 +752,7 @@ export class VoiceSession {
       const source = this._audioContext.createMediaStreamSource(this._micStream);
       this._workletNode = new AudioWorkletNode(this._audioContext, "pcm-capture");
       this._workletNode.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; micLevel: number }>) => {
-        if (this.state.muted || this._speakerActive) return;
+        if (this.state.muted) return;
         this._sendAudio(new Int16Array(e.data.pcm));
         this._update((s) => {
           s.micLevel = e.data.micLevel;
