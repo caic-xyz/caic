@@ -347,7 +347,10 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	t.AttachSession(h)
 
 	t.addMessage(ctx, syntheticUserInput(t.InitialPrompt), false)
-	t.SetState(StateRunning)
+	// Use SetStateIf so that a fast agent subprocess that already
+	// produced a result (and was processed by the dispatch goroutine
+	// via addMessage) isn't overwritten back to Running.
+	t.SetStateIf(StateStarting, StateRunning)
 	tlog.Info("agent running", "session_dur", time.Since(tSession), "total_startup_dur", time.Since(tStart))
 	return h, nil
 }

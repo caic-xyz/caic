@@ -561,10 +561,23 @@ func TestTask(t *testing.T) {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateRunning)
 			}
 		})
+		t.Run("TextMessageTransitionsStartingToRunning", func(t *testing.T) {
+			// When the agent subprocess produces output before
+			// Runner.Start calls SetState(Running), StateStarting
+			// must transition to Running so the subsequent
+			// ResultMessage can transition further.
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateStarting)
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "output"}, false)
+			if tk.GetState() != StateRunning {
+				t.Errorf("state = %v, want %v", tk.GetState(), StateRunning)
+			}
+		})
 		t.Run("NoTransitionForNonActiveStates", func(t *testing.T) {
 			// TextMessages should NOT transition terminal or
-			// setup states.
-			for _, state := range []State{StatePending, StateBranching, StateProvisioning, StateStarting, StatePurging, StateFailed, StatePurged} {
+			// setup states (except StateStarting, which is
+			// tested separately above).
+			for _, state := range []State{StatePending, StateBranching, StateProvisioning, StatePurging, StateFailed, StatePurged} {
 				tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 				tk.SetState(state)
 				tk.addMessage(t.Context(), &agent.TextMessage{Text: "output"}, false)

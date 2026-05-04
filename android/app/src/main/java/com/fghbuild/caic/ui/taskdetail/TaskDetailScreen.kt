@@ -650,7 +650,9 @@ internal fun TaskDetailBody(
                     .padding(12.dp),
             ) {
                 Surface(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("initial-prompt"),
                     shape = RoundedCornerShape(6.dp),
                     color = MaterialTheme.appColors.userMsgBg,
                 ) {

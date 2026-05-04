@@ -6,7 +6,6 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.caic.sdk.v1.Harnesses
@@ -69,7 +68,7 @@ class TaskDetailBodyTest {
                 isReady = true,
             ),
         )
-        composeTestRule.onNodeWithText("Fix the login bug").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("initial-prompt").assertIsDisplayed()
     }
 
     @Test
@@ -95,7 +94,7 @@ class TaskDetailBodyTest {
                 isReady = false,
             ),
         )
-        composeTestRule.onNodeWithText("Do something").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("initial-prompt").assertIsDisplayed()
         composeTestRule.onNodeWithTag("loading").assertIsDisplayed()
     }
 

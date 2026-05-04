@@ -691,14 +691,17 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 			t.reportedContextWindow = u.ContextWindow
 		}
 	}
-	// Transition to running when the agent starts producing output
-	// while the task is in a waiting state. This covers the case where
-	// the server restarts and RestoreMessages inferred StateWaiting
-	// from a trailing ResultMessage, but the agent already started a
-	// new turn on the relay before we reattached.
+	// Transition to running when the agent starts producing output.
+	// Handles three cases:
+	//   - Normal turn: awaiting user input (Waiting/Asking/HasPlan).
+	//   - Server restart: RestoreMessages inferred a waiting state,
+	//     but the relay already started a new turn before reattach.
+	//   - First turn: the agent may produce output before Runner.Start
+	//     sets StateRunning (race between backend subprocess and
+	//     SetState on the main goroutine).
 	switch m.(type) {
 	case *agent.TextMessage, *agent.ToolUseMessage, *agent.AskMessage, *agent.TodoMessage:
-		if t.state == StateWaiting || t.state == StateAsking || t.state == StateHasPlan {
+		if t.state == StateStarting || t.state == StateWaiting || t.state == StateAsking || t.state == StateHasPlan {
 			t.setState(StateRunning)
 		}
 	}
@@ -737,7 +740,9 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 		// Waiting before the dispatch goroutine processed this
 		// ResultMessage (it does a blocking Fetch first). In that case
 		// we still need to distinguish Waiting from Asking/HasPlan.
-		if t.state == StateRunning || t.state == StateWaiting {
+		// StateStarting is also handled: the agent subprocess may
+		// produce a result before Runner.Start calls SetState(Running).
+		if t.state == StateRunning || t.state == StateStarting || t.state == StateWaiting {
 			switch {
 			case lastTurnHasAsk(t.msgs):
 				t.setState(StateAsking)
