@@ -52,6 +52,7 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | POST | `/api/v1/tasks/{id}/sync` | Pushes task changes to the remote repository. | `SyncReq` | `SyncResp` |
 | POST | `/api/v1/tasks/{id}/fork` | Forks a task by snapshotting its container and creating a new task on a derived branch. | `ForkTaskReq` | `CreateTaskResp` |
 | GET | `/api/v1/tasks/{id}/diff` | Returns the unified diff for a task's branch. |  | `DiffResp` |
+| GET | `/api/v1/tasks/{id}/processes` | Returns the list of running processes inside the task's container. |  | `ProcessListResp` |
 | GET | `/api/v1/tasks/{id}/tool/{toolUseID}` | Returns the full (untruncated) input for a tool call. |  | `TaskToolInputResp` |
 
 ## Usage
@@ -802,6 +803,29 @@ DiffResp is the response for GET /api/v1/tasks/{id}/diff.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `diff` | `string` |  | yes |
+
+### ProcessInfo
+
+ProcessInfo describes a single process running inside a task container.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `pid` | `number` |  | yes |
+| `ppid` | `number` |  | yes |
+| `user` | `string` |  | yes |
+| `state` | `string` | Single-character state: R, S, D, Z, T, etc. | yes |
+| `cpu` | `number` |  | yes |
+| `mem` | `number` |  | yes |
+| `time` | `string` | Cumulative CPU time. | yes |
+| `command` | `string` | Full command line. | yes |
+
+### ProcessListResp
+
+ProcessListResp is the response for GET /api/v1/tasks/{id}/processes.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `processes` | `ProcessInfo[]` |  | yes |
 
 ### TaskToolInputResp
 

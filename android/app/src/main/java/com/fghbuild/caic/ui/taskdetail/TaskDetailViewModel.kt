@@ -13,6 +13,7 @@ import com.caic.sdk.v1.TodoItem
 import com.caic.sdk.v1.HarnessInfo
 import com.caic.sdk.v1.ImageData
 import com.caic.sdk.v1.InputReq
+import com.caic.sdk.v1.ProcessInfo
 import com.caic.sdk.v1.Prompt
 import com.caic.sdk.v1.ForkTaskReq
 import com.caic.sdk.v1.Repo
@@ -67,6 +68,7 @@ data class TaskDetailState(
     val supportsCompact: Boolean = false,
     val harnesses: List<HarnessInfo> = emptyList(),
     val allRepos: List<Repo> = emptyList(),
+    val processes: List<ProcessInfo>? = null, // null = not yet loaded
 )
 
 private val TerminalStates = setOf("stopping", "stopped", "purging", "purged", "failed")
@@ -91,6 +93,7 @@ class TaskDetailViewModel @Inject constructor(
     private val _pendingImages = MutableStateFlow(draftStore.get(taskId).images)
     private val _harnesses = MutableStateFlow<List<HarnessInfo>>(emptyList())
     private val _repos = MutableStateFlow<List<Repo>>(emptyList())
+    private val _processes = MutableStateFlow<List<ProcessInfo>?>(null)
 
     private var sseJob: Job? = null
 
@@ -112,7 +115,7 @@ class TaskDetailViewModel @Inject constructor(
         listOf(
             taskRepository.tasks, _grouped, _isReady, _sending,
             _pendingAction, _actionError, _safetyIssues, _inputDraft,
-            _pendingImages, _harnesses, _statsHistory, _repos,
+            _pendingImages, _harnesses, _statsHistory, _repos, _processes,
         )
     ) { values ->
         val tasks = values[0] as List<Task>
@@ -128,6 +131,7 @@ class TaskDetailViewModel @Inject constructor(
         @Suppress("UNCHECKED_CAST")
         val statsHist = values[10] as List<EventStats>
         val repos = values[11] as List<Repo>
+        val procs = values[12] as List<ProcessInfo>?
         val task = tasks.firstOrNull { it.id == taskId }
         val taskHarness = harnesses.firstOrNull { it.name == task?.harness }
         val imgSupport = task != null && taskHarness?.supportsImages == true
@@ -155,6 +159,7 @@ class TaskDetailViewModel @Inject constructor(
             supportsCompact = compactSupport,
             harnesses = harnesses,
             allRepos = repos,
+            processes = procs,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskDetailState())
 
@@ -187,6 +192,19 @@ class TaskDetailViewModel @Inject constructor(
                 _repos.value = apiClient().listRepos()
             } catch (_: Exception) {
                 // Non-critical; fork dialog will just show no extra repos.
+            }
+        }
+    }
+
+    fun loadProcesses() {
+        viewModelScope.launch {
+            val url = taskRepository.serverURL()
+            if (url.isBlank()) return@launch
+            try {
+                val resp = apiClient().getTaskProcesses(taskId)
+                _processes.value = resp.processes
+            } catch (_: Exception) {
+                _processes.value = emptyList()
             }
         }
     }

@@ -668,6 +668,26 @@ public struct DiffResp: Codable {
     public let diff: String
 }
 
+/// ProcessInfo describes a single process running inside a task container.
+public struct ProcessInfo: Codable {
+    public let pid: Int
+    public let ppid: Int
+    public let user: String
+    /// Single-character state: R, S, D, Z, T, etc.
+    public let state: String
+    public let cpu: Double
+    public let mem: Double
+    /// Cumulative CPU time.
+    public let time: String
+    /// Full command line.
+    public let command: String
+}
+
+/// ProcessListResp is the response for GET /api/v1/tasks/{id}/processes.
+public struct ProcessListResp: Codable {
+    public let processes: [ProcessInfo]
+}
+
 /// TaskToolInputResp is the response for GET /api/v1/tasks/{id}/tool/{toolUseID}.
 /// It returns the full (untruncated) input for a tool call.
 public struct TaskToolInputResp: Codable {

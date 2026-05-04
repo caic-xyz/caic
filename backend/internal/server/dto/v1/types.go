@@ -405,6 +405,23 @@ type DiffResp struct {
 	Diff string `json:"diff"`
 }
 
+// ProcessInfo describes a single process running inside a task container.
+type ProcessInfo struct {
+	PID     int     `json:"pid"`
+	PPID    int     `json:"ppid"`
+	User    string  `json:"user"`
+	State   string  `json:"state"` // Single-character state: R, S, D, Z, T, etc.
+	CPU     float64 `json:"cpu"`
+	Mem     float64 `json:"mem"`
+	Time    string  `json:"time"`    // Cumulative CPU time.
+	Command string  `json:"command"` // Full command line.
+}
+
+// ProcessListResp is the response for GET /api/v1/tasks/{id}/processes.
+type ProcessListResp struct {
+	Processes []ProcessInfo `json:"processes"`
+}
+
 // RepoPrefsResp holds per-repository preferences.
 type RepoPrefsResp struct {
 	Path       string `json:"path"`

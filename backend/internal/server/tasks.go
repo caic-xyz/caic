@@ -746,6 +746,35 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(v1.DiffResp{Diff: diff})
 }
 
+// handleGetProcesses returns the list of running processes inside the task's
+// container by running ps via SSH.
+func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
+	entry, err := s.getTask(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	t := entry.task
+	if t.Container == "" {
+		writeError(w, dto.Conflict("task has no container"))
+		return
+	}
+	procs, err := s.backend.Processes(r.Context(), t.Container)
+	if err != nil {
+		writeError(w, dto.InternalError(err.Error()))
+		return
+	}
+	v1Procs := make([]v1.ProcessInfo, len(procs))
+	for i, p := range procs {
+		v1Procs[i] = v1.ProcessInfo{
+			PID: p.PID, PPID: p.PPID, User: p.User, State: p.State,
+			CPU: p.CPU, Mem: p.Mem, Time: p.Time, Command: p.Command,
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v1.ProcessListResp{Processes: v1Procs})
+}
+
 // watchSession monitors a single active session. When the session's SSH
 // process exits, it transitions the task to StateWaiting (the container and
 // relay daemon may still be alive — see Flow 2 in the relay shutdown protocol

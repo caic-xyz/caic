@@ -1,4 +1,4 @@
-/* Styles for the StatsIcon component: 2×2 bar chart icon and popup panel. */
+/* Styles for the StatsIcon component: 2×2 bar chart icon, popup panel, and perf table. */
 
 .wrapper {
   position: relative;
@@ -34,7 +34,8 @@
   top: calc(100% + 4px);
   right: 0;
   z-index: 100;
-  min-width: 260px;
+  min-width: 320px;
+  max-width: 480px;
   background: #fff;
   border: 1px solid var(--color-border-medium);
   border-radius: var(--radius-lg);

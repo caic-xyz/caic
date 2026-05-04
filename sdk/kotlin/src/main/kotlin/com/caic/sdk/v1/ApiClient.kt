@@ -134,6 +134,8 @@ class ApiClient(
     suspend fun forkTask(id: String, req: ForkTaskReq): CreateTaskResp = request("POST", "/api/v1/tasks/$id/fork", json.encodeToString(req))
     /** Returns the unified diff for a task's branch. */
     suspend fun getTaskDiff(id: String): DiffResp = request("GET", "/api/v1/tasks/$id/diff")
+    /** Returns the list of running processes inside the task's container. */
+    suspend fun getTaskProcesses(id: String): ProcessListResp = request("GET", "/api/v1/tasks/$id/processes")
     /** Returns the full (untruncated) input for a tool call. */
     suspend fun getTaskToolInput(id: String, toolUseID: String): TaskToolInputResp = request("GET", "/api/v1/tasks/$id/tool/$toolUseID")
     /** Returns current usage quota statistics. */

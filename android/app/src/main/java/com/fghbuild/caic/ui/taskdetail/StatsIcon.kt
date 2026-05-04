@@ -1,7 +1,9 @@
 // StatsIcon renders a 2×2 bar-chart icon in the task header that opens a popup
-// showing container resource history (CPU, MEM, NET, DISK) and per-turn perf data.
+// showing container resource history (CPU, MEM, NET, DISK), running processes,
+// and per-turn perf data.
 package com.fghbuild.caic.ui.taskdetail
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,12 +14,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,6 +35,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.EventStats
+import com.caic.sdk.v1.ProcessInfo
 import com.fghbuild.caic.util.Session
 import com.fghbuild.caic.util.Turn
 import com.fghbuild.caic.util.formatDuration
@@ -154,11 +159,21 @@ private fun collectTurnPerfs(
     return perfs
 }
 
+// State color mapping for process state characters.
+private fun stateColor(state: String): Color = when (state) {
+    "R" -> Color(0xFF28A745)
+    "D", "Z" -> Color(0xFFDC3545)
+    "T" -> Color(0xFF856404)
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
 @Composable
 fun StatsIcon(
     stats: List<EventStats>,
     completedSessions: List<Session>,
     currentSessionTurns: List<Turn>,
+    processes: List<ProcessInfo>?,
+    onLoadProcesses: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val latest = stats.lastOrNull()
@@ -171,6 +186,11 @@ fun StatsIcon(
     val diskRatio = latest?.let { (it.diskUsed.coerceAtLeast(0L).toFloat() / maxDisk.toFloat()).coerceIn(0f, 1f) } ?: 0f
 
     var expanded by remember { mutableStateOf(false) }
+
+    // Fetch processes when the popup opens.
+    LaunchedEffect(expanded) {
+        if (expanded) onLoadProcesses()
+    }
 
     val perfs = remember(completedSessions, currentSessionTurns) {
         collectTurnPerfs(completedSessions, currentSessionTurns)
@@ -291,6 +311,79 @@ fun StatsIcon(
                                             },
                                     )
                                 }
+                            }
+                        }
+                    }
+                }
+                if (processes != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "PROCESSES",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    if (processes.isEmpty()) {
+                        Text(
+                            text = "No processes",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        ) {
+                            listOf("PID" to 36, "S" to 20, "CPU" to 40, "MEM" to 40, "TIME" to 56, "COMMAND" to 200).forEach { (h, w) ->
+                                Text(
+                                    text = h,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.width(w.dp),
+                                )
+                            }
+                        }
+                        processes.forEach { p ->
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(vertical = 1.dp),
+                            ) {
+                                Text(
+                                    text = "${p.pid}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.width(36.dp),
+                                )
+                                Text(
+                                    text = p.state,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = stateColor(p.state),
+                                    modifier = Modifier.width(20.dp),
+                                )
+                                Text(
+                                    text = String.format(Locale.US, "%.1f", p.cpu),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.width(40.dp),
+                                )
+                                Text(
+                                    text = String.format(Locale.US, "%.1f", p.mem),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.width(40.dp),
+                                )
+                                Text(
+                                    text = p.time,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.width(56.dp),
+                                )
+                                Text(
+                                    text = p.command,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 2,
+                                    modifier = Modifier.width(200.dp),
+                                )
                             }
                         }
                     }

@@ -589,6 +589,23 @@ data class ForkTaskReq(
 @Serializable
 data class DiffResp(val diff: String)
 
+/** ProcessInfo describes a single process running inside a task container. */
+@Serializable
+data class ProcessInfo(
+    val pid: Int,
+    val ppid: Int,
+    val user: String,
+    val state: String,
+    val cpu: Double,
+    val mem: Double,
+    val time: String,
+    val command: String,
+)
+
+/** ProcessListResp is the response for GET /api/v1/tasks/{id}/processes. */
+@Serializable
+data class ProcessListResp(val processes: List<ProcessInfo>)
+
 /**
  * TaskToolInputResp is the response for GET /api/v1/tasks/{id}/tool/{toolUseID}.
  * It returns the full (untruncated) input for a tool call.

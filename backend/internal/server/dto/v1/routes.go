@@ -257,6 +257,13 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[DiffResp](),
 	},
 	{
+		Name:   "getTaskProcesses",
+		Doc:    "Returns the list of running processes inside the task's container.",
+		Method: "GET",
+		Path:   "/api/v1/tasks/{id}/processes",
+		Resp:   reflect.TypeFor[ProcessListResp](),
+	},
+	{
 		Name:   "getTaskToolInput",
 		Doc:    "Returns the full (untruncated) input for a tool call.",
 		Method: "GET",

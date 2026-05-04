@@ -269,6 +269,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("GET /api/v1/tasks/{id}/ci-log", s.handleGetCILog)
 	apiMux.HandleFunc("POST /api/v1/tasks/{id}/sync", handleWithTask(s, s.syncTask))
 	apiMux.HandleFunc("GET /api/v1/tasks/{id}/diff", s.handleGetDiff)
+	apiMux.HandleFunc("GET /api/v1/tasks/{id}/processes", s.handleGetProcesses)
 	apiMux.HandleFunc("GET /api/v1/tasks/{id}/tool/{toolUseID}", s.handleTaskToolInput)
 	apiMux.HandleFunc("GET /api/v1/usage", s.handleGetUsage)
 	apiMux.HandleFunc("GET /api/v1/voice/token", handle(s.getVoiceToken))

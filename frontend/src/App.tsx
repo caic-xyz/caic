@@ -10,6 +10,7 @@ import { useAuth } from "./AuthContext";
 import Login from "./Login";
 import TaskDetail from "./TaskDetail";
 import DiffDetail from "./DiffDetail";
+import ProcessDetail from "./ProcessDetail";
 import TaskList from "./TaskList";
 import { confirmTaskAction } from "./TaskCard";
 import PromptInput from "./PromptInput";
@@ -49,11 +50,11 @@ function taskPath(id: string, repo: string, branch: string, query: string): stri
   return `/task/@${id}+${slug}`;
 }
 
-/** Extract the task ID from a /task/@{id}+{slug} or /task/@{id}+{slug}/diff pathname, or null. */
+/** Extract the task ID from a /task/@{id}+{slug} or /task/@{id}+{slug}/diff or /processes pathname, or null. */
 function taskIdFromPath(pathname: string): string | null {
   const prefix = "/task/@";
   if (!pathname.startsWith(prefix)) return null;
-  const rest = pathname.slice(prefix.length).replace(/\/diff$/, "");
+  const rest = pathname.slice(prefix.length).replace(/\/(diff|processes)$/, "");
   const plus = rest.indexOf("+");
   return plus === -1 ? rest : rest.slice(0, plus);
 }
@@ -61,6 +62,11 @@ function taskIdFromPath(pathname: string): string | null {
 /** True when the pathname ends with /diff (diff view route). */
 function isDiffPath(pathname: string): boolean {
   return pathname.startsWith("/task/@") && pathname.endsWith("/diff");
+}
+
+/** True when the pathname ends with /processes (process list route). */
+function isProcessesPath(pathname: string): boolean {
+  return pathname.startsWith("/task/@") && pathname.endsWith("/processes");
 }
 
 function ConnectionDot(props: { connected: boolean }) {
@@ -187,8 +193,8 @@ export default function App() {
         return;
       }
       if (e.key === "Escape" && selectedId() !== null) {
-        if (isDiffPath(location.pathname)) {
-          navigate(location.pathname.replace(/\/diff$/, ""));
+        if (isDiffPath(location.pathname) || isProcessesPath(location.pathname)) {
+          navigate(location.pathname.replace(/\/(diff|processes)$/, ""));
         } else {
           navigate("/");
           promptRef?.focus();
@@ -888,6 +894,22 @@ export default function App() {
                   <DiffDetail
                     taskId={id}
                     diffStat={t?.diffStat ?? []}
+                    repo={t?.repos?.[0]?.name ?? ""}
+                    branch={t?.repos?.[0]?.branch ?? ""}
+                    taskPath={tp}
+                  />
+                </div>
+              );
+            }}
+          </Match>
+          <Match when={isProcessesPath(location.pathname) && selectedId()} keyed>
+            {(id) => {
+              const t = selectedTask();
+              const tp = t ? taskPath(t.id, t.repos?.[0]?.name ?? "", t.repos?.[0]?.branch ?? "", t.title) : `/task/@${id}`;
+              return (
+                <div class={styles.detailPane}>
+                  <ProcessDetail
+                    taskId={id}
                     repo={t?.repos?.[0]?.name ?? ""}
                     branch={t?.repos?.[0]?.branch ?? ""}
                     taskPath={tp}

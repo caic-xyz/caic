@@ -583,6 +583,9 @@ export default function TaskDetail(props: Props) {
         <Show when={(props.diffStat?.length ?? 0) > 0}>
           <A class={styles.diffLink} href={`${location.pathname}/diff`}>Diff</A>
         </Show>
+        <Show when={props.taskState !== "pending" && props.taskState !== "branching" && props.taskState !== "provisioning" && props.taskState !== "starting" && props.taskState !== "purged" && props.taskState !== "failed"}>
+          <A class={styles.diffLink} href={`${location.pathname}/processes`}>Processes</A>
+        </Show>
         <Show when={props.inPlanMode}>
           <span class={styles.planIndicator} title="Agent is in plan mode">Plan Mode</span>
         </Show>

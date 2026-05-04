@@ -881,6 +881,25 @@ export interface DiffResp {
   diff: string;
 }
 /**
+ * ProcessInfo describes a single process running inside a task container.
+ */
+export interface ProcessInfo {
+  pid: number /* int */;
+  ppid: number /* int */;
+  user: string;
+  state: string; // Single-character state: R, S, D, Z, T, etc.
+  cpu: number /* float64 */;
+  mem: number /* float64 */;
+  time: string; // Cumulative CPU time.
+  command: string; // Full command line.
+}
+/**
+ * ProcessListResp is the response for GET /api/v1/tasks/{id}/processes.
+ */
+export interface ProcessListResp {
+  processes: ProcessInfo[];
+}
+/**
  * RepoPrefsResp holds per-repository preferences.
  */
 export interface RepoPrefsResp {

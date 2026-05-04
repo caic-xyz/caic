@@ -207,6 +207,10 @@ public final class ApiClient {
     public func getTaskDiff(id: String) async throws -> DiffResp {
         try await request("GET", path: "/api/v1/tasks/\(id)/diff")
     }
+    /// Returns the list of running processes inside the task's container.
+    public func getTaskProcesses(id: String) async throws -> ProcessListResp {
+        try await request("GET", path: "/api/v1/tasks/\(id)/processes")
+    }
     /// Returns the full (untruncated) input for a tool call.
     public func getTaskToolInput(id: String, toolUseID: String) async throws -> TaskToolInputResp {
         try await request("GET", path: "/api/v1/tasks/\(id)/tool/\(toolUseID)")
