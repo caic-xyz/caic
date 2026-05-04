@@ -362,14 +362,18 @@ type session struct {
 func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 	dec, err := newDecoder()
 	if err != nil {
-		slog.Error("voicertc: decoder init failed", "session", s.id, "err", err)
+		slog.ErrorContext(ctx, "voicertc: decoder init failed", "session", s.id, "err", err)
+		s.sendError("Microphone unavailable: voice codec failed to initialise")
+		s.cancel()
 		return
 	}
 	for {
 		pkt, _, readErr := track.ReadRTP()
 		if readErr != nil {
 			if ctx.Err() == nil {
-				slog.Warn("voicertc: audio read failed", "session", s.id, "err", readErr)
+				slog.WarnContext(ctx, "voicertc: audio read failed", "session", s.id, "err", readErr)
+				s.sendError("Microphone lost: " + readErr.Error())
+				s.cancel()
 			}
 			return
 		}
@@ -401,7 +405,7 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 		}
 		if err := wsConn.Write(ctx, websocket.MessageText, msg); err != nil {
 			if ctx.Err() == nil {
-				slog.Warn("voicertc: audio→gemini write failed", "session", s.id, "err", err)
+				slog.WarnContext(ctx, "voicertc: audio→gemini write failed", "session", s.id, "err", err)
 			}
 			return
 		}
@@ -410,29 +414,29 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 
 // geminiRxLoop reads from the Gemini WebSocket and forwards messages.
 //
-// When the client has an RTP audio track: audio chunks are encoded to Opus
-// and sent via RTP, non-audio content goes through the data channel.
-// Otherwise everything goes through the data channel (passthrough).
-//
-// A single consumer goroutine processes audioJobs serially so the Opus
-// encoder is never used concurrently.
+// When the client has an RTP audio track: audio chunks are appended to audioBuf
+// for real-time playback by audioSendLoop, and non-audio content goes through
+// the data channel. Otherwise everything goes through the data channel (passthrough).
 func (s *session) geminiRxLoop(ctx context.Context) {
 	var enc *opusEncoder
 	if codecAvailable && s.audioTrack != nil {
 		var err error
 		enc, err = newEncoder()
 		if err != nil {
-			slog.Warn("voicertc: encoder init failed, falling back to passthrough", "session", s.id, "err", err)
-		} else {
-			go s.audioSendLoop(ctx, enc)
+			slog.WarnContext(ctx, "voicertc: encoder init failed", "session", s.id, "err", err)
+			s.sendError("Voice audio unavailable: codec failed to initialise")
+			s.cancel()
+			return
 		}
+		go s.audioSendLoop(ctx, enc)
 	}
 
 	for {
 		_, data, err := s.geminiWS.Read(ctx)
 		if err != nil {
 			if ctx.Err() == nil {
-				slog.Warn("voicertc: gemini read failed", "session", s.id, "err", err)
+				slog.WarnContext(ctx, "voicertc: gemini read failed", "session", s.id, "err", err)
+				s.sendError("Connection to Gemini lost: " + geminiCloseReason(err))
 			}
 			s.cancel()
 			return
@@ -495,6 +499,12 @@ func (s *session) handleAudioExtraction(data []byte) ([]byte, bool) {
 			continue
 		}
 		hadAudio = true
+		if mt := part.InlineData.MimeType; mt != "" && mt != "audio/pcm;rate=24000" {
+			slog.Warn("voicertc: unexpected audio mime type", "session", s.id, "mimeType", mt)
+			s.sendError("Unexpected audio format from Gemini: " + mt)
+			s.cancel()
+			return nil, false
+		}
 		pcmBytes, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
 		if err != nil {
 			slog.Debug("voicertc: base64 decode failed", "session", s.id, "err", err)
@@ -555,6 +565,7 @@ func (s *session) audioSendLoop(ctx context.Context, enc *opusEncoder) {
 				Duration: frameDuration,
 			}); err != nil {
 				slog.Debug("voicertc: rtp write failed", "session", s.id, "err", err)
+				s.cancel()
 				return
 			}
 		}
@@ -571,8 +582,36 @@ func (s *session) appendAudioPCM(pcmBytes []byte) {
 // interruptAudio clears the playback buffer when Gemini signals an interruption.
 func (s *session) interruptAudio() {
 	s.audioMu.Lock()
-	s.audioBuf = s.audioBuf[:0]
+	s.audioBuf = nil
 	s.audioMu.Unlock()
+}
+
+// geminiCloseReason extracts a human-readable reason from a Gemini WebSocket
+// close error, stripping the websocket library's internal error chain. Returns
+// the raw error string if the error is not a close frame.
+func geminiCloseReason(err error) string {
+	var ce websocket.CloseError
+	if errors.As(err, &ce) {
+		if ce.Reason != "" {
+			return ce.Reason
+		}
+		return ce.Code.String()
+	}
+	return err.Error()
+}
+
+// sendError delivers an error message to the client via the data channel using
+// the same {"error":{"message":"..."}} shape that the frontend already handles
+// for Gemini protocol errors.
+func (s *session) sendError(msg string) {
+	s.mu.Lock()
+	dc := s.dc
+	s.mu.Unlock()
+	if dc == nil {
+		return
+	}
+	data, _ := json.Marshal(map[string]any{"error": map[string]string{"message": msg}})
+	_ = dc.SendText(string(data))
 }
 
 // upsample24to48 converts PCM from 24kHz S16LE to 48kHz using linear

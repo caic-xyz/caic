@@ -700,15 +700,14 @@ class VoiceSession @Inject constructor(
                 "toolCallCancellation" in msg -> {
                     _state.update { it.copy(activeTool = null) }
                 }
+                "error" in msg -> {
+                    val message = msg["error"]?.jsonObject
+                        ?.get("message")?.jsonPrimitive?.content
+                        ?: "Server error"
+                    setError(message)
+                }
                 else -> {
                     Log.w(TAG, "Unrecognized server message: ${msg.keys}")
-                    // Surface error responses from Gemini (e.g. invalid model, auth failure).
-                    val error = msg["error"]?.jsonObject
-                    if (error != null) {
-                        val message = error["message"]?.jsonPrimitive?.content
-                            ?: "Server error"
-                        setError(message)
-                    }
                 }
             }
         } catch (e: CancellationException) {
