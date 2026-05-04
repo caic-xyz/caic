@@ -207,16 +207,19 @@ export default function TaskCard(props: TaskCardProps) {
             </span>
           </Tooltip>
         </>;
-        const repoSpan = (r: { baseBranch?: string; branch: string; name: string }, showName: boolean) => <>
-          <Show when={r.baseBranch && r.branch}>
-            <span class={styles.baseBranch}>{r.baseBranch}</span>
-            <span class={styles.branchArrow}>→</span>
-          </Show>
-          <span class={styles.branchName}>{r.branch}</span>
-          <Show when={showName}>
-            <span class={styles.repoName}>{r.name}</span>
-          </Show>
-        </>;
+        const repoSpan = (r: { baseBranch?: string; branch: string; name: string }, showName: boolean) => {
+          if (!r.branch) return <Show when={showName}><span class={styles.repoName}>{r.name}</span></Show>;
+          return <>
+            <Show when={r.baseBranch && r.branch}>
+              <span class={styles.baseBranch}>{r.baseBranch}</span>
+              <span class={styles.branchArrow}>→</span>
+            </Show>
+            <span class={styles.branchName}>{r.branch}</span>
+            <Show when={showName}>
+              <span class={styles.repoName}>{r.name}</span>
+            </Show>
+          </>;
+        };
         return <>
           <Show when={!multiRepo}>
             {/* Single repo: branch + timing + badges on same row */}

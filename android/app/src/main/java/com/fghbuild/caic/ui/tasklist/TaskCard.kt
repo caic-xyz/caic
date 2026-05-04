@@ -143,8 +143,10 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
                             if (!r.baseBranch.isNullOrBlank()) {
                                 append("${r.baseBranch}\u2192")
                             }
-                            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                                append(r.branch)
+                            if (r.branch.isNotBlank()) {
+                                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                                    append(r.branch)
+                                }
                             }
                             withStyle(SpanStyle(fontWeight = FontWeight.Normal, color = repoNameColor)) {
                                 append(" ${r.name}")
@@ -173,8 +175,10 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
                                     if (!repo.baseBranch.isNullOrBlank()) {
                                         append("${repo.baseBranch}\u2192")
                                     }
-                                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                                        append(repo.branch)
+                                    if (repo.branch.isNotBlank()) {
+                                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                                            append(repo.branch)
+                                        }
                                     }
                                     withStyle(SpanStyle(fontWeight = FontWeight.Normal, color = repoNameColor)) {
                                         append(" ${repo.name}")
@@ -194,8 +198,10 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
                                 if (!repo.baseBranch.isNullOrBlank()) {
                                     append("${repo.baseBranch}\u2192")
                                 }
-                                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                                    append(repo.branch)
+                                if (repo.branch.isNotBlank()) {
+                                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                                        append(repo.branch)
+                                    }
                                 }
                                 withStyle(SpanStyle(fontWeight = FontWeight.Normal, color = repoNameColor)) {
                                     append(" ${repo.name}")
