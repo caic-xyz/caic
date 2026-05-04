@@ -66,7 +66,7 @@ class TaskListViewModelTest {
                     .setResponseCode(404)
                 return when (path) {
                     "/api/v1/server/config" -> jsonResponse(
-                        """{"tailscaleAvailable":false,"usbAvailable":false,"displayAvailable":false}"""
+                        """{"tailscaleAvailable":false,"usbAvailable":false,"displayAvailable":false,"webrtcAvailable":false}"""
                     )
                     "/api/v1/server/repos" -> jsonResponse(
                         """[
@@ -155,7 +155,7 @@ class TaskListViewModelTest {
                     .setResponseCode(404)
                 return when (path) {
                     "/api/v1/server/config" -> jsonResponse(
-                        """{"tailscaleAvailable":false,"usbAvailable":false,"displayAvailable":false}"""
+                        """{"tailscaleAvailable":false,"usbAvailable":false,"displayAvailable":false,"webrtcAvailable":false}"""
                     )
                     "/api/v1/server/repos" -> jsonResponse(
                         """[{"path":"my-org/repo","baseBranch":{"name":"main"}}]"""

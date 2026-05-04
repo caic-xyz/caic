@@ -176,7 +176,7 @@ export class VoiceSession {
   // -----------------------------------------------------------------------
 
   /** Start a new voice session with current task context. */
-  async connect(tasks: Task[], recentRepo: string, defaultHarness = "", defaultModel = ""): Promise<void> {
+  async connectWebSocket(tasks: Task[], recentRepo: string, defaultHarness = "", defaultModel = ""): Promise<void> {
     // Release all transports before any await so we can recreate AudioContext while still
     // within the user gesture handler (Chrome requires gesture context for running state).
     this._releaseAll();
@@ -297,7 +297,7 @@ export class VoiceSession {
       const harnessNames = harnesses.map((h) => h.name);
       const repoPaths = repos.map((r) => r.path);
 
-      // Build task snapshot (same as connect()).
+      // Build task snapshot (same as connectWebSocket()).
       const prePurged = new Set(
         tasks
           .filter((t) => t.state === "purged" || t.state === "failed" || t.state === "stopped" || t.state === "stopping")
@@ -733,7 +733,7 @@ export class VoiceSession {
 
   private async _startAudio(): Promise<void> {
     try {
-      // AudioContext was pre-created in connect() within the user gesture handler.
+      // AudioContext was pre-created in connectWebSocket() within the user gesture handler.
       // Recreating it here would be outside the gesture context and suspended in Chrome.
       if (!this._audioContext) {
         this._setError("AudioContext not initialized");

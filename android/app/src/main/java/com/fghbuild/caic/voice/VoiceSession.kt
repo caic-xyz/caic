@@ -101,6 +101,8 @@ class VoiceSession @Inject constructor(
     private var dataChannel: DataChannel? = null
     private var rtcSessionID: String? = null
     private var pcFactory: PeerConnectionFactory? = null
+    private var rtcAudioSource: org.webrtc.AudioSource? = null
+    private var localAudioTrack: org.webrtc.AudioTrack? = null
     private var audioRecord: AudioRecord? = null
     private var audioTrack: AudioTrack? = null
     private var recordingJob: Job? = null
@@ -160,7 +162,7 @@ class VoiceSession @Inject constructor(
     }
 
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all failures to UI.
-    fun connect() {
+    fun connectWebSocket() {
         // Close any existing connection to prevent WebSocket leaks.
         webSocket?.close(WS_CLOSE_NORMAL, "Reconnecting")
         webSocket = null
@@ -290,6 +292,25 @@ class VoiceSession @Inject constructor(
                 }
                 peerConnection = pc
 
+                // Add local audio track (mic → RTP) so the SDP offer
+                // contains an m=audio line required by the backend bridge.
+                val audioConstraints = MediaConstraints().apply {
+                    mandatory.add(
+                        MediaConstraints.KeyValuePair("googEchoCancellation", "true"),
+                    )
+                    mandatory.add(
+                        MediaConstraints.KeyValuePair("googAutoGainControl", "true"),
+                    )
+                    mandatory.add(
+                        MediaConstraints.KeyValuePair("googNoiseSuppression", "true"),
+                    )
+                }
+                val audioSrc = factory.createAudioSource(audioConstraints)
+                rtcAudioSource = audioSrc
+                val micTrack = factory.createAudioTrack("mic-audio", audioSrc)
+                localAudioTrack = micTrack
+                pc.addTrack(micTrack)
+
                 val dcInit = DataChannel.Init().apply { ordered = true }
                 val dc = pc.createDataChannel("gemini", dcInit) ?: run {
                     setError("Failed to create data channel")
@@ -369,7 +390,13 @@ class VoiceSession @Inject constructor(
         override fun onRemoveStream(stream: MediaStream) = Unit
         override fun onDataChannel(dc: DataChannel) = Unit
         override fun onRenegotiationNeeded() = Unit
-        override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) = Unit
+        override fun onAddTrack(receiver: RtpReceiver, streams: Array<out MediaStream>) {
+            val track = receiver.track()
+            if (track is org.webrtc.AudioTrack) {
+                track.setEnabled(true)
+                Log.i(TAG, "WebRTC remote audio track enabled")
+            }
+        }
     }
 
     private fun noOpSdpObserver() = object : SdpObserver {
@@ -443,8 +470,10 @@ class VoiceSession @Inject constructor(
     fun toggleMute() {
         muted = !muted
         _state.update { it.copy(muted = muted) }
+        // In WebRTC mode, mute/unmute the RTP audio track directly.
+        localAudioTrack?.setEnabled(!muted)
         if (!muted) {
-            // Drain stale audio buffered while muted.
+            // Drain stale audio buffered while muted (WebSocket mode only).
             val rec = audioRecord ?: return
             val drain = ByteArray(AUDIO_BUFFER_SIZE)
             while (rec.read(drain, 0, drain.size, AudioRecord.READ_NON_BLOCKING) > 0) {
@@ -463,6 +492,10 @@ class VoiceSession @Inject constructor(
         dataChannel?.close()
         dataChannel?.dispose()
         dataChannel = null
+        localAudioTrack?.dispose()
+        localAudioTrack = null
+        rtcAudioSource?.dispose()
+        rtcAudioSource = null
         peerConnection?.close()
         peerConnection?.dispose()
         peerConnection = null
@@ -629,11 +662,26 @@ class VoiceSession @Inject constructor(
             val msg = json.decodeFromString<JsonElement>(text).jsonObject
             when {
                 "setupComplete" in msg -> {
-                    Log.i(TAG, "setupComplete received, starting audio")
                     setupTimeoutJob?.cancel()
                     setupTimeoutJob = null
-                    _state.update { it.copy(connectStatus = null, connected = true, error = null) }
-                    startAudio()
+                    if (peerConnection != null) {
+                        // WebRTC mode: the library handles audio I/O via RTP.
+                        Log.i(TAG, "setupComplete received (WebRTC)")
+                        _state.update {
+                            it.copy(
+                                connectStatus = null,
+                                connected = true,
+                                listening = true,
+                                error = null,
+                            )
+                        }
+                    } else {
+                        Log.i(TAG, "setupComplete received, starting audio")
+                        _state.update {
+                            it.copy(connectStatus = null, connected = true, error = null)
+                        }
+                        startAudio()
+                    }
                 }
                 "serverContent" in msg -> {
                     val serverContent = json.decodeFromJsonElement(
@@ -671,9 +719,12 @@ class VoiceSession @Inject constructor(
     }
 
     private fun handleServerContent(content: BidiGenerateContentServerContent) {
+        val isWebRTC = peerConnection != null
         content.modelTurn?.parts?.forEach { part ->
             val inlineData = part.inlineData
-            if (inlineData != null) {
+            if (inlineData != null && !isWebRTC) {
+                // WebSocket mode: play PCM from data channel. In WebRTC mode
+                // audio arrives via RTP and the library plays it directly.
                 val pcmBytes = Base64.decode(inlineData.data, Base64.NO_WRAP)
                 // Pause mic while model speaks so speaker output doesn't feed back
                 // into the recording as garbled input. AEC alone is not reliable.

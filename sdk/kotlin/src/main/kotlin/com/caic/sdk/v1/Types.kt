@@ -70,6 +70,7 @@ data class Config(
     val tailscaleAvailable: Boolean,
     val usbAvailable: Boolean,
     val displayAvailable: Boolean,
+    val webrtcAvailable: Boolean,
     val gitHubAppEnabled: Boolean? = null,
     val authProviders: List<String>? = null,
 )

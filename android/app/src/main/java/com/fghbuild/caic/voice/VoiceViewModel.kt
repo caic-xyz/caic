@@ -3,13 +3,16 @@ package com.fghbuild.caic.voice
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.caic.sdk.v1.ApiClient
 import com.caic.sdk.v1.Task
 import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.util.formatCost
 import com.fghbuild.caic.util.formatElapsed
 import com.fghbuild.caic.data.TaskRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -28,6 +31,9 @@ class VoiceViewModel @Inject constructor(
 
     val serverWarnings = taskRepository.warnings
 
+    private val _webrtcAvailable = MutableStateFlow(false)
+    val webrtcAvailable: StateFlow<Boolean> = _webrtcAvailable.asStateFlow()
+
     private val taskNumberMap: TaskNumberMap
         get() = voiceSessionManager.taskNumberMap
 
@@ -38,6 +44,21 @@ class VoiceViewModel @Inject constructor(
     private var prePurgedIds: Set<String> = emptySet()
 
     init {
+        // Fetch server config to determine WebRTC availability.
+        viewModelScope.launch {
+            settingsRepository.settings
+                .map { it.serverURL }
+                .distinctUntilChanged()
+                .collect { url ->
+                    if (url.isBlank()) return@collect
+                    try {
+                        val client = ApiClient(url, tokenProvider = { settingsRepository.settings.value.authToken })
+                        _webrtcAvailable.value = client.getConfig().webrtcAvailable
+                    } catch (_: Exception) {
+                        _webrtcAvailable.value = false
+                    }
+                }
+        }
         // Inject snapshot when the session transitions to connected.
         viewModelScope.launch {
             voiceSessionManager.state
@@ -78,8 +99,8 @@ class VoiceViewModel @Inject constructor(
         }
     }
 
-    fun connect() {
-        voiceSessionManager.connect()
+    fun connectWebSocket() {
+        voiceSessionManager.connectWebSocket()
     }
 
     fun connectWebRTC() {

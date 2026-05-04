@@ -57,6 +57,7 @@ fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
     val navController = rememberNavController()
     val voiceState by voiceViewModel.voiceState.collectAsStateWithLifecycle()
     val settings by voiceViewModel.settings.collectAsStateWithLifecycle()
+    val webrtcAvailable by voiceViewModel.webrtcAvailable.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -122,6 +123,9 @@ fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
                 }
             }
 
+            val connectVoice = {
+                if (webrtcAvailable) voiceViewModel.connectWebRTC() else voiceViewModel.connectWebSocket()
+            }
             VoicePanel(
                 voiceState = voiceState,
                 voiceEnabled = settings.voiceEnabled,
@@ -131,9 +135,9 @@ fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
                             Manifest.permission.RECORD_AUDIO,
                         ) == PackageManager.PERMISSION_GRANTED
                     ) {
-                        voiceViewModel.connect()
+                        connectVoice()
                     } else {
-                        onMicGranted = { voiceViewModel.connect() }
+                        onMicGranted = { connectVoice() }
                         micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     }
                 },

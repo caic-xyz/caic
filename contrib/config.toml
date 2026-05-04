@@ -27,9 +27,11 @@
 # Example: "https://caic.example.com" or "https://caic.my-tailnet.ts.net"
 #external_url = "auto"
 
-# UDP port for WebRTC ICE (single-port mux). 0 disables WebRTC voice.
+# UDP port for WebRTC ICE (single-port mux).
+# 0 (default) = enabled with OS-assigned ephemeral port.
+# >0 = enabled on that static port (open it in your firewall for UDP traffic).
+# -1 = disabled.
 # Requires libopus-dev at build time (CGO_ENABLED=1).
-# Open this port in your firewall for UDP traffic.
 #webrtc_port = 0
 
 # Path to a MaxMind MMDB file for country-code resolution and logging.

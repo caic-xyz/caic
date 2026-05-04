@@ -458,6 +458,7 @@ export interface Config {
   tailscaleAvailable: boolean;
   usbAvailable: boolean;
   displayAvailable: boolean;
+  webrtcAvailable: boolean;
   gitHubAppEnabled?: boolean;
   authProviders?: string[]; // e.g. ["github","gitlab"]
 }

@@ -26,6 +26,15 @@ type opusDecoder struct {
 }
 
 func newDecoder() (*opusDecoder, error) {
+	dec, err := opus.NewDecoder(inputSampleRate, 1)
+	if err != nil {
+		return nil, fmt.Errorf("opus decoder: %w", err)
+	}
+	return &opusDecoder{dec: dec}, nil
+}
+
+// newDecoderAtRate creates an Opus decoder at the given sample rate (for tests).
+func newDecoderAtRate(sampleRate int) (*opusDecoder, error) {
 	dec, err := opus.NewDecoder(sampleRate, 1)
 	if err != nil {
 		return nil, fmt.Errorf("opus decoder: %w", err)
@@ -43,20 +52,20 @@ func (d *opusDecoder) Decode(pkt []byte) ([]int16, error) {
 	return pcm[:n], nil
 }
 
-// opusEncoder wraps libopus for PCM->Opus (16kHz mono, AppVoIP).
+// opusEncoder wraps libopus for PCM->Opus (48kHz mono, AppVoIP).
 type opusEncoder struct {
 	enc *opus.Encoder
 }
 
 func newEncoder() (*opusEncoder, error) {
-	enc, err := opus.NewEncoder(sampleRate, 1, opus.AppVoIP)
+	enc, err := opus.NewEncoder(encoderSampleRate, 1, opus.AppVoIP)
 	if err != nil {
 		return nil, fmt.Errorf("opus encoder: %w", err)
 	}
 	return &opusEncoder{enc: enc}, nil
 }
 
-// Encode encodes PCM 16kHz mono samples into an Opus packet.
+// Encode encodes PCM 48kHz mono samples into an Opus packet.
 func (e *opusEncoder) Encode(pcm []int16) ([]byte, error) {
 	data := make([]byte, maxOpusPacketSize)
 	n, err := e.enc.Encode(pcm, data)

@@ -11,7 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,14 +33,19 @@ const (
 	// wsReadLimit is the max WebSocket message size (16 MiB for audio chunks).
 	wsReadLimit = 16 * 1024 * 1024
 
-	// sampleRate is the PCM sample rate used for Gemini audio I/O.
-	sampleRate = 16000
+	// inputSampleRate matches Gemini's required input rate (PCM 16-bit, 16kHz).
+	inputSampleRate = 16000
+
+	// encoderSampleRate is the Opus encoder input rate. We encode at 48kHz —
+	// the native Opus rate that every WebRTC implementation handles. Gemini
+	// outputs 24kHz; we upsample before encoding.
+	encoderSampleRate = 48000
 
 	// frameDuration is the Opus frame duration.
 	frameDuration = 20 * time.Millisecond
 
-	// frameSamples is the number of 16kHz samples per 20ms frame.
-	frameSamples = sampleRate * int(frameDuration/time.Millisecond) / 1000 // 320
+	// encoderFrameSamples is the number of samples per 20ms frame at the encoder rate.
+	encoderFrameSamples = encoderSampleRate * int(frameDuration/time.Millisecond) / 1000 // 960
 )
 
 // Bridge manages active WebRTC voice sessions.
@@ -53,14 +60,35 @@ type Bridge struct {
 // NewBridge creates a Bridge that multiplexes all WebRTC traffic through a
 // single UDP port. This avoids opening ephemeral port ranges in the firewall.
 func NewBridge(geminiAPIKey string, udpPort int) (*Bridge, error) {
-	mux, err := ice.NewMultiUDPMuxFromPort(udpPort)
+	// Discover the host's default IPv4 address without netlink (which fails
+	// on hosts without IPv6 due to pion/anet's netlinkrib call).
+	hostIP, err := defaultIPv4()
 	if err != nil {
-		return nil, fmt.Errorf("listen UDP :%d: %w", udpPort, err)
+		return nil, fmt.Errorf("detect host IP: %w", err)
 	}
+	conn, err := net.ListenPacket("udp4", fmt.Sprintf(":%d", udpPort))
+	if err != nil {
+		return nil, fmt.Errorf("listen UDP4 :%d: %w", udpPort, err)
+	}
+	mux := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn})
 	se := webrtc.SettingEngine{}
 	se.SetICEUDPMux(mux)
+	se.SetNet(newIPv4Net(hostIP))
+	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
+	if err := se.SetICEAddressRewriteRules(webrtc.ICEAddressRewriteRule{
+		External:        []string{hostIP.String()},
+		AsCandidateType: webrtc.ICECandidateTypeHost,
+	}); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("set ICE address rewrite: %w", err)
+	}
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(se))
-	slog.Info("voicertc: listening", "udpPort", udpPort)
+	addr, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		_ = conn.Close()
+		return nil, fmt.Errorf("unexpected local address type: %T", conn.LocalAddr())
+	}
+	slog.Info("voicertc: listening", "udpPort", addr.Port, "hostIP", hostIP)
 	return &Bridge{
 		geminiAPIKey: geminiAPIKey,
 		api:          api,
@@ -74,6 +102,9 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 	if b.geminiAPIKey == "" {
 		return "", "", errors.New("GEMINI_API_KEY not configured")
 	}
+	if !strings.Contains(sdpOffer, "m=audio ") {
+		return "", "", errors.New("SDP offer must include an audio track")
+	}
 
 	// Create PeerConnection using the shared UDP mux.
 	pc, err := b.api.NewPeerConnection(webrtc.Configuration{
@@ -85,7 +116,7 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 		return "", "", fmt.Errorf("create peer connection: %w", err)
 	}
 
-	sessionCtx, cancel := context.WithCancel(ctx)
+	sessionCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	sess := &session{
 		id:     generateSessionID(),
 		pc:     pc,
@@ -118,11 +149,23 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 				return
 			}
 			slog.Info("voicertc: audio track received", "session", sess.id, "codec", track.Codec().MimeType)
-			go sess.audioRxLoop(sessionCtx, track)
+			sess.mu.Lock()
+			if sess.geminiWS != nil {
+				// Gemini already connected (data channel opened first). Start now.
+				sess.mu.Unlock()
+				go sess.audioRxLoop(sessionCtx, track)
+			} else {
+				// Gemini not connected yet. Store the track; dc.OnOpen will start it.
+				sess.pendingTrack = track
+				sess.mu.Unlock()
+			}
 		})
 	}
 
 	// Set up data channel handler. The client creates the "gemini" data channel.
+	// geminiReady is closed once the Gemini WebSocket is connected, unblocking
+	// any client messages that arrived before the dial completed.
+	geminiReady := make(chan struct{})
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		slog.Info("voicertc: data channel opened", "label", dc.Label(), "session", sess.id)
 		sess.mu.Lock()
@@ -141,15 +184,29 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 			wsConn.SetReadLimit(wsReadLimit)
 			sess.mu.Lock()
 			sess.geminiWS = wsConn
+			track := sess.pendingTrack
+			sess.pendingTrack = nil
 			sess.mu.Unlock()
+			close(geminiReady)
 			slog.Info("voicertc: gemini connected", "session", sess.id, "rtpAudio", codecAvailable)
+
+			// Start mic → Gemini forwarding if the track arrived before Gemini connected.
+			if track != nil {
+				go sess.audioRxLoop(sessionCtx, track)
+			}
 
 			// Start Gemini → data channel / RTP forwarding.
 			go sess.geminiRxLoop(sessionCtx)
 		})
 
-		// Data channel → Gemini passthrough.
+		// Data channel → Gemini passthrough. Blocks until Gemini is connected
+		// so the client's setup message is never dropped.
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+			select {
+			case <-geminiReady:
+			case <-sessionCtx.Done():
+				return
+			}
 			sess.mu.Lock()
 			wsConn := sess.geminiWS
 			sess.mu.Unlock()
@@ -278,15 +335,25 @@ func (b *Bridge) CloseAll() {
 	}
 }
 
+// audioJob represents one utterance to be sent via RTP.
+type audioJob struct {
+	ctx      context.Context
+	pcmBytes []byte
+}
+
 // session holds all state for one bridge session.
 type session struct {
-	id         string
-	mu         sync.Mutex
-	pc         *webrtc.PeerConnection
-	dc         *webrtc.DataChannel
-	audioTrack *webrtc.TrackLocalStaticSample
-	geminiWS   *websocket.Conn
-	cancel     context.CancelFunc
+	id string
+
+	mu             sync.Mutex
+	pc             *webrtc.PeerConnection
+	dc             *webrtc.DataChannel
+	audioTrack     *webrtc.TrackLocalStaticSample
+	geminiWS       *websocket.Conn
+	pendingTrack   *webrtc.TrackRemote // set by OnTrack, consumed after geminiWS connects
+	cancel         context.CancelFunc
+	audioJobCancel context.CancelFunc // cancels the currently-processing audio job
+	audioJobs      chan *audioJob     // single consumer: audioSendLoop
 }
 
 // audioRxLoop reads Opus RTP from the client's mic track, decodes to PCM,
@@ -319,7 +386,7 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 		msg, _ := json.Marshal(map[string]any{
 			"realtimeInput": map[string]any{
 				"audio": map[string]string{
-					"mimeType": fmt.Sprintf("audio/pcm;rate=%d", sampleRate),
+					"mimeType": fmt.Sprintf("audio/pcm;rate=%d", inputSampleRate),
 					"data":     b64,
 				},
 			},
@@ -341,9 +408,13 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 }
 
 // geminiRxLoop reads from the Gemini WebSocket and forwards messages.
-// When codec is available: audio chunks are encoded to Opus and sent via RTP,
-// non-audio content goes through the data channel.
-// Without codec: everything goes through the data channel (passthrough).
+//
+// When the client has an RTP audio track: audio chunks are encoded to Opus
+// and sent via RTP, non-audio content goes through the data channel.
+// Otherwise everything goes through the data channel (passthrough).
+//
+// A single consumer goroutine processes audioJobs serially so the Opus
+// encoder is never used concurrently.
 func (s *session) geminiRxLoop(ctx context.Context) {
 	var enc *opusEncoder
 	if codecAvailable && s.audioTrack != nil {
@@ -351,6 +422,9 @@ func (s *session) geminiRxLoop(ctx context.Context) {
 		enc, err = newEncoder()
 		if err != nil {
 			slog.Warn("voicertc: encoder init failed, falling back to passthrough", "session", s.id, "err", err)
+		} else {
+			s.audioJobs = make(chan *audioJob, 1)
+			go s.audioSendLoop(ctx, enc)
 		}
 	}
 
@@ -366,7 +440,7 @@ func (s *session) geminiRxLoop(ctx context.Context) {
 
 		// When encoder is available, intercept serverContent audio and send via RTP.
 		if enc != nil {
-			if modified, ok := s.handleAudioExtraction(ctx, data, enc); ok {
+			if modified, ok := s.handleAudioExtraction(ctx, data); ok {
 				data = modified
 			}
 		}
@@ -389,7 +463,7 @@ func (s *session) geminiRxLoop(ctx context.Context) {
 // inlineData audio. If so, it encodes the PCM audio to Opus and sends it via
 // the RTP audio track, then returns a modified message with the audio stripped.
 // Returns (modifiedData, true) if audio was extracted, (nil, false) otherwise.
-func (s *session) handleAudioExtraction(ctx context.Context, data []byte, enc *opusEncoder) ([]byte, bool) {
+func (s *session) handleAudioExtraction(ctx context.Context, data []byte) ([]byte, bool) {
 	var msg map[string]json.RawMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return nil, false
@@ -415,13 +489,13 @@ func (s *session) handleAudioExtraction(ctx context.Context, data []byte, enc *o
 			continue
 		}
 		hadAudio = true
-		// Decode base64 PCM and send as Opus RTP.
+		// Decode base64 PCM and enqueue as a job for the audioSendLoop.
 		pcmBytes, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
 		if err != nil {
 			slog.Debug("voicertc: base64 decode failed", "session", s.id, "err", err)
 			continue
 		}
-		s.encodeAndSendRTP(ctx, pcmBytes, enc)
+		s.enqueueAudioJob(ctx, pcmBytes)
 	}
 	if !hadAudio {
 		return nil, false
@@ -441,32 +515,84 @@ func (s *session) handleAudioExtraction(ctx context.Context, data []byte, enc *o
 	return rebuilt, true
 }
 
-// encodeAndSendRTP converts Gemini PCM (24kHz S16LE) to 16kHz, encodes as
-// Opus, and writes to the RTP audio track.
-func (s *session) encodeAndSendRTP(_ context.Context, pcmBytes []byte, enc *opusEncoder) {
-	// Gemini outputs 24kHz PCM. Downsample to 16kHz by dropping every 3rd sample
-	// (24000/16000 = 3/2 ratio: take 2 out of every 3 samples).
-	samples24 := len(pcmBytes) / 2
-	samples16 := samples24 * 2 / 3
-	pcm16 := make([]int16, 0, samples16)
-	for i := range samples24 {
-		sample := int16(binary.LittleEndian.Uint16(pcmBytes[i*2:])) //nolint:gosec // PCM uint16→int16 reinterpret is intentional
-		// Keep samples at positions 0,1 of every group of 3; skip position 2.
-		if i%3 != 2 {
-			pcm16 = append(pcm16, sample)
+// audioSendLoop is the single consumer for audioJobs. It serializes all
+// encoding and RTP writes so the Opus encoder is never used concurrently.
+func (s *session) audioSendLoop(ctx context.Context, enc *opusEncoder) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case job, ok := <-s.audioJobs:
+			if !ok {
+				return
+			}
+			s.encodeAndSendRTP(job.ctx, job.pcmBytes, enc) //nolint:contextcheck // job.ctx is created in enqueueAudioJob, used here by the single consumer
 		}
 	}
+}
 
-	// Encode in 20ms frames (320 samples at 16kHz).
-	for i := 0; i+frameSamples <= len(pcm16); i += frameSamples {
-		frame := pcm16[i : i+frameSamples]
-		opusPkt, err := enc.Encode(frame)
+// enqueueAudioJob cancels any in-flight audio job and queues a new one.
+// The audioSendLoop picks it up and processes it serially.
+func (s *session) enqueueAudioJob(parentCtx context.Context, pcmBytes []byte) {
+	s.mu.Lock()
+	if s.audioJobCancel != nil {
+		s.audioJobCancel()
+	}
+	// Drain any queued-but-not-started job.
+	select {
+	case <-s.audioJobs:
+	default:
+	}
+	jobCtx, jobCancel := context.WithCancel(context.WithoutCancel(parentCtx))
+	s.audioJobCancel = jobCancel
+	s.mu.Unlock()
+	s.audioJobs <- &audioJob{ctx: jobCtx, pcmBytes: pcmBytes}
+}
+
+// encodeAndSendRTP converts Gemini PCM (24kHz S16LE) to Opus and writes to
+// the RTP audio track with frame pacing.
+//
+// Pacing is critical: without it, all Opus frames for an utterance are written
+// in a tight loop, flooding the receiver's jitter buffer and causing stutter.
+// Each 20ms frame is spaced ~20ms apart so the receiver's NetEq sees a realistic
+// arrival schedule.
+func (s *session) encodeAndSendRTP(ctx context.Context, pcmBytes []byte, enc *opusEncoder) {
+	// Gemini outputs 24kHz PCM. Upsample to 48kHz for the Opus encoder.
+	pcm48 := upsample24to48(pcmBytes)
+
+	// Pre-encode all frames so pacing isn't affected by encoding latency.
+	var frames [][]byte
+	for i := 0; i+encoderFrameSamples <= len(pcm48); i += encoderFrameSamples {
+		opusPkt, err := enc.Encode(pcm48[i : i+encoderFrameSamples])
 		if err != nil {
 			slog.Debug("voicertc: opus encode failed", "session", s.id, "err", err)
 			continue
 		}
+		frames = append(frames, opusPkt)
+	}
+
+	// Pace writes at ~20ms per frame so the receiver's jitter buffer
+	// doesn't get flooded.
+	deadline := time.Now()
+	for _, f := range frames {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// Sleep until the deadline, then advance by one frame duration.
+		if wait := time.Until(deadline); wait > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
+		}
+		deadline = time.Now().Add(frameDuration)
+
 		if err := s.audioTrack.WriteSample(media.Sample{
-			Data:     opusPkt,
+			Data:     f,
 			Duration: frameDuration,
 		}); err != nil {
 			slog.Debug("voicertc: rtp write failed", "session", s.id, "err", err)
@@ -475,6 +601,25 @@ func (s *session) encodeAndSendRTP(_ context.Context, pcmBytes []byte, enc *opus
 	}
 }
 
+// upsample24to48 converts PCM from 24kHz S16LE to 48kHz using linear
+// interpolation (factor 2).
+func upsample24to48(pcmBytes []byte) []int16 {
+	samples24 := len(pcmBytes) / 2
+	pcm48 := make([]int16, samples24*2)
+	for i := range samples24 {
+		s0 := int16(binary.LittleEndian.Uint16(pcmBytes[i*2:])) //nolint:gosec // PCM uint16→int16 reinterpret
+		pcm48[i*2] = s0
+		if i+1 < samples24 {
+			s1 := int16(binary.LittleEndian.Uint16(pcmBytes[(i+1)*2:])) //nolint:gosec // PCM uint16→int16 reinterpret
+			pcm48[i*2+1] = int16((int32(s0) + int32(s1)) / 2)           //nolint:gosec // sum/2 fits in int16
+		} else {
+			pcm48[i*2+1] = s0
+		}
+	}
+	return pcm48
+}
+
+// close tears down the Gemini WebSocket and PeerConnection.
 func (s *session) close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

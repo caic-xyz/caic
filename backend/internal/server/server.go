@@ -91,8 +91,8 @@ type Config struct {
 	// Required for OAuth login and webhook delivery.
 	ExternalURL string
 
-	// WebRTC voice bridge (optional).
-	WebRTCPort int // UDP port for ICE; 0 disables WebRTC
+	// WebRTC voice bridge.
+	WebRTCPort int // UDP port for ICE; 0 = ephemeral; -1 = disabled
 
 	// Profiling.
 	Pprof bool // expose /debug/pprof/* endpoints

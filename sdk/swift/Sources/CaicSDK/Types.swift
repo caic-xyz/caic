@@ -85,6 +85,7 @@ public struct Config: Codable {
     public let tailscaleAvailable: Bool
     public let usbAvailable: Bool
     public let displayAvailable: Bool
+    public let webrtcAvailable: Bool
     public let gitHubAppEnabled: Bool?
     /// e.g. ["github","gitlab"]
     public let authProviders: [String]?

@@ -62,6 +62,7 @@ type Config struct {
 	TailscaleAvailable bool     `json:"tailscaleAvailable"`
 	USBAvailable       bool     `json:"usbAvailable"`
 	DisplayAvailable   bool     `json:"displayAvailable"`
+	WebRTCAvailable    bool     `json:"webrtcAvailable"`
 	GitHubAppEnabled   bool     `json:"gitHubAppEnabled,omitempty"`
 	AuthProviders      []string `json:"authProviders,omitempty"` // e.g. ["github","gitlab"]
 }

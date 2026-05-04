@@ -14,6 +14,8 @@ type opusDecoder struct{}
 
 func newDecoder() (*opusDecoder, error) { return nil, errNoCodec }
 
+func newDecoderAtRate(_ int) (*opusDecoder, error) { return nil, errNoCodec }
+
 func (d *opusDecoder) Decode(_ []byte) ([]int16, error) { return nil, errNoCodec }
 
 type opusEncoder struct{}

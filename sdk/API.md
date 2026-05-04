@@ -104,6 +104,7 @@ Config reports server capabilities to the frontend.
 | `tailscaleAvailable` | `boolean` |  | yes |
 | `usbAvailable` | `boolean` |  | yes |
 | `displayAvailable` | `boolean` |  | yes |
+| `webrtcAvailable` | `boolean` |  | yes |
 | `gitHubAppEnabled` | `boolean` |  |  |
 | `authProviders` | `string[]` | e.g. ["github","gitlab"] |  |
 

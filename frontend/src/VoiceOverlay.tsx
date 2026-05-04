@@ -15,6 +15,7 @@ interface Props {
   recentRepo: () => string;
   selectedHarness: () => string;
   selectedModel: () => string;
+  webrtcAvailable: () => boolean;
 }
 
 /** Bar transition durations (ms): center reacts fastest, outer bars lag. */
@@ -109,7 +110,15 @@ export default function VoiceOverlay(props: Props) {
     if (session.state.connected || session.state.connectStatus !== null) {
       session.disconnect();
     } else {
-      void session.connect(untrack(() => props.tasks()), untrack(() => props.recentRepo()), untrack(() => props.selectedHarness()), untrack(() => props.selectedModel()));
+      const tasks = untrack(() => props.tasks());
+      const repo = untrack(() => props.recentRepo());
+      const harness = untrack(() => props.selectedHarness());
+      const model = untrack(() => props.selectedModel());
+      if (untrack(() => props.webrtcAvailable())) {
+        void session.connectWebRTC(tasks, repo, harness, model);
+      } else {
+        void session.connectWebSocket(tasks, repo, harness, model);
+      }
     }
   };
 

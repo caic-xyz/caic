@@ -120,6 +120,7 @@ export default function App() {
   const [usbAvailable, setUSBAvailable] = createSignal(false);
   const [usbEnabled, setUSBEnabled] = createSignal(false);
   const [displayAvailable, setDisplayAvailable] = createSignal(false);
+  const [webrtcAvailable, setWebrtcAvailable] = createSignal(false);
   const [displayEnabled, setDisplayEnabled] = createSignal(false);
   const [recentCount, setRecentCount] = createSignal(0);
   const [actionId, setActionId] = createSignal<string | null>(null);
@@ -315,6 +316,7 @@ export default function App() {
           setTailscaleAvailable(config.tailscaleAvailable);
           setUSBAvailable(config.usbAvailable);
           setDisplayAvailable(config.displayAvailable);
+          setWebrtcAvailable(config.webrtcAvailable);
         }
         if (prefs?.settings) {
           setAutoFixCI(prefs.settings.autoFixOnCIFailure);
@@ -1209,7 +1211,7 @@ export default function App() {
           </div>
         </div>
       </Show>
-      <VoiceOverlay tasks={tasks} recentRepo={() => repos()[0]?.path ?? ""} selectedHarness={selectedHarness} selectedModel={selectedModel} />
+      <VoiceOverlay tasks={tasks} recentRepo={() => repos()[0]?.path ?? ""} selectedHarness={selectedHarness} selectedModel={selectedModel} webrtcAvailable={webrtcAvailable} />
       <Portal>
         <div class={styles.toastContainer}>
           <For each={warnings()}>
