@@ -162,6 +162,7 @@ type Task struct {
 	Repos         []RepoMount   // index 0 = primary; empty = no-repo
 	Harness       agent.Harness // Agent harness ("claude", "gemini", etc.).
 	Model         string        // User-requested model; passed to agent CLI.
+	Effort        string        // Thinking effort; passed to agent CLI. Empty = default.
 	DockerImage   string        // Custom Docker base image; empty means use the default.
 	GitHubToken   string        // GitHub token to inject into the container; empty means none.
 	Tailscale     bool          // Enable Tailscale networking in the container.
@@ -655,6 +656,11 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 		}
 		if init.Model != "" {
 			t.reportedModel = init.Model
+		}
+		// Inject the user-requested thinking effort into the init message
+		// so the frontend can display it. The agent CLI doesn't report it.
+		if init.Effort == "" && t.Effort != "" {
+			init.Effort = t.Effort
 		}
 	}
 	// Track model rerouting (codex): update reportedModel to the active model.

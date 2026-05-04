@@ -212,6 +212,9 @@ func buildArgs(opts *agent.Options) []string {
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
+	if opts.Effort != "" {
+		args = append(args, "--effort", opts.Effort)
+	}
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	}

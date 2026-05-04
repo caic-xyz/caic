@@ -73,6 +73,21 @@ function ConnectionDot(props: { connected: boolean }) {
   );
 }
 
+/**
+ * Returns the list of valid effort levels for a given harness.
+ * Empty for harnesses that don't support thinking effort.
+ */
+function effortOptions(harness: string): string[] {
+  switch (harness) {
+    case "claude":
+      return ["low", "medium", "high", "max"];
+    case "codex":
+      return ["none", "minimal", "low", "medium", "high", "xhigh"];
+    default:
+      return [];
+  }
+}
+
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -85,6 +100,7 @@ export default function App() {
   const [repos, setRepos] = createSignal<Repo[]>([]);
   const [selectedRepos, setSelectedRepos] = createSignal<RepoEntry[]>([]);
   const [selectedModel, setSelectedModel] = createSignal("");
+  const [selectedEffort, setSelectedEffort] = createSignal("");
   const [selectedImage, setSelectedImage] = createSignal("");
   const [harnesses, setHarnesses] = createSignal<HarnessInfo[]>([]);
   const [selectedHarness, setSelectedHarness] = createSignal("");
@@ -557,6 +573,7 @@ export default function App() {
   const [forkPrompt, setForkPrompt] = createSignal("");
   const [forkHarness, setForkHarness] = createSignal("");
   const [forkModel, setForkModel] = createSignal("");
+  const [forkEffort, setForkEffort] = createSignal("");
   const [forkExtraRepos, setForkExtraRepos] = createSignal<RepoEntry[]>([]);
 
   // Repos available to add in the fork dialog (exclude already-selected extras and source task repos).
@@ -575,6 +592,7 @@ export default function App() {
     setForkPrompt("");
     setForkHarness(task?.harness ?? selectedHarness());
     setForkModel(task?.model ?? "");
+    setForkEffort(task?.effort ?? "");
     setForkExtraRepos([]);
   }
 
@@ -586,12 +604,14 @@ export default function App() {
     try {
       const h = forkHarness();
       const m = forkModel();
+      const e = forkEffort();
       const extras = forkExtraRepos();
       const sourceTask = tasks().find((t) => t.id === id);
       const resp = await forkTask(id, {
         prompt: { text },
         harness: h !== (sourceTask?.harness ?? "") ? h as Harness : undefined,
         model: m !== (sourceTask?.model ?? "") ? m : undefined,
+        effort: e !== (sourceTask?.effort ?? "") ? e : undefined,
         extraRepos: extras.length > 0 ? extras.map((r) => ({ name: r.path, ...(r.branch ? { baseBranch: r.branch } : {}) })) : undefined,
       });
       navigate(`/task/${resp.id}`);
@@ -621,12 +641,13 @@ export default function App() {
     }
     try {
       const model = selectedModel();
+      const effort = selectedEffort();
       const ts = tailscaleEnabled();
       const usb = usbEnabled();
       const disp = displayEnabled();
       const harness = selectedHarness();
       const repoSpecs = selRepos.length > 0 ? selRepos.map((r) => ({ name: r.path, ...(r.branch ? { baseBranch: r.branch } : {}) })) : undefined;
-      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repos: repoSpecs, harness, ...(model ? { model } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}) });
+      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repos: repoSpecs, harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}) });
       if (model) prefModels[harness] = model;
       else delete prefModels[harness];
       setPrompt("");
@@ -728,6 +749,7 @@ export default function App() {
               const models = harnesses().find((x) => x.name === h)?.models ?? [];
               const lastModel = prefModels[h];
               setSelectedModel(lastModel && models.includes(lastModel) ? lastModel : "");
+              setSelectedEffort("");
             }}
             class={styles.modelSelect}
           >
@@ -750,6 +772,18 @@ export default function App() {
             <option value="">Default model</option>
             <For each={harnesses().find((h) => h.name === selectedHarness())?.models ?? []}>
               {(m) => <option value={m}>{m}</option>}
+            </For>
+          </select>
+        </Show>
+        <Show when={effortOptions(selectedHarness()).length > 0}>
+          <select
+            value={selectedEffort()}
+            onChange={(e) => setSelectedEffort(e.currentTarget.value)}
+            class={styles.modelSelect}
+          >
+            <option value="">Default effort</option>
+            <For each={effortOptions(selectedHarness())}>
+              {(e) => <option value={e}>{e}</option>}
             </For>
           </select>
         </Show>
@@ -935,6 +969,7 @@ export default function App() {
                     setForkHarness(h);
                     const models = harnesses().find((x) => x.name === h)?.models ?? [];
                     setForkModel(models.includes(forkModel()) ? forkModel() : "");
+                    setForkEffort("");
                   }}
                   class={styles.modelSelect}
                 >
@@ -952,6 +987,18 @@ export default function App() {
                   <option value="">Default model</option>
                   <For each={harnesses().find((h) => h.name === forkHarness())?.models ?? []}>
                     {(m) => <option value={m}>{m}</option>}
+                  </For>
+                </select>
+              </Show>
+              <Show when={effortOptions(forkHarness()).length > 0}>
+                <select
+                  value={forkEffort()}
+                  onChange={(e) => setForkEffort(e.currentTarget.value)}
+                  class={styles.modelSelect}
+                >
+                  <option value="">Default effort</option>
+                  <For each={effortOptions(forkHarness())}>
+                    {(e) => <option value={e}>{e}</option>}
                   </For>
                 </select>
               </Show>

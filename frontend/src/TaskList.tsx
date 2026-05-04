@@ -178,6 +178,7 @@ export default function TaskList(props: TaskListProps) {
       repos={t().repos}
       harness={t().harness}
       model={t().model}
+      effort={t().effort}
       costUSD={t().costUSD}
       duration={t().duration}
       numTurns={t().numTurns}

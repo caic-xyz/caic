@@ -193,6 +193,7 @@ type Task struct {
 	// Per-task harness/container metadata.
 	Harness       Harness   `json:"harness"`
 	Model         string    `json:"model,omitempty"`
+	Effort        string    `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
 	AgentVersion  string    `json:"agentVersion,omitempty"`
 	SessionID     string    `json:"sessionID,omitempty"`
 	StartedAt     time.Time `json:"startedAt,omitzero"`     // When the container started.
@@ -251,6 +252,7 @@ type CreateTaskReq struct {
 	InitialPrompt Prompt     `json:"initialPrompt"`
 	Repos         []RepoSpec `json:"repos,omitempty"`
 	Model         string     `json:"model,omitempty"`
+	Effort        string     `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
 	Harness       Harness    `json:"harness"`
 	Tailscale     bool       `json:"tailscale,omitempty"`
 	USB           bool       `json:"usb,omitempty"`
@@ -262,6 +264,7 @@ type ForkTaskReq struct {
 	Prompt     Prompt     `json:"prompt"`               // Initial prompt for the forked task.
 	Harness    Harness    `json:"harness,omitempty"`    // Override harness; empty means inherit from source.
 	Model      string     `json:"model,omitempty"`      // Override model; empty means inherit from source.
+	Effort     string     `json:"effort,omitempty"`     // Override thinking effort; empty means inherit from source.
 	ExtraRepos []RepoSpec `json:"extraRepos,omitempty"` // Additional repos to map into the fork.
 }
 

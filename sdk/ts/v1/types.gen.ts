@@ -148,6 +148,7 @@ export interface EventMessage {
  */
 export interface EventInit {
   model: string;
+  effort?: string; // Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported.
   agentVersion: string;
   sessionID: string;
   tools: string[];
@@ -635,6 +636,7 @@ export interface Task {
    */
   harness: Harness;
   model?: string;
+  effort?: string; // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
   agentVersion?: string;
   sessionID?: string;
   startedAt?: ISOTimestamp; // When the container started.
@@ -699,6 +701,7 @@ export interface CreateTaskReq {
   initialPrompt: Prompt;
   repos?: RepoSpec[];
   model?: string;
+  effort?: string; // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
   harness: Harness;
   tailscale?: boolean;
   usb?: boolean;
@@ -711,6 +714,7 @@ export interface ForkTaskReq {
   prompt: Prompt; // Initial prompt for the forked task.
   harness?: Harness; // Override harness; empty means inherit from source.
   model?: string; // Override model; empty means inherit from source.
+  effort?: string; // Override thinking effort; empty means inherit from source.
   extraRepos?: RepoSpec[]; // Additional repos to map into the fork.
 }
 /**

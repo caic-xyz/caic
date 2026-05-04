@@ -45,6 +45,7 @@ func (tt *toolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 			Ts:   ts,
 			Init: &v1.EventInit{
 				Model:        m.Model,
+				Effort:       m.Effort,
 				AgentVersion: m.Version,
 				SessionID:    m.SessionID,
 				Tools:        m.Tools,

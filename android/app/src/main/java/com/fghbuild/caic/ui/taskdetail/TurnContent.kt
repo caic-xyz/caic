@@ -85,9 +85,13 @@ fun MessageGroupContent(
                 event?.kind == EventKinds.Init -> {
                     val init = event.init
                     if (init != null) {
+                        val parts = mutableListOf("Session started")
+                        parts.add(init.model)
+                        if (!init.effort.isNullOrBlank()) parts.add("${init.effort} effort")
+                        parts.add(init.agentVersion)
+                        parts.add(init.sessionID)
                         Text(
-                            text = "Session started \u00b7 ${init.model}" +
-                                " \u00b7 ${init.agentVersion} \u00b7 ${init.sessionID}",
+                            text = parts.joinToString(" \u00b7 "),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

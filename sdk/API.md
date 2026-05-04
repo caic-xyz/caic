@@ -360,6 +360,7 @@ Task is the JSON representation sent to the frontend.
 | `owner` | `string` | username of creator; omitted in no-auth mode |  |
 | `harness` | `string` | Per-task harness/container metadata. | yes |
 | `model` | `string` |  |  |
+| `effort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. |  |
 | `agentVersion` | `string` |  |  |
 | `sessionID` | `string` |  |  |
 | `startedAt` | `ISOTimestamp` | When the container started. |  |
@@ -406,6 +407,7 @@ CreateTaskReq is the request body for POST /api/v1/tasks.
 | `initialPrompt` | `Prompt` |  | yes |
 | `repos` | `RepoSpec[]` |  |  |
 | `model` | `string` |  |  |
+| `effort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. |  |
 | `harness` | `string` |  | yes |
 | `tailscale` | `boolean` |  |  |
 | `usb` | `boolean` |  |  |
@@ -419,6 +421,7 @@ field so the client knows which backend produced the stream.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `model` | `string` |  | yes |
+| `effort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported. |  |
 | `agentVersion` | `string` |  | yes |
 | `sessionID` | `string` |  | yes |
 | `tools` | `string[]` |  | yes |
@@ -789,6 +792,7 @@ ForkTaskReq is the request body for POST /api/v1/tasks/{id}/fork.
 | `prompt` | `Prompt` | Initial prompt for the forked task. | yes |
 | `harness` | `string` | Override harness; empty means inherit from source. |  |
 | `model` | `string` | Override model; empty means inherit from source. |  |
+| `effort` | `string` | Override thinking effort; empty means inherit from source. |  |
 | `extraRepos` | `RepoSpec[]` | Additional repos to map into the fork. |  |
 
 ### DiffResp

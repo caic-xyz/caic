@@ -20,6 +20,7 @@ export interface TaskCardProps {
   repos?: TaskRepo[];
   harness?: string;
   model?: string;
+  effort?: string;
   costUSD: number;
   duration: number;
   numTurns: number;
@@ -264,7 +265,7 @@ export default function TaskCard(props: TaskCardProps) {
         </>;
       })()}
 
-      {/* Line 3: harness · model · tokens · cost */}
+      {/* Line 3: harness · model · effort · tokens · cost */}
       <Show when={props.harness || props.model}>
         <div class={styles.metaRow}>
           <span class={styles.meta}>
@@ -272,6 +273,7 @@ export default function TaskCard(props: TaskCardProps) {
               const parts: string[] = [];
               if (props.harness) parts.push(props.harness);
               if (props.model) parts.push(props.model);
+              if (props.effort) parts.push(props.effort);
               return parts.join(" · ");
             })()}
             <Show when={props.activeInputTokens + props.activeCacheReadTokens > 0}>

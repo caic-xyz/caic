@@ -74,6 +74,7 @@ type Options struct {
 	Container       string
 	Dir             string // Working directory inside the container.
 	Model           string // Model alias ("opus", "sonnet", "haiku") or full ID. Empty = default.
+	Effort          string // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
 	InitialPrompt   Prompt // Initial prompt; never mutated after creation.
 	ResumeSessionID string
 	RelayOffset     int64          // Byte offset into relay output.jsonl for AttachRelay.

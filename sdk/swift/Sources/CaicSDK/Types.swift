@@ -309,6 +309,8 @@ public struct Task: Codable {
     /// Per-task harness/container metadata.
     public let harness: Harness
     public let model: String?
+    /// Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
+    public let effort: String?
     public let agentVersion: String?
     public let sessionID: String?
     /// When the container started.
@@ -348,6 +350,8 @@ public struct CreateTaskReq: Codable {
     public let initialPrompt: Prompt
     public let repos: [RepoSpec]?
     public let model: String?
+    /// Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
+    public let effort: String?
     public let harness: Harness
     public let tailscale: Bool?
     public let usb: Bool?
@@ -358,6 +362,8 @@ public struct CreateTaskReq: Codable {
 /// field so the client knows which backend produced the stream.
 public struct EventInit: Codable {
     public let model: String
+    /// Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported.
+    public let effort: String?
     public let agentVersion: String
     public let sessionID: String
     public let tools: [String]
@@ -651,6 +657,8 @@ public struct ForkTaskReq: Codable {
     public let harness: Harness?
     /// Override model; empty means inherit from source.
     public let model: String?
+    /// Override thinking effort; empty means inherit from source.
+    public let effort: String?
     /// Additional repos to map into the fork.
     public let extraRepos: [RepoSpec]?
 }

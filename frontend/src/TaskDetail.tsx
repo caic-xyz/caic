@@ -829,7 +829,9 @@ function SessionBoundaryItem(props: { event: EventMessage }) {
       <Match when={ev().init} keyed>
         {(init) => (
           <div class={styles.systemInit}>
-            Session started &middot; {init.model} &middot; {init.agentVersion} &middot; {init.sessionID}
+            Session started &middot; {init.model}
+            {init.effort ? <>{' · '}{init.effort} effort</> : null}
+            {' · '}{init.agentVersion} &middot; {init.sessionID}
           </div>
         )}
       </Match>

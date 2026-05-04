@@ -135,15 +135,17 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 	// Pre-populate thread ID from the known session so WritePrompt works
 	// immediately. wireFormat.process() will update it again if thread/started
 	// appears in the replayed output.
-	wire := &wireFormat{threadID: opts.ResumeSessionID, fw: &jsonutil.FieldWarner{}}
+	wire := &wireFormat{threadID: opts.ResumeSessionID, effort: opts.Effort, fw: &jsonutil.FieldWarner{}}
 	return agent.AttachRelaySession(ctx, opts, wire)
 }
 
 // wireFormat implements agent.WireFormat for the codex app-server JSON-RPC
 // protocol. It holds per-session state: the thread ID, a request ID counter,
-// and accumulated token usage from thread/tokenUsage/updated.
+// accumulated token usage from thread/tokenUsage/updated, and the reasoning
+// effort level.
 type wireFormat struct {
 	threadID   string
+	effort     string // Reasoning effort (e.g. "none", "low", "medium", "high").
 	nextID     atomic.Int64
 	mu         sync.Mutex
 	totalUsage agent.Usage // accumulated per-turn from thread/tokenUsage/updated
@@ -171,7 +173,7 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  "turn/start",
-		Params:  cx.TurnStartParams{ThreadID: w.threadID, Input: input},
+		Params:  cx.TurnStartParams{ThreadID: w.threadID, Input: input, Effort: cx.ReasoningEffort(w.effort)},
 	}
 	// Don't log to logW — stdin is not logged with --no-log-stdin.
 	return writeJSON(wr, req)
@@ -271,7 +273,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	w := &wireFormat{fw: &jsonutil.FieldWarner{}}
+	w := &wireFormat{effort: opts.Effort, fw: &jsonutil.FieldWarner{}}
 
 	// 1. Send initialize request.
 	initReq := cx.JSONRPCRequest{

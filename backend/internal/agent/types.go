@@ -46,6 +46,7 @@ type InitMessage struct {
 	Tools     []string `json:"tools"`
 	Model     string   `json:"model"`
 	Version   string   `json:"claude_code_version"`
+	Effort    string   `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported.
 }
 
 // Type implements Message.

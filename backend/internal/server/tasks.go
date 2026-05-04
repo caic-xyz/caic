@@ -128,6 +128,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		Repos:         mounts,
 		Harness:       harness,
 		Model:         req.Model,
+		Effort:        req.Effort,
 		DockerImage:   dockerImage,
 		GitHubToken:   ghToken,
 		Tailscale:     req.Tailscale,
@@ -524,6 +525,7 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 	// Resolve harness and model: use overrides from the request, falling back to source.
 	forkHarness := source.Harness
 	forkModel := source.Model
+	forkEffort := source.Effort
 	if req.Harness != "" {
 		forkHarness = toAgentHarness(req.Harness)
 		backend, ok := runner.Backends[forkHarness]
@@ -534,6 +536,7 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 			return nil, dto.BadRequest("unsupported model for " + string(req.Harness) + ": " + req.Model)
 		}
 		forkModel = req.Model
+		forkEffort = req.Effort
 	} else if req.Model != "" {
 		// Model override without harness override: validate against source harness.
 		backend, ok := runner.Backends[forkHarness]
@@ -544,6 +547,7 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 			return nil, dto.BadRequest("unsupported model for " + string(source.Harness) + ": " + req.Model)
 		}
 		forkModel = req.Model
+		forkEffort = req.Effort
 	}
 
 	var ownerID string
@@ -587,6 +591,7 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 		Repos:         mounts,
 		Harness:       forkHarness,
 		Model:         forkModel,
+		Effort:        forkEffort,
 		DockerImage:   source.DockerImage,
 		GitHubToken:   ghToken,
 		Tailscale:     source.Tailscale,
@@ -885,6 +890,7 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 		StateUpdatedAt: snap.StateUpdatedAt,
 		Harness:        toV1Harness(e.task.Harness),
 		Model:          snap.Model,
+		Effort:         e.task.Effort,
 		AgentVersion:   snap.AgentVersion,
 		SessionID:      snap.SessionID,
 		InPlanMode:     snap.InPlanMode,

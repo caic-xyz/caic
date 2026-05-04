@@ -260,6 +260,7 @@ data class Task(
     val owner: String? = null,
     val harness: Harness,
     val model: String? = null,
+    val effort: String? = null,
     val agentVersion: String? = null,
     @SerialName("sessionID") val sessionID: String? = null,
     val startedAt: Instant? = null,
@@ -289,6 +290,7 @@ data class CreateTaskReq(
     val initialPrompt: Prompt,
     val repos: List<RepoSpec>? = null,
     val model: String? = null,
+    val effort: String? = null,
     val harness: Harness,
     val tailscale: Boolean? = null,
     val usb: Boolean? = null,
@@ -302,6 +304,7 @@ data class CreateTaskReq(
 @Serializable
 data class EventInit(
     val model: String,
+    val effort: String? = null,
     val agentVersion: String,
     @SerialName("sessionID") val sessionID: String,
     val tools: List<String>,
@@ -578,6 +581,7 @@ data class ForkTaskReq(
     val prompt: Prompt,
     val harness: Harness? = null,
     val model: String? = null,
+    val effort: String? = null,
     val extraRepos: List<RepoSpec>? = null,
 )
 
