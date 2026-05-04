@@ -103,8 +103,12 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 			return nil, fmt.Errorf("pi: write set_model: %w", err)
 		}
 		br = bufio.NewReaderSize(rp.Stdout, 1<<20)
-		if err := waitForResponse(br, pi.CmdSetModel, opts.LogW); err != nil {
+		resp, err := waitForResponse(br, pi.CmdSetModel, opts.LogW)
+		if err != nil {
 			return nil, fmt.Errorf("pi: set_model %s: %w", opts.Model, err)
+		}
+		if cw := parseModelContextWindow(&resp); cw > 0 {
+			wire.modelCtxWindow = cw
 		}
 		rp.Stdout = br // hand the buffered reader to the next command
 	}
@@ -115,7 +119,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		if br == nil {
 			br = bufio.NewReaderSize(rp.Stdout, 1<<20)
 		}
-		if err := waitForResponse(br, pi.CmdSetThinking, opts.LogW); err != nil {
+		if _, err := waitForResponse(br, pi.CmdSetThinking, opts.LogW); err != nil {
 			return nil, fmt.Errorf("pi: set_thinking_level %s: %w", opts.Effort, err)
 		}
 		rp.Stdout = br
@@ -250,6 +254,8 @@ type piWireFormat struct {
 	thinkAccum strings.Builder
 	startTime  time.Time // When the prompt was written.
 	numTurns   int       // Incremented by handleTurnEnd; consumed by handleAgentEnd.
+
+	modelCtxWindow int64 // Model's context window from set_model response; 0 if unknown.
 
 	fw *jsonutil.FieldWarner
 }
@@ -507,19 +513,21 @@ func (w *piWireFormat) handleTurnEnd(line []byte) ([]agent.Message, error) {
 				CacheReadInputTokens:     int(ev.Message.Usage.CacheRead),
 				CacheCreationInputTokens: int(ev.Message.Usage.CacheWrite),
 			},
+			ContextWindow: int(w.modelCtxWindow),
 		}}, nil
 	}
 	return nil, nil
 }
 
 // waitForResponse reads JSONL lines from r until a response for the given
-// command is found. Lines are logged to logW. Non-response events are
-// discarded (Pi should not emit any before the first prompt).
-func waitForResponse(r *bufio.Reader, cmd pi.CommandType, logW io.Writer) error {
+// command is found. Returns the full response envelope. Lines are logged to
+// logW. Non-response events are discarded (Pi should not emit any before the
+// first prompt).
+func waitForResponse(r *bufio.Reader, cmd pi.CommandType, logW io.Writer) (pi.Response, error) {
 	for {
 		line, err := r.ReadBytes('\n')
 		if err != nil {
-			return fmt.Errorf("read response for %s: %w", cmd, err)
+			return pi.Response{}, fmt.Errorf("read response for %s: %w", cmd, err)
 		}
 		if logW != nil {
 			_, _ = logW.Write(line)
@@ -539,10 +547,22 @@ func waitForResponse(r *bufio.Reader, cmd pi.CommandType, logW io.Writer) error 
 			continue
 		}
 		if !resp.Success {
-			return fmt.Errorf("pi %s: %s", cmd, resp.Error)
+			return pi.Response{}, fmt.Errorf("pi %s: %s", cmd, resp.Error)
 		}
-		return nil
+		return resp, nil
 	}
+}
+
+// parseModelContextWindow extracts the context window from a set_model response.
+func parseModelContextWindow(resp *pi.Response) int64 {
+	if resp.Command != pi.CmdSetModel {
+		return 0
+	}
+	var m pi.Model
+	if err := json.Unmarshal(resp.Data, &m); err != nil {
+		return 0
+	}
+	return m.ContextWindow
 }
 
 // writeSetModel sends a set_model command to Pi. The model string is split on
