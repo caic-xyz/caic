@@ -24,8 +24,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalClipboardManager
+import android.content.ClipData
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.text.AnnotatedString
+import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,7 +68,8 @@ fun MarkdownWithRawToggle(text: String, modifier: Modifier = Modifier) {
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             )
             if (showRaw) {
-                val clipboard = LocalClipboardManager.current
+                val clipboard = LocalClipboard.current
+                val scope = rememberCoroutineScope()
                 Icon(
                     imageVector = Icons.Outlined.ContentCopy,
                     contentDescription = "Copy",
@@ -72,7 +77,13 @@ fun MarkdownWithRawToggle(text: String, modifier: Modifier = Modifier) {
                     modifier = Modifier
                         .size(32.dp)
                         .clip(MaterialTheme.shapes.small)
-                        .clickable { clipboard.setText(AnnotatedString(text)) }
+                        .clickable {
+                            scope.launch {
+                                clipboard.setClipEntry(
+                                    ClipEntry(ClipData.newPlainText("text", text))
+                                )
+                            }
+                        }
                         .padding(6.dp),
                 )
             }

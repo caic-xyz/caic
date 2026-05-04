@@ -160,6 +160,7 @@ private fun collectTurnPerfs(
 }
 
 // State color mapping for process state characters.
+@Composable
 private fun stateColor(state: String): Color = when (state) {
     "R" -> Color(0xFF28A745)
     "D", "Z" -> Color(0xFFDC3545)
