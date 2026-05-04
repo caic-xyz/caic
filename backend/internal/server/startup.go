@@ -364,7 +364,11 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	phase4.End()
 
 	// Resume bot comment watchers for adopted tasks with pending forge issues.
-	s.Bot.ResumePendingComments()
+	{
+		region := trace.StartRegion(ctx, "bot-resume-comments")
+		s.Bot.ResumePendingComments()
+		region.End()
+	}
 
 	s.ipgeoChecker, err = ipgeo.NewChecker(ctx, cfg.IPGeoAllowlist, cfg.IPGeoDB)
 	if err != nil {
@@ -375,11 +379,25 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	}
 
 	s.watchContainerEvents(ctx)
-	go s.warmupImages()
-	go s.refreshHarnessModels() //nolint:contextcheck // server-lifetime goroutine, uses s.ctx internally
-	go s.pollStats(s.ctx)       //nolint:contextcheck // server-lifetime context is intentional
+	go func() {
+		_, tk := trace.NewTask(ctx, "warmup-images")
+		defer tk.End()
+		trace.Log(ctx, "startup", "warmup-images: begin")
+		s.warmupImages()
+	}()
+	go func() {
+		_, tk := trace.NewTask(ctx, "refresh-harness-models")
+		defer tk.End()
+		trace.Log(ctx, "startup", "refresh-harness-models: begin")
+		s.refreshHarnessModels() //nolint:contextcheck // server-lifetime goroutine, uses s.ctx internally
+	}()
+	go s.pollStats(s.ctx) //nolint:contextcheck // server-lifetime context is intentional
 	go s.watchNewRepos()
-	s.ciService = ci.NewService(s.ciCache, s.provider, s)
+	{
+		region := trace.StartRegion(ctx, "ci-new-service")
+		s.ciService = ci.NewService(s.ciCache, s.provider, s)
+		region.End()
+	}
 	return s, nil
 }
 
@@ -511,30 +529,13 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 		} else {
 			t.SetTitle(lt.Prompt)
 		}
-		s.setParser(lt)
-		if err := lt.LoadMessages(); err != nil {
-			ltPrimary := lt.Primary()
-			ltRepo, ltBranch := "", ""
-			if ltPrimary != nil {
-				ltRepo = ltPrimary.Name
-				ltBranch = ltPrimary.Branch
-			}
-			slog.Warn("load messages failed", "repo", ltRepo, "br", ltBranch, "err", err)
-		}
-		if lt.Msgs != nil {
-			t.RestoreMessages(lt.Msgs)
-		}
-		// For tasks without a caic_result trailer (lt.State == StateRunning
-		// sentinel), any state RestoreMessages inferred is unreliable — the
-		// task may have been purged or interrupted without a trailer.
-		// Force StateFailed; adoptContainers replaces this entry with the
-		// correct live state if the container is still running.
+		// Purged tasks get all metadata from the caic_result trailer and
+		// the header-only tail scan (64 KiB). Full message parse is never
+		// needed. adoptContainers corrects the state for trailer-less tasks
+		// that are still running.
 		if lt.State == task.StateRunning {
 			t.SetState(task.StateFailed)
 		}
-		// SetPR after LoadMessages: the header-only tail scan may miss
-		// caic_pr when the record is beyond the 64 KiB window; the full
-		// parse in LoadMessages always finds it.
 		if lt.ForgePR > 0 {
 			t.SetPR(lt.ForgeOwner, lt.ForgeRepo, lt.ForgePR)
 		}
@@ -648,6 +649,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	// Only adopt containers that caic started. The caic label is set at
 	// container creation and is the authoritative proof of ownership.
 	caicLabelReg := trace.StartRegion(ctx, "caic-label")
+	trace.Logf(ctx, "adopt", "%s: label-caic", c.Name)
 	labelVal, err := container.LabelValue(ctx, c.Name, "caic")
 	caicLabelReg.End()
 	if err != nil {
@@ -697,6 +699,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 
 	// Read the harness from the container label (authoritative), falling
 	// back to the log file, then to Claude as the default.
+	trace.Logf(ctx, "adopt", "%s: label-harness", c.Name)
 	harnessLabel, _ := container.LabelValue(ctx, c.Name, "harness")
 	harnessName := agent.Harness(harnessLabel)
 	if harnessName == "" && lt != nil {
@@ -715,6 +718,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	if !isExited {
 		var relayErr error
 		relayStatusReg := trace.StartRegion(ctx, "relay-status")
+		trace.Logf(ctx, "adopt", "%s: relay-status", c.Name)
 		relayAlive, relayDiag, relayErr = agent.RelayStatus(ctx, c.Name)
 		relayStatusReg.End()
 		if relayErr != nil {
@@ -723,6 +727,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		if relayAlive {
 			// Relay is alive — read authoritative output from container.
 			relayReadReg := trace.StartRegion(ctx, "relay-read")
+			trace.Logf(ctx, "adopt", "%s: relay-read", c.Name)
 			relayMsgs, relaySize, relayErr = runner.ReadRelayOutput(ctx, c.Name, harnessName)
 			relayReadReg.End()
 			if relayErr != nil {
@@ -847,6 +852,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		if relayLog != "" {
 			slog.Warn("relay", "msg", "log from dead relay", "ctr", c.Name, "br", branch, "diag", relayDiag, "log", relayLog)
 		}
+		trace.Logf(ctx, "adopt", "%s: relay-dead", c.Name)
 		if t.GetState() == task.StateRunning {
 			t.SetStateAt(task.StateWaiting, stateUpdatedAt)
 			slog.Warn("relay", "msg", "dead, marking waiting",

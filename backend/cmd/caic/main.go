@@ -178,6 +178,7 @@ Flags:
 			return fmt.Errorf("start trace: %w", err)
 		}
 		defer trace.Stop()
+		trace.Log(ctx, "trace", "started")
 		slog.Info("execution trace enabled", "file", tc.Debug.Trace)
 	}
 	if tc.Debug.MemProfile != "" {

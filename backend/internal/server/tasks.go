@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/trace"
 	"slices"
 	"sort"
 	"sync"
@@ -493,8 +494,10 @@ func (s *Server) reviveTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq
 	entry.cleanupOnce = sync.Once{}
 	s.taskChanged()
 	s.mu.Unlock()
-	go func() {
-		h, err := runner.ReviveTask(s.ctx, entry.task)
+	go func() { //nolint:contextcheck // intentionally using server context
+		ctx, tk := trace.NewTask(s.ctx, "task.revive:"+entry.task.ID.String())
+		defer tk.End()
+		h, err := runner.ReviveTask(ctx, entry.task)
 		if err != nil {
 			slog.Warn("revive failed", "task", entry.task.ID, "err", err)
 			return
@@ -615,7 +618,9 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 		extraEnv = append(extraEnv, "GITHUB_TOKEN="+ghToken)
 	}
 
-	go func() {
+	go func() { //nolint:contextcheck // intentionally using server context
+		ctx, tk := trace.NewTask(s.ctx, "task.fork:"+source.ID.String()+"->"+t.ID.String())
+		defer tk.End()
 		forkOpts := &task.ForkOptions{
 			ExtraRepos: extraRepos,
 			Display:    source.Display,
@@ -625,7 +630,7 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 			Harness:    forkHarness,
 			ExtraEnv:   extraEnv,
 		}
-		h, err := runner.ForkTask(s.ctx, source, t, forkOpts)
+		h, err := runner.ForkTask(ctx, source, t, forkOpts)
 		if err != nil {
 			result := task.Result{State: task.StateFailed, Err: err}
 			s.mu.Lock()
@@ -782,6 +787,9 @@ func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
 func (s *Server) watchSession(entry *taskEntry, runner *task.Runner, h *task.SessionHandle) {
 	_ = runner // kept for interface consistency
 	go func() {
+		ctx, tk := trace.NewTask(s.ctx, "session.watch:"+entry.task.ID.String())
+		defer tk.End()
+		_ = ctx
 		done := h.Session.Done()
 		select {
 		case <-done:

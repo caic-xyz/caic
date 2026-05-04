@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/trace"
 	"strconv"
 	"strings"
 	"sync"
@@ -221,6 +222,9 @@ func (r *Runner) Init(ctx context.Context) error {
 //   - All-fail: reverts to StateWaiting.
 func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (*SessionHandle, error) {
 	r.initDefaults()
+	ctx, task := trace.NewTask(ctx, "task.reconnect:"+t.ID.String())
+	defer task.End()
+
 	if t.HasSession() {
 		return nil, errors.New("session already active")
 	}
@@ -288,6 +292,9 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 // The session is left open for follow-up messages via SendInput.
 func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	r.initDefaults()
+	ctx, task := trace.NewTask(ctx, "task.start:"+t.ID.String())
+	defer task.End()
+
 	if r.Container == nil {
 		return nil, errors.New("runner has no container backend configured")
 	}
@@ -298,7 +305,9 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	tStart := time.Now()
 	// 1. Create branch (serialized) + start container (concurrent).
 	r.log.Info("setup task")
+	region := trace.StartRegion(ctx, "setup")
 	sr, err := r.setup(ctx, t, []string{"caic=" + t.ID.String(), "harness=" + string(t.Harness)})
+	region.End()
 	if err != nil {
 		t.SetState(StateFailed)
 		return nil, err
@@ -313,8 +322,15 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 
 	// 2. Start the agent session.
 	t.SetState(StateStarting)
-	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
-	logW, err := r.openLog(t)
+	var msgCh chan agent.Message
+	var dispatchDone <-chan struct{}
+	var logW io.WriteCloser
+	{
+		region := trace.StartRegion(ctx, "dispatch-init")
+		msgCh, dispatchDone = r.startMessageDispatch(ctx, t, false)
+		logW, err = r.openLog(t)
+		region.End()
+	}
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
@@ -325,6 +341,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	tSession := time.Now()
 	tlog := r.log.With("br", primaryBranch, "ctr", t.Container)
 	tlog.Info("starting session", "hns", t.Harness)
+	region = trace.StartRegion(ctx, "agent-session")
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
 		Container:     t.Container,
 		Dir:           r.containerDir(),
@@ -333,6 +350,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 		MsgCh:         msgCh,
 		LogW:          logW,
 	})
+	region.End()
 	if err != nil {
 		_ = logW.Close()
 		close(msgCh)
@@ -373,6 +391,9 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 //  7. Build and return Result.
 func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	r.initDefaults()
+	ctx, task := trace.NewTask(ctx, "task.cleanup:"+t.ID.String())
+	defer task.End()
+
 	h := t.DetachSession()
 
 	name := t.Container
@@ -445,6 +466,9 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 // this preserves git remotes and SSH config.
 func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	r.initDefaults()
+	ctx, task := trace.NewTask(ctx, "task.stop:"+t.ID.String())
+	defer task.End()
+
 	h := t.DetachSession()
 
 	name := t.Container
@@ -508,6 +532,9 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 // the previous session.
 func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error) {
 	r.initDefaults()
+	ctx, task := trace.NewTask(ctx, "task.revive:"+t.ID.String())
+	defer task.End()
+
 	if r.Container == nil {
 		return nil, errors.New("runner has no container backend configured")
 	}
@@ -616,6 +643,9 @@ func (r *Runner) EnsureSession(ctx context.Context, t *Task, h *SessionHandle, t
 // and the task stays in its current state (typically StateWaiting).
 func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
 	r.initDefaults()
+	ctx, task := trace.NewTask(ctx, "task.start-session:"+t.ID.String())
+	defer task.End()
+
 	if t.Container == "" {
 		return nil, errors.New("no container")
 	}
@@ -665,6 +695,9 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 // Container, Repos[*].Branch, and starts the session.
 func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *ForkOptions) (*SessionHandle, error) {
 	r.initDefaults()
+	ctx, task := trace.NewTask(ctx, "task.fork:"+source.ID.String()+"->"+fork.ID.String())
+	defer task.End()
+
 	if r.Container == nil {
 		return nil, errors.New("runner has no container backend configured")
 	}
@@ -845,6 +878,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResu
 	r.log.Debug("runner", "msg", "provisioning phase A: launching container and creating branch", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "repos_count", len(repos))
 	eg, egCtx := errgroup.WithContext(startCtx)
 	eg.Go(func() error {
+		defer trace.StartRegion(egCtx, "container-launch").End()
 		r.log.Debug("runner", "msg", "calling container.Launch", "branch", primaryBranch)
 		name, err := r.Container.Launch(egCtx, repos, labels, opts)
 		if err != nil {
@@ -857,6 +891,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResu
 	})
 	if r.Dir != "" {
 		eg.Go(func() error {
+			defer trace.StartRegion(egCtx, "branch-create").End()
 			r.log.Debug("runner", "msg", "fetching and creating branch", "branch", primaryBranch)
 			err := r.fetchAndCreateBranch(egCtx, t, primaryBranch)
 			if err != nil {
@@ -892,16 +927,19 @@ func (r *Runner) SyncToOrigin(ctx context.Context, branch, container string, for
 	if r.Dir == "" {
 		return nil, nil, errors.New("sync is not supported for no-repo tasks")
 	}
+	region := trace.StartRegion(ctx, "sync-fetch")
 	fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 	defer fetchCancel()
 	r.branchMu.Lock()
 	r.log.Info("fetch", "br", branch)
 	if err := r.Container.Fetch(fetchCtx, append([]md.Repo{{GitRoot: r.Dir, Branch: branch}}, extraRepos...)); err != nil {
 		r.branchMu.Unlock()
+		region.End()
 		return nil, nil, err
 	}
 	ds := r.diffStat(fetchCtx, branch)
 	r.branchMu.Unlock()
+	region.End()
 
 	ref := "refs/remotes/" + container + "/" + branch
 	safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
@@ -930,16 +968,19 @@ func (r *Runner) SyncToDefault(ctx context.Context, branch, container, message s
 	if r.Dir == "" {
 		return nil, nil, errors.New("sync is not supported for no-repo tasks")
 	}
+	region := trace.StartRegion(ctx, "sync-default-fetch")
 	fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 	defer fetchCancel()
 	r.branchMu.Lock()
 	r.log.Info("fetch for default sync", "br", branch)
 	if err := r.Container.Fetch(fetchCtx, append([]md.Repo{{GitRoot: r.Dir, Branch: branch}}, extraRepos...)); err != nil {
 		r.branchMu.Unlock()
+		region.End()
 		return nil, nil, err
 	}
 	ds := r.diffStat(fetchCtx, branch)
 	r.branchMu.Unlock()
+	region.End()
 
 	ref := "refs/remotes/" + container + "/" + branch
 	safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
@@ -964,6 +1005,8 @@ func (r *Runner) SyncToDefault(ctx context.Context, branch, container, message s
 // caller can start a session watcher.
 func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
 	r.initDefaults()
+	ctx, task := trace.NewTask(ctx, "task.restart:"+t.ID.String())
+	defer task.End()
 
 	state := t.GetState()
 	if state != StateWaiting && state != StateAsking && state != StateHasPlan {
@@ -1036,6 +1079,8 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 // so the user can send a new message when ready.
 func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHandle, error) {
 	r.initDefaults()
+	ctx, task := trace.NewTask(ctx, "task.clear-context:"+t.ID.String())
+	defer task.End()
 
 	state := t.GetState()
 	if state != StateWaiting && state != StateAsking && state != StateHasPlan {

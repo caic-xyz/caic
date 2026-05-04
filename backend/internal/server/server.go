@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"runtime/trace"
 	"strings"
 	"sync"
 	"time"
@@ -394,6 +395,7 @@ func (s *Server) pollStats(ctx context.Context) {
 }
 
 func (s *Server) pushStats(ctx context.Context) {
+	defer trace.StartRegion(ctx, "poll-stats").End()
 	s.mu.Lock()
 	type entry struct {
 		task *task.Task

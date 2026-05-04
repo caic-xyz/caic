@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"runtime/trace"
 	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -62,6 +63,7 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) (client 
 
 // Launch implements task.ContainerBackend.
 func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, opts *task.StartOptions) (string, error) {
+	defer trace.StartRegion(ctx, "container.launch").End()
 	if len(repos) > 0 {
 		slog.Info("md", "phase", "launch", "dir", repos[0].GitRoot, "br", repos[0].Branch, "hns", opts.Harness)
 	} else {
@@ -101,6 +103,7 @@ func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, 
 
 // Connect implements task.ContainerBackend.
 func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opts *task.StartOptions) (tailscaleFQDN string, err error) {
+	defer trace.StartRegion(ctx, "container.connect").End()
 	if len(repos) > 0 {
 		slog.Info("md", "phase", "connect", "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	}
@@ -130,6 +133,7 @@ func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opt
 
 // Diff implements task.ContainerBackend.
 func (b *Backend) Diff(ctx context.Context, repo md.Repo, args ...string) (string, error) {
+	defer trace.StartRegion(ctx, "container.diff").End()
 	slog.Info("md diff", "dir", repo.GitRoot, "br", repo.Branch, "args", args)
 	var stdout bytes.Buffer
 	if err := b.Client.Container(repo).Diff(ctx, &stdout, &SlogWriter{Phase: "diff"}, 0, args); err != nil {
@@ -140,6 +144,7 @@ func (b *Backend) Diff(ctx context.Context, repo md.Repo, args ...string) (strin
 
 // Fetch implements task.ContainerBackend.
 func (b *Backend) Fetch(ctx context.Context, repos []md.Repo) error {
+	defer trace.StartRegion(ctx, "container.fetch").End()
 	if len(repos) > 0 {
 		slog.Info("md fetch", "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	}
@@ -154,6 +159,7 @@ func (b *Backend) Fetch(ctx context.Context, repos []md.Repo) error {
 
 // Stop implements task.ContainerBackend.
 func (b *Backend) Stop(ctx context.Context, name string) error {
+	defer trace.StartRegion(ctx, "container.stop").End()
 	slog.Info("md stop", "name", name)
 	ct := b.Client.Container()
 	ct.Name = name
@@ -162,6 +168,7 @@ func (b *Backend) Stop(ctx context.Context, name string) error {
 
 // Purge implements task.ContainerBackend.
 func (b *Backend) Purge(ctx context.Context, name string, repos []md.Repo) error {
+	defer trace.StartRegion(ctx, "container.purge").End()
 	if len(repos) > 0 {
 		slog.Info("md purge", "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	} else {
@@ -176,6 +183,7 @@ func (b *Backend) Purge(ctx context.Context, name string, repos []md.Repo) error
 
 // Revive implements task.ContainerBackend.
 func (b *Backend) Revive(ctx context.Context, name string, repos []md.Repo) error {
+	defer trace.StartRegion(ctx, "container.revive").End()
 	if len(repos) > 0 {
 		slog.Info("md revive", "dir", repos[0].GitRoot, "br", repos[0].Branch, "ctr", name)
 	} else {
@@ -198,6 +206,7 @@ func (b *Backend) Revive(ctx context.Context, name string, repos []md.Repo) erro
 
 // Fork implements task.ContainerBackend.
 func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *task.ForkOptions) (string, []md.Repo, error) {
+	defer trace.StartRegion(ctx, "container.fork").End()
 	if len(repos) > 0 {
 		slog.Info("md", "phase", "fork", "src", name, "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	}
