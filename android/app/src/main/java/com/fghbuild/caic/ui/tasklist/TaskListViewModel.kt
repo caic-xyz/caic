@@ -64,6 +64,7 @@ data class TaskListState(
     val editingBranches: List<BranchInfo> = emptyList(),
     val selectedHarness: String = "",
     val selectedModel: String = "",
+    val selectedEffort: String = "",
     val prompt: String = "",
     val recentRepoCount: Int = 0,
     val submitting: Boolean = false,
@@ -170,6 +171,7 @@ class TaskListViewModel @Inject constructor(
             editingBranches = form.editingBranches,
             selectedHarness = form.selectedHarness,
             selectedModel = form.selectedModel,
+            selectedEffort = form.selectedEffort,
             prompt = form.prompt,
             submitting = form.submitting,
             cloning = form.cloning,
@@ -304,7 +306,7 @@ class TaskListViewModel @Inject constructor(
         val lastModel = _formState.value.prefModels[harness] ?: ""
         val harnessModels = _formState.value.harnesses.find { it.name == harness }?.models.orEmpty()
         val model = if (lastModel in harnessModels) lastModel else ""
-        _formState.value = _formState.value.copy(selectedHarness = harness, selectedModel = model)
+        _formState.value = _formState.value.copy(selectedHarness = harness, selectedModel = model, selectedEffort = "")
     }
 
     fun selectModel(model: String) {
@@ -314,6 +316,10 @@ class TaskListViewModel @Inject constructor(
         else
             _formState.value.prefModels + (harness to model)
         _formState.value = _formState.value.copy(selectedModel = model, prefModels = updated)
+    }
+
+    fun selectEffort(effort: String) {
+        _formState.value = _formState.value.copy(selectedEffort = effort)
     }
 
     fun addImages(images: List<ImageData>) {
@@ -369,6 +375,7 @@ class TaskListViewModel @Inject constructor(
                         },
                         harness = form.selectedHarness,
                         model = form.selectedModel.ifBlank { null },
+                        effort = form.selectedEffort.ifBlank { null },
                     )
                 )
                 // Promote all selected repos to the front of the MRU list.
@@ -448,6 +455,7 @@ class TaskListViewModel @Inject constructor(
         val editingBranches: List<BranchInfo> = emptyList(),
         val selectedHarness: String = "",
         val selectedModel: String = "",
+        val selectedEffort: String = "",
         val prompt: String = "",
         val submitting: Boolean = false,
         val cloning: Boolean = false,

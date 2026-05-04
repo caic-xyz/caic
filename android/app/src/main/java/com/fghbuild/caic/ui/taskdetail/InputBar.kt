@@ -80,6 +80,14 @@ import com.fghbuild.caic.ui.theme.appColors
 import com.fghbuild.caic.util.imageDataToBitmap
 
 @OptIn(ExperimentalMaterial3Api::class)
+/** Returns valid effort levels for [harness], empty if unsupported. */
+private fun effortOptions(harness: String): List<String> = when (harness) {
+    "claude" -> listOf("low", "medium", "high", "max")
+    "codex" -> listOf("none", "minimal", "low", "medium", "high", "xhigh")
+    "pi" -> listOf("off", "minimal", "low", "medium", "high", "xhigh")
+    else -> emptyList()
+}
+
 @Composable
 fun InputBar(
     draft: String,
@@ -90,7 +98,7 @@ fun InputBar(
     onStop: () -> Unit,
     onPurge: () -> Unit,
     onRevive: () -> Unit,
-    onFork: (prompt: String, harness: String?, model: String?, extraRepos: List<RepoSpec>?) -> Unit = { _, _, _, _ -> },
+    onFork: (prompt: String, harness: String?, model: String?, effort: String?, extraRepos: List<RepoSpec>?) -> Unit = { _, _, _, _, _ -> },
     taskState: String = "",
     taskTitle: String = "",
     taskRepo: String = "",
@@ -98,6 +106,7 @@ fun InputBar(
     taskBaseBranch: String = "",
     taskHarness: String = "",
     taskModel: String = "",
+    taskEffort: String = "",
     harnesses: List<HarnessInfo> = emptyList(),
     allRepos: List<Repo> = emptyList(),
     forkAvailableRecent: List<Repo> = emptyList(),
@@ -345,6 +354,7 @@ fun InputBar(
             val forkFocus = remember { FocusRequester() }
             var forkSelectedHarness by remember { mutableStateOf(taskHarness) }
             var forkSelectedModel by remember { mutableStateOf(taskModel) }
+            var forkSelectedEffort by remember { mutableStateOf(taskEffort) }
             var forkExtraRepos by remember { mutableStateOf(emptyList<RepoEntry>()) }
             val forkExtraPaths = forkExtraRepos.map { it.path }.toSet()
             AlertDialog(
@@ -406,6 +416,17 @@ fun InputBar(
                                 },
                             )
                         }
+                        val effortOpts = effortOptions(forkSelectedHarness)
+                        if (effortOpts.isNotEmpty()) {
+                            ForkDropdown(
+                                label = "Effort",
+                                selected = forkSelectedEffort.ifBlank { "Default" },
+                                options = listOf("Default") + effortOpts,
+                                onSelect = { e ->
+                                    forkSelectedEffort = if (e == "Default") "" else e
+                                },
+                            )
+                        }
                         LaunchedEffect(Unit) { forkFocus.requestFocus() }
                     }
                 },
@@ -418,7 +439,8 @@ fun InputBar(
                             val extras = forkExtraRepos.takeIf { it.isNotEmpty() }?.map {
                                 RepoSpec(name = it.path, baseBranch = it.branch.ifBlank { null })
                             }
-                            onFork(forkPrompt.trim(), h, m, extras)
+                            val e = forkSelectedEffort.takeIf { it != taskEffort }
+                            onFork(forkPrompt.trim(), h, m, e, extras)
                         },
                         enabled = forkPrompt.isNotBlank(),
                     ) { Text("Fork") }

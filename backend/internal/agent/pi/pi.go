@@ -95,20 +95,30 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		return nil, err
 	}
 
-	// Pre-prompt command: set_model. We must wait for the response before
-	// sending the prompt, otherwise Pi may reject it or use the wrong model.
+	// Pre-prompt commands: set_model and set_thinking_level. We must wait
+	// for each response before sending the next.
+	var br *bufio.Reader
 	if opts.Model != "" {
 		if err := writeSetModel(rp.Stdin, opts.Model, opts.LogW); err != nil {
 			return nil, fmt.Errorf("pi: write set_model: %w", err)
 		}
-		// Read stdout synchronously until we get the set_model response.
-		// The bufio.Reader wraps rp.Stdout so any buffered-ahead bytes are
-		// preserved for the session's read goroutine.
-		br := bufio.NewReaderSize(rp.Stdout, 1<<20)
+		br = bufio.NewReaderSize(rp.Stdout, 1<<20)
 		if err := waitForResponse(br, pi.CmdSetModel, opts.LogW); err != nil {
 			return nil, fmt.Errorf("pi: set_model %s: %w", opts.Model, err)
 		}
-		rp.Stdout = br // hand the buffered reader to the session
+		rp.Stdout = br // hand the buffered reader to the next command
+	}
+	if opts.Effort != "" {
+		if err := writeSetThinking(rp.Stdin, opts.Effort, opts.LogW); err != nil {
+			return nil, fmt.Errorf("pi: write set_thinking_level: %w", err)
+		}
+		if br == nil {
+			br = bufio.NewReaderSize(rp.Stdout, 1<<20)
+		}
+		if err := waitForResponse(br, pi.CmdSetThinking, opts.LogW); err != nil {
+			return nil, fmt.Errorf("pi: set_thinking_level %s: %w", opts.Effort, err)
+		}
+		rp.Stdout = br
 	}
 
 	c := newPiConn(rp.Stdin, opts.LogW, wire)
@@ -546,6 +556,15 @@ func writeSetModel(w io.Writer, model string, logW io.Writer) error {
 		Type:     pi.CmdSetModel,
 		Provider: provider,
 		ModelID:  modelID,
+	}
+	return writeJSONLine(w, cmd, logW)
+}
+
+// writeSetThinking sends a set_thinking_level command to Pi.
+func writeSetThinking(w io.Writer, level string, logW io.Writer) error {
+	cmd := pi.SetThinkingCmd{
+		Type:  pi.CmdSetThinking,
+		Level: pi.ThinkingLevel(level),
 	}
 	return writeJSONLine(w, cmd, logW)
 }

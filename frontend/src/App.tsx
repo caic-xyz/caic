@@ -83,6 +83,8 @@ function effortOptions(harness: string): string[] {
       return ["low", "medium", "high", "max"];
     case "codex":
       return ["none", "minimal", "low", "medium", "high", "xhigh"];
+    case "pi":
+      return ["off", "minimal", "low", "medium", "high", "xhigh"];
     default:
       return [];
   }

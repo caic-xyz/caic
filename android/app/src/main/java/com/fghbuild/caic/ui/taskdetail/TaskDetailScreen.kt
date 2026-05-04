@@ -563,8 +563,8 @@ fun TaskDetailScreen(
                         onStop = viewModel::stopTask,
                         onPurge = viewModel::purgeTask,
                         onRevive = viewModel::reviveTask,
-                        onFork = { prompt, harness, model, extraRepos ->
-                            viewModel.forkTask(prompt, harness, model, extraRepos)
+                        onFork = { prompt, harness, model, effort, extraRepos ->
+                            viewModel.forkTask(prompt, harness, model, effort, extraRepos)
                         },
                         taskState = task?.state ?: "",
                         taskTitle = task?.title ?: "",
@@ -573,6 +573,7 @@ fun TaskDetailScreen(
                         taskBaseBranch = task?.repos?.firstOrNull()?.baseBranch ?: "",
                         taskHarness = task?.harness ?: "",
                         taskModel = task?.model ?: "",
+                        taskEffort = task?.effort ?: "",
                         harnesses = state.harnesses,
                         allRepos = state.allRepos,
                         forkAvailableRecent = run {

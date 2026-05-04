@@ -429,6 +429,14 @@ private fun SubGroupHeader(
 
 
 @OptIn(ExperimentalMaterial3Api::class)
+/** Returns valid effort levels for [harness], empty if unsupported. */
+private fun effortOptions(harness: String): List<String> = when (harness) {
+    "claude" -> listOf("low", "medium", "high", "max")
+    "codex" -> listOf("none", "minimal", "low", "medium", "high", "xhigh")
+    "pi" -> listOf("off", "minimal", "low", "medium", "high", "xhigh")
+    else -> emptyList()
+}
+
 @Composable
 private fun TaskCreationForm(state: TaskListState, viewModel: TaskListViewModel) {
     val requestNotificationPermission = rememberNotificationPermissionRequester()
@@ -597,6 +605,14 @@ private fun TaskCreationRepoStrip(
                 selected = state.selectedModel.ifBlank { models.first() },
                 options = models,
                 onSelect = viewModel::selectModel,
+            )
+        }
+        val effortOpts = effortOptions(state.selectedHarness)
+        if (effortOpts.isNotEmpty()) {
+            DropdownField(
+                selected = state.selectedEffort.ifBlank { "Default effort" },
+                options = listOf("Default effort") + effortOpts,
+                onSelect = { viewModel.selectEffort(if (it == "Default effort") "" else it) },
             )
         }
     }

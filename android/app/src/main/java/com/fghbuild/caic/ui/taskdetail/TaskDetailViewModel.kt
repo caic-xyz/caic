@@ -385,7 +385,13 @@ class TaskDetailViewModel @Inject constructor(
     }
 
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
-    fun forkTask(prompt: String, harness: String? = null, model: String? = null, extraRepos: List<RepoSpec>? = null) {
+    fun forkTask(
+        prompt: String,
+        harness: String? = null,
+        model: String? = null,
+        effort: String? = null,
+        extraRepos: List<RepoSpec>? = null,
+    ) {
         _pendingAction.value = "fork"
         viewModelScope.launch {
             try {
@@ -396,6 +402,7 @@ class TaskDetailViewModel @Inject constructor(
                         prompt = Prompt(text = prompt),
                         harness = harness,
                         model = model?.ifBlank { null },
+                        effort = effort?.ifBlank { null },
                         extraRepos = extraRepos,
                     ),
                 )
