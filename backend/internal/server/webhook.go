@@ -227,7 +227,7 @@ func (s *Server) webhookOnCI(ctx context.Context, kind forge.Kind, owner, repo, 
 		if err := s.ciCache.Put(owner, repo, sha, result); err != nil {
 			slog.Warn("webhookOnCI: cache put", "err", err)
 		}
-		s.applyMonitorCIResult(ctx, e, f, owner, repo, sha, result)
+		s.ciService.ApplyMonitorCIResult(ctx, e, f, owner, repo, sha, result)
 	}
 
 	for _, relPath := range affectedRepoPaths {
@@ -236,13 +236,13 @@ func (s *Server) webhookOnCI(ctx context.Context, kind forge.Kind, owner, repo, 
 			if interimStatus == forge.CIStatusFailure {
 				repoStatus = forge.CIStatusFailure
 			}
-			s.setRepoCIStatus(relPath, sha, forgecache.Result{Status: repoStatus, Checks: result.Checks})
+			s.ciService.SetRepoCIStatus(relPath, sha, forgecache.Result{Status: repoStatus, Checks: result.Checks})
 			continue
 		}
 		if err := s.ciCache.Put(owner, repo, sha, result); err != nil {
 			slog.Warn("webhookOnCI: cache put", "err", err)
 		}
-		s.setRepoCIStatus(relPath, sha, result)
+		s.ciService.SetRepoCIStatus(relPath, sha, forgecache.Result{Status: result.Status, Checks: result.Checks})
 	}
 }
 
@@ -257,7 +257,7 @@ func (s *Server) handleIssuesEvent(ctx context.Context, ev *github.IssuesEvent) 
 	for i, l := range ev.Issue.Labels {
 		labels[i] = l.Name
 	}
-	s.bot.OnIssueOpened(ctx, &bot.IssueEvent{
+	s.Bot.OnIssueOpened(ctx, &bot.IssueEvent{
 		ForgeFullName: ev.Repository.FullName,
 		Number:        ev.Issue.Number,
 		Title:         ev.Issue.Title,
@@ -275,7 +275,7 @@ func (s *Server) handlePullRequestEvent(ctx context.Context, ev *github.PullRequ
 	// Create a new task to review/fix the PR if auto-fix on PR open is enabled.
 	if (ev.Action == "opened" || ev.Action == "reopened") && s.prefs.Get("default").Settings.AutoFixOnPROpen {
 		s.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
-		s.bot.OnPROpened(ctx, &bot.PREvent{
+		s.Bot.OnPROpened(ctx, &bot.PREvent{
 			ForgeFullName: ev.Repository.FullName,
 			Number:        ev.PullRequest.Number,
 			Title:         ev.PullRequest.Title,
@@ -346,7 +346,7 @@ func (s *Server) handlePRForExistingTask(ctx context.Context, ev *github.PullReq
 					s.mu.Lock()
 					entry.monitorBranch = branch
 					s.mu.Unlock()
-					go s.monitorCI(ctx, entry, f, owner, repo, sha)
+					go s.ciService.MonitorCI(ctx, entry, f, owner, repo, sha)
 				}
 			}
 		} else if snap.ForgePR == prNumber && ev.Action == "synchronize" {
@@ -355,7 +355,7 @@ func (s *Server) handlePRForExistingTask(ctx context.Context, ev *github.PullReq
 				"task", entry.task.ID, "repo", owner+"/"+repo, "br", branch, "pr", prNumber, "sha", sha[:min(7, len(sha))])
 			ri := s.repoByForge(owner + "/" + repo)
 			if ri != nil {
-				go s.monitorCI(ctx, entry, s.forge.forgeFor(ctx, ri.ForgeKind), owner, repo, sha)
+				go s.ciService.MonitorCI(ctx, entry, s.forge.forgeFor(ctx, ri.ForgeKind), owner, repo, sha)
 			}
 		}
 	}
@@ -458,7 +458,7 @@ func (s *Server) handleIssueCommentEvent(ctx context.Context, ev *github.IssueCo
 		return
 	}
 	s.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
-	s.bot.OnIssueComment(ctx, bot.CommentEvent{
+	s.Bot.OnIssueComment(ctx, bot.CommentEvent{
 		ForgeFullName: ev.Repository.FullName,
 		IssueNumber:   ev.Issue.Number,
 		IssueTitle:    ev.Issue.Title,
@@ -532,7 +532,7 @@ func (s *Server) handleCheckSuiteEvent(ctx context.Context, ev *github.CheckSuit
 		case err != nil:
 			slog.Warn("handleCheckSuiteEvent: get HEAD SHA", "repo", repo.RelPath, "err", err)
 		case headSHA == sha:
-			s.setRepoCIStatus(repo.RelPath, sha, result)
+			s.ciService.SetRepoCIStatus(repo.RelPath, sha, forgecache.Result{Status: result.Status, Checks: result.Checks})
 		default:
 			slog.Debug("handleCheckSuiteEvent: ignoring stale check suite", "sha", sha, "head", headSHA)
 		}
@@ -554,7 +554,7 @@ func (s *Server) handleCheckSuiteEvent(ctx context.Context, ev *github.CheckSuit
 	}
 	s.mu.Unlock()
 	for _, entry := range waiting {
-		go s.applyMonitorCIResult(s.ctx, entry, client, repo.ForgeOwner, repo.ForgeRepo, sha, result) //nolint:contextcheck // fire-and-forget; must outlive webhook request
+		go s.ciService.ApplyMonitorCIResult(s.ctx, entry, client, repo.ForgeOwner, repo.ForgeRepo, sha, result) //nolint:contextcheck // fire-and-forget; must outlive webhook request
 	}
 }
 

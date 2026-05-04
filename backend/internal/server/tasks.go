@@ -32,9 +32,12 @@ func (s *Server) reposLocked() *[]v1.Repo {
 	for i := range s.repos {
 		r := &s.repos[i]
 		repo := v1.Repo{Path: r.RelPath, BaseBranch: v1.BranchInfo{Name: r.BaseBranch, Remote: r.BaseBranchRemote}, RemoteURL: gitutil.RemoteToHTTPS(r.Remote), Forge: v1.Forge(r.ForgeKind)}
-		if ci, ok := s.repoCIStatus[r.RelPath]; ok {
-			repo.DefaultBranchCIStatus = v1.CIStatus(ci.Status)
-			repo.DefaultBranchChecks = ci.Checks
+		if ciState, ok := s.repoCIStatus[r.RelPath]; ok {
+			repo.DefaultBranchCIStatus = v1.CIStatus(ciState.Status)
+			repo.DefaultBranchChecks = make([]v1.ForgeCheck, len(ciState.Checks))
+			for i := range ciState.Checks {
+				repo.DefaultBranchChecks[i] = checkToDTO(&ciState.Checks[i])
+			}
 		}
 		out[i] = repo
 	}
@@ -689,7 +692,8 @@ func (s *Server) syncTask(ctx context.Context, entry *taskEntry, req *v1.SyncReq
 	if status != "blocked" {
 		if info := s.repoInfoFor(syncPrimaryName); info != nil {
 			if f := s.forge.forgeForInfo(ctx, info); f != nil {
-				prNumber, err := s.startPRFlow(ctx, entry, f, info, syncPrimaryBranch, s.effectiveBaseBranch(t))
+				ciInfo := s.RepoInfoFor(info.RelPath)
+				prNumber, err := s.ciService.StartPRFlow(ctx, entry, f, &ciInfo, syncPrimaryBranch, s.effectiveBaseBranch(t))
 				if err != nil {
 					slog.Warn("sync: create PR", "repo", info.ForgeRepo, "branch", syncPrimaryBranch, "err", err)
 				} else {
@@ -941,7 +945,8 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 	return j
 }
 
-// SetRunnerOps overrides container and agent backends on all runners.
+// SetRunnerOps updates the container backend and agent runner backends
+// for all runners.
 func (s *Server) SetRunnerOps(c task.ContainerBackend, backends map[agent.Harness]agent.Backend) {
 	for _, r := range s.runners {
 		if c != nil {
@@ -951,4 +956,20 @@ func (s *Server) SetRunnerOps(c task.ContainerBackend, backends map[agent.Harnes
 			r.Backends = backends
 		}
 	}
+}
+
+// effectiveBaseBranch returns the branch the task was forked from: the task's
+// own override if set, otherwise the runner's configured default.
+func (s *Server) effectiveBaseBranch(t *task.Task) string {
+	p := t.Primary()
+	if p == nil {
+		return ""
+	}
+	if p.BaseBranch != "" {
+		return p.BaseBranch
+	}
+	if runner, ok := s.GetRunner(p.Name); ok {
+		return runner.BaseBranch
+	}
+	return ""
 }

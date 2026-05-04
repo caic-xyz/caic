@@ -20,6 +20,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
+	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
@@ -218,7 +219,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		ciCache:            cache,
 		backend:            backend,
 		tasks:              make(map[string]*taskEntry),
-		repoCIStatus:       make(map[string]repoCIState),
+		repoCIStatus:       make(map[string]ci.RepoCIState),
 		changed:            make(chan struct{}),
 	}
 	s.githubWebhookSecret = cfg.GitHubWebhookSecret
@@ -330,7 +331,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 
 	// Wire the bot with the server as its client.
 	// Eventually we may want to use a clearer observer pattern.
-	s.bot = bot.New(ctx, s)
+	s.Bot = bot.New(ctx, s)
 
 	// Always register a no-repo runner (keyed by "") for tasks that don't
 	// need a git repository.
@@ -363,7 +364,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	phase4.End()
 
 	// Resume bot comment watchers for adopted tasks with pending forge issues.
-	s.bot.ResumePendingComments()
+	s.Bot.ResumePendingComments()
 
 	s.ipgeoChecker, err = ipgeo.NewChecker(ctx, cfg.IPGeoAllowlist, cfg.IPGeoDB)
 	if err != nil {
@@ -378,6 +379,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	go s.refreshHarnessModels() //nolint:contextcheck // server-lifetime goroutine, uses s.ctx internally
 	go s.pollStats(s.ctx)       //nolint:contextcheck // server-lifetime context is intentional
 	go s.watchNewRepos()
+	s.ciService = ci.NewService(s.ciCache, s.provider, s)
 	return s, nil
 }
 
@@ -891,7 +893,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 					s.mu.Lock()
 					entry.monitorBranch = branch
 					s.mu.Unlock()
-					go s.monitorCI(s.ctx, entry, f, ri.ForgeOwner, ri.ForgeRepo, sha) //nolint:contextcheck // CI monitoring must outlive the request
+					go s.ciService.MonitorCI(s.ctx, entry, f, ri.ForgeOwner, ri.ForgeRepo, sha) //nolint:contextcheck // CI monitoring must outlive the request
 				}
 			}
 		}
@@ -1005,7 +1007,7 @@ func (s *Server) lookupExternalPR(ri *repoInfo, branch string, t *task.Task, ent
 	s.mu.Lock()
 	entry.monitorBranch = branch
 	s.mu.Unlock()
-	s.monitorCI(s.ctx, entry, f, ri.ForgeOwner, ri.ForgeRepo, sha)
+	s.ciService.MonitorCI(s.ctx, entry, f, ri.ForgeOwner, ri.ForgeRepo, sha)
 }
 
 // watchContainerEvents starts a single goroutine that listens for Docker

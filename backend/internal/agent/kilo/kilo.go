@@ -157,7 +157,7 @@ func (w *kiloWireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Write
 }
 
 // ParseMessage implements agent.WireFormat. It delegates to the stateless
-// parseMessage function and post-processes step-finish, turn-close, and
+// ParseMessage function and post-processes step-finish, turn-close, and
 // reasoning delta events.
 func (w *kiloWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	// Pre-pass: record part types from message.part.updated so deltas can be

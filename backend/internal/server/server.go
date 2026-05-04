@@ -18,6 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/frontend"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
+	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
@@ -164,17 +165,18 @@ type Server struct {
 	// Immutable after construction.
 
 	// Core infrastructure.
-	ctx      context.Context // server-lifetime context; outlives individual HTTP requests
-	absRoot  string          // absolute path to the root repos directory
-	repos    []repoInfo
-	runners  map[string]*task.Runner // keyed by RelPath
-	mdClient *md.Client
-	backend  *container.Backend // container backend for runner creation
-	logDir   string
-	cacheDir string
-	ciCache  *forgecache.Cache
-	provider genai.Provider // nil if LLM not configured
-	bot      *bot.Bot       // handles forge event-driven task automation
+	ctx       context.Context // server-lifetime context; outlives individual HTTP requests
+	absRoot   string          // absolute path to the root repos directory
+	repos     []repoInfo
+	runners   map[string]*task.Runner // keyed by RelPath
+	mdClient  *md.Client
+	backend   *container.Backend // container backend for runner creation
+	logDir    string
+	cacheDir  string
+	ciCache   *forgecache.Cache
+	provider  genai.Provider // nil if LLM not configured
+	Bot       *bot.Bot
+	ciService *ci.Service // handles forge event-driven task automation
 
 	// Profiling.
 	pprof bool
@@ -213,10 +215,9 @@ type Server struct {
 	// Guarded by mu.
 	mu           sync.Mutex
 	tasks        map[string]*taskEntry
-	repoCIStatus map[string]repoCIState // keyed by repoInfo.RelPath
-	changed      chan struct{}          // closed on task mutation; replaced under mu
-	warnings     []serverWarning        // append-only ring buffer; capped at maxWarnings
-	warningSeq   uint64                 // monotonic sequence counter for warnings
+	repoCIStatus map[string]ci.RepoCIState // keyed by repoInfo.RelPath
+	changed      chan struct{}             // closed on task mutation; replaced under mu
+	warnings     []serverWarning           // ring buffer of recent CI warnings for SSE clients
 }
 
 type taskEntry struct {

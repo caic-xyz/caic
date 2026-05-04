@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
@@ -89,7 +90,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("updates CI status when SHA matches HEAD", func(t *testing.T) {
 		s := minimalServer(t)
 		s.repos = []repoInfo{{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}}
-		s.repoCIStatus = make(map[string]repoCIState)
+		s.repoCIStatus = make(map[string]ci.RepoCIState)
 		s.forge.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}}
 
 		s.handleCheckSuiteEvent(context.Background(), &github.CheckSuiteEvent{
@@ -114,7 +115,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("ignores out-of-order delivery when SHA is not HEAD", func(t *testing.T) {
 		s := minimalServer(t)
 		s.repos = []repoInfo{{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}}
-		s.repoCIStatus = make(map[string]repoCIState)
+		s.repoCIStatus = make(map[string]ci.RepoCIState)
 		// HEAD is now "newsha"; the webhook carries "oldsha".
 		s.forge.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}}
 
@@ -358,12 +359,14 @@ func minimalServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	return &Server{
+	s := &Server{
 		ctx:          ctx,
 		ciCache:      cache,
 		tasks:        make(map[string]*taskEntry),
-		repoCIStatus: make(map[string]repoCIState),
+		repoCIStatus: make(map[string]ci.RepoCIState),
 		changed:      make(chan struct{}, 1),
 		forge:        newForgeManager("", "", nil),
 	}
+	s.ciService = ci.NewService(s.ciCache, s.provider, s)
+	return s
 }

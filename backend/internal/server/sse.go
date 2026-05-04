@@ -47,12 +47,12 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Seed CI status immediately on connect (once); subsequent updates come from
 	// webhooks (App) or the ciTicker (polling).
-	go s.pollCIForActiveRepos(context.WithoutCancel(r.Context()))
+	go s.ciService.PollCIForActiveRepos(context.WithoutCancel(r.Context()))
 
 	// prevByID tracks the last marshalled JSON for each task ID.
 	prevByID := map[string][]byte{}
 	var prevReposJSON []byte
-	var lastWarnSeq uint64
+	var lastWarnTime time.Time
 	first := true
 
 	for {
@@ -62,7 +62,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 			out = append(out, s.toJSON(e))
 		}
 		repos := s.reposLocked()
-		newWarnings := s.warningsSince(lastWarnSeq)
+		newWarnings := s.warningsSince(lastWarnTime)
 		ch := s.changed
 		s.mu.Unlock()
 
@@ -127,6 +127,15 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 					delete(prevByID, id)
 				}
 			}
+			// Emit any new warnings.
+			for _, warn := range newWarnings {
+				if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "warning", Warning: warn.msg}); err != nil {
+					slog.Warn("marshal warning", "err", err)
+					return
+				}
+				lastWarnTime = warn.ts
+			}
+
 			// Emit repos update when default-branch CI status has changed.
 			if !bytes.Equal(reposJSON, prevReposJSON) {
 				prevReposJSON = reposJSON
@@ -137,22 +146,13 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Emit any new warnings.
-		for _, warn := range newWarnings {
-			if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "warning", Warning: warn.msg}); err != nil {
-				slog.Warn("marshal warning", "err", err)
-				return
-			}
-			lastWarnSeq = warn.seq
-		}
-
 		select {
 		case <-r.Context().Done():
 			return
 		case <-ch:
 		case <-ticker.C:
 		case <-ciTickerC:
-			go s.pollCIForActiveRepos(context.WithoutCancel(r.Context()))
+			go s.ciService.PollCIForActiveRepos(context.WithoutCancel(r.Context()))
 		}
 	}
 }
