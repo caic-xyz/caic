@@ -37,9 +37,8 @@ func (s *Server) getConfig(_ context.Context, _ *dto.EmptyReq) (*v1.Config, erro
 		TailscaleAvailable: s.mdClient.TailscaleAPIKey != "",
 		USBAvailable:       runtime.GOOS == "linux",
 		DisplayAvailable:   true,
-		// TODO: Investigate why the output is garbled. Microphone seems okay.
-		// WebRTCAvailable:    s.voiceBridge != nil,
-		GitHubAppEnabled: s.forge.githubApp != nil,
+		WebRTCAvailable:    s.voiceBridge != nil,
+		GitHubAppEnabled:   s.forge.githubApp != nil,
 	}
 	if s.authEnabled() {
 		cfg.AuthProviders = s.authProviders()
