@@ -324,6 +324,7 @@ public struct Task: Codable {
     public let tailscale: String?
     public let usb: Bool?
     public let display: Bool?
+    public let vncPort: Int?
 }
 
 /// ImageData carries a single base64-encoded image.

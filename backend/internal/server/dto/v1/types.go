@@ -204,6 +204,7 @@ type Task struct {
 	Tailscale     string    `json:"tailscale,omitempty"` // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
 	USB           bool      `json:"usb,omitempty"`
 	Display       bool      `json:"display,omitempty"`
+	VNCPort       int       `json:"vncPort,omitempty"`
 }
 
 // TaskListEvent is a discriminated-union event for the task list SSE stream.

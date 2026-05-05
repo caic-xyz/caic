@@ -271,6 +271,7 @@ data class Task(
     val tailscale: String? = null,
     val usb: Boolean? = null,
     val display: Boolean? = null,
+    val vncPort: Int? = null,
 )
 
 /** ImageData carries a single base64-encoded image. */

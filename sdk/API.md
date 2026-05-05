@@ -372,6 +372,7 @@ Task is the JSON representation sent to the frontend.
 | `tailscale` | `string` | Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. |  |
 | `usb` | `boolean` |  |  |
 | `display` | `boolean` |  |  |
+| `vncPort` | `number` |  |  |
 
 ### ImageData
 

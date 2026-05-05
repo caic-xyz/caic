@@ -168,6 +168,7 @@ type Task struct {
 	Tailscale     bool          // Enable Tailscale networking in the container.
 	USB           bool          // Enable USB passthrough in the container.
 	Display       bool          // Enable Xvfb display in the container.
+	VNCPort       int           // VNC WebSocket port inside the container (0 = no VNC). Set during launch.
 	StartedAt     time.Time     // When the task was created.
 	OwnerID       string        // Internal user ID of the creator; empty in no-auth mode.
 	ForgeIssue    int           // Originating issue number for bot comment callbacks; 0 = none.
@@ -461,6 +462,7 @@ type Snapshot struct {
 	ForgeIssue         int
 	CIStatus           forge.CIStatus
 	CIChecks           []forge.Check
+	VNCPort            int // VNC WebSocket port (0 = no VNC).
 }
 
 // Snapshot returns a consistent read of all volatile fields under the mutex.
@@ -498,6 +500,7 @@ func (t *Task) Snapshot() Snapshot {
 		ForgeIssue:         t.ForgeIssue,
 		CIStatus:           t.ciStatus,
 		CIChecks:           append([]forge.Check(nil), t.ciChecks...),
+		VNCPort:            t.VNCPort,
 	}
 }
 

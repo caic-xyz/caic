@@ -935,6 +935,7 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 		Tailscale:      tailscaleURL(e.task),
 		USB:            e.task.USB,
 		Display:        e.task.Display,
+		VNCPort:        snap.VNCPort,
 		CostUSD:        snap.CostUSD,
 		NumTurns:       snap.NumTurns,
 		Duration:       snap.Duration.Seconds(),

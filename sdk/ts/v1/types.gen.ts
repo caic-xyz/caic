@@ -647,6 +647,7 @@ export interface Task {
   tailscale?: string; // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
   usb?: boolean;
   display?: boolean;
+  vncPort?: number /* int */;
 }
 /**
  * TaskListEvent is a discriminated-union event for the task list SSE stream.
