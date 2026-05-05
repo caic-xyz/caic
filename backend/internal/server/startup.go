@@ -751,7 +751,14 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	var adoptRepos []task.RepoMount
 	if ri.RelPath != "" {
 		// Primary mount from repoInfo; extra mounts from log.
-		adoptRepos = []task.RepoMount{{Name: ri.RelPath, GitRoot: ri.AbsPath, Branch: branch}}
+		// Restore BaseBranch from the log so that tasks created with
+		// a non-default base (e.g. "develop" vs. repo default "main")
+		// survive server restarts.
+		primaryBaseBranch := ""
+		if lt != nil && lt.Primary() != nil {
+			primaryBaseBranch = lt.Primary().BaseBranch
+		}
+		adoptRepos = []task.RepoMount{{Name: ri.RelPath, BaseBranch: primaryBaseBranch, GitRoot: ri.AbsPath, Branch: branch}}
 		if lt != nil {
 			for _, lm := range lt.Repos[1:] {
 				gitRoot := ""
