@@ -79,16 +79,16 @@ beforeEach(() => {
     repositories: [{ path: "repos/a" }],
     models: {},
     harness: "",
-    baseImage: "",
-  } as PreferencesResp);
+    settings: { baseImage: "" },
+  } as unknown as PreferencesResp);
   vi.mocked(api.listHarnesses).mockResolvedValue([
-    { name: "claude", models: [], supportsImages: false },
-  ] as HarnessInfo[]);
+    { name: "claude", models: [], supportsImages: false, supportsCompact: false },
+  ] as unknown as HarnessInfo[]);
   vi.mocked(api.getConfig).mockRejectedValue(new Error("no config"));
   vi.mocked(api.getUsage).mockRejectedValue(new Error("no usage"));
   vi.mocked(api.listRepoBranches).mockResolvedValue({ branches: [{ name: "main" }, { name: "dev", remote: "origin" }] });
   vi.mocked(api.cloneRepo).mockResolvedValue(newRepo);
-  vi.mocked(api.createTask).mockResolvedValue({ id: "task1" });
+  vi.mocked(api.createTask).mockResolvedValue({ id: "task1", status: "accepted" });
 });
 
 describe("App repo chips: No repository", () => {
@@ -155,8 +155,8 @@ describe("App repo chip ordering", () => {
       repositories: [{ path: "repos/b" }, { path: "repos/a" }],
       models: {},
       harness: "",
-      baseImage: "",
-    } as PreferencesResp);
+      settings: { baseImage: "" },
+    } as unknown as PreferencesResp);
     render(() => <App />);
 
     await waitFor(() => {

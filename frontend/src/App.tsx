@@ -967,7 +967,7 @@ export default function App() {
                   harness={selectedTask()?.harness ?? ""}
                   model={selectedTask()?.model}
                   diffStat={selectedTask()?.diffStat}
-                  vncPort={selectedTask()?.vncPort ?? 0}
+                  vncPort={selectedTask()?.container.vncPort ?? 0}
                   supportsImages={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsImages}
                   supportsCompact={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsCompact}
                   onStop={handleStop}
@@ -1135,7 +1135,7 @@ export default function App() {
                               newCaches[cache.name] = false;
                             }
                             setWellKnownCaches(newCaches);
-                            await updatePreferences(currentSettings({ wellKnownCaches: newCaches }));
+                            await updatePreferences(currentSettings({ wellKnownCaches: newCaches as Record<string, boolean> }));
                           }}
                         />
                         {cache.name}

@@ -72,7 +72,7 @@ export default function AutoResizeTextarea(props: Props) {
         el.addEventListener("input", handleInput);
         props.ref?.(el);
       }}
-      contentEditable={props.disabled ? "false" : "true"}
+      contentEditable={!props.disabled}
       role="textbox"
       aria-multiline="true"
       aria-label={props.placeholder}

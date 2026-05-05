@@ -1044,3 +1044,7 @@ export interface VoiceRTCAnswerResp {
  * EmptyReq is used for endpoints that take no request body.
  */
 export type EmptyReq = any /* dto.EmptyReq */;
+/**
+ * ErrorResponse is the JSON envelope for error responses.
+ */
+export type ErrorResponse = any /* dto.ErrorResponse */;

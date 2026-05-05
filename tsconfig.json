@@ -9,11 +9,19 @@
     "noEmit": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "types": ["vite/client", "@testing-library/jest-dom"],
-    "baseUrl": ".",
+    "types": [
+      "vite/client",
+      "@testing-library/jest-dom",
+      "vite-solid-svg"
+    ],
     "paths": {
-      "@sdk/*": ["sdk/ts/v1/*"]
+      "@sdk/*": [
+        "./sdk/ts/v1/*"
+      ]
     }
   },
-  "include": ["frontend/src", "sdk"]
+  "include": [
+    "frontend/src",
+    "sdk"
+  ]
 }

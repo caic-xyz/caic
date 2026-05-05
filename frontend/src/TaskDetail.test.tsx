@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import type { EventMessage } from "@sdk/types.gen";
+import type { JSX } from "solid-js";
 
 const navigateMock = vi.fn();
 
@@ -19,7 +20,7 @@ vi.mock("@solidjs/router", () => ({
         navigateMock(props.href);
       }}
     >
-      {props.children as unknown}
+      {props.children as JSX.Element}
     </a>
   ),
 }));
@@ -66,6 +67,9 @@ const baseProps = {
   baseBranch: "main",
   harness: "claude",
   onClose: () => {},
+  onStop: () => {},
+  onPurge: () => {},
+  onRevive: () => {},
   inputDraft: "",
   onInputDraft: () => {},
   inputImages: [],

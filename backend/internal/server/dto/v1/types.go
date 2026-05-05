@@ -536,3 +536,6 @@ type VoiceRTCAnswerResp struct {
 
 // EmptyReq is used for endpoints that take no request body.
 type EmptyReq = dto.EmptyReq
+
+// ErrorResponse is the JSON envelope for error responses.
+type ErrorResponse = dto.ErrorResponse

@@ -21,7 +21,6 @@ export const {
   taskRawEvents,
   taskEvents,
   sendInput,
-  taskFixPR,
   restartTask,
   clearContext,
   compactContext,

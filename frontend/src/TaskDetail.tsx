@@ -177,15 +177,15 @@ export default function TaskDetail(props: Props) {
 
   // Expansion state for collapsed past turns and sessions. Persisted per task across remounts.
   const [expandedTurnKeys, setExpandedTurnKeys] = createSignal<ReadonlySet<string>>(
-    expandedTurnsByTask.get(props.taskId) ?? new Set(), // eslint-disable-line solid/reactivity -- initial value; createEffect below syncs on taskId changes
+    expandedTurnsByTask.get(props.taskId) ?? new Set<string>(), // eslint-disable-line solid/reactivity -- initial value; createEffect below syncs on taskId changes
   );
   const [expandedSessionKeys, setExpandedSessionKeys] = createSignal<ReadonlySet<string>>(
-    expandedSessionsByTask.get(props.taskId) ?? new Set(), // eslint-disable-line solid/reactivity -- initial value
+    expandedSessionsByTask.get(props.taskId) ?? new Set<string>(), // eslint-disable-line solid/reactivity -- initial value
   );
   // Sync expansion state when taskId changes.
   createEffect(() => {
-    setExpandedTurnKeys(expandedTurnsByTask.get(props.taskId) ?? new Set());
-    setExpandedSessionKeys(expandedSessionsByTask.get(props.taskId) ?? new Set());
+    setExpandedTurnKeys(expandedTurnsByTask.get(props.taskId) ?? new Set<string>());
+    setExpandedSessionKeys(expandedSessionsByTask.get(props.taskId) ?? new Set<string>());
   });
   function toggleTurn(key: string) {
     setExpandedTurnKeys((prev) => {
@@ -464,7 +464,6 @@ export default function TaskDetail(props: Props) {
     setPendingAction("sync");
     setActionError(null);
     setSafetyIssues([]);
-    setSyncMenuOpen(false);
     try {
       const resp = await apiSyncTask(props.taskId, { force, ...(target ? { target } : {}) });
       if (resp.status === "blocked" && resp.safetyIssues?.length) {
@@ -891,14 +890,12 @@ function MessageItem(props: { ev: EventMessage }) {
         <div class={styles.parseError}>API error</div>
       </Match>
       <Match when={props.ev.system?.subtype === "step_start"}>
-        {/* suppress: no useful content */}
+        <></>
       </Match>
-      <Match when={props.ev.system?.subtype === "model_rerouted"} keyed>
-        {() => (
-          <div class={styles.systemMsg}>
-            Model rerouted{props.ev.system?.detail ? `: ${props.ev.system.detail}` : ""}
-          </div>
-        )}
+      <Match when={props.ev.system?.subtype === "model_rerouted"}>
+        <div class={styles.systemMsg}>
+          Model rerouted{props.ev.system?.detail ? `: ${props.ev.system.detail}` : ""}
+        </div>
       </Match>
       <Match when={props.ev.system} keyed>
         {(sys) => (
