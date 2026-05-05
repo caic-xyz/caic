@@ -759,4 +759,99 @@ class GroupingTest {
             }
         }
     }
+
+    /**
+     * Performance benchmark: measures how long [nextGrouped] takes to process message histories
+     * of increasing size.  The pi harness emits thousands of thinking_delta events per turn;
+     * this test catches regressions in the O(n²) incremental path early.
+     *
+     * Thresholds (JVM, approximate):
+     * - 1k  events: < 10 ms   (typical Claude Code turn)
+     * - 10k events: < 200 ms  (large pi turn)
+     * - 65k events: < 1500 ms (extreme case from caic-43 trace)
+     */
+    @Test
+    fun benchmarkNextGrouped() {
+        val sizes = listOf(1000, 10_000, 65_000)
+        for (size in sizes) {
+            val msgs = generateThinkingDeltas(size)
+            val elapsed = kotlin.system.measureTimeMillis {
+                nextGrouped(IncrementalGrouped(), msgs)
+            }
+            println("nextGrouped(${size} events, single call): $elapsed ms")
+            val maxMs = when (size) {
+                1000 -> 50L
+                10_000 -> 500L
+                65_000 -> 3000L
+                else -> Long.MAX_VALUE
+            }
+            assertTrue(
+                "nextGrouped(${size}) took ${elapsed}ms, expected < ${maxMs}ms",
+                elapsed < maxMs,
+            )
+        }
+    }
+
+    /**
+     * Simulates the actual SSE batching pattern: N batches of ~50 events each,
+     * calling nextGrouped incrementally. This triggers the O(n²) behaviour in
+     * the incremental path where groupMessages re-processes the growing current-turn
+     * list on every batch.
+     */
+    @Test
+    fun benchmarkNextGroupedIncremental() {
+        val totalEvents = 10_000
+        val batchSize = 50
+        val baseMsgs = generateThinkingDeltas(0) // just the init + thinking_start
+        var state = nextGrouped(IncrementalGrouped(), baseMsgs)
+        var cumulativeMsgs = baseMsgs
+        var totalTime = 0L
+        for (i in 0 until totalEvents / batchSize) {
+            val newDeltas = (0 until batchSize).map { j ->
+                EventMessage(
+                    kind = EventKinds.ThinkingDelta,
+                    ts = 1777988039509 + (i * batchSize + j).toLong(),
+                    thinkingDelta = EventThinkingDelta(text = "word${i * batchSize + j} "),
+                )
+            }
+            cumulativeMsgs = cumulativeMsgs + newDeltas
+            val batchTime = kotlin.system.measureTimeMillis {
+                state = nextGrouped(state, cumulativeMsgs)
+            }
+            totalTime += batchTime
+        }
+        println("nextGrouped incremental (${totalEvents} events, ${batchSize}/batch, ${totalEvents / batchSize} batches): total=${totalTime}ms avg=${totalTime / (totalEvents / batchSize)}ms")
+        // The O(n²) behaviour means the last few batches dominate. This must not explode.
+        assertTrue(
+            "Incremental total ${totalTime}ms is too high for $totalEvents events",
+            totalTime < 5000,
+        )
+    }
+
+    /** Generates [count] synthetic thinking_delta EventMessages mimicking a pi session. */
+    private fun generateThinkingDeltas(count: Int): List<EventMessage> {
+        val msgs = mutableListOf<EventMessage>()
+        // Init event at ~realistic offset from the trace.
+        msgs.add(EventMessage(
+            kind = EventKinds.Init, ts = 1777988039000,
+            init = EventInit(
+                model = "deepseek-v4-pro", agentVersion = "1.0",
+                sessionID = "bench-session", tools = emptyList(), cwd = "/home/user",
+                harness = "pi",
+            ),
+        ))
+        // One thinking_start, then many thinking_delta.
+        msgs.add(EventMessage(
+            kind = EventKinds.Thinking, ts = 1777988039500,
+            thinking = EventThinking(text = "Let me think about this..."),
+        ))
+        for (i in 0 until count) {
+            msgs.add(EventMessage(
+                kind = EventKinds.ThinkingDelta,
+                ts = 1777988039509 + i.toLong(),
+                thinkingDelta = EventThinkingDelta(text = "word$i "),
+            ))
+        }
+        return msgs
+    }
 }
