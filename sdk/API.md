@@ -324,6 +324,18 @@ DiffFileStat describes changes to a single file.
 | `deleted` | `number` |  | yes |
 | `binary` | `boolean` |  |  |
 
+### Container
+
+Container holds per-task container metadata.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` | Container name/ID. | yes |
+| `tailscale` | `string` | Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. |  |
+| `usb` | `boolean` |  |  |
+| `display` | `boolean` |  |  |
+| `vncPort` | `number` |  |  |
+
 ### Task
 
 Task is the JSON representation sent to the frontend.
@@ -334,7 +346,6 @@ Task is the JSON representation sent to the frontend.
 | `initialPrompt` | `string` |  | yes |
 | `title` | `string` |  | yes |
 | `repos` | `TaskRepo[]` |  |  |
-| `container` | `string` |  | yes |
 | `state` | `string` |  | yes |
 | `stateUpdatedAt` | `ISOTimestamp` | When the task state last changed. | yes |
 | `diffStat` | `DiffFileStat[]` |  |  |
@@ -360,19 +371,16 @@ Task is the JSON representation sent to the frontend.
 | `ciStatus` | `string` |  |  |
 | `ciChecks` | `ForgeCheck[]` |  |  |
 | `owner` | `string` | username of creator; omitted in no-auth mode |  |
-| `harness` | `string` | Per-task harness/container metadata. | yes |
+| `harness` | `string` | Per-task harness/agent metadata. | yes |
 | `model` | `string` |  |  |
 | `effort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default. |  |
 | `agentVersion` | `string` |  |  |
 | `sessionID` | `string` |  |  |
-| `startedAt` | `ISOTimestamp` | When the container started. |  |
+| `startedAt` | `ISOTimestamp` | When the task was created. |  |
 | `turnStartedAt` | `ISOTimestamp` | When the current turn started; zero when not running. |  |
 | `inPlanMode` | `boolean` |  |  |
 | `planContent` | `string` |  |  |
-| `tailscale` | `string` | Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. |  |
-| `usb` | `boolean` |  |  |
-| `display` | `boolean` |  |  |
-| `vncPort` | `number` |  |  |
+| `container` | `Container` |  | yes |
 
 ### ImageData
 

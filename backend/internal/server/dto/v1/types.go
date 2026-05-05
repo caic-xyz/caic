@@ -159,13 +159,21 @@ type TaskRepo struct {
 	Forge      Forge  `json:"forge,omitempty"` // "github", "gitlab", or empty if unknown.
 }
 
+// Container holds per-task container metadata.
+type Container struct {
+	Name      string `json:"name"`                // Container name/ID.
+	Tailscale string `json:"tailscale,omitempty"` // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
+	USB       bool   `json:"usb,omitempty"`
+	Display   bool   `json:"display,omitempty"`
+	VNCPort   int    `json:"vncPort,omitempty"`
+}
+
 // Task is the JSON representation sent to the frontend.
 type Task struct {
 	ID                                 ksid.ID      `json:"id"`
 	InitialPrompt                      string       `json:"initialPrompt"`
 	Title                              string       `json:"title"`
 	Repos                              []TaskRepo   `json:"repos,omitempty"`
-	Container                          string       `json:"container"`
 	State                              string       `json:"state"`
 	StateUpdatedAt                     time.Time    `json:"stateUpdatedAt"` // When the task state last changed.
 	DiffStat                           DiffStat     `json:"diffStat,omitzero"`
@@ -191,20 +199,17 @@ type Task struct {
 	CIStatus                           CIStatus     `json:"ciStatus,omitempty"`
 	CIChecks                           []ForgeCheck `json:"ciChecks,omitempty"`
 	Owner                              string       `json:"owner,omitempty"` // username of creator; omitted in no-auth mode
-	// Per-task harness/container metadata.
+	// Per-task harness/agent metadata.
 	Harness       Harness   `json:"harness"`
 	Model         string    `json:"model,omitempty"`
 	Effort        string    `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
 	AgentVersion  string    `json:"agentVersion,omitempty"`
 	SessionID     string    `json:"sessionID,omitempty"`
-	StartedAt     time.Time `json:"startedAt,omitzero"`     // When the container started.
+	StartedAt     time.Time `json:"startedAt,omitzero"`     // When the task was created.
 	TurnStartedAt time.Time `json:"turnStartedAt,omitzero"` // When the current turn started; zero when not running.
 	InPlanMode    bool      `json:"inPlanMode,omitempty"`
 	PlanContent   string    `json:"planContent,omitempty"`
-	Tailscale     string    `json:"tailscale,omitempty"` // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
-	USB           bool      `json:"usb,omitempty"`
-	Display       bool      `json:"display,omitempty"`
-	VNCPort       int       `json:"vncPort,omitempty"`
+	Container     Container `json:"container"`
 }
 
 // TaskListEvent is a discriminated-union event for the task list SSE stream.

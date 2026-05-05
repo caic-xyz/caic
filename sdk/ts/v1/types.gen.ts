@@ -599,6 +599,16 @@ export interface TaskRepo {
   forge?: Forge; // "github", "gitlab", or empty if unknown.
 }
 /**
+ * Container holds per-task container metadata.
+ */
+export interface Container {
+  name: string; // Container name/ID.
+  tailscale?: string; // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
+  usb?: boolean;
+  display?: boolean;
+  vncPort?: number /* int */;
+}
+/**
  * Task is the JSON representation sent to the frontend.
  */
 export interface Task {
@@ -606,7 +616,6 @@ export interface Task {
   initialPrompt: string;
   title: string;
   repos?: TaskRepo[];
-  container: string;
   state: string;
   stateUpdatedAt: ISOTimestamp; // When the task state last changed.
   diffStat?: DiffStat;
@@ -633,21 +642,18 @@ export interface Task {
   ciChecks?: ForgeCheck[];
   owner?: string; // username of creator; omitted in no-auth mode
   /**
-   * Per-task harness/container metadata.
+   * Per-task harness/agent metadata.
    */
   harness: Harness;
   model?: string;
   effort?: string; // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
   agentVersion?: string;
   sessionID?: string;
-  startedAt?: ISOTimestamp; // When the container started.
+  startedAt?: ISOTimestamp; // When the task was created.
   turnStartedAt?: ISOTimestamp; // When the current turn started; zero when not running.
   inPlanMode?: boolean;
   planContent?: string;
-  tailscale?: string; // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
-  usb?: boolean;
-  display?: boolean;
-  vncPort?: number /* int */;
+  container: Container;
 }
 /**
  * TaskListEvent is a discriminated-union event for the task list SSE stream.

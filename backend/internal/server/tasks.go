@@ -1017,11 +1017,17 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 	}
 
 	j := v1.Task{
-		ID:             e.task.ID,
-		InitialPrompt:  e.task.InitialPrompt.Text,
-		Title:          snap.Title,
-		Repos:          taskRepos,
-		Container:      e.task.Container,
+		ID:            e.task.ID,
+		InitialPrompt: e.task.InitialPrompt.Text,
+		Title:         snap.Title,
+		Repos:         taskRepos,
+		Container: v1.Container{
+			Name:      e.task.Container,
+			Tailscale: tailscaleURL(e.task),
+			USB:       e.task.USB,
+			Display:   e.task.Display,
+			VNCPort:   snap.VNCPort,
+		},
 		State:          snap.State.String(),
 		StateUpdatedAt: snap.StateUpdatedAt,
 		Harness:        toV1Harness(e.task.Harness),
@@ -1031,10 +1037,6 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 		SessionID:      snap.SessionID,
 		InPlanMode:     snap.InPlanMode,
 		PlanContent:    snap.PlanContent,
-		Tailscale:      tailscaleURL(e.task),
-		USB:            e.task.USB,
-		Display:        e.task.Display,
-		VNCPort:        snap.VNCPort,
 		CostUSD:        costUSD,
 		NumTurns:       numTurns,
 		Duration:       duration.Seconds(),

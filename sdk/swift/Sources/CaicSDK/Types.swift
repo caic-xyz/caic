@@ -267,13 +267,23 @@ public struct DiffFileStat: Codable {
     public let binary: Bool?
 }
 
+/// Container holds per-task container metadata.
+public struct Container: Codable {
+    /// Container name/ID.
+    public let name: String
+    /// Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
+    public let tailscale: String?
+    public let usb: Bool?
+    public let display: Bool?
+    public let vncPort: Int?
+}
+
 /// Task is the JSON representation sent to the frontend.
 public struct Task: Codable {
     public let id: String
     public let initialPrompt: String
     public let title: String
     public let repos: [TaskRepo]?
-    public let container: String
     public let state: String
     /// When the task state last changed.
     public let stateUpdatedAt: ISOTimestamp
@@ -307,24 +317,20 @@ public struct Task: Codable {
     public let ciChecks: [ForgeCheck]?
     /// username of creator; omitted in no-auth mode
     public let owner: String?
-    /// Per-task harness/container metadata.
+    /// Per-task harness/agent metadata.
     public let harness: Harness
     public let model: String?
     /// Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
     public let effort: String?
     public let agentVersion: String?
     public let sessionID: String?
-    /// When the container started.
+    /// When the task was created.
     public let startedAt: ISOTimestamp?
     /// When the current turn started; zero when not running.
     public let turnStartedAt: ISOTimestamp?
     public let inPlanMode: Bool?
     public let planContent: String?
-    /// Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
-    public let tailscale: String?
-    public let usb: Bool?
-    public let display: Bool?
-    public let vncPort: Int?
+    public let container: Container
 }
 
 /// ImageData carries a single base64-encoded image.

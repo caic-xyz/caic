@@ -120,9 +120,9 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
                             )
                         }
                     }
-                    if (task.tailscale != null) TailscaleIconBadge(url = task.tailscale)
-                    if (task.usb == true) FeatureBadge("USB")
-                    if (task.display == true) FeatureIconBadge(com.fghbuild.caic.R.drawable.ic_display, "Display")
+                    if (task.container.tailscale != null) TailscaleIconBadge(url = task.container.tailscale)
+                    if (task.container.usb == true) FeatureBadge("USB")
+                    if (task.container.display == true) FeatureIconBadge(com.fghbuild.caic.R.drawable.ic_display, "Display")
                 }
             }
 

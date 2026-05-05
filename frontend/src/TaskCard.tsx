@@ -33,14 +33,17 @@ export interface TaskCardProps {
   contextWindowLimit: number;
   cacheTTLSeconds?: number;
   cacheExpiresAt?: string;
-  startedAt?: string;
   turnStartedAt?: string;
   diffStat?: DiffStat;
   error?: string;
   inPlanMode?: boolean;
-  tailscale?: string;
-  usb?: boolean;
-  display?: boolean;
+  container?: {
+    name: string;
+    tailscale?: string;
+    usb?: boolean;
+    display?: boolean;
+    vncPort?: number;
+  };
   forgePR?: number;
   ciStatus?: CIStatus;
   ciChecks?: ForgeCheck[];
@@ -94,16 +97,16 @@ export default function TaskCard(props: TaskCardProps) {
           <strong ref={titleRef} class={styles.title}>{props.title}</strong>
         </Tooltip>
         <span class={styles.stateGroup}>
-          <Show when={props.tailscale} keyed>
+          <Show when={props.container?.tailscale} keyed>
             {(ts) => ts.startsWith("https://")
               ? <a class={styles.featureIconBadge} href={ts} target="_blank" rel="noopener" title="Tailscale" onClick={(e) => e.stopPropagation()}><TailscaleIcon width="0.7rem" height="0.7rem" /></a>
               : <span class={styles.featureIconBadge} title="Tailscale"><TailscaleIcon width="0.7rem" height="0.7rem" /></span>
             }
           </Show>
-          <Show when={props.usb}>
+          <Show when={props.container?.usb}>
             <span class={styles.featureBadge} title="USB">USB</span>
           </Show>
-          <Show when={props.display}>
+          <Show when={props.container?.display}>
             <span class={styles.featureIconBadge} title="Display"><DisplayIcon width="0.7rem" height="0.7rem" /></span>
           </Show>
           {/* Stopped: revive + purge buttons */}

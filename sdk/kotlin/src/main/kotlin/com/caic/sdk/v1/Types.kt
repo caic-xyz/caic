@@ -226,6 +226,16 @@ data class DiffFileStat(
     val binary: Boolean? = null,
 )
 
+/** Container holds per-task container metadata. */
+@Serializable
+data class Container(
+    val name: String,
+    val tailscale: String? = null,
+    val usb: Boolean? = null,
+    val display: Boolean? = null,
+    val vncPort: Int? = null,
+)
+
 /** Task is the JSON representation sent to the frontend. */
 @Serializable
 data class Task(
@@ -233,7 +243,6 @@ data class Task(
     val initialPrompt: String,
     val title: String,
     val repos: List<TaskRepo>? = null,
-    val container: String,
     val state: String,
     val stateUpdatedAt: Instant,
     val diffStat: List<DiffFileStat>? = null,
@@ -268,10 +277,7 @@ data class Task(
     val turnStartedAt: Instant? = null,
     val inPlanMode: Boolean? = null,
     val planContent: String? = null,
-    val tailscale: String? = null,
-    val usb: Boolean? = null,
-    val display: Boolean? = null,
-    val vncPort: Int? = null,
+    val container: Container,
 )
 
 /** ImageData carries a single base64-encoded image. */

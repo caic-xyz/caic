@@ -191,14 +191,11 @@ export default function TaskList(props: TaskListProps) {
       contextWindowLimit={t().contextWindowLimit}
       cacheTTLSeconds={t().cacheTTLSeconds}
       cacheExpiresAt={t().cacheExpiresAt}
-      startedAt={t().startedAt}
       turnStartedAt={t().turnStartedAt}
       diffStat={t().diffStat}
       error={t().error}
       inPlanMode={t().inPlanMode}
-      tailscale={t().tailscale}
-      usb={t().usb}
-      display={t().display}
+      container={t().container}
       forgePR={t().forgePR}
       ciStatus={t().ciStatus}
       ciChecks={t().ciChecks}
