@@ -7,6 +7,10 @@ import FullscreenIcon from "@material-symbols/svg-400/outlined/fullscreen.svg?so
 import FullscreenExitIcon from "@material-symbols/svg-400/outlined/fullscreen_exit.svg?solid";
 import styles from "./VncViewer.module.css";
 
+interface RFBEvent {
+  detail: { clean: boolean; code: number; reason: string };
+}
+
 interface Props {
   taskId: string;
   repo: string;
@@ -37,8 +41,28 @@ export default function VncViewer(props: Props) {
       return;
     }
 
+    function onDisconnect(e: Event) {
+      const de = e as CustomEvent<RFBEvent["detail"]>;
+      const { clean, code, reason } = de.detail;
+      if (!clean) {
+        const detail = reason || `WebSocket closed (code: ${code})`;
+        setError(`VNC connection lost: ${detail}`);
+      }
+    }
+
+    function onConnect(_e: Event) {
+      setError(null);
+    }
+
+    rfb.addEventListener("disconnect", onDisconnect);
+    rfb.addEventListener("connect", onConnect);
+
     onCleanup(() => {
-      try { rfb.disconnect(); } catch { /* ignore */ }
+      try {
+        rfb.removeEventListener("disconnect", onDisconnect);
+        rfb.removeEventListener("connect", onConnect);
+        rfb.disconnect();
+      } catch { /* ignore */ }
     });
   });
 

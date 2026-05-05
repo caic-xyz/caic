@@ -55,6 +55,13 @@ type compressWriter struct {
 }
 
 func (cw *compressWriter) WriteHeader(code int) {
+	// WebSocket upgrades hijack the connection; compressing the 101
+	// response adds a bogus Content-Encoding header and causes a
+	// "response.Write on hijacked connection" log on cleanup.
+	if code == http.StatusSwitchingProtocols {
+		cw.skipCompress = true
+		cw.headerSent = true
+	}
 	cw.initOnce()
 	cw.ResponseWriter.WriteHeader(code)
 }

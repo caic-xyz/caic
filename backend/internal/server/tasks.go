@@ -798,6 +798,7 @@ func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 		InsecureSkipVerify: true, // same-origin, no Origin check needed
 	})
 	if err != nil {
+		slog.Warn("vnc websocket: accept failed", "task", t.ID, "err", err)
 		return
 	}
 	defer func() { _ = wsConn.Close(websocket.StatusNormalClosure, "") }()
