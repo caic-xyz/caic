@@ -41,11 +41,14 @@ import com.caic.sdk.v1.QuotaExtraUsage
 import com.caic.sdk.v1.QuotaRateLimit
 import com.caic.sdk.v1.UsageResp
 import com.caverock.androidsvg.SVG
+import android.util.Log
 import com.fghbuild.caic.ui.theme.appColors
 import com.fghbuild.caic.util.currencySign
 import com.fghbuild.caic.util.formatBalance
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+private const val TAG = "UsageBadges"
 
 private data class BadgeColors(val bg: Color, val fg: Color)
 
@@ -91,7 +94,8 @@ private fun SvgUrlImage(url: String, contentDescription: String?, modifier: Modi
             val canvas = android.graphics.Canvas(bm)
             svg.renderToCanvas(canvas, android.graphics.RectF(0f, 0f, sizePx.toFloat(), sizePx.toFloat()))
             bitmap = bm
-        } catch (_: Exception) {
+        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            Log.w(TAG, "Failed to load SVG icon from $url", e)
         }
     }
     bitmap?.let {

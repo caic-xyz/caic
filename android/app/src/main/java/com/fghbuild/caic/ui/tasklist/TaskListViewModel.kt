@@ -32,8 +32,11 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import android.util.Log
 import javax.inject.Inject
 
+
+private const val TAG = "TaskListViewModel"
 
 // Compare task IDs descending (newest first). Ksid strings use base32 Extended
 // Hex (0-9A-V), so lexicographic order matches numeric order only for equal-length
@@ -231,7 +234,10 @@ class TaskListViewModel @Inject constructor(
                 val harnesses = client.listHarnesses()
                 val prefs = try {
                     client.getPreferences().also { settingsRepository.updateServerPreferences(it) }
-                } catch (_: Exception) { null }
+                } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                    Log.w(TAG, "Failed to load preferences", e)
+                    null
+                }
                 val recentPaths = prefs?.repositories?.map { it.path }.orEmpty()
                 val recentSet = recentPaths.toSet()
                 val recentRepos = recentPaths.mapNotNull { r -> repos.find { it.path == r } }
@@ -257,8 +263,8 @@ class TaskListViewModel @Inject constructor(
                     selectedModel = if (lastModel in harnessModels) lastModel else "",
                     prefModels = prefModels,
                 )
-            } catch (_: Exception) {
-                // Form data will remain empty; user can still see tasks.
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                Log.w(TAG, "Failed to load form data", e)
             }
         }
     }
@@ -296,7 +302,8 @@ class TaskListViewModel @Inject constructor(
                 val client = ApiClient(url, tokenProvider = { settingsRepository.settings.value.authToken })
                 val resp = client.listRepoBranches(path)
                 _formState.value = _formState.value.copy(editingBranches = resp.branches)
-            } catch (_: Exception) {
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                Log.w(TAG, "Failed to load branches for $path", e)
                 _formState.value = _formState.value.copy(editingBranches = emptyList())
             }
         }
@@ -438,8 +445,8 @@ class TaskListViewModel @Inject constructor(
                     val client = ApiClient(url, tokenProvider = { settingsRepository.settings.value.authToken })
                     client.logout()
                 }
-            } catch (_: Exception) {
-                // Best-effort; continue clearing local state.
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                Log.w(TAG, "Logout API call failed, clearing local state", e)
             }
             settingsRepository.updateAuthToken(null)
             _formState.value = _formState.value.copy(authRequired = true, user = null)

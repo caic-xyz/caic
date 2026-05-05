@@ -4,6 +4,7 @@ package com.fghbuild.caic.ui.taskdetail
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.util.Log
 import com.caic.sdk.v1.ApiClient
 import com.caic.sdk.v1.BotFixPRReq
 import com.caic.sdk.v1.EventMessage
@@ -72,6 +73,8 @@ data class TaskDetailState(
 )
 
 private val TerminalStates = setOf("stopping", "stopped", "purging", "purged", "failed")
+
+private const val TAG = "TaskDetailViewModel"
 
 @HiltViewModel
 class TaskDetailViewModel @Inject constructor(
@@ -178,8 +181,8 @@ class TaskDetailViewModel @Inject constructor(
             if (url.isBlank()) return@launch
             try {
                 _harnesses.value = apiClient().listHarnesses()
-            } catch (_: Exception) {
-                // Non-critical; attach button will just stay hidden.
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                Log.w(TAG, "Failed to load harnesses", e)
             }
         }
     }
@@ -190,8 +193,8 @@ class TaskDetailViewModel @Inject constructor(
             if (url.isBlank()) return@launch
             try {
                 _repos.value = apiClient().listRepos()
-            } catch (_: Exception) {
-                // Non-critical; fork dialog will just show no extra repos.
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                Log.w(TAG, "Failed to load repos", e)
             }
         }
     }
@@ -203,7 +206,8 @@ class TaskDetailViewModel @Inject constructor(
             try {
                 val resp = apiClient().getTaskProcesses(taskId)
                 _processes.value = resp.processes
-            } catch (_: Exception) {
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                Log.w(TAG, "Failed to load processes", e)
                 _processes.value = emptyList()
             }
         }

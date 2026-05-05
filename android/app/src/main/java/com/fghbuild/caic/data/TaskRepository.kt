@@ -36,11 +36,14 @@ import okhttp3.Response
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
+import android.util.Log
 import java.io.IOException
 import java.net.HttpURLConnection.HTTP_UNAUTHORIZED
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+
+private const val TAG = "TaskRepository"
 
 private const val DELAY_CAP = 30_000L
 
@@ -153,8 +156,8 @@ class TaskRepository @Inject constructor(
                 try {
                     val msg = json.decodeFromString<EventMessage>(data)
                     trySend(TaskSSEEvent.Event(msg))
-                } catch (_: Exception) {
-                    // Skip malformed events.
+                } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                    Log.w(TAG, "Failed to parse task raw event", e)
                 }
             }
 
@@ -206,8 +209,8 @@ class TaskRepository @Inject constructor(
                         }
                     }
                     trySend(taskMap.values.toList())
-                } catch (_: Exception) {
-                    // Skip malformed events.
+                } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                    Log.w(TAG, "Failed to parse task list event", e)
                 }
             }
 
@@ -237,8 +240,8 @@ class TaskRepository @Inject constructor(
             override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                 try {
                     trySend(json.decodeFromString<T>(data))
-                } catch (_: Exception) {
-                    // Skip malformed events.
+                } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                    Log.w(TAG, "Failed to parse SSE event from $url", e)
                 }
             }
 

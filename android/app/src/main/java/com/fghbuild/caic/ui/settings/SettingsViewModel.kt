@@ -3,6 +3,7 @@ package com.fghbuild.caic.ui.settings
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.util.Log
 import com.caic.sdk.v1.ApiClient
 import com.caic.sdk.v1.CacheMappingResp
 import com.caic.sdk.v1.UpdatePreferencesReq
@@ -39,6 +40,8 @@ data class SettingsScreenState(
 )
 
 private const val DEBOUNCE_MS = 500L
+
+private const val TAG = "SettingsViewModel"
 
 @OptIn(FlowPreview::class)
 @HiltViewModel
@@ -137,7 +140,8 @@ class SettingsViewModel @Inject constructor(
                 val client = ApiClient(url, tokenProvider = { settingsRepository.settings.value.authToken })
                 client.getConfig()
                 _state.update { it.copy(connectionStatus = ConnectionStatus.Success) }
-            } catch (_: Exception) {
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                Log.w(TAG, "Connection test failed", e)
                 _state.update { it.copy(connectionStatus = ConnectionStatus.Failed) }
             }
         }
@@ -148,8 +152,14 @@ class SettingsViewModel @Inject constructor(
             try {
                 val client = ApiClient(serverURL, tokenProvider = { authToken })
                 val prefs = client.getPreferences()
-                val caches = try { client.listCaches() } catch (_: Exception) { null }
-                val config = try { client.getConfig() } catch (_: Exception) { null }
+                val caches = try { client.listCaches() } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                    Log.w(TAG, "Failed to list caches", e)
+                    null
+                }
+                val config = try { client.getConfig() } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                    Log.w(TAG, "Failed to get config", e)
+                    null
+                }
                 _state.update { prev ->
                     prev.copy(
                         autoFixCI = prefs.settings.autoFixOnCIFailure,
@@ -163,8 +173,8 @@ class SettingsViewModel @Inject constructor(
                         serverVersion = config?.version ?: "",
                     )
                 }
-            } catch (_: Exception) {
-                // Server may not be reachable; leave defaults.
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                Log.w(TAG, "Failed to load server preferences", e)
             }
         }
     }
@@ -251,7 +261,8 @@ class SettingsViewModel @Inject constructor(
                     cacheMappings = snapshot.cacheMappings.ifEmpty { null },
                 )
                 client.updatePreferences(UpdatePreferencesReq(settings = update(current)))
-            } catch (_: Exception) {
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                Log.w(TAG, "Failed to save settings", e)
                 // Revert optimistic update on failure.
                 _state.update {
                     it.copy(
