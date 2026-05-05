@@ -28,6 +28,7 @@ import GitHubIcon from "./github.svg?solid";
 import GitLabIcon from "./gitlab.svg?solid";
 import WidgetCard from "./WidgetCard";
 import { confirmTaskAction } from "./TaskCard";
+import Dropdown from "./Dropdown";
 import styles from "./TaskDetail.module.css";
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
@@ -718,13 +719,11 @@ export default function TaskDetail(props: Props) {
             onImagesChange={props.onInputImages}
             sendButton={<Button type="submit" disabled={sending() || (!props.inputDraft.trim() && props.inputImages.length === 0)} title="Send" data-testid="send-input"><SendIcon width="1.1em" height="1.1em" /></Button>}
           />
-          <div class={styles.syncButtonGroup}>
-            <Show when={!!pendingAction()} fallback={
-              <button type="button" class={styles.contextMenuToggle} disabled={!!pendingAction()} onClick={() => setContextMenuOpen((v) => !v)} aria-label="Context actions" title="Context actions">&#8942;</button>
-            }>
-              <button type="button" class={styles.contextMenuToggle} disabled>&#8987;</button>
-            </Show>
-            <Show when={contextMenuOpen()}>
+          <Dropdown
+            open={contextMenuOpen()}
+            onOpenChange={setContextMenuOpen}
+            class={styles.syncButtonGroup}
+            content={
               <div class={styles.syncDropdown}>
                 <button type="button" class={`${styles.syncDropdownItem} ${props.taskState === "purging" ? styles.syncDropdownItemDisabled : ""}`} disabled={props.taskState === "purging"} onClick={() => { setContextMenuOpen(false); doSync(false); }}>
                   <Switch fallback={<SyncIcon width="1em" height="1em" />}>
@@ -772,8 +771,14 @@ export default function TaskDetail(props: Props) {
                   </button>
                 </Show>
               </div>
+            }
+          >
+            <Show when={!!pendingAction()} fallback={
+              <button type="button" class={styles.contextMenuToggle} disabled={!!pendingAction()} onClick={() => setContextMenuOpen((v) => !v)} aria-label="Context actions" title="Context actions">&#8942;</button>
+            }>
+              <button type="button" class={styles.contextMenuToggle} disabled>&#8987;</button>
             </Show>
-          </div>
+          </Dropdown>
         </form>
         <Show when={safetyIssues().length > 0}>
           <div class={styles.safetyWarning}>

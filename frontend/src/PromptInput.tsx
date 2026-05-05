@@ -1,10 +1,11 @@
 // Reusable prompt input with image support: paste, drag & drop, attach button, and preview strip.
-import { createSignal, For, Show, onCleanup, type JSX } from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 import type { ImageData as APIImageData } from "@sdk/types.gen";
 import { captureScreen, fileToImageData, imagesFromClipboard } from "./images";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
 import CameraCapture from "./CameraCapture";
+import Dropdown from "./Dropdown";
 import AttachIcon from "@material-symbols/svg-400/outlined/attach_file.svg?solid";
 import CameraIcon from "@material-symbols/svg-400/outlined/photo_camera.svg?solid";
 import ImageIcon from "@material-symbols/svg-400/outlined/image.svg?solid";
@@ -105,19 +106,6 @@ export default function PromptInput(props: Props) {
     props.onImagesChange([...props.images, img]);
   }
 
-  // Close menu when clicking outside.
-  {
-    const onOutsideClick = (e: MouseEvent) => {
-      if (!menuOpen()) return;
-      const target = e.target as HTMLElement;
-      if (!target.closest(`.${styles.attachWrap}`)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onOutsideClick);
-    onCleanup(() => document.removeEventListener("mousedown", onOutsideClick));
-  }
-
   return (
     // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- drag-and-drop target for file attachment
     <div
@@ -152,11 +140,11 @@ export default function PromptInput(props: Props) {
               class={styles.hiddenFileInput}
               onChange={handleFileChange}
             />
-            <div class={styles.attachWrap}>
-              <Button type="button" variant="gray" disabled={props.disabled} aria-label="Attach images" onClick={handleAttachClick} data-testid="attach-images">
-                <AttachIcon width="1.2em" height="1.2em" />
-              </Button>
-              <Show when={menuOpen()}>
+            <Dropdown
+              open={menuOpen()}
+              onOpenChange={setMenuOpen}
+              class={styles.attachWrap}
+              content={
                 <div
                   class={`${styles.attachMenu}${menuFlipped() ? ` ${styles.attachMenuFlipped}` : ""}`}
                   role="menu"
@@ -182,8 +170,12 @@ export default function PromptInput(props: Props) {
                     Choose file
                   </button>
                 </div>
-              </Show>
-            </div>
+              }
+            >
+              <Button type="button" variant="gray" disabled={props.disabled} aria-label="Attach images" onClick={handleAttachClick} data-testid="attach-images">
+                <AttachIcon width="1.2em" height="1.2em" />
+              </Button>
+            </Dropdown>
           </Show>
           {props.sendButton}
         </div>

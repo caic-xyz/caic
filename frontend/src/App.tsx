@@ -4,6 +4,7 @@ import { Portal } from "solid-js/web";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { Harness, HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp } from "@sdk/types.gen";
 import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI } from "./api";
+import Dropdown from "./Dropdown";
 import RepoChipStrip from "./RepoChipStrip";
 import type { RepoEntry } from "./RepoChipStrip";
 import { useAuth } from "./AuthContext";
@@ -704,19 +705,24 @@ export default function App() {
         <Show when={auth.providers().length > 0 && auth.user()}>
           {(() => {
             const [menuOpen, setMenuOpen] = createSignal(false);
-            let menuRef: HTMLDivElement | undefined;
-            const onClickOutside = (e: MouseEvent) => {
-              if (menuRef && !menuRef.contains(e.target as Node)) setMenuOpen(false);
-            };
-            createEffect(() => {
-              if (menuOpen()) document.addEventListener("click", onClickOutside, true);
-              else document.removeEventListener("click", onClickOutside, true);
-              onCleanup(() => document.removeEventListener("click", onClickOutside, true));
-            });
             const user = () => auth.user() ?? { username: "", avatarURL: undefined };
             const initials = () => user().username.slice(0, 2).toUpperCase();
             return (
-              <div class={styles.userMenu} ref={(el) => { menuRef = el; }}>
+              <Dropdown
+                open={menuOpen()}
+                onOpenChange={setMenuOpen}
+                class={styles.userMenu}
+                content={
+                  <div class={styles.userDropdown}>
+                    <span class={styles.dropdownUser}>{user().username}</span>
+                    <button class={styles.dropdownItem} onClick={() => { setMenuOpen(false); setSettingsOpen(true); }}>
+                      <SettingsIcon width="1em" height="1em" style={{ "vertical-align": "middle", "margin-right": "0.4em" }} />
+                      Settings
+                    </button>
+                    <button class={styles.dropdownItem} onClick={() => { setMenuOpen(false); void auth.logout(); }}>Sign out</button>
+                  </div>
+                }
+              >
                 <button
                   class={styles.avatarButton}
                   onClick={() => setMenuOpen((v) => !v)}
@@ -728,17 +734,7 @@ export default function App() {
                     {(url) => <img src={url} alt={user().username} class={styles.avatarImg} />}
                   </Show>
                 </button>
-                <Show when={menuOpen()}>
-                  <div class={styles.userDropdown}>
-                    <span class={styles.dropdownUser}>{user().username}</span>
-                    <button class={styles.dropdownItem} onClick={() => { setMenuOpen(false); setSettingsOpen(true); }}>
-                      <SettingsIcon width="1em" height="1em" style={{ "vertical-align": "middle", "margin-right": "0.4em" }} />
-                      Settings
-                    </button>
-                    <button class={styles.dropdownItem} onClick={() => { setMenuOpen(false); void auth.logout(); }}>Sign out</button>
-                  </div>
-                </Show>
-              </div>
+              </Dropdown>
             );
           })()}
         </Show>
