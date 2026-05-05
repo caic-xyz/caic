@@ -17,5 +17,21 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
+    coverage: {
+      provider: "v8",
+      include: ["frontend/src/**"],
+      exclude: [
+        "frontend/src/test-setup.ts",
+        "frontend/src/**/*.test.ts",
+        "frontend/src/**/*.test.tsx",
+        "frontend/src/css.d.ts",
+        "frontend/src/novnc.d.ts",
+      ],
+      thresholds: {
+        // Informational only — not enforced.
+        lines: 0,
+        branches: 0,
+      },
+    },
   },
 });

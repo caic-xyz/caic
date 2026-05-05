@@ -22,12 +22,61 @@ live next to their source as `*.test.tsx` or `*.test.ts`.
 ```bash
 pnpm test           # single run
 pnpm test:watch     # watch mode
+pnpm test:coverage  # single run with coverage report
 ```
 
 - Render components with `render(() => <Comp />)`.
 - Prefer role-based queries (`getByRole`, `getByText`) over test IDs.
 - Use `@testing-library/user-event` for interactions.
 - `@testing-library/jest-dom` matchers are available globally.
+
+### Query strategy
+
+Use semantic queries whenever the element represents a user-visible interaction:
+- **`getByRole("button", { name: "Send" })`** — buttons with stable labels
+- **`getByLabelText(...)`** — form fields with associated labels
+- **`getByText(...)`** — visible text content
+
+Use `data-testid` + `getByTestId(...)` for **internal component contracts**
+(repo chips, clone dialogs, SSE-connected UI) where the element identity must
+survive copy changes, layout refactors, and style rewrites. Testids are an
+explicit stability contract between tests and components — use them without
+guilt for developer-facing test targets.
+
+### Portal content
+
+If a component uses `<Portal>`, query the portal-rendered content with the
+`screen` export instead of destructuring from `render()`:
+
+```tsx
+import { render, screen } from "@solidjs/testing-library";
+
+render(() => <Comp />);
+expect(screen.getByText("portal content")).toBeInTheDocument();
+```
+
+### Router tests
+
+Components that use `useNavigate`, `useLocation`, or `<A>` need a router
+context. Mock `@solidjs/router` with `vi.mock` to provide stubs:
+
+```tsx
+const navigateMock = vi.fn();
+vi.mock("@solidjs/router", () => ({
+  useNavigate: () => navigateMock,
+  useLocation: () => ({ pathname: "/test-path" }),
+  A: (props: Record<string, unknown>) => (
+    <a href={props.href as string} onClick={(e) => { e.preventDefault(); navigateMock(props.href); }}>
+      {props.children}
+    </a>
+  ),
+}));
+```
+
+The `location` render option only works for actual `<Route>` components, not
+for arbitrary components that consume router hooks. When testing a `<Route>`
+component directly, use `render(() => <Route ... />, { location: "/path" })`
+with `findBy*` queries (router is lazily loaded).
 
 ## Styling
 

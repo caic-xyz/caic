@@ -153,7 +153,7 @@ export default function PromptInput(props: Props) {
               onChange={handleFileChange}
             />
             <div class={styles.attachWrap}>
-              <Button type="button" variant="gray" disabled={props.disabled} title="Attach images" onClick={handleAttachClick} data-testid="attach-images">
+              <Button type="button" variant="gray" disabled={props.disabled} aria-label="Attach images" onClick={handleAttachClick} data-testid="attach-images">
                 <AttachIcon width="1.2em" height="1.2em" />
               </Button>
               <Show when={menuOpen()}>
@@ -197,7 +197,7 @@ export default function PromptInput(props: Props) {
             {(img, idx) => (
               <div class={styles.imageThumb}>
                 <img src={`data:${img.mediaType};base64,${img.data}`} alt="attached" />
-                <button class={styles.imageRemove} onClick={() => removeImage(idx())} title="Remove">&times;</button>
+                <button class={styles.imageRemove} onClick={() => removeImage(idx())} aria-label="Remove">&times;</button>
               </div>
             )}
           </For>

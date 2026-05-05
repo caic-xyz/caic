@@ -7,7 +7,7 @@ import type { JSX } from "solid-js";
 
 const navigateMock = vi.fn();
 
-// Mock the router to avoid .jsx resolution issues with @solidjs/router dist.
+// Mock the router so SSE tests don't need a real Router context.
 vi.mock("@solidjs/router", () => ({
   useNavigate: () => navigateMock,
   useLocation: () => ({ pathname: "/task/@abc+test-task" }),
@@ -54,10 +54,6 @@ vi.mock("./api", () => ({
 import TaskDetail from "./TaskDetail";
 import { taskEvents } from "./api";
 
-afterEach(() => {
-  navigateMock.mockClear();
-});
-
 const baseProps = {
   taskId: "abc",
   taskState: "running",
@@ -77,6 +73,10 @@ const baseProps = {
 };
 
 describe("TaskDetail", () => {
+
+  afterEach(() => {
+    navigateMock.mockClear();
+  });
 
   it("shows Diff link when diffStat has items", () => {
     const { getByText } = render(() => (

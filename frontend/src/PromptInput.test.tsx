@@ -27,17 +27,17 @@ describe("PromptInput", () => {
   });
 
   it("shows attach button when supportsImages is true", () => {
-    const { getByTitle } = render(() => (
+    const { getByRole } = render(() => (
       <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
     ));
-    expect(getByTitle("Attach images")).toBeInTheDocument();
+    expect(getByRole("button", { name: "Attach images" })).toBeInTheDocument();
   });
 
   it("hides attach button when supportsImages is false", () => {
-    const { queryByTitle } = render(() => (
+    const { queryByRole } = render(() => (
       <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={false} />
     ));
-    expect(queryByTitle("Attach images")).not.toBeInTheDocument();
+    expect(queryByRole("button", { name: "Attach images" })).not.toBeInTheDocument();
   });
 
   it("shows image preview when images is non-empty", () => {
@@ -50,10 +50,10 @@ describe("PromptInput", () => {
   it("calls onImagesChange to remove an image when remove button clicked", async () => {
     const user = userEvent.setup();
     const onImagesChange = vi.fn();
-    const { getByTitle } = render(() => (
+    const { getByRole } = render(() => (
       <PromptInput value="" onInput={() => {}} images={[fakeImage]} onImagesChange={onImagesChange} />
     ));
-    await user.click(getByTitle("Remove"));
+    await user.click(getByRole("button", { name: "Remove" }));
     expect(onImagesChange).toHaveBeenCalledWith([]);
   });
 
@@ -116,11 +116,11 @@ describe("PromptInput", () => {
 
   it("opens attach menu on attach button click", async () => {
     const user = userEvent.setup();
-    const { getByTitle, getByText, queryByText } = render(() => (
+    const { getByRole, getByText, queryByText } = render(() => (
       <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
     ));
     expect(queryByText("Take photo")).not.toBeInTheDocument();
-    await user.click(getByTitle("Attach images"));
+    await user.click(getByRole("button", { name: "Attach images" }));
     expect(getByText("Take photo")).toBeInTheDocument();
     // Screenshot only shown when getDisplayMedia is available (not in jsdom).
     expect(getByText("Choose file")).toBeInTheDocument();
@@ -128,10 +128,10 @@ describe("PromptInput", () => {
 
   it("closes attach menu and opens file picker on Choose file", async () => {
     const user = userEvent.setup();
-    const { getByTitle, getByText, queryByText } = render(() => (
+    const { getByRole, getByText, queryByText } = render(() => (
       <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
     ));
-    await user.click(getByTitle("Attach images"));
+    await user.click(getByRole("button", { name: "Attach images" }));
     const fileInput = document.querySelector("input[type=file]") as HTMLInputElement;
     const clickSpy = vi.spyOn(fileInput, "click").mockImplementation(() => {});
     await user.click(getByText("Choose file"));
@@ -142,12 +142,12 @@ describe("PromptInput", () => {
 
   it("toggles attach menu closed on second click", async () => {
     const user = userEvent.setup();
-    const { getByTitle, getByText, queryByText } = render(() => (
+    const { getByRole, getByText, queryByText } = render(() => (
       <PromptInput value="" onInput={() => {}} images={[]} onImagesChange={() => {}} supportsImages={true} />
     ));
-    await user.click(getByTitle("Attach images"));
+    await user.click(getByRole("button", { name: "Attach images" }));
     expect(getByText("Take photo")).toBeInTheDocument();
-    await user.click(getByTitle("Attach images"));
+    await user.click(getByRole("button", { name: "Attach images" }));
     expect(queryByText("Take photo")).not.toBeInTheDocument();
   });
 });

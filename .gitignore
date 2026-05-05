@@ -2,6 +2,7 @@
 .env.*.local
 .env.local
 coverage.out
+frontend/coverage/
 node_modules/
 /dist/
 /emulator*.log
