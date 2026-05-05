@@ -1,5 +1,6 @@
 // Modal dialog for cloning a git repository by URL.
-import { createSignal, Show, onMount, onCleanup } from "solid-js";
+// Uses native <dialog> for built-in Escape handling, focus trapping, and backdrop.
+import { createSignal, Show, onMount } from "solid-js";
 import Button from "./Button";
 import styles from "./CloneRepoDialog.module.css";
 
@@ -13,6 +14,7 @@ interface Props {
 export default function CloneRepoDialog(props: Props) {
   const [url, setUrl] = createSignal("");
   const [path, setPath] = createSignal("");
+  let dialogRef!: HTMLDialogElement;
 
   function submit() {
     const u = url().trim();
@@ -22,54 +24,50 @@ export default function CloneRepoDialog(props: Props) {
   }
 
   onMount(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !props.loading) {
-        e.preventDefault();
-        props.onClose();
-      }
-    };
-    document.addEventListener("keydown", handler);
-    onCleanup(() => document.removeEventListener("keydown", handler));
+    dialogRef.addEventListener("close", () => props.onClose());
+    dialogRef.showModal();
   });
 
   return (
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- backdrop dismiss is supplementary to Cancel button
-    <div class={styles.overlay} onClick={(e) => { if (e.target === e.currentTarget && !props.loading) props.onClose(); }}>
-      <div class={styles.dialog} role="dialog" aria-modal="true">
-        <h2 class={styles.title}>Clone Repository</h2>
-        <label class={styles.label}>
-          URL
-          <input
-            type="text"
-            value={url()}
-            onInput={(e) => setUrl(e.currentTarget.value)}
-            placeholder="https://github.com/org/repo.git"
-            disabled={props.loading}
-            class={styles.input}
-            data-testid="clone-url"
-            autofocus
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }}
-          />
-        </label>
-        <label class={styles.label}>
-          Path <span class={styles.optional}>(optional)</span>
-          <input
-            type="text"
-            value={path()}
-            onInput={(e) => setPath(e.currentTarget.value)}
-            placeholder="Derived from URL if empty"
-            disabled={props.loading}
-            class={styles.input}
-            data-testid="clone-path"
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }
-          />
-        </label>
-        <Show when={props.error}><p class={styles.error}>{props.error}</p></Show>
-        <div class={styles.actions}>
-          <button type="button" class={styles.cancelBtn} onClick={() => props.onClose()} disabled={props.loading}>Cancel</button>
-          <Button type="button" onClick={submit} disabled={props.loading || !url().trim()} loading={props.loading} data-testid="clone-submit">Clone</Button>
-        </div>
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events -- native <dialog> handles Escape; click-to-dismiss on padding is supplementary
+    <dialog
+      ref={(el) => (dialogRef = el)}
+      class={styles.dialog}
+      onClick={(e) => { if (e.target === e.currentTarget && !props.loading) props.onClose(); }}
+    >
+      <h2 class={styles.title}>Clone Repository</h2>
+      <label class={styles.label}>
+        URL
+        <input
+          type="text"
+          value={url()}
+          onInput={(e) => setUrl(e.currentTarget.value)}
+          placeholder="https://github.com/org/repo.git"
+          disabled={props.loading}
+          class={styles.input}
+          data-testid="clone-url"
+          autofocus
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }}
+        />
+      </label>
+      <label class={styles.label}>
+        Path <span class={styles.optional}>(optional)</span>
+        <input
+          type="text"
+          value={path()}
+          onInput={(e) => setPath(e.currentTarget.value)}
+          placeholder="Derived from URL if empty"
+          disabled={props.loading}
+          class={styles.input}
+          data-testid="clone-path"
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }}
+        />
+      </label>
+      <Show when={props.error}><p class={styles.error}>{props.error}</p></Show>
+      <div class={styles.actions}>
+        <button type="button" class={styles.cancelBtn} onClick={() => props.onClose()} disabled={props.loading}>Cancel</button>
+        <Button type="button" onClick={submit} disabled={props.loading || !url().trim()} loading={props.loading} data-testid="clone-submit">Clone</Button>
       </div>
-    </div>
+    </dialog>
   );
 }
