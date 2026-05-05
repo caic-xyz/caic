@@ -46,7 +46,11 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   const stopBtn = taskCard.getByTestId("stop-task");
   await expect(stopBtn).toBeVisible({ timeout: 15_000 });
 
-  // Click Stop (no confirmation needed for waiting tasks).
+  // Wait for the SSE event to update the frontend state to "waiting".
+  // If the UI still shows "running", the stop button triggers a
+  // window.confirm() that Playwright auto-dismisses as false.
+  await expect(taskCard.getByTestId("state-badge")).toHaveText("waiting", { timeout: 15_000 });
+
   await stopBtn.click();
 
   // Poll API until our task is "stopped".

@@ -205,7 +205,7 @@ export default function TaskCard(props: TaskCardProps) {
             {(status) => <CIDot status={status as CIStatus} checks={props.ciChecks} />}
           </Show>
           <Tooltip text={`Prompt cache likely expired (${formatElapsed((props.cacheTTLSeconds ?? 3600) * 1000)} TTL) — continuing may use more tokens`} disabled={!stale()}>
-            <span class={styles.badge} style={{ background: stale() ? staleStateColor(props.state) : stateColor(props.state) }}>
+            <span class={styles.badge} data-testid="state-badge" style={{ background: stale() ? staleStateColor(props.state) : stateColor(props.state) }}>
               {props.state}
             </span>
           </Tooltip>
