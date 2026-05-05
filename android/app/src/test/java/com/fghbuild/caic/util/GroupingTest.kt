@@ -820,7 +820,11 @@ class GroupingTest {
             }
             totalTime += batchTime
         }
-        println("nextGrouped incremental (${totalEvents} events, ${batchSize}/batch, ${totalEvents / batchSize} batches): total=${totalTime}ms avg=${totalTime / (totalEvents / batchSize)}ms")
+        println(
+            "nextGrouped incremental ($totalEvents events, $batchSize/batch, " +
+                "${totalEvents / batchSize} batches): total=${totalTime}ms " +
+                "avg=${totalTime / (totalEvents / batchSize)}ms",
+        )
         // The O(n²) behaviour means the last few batches dominate. This must not explode.
         assertTrue(
             "Incremental total ${totalTime}ms is too high for $totalEvents events",
