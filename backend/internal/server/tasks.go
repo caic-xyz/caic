@@ -917,6 +917,27 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 		primaryName = p.Name
 	}
 
+	// For purged tasks loaded from logs, snap stats may be zero because
+	// messages aren't restored. Fall back to the result trailer.
+	costUSD := snap.CostUSD
+	numTurns := snap.NumTurns
+	duration := snap.Duration
+	cumulativeUsage := snap.Usage
+	if e.result != nil {
+		if costUSD == 0 {
+			costUSD = e.result.CostUSD
+		}
+		if numTurns == 0 {
+			numTurns = e.result.NumTurns
+		}
+		if duration == 0 {
+			duration = e.result.Duration
+		}
+		if cumulativeUsage == (agent.Usage{}) {
+			cumulativeUsage = e.result.Usage
+		}
+	}
+
 	j := v1.Task{
 		ID:             e.task.ID,
 		InitialPrompt:  e.task.InitialPrompt.Text,
@@ -936,16 +957,16 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 		USB:            e.task.USB,
 		Display:        e.task.Display,
 		VNCPort:        snap.VNCPort,
-		CostUSD:        snap.CostUSD,
-		NumTurns:       snap.NumTurns,
-		Duration:       snap.Duration.Seconds(),
+		CostUSD:        costUSD,
+		NumTurns:       numTurns,
+		Duration:       duration.Seconds(),
 	}
 	j.StartedAt = e.task.StartedAt
 	j.TurnStartedAt = snap.TurnStartedAt
-	j.CumulativeInputTokens = snap.Usage.InputTokens
-	j.CumulativeOutputTokens = snap.Usage.OutputTokens
-	j.CumulativeCacheCreationInputTokens = snap.Usage.CacheCreationInputTokens
-	j.CumulativeCacheReadInputTokens = snap.Usage.CacheReadInputTokens
+	j.CumulativeInputTokens = cumulativeUsage.InputTokens
+	j.CumulativeOutputTokens = cumulativeUsage.OutputTokens
+	j.CumulativeCacheCreationInputTokens = cumulativeUsage.CacheCreationInputTokens
+	j.CumulativeCacheReadInputTokens = cumulativeUsage.CacheReadInputTokens
 	// Active tokens = last API call's context window fill (not the per-query sum).
 	j.ActiveInputTokens = snap.LastAPIUsage.InputTokens + snap.LastAPIUsage.CacheCreationInputTokens
 	j.ActiveCacheReadTokens = snap.LastAPIUsage.CacheReadInputTokens

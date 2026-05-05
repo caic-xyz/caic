@@ -516,6 +516,7 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 		t := &task.Task{
 			ID:            taskID,
 			InitialPrompt: agent.Prompt{Text: lt.Prompt},
+			Model:         lt.Model,
 			Repos:         lt.Repos, // GitRoot is empty for purged tasks
 			Harness:       lt.Harness,
 			StartedAt:     lt.StartedAt,
@@ -524,6 +525,9 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 			Display:       lt.Display,
 		}
 		t.SetStateAt(lt.State, lt.LastStateUpdateAt)
+		if lt.AgentVersion != "" {
+			t.SetAgentVersion(lt.AgentVersion)
+		}
 		if lt.Title != "" {
 			t.SetTitle(lt.Title)
 		} else {
@@ -539,11 +543,8 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 		if lt.ForgePR > 0 {
 			t.SetPR(lt.ForgeOwner, lt.ForgeRepo, lt.ForgePR)
 		}
-		// Backfill result stats from restored messages when the trailer
-		// has zero cost (e.g. session exited without a final ResultMessage).
-		if lt.Result.CostUSD == 0 {
-			lt.Result.CostUSD, lt.Result.NumTurns, lt.Result.Duration, lt.Result.Usage, _ = t.LiveStats()
-		}
+		// Stats backfill from messages is handled by loadLogHeader's tail
+		// scan when the trailer has zero cost (see case "result").
 		done := make(chan struct{})
 		close(done)
 		entry := &taskEntry{task: t, result: lt.Result, done: done}

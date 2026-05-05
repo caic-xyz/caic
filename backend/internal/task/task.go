@@ -1193,6 +1193,14 @@ func (t *Task) SetTitle(title string) {
 	t.mu.Unlock()
 }
 
+// SetAgentVersion sets the agent version reported by the init message.
+// Used when restoring purged tasks from logs without full message parsing.
+func (t *Task) SetAgentVersion(v string) {
+	t.mu.Lock()
+	t.agentVersion = v
+	t.mu.Unlock()
+}
+
 // GenerateTitle asks the LLM for a short title from the prompt and any result
 // messages. No-op when the provider is unconfigured.
 func (t *Task) GenerateTitle(ctx context.Context) {

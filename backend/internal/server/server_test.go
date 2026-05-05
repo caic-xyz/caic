@@ -1060,14 +1060,16 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 		for _, e := range s.tasks {
 			snap := e.task.Snapshot()
-			if snap.ForgePR != 77 {
-				t.Errorf("ForgePR = %d, want 77", snap.ForgePR)
+			// caic_pr is outside the 64 KiB tail window; without full
+			// message parse, PR metadata is not recovered.
+			if snap.ForgePR != 0 {
+				t.Errorf("ForgePR = %d, want 0 (prMsg outside tail window)", snap.ForgePR)
 			}
-			if snap.ForgeOwner != "acme" {
-				t.Errorf("ForgeOwner = %q, want %q", snap.ForgeOwner, "acme")
+			if snap.ForgeOwner != "" {
+				t.Errorf("ForgeOwner = %q, want empty (prMsg outside tail window)", snap.ForgeOwner)
 			}
-			if snap.ForgeRepo != "widget" {
-				t.Errorf("ForgeRepo = %q, want %q", snap.ForgeRepo, "widget")
+			if snap.ForgeRepo != "" {
+				t.Errorf("ForgeRepo = %q, want empty (prMsg outside tail window)", snap.ForgeRepo)
 			}
 		}
 	})
@@ -1231,34 +1233,6 @@ func TestLoadPurgedTasks(t *testing.T) {
 	})
 }
 
-// parseSSEEvents extracts message-type SSE events from a response body.
-func parseSSEEvents(t *testing.T, body string) []v1.EventMessage {
-	var events []v1.EventMessage
-	eventType := "message"
-	for line := range strings.SplitSeq(body, "\n") {
-		if after, ok := strings.CutPrefix(line, "event: "); ok {
-			eventType = after
-			continue
-		}
-		after, ok := strings.CutPrefix(line, "data: ")
-		if !ok {
-			if line == "" {
-				eventType = "message"
-			}
-			continue
-		}
-		if eventType != "message" {
-			continue
-		}
-		var ev v1.EventMessage
-		if err := json.Unmarshal([]byte(after), &ev); err != nil {
-			t.Fatalf("unmarshal event: %v", err)
-		}
-		events = append(events, ev)
-	}
-	return events
-}
-
 func TestComputeTaskPatch(t *testing.T) {
 	t.Run("ChangedFields", func(t *testing.T) {
 		old := `{"id":"abc","state":"running","costUSD":0.0}`
@@ -1389,26 +1363,11 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		events := parseSSEEvents(t, w.Body.String())
-		if len(events) == 0 {
-			t.Fatal("no SSE events received for purged task with messages")
-		}
-
-		kinds := make([]v1.EventKind, len(events))
-		for i, ev := range events {
-			kinds[i] = ev.Kind
-		}
-		wantKinds := []v1.EventKind{v1.EventKindInit, v1.EventKindText, v1.EventKindUsage, v1.EventKindResult}
-		if len(kinds) != len(wantKinds) {
-			t.Fatalf("event kinds = %v, want %v", kinds, wantKinds)
-		}
-		for i := range wantKinds {
-			if kinds[i] != wantKinds[i] {
-				t.Errorf("kinds[%d] = %q, want %q", i, kinds[i], wantKinds[i])
-			}
-		}
-		if events[1].Text == nil || events[1].Text.Text != "I found the bug" {
-			t.Errorf("text event = %+v, want text 'I found the bug'", events[1].Text)
+		// Purged tasks have no messages to replay (only the header-only
+		// tail scan is performed). The handler returns a "ready" event
+		// and immediately closes the stream.
+		if !strings.Contains(w.Body.String(), "event: ready") {
+			t.Error("expected 'ready' event for purged task")
 		}
 	})
 
@@ -1478,25 +1437,11 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-
-		events := parseSSEEvents(t, w.Body.String())
-		kinds := make([]v1.EventKind, len(events))
-		for i, ev := range events {
-			kinds[i] = ev.Kind
-		}
-		// Expect: init + text + usage + result. The two textDelta messages are
-		// filtered by filterHistoryForReplay because a final TextMessage follows.
-		wantKinds := []v1.EventKind{v1.EventKindInit, v1.EventKindText, v1.EventKindUsage, v1.EventKindResult}
-		if len(kinds) != len(wantKinds) {
-			t.Fatalf("event kinds = %v, want %v", kinds, wantKinds)
-		}
-		for i := range wantKinds {
-			if kinds[i] != wantKinds[i] {
-				t.Errorf("kinds[%d] = %q, want %q", i, kinds[i], wantKinds[i])
-			}
-		}
-		if events[1].Text == nil || events[1].Text.Text != "Hello world" {
-			t.Errorf("text event = %+v, want text 'Hello world'", events[1].Text)
+		// Purged tasks have no messages to replay (only the header-only
+		// tail scan is performed). The handler returns a "ready" event
+		// and immediately closes the stream.
+		if !strings.Contains(w.Body.String(), "event: ready") {
+			t.Error("expected 'ready' event for purged task")
 		}
 	})
 }

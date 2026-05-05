@@ -34,6 +34,21 @@ type typeEnvelope struct {
 	Type string `json:"type"`
 }
 
+// tailInit is the subset of a system/init message parsed from the tail scan.
+type tailInit struct {
+	Subtype string `json:"subtype"`
+	Model   string `json:"model"`
+	Version string `json:"claude_code_version"`
+}
+
+// tailResult is the subset of a result message parsed from the tail scan.
+type tailResult struct {
+	TotalCostUSD float64     `json:"total_cost_usd"`
+	DurationMs   int64       `json:"duration_ms"`
+	NumTurns     int         `json:"num_turns"`
+	Usage        agent.Usage `json:"usage"`
+}
+
 // LoadedTask holds the data reconstructed from a single JSONL log file.
 type LoadedTask struct {
 	TaskID            string // Task ID parsed from log filename; empty if unparseable.
@@ -51,6 +66,8 @@ type LoadedTask struct {
 	Tailscale         bool
 	USB               bool
 	Display           bool
+	Model             string
+	AgentVersion      string
 	Msgs              []agent.Message
 	Result            *Result
 
@@ -229,6 +246,12 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 	buf := make([]byte, size-offset)
 	n, _ := f.ReadAt(buf, offset)
 	if n > 0 {
+		// Track the last ResultMessage stats from the tail for backfill
+		// when the trailer has zero cost (session exited without final ResultMessage).
+		var lastResultCostUSD float64
+		var lastResultDuration time.Duration
+		var lastResultNumTurns int
+		var lastResultUsage agent.Usage
 		for line := range bytes.SplitSeq(buf[:n], []byte("\n")) {
 			line = bytes.TrimSpace(line)
 			if len(line) == 0 {
@@ -282,8 +305,41 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 							lt.Result.Err = errors.New(mr.Error)
 						}
 					}
+				case "system":
+					// Extract model and version from system/init messages
+					// in the tail. For long logs the init may be outside
+					// the 64 KiB window — model/version will be empty.
+					var sm tailInit
+					if json.Unmarshal(line, &sm) == nil && sm.Subtype == "init" {
+						if sm.Model != "" {
+							lt.Model = sm.Model
+						}
+						// TODO: This is a claudecode hack.
+						if sm.Version != "" {
+							lt.AgentVersion = sm.Version
+						}
+					}
+				case "result":
+					// Track the last ResultMessage for backfill when
+					// the caic_result trailer has zero cost.
+					var rm tailResult
+					// TODO: This is a claudecode hack.
+					if json.Unmarshal(line, &rm) == nil {
+						lastResultCostUSD = rm.TotalCostUSD
+						lastResultDuration = time.Duration(rm.DurationMs) * time.Millisecond
+						lastResultNumTurns = rm.NumTurns
+						lastResultUsage = rm.Usage
+					}
 				}
 			}
+		}
+		// Backfill trailer result from last ResultMessage when the trailer
+		// has zero cost (session exited without a final ResultMessage).
+		if lt.Result != nil && lt.Result.CostUSD == 0 && lastResultCostUSD > 0 {
+			lt.Result.CostUSD = lastResultCostUSD
+			lt.Result.Duration = lastResultDuration
+			lt.Result.NumTurns = lastResultNumTurns
+			lt.Result.Usage = lastResultUsage
 		}
 	}
 
