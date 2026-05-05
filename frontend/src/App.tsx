@@ -1062,21 +1062,19 @@ export default function App() {
         </div>
       </Show>
       <Show when={settingsOpen()}>
-        <div
-          class={styles.settingsOverlay}
-          role="button"
-          tabIndex={-1}
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events -- native <dialog> handles Escape; click-to-dismiss on padding is supplementary */}
+        <dialog
+          ref={(el) => {
+            el.addEventListener("close", () => setSettingsOpen(false));
+            // showModal requires the element to be in the document; defer to next microtask.
+            queueMicrotask(() => el.showModal());
+          }}
+          class={styles.settingsPanel}
           onClick={() => setSettingsOpen(false)}
-          onKeyDown={(e) => { if (e.key === "Escape") setSettingsOpen(false); }}
         >
-          {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- click/key propagation stop is supplementary to the overlay backdrop dismiss */}
+          {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events -- stop click propagation to dialog backdrop; native <dialog> handles Escape */}
           <div
-            class={styles.settingsPanel}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Settings"
             onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
           >
             <h2 class={styles.settingsPanelTitle}>Settings</h2>
             <div class={styles.settingsSection}>
@@ -1234,7 +1232,7 @@ export default function App() {
               <p class={styles.settingsVersion}>caic v{serverVersion()}</p>
             </Show>
           </div>
-        </div>
+        </dialog>
       </Show>
       <VoiceOverlay tasks={tasks} recentRepo={() => repos()[0]?.path ?? ""} selectedHarness={selectedHarness} selectedModel={selectedModel} webrtcAvailable={webrtcAvailable} />
       <Portal>
