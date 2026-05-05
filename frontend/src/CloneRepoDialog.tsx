@@ -1,5 +1,5 @@
 // Modal dialog for cloning a git repository by URL.
-import { createSignal, Show } from "solid-js";
+import { createSignal, Show, onMount, onCleanup } from "solid-js";
 import Button from "./Button";
 import styles from "./CloneRepoDialog.module.css";
 
@@ -21,12 +21,20 @@ export default function CloneRepoDialog(props: Props) {
     props.onClone(u, p);
   }
 
+  onMount(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !props.loading) {
+        e.preventDefault();
+        props.onClose();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    onCleanup(() => document.removeEventListener("keydown", handler));
+  });
+
   return (
-    <div
-      class={styles.overlay}
-      onClick={(e) => { if (e.target === e.currentTarget && !props.loading) props.onClose(); }}
-      onKeyDown={(e) => { if (e.key === "Escape" && !props.loading) { e.preventDefault(); props.onClose(); } }}
-    >
+    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- backdrop dismiss is supplementary to Cancel button
+    <div class={styles.overlay} onClick={(e) => { if (e.target === e.currentTarget && !props.loading) props.onClose(); }}>
       <div class={styles.dialog} role="dialog" aria-modal="true">
         <h2 class={styles.title}>Clone Repository</h2>
         <label class={styles.label}>
