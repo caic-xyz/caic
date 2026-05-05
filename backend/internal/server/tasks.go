@@ -441,7 +441,7 @@ func (s *Server) compactContext(ctx context.Context, entry *taskEntry, req *v1.C
 	return &v1.StatusResp{Status: "compacting"}, nil
 }
 
-func (s *Server) stopTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
+func (s *Server) stopTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
 	state := entry.task.GetState()
 	if state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan && state != task.StateRunning {
 		return nil, dto.Conflict("task is not running or waiting")
@@ -455,8 +455,11 @@ func (s *Server) stopTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) 
 		stopPrimaryName = p.Name
 	}
 	runner := s.runners[stopPrimaryName]
+	id := entry.task.ID
+	slog.InfoContext(ctx, "stop requested", "task", id, "ctr", entry.task.Container, "state", state)
 	go func() {
 		runner.StopTask(s.ctx, entry.task)
+		slog.InfoContext(s.ctx, "stop completed", "task", id, "ctr", entry.task.Container, "final_state", entry.task.GetState())
 		s.mu.Lock()
 		s.taskChanged()
 		s.mu.Unlock()
@@ -464,7 +467,7 @@ func (s *Server) stopTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) 
 	return &v1.StatusResp{Status: "stopping"}, nil
 }
 
-func (s *Server) purgeTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
+func (s *Server) purgeTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
 	state := entry.task.GetState()
 	if state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan && state != task.StateRunning && state != task.StateStopping && state != task.StateStopped {
 		return nil, dto.Conflict("task is not running or waiting")
@@ -478,7 +481,12 @@ func (s *Server) purgeTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq)
 		purgePrimaryName = p.Name
 	}
 	runner := s.runners[purgePrimaryName]
-	go s.cleanupTask(entry, runner, task.StatePurged)
+	id := entry.task.ID
+	slog.InfoContext(ctx, "purge requested", "task", id, "ctr", entry.task.Container, "state", state)
+	go func() {
+		s.cleanupTask(entry, runner, task.StatePurged)
+		slog.InfoContext(s.ctx, "purge completed", "task", id, "final_state", entry.task.GetState())
+	}()
 	return &v1.StatusResp{Status: "purging"}, nil
 }
 
@@ -923,7 +931,16 @@ func (s *Server) watchSession(entry *taskEntry, runner *task.Runner, h *task.Ses
 // entry.cleanupOnce), stores the result, notifies SSE, and closes entry.done.
 func (s *Server) cleanupTask(entry *taskEntry, runner *task.Runner, reason task.State) {
 	entry.cleanupOnce.Do(func() {
-		result := runner.Cleanup(s.ctx, entry.task, reason)
+		start := time.Now()
+		t := entry.task
+		result := runner.Cleanup(s.ctx, t, reason)
+		elapsed := time.Since(start).Round(time.Millisecond)
+		if result.Err != nil {
+			slog.ErrorContext(s.ctx, "cleanup failed", "task", t.ID, "reason", reason, "dur", elapsed, "err", result.Err)
+		} else {
+			slog.InfoContext(s.ctx, "cleanup done", "task", t.ID, "reason", reason, "dur", elapsed,
+				"cost", result.CostUSD, "turns", result.NumTurns, "final_state", result.State)
+		}
 		s.mu.Lock()
 		entry.result = &result
 		s.taskChanged()

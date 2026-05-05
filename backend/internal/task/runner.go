@@ -379,7 +379,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 
 // Cleanup is the single shutdown path for a task (Flow 1 in the relay
 // shutdown protocol — see package agent). It sends the null-byte sentinel
-// to trigger graceful agent exit, then kills the container.
+// to trigger graceful agent exit, then purges the container.
 //
 // This is only called for intentional purge (user action or container
 // death), never during backend restart. On restart, the relay daemon stays
@@ -389,7 +389,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 //  1. Detach the session handle from the task.
 //  2. If a session exists: Stop (sends \x00, waits up to 20s), then Close.
 //  3. Set task state to reason (StatePurged or StateFailed).
-//  4. Kill the container.
+//  4. Purge the container (stop + remove + cleanup git remotes/SSH config).
 //  5. If graceful wait timed out, drain session now (container dead, SSH severed).
 //  6. Close msgCh and logW, write log trailer.
 //  7. Build and return Result.
@@ -398,37 +398,50 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	ctx, task := trace.NewTask(ctx, "task.cleanup:"+t.ID.String())
 	defer task.End()
 
-	h := t.DetachSession()
-
+	start := time.Now()
 	name := t.Container
-
-	// Graceful shutdown: send stop sentinel so the relay sends SIGINT.
-	// Stats come from live accumulators updated by startMessageDispatch.
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
 	tlog := r.log.With("br", primaryBranch, "ctr", name)
+	tlog.InfoContext(ctx, "cleanup starting", "reason", reason, "state", t.GetState(), "has_session", t.HasSession())
+
+	h := t.DetachSession()
+
+	// Graceful shutdown: send stop sentinel so the relay sends SIGINT.
+	// Stats come from live accumulators updated by startMessageDispatch.
 	if h != nil {
+		tlog.DebugContext(ctx, "cleanup: sending graceful stop")
+		gStart := time.Now()
 		if err := h.GracefulStop(ctx, 20*time.Second); err != nil {
-			tlog.Warn("graceful stop timed out", "err", err)
+			tlog.WarnContext(ctx, "graceful stop timed out", "err", err, "dur", time.Since(gStart).Round(time.Millisecond))
 			r.logRelayDiag(ctx, tlog, name)
+		} else {
+			tlog.DebugContext(ctx, "cleanup: graceful stop succeeded", "dur", time.Since(gStart).Round(time.Millisecond))
 		}
 	}
 
 	t.SetState(reason)
 
-	tlog.Info("purge container")
 	if name != "" && r.Container != nil {
+		tlog.InfoContext(ctx, "cleanup: purging container")
+		pStart := time.Now()
 		if err := r.PurgeContainer(ctx, name, primaryBranch, t.ExtraMDRepos()); err != nil {
-			tlog.Warn("purge failed", "err", err)
+			tlog.WarnContext(ctx, "purge container failed", "err", err, "dur", time.Since(pStart).Round(time.Millisecond))
+		} else {
+			tlog.DebugContext(ctx, "cleanup: container purged", "dur", time.Since(pStart).Round(time.Millisecond))
 		}
+	} else {
+		tlog.DebugContext(ctx, "cleanup: no container to purge", "name", name, "has_backend", r.Container != nil)
 	}
 
-	// Drain the session: if graceful stop timed out, the container kill
+	// Drain the session: if graceful stop timed out, the container purge
 	// above severed SSH so this unblocks.
 	if h != nil {
+		dStart := time.Now()
 		h.Drain()
+		tlog.DebugContext(ctx, "cleanup: session drained", "dur", time.Since(dStart).Round(time.Millisecond))
 	}
 
 	res := Result{
@@ -452,16 +465,20 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 		// released by StopTask. Reopen the log for appending so we can write
 		// the caic_result trailer; without it the task would load as "failed"
 		// on the next server restart instead of "purged".
+		tlog.DebugContext(ctx, "cleanup: no session handle, reopening log for trailer")
 		var reopenErr error
 		logW, reopenErr = r.reopenLog(t)
 		if reopenErr != nil {
-			tlog.Warn("reopen log for trailer failed", "err", reopenErr)
+			tlog.WarnContext(ctx, "reopen log for trailer failed", "err", reopenErr)
 		}
 	}
 	writeLogTrailer(logW, t.Title(), &res)
 	if logW != nil {
 		_ = logW.Close()
+		tlog.DebugContext(ctx, "cleanup: log trailer written and closed")
 	}
+	tlog.InfoContext(ctx, "cleanup done", "dur", time.Since(start).Round(time.Millisecond),
+		"cost", res.CostUSD, "turns", res.NumTurns, "reason", reason)
 	return res
 }
 
@@ -473,37 +490,50 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	ctx, task := trace.NewTask(ctx, "task.stop:"+t.ID.String())
 	defer task.End()
 
-	h := t.DetachSession()
-
+	start := time.Now()
 	name := t.Container
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
 	tlog := r.log.With("br", primaryBranch, "ctr", name)
+	tlog.InfoContext(ctx, "stop starting", "state", t.GetState())
+
+	h := t.DetachSession()
 
 	// Graceful shutdown: send stop sentinel so the relay sends SIGINT.
 	if h != nil {
+		tlog.DebugContext(ctx, "stop: sending graceful stop")
+		gStart := time.Now()
 		if err := h.GracefulStop(ctx, 20*time.Second); err != nil {
-			tlog.Warn("graceful stop timed out", "err", err)
+			tlog.WarnContext(ctx, "graceful stop timed out", "err", err, "dur", time.Since(gStart).Round(time.Millisecond))
 			r.logRelayDiag(ctx, tlog, name)
+		} else {
+			tlog.DebugContext(ctx, "stop: graceful stop succeeded", "dur", time.Since(gStart).Round(time.Millisecond))
 		}
 	}
 
 	t.SetState(StateStopping)
 
-	tlog.Info("stop container")
+	tlog.InfoContext(ctx, "stop: stopping container")
 	if name != "" && r.Container != nil {
+		cStart := time.Now()
 		if err := r.Container.Stop(ctx, name); err != nil {
-			tlog.Warn("stop failed", "err", err)
+			tlog.WarnContext(ctx, "stop: container Stop failed", "err", err, "dur", time.Since(cStart).Round(time.Millisecond))
+		} else {
+			tlog.DebugContext(ctx, "stop: container Stop succeeded", "dur", time.Since(cStart).Round(time.Millisecond))
 		}
+	} else {
+		tlog.DebugContext(ctx, "stop: no container to stop", "name", name, "has_backend", r.Container != nil)
 	}
 
 	// Drain session after container is stopped, then wait for the dispatch
 	// goroutine to finish processing all buffered messages so that t.msgs
 	// is complete before the state transitions to StateStopped.
 	if h != nil {
+		dStart := time.Now()
 		h.Drain()
+		tlog.DebugContext(ctx, "stop: session drained", "dur", time.Since(dStart).Round(time.Millisecond))
 	}
 
 	t.SetState(StateStopped)
@@ -528,6 +558,8 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	if logW != nil {
 		_ = logW.Close()
 	}
+	tlog.InfoContext(ctx, "stop done", "dur", time.Since(start).Round(time.Millisecond),
+		"cost", res.CostUSD, "turns", res.NumTurns)
 }
 
 // ReviveTask restarts a stopped container and resumes the agent session.
