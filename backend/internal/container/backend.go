@@ -25,6 +25,15 @@ type Backend struct {
 
 	mu                sync.Mutex
 	pendingContainers map[string]*md.Container // keyed by container name
+	vncPorts          map[string]int32         // container name → host VNC port
+}
+
+// NewBackend creates a Backend wrapping the given md client.
+func NewBackend(client *md.Client) *Backend {
+	return &Backend{
+		Client:   client,
+		vncPorts: make(map[string]int32),
+	}
 }
 
 func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) (client *md.Client, mdOpts *md.StartOpts) {
@@ -96,6 +105,7 @@ func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, 
 		b.pendingContainers = make(map[string]*md.Container)
 	}
 	b.pendingContainers[c.Name] = c
+	b.vncPorts[c.Name] = c.VNCPort
 	b.mu.Unlock()
 	slog.Debug("container", "msg", "Launch returning", "container", c.Name)
 	return c.Name, nil
@@ -201,6 +211,10 @@ func (b *Backend) Revive(ctx context.Context, name string, repos []md.Repo) erro
 		return err
 	}
 	slog.Debug("container", "msg", "Revive succeeded", "container", name)
+	// VNC port may have changed after restart (Docker port remapping).
+	b.mu.Lock()
+	b.vncPorts[name] = ct.VNCPort
+	b.mu.Unlock()
 	return nil
 }
 
@@ -245,7 +259,17 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 		return "", nil, err
 	}
 	slog.Debug("container", "msg", "Fork succeeded", "source", name, "fork", forked.Name)
+	b.mu.Lock()
+	b.vncPorts[forked.Name] = forked.VNCPort
+	b.mu.Unlock()
 	return forked.Name, forked.Repos, nil
+}
+
+// VNCPort implements task.ContainerBackend.
+func (b *Backend) VNCPort(containerName string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return int(b.vncPorts[containerName])
 }
 
 // logWriters returns stdout and stderr writers for md task operations.

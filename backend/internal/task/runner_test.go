@@ -808,6 +808,7 @@ func (s *stubContainer) Revive(_ context.Context, _ string, _ []md.Repo) error {
 func (s *stubContainer) Fork(_ context.Context, _ string, _ []md.Repo, _ *ForkOptions) (string, []md.Repo, error) {
 	return "stub-fork", nil, nil
 }
+func (s *stubContainer) VNCPort(_ string) int { return 0 }
 
 // recvMsg reads a single message from ch, respecting the test context and a
 // 1-second safety timeout.

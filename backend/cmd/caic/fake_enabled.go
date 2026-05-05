@@ -154,3 +154,5 @@ func (*fakeContainer) Revive(_ context.Context, _ string, _ []md.Repo) error { r
 func (*fakeContainer) Fork(_ context.Context, _ string, _ []md.Repo, _ *task.ForkOptions) (string, []md.Repo, error) {
 	return "fake-fork", nil, fmt.Errorf("fork not supported in fake mode")
 }
+
+func (*fakeContainer) VNCPort(_ string) int { return 0 }

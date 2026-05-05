@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime/trace"
 	"slices"
@@ -23,6 +25,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/gitutil"
+	"github.com/coder/websocket"
 	"github.com/maruel/ksid"
 )
 
@@ -749,6 +752,81 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v1.DiffResp{Diff: diff})
+}
+
+// handleVNCWebSocket proxies a WebSocket connection to the container's VNC
+// TCP port via the Docker host port mapping. Used by noVNC in the frontend.
+func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
+	entry, err := s.getTask(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	t := entry.task
+	if t.Container == "" || t.VNCPort == 0 {
+		writeError(w, dto.BadRequest("task has no VNC display"))
+		return
+	}
+	vncAddr := fmt.Sprintf("127.0.0.1:%d", t.VNCPort)
+
+	vncConn, err := net.DialTimeout("tcp", vncAddr, 10*time.Second)
+	if err != nil {
+		slog.Error("vnc websocket: dial failed", "addr", vncAddr, "err", err)
+		writeError(w, dto.InternalError("cannot reach container VNC"))
+		return
+	}
+	defer func() { _ = vncConn.Close() }()
+
+	wsConn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true, // same-origin, no Origin check needed
+	})
+	if err != nil {
+		return
+	}
+	defer func() { _ = wsConn.Close(websocket.StatusNormalClosure, "") }()
+
+	// Bidirectional copy: WebSocket ↔ TCP.
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	go func() {
+		defer cancel()
+		for {
+			_, buf, err := wsConn.Read(ctx)
+			if err != nil {
+				return
+			}
+			if _, err := vncConn.Write(buf); err != nil {
+				return
+			}
+		}
+	}()
+	_, _ = io.Copy(wsNetConn{wsConn, ctx}, vncConn)
+}
+
+// wsNetConn adapts a coder/websocket connection to net.Conn for io.Copy.
+type wsNetConn struct {
+	*websocket.Conn
+	ctx context.Context
+}
+
+func (w wsNetConn) Read(b []byte) (int, error) {
+	_, buf, err := w.Conn.Read(w.ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := copy(b, buf)
+	if n < len(buf) {
+		return n, io.ErrShortBuffer
+	}
+	return n, nil
+}
+
+func (w wsNetConn) Write(b []byte) (int, error) {
+	if err := w.Conn.Write(w.ctx, websocket.MessageBinary, b); err != nil {
+		return 0, err
+	}
+	return len(b), nil
 }
 
 // handleGetProcesses returns the list of running processes inside the task's

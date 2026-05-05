@@ -178,7 +178,8 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("open preferences: %w", err)
 	}
 
-	backend := &container.Backend{Client: mdClient, HarnessEnv: cfg.HarnessEnv}
+	backend := container.NewBackend(mdClient)
+	backend.HarnessEnv = cfg.HarnessEnv
 
 	cachePath := filepath.Join(cfg.CacheDir, "ci_results.json")
 	cache, err := forgecache.Open(cachePath)

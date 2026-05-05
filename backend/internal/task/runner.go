@@ -70,6 +70,9 @@ type ContainerBackend interface {
 	// repos are the source container's repos (used to reconstruct the container handle).
 	// Returns the forked container name and new repos (with branches set).
 	Fork(ctx context.Context, name string, repos []md.Repo, opts *ForkOptions) (forkName string, forkRepos []md.Repo, err error)
+	// VNCPort returns the Docker host port mapped to the container's VNC
+	// port (5901). Returns 0 when the container has no display.
+	VNCPort(containerName string) int
 }
 
 // ForkOptions holds parameters for forking a container.
@@ -314,6 +317,7 @@ func (r *Runner) Start(ctx context.Context, t *Task) (*SessionHandle, error) {
 	}
 	t.Container = sr.Container
 	t.TailscaleFQDN = sr.TailscaleFQDN
+	t.VNCPort = r.Container.VNCPort(sr.Container)
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
@@ -558,6 +562,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 		return nil, fmt.Errorf("revive container: %w", err)
 	}
 	tlog.Debug("runner", "msg", "Revive succeeded", "container", t.Container)
+	t.VNCPort = r.Container.VNCPort(t.Container)
 
 	// 2. Start a new relay with --resume to continue the previous session.
 	// skipSideEffects=true: --resume replays all historical messages and
@@ -724,6 +729,7 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *For
 	}
 	tlog.Debug("runner", "msg", "container.Fork succeeded", "source", source.Container, "fork", forkName)
 	fork.Container = forkName
+	fork.VNCPort = r.Container.VNCPort(forkName)
 	for i := range fork.Repos {
 		if i < len(forkRepos) {
 			fork.Repos[i].Branch = forkRepos[i].Branch
