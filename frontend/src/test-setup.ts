@@ -25,3 +25,16 @@ class ResizeObserverStub {
   disconnect() {}
 }
 globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+
+// jsdom does not implement HTMLDialogElement.showModal / close; stub them so
+// components using native <dialog> (CloneRepoDialog, CameraCapture) don't
+// throw when calling showModal in onMount.
+if (!HTMLDialogElement.prototype.showModal) {
+  HTMLDialogElement.prototype.showModal = function showModal() {
+    this.setAttribute("open", "");
+  };
+  HTMLDialogElement.prototype.close = function close() {
+    this.removeAttribute("open");
+    this.dispatchEvent(new Event("close"));
+  };
+}
