@@ -264,33 +264,50 @@ export default function TaskDetail(props: Props) {
     return groupMessages(msgs);
   });
 
-  // Flat item model: past sessions (elided) + current session boundary + current session
-  // completed turns (elided) + last completed turn (always expanded) + live turn groups.
-  // The last completed turn is always expanded to provide context for the current state.
-  const items = createMemo((): MsgItem[] => {
-    const pastSessionItems = buildPastSessionItems(pastSessions(), expandedSessionKeys(), expandedTurnKeys());
-    const boundaryEv = currentSessionBoundaryEvent();
-    const sessionBoundaryItems: MsgItem[] = boundaryEv
-      ? [{ kind: "sessionBoundary", event: boundaryEv, key: "cur-sess-boundary" }]
-      : [];
-    const liveGroups = currentGroups();
+  // Past session items: stable during streaming (only change on turn completion or expansion toggle).
+  // Memoized separately so MsgItem object references persist across rAF frames — the
+  // <Match when={..} keyed> pattern uses reference equality as the DOM key, and new
+  // object identities on every frame would cause remounting (flickering + unclickable).
+  const pastSessionItems = createMemo(() =>
+    buildPastSessionItems(pastSessions(), expandedSessionKeys(), expandedTurnKeys()),
+  );
+  // Completed turn items (elidable): stable during streaming.
+  const completedTurnItems = createMemo(() => {
     const completedTurns = currentSessionCompletedTurns();
-    // The last completed turn is always expanded — it provides context whether
-    // the agent is idle (no live groups) or actively streaming (live groups present).
     const elidableTurns = completedTurns.slice(0, -1);
-    const lastCompletedTurn = completedTurns[completedTurns.length - 1] as typeof completedTurns[number] | undefined;
-    const completedTurnItems = buildTurnItems(elidableTurns, expandedTurnKeys(), currentSessionKey());
-    const lastTurnItems: MsgItem[] = lastCompletedTurn
-      ? lastCompletedTurn.groups.map((g, j) => ({ kind: "group" as const, group: g, isLive: false, key: `last-g${j}` }))
-      : [];
-    const liveItems: MsgItem[] = liveGroups.map((g, j) => ({
+    return buildTurnItems(elidableTurns, expandedTurnKeys(), currentSessionKey());
+  });
+  // Last completed turn is always expanded.
+  const lastTurnItems = createMemo((): MsgItem[] => {
+    const completedTurns = currentSessionCompletedTurns();
+    const last = completedTurns[completedTurns.length - 1];
+    if (!last) return [];
+    return last.groups.map((g, j) => ({ kind: "group" as const, group: g, isLive: false, key: `last-g${j}` }));
+  });
+  // Session boundary item for the current session.
+  const sessionBoundaryItems = createMemo((): MsgItem[] => {
+    const boundaryEv = currentSessionBoundaryEvent();
+    return boundaryEv ? [{ kind: "sessionBoundary", event: boundaryEv, key: "cur-sess-boundary" }] : [];
+  });
+  // Live turn groups: change on every frame.
+  const liveItems = createMemo((): MsgItem[] => {
+    const liveGroups = currentGroups();
+    return liveGroups.map((g, j) => ({
       kind: "group" as const,
       group: g,
       isLive: true,
       key: `live-g${j}`,
     }));
-    return [...pastSessionItems, ...sessionBoundaryItems, ...completedTurnItems, ...lastTurnItems, ...liveItems];
   });
+  // Flat item model: past sessions (elided) + current session boundary + current session
+  // completed turns (elided) + last completed turn (always expanded) + live turn groups.
+  const items = createMemo((): MsgItem[] => [
+    ...pastSessionItems(),
+    ...sessionBoundaryItems(),
+    ...completedTurnItems(),
+    ...lastTurnItems(),
+    ...liveItems(),
+  ]);
 
   // Last ask group: only the most recent ask is interactive.
   // Flatten all groups from all sessions + current live turn for ask detection.
