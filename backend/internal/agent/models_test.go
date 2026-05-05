@@ -32,6 +32,28 @@ func TestSortModels(t *testing.T) {
 		}
 	})
 
+	t.Run("blacklist", func(t *testing.T) {
+		input := []string{
+			"openai/gpt-5.4",
+			"openai/o4-mini",
+			"openai/o4",
+			"openrouter/anthropic/claude-opus-4.6",
+			"openrouter/allenai/olmo-4",
+			"openrouter/cohere/command-r-plus-08-2024",
+			"openrouter/nvidia/llama-3.1-nemotron-70b",
+			"openrouter/x-ai/grok-4.3",
+		}
+		got := SortModels(input)
+		want := []string{
+			"openai/gpt-5.4",
+			"openrouter/anthropic/claude-opus-4.6",
+			"openrouter/x-ai/grok-4.3",
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("got  %v\nwant %v", got, want)
+		}
+	})
+
 	t.Run("empty", func(t *testing.T) {
 		got := SortModels(nil)
 		if len(got) != 0 {

@@ -1,4 +1,5 @@
-// Model list sorting: latest version per family, superseded versions dropped.
+// Model list sorting: blacklist filtering, then latest version per family
+// deduplication. Superseded versions and blacklisted prefixes are dropped.
 package agent
 
 import (
@@ -7,6 +8,31 @@ import (
 	"strconv"
 	"strings"
 )
+
+// modelBlacklist contains model prefixes that are always excluded from the
+// sorted model list (junky or unusable aggregator models).
+var modelBlacklist = []string{
+	"google/gemini-live",
+	"openai/o4",
+	"openrouter/ai21/",
+	"openrouter/allenai/",
+	"openrouter/amazon/",
+	"openrouter/arcee-ai/",
+	"openrouter/cohere/",
+	"openrouter/ibm-granite/",
+	"openrouter/inception/",
+	"openrouter/kwaipilot/",
+	"openrouter/nvidia/",
+	"openrouter/poolside/",
+	"openrouter/prime-intellect/",
+	"openrouter/rekaai/",
+	"openrouter/relace/",
+	"openrouter/sao10k/",
+	"openrouter/stepfun/",
+	"openrouter/thedrummer/",
+	"openrouter/tngtech/",
+	"openrouter/upstage/",
+}
 
 var modelVersionRegex = regexp.MustCompile(`(\D+)([0-9.]+)`)
 
@@ -19,9 +45,20 @@ type modelEntry struct {
 }
 
 // SortModels returns models with version deduplication: only the latest
-// version per family key is kept. Models without parseable versions are
-// preserved as-is. Output is sorted alphabetically.
+// version per family key is kept. Models matching a modelBlacklist prefix
+// are dropped. Models without parseable versions are preserved as-is.
+// Output is sorted alphabetically.
 func SortModels(models []string) []string {
+	// Filter out blacklisted models.
+	models = slices.DeleteFunc(models, func(id string) bool {
+		for _, prefix := range modelBlacklist {
+			if strings.HasPrefix(id, prefix) {
+				return true
+			}
+		}
+		return false
+	})
+
 	entries := make([]modelEntry, len(models))
 	for i, id := range models {
 		_, key, ver, hasVer := parseModelVersion(id)

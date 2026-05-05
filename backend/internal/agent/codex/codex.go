@@ -106,8 +106,9 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		return nil, fmt.Errorf("codex handshake: %w", err)
 	}
 	if len(models) > 0 {
+		sorted := agent.SortModels(models)
 		b.mu.Lock()
-		b.ModelList = models
+		b.ModelList = sorted
 		b.mu.Unlock()
 	}
 
