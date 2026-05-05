@@ -28,6 +28,13 @@
   letter-spacing: 0.02em;
 }
 
+.providerLogo {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  display: block;
+}
+
 .providerBadges {
   display: inline-flex;
   gap: 0.25rem;

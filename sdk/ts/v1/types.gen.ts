@@ -842,6 +842,7 @@ export interface QuotaExtraUsage {
 export interface ProviderQuota {
   provider: string; // "anthropic", "deepseek", "gemini", "openai", "codex", "openrouter", …
   label: string; // human-readable: "Anthropic", "DeepSeek", …
+  logoUrl: string; // absolute URL path to provider SVG, e.g. "/logos/anthropic.svg"
   authKind: string; // "oauth" or "apikey"
   rateLimits?: QuotaRateLimit[];
   balance?: QuotaBalance;

@@ -758,6 +758,8 @@ public struct ProviderQuota: Codable {
     public let provider: String
     /// human-readable: "Anthropic", "DeepSeek", …
     public let label: String
+    /// absolute URL path to provider SVG, e.g. "/logos/anthropic.svg"
+    public let logoUrl: String
     /// "oauth" or "apikey"
     public let authKind: String
     public let rateLimits: [QuotaRateLimit]?

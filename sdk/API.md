@@ -908,6 +908,7 @@ ProviderQuota is the quota data for one provider.
 |-------|------|-------------|----------|
 | `provider` | `string` | "anthropic", "deepseek", "gemini", "openai", "codex", "openrouter", … | yes |
 | `label` | `string` | human-readable: "Anthropic", "DeepSeek", … | yes |
+| `logoUrl` | `string` | absolute URL path to provider SVG, e.g. "/logos/anthropic.svg" | yes |
 | `authKind` | `string` | "oauth" or "apikey" | yes |
 | `rateLimits` | `QuotaRateLimit[]` |  |  |
 | `balance` | `QuotaBalance` |  |  |

@@ -6,9 +6,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.Image
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
@@ -17,8 +19,18 @@ import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -28,9 +40,12 @@ import com.caic.sdk.v1.QuotaBalance
 import com.caic.sdk.v1.QuotaExtraUsage
 import com.caic.sdk.v1.QuotaRateLimit
 import com.caic.sdk.v1.UsageResp
+import com.caverock.androidsvg.SVG
 import com.fghbuild.caic.ui.theme.appColors
 import com.fghbuild.caic.util.currencySign
 import com.fghbuild.caic.util.formatBalance
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private data class BadgeColors(val bg: Color, val fg: Color)
 
@@ -45,17 +60,51 @@ private fun pctColor(pct: Double): BadgeColors {
 }
 
 @Composable
-fun UsageBadges(usage: UsageResp) {
+fun UsageBadges(usage: UsageResp, serverURL: String = "", modifier: Modifier = Modifier) {
     FlowRow(
+        modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        usage.providers.forEach { pq -> ProviderPill(pq) }
+        ProviderPills(usage, serverURL)
     }
 }
 
 @Composable
-private fun ProviderPill(pq: ProviderQuota) {
+fun ProviderPills(usage: UsageResp, serverURL: String) {
+    usage.providers.forEach { pq -> ProviderPill(pq, serverURL) }
+}
+
+@Composable
+private fun SvgUrlImage(url: String, contentDescription: String?, modifier: Modifier = Modifier) {
+    var bitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    val density = LocalDensity.current
+    val sizePx = with(density) { 12.dp.toPx().toInt() }
+    LaunchedEffect(url) {
+        try {
+            val svgText = withContext(Dispatchers.IO) { java.net.URL(url).readText() }
+            val svg = SVG.getFromString(svgText)
+            val bm: android.graphics.Bitmap = android.graphics.Bitmap.createBitmap(
+                sizePx, sizePx, android.graphics.Bitmap.Config.ARGB_8888,
+            )
+            val canvas = android.graphics.Canvas(bm)
+            svg.renderToCanvas(canvas, android.graphics.RectF(0f, 0f, sizePx.toFloat(), sizePx.toFloat()))
+            bitmap = bm
+        } catch (_: Exception) {
+        }
+    }
+    bitmap?.let {
+        Image(
+            painter = BitmapPainter(it.asImageBitmap()),
+            contentDescription = contentDescription,
+            modifier = modifier,
+            contentScale = ContentScale.Fit,
+        )
+    }
+}
+
+@Composable
+private fun ProviderPill(pq: ProviderQuota, serverURL: String) {
     val pillBg = MaterialTheme.colorScheme.surfaceVariant
     val pillBorder = Color(0xFFDDDDDD)
     Row(
@@ -64,7 +113,15 @@ private fun ProviderPill(pq: ProviderQuota) {
             .border(0.5.dp, pillBorder, RoundedCornerShape(4.dp))
             .padding(horizontal = 5.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (pq.logoUrl.isNotBlank() && serverURL.isNotBlank()) {
+            SvgUrlImage(
+                url = serverURL.trimEnd('/') + "/" + pq.logoUrl.trimStart('/'),
+                contentDescription = pq.label,
+                modifier = Modifier.size(12.dp),
+            )
+        }
         pq.rateLimits?.forEach { rl -> RateLimitBadge(pq.label, rl) }
         pq.balance?.let { BalanceBadge(pq.label, it) }
         pq.extraUsage?.let { ExtraUsageBadge(pq.label, it) }

@@ -25,6 +25,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -114,34 +117,46 @@ fun TaskListScreen(
     Scaffold(
         modifier = modifier,
         topBar = {
-            TopAppBar(
-                title = { Text("caic", style = MaterialTheme.typography.titleMedium) },
-                actions = {
-                    state.usage?.let { UsageBadges(it) }
-                    if (state.serverConfigured) {
-                        ConnectionDot(connected = state.connected)
+            Row(
+                modifier = Modifier
+                    .statusBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("caic", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.width(8.dp))
+                FlowRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    state.usage?.let {
+                        ProviderPills(it, state.serverURL)
                     }
-                    val user = state.user
-                    if (user != null) {
-                        UserAvatar(
-                            username = user.username,
-                            avatarURL = user.avatarURL,
-                            onSettings = onNavigateToSettings,
-                            onLogout = { viewModel.logout() },
-                        )
-                    } else {
-                        TooltipBox(
-                            positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
-                            tooltip = { PlainTooltip { Text("Settings") } },
-                            state = rememberTooltipState(),
-                        ) {
-                            IconButton(onClick = onNavigateToSettings) {
-                                Icon(Icons.Default.Settings, contentDescription = "Settings")
-                            }
+                }
+                if (state.serverConfigured) {
+                    ConnectionDot(connected = state.connected)
+                }
+                val user = state.user
+                if (user != null) {
+                    UserAvatar(
+                        username = user.username,
+                        avatarURL = user.avatarURL,
+                        onSettings = onNavigateToSettings,
+                        onLogout = { viewModel.logout() },
+                    )
+                } else {
+                    TooltipBox(
+                        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                        tooltip = { PlainTooltip { Text("Settings") } },
+                        state = rememberTooltipState(),
+                    ) {
+                        IconButton(onClick = onNavigateToSettings) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings")
                         }
                     }
-                },
-            )
+                }
+            }
         },
     ) { padding ->
         when {

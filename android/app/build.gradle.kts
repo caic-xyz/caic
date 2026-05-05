@@ -94,6 +94,9 @@ dependencies {
     implementation(libs.multiplatform.markdown.renderer.m3)
     implementation(libs.multiplatform.markdown.renderer.coil3)
 
+    // SVG rendering
+    implementation("com.caverock:androidsvg:1.4")
+
     // Networking & serialization (used by TaskRepository for SSE)
     implementation(libs.okhttp)
     implementation(libs.okhttp.sse)

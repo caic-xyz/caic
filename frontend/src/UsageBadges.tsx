@@ -63,10 +63,21 @@ function RateLimitBadge(props: { rl: QuotaRateLimit; now: Accessor<number>; labe
   );
 }
 
+function ProviderIcon(props: { logoUrl?: string; label: string }) {
+  return (
+    <Show
+      when={props.logoUrl}
+      fallback={<span class={styles.providerLabel}>{props.label}</span>}
+    >
+      {(url) => <img class={styles.providerLogo} src={url()} alt={props.label} />}
+    </Show>
+  );
+}
+
 function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
   return (
     <span class={styles.providerPill}>
-      <span class={styles.providerLabel}>{props.pq.label}</span>
+      <ProviderIcon logoUrl={props.pq.logoUrl} label={props.pq.label} />
       <span class={styles.providerBadges}>
         <For each={props.pq.rateLimits ?? []}>
           {(rl) => <RateLimitBadge rl={rl} now={props.now} label={props.pq.label} />}

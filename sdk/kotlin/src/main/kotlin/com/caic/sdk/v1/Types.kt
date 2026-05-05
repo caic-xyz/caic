@@ -676,6 +676,7 @@ data class QuotaExtraUsage(
 data class ProviderQuota(
     val provider: String,
     val label: String,
+    val logoUrl: String,
     val authKind: String,
     val rateLimits: List<QuotaRateLimit>? = null,
     val balance: QuotaBalance? = null,

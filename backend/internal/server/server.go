@@ -299,6 +299,13 @@ func (s *Server) buildHandler() (http.Handler, error) {
 		slog.Info("pprof enabled", "url", "/debug/pprof/")
 	}
 
+	// Serve embedded provider logos (static, no auth).
+	logosFS, err := fs.Sub(frontend.Logos, "logos")
+	if err != nil {
+		return nil, err
+	}
+	mux.Handle("/logos/", http.StripPrefix("/logos/", http.FileServer(http.FS(logosFS))))
+
 	// Serve embedded frontend with SPA fallback and precompressed variants.
 	dist, err := fs.Sub(frontend.Files, "dist")
 	if err != nil {
