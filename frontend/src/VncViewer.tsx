@@ -31,8 +31,7 @@ export default function VncViewer(props: Props) {
     let rfb: InstanceType<typeof RFB>;
     try {
       rfb = new RFB(canvas, url);
-      rfb.scaleViewport = true;
-      rfb.resizeSession = false;
+      rfb.resizeSession = true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to connect");
       return;
