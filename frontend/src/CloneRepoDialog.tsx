@@ -22,8 +22,11 @@ export default function CloneRepoDialog(props: Props) {
   }
 
   return (
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events -- backdrop dismiss is supplementary to Cancel button and Escape key
-    <div class={styles.overlay} onClick={(e) => { if (e.target === e.currentTarget && !props.loading) props.onClose(); }}>
+    <div
+      class={styles.overlay}
+      onClick={(e) => { if (e.target === e.currentTarget && !props.loading) props.onClose(); }}
+      onKeyDown={(e) => { if (e.key === "Escape" && !props.loading) { e.preventDefault(); props.onClose(); } }}
+    >
       <div class={styles.dialog} role="dialog" aria-modal="true">
         <h2 class={styles.title}>Clone Repository</h2>
         <label class={styles.label}>
