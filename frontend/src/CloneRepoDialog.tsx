@@ -48,7 +48,7 @@ export default function CloneRepoDialog(props: Props) {
             class={styles.input}
             data-testid="clone-url"
             autofocus
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } if (e.key === "Escape") props.onClose(); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }}
           />
         </label>
         <label class={styles.label}>
@@ -61,7 +61,7 @@ export default function CloneRepoDialog(props: Props) {
             disabled={props.loading}
             class={styles.input}
             data-testid="clone-path"
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } if (e.key === "Escape") props.onClose(); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } }
           />
         </label>
         <Show when={props.error}><p class={styles.error}>{props.error}</p></Show>
