@@ -740,6 +740,11 @@ fun nextGrouped(prev: IncrementalGrouped, msgs: List<EventMessage>): Incremental
         return prev.copy(todos = todos, activeAgents = activeAgents)
     }
 
+    // NOTE: groupMessages is called on the entire current-turn message list (which grows
+    // monotonically between result events). For harnesses like pi that emit thousands of
+    // thinking_delta per turn, this is O(n²) per SSE batch. A future optimisation could
+    // make groupMessages incremental by caching mutable group state and only processing
+    // the new events, then re-running the merge pass on the expanded group list.
     val groups = groupMessages(currentSessionNewMsgs)
     val currentTurns = groupTurns(groups)
     val lastTurnComplete = currentTurns.lastOrNull()?.groups?.any { g ->

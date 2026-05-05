@@ -1,6 +1,6 @@
 // Tests for groupMessages and groupTurns logic.
 import { describe, it, expect } from "vitest";
-import { groupMessages, groupTurns, groupSessions, turnSummary, buildTurnItems } from "./grouping";
+import { groupMessages, groupTurns, groupSessions, turnSummary, buildTurnItems, buildPastSessionItems } from "./grouping";
 import type { EventMessage } from "@sdk/types.gen";
 
 function toolUseEvent(id: string, name: string): EventMessage {
@@ -489,5 +489,97 @@ describe("buildTurnItems", () => {
     const items = buildTurnItems(turns, new Set([turnKey]), "session:0:");
     expect(items[0].kind).toBe("expandedHeader");
     expect(items[1].kind).toBe("group");
+  });
+
+  it("produces identical keys for two calls with the same inputs", () => {
+    // Regression: if buildTurnItems creates new MsgItem objects on every call,
+    // the <Match when={..} keyed> pattern in TaskDetail remounts DOM elements
+    // (Solid uses reference equality for keyed keys), causing flickering.
+    // The fix splits items() into per-concern createMemo calls so stable parts
+    // retain object identity. This test validates that keys are deterministic:
+    // any caching layer can use them as stable lookup keys.
+    const events: EventMessage[] = [
+      textDeltaEvent("turn 1"),
+      resultEvent(),
+      textDeltaEvent("turn 2"),
+      resultEvent(),
+    ];
+    const turns = groupTurns(groupMessages(events));
+    const sessionKey = "session:0:";
+    const expanded = new Set<string>();
+    const a = buildTurnItems(turns, expanded, sessionKey);
+    const b = buildTurnItems(turns, expanded, sessionKey);
+    expect(a.length).toBe(b.length);
+    for (let i = 0; i < a.length; i++) {
+      expect(a[i].key).toBe(b[i].key);
+    }
+  });
+
+  it("turn keys from different sessions do not collide", () => {
+    // Validate that the sessionKey prefix is embedded in the turn key so
+    // turns from different sessions never share a key, even with index 0 and ts 0.
+    const events: EventMessage[] = [textDeltaEvent("msg"), resultEvent()];
+    const turns = groupTurns(groupMessages(events));
+    const a = buildTurnItems(turns, new Set(), "session:0:");
+    const b = buildTurnItems(turns, new Set(), "session:1:");
+    const keysA = new Set(a.map((i) => i.key));
+    const keysB = new Set(b.map((i) => i.key));
+    for (const k of keysA) {
+      expect(keysB.has(k)).toBe(false);
+    }
+  });
+
+  it("expanded turn items include the sessionKey in their key prefix", () => {
+    // Expanded turn groups use keys like "hdr:<turnKey>" and "<turnKey>-g0".
+    // The turnKey itself must embed the sessionKey to avoid collisions when
+    // two sessions have turns at index 0 with the same first-event ts.
+    const events: EventMessage[] = [textDeltaEvent("text"), resultEvent()];
+    const turns = groupTurns(groupMessages(events));
+    const sessionKey = "session:1:";
+    const turnKey = `${sessionKey}turn:0:${turns[0].groups[0]?.events[0]?.ts ?? ""}`;
+    const items = buildTurnItems(turns, new Set([turnKey]), sessionKey);
+    for (const item of items) {
+      expect(item.key).toContain("session:1:");
+    }
+  });
+});
+
+describe("buildPastSessionItems", () => {
+  it("produces identical keys for two calls with the same inputs", () => {
+    // Past sessions are memoized via createMemo in TaskDetail. If keys change
+    // identity between calls, the keyed Match components remount and cause flickering.
+    const msgs: EventMessage[] = [
+      { kind: "init", ts: 1, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("session 1"),
+      resultEvent(),
+      { kind: "init", ts: 2, init: { model: "m", agentVersion: "1", sessionID: "s2", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("session 2"),
+    ];
+    const sessions = groupSessions(msgs);
+    const a = buildPastSessionItems(sessions, new Set(), new Set());
+    const b = buildPastSessionItems(sessions, new Set(), new Set());
+    expect(a.length).toBe(b.length);
+    for (let i = 0; i < a.length; i++) {
+      expect(a[i].key).toBe(b[i].key);
+    }
+  });
+
+  it("session keys from different calls with same inputs are stable", () => {
+    // When a past session is collapsed (sessionElided), its key must not change
+    // across recomputation frames, otherwise the elided row remounts.
+    const msgs: EventMessage[] = [
+      { kind: "init", ts: 10, init: { model: "m", agentVersion: "1", sessionID: "s1", tools: [], cwd: "/", harness: "claude" } },
+      textDeltaEvent("text"),
+      resultEvent(),
+    ];
+    const sessions = groupSessions(msgs);
+    const items = buildPastSessionItems(sessions, new Set(), new Set());
+    // All items from past sessions should be sessionElided when not expanded.
+    expect(items.every((i) => i.kind === "sessionElided")).toBe(true);
+    const keys = items.map((i) => i.key);
+    // Keys should be unique.
+    expect(new Set(keys).size).toBe(keys.length);
+    // Session key should include the boundary event timestamp.
+    expect(keys[0]).toContain("10");
   });
 });

@@ -701,6 +701,52 @@ class GroupingTest {
             assertTrue(allEvents.any { it.kind == EventKinds.UserInput })
             assertTrue(allEvents.any { it.kind == EventKinds.TextDelta })
         }
+
+        t.run("currentSessionCompletedTurns has stable reference when no turn completes") {
+            // Regression: TaskDetailScreen uses remember(currentSessionCompletedTurns) to cache
+            // elidableCompletedTurns. If nextGrouped returns a new list reference on every call,
+            // remember invalidates and re-allocates dropLast(1) lists on every SSE batch.
+            // The frontend equivalent is createMemo wrapping buildTurnItems.
+            val msgs = listOf(
+                textDeltaEvent("msg", ts = 1),
+            )
+            val state1 = nextGrouped(IncrementalGrouped(), msgs)
+            assertNotNull(state1.currentTurn) // live turn, no result yet
+
+            // Add a thinking_delta — no turn completion, so completed turns must not change reference.
+            val moreMsgs = msgs + listOf(
+                EventMessage(kind = EventKinds.ThinkingDelta, ts = 2, thinkingDelta = com.caic.sdk.v1.EventThinkingDelta(text = "hmm")),
+            )
+            val state2 = nextGrouped(state1, moreMsgs)
+            assertEquals(0, state2.currentSessionCompletedTurns.size)
+            // Reference identity: same empty list reference from IncrementalGrouped default.
+            // The important guarantee is that it doesn't create a new object unnecessarily.
+            assertTrue(state2.currentSessionCompletedTurns === state1.currentSessionCompletedTurns)
+        }
+
+        t.run("currentSessionCompletedTurns reference changes only when a turn completes") {
+            val state1 = nextGrouped(
+                IncrementalGrouped(),
+                listOf(textDeltaEvent("turn 1", ts = 1), resultEvent(ts = 2)),
+            )
+            assertEquals(1, state1.currentSessionCompletedTurns.size)
+            val ref1 = state1.currentSessionCompletedTurns
+
+            // Add events for turn 2 (no result yet) — completed turns reference must NOT change.
+            val moreMsgs = listOf(
+                textDeltaEvent("turn 1", ts = 1), resultEvent(ts = 2),
+                textDeltaEvent("turn 2 start", ts = 3),
+            )
+            val state2 = nextGrouped(state1, moreMsgs)
+            assertEquals(1, state2.currentSessionCompletedTurns.size)
+            assertTrue(state2.currentSessionCompletedTurns === ref1)
+
+            // Complete turn 2 — reference must change (new element added).
+            val allMsgs = moreMsgs + resultEvent(ts = 4)
+            val state3 = nextGrouped(state2, allMsgs)
+            assertEquals(2, state3.currentSessionCompletedTurns.size)
+            assertTrue(state3.currentSessionCompletedTurns !== ref1)
+        }
     }
 
     // Helper to allow t.run("name") { ... } syntax for subtests within a single @Test method.

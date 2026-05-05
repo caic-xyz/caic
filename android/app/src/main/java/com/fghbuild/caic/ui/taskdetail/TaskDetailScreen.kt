@@ -752,8 +752,15 @@ private fun MessageList(
     var expandedToolGroups by remember { mutableStateOf(setOf<String>()) }
     // The last completed turn is always expanded to provide context for the current state,
     // whether the agent is idle (no live turn) or actively streaming.
-    val elidableCompletedTurns = currentSessionCompletedTurns.dropLast(1)
-    val lastExpandedTurn = currentSessionCompletedTurns.lastOrNull()
+    // Cached in remember so that dropLast/lastOrNull don't allocate new lists on every
+    // recomposition during streaming; currentSessionCompletedTurns has stable identity
+    // (same list reference) between turn completions, so remember returns the cached value.
+    val elidableCompletedTurns = remember(currentSessionCompletedTurns) {
+        currentSessionCompletedTurns.dropLast(1)
+    }
+    val lastExpandedTurn = remember(currentSessionCompletedTurns) {
+        currentSessionCompletedTurns.lastOrNull()
+    }
     // Completed items are stable during streaming: references are unchanged until a turn boundary,
     // so this remember block only recomputes then or on expansion.
     val completedItems = remember(
