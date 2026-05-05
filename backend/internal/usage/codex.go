@@ -1,5 +1,5 @@
-// Codex usage quota fetcher with caching, credential file watching, and
-// exponential backoff on errors.
+// Codex OAuth usage quota fetcher with caching, credential file watching,
+// and exponential backoff on errors. Implements ProviderFetcher.
 package usage
 
 import (
@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -20,36 +21,65 @@ import (
 
 const codexUsageAPIURL = "https://chatgpt.com/backend-api/wham/usage"
 
-// CodexFetcher fetches and caches Codex rate-limit usage data. It watches
-// ~/.codex/auth.json for changes and applies exponential backoff when fetches
-// fail.
+// codexWindowSnapshot mirrors a single Codex rate-limit window in the
+// usage API response.
+type codexWindowSnapshot struct {
+	UsedPercent        int `json:"used_percent"`
+	LimitWindowSeconds int `json:"limit_window_seconds"`
+	ResetAfterSeconds  int `json:"reset_after_seconds"`
+	ResetAt            int `json:"reset_at"`
+}
+
+// codexUsagePayload mirrors the Codex GET /backend-api/wham/usage response.
+type codexUsagePayload struct {
+	PlanType  string `json:"plan_type"`
+	RateLimit *struct {
+		PrimaryWindow   *codexWindowSnapshot `json:"primary_window"`
+		SecondaryWindow *codexWindowSnapshot `json:"secondary_window"`
+	} `json:"rate_limit"`
+	Credits *struct {
+		HasCredits bool   `json:"has_credits"`
+		Unlimited  bool   `json:"unlimited"`
+		Balance    string `json:"balance"`
+	} `json:"credits"`
+}
+
+// codexAuthJSON mirrors the Codex CLI auth.json structure.
+type codexAuthJSON struct {
+	Tokens struct {
+		AccessToken string `json:"access_token"`
+		AccountID   string `json:"account_id"`
+	} `json:"tokens"`
+}
+
+// CodexFetcher fetches and caches Codex rate-limit and credit usage data. It
+// watches ~/.codex/auth.json for token changes.
 type CodexFetcher struct {
-	client *http.Client
+	client   *http.Client
+	watcher  *fsnotify.Watcher
+	authPath string
 
 	mu        sync.Mutex
 	token     string
 	accountID string
-	cached    *v1.CodexUsage
-	fetchAt   time.Time     // when cached was last successfully fetched
-	backoff   time.Duration // current backoff; 0 means no backoff
-	errorAt   time.Time     // when the last error occurred
-	watcher   *fsnotify.Watcher
-	authPath  string // resolved path to auth.json
+	cached    *v1.ProviderQuota
+	fetchAt   time.Time
+	backoff   time.Duration
+	errorAt   time.Time
 }
 
-// NewCodexFetcher creates a fetcher and starts watching
-// ~/.codex/auth.json for token changes. Returns nil if the home directory
-// cannot be determined. The watcher goroutine exits when ctx is cancelled.
+// NewCodexFetcher creates a fetcher and starts watching ~/.codex/auth.json.
+// Returns nil if the home directory cannot be determined.
 func NewCodexFetcher(ctx context.Context) *CodexFetcher {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		slog.Warn("cannot determine home dir; codex usage disabled", "err", err)
+		slog.Warn("cannot determine home dir; Codex usage disabled", "err", err)
 		return nil
 	}
 	authPath := filepath.Join(home, ".codex", "auth.json")
-	token, accountID := readCodexAuthToken(authPath)
+	token, accountID := readCodexAuth(authPath)
 	if token == "" {
-		slog.Info("no Codex OAuth token found; codex usage endpoint disabled (will watch for credentials)")
+		slog.Info("no Codex OAuth token found; Codex usage disabled (will watch for credentials)")
 	}
 
 	f := &CodexFetcher{
@@ -60,9 +90,112 @@ func NewCodexFetcher(ctx context.Context) *CodexFetcher {
 	}
 
 	if err := f.startWatcher(ctx); err != nil {
-		slog.Warn("failed to watch codex auth file", "err", err)
+		slog.Warn("failed to watch Codex auth file", "err", err)
 	}
 	return f
+}
+
+// Provider returns the provider identifier.
+func (f *CodexFetcher) Provider() string { return "codex" }
+
+// Label returns the human-readable provider name.
+func (f *CodexFetcher) Label() string { return "Codex" }
+
+// AuthKind returns the authentication method.
+func (f *CodexFetcher) AuthKind() string { return "oauth" }
+
+// Get returns the cached quota data, refreshing if stale.
+func (f *CodexFetcher) Get(ctx context.Context) *v1.ProviderQuota {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.token == "" {
+		return nil
+	}
+	if f.cached != nil && time.Since(f.fetchAt) < CacheTTL {
+		return f.cached
+	}
+	if f.backoff > 0 && time.Since(f.errorAt) < f.backoff {
+		return f.cached
+	}
+	resp, err := f.fetch(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to fetch Codex usage", "err", err)
+		f.errorAt = time.Now()
+		if f.backoff == 0 {
+			f.backoff = backoffMin
+		} else {
+			f.backoff *= 2
+			if f.backoff > backoffMax {
+				f.backoff = backoffMax
+			}
+		}
+		return f.cached
+	}
+	f.backoff = 0
+	f.cached = resp
+	f.fetchAt = time.Now()
+	return resp
+}
+
+func (f *CodexFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, codexUsageAPIURL, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+f.token)
+	req.Header.Set("User-Agent", "caic")
+	if f.accountID != "" {
+		req.Header.Set("Chatgpt-Account-Id", f.accountID)
+	}
+
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("codex usage API returned %d: %s", resp.StatusCode, body)
+	}
+
+	var raw codexUsagePayload
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode Codex usage: %w", err)
+	}
+
+	out := &v1.ProviderQuota{
+		Provider: f.Provider(),
+		Label:    f.Label(),
+		AuthKind: f.AuthKind(),
+	}
+	if raw.RateLimit != nil {
+		if w := raw.RateLimit.PrimaryWindow; w != nil {
+			out.RateLimits = append(out.RateLimits, v1.QuotaRateLimit{
+				Window:   "primary",
+				UsedPct:  float64(w.UsedPercent),
+				ResetsAt: time.Unix(int64(w.ResetAt), 0).UTC(),
+			})
+		}
+		if w := raw.RateLimit.SecondaryWindow; w != nil {
+			out.RateLimits = append(out.RateLimits, v1.QuotaRateLimit{
+				Window:   "secondary",
+				UsedPct:  float64(w.UsedPercent),
+				ResetsAt: time.Unix(int64(w.ResetAt), 0).UTC(),
+			})
+		}
+	}
+	if raw.Credits != nil && raw.Credits.Balance != "" {
+		bal, _ := strconv.ParseFloat(raw.Credits.Balance, 64)
+		out.Balance = v1.QuotaBalance{
+			Currency: "USD",
+			Total:    bal,
+		}
+		if !raw.Credits.HasCredits && !raw.Credits.Unlimited {
+			out.Balance.Total = 0
+		}
+	}
+	return out, nil
 }
 
 func (f *CodexFetcher) startWatcher(ctx context.Context) error {
@@ -102,13 +235,13 @@ func (f *CodexFetcher) watchLoop(ctx context.Context) {
 			if !ok {
 				return
 			}
-			slog.Warn("codex auth watcher error", "err", err)
+			slog.Warn("Codex auth watcher error", "err", err)
 		}
 	}
 }
 
 func (f *CodexFetcher) onAuthChanged() {
-	token, accountID := readCodexAuthToken(f.authPath)
+	token, accountID := readCodexAuth(f.authPath)
 	if token == "" {
 		return
 	}
@@ -123,142 +256,15 @@ func (f *CodexFetcher) onAuthChanged() {
 	f.errorAt = time.Time{}
 	f.cached = nil
 	f.fetchAt = time.Time{}
-	slog.Info("codex credentials updated, token refreshed")
+	slog.Info("Codex credentials updated, token refreshed")
 }
 
-// Get returns the cached Codex usage data, refreshing if stale.
-func (f *CodexFetcher) Get(ctx context.Context) *v1.CodexUsage {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.token == "" {
-		return nil
-	}
-	if f.cached != nil && time.Since(f.fetchAt) < CacheTTL {
-		return f.cached
-	}
-	if f.backoff > 0 && time.Since(f.errorAt) < f.backoff {
-		return f.cached
-	}
-	resp, err := f.fetch(ctx)
-	if err != nil {
-		slog.Warn("failed to fetch codex usage", "err", err)
-		f.errorAt = time.Now()
-		if f.backoff == 0 {
-			f.backoff = backoffMin
-		} else {
-			f.backoff *= 2
-			if f.backoff > backoffMax {
-				f.backoff = backoffMax
-			}
-		}
-		return f.cached
-	}
-	f.backoff = 0
-	f.cached = resp
-	f.fetchAt = time.Now()
-	return resp
-}
-
-func (f *CodexFetcher) fetch(ctx context.Context) (*v1.CodexUsage, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, codexUsageAPIURL, http.NoBody)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+f.token)
-	req.Header.Set("User-Agent", "caic")
-	if f.accountID != "" {
-		req.Header.Set("Chatgpt-Account-Id", f.accountID)
-	}
-
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("codex usage API returned %d: %s", resp.StatusCode, body)
-	}
-
-	var raw codexUsagePayload
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("decode codex usage: %w", err)
-	}
-
-	out := &v1.CodexUsage{PlanType: raw.PlanType}
-	if raw.RateLimit != nil {
-		if raw.RateLimit.PrimaryWindow != nil {
-			out.Primary = &v1.CodexRateLimitWindow{
-				UsedPercent:        raw.RateLimit.PrimaryWindow.UsedPercent,
-				LimitWindowSeconds: raw.RateLimit.PrimaryWindow.LimitWindowSeconds,
-				ResetAfterSeconds:  raw.RateLimit.PrimaryWindow.ResetAfterSeconds,
-				ResetAt:            raw.RateLimit.PrimaryWindow.ResetAt,
-			}
-		}
-		if raw.RateLimit.SecondaryWindow != nil {
-			out.Secondary = &v1.CodexRateLimitWindow{
-				UsedPercent:        raw.RateLimit.SecondaryWindow.UsedPercent,
-				LimitWindowSeconds: raw.RateLimit.SecondaryWindow.LimitWindowSeconds,
-				ResetAfterSeconds:  raw.RateLimit.SecondaryWindow.ResetAfterSeconds,
-				ResetAt:            raw.RateLimit.SecondaryWindow.ResetAt,
-			}
-		}
-	}
-	if raw.Credits != nil {
-		out.Credits = v1.CodexCredits{
-			HasCredits: raw.Credits.HasCredits,
-			Unlimited:  raw.Credits.Unlimited,
-			Balance:    raw.Credits.Balance,
-		}
-	}
-	return out, nil
-}
-
-// readCodexAuthToken reads the OAuth access token from ~/.codex/auth.json.
-func readCodexAuthToken(authPath string) (token, accountID string) {
-	data, err := os.ReadFile(authPath) //nolint:gosec // authPath is derived from os.UserHomeDir, not user input
+func readCodexAuth(authPath string) (token, accountID string) {
+	data, err := os.ReadFile(authPath) //nolint:gosec // authPath from os.UserHomeDir
 	if err != nil {
 		return "", ""
 	}
 	var auth codexAuthJSON
 	_ = json.Unmarshal(data, &auth)
 	return auth.Tokens.AccessToken, auth.Tokens.AccountID
-}
-
-// codexAuthJSON mirrors the Codex CLI auth.json structure.
-type codexAuthJSON struct {
-	Tokens codexTokenData `json:"tokens"`
-}
-
-type codexTokenData struct {
-	AccessToken string `json:"access_token"`
-	AccountID   string `json:"account_id"`
-}
-
-// codexUsagePayload mirrors the Codex RateLimitStatusPayload response.
-type codexUsagePayload struct {
-	PlanType  string                 `json:"plan_type"`
-	RateLimit *codexRateLimitDetails `json:"rate_limit"`
-	Credits   *codexCreditDetails    `json:"credits"`
-}
-
-type codexRateLimitDetails struct {
-	Allowed         bool                 `json:"allowed"`
-	LimitReached    bool                 `json:"limit_reached"`
-	PrimaryWindow   *codexWindowSnapshot `json:"primary_window"`
-	SecondaryWindow *codexWindowSnapshot `json:"secondary_window"`
-}
-
-type codexWindowSnapshot struct {
-	UsedPercent        int `json:"used_percent"`
-	LimitWindowSeconds int `json:"limit_window_seconds"`
-	ResetAfterSeconds  int `json:"reset_after_seconds"`
-	ResetAt            int `json:"reset_at"`
-}
-
-type codexCreditDetails struct {
-	HasCredits bool   `json:"has_credits"`
-	Unlimited  bool   `json:"unlimited"`
-	Balance    string `json:"balance"`
 }

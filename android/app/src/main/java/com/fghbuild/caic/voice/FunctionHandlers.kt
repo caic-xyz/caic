@@ -16,6 +16,7 @@ import com.caic.sdk.v1.Task
 import com.caic.sdk.v1.WebFetchReq
 import com.fghbuild.caic.data.TaskRepository
 import com.fghbuild.caic.data.TaskSSEEvent
+import com.fghbuild.caic.util.formatBalance
 import com.fghbuild.caic.util.formatCost
 import com.fghbuild.caic.util.formatElapsed
 import kotlinx.coroutines.flow.takeWhile
@@ -208,14 +209,19 @@ class FunctionHandlers(
         } else {
             "\$${String.format(java.util.Locale.US, "%.2f", cost)}"
         }
-        fun tokens(w: com.caic.sdk.v1.ClaudeUsageWindow) = w.inputTokens + w.outputTokens
         val parts = mutableListOf<String>()
-        usage.claude?.let { claude ->
-            parts.add("5-hour cost: ${fmt(claude.fiveHour.costUSD)} (${tokens(claude.fiveHour)} tokens)")
-            parts.add("7-day cost: ${fmt(claude.sevenDay.costUSD)} (${tokens(claude.sevenDay)} tokens)")
+        for (w in usage.local.windows) {
+            parts.add("${w.duration} cost: ${fmt(w.costUSD)} (${w.inputTokens + w.outputTokens} tokens)")
         }
-        usage.codex?.let { codex ->
-            parts.add("Codex plan: ${codex.planType}, balance: \$${codex.credits.balance}")
+        for (pq in usage.providers) {
+            val pParts = mutableListOf<String>()
+            pq.balance?.let { bal ->
+                pParts.add(formatBalance(bal.currency, bal.total))
+            }
+            pq.rateLimits?.forEach { rl ->
+                pParts.add("${rl.window}: ${rl.usedPct.toInt()}%")
+            }
+            if (pParts.isNotEmpty()) parts.add("${pq.label}: ${pParts.joinToString(", ")}")
         }
         if (parts.isEmpty()) parts.add("No usage data available.")
         return textResult(parts.joinToString("\n"))

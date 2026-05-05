@@ -720,61 +720,69 @@ public struct TaskListEvent: Codable {
     public let warning: String?
 }
 
-/// ClaudeUsageWindow represents a single Claude usage window (5-hour or 7-day)
-/// combining local task cost with OAuth rate-limit quota.
-public struct ClaudeUsageWindow: Codable {
-    /// Local task cost (always populated).
+/// QuotaRateLimit is a single rate-limit window snapshot from any provider.
+public struct QuotaRateLimit: Codable {
+    /// "5h", "7d", "primary", "secondary", "rpm", "tpd", …
+    public let window: String
+    /// 0–100
+    public let usedPct: Double
+    /// zero when unknown
+    public let resetsAt: ISOTimestamp?
+}
+
+/// QuotaBalance is a balance/credit snapshot from any provider.
+public struct QuotaBalance: Codable {
+    /// "USD", "CNY", "credits", …
+    public let currency: String
+    /// total available balance
+    public let total: Double
+    /// unexpired promotional/grant balance
+    public let granted: Double?
+    /// self-funded recharge balance
+    public let toppedUp: Double?
+}
+
+/// QuotaExtraUsage is pay-as-you-go usage info (Anthropic-style extra credits).
+public struct QuotaExtraUsage: Codable {
+    /// "USD", "CNY", …
+    public let currency: String
+    public let isEnabled: Bool
+    public let usedCredits: Double
+    public let monthlyLimit: Double
+    public let usedPct: Double
+}
+
+/// ProviderQuota is the quota data for one provider.
+public struct ProviderQuota: Codable {
+    /// "anthropic", "deepseek", "gemini", "openai", "codex", "openrouter", …
+    public let provider: String
+    /// human-readable: "Anthropic", "DeepSeek", …
+    public let label: String
+    /// "oauth" or "apikey"
+    public let authKind: String
+    public let rateLimits: [QuotaRateLimit]?
+    public let balance: QuotaBalance?
+    public let extraUsage: QuotaExtraUsage?
+}
+
+/// LocalWindow is the aggregated local cost for a rolling time window.
+public struct LocalWindow: Codable {
+    /// "1h", "6h", "24h"
+    public let duration: String
     public let costUSD: Double
     public let inputTokens: Int
     public let outputTokens: Int
-    /// OAuth rate-limit quota; zero when OAuth unavailable.
-    public let utilization: Double
-    public let resetsAt: String
 }
 
-/// ClaudeExtraUsage represents the Claude extra (pay-as-you-go) usage state.
-public struct ClaudeExtraUsage: Codable {
-    public let isEnabled: Bool
-    public let monthlyLimit: Double
-    public let usedCredits: Double
-    public let utilization: Double
-}
-
-/// ClaudeUsage holds local task cost and rate-limit quota data for Claude.
-public struct ClaudeUsage: Codable {
-    public let fiveHour: ClaudeUsageWindow
-    public let sevenDay: ClaudeUsageWindow
-    public let extraUsage: ClaudeExtraUsage
-}
-
-/// CodexRateLimitWindow represents a single Codex rate-limit window snapshot.
-public struct CodexRateLimitWindow: Codable {
-    public let usedPercent: Int
-    public let limitWindowSeconds: Int
-    public let resetAfterSeconds: Int
-    /// unix timestamp
-    public let resetAt: Int
-}
-
-/// CodexCredits represents Codex credit/balance information.
-public struct CodexCredits: Codable {
-    public let hasCredits: Bool
-    public let unlimited: Bool
-    public let balance: String
-}
-
-/// CodexUsage holds rate-limit quota data from the Codex usage API.
-public struct CodexUsage: Codable {
-    public let planType: String
-    public let primary: CodexRateLimitWindow?
-    public let secondary: CodexRateLimitWindow?
-    public let credits: CodexCredits
+/// LocalUsage is the aggregated cost across all tasks within recent time windows.
+public struct LocalUsage: Codable {
+    public let windows: [LocalWindow]
 }
 
 /// UsageResp is the response for GET /api/v1/usage.
 public struct UsageResp: Codable {
-    public let claude: ClaudeUsage?
-    public let codex: CodexUsage?
+    public let providers: [ProviderQuota]
+    public let local: LocalUsage
 }
 
 /// VoiceTokenResp is the response for GET /api/v1/voice/token.

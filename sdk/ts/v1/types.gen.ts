@@ -382,7 +382,9 @@ export interface EventStats {
 //////////
 // source: types.go
 /*
-Exported request and response types for the caic API.
+Exported request and response types for the caic API, including
+usage/quota provider-agnostic types (ProviderQuota, QuotaRateLimit,
+QuotaBalance, QuotaExtraUsage, LocalUsage).
 */
 
 /**
@@ -808,71 +810,64 @@ export interface SyncResp {
   prNumber?: number /* int */; // non-zero if a PR/MR was created
 }
 /**
- * ClaudeUsage holds local task cost and rate-limit quota data for Claude.
+ * QuotaRateLimit is a single rate-limit window snapshot from any provider.
  */
-export interface ClaudeUsage {
-  fiveHour: ClaudeUsageWindow;
-  sevenDay: ClaudeUsageWindow;
-  extraUsage: ClaudeExtraUsage;
+export interface QuotaRateLimit {
+  window: string; // "5h", "7d", "primary", "secondary", "rpm", "tpd", …
+  usedPct: number /* float64 */; // 0–100
+  resetsAt?: ISOTimestamp; // zero when unknown
 }
 /**
- * ClaudeUsageWindow represents a single Claude usage window (5-hour or 7-day)
- * combining local task cost with OAuth rate-limit quota.
+ * QuotaBalance is a balance/credit snapshot from any provider.
  */
-export interface ClaudeUsageWindow {
-  /**
-   * Local task cost (always populated).
-   */
+export interface QuotaBalance {
+  currency: string; // "USD", "CNY", "credits", …
+  total: number /* float64 */; // total available balance
+  granted?: number /* float64 */; // unexpired promotional/grant balance
+  toppedUp?: number /* float64 */; // self-funded recharge balance
+}
+/**
+ * QuotaExtraUsage is pay-as-you-go usage info (Anthropic-style extra credits).
+ */
+export interface QuotaExtraUsage {
+  currency: string; // "USD", "CNY", …
+  isEnabled: boolean;
+  usedCredits: number /* float64 */;
+  monthlyLimit: number /* float64 */;
+  usedPct: number /* float64 */;
+}
+/**
+ * ProviderQuota is the quota data for one provider.
+ */
+export interface ProviderQuota {
+  provider: string; // "anthropic", "deepseek", "gemini", "openai", "codex", "openrouter", …
+  label: string; // human-readable: "Anthropic", "DeepSeek", …
+  authKind: string; // "oauth" or "apikey"
+  rateLimits?: QuotaRateLimit[];
+  balance?: QuotaBalance;
+  extraUsage?: QuotaExtraUsage;
+}
+/**
+ * LocalWindow is the aggregated local cost for a rolling time window.
+ */
+export interface LocalWindow {
+  duration: string; // "1h", "6h", "24h"
   costUSD: number /* float64 */;
   inputTokens: number /* int */;
   outputTokens: number /* int */;
-  /**
-   * OAuth rate-limit quota; zero when OAuth unavailable.
-   */
-  utilization: number /* float64 */;
-  resetsAt: string;
 }
 /**
- * ClaudeExtraUsage represents the Claude extra (pay-as-you-go) usage state.
+ * LocalUsage is the aggregated cost across all tasks within recent time windows.
  */
-export interface ClaudeExtraUsage {
-  isEnabled: boolean;
-  monthlyLimit: number /* float64 */;
-  usedCredits: number /* float64 */;
-  utilization: number /* float64 */;
-}
-/**
- * CodexRateLimitWindow represents a single Codex rate-limit window snapshot.
- */
-export interface CodexRateLimitWindow {
-  usedPercent: number /* int */;
-  limitWindowSeconds: number /* int */;
-  resetAfterSeconds: number /* int */;
-  resetAt: number /* int */; // unix timestamp
-}
-/**
- * CodexCredits represents Codex credit/balance information.
- */
-export interface CodexCredits {
-  hasCredits: boolean;
-  unlimited: boolean;
-  balance: string;
-}
-/**
- * CodexUsage holds rate-limit quota data from the Codex usage API.
- */
-export interface CodexUsage {
-  planType: string;
-  primary?: CodexRateLimitWindow;
-  secondary?: CodexRateLimitWindow;
-  credits: CodexCredits;
+export interface LocalUsage {
+  windows: LocalWindow[];
 }
 /**
  * UsageResp is the response for GET /api/v1/usage.
  */
 export interface UsageResp {
-  claude?: ClaudeUsage;
-  codex?: CodexUsage;
+  providers: ProviderQuota[];
+  local: LocalUsage;
 }
 /**
  * VoiceTokenResp is the response for GET /api/v1/voice/token.

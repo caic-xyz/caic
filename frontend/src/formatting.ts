@@ -2,6 +2,18 @@
 // Note: formatElapsed takes milliseconds (JS timestamps); the Android
 // equivalent takes seconds. Call formatElapsed(seconds * 1000) for API durations.
 
+/** Returns the currency symbol for a currency code. Unknown codes return "??". */
+export function currencySign(currency: string): string {
+  if (currency === "CNY") return "¥";
+  if (currency === "USD") return "$";
+  return "??";
+}
+
+/** Formats a monetary balance value. */
+export function formatBalance(currency: string, total: number): string {
+  return `${currencySign(currency)}${total.toFixed(2)}`;
+}
+
 export function formatCost(usd: number): string {
   return usd < 0.01 ? "<$0.01" : `$${usd.toFixed(2)}`;
 }

@@ -1,4 +1,6 @@
-// Local task cost aggregation for usage reporting.
+// Local task cost aggregation for usage reporting. Computes rolling-window
+// cost and token sums across all tasks, regardless of harness or provider. Computes rolling-window
+// cost and token sums across all tasks, regardless of harness or provider.
 package server
 
 import (
@@ -8,17 +10,28 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 )
 
-// computeClaudeUsage aggregates task cost and token usage within rolling
-// 5-hour and 7-day windows. Tasks are attributed to the window that contains
-// their StartedAt time. For running tasks without a final result, the current
-// live stats are used.
-func computeClaudeUsage(tasks map[string]*taskEntry, now time.Time) v1.ClaudeUsage {
-	cutoff5h := now.Add(-5 * time.Hour)
-	cutoff7d := now.Add(-7 * 24 * time.Hour)
+// localWindows defines the rolling time windows for local cost aggregation.
+var localWindows = []struct {
+	duration time.Duration
+	label    string
+}{
+	{1 * time.Hour, "1h"},
+	{6 * time.Hour, "6h"},
+	{24 * time.Hour, "24h"},
+}
 
-	var out v1.ClaudeUsage
+// computeLocalUsage aggregates task cost and token usage within rolling
+// time windows across all tasks. For running tasks without a final result,
+// the current live stats are used.
+func computeLocalUsage(tasks map[string]*taskEntry, now time.Time) v1.LocalUsage {
+	out := v1.LocalUsage{
+		Windows: make([]v1.LocalWindow, len(localWindows)),
+	}
+	for i, w := range localWindows {
+		out.Windows[i] = v1.LocalWindow{Duration: w.label}
+	}
 	for _, e := range tasks {
-		if e.task.StartedAt.IsZero() || !e.task.StartedAt.After(cutoff7d) {
+		if e.task.StartedAt.IsZero() {
 			continue
 		}
 		var costUSD float64
@@ -29,14 +42,13 @@ func computeClaudeUsage(tasks map[string]*taskEntry, now time.Time) v1.ClaudeUsa
 		} else {
 			costUSD, _, _, usage, _ = e.task.LiveStats()
 		}
-		total := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
-		out.SevenDay.CostUSD += costUSD
-		out.SevenDay.InputTokens += total
-		out.SevenDay.OutputTokens += usage.OutputTokens
-		if e.task.StartedAt.After(cutoff5h) {
-			out.FiveHour.CostUSD += costUSD
-			out.FiveHour.InputTokens += total
-			out.FiveHour.OutputTokens += usage.OutputTokens
+		totalInput := usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
+		for i, w := range localWindows {
+			if e.task.StartedAt.After(now.Add(-w.duration)) {
+				out.Windows[i].CostUSD += costUSD
+				out.Windows[i].InputTokens += totalInput
+				out.Windows[i].OutputTokens += usage.OutputTokens
+			}
 		}
 	}
 	return out

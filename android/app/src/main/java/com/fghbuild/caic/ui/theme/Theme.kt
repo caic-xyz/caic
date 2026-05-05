@@ -79,6 +79,8 @@ data class AppColors(
     val success: Color,         // #28A745  --color-success
     val successBg: Color,       // #D4EDDA  --color-success-bg
     val successText: Color,     // #155724  --color-success-text
+    val dangerBg: Color,        // #F8D7DA  --color-danger-bg
+    val dangerText: Color,      // #721C24  --color-danger-text
     val warningBg: Color,       // #FFF3CD  --color-warning-bg
     val warningBorder: Color,   // #FFC107  --color-warning-border
     val warningText: Color,     // #856404  --color-warning-text
@@ -112,6 +114,8 @@ private val LightAppColors = AppColors(
     success = Color(0xFF28A745),
     successBg = Color(0xFFD4EDDA),
     successText = Color(0xFF155724),
+    dangerBg = Color(0xFFF8D7DA),
+    dangerText = Color(0xFF721C24),
     warningBg = Color(0xFFFFF3CD),
     warningBorder = Color(0xFFFFC107),
     warningText = Color(0xFF856404),

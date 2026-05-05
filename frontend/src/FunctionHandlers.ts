@@ -17,7 +17,7 @@ import {
   botFixPR,
 } from "./api";
 import type { Task, EventMessage } from "@sdk/types.gen";
-import { formatCost, formatElapsed } from "./formatting";
+import { formatCost, formatElapsed, formatBalance } from "./formatting";
 import type { TaskNumberMap } from "./TaskNumberMap";
 
 type FunctionArgs = Record<string, unknown>;
@@ -268,19 +268,22 @@ export class FunctionHandlers {
   private async handleGetUsage(): Promise<Record<string, unknown>> {
     const usage = await getUsage();
     const pct = (v: number) => `${Math.floor(v)}%`;
+    const fmtUSD = (v: number) => `$${v.toFixed(2)}`;
     const lines: string[] = [];
-    if (usage.claude) {
-      lines.push(
-        `5-hour window: ${pct(usage.claude.fiveHour.utilization)} used, resets ${usage.claude.fiveHour.resetsAt}`,
-        `7-day window: ${pct(usage.claude.sevenDay.utilization)} used, resets ${usage.claude.sevenDay.resetsAt}`,
-      );
-      if (usage.claude.extraUsage.isEnabled) {
-        const usedDollars = Math.floor(usage.claude.extraUsage.usedCredits / 100);
-        const limitDollars = Math.floor(usage.claude.extraUsage.monthlyLimit / 100);
-        lines.push(`Extra usage: $${usedDollars} of $${limitDollars} monthly limit used`);
-      }
+    for (const w of usage.local.windows) {
+      lines.push(`${w.duration} cost: ${fmtUSD(w.costUSD)} (${w.inputTokens + w.outputTokens} tokens)`);
     }
-    if (lines.length === 0) lines.push("No Claude usage data available.");
+    for (const pq of usage.providers) {
+      const pParts: string[] = [];
+      if (pq.balance) {
+        pParts.push(formatBalance(pq.balance.currency, pq.balance.total));
+      }
+      for (const rl of pq.rateLimits ?? []) {
+        pParts.push(`${rl.window}: ${pct(rl.usedPct)}`);
+      }
+      if (pParts.length > 0) lines.push(`${pq.label}: ${pParts.join(", ")}`);
+    }
+    if (lines.length === 0) lines.push("No usage data available.");
     return textResult(lines.join("\n"));
   }
 

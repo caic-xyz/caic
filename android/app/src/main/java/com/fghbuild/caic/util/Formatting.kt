@@ -56,3 +56,14 @@ private fun JsonObject.stringField(key: String): String? {
     val el = get(key) ?: return null
     return if (el is JsonPrimitive && el.isString) el.jsonPrimitive.content else null
 }
+
+/** Returns the currency symbol for a currency code. Unknown codes return "??". */
+fun currencySign(currency: String): String = when (currency) {
+    "CNY" -> "¥"
+    "USD" -> "$"
+    else -> "??"
+}
+
+/** Formats a monetary balance value. */
+fun formatBalance(currency: String, total: Double): String =
+    "%s%.2f".format(currencySign(currency), total)

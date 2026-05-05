@@ -1,23 +1,20 @@
-// Usage badges showing API utilization with color-coded thresholds.
-import { Show } from "solid-js";
+// Usage badges: per-provider grouped pills with color-coded thresholds.
+import { Show, For } from "solid-js";
 import type { Accessor } from "solid-js";
-import type { ClaudeExtraUsage, ClaudeUsageWindow, CodexRateLimitWindow, CodexUsage, UsageResp } from "@sdk/types.gen";
+import type { ProviderQuota, QuotaRateLimit, QuotaBalance, QuotaExtraUsage, UsageResp } from "@sdk/types.gen";
 import Tooltip from "./Tooltip";
+import { currencySign, formatBalance } from "./formatting";
 import styles from "./UsageBadges.module.css";
 
-/** Grace period (ms) after resetsAt before the frontend zeroes utilization. */
-const RESET_GRACE_MS = 60_000;
-
-/** Return 0 utilization if the reset timestamp has passed (plus grace). */
-function effectiveUtilization(w: ClaudeUsageWindow, now: number): number {
-  const resetMs = new Date(w.resetsAt).getTime();
-  if (now > resetMs + RESET_GRACE_MS) return 0;
-  return w.utilization;
+function pctColor(pct: number) {
+  if (pct >= 90) return styles.red;
+  if (pct >= 80) return styles.yellow;
+  return styles.green;
 }
 
-function formatReset(iso: string): string {
+function formatReset(iso: string | undefined, now: number): string | undefined {
+  if (!iso) return undefined;
   const d = new Date(iso);
-  const now = Date.now();
   const diffMs = d.getTime() - now;
   if (diffMs <= 0) return "now";
   const hours = Math.floor(diffMs / 3_600_000);
@@ -30,78 +27,72 @@ function formatReset(iso: string): string {
   return `in ${mins}m`;
 }
 
-function Badge(props: { label: string; window: ClaudeUsageWindow; now: Accessor<number>; yellowAt: number; redAt: number }) {
-  const pct = () => Math.round(effectiveUtilization(props.window, props.now()));
-  const cls = () => (pct() >= props.redAt ? styles.red : pct() >= props.yellowAt ? styles.yellow : styles.green);
-  return (
-    <Tooltip text={`Resets ${formatReset(props.window.resetsAt)}`}>
-      <span class={`${styles.badge} ${cls()}`}>
-        {props.label}: {pct()}%
-      </span>
-    </Tooltip>
-  );
+function extraClass(extra: QuotaExtraUsage): string {
+  if (!extra.isEnabled) return `${styles.badge} ${styles.disabled}`;
+  return `${styles.badge} ${pctColor(extra.usedPct)}`;
 }
 
-function formatSeconds(seconds: number): string {
-  if (seconds <= 0) return "now";
-  const hours = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  if (hours >= 24) {
-    const days = Math.floor(hours / 24);
-    return `in ${days}d ${hours % 24}h`;
+function balanceClass(bal: QuotaBalance): string {
+  return `${styles.badge} ${bal.total <= 0 ? styles.red : styles.green}`;
+}
+
+function extraLabel(extra: QuotaExtraUsage): string {
+  const s = currencySign(extra.currency);
+  return `extra ${s}${extra.usedCredits.toFixed(0)}/${s}${extra.monthlyLimit.toFixed(0)}`;
+}
+
+function extraTooltip(extra: QuotaExtraUsage): string {
+  const s = currencySign(extra.currency);
+  if (extra.isEnabled) {
+    return `${s}${extra.usedCredits.toFixed(2)} / ${s}${extra.monthlyLimit.toFixed(2)}`;
   }
-  if (hours > 0) return `in ${hours}h ${mins}m`;
-  return `in ${mins}m`;
+  return `Disabled — ${s}${extra.usedCredits.toFixed(2)} / ${s}${extra.monthlyLimit.toFixed(2)}`;
 }
 
-function CodexWindowBadge(props: { label: string; window: CodexRateLimitWindow; yellowAt: number; redAt: number }) {
-  const pct = () => Math.min(props.window.usedPercent, 100);
-  const cls = () => (pct() >= props.redAt ? styles.red : pct() >= props.yellowAt ? styles.yellow : styles.green);
+function RateLimitBadge(props: { rl: QuotaRateLimit; now: Accessor<number>; label: string }) {
+  const tip = () => {
+    const reset = formatReset(props.rl.resetsAt, props.now());
+    return reset ? `${props.label} ${props.rl.window}: ${Math.round(props.rl.usedPct)}% — Resets ${reset}` : undefined;
+  };
   return (
-    <Tooltip text={`Resets ${formatSeconds(props.window.resetAfterSeconds)}`}>
-      <span class={`${styles.badge} ${cls()}`}>
-        {props.label}: {pct()}%
+    <Tooltip text={tip()}>
+      <span class={`${styles.badge} ${pctColor(props.rl.usedPct)}`}>
+        {props.rl.window} {Math.round(props.rl.usedPct)}%
       </span>
     </Tooltip>
   );
 }
 
-function CodexBadges(props: { codex: CodexUsage }) {
+function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
   return (
-    <>
-      <Show when={props.codex.primary}>
-        {(w) => <CodexWindowBadge label="Codex" window={w()} yellowAt={80} redAt={90} />}
-      </Show>
-      <Show when={props.codex.secondary}>
-        {(w) => <CodexWindowBadge label="Codex 2" window={w()} yellowAt={90} redAt={95} />}
-      </Show>
-      <Show when={props.codex.credits.balance}>
-        <Tooltip text={`Balance: $${props.codex.credits.balance}`}>
-          <span class={`${styles.badge} ${props.codex.credits.hasCredits ? styles.green : styles.red}`}>
-            Codex: ${props.codex.credits.balance}
-          </span>
-        </Tooltip>
-      </Show>
-    </>
-  );
-}
-
-function ExtraBadge(props: { extra: ClaudeExtraUsage }) {
-  const pct = () => Math.round(props.extra.utilization);
-  const cls = () => (pct() >= 80 ? styles.red : pct() >= 50 ? styles.yellow : styles.green);
-  // API values are in cents; convert to dollars for display.
-  const used = () => props.extra.usedCredits / 100;
-  const limit = () => props.extra.monthlyLimit / 100;
-  const title = () => `$${used().toFixed(2)} / $${limit().toFixed(2)}`;
-  const hasData = () => props.extra.usedCredits !== 0 || props.extra.monthlyLimit !== 0;
-  return (
-    <Show when={hasData()}>
-      <Tooltip text={props.extra.isEnabled ? title() : `Disabled — ${title()}`}>
-        <span class={`${styles.badge} ${props.extra.isEnabled ? cls() : styles.disabled}`}>
-          Extra: ${used().toFixed(0)} / ${limit().toFixed(0)}
-        </span>
-      </Tooltip>
-    </Show>
+    <span class={styles.providerPill}>
+      <span class={styles.providerLabel}>{props.pq.label}</span>
+      <span class={styles.providerBadges}>
+        <For each={props.pq.rateLimits ?? []}>
+          {(rl) => <RateLimitBadge rl={rl} now={props.now} label={props.pq.label} />}
+        </For>
+        <Show when={props.pq.balance}>
+          {(bal) => (
+            <Tooltip text={`${props.pq.label}: ${formatBalance(bal().currency, bal().total)}`}>
+              <span class={balanceClass(bal())}>
+                {formatBalance(bal().currency, bal().total)}
+              </span>
+            </Tooltip>
+          )}
+        </Show>
+        <Show when={props.pq.extraUsage}>
+          {(extra) => (
+            <Show when={extra().usedCredits !== 0 || extra().monthlyLimit !== 0}>
+              <Tooltip text={`${props.pq.label}: ${extraTooltip(extra())}`}>
+                <span class={extraClass(extra())}>
+                  {extraLabel(extra())}
+                </span>
+              </Tooltip>
+            </Show>
+          )}
+        </Show>
+      </span>
+    </span>
   );
 }
 
@@ -110,20 +101,9 @@ export default function UsageBadges(props: { usage: Accessor<UsageResp | null>; 
     <span class={styles.usageRow}>
       <Show when={props.usage()} keyed>
         {(u) => (
-          <>
-            <Show when={u.claude?.fiveHour}>
-              {(w) => <Badge label="5h" window={w()} now={props.now} yellowAt={80} redAt={90} />}
-            </Show>
-            <Show when={u.claude?.sevenDay}>
-              {(w) => <Badge label="7d" window={w()} now={props.now} yellowAt={90} redAt={95} />}
-            </Show>
-            <Show when={u.claude?.extraUsage}>
-              {(extra) => <ExtraBadge extra={extra()} />}
-            </Show>
-            <Show when={u.codex}>
-              {(c) => <CodexBadges codex={c()} />}
-            </Show>
-          </>
+          <For each={u.providers}>
+            {(pq) => <ProviderPill pq={pq} now={props.now} />}
+          </For>
         )}
       </Show>
     </span>

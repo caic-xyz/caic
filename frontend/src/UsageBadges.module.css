@@ -1,34 +1,49 @@
-/* Usage badge styles. */
+/* Usage badge styles — provider-grouped pills. */
 
 .usageRow {
-  display: inline-flex;
-  gap: 0.4rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
   margin-left: auto;
 }
 
-.badge {
-  font-size: 0.75rem;
+.providerPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   padding: 0.15rem 0.45rem;
   border-radius: var(--radius-sm);
-  font-weight: 500;
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border-light);
   white-space: nowrap;
   cursor: default;
 }
 
-.green {
-  background: var(--color-success-bg);
-  color: var(--color-success-text);
+.providerLabel {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: lowercase;
+  font-variant: small-caps;
+  letter-spacing: 0.02em;
 }
 
-.yellow {
-  background: var(--color-warning-bg);
-  color: var(--color-warning-text);
+.providerBadges {
+  display: inline-flex;
+  gap: 0.25rem;
 }
 
-.red {
-  background: var(--color-danger-bg);
-  color: var(--color-danger-text);
+.badge {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  font-weight: 500;
+  white-space: nowrap;
 }
+
+.green  { background: var(--color-success-bg); color: var(--color-success-text); }
+.yellow { background: var(--color-warning-bg); color: var(--color-warning-text); }
+.red    { background: var(--color-danger-bg);  color: var(--color-danger-text);  }
 
 .disabled {
   background: #e2e3e5;
@@ -37,8 +52,18 @@
 }
 
 @media (max-width: 768px) {
+  .usageRow {
+    gap: 0.25rem;
+  }
+  .providerPill {
+    gap: 0.15rem;
+    padding: 0.1rem 0.25rem;
+  }
+  .providerLabel {
+    display: none;
+  }
   .badge {
-    font-size: 0.65rem;
-    padding: 0.1rem 0.35rem;
+    font-size: 0.6rem;
+    padding: 0.06rem 0.22rem;
   }
 }

@@ -158,8 +158,8 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleUsageEvents streams usage snapshots as SSE. It reacts to task changes
-// immediately and ticks every 5 minutes for window rollovers and OAuth cache
-// refreshes. Each message is a single UsageResp JSON object.
+// immediately and ticks every CacheTTL for provider cache refreshes. Each
+// message is a single UsageResp JSON object.
 func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -178,25 +178,7 @@ func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 	var prev []byte
 
 	for {
-		s.mu.Lock()
-		claude := computeClaudeUsage(s.tasks, time.Now())
-		ch := s.changed
-		s.mu.Unlock()
-
-		if s.usage != nil {
-			if oauth := s.usage.Get(r.Context()); oauth != nil {
-				claude.FiveHour.Utilization = oauth.FiveHour.Utilization
-				claude.FiveHour.ResetsAt = oauth.FiveHour.ResetsAt
-				claude.SevenDay.Utilization = oauth.SevenDay.Utilization
-				claude.SevenDay.ResetsAt = oauth.SevenDay.ResetsAt
-				claude.ExtraUsage = oauth.ExtraUsage
-			}
-		}
-
-		resp := v1.UsageResp{Claude: &claude}
-		if s.codexUsage != nil {
-			resp.Codex = s.codexUsage.Get(r.Context())
-		}
+		resp := s.buildUsageResp(r.Context())
 
 		data, err := json.Marshal(resp)
 		if err == nil && !bytes.Equal(data, prev) {
@@ -204,6 +186,10 @@ func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 			prev = data
 		}
+
+		s.mu.Lock()
+		ch := s.changed
+		s.mu.Unlock()
 
 		select {
 		case <-r.Context().Done():
@@ -216,25 +202,24 @@ func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 
 // handleGetUsage returns a one-shot usage snapshot as JSON.
 func (s *Server) handleGetUsage(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	claude := computeClaudeUsage(s.tasks, time.Now())
-	s.mu.Unlock()
-
-	if s.usage != nil {
-		if oauth := s.usage.Get(r.Context()); oauth != nil {
-			claude.FiveHour.Utilization = oauth.FiveHour.Utilization
-			claude.FiveHour.ResetsAt = oauth.FiveHour.ResetsAt
-			claude.SevenDay.Utilization = oauth.SevenDay.Utilization
-			claude.SevenDay.ResetsAt = oauth.SevenDay.ResetsAt
-			claude.ExtraUsage = oauth.ExtraUsage
-		}
-	}
-
-	resp := v1.UsageResp{Claude: &claude}
-	if s.codexUsage != nil {
-		resp.Codex = s.codexUsage.Get(r.Context())
-	}
-
+	resp := s.buildUsageResp(r.Context())
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// buildUsageResp assembles the full usage response: local task cost
+// aggregation plus per-provider quota data from each registered fetcher.
+func (s *Server) buildUsageResp(ctx context.Context) v1.UsageResp {
+	s.mu.Lock()
+	local := computeLocalUsage(s.tasks, time.Now())
+	s.mu.Unlock()
+
+	resp := v1.UsageResp{Local: local}
+	detached := context.WithoutCancel(ctx)
+	for _, f := range s.usageFetchers {
+		if q := f.Get(detached); q != nil {
+			resp.Providers = append(resp.Providers, *q)
+		}
+	}
+	return resp
 }

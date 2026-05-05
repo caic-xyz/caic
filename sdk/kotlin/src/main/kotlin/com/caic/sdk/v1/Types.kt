@@ -644,65 +644,60 @@ data class TaskListEvent(
     val warning: String? = null,
 )
 
-/**
- * ClaudeUsageWindow represents a single Claude usage window (5-hour or 7-day)
- * combining local task cost with OAuth rate-limit quota.
- */
+/** QuotaRateLimit is a single rate-limit window snapshot from any provider. */
 @Serializable
-data class ClaudeUsageWindow(
+data class QuotaRateLimit(
+    val window: String,
+    val usedPct: Double,
+    val resetsAt: Instant? = null,
+)
+
+/** QuotaBalance is a balance/credit snapshot from any provider. */
+@Serializable
+data class QuotaBalance(
+    val currency: String,
+    val total: Double,
+    val granted: Double? = null,
+    val toppedUp: Double? = null,
+)
+
+/** QuotaExtraUsage is pay-as-you-go usage info (Anthropic-style extra credits). */
+@Serializable
+data class QuotaExtraUsage(
+    val currency: String,
+    val isEnabled: Boolean,
+    val usedCredits: Double,
+    val monthlyLimit: Double,
+    val usedPct: Double,
+)
+
+/** ProviderQuota is the quota data for one provider. */
+@Serializable
+data class ProviderQuota(
+    val provider: String,
+    val label: String,
+    val authKind: String,
+    val rateLimits: List<QuotaRateLimit>? = null,
+    val balance: QuotaBalance? = null,
+    val extraUsage: QuotaExtraUsage? = null,
+)
+
+/** LocalWindow is the aggregated local cost for a rolling time window. */
+@Serializable
+data class LocalWindow(
+    val duration: String,
     @SerialName("costUSD") val costUSD: Double,
     val inputTokens: Int,
     val outputTokens: Int,
-    val utilization: Double,
-    val resetsAt: String,
 )
 
-/** ClaudeExtraUsage represents the Claude extra (pay-as-you-go) usage state. */
+/** LocalUsage is the aggregated cost across all tasks within recent time windows. */
 @Serializable
-data class ClaudeExtraUsage(
-    val isEnabled: Boolean,
-    val monthlyLimit: Double,
-    val usedCredits: Double,
-    val utilization: Double,
-)
-
-/** ClaudeUsage holds local task cost and rate-limit quota data for Claude. */
-@Serializable
-data class ClaudeUsage(
-    val fiveHour: ClaudeUsageWindow,
-    val sevenDay: ClaudeUsageWindow,
-    val extraUsage: ClaudeExtraUsage,
-)
-
-/** CodexRateLimitWindow represents a single Codex rate-limit window snapshot. */
-@Serializable
-data class CodexRateLimitWindow(
-    val usedPercent: Int,
-    val limitWindowSeconds: Int,
-    val resetAfterSeconds: Int,
-    val resetAt: Int,
-)
-
-/** CodexCredits represents Codex credit/balance information. */
-@Serializable
-data class CodexCredits(
-    val hasCredits: Boolean,
-    val unlimited: Boolean,
-    val balance: String,
-)
-
-/** CodexUsage holds rate-limit quota data from the Codex usage API. */
-@Serializable
-data class CodexUsage(
-    val planType: String,
-    val primary: CodexRateLimitWindow? = null,
-    val secondary: CodexRateLimitWindow? = null,
-    val credits: CodexCredits,
-)
+data class LocalUsage(val windows: List<LocalWindow>)
 
 /** UsageResp is the response for GET /api/v1/usage. */
 @Serializable
-data class UsageResp(val claude: ClaudeUsage? = null, val codex: CodexUsage? = null)
+data class UsageResp(val providers: List<ProviderQuota>, val local: LocalUsage)
 
 /** VoiceTokenResp is the response for GET /api/v1/voice/token. */
 @Serializable

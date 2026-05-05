@@ -211,8 +211,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		githubAllowedUsers: githubAllowedUsers,
 		gitlabAllowedUsers: gitlabAllowedUsers,
 		hostState:          hostState,
-		usage:              usage.NewClaudeFetcher(ctx),
-		codexUsage:         usage.NewCodexFetcher(ctx),
+		usageFetchers:      detectProviders(ctx, cfg.HarnessEnv),
 		pprof:              cfg.Pprof,
 		geminiAPIKey:       cfg.GeminiAPIKey,
 		voiceBridge:        voiceBridge,
@@ -1405,6 +1404,63 @@ func collectWatchDirs(ctx context.Context, root string, maxDepth int) []string {
 		dirs = append(dirs, collectWatchDirs(ctx, sub, maxDepth-1)...)
 	}
 	return dirs
+}
+
+// detectProviders scans harness environment variables for known API keys and
+// OAuth credential files, creating the appropriate ProviderFetcher for each
+// provider found. OAuth-based providers (Anthropic, Codex) are always
+// attempted since their credentials come from files, not env vars.
+func detectProviders(ctx context.Context, harnessEnv map[string][]string) []usage.ProviderFetcher {
+	// Collect all env vars across all harnesses.
+	envKeys := make(map[string]struct{})
+	for _, envs := range harnessEnv {
+		for _, e := range envs {
+			if k, _, ok := strings.Cut(e, "="); ok {
+				envKeys[k] = struct{}{}
+			}
+		}
+	}
+
+	var fetchers []usage.ProviderFetcher
+
+	// OAuth-based: always try these (they watch credential files).
+	if f := usage.NewAnthropicFetcher(ctx); f != nil {
+		fetchers = append(fetchers, f)
+	}
+	if f := usage.NewCodexFetcher(ctx); f != nil {
+		fetchers = append(fetchers, f)
+	}
+
+	// API-key-based: detect from env vars.
+	if _, ok := envKeys["DEEPSEEK_API_KEY"]; ok {
+		key := firstEnvValue(harnessEnv, "DEEPSEEK_API_KEY")
+		if f := usage.NewDeepSeekFetcher(key); f != nil {
+			fetchers = append(fetchers, f)
+		}
+	}
+	if _, ok := envKeys["OPENROUTER_API_KEY"]; ok {
+		key := firstEnvValue(harnessEnv, "OPENROUTER_API_KEY")
+		if f := usage.NewOpenRouterFetcher(key); f != nil {
+			fetchers = append(fetchers, f)
+		}
+	}
+
+	slog.InfoContext(ctx, "provider usage fetchers", "count", len(fetchers))
+	return fetchers
+}
+
+// firstEnvValue returns the value for the given key from the first harness
+// that defines it.
+func firstEnvValue(harnessEnv map[string][]string, key string) string {
+	for _, envs := range harnessEnv {
+		for _, e := range envs {
+			k, v, ok := strings.Cut(e, "=")
+			if ok && k == key {
+				return v
+			}
+		}
+	}
+	return ""
 }
 
 // autoDetectLLMProvider detects the best available LLM provider from the

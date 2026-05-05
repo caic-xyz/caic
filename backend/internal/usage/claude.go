@@ -1,5 +1,5 @@
-// Claude Code OAuth usage quota fetcher with caching, credential file
-// watching, and exponential backoff on errors.
+// Anthropic OAuth usage quota fetcher with caching, credential file watching,
+// and exponential backoff on errors. Implements ProviderFetcher.
 package usage
 
 import (
@@ -18,60 +18,178 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-const usageAPIURL = "https://api.anthropic.com/api/oauth/usage"
+const anthropicUsageAPIURL = "https://api.anthropic.com/api/oauth/usage"
 
-// ClaudeFetcher fetches and caches Claude Code usage quota data. It watches
-// ~/.claude/.credentials.json for changes and applies exponential backoff when
-// fetches fail.
-type ClaudeFetcher struct {
-	client *http.Client
-
-	mu       sync.Mutex
-	token    string
-	cached   *v1.ClaudeUsage
-	fetchAt  time.Time     // when cached was last successfully fetched
-	backoff  time.Duration // current backoff; 0 means no backoff
-	errorAt  time.Time     // when the last error occurred
-	watcher  *fsnotify.Watcher
-	credPath string // resolved path to .credentials.json
+// anthropicUsagePayload mirrors the Anthropic GET /api/oauth/usage response.
+type anthropicUsagePayload struct {
+	FiveHour   *anthropicUsageWindow `json:"five_hour"`
+	SevenDay   *anthropicUsageWindow `json:"seven_day"`
+	ExtraUsage *anthropicExtraUsage  `json:"extra_usage"`
 }
 
-// NewClaudeFetcher creates a fetcher and starts watching
-// ~/.claude/.credentials.json for token changes. The watcher goroutine exits
-// when ctx is cancelled.
-func NewClaudeFetcher(ctx context.Context) *ClaudeFetcher {
+type anthropicUsageWindow struct {
+	Utilization float64 `json:"utilization"`
+	ResetsAt    string  `json:"resets_at"`
+}
+
+type anthropicExtraUsage struct {
+	IsEnabled    bool    `json:"is_enabled"`
+	MonthlyLimit float64 `json:"monthly_limit"`
+	UsedCredits  float64 `json:"used_credits"`
+	Utilization  float64 `json:"utilization"`
+}
+
+// AnthropicFetcher fetches and caches Anthropic OAuth usage quota data. It
+// watches ~/.claude/.credentials.json for token changes and applies
+// exponential backoff when fetches fail.
+type AnthropicFetcher struct {
+	client   *http.Client
+	watcher  *fsnotify.Watcher
+	credPath string
+
+	mu      sync.Mutex
+	token   string
+	cached  *v1.ProviderQuota
+	fetchAt time.Time
+	backoff time.Duration
+	errorAt time.Time
+}
+
+// NewAnthropicFetcher creates a fetcher and starts watching
+// ~/.claude/.credentials.json for token changes. Returns nil if the home
+// directory cannot be determined. The watcher goroutine exits when ctx is
+// cancelled.
+func NewAnthropicFetcher(ctx context.Context) *AnthropicFetcher {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		slog.Warn("cannot determine home dir; usage disabled", "err", err)
+		slog.Warn("cannot determine home dir; Anthropic usage disabled", "err", err)
 		return nil
 	}
 	credPath := filepath.Join(home, ".claude", ".credentials.json")
-	token := readCredentialsToken(credPath)
+	token := readAnthropicToken(credPath)
 	if token == "" {
-		slog.Warn("no Claude OAuth token found; usage endpoint disabled (will watch for credentials)")
+		slog.Info("no Claude OAuth token found; Anthropic usage disabled (will watch for credentials)")
 	}
 
-	f := &ClaudeFetcher{
+	f := &AnthropicFetcher{
 		client:   &http.Client{Timeout: 10 * time.Second},
 		token:    token,
 		credPath: credPath,
 	}
 
 	if err := f.startWatcher(ctx); err != nil {
-		slog.Warn("failed to watch credentials file", "err", err)
+		slog.Warn("failed to watch Anthropic credentials file", "err", err)
 	}
 	return f
 }
 
-// startWatcher sets up fsnotify on the credentials file. It watches the parent
-// directory so it catches creates/renames (atomic writes).
-func (f *ClaudeFetcher) startWatcher(ctx context.Context) error {
+// Provider returns the provider identifier.
+func (f *AnthropicFetcher) Provider() string { return "anthropic" }
+
+// Label returns the human-readable provider name.
+func (f *AnthropicFetcher) Label() string { return "Anthropic" }
+
+// AuthKind returns the authentication method.
+func (f *AnthropicFetcher) AuthKind() string { return "oauth" }
+
+// Get returns the cached quota data, refreshing if stale. Returns nil when
+// no token is available.
+func (f *AnthropicFetcher) Get(ctx context.Context) *v1.ProviderQuota {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.token == "" {
+		return nil
+	}
+	if f.cached != nil && time.Since(f.fetchAt) < CacheTTL {
+		return f.cached
+	}
+	if f.backoff > 0 && time.Since(f.errorAt) < f.backoff {
+		return f.cached
+	}
+	resp, err := f.fetch(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to fetch Anthropic usage", "err", err)
+		f.errorAt = time.Now()
+		if f.backoff == 0 {
+			f.backoff = backoffMin
+		} else {
+			f.backoff *= 2
+			if f.backoff > backoffMax {
+				f.backoff = backoffMax
+			}
+		}
+		return f.cached
+	}
+	f.backoff = 0
+	f.cached = resp
+	f.fetchAt = time.Now()
+	return resp
+}
+
+func (f *AnthropicFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, anthropicUsageAPIURL, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+f.token)
+	req.Header.Set("User-Agent", "caic")
+	req.Header.Set("Anthropic-Beta", "oauth-2025-04-20")
+
+	resp, err := f.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("usage API returned %d: %s", resp.StatusCode, body)
+	}
+
+	var raw anthropicUsagePayload
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode usage: %w", err)
+	}
+
+	out := &v1.ProviderQuota{
+		Provider: f.Provider(),
+		Label:    f.Label(),
+		AuthKind: f.AuthKind(),
+	}
+	if raw.FiveHour != nil {
+		t, _ := time.Parse(time.RFC3339, raw.FiveHour.ResetsAt)
+		out.RateLimits = append(out.RateLimits, v1.QuotaRateLimit{
+			Window:   "5h",
+			UsedPct:  raw.FiveHour.Utilization,
+			ResetsAt: t,
+		})
+	}
+	if raw.SevenDay != nil {
+		t, _ := time.Parse(time.RFC3339, raw.SevenDay.ResetsAt)
+		out.RateLimits = append(out.RateLimits, v1.QuotaRateLimit{
+			Window:   "7d",
+			UsedPct:  raw.SevenDay.Utilization,
+			ResetsAt: t,
+		})
+	}
+	if raw.ExtraUsage != nil {
+		out.ExtraUsage = v1.QuotaExtraUsage{
+			Currency:     "USD",
+			IsEnabled:    raw.ExtraUsage.IsEnabled,
+			MonthlyLimit: raw.ExtraUsage.MonthlyLimit / 100,
+			UsedCredits:  raw.ExtraUsage.UsedCredits / 100,
+			UsedPct:      raw.ExtraUsage.Utilization,
+		}
+	}
+	return out, nil
+}
+
+func (f *AnthropicFetcher) startWatcher(ctx context.Context) error {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
 	}
-	// Watch the directory so we catch atomic-write patterns (write to
-	// tmp + rename) that don't fire events on the file itself.
 	dir := filepath.Dir(f.credPath)
 	if err := w.Add(dir); err != nil {
 		_ = w.Close()
@@ -82,7 +200,7 @@ func (f *ClaudeFetcher) startWatcher(ctx context.Context) error {
 	return nil
 }
 
-func (f *ClaudeFetcher) watchLoop(ctx context.Context) {
+func (f *AnthropicFetcher) watchLoop(ctx context.Context) {
 	defer func() { _ = f.watcher.Close() }()
 	base := filepath.Base(f.credPath)
 	for {
@@ -109,8 +227,8 @@ func (f *ClaudeFetcher) watchLoop(ctx context.Context) {
 	}
 }
 
-func (f *ClaudeFetcher) onCredentialsChanged() {
-	token := readCredentialsToken(f.credPath)
+func (f *AnthropicFetcher) onCredentialsChanged() {
+	token := readAnthropicToken(f.credPath)
 	if token == "" {
 		return
 	}
@@ -124,118 +242,20 @@ func (f *ClaudeFetcher) onCredentialsChanged() {
 	f.errorAt = time.Time{}
 	f.cached = nil
 	f.fetchAt = time.Time{}
-	slog.Info("credentials updated, token refreshed")
+	slog.Info("credentials updated, Anthropic token refreshed")
 }
 
-// Get returns the cached usage data, refreshing if stale. Respects
-// exponential backoff on prior errors.
-func (f *ClaudeFetcher) Get(ctx context.Context) *v1.ClaudeUsage {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.token == "" {
-		return nil
-	}
-	// Still within cache TTL?
-	if f.cached != nil && time.Since(f.fetchAt) < CacheTTL {
-		return f.cached
-	}
-	// In backoff window?
-	if f.backoff > 0 && time.Since(f.errorAt) < f.backoff {
-		return f.cached
-	}
-	resp, err := f.fetch(ctx)
-	if err != nil {
-		slog.Warn("failed to fetch usage", "err", err)
-		f.errorAt = time.Now()
-		if f.backoff == 0 {
-			f.backoff = backoffMin
-		} else {
-			f.backoff *= 2
-			if f.backoff > backoffMax {
-				f.backoff = backoffMax
-			}
-		}
-		return f.cached
-	}
-	f.backoff = 0
-	f.cached = resp
-	f.fetchAt = time.Now()
-	return resp
-}
-
-func (f *ClaudeFetcher) fetch(ctx context.Context) (*v1.ClaudeUsage, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, usageAPIURL, http.NoBody)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+f.token)
-	req.Header.Set("User-Agent", "caic")
-	req.Header.Set("Anthropic-Beta", "oauth-2025-04-20")
-
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("usage API returned %d: %s", resp.StatusCode, body)
-	}
-
-	var raw struct {
-		FiveHour *struct {
-			Utilization float64 `json:"utilization"`
-			ResetsAt    string  `json:"resets_at"`
-		} `json:"five_hour"`
-		SevenDay *struct {
-			Utilization float64 `json:"utilization"`
-			ResetsAt    string  `json:"resets_at"`
-		} `json:"seven_day"`
-		ExtraUsage *struct {
-			IsEnabled    bool    `json:"is_enabled"`
-			MonthlyLimit float64 `json:"monthly_limit"`
-			UsedCredits  float64 `json:"used_credits"`
-			Utilization  float64 `json:"utilization"`
-		} `json:"extra_usage"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("decode usage: %w", err)
-	}
-
-	out := &v1.ClaudeUsage{}
-	if raw.FiveHour != nil {
-		out.FiveHour.Utilization = raw.FiveHour.Utilization
-		out.FiveHour.ResetsAt = raw.FiveHour.ResetsAt
-	}
-	if raw.SevenDay != nil {
-		out.SevenDay.Utilization = raw.SevenDay.Utilization
-		out.SevenDay.ResetsAt = raw.SevenDay.ResetsAt
-	}
-	if raw.ExtraUsage != nil {
-		out.ExtraUsage = v1.ClaudeExtraUsage{
-			IsEnabled:    raw.ExtraUsage.IsEnabled,
-			MonthlyLimit: raw.ExtraUsage.MonthlyLimit,
-			UsedCredits:  raw.ExtraUsage.UsedCredits,
-			Utilization:  raw.ExtraUsage.Utilization,
-		}
-	}
-	return out, nil
-}
-
-// readCredentialsToken reads the OAuth token from ~/.claude/.credentials.json.
-func readCredentialsToken(credPath string) string {
-	var creds claudeCreds
-	data, err := os.ReadFile(credPath) //nolint:gosec // credPath is derived from os.UserHomeDir, not user input
+func readAnthropicToken(credPath string) string {
+	data, err := os.ReadFile(credPath) //nolint:gosec // credPath from os.UserHomeDir
 	if err != nil {
 		return ""
 	}
+	var creds anthropicCreds
 	_ = json.Unmarshal(data, &creds)
 	return creds.ClaudeAiOauth.AccessToken
 }
 
-type claudeCreds struct {
+type anthropicCreds struct {
 	ClaudeAiOauth struct {
 		AccessToken string `json:"accessToken"`
 	} `json:"claudeAiOauth"`

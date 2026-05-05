@@ -867,71 +867,70 @@ kind=="warning":  Warning holds a transient server warning message for the user.
 | `repos` | `Repo[]` |  |  |
 | `warning` | `string` |  |  |
 
-### ClaudeUsageWindow
+### QuotaRateLimit
 
-ClaudeUsageWindow represents a single Claude usage window (5-hour or 7-day)
-combining local task cost with OAuth rate-limit quota.
+QuotaRateLimit is a single rate-limit window snapshot from any provider.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `costUSD` | `number` | Local task cost (always populated). | yes |
+| `window` | `string` | "5h", "7d", "primary", "secondary", "rpm", "tpd", … | yes |
+| `usedPct` | `number` | 0–100 | yes |
+| `resetsAt` | `ISOTimestamp` | zero when unknown |  |
+
+### QuotaBalance
+
+QuotaBalance is a balance/credit snapshot from any provider.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `currency` | `string` | "USD", "CNY", "credits", … | yes |
+| `total` | `number` | total available balance | yes |
+| `granted` | `number` | unexpired promotional/grant balance |  |
+| `toppedUp` | `number` | self-funded recharge balance |  |
+
+### QuotaExtraUsage
+
+QuotaExtraUsage is pay-as-you-go usage info (Anthropic-style extra credits).
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `currency` | `string` | "USD", "CNY", … | yes |
+| `isEnabled` | `boolean` |  | yes |
+| `usedCredits` | `number` |  | yes |
+| `monthlyLimit` | `number` |  | yes |
+| `usedPct` | `number` |  | yes |
+
+### ProviderQuota
+
+ProviderQuota is the quota data for one provider.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `provider` | `string` | "anthropic", "deepseek", "gemini", "openai", "codex", "openrouter", … | yes |
+| `label` | `string` | human-readable: "Anthropic", "DeepSeek", … | yes |
+| `authKind` | `string` | "oauth" or "apikey" | yes |
+| `rateLimits` | `QuotaRateLimit[]` |  |  |
+| `balance` | `QuotaBalance` |  |  |
+| `extraUsage` | `QuotaExtraUsage` |  |  |
+
+### LocalWindow
+
+LocalWindow is the aggregated local cost for a rolling time window.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `duration` | `string` | "1h", "6h", "24h" | yes |
+| `costUSD` | `number` |  | yes |
 | `inputTokens` | `number` |  | yes |
 | `outputTokens` | `number` |  | yes |
-| `utilization` | `number` | OAuth rate-limit quota; zero when OAuth unavailable. | yes |
-| `resetsAt` | `string` |  | yes |
 
-### ClaudeExtraUsage
+### LocalUsage
 
-ClaudeExtraUsage represents the Claude extra (pay-as-you-go) usage state.
+LocalUsage is the aggregated cost across all tasks within recent time windows.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `isEnabled` | `boolean` |  | yes |
-| `monthlyLimit` | `number` |  | yes |
-| `usedCredits` | `number` |  | yes |
-| `utilization` | `number` |  | yes |
-
-### ClaudeUsage
-
-ClaudeUsage holds local task cost and rate-limit quota data for Claude.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `fiveHour` | `ClaudeUsageWindow` |  | yes |
-| `sevenDay` | `ClaudeUsageWindow` |  | yes |
-| `extraUsage` | `ClaudeExtraUsage` |  | yes |
-
-### CodexRateLimitWindow
-
-CodexRateLimitWindow represents a single Codex rate-limit window snapshot.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `usedPercent` | `number` |  | yes |
-| `limitWindowSeconds` | `number` |  | yes |
-| `resetAfterSeconds` | `number` |  | yes |
-| `resetAt` | `number` | unix timestamp | yes |
-
-### CodexCredits
-
-CodexCredits represents Codex credit/balance information.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `hasCredits` | `boolean` |  | yes |
-| `unlimited` | `boolean` |  | yes |
-| `balance` | `string` |  | yes |
-
-### CodexUsage
-
-CodexUsage holds rate-limit quota data from the Codex usage API.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `planType` | `string` |  | yes |
-| `primary` | `CodexRateLimitWindow` |  |  |
-| `secondary` | `CodexRateLimitWindow` |  |  |
-| `credits` | `CodexCredits` |  | yes |
+| `windows` | `LocalWindow[]` |  | yes |
 
 ### UsageResp
 
@@ -939,8 +938,8 @@ UsageResp is the response for GET /api/v1/usage.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `claude` | `ClaudeUsage` |  |  |
-| `codex` | `CodexUsage` |  |  |
+| `providers` | `ProviderQuota[]` |  | yes |
+| `local` | `LocalUsage` |  | yes |
 
 ### VoiceTokenResp
 

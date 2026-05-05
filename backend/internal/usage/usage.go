@@ -1,4 +1,7 @@
-// Package usage provides cached fetchers for coding agent usage quotas.
+// Package usage provides cached fetchers for LLM provider usage quotas.
+// Each provider (Anthropic, DeepSeek, Gemini, Codex, …) has its own
+// fetcher implementing the ProviderFetcher interface. The server
+// auto-detects available providers from configuration and environment.
 package usage
 
 import "time"

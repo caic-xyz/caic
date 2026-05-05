@@ -1,4 +1,6 @@
-// Exported request and response types for the caic API.
+// Exported request and response types for the caic API, including
+// usage/quota provider-agnostic types (ProviderQuota, QuotaRateLimit,
+// QuotaBalance, QuotaExtraUsage, LocalUsage).
 package v1
 
 import (
@@ -344,60 +346,58 @@ type SyncResp struct {
 	PRNumber     int           `json:"prNumber,omitempty"` // non-zero if a PR/MR was created
 }
 
-// ClaudeUsage holds local task cost and rate-limit quota data for Claude.
-type ClaudeUsage struct {
-	FiveHour   ClaudeUsageWindow `json:"fiveHour"`
-	SevenDay   ClaudeUsageWindow `json:"sevenDay"`
-	ExtraUsage ClaudeExtraUsage  `json:"extraUsage"`
+// QuotaRateLimit is a single rate-limit window snapshot from any provider.
+type QuotaRateLimit struct {
+	Window   string    `json:"window"`            // "5h", "7d", "primary", "secondary", "rpm", "tpd", …
+	UsedPct  float64   `json:"usedPct"`           // 0–100
+	ResetsAt time.Time `json:"resetsAt,omitzero"` // zero when unknown
 }
 
-// ClaudeUsageWindow represents a single Claude usage window (5-hour or 7-day)
-// combining local task cost with OAuth rate-limit quota.
-type ClaudeUsageWindow struct {
-	// Local task cost (always populated).
+// QuotaBalance is a balance/credit snapshot from any provider.
+type QuotaBalance struct {
+	Currency string  `json:"currency"`           // "USD", "CNY", "credits", …
+	Total    float64 `json:"total"`              // total available balance
+	Granted  float64 `json:"granted,omitempty"`  // unexpired promotional/grant balance
+	ToppedUp float64 `json:"toppedUp,omitempty"` // self-funded recharge balance
+}
+
+// QuotaExtraUsage is pay-as-you-go usage info (Anthropic-style extra credits).
+type QuotaExtraUsage struct {
+	Currency     string  `json:"currency"` // "USD", "CNY", …
+	IsEnabled    bool    `json:"isEnabled"`
+	UsedCredits  float64 `json:"usedCredits"`
+	MonthlyLimit float64 `json:"monthlyLimit"`
+	UsedPct      float64 `json:"usedPct"`
+}
+
+// ProviderQuota is the quota data for one provider.
+type ProviderQuota struct {
+	Provider string `json:"provider"` // "anthropic", "deepseek", "gemini", "openai", "codex", "openrouter", …
+	Label    string `json:"label"`    // human-readable: "Anthropic", "DeepSeek", …
+	AuthKind string `json:"authKind"` // "oauth" or "apikey"
+
+	RateLimits []QuotaRateLimit `json:"rateLimits,omitzero"`
+	Balance    QuotaBalance     `json:"balance,omitzero"`
+	ExtraUsage QuotaExtraUsage  `json:"extraUsage,omitzero"`
+}
+
+// LocalWindow is the aggregated local cost for a rolling time window.
+type LocalWindow struct {
+	Duration     string  `json:"duration"` // "1h", "6h", "24h"
 	CostUSD      float64 `json:"costUSD"`
 	InputTokens  int     `json:"inputTokens"`
 	OutputTokens int     `json:"outputTokens"`
-	// OAuth rate-limit quota; zero when OAuth unavailable.
-	Utilization float64 `json:"utilization"`
-	ResetsAt    string  `json:"resetsAt"`
 }
 
-// ClaudeExtraUsage represents the Claude extra (pay-as-you-go) usage state.
-type ClaudeExtraUsage struct {
-	IsEnabled    bool    `json:"isEnabled"`
-	MonthlyLimit float64 `json:"monthlyLimit"`
-	UsedCredits  float64 `json:"usedCredits"`
-	Utilization  float64 `json:"utilization"`
-}
-
-// CodexRateLimitWindow represents a single Codex rate-limit window snapshot.
-type CodexRateLimitWindow struct {
-	UsedPercent        int `json:"usedPercent"`
-	LimitWindowSeconds int `json:"limitWindowSeconds"`
-	ResetAfterSeconds  int `json:"resetAfterSeconds"`
-	ResetAt            int `json:"resetAt"` // unix timestamp
-}
-
-// CodexCredits represents Codex credit/balance information.
-type CodexCredits struct {
-	HasCredits bool   `json:"hasCredits"`
-	Unlimited  bool   `json:"unlimited"`
-	Balance    string `json:"balance"`
-}
-
-// CodexUsage holds rate-limit quota data from the Codex usage API.
-type CodexUsage struct {
-	PlanType  string                `json:"planType"`
-	Primary   *CodexRateLimitWindow `json:"primary,omitempty"`
-	Secondary *CodexRateLimitWindow `json:"secondary,omitempty"`
-	Credits   CodexCredits          `json:"credits"`
+// LocalUsage is the aggregated cost across all tasks within recent time windows.
+type LocalUsage struct {
+	Windows []LocalWindow `json:"windows"`
 }
 
 // UsageResp is the response for GET /api/v1/usage.
 type UsageResp struct {
-	Claude *ClaudeUsage `json:"claude,omitempty"`
-	Codex  *CodexUsage  `json:"codex,omitempty"`
+	Providers []ProviderQuota `json:"providers"`
+	Local     LocalUsage      `json:"local"`
 }
 
 // VoiceTokenResp is the response for GET /api/v1/voice/token.

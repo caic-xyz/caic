@@ -204,8 +204,7 @@ type Server struct {
 	authStore     *auth.Store     // nil when auth disabled
 	sessionSecret []byte          // nil when auth disabled
 	hostState     *auth.HostState // non-nil when ExternalURL is set (static or auto)
-	usage         *usage.ClaudeFetcher
-	codexUsage    *usage.CodexFetcher
+	usageFetchers []usage.ProviderFetcher
 
 	// IP geolocation.
 	ipgeoChecker *ipgeo.Checker
