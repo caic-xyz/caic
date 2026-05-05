@@ -1,4 +1,5 @@
 // Camera capture dialog: opens webcam, lets user take a photo, returns base64 ImageData.
+// Uses native <dialog> for built-in Escape handling, focus trapping, and backdrop.
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { ImageData as APIImageData } from "@sdk/types.gen";
 import SwitchCameraIcon from "@material-symbols/svg-400/outlined/cameraswitch.svg?solid";
@@ -12,6 +13,7 @@ interface Props {
 export default function CameraCapture(props: Props) {
   let videoRef!: HTMLVideoElement;
   let canvasRef!: HTMLCanvasElement;
+  let dialogRef!: HTMLDialogElement;
   const [stream, setStream] = createSignal<MediaStream | null>(null);
   const [error, setError] = createSignal("");
   const [facingMode, setFacingMode] = createSignal<"environment" | "user">("environment");
@@ -34,6 +36,8 @@ export default function CameraCapture(props: Props) {
   }
 
   onMount(async () => {
+    dialogRef.addEventListener("close", () => props.onClose());
+    dialogRef.showModal();
     await startCamera(facingMode());
     // Detect whether multiple cameras are available.
     try {
@@ -71,30 +75,31 @@ export default function CameraCapture(props: Props) {
   }
 
   return (
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events -- backdrop dismiss is supplementary to Cancel button and Escape key
-    <div class={styles.overlay} onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }}>
-      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- Escape key dismissal is standard for modal dialogs */}
-      <div class={styles.dialog} role="dialog" aria-modal="true" onKeyDown={(e) => { if (e.key === "Escape") props.onClose(); }}>
-        {error() ? (
-          <p class={styles.error}>{error()}</p>
-        ) : (
-          <>
-            <video ref={(el) => { videoRef = el; }} class={styles.video} autoplay playsinline muted />
-            <canvas ref={(el) => { canvasRef = el; }} class={styles.canvas} />
-          </>
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events -- native <dialog> handles Escape; click-to-dismiss on padding is supplementary
+    <dialog
+      ref={(el) => (dialogRef = el)}
+      class={styles.dialog}
+      onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }}
+    >
+      {error() ? (
+        <p class={styles.error}>{error()}</p>
+      ) : (
+        <>
+          <video ref={(el) => { videoRef = el; }} class={styles.video} autoplay playsinline muted />
+          <canvas ref={(el) => { canvasRef = el; }} class={styles.canvas} />
+        </>
+      )}
+      <div class={styles.actions}>
+        <Show when={hasMultiple() && !error()}>
+          <button class={styles.switchBtn} onClick={switchCamera} title="Switch camera">
+            <SwitchCameraIcon width="1.4em" height="1.4em" />
+          </button>
+        </Show>
+        {!error() && (
+          <button class={styles.captureBtn} onClick={capture} title="Take photo" />
         )}
-        <div class={styles.actions}>
-          <Show when={hasMultiple() && !error()}>
-            <button class={styles.switchBtn} onClick={switchCamera} title="Switch camera">
-              <SwitchCameraIcon width="1.4em" height="1.4em" />
-            </button>
-          </Show>
-          {!error() && (
-            <button class={styles.captureBtn} onClick={capture} title="Take photo" />
-          )}
-          <button class={styles.closeBtn} onClick={() => props.onClose()}>Cancel</button>
-        </div>
+        <button class={styles.closeBtn} onClick={() => props.onClose()}>Cancel</button>
       </div>
-    </div>
+    </dialog>
   );
 }

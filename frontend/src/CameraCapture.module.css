@@ -1,14 +1,4 @@
-/* Styles for the CameraCapture dialog overlay and controls. */
-
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
+/* Styles for the CameraCapture dialog. */
 
 .dialog {
   background: #1a1a1a;
@@ -20,6 +10,12 @@
   flex-direction: column;
   align-items: center;
   gap: 0.75rem;
+  border: none;
+  color: #fff;
+}
+
+.dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
 }
 
 .video {

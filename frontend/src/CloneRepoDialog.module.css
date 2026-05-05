@@ -1,5 +1,4 @@
 /* Styles for the CloneRepoDialog modal. */
-/* Uses native <dialog> with ::backdrop for the overlay. */
 
 .dialog {
   background: #fff;
