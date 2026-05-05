@@ -60,7 +60,7 @@ private fun pctColor(pct: Double): BadgeColors {
 }
 
 @Composable
-fun UsageBadges(usage: UsageResp, serverURL: String = "", modifier: Modifier = Modifier) {
+fun UsageBadges(usage: UsageResp, modifier: Modifier = Modifier, serverURL: String = "") {
     FlowRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -84,6 +84,7 @@ private fun SvgUrlImage(url: String, contentDescription: String?, modifier: Modi
         try {
             val svgText = withContext(Dispatchers.IO) { java.net.URL(url).readText() }
             val svg = SVG.getFromString(svgText)
+            @Suppress("UseKtx")
             val bm: android.graphics.Bitmap = android.graphics.Bitmap.createBitmap(
                 sizePx, sizePx, android.graphics.Bitmap.Config.ARGB_8888,
             )
