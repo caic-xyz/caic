@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.util.Log
 import javax.inject.Inject
@@ -197,6 +198,7 @@ class TaskListViewModel @Inject constructor(
         taskNotifier.start(viewModelScope)
         loadFormData()
         observeServerChanges()
+        observeWarnings()
     }
 
     /** Re-runs [loadFormData] when the server URL or auth token changes (e.g. server switch or OAuth). */
@@ -450,6 +452,19 @@ class TaskListViewModel @Inject constructor(
             }
             settingsRepository.updateAuthToken(null)
             _formState.value = _formState.value.copy(authRequired = true, user = null)
+        }
+    }
+
+    /** Surface stream corruption warnings from [TaskRepository] as transient errors. */
+    private fun observeWarnings() {
+        viewModelScope.launch {
+            taskRepository.warnings.collect { warning ->
+                _formState.value = _formState.value.copy(error = warning)
+                delay(8000)
+                if (_formState.value.error == warning) {
+                    _formState.value = _formState.value.copy(error = null)
+                }
+            }
         }
     }
 

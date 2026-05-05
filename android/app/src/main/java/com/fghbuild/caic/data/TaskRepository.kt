@@ -158,6 +158,8 @@ class TaskRepository @Inject constructor(
                     trySend(TaskSSEEvent.Event(msg))
                 } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
                     Log.w(TAG, "Failed to parse task raw event", e)
+                    _warnings.tryEmit("Task stream corrupted, reconnecting…")
+                    close(IOException("Failed to parse SSE event", e))
                 }
             }
 
@@ -211,6 +213,8 @@ class TaskRepository @Inject constructor(
                     trySend(taskMap.values.toList())
                 } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
                     Log.w(TAG, "Failed to parse task list event", e)
+                    _warnings.tryEmit("Task list stream corrupted, reconnecting…")
+                    close(IOException("Failed to parse SSE event", e))
                 }
             }
 
@@ -242,6 +246,8 @@ class TaskRepository @Inject constructor(
                     trySend(json.decodeFromString<T>(data))
                 } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
                     Log.w(TAG, "Failed to parse SSE event from $url", e)
+                    _warnings.tryEmit("Usage stream corrupted, reconnecting…")
+                    close(IOException("Failed to parse SSE event", e))
                 }
             }
 

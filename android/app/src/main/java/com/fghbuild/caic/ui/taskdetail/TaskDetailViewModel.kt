@@ -70,6 +70,7 @@ data class TaskDetailState(
     val harnesses: List<HarnessInfo> = emptyList(),
     val allRepos: List<Repo> = emptyList(),
     val processes: List<ProcessInfo>? = null, // null = not yet loaded
+    val streamWarning: String? = null,
 )
 
 private val TerminalStates = setOf("stopping", "stopped", "purging", "purged", "failed")
@@ -97,6 +98,7 @@ class TaskDetailViewModel @Inject constructor(
     private val _harnesses = MutableStateFlow<List<HarnessInfo>>(emptyList())
     private val _repos = MutableStateFlow<List<Repo>>(emptyList())
     private val _processes = MutableStateFlow<List<ProcessInfo>?>(null)
+    private val _streamWarning = MutableStateFlow<String?>(null)
 
     private var sseJob: Job? = null
 
@@ -119,6 +121,7 @@ class TaskDetailViewModel @Inject constructor(
             taskRepository.tasks, _grouped, _isReady, _sending,
             _pendingAction, _actionError, _safetyIssues, _inputDraft,
             _pendingImages, _harnesses, _statsHistory, _repos, _processes,
+            _streamWarning,
         )
     ) { values ->
         val tasks = values[0] as List<Task>
@@ -135,6 +138,7 @@ class TaskDetailViewModel @Inject constructor(
         val statsHist = values[10] as List<EventStats>
         val repos = values[11] as List<Repo>
         val procs = values[12] as List<ProcessInfo>?
+        val warning = values[13] as String?
         val task = tasks.firstOrNull { it.id == taskId }
         val taskHarness = harnesses.firstOrNull { it.name == task?.harness }
         val imgSupport = task != null && taskHarness?.supportsImages == true
@@ -163,6 +167,7 @@ class TaskDetailViewModel @Inject constructor(
             harnesses = harnesses,
             allRepos = repos,
             processes = procs,
+            streamWarning = warning,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskDetailState())
 
@@ -170,6 +175,20 @@ class TaskDetailViewModel @Inject constructor(
         connectSSE()
         loadHarnesses()
         loadRepos()
+        observeWarnings()
+    }
+
+    /** Surface stream corruption warnings from [TaskRepository] as transient errors. */
+    private fun observeWarnings() {
+        viewModelScope.launch {
+            taskRepository.warnings.collect { warning ->
+                _streamWarning.value = warning
+                delay(8000)
+                if (_streamWarning.value == warning) {
+                    _streamWarning.value = null
+                }
+            }
+        }
     }
 
     private fun apiClient(): ApiClient =

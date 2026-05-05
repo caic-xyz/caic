@@ -556,6 +556,14 @@ fun TaskDetailScreen(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
                         )
                     }
+                    state.streamWarning?.let { warning ->
+                        Text(
+                            text = warning,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                        )
+                    }
                     InputBar(
                         draft = state.inputDraft,
                         onDraftChange = viewModel::updateInputDraft,
