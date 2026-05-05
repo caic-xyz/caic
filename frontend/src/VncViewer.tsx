@@ -7,10 +7,6 @@ import FullscreenIcon from "@material-symbols/svg-400/outlined/fullscreen.svg?so
 import FullscreenExitIcon from "@material-symbols/svg-400/outlined/fullscreen_exit.svg?solid";
 import styles from "./VncViewer.module.css";
 
-interface RFBEvent {
-  detail: { clean: boolean; code: number; reason: string };
-}
-
 interface Props {
   taskId: string;
   repo: string;
@@ -42,11 +38,10 @@ export default function VncViewer(props: Props) {
     }
 
     function onDisconnect(e: Event) {
-      const de = e as CustomEvent<RFBEvent["detail"]>;
-      const { clean, code, reason } = de.detail;
-      if (!clean) {
-        const detail = reason || `WebSocket closed (code: ${code})`;
-        setError(`VNC connection lost: ${detail}`);
+      // noVNC 1.7.0 disconnect detail only has { clean: boolean }.
+      const de = e as CustomEvent<{ clean: boolean }>;
+      if (!de.detail.clean) {
+        setError("VNC connection failed — check that the container has a display enabled");
       }
     }
 
