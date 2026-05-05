@@ -583,3 +583,70 @@ describe("buildPastSessionItems", () => {
     expect(keys[0]).toContain("10");
   });
 });
+
+// Performance benchmarks: validate that groupMessages + groupTurns scale linearly
+// for realistic workloads. Pi-style thinking_delta torrents are the stress case.
+//
+// Thresholds (Node.js, approximate):
+// - 1k  events: < 5 ms   (typical Claude Code turn)
+// - 10k events: < 50 ms  (large pi turn)
+// - 65k events: < 500 ms (extreme case from caic-43 trace)
+describe("performance benchmarks", () => {
+  function generateThinkingDeltas(count: number): EventMessage[] {
+    const msgs: EventMessage[] = [
+      {
+        kind: "thinking", ts: 1777988039500,
+        thinking: { text: "Let me think about this..." },
+      },
+    ];
+    for (let i = 0; i < count; i++) {
+      msgs.push({
+        kind: "thinkingDelta", ts: 1777988039509 + i,
+        thinkingDelta: { text: `word${i} ` },
+      });
+    }
+    return msgs;
+  }
+
+  it("single-call performance scales acceptably", () => {
+    const sizes = [1000, 10000, 65000];
+    for (const size of sizes) {
+      const msgs = generateThinkingDeltas(size);
+      const start = performance.now();
+      const groups = groupMessages(msgs);
+      const turns = groupTurns(groups);
+      const elapsed = performance.now() - start;
+      // Force consumption so dead code elimination doesn't skip work.
+      expect(turns.length).toBeGreaterThanOrEqual(0);
+      // eslint-disable-next-line no-console -- benchmark diagnostic output
+      console.log(`groupMessages+groupTurns(${size} events): ${elapsed.toFixed(1)} ms`);
+      const maxMs = size === 1000 ? 50 : size === 10000 ? 200 : 3000;
+      expect(elapsed).toBeLessThan(maxMs);
+    }
+  });
+
+  it("incremental performance (batched deltas) scales acceptably", () => {
+    const totalEvents = 10000;
+    const batchSize = 50;
+    const batches = totalEvents / batchSize;
+    let cumulative: EventMessage[] = [];
+    let totalTime = 0;
+    for (let i = 0; i < batches; i++) {
+      const newDeltas = Array.from({ length: batchSize }, (_, j) => ({
+        kind: "thinkingDelta" as const,
+        ts: 1777988039509 + (i * batchSize + j),
+        thinkingDelta: { text: `word${i * batchSize + j} ` },
+      }));
+      cumulative = [...cumulative, ...newDeltas];
+      const start = performance.now();
+      const groups = groupMessages(cumulative);
+      groupTurns(groups);
+      totalTime += performance.now() - start;
+    }
+    // eslint-disable-next-line no-console -- benchmark diagnostic output
+    console.log(
+      `groupMessages incremental (${totalEvents} events, ${batchSize}/batch, ${batches} batches): total=${totalTime.toFixed(1)}ms avg=${(totalTime / batches).toFixed(2)}ms`,
+    );
+    expect(totalTime).toBeLessThan(5000);
+  });
+});

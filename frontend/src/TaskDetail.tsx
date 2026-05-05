@@ -271,32 +271,43 @@ export default function TaskDetail(props: Props) {
   const pastSessionItems = createMemo(() =>
     buildPastSessionItems(pastSessions(), expandedSessionKeys(), expandedTurnKeys()),
   );
-  // Completed turn items (elidable): stable during streaming.
-  const completedTurnItems = createMemo(() => {
+  // Whether a live turn is currently streaming. Mirrors Android's hasLiveTurn.
+  const hasLiveTurn = createMemo(() => currentGroups().length > 0);
+  // Elidable turns (all completed turns except the last, which is always expanded).
+  // Cached in its own memo so slice(0, -1) only runs on turn completion, matching
+  // Android's remember(currentSessionCompletedTurns) { dropLast(1) } pattern.
+  const elidableTurns = createMemo(() => {
     const completedTurns = currentSessionCompletedTurns();
-    const elidableTurns = completedTurns.slice(0, -1);
-    return buildTurnItems(elidableTurns, expandedTurnKeys(), currentSessionKey());
+    return completedTurns.slice(0, -1);
   });
+  // Completed turn items (elidable): stable during streaming.
+  const completedTurnItems = createMemo(() =>
+    buildTurnItems(elidableTurns(), expandedTurnKeys(), currentSessionKey()),
+  );
   // Last completed turn is always expanded.
   const lastTurnItems = createMemo((): MsgItem[] => {
     const completedTurns = currentSessionCompletedTurns();
     const last = completedTurns[completedTurns.length - 1];
     if (!last) return [];
-    return last.groups.map((g, j) => ({ kind: "group" as const, group: g, isLive: false, key: `last-g${j}` }));
+    // Match Android's keyPrefix strategy: when a live turn exists, use "lg" to avoid
+    // key collisions with live items. When idle, use "g" so the LazyColumn can reuse
+    // composables if the same turn transitions between live and last-expanded states.
+    const keyPrefix = hasLiveTurn() ? "lg" : "g";
+    return last.groups.map((g, j) => ({ kind: "group" as const, group: g, isLive: false, key: `${keyPrefix}:${j}` }));
   });
   // Session boundary item for the current session.
   const sessionBoundaryItems = createMemo((): MsgItem[] => {
     const boundaryEv = currentSessionBoundaryEvent();
     return boundaryEv ? [{ kind: "sessionBoundary", event: boundaryEv, key: "cur-sess-boundary" }] : [];
   });
-  // Live turn groups: change on every frame.
+  // Live turn groups: change on every frame. Uses "g" prefix to match Android.
   const liveItems = createMemo((): MsgItem[] => {
     const liveGroups = currentGroups();
     return liveGroups.map((g, j) => ({
       kind: "group" as const,
       group: g,
       isLive: true,
-      key: `live-g${j}`,
+      key: `g:${j}`,
     }));
   });
   // Flat item model: past sessions (elided) + current session boundary + current session

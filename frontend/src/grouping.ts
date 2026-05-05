@@ -57,6 +57,14 @@ export function isSessionBoundary(ev: EventMessage): boolean {
   return ev.kind === "init" || (ev.kind === "system" && ev.system?.subtype === "compact_boundary");
 }
 
+// Groups consecutive events for cohesive rendering.
+//
+// NOTE: This function is called on the entire current-turn message list on every
+// SSE batch (via currentGroups -> groupMessages). The list grows monotonically between
+// result events, so re-processing all events each time is O(n²) in total across all
+// batches within a turn. For harnesses like pi that emit thousands of thinking_delta
+// events per turn, this dominates CPU during streaming. A future optimisation could
+// cache the mutable group state and only process new events.
 export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
   const groups: MessageGroup[] = [];
 
