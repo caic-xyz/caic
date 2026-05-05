@@ -1,0 +1,111 @@
+/* Styles for the VNC desktop viewer. */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Fullscreen: black background, absolute positioning. */
+.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: #000;
+}
+
+.fullscreen .header {
+  background: rgba(0, 0, 0, 0.6);
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.fullscreen .header:hover {
+  opacity: 1;
+}
+
+.fullscreen .backBtn {
+  color: #ccc;
+}
+
+.fullscreen .backBtn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.fullscreen .headerRepo,
+.fullscreen .headerBranch {
+  color: #ccc;
+}
+
+.fullscreen .headerBranch {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.backBtn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.backBtn:hover {
+  background: var(--color-bg-hover);
+}
+
+.headerMeta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.headerRepo {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.headerBranch {
+  font-family: monospace;
+  background: var(--color-bg-hover);
+  border-radius: var(--radius-sm);
+  padding: 0 0.35rem;
+}
+
+.content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+}
+
+.canvas {
+  flex: 1;
+}
+
+/* noVNC uses a canvas element inside the target div. */
+.canvas canvas {
+  display: block;
+}
+
+.error {
+  color: var(--color-danger);
+  font-size: 0.85rem;
+  padding: 1rem 0;
+}

@@ -66,6 +66,7 @@ interface Props {
   harness: string;
   model?: string;
   diffStat?: DiffFileStat[];
+  vncPort?: number;
   supportsImages?: boolean;
   supportsCompact?: boolean;
   onStop: (id: string) => void;
@@ -585,6 +586,9 @@ export default function TaskDetail(props: Props) {
         </Show>
         <Show when={props.taskState !== "pending" && props.taskState !== "branching" && props.taskState !== "provisioning" && props.taskState !== "starting" && props.taskState !== "purged" && props.taskState !== "failed"}>
           <A class={styles.diffLink} href={`${location.pathname}/processes`}>Processes</A>
+        </Show>
+        <Show when={(props.vncPort ?? 0) > 0}>
+          <A class={styles.diffLink} href={`${location.pathname}/vnc`}>VNC</A>
         </Show>
         <Show when={props.inPlanMode}>
           <span class={styles.planIndicator} title="Agent is in plan mode">Plan Mode</span>

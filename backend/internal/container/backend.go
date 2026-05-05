@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os/exec"
 	"runtime/trace"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -268,8 +271,38 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 // VNCPort implements task.ContainerBackend.
 func (b *Backend) VNCPort(containerName string) int {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	return int(b.vncPorts[containerName])
+	port := int(b.vncPorts[containerName])
+	b.mu.Unlock()
+	if port != 0 {
+		return port
+	}
+	// Fallback: query Docker label on the container. Handles server
+	// restarts where the in-memory map is empty but the container
+	// is still running with a display.
+	if v, err := LabelValue(context.Background(), containerName, "md.display"); err == nil && v == "1" {
+		if hp, err := hostPort(containerName, "5901/tcp"); err == nil {
+			b.mu.Lock()
+			b.vncPorts[containerName] = int32(hp) //nolint:gosec // port numbers are 1-65535, safe for int32
+			b.mu.Unlock()
+			return hp
+		}
+	}
+	return 0
+}
+
+// hostPort reads the Docker host port mapping for the given container port.
+func hostPort(containerName, containerPort string) (int, error) {
+	cmd := exec.Command("docker", "port", containerName, containerPort) //nolint:gosec // containerName is internally-assigned
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	// Output format: "0.0.0.0:32768" or "127.0.0.1:32768"
+	parts := strings.SplitN(strings.TrimSpace(string(out)), ":", 2)
+	if len(parts) != 2 {
+		return 0, fmt.Errorf("unexpected docker port output: %q", out)
+	}
+	return strconv.Atoi(parts[1])
 }
 
 // logWriters returns stdout and stderr writers for md task operations.

@@ -178,6 +178,9 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 			close(entry.done)
 			return
 		}
+		s.mu.Lock()
+		s.taskChanged()
+		s.mu.Unlock()
 		s.watchSession(entry, primaryRunner, h)
 	}()
 
@@ -505,6 +508,9 @@ func (s *Server) reviveTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq
 			slog.Warn("revive failed", "task", entry.task.ID, "err", err)
 			return
 		}
+		s.mu.Lock()
+		s.taskChanged()
+		s.mu.Unlock()
 		s.watchSession(entry, runner, h)
 	}()
 	return &v1.StatusResp{Status: "provisioning"}, nil
@@ -643,6 +649,9 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 			close(forkEntry.done)
 			return
 		}
+		s.mu.Lock()
+		s.taskChanged()
+		s.mu.Unlock()
 		s.watchSession(forkEntry, runner, h)
 	}()
 

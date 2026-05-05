@@ -1,5 +1,5 @@
 // Main application component for caic web UI.
-import { createEffect, createSignal, For, Show, Switch, Match, onCleanup } from "solid-js";
+import { createEffect, createSignal, For, Show, Switch, Match, onCleanup, lazy, Suspense } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { Harness, HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp } from "@sdk/types.gen";
@@ -11,6 +11,7 @@ import Login from "./Login";
 import TaskDetail from "./TaskDetail";
 import DiffDetail from "./DiffDetail";
 import ProcessDetail from "./ProcessDetail";
+const VncViewer = lazy(() => import("./VncViewer"));
 import TaskList from "./TaskList";
 import { confirmTaskAction } from "./TaskCard";
 import PromptInput from "./PromptInput";
@@ -54,7 +55,7 @@ function taskPath(id: string, repo: string, branch: string, query: string): stri
 function taskIdFromPath(pathname: string): string | null {
   const prefix = "/task/@";
   if (!pathname.startsWith(prefix)) return null;
-  const rest = pathname.slice(prefix.length).replace(/\/(diff|processes)$/, "");
+  const rest = pathname.slice(prefix.length).replace(/\/(diff|processes|vnc)$/, "");
   const plus = rest.indexOf("+");
   return plus === -1 ? rest : rest.slice(0, plus);
 }
@@ -67,6 +68,11 @@ function isDiffPath(pathname: string): boolean {
 /** True when the pathname ends with /processes (process list route). */
 function isProcessesPath(pathname: string): boolean {
   return pathname.startsWith("/task/@") && pathname.endsWith("/processes");
+}
+
+/** True when the pathname ends with /vnc (VNC viewer route). */
+function isVncPath(pathname: string): boolean {
+  return pathname.startsWith("/task/@") && pathname.endsWith("/vnc");
 }
 
 function ConnectionDot(props: { connected: boolean }) {
@@ -194,7 +200,7 @@ export default function App() {
         return;
       }
       if (e.key === "Escape" && selectedId() !== null) {
-        if (isDiffPath(location.pathname) || isProcessesPath(location.pathname)) {
+        if (isDiffPath(location.pathname) || isProcessesPath(location.pathname) || isVncPath(location.pathname)) {
           navigate(location.pathname.replace(/\/(diff|processes)$/, ""));
         } else {
           navigate("/");
@@ -920,6 +926,24 @@ export default function App() {
               );
             }}
           </Match>
+          <Match when={isVncPath(location.pathname) && selectedId()} keyed>
+            {(id) => {
+              const t = selectedTask();
+              const tp = t ? taskPath(t.id, t.repos?.[0]?.name ?? "", t.repos?.[0]?.branch ?? "", t.title) : `/task/@${id}`;
+              return (
+                <div class={styles.detailPane}>
+                  <Suspense fallback={<div style={{ padding: "1rem", color: "var(--color-text-muted)" }}>Loading VNC viewer…</div>}>
+                    <VncViewer
+                      taskId={id}
+                      repo={t?.repos?.[0]?.name ?? ""}
+                      branch={t?.repos?.[0]?.branch ?? ""}
+                      taskPath={tp}
+                    />
+                  </Suspense>
+                </div>
+              );
+            }}
+          </Match>
           <Match when={selectedId()} keyed>
             {(id) => (
               <div class={styles.detailPane}>
@@ -943,6 +967,7 @@ export default function App() {
                   harness={selectedTask()?.harness ?? ""}
                   model={selectedTask()?.model}
                   diffStat={selectedTask()?.diffStat}
+                  vncPort={selectedTask()?.vncPort ?? 0}
                   supportsImages={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsImages}
                   supportsCompact={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsCompact}
                   onStop={handleStop}

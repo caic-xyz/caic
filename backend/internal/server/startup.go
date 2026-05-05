@@ -777,6 +777,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		TailscaleFQDN: c.TailscaleFQDN(ctx),
 		USB:           c.USB,
 		Display:       c.Display,
+		VNCPort:       int(c.VNCPort),
 		Provider:      s.provider,
 		ForgeIssue:    forgeIssue,
 	}
@@ -959,6 +960,8 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 				return
 			}
 			tlog.Debug("auto-reconnect succeeded")
+			// Repopulate VNC port from Docker (not in container labels).
+			t.VNCPort = runner.Container.VNCPort(t.Container)
 			// Compute host-side diff stat after reconnect. Reconnect
 			// replays relay messages which may include stale
 			// DiffStatMessages (old relay code diffs against HEAD, not
