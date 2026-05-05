@@ -14,6 +14,7 @@ import (
 	"slices"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -784,6 +785,7 @@ func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, dto.BadRequest("task has no VNC display"))
 		return
 	}
+	slog.Info("vnc proxy start", "task", t.ID, "ctr", t.Container, "port", t.VNCPort)
 	vncAddr := fmt.Sprintf("127.0.0.1:%d", t.VNCPort)
 
 	vncConn, err := net.DialTimeout("tcp", vncAddr, 10*time.Second)
@@ -807,19 +809,24 @@ func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	var written atomic.Int64
 	go func() {
 		defer cancel()
 		for {
 			_, buf, err := wsConn.Read(ctx)
 			if err != nil {
+				slog.Debug("vnc ws→tcp done", "task", t.ID, "err", err)
 				return
 			}
 			if _, err := vncConn.Write(buf); err != nil {
+				slog.Debug("vnc ws→tcp write failed", "task", t.ID, "err", err)
 				return
 			}
 		}
 	}()
-	_, _ = io.Copy(wsNetConn{wsConn, ctx}, vncConn)
+	n, cpErr := io.Copy(wsNetConn{wsConn, ctx}, vncConn)
+	written.Store(n)
+	slog.Info("vnc proxy done", "task", t.ID, "vnc→ws_bytes", n, "err", cpErr)
 }
 
 // wsNetConn adapts a coder/websocket connection to net.Conn for io.Copy.
