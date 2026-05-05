@@ -53,7 +53,7 @@ func New(cacheDir string, envVars []string) *Backend {
 	if cacheDir != "" {
 		b.cache = agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 		if models, _ := b.cache.Models(agent.OpenCode); len(models) > 0 {
-			b.ModelList = models
+			b.ModelList = agent.SortModels(models)
 		}
 	}
 	return b
@@ -66,11 +66,11 @@ func (b *Backend) Models() []string {
 	return b.ModelList
 }
 
-// SetModels replaces the model list. Thread-safe.
+// SetModels replaces the model list with sorted models. Thread-safe.
 func (b *Backend) SetModels(models []string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.ModelList = models
+	b.ModelList = agent.SortModels(models)
 }
 
 // Start launches an OpenCode ACP process via the relay daemon in the given
@@ -117,7 +117,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	}
 	if len(hs.models) > 0 {
 		b.mu.Lock()
-		b.ModelList = hs.models
+		b.ModelList = agent.SortModels(hs.models)
 		b.mu.Unlock()
 		if b.cache != nil {
 			b.cache.SetModels(agent.OpenCode, hs.models)

@@ -68,11 +68,11 @@ func (b *Backend) Models() []string {
 	return b.ModelList
 }
 
-// SetModels replaces the model list (thread-safe).
+// SetModels replaces the model list with sorted models (thread-safe).
 func (b *Backend) SetModels(models []string) {
 	b.modelsMu.Lock()
 	defer b.modelsMu.Unlock()
-	b.ModelList = models
+	b.ModelList = agent.SortModels(models)
 }
 
 // Start deploys relay and bridge scripts, then launches via relay serve-attach.

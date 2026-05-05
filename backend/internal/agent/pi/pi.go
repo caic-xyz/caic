@@ -58,7 +58,7 @@ func New(cacheDir string, envVars []string) *Backend {
 	if cacheDir != "" {
 		b.cache = agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 		if models, _ := b.cache.Models(agent.Pi); len(models) > 0 {
-			b.ModelList = models
+			b.ModelList = agent.SortModels(models)
 		}
 	}
 	return b
@@ -71,11 +71,11 @@ func (b *Backend) Models() []string {
 	return b.ModelList
 }
 
-// SetModels replaces the model list. Thread-safe.
+// SetModels replaces the model list with sorted models. Thread-safe.
 func (b *Backend) SetModels(models []string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.ModelList = models
+	b.ModelList = agent.SortModels(models)
 }
 
 // NewParser implements agent.Backend.
@@ -141,8 +141,9 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 				if models, err := FetchModels(fetchCtx, container, b.EnvVars); err != nil {
 					slog.Warn("pi: background model fetch failed", "err", err)
 				} else {
+					sorted := agent.SortModels(models)
 					b.mu.Lock()
-					b.ModelList = models
+					b.ModelList = sorted
 					b.mu.Unlock()
 					b.cache.SetModels(agent.Pi, models)
 				}
