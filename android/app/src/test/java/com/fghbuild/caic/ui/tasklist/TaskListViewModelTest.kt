@@ -70,8 +70,8 @@ class TaskListViewModelTest {
                     )
                     "/api/v1/server/repos" -> jsonResponse(
                         """[
-                            {"path":"acme/web-app","baseBranch":{"name":"main"}},
-                            {"path":"acme/api-server","baseBranch":{"name":"develop"}}
+                            {"path":"acme/web-app","branch":"main","baseBranch":{"name":"main"}},
+                            {"path":"acme/api-server","branch":"develop","baseBranch":{"name":"develop"}}
                         ]"""
                     )
                     "/api/v1/server/harnesses" -> jsonResponse(
@@ -158,7 +158,7 @@ class TaskListViewModelTest {
                         """{"tailscaleAvailable":false,"usbAvailable":false,"displayAvailable":false,"webrtcAvailable":false}"""
                     )
                     "/api/v1/server/repos" -> jsonResponse(
-                        """[{"path":"my-org/repo","baseBranch":{"name":"main"}}]"""
+                        """[{"path":"my-org/repo","branch":"main","baseBranch":{"name":"main"}}]"""
                     )
                     "/api/v1/server/harnesses" -> jsonResponse(
                         """[
