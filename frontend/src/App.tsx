@@ -16,6 +16,7 @@ const VncViewer = lazy(() => import("./VncViewer"));
 import TaskList from "./TaskList";
 import { confirmTaskAction } from "./TaskCard";
 import PromptInput from "./PromptInput";
+import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
 import { requestNotificationPermission, notifyWaiting, dismissNotification } from "./notifications";
 import UsageBadges from "./UsageBadges";
@@ -986,15 +987,17 @@ export default function App() {
         <div class={styles.forkOverlay} onClick={(e) => { if (e.target === e.currentTarget) setForkTaskId(null); }}>
           <div class={styles.forkDialog} role="dialog" aria-modal="true">
             <h2 class={styles.forkTitle}>Fork task</h2>
-            <input
-              type="text"
-              value={forkPrompt()}
-              onInput={(e) => setForkPrompt(e.currentTarget.value)}
-              placeholder="Prompt for forked task"
-              class={styles.forkInput}
-              autofocus
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitFork(); } if (e.key === "Escape") setForkTaskId(null); }}
-            />
+            {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Escape key closes the dialog */}
+            <div onKeyDown={(e) => { if (e.key === "Escape") setForkTaskId(null); }}>
+              <AutoResizeTextarea
+                value={forkPrompt()}
+                onInput={setForkPrompt}
+                onSubmit={submitFork}
+                placeholder="Prompt for forked task"
+                class={styles.forkInput}
+                tabIndex={0}
+              />
+            </div>
             <Show when={forkAvailableRecent().length > 0 || forkAvailableRest().length > 0 || forkExtraRepos().length > 0}>
               <RepoChipStrip
                 repos={repos}

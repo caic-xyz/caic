@@ -237,8 +237,8 @@
   background: #fff;
   border-radius: var(--radius-xl);
   padding: 1.5rem;
-  width: 90vw;
-  max-width: 420px;
+  width: calc(100vw - 2rem);
+  max-width: 640px;
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -253,20 +253,30 @@
 
 .forkRow {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
+}
+
+.forkRow > select {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .forkInput {
   padding: 0.5rem 0.6rem;
   font: inherit;
   font-size: 0.9rem;
+  line-height: 1.4;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-surface);
   color: inherit;
   width: 100%;
   box-sizing: border-box;
+  min-height: 2.5em;
+  max-height: 10rem;
+  overflow-y: auto;
 }
 
 .forkInput:focus {
