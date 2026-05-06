@@ -86,7 +86,7 @@
 .app {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0.5rem 1rem 1rem;
+  padding: 0.5rem 1rem 0;
   font-family: system-ui;
   height: 100dvh;
   display: flex;
@@ -505,7 +505,7 @@
 /* Mobile: <=768px */
 @media (max-width: 768px) {
   .app {
-    padding: 0.5rem 0.5rem 1rem;
+    padding: 0.5rem 0.5rem 0;
     overflow-y: auto;
   }
 
