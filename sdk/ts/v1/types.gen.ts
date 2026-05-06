@@ -867,7 +867,7 @@ export interface LocalUsage {
  * UsageResp is the response for GET /api/v1/usage.
  */
 export interface UsageResp {
-  providers: ProviderQuota[];
+  providers?: ProviderQuota[];
   local: LocalUsage;
 }
 /**

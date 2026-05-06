@@ -397,7 +397,7 @@ type LocalUsage struct {
 
 // UsageResp is the response for GET /api/v1/usage.
 type UsageResp struct {
-	Providers []ProviderQuota `json:"providers"`
+	Providers []ProviderQuota `json:"providers,omitempty"`
 	Local     LocalUsage      `json:"local"`
 }
 

@@ -783,7 +783,7 @@ public struct LocalUsage: Codable {
 
 /// UsageResp is the response for GET /api/v1/usage.
 public struct UsageResp: Codable {
-    public let providers: [ProviderQuota]
+    public let providers: [ProviderQuota]?
     public let local: LocalUsage
 }
 

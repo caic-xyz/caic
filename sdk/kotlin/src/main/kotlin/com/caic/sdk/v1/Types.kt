@@ -698,7 +698,7 @@ data class LocalUsage(val windows: List<LocalWindow>)
 
 /** UsageResp is the response for GET /api/v1/usage. */
 @Serializable
-data class UsageResp(val providers: List<ProviderQuota>, val local: LocalUsage)
+data class UsageResp(val providers: List<ProviderQuota>? = null, val local: LocalUsage)
 
 /** VoiceTokenResp is the response for GET /api/v1/voice/token. */
 @Serializable

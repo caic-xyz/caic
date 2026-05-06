@@ -939,7 +939,7 @@ UsageResp is the response for GET /api/v1/usage.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `providers` | `ProviderQuota[]` |  | yes |
+| `providers` | `ProviderQuota[]` |  |  |
 | `local` | `LocalUsage` |  | yes |
 
 ### VoiceTokenResp
