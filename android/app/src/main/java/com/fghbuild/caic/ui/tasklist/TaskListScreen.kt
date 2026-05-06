@@ -120,7 +120,8 @@ fun TaskListScreen(
             Row(
                 modifier = Modifier
                     .statusBarsPadding()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .testTag("top-bar"),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("caic", style = MaterialTheme.typography.titleMedium)

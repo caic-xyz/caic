@@ -53,18 +53,21 @@ class GenScreenshotsTest : E2eTestBase() {
         screenshotDir.listFiles()?.forEach { it.delete() }
 
         // Verify the server is configured before waiting for the connection dot.
-        // If the DataStore write from e2eConfigureRule hasn't propagated through the
-        // StateFlow yet, the UI shows NotConfiguredContent instead of the connection dot.
         composeTestRule.waitUntil(CONNECTION_TIMEOUT_MS) {
-            val configured = composeTestRule.onAllNodesWithTag("connection-dot")
+            var found = composeTestRule.onAllNodesWithTag("connection-dot")
                 .fetchSemanticsNodes().isNotEmpty()
-            if (!configured) {
+            if (!found) {
+                val topBar = composeTestRule.onAllNodesWithTag("top-bar")
+                    .fetchSemanticsNodes()
+                assert(topBar.isNotEmpty()) {
+                    "Top bar not composed — UI did not reach TaskListScreen"
+                }
                 val notConfig = composeTestRule.onAllNodesWithTag("not-configured")
                 assert(notConfig.fetchSemanticsNodes().isEmpty()) {
                     "Server not configured — DataStore write from e2eConfigureRule never propagated"
                 }
             }
-            configured
+            found
         }
 
         // Create the same 4 tasks as gen-android-screenshots.sh.
