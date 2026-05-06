@@ -180,7 +180,9 @@ def main():
             )
             devices = [line for line in result.stdout.strip().splitlines()[1:] if line.strip()]
             if len(devices) == 0:
-                print("No adb devices found. Start an emulator or connect a device.", file=sys.stderr)
+                print("No adb devices found.", file=sys.stderr)
+                print("Start one with:  make android-start-emulator", file=sys.stderr)
+                print("Stop it with:    make android-stop-emulator", file=sys.stderr)
                 return 1
             if len(devices) > 1:
                 print(
