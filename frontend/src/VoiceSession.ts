@@ -1,6 +1,6 @@
-// Core Gemini Live voice session manager for the web frontend. Keep in sync with android/app/src/main/java/com/fghbuild/caic/voice/VoiceSession.kt
+// Core Gemini Live voice session manager for the web frontend via WebRTC. Keep in sync with android/app/src/main/java/com/fghbuild/caic/voice/VoiceSession.kt
 import { createStore, produce } from "solid-js/store";
-import { getVoiceToken, voiceRTCOffer, listHarnesses, listRepos } from "./api";
+import { voiceRTCOffer, listHarnesses, listRepos } from "./api";
 import type { Task } from "@sdk/types.gen";
 import { FunctionHandlers } from "./FunctionHandlers";
 import { TaskNumberMap } from "./TaskNumberMap";
@@ -10,7 +10,6 @@ import { formatElapsed, formatCost } from "./formatting";
 // Constants
 
 const MODEL_NAME = "models/gemini-3.1-flash-live-preview";
-const PLAYBACK_SAMPLE_RATE = 24000;
 /** Max time (ms) to wait for setupComplete before timing out. */
 const SETUP_TIMEOUT_MS = 15000;
 
@@ -59,42 +58,6 @@ const SYSTEM_INSTRUCTION =
   "- Proactively notify the user when tasks finish or need input.\n" +
   "- For safety issues during sync, describe each issue and ask whether to force.";
 
-// AudioWorklet — inline blob to avoid Vite build complications
-
-const WORKLET_CODE = `
-class PCMCapture extends AudioWorkletProcessor {
-  constructor() {
-    super();
-    this._buf = [];
-    this._CHUNK = 1600; // ~100ms at 16 kHz
-    this.port.onmessage = (e) => {
-      if (e.data === "drain") this._buf = [];
-    };
-  }
-  process(inputs) {
-    const ch = inputs[0]?.[0];
-    if (!ch) return true;
-    for (let i = 0; i < ch.length; i++) this._buf.push(ch[i]);
-    while (this._buf.length >= this._CHUNK) {
-      const chunk = this._buf.splice(0, this._CHUNK);
-      const int16 = new Int16Array(this._CHUNK);
-      let sumSq = 0;
-      for (let i = 0; i < this._CHUNK; i++) {
-        const s = Math.max(-1, Math.min(1, chunk[i]));
-        const v = Math.round(s < 0 ? s * 32768 : s * 32767);
-        int16[i] = v;
-        sumSq += v * v;
-      }
-      const rms = Math.sqrt(sumSq / this._CHUNK) / 32768;
-      const micLevel = Math.min(1, Math.sqrt(rms));
-      this.port.postMessage({ pcm: int16.buffer, micLevel }, [int16.buffer]);
-    }
-    return true;
-  }
-}
-registerProcessor("pcm-capture", PCMCapture);
-`;
-
 // State types
 
 export type TranscriptSpeaker = "user" | "assistant";
@@ -115,7 +78,6 @@ export interface VoiceState {
   transcript: TranscriptEntry[];
   micLevel: number;
   error: string | null;
-  transport: "websocket" | "webrtc";
 }
 
 // VoiceSession
@@ -129,15 +91,12 @@ export class VoiceSession {
   /** Task IDs excluded from AI context (pre-purged at session start). */
   excludedTaskIds: Set<string> = new Set();
 
-  private _ws: WebSocket | null = null;
   private _pc: RTCPeerConnection | null = null;
   private _dc: RTCDataChannel | null = null;
   private _rtcSessionID: string | null = null;
   private _audioContext: AudioContext | null = null;
   private _micStream: MediaStream | null = null;
-  private _workletNode: AudioWorkletNode | null = null;
-  private _nextPlayTime = 0;
-  /** True while the model is speaking — mic audio is discarded to prevent echo. */
+  /** True while the model is speaking — injected text is buffered and flushed after the turn ends. */
   private _speakerActive = false;
   /** Text notifications buffered while the model is speaking; flushed on turn end. */
   private _pendingNotifications: string[] = [];
@@ -157,7 +116,6 @@ export class VoiceSession {
       transcript: [],
       micLevel: 0,
       error: null,
-      transport: "websocket",
     });
     // eslint-disable-next-line solid/reactivity
     this.state = state;
@@ -168,115 +126,8 @@ export class VoiceSession {
   // Public API
   // -----------------------------------------------------------------------
 
-  /** Start a new voice session with current task context. */
-  async connectWebSocket(tasks: Task[], recentRepo: string, defaultHarness = "", defaultModel = ""): Promise<void> {
-    // Release all transports before any await so we can recreate AudioContext while still
-    // within the user gesture handler (Chrome requires gesture context for running state).
-    this._releaseAll();
-    // Create AudioContext now — synchronously within the user gesture, before any await.
-    // After an await, Chrome may start the context suspended and refuse to resume it.
-    this._audioContext = new AudioContext({ sampleRate: 16000 });
-    this._clearTranscript();
-    this._setStatus("Fetching token…");
-
-    try {
-      const [tokenResp, harnesses, repos] = await Promise.all([
-        getVoiceToken(),
-        listHarnesses().catch(() => []),
-        listRepos().catch(() => []),
-      ]);
-
-      const harnessNames = harnesses.map((h) => h.name);
-      const repoPaths = repos.map((r) => r.path);
-
-      // Build snapshot before resetting the map.
-      const prePurged = new Set(
-        tasks
-          .filter((t) => t.state === "purged" || t.state === "failed" || t.state === "stopped" || t.state === "stopping")
-          .map((t) => t.id),
-      );
-      this.excludedTaskIds = prePurged;
-      const active = tasks
-        .filter((t) => !prePurged.has(t.id))
-        .sort((a, b) => {
-          const lc = a.id.length - b.id.length;
-          if (lc !== 0) return lc;
-          return a.id > b.id ? 1 : a.id < b.id ? -1 : 0;
-        });
-      this.taskNumberMap.reset();
-      this.taskNumberMap.update(active);
-      this._pendingSnapshot = buildSnapshot(active, recentRepo, this.taskNumberMap, defaultHarness, defaultModel);
-
-      this._functions = new FunctionHandlers(
-        this.taskNumberMap,
-        () => this.excludedTaskIds,
-        defaultHarness,
-        defaultModel,
-      );
-
-      const wsUrl = tokenResp.ephemeral
-        ? `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContentConstrained?access_token=${encodeURIComponent(tokenResp.token)}`
-        : `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(tokenResp.token)}`;
-
-      this._setStatus("Connecting…");
-      const ws = new WebSocket(wsUrl);
-      this._ws = ws;
-
-      // Fail fast if server never sends setupComplete (overloaded, network black hole).
-      if (this._setupTimer !== null) clearTimeout(this._setupTimer);
-      this._setupTimer = setTimeout(() => {
-        if (ws === this._ws && !this.state.connected && !this.state.error) {
-          ws.close();
-          this._ws = null;
-          this._setError("Connection timed out — server did not respond");
-        }
-      }, SETUP_TIMEOUT_MS);
-
-      ws.onopen = () => {
-        if (ws !== this._ws) return;
-        this._setStatus("Waiting for server…");
-        this._sendSetup(harnessNames, repoPaths, defaultHarness);
-      };
-
-      // Set binaryType so binary frames arrive as ArrayBuffer, not opaque Blob.
-      // Gemini may send protocol messages as binary WebSocket frames; without this,
-      // JSON.parse(blob) silently fails and setupComplete is never processed.
-      ws.binaryType = "arraybuffer";
-      ws.onmessage = (e: MessageEvent<string | ArrayBuffer>) => {
-        if (ws !== this._ws) return;
-        const text =
-          e.data instanceof ArrayBuffer
-            ? new TextDecoder().decode(e.data)
-            : (e.data as string);
-        this._handleMessage(text).catch((err: unknown) => {
-          this._setError(err instanceof Error ? err.message : "Message handling failed");
-        });
-      };
-
-      ws.onerror = () => {
-        if (ws !== this._ws) return;
-        this._setError("WebSocket connection failed");
-      };
-
-      ws.onclose = (e) => {
-        if (ws !== this._ws) return;
-        if (!this.state.connected) {
-          this._setError(formatCloseReason(e.code, e.reason));
-        } else {
-          this._update((s) => {
-            s.connected = false;
-            s.listening = false;
-            s.speaking = false;
-          });
-        }
-      };
-    } catch (e: unknown) {
-      this._setError(e instanceof Error ? e.message : "Connection failed");
-    }
-  }
-
   /** Start a new voice session via WebRTC data channel through the caic backend. */
-  async connectWebRTC(tasks: Task[], recentRepo: string, defaultHarness = "", defaultModel = ""): Promise<void> {
+  async connect(tasks: Task[], recentRepo: string, defaultHarness = "", defaultModel = ""): Promise<void> {
     this._releaseAll();
     this._audioContext = new AudioContext({ sampleRate: 16000 });
     this._clearTranscript();
@@ -406,7 +257,6 @@ export class VoiceSession {
       await pc.setRemoteDescription({ type: "answer", sdp: resp.sdp });
 
       this._update((s) => {
-        s.transport = "webrtc";
         s.listening = true;
       });
     } catch (e: unknown) {
@@ -419,14 +269,7 @@ export class VoiceSession {
       clearTimeout(this._setupTimer);
       this._setupTimer = null;
     }
-    this._releaseAudio();
-    this._ws?.close(1000, "User disconnected");
-    this._ws = null;
-    this._dc?.close();
-    this._dc = null;
-    this._pc?.close();
-    this._pc = null;
-    this._rtcSessionID = null;
+    this._releaseAll();
     this._functions = null;
     this._pendingSnapshot = null;
     // Preserve transcript for review; mark all entries final.
@@ -444,10 +287,6 @@ export class VoiceSession {
   toggleMute(): void {
     this._update((s) => {
       s.muted = !s.muted;
-      if (!s.muted) {
-        // Drain worklet buffer so stale audio isn't sent.
-        this._workletNode?.port.postMessage("drain");
-      }
     });
   }
 
@@ -481,19 +320,15 @@ export class VoiceSession {
   // Private helpers
   // -----------------------------------------------------------------------
 
-  /** Send a message via whichever transport is active (data channel or WebSocket). */
+  /** Send a message via the WebRTC data channel. */
   private _send(msg: string): void {
     if (this._dc && this._dc.readyState === "open") {
       this._dc.send(msg);
-    } else if (this._ws && this._ws.readyState === WebSocket.OPEN) {
-      this._ws.send(msg);
     }
   }
 
-  /** Release all transports and audio resources. */
+  /** Release WebRTC transport and audio resources. */
   private _releaseAll(): void {
-    this._ws?.close(1000, "Reconnecting");
-    this._ws = null;
     this._dc?.close();
     this._dc = null;
     this._pc?.close();
@@ -510,7 +345,7 @@ export class VoiceSession {
   }
 
   private _setError(message: string): void {
-    this._releaseAudio();
+    this._releaseAll();
     this._update((s) => {
       s.connectStatus = null;
       s.connected = false;
@@ -531,7 +366,7 @@ export class VoiceSession {
   }
 
   // -----------------------------------------------------------------------
-  // WebSocket setup
+  // Gemini setup message
   // -----------------------------------------------------------------------
 
   private _sendSetup(harnesses: string[], repos: string[], defaultHarness: string): void {
@@ -587,10 +422,7 @@ export class VoiceSession {
         s.connected = true;
         s.error = null;
       });
-      // Start audio capture (WebSocket mode only — WebRTC uses RTP tracks).
-      if (!this._pc) {
-        await this._startAudio();
-      }
+      // Audio capture is handled via WebRTC RTP tracks; no separate audio setup needed.
       // Inject snapshot so Gemini knows current task state.
       if (this._pendingSnapshot) {
         this.injectText(this._pendingSnapshot);
@@ -629,17 +461,7 @@ export class VoiceSession {
   }
 
   private _handleServerContent(content: ServerContent): void {
-    const parts = content.modelTurn?.parts ?? [];
-    for (const part of parts) {
-      if (part.inlineData?.data) {
-        this._speakerActive = true;
-        this._playPCM(part.inlineData.data);
-        this._update((s) => {
-          s.speaking = true;
-          s.micLevel = 0;
-        });
-      }
-    }
+    // Audio playback is handled via WebRTC RTP; inlineData audio is ignored here.
 
     if (content.inputTranscription?.text) {
       const chunk = content.inputTranscription.text;
@@ -657,7 +479,6 @@ export class VoiceSession {
 
     if (content.interrupted) {
       this._speakerActive = false;
-      this._workletNode?.port.postMessage("drain");
       this._flushPendingNotifications();
       this._update((s) => {
         s.speaking = false;
@@ -666,7 +487,6 @@ export class VoiceSession {
 
     if (content.turnComplete) {
       this._speakerActive = false;
-      this._workletNode?.port.postMessage("drain");
       this._flushPendingNotifications();
       this._update((s) => {
         s.speaking = false;
@@ -722,54 +542,10 @@ export class VoiceSession {
   }
 
   // -----------------------------------------------------------------------
-  // Audio capture
+  // Audio cleanup
   // -----------------------------------------------------------------------
 
-  private async _startAudio(): Promise<void> {
-    try {
-      // AudioContext was pre-created in connectWebSocket() within the user gesture handler.
-      // Recreating it here would be outside the gesture context and suspended in Chrome.
-      if (!this._audioContext) {
-        this._setError("AudioContext not initialized");
-        return;
-      }
-      this._micStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true },
-      });
-
-      const blobUrl = URL.createObjectURL(
-        new Blob([WORKLET_CODE], { type: "application/javascript" }),
-      );
-      await this._audioContext.audioWorklet.addModule(blobUrl);
-      URL.revokeObjectURL(blobUrl);
-
-      const source = this._audioContext.createMediaStreamSource(this._micStream);
-      this._workletNode = new AudioWorkletNode(this._audioContext, "pcm-capture");
-      this._workletNode.port.onmessage = (e: MessageEvent<{ pcm: ArrayBuffer; micLevel: number }>) => {
-        if (this.state.muted) return;
-        this._sendAudio(new Int16Array(e.data.pcm));
-        this._update((s) => {
-          s.micLevel = e.data.micLevel;
-        });
-      };
-      source.connect(this._workletNode);
-      // Don't connect worklet to destination — we only want the port messages.
-
-      this._update((s) => {
-        s.listening = true;
-      });
-    } catch (e: unknown) {
-      this._setError(e instanceof Error ? e.message : "Microphone setup failed");
-    }
-  }
-
   private _releaseAudio(): void {
-    try {
-      this._workletNode?.disconnect();
-      this._workletNode = null;
-    } catch {
-      // ignore
-    }
     try {
       this._micStream?.getTracks().forEach((t) => t.stop());
       this._micStream = null;
@@ -782,57 +558,8 @@ export class VoiceSession {
     } catch {
       // ignore
     }
-    this._nextPlayTime = 0;
     this._speakerActive = false;
     this._pendingNotifications = [];
-  }
-
-  // -----------------------------------------------------------------------
-  // Audio send (capture → Gemini)
-  // -----------------------------------------------------------------------
-
-  private _sendAudio(int16: Int16Array): void {
-    const base64 = arrayBufferToBase64(int16.buffer as ArrayBuffer);
-    this._send(
-      JSON.stringify({
-        realtimeInput: {
-          audio: { mimeType: "audio/pcm;rate=16000", data: base64 },
-        },
-      }),
-    );
-  }
-
-  // -----------------------------------------------------------------------
-  // Audio playback (Gemini → speaker)
-  // -----------------------------------------------------------------------
-
-  private _playPCM(base64: string): void {
-    const ctx = this._audioContext;
-    if (!ctx) return;
-
-    const binaryStr = atob(base64);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
-    }
-    const int16 = new Int16Array(bytes.buffer);
-
-    const float32 = new Float32Array(int16.length);
-    for (let i = 0; i < int16.length; i++) {
-      float32[i] = int16[i] / 32768;
-    }
-
-    const buffer = ctx.createBuffer(1, float32.length, PLAYBACK_SAMPLE_RATE);
-    buffer.getChannelData(0).set(float32);
-
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-
-    const now = ctx.currentTime;
-    const startAt = Math.max(now, this._nextPlayTime);
-    source.start(startAt);
-    this._nextPlayTime = startAt + buffer.duration;
   }
 }
 
@@ -868,26 +595,6 @@ function appendChunk(
     return [...transcript.slice(0, -1), { speaker, text: last.text + text, final: false }];
   }
   return [...transcript, { speaker, text, final: false }];
-}
-
-// Base64 helper
-
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-// WebSocket close reason formatting
-
-function formatCloseReason(code: number, reason: string): string {
-  if (reason.includes("unregistered callers")) {
-    return "Voice auth failed — check that GEMINI_API_KEY is set on the server";
-  }
-  return reason || `Connection closed (code ${code})`;
 }
 
 // Protocol types (subset needed for deserialization)

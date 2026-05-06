@@ -1,10 +1,9 @@
-// Tests for VoiceOverlay WebRTC transport selection.
+// Tests for VoiceOverlay voice session connection.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
-const connectWebSocketMock = vi.fn();
-const connectWebRTCMock = vi.fn();
+const connectMock = vi.fn();
 
 vi.mock("./VoiceSession", () => ({
   VoiceSession: class {
@@ -18,12 +17,10 @@ vi.mock("./VoiceSession", () => ({
       transcript: [],
       micLevel: 0,
       error: null,
-      transport: "websocket" as const,
     };
     taskNumberMap = { update: vi.fn(), reset: vi.fn() };
     excludedTaskIds = new Set<string>();
-    connectWebSocket = connectWebSocketMock;
-    connectWebRTC = connectWebRTCMock;
+    connect = connectMock;
     disconnect = vi.fn();
     toggleMute = vi.fn();
     injectText = vi.fn();
@@ -47,8 +44,8 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("VoiceOverlay transport selection", () => {
-  it("calls connect() when webrtcAvailable is false", async () => {
+describe("VoiceOverlay connection", () => {
+  it("calls connect() on mic button click", async () => {
     const user = userEvent.setup();
     render(() => (
       <VoiceOverlay
@@ -56,33 +53,12 @@ describe("VoiceOverlay transport selection", () => {
         recentRepo={() => "my-repo"}
         selectedHarness={() => "claude"}
         selectedModel={() => "opus"}
-        webrtcAvailable={() => false}
       />
     ));
 
     const micButton = screen.getByRole("button", { name: /voice/i });
     await user.click(micButton);
 
-    expect(connectWebSocketMock).toHaveBeenCalledOnce();
-    expect(connectWebRTCMock).not.toHaveBeenCalled();
-  });
-
-  it("calls connectWebRTC() when webrtcAvailable is true", async () => {
-    const user = userEvent.setup();
-    render(() => (
-      <VoiceOverlay
-        tasks={() => []}
-        recentRepo={() => "my-repo"}
-        selectedHarness={() => "claude"}
-        selectedModel={() => "opus"}
-        webrtcAvailable={() => true}
-      />
-    ));
-
-    const micButton = screen.getByRole("button", { name: /voice/i });
-    await user.click(micButton);
-
-    expect(connectWebRTCMock).toHaveBeenCalledOnce();
-    expect(connectWebSocketMock).not.toHaveBeenCalled();
+    expect(connectMock).toHaveBeenCalledOnce();
   });
 });

@@ -271,6 +271,26 @@ private fun ErrorPanel(onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AudioDevicePicker(
+    devices: List<AudioDevice>,
+    selectedDeviceId: Int?,
+    onSelect: (Int) -> Unit,
+) {
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        devices.forEach { device ->
+            FilterChip(
+                selected = device.id == selectedDeviceId,
+                onClick = { onSelect(device.id) },
+                label = { Text(device.name, style = MaterialTheme.typography.labelSmall) },
+            )
+        }
+    }
+}
+
 @Composable
 private fun TranscriptLog(
     entries: List<TranscriptEntry>,
@@ -343,22 +363,4 @@ private fun MicLevelIndicator(micLevel: Float = 0f) {
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun AudioDevicePicker(
-    devices: List<AudioDevice>,
-    selectedDeviceId: Int?,
-    onSelect: (Int) -> Unit,
-) {
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        devices.forEach { device ->
-            FilterChip(
-                selected = device.id == selectedDeviceId,
-                onClick = { onSelect(device.id) },
-                label = { Text(device.name, style = MaterialTheme.typography.labelSmall) },
-            )
-        }
-    }
-}
+

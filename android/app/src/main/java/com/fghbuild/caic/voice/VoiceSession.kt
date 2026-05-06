@@ -1,42 +1,32 @@
-// Manages Gemini Live WebSocket session, audio I/O, and function call dispatch. Keep in sync with frontend/src/VoiceSession.ts
+// Manages Gemini Live voice session via WebRTC, audio I/O, and function call dispatch. Keep in sync with frontend/src/VoiceSession.ts
 package com.fghbuild.caic.voice
 
-import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.util.Log
 import android.media.AudioAttributes
 import android.media.AudioDeviceCallback
-import android.media.AudioFocusRequest
 import android.media.AudioDeviceInfo
-import android.media.AudioFormat
+import android.media.AudioFocusRequest
 import android.media.AudioManager
-import android.media.AudioRecord
-import android.media.AudioTrack
-import android.media.MediaRecorder
-import android.media.audiofx.AcousticEchoCanceler
 import android.os.Handler
 import android.os.Looper
-import android.net.Uri
-import android.util.Base64
+import android.util.Log
 import com.caic.sdk.v1.ApiClient
+import com.caic.sdk.v1.VoiceRTCOfferReq
 import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.data.TaskRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -45,13 +35,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import com.caic.sdk.v1.VoiceRTCOfferReq
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
-import okio.ByteString
 import org.webrtc.DataChannel
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
@@ -63,19 +46,11 @@ import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "VoiceSession"
-private const val RECORD_SAMPLE_RATE = 16000
-private const val PLAYBACK_SAMPLE_RATE = 24000
-private const val AUDIO_BUFFER_SIZE = 4096
-private const val WS_CLOSE_NORMAL = 1000
 private const val MODEL_NAME = "models/gemini-3.1-flash-live-preview"
-/** Max time (ms) to wait for setupComplete before timing out. */
-private const val SETUP_TIMEOUT_MS = 15_000L
 
 @Singleton
 class VoiceSession @Inject constructor(
@@ -85,21 +60,13 @@ class VoiceSession @Inject constructor(
 ) {
     private val audioManager = appContext.getSystemService(AudioManager::class.java)
     private val json = Json { ignoreUnknownKeys = true }
-    private val client = OkHttpClient.Builder()
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .pingInterval(30, TimeUnit.SECONDS) // Detect silently dead connections (NAT timeout, proxy drop).
-        .build()
 
-    private var webSocket: WebSocket? = null
     private var peerConnection: PeerConnection? = null
     private var dataChannel: DataChannel? = null
     private var rtcSessionID: String? = null
     private var pcFactory: PeerConnectionFactory? = null
     private var rtcAudioSource: org.webrtc.AudioSource? = null
     private var localAudioTrack: org.webrtc.AudioTrack? = null
-    private var audioRecord: AudioRecord? = null
-    private var audioTrack: AudioTrack? = null
-    private var recordingJob: Job? = null
     private var functionHandlers: FunctionHandlers? = null
     private var availableHarnesses: List<String> = emptyList()
     private var availableRepos: List<String> = emptyList()
@@ -108,16 +75,11 @@ class VoiceSession @Inject constructor(
     private var deviceCallback: AudioDeviceCallback? = null
     private var scoReceiver: BroadcastReceiver? = null
     private var audioFocusRequest: AudioFocusRequest? = null
-    private var setupTimeoutJob: Job? = null
 
     private val _state = MutableStateFlow(VoiceState())
     val state: StateFlow<VoiceState> = _state.asStateFlow()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-
-    /** Single-threaded dispatcher for AudioTrack.write() — serializes writes and prevents
-     *  concurrent access that can SIGSEGV in native AudioTrack code. */
-    private val playbackDispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 
     val taskNumberMap = TaskNumberMap()
 
@@ -137,7 +99,11 @@ class VoiceSession @Inject constructor(
 
     fun setError(message: String) {
         Log.e(TAG, "setError: $message")
-        releaseAudio()
+        abandonAudioFocus()
+        VoiceService.stop(appContext)
+        unregisterDeviceCallback()
+        unregisterScoReceiver()
+        clearCommunicationDevice()
         _state.update {
             it.copy(
                 connectStatus = null,
@@ -155,13 +121,21 @@ class VoiceSession @Inject constructor(
         _state.update { it.copy(connectStatus = status, error = null) }
     }
 
+    /**
+     * Connect via WebRTC data channel through the caic backend bridge.
+     */
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all failures to UI.
-    fun connectWebSocket() {
-        // Close any existing connection to prevent WebSocket leaks.
-        webSocket?.close(WS_CLOSE_NORMAL, "Reconnecting")
-        webSocket = null
+    fun connect() {
+        peerConnection?.close()
+        peerConnection?.dispose()
+        peerConnection = null
         clearTranscript()
-        setStatus("Fetching token…")
+        requestAudioFocus()
+        VoiceService.start(appContext)
+        refreshAvailableDevices()
+        registerDeviceCallback()
+        registerScoReceiver()
+        setStatus("Setting up WebRTC…")
 
         scope.launch {
             try {
@@ -183,90 +157,12 @@ class VoiceSession @Inject constructor(
                     { excludedTaskIds }, defaultHarness, defaultModel,
                 )
 
-                val tokenResp = apiClient.getVoiceToken()
-                setStatus("Connecting…")
-                // Ephemeral tokens (v1alpha) use access_token + BidiGenerateContentConstrained.
-                // Raw API keys (v1beta) use key + BidiGenerateContent.
-                val wsUrl = if (tokenResp.ephemeral) {
-                    Uri.Builder()
-                        .scheme("wss")
-                        .authority("generativelanguage.googleapis.com")
-                        .path(
-                            "/ws/google.ai.generativelanguage.v1alpha" +
-                                ".GenerativeService.BidiGenerateContentConstrained",
-                        )
-                        .appendQueryParameter("access_token", tokenResp.token)
-                        .build()
-                        .toString()
-                } else {
-                    Uri.Builder()
-                        .scheme("wss")
-                        .authority("generativelanguage.googleapis.com")
-                        .path("/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent")
-                        .appendQueryParameter("key", tokenResp.token)
-                        .build()
-                        .toString()
-                }
-
-                val request = Request.Builder().url(wsUrl).build()
-                webSocket = client.newWebSocket(request, createWebSocketListener())
-                // Fail fast if server never sends setupComplete (overloaded, network black hole).
-                setupTimeoutJob?.cancel()
-                setupTimeoutJob = scope.launch {
-                    delay(SETUP_TIMEOUT_MS)
-                    if (_state.value.connectStatus != null && !_state.value.connected) {
-                        setError("Connection timed out — server did not respond")
-                    }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                setError(e.message ?: "Connection failed")
-            }
-        }
-    }
-
-    /**
-     * Connect via WebRTC data channel through the caic backend bridge.
-     * The data channel carries the same Gemini protocol as the direct WebSocket;
-     * audio I/O still uses AudioRecord/AudioTrack via PCM over the data channel.
-     */
-    @Suppress("TooGenericExceptionCaught") // Error boundary: surface all failures to UI.
-    fun connectWebRTC() {
-        webSocket?.close(WS_CLOSE_NORMAL, "Switching to WebRTC")
-        webSocket = null
-        clearTranscript()
-        setStatus("Setting up WebRTC…")
-
-        scope.launch {
-            try {
-                val settings = settingsRepository.settings.value
-                if (settings.serverURL.isBlank()) {
-                    setError("Server URL is not configured")
-                    return@launch
-                }
-
-                val apiClient = ApiClient(
-                    settings.serverURL,
-                    tokenProvider = { settingsRepository.settings.value.authToken },
-                )
-                availableHarnesses = apiClient.listHarnesses().map { it.name }
-                availableRepos = apiClient.listRepos().map { it.path }
-                val prefs = settingsRepository.serverPreferences.value
-                defaultHarness = prefs?.harness?.ifBlank { null }
-                    ?: availableHarnesses.firstOrNull() ?: ""
-                defaultModel = prefs?.harness?.let { h -> prefs.models?.get(h) }?.ifBlank { null } ?: ""
-                functionHandlers = FunctionHandlers(
-                    apiClient, taskRepository, settings.serverURL, taskNumberMap,
-                    { excludedTaskIds }, defaultHarness, defaultModel,
-                )
-
                 // Initialize WebRTC factory.
                 if (pcFactory == null) {
                     PeerConnectionFactory.initialize(
                         PeerConnectionFactory.InitializationOptions.builder(appContext)
                             .setEnableInternalTracer(false)
-                            .createInitializationOptions()
+                            .createInitializationOptions(),
                     )
                     pcFactory = PeerConnectionFactory.builder().createPeerConnectionFactory()
                 }
@@ -404,85 +300,25 @@ class VoiceSession @Inject constructor(
         }
     }
 
-    @Suppress("TooGenericExceptionCaught") // Error boundary: surface all failures to UI.
-    private fun startAudio() {
-        try {
-            requestAudioFocus()
-            VoiceService.start(appContext)
-            refreshAvailableDevices()
-            registerDeviceCallback()
-            registerScoReceiver()
-            setupAudioRecord()
-            check(audioRecord?.state == AudioRecord.STATE_INITIALIZED) {
-                "Microphone initialization failed"
-            }
-            setupAudioTrack()
-            startRecording()
-            _state.update { it.copy(listening = true) }
-        } catch (e: Exception) {
-            setError(e.message ?: "Audio setup failed")
-        }
-    }
-
-    /** Release audio resources without throwing. */
-    @Suppress("TooGenericExceptionCaught") // Must not throw from cleanup.
-    private fun releaseAudio() {
-        abandonAudioFocus()
-        VoiceService.stop(appContext)
-        recordingJob?.cancel()
-        recordingJob = null
-        unregisterDeviceCallback()
-        unregisterScoReceiver()
-        try {
-            audioRecord?.stop()
-        } catch (e: Exception) {
-            Log.w(TAG, "AudioRecord.stop() failed: ${e.message}")
-        }
-        try {
-            audioRecord?.release()
-        } catch (e: Exception) {
-            Log.w(TAG, "AudioRecord.release() failed: ${e.message}")
-        }
-        audioRecord = null
-        try {
-            audioTrack?.stop()
-        } catch (e: Exception) {
-            Log.w(TAG, "AudioTrack.stop() failed: ${e.message}")
-        }
-        try {
-            audioTrack?.release()
-        } catch (e: Exception) {
-            Log.w(TAG, "AudioTrack.release() failed: ${e.message}")
-        }
-        audioTrack = null
-        clearCommunicationDevice()
-        speakerActive = false
-        pendingNotifications.clear()
-    }
-
-    /** Toggle microphone mute. Recording continues but audio is discarded. */
+    /** Toggle microphone mute via the RTP audio track. */
     fun toggleMute() {
         muted = !muted
         _state.update { it.copy(muted = muted) }
-        // In WebRTC mode, mute/unmute the RTP audio track directly.
         localAudioTrack?.setEnabled(!muted)
-        if (!muted) {
-            // Drain stale audio buffered while muted (WebSocket mode only).
-            val rec = audioRecord ?: return
-            val drain = ByteArray(AUDIO_BUFFER_SIZE)
-            while (rec.read(drain, 0, drain.size, AudioRecord.READ_NON_BLOCKING) > 0) {
-                // discard
-            }
-        }
+    }
+
+    fun selectAudioDevice(deviceId: Int) {
+        _state.update { it.copy(selectedDeviceId = deviceId) }
+        applyCommunicationDevice(deviceId)
     }
 
     fun disconnect() {
         muted = false
-        setupTimeoutJob?.cancel()
-        setupTimeoutJob = null
-        releaseAudio()
-        webSocket?.close(WS_CLOSE_NORMAL, "User disconnected")
-        webSocket = null
+        abandonAudioFocus()
+        VoiceService.stop(appContext)
+        unregisterDeviceCallback()
+        unregisterScoReceiver()
+        clearCommunicationDevice()
         dataChannel?.close()
         dataChannel?.dispose()
         dataChannel = null
@@ -511,14 +347,12 @@ class VoiceSession @Inject constructor(
         sendClientContent(text)
     }
 
-    /** Send a message via whichever transport is active (data channel or WebSocket). */
+    /** Send a message via the WebRTC data channel. */
     private fun send(text: String) {
         val dc = dataChannel
         if (dc != null && dc.state() == DataChannel.State.OPEN) {
             val buf = ByteBuffer.wrap(text.toByteArray(StandardCharsets.UTF_8))
             dc.send(DataChannel.Buffer(buf, false))
-        } else {
-            webSocket?.send(text)
         }
     }
 
@@ -586,94 +420,20 @@ class VoiceSession @Inject constructor(
             .wrapTopLevel("setup")
     }
 
-    private fun createWebSocketListener() = object : WebSocketListener() {
-        /** Ignore callbacks from WebSockets we already replaced or disconnected. */
-        private fun isStale(ws: WebSocket) = ws !== this@VoiceSession.webSocket
-
-        override fun onOpen(webSocket: WebSocket, response: Response) {
-            if (isStale(webSocket)) return
-            setStatus("Sending setup…")
-            val voiceName = settingsRepository.settings.value.voiceName
-            sendSetupMessage(voiceName)
-            setStatus("Waiting for server…")
-        }
-
-        override fun onMessage(webSocket: WebSocket, text: String) {
-            if (isStale(webSocket)) return
-            scope.launch { handleServerMessage(text) }
-        }
-
-        override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-            if (isStale(webSocket)) return
-            scope.launch { handleServerMessage(bytes.utf8()) }
-        }
-
-        override fun onFailure(
-            webSocket: WebSocket,
-            t: Throwable,
-            response: Response?,
-        ) {
-            Log.e(TAG, "WebSocket failure: ${t.message}", t)
-            if (isStale(webSocket)) return
-            setError(t.message ?: "WebSocket connection failed")
-        }
-
-        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-            Log.i(TAG, "WebSocket closing: code=$code reason=$reason")
-            webSocket.close(code, reason)
-        }
-
-        override fun onClosed(
-            webSocket: WebSocket,
-            code: Int,
-            reason: String,
-        ) {
-            Log.i(TAG, "WebSocket closed: code=$code reason=$reason")
-            if (isStale(webSocket)) return
-            if (!_state.value.connected) {
-                // Connection closed before setupComplete — surface an error.
-                val msg = formatCloseReason(code, reason)
-                setError(msg)
-            } else {
-                _state.update { it.copy(connected = false, listening = false, speaking = false) }
-            }
-        }
-    }
-
-    /** Map WebSocket close reasons to user-friendly messages.
-     *  Close reasons are truncated to 123 bytes by RFC 6455. */
-    private fun formatCloseReason(code: Int, reason: String): String {
-        if (reason.contains("unregistered callers")) {
-            return "Voice auth failed — check that GEMINI_API_KEY is set on the server"
-        }
-        return reason.ifBlank { "Connection closed (code $code)" }
-    }
-
     @Suppress("TooGenericExceptionCaught") // Error boundary: malformed messages must not crash.
     private suspend fun handleServerMessage(text: String) {
         try {
             val msg = json.decodeFromString<JsonElement>(text).jsonObject
             when {
                 "setupComplete" in msg -> {
-                    setupTimeoutJob?.cancel()
-                    setupTimeoutJob = null
-                    if (peerConnection != null) {
-                        // WebRTC mode: the library handles audio I/O via RTP.
-                        Log.i(TAG, "setupComplete received (WebRTC)")
-                        _state.update {
-                            it.copy(
-                                connectStatus = null,
-                                connected = true,
-                                listening = true,
-                                error = null,
-                            )
-                        }
-                    } else {
-                        Log.i(TAG, "setupComplete received, starting audio")
-                        _state.update {
-                            it.copy(connectStatus = null, connected = true, error = null)
-                        }
-                        startAudio()
+                    Log.i(TAG, "setupComplete received")
+                    _state.update {
+                        it.copy(
+                            connectStatus = null,
+                            connected = true,
+                            listening = true,
+                            error = null,
+                        )
                     }
                 }
                 "serverContent" in msg -> {
@@ -711,20 +471,7 @@ class VoiceSession @Inject constructor(
     }
 
     private fun handleServerContent(content: BidiGenerateContentServerContent) {
-        val isWebRTC = peerConnection != null
-        content.modelTurn?.parts?.forEach { part ->
-            val inlineData = part.inlineData
-            if (inlineData != null && !isWebRTC) {
-                // WebSocket mode: play PCM from data channel. In WebRTC mode
-                // audio arrives via RTP and the library plays it directly.
-                val pcmBytes = Base64.decode(inlineData.data, Base64.NO_WRAP)
-                // Keep mic live so server-side VAD can detect user speech for barge-in.
-                // AEC (AcousticEchoCanceler + VOICE_COMMUNICATION source) handles echo.
-                speakerActive = true
-                playAudio(pcmBytes)
-                _state.update { it.copy(speaking = true, micLevel = 0f) }
-            }
-        }
+        // Audio playback is handled via WebRTC RTP; inlineData audio is ignored here.
         content.inputTranscription?.text?.let { text ->
             _state.update { it.copy(transcript = it.transcript.appendChunk(TranscriptSpeaker.USER, text)) }
         }
@@ -788,62 +535,9 @@ class VoiceSession @Inject constructor(
         )
     }
 
-    @SuppressLint("MissingPermission")
-    private fun setupAudioRecord() {
-        val bufferSize = AudioRecord.getMinBufferSize(
-            RECORD_SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-        )
-        Log.i(TAG, "AudioRecord buffer: $bufferSize")
-        // Match Firebase AI SDK: VOICE_COMMUNICATION + AcousticEchoCanceler.
-        audioRecord = AudioRecord.Builder()
-            .setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(RECORD_SAMPLE_RATE)
-                    .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
-                    .build()
-            )
-            .setBufferSizeInBytes(bufferSize)
-            .build()
-        audioRecord?.let { rec ->
-            if (AcousticEchoCanceler.isAvailable()) {
-                AcousticEchoCanceler.create(rec.audioSessionId)?.enabled = true
-            }
-            Log.i(TAG, "AudioRecord: rate=${rec.sampleRate} state=${rec.state}")
-        }
-    }
-
-    private fun setupAudioTrack() {
-        val bufferSize = AudioTrack.getMinBufferSize(
-            PLAYBACK_SAMPLE_RATE,
-            AudioFormat.CHANNEL_OUT_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-        )
-        // USAGE_MEDIA avoids the telephony DSP reroute latency that VOICE_COMMUNICATION
-        // causes on many devices (clips the first 1-2s of playback). HFP signaling is
-        // handled by the AudioFocusRequest's USAGE_VOICE_COMMUNICATION instead.
-        audioTrack = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setSampleRate(PLAYBACK_SAMPLE_RATE)
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build()
-            )
-            .setBufferSizeInBytes(bufferSize)
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .build()
-        audioTrack?.play()
-    }
+    // -----------------------------------------------------------------------
+    // Audio device management (transport-agnostic)
+    // -----------------------------------------------------------------------
 
     /** Populate available devices list and auto-select the best device. */
     private fun refreshAvailableDevices() {
@@ -866,11 +560,6 @@ class VoiceSession @Inject constructor(
         if (autoSelect != null) {
             applyCommunicationDevice(autoSelect)
         }
-    }
-
-    fun selectAudioDevice(deviceId: Int) {
-        _state.update { it.copy(selectedDeviceId = deviceId) }
-        applyCommunicationDevice(deviceId)
     }
 
     private fun applyCommunicationDevice(deviceId: Int) {
@@ -976,89 +665,6 @@ class VoiceSession @Inject constructor(
         audioFocusRequest = null
     }
 
-    @Suppress("TooGenericExceptionCaught") // Error boundary: recording failures must not crash.
-    private fun startRecording() {
-        audioRecord?.startRecording()
-        recordingJob = scope.launch(Dispatchers.IO) {
-            val buffer = ByteArray(AUDIO_BUFFER_SIZE)
-            while (isActive) {
-                val rec = audioRecord ?: return@launch
-                val bytesRead = readMicChunk(rec, buffer)
-                if (bytesRead < 0) return@launch
-                if (bytesRead > 0) {
-                    if (muted) {
-                        _state.update { it.copy(micLevel = 0f) }
-                    } else {
-                        sendAudioChunk(buffer.copyOf(bytesRead))
-                        _state.update { it.copy(micLevel = rmsLevel(buffer, bytesRead)) }
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Read one chunk from the mic.
-     * Returns >0 on success, 0 when skipped, -1 on fatal error.
-     */
-    @Suppress("TooGenericExceptionCaught") // Error boundary: recording failures must not crash.
-    private fun readMicChunk(rec: AudioRecord, buffer: ByteArray): Int {
-        return try {
-            rec.read(buffer, 0, buffer.size)
-        } catch (e: IllegalStateException) {
-            Log.w(TAG, "AudioRecord.read() interrupted: ${e.message}")
-            0
-        } catch (e: Exception) {
-            setError(e.message ?: "Audio recording failed")
-            -1
-        }
-    }
-
-    /** RMS of PCM 16-bit LE mono samples, normalized to 0..1.
-     *  Applies sqrt scaling so normal speech levels produce visible indicator movement. */
-    private fun rmsLevel(buffer: ByteArray, bytesRead: Int): Float {
-        val samples = bytesRead / 2
-        var sumSq = 0.0
-        for (i in 0 until samples) {
-            val lo = buffer[i * 2].toInt() and 0xFF
-            val hi = buffer[i * 2 + 1].toInt()
-            val sample = (hi shl 8) or lo
-            sumSq += sample.toDouble() * sample
-        }
-        val linear = (Math.sqrt(sumSq / samples) / Short.MAX_VALUE).toFloat()
-        // Sqrt compresses the range so typical speech (~0.02-0.10 linear) maps to ~0.15-0.30,
-        // making the indicator visibly responsive.
-        return Math.sqrt(linear.toDouble()).toFloat().coerceIn(0f, 1f)
-    }
-
-    private fun sendAudioChunk(pcmBytes: ByteArray) {
-        val encoded = Base64.encodeToString(pcmBytes, Base64.NO_WRAP)
-        val realtimeInput = BidiGenerateContentRealtimeInput(
-            audio = Blob(
-                mimeType = "audio/pcm",
-                data = encoded,
-            )
-        )
-        send(
-            json.encodeToString(BidiGenerateContentRealtimeInput.serializer(), realtimeInput)
-                .wrapTopLevel("realtimeInput")
-        )
-    }
-
-    private fun playAudio(pcmBytes: ByteArray) {
-        // AudioTrack.write() blocks until the buffer is consumed; run off-main to avoid
-        // back-pressuring the WebSocket message handler. Uses a single-threaded dispatcher
-        // to serialize writes — concurrent writes cause SIGSEGV in native AudioTrack code.
-        scope.launch(playbackDispatcher) {
-            val track = audioTrack ?: return@launch
-            try {
-                track.write(pcmBytes, 0, pcmBytes.size)
-            } catch (_: IllegalStateException) {
-                // AudioTrack was released while write was queued — harmless on disconnect.
-            }
-        }
-    }
-
     companion object {
         private const val SYSTEM_INSTRUCTION =
             "You are a voice assistant for caic, a system for managing AI coding agents.\n\n" +
@@ -1126,7 +732,7 @@ data class VoiceState(
     val transcript: List<TranscriptEntry> = emptyList(),
     /** RMS mic input level, normalized 0..1. */
     val micLevel: Float = 0f,
-    /** Available audio input devices. */
+    /** Available audio input/output devices. */
     val availableDevices: List<AudioDevice> = emptyList(),
     /** Currently selected audio device ID, or null for system default. */
     val selectedDeviceId: Int? = null,
@@ -1164,3 +770,4 @@ private fun audioDeviceTypeName(type: Int): String = when (type) {
     AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired Headphones"
     else -> "Device $type"
 }
+
