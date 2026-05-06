@@ -255,7 +255,8 @@ private fun NotConfiguredContent(padding: PaddingValues, onNavigateToSettings: (
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(padding),
+            .padding(padding)
+            .testTag("not-configured"),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {

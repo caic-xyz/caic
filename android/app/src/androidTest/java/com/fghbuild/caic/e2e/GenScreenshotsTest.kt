@@ -52,13 +52,19 @@ class GenScreenshotsTest : E2eTestBase() {
         // Clear stale screenshots from previous runs.
         screenshotDir.listFiles()?.forEach { it.delete() }
 
-        // Wait for the app to connect to the configured server before creating
-        // tasks. The e2eConfigureRule populates the DataStore before the Activity
-        // launches, so the SSE connection starts immediately. Still wait for the
-        // connection dot as a synchronization point on slow CI emulators.
+        // Verify the server is configured before waiting for the connection dot.
+        // If the DataStore write from e2eConfigureRule hasn't propagated through the
+        // StateFlow yet, the UI shows NotConfiguredContent instead of the connection dot.
         composeTestRule.waitUntil(CONNECTION_TIMEOUT_MS) {
-            composeTestRule.onAllNodesWithTag("connection-dot")
+            val configured = composeTestRule.onAllNodesWithTag("connection-dot")
                 .fetchSemanticsNodes().isNotEmpty()
+            if (!configured) {
+                val notConfig = composeTestRule.onAllNodesWithTag("not-configured")
+                assert(notConfig.fetchSemanticsNodes().isEmpty()) {
+                    "Server not configured — DataStore write from e2eConfigureRule never propagated"
+                }
+            }
+            configured
         }
 
         // Create the same 4 tasks as gen-android-screenshots.sh.
