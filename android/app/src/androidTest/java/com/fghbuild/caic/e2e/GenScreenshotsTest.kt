@@ -124,7 +124,10 @@ class GenScreenshotsTest : E2eTestBase() {
 
     companion object {
         private const val SETTLE_DELAY_MS = 1000L
-        private const val CONNECTION_TIMEOUT_MS = 30_000L
-        private const val LOAD_TIMEOUT_MS = 30_000L
+        // CI emulators render at ~1 FPS (Skipped 63-95 frames, 1.1-1.6s first frame).
+        // A full compose pass can take >1s, and the connection dot requires the SSE
+        // handshake + compose cycle — 30s is too tight when frames take seconds each.
+        private const val CONNECTION_TIMEOUT_MS = 90_000L
+        private const val LOAD_TIMEOUT_MS = 60_000L
     }
 }
