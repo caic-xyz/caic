@@ -9,6 +9,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -74,7 +75,7 @@ class TaskRepository @Inject constructor(
     private val _usage = MutableStateFlow<UsageResp?>(null)
     val usage: StateFlow<UsageResp?> = _usage.asStateFlow()
 
-    private val _warnings = MutableSharedFlow<String>(extraBufferCapacity = 10)
+    private val _warnings = MutableSharedFlow<String>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val warnings: SharedFlow<String> = _warnings.asSharedFlow()
 
     // SSE connections are long-lived; disable the read timeout so idle
@@ -157,7 +158,7 @@ class TaskRepository @Inject constructor(
                     val msg = json.decodeFromString<EventMessage>(data)
                     trySend(TaskSSEEvent.Event(msg))
                 } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-                    Log.w(TAG, "Failed to parse task raw event", e)
+                    Log.e(TAG, "Failed to parse task raw event", e)
                     _warnings.tryEmit("Task stream corrupted, reconnecting…")
                     close(IOException("Failed to parse SSE event", e))
                 }
@@ -212,7 +213,7 @@ class TaskRepository @Inject constructor(
                     }
                     trySend(taskMap.values.toList())
                 } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-                    Log.w(TAG, "Failed to parse task list event", e)
+                    Log.e(TAG, "Failed to parse task list event", e)
                     _warnings.tryEmit("Task list stream corrupted, reconnecting…")
                     close(IOException("Failed to parse SSE event", e))
                 }
@@ -245,7 +246,7 @@ class TaskRepository @Inject constructor(
                 try {
                     trySend(json.decodeFromString<T>(data))
                 } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-                    Log.w(TAG, "Failed to parse SSE event from $url", e)
+                    Log.e(TAG, "Failed to parse SSE event from $url", e)
                     _warnings.tryEmit("Usage stream corrupted, reconnecting…")
                     close(IOException("Failed to parse SSE event", e))
                 }

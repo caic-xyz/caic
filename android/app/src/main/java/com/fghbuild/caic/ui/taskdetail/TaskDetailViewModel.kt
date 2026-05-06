@@ -41,6 +41,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
@@ -169,7 +171,8 @@ class TaskDetailViewModel @Inject constructor(
             processes = procs,
             streamWarning = warning,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskDetailState())
+    }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskDetailState())
 
     init {
         connectSSE()
@@ -181,7 +184,12 @@ class TaskDetailViewModel @Inject constructor(
     /** Surface stream corruption warnings from [TaskRepository] as transient errors. */
     private fun observeWarnings() {
         viewModelScope.launch {
-            taskRepository.warnings.collect { warning ->
+            // distinctUntilChanged: skip repeated identical warnings (e.g. reconnect loop).
+            // conflate: drop intermediate warnings while a previous one is still displayed.
+            taskRepository.warnings
+                .distinctUntilChanged()
+                .conflate()
+                .collect { warning ->
                 _streamWarning.value = warning
                 delay(8000)
                 if (_streamWarning.value == warning) {

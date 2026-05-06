@@ -61,13 +61,7 @@ jobs:
           emulator-boot-timeout: 600
           script: |
             adb shell 'while ! pm list packages > /dev/null 2>&1; do echo "Waiting for package manager..."; sleep 2; done'
-            adb logcat -c
-            adb logcat '*:E' &
-            LOGCAT_PID=$!
             make android-e2e
-            E2E_RC=$?
-            kill $LOGCAT_PID 2>/dev/null || true
-            exit $E2E_RC
       - name: Upload lint results
         if: always()
         uses: actions/upload-artifact@v7

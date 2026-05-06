@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
@@ -191,7 +192,8 @@ class TaskListViewModel @Inject constructor(
             autoFixCI = serverPrefs?.settings?.autoFixOnCIFailure == true,
             autoFixPR = serverPrefs?.settings?.autoFixOnPROpen == true,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskListState())
+    }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskListState())
 
     init {
         taskRepository.start(viewModelScope)
@@ -458,7 +460,13 @@ class TaskListViewModel @Inject constructor(
     /** Surface stream corruption warnings from [TaskRepository] as transient errors. */
     private fun observeWarnings() {
         viewModelScope.launch {
-            taskRepository.warnings.collect { warning ->
+            // distinctUntilChanged: skip repeated identical warnings (e.g. reconnect loop).
+            // conflate: drop intermediate warnings while a previous one is still displayed,
+            // preventing rapid _formState churn that triggers full combine recomposition.
+            taskRepository.warnings
+                .distinctUntilChanged()
+                .conflate()
+                .collect { warning ->
                 _formState.value = _formState.value.copy(error = warning)
                 delay(8000)
                 if (_formState.value.error == warning) {
