@@ -37,7 +37,7 @@ jobs:
       - name: Build
         run: make android-build
       - name: Upload APK
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: app-debug.apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
@@ -61,19 +61,34 @@ jobs:
           emulator-boot-timeout: 600
           script: |
             adb shell 'while ! pm list packages > /dev/null 2>&1; do echo "Waiting for package manager..."; sleep 2; done'
+            adb logcat -c
+            adb logcat '*:E' &
+            LOGCAT_PID=$!
             make android-e2e
+            E2E_RC=$?
+            kill $LOGCAT_PID 2>/dev/null || true
+            exit $E2E_RC
       - name: Upload lint results
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: lint-results
           path: |
             android/app/build/reports/lint-results-debug.xml
             android/app/build/reports/detekt/
           retention-days: 14
+      - name: Upload E2E logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-failure-logs
+          path: |
+            android/app/build/reports/androidTests/connected/**
+            android/app/build/outputs/androidTest-results/connected/**
+          retention-days: 7
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: test-results
           path: android/app/build/reports/tests/

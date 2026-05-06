@@ -74,6 +74,52 @@ def wait_for_backend(port):
     return False
 
 
+def start_logcat(tmp_dir):
+    """Start adb logcat in the background, writing to a temp file."""
+    logcat_path = os.path.join(tmp_dir, "logcat.txt")
+    logcat_file = open(logcat_path, "w")  # noqa: SIM115
+    proc = subprocess.Popen(
+        ["adb", "logcat", "-v", "threadtime"],
+        stdout=logcat_file,
+        stderr=logcat_file,
+    )
+    return proc, logcat_path, logcat_file
+
+
+def stop_logcat(proc, logcat_file=None):
+    """Kill the background logcat process and close the log file."""
+    try:
+        proc.terminate()
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    if logcat_file:
+        logcat_file.close()
+
+
+def dump_logcat_on_failure(logcat_path):
+    """Dump logcat to stderr for immediate CI visibility."""
+    print("--- LOGCAT (last 200 lines) ---", file=sys.stderr)
+    try:
+        with open(logcat_path) as f:
+            lines = f.readlines()
+            for line in lines[-200:]:
+                print(line.rstrip(), file=sys.stderr)
+    except OSError as e:
+        print(f"Failed to read logcat: {e}", file=sys.stderr)
+    print("--- END LOGCAT ---", file=sys.stderr)
+
+
+def persist_logcat_for_artifact(logcat_path):
+    """Copy logcat to android/app/build/reports/ so CI can upload it as an artifact."""
+    dest_dir = os.path.join(ROOT_DIR, "android", "app", "build", "reports", "androidTests", "connected")
+    os.makedirs(dest_dir, exist_ok=True)
+    dest = os.path.join(dest_dir, "logcat.txt")
+    shutil.copy2(logcat_path, dest)
+    return dest
+
+
 def run_tests(port):
     result = subprocess.run(
         [
@@ -193,9 +239,17 @@ def main():
             subprocess.check_call(["adb", "reverse", f"tcp:{port}", f"tcp:{port}"])
 
             print("Running Android E2E tests...")
-            rc = run_tests(port)
+            logcat_proc, logcat_path, logcat_file = start_logcat(tmp_dir)
+            try:
+                rc = run_tests(port)
+            finally:
+                stop_logcat(logcat_proc, logcat_file)
 
-            if rc == 0:
+            if rc != 0:
+                print(f"Tests failed (exit {rc}). Dumping logcat:", file=sys.stderr)
+                dump_logcat_on_failure(logcat_path)
+                persist_logcat_for_artifact(logcat_path)
+            else:
                 print("Pulling screenshots...")
                 rc = pull_screenshots()
 
