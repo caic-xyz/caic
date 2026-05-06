@@ -109,6 +109,14 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		}
 		if cw := parseModelContextWindow(&resp); cw > 0 {
 			wire.modelCtxWindow = cw
+			// Persist to relay output so replay/adoption restores the
+			// context window (otherwise it falls back to the harness
+			// hardcoded default of 200k).
+			info, _ := json.Marshal(caicModelInfo{
+				Type:          "caic_model_info",
+				ContextWindow: cw,
+			})
+			_, _ = opts.LogW.Write(append(info, '\n'))
 		}
 		rp.Stdout = br // hand the buffered reader to the next command
 	}
@@ -169,6 +177,14 @@ func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agen
 // buildArgs constructs the Pi CLI arguments for RPC mode.
 func buildArgs() []string {
 	return []string{"pi", "--mode", "rpc", "--no-session"}
+}
+
+// caicModelInfo is written to output.jsonl during Start so replay/adoption
+// can restore the model's context window. Without it, the context window
+// defaults to the harness's hardcoded fallback (200k) after server restart.
+type caicModelInfo struct {
+	Type          string `json:"type"` // always "caic_model_info"
+	ContextWindow int64  `json:"context_window"`
 }
 
 // piConn wraps a default Conn to intercept extension_ui_request messages
@@ -306,6 +322,18 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	var probe pi.LineProbe
 	if err := json.Unmarshal(line, &probe); err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
+	}
+
+	// Restore model context window from synthetic caic_model_info line
+	// written during Start. This ensures replay/adoption correctly
+	// reports the model's real context window instead of falling back
+	// to the harness hardcoded default of 200k.
+	if probe.Type == "caic_model_info" {
+		var info caicModelInfo
+		if err := json.Unmarshal(line, &info); err == nil && info.ContextWindow > 0 {
+			w.modelCtxWindow = info.ContextWindow
+		}
+		return nil, nil
 	}
 
 	// Intercept agent_end for final usage.

@@ -147,6 +147,79 @@ func TestHandleAgentEndResultText(t *testing.T) {
 	})
 }
 
+func TestCaicModelInfo(t *testing.T) {
+	// Verify caic_model_info sets modelCtxWindow on the wire format,
+	// which is then used by handleTurnEnd to emit the correct ContextWindow
+	// in UsageMessage.
+
+	t.Run("sets modelCtxWindow from caic_model_info line", func(t *testing.T) {
+		w := &piWireFormat{}
+
+		// Parse the synthetic caic_model_info line.
+		infoLine := []byte(`{"type":"caic_model_info","context_window":1000000}`)
+		msgs, err := w.ParseMessage(infoLine)
+		if err != nil {
+			t.Fatalf("ParseMessage(caic_model_info): %v", err)
+		}
+		if len(msgs) != 0 {
+			t.Errorf("expected 0 messages, got %d", len(msgs))
+		}
+		if w.modelCtxWindow != 1000000 {
+			t.Errorf("modelCtxWindow = %d, want 1000000", w.modelCtxWindow)
+		}
+	})
+
+	t.Run("turn_end after caic_model_info has correct ContextWindow", func(t *testing.T) {
+		w := &piWireFormat{}
+
+		// Simulate replay order: caic_model_info first, then turn_end.
+		if _, err := w.ParseMessage([]byte(`{"type":"caic_model_info","context_window":1000000}`)); err != nil {
+			t.Fatal(err)
+		}
+		turnEndLine := []byte(`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":100,"output":50,"totalTokens":150}}}`)
+		msgs, err := w.ParseMessage(turnEndLine)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("expected 1 message, got %d", len(msgs))
+		}
+		um, ok := msgs[0].(*agent.UsageMessage)
+		if !ok {
+			t.Fatalf("expected *agent.UsageMessage, got %T", msgs[0])
+		}
+		if um.ContextWindow != 1000000 {
+			t.Errorf("ContextWindow = %d, want 1000000", um.ContextWindow)
+		}
+	})
+
+	t.Run("turn_end without caic_model_info defaults to 0", func(t *testing.T) {
+		w := &piWireFormat{}
+		turnEndLine := []byte(`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":100,"output":50,"totalTokens":150}}}`)
+		msgs, err := w.ParseMessage(turnEndLine)
+		if err != nil {
+			t.Fatal(err)
+		}
+		um, ok := msgs[0].(*agent.UsageMessage)
+		if !ok {
+			t.Fatalf("expected *agent.UsageMessage, got %T", msgs[0])
+		}
+		if um.ContextWindow != 0 {
+			t.Errorf("ContextWindow = %d, want 0 (no caic_model_info)", um.ContextWindow)
+		}
+	})
+
+	t.Run("caic_model_info with zero context_window is ignored", func(t *testing.T) {
+		w := &piWireFormat{}
+		if _, err := w.ParseMessage([]byte(`{"type":"caic_model_info","context_window":0}`)); err != nil {
+			t.Fatal(err)
+		}
+		if w.modelCtxWindow != 0 {
+			t.Errorf("modelCtxWindow = %d, want 0 (zero should be ignored)", w.modelCtxWindow)
+		}
+	})
+}
+
 func TestWireFormatDurationTracking(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		w := &piWireFormat{}

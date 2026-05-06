@@ -42,6 +42,10 @@ func parseMessage(line []byte, _ *jsonutil.FieldWarner) ([]agent.Message, error)
 
 	// caic-injected lines.
 	switch probe.Type {
+	case "caic_model_info":
+		// Handled by wireFormat.ParseMessage; skip in stateless replay.
+		return nil, nil
+
 	case "caic_diff_stat":
 		var m agent.DiffStatMessage
 		if err := json.Unmarshal(line, &m); err != nil {
