@@ -140,6 +140,16 @@ func (r *ForkTaskReq) Validate() error {
 // Validate is a no-op; all settings values are accepted.
 func (r *UpdatePreferencesReq) Validate() error { return nil }
 
+// Validate checks that the signal is SIGTERM or SIGKILL.
+func (r *SignalProcessReq) Validate() error {
+	switch r.Signal {
+	case "SIGTERM", "SIGKILL":
+		return nil
+	default:
+		return dto.BadRequest("signal must be SIGTERM or SIGKILL")
+	}
+}
+
 // Validate checks that the SDP offer is provided.
 func (r *VoiceRTCOfferReq) Validate() error {
 	if r.SDP == "" {

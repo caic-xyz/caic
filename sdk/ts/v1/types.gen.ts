@@ -904,6 +904,12 @@ export interface ProcessListResp {
   processes: ProcessInfo[];
 }
 /**
+ * SignalProcessReq is the request body for POST /api/v1/tasks/{id}/processes/{pid}/signal.
+ */
+export interface SignalProcessReq {
+  signal: string; // "SIGTERM" or "SIGKILL"
+}
+/**
  * RepoPrefsResp holds per-repository preferences.
  */
 export interface RepoPrefsResp {

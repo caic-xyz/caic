@@ -136,6 +136,8 @@ class ApiClient(
     suspend fun getTaskDiff(id: String): DiffResp = request("GET", "/api/v1/tasks/$id/diff")
     /** Returns the list of running processes inside the task's container. */
     suspend fun getTaskProcesses(id: String): ProcessListResp = request("GET", "/api/v1/tasks/$id/processes")
+    /** Sends SIGTERM or SIGKILL to a process inside the task's container. */
+    suspend fun signalProcess(id: String, pid: String, req: SignalProcessReq): StatusResp = request("POST", "/api/v1/tasks/$id/processes/$pid/signal", json.encodeToString(req))
     /** Returns the full (untruncated) input for a tool call. */
     suspend fun getTaskToolInput(id: String, toolUseID: String): TaskToolInputResp = request("GET", "/api/v1/tasks/$id/tool/$toolUseID")
     /** Returns current usage quota statistics. */

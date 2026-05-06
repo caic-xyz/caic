@@ -2,7 +2,7 @@
 import { createSignal, createEffect, For, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import type { ProcessInfo } from "@sdk/types.gen";
-import { getTaskProcesses } from "./api";
+import { getTaskProcesses, signalProcess } from "./api";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 import styles from "./ProcessDetail.module.css";
 
@@ -28,16 +28,30 @@ export default function ProcessDetail(props: Props) {
   const [processes, setProcesses] = createSignal<ProcessInfo[] | null>(null);
   const [error, setError] = createSignal<string | null>(null);
   const [loading, setLoading] = createSignal(true);
+  const [signallingPid, setSignallingPid] = createSignal<number | null>(null);
 
-  createEffect(() => {
-    const id = props.taskId;
+  const refresh = () => {
     setLoading(true);
     setError(null);
-    getTaskProcesses(id)
+    getTaskProcesses(props.taskId)
       .then((resp) => setProcesses(resp.processes))
       .catch((e) => setError(e instanceof Error ? e.message : "Unknown error"))
       .finally(() => setLoading(false));
-  });
+  };
+
+  createEffect(refresh);
+
+  const handleSignal = async (pid: number, sig: "SIGTERM" | "SIGKILL") => {
+    setSignallingPid(pid);
+    try {
+      await signalProcess(props.taskId, String(pid), { signal: sig });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to send signal");
+    } finally {
+      setSignallingPid(null);
+    }
+  };
 
   return (
     <div class={styles.container}>
@@ -68,6 +82,7 @@ export default function ProcessDetail(props: Props) {
                 <table class={styles.table}>
                   <thead>
                     <tr>
+                      <th class={`${styles.th} ${styles.actionsHdr}`}>ACTIONS</th>
                       <th class={styles.th}>PID</th>
                       <th class={styles.th}>S</th>
                       <th class={styles.th}>CPU</th>
@@ -80,6 +95,24 @@ export default function ProcessDetail(props: Props) {
                     <For each={procs}>
                       {(p) => (
                         <tr>
+                          <td class={`${styles.td} ${styles.actions}`}>
+                            <button
+                              class={styles.signalBtn}
+                              onClick={() => handleSignal(p.pid, "SIGTERM")}
+                              disabled={signallingPid() === p.pid}
+                              title="Send SIGTERM (graceful termination)"
+                            >
+                              TERM
+                            </button>
+                            <button
+                              class={`${styles.signalBtn} ${styles.signalKill}`}
+                              onClick={() => handleSignal(p.pid, "SIGKILL")}
+                              disabled={signallingPid() === p.pid}
+                              title="Send SIGKILL (force kill)"
+                            >
+                              KILL
+                            </button>
+                          </td>
                           <td class={styles.td}>{p.pid}</td>
                           <td class={styles.td}>
                             <span class={styles.state} style={{ color: stateColor(p.state) }}>{p.state}</span>

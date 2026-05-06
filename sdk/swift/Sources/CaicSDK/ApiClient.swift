@@ -211,6 +211,10 @@ public final class ApiClient {
     public func getTaskProcesses(id: String) async throws -> ProcessListResp {
         try await request("GET", path: "/api/v1/tasks/\(id)/processes")
     }
+    /// Sends SIGTERM or SIGKILL to a process inside the task's container.
+    public func signalProcess(id: String, pid: String, req: SignalProcessReq) async throws -> StatusResp {
+        try await request("POST", path: "/api/v1/tasks/\(id)/processes/\(pid)/signal", body: try encoder.encode(req))
+    }
     /// Returns the full (untruncated) input for a tool call.
     public func getTaskToolInput(id: String, toolUseID: String) async throws -> TaskToolInputResp {
         try await request("GET", path: "/api/v1/tasks/\(id)/tool/\(toolUseID)")

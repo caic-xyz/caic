@@ -539,6 +539,7 @@ fun TaskDetailScreen(
                         currentSessionTurns = state.currentSessionCompletedTurns,
                         processes = state.processes,
                         onLoadProcesses = { viewModel.loadProcesses() },
+                        onSignalProcess = { pid, signal -> viewModel.signalProcess(pid, signal) },
                     )
                 },
             )

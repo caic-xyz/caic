@@ -614,6 +614,10 @@ data class ProcessInfo(
 @Serializable
 data class ProcessListResp(val processes: List<ProcessInfo>)
 
+/** SignalProcessReq is the request body for POST /api/v1/tasks/{id}/processes/{pid}/signal. */
+@Serializable
+data class SignalProcessReq(val signal: String)
+
 /**
  * TaskToolInputResp is the response for GET /api/v1/tasks/{id}/tool/{toolUseID}.
  * It returns the full (untruncated) input for a tool call.

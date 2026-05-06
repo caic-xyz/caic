@@ -3,6 +3,8 @@
 // and per-turn perf data.
 package com.fghbuild.caic.ui.taskdetail
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
@@ -28,11 +31,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.EventStats
 import com.caic.sdk.v1.ProcessInfo
@@ -175,6 +181,7 @@ fun StatsIcon(
     currentSessionTurns: List<Turn>,
     processes: List<ProcessInfo>?,
     onLoadProcesses: () -> Unit,
+    onSignalProcess: (Int, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val latest = stats.lastOrNull()
@@ -333,14 +340,40 @@ fun StatsIcon(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else {
+                        val procScrollState = rememberScrollState()
+                        val surfaceColor = MaterialTheme.colorScheme.surface
+                        Box(
+                            modifier = Modifier
+                                .clipToBounds()
+                                .drawWithContent {
+                                drawContent()
+                                if (procScrollState.canScrollForward) {
+                                    val fadeWidth = 32.dp.toPx()
+                                    drawRect(
+                                        brush = Brush.horizontalGradient(
+                                            0f to Color.Transparent,
+                                            1f to surfaceColor.copy(alpha = 0.9f),
+                                            startX = size.width - fadeWidth,
+                                            endX = size.width,
+                                        ),
+                                    )
+                                }
+                            },
+                        ) {
+                            Column {
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            modifier = Modifier.horizontalScroll(procScrollState),
                         ) {
-                            listOf("PID" to 36, "S" to 20, "CPU" to 40, "MEM" to 40, "TIME" to 56, "COMMAND" to 200).forEach { (h, w) ->
+                            listOf(
+                                "ACTIONS" to 44, "PID" to 36,
+                                "S" to 20, "CPU" to 40, "MEM" to 40,
+                                "TIME" to 56, "COMMAND" to 280,
+                            ).forEach { (h, w) ->
                                 Text(
                                     text = h,
                                     style = MaterialTheme.typography.labelSmall,
+                                    softWrap = false,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.width(w.dp),
                                 )
@@ -350,9 +383,33 @@ fun StatsIcon(
                             Row(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 modifier = Modifier
-                                    .horizontalScroll(rememberScrollState())
+                                    .horizontalScroll(procScrollState)
                                     .padding(vertical = 1.dp),
                             ) {
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                                    modifier = Modifier.width(44.dp),
+                                ) {
+                                    val btnShape = RoundedCornerShape(3.dp)
+                                    Text(
+                                        text = "TERM",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = Color(0xFF856404),
+                                        modifier = Modifier
+                                            .background(Color(0x18FFC107), btnShape)
+                                            .clickable { onSignalProcess(p.pid, "SIGTERM") }
+                                            .padding(horizontal = 2.dp, vertical = 1.dp),
+                                    )
+                                    Text(
+                                        text = "KILL",
+                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                        color = Color(0xFFDC3545),
+                                        modifier = Modifier
+                                            .background(Color(0x18DC3545), btnShape)
+                                            .clickable { onSignalProcess(p.pid, "SIGKILL") }
+                                            .padding(horizontal = 2.dp, vertical = 1.dp),
+                                    )
+                                }
                                 Text(
                                     text = "${p.pid}",
                                     style = MaterialTheme.typography.bodySmall,
@@ -383,8 +440,10 @@ fun StatsIcon(
                                     text = p.command,
                                     style = MaterialTheme.typography.bodySmall,
                                     maxLines = 2,
-                                    modifier = Modifier.width(200.dp),
+                                    modifier = Modifier.width(280.dp),
                                 )
+                            }
+                        }
                             }
                         }
                     }

@@ -98,10 +98,52 @@
 .cmd {
   white-space: normal;
   word-break: break-all;
-  max-width: 600px;
+  max-width: 700px;
+}
+
+.actionsHdr {
+  white-space: nowrap;
 }
 
 .state {
   font-weight: 700;
   font-size: 0.75rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.signalBtn {
+  border: 1px solid var(--color-border-light);
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.65rem;
+  font-weight: 600;
+  font-family: monospace;
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-sm);
+  color: var(--color-warning-text);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.signalBtn:hover:not(:disabled) {
+  background: var(--color-warning-bg);
+  border-color: var(--color-warning-text);
+}
+
+.signalBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.signalKill {
+  color: var(--color-danger);
+  border-color: var(--color-border-light);
+}
+
+.signalKill:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger);
 }

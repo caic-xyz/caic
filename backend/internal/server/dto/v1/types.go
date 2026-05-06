@@ -430,6 +430,11 @@ type ProcessListResp struct {
 	Processes []ProcessInfo `json:"processes"`
 }
 
+// SignalProcessReq is the request body for POST /api/v1/tasks/{id}/processes/{pid}/signal.
+type SignalProcessReq struct {
+	Signal string `json:"signal"` // "SIGTERM" or "SIGKILL"
+}
+
 // RepoPrefsResp holds per-repository preferences.
 type RepoPrefsResp struct {
 	Path       string `json:"path"`

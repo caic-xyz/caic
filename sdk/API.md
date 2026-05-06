@@ -53,6 +53,7 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | POST | `/api/v1/tasks/{id}/fork` | Forks a task by snapshotting its container and creating a new task on a derived branch. | `ForkTaskReq` | `CreateTaskResp` |
 | GET | `/api/v1/tasks/{id}/diff` | Returns the unified diff for a task's branch. |  | `DiffResp` |
 | GET | `/api/v1/tasks/{id}/processes` | Returns the list of running processes inside the task's container. |  | `ProcessListResp` |
+| POST | `/api/v1/tasks/{id}/processes/{pid}/signal` | Sends SIGTERM or SIGKILL to a process inside the task's container. | `SignalProcessReq` | `StatusResp` |
 | GET | `/api/v1/tasks/{id}/tool/{toolUseID}` | Returns the full (untruncated) input for a tool call. |  | `TaskToolInputResp` |
 
 ## Usage
@@ -836,6 +837,14 @@ ProcessListResp is the response for GET /api/v1/tasks/{id}/processes.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `processes` | `ProcessInfo[]` |  | yes |
+
+### SignalProcessReq
+
+SignalProcessReq is the request body for POST /api/v1/tasks/{id}/processes/{pid}/signal.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `signal` | `string` | "SIGTERM" or "SIGKILL" | yes |
 
 ### TaskToolInputResp
 

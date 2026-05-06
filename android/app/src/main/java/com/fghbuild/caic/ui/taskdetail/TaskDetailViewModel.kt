@@ -240,6 +240,18 @@ class TaskDetailViewModel @Inject constructor(
         }
     }
 
+    /** Sends a signal (SIGTERM or SIGKILL) to a process and refreshes the process list. */
+    fun signalProcess(pid: Int, signal: String) {
+        viewModelScope.launch {
+            try {
+                apiClient().signalProcess(taskId, pid.toString(), com.caic.sdk.v1.SignalProcessReq(signal))
+                loadProcesses()
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                Log.w(TAG, "Failed to signal process $pid with $signal", e)
+            }
+        }
+    }
+
     @Suppress("CyclomaticComplexMethod")
     private fun connectSSE() {
         sseJob?.cancel()

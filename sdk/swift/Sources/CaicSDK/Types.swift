@@ -696,6 +696,12 @@ public struct ProcessListResp: Codable {
     public let processes: [ProcessInfo]
 }
 
+/// SignalProcessReq is the request body for POST /api/v1/tasks/{id}/processes/{pid}/signal.
+public struct SignalProcessReq: Codable {
+    /// "SIGTERM" or "SIGKILL"
+    public let signal: String
+}
+
 /// TaskToolInputResp is the response for GET /api/v1/tasks/{id}/tool/{toolUseID}.
 /// It returns the full (untruncated) input for a tool call.
 public struct TaskToolInputResp: Codable {

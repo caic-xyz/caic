@@ -13,6 +13,7 @@ import (
 	"runtime/trace"
 	"slices"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -886,6 +887,46 @@ func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v1.ProcessListResp{Processes: v1Procs})
+}
+
+// handleSignalProcess sends a signal to a process inside the task's container.
+// Reads the pid from the URL path and the signal name from the request body.
+func (s *Server) handleSignalProcess(w http.ResponseWriter, r *http.Request) {
+	entry, err := s.getTask(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	t := entry.task
+	if t.Container == "" {
+		writeError(w, dto.Conflict("task has no container"))
+		return
+	}
+	pidStr := r.PathValue("pid")
+	if pidStr == "" {
+		writeError(w, dto.BadRequest("pid is required"))
+		return
+	}
+	pid, convErr := strconv.Atoi(pidStr)
+	if convErr != nil || pid < 1 {
+		writeError(w, dto.BadRequest("invalid pid: "+pidStr))
+		return
+	}
+	var req v1.SignalProcessReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, dto.BadRequest("invalid request body"))
+		return
+	}
+	if err := req.Validate(); err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := s.backend.Signal(r.Context(), t.Container, pid, req.Signal); err != nil {
+		writeError(w, dto.InternalError(err.Error()))
+		return
+	}
+	slog.Info("signal sent", "task", t.ID, "container", t.Container, "pid", pid, "signal", req.Signal)
+	writeJSONResponse(w, &v1.StatusResp{Status: "signalled"}, nil)
 }
 
 // watchSession monitors a single active session. When the session's SSH

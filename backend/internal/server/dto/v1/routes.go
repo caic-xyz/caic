@@ -264,6 +264,14 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[ProcessListResp](),
 	},
 	{
+		Name:   "signalProcess",
+		Doc:    "Sends SIGTERM or SIGKILL to a process inside the task's container.",
+		Method: "POST",
+		Path:   "/api/v1/tasks/{id}/processes/{pid}/signal",
+		Req:    reflect.TypeFor[SignalProcessReq](),
+		Resp:   reflect.TypeFor[StatusResp](),
+	},
+	{
 		Name:   "getTaskToolInput",
 		Doc:    "Returns the full (untruncated) input for a tool call.",
 		Method: "GET",

@@ -36,6 +36,19 @@ func (b *Backend) Processes(ctx context.Context, containerName string) ([]Proces
 	return parsePSOutput(string(out))
 }
 
+// Signal sends a signal (e.g. SIGTERM, SIGKILL) to a process inside the
+// named container via SSH using kill.
+func (b *Backend) Signal(ctx context.Context, containerName string, pid int, sig string) error {
+	cmd := fmt.Sprintf("kill -s %s %d", sig, pid)
+	sshArgs := b.Client.SSHCommand(containerName, cmd)
+	c := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // containerName is internally-assigned; cmd uses fmt.Sprintf
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("signal %s pid %d in container %s: %w (output: %s)", sig, pid, containerName, err, string(out))
+	}
+	return nil
+}
+
 // parsePSOutput parses the output of ps with the columns above. The last
 // column (args) may contain spaces; we split by whitespace for the first 7
 // fields and treat the remainder as the command.

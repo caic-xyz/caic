@@ -32,6 +32,7 @@ export const {
   syncTask,
   getTaskDiff,
   getTaskProcesses,
+  signalProcess,
   getTaskToolInput,
   globalTaskEvents,
   globalUsageEvents,
