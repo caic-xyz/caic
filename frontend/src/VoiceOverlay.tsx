@@ -105,10 +105,11 @@ export default function VoiceOverlay(props: Props) {
   // Event handlers
   // -----------------------------------------------------------------------
 
-  const handleMicClick = () => {
+  const handleMicClick = async () => {
     if (session.state.connected || session.state.connectStatus !== null) {
       session.disconnect();
     } else {
+      await session.enumerateDevices();
       const tasks = untrack(() => props.tasks());
       const repo = untrack(() => props.recentRepo());
       const harness = untrack(() => props.selectedHarness());
@@ -163,6 +164,8 @@ export default function VoiceOverlay(props: Props) {
           state={session.state}
           onDisconnect={() => session.disconnect()}
           onToggleMute={() => session.toggleMute()}
+          onSelectInput={(id) => { void session.selectInputDevice(id); }}
+          onSelectOutput={(id) => { session.selectOutputDevice(id); }}
           onClearTranscript={() => session.clearTranscript()}
         />
       </Show>
@@ -212,6 +215,8 @@ function ActivePanel(props: {
   state: VoiceState;
   onDisconnect: () => void;
   onToggleMute: () => void;
+  onSelectInput: (id: string) => void;
+  onSelectOutput: (id: string) => void;
   onClearTranscript: () => void;
 }) {
   const statusText = () => {
@@ -252,11 +257,61 @@ function ActivePanel(props: {
           <CallEndIcon width="1.1em" height="1.1em" />
         </button>
       </div>
+      {(props.state.audioInputs.length > 1 || props.state.audioOutputs.length > 1) && (
+        <AudioDevicePicker
+          inputs={props.state.audioInputs}
+          outputs={props.state.audioOutputs}
+          selectedInputId={props.state.selectedInputId}
+          selectedOutputId={props.state.selectedOutputId}
+          onSelectInput={props.onSelectInput}
+          onSelectOutput={props.onSelectOutput}
+        />
+      )}
       <TranscriptLog
         transcript={props.state.transcript}
         onClear={() => props.onClearTranscript()}
       />
     </>
+  );
+}
+
+// Audio device picker
+
+function AudioDevicePicker(props: {
+  inputs: Array<{ deviceId: string; label: string }>;
+  outputs: Array<{ deviceId: string; label: string }>;
+  selectedInputId: string;
+  selectedOutputId: string;
+  onSelectInput: (id: string) => void;
+  onSelectOutput: (id: string) => void;
+}) {
+  return (
+    <div class={styles.deviceRow}>
+      {props.inputs.length > 1 && (
+        <select
+          class={styles.deviceSelect}
+          value={props.selectedInputId}
+          onChange={(e) => props.onSelectInput(e.currentTarget.value)}
+          aria-label="Microphone"
+        >
+          <For each={props.inputs}>
+            {(d) => <option value={d.deviceId}>🎤 {d.label}</option>}
+          </For>
+        </select>
+      )}
+      {props.outputs.length > 1 && (
+        <select
+          class={styles.deviceSelect}
+          value={props.selectedOutputId}
+          onChange={(e) => props.onSelectOutput(e.currentTarget.value)}
+          aria-label="Speaker"
+        >
+          <For each={props.outputs}>
+            {(d) => <option value={d.deviceId}>🔊 {d.label}</option>}
+          </For>
+        </select>
+      )}
+    </div>
   );
 }
 

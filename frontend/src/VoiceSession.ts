@@ -68,6 +68,13 @@ export interface TranscriptEntry {
   final: boolean;
 }
 
+/** Describes a single audio input/output device. Mirrors Android's AudioDevice. */
+export interface AudioDevice {
+  deviceId: string;
+  kind: MediaDeviceKind;
+  label: string;
+}
+
 export interface VoiceState {
   connectStatus: string | null;
   connected: boolean;
@@ -78,6 +85,14 @@ export interface VoiceState {
   transcript: TranscriptEntry[];
   micLevel: number;
   error: string | null;
+  /** Available audio input devices (microphones). */
+  audioInputs: AudioDevice[];
+  /** Available audio output devices (speakers, headsets). */
+  audioOutputs: AudioDevice[];
+  /** Currently selected input device ID, empty string for system default. */
+  selectedInputId: string;
+  /** Currently selected output device ID, empty string for system default. */
+  selectedOutputId: string;
 }
 
 // VoiceSession
@@ -96,6 +111,8 @@ export class VoiceSession {
   private _rtcSessionID: string | null = null;
   private _audioContext: AudioContext | null = null;
   private _micStream: MediaStream | null = null;
+  /** The <audio> element playing remote RTP audio, stored so we can call setSinkId(). */
+  private _speakerAudio: HTMLAudioElement | null = null;
   /** True while the model is speaking — injected text is buffered and flushed after the turn ends. */
   private _speakerActive = false;
   /** Text notifications buffered while the model is speaking; flushed on turn end. */
@@ -116,6 +133,10 @@ export class VoiceSession {
       transcript: [],
       micLevel: 0,
       error: null,
+      audioInputs: [],
+      audioOutputs: [],
+      selectedInputId: "",
+      selectedOutputId: "",
     });
     // eslint-disable-next-line solid/reactivity
     this.state = state;
@@ -125,6 +146,96 @@ export class VoiceSession {
   // -----------------------------------------------------------------------
   // Public API
   // -----------------------------------------------------------------------
+
+  /** Enumerate available audio devices and auto-select defaults. Call before connect(). */
+  async enumerateDevices(): Promise<void> {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const inputs: AudioDevice[] = [];
+      const outputs: AudioDevice[] = [];
+      for (const d of devices) {
+        if (d.kind === "audioinput") {
+          inputs.push({ deviceId: d.deviceId, kind: d.kind, label: d.label || "Microphone" });
+        } else if (d.kind === "audiooutput") {
+          outputs.push({ deviceId: d.deviceId, kind: d.kind, label: d.label || "Speaker" });
+        }
+      }
+      // Auto-select: first available, or keep current selection if still valid.
+      const curSel = this.state.selectedInputId;
+      const curOut = this.state.selectedOutputId;
+      const newInId = curSel && inputs.some((d) => d.deviceId === curSel) ? curSel : inputs[0]?.deviceId ?? "";
+      const newOutId = curOut && outputs.some((d) => d.deviceId === curOut) ? curOut : outputs[0]?.deviceId ?? "";
+      this._update((s) => {
+        s.audioInputs = inputs;
+        s.audioOutputs = outputs;
+        s.selectedInputId = newInId;
+        s.selectedOutputId = newOutId;
+      });
+    } catch {
+      // enumerateDevices() can fail if permissions are denied; ignore silently.
+    }
+  }
+
+  /** Select an audio input device. If connected, replaces the mic track. */
+  async selectInputDevice(deviceId: string): Promise<void> {
+    this._update((s) => { s.selectedInputId = deviceId; });
+    if (this._pc && this._micStream) {
+      try {
+        // Stop old mic tracks.
+        this._micStream.getTracks().forEach((t) => t.stop());
+        // Acquire new mic stream with the selected device.
+        const constraints: MediaStreamConstraints = {
+          audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+          video: false,
+        };
+        const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+        this._micStream = newStream;
+        // Replace tracks on the PeerConnection.
+        const sender = this._pc.getSenders().find((s) => s.track?.kind === "audio");
+        for (const t of newStream.getAudioTracks()) {
+          if (sender) {
+            await sender.replaceTrack(t);
+          } else {
+            this._pc.addTrack(t, newStream);
+          }
+        }
+        // Reconnect AnalyserNode if present.
+        if (this._audioContext) {
+          const analyser = this._audioContext.createAnalyser();
+          analyser.fftSize = 256;
+          const source = this._audioContext.createMediaStreamSource(newStream);
+          source.connect(analyser);
+          const buf = new Uint8Array(analyser.frequencyBinCount);
+          const pc = this._pc;
+          const pollMicLevel = () => {
+            if (this._pc !== pc) return;
+            analyser.getByteTimeDomainData(buf);
+            let sumSq = 0;
+            for (let i = 0; i < buf.length; i++) {
+              const v = (buf[i] - 128) / 128;
+              sumSq += v * v;
+            }
+            const rms = Math.sqrt(sumSq / buf.length);
+            if (!this.state.muted && !this._speakerActive) {
+              this._update((s) => { s.micLevel = Math.min(1, Math.sqrt(rms)); });
+            }
+            requestAnimationFrame(pollMicLevel);
+          };
+          requestAnimationFrame(pollMicLevel);
+        }
+      } catch {
+        // If switching fails, leave the previous stream in place.
+      }
+    }
+  }
+
+  /** Select an audio output device. Applies immediately if connected. */
+  selectOutputDevice(deviceId: string): void {
+    this._update((s) => { s.selectedOutputId = deviceId; });
+    if (this._speakerAudio && "setSinkId" in this._speakerAudio) {
+      void (this._speakerAudio as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> }).setSinkId(deviceId);
+    }
+  }
 
   /** Start a new voice session via WebRTC data channel through the caic backend. */
   async connect(tasks: Task[], recentRepo: string, defaultHarness = "", defaultModel = ""): Promise<void> {
@@ -167,7 +278,12 @@ export class VoiceSession {
       this._pc = pc;
 
       // Mic audio → RTP track (browser handles Opus encoding + AEC).
-      this._micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      const inputId = this.state.selectedInputId;
+      const micConstraints: MediaStreamConstraints = {
+        audio: inputId ? { deviceId: { exact: inputId } } : true,
+        video: false,
+      };
+      this._micStream = await navigator.mediaDevices.getUserMedia(micConstraints);
       for (const t of this._micStream.getAudioTracks()) {
         pc.addTrack(t, this._micStream);
       }
@@ -199,9 +315,14 @@ export class VoiceSession {
       }
 
       // Speaker audio from remote RTP track.
+      const outId = this.state.selectedOutputId;
       pc.ontrack = (evt) => {
         const audio = new Audio();
+        this._speakerAudio = audio;
         audio.srcObject = evt.streams[0];
+        if (outId && "setSinkId" in audio) {
+          void (audio as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> }).setSinkId(outId);
+        }
         audio.play().catch(() => {
           // Autoplay may be blocked; user interaction will resume.
         });
@@ -270,6 +391,7 @@ export class VoiceSession {
       this._setupTimer = null;
     }
     this._releaseAll();
+    this._speakerAudio = null;
     this._functions = null;
     this._pendingSnapshot = null;
     // Preserve transcript for review; mark all entries final.

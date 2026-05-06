@@ -17,6 +17,10 @@ vi.mock("./VoiceSession", () => ({
       transcript: [],
       micLevel: 0,
       error: null,
+      audioInputs: [],
+      audioOutputs: [],
+      selectedInputId: "",
+      selectedOutputId: "",
     };
     taskNumberMap = { update: vi.fn(), reset: vi.fn() };
     excludedTaskIds = new Set<string>();
@@ -25,6 +29,9 @@ vi.mock("./VoiceSession", () => ({
     toggleMute = vi.fn();
     injectText = vi.fn();
     clearTranscript = vi.fn();
+    enumerateDevices = vi.fn();
+    selectInputDevice = vi.fn();
+    selectOutputDevice = vi.fn();
   },
 }));
 
