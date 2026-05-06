@@ -213,7 +213,7 @@ class FunctionHandlers(
         for (w in usage.local.windows) {
             parts.add("${w.duration} cost: ${fmt(w.costUSD)} (${w.inputTokens + w.outputTokens} tokens)")
         }
-        for (pq in usage.providers) {
+        for (pq in usage.providers.orEmpty()) {
             val pParts = mutableListOf<String>()
             pq.balance?.let { bal ->
                 pParts.add(formatBalance(bal.currency, bal.total))

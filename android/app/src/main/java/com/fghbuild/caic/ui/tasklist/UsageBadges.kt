@@ -75,7 +75,7 @@ fun UsageBadges(usage: UsageResp, modifier: Modifier = Modifier, serverURL: Stri
 
 @Composable
 fun ProviderPills(usage: UsageResp, serverURL: String) {
-    usage.providers.forEach { pq -> ProviderPill(pq, serverURL) }
+    usage.providers?.forEach { pq -> ProviderPill(pq, serverURL) }
 }
 
 @Composable
