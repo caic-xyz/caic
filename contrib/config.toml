@@ -88,6 +88,8 @@
 
 [harness.pi.env]
 # See https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md
+# Here's example keys, you can set any environment variable you want.
+#DEEPSEEK_API_KEY= ""
 #GEMINI_API_KEY = "AIza..."
 #OPENROUTER_API_KEY = "sk-or-..."
 #OPENAI_API_KEY = "sk-..."
