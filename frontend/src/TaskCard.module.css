@@ -18,6 +18,22 @@
   align-items: center;
 }
 
+.voiceNumber {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.2rem;
+  height: 1.2rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-ring);
+  color: var(--color-primary);
+  font-size: 0.65rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  line-height: 1;
+  margin-right: 0.35rem;
+}
+
 .titleWrapper {
   flex: 1 1 0%;
   min-width: 0;

@@ -98,6 +98,12 @@ class VoiceViewModel @Inject constructor(
         voiceSessionManager.clearTranscript()
     }
 
+    /** Returns the voice-mode task number for [id], or null if not mapped or session not connected. */
+    fun getTaskNumber(id: String): Int? {
+        if (!voiceSessionManager.state.value.connected) return null
+        return taskNumberMap.toNumber(id)
+    }
+
     private fun notifyTaskChanges(tasks: List<Task>) {
         for (task in tasks) {
             val prev = previousTaskStates[task.id]

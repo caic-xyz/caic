@@ -4,6 +4,7 @@ import type { Task } from "@sdk/types.gen";
 import { VoiceSession } from "./VoiceSession";
 import type { VoiceState, TranscriptEntry } from "./VoiceSession";
 import { setVoiceActive } from "./notifications";
+import { setVoiceConnected, setVoiceTaskNumberMap } from "./VoiceState";
 import styles from "./VoiceOverlay.module.css";
 import MicIcon from "@material-symbols/svg-400/outlined/mic.svg?solid";
 import MicOffIcon from "@material-symbols/svg-400/outlined/mic_off.svg?solid";
@@ -46,6 +47,7 @@ export default function VoiceOverlay(props: Props) {
   let wasConnected = false;
   createEffect(() => {
     const connected = session.state.connected;
+    setVoiceConnected(connected);
     if (connected && !wasConnected) {
       const tasks = untrack(() => props.tasks());
       const prePurged = new Set(
@@ -54,6 +56,7 @@ export default function VoiceOverlay(props: Props) {
           .map((t) => t.id),
       );
       setPreTerminatedIds(prePurged);
+      setVoiceTaskNumberMap(session.taskNumberMap);
       prevStates = new Map(tasks.map((t) => [t.id, t.state]));
       prevCIStatuses = new Map(tasks.map((t) => [t.id, t.ciStatus]));
     }
@@ -89,6 +92,8 @@ export default function VoiceOverlay(props: Props) {
   // Disconnect on component cleanup.
   onCleanup(() => {
     setVoiceActive(false);
+    setVoiceConnected(false);
+    setVoiceTaskNumberMap(null);
     session.disconnect();
   });
 

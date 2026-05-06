@@ -69,7 +69,7 @@ private val TerminalStates = setOf("purged", "failed")
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = false, onClick: () -> Unit = {}) {
+fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = false, onClick: () -> Unit = {}, voiceNumber: Int? = null) {
     var showMenu by remember { mutableStateOf(false) }
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
@@ -85,28 +85,35 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
             ),
     ) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            // Line 1: title + plan badge + feature badges (no state badge)
+            // Line 1: voice number + title + plan badge + feature badges (no state badge)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                var titleTruncated by remember { mutableStateOf(false) }
-                TooltipBox(
-                    positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
-                    tooltip = { PlainTooltip { Text(task.title) } },
-                    state = rememberTooltipState(),
-                    enableUserInput = titleTruncated,
+                Row(
                     modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = task.title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        onTextLayout = { titleTruncated = it.hasVisualOverflow },
-                    )
+                    if (voiceNumber != null) {
+                        VoiceNumberBadge(voiceNumber)
+                    }
+                    var titleTruncated by remember { mutableStateOf(false) }
+                    TooltipBox(
+                        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+                        tooltip = { PlainTooltip { Text(task.title) } },
+                        state = rememberTooltipState(),
+                        enableUserInput = titleTruncated,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            text = task.title,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            onTextLayout = { titleTruncated = it.hasVisualOverflow },
+                        )
+                    }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (task.inPlanMode == true) {
@@ -572,6 +579,23 @@ private fun StateBadge(task: Task) {
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
             )
         }
+    }
+}
+
+/**
+ * Voice-mode task number badge shown when Gemini Live is connected.
+ * Mirrors VoiceNumberBadge styles from the web frontend.
+ */
+@Composable
+private fun VoiceNumberBadge(number: Int) {
+    Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+        Text(
+            text = "#$number",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+        )
     }
 }
 

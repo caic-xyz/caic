@@ -26,6 +26,7 @@ import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?
 import SettingsIcon from "@material-symbols/svg-400/outlined/settings.svg?solid";
 import TailscaleIcon from "./tailscale.svg?solid";
 import CloneRepoDialog from "./CloneRepoDialog";
+import { voiceConnected, getVoiceTaskNumber } from "./VoiceState";
 import VoiceOverlay from "./VoiceOverlay";
 import styles from "./App.module.css";
 
@@ -885,6 +886,8 @@ export default function App() {
               navigate(taskPath(data.id, repoPath, "", `Fix CI: ${repoPath}`));
             });
           }}
+          voiceConnected={voiceConnected}
+          getTaskNumber={getVoiceTaskNumber}
         />
 
         <Switch>

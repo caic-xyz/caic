@@ -51,6 +51,9 @@ class FakeEventSource {
 }
 vi.stubGlobal("EventSource", FakeEventSource);
 
+// Stub VoiceOverlay to avoid WebRTC/WebSocket connections in tests.
+vi.mock("./VoiceOverlay", () => ({ default: () => null }));
+
 function dispatchSSE(data: unknown) {
   const payload = { data: JSON.stringify(data) };
   fakeESListeners.forEach((fn) => fn(payload));

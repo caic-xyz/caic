@@ -56,6 +56,8 @@ export interface TaskCardProps {
   onRevive?: () => void;
   actionLoading?: boolean;
   onDiffClick?: () => void;
+  /** Task number for voice mode display. Shown only when Gemini Live is connected. */
+  voiceNumber?: number;
 }
 
 const terminalStates = new Set(["stopping", "stopped", "purging", "purged", "failed"]);
@@ -93,6 +95,9 @@ export default function TaskCard(props: TaskCardProps) {
     >
       {/* Line 1: title + feature icons + plan badge + purge (no state badge) */}
       <div class={styles.header}>
+        <Show when={props.voiceNumber !== undefined}>
+          <span class={styles.voiceNumber}>#{props.voiceNumber}</span>
+        </Show>
         <Tooltip text={props.title} class={styles.titleWrapper} disabled={!titleTruncated()}>
           <strong ref={titleRef} class={styles.title}>{props.title}</strong>
         </Tooltip>

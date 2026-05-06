@@ -111,6 +111,7 @@ fun TaskListScreen(
     viewModel: TaskListViewModel = hiltViewModel(),
     onNavigateToSettings: () -> Unit = {},
     onNavigateToTask: (String) -> Unit = {},
+    getTaskNumber: (String) -> Int? = { null },
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -163,7 +164,7 @@ fun TaskListScreen(
         when {
             !state.serverConfigured -> NotConfiguredContent(padding, onNavigateToSettings)
             state.authRequired -> LoginScreen(serverURL = state.serverURL, providers = state.authProviders)
-            else -> MainContent(state, padding, onNavigateToTask, viewModel)
+            else -> MainContent(state, padding, onNavigateToTask, viewModel, getTaskNumber)
         }
     }
 }
@@ -277,6 +278,7 @@ private fun MainContent(
     padding: PaddingValues,
     onNavigateToTask: (String) -> Unit,
     viewModel: TaskListViewModel,
+    getTaskNumber: (String) -> Int? = { null },
 ) {
     val expandedGroups = remember { mutableStateMapOf<String, Boolean>() }
 
@@ -374,7 +376,12 @@ private fun MainContent(
                 }
 
                 items(items = group.active, key = { it.id }) { task ->
-                    TaskCard(task = task, autoFixPR = state.autoFixPR, onClick = { onNavigateToTask(task.id) })
+                    TaskCard(
+                        task = task,
+                        autoFixPR = state.autoFixPR,
+                        onClick = { onNavigateToTask(task.id) },
+                        voiceNumber = getTaskNumber(task.id),
+                    )
                 }
 
                 if (group.stopped.isNotEmpty()) {
@@ -389,7 +396,12 @@ private fun MainContent(
                     }
                     if (isExpanded) {
                         items(items = group.stopped, key = { it.id }) { task ->
-                            TaskCard(task = task, autoFixPR = state.autoFixPR, onClick = { onNavigateToTask(task.id) })
+                            TaskCard(
+                                task = task,
+                                autoFixPR = state.autoFixPR,
+                                onClick = { onNavigateToTask(task.id) },
+                                voiceNumber = getTaskNumber(task.id),
+                            )
                         }
                     }
                 }
@@ -406,7 +418,12 @@ private fun MainContent(
                     }
                     if (isExpanded) {
                         items(items = group.purged, key = { it.id }) { task ->
-                            TaskCard(task = task, autoFixPR = state.autoFixPR, onClick = { onNavigateToTask(task.id) })
+                            TaskCard(
+                                task = task,
+                                autoFixPR = state.autoFixPR,
+                                onClick = { onNavigateToTask(task.id) },
+                                voiceNumber = getTaskNumber(task.id),
+                            )
                         }
                     }
                 }

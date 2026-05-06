@@ -26,6 +26,8 @@ export interface TaskListProps {
   autoFixCI: Accessor<boolean>;
   autoFixPR: Accessor<boolean>;
   onFixCI?: (repoPath: string) => void;
+  voiceConnected: Accessor<boolean>;
+  getTaskNumber: (id: string) => number | undefined;
 }
 
 const naturalCompare = (a: string, b: string) =>
@@ -208,6 +210,7 @@ export default function TaskList(props: TaskListProps) {
       onRevive={() => props.onRevive(t().id)}
       actionLoading={props.actionId() === t().id}
       onDiffClick={props.onDiffClick ? () => { const fn = props.onDiffClick; if (fn) fn(t().id); } : undefined}
+      voiceNumber={props.voiceConnected() ? props.getTaskNumber(t().id) : undefined}
     />
   );
 

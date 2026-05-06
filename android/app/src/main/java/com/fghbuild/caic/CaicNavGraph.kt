@@ -113,11 +113,13 @@ fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
                     WideLayout(
                         navController = navController,
                         modifier = Modifier.fillMaxSize(),
+                        getTaskNumber = { voiceViewModel.getTaskNumber(it) },
                     )
                 } else {
                     CompactLayout(
                         navController = navController,
                         modifier = Modifier.fillMaxSize(),
+                        getTaskNumber = { voiceViewModel.getTaskNumber(it) },
                     )
                 }
             }
@@ -155,6 +157,7 @@ fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
 private fun CompactLayout(
     navController: NavHostController,
     modifier: Modifier = Modifier,
+    getTaskNumber: (String) -> Int? = { null },
 ) {
     NavHost(
         navController = navController,
@@ -167,6 +170,7 @@ private fun CompactLayout(
                 onNavigateToTask = { taskId ->
                     navController.navigate(Screen.TaskDetail(taskId))
                 },
+                getTaskNumber = getTaskNumber,
             )
         }
         composable<Screen.Settings> {
@@ -200,6 +204,7 @@ private fun CompactLayout(
 private fun WideLayout(
     navController: NavHostController,
     modifier: Modifier = Modifier,
+    getTaskNumber: (String) -> Int? = { null },
 ) {
     Row(modifier = modifier) {
         TaskListScreen(
@@ -213,6 +218,7 @@ private fun WideLayout(
                     popUpTo(Screen.TaskList)
                 }
             },
+            getTaskNumber = getTaskNumber,
             modifier = Modifier
                 .width(360.dp)
                 .fillMaxHeight(),
