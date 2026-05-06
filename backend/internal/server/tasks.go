@@ -38,12 +38,12 @@ func (s *Server) reposLocked() *[]v1.Repo {
 	out := make([]v1.Repo, len(s.repos))
 	for i := range s.repos {
 		r := &s.repos[i]
-		repo := v1.Repo{Path: r.RelPath, BaseBranch: v1.BranchInfo{Name: r.BaseBranch, Remote: r.BaseBranchRemote}, RemoteURL: gitutil.RemoteToHTTPS(r.Remote), Forge: v1.Forge(r.ForgeKind)}
+		repo := v1.Repo{Path: r.RelPath, Branch: r.BaseBranch, BaseBranch: v1.BranchInfo{Name: r.BaseBranch, Remote: r.BaseBranchRemote}, RemoteURL: gitutil.RemoteToHTTPS(r.Remote), Forge: v1.Forge(r.ForgeKind)}
 		if ciState, ok := s.repoCIStatus[r.RelPath]; ok {
-			repo.DefaultBranchCIStatus = v1.CIStatus(ciState.Status)
-			repo.DefaultBranchChecks = make([]v1.ForgeCheck, len(ciState.Checks))
+			repo.CI = v1.CIStatus(ciState.Status)
+			repo.CIChecks = make([]v1.ForgeCheck, len(ciState.Checks))
 			for i := range ciState.Checks {
-				repo.DefaultBranchChecks[i] = checkToDTO(&ciState.Checks[i])
+				repo.CIChecks[i] = checkToDTO(&ciState.Checks[i])
 			}
 		}
 		out[i] = repo

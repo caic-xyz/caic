@@ -209,12 +209,14 @@ public struct ForgeCheck: Codable {
 /// Repo is the JSON representation of a discovered repo.
 public struct Repo: Codable {
     public let path: String
+    public let branch: String
     public let baseBranch: BranchInfo
     public let remoteURL: String?
     /// "github", "gitlab", or empty if unknown.
     public let forge: String?
-    public let defaultBranchCIStatus: String?
-    public let defaultBranchChecks: [ForgeCheck]?
+    public let ci: String?
+    public let ciChecks: [ForgeCheck]?
+    public let checksDate: ISOTimestamp?
 }
 
 /// CloneRepoReq is the request body for POST /api/v1/server/repos.

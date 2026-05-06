@@ -138,12 +138,14 @@ type ForgeCheck struct {
 
 // Repo is the JSON representation of a discovered repo.
 type Repo struct {
-	Path                  string       `json:"path"`
-	BaseBranch            BranchInfo   `json:"baseBranch"`
-	RemoteURL             string       `json:"remoteURL,omitempty"`
-	Forge                 Forge        `json:"forge,omitempty"` // "github", "gitlab", or empty if unknown.
-	DefaultBranchCIStatus CIStatus     `json:"defaultBranchCIStatus,omitempty"`
-	DefaultBranchChecks   []ForgeCheck `json:"defaultBranchChecks,omitempty"`
+	Path       string       `json:"path"`
+	Branch     string       `json:"branch"`
+	BaseBranch BranchInfo   `json:"baseBranch"`
+	RemoteURL  string       `json:"remoteURL,omitempty"`
+	Forge      Forge        `json:"forge,omitempty"` // "github", "gitlab", or empty if unknown.
+	CI         CIStatus     `json:"ci,omitempty"`
+	CIChecks   []ForgeCheck `json:"ciChecks,omitempty"`
+	ChecksDate time.Time    `json:"checksDate,omitzero"`
 }
 
 // RepoSpec describes a repository to associate with a task at creation time.

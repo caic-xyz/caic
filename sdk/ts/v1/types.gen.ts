@@ -577,11 +577,13 @@ export interface ForgeCheck {
  */
 export interface Repo {
   path: string;
+  branch: string;
   baseBranch: BranchInfo;
   remoteURL?: string;
   forge?: Forge; // "github", "gitlab", or empty if unknown.
-  defaultBranchCIStatus?: CIStatus;
-  defaultBranchChecks?: ForgeCheck[];
+  ci?: CIStatus;
+  ciChecks?: ForgeCheck[];
+  checksDate?: ISOTimestamp;
 }
 /**
  * RepoSpec describes a repository to associate with a task at creation time.

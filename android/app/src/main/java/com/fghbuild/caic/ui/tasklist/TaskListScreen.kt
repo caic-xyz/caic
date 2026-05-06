@@ -349,7 +349,7 @@ private fun MainContent(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.SemiBold,
                         )
-                        val ciStatus = repoMeta?.defaultBranchCIStatus
+                        val ciStatus = repoMeta?.ci
                         if (ciStatus != null) {
                             val dotColor = when (ciStatus) {
                                 "success" -> Color(0xFF28A745)
@@ -801,8 +801,8 @@ private val nonPassingConclusions = setOf("failure", "cancelled", "timed_out", "
 
 private fun ciDotUrl(repo: Repo): String? {
     val isGitLab = repo.remoteURL?.contains("gitlab.com") == true
-    if (repo.defaultBranchCIStatus == "failure") {
-        val failed = repo.defaultBranchChecks?.find { it.conclusion in nonPassingConclusions }
+    if (repo.ci == "failure") {
+        val failed = repo.ciChecks?.find { it.conclusion in nonPassingConclusions }
         if (failed != null) {
             return if (isGitLab) {
                 "https://gitlab.com/${failed.owner}/${failed.repo}/-/jobs/${failed.jobID}"

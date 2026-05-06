@@ -170,11 +170,13 @@ data class ForgeCheck(
 @Serializable
 data class Repo(
     val path: String,
+    val branch: String,
     val baseBranch: BranchInfo,
     @SerialName("remoteURL") val remoteURL: String? = null,
     val forge: String? = null,
-    @SerialName("defaultBranchCIStatus") val defaultBranchCIStatus: String? = null,
-    val defaultBranchChecks: List<ForgeCheck>? = null,
+    val ci: String? = null,
+    val ciChecks: List<ForgeCheck>? = null,
+    val checksDate: Instant? = null,
 )
 
 /** CloneRepoReq is the request body for POST /api/v1/server/repos. */

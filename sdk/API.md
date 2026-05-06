@@ -251,11 +251,13 @@ Repo is the JSON representation of a discovered repo.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `path` | `string` |  | yes |
+| `branch` | `string` |  | yes |
 | `baseBranch` | `BranchInfo` |  | yes |
 | `remoteURL` | `string` |  |  |
 | `forge` | `string` | "github", "gitlab", or empty if unknown. |  |
-| `defaultBranchCIStatus` | `string` |  |  |
-| `defaultBranchChecks` | `ForgeCheck[]` |  |  |
+| `ci` | `string` |  |  |
+| `ciChecks` | `ForgeCheck[]` |  |  |
+| `checksDate` | `ISOTimestamp` |  |  |
 
 ### CloneRepoReq
 

@@ -288,7 +288,7 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 	s.runners[targetPath] = runner
 	slog.Info("cloned repo", "url", req.URL, "path", targetPath)
 
-	return &v1.Repo{Path: targetPath, BaseBranch: v1.BranchInfo{Name: branch, Remote: remoteName}, RemoteURL: gitutil.RemoteToHTTPS(remote), Forge: v1.Forge(cloneForgeKind)}, nil
+	return &v1.Repo{Path: targetPath, Branch: branch, BaseBranch: v1.BranchInfo{Name: branch, Remote: remoteName}, RemoteURL: gitutil.RemoteToHTTPS(remote), Forge: v1.Forge(cloneForgeKind)}, nil
 }
 
 // getVoiceToken returns a Gemini API credential for the Android voice client.

@@ -65,10 +65,10 @@ interface RepoGroup {
 const NON_PASSING = new Set(["failure", "cancelled", "timed_out", "action_required", "stale"]);
 
 function ciDotURL(repo: Repo): string | undefined {
-  if (!repo.defaultBranchCIStatus) return undefined;
+  if (!repo.ci) return undefined;
   const isGitLab = !!repo.remoteURL?.includes("gitlab.com");
-  if (repo.defaultBranchCIStatus === "failure") {
-    const failed = repo.defaultBranchChecks?.find((c) => NON_PASSING.has(c.conclusion));
+  if (repo.ci === "failure") {
+    const failed = repo.ciChecks?.find((c) => NON_PASSING.has(c.conclusion));
     if (failed) {
       if (isGitLab) return `https://gitlab.com/${failed.owner}/${failed.repo}/-/jobs/${failed.jobID}`;
       if (failed.runID && failed.jobID) return `https://github.com/${failed.owner}/${failed.repo}/actions/runs/${failed.runID}/job/${failed.jobID}`;
@@ -239,9 +239,9 @@ export default function TaskList(props: TaskListProps) {
                 {group.repo || "Other"}
                 <Show when={repoMeta()} keyed>
                   {(meta) => (
-                    <Show when={meta.defaultBranchCIStatus} keyed>
+                    <Show when={meta.ci} keyed>
                       {(status) => <>
-                        <CIDot status={status as CIStatus} checks={meta.defaultBranchChecks} href={ciDotURL(meta)} />
+                        <CIDot status={status as CIStatus} checks={meta.ciChecks} href={ciDotURL(meta)} />
                         <Show when={status === "failure" && props.autoFixCI()}>
                           <span class={styles.autoBadge} title="Auto-fix CI enabled">auto</span>
                         </Show>

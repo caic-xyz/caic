@@ -63,9 +63,9 @@ function dispatchSSE(data: unknown) {
 import App from "./App";
 import * as api from "./api";
 
-const repoA: Repo = { path: "repos/a", baseBranch: { name: "main" }, remoteURL: "" };
-const repoB: Repo = { path: "repos/b", baseBranch: { name: "main" }, remoteURL: "" };
-const newRepo: Repo = { path: "repos/new", baseBranch: { name: "main" }, remoteURL: "" };
+const repoA: Repo = { path: "repos/a", branch: "main", baseBranch: { name: "main" }, remoteURL: "" };
+const repoB: Repo = { path: "repos/b", branch: "main", baseBranch: { name: "main" }, remoteURL: "" };
+const newRepo: Repo = { path: "repos/new", branch: "main", baseBranch: { name: "main" }, remoteURL: "" };
 
 function chipPathValues(): string[] {
   const btns = screen.queryAllByTestId("repo-chips")[0]
@@ -123,7 +123,7 @@ describe("App repo chips: No repository", () => {
     expect(chipPathValues()).toHaveLength(0);
 
     // Simulate a "repos" SSE event (e.g. CI status update) which triggers setRepos.
-    const repoAUpdated: Repo = { path: "repos/a", baseBranch: { name: "main" }, remoteURL: "", defaultBranchCIStatus: "success" as const };
+    const repoAUpdated: Repo = { path: "repos/a", branch: "main", baseBranch: { name: "main" }, remoteURL: "", ci: "success" as const };
     dispatchSSE({ kind: "repos", repos: [repoAUpdated] });
 
     await waitFor(() => {
