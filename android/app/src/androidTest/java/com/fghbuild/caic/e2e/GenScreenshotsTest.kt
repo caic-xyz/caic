@@ -53,9 +53,9 @@ class GenScreenshotsTest : E2eTestBase() {
         screenshotDir.listFiles()?.forEach { it.delete() }
 
         // Wait for the app to connect to the configured server before creating
-        // tasks. The Activity launches before setUpE2e() configures the URL, so
-        // the SSE connection starts asynchronously. On slow CI emulators the
-        // connection dot (visible when serverConfigured=true) may lag behind.
+        // tasks. The e2eConfigureRule populates the DataStore before the Activity
+        // launches, so the SSE connection starts immediately. Still wait for the
+        // connection dot as a synchronization point on slow CI emulators.
         composeTestRule.waitUntil(CONNECTION_TIMEOUT_MS) {
             composeTestRule.onAllNodesWithTag("connection-dot")
                 .fetchSemanticsNodes().isNotEmpty()

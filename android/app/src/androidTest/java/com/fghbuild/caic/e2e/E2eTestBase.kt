@@ -20,8 +20,9 @@ import dagger.hilt.android.testing.HiltAndroidRule
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import org.junit.Before
 import org.junit.Rule
+import org.junit.rules.TestRule
+import org.junit.runners.model.Statement
 import javax.inject.Inject
 
 @Suppress("UnnecessaryAbstractClass")
@@ -41,15 +42,27 @@ abstract class E2eTestBase {
         InstrumentationRegistry.getArguments().getString("baseUrl", DEFAULT_BASE_URL)
     }
 
-    @Before
-    fun setUpE2e() {
-        hiltRule.inject()
-        api = ApiClient(baseUrl)
-        runBlocking {
-            // Add a server entry pointing at the fake backend so the app connects.
-            val id = settingsRepository.addServer("E2E")
-            settingsRepository.switchServer(id)
-            settingsRepository.updateServerURL(baseUrl)
+    /**
+     * Rule that configures the DataStore with the fake backend URL before any
+     * Activity-launching rule runs. Both this and [hiltRule] have order = 0;
+     * JUnit applies them as hiltRule (outer) → this rule (inner) →
+     * subclass Compose rule (order = 1, innermost). This ensures the
+     * DataStore is populated before MainActivity.onCreate reads it.
+     */
+    @get:Rule(order = 0)
+    val e2eConfigureRule = TestRule { base, _ ->
+        object : Statement() {
+            override fun evaluate() {
+                hiltRule.inject()
+                api = ApiClient(baseUrl)
+                runBlocking {
+                    // Add a server entry pointing at the fake backend so the app connects.
+                    val id = settingsRepository.addServer("E2E")
+                    settingsRepository.switchServer(id)
+                    settingsRepository.updateServerURL(baseUrl)
+                }
+                base.evaluate()
+            }
         }
     }
 
