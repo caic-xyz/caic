@@ -52,6 +52,15 @@ class GenScreenshotsTest : E2eTestBase() {
         // Clear stale screenshots from previous runs.
         screenshotDir.listFiles()?.forEach { it.delete() }
 
+        // Wait for the app to connect to the configured server before creating
+        // tasks. The Activity launches before setUpE2e() configures the URL, so
+        // the SSE connection starts asynchronously. On slow CI emulators the
+        // connection dot (visible when serverConfigured=true) may lag behind.
+        composeTestRule.waitUntil(CONNECTION_TIMEOUT_MS) {
+            composeTestRule.onAllNodesWithTag("connection-dot")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+
         // Create the same 4 tasks as gen-android-screenshots.sh.
         val id1 = createTaskAPI("Fix token expiry bug in auth middleware")
         val id2 = createTaskAPI("Plan the rate limiting implementation for API endpoints")
@@ -115,6 +124,7 @@ class GenScreenshotsTest : E2eTestBase() {
 
     companion object {
         private const val SETTLE_DELAY_MS = 1000L
-        private const val LOAD_TIMEOUT_MS = 15_000L
+        private const val CONNECTION_TIMEOUT_MS = 30_000L
+        private const val LOAD_TIMEOUT_MS = 30_000L
     }
 }
