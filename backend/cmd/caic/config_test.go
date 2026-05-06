@@ -30,7 +30,10 @@ func TestLoadTOMLConfig(t *testing.T) {
 [core]
 root = "/srv/repos"
 auto_update = ""
-tailscale_api_key = "tskey_test"
+
+[core.env]
+TAILSCALE_API_KEY = "tskey_test"
+GEMINI_API_KEY = "AIza_test"
 
 [server]
 http = ":9090"
@@ -42,7 +45,6 @@ allow_origins = ["local", "CA", "US"]
 [ai]
 provider = "anthropic"
 model = "claude-haiku-4-5-20251001"
-gemini_api_key = "AIza_test"
 
 [github]
 token = "ghp_test"
@@ -91,11 +93,11 @@ pprof = true
 		if tc.Server.WebRTCPort != 3478 {
 			t.Errorf("Server.WebRTCPort = %d", tc.Server.WebRTCPort)
 		}
-		if tc.AI.GeminiAPIKey != "AIza_test" {
-			t.Errorf("AI.GeminiAPIKey = %q", tc.AI.GeminiAPIKey)
+		if tc.Core.Env["TAILSCALE_API_KEY"] != "tskey_test" {
+			t.Errorf("Core.Env[TAILSCALE_API_KEY] = %q", tc.Core.Env["TAILSCALE_API_KEY"])
 		}
-		if tc.Core.TailscaleAPIKey != "tskey_test" {
-			t.Errorf("Core.TailscaleAPIKey = %q", tc.Core.TailscaleAPIKey)
+		if tc.Core.Env["GEMINI_API_KEY"] != "AIza_test" {
+			t.Errorf("Core.Env[GEMINI_API_KEY] = %q", tc.Core.Env["GEMINI_API_KEY"])
 		}
 		if len(tc.Server.AllowOrigins) != 3 {
 			t.Errorf("Server.AllowOrigins = %v", tc.Server.AllowOrigins)
@@ -223,6 +225,10 @@ func TestTomlToServerConfig(t *testing.T) {
 		tc := &tomlConfig{
 			Core: tomlCore{
 				Root: "/repos",
+				Env: map[string]string{
+					"GEMINI_API_KEY":    "AIza_from_core_env",
+					"TAILSCALE_API_KEY": "tskey_from_core_env",
+				},
 			},
 			Debug: tomlDebug{
 				LogLevel: "warn",
@@ -275,6 +281,12 @@ func TestTomlToServerConfig(t *testing.T) {
 		if cfg.IPGeoAllowlist != "local,tailscale" {
 			t.Errorf("IPGeoAllowlist = %q", cfg.IPGeoAllowlist)
 		}
+		if cfg.GeminiAPIKey != "AIza_from_core_env" {
+			t.Errorf("GeminiAPIKey = %q, want AIza_from_core_env", cfg.GeminiAPIKey)
+		}
+		if cfg.TailscaleAPIKey != "tskey_from_core_env" {
+			t.Errorf("TailscaleAPIKey = %q, want tskey_from_core_env", cfg.TailscaleAPIKey)
+		}
 	})
 
 	t.Run("geo_db defaults to GeoLite2-Country.mmdb if file exists", func(t *testing.T) {
@@ -314,12 +326,14 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("gemini_api_key from config file", func(t *testing.T) {
+	t.Run("core env from config file", func(t *testing.T) {
 		dir := t.TempDir()
 		wantKey := "AIza_from_config"
 		tc := &tomlConfig{
-			AI: tomlAI{
-				GeminiAPIKey: wantKey,
+			Core: tomlCore{
+				Env: map[string]string{
+					"GEMINI_API_KEY": wantKey,
+				},
 			},
 		}
 		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
@@ -331,11 +345,11 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("gemini_api_key from env variable fallback", func(t *testing.T) {
+	t.Run("core env from env variable fallback", func(t *testing.T) {
 		dir := t.TempDir()
 		envKey := "AIza_from_env"
 		t.Setenv("GEMINI_API_KEY", envKey)
-		tc := &tomlConfig{} // empty config, no gemini_api_key set
+		tc := &tomlConfig{} // empty config, no core.env set
 		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
 		if err != nil {
 			t.Fatal(err)
@@ -345,14 +359,16 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("gemini_api_key config takes precedence over env", func(t *testing.T) {
+	t.Run("core env config takes precedence over host env", func(t *testing.T) {
 		dir := t.TempDir()
 		envKey := "AIza_from_env"
 		configKey := "AIza_from_config"
 		t.Setenv("GEMINI_API_KEY", envKey)
 		tc := &tomlConfig{
-			AI: tomlAI{
-				GeminiAPIKey: configKey,
+			Core: tomlCore{
+				Env: map[string]string{
+					"GEMINI_API_KEY": configKey,
+				},
 			},
 		}
 		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
@@ -361,6 +377,39 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 		if cfg.GeminiAPIKey != configKey {
 			t.Errorf("GeminiAPIKey = %q, want %q", cfg.GeminiAPIKey, configKey)
+		}
+	})
+
+	t.Run("tailscale_api_key from core env", func(t *testing.T) {
+		dir := t.TempDir()
+		wantKey := "tskey_config"
+		tc := &tomlConfig{
+			Core: tomlCore{
+				Env: map[string]string{
+					"TAILSCALE_API_KEY": wantKey,
+				},
+			},
+		}
+		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.TailscaleAPIKey != wantKey {
+			t.Errorf("TailscaleAPIKey = %q, want %q", cfg.TailscaleAPIKey, wantKey)
+		}
+	})
+
+	t.Run("tailscale_api_key from env variable fallback", func(t *testing.T) {
+		dir := t.TempDir()
+		envKey := "tskey_env"
+		t.Setenv("TAILSCALE_API_KEY", envKey)
+		tc := &tomlConfig{} // empty config
+		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.TailscaleAPIKey != envKey {
+			t.Errorf("TailscaleAPIKey = %q, want %q", cfg.TailscaleAPIKey, envKey)
 		}
 	})
 }

@@ -189,11 +189,13 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	}
 
 	var voiceBridge *voicertc.Bridge
-	if cfg.WebRTCPort >= 0 {
+	if cfg.WebRTCPort >= 0 && cfg.GeminiAPIKey != "" {
 		voiceBridge, err = voicertc.NewBridge(cfg.GeminiAPIKey, cfg.WebRTCPort)
 		if err != nil {
 			return nil, fmt.Errorf("voice bridge: %w", err)
 		}
+	} else if cfg.WebRTCPort >= 0 {
+		slog.Info("voice bridge disabled: GEMINI_API_KEY not set")
 	}
 
 	s := &Server{

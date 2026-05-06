@@ -32,9 +32,9 @@ type tomlHarness struct {
 }
 
 type tomlCore struct {
-	Root            string  `toml:"root"`
-	AutoUpdate      *string `toml:"auto_update"` // nil = default schedule; "" = disabled; else cron expression
-	TailscaleAPIKey string  `toml:"tailscale_api_key"`
+	Root       string            `toml:"root"`
+	AutoUpdate *string           `toml:"auto_update"` // nil = default schedule; "" = disabled; else cron expression
+	Env        map[string]string `toml:"env"`
 }
 
 type tomlServer struct {
@@ -55,9 +55,8 @@ type tomlDebug struct {
 }
 
 type tomlAI struct {
-	Provider     string `toml:"provider"`
-	Model        string `toml:"model"`
-	GeminiAPIKey string `toml:"gemini_api_key"`
+	Provider string `toml:"provider"`
+	Model    string `toml:"model"`
 }
 
 type tomlGitHub struct {
@@ -151,11 +150,10 @@ func tomlToServerConfig(tc *tomlConfig, cfgDir string) (cfg *server.Config, addr
 	if ghToken == "" && tc.GitHub.OAuthClientID == "" {
 		ghToken = resolveGitHubTokenFromGH()
 	}
-	// Gemini API key fallback: if not set in config, use environment variable.
-	geminiAPIKey := tc.AI.GeminiAPIKey
-	if geminiAPIKey == "" {
-		geminiAPIKey = os.Getenv("GEMINI_API_KEY")
-	}
+	// Resolve core env vars: explicit config values take precedence over the host environment.
+	tailscaleAPIKey := coreEnvOrDefault(tc.Core.Env, "TAILSCALE_API_KEY")
+	geminiAPIKey := coreEnvOrDefault(tc.Core.Env, "GEMINI_API_KEY")
+
 	// Convert per-harness env maps to KEY=VALUE slices.
 	harnessEnv := make(map[string][]string, len(tc.Harness))
 	for name, h := range tc.Harness {
@@ -169,7 +167,7 @@ func tomlToServerConfig(tc *tomlConfig, cfgDir string) (cfg *server.Config, addr
 		CacheDir:                cacheDir(),
 		HarnessEnv:              harnessEnv,
 		GeminiAPIKey:            geminiAPIKey,
-		TailscaleAPIKey:         tc.Core.TailscaleAPIKey,
+		TailscaleAPIKey:         tailscaleAPIKey,
 		LLMProvider:             tc.AI.Provider,
 		LLMModel:                tc.AI.Model,
 		GitHubToken:             ghToken,
@@ -222,6 +220,16 @@ func geoDBOrDefault(geoDB *string, cfgDir string) string {
 	}
 	// Explicitly set; resolve relative to cfgDir
 	return resolvePath(*geoDB, cfgDir)
+}
+
+// coreEnvOrDefault returns the value for key from the core env map, falling
+// back to the host environment variable of the same name when the map does
+// not contain the key.
+func coreEnvOrDefault(env map[string]string, key string) string {
+	if v, ok := env[key]; ok {
+		return v
+	}
+	return os.Getenv(key)
 }
 
 // defaultAutoUpdate is the default cron schedule: daily at 04:50 local time.

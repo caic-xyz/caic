@@ -12,14 +12,22 @@
 # When not set, defaults to daily at 04:50.
 #auto_update = ""
 
+# Add environment variables to the ones inherited by the server process.
+# Falls back to the host environment if not set.
+[core.env]
 # Tailscale API key — required for Tailscale ephemeral node.
 # Obtain from https://login.tailscale.com/admin/settings/keys
-#tailscale_api_key = ""
+#TAILSCALE_API_KEY = ""
+
+# Gemini API key: required for Gemini Live voice agent via WebRTC, and title generation
+# when provider is "gemini". Obtain from https://aistudio.google.com/app/apikey
+#GEMINI_API_KEY = ""
 
 # ── Server ───────────────────────────────────────────────────────────────────
 
 [server]
-# HTTP listen address for the web UI.
+# HTTP listen address for the web UI. By default only listens to localhost. To listen to all IPv4 addreses,
+# prefix with "0.0.0.0".
 #http = ":2242"
 
 # Public base URL. "auto" locks the hostname from the first FQDN request.
@@ -32,6 +40,8 @@
 # >0 = enabled on that static port (open it in your firewall for UDP traffic).
 # -1 = disabled.
 # Requires libopus-dev at build time (CGO_ENABLED=1).
+# When GEMINI_API_KEY is not set in core.env, the voice bridge is disabled
+# regardless of this setting (effective default: -1).
 #webrtc_port = 0
 
 # Path to a MaxMind MMDB file for country-code resolution and logging.
@@ -60,13 +70,8 @@
 # Available providers: https://pkg.go.dev/github.com/maruel/genai/providers
 #provider = ""
 
-# Model name or alias. When unset, uses the provider's cheapest model.
+# Model name or alias. When unset, uses the provider's auto-detected cheapest model.
 #model = ""
-
-# Gemini API key — required for Gemini Live voice agent and title generation
-# when provider is "gemini". Falls back to GEMINI_API_KEY environment variable
-# if not set. Obtain from https://aistudio.google.com/app/apikey
-#gemini_api_key = ""
 
 # ── Harness ──────────────────────────────────────────────────────────────────
 # Per-harness environment variables injected into containers. Each harness
