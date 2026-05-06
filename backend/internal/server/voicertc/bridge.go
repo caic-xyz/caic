@@ -184,6 +184,7 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 			wsConn, _, err := websocket.Dial(sessionCtx, geminiURL, nil)
 			if err != nil {
 				slog.Error("voicertc: gemini dial failed", "session", sess.id, "err", err)
+				sess.sendError("Failed to connect to Gemini: " + err.Error())
 				cancel()
 				return
 			}
@@ -364,7 +365,6 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 	if err != nil {
 		slog.ErrorContext(ctx, "voicertc: decoder init failed", "session", s.id, "err", err)
 		s.sendError("Microphone unavailable: voice codec failed to initialise")
-		s.cancel()
 		return
 	}
 	for {
@@ -373,7 +373,6 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 			if ctx.Err() == nil {
 				slog.WarnContext(ctx, "voicertc: audio read failed", "session", s.id, "err", readErr)
 				s.sendError("Microphone lost: " + readErr.Error())
-				s.cancel()
 			}
 			return
 		}
@@ -425,7 +424,7 @@ func (s *session) geminiRxLoop(ctx context.Context) {
 		if err != nil {
 			slog.WarnContext(ctx, "voicertc: encoder init failed", "session", s.id, "err", err)
 			s.sendError("Voice audio unavailable: codec failed to initialise")
-			s.cancel()
+			// Don't cancel — let the client see the error and disconnect.
 			return
 		}
 		go s.audioSendLoop(ctx, enc)
@@ -438,7 +437,9 @@ func (s *session) geminiRxLoop(ctx context.Context) {
 				slog.WarnContext(ctx, "voicertc: gemini read failed", "session", s.id, "err", err)
 				s.sendError("Connection to Gemini lost: " + geminiCloseReason(err))
 			}
-			s.cancel()
+			// Don't cancel here — the session stays alive so the error reaches the
+			// client via the data channel. The client will disconnect on error,
+			// which closes the data channel and triggers cleanup via dc.OnClose.
 			return
 		}
 

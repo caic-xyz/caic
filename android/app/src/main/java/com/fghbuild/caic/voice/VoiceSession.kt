@@ -69,15 +69,11 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "VoiceSession"
-private val functionScheduling: Map<String, String> =
-    buildFunctionDeclarations(emptyList()).mapNotNull { fd ->
-        fd.scheduling?.let { fd.name to it }
-    }.toMap()
 private const val RECORD_SAMPLE_RATE = 16000
 private const val PLAYBACK_SAMPLE_RATE = 24000
 private const val AUDIO_BUFFER_SIZE = 4096
 private const val WS_CLOSE_NORMAL = 1000
-private const val MODEL_NAME = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+private const val MODEL_NAME = "models/gemini-3.1-flash-live-preview"
 /** Max time (ms) to wait for setupComplete before timing out. */
 private const val SETUP_TIMEOUT_MS = 15_000L
 
@@ -579,7 +575,6 @@ class VoiceSession @Inject constructor(
                             name = fd.name,
                             description = fd.description,
                             parameters = fd.parameters,
-                            behavior = fd.behavior,
                         )
                     }
                 )
@@ -758,7 +753,6 @@ class VoiceSession @Inject constructor(
     private suspend fun handleToolCall(toolCall: BidiGenerateContentToolCall) {
         val responses = toolCall.functionCalls.map { fc ->
             try {
-                val scheduling = functionScheduling[fc.name]
                 _state.update { it.copy(activeTool = fc.name) }
                 val result = functionHandlers?.handle(fc.name, fc.args) ?: errorJson("No handler")
                 _state.update { it.copy(activeTool = null) }
@@ -773,13 +767,7 @@ class VoiceSession @Inject constructor(
                     }
                 }
 
-                val response = if (scheduling != null && result is JsonObject) {
-                    JsonObject(result.toMutableMap().apply {
-                        put("scheduling", JsonPrimitive(scheduling))
-                    })
-                } else {
-                    result
-                }
+                val response = result
                 FunctionResponse(id = fc.id, name = fc.name, response = response)
             } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
                 _state.update { it.copy(activeTool = null) }

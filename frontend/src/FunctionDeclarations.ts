@@ -35,8 +35,6 @@ export interface FunctionDeclaration {
   name: string;
   description: string;
   parameters: JsonSchema;
-  behavior?: string;
-  scheduling?: string;
 }
 
 export function buildFunctionDeclarations(
@@ -53,8 +51,6 @@ export function buildFunctionDeclarations(
       name: "tasks_list",
       description: "List all current coding tasks with their status, cost, and duration.",
       parameters: emptyObjectSchema,
-      behavior: "BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "task_create",
@@ -77,8 +73,6 @@ export function buildFunctionDeclarations(
         },
         ["prompt", "repos"],
       ),
-      behavior: "BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "task_get_detail",
@@ -87,8 +81,6 @@ export function buildFunctionDeclarations(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],
       ),
-      behavior: "BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "task_send_message",
@@ -100,8 +92,6 @@ export function buildFunctionDeclarations(
         },
         ["task_number", "message"],
       ),
-      behavior: "BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "task_answer_question",
@@ -113,8 +103,6 @@ export function buildFunctionDeclarations(
         },
         ["task_number", "answer"],
       ),
-      behavior: "BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "task_push_branch_to_remote",
@@ -133,8 +121,6 @@ export function buildFunctionDeclarations(
         },
         ["task_number"],
       ),
-      behavior: "NON_BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "task_stop",
@@ -143,8 +129,6 @@ export function buildFunctionDeclarations(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],
       ),
-      behavior: "BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "task_purge",
@@ -153,8 +137,6 @@ export function buildFunctionDeclarations(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],
       ),
-      behavior: "BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "task_revive",
@@ -163,8 +145,6 @@ export function buildFunctionDeclarations(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],
       ),
-      behavior: "BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "task_fork",
@@ -181,15 +161,11 @@ export function buildFunctionDeclarations(
         },
         ["task_number", "prompt"],
       ),
-      behavior: "BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "get_usage",
       description: "Check current API quota utilization and limits.",
       parameters: emptyObjectSchema,
-      behavior: "BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "clone_repo",
@@ -201,8 +177,6 @@ export function buildFunctionDeclarations(
         },
         ["url"],
       ),
-      behavior: "BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "task_get_last_message_from_assistant",
@@ -211,8 +185,6 @@ export function buildFunctionDeclarations(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],
       ),
-      behavior: "NON_BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "web_search",
@@ -221,8 +193,6 @@ export function buildFunctionDeclarations(
         { query: stringProp("The search query") },
         ["query"],
       ),
-      behavior: "NON_BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "web_fetch",
@@ -231,8 +201,6 @@ export function buildFunctionDeclarations(
         { url: stringProp("The URL to open") },
         ["url"],
       ),
-      behavior: "NON_BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "task_fix_pr",
@@ -241,8 +209,6 @@ export function buildFunctionDeclarations(
         { task_number: intProp("The task number whose PR CI should be fixed") },
         ["task_number"],
       ),
-      behavior: "BLOCKING",
-      scheduling: "INTERRUPT",
     },
     {
       name: "bot_fix_ci",
@@ -256,8 +222,6 @@ export function buildFunctionDeclarations(
         },
         ["repo"],
       ),
-      behavior: "BLOCKING",
-      scheduling: "INTERRUPT",
     },
   ];
 }

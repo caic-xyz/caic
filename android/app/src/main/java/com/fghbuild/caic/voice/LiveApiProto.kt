@@ -206,15 +206,14 @@ data class Tool(
 
 /**
  * Function declaration as sent to the Gemini Live API.
- * The `behavior` field marks the function as NON_BLOCKING.
- * Note: `scheduling` is NOT part of the declaration — it goes in the FunctionResponse.
+ * gemini-3.1-flash-live-preview only supports synchronous function calling;
+ * the behavior field is removed.
  */
 @Serializable
 data class LiveFunctionDeclaration(
     val name: String,
     val description: String,
     val parameters: JsonElement,
-    val behavior: String? = null,  // FunctionBehavior.NON_BLOCKING
 )
 
 /** The first client message on every session. */

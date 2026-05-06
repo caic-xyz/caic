@@ -9,17 +9,10 @@ import { formatElapsed, formatCost } from "./formatting";
 
 // Constants
 
-const MODEL_NAME = "models/gemini-2.5-flash-native-audio-preview-12-2025";
+const MODEL_NAME = "models/gemini-3.1-flash-live-preview";
 const PLAYBACK_SAMPLE_RATE = 24000;
 /** Max time (ms) to wait for setupComplete before timing out. */
 const SETUP_TIMEOUT_MS = 15000;
-
-/** Scheduling hint map derived from function declarations (same as Android). */
-const FUNCTION_SCHEDULING = new Map<string, string>(
-  buildFunctionDeclarations([]).flatMap((fd) =>
-    fd.scheduling ? [[fd.name, fd.scheduling]] : [],
-  ),
-);
 
 const SYSTEM_INSTRUCTION =
   "You are a voice assistant for caic, a system for managing AI coding agents.\n\n" +
@@ -232,7 +225,7 @@ export class VoiceSession {
       // Fail fast if server never sends setupComplete (overloaded, network black hole).
       if (this._setupTimer !== null) clearTimeout(this._setupTimer);
       this._setupTimer = setTimeout(() => {
-        if (ws === this._ws && !this.state.connected) {
+        if (ws === this._ws && !this.state.connected && !this.state.error) {
           ws.close();
           this._ws = null;
           this._setError("Connection timed out — server did not respond");
@@ -399,7 +392,7 @@ export class VoiceSession {
       // Setup timeout.
       if (this._setupTimer !== null) clearTimeout(this._setupTimer);
       this._setupTimer = setTimeout(() => {
-        if (this._pc === pc && !this.state.connected) {
+        if (this._pc === pc && !this.state.connected && !this.state.error) {
           this._setError("Connection timed out — server did not respond");
         }
       }, SETUP_TIMEOUT_MS);
@@ -549,7 +542,7 @@ export class VoiceSession {
         generationConfig: {
           responseModalities: ["AUDIO"],
           speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: "ORUS" } },
+            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Orus" } },
           },
         },
         systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
@@ -559,7 +552,6 @@ export class VoiceSession {
               name: fd.name,
               description: fd.description,
               parameters: fd.parameters,
-              ...(fd.behavior ? { behavior: fd.behavior } : {}),
             })),
           },
         ],
@@ -628,6 +620,10 @@ export class VoiceSession {
     // Surface Gemini error responses (e.g. auth failure, invalid model).
     const error = msg["error"] as { message?: string } | undefined;
     if (error?.message) {
+      if (this._setupTimer !== null) {
+        clearTimeout(this._setupTimer);
+        this._setupTimer = null;
+      }
       this._setError(error.message);
     }
   }
@@ -686,7 +682,6 @@ export class VoiceSession {
     const responses: FunctionResponse[] = [];
     for (const fc of toolCall.functionCalls ?? []) {
       try {
-        const scheduling = FUNCTION_SCHEDULING.get(fc.name);
         this._update((s) => {
           s.activeTool = fc.name;
         });
@@ -706,8 +701,7 @@ export class VoiceSession {
           });
         }
 
-        const response: Record<string, unknown> =
-          scheduling !== undefined ? { ...result, scheduling } : result;
+        const response: Record<string, unknown> = result;
         responses.push({ id: fc.id, name: fc.name, response });
       } catch (e: unknown) {
         this._update((s) => {

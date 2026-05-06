@@ -9,25 +9,13 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-// FunctionDeclaration fields:
-//
-// behavior:
-//   NON_BLOCKING — model keeps generating audio while the function runs in parallel.
-//   BLOCKING     — model waits silently for the function to return before continuing.
-//
-// scheduling:
-//   INTERRUPT    — function may be called mid-response, interrupting the model's audio output.
-//                  Use for all user-initiated requests (queries and actions).
-//   WHEN_IDLE    — function is only called when the model is not generating audio.
-//                  Use for background context the model gathers on its own initiative.
-//   SILENT       — function result is not spoken aloud; used for fire-and-forget side effects.
+// gemini-3.1-flash-live-preview only supports synchronous function calling;
+// behavior (NON_BLOCKING/BLOCKING) and scheduling hints are removed.
 @Serializable
 data class FunctionDeclaration(
     val name: String,
     val description: String,
     val parameters: JsonElement,
-    val behavior: String? = null,
-    val scheduling: String? = null,
 )
 
 // Schema builder helpers.
@@ -105,8 +93,6 @@ fun buildFunctionDeclarations(
         name = "tasks_list",
         description = "List all current coding tasks with their status, cost, and duration.",
         parameters = emptyObjectSchema,
-        behavior = "BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "task_create",
@@ -129,8 +115,6 @@ fun buildFunctionDeclarations(
             },
             required = listOf("prompt", "repos"),
         ),
-        behavior = "BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "task_get_detail",
@@ -139,8 +123,6 @@ fun buildFunctionDeclarations(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
             required = listOf("task_number"),
         ),
-        behavior = "BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "task_send_message",
@@ -150,8 +132,6 @@ fun buildFunctionDeclarations(
             "message" to stringProp("The message to send to the agent"),
             required = listOf("task_number", "message"),
         ),
-        behavior = "BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "task_answer_question",
@@ -161,8 +141,6 @@ fun buildFunctionDeclarations(
             "answer" to stringProp("The answer to the agent's question"),
             required = listOf("task_number", "answer"),
         ),
-        behavior = "BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "task_push_branch_to_remote",
@@ -177,8 +155,6 @@ fun buildFunctionDeclarations(
             ),
             required = listOf("task_number"),
         ),
-        behavior = "NON_BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "task_stop",
@@ -187,8 +163,6 @@ fun buildFunctionDeclarations(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
             required = listOf("task_number"),
         ),
-        behavior = "BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "task_purge",
@@ -197,8 +171,6 @@ fun buildFunctionDeclarations(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
             required = listOf("task_number"),
         ),
-        behavior = "BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "task_revive",
@@ -207,8 +179,6 @@ fun buildFunctionDeclarations(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
             required = listOf("task_number"),
         ),
-        behavior = "BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "task_fork",
@@ -226,15 +196,11 @@ fun buildFunctionDeclarations(
             "model" to stringProp("Override model (optional, inherits from source if omitted)"),
             required = listOf("task_number", "prompt"),
         ),
-        behavior = "BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "get_usage",
         description = "Check current task cost and token usage for rolling 5-hour and 7-day windows.",
         parameters = emptyObjectSchema,
-        behavior = "BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "clone_repo",
@@ -244,8 +210,6 @@ fun buildFunctionDeclarations(
             "path" to stringProp("Local directory name (optional, derived from URL if omitted)"),
             required = listOf("url"),
         ),
-        behavior = "BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "task_get_last_message_from_assistant",
@@ -254,8 +218,6 @@ fun buildFunctionDeclarations(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
             required = listOf("task_number"),
         ),
-        behavior = "NON_BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "web_search",
@@ -264,8 +226,6 @@ fun buildFunctionDeclarations(
             "query" to stringProp("The search query"),
             required = listOf("query"),
         ),
-        behavior = "NON_BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "web_fetch",
@@ -274,8 +234,6 @@ fun buildFunctionDeclarations(
             "url" to stringProp("The URL to open"),
             required = listOf("url"),
         ),
-        behavior = "NON_BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "task_fix_pr",
@@ -284,8 +242,6 @@ fun buildFunctionDeclarations(
             "task_number" to intProp("The task number whose PR CI should be fixed"),
             required = listOf("task_number"),
         ),
-        behavior = "BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     FunctionDeclaration(
         name = "bot_fix_ci",
@@ -298,8 +254,6 @@ fun buildFunctionDeclarations(
             },
             required = listOf("repo"),
         ),
-        behavior = "BLOCKING",
-        scheduling = "INTERRUPT",
     ),
     )
 }
