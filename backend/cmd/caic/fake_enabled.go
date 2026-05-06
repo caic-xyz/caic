@@ -79,6 +79,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 	fc := &fakeContainer{vncPort: fvnc.Port()}
 	fb := fake.New()
 	srv.SetRunnerOps(fc, map[agent.Harness]agent.Backend{fb.Harness(): fb})
+	srv.SetUsageFetchers(fakeUsageFetchers())
 
 	return srv.Serve(ctx, ln)
 }

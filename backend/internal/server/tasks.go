@@ -24,6 +24,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/gitutil"
 	"github.com/coder/websocket"
@@ -1139,6 +1140,13 @@ func (s *Server) SetRunnerOps(c task.ContainerBackend, backends map[agent.Harnes
 			r.Backends = backends
 		}
 	}
+}
+
+// SetUsageFetchers replaces the provider usage fetchers used by the usage
+// endpoints. Intended for e2e tests to inject fake fetchers that return
+// canned data without real API credentials.
+func (s *Server) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
+	s.usageFetchers = fetchers
 }
 
 // effectiveBaseBranch returns the branch the task was forked from: the task's
