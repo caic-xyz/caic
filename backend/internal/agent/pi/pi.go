@@ -145,6 +145,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 					b.mu.Lock()
 					b.ModelList = sorted
 					b.mu.Unlock()
+					// Store raw models so the cache survives blacklist changes.
 					b.cache.SetModels(agent.Pi, models)
 				}
 			}()

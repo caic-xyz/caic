@@ -48,7 +48,13 @@ type modelEntry struct {
 // version per family key is kept. Models matching a modelBlacklist prefix
 // are dropped. Models without parseable versions are preserved as-is.
 // Output is sorted alphabetically.
+//
+// The input slice is copied first so the caller's backing array is not
+// modified by slices.DeleteFunc's clear() call.
 func SortModels(models []string) []string {
+	// Clone to avoid corrupting the caller's slice via DeleteFunc's clear().
+	models = slices.Clone(models)
+
 	// Filter out blacklisted models.
 	models = slices.DeleteFunc(models, func(id string) bool {
 		for _, prefix := range modelBlacklist {
