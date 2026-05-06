@@ -98,17 +98,53 @@ def stop_logcat(proc, logcat_file=None):
         logcat_file.close()
 
 
+def _get_app_pids():
+    """Return PIDs for com.fghbuild.caic and com.fghbuild.caic.test, if running."""
+    try:
+        out = subprocess.run(
+            ["adb", "shell", "pidof", "com.fghbuild.caic", "com.fghbuild.caic.test"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return out.stdout.strip().split()
+    except subprocess.TimeoutExpired:
+        return []
+
+
 def dump_logcat_on_failure(logcat_path):
     """Dump logcat to stderr for immediate CI visibility."""
-    print("--- LOGCAT (last 200 lines) ---", file=sys.stderr)
+    tail_lines = 500
+    print(f"--- LOGCAT (last {tail_lines} lines) ---", file=sys.stderr)
     try:
         with open(logcat_path) as f:
             lines = f.readlines()
-            for line in lines[-200:]:
+            for line in lines[-tail_lines:]:
                 print(line.rstrip(), file=sys.stderr)
     except OSError as e:
         print(f"Failed to read logcat: {e}", file=sys.stderr)
     print("--- END LOGCAT ---", file=sys.stderr)
+
+    # Dump only lines belonging to our app processes. Logcat threadtime format
+    # includes the PID as the first column after the date: "05-06 17:58:10.123  4395".
+    # We match by PID so this stays correct as tags are added, renamed, or removed.
+    app_pids = _get_app_pids()
+    app_tail = 300
+    print(
+        f"--- APP LOGCAT (last {app_tail} lines for PIDs {app_pids}) ---",
+        file=sys.stderr,
+    )
+    if app_pids:
+        try:
+            with open(logcat_path) as f:
+                lines = [line for line in f if any(f" {pid} " in line for pid in app_pids)]
+                for line in lines[-app_tail:]:
+                    print(line.rstrip(), file=sys.stderr)
+        except OSError as e:
+            print(f"Failed to read logcat: {e}", file=sys.stderr)
+    else:
+        print("(app not running — no PIDs to filter by)", file=sys.stderr)
+    print("--- END APP LOGCAT ---", file=sys.stderr)
 
 
 def persist_logcat_for_artifact(logcat_path):
@@ -137,7 +173,10 @@ def pull_screenshots():
     """Pull screenshots from device, convert to webp, clean up."""
     has_ffmpeg = shutil.which("ffmpeg") is not None
     if not has_ffmpeg:
-        print("WARNING: ffmpeg not found; screenshots will be kept as PNG", file=sys.stderr)
+        print(
+            "WARNING: ffmpeg not found; screenshots will be kept as PNG",
+            file=sys.stderr,
+        )
 
     device_dir = "/sdcard/Pictures/caic-screenshots"
     result = subprocess.run(
