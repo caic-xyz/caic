@@ -30,7 +30,7 @@ export default function VncViewer(props: Props) {
 
     let rfb: InstanceType<typeof RFB>;
     try {
-      rfb = new RFB(canvas, url);
+      rfb = new RFB(canvas, url, { shared: false });
       rfb.resizeSession = true;
       rfb.scaleViewport = true;
     } catch (e) {

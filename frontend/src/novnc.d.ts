@@ -1,7 +1,7 @@
 /** Minimal type declaration for @novnc/novnc (noVNC). */
 declare module "@novnc/novnc" {
   class RFB {
-    constructor(canvas: HTMLElement, url: string);
+    constructor(canvas: HTMLElement, url: string, options?: { shared?: boolean });
     scaleViewport: boolean;
     resizeSession: boolean;
     disconnect(): void;
