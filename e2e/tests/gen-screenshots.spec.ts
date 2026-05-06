@@ -163,8 +163,60 @@ test("generate documentation screenshots", async ({ page, api }) => {
     }
   }
 
-  // Screenshot 6: Mobile — task detail at phone viewport.
-  await bugFixCard.click();
+  // Screenshot 6: VNC display — fake IDE screenshot in noVNC viewer.
+  const harnesses = await api.listHarnesses();
+  const repos = await api.listRepos();
+  const vncResp = await api.createTask({
+    initialPrompt: { text: "Show the VNC display" },
+    repos: [{ name: repos[0].path }],
+    harness: harnesses[0].name,
+    display: true,
+  });
+  await waitForTaskState(api, vncResp.id, "waiting", 30_000);
+
+  // Reload to get fresh state.
+  await page.goto("/");
+  await expect(
+    page
+      .getByTestId("repo-chips")
+      .locator("[data-testid^='chip-label-']")
+      .first(),
+  ).toBeVisible();
+
+  // Find the VNC task and navigate to it.
+  const vncTask = await api.getTask(vncResp.id);
+  expect(vncTask).toBeTruthy();
+
+  // Click the VNC task card (client-side navigation, no page reload).
+  const vncCard = page.locator(`[data-task-id="${vncTask!.id}"]`);
+  await expect(vncCard).toBeVisible({ timeout: 10_000 });
+  await vncCard.click();
+  await page.waitForTimeout(500);
+
+  // Click the VNC link to open the viewer.
+  const vncLink = page.getByRole("link", { name: "VNC" });
+  await expect(vncLink).toBeVisible({ timeout: 10_000 });
+  await vncLink.click();
+
+  // Wait for noVNC canvas to appear and render the fake screenshot.
+  await expect(page.locator("canvas")).toBeVisible({ timeout: 15_000 });
+  // Give noVNC time to complete the RFB handshake and render the framebuffer.
+  await page.waitForTimeout(2000);
+  await page.screenshot({
+    path: path.join(screenshotDir, "task-vnc.png"),
+  });
+
+  // Screenshot 7: Mobile — task detail at phone viewport.
+  await page.goto("/");
+  await expect(
+    page
+      .getByTestId("repo-chips")
+      .locator("[data-testid^='chip-label-']")
+      .first(),
+  ).toBeVisible();
+  const bugFixCard2 = page.locator(`[data-task-id="${id1}"]`);
+  await expect(bugFixCard2).toBeVisible({ timeout: 10_000 });
+  await bugFixCard2.click();
   await page.waitForTimeout(500);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);

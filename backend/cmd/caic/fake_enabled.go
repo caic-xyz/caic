@@ -68,8 +68,17 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
+
+	// Start a fake VNC server serving a generated IDE screenshot.
+	fvnc, err := startFakeVNC()
+	if err != nil {
+		return fmt.Errorf("start fake VNC: %w", err)
+	}
+	defer func() { retErr = errors.Join(retErr, fvnc.Close()) }()
+
+	fc := &fakeContainer{vncPort: fvnc.Port()}
 	fb := fake.New()
-	srv.SetRunnerOps(&fakeContainer{}, map[agent.Harness]agent.Backend{fb.Harness(): fb})
+	srv.SetRunnerOps(fc, map[agent.Harness]agent.Backend{fb.Harness(): fb})
 
 	return srv.Serve(ctx, ln)
 }
@@ -127,7 +136,9 @@ func runGit(args ...string) error {
 }
 
 // fakeContainer implements task.ContainerBackend with no-op operations.
-type fakeContainer struct{}
+type fakeContainer struct {
+	vncPort int // non-zero when a fake VNC server is running.
+}
 
 var _ task.ContainerBackend = (*fakeContainer)(nil)
 
@@ -155,4 +166,4 @@ func (*fakeContainer) Fork(_ context.Context, _ string, _ []md.Repo, _ *task.For
 	return "fake-fork", nil, fmt.Errorf("fork not supported in fake mode")
 }
 
-func (*fakeContainer) VNCPort(_ string) int { return 0 }
+func (fc *fakeContainer) VNCPort(_ string) int { return fc.vncPort }
