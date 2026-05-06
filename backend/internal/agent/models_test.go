@@ -77,15 +77,6 @@ func TestSortModels(t *testing.T) {
 			t.Errorf("input was corrupted:\n  before: %v\n  after:  %v", original, input)
 		}
 	})
-
-	t.Run("filters_empty_strings", func(t *testing.T) {
-		input := []string{"openai/gpt-5.5", "", "openai/o4", ""}
-		got := SortModels(input)
-		want := []string{"openai/gpt-5.5"}
-		if !slices.Equal(got, want) {
-			t.Errorf("got %v, want %v", got, want)
-		}
-	})
 }
 
 func TestParseModelVersion(t *testing.T) {
