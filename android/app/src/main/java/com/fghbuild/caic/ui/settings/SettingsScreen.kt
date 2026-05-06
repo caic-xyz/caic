@@ -183,7 +183,7 @@ fun SettingsScreen(
                 value = screenState.baseImage,
                 onValueChange = { viewModel.updateBaseImage(it) },
                 label = { Text("Docker image") },
-                placeholder = { Text("ghcr.io/caic-xyz/md:latest") },
+                placeholder = { Text("ghcr.io/caic-xyz/md-user:latest") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )

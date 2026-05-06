@@ -1080,7 +1080,7 @@ export default function App() {
                 <input
                   type="text"
                   class={styles.settingsInput}
-                  placeholder="ghcr.io/caic-xyz/md:latest"
+                  placeholder="ghcr.io/caic-xyz/md-user:latest"
                   value={selectedImage() || ""}
                   onChange={(e) => setSelectedImage(e.currentTarget.value)}
                   onBlur={async () => {
