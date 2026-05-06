@@ -225,6 +225,9 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Lazily load messages for purged tasks on first access.
+	s.loadTaskMessagesOnDemand(entry)
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, dto.InternalError("streaming not supported"))
@@ -317,6 +320,7 @@ func (s *Server) handleTaskToolInput(w http.ResponseWriter, r *http.Request) {
 		writeError(w, dto.BadRequest("toolUseID required"))
 		return
 	}
+	s.loadTaskMessagesOnDemand(entry)
 	history, _, unsub := entry.task.Subscribe(r.Context())
 	unsub()
 	for _, msg := range history {

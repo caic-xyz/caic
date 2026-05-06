@@ -1363,11 +1363,15 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		// Purged tasks have no messages to replay (only the header-only
-		// tail scan is performed). The handler returns a "ready" event
-		// and immediately closes the stream.
-		if !strings.Contains(w.Body.String(), "event: ready") {
+		// With lazy loading, purged task messages are loaded on demand
+		// when the events endpoint is accessed. The handler replays the
+		// full message history, then emits "ready" and closes the stream.
+		body := w.Body.String()
+		if !strings.Contains(body, "event: ready") {
 			t.Error("expected 'ready' event for purged task")
+		}
+		if !strings.Contains(body, "I found the bug") {
+			t.Error("expected text message 'I found the bug' to be replayed for purged task")
 		}
 	})
 
@@ -1437,11 +1441,15 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		// Purged tasks have no messages to replay (only the header-only
-		// tail scan is performed). The handler returns a "ready" event
-		// and immediately closes the stream.
-		if !strings.Contains(w.Body.String(), "event: ready") {
+		// With lazy loading, purged task messages are loaded on demand
+		// when the events endpoint is accessed. The handler replays the
+		// full message history, then emits "ready" and closes the stream.
+		body := w.Body.String()
+		if !strings.Contains(body, "event: ready") {
 			t.Error("expected 'ready' event for purged task")
+		}
+		if !strings.Contains(body, "Hello world") {
+			t.Error("expected text message 'Hello world' to be replayed for purged task")
 		}
 	})
 }

@@ -228,6 +228,12 @@ type taskEntry struct {
 	// CI monitoring: set when a PR is created; used by webhook handlers to
 	// find the task waiting for CI results.
 	monitorBranch string // branch being monitored (e.g. "caic-123"); empty when no CI monitoring active
+
+	// loadedTask holds the LoadedTask for purged tasks so messages can be
+	// lazily parsed from the log file on demand (e.g. when the user opens
+	// task detail and subscribes to events).
+	loadedTask     *task.LoadedTask
+	loadedTaskOnce sync.Once
 }
 
 // buildHandler assembles the full HTTP handler. Extracted from Serve so that

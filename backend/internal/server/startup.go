@@ -454,6 +454,23 @@ func (s *Server) setParser(lt *task.LoadedTask) {
 	}
 }
 
+// loadTaskMessagesOnDemand triggers lazy message loading for purged tasks
+// the first time the full conversation is needed (e.g. when the user opens
+// task detail and subscribes to SSE events). Must be called before
+// Subscribe to populate the history snapshot.
+func (s *Server) loadTaskMessagesOnDemand(entry *taskEntry) {
+	if entry.loadedTask == nil {
+		return
+	}
+	entry.loadedTaskOnce.Do(func() {
+		if err := entry.loadedTask.LoadMessages(); err != nil {
+			slog.Warn("lazy load messages failed", "task", entry.task.ID, "err", err)
+			return
+		}
+		entry.task.RestoreMessages(entry.loadedTask.Msgs)
+	})
+}
+
 // loadPurgedTasksFrom populates s.tasks from pre-loaded log data.
 //
 // It keeps tasks updated within the last few days and limits the result to the N most recent per repository.
@@ -545,9 +562,11 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 		}
 		// Stats backfill from messages is handled by loadLogHeader's tail
 		// scan when the trailer has zero cost (see case "result").
+		// Set up the parser so messages can be lazily loaded on demand.
+		s.setParser(lt)
 		done := make(chan struct{})
 		close(done)
-		entry := &taskEntry{task: t, result: lt.Result, done: done}
+		entry := &taskEntry{task: t, result: lt.Result, done: done, loadedTask: lt}
 		s.tasks[t.ID.String()] = entry
 	}
 	s.taskChanged()
