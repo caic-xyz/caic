@@ -5,6 +5,9 @@ run:
   tests: true
 linters:
   enable:
+    - asasalint
+    - asciicheck
+    - bidichk
     - bodyclose
     - canonicalheader
     - contextcheck
@@ -17,36 +20,56 @@ linters:
     - errname
     - errorlint
     - exhaustive
+    - exptostd
     - fatcontext
     - forcetypeassert
     - funcorder
-    - gosmopolitan
+    - gocheckcompilerdirectives
+    - gochecksumtype
     - gocritic
+    - gosmopolitan
     - gosec
     - godoclint
     - godot
+    - gomoddirectives
+    - goprintffuncname
+    - gosec
+    - grouper
+    - iface
+    - importas
+    - inamedparam
     - intrange
+    - iotamixing
+    - loggercheck
+    - makezero
     - mirror
     - misspell
     - modernize
     - musttag
     - nakedret
     - nilerr
+    - nilnesserr
     - nilnil
     - noctx
     - nolintlint
+    - nosprintfhostport
     - paralleltest
     - perfsprint
     - prealloc
+    - predeclared
+    - reassign
     - recvcheck
     - revive
     - sloglint
     - sqlclosecheck
+    - tagalign
+    - tparallel
     - unconvert
     - unparam
     - unused
     - usestdlibvars
     - usetesting
+    - wastedassign
     - whitespace
   settings:
     funcorder:
