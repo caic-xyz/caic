@@ -37,14 +37,11 @@ import okhttp3.Response
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
-import android.util.Log
 import java.io.IOException
 import java.net.HttpURLConnection.HTTP_UNAUTHORIZED
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
-
-private const val TAG = "TaskRepository"
 
 private const val DELAY_CAP = 30_000L
 
@@ -158,9 +155,7 @@ class TaskRepository @Inject constructor(
                     val msg = json.decodeFromString<EventMessage>(data)
                     trySend(TaskSSEEvent.Event(msg))
                 } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-                    Log.e(TAG, "Failed to parse task raw event", e)
-                    _warnings.tryEmit("Task stream corrupted, reconnecting…")
-                    close(IOException("Failed to parse SSE event", e))
+                    _warnings.tryEmit("Invalid task event: ${e.message}")
                 }
             }
 
@@ -213,9 +208,7 @@ class TaskRepository @Inject constructor(
                     }
                     trySend(taskMap.values.toList())
                 } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-                    Log.e(TAG, "Failed to parse task list event", e)
-                    _warnings.tryEmit("Task list stream corrupted, reconnecting…")
-                    close(IOException("Failed to parse SSE event", e))
+                    _warnings.tryEmit("Invalid task list event: ${e.message}")
                 }
             }
 
@@ -246,9 +239,7 @@ class TaskRepository @Inject constructor(
                 try {
                     trySend(json.decodeFromString<T>(data))
                 } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-                    Log.e(TAG, "Failed to parse SSE event from $url", e)
-                    _warnings.tryEmit("Usage stream corrupted, reconnecting…")
-                    close(IOException("Failed to parse SSE event", e))
+                    _warnings.tryEmit("Invalid usage event: ${e.message}")
                 }
             }
 
