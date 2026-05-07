@@ -1,8 +1,11 @@
 // Usage badges: per-provider grouped pills with color-coded thresholds.
 package com.fghbuild.caic.ui.tasklist
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -30,6 +33,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -112,8 +116,17 @@ private fun SvgUrlImage(url: String, contentDescription: String?, modifier: Modi
 private fun ProviderPill(pq: ProviderQuota, serverURL: String) {
     val pillBg = MaterialTheme.colorScheme.surfaceVariant
     val pillBorder = Color(0xFFDDDDDD)
+    val context = LocalContext.current
+    val modifier = if (pq.usageUrl.isNotBlank()) {
+        Modifier.clickable {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(pq.usageUrl))
+            context.startActivity(intent)
+        }
+    } else {
+        Modifier
+    }
     Row(
-        modifier = Modifier
+        modifier = modifier
             .background(pillBg, RoundedCornerShape(4.dp))
             .border(0.5.dp, pillBorder, RoundedCornerShape(4.dp))
             .padding(horizontal = 5.dp, vertical = 2.dp),

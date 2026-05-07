@@ -16,7 +16,16 @@
   background: var(--color-bg-hover);
   border: 1px solid var(--color-border-light);
   white-space: nowrap;
-  cursor: default;
+  text-decoration: none;
+  color: inherit;
+}
+
+a.providerPill {
+  cursor: pointer;
+}
+
+a.providerPill:hover {
+  background: var(--color-bg-input-hover);
 }
 
 .providerLabel {

@@ -770,6 +770,8 @@ public struct ProviderQuota: Codable {
     public let logoUrl: String
     /// "oauth" or "apikey"
     public let authKind: String
+    /// link to provider's usage/billing page
+    public let usageUrl: String
     public let rateLimits: [QuotaRateLimit]?
     public let balance: QuotaBalance?
     public let extraUsage: QuotaExtraUsage?

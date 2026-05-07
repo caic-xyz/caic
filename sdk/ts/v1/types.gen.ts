@@ -834,6 +834,8 @@ export interface ProviderQuota {
   logoUrl: string;
   /** "oauth" or "apikey" */
   authKind: string;
+  /** link to provider's usage/billing page */
+  usageUrl: string;
   rateLimits?: QuotaRateLimit[];
   balance?: QuotaBalance;
   extraUsage?: QuotaExtraUsage;

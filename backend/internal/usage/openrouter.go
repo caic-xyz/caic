@@ -59,6 +59,9 @@ func (f *OpenRouterFetcher) Label() string { return "OpenRouter" }
 // AuthKind returns the authentication method.
 func (f *OpenRouterFetcher) AuthKind() string { return "apikey" }
 
+// UsageURL returns the link to the provider's usage/billing page.
+func (f *OpenRouterFetcher) UsageURL() string { return "https://openrouter.ai/settings/credits" }
+
 // Get returns the cached credit balance.
 func (f *OpenRouterFetcher) Get(ctx context.Context) *v1.ProviderQuota {
 	f.mu.Lock()

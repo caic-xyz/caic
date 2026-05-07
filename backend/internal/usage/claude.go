@@ -92,6 +92,9 @@ func (f *AnthropicFetcher) Label() string { return "Anthropic" }
 // AuthKind returns the authentication method.
 func (f *AnthropicFetcher) AuthKind() string { return "oauth" }
 
+// UsageURL returns the link to the provider's usage/billing page.
+func (f *AnthropicFetcher) UsageURL() string { return "https://claude.ai/settings/usage" }
+
 // Get returns the cached quota data, refreshing if stale. Returns nil when
 // no token is available.
 func (f *AnthropicFetcher) Get(ctx context.Context) *v1.ProviderQuota {

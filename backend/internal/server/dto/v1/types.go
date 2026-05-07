@@ -377,6 +377,7 @@ type ProviderQuota struct {
 	Label    string `json:"label"`    // human-readable: "Anthropic", "DeepSeek", …
 	LogoURL  string `json:"logoUrl"`  // absolute URL path to provider SVG, e.g. "/logos/anthropic.svg"
 	AuthKind string `json:"authKind"` // "oauth" or "apikey"
+	UsageURL string `json:"usageUrl"` // link to provider's usage/billing page
 
 	RateLimits []QuotaRateLimit `json:"rateLimits,omitzero"`
 	Balance    QuotaBalance     `json:"balance,omitzero"`

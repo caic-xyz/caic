@@ -19,6 +19,8 @@ type ProviderFetcher interface {
 	Label() string
 	// AuthKind returns "oauth" or "apikey".
 	AuthKind() string
+	// UsageURL returns the link to the provider's usage/billing page.
+	UsageURL() string
 	// Get returns the latest quota data, using cached values when fresh.
 	Get(ctx context.Context) *v1.ProviderQuota
 }

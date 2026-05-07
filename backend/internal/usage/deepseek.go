@@ -62,6 +62,9 @@ func (f *DeepSeekFetcher) Label() string { return "DeepSeek" }
 // AuthKind returns the authentication method.
 func (f *DeepSeekFetcher) AuthKind() string { return "apikey" }
 
+// UsageURL returns the link to the provider's usage/billing page.
+func (f *DeepSeekFetcher) UsageURL() string { return "https://platform.deepseek.com/usage" }
+
 // Get returns the cached balance, refreshing if stale.
 func (f *DeepSeekFetcher) Get(ctx context.Context) *v1.ProviderQuota {
 	f.mu.Lock()

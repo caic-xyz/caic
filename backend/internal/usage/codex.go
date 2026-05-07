@@ -104,6 +104,9 @@ func (f *CodexFetcher) Label() string { return "Codex" }
 // AuthKind returns the authentication method.
 func (f *CodexFetcher) AuthKind() string { return "oauth" }
 
+// UsageURL returns the link to the provider's usage/billing page.
+func (f *CodexFetcher) UsageURL() string { return "https://chatgpt.com/codex/cloud/settings/analytics" }
+
 // Get returns the cached quota data, refreshing if stale.
 func (f *CodexFetcher) Get(ctx context.Context) *v1.ProviderQuota {
 	f.mu.Lock()

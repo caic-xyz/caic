@@ -1,5 +1,5 @@
 // Usage badges: per-provider grouped pills with color-coded thresholds.
-import { Show, For } from "solid-js";
+import { Show, For, Switch, Match } from "solid-js";
 import type { Accessor } from "solid-js";
 import type { ProviderQuota, QuotaRateLimit, QuotaBalance, QuotaExtraUsage, UsageResp } from "@sdk/types.gen";
 import Tooltip from "./Tooltip";
@@ -75,35 +75,52 @@ function ProviderIcon(props: { logoUrl?: string; label: string }) {
 }
 
 function ProviderPill(props: { pq: ProviderQuota; now: Accessor<number> }) {
-  return (
-    <span class={styles.providerPill}>
-      <ProviderIcon logoUrl={props.pq.logoUrl} label={props.pq.label} />
-      <span class={styles.providerBadges}>
-        <For each={props.pq.rateLimits ?? []}>
-          {(rl) => <RateLimitBadge rl={rl} now={props.now} label={props.pq.label} />}
-        </For>
-        <Show when={props.pq.balance}>
-          {(bal) => (
-            <Tooltip text={`${props.pq.label}: ${formatBalance(bal().currency, bal().total)}`}>
-              <span class={balanceClass(bal())}>
-                {formatBalance(bal().currency, bal().total)}
+  const badgeSpan = (
+    <span class={styles.providerBadges}>
+      <For each={props.pq.rateLimits ?? []}>
+        {(rl) => <RateLimitBadge rl={rl} now={props.now} label={props.pq.label} />}
+      </For>
+      <Show when={props.pq.balance}>
+        {(bal) => (
+          <Tooltip text={`${props.pq.label}: ${formatBalance(bal().currency, bal().total)}`}>
+            <span class={balanceClass(bal())}>
+              {formatBalance(bal().currency, bal().total)}
+            </span>
+          </Tooltip>
+        )}
+      </Show>
+      <Show when={props.pq.extraUsage}>
+        {(extra) => (
+          <Show when={extra().usedCredits !== 0 || extra().monthlyLimit !== 0}>
+            <Tooltip text={`${props.pq.label}: ${extraTooltip(extra())}`}>
+              <span class={extraClass(extra())}>
+                {extraLabel(extra())}
               </span>
             </Tooltip>
-          )}
-        </Show>
-        <Show when={props.pq.extraUsage}>
-          {(extra) => (
-            <Show when={extra().usedCredits !== 0 || extra().monthlyLimit !== 0}>
-              <Tooltip text={`${props.pq.label}: ${extraTooltip(extra())}`}>
-                <span class={extraClass(extra())}>
-                  {extraLabel(extra())}
-                </span>
-              </Tooltip>
-            </Show>
-          )}
-        </Show>
-      </span>
+          </Show>
+        )}
+      </Show>
     </span>
+  );
+
+  const content = (
+    <>
+      <ProviderIcon logoUrl={props.pq.logoUrl} label={props.pq.label} />
+      {badgeSpan}
+    </>
+  );
+
+  return (
+    <Switch>
+      <Match when={!!props.pq.usageUrl}>
+        <a class={styles.providerPill} href={props.pq.usageUrl} target="_blank" rel="noopener noreferrer">
+          {content}
+        </a>
+      </Match>
+      <Match when={!props.pq.usageUrl}>
+        <span class={styles.providerPill}>{content}</span>
+      </Match>
+    </Switch>
   );
 }
 
