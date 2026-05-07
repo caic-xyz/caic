@@ -21,6 +21,35 @@ object InstantSerializer : KSerializer<Instant> {
     override fun deserialize(decoder: Decoder): Instant = Instant.parse(decoder.decodeString())
 }
 
+typealias CIStatus = String
+
+object CIStatuses {
+    const val Pending: CIStatus = "pending"
+    const val Success: CIStatus = "success"
+    const val Failure: CIStatus = "failure"
+}
+
+typealias CheckConclusion = String
+
+object CheckConclusions {
+    const val Success: CheckConclusion = "success"
+    const val Failure: CheckConclusion = "failure"
+    const val Neutral: CheckConclusion = "neutral"
+    const val Skipped: CheckConclusion = "skipped"
+    const val Cancelled: CheckConclusion = "cancelled"
+    const val TimedOut: CheckConclusion = "timed_out"
+    const val ActionRequired: CheckConclusion = "action_required"
+    const val Stale: CheckConclusion = "stale"
+}
+
+typealias CheckStatus = String
+
+object CheckStatuses {
+    const val Queued: CheckStatus = "queued"
+    const val InProgress: CheckStatus = "in_progress"
+    const val Completed: CheckStatus = "completed"
+}
+
 typealias EventKind = String
 
 object EventKinds {
@@ -49,6 +78,21 @@ object EventKinds {
     const val Stats: EventKind = "stats"
 }
 
+typealias Forge = String
+
+object Forges {
+    const val GitHub: Forge = "github"
+    const val GitLab: Forge = "gitlab"
+}
+
+typealias ForgePRState = String
+
+object ForgePRStates {
+    const val Open: ForgePRState = "open"
+    const val Closed: ForgePRState = "closed"
+    const val Merged: ForgePRState = "merged"
+}
+
 typealias Harness = String
 
 object Harnesses {
@@ -58,14 +102,6 @@ object Harnesses {
     const val Kilo: Harness = "kilo"
     const val OpenCode: Harness = "opencode"
     const val Pi: Harness = "pi"
-}
-
-typealias CIStatus = String
-
-object CIStatuses {
-    const val Pending: CIStatus = "pending"
-    const val Success: CIStatus = "success"
-    const val Failure: CIStatus = "failure"
 }
 
 typealias SyncTarget = String
@@ -81,42 +117,6 @@ object ToolOutputContentTypes {
     const val ToolOutputText: ToolOutputContentType = "text"
     const val ToolOutputJSON: ToolOutputContentType = "json"
     const val ToolOutputMarkdown: ToolOutputContentType = "markdown"
-}
-
-typealias Forge = String
-
-object Forges {
-    const val GitHub: Forge = "github"
-    const val GitLab: Forge = "gitlab"
-}
-
-typealias CheckConclusion = String
-
-object CheckConclusions {
-    const val Success: CheckConclusion = "success"
-    const val Failure: CheckConclusion = "failure"
-    const val Neutral: CheckConclusion = "neutral"
-    const val Skipped: CheckConclusion = "skipped"
-    const val Cancelled: CheckConclusion = "cancelled"
-    const val TimedOut: CheckConclusion = "timed_out"
-    const val ActionRequired: CheckConclusion = "action_required"
-    const val Stale: CheckConclusion = "stale"
-}
-
-typealias ForgePRState = String
-
-object ForgePRStates {
-    const val Open: ForgePRState = "open"
-    const val Closed: ForgePRState = "closed"
-    const val Merged: ForgePRState = "merged"
-}
-
-typealias CheckStatus = String
-
-object CheckStatuses {
-    const val Queued: CheckStatus = "queued"
-    const val InProgress: CheckStatus = "in_progress"
-    const val Completed: CheckStatus = "completed"
 }
 
 object ErrorCodes {

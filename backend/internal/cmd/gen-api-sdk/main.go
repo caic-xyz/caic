@@ -7,12 +7,12 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -42,10 +42,13 @@ func isSDKPkg(pkgPath string) bool {
 
 // docRegistry holds parsed documentation extracted from Go source files.
 type docRegistry struct {
-	typeDoc  map[string]string            // Go type name → doc comment text
-	typeFile map[string]string            // Go type name → source filename (e.g. "events.go")
-	fieldDoc map[string]map[string]string // Go type name → Go field name → doc comment text
-	aliases  []aliasInfo                  // named-string types with their constants
+	typeDoc          map[string]string            // Go type name → doc comment text
+	typeFile         map[string]string            // Go type name → source filename (e.g. "events.go")
+	fieldDoc         map[string]map[string]string // Go type name → Go field name → doc comment text
+	aliases          []aliasInfo                  // named-string types with their constants
+	tsAliasNames     map[string]struct{}          // set of alias names for TS
+	kotlinAliasNames map[string]struct{}          // set of alias names for Kotlin
+	swiftAliasNames  map[string]struct{}          // set of alias names for Swift
 }
 
 // aliasInfo describes a Go named-string type and its constant values,
@@ -198,13 +201,26 @@ func loadDocs() (*docRegistry, error) {
 		}
 	}
 
-	for name, file := range stringAliases {
+	// Build aliases in sorted order for deterministic output.
+	aliasNames := slices.Sorted(maps.Keys(stringAliases))
+	for _, name := range aliasNames {
+		file := stringAliases[name]
 		reg.aliases = append(reg.aliases, aliasInfo{
 			name:      name,
 			file:      file,
 			constants: aliasConsts[name],
 		})
 	}
+
+	reg.tsAliasNames = map[string]struct{}{}
+	reg.kotlinAliasNames = map[string]struct{}{}
+	reg.swiftAliasNames = map[string]struct{}{}
+	for _, a := range reg.aliases {
+		reg.tsAliasNames[a.name] = struct{}{}
+		reg.kotlinAliasNames[a.name] = struct{}{}
+		reg.swiftAliasNames[a.name] = struct{}{}
+	}
+
 	return reg, nil
 }
 
@@ -250,7 +266,6 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("loading docs: %w", err)
 	}
-	buildAliasNameSets(docs)
 	if err := generateTSTypes(tsDir, docs); err != nil {
 		return err
 	}
@@ -343,7 +358,7 @@ func discoverTSStructs(docs *docRegistry) []kotlinStruct {
 }
 
 // goTypeToTS maps a Go reflect.Type to its TypeScript type string.
-func goTypeToTS(t reflect.Type) string {
+func goTypeToTS(t reflect.Type, docs *docRegistry) string {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -365,7 +380,7 @@ func goTypeToTS(t reflect.Type) string {
 		return "{ [key: string]: string}"
 	}
 
-	if _, ok := tsAliasNames[t.Name()]; ok {
+	if _, ok := docs.tsAliasNames[t.Name()]; ok {
 		return t.Name()
 	}
 
@@ -383,9 +398,9 @@ func goTypeToTS(t reflect.Type) string {
 	case reflect.Bool:
 		return "boolean"
 	case reflect.Slice:
-		return goTypeToTS(t.Elem()) + "[]"
+		return goTypeToTS(t.Elem(), docs) + "[]"
 	case reflect.Map:
-		return "{ [key: " + goTypeToTS(t.Key()) + "]: " + goTypeToTS(t.Elem()) + "}"
+		return "{ [key: " + goTypeToTS(t.Key(), docs) + "]: " + goTypeToTS(t.Elem(), docs) + "}"
 	case reflect.Struct:
 		return t.Name()
 	default:
@@ -413,10 +428,10 @@ func emitTSStruct(b *strings.Builder, t reflect.Type, docs *docRegistry) {
 		if jsonName == "" {
 			jsonName = sf.Name
 		}
-		omit := opts.contains("omitempty") || opts.contains("omitzero")
+		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
 		isPtr := sf.Type.Kind() == reflect.Pointer
 		optional := isPtr || (omit && !isPtr)
-		tsType := goTypeToTS(sf.Type)
+		tsType := goTypeToTS(sf.Type, docs)
 
 		// Field-level doc: block comment for multi-line, inline for single-line.
 		fdoc := ""
@@ -556,35 +571,30 @@ func emitTSAlias(b *strings.Builder, a aliasInfo) {
 
 // tsFieldValidator returns a TypeScript expression that validates a value
 // at the given pathExpr. pathLit is a string literal for error messages.
-func tsFieldValidator(t reflect.Type, pathExpr, pathLit string) string {
+func tsFieldValidator(t reflect.Type, pathExpr, pathLit string, docs *docRegistry) string {
 	if t.Kind() == reflect.Pointer {
-		return tsFieldValidator(t.Elem(), pathExpr, pathLit)
+		return tsFieldValidator(t.Elem(), pathExpr, pathLit, docs)
 	}
 
-	// json.RawMessage is []byte (Kind == Slice) so it hits the Slice branch
-	// below. Bypass kind dispatch — it's validated as passthrough (any).
 	if t == jsonRawMessageType {
 		return tsPrimitiveValidator(t, pathExpr, pathLit)
 	}
 
 	rt := t
 
-	// Slice — cast result to expected type.
 	if rt.Kind() == reflect.Slice {
 		elemFn := tsElemValidatorFunc(rt.Elem(), pathLit+"[i]")
-		elemTS := goTypeToTS(rt.Elem())
+		elemTS := goTypeToTS(rt.Elem(), docs)
 		return fmt.Sprintf("validateArray(%s, %q, %s) as %s[]", pathExpr, pathLit, elemFn, elemTS)
 	}
 
-	// Map — cast result.
 	if rt.Kind() == reflect.Map {
 		valFn := tsElemValidatorFunc(rt.Elem(), pathLit+"[k]")
-		keyTS := goTypeToTS(rt.Key())
-		valTS := goTypeToTS(rt.Elem())
+		keyTS := goTypeToTS(rt.Key(), docs)
+		valTS := goTypeToTS(rt.Elem(), docs)
 		return fmt.Sprintf("validateRecord(%s, %q, %s) as { [key: %s]: %s }", pathExpr, pathLit, valFn, keyTS, valTS)
 	}
 
-	// Struct
 	if rt.Kind() == reflect.Struct && isSDKPkg(rt.PkgPath()) {
 		return fmt.Sprintf("validate%s(%s)", rt.Name(), pathExpr)
 	}
@@ -594,8 +604,8 @@ func tsFieldValidator(t reflect.Type, pathExpr, pathLit string) string {
 
 // tsFieldOptValidator is like tsFieldValidator but wraps the result to
 // return undefined when the value is null/undefined.
-func tsFieldOptValidator(t reflect.Type, pathExpr, pathLit string) string {
-	inner := tsFieldValidator(t, pathExpr, pathLit)
+func tsFieldOptValidator(t reflect.Type, pathExpr, pathLit string, docs *docRegistry) string {
+	inner := tsFieldValidator(t, pathExpr, pathLit, docs)
 	return fmt.Sprintf("(%s === undefined || %s === null ? undefined : %s)", pathExpr, pathExpr, inner)
 }
 
@@ -638,7 +648,7 @@ func tsElemValidatorFunc(t reflect.Type, pathLit string) string {
 }
 
 // emitTSValidator writes a validateXxx(raw: unknown): Xxx function for a struct.
-func emitTSValidator(b *strings.Builder, t reflect.Type) {
+func emitTSValidator(b *strings.Builder, t reflect.Type, docs *docRegistry) {
 	name := t.Name()
 	fmt.Fprintf(b, "export function validate%s(raw: unknown): %s {\n", name, name)
 	fmt.Fprintf(b, "  const obj = asObject(raw, %q);\n", name)
@@ -657,16 +667,16 @@ func emitTSValidator(b *strings.Builder, t reflect.Type) {
 		if jsonName == "" {
 			jsonName = sf.Name
 		}
-		omit := opts.contains("omitempty") || opts.contains("omitzero")
+		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
 		isPtr := sf.Type.Kind() == reflect.Pointer
 		optional := isPtr || (omit && !isPtr)
 
 		pathExpr := fmt.Sprintf("obj[%q]", jsonName)
 		pathLit := fmt.Sprintf("%s.%s", name, jsonName)
 		if optional {
-			fmt.Fprintf(b, "    %s: %s,\n", jsonName, tsFieldOptValidator(sf.Type, pathExpr, pathLit))
+			fmt.Fprintf(b, "    %s: %s,\n", jsonName, tsFieldOptValidator(sf.Type, pathExpr, pathLit, docs))
 		} else {
-			fmt.Fprintf(b, "    %s: %s,\n", jsonName, tsFieldValidator(sf.Type, pathExpr, pathLit))
+			fmt.Fprintf(b, "    %s: %s,\n", jsonName, tsFieldValidator(sf.Type, pathExpr, pathLit, docs))
 		}
 	}
 
@@ -692,7 +702,7 @@ func discoverSSEStructs() []kotlinStruct {
 
 // generateTSValidate generates sdk/ts/v1/validate.gen.ts with runtime
 // validators for SSE-relevant DTO structs.
-func generateTSValidate(outDir string, _ *docRegistry) error {
+func generateTSValidate(outDir string, docs *docRegistry) error {
 	var b strings.Builder
 	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\n\n")
 	b.WriteString("// Runtime schema validators for SSE payloads.\n")
@@ -715,7 +725,7 @@ func generateTSValidate(outDir string, _ *docRegistry) error {
 		for name := range refTypes {
 			sorted = append(sorted, name)
 		}
-		sort.Strings(sorted)
+		slices.Sort(sorted)
 		b.WriteString("import type { ")
 		for i, name := range sorted {
 			if i > 0 {
@@ -783,7 +793,7 @@ func generateTSValidate(outDir string, _ *docRegistry) error {
 			continue
 		}
 		emitted[name] = struct{}{}
-		emitTSValidator(&b, ks.t)
+		emitTSValidator(&b, ks.t, docs)
 	}
 
 	// EventMessage discriminated union validator.
@@ -1016,25 +1026,6 @@ func generateKotlin(outDir string, docs *docRegistry) error {
 
 // kotlinTypeAlias describes a `typealias X = String` with an optional
 // companion object holding constants.
-// aliasNameSet records the names of Go named-string types for a target
-// language. Looked up by t.Name() in goTypeToTS/goTypeToKotlin/goTypeToSwift.
-var (
-	tsAliasNames     map[string]struct{}
-	kotlinAliasNames map[string]struct{}
-	swiftAliasNames  map[string]struct{}
-)
-
-// buildAliasNameSets populates the alias name sets from docs.aliases.
-func buildAliasNameSets(docs *docRegistry) {
-	tsAliasNames = map[string]struct{}{}
-	kotlinAliasNames = map[string]struct{}{}
-	swiftAliasNames = map[string]struct{}{}
-	for _, a := range docs.aliases {
-		tsAliasNames[a.name] = struct{}{}
-		kotlinAliasNames[a.name] = struct{}{}
-		swiftAliasNames[a.name] = struct{}{}
-	}
-}
 
 // kotlinStruct wraps a reflect.Type with an optional section comment that
 // appears before the struct in the generated output.
@@ -1054,6 +1045,17 @@ type kotlinField struct {
 }
 
 // Error code constants.
+// docErrorCodes maps dto error codes to their HTTP status for API doc generation.
+var docErrorCodes = []struct {
+	code   dto.ErrorCode
+	status int
+}{
+	{dto.CodeBadRequest, 400},
+	{dto.CodeNotFound, 404},
+	{dto.CodeConflict, 409},
+	{dto.CodeInternalError, 500},
+}
+
 var kotlinErrorCodes = []aliasConstant{
 	{"BadRequest", string(dto.CodeBadRequest)},
 	{"NotFound", string(dto.CodeNotFound)},
@@ -1088,7 +1090,7 @@ var (
 	timeType           = reflect.TypeFor[time.Time]()
 )
 
-func goTypeToKotlin(t reflect.Type) string {
+func goTypeToKotlin(t reflect.Type, docs *docRegistry) string {
 	// Unwrap pointer — nullability is handled by the caller.
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -1109,7 +1111,7 @@ func goTypeToKotlin(t reflect.Type) string {
 	}
 
 	// Named string aliases (Harness, EventKind).
-	if _, ok := kotlinAliasNames[t.Name()]; ok {
+	if _, ok := docs.kotlinAliasNames[t.Name()]; ok {
 		return t.Name()
 	}
 
@@ -1127,9 +1129,9 @@ func goTypeToKotlin(t reflect.Type) string {
 	case reflect.Bool:
 		return "Boolean"
 	case reflect.Slice:
-		return "List<" + goTypeToKotlin(t.Elem()) + ">"
+		return "List<" + goTypeToKotlin(t.Elem(), docs) + ">"
 	case reflect.Map:
-		return "Map<" + goTypeToKotlin(t.Key()) + ", " + goTypeToKotlin(t.Elem()) + ">"
+		return "Map<" + goTypeToKotlin(t.Key(), docs) + ", " + goTypeToKotlin(t.Elem(), docs) + ">"
 	case reflect.Struct:
 		return t.Name()
 	default:
@@ -1138,7 +1140,7 @@ func goTypeToKotlin(t reflect.Type) string {
 }
 
 // parseStructFields extracts kotlinField entries from a reflect.Type.
-func parseStructFields(t reflect.Type) []kotlinField {
+func parseStructFields(t reflect.Type, docs *docRegistry) []kotlinField {
 	fields := make([]kotlinField, 0, t.NumField())
 	for i := range t.NumField() {
 		sf := t.Field(i)
@@ -1153,12 +1155,12 @@ func parseStructFields(t reflect.Type) []kotlinField {
 		if jsonName == "" {
 			jsonName = sf.Name
 		}
-		omit := opts.contains("omitempty") || opts.contains("omitzero")
+		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
 
 		ft := sf.Type
 		isPtr := ft.Kind() == reflect.Pointer
 
-		ktType := goTypeToKotlin(ft)
+		ktType := goTypeToKotlin(ft, docs)
 		nullable := isPtr || (omit && !isPtr)
 
 		sn := ""
@@ -1201,7 +1203,7 @@ func emitKotlinStruct(b *strings.Builder, t reflect.Type, docs *docRegistry) {
 	if doc := docs.typeDoc[t.Name()]; doc != "" {
 		b.WriteString(formatBlockDoc(doc, ""))
 	}
-	fields := parseStructFields(t)
+	fields := parseStructFields(t, docs)
 	name := t.Name()
 
 	// Compact single-line form for structs with ≤2 fields and no @SerialName.
@@ -1252,25 +1254,12 @@ func fieldsNeedAnnotation(fields []kotlinField) bool {
 }
 
 // parseJSONTag splits a json struct tag value into name and options.
-func parseJSONTag(tag string) (string, jsonTagOptions) {
-	if name, rest, ok := strings.Cut(tag, ","); ok {
-		return name, jsonTagOptions(rest)
+func parseJSONTag(tag string) (name string, opts []string) {
+	name, rest, ok := strings.Cut(tag, ",")
+	if !ok || rest == "" {
+		return name, nil
 	}
-	return tag, ""
-}
-
-type jsonTagOptions string
-
-func (o jsonTagOptions) contains(opt string) bool {
-	s := string(o)
-	for s != "" {
-		var name string
-		name, s, _ = strings.Cut(s, ",")
-		if name == opt {
-			return true
-		}
-	}
-	return false
+	return name, strings.Split(rest, ",")
 }
 
 func writeKotlinTypes(outDir string, docs *docRegistry) error {
@@ -1555,7 +1544,7 @@ func writeKotlinReconnectingFunc(b *strings.Builder, r *v1.Route, params []strin
 	// Build the function name: e.g. "taskEvents" -> "taskEventsReconnecting"
 	reconnectName := r.Name + "Reconnecting"
 
-	allParams := append(params, r.QueryParams...) //nolint:gocritic // concat is intentional
+	allParams := slices.Concat(params, r.QueryParams)
 	args := make([]string, 0, len(allParams))
 	callArgs := make([]string, 0, len(allParams))
 	for _, p := range allParams {
@@ -1666,10 +1655,10 @@ func generateDoc(outDir string, docs *docRegistry) error {
 	b.WriteString("```\n\n")
 	b.WriteString("| HTTP | Code |\n")
 	b.WriteString("|------|------|\n")
-	b.WriteString("| 400 | `BAD_REQUEST` |\n")
-	b.WriteString("| 404 | `NOT_FOUND` |\n")
-	b.WriteString("| 409 | `CONFLICT` |\n")
-	b.WriteString("| 500 | `INTERNAL_ERROR` |\n\n")
+	for _, e := range docErrorCodes {
+		fmt.Fprintf(&b, "| %d | `%s` |\n", e.status, e.code)
+	}
+	b.WriteString("\n")
 
 	// Types section.
 	b.WriteString("## Types\n\n")
@@ -1728,7 +1717,7 @@ func writeDocType(b *strings.Builder, t reflect.Type, docs *docRegistry) {
 		if jsonName == "" {
 			jsonName = sf.Name
 		}
-		optional := opts.contains("omitempty") || opts.contains("omitzero") || sf.Type.Kind() == reflect.Pointer
+		optional := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero") || sf.Type.Kind() == reflect.Pointer
 		typeName := goTypeToDoc(sf.Type)
 		req := "yes"
 		if optional {
@@ -1815,7 +1804,7 @@ func swiftEscapeIdent(name string) string {
 }
 
 // goTypeToSwift maps a Go reflect.Type to its Swift type string.
-func goTypeToSwift(t reflect.Type) string {
+func goTypeToSwift(t reflect.Type, docs *docRegistry) string {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -1831,7 +1820,7 @@ func goTypeToSwift(t reflect.Type) string {
 	case mapStringAnyType:
 		return "[String: JSONValue]"
 	}
-	if _, ok := swiftAliasNames[t.Name()]; ok {
+	if _, ok := docs.swiftAliasNames[t.Name()]; ok {
 		return t.Name()
 	}
 	switch t.Kind() {
@@ -1844,9 +1833,9 @@ func goTypeToSwift(t reflect.Type) string {
 	case reflect.Bool:
 		return "Bool"
 	case reflect.Slice:
-		return "[" + goTypeToSwift(t.Elem()) + "]"
+		return "[" + goTypeToSwift(t.Elem(), docs) + "]"
 	case reflect.Map:
-		return "[" + goTypeToSwift(t.Key()) + ": " + goTypeToSwift(t.Elem()) + "]"
+		return "[" + goTypeToSwift(t.Key(), docs) + ": " + goTypeToSwift(t.Elem(), docs) + "]"
 	case reflect.Struct:
 		return t.Name()
 	default:
@@ -1918,9 +1907,9 @@ func emitSwiftStruct(b *strings.Builder, t reflect.Type, docs *docRegistry) {
 		if jsonName == "" {
 			jsonName = sf.Name
 		}
-		omit := opts.contains("omitempty") || opts.contains("omitzero")
+		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
 		isPtr := sf.Type.Kind() == reflect.Pointer
-		swiftType := goTypeToSwift(sf.Type)
+		swiftType := goTypeToSwift(sf.Type, docs)
 		optional := isPtr || (omit && !isPtr)
 		swiftName := swiftEscapeIdent(jsonName)
 
@@ -2069,7 +2058,7 @@ func writeSwiftSSEFunc(b *strings.Builder, r *v1.Route, params []string) {
 }
 
 func writeSwiftReconnectingFunc(b *strings.Builder, r *v1.Route, params []string) {
-	allParams := append(params, r.QueryParams...) //nolint:gocritic // concat is intentional
+	allParams := slices.Concat(params, r.QueryParams)
 	args := make([]string, 0, len(allParams))
 	callArgs := make([]string, 0, len(allParams))
 	for _, p := range allParams {

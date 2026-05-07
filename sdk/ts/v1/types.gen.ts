@@ -297,17 +297,6 @@ export interface EventMessage {
 //////////
 // source: types.go
 
-export type Harness = string;
-/**
- * Supported values.
- */
-export const HarnessClaude: Harness = "claude";
-export const HarnessCodex: Harness = "codex";
-export const HarnessGemini: Harness = "gemini";
-export const HarnessKilo: Harness = "kilo";
-export const HarnessOpenCode: Harness = "opencode";
-export const HarnessPi: Harness = "pi";
-
 export type CIStatus = string;
 /**
  * Supported values.
@@ -315,20 +304,6 @@ export type CIStatus = string;
 export const CIStatusPending: CIStatus = "pending";
 export const CIStatusSuccess: CIStatus = "success";
 export const CIStatusFailure: CIStatus = "failure";
-
-export type SyncTarget = string;
-/**
- * Supported values.
- */
-export const SyncTargetBranch: SyncTarget = "branch";
-export const SyncTargetDefault: SyncTarget = "default";
-
-export type Forge = string;
-/**
- * Supported values.
- */
-export const ForgeGitHub: Forge = "github";
-export const ForgeGitLab: Forge = "gitlab";
 
 export type CheckConclusion = string;
 /**
@@ -343,6 +318,21 @@ export const CheckConclusionTimedOut: CheckConclusion = "timed_out";
 export const CheckConclusionActionRequired: CheckConclusion = "action_required";
 export const CheckConclusionStale: CheckConclusion = "stale";
 
+export type CheckStatus = string;
+/**
+ * Supported values.
+ */
+export const CheckStatusQueued: CheckStatus = "queued";
+export const CheckStatusInProgress: CheckStatus = "in_progress";
+export const CheckStatusCompleted: CheckStatus = "completed";
+
+export type Forge = string;
+/**
+ * Supported values.
+ */
+export const ForgeGitHub: Forge = "github";
+export const ForgeGitLab: Forge = "gitlab";
+
 export type ForgePRState = string;
 /**
  * Supported values.
@@ -351,13 +341,23 @@ export const ForgePRStateOpen: ForgePRState = "open";
 export const ForgePRStateClosed: ForgePRState = "closed";
 export const ForgePRStateMerged: ForgePRState = "merged";
 
-export type CheckStatus = string;
+export type Harness = string;
 /**
  * Supported values.
  */
-export const CheckStatusQueued: CheckStatus = "queued";
-export const CheckStatusInProgress: CheckStatus = "in_progress";
-export const CheckStatusCompleted: CheckStatus = "completed";
+export const HarnessClaude: Harness = "claude";
+export const HarnessCodex: Harness = "codex";
+export const HarnessGemini: Harness = "gemini";
+export const HarnessKilo: Harness = "kilo";
+export const HarnessOpenCode: Harness = "opencode";
+export const HarnessPi: Harness = "pi";
+
+export type SyncTarget = string;
+/**
+ * Supported values.
+ */
+export const SyncTargetBranch: SyncTarget = "branch";
+export const SyncTargetDefault: SyncTarget = "default";
 
 /**
  * DiffStat summarises the changes in a branch relative to its base.

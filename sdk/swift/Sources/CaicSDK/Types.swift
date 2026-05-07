@@ -37,6 +37,35 @@ public enum JSONValue: Codable, Equatable {
     }
 }
 
+public typealias CIStatus = String
+
+public enum CIStatuses {
+    public static let Pending: CIStatus = "pending"
+    public static let Success: CIStatus = "success"
+    public static let Failure: CIStatus = "failure"
+}
+
+public typealias CheckConclusion = String
+
+public enum CheckConclusions {
+    public static let Success: CheckConclusion = "success"
+    public static let Failure: CheckConclusion = "failure"
+    public static let Neutral: CheckConclusion = "neutral"
+    public static let Skipped: CheckConclusion = "skipped"
+    public static let Cancelled: CheckConclusion = "cancelled"
+    public static let TimedOut: CheckConclusion = "timed_out"
+    public static let ActionRequired: CheckConclusion = "action_required"
+    public static let Stale: CheckConclusion = "stale"
+}
+
+public typealias CheckStatus = String
+
+public enum CheckStatuses {
+    public static let Queued: CheckStatus = "queued"
+    public static let InProgress: CheckStatus = "in_progress"
+    public static let Completed: CheckStatus = "completed"
+}
+
 public typealias EventKind = String
 
 public enum EventKinds {
@@ -65,6 +94,21 @@ public enum EventKinds {
     public static let Stats: EventKind = "stats"
 }
 
+public typealias Forge = String
+
+public enum Forges {
+    public static let GitHub: Forge = "github"
+    public static let GitLab: Forge = "gitlab"
+}
+
+public typealias ForgePRState = String
+
+public enum ForgePRStates {
+    public static let Open: ForgePRState = "open"
+    public static let Closed: ForgePRState = "closed"
+    public static let Merged: ForgePRState = "merged"
+}
+
 public typealias Harness = String
 
 public enum Harnesses {
@@ -74,14 +118,6 @@ public enum Harnesses {
     public static let Kilo: Harness = "kilo"
     public static let OpenCode: Harness = "opencode"
     public static let Pi: Harness = "pi"
-}
-
-public typealias CIStatus = String
-
-public enum CIStatuses {
-    public static let Pending: CIStatus = "pending"
-    public static let Success: CIStatus = "success"
-    public static let Failure: CIStatus = "failure"
 }
 
 public typealias SyncTarget = String
@@ -97,42 +133,6 @@ public enum ToolOutputContentTypes {
     public static let ToolOutputText: ToolOutputContentType = "text"
     public static let ToolOutputJSON: ToolOutputContentType = "json"
     public static let ToolOutputMarkdown: ToolOutputContentType = "markdown"
-}
-
-public typealias Forge = String
-
-public enum Forges {
-    public static let GitHub: Forge = "github"
-    public static let GitLab: Forge = "gitlab"
-}
-
-public typealias CheckConclusion = String
-
-public enum CheckConclusions {
-    public static let Success: CheckConclusion = "success"
-    public static let Failure: CheckConclusion = "failure"
-    public static let Neutral: CheckConclusion = "neutral"
-    public static let Skipped: CheckConclusion = "skipped"
-    public static let Cancelled: CheckConclusion = "cancelled"
-    public static let TimedOut: CheckConclusion = "timed_out"
-    public static let ActionRequired: CheckConclusion = "action_required"
-    public static let Stale: CheckConclusion = "stale"
-}
-
-public typealias ForgePRState = String
-
-public enum ForgePRStates {
-    public static let Open: ForgePRState = "open"
-    public static let Closed: ForgePRState = "closed"
-    public static let Merged: ForgePRState = "merged"
-}
-
-public typealias CheckStatus = String
-
-public enum CheckStatuses {
-    public static let Queued: CheckStatus = "queued"
-    public static let InProgress: CheckStatus = "in_progress"
-    public static let Completed: CheckStatus = "completed"
 }
 
 public enum ErrorCodes {
