@@ -25,24 +25,30 @@ import (
 
 var pathParamRe = regexp.MustCompile(`\{(\w+)\}`)
 
-// Error code constants.
-// errorCodeDefs is the single source of truth for all API error codes.
-// Kotlin/Swift constant names are derived from the code value
-// (e.g. "BAD_REQUEST" → "BadRequest" / "badRequest").
-var errorCodeDefs = []struct {
+// errorCodeDef describes an API error code for docs and generated constants.
+type errorCodeDef struct {
 	code   dto.ErrorCode
 	status int
-}{
-	{dto.CodeBadRequest, 400},
-	{dto.CodeNotFound, 404},
-	{dto.CodeConflict, 409},
-	{dto.CodeInternalError, 500},
 }
 
-// sectionComments maps type names to section comments emitted before
-// the type in generated Kotlin and Swift output.
-var sectionComments = map[string]string{
-	"EventMessage": "Backend-neutral event types",
+// genConfig holds configuration for SDK code generation, created once in mainImpl
+// and threaded through docRegistry.
+type genConfig struct {
+	sectionComments map[string]string
+	specialTypes    []specialType
+	sseSeeds        []reflect.Type
+	discriminated   []string // Type names using kind-based dispatch in TS validators
+	errorCodes      []errorCodeDef
+}
+
+// lookupSpecial returns the matching specialType entry for t, or nil.
+func (c *genConfig) lookupSpecial(t reflect.Type) *specialType {
+	for i := range c.specialTypes {
+		if c.specialTypes[i].t == t {
+			return &c.specialTypes[i]
+		}
+	}
+	return nil
 }
 
 // specialTypes defines custom mappings for Go types that need non-standard
@@ -55,50 +61,6 @@ type specialType struct {
 	swiftType  string // Swift type
 	docType    string // API doc type
 	tsValidate string // TS validator format string: %[1]s=pathExpr, %[2]q=pathLit
-}
-
-var specialTypeMappings = []specialType{
-	{
-		t:          reflect.TypeFor[json.RawMessage](),
-		tsType:     "any /* json.RawMessage */",
-		ktType:     "JsonElement",
-		swiftType:  "JSONValue",
-		docType:    "object",
-		tsValidate: "%[1]s",
-	},
-	{
-		t:          reflect.TypeFor[ksid.ID](),
-		tsType:     "string",
-		ktType:     "String",
-		swiftType:  "String",
-		docType:    "string",
-		tsValidate: "asString(%[1]s, %[2]q)",
-	},
-	{
-		t:          reflect.TypeFor[time.Time](),
-		tsType:     "ISOTimestamp",
-		ktType:     "Instant",
-		swiftType:  "ISOTimestamp",
-		docType:    "ISOTimestamp",
-		tsValidate: "asString(%[1]s, %[2]q) as ISOTimestamp",
-	},
-	{
-		t:         reflect.TypeFor[map[string]any](),
-		tsType:    "{ [key: string]: any /* json.RawMessage */}",
-		ktType:    "Map<String, JsonElement>",
-		swiftType: "[String: JSONValue]",
-		docType:   "Record<string, unknown>",
-	},
-}
-
-// lookupSpecial returns the matching specialType entry for t, or nil.
-func lookupSpecial(t reflect.Type) *specialType {
-	for i := range specialTypeMappings {
-		if specialTypeMappings[i].t == t {
-			return &specialTypeMappings[i]
-		}
-	}
-	return nil
 }
 
 // swiftReservedWords is the set of Swift keywords that require backtick escaping
@@ -423,8 +385,8 @@ func emitTSAlias(b *strings.Builder, a aliasInfo) {
 // tsPrimitiveValidator returns the validator expression for a primitive/special type.
 // For special types with a tsValidate template, it formats the expression using
 // pathExpr and pathLit. Otherwise it falls back to kind-based validation.
-func tsPrimitiveValidator(t reflect.Type, pathExpr, pathLit string) string {
-	if m := lookupSpecial(t); m != nil && m.tsValidate != "" {
+func (c *genConfig) tsPrimitiveValidator(t reflect.Type, pathExpr, pathLit string) string {
+	if m := c.lookupSpecial(t); m != nil && m.tsValidate != "" {
 		return fmt.Sprintf(m.tsValidate, pathExpr, pathLit)
 	}
 	switch t.Kind() {
@@ -441,25 +403,30 @@ func tsPrimitiveValidator(t reflect.Type, pathExpr, pathLit string) string {
 
 // tsElemValidatorFunc returns a function expression (v: unknown) => validated
 // for use as the element validator callback in validateArray/validateRecord.
-func tsElemValidatorFunc(t reflect.Type, pathLit string) string {
+func (c *genConfig) tsElemValidatorFunc(t reflect.Type, pathLit string) string {
 	if t.Kind() == reflect.Pointer {
-		return tsElemValidatorFunc(t.Elem(), pathLit)
+		return c.tsElemValidatorFunc(t.Elem(), pathLit)
 	}
 	if t.Kind() == reflect.Struct && isSDKPkg(t.PkgPath()) {
 		return "validate" + t.Name()
 	}
-	return "(v) => " + tsPrimitiveValidator(t, "v", pathLit)
+	return "(v) => " + c.tsPrimitiveValidator(t, "v", pathLit)
+}
+
+// docRegistry holds parsed documentation extracted from Go source files.
+type docRegistry struct {
+	cfg        *genConfig
+	typeDoc    map[string]string            // Go type name → doc comment text
+	typeFile   map[string]string            // Go type name → source filename (e.g. "events.go")
+	fieldDoc   map[string]map[string]string // Go type name → Go field name → doc comment text
+	aliases    []aliasInfo                  // named-string types with their constants
+	aliasNames map[string]struct{}          // set of alias type names for all target languages
 }
 
 // discoverSSEStructs returns the structs reachable from the SSE event types
 // (EventMessage, TaskListEvent, UsageResp) in dependency order.
-func discoverSSEStructs() []sdkType {
-	seeds := []reflect.Type{
-		reflect.TypeFor[v1.EventMessage](),
-		reflect.TypeFor[v1.TaskListEvent](),
-		reflect.TypeFor[v1.UsageResp](),
-	}
-	order := walkSDKTypes(seeds)
+func (d *docRegistry) discoverSSEStructs() []sdkType {
+	order := walkSDKTypes(d.cfg.sseSeeds)
 	result := make([]sdkType, len(order))
 	for i, t := range order {
 		result[i] = sdkType{t: t}
@@ -524,12 +491,12 @@ func writeTSSSEMethod(b *strings.Builder, r *v1.Route, params []string) {
 
 // discoverKotlinStructs walks the dto struct types reachable from route
 // types and returns them in dependency order (leaves first).
-func discoverKotlinStructs() []sdkType {
+func (d *docRegistry) discoverKotlinStructs() []sdkType {
 	seeds := append(routeSeedTypes(), reflect.TypeFor[dto.ErrorResponse]())
 	order := walkSDKTypes(seeds)
 	result := make([]sdkType, len(order))
 	for i, t := range order {
-		result[i] = sdkType{t: t, comment: sectionComments[t.Name()]}
+		result[i] = sdkType{t: t, comment: d.cfg.sectionComments[t.Name()]}
 	}
 	return result
 }
@@ -896,11 +863,11 @@ func docGroupRoutes(routes []v1.Route) []docRouteGroup {
 }
 
 // goTypeToDoc maps a Go reflect.Type to a TypeScript-style string for docs.
-func goTypeToDoc(t reflect.Type) string {
+func (c *genConfig) goTypeToDoc(t reflect.Type) string {
 	if t.Kind() == reflect.Pointer {
-		return goTypeToDoc(t.Elem())
+		return c.goTypeToDoc(t.Elem())
 	}
-	if m := lookupSpecial(t); m != nil {
+	if m := c.lookupSpecial(t); m != nil {
 		return m.docType
 	}
 	switch t.Kind() {
@@ -914,7 +881,7 @@ func goTypeToDoc(t reflect.Type) string {
 		if isSDKPkg(t.PkgPath()) {
 			return t.Name() // Named slice.
 		}
-		return goTypeToDoc(t.Elem()) + "[]"
+		return c.goTypeToDoc(t.Elem()) + "[]"
 	case reflect.Struct:
 		return t.Name()
 	case reflect.Map:
@@ -978,12 +945,12 @@ func buildSwiftPath(path string, queryParams []string) string {
 
 // discoverSwiftStructs walks the dto struct types reachable from route types
 // and returns them in dependency order, annotated with Swift section comments.
-func discoverSwiftStructs() []sdkType {
+func (d *docRegistry) discoverSwiftStructs() []sdkType {
 	seeds := append(routeSeedTypes(), reflect.TypeFor[dto.ErrorResponse]())
 	order := walkSDKTypes(seeds)
 	result := make([]sdkType, len(order))
 	for i, t := range order {
-		result[i] = sdkType{t: t, comment: sectionComments[t.Name()]}
+		result[i] = sdkType{t: t, comment: d.cfg.sectionComments[t.Name()]}
 	}
 	return result
 }
@@ -1202,15 +1169,6 @@ public final class ApiClient {
 	return os.WriteFile(filepath.Join(outDir, "ApiClient.swift"), []byte(b.String()), 0o600)
 }
 
-// docRegistry holds parsed documentation extracted from Go source files.
-type docRegistry struct {
-	typeDoc    map[string]string            // Go type name → doc comment text
-	typeFile   map[string]string            // Go type name → source filename (e.g. "events.go")
-	fieldDoc   map[string]map[string]string // Go type name → Go field name → doc comment text
-	aliases    []aliasInfo                  // named-string types with their constants
-	aliasNames map[string]struct{}          // set of alias type names for all target languages
-}
-
 // discoverTSStructs walks route types and ErrorResponse, and annotates
 // each struct with its source file for section grouping.
 func (d *docRegistry) discoverTSStructs() []sdkType {
@@ -1229,7 +1187,7 @@ func (d *docRegistry) goTypeToTS(t reflect.Type) string {
 		t = t.Elem()
 	}
 
-	if m := lookupSpecial(t); m != nil {
+	if m := d.cfg.lookupSpecial(t); m != nil {
 		return m.tsType
 	}
 	switch t {
@@ -1396,7 +1354,7 @@ func (d *docRegistry) generateTSTypes(outDir string) error {
 		if doc := d.typeDoc[name]; doc != "" {
 			b.WriteString(formatBlockDoc(doc, ""))
 		}
-		fmt.Fprintf(&b, "export type %s = %s[];\n\n", name, goTypeToDoc(ns.Elem()))
+		fmt.Fprintf(&b, "export type %s = %s[];\n\n", name, d.cfg.goTypeToDoc(ns.Elem()))
 		seen[name] = struct{}{}
 	}
 
@@ -1420,17 +1378,17 @@ func (d *docRegistry) tsFieldValidator(t reflect.Type, pathExpr, pathLit string)
 	if t.Kind() == reflect.Pointer {
 		return d.tsFieldValidator(t.Elem(), pathExpr, pathLit)
 	}
-	if m := lookupSpecial(t); m != nil && m.tsValidate != "" {
+	if m := d.cfg.lookupSpecial(t); m != nil && m.tsValidate != "" {
 		return fmt.Sprintf(m.tsValidate, pathExpr, pathLit)
 	}
 	if t.Kind() == reflect.Slice {
-		elemFn := tsElemValidatorFunc(t.Elem(), pathLit+"[i]")
+		elemFn := d.cfg.tsElemValidatorFunc(t.Elem(), pathLit+"[i]")
 		elemTS := d.goTypeToTS(t.Elem())
 		return fmt.Sprintf("validateArray(%s, %q, %s) as %s[]", pathExpr, pathLit, elemFn, elemTS)
 	}
 
 	if t.Kind() == reflect.Map {
-		valFn := tsElemValidatorFunc(t.Elem(), pathLit+"[k]")
+		valFn := d.cfg.tsElemValidatorFunc(t.Elem(), pathLit+"[k]")
 		keyTS := d.goTypeToTS(t.Key())
 		valTS := d.goTypeToTS(t.Elem())
 		return fmt.Sprintf("validateRecord(%s, %q, %s) as { [key: %s]: %s }", pathExpr, pathLit, valFn, keyTS, valTS)
@@ -1438,7 +1396,7 @@ func (d *docRegistry) tsFieldValidator(t reflect.Type, pathExpr, pathLit string)
 	if t.Kind() == reflect.Struct && isSDKPkg(t.PkgPath()) {
 		return fmt.Sprintf("validate%s(%s)", t.Name(), pathExpr)
 	}
-	return tsPrimitiveValidator(t, pathExpr, pathLit)
+	return d.cfg.tsPrimitiveValidator(t, pathExpr, pathLit)
 }
 
 // tsFieldOptValidator is like tsFieldValidator but wraps the result to
@@ -1557,7 +1515,7 @@ func (d *docRegistry) generateTSValidate(outDir string) error {
 	// Collect all types referenced by validators. ISOTimestamp is the only
 	// type not discoverable from Go struct reflection (it's a TypeScript alias
 	// for time.Time).
-	needed := discoverSSEStructs()
+	needed := d.discoverSSEStructs()
 	refTypes := map[string]struct{}{}
 	for _, ks := range needed {
 		refTypes[ks.t.Name()] = struct{}{}
@@ -1621,7 +1579,10 @@ func (d *docRegistry) generateTSValidate(outDir string) error {
 
 	// Generate validators for SSE-relevant structs: EventMessage sub-types,
 	// TaskListEvent's referenced types, and UsageResp's referenced types.
-	discriminated := map[string]struct{}{"EventMessage": {}, "TaskListEvent": {}}
+	discriminated := map[string]struct{}{}
+	for _, n := range d.cfg.discriminated {
+		discriminated[n] = struct{}{}
+	}
 	emitted := map[string]struct{}{}
 
 	for _, ks := range needed {
@@ -1745,7 +1706,7 @@ func (d *docRegistry) goTypeToKotlin(t reflect.Type) string {
 	}
 
 	// Special cases.
-	if m := lookupSpecial(t); m != nil {
+	if m := d.cfg.lookupSpecial(t); m != nil {
 		return m.ktType
 	}
 
@@ -1893,13 +1854,13 @@ func (d *docRegistry) writeKotlinTypes(outDir string) error {
 
 	// Error codes.
 	b.WriteString("object ErrorCodes {\n")
-	for _, e := range errorCodeDefs {
+	for _, e := range d.cfg.errorCodes {
 		fmt.Fprintf(&b, "    const val %s = %q\n", snakeToPascal(string(e.code)), e.code)
 	}
 	b.WriteString("}\n\n")
 
 	// Structs: auto-discovered from route types and their transitive fields.
-	kcStructs := discoverKotlinStructs()
+	kcStructs := d.discoverKotlinStructs()
 
 	// Named slice type aliases.
 	for _, ns := range collectNamedSlices(kcStructs) {
@@ -1960,7 +1921,7 @@ func (d *docRegistry) generateMarkdownDoc(outDir string) error {
 	b.WriteString("```\n\n")
 	b.WriteString("| HTTP | Code |\n")
 	b.WriteString("|------|------|\n")
-	for _, e := range errorCodeDefs {
+	for _, e := range d.cfg.errorCodes {
 		fmt.Fprintf(&b, "| %d | `%s` |\n", e.status, e.code)
 	}
 	b.WriteString("\n")
@@ -1997,7 +1958,7 @@ func (d *docRegistry) writeDocType(b *strings.Builder, t reflect.Type) {
 			jsonName = sf.Name
 		}
 		optional := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero") || sf.Type.Kind() == reflect.Pointer
-		typeName := goTypeToDoc(sf.Type)
+		typeName := d.cfg.goTypeToDoc(sf.Type)
 		req := "yes"
 		if optional {
 			req = ""
@@ -2016,7 +1977,7 @@ func (d *docRegistry) goTypeToSwift(t reflect.Type) string {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
-	if m := lookupSpecial(t); m != nil {
+	if m := d.cfg.lookupSpecial(t); m != nil {
 		return m.swiftType
 	}
 
@@ -2141,13 +2102,13 @@ public enum JSONValue: Codable, Equatable {
 
 	// Error codes.
 	b.WriteString("public enum ErrorCodes {\n")
-	for _, e := range errorCodeDefs {
+	for _, e := range d.cfg.errorCodes {
 		fmt.Fprintf(&b, "    public static let %s = %q\n", snakeToCamel(string(e.code)), e.code)
 	}
 	b.WriteString("}\n\n")
 
 	// Structs.
-	swStructs := discoverSwiftStructs()
+	swStructs := d.discoverSwiftStructs()
 
 	// Named slice type aliases.
 	for _, ns := range collectNamedSlices(swStructs) {
@@ -2253,6 +2214,58 @@ func mainImpl() error {
 	if err != nil {
 		return fmt.Errorf("loading docs: %w", err)
 	}
+	// Code generation configuration.
+	docs.cfg = &genConfig{
+		sectionComments: map[string]string{
+			"EventMessage": "Backend-neutral event types",
+		},
+		specialTypes: []specialType{
+			{
+				t:          reflect.TypeFor[json.RawMessage](),
+				tsType:     "any /* json.RawMessage */",
+				ktType:     "JsonElement",
+				swiftType:  "JSONValue",
+				docType:    "object",
+				tsValidate: "%[1]s",
+			},
+			{
+				t:          reflect.TypeFor[ksid.ID](),
+				tsType:     "string",
+				ktType:     "String",
+				swiftType:  "String",
+				docType:    "string",
+				tsValidate: "asString(%[1]s, %[2]q)",
+			},
+			{
+				t:          reflect.TypeFor[time.Time](),
+				tsType:     "ISOTimestamp",
+				ktType:     "Instant",
+				swiftType:  "ISOTimestamp",
+				docType:    "ISOTimestamp",
+				tsValidate: "asString(%[1]s, %[2]q) as ISOTimestamp",
+			},
+			{
+				t:         reflect.TypeFor[map[string]any](),
+				tsType:    "{ [key: string]: any /* json.RawMessage */}",
+				ktType:    "Map<String, JsonElement>",
+				swiftType: "[String: JSONValue]",
+				docType:   "Record<string, unknown>",
+			},
+		},
+		sseSeeds: []reflect.Type{
+			reflect.TypeFor[v1.EventMessage](),
+			reflect.TypeFor[v1.TaskListEvent](),
+			reflect.TypeFor[v1.UsageResp](),
+		},
+		discriminated: []string{"EventMessage", "TaskListEvent"},
+		errorCodes: []errorCodeDef{
+			{dto.CodeBadRequest, 400},
+			{dto.CodeNotFound, 404},
+			{dto.CodeConflict, 409},
+			{dto.CodeInternalError, 500},
+		},
+	}
+
 	if err := docs.generateTSTypes(tsDir); err != nil {
 		return err
 	}
