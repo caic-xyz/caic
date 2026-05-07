@@ -177,12 +177,11 @@ func run() error {
 	return generateDoc(sdkDir, docs)
 }
 
-// discoverTSStructs walks the dto struct types reachable from route types
-// and returns them in dependency order, annotated with their source file.
-// Differs from discoverKotlinStructs: does not walk dto.ErrorResponse (emitted
-// as `any`) and does not include dto package structs (not reachable through v1 types).
-func discoverTSStructs() []kotlinStruct {
-	seen := map[reflect.Type]bool{}
+// walkSDKTypes traverses struct types reachable from seeds in post-order
+// (leaves first), returning only dto or dto/v1 struct types. Types in skip
+// are excluded entirely (neither emitted nor traversed).
+func walkSDKTypes(seeds []reflect.Type, skip map[reflect.Type]struct{}) []reflect.Type {
+	seen := map[reflect.Type]struct{}{}
 	var order []reflect.Type
 
 	var walk func(t reflect.Type)
@@ -201,32 +200,52 @@ func discoverTSStructs() []kotlinStruct {
 		if t.Kind() != reflect.Struct || !isSDKPkg(t.PkgPath()) {
 			return
 		}
-		// Skip dto.ErrorResponse and its dependencies — emitted as `any`.
-		if t == reflect.TypeFor[dto.ErrorResponse]() {
+		if _, ok := skip[t]; ok {
 			return
 		}
-		if seen[t] {
+		if _, ok := seen[t]; ok {
 			return
 		}
-		seen[t] = true
+		seen[t] = struct{}{}
 		for i := range t.NumField() {
 			walk(t.Field(i).Type)
 		}
 		order = append(order, t)
 	}
 
+	for _, t := range seeds {
+		walk(t)
+	}
+	return order
+}
+
+// routeSeedTypes returns the set of request and response types from the
+// route table, used to seed type discovery for SDK generation.
+func routeSeedTypes() []reflect.Type {
+	var seeds []reflect.Type
 	for i := range v1.Routes {
 		r := &v1.Routes[i]
 		if r.Req != nil {
-			walk(r.Req)
+			seeds = append(seeds, r.Req)
 		}
-		walk(r.Resp)
+		seeds = append(seeds, r.Resp)
 	}
+	return seeds
+}
 
+// skipErrorResponse is the skip set for TS generation, which emits
+// dto.ErrorResponse as `any` instead of a generated struct.
+var skipErrorResponse = map[reflect.Type]struct{}{
+	reflect.TypeFor[dto.ErrorResponse](): {},
+}
+
+// discoverTSStructs walks route types, skipping ErrorResponse, and annotates
+// each struct with its source file for section grouping.
+func discoverTSStructs() []kotlinStruct {
+	order := walkSDKTypes(routeSeedTypes(), skipErrorResponse)
 	result := make([]kotlinStruct, len(order))
 	for i, t := range order {
-		comment := tsSourceFiles[t.Name()]
-		result[i] = kotlinStruct{t: t, comment: comment}
+		result[i] = kotlinStruct{t: t, comment: tsSourceFiles[t.Name()]}
 	}
 	return result
 }
@@ -564,40 +583,12 @@ func emitTSValidator(b *strings.Builder, t reflect.Type) {
 // discoverSSEStructs returns the structs reachable from the SSE event types
 // (EventMessage, TaskListEvent, UsageResp) in dependency order.
 func discoverSSEStructs() []kotlinStruct {
-	seen := map[reflect.Type]bool{}
-	var order []reflect.Type
-
-	var walk func(t reflect.Type)
-	walk = func(t reflect.Type) {
-		if t.Kind() == reflect.Pointer {
-			t = t.Elem()
-		}
-		if t.Kind() == reflect.Slice {
-			walk(t.Elem())
-			return
-		}
-		if t.Kind() == reflect.Map {
-			walk(t.Elem())
-			return
-		}
-		if t.Kind() != reflect.Struct || !isSDKPkg(t.PkgPath()) {
-			return
-		}
-		if seen[t] {
-			return
-		}
-		seen[t] = true
-		for i := range t.NumField() {
-			walk(t.Field(i).Type)
-		}
-		order = append(order, t)
+	seeds := []reflect.Type{
+		reflect.TypeFor[v1.EventMessage](),
+		reflect.TypeFor[v1.TaskListEvent](),
+		reflect.TypeFor[v1.UsageResp](),
 	}
-
-	// Walk from SSE root types.
-	walk(reflect.TypeFor[v1.EventMessage]())
-	walk(reflect.TypeFor[v1.TaskListEvent]())
-	walk(reflect.TypeFor[v1.UsageResp]())
-
+	order := walkSDKTypes(seeds, nil)
 	result := make([]kotlinStruct, len(order))
 	for i, t := range order {
 		result[i] = kotlinStruct{t: t}
@@ -1016,50 +1007,10 @@ var kotlinSectionComments = map[string]string{
 }
 
 // discoverKotlinStructs walks the dto struct types reachable from route
-// ReqRT/RespRT fields and returns them in dependency order (leaves first).
+// types and returns them in dependency order (leaves first).
 func discoverKotlinStructs() []kotlinStruct {
-	seen := map[reflect.Type]bool{}
-	var order []reflect.Type
-
-	// walk recursively collects dto/v1 struct types in post-order so that
-	// referenced types appear before the types that reference them.
-	var walk func(t reflect.Type)
-	walk = func(t reflect.Type) {
-		if t.Kind() == reflect.Pointer {
-			t = t.Elem()
-		}
-		if t.Kind() == reflect.Slice {
-			walk(t.Elem())
-			return
-		}
-		if t.Kind() == reflect.Map {
-			walk(t.Elem())
-			return
-		}
-		if t.Kind() != reflect.Struct || !isSDKPkg(t.PkgPath()) {
-			return
-		}
-		if seen[t] {
-			return
-		}
-		seen[t] = true
-		for i := range t.NumField() {
-			walk(t.Field(i).Type)
-		}
-		order = append(order, t)
-	}
-
-	// Seed from route types.
-	for i := range v1.Routes {
-		r := &v1.Routes[i]
-		if r.Req != nil {
-			walk(r.Req)
-		}
-		walk(r.Resp)
-	}
-	// Always include error types.
-	walk(reflect.TypeFor[dto.ErrorResponse]())
-
+	seeds := append(routeSeedTypes(), reflect.TypeFor[dto.ErrorResponse]())
+	order := walkSDKTypes(seeds, nil)
 	result := make([]kotlinStruct, len(order))
 	for i, t := range order {
 		result[i] = kotlinStruct{t: t, comment: kotlinSectionComments[t.Name()]}
@@ -1877,43 +1828,7 @@ func docGroupRoutes(routes []v1.Route) []docRouteGroup {
 // discoverDocTypes returns all dto struct types reachable from Routes in
 // dependency order (leaves first).
 func discoverDocTypes() []reflect.Type {
-	seen := map[reflect.Type]bool{}
-	var order []reflect.Type
-
-	var walk func(t reflect.Type)
-	walk = func(t reflect.Type) {
-		if t.Kind() == reflect.Pointer {
-			t = t.Elem()
-		}
-		if t.Kind() == reflect.Slice {
-			walk(t.Elem())
-			return
-		}
-		if t.Kind() == reflect.Map {
-			walk(t.Elem())
-			return
-		}
-		if t.Kind() != reflect.Struct || !isSDKPkg(t.PkgPath()) {
-			return
-		}
-		if seen[t] {
-			return
-		}
-		seen[t] = true
-		for i := range t.NumField() {
-			walk(t.Field(i).Type)
-		}
-		order = append(order, t)
-	}
-
-	for i := range v1.Routes {
-		r := &v1.Routes[i]
-		if r.Req != nil {
-			walk(r.Req)
-		}
-		walk(r.Resp)
-	}
-	return order
+	return walkSDKTypes(routeSeedTypes(), nil)
 }
 
 func writeDocType(b *strings.Builder, t reflect.Type, docs *docRegistry) {
@@ -2208,44 +2123,8 @@ func emitSwiftStruct(b *strings.Builder, t reflect.Type, docs *docRegistry) {
 // discoverSwiftStructs walks the dto struct types reachable from route types
 // and returns them in dependency order, annotated with Swift section comments.
 func discoverSwiftStructs() []kotlinStruct {
-	seen := map[reflect.Type]bool{}
-	var order []reflect.Type
-
-	var walk func(t reflect.Type)
-	walk = func(t reflect.Type) {
-		if t.Kind() == reflect.Pointer {
-			t = t.Elem()
-		}
-		if t.Kind() == reflect.Slice {
-			walk(t.Elem())
-			return
-		}
-		if t.Kind() == reflect.Map {
-			walk(t.Elem())
-			return
-		}
-		if t.Kind() != reflect.Struct || !isSDKPkg(t.PkgPath()) {
-			return
-		}
-		if seen[t] {
-			return
-		}
-		seen[t] = true
-		for i := range t.NumField() {
-			walk(t.Field(i).Type)
-		}
-		order = append(order, t)
-	}
-
-	for i := range v1.Routes {
-		r := &v1.Routes[i]
-		if r.Req != nil {
-			walk(r.Req)
-		}
-		walk(r.Resp)
-	}
-	walk(reflect.TypeFor[dto.ErrorResponse]())
-
+	seeds := append(routeSeedTypes(), reflect.TypeFor[dto.ErrorResponse]())
+	order := walkSDKTypes(seeds, nil)
 	result := make([]kotlinStruct, len(order))
 	for i, t := range order {
 		result[i] = kotlinStruct{t: t, comment: swiftSectionComments[t.Name()]}
