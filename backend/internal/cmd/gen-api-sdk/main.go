@@ -385,32 +385,35 @@ func emitTSAlias(b *strings.Builder, a aliasInfo) {
 // tsPrimitiveValidator returns the validator expression for a primitive/special type.
 // For special types with a tsValidate template, it formats the expression using
 // pathExpr and pathLit. Otherwise it falls back to kind-based validation.
-func (c *genConfig) tsPrimitiveValidator(t reflect.Type, pathExpr, pathLit string) string {
+func (c *genConfig) tsPrimitiveValidator(t reflect.Type, pathExpr, pathLit string) (string, error) {
 	if m := c.lookupSpecial(t); m != nil && m.tsValidate != "" {
-		return fmt.Sprintf(m.tsValidate, pathExpr, pathLit)
+		return fmt.Sprintf(m.tsValidate, pathExpr, pathLit), nil
 	}
 	switch t.Kind() {
 	case reflect.String:
-		return fmt.Sprintf("asString(%s, %q)", pathExpr, pathLit)
+		return fmt.Sprintf("asString(%s, %q)", pathExpr, pathLit), nil
 	case reflect.Int, reflect.Int64, reflect.Uint64, reflect.Float64:
-		return fmt.Sprintf("asNumber(%s, %q)", pathExpr, pathLit)
+		return fmt.Sprintf("asNumber(%s, %q)", pathExpr, pathLit), nil
 	case reflect.Bool:
-		return fmt.Sprintf("asBoolean(%s, %q)", pathExpr, pathLit)
-	default:
-		return pathExpr
+		return fmt.Sprintf("asBoolean(%s, %q)", pathExpr, pathLit), nil
 	}
+	return "", fmt.Errorf("tsPrimitiveValidator: unhandled kind %s for %s", t.Kind(), t)
 }
 
 // tsElemValidatorFunc returns a function expression (v: unknown) => validated
 // for use as the element validator callback in validateArray/validateRecord.
-func (c *genConfig) tsElemValidatorFunc(t reflect.Type, pathLit string) string {
+func (c *genConfig) tsElemValidatorFunc(t reflect.Type, pathLit string) (string, error) {
 	if t.Kind() == reflect.Pointer {
 		return c.tsElemValidatorFunc(t.Elem(), pathLit)
 	}
 	if t.Kind() == reflect.Struct && isSDKPkg(t.PkgPath()) {
-		return "validate" + t.Name()
+		return "validate" + t.Name(), nil
 	}
-	return "(v) => " + c.tsPrimitiveValidator(t, "v", pathLit)
+	v, err := c.tsPrimitiveValidator(t, "v", pathLit)
+	if err != nil {
+		return "", err
+	}
+	return "(v) => " + v, nil
 }
 
 // docRegistry holds parsed documentation extracted from Go source files.
@@ -863,32 +866,41 @@ func docGroupRoutes(routes []v1.Route) []docRouteGroup {
 }
 
 // goTypeToDoc maps a Go reflect.Type to a TypeScript-style string for docs.
-func (c *genConfig) goTypeToDoc(t reflect.Type) string {
+func (c *genConfig) goTypeToDoc(t reflect.Type) (string, error) {
 	if t.Kind() == reflect.Pointer {
 		return c.goTypeToDoc(t.Elem())
 	}
 	if m := c.lookupSpecial(t); m != nil {
-		return m.docType
+		return m.docType, nil
 	}
 	switch t.Kind() {
 	case reflect.String:
-		return "string"
-	case reflect.Int, reflect.Int64, reflect.Float64:
-		return "number"
+		return "string", nil
+	case reflect.Int:
+		return "int", nil
+	case reflect.Int64:
+		return "int64", nil
+	case reflect.Uint64:
+		return "uint64", nil
+	case reflect.Float64:
+		return "float64", nil
 	case reflect.Bool:
-		return "boolean"
+		return "boolean", nil
 	case reflect.Slice:
 		if isSDKPkg(t.PkgPath()) {
-			return t.Name() // Named slice.
+			return t.Name(), nil // Named slice.
 		}
-		return c.goTypeToDoc(t.Elem()) + "[]"
+		e, err := c.goTypeToDoc(t.Elem())
+		if err != nil {
+			return "", err
+		}
+		return e + "[]", nil
 	case reflect.Struct:
-		return t.Name()
+		return t.Name(), nil
 	case reflect.Map:
-		return "Record<string, unknown>"
-	default:
-		return t.Name()
+		return "Record<string, unknown>", nil
 	}
+	return "", fmt.Errorf("goTypeToDoc: unhandled kind %s for %s", t.Kind(), t)
 }
 
 // swiftEscapeIdent wraps name in backticks if it is a Swift reserved word.
@@ -1182,54 +1194,65 @@ func (d *docRegistry) discoverTSStructs() []sdkType {
 }
 
 // goTypeToTS maps a Go reflect.Type to its TypeScript type string.
-func (d *docRegistry) goTypeToTS(t reflect.Type) string {
+func (d *docRegistry) goTypeToTS(t reflect.Type) (string, error) {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
 	if m := d.cfg.lookupSpecial(t); m != nil {
-		return m.tsType
+		return m.tsType, nil
 	}
 	switch t {
 	case reflect.TypeFor[map[string]bool]():
-		return "{ [key: string]: boolean}"
+		return "{ [key: string]: boolean}", nil
 	case reflect.TypeFor[map[string]string]():
-		return "{ [key: string]: string}"
+		return "{ [key: string]: string}", nil
 	}
 
 	if _, ok := d.aliasNames[t.Name()]; ok {
-		return t.Name()
+		return t.Name(), nil
 	}
 
 	switch t.Kind() {
 	case reflect.String:
-		return "string"
+		return "string", nil
 	case reflect.Int:
-		return "number /* int */"
+		return "number /* int */", nil
 	case reflect.Int64:
-		return "number /* int64 */"
+		return "number /* int64 */", nil
 	case reflect.Uint64:
-		return "number /* uint64 */"
+		return "number /* uint64 */", nil
 	case reflect.Float64:
-		return "number /* float64 */"
+		return "number /* float64 */", nil
 	case reflect.Bool:
-		return "boolean"
+		return "boolean", nil
 	case reflect.Slice:
 		if isSDKPkg(t.PkgPath()) {
-			return t.Name() // Named slice.
+			return t.Name(), nil // Named slice.
 		}
-		return d.goTypeToTS(t.Elem()) + "[]"
+		e, err := d.goTypeToTS(t.Elem())
+		if err != nil {
+			return "", err
+		}
+		return e + "[]", nil
 	case reflect.Map:
-		return "{ [key: " + d.goTypeToTS(t.Key()) + "]: " + d.goTypeToTS(t.Elem()) + "}"
+		k, err := d.goTypeToTS(t.Key())
+		if err != nil {
+			return "", err
+		}
+		v, err := d.goTypeToTS(t.Elem())
+		if err != nil {
+			return "", err
+		}
+		return "{ [key: " + k + "]: " + v + "}", nil
 	case reflect.Struct:
-		return t.Name()
-	default:
-		return "any"
+		return t.Name(), nil
 	}
+	return "", fmt.Errorf("goTypeToTS: unhandled kind %s for %s", t.Kind(), t)
 }
 
 // emitTSStruct writes a TypeScript interface to b.
-func (d *docRegistry) emitTSStruct(b *strings.Builder, t reflect.Type) {
+func (d *docRegistry) emitTSStruct(b *strings.Builder, t reflect.Type) error {
 	if doc := d.typeDoc[t.Name()]; doc != "" {
 		b.WriteString(formatBlockDoc(doc, ""))
 	}
@@ -1251,7 +1274,10 @@ func (d *docRegistry) emitTSStruct(b *strings.Builder, t reflect.Type) {
 		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
 		isPtr := sf.Type.Kind() == reflect.Pointer
 		optional := isPtr || (omit && !isPtr)
-		tsType := d.goTypeToTS(sf.Type)
+		tsType, err := d.goTypeToTS(sf.Type)
+		if err != nil {
+			return fmt.Errorf("%s.%s: %w", name, jsonName, err)
+		}
 
 		// Field-level doc: block comment for multi-line, inline for single-line.
 		fdoc := ""
@@ -1273,6 +1299,7 @@ func (d *docRegistry) emitTSStruct(b *strings.Builder, t reflect.Type) {
 		}
 	}
 	b.WriteString("}\n")
+	return nil
 }
 
 // generateTSTypes generates sdk/ts/v1/types.gen.ts from the Go DTO structs.
@@ -1325,7 +1352,9 @@ func (d *docRegistry) generateTSTypes(outDir string) error {
 				continue
 			}
 			seen[name] = struct{}{}
-			d.emitTSStruct(&b, ks.t)
+			if err := d.emitTSStruct(&b, ks.t); err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
 			b.WriteString("\n")
 		}
 		delete(structsBySource, "events.go")
@@ -1354,7 +1383,11 @@ func (d *docRegistry) generateTSTypes(outDir string) error {
 		if doc := d.typeDoc[name]; doc != "" {
 			b.WriteString(formatBlockDoc(doc, ""))
 		}
-		fmt.Fprintf(&b, "export type %s = %s[];\n\n", name, d.cfg.goTypeToDoc(ns.Elem()))
+		elemType, err := d.cfg.goTypeToDoc(ns.Elem())
+		if err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		fmt.Fprintf(&b, "export type %s = %s[];\n\n", name, elemType)
 		seen[name] = struct{}{}
 	}
 
@@ -1365,7 +1398,9 @@ func (d *docRegistry) generateTSTypes(outDir string) error {
 			continue
 		}
 		seen[name] = struct{}{}
-		d.emitTSStruct(&b, ks.t)
+		if err := d.emitTSStruct(&b, ks.t); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
 		b.WriteString("\n")
 	}
 
@@ -1374,43 +1409,61 @@ func (d *docRegistry) generateTSTypes(outDir string) error {
 
 // tsFieldValidator returns a TypeScript expression that validates a value
 // at the given pathExpr. pathLit is a string literal for error messages.
-func (d *docRegistry) tsFieldValidator(t reflect.Type, pathExpr, pathLit string) string {
+func (d *docRegistry) tsFieldValidator(t reflect.Type, pathExpr, pathLit string) (string, error) {
 	if t.Kind() == reflect.Pointer {
 		return d.tsFieldValidator(t.Elem(), pathExpr, pathLit)
 	}
 	if m := d.cfg.lookupSpecial(t); m != nil && m.tsValidate != "" {
-		return fmt.Sprintf(m.tsValidate, pathExpr, pathLit)
+		return fmt.Sprintf(m.tsValidate, pathExpr, pathLit), nil
 	}
 	if t.Kind() == reflect.Slice {
-		elemFn := d.cfg.tsElemValidatorFunc(t.Elem(), pathLit+"[i]")
-		elemTS := d.goTypeToTS(t.Elem())
-		return fmt.Sprintf("validateArray(%s, %q, %s) as %s[]", pathExpr, pathLit, elemFn, elemTS)
+		elemFn, err := d.cfg.tsElemValidatorFunc(t.Elem(), pathLit+"[i]")
+		if err != nil {
+			return "", err
+		}
+		elemTS, err := d.goTypeToTS(t.Elem())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("validateArray(%s, %q, %s) as %s[]", pathExpr, pathLit, elemFn, elemTS), nil
 	}
 
 	if t.Kind() == reflect.Map {
-		valFn := d.cfg.tsElemValidatorFunc(t.Elem(), pathLit+"[k]")
-		keyTS := d.goTypeToTS(t.Key())
-		valTS := d.goTypeToTS(t.Elem())
-		return fmt.Sprintf("validateRecord(%s, %q, %s) as { [key: %s]: %s }", pathExpr, pathLit, valFn, keyTS, valTS)
+		valFn, err := d.cfg.tsElemValidatorFunc(t.Elem(), pathLit+"[k]")
+		if err != nil {
+			return "", err
+		}
+		keyTS, err := d.goTypeToTS(t.Key())
+		if err != nil {
+			return "", err
+		}
+		valTS, err := d.goTypeToTS(t.Elem())
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("validateRecord(%s, %q, %s) as { [key: %s]: %s }", pathExpr, pathLit, valFn, keyTS, valTS), nil
 	}
 	if t.Kind() == reflect.Struct && isSDKPkg(t.PkgPath()) {
-		return fmt.Sprintf("validate%s(%s)", t.Name(), pathExpr)
+		return fmt.Sprintf("validate%s(%s)", t.Name(), pathExpr), nil
 	}
 	return d.cfg.tsPrimitiveValidator(t, pathExpr, pathLit)
 }
 
 // tsFieldOptValidator is like tsFieldValidator but wraps the result to
 // return undefined when the value is null/undefined.
-func (d *docRegistry) tsFieldOptValidator(t reflect.Type, pathExpr, pathLit string) string {
-	inner := d.tsFieldValidator(t, pathExpr, pathLit)
-	return fmt.Sprintf("(%s === undefined || %s === null ? undefined : %s)", pathExpr, pathExpr, inner)
+func (d *docRegistry) tsFieldOptValidator(t reflect.Type, pathExpr, pathLit string) (string, error) {
+	inner, err := d.tsFieldValidator(t, pathExpr, pathLit)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("(%s === undefined || %s === null ? undefined : %s)", pathExpr, pathExpr, inner), nil
 }
 
 // emitTSDiscriminator writes a discriminated union validator with a kind-based
 // dispatch. Fields without omitempty are base fields extracted before the switch
 // (except "kind", which is always the discriminator). Fields with omitempty or
 // pointer types are variant fields dispatched by their json name.
-func (d *docRegistry) emitTSDiscriminator(b *strings.Builder, t reflect.Type) {
+func (d *docRegistry) emitTSDiscriminator(b *strings.Builder, t reflect.Type) error {
 	name := t.Name()
 	fmt.Fprintf(b, "export function validate%s(raw: unknown): %s {\n", name, name)
 	fmt.Fprintf(b, "  const obj = asObject(raw, %q);\n", name)
@@ -1440,12 +1493,16 @@ func (d *docRegistry) emitTSDiscriminator(b *strings.Builder, t reflect.Type) {
 		pathExpr := fmt.Sprintf("obj[%q]", jsonName)
 		pathLit := fmt.Sprintf("%s.%s", name, jsonName)
 
+		expr, err := d.tsFieldValidator(sf.Type, pathExpr, pathLit)
+		if err != nil {
+			return fmt.Errorf("%s.%s: %w", name, jsonName, err)
+		}
 		if !omit && !isPtr {
 			// Base field: extracted before the switch.
-			baseFields = append(baseFields, tsFieldBinding{jsonName, d.tsFieldValidator(sf.Type, pathExpr, pathLit)})
+			baseFields = append(baseFields, tsFieldBinding{jsonName, expr})
 		} else {
 			// Variant field: extracted in the switch.
-			variantFields = append(variantFields, tsFieldBinding{jsonName, d.tsFieldValidator(sf.Type, pathExpr, pathLit)})
+			variantFields = append(variantFields, tsFieldBinding{jsonName, expr})
 		}
 	}
 
@@ -1464,10 +1521,11 @@ func (d *docRegistry) emitTSDiscriminator(b *strings.Builder, t reflect.Type) {
 	b.WriteString("  }\n")
 	b.WriteString("  return result;\n")
 	b.WriteString("}\n\n")
+	return nil
 }
 
 // emitTSValidator writes a validateXxx(raw: unknown): Xxx function for a struct.
-func (d *docRegistry) emitTSValidator(b *strings.Builder, t reflect.Type) {
+func (d *docRegistry) emitTSValidator(b *strings.Builder, t reflect.Type) error {
 	name := t.Name()
 	fmt.Fprintf(b, "export function validate%s(raw: unknown): %s {\n", name, name)
 	fmt.Fprintf(b, "  const obj = asObject(raw, %q);\n", name)
@@ -1492,15 +1550,22 @@ func (d *docRegistry) emitTSValidator(b *strings.Builder, t reflect.Type) {
 
 		pathExpr := fmt.Sprintf("obj[%q]", jsonName)
 		pathLit := fmt.Sprintf("%s.%s", name, jsonName)
+		var expr string
+		var err error
 		if optional {
-			fmt.Fprintf(b, "    %s: %s,\n", jsonName, d.tsFieldOptValidator(sf.Type, pathExpr, pathLit))
+			expr, err = d.tsFieldOptValidator(sf.Type, pathExpr, pathLit)
 		} else {
-			fmt.Fprintf(b, "    %s: %s,\n", jsonName, d.tsFieldValidator(sf.Type, pathExpr, pathLit))
+			expr, err = d.tsFieldValidator(sf.Type, pathExpr, pathLit)
 		}
+		if err != nil {
+			return fmt.Errorf("%s.%s: %w", name, jsonName, err)
+		}
+		fmt.Fprintf(b, "    %s: %s,\n", jsonName, expr)
 	}
 
 	b.WriteString("  };\n")
 	b.WriteString("}\n\n")
+	return nil
 }
 
 // generateTSValidate generates sdk/ts/v1/validate.gen.ts with runtime
@@ -1591,12 +1656,16 @@ func (d *docRegistry) generateTSValidate(outDir string) error {
 			continue
 		}
 		if _, ok := discriminated[name]; ok {
-			d.emitTSDiscriminator(&b, ks.t)
+			if err := d.emitTSDiscriminator(&b, ks.t); err != nil {
+				return fmt.Errorf("validate%s: %w", name, err)
+			}
 			emitted[name] = struct{}{}
 			continue
 		}
 		emitted[name] = struct{}{}
-		d.emitTSValidator(&b, ks.t)
+		if err := d.emitTSValidator(&b, ks.t); err != nil {
+			return fmt.Errorf("validate%s: %w", name, err)
+		}
 	}
 
 	return os.WriteFile(filepath.Join(outDir, "validate.gen.ts"), []byte(b.String()), 0o600)
@@ -1699,7 +1768,7 @@ func (d *docRegistry) generateKotlin(outDir string) error {
 	return writeKotlinClient(outDir)
 }
 
-func (d *docRegistry) goTypeToKotlin(t reflect.Type) string {
+func (d *docRegistry) goTypeToKotlin(t reflect.Type) (string, error) {
 	// Unwrap pointer — nullability is handled by the caller.
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -1707,43 +1776,54 @@ func (d *docRegistry) goTypeToKotlin(t reflect.Type) string {
 
 	// Special cases.
 	if m := d.cfg.lookupSpecial(t); m != nil {
-		return m.ktType
+		return m.ktType, nil
 	}
 
 	// Named string aliases (Harness, EventKind).
 	if _, ok := d.aliasNames[t.Name()]; ok {
-		return t.Name()
+		return t.Name(), nil
 	}
 
 	switch t.Kind() {
 	case reflect.String:
-		return "String"
+		return "String", nil
 	case reflect.Int:
-		return "Int"
+		return "Int", nil
 	case reflect.Int64:
-		return "Long"
+		return "Long", nil
 	case reflect.Uint64:
-		return "Long" // JSON numbers; unsigned semantics not enforced at wire level.
+		return "Long", nil // JSON numbers; unsigned semantics not enforced at wire level.
 	case reflect.Float64:
-		return "Double"
+		return "Double", nil
 	case reflect.Bool:
-		return "Boolean"
+		return "Boolean", nil
 	case reflect.Slice:
 		if isSDKPkg(t.PkgPath()) {
-			return t.Name() // Named slice.
+			return t.Name(), nil // Named slice.
 		}
-		return "List<" + d.goTypeToKotlin(t.Elem()) + ">"
+		e, err := d.goTypeToKotlin(t.Elem())
+		if err != nil {
+			return "", err
+		}
+		return "List<" + e + ">", nil
 	case reflect.Map:
-		return "Map<" + d.goTypeToKotlin(t.Key()) + ", " + d.goTypeToKotlin(t.Elem()) + ">"
+		k, err := d.goTypeToKotlin(t.Key())
+		if err != nil {
+			return "", err
+		}
+		v, err := d.goTypeToKotlin(t.Elem())
+		if err != nil {
+			return "", err
+		}
+		return "Map<" + k + ", " + v + ">", nil
 	case reflect.Struct:
-		return t.Name()
-	default:
-		return t.Name()
+		return t.Name(), nil
 	}
+	return "", fmt.Errorf("goTypeToKotlin: unhandled kind %s for %s", t.Kind(), t)
 }
 
 // parseStructFields extracts kotlinField entries from a reflect.Type.
-func (d *docRegistry) parseStructFields(t reflect.Type) []kotlinField {
+func (d *docRegistry) parseStructFields(t reflect.Type) ([]kotlinField, error) {
 	fields := make([]kotlinField, 0, t.NumField())
 	for i := range t.NumField() {
 		sf := t.Field(i)
@@ -1763,7 +1843,10 @@ func (d *docRegistry) parseStructFields(t reflect.Type) []kotlinField {
 		ft := sf.Type
 		isPtr := ft.Kind() == reflect.Pointer
 
-		ktType := d.goTypeToKotlin(ft)
+		ktType, err := d.goTypeToKotlin(ft)
+		if err != nil {
+			return nil, fmt.Errorf("%s.%s: %w", t.Name(), jsonName, err)
+		}
 		nullable := isPtr || (omit && !isPtr)
 
 		sn := ""
@@ -1779,15 +1862,18 @@ func (d *docRegistry) parseStructFields(t reflect.Type) []kotlinField {
 			serialName: sn,
 		})
 	}
-	return fields
+	return fields, nil
 }
 
 // emitKotlinStruct writes a @Serializable data class to b.
-func (d *docRegistry) emitKotlinStruct(b *strings.Builder, t reflect.Type) {
+func (d *docRegistry) emitKotlinStruct(b *strings.Builder, t reflect.Type) error {
 	if doc := d.typeDoc[t.Name()]; doc != "" {
 		b.WriteString(formatBlockDoc(doc, ""))
 	}
-	fields := d.parseStructFields(t)
+	fields, err := d.parseStructFields(t)
+	if err != nil {
+		return err
+	}
 	name := t.Name()
 
 	// Compact single-line form for structs with ≤2 fields and no @SerialName.
@@ -1801,7 +1887,7 @@ func (d *docRegistry) emitKotlinStruct(b *strings.Builder, t reflect.Type) {
 			writeFieldDecl(b, &fields[i])
 		}
 		b.WriteString(")\n")
-		return
+		return nil
 	}
 
 	b.WriteString("@Serializable\n")
@@ -1816,6 +1902,7 @@ func (d *docRegistry) emitKotlinStruct(b *strings.Builder, t reflect.Type) {
 		b.WriteString(",\n")
 	}
 	b.WriteString(")\n")
+	return nil
 }
 
 func (d *docRegistry) writeKotlinTypes(outDir string) error {
@@ -1864,14 +1951,20 @@ func (d *docRegistry) writeKotlinTypes(outDir string) error {
 
 	// Named slice type aliases.
 	for _, ns := range collectNamedSlices(kcStructs) {
-		fmt.Fprintf(&b, "typealias %s = List<%s>\n\n", ns.Name(), d.goTypeToKotlin(ns.Elem()))
+		ktElem, err := d.goTypeToKotlin(ns.Elem())
+		if err != nil {
+			return fmt.Errorf("%s: %w", ns.Name(), err)
+		}
+		fmt.Fprintf(&b, "typealias %s = List<%s>\n\n", ns.Name(), ktElem)
 	}
 
 	for _, ks := range kcStructs {
 		if ks.comment != "" {
 			fmt.Fprintf(&b, "// %s\n\n", ks.comment)
 		}
-		d.emitKotlinStruct(&b, ks.t)
+		if err := d.emitKotlinStruct(&b, ks.t); err != nil {
+			return err
+		}
 		b.WriteString("\n")
 	}
 
@@ -1931,13 +2024,15 @@ func (d *docRegistry) generateMarkdownDoc(outDir string) error {
 	// Discover all dto struct types reachable from Routes in
 	// dependency order (leaves first).
 	for _, t := range walkSDKTypes(routeSeedTypes()) {
-		d.writeDocType(&b, t)
+		if err := d.writeDocType(&b, t); err != nil {
+			return err
+		}
 	}
 
 	return os.WriteFile(filepath.Join(outDir, "API.md"), []byte(b.String()), 0o600)
 }
 
-func (d *docRegistry) writeDocType(b *strings.Builder, t reflect.Type) {
+func (d *docRegistry) writeDocType(b *strings.Builder, t reflect.Type) error {
 	fmt.Fprintf(b, "### %s\n\n", t.Name())
 	if typeDoc := d.typeDoc[t.Name()]; typeDoc != "" {
 		fmt.Fprintf(b, "%s\n\n", typeDoc)
@@ -1958,7 +2053,10 @@ func (d *docRegistry) writeDocType(b *strings.Builder, t reflect.Type) {
 			jsonName = sf.Name
 		}
 		optional := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero") || sf.Type.Kind() == reflect.Pointer
-		typeName := d.cfg.goTypeToDoc(sf.Type)
+		typeName, err := d.cfg.goTypeToDoc(sf.Type)
+		if err != nil {
+			return fmt.Errorf("%s.%s: %w", t.Name(), jsonName, err)
+		}
 		req := "yes"
 		if optional {
 			req = ""
@@ -1970,45 +2068,57 @@ func (d *docRegistry) writeDocType(b *strings.Builder, t reflect.Type) {
 		fmt.Fprintf(b, "| `%s` | `%s` | %s | %s |\n", jsonName, typeName, fieldDoc, req)
 	}
 	b.WriteString("\n")
+	return nil
 }
 
 // goTypeToSwift maps a Go reflect.Type to its Swift type string.
-func (d *docRegistry) goTypeToSwift(t reflect.Type) string {
+func (d *docRegistry) goTypeToSwift(t reflect.Type) (string, error) {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if m := d.cfg.lookupSpecial(t); m != nil {
-		return m.swiftType
+		return m.swiftType, nil
 	}
 
 	if _, ok := d.aliasNames[t.Name()]; ok {
-		return t.Name()
+		return t.Name(), nil
 	}
 	switch t.Kind() {
 	case reflect.String:
-		return "String"
-	case reflect.Int, reflect.Int64:
-		return "Int"
+		return "String", nil
+	case reflect.Int, reflect.Int64, reflect.Uint64:
+		return "Int", nil
 	case reflect.Float64:
-		return "Double"
+		return "Double", nil
 	case reflect.Bool:
-		return "Bool"
+		return "Bool", nil
 	case reflect.Slice:
 		if isSDKPkg(t.PkgPath()) {
-			return t.Name() // Named slice.
+			return t.Name(), nil // Named slice.
 		}
-		return "[" + d.goTypeToSwift(t.Elem()) + "]"
+		e, err := d.goTypeToSwift(t.Elem())
+		if err != nil {
+			return "", err
+		}
+		return "[" + e + "]", nil
 	case reflect.Map:
-		return "[" + d.goTypeToSwift(t.Key()) + ": " + d.goTypeToSwift(t.Elem()) + "]"
+		k, err := d.goTypeToSwift(t.Key())
+		if err != nil {
+			return "", err
+		}
+		v, err := d.goTypeToSwift(t.Elem())
+		if err != nil {
+			return "", err
+		}
+		return "[" + k + ": " + v + "]", nil
 	case reflect.Struct:
-		return t.Name()
-	default:
-		return t.Name()
+		return t.Name(), nil
 	}
+	return "", fmt.Errorf("goTypeToSwift: unhandled kind %s for %s", t.Kind(), t)
 }
 
 // emitSwiftStruct writes a public Codable struct to b.
-func (d *docRegistry) emitSwiftStruct(b *strings.Builder, t reflect.Type) {
+func (d *docRegistry) emitSwiftStruct(b *strings.Builder, t reflect.Type) error {
 	if doc := d.typeDoc[t.Name()]; doc != "" {
 		b.WriteString(formatSwiftDoc(doc, ""))
 	}
@@ -2029,7 +2139,10 @@ func (d *docRegistry) emitSwiftStruct(b *strings.Builder, t reflect.Type) {
 		}
 		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
 		isPtr := sf.Type.Kind() == reflect.Pointer
-		swiftType := d.goTypeToSwift(sf.Type)
+		swiftType, err := d.goTypeToSwift(sf.Type)
+		if err != nil {
+			return fmt.Errorf("%s.%s: %w", name, jsonName, err)
+		}
 		optional := isPtr || (omit && !isPtr)
 		swiftName := swiftEscapeIdent(jsonName)
 
@@ -2045,6 +2158,7 @@ func (d *docRegistry) emitSwiftStruct(b *strings.Builder, t reflect.Type) {
 		}
 	}
 	b.WriteString("}\n")
+	return nil
 }
 
 func (d *docRegistry) writeSwiftTypes(outDir string) error {
@@ -2115,14 +2229,20 @@ public enum JSONValue: Codable, Equatable {
 		if doc := d.typeDoc[ns.Name()]; doc != "" {
 			b.WriteString(formatSwiftDoc(doc, ""))
 		}
-		fmt.Fprintf(&b, "public typealias %s = [%s]\n\n", ns.Name(), d.goTypeToSwift(ns.Elem()))
+		swElem, err := d.goTypeToSwift(ns.Elem())
+		if err != nil {
+			return fmt.Errorf("%s: %w", ns.Name(), err)
+		}
+		fmt.Fprintf(&b, "public typealias %s = [%s]\n\n", ns.Name(), swElem)
 	}
 
 	for _, ks := range swStructs {
 		if ks.comment != "" {
 			fmt.Fprintf(&b, "// %s\n\n", ks.comment)
 		}
-		d.emitSwiftStruct(&b, ks.t)
+		if err := d.emitSwiftStruct(&b, ks.t); err != nil {
+			return err
+		}
 		b.WriteString("\n")
 	}
 

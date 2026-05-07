@@ -635,13 +635,13 @@ public struct EventRateLimit: Codable {
 public struct EventStats: Codable {
     public let ts: Int
     public let cpuPerc: Double
-    public let memUsed: uint64
-    public let memLimit: uint64
+    public let memUsed: Int
+    public let memLimit: Int
     public let memPerc: Double
-    public let netRx: uint64
-    public let netTx: uint64
-    public let blockRead: uint64
-    public let blockWrite: uint64
+    public let netRx: Int
+    public let netTx: Int
+    public let blockRead: Int
+    public let blockWrite: Int
     public let diskUsed: Int
 }
 

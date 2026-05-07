@@ -236,8 +236,8 @@ ForgeCheck describes a CI check run with its status, conclusion, and timing.
 | `name` | `string` |  | yes |
 | `owner` | `string` |  | yes |
 | `repo` | `string` |  | yes |
-| `runID` | `number` | Pipeline/workflow run ID. | yes |
-| `jobID` | `number` | Check run / job ID. | yes |
+| `runID` | `int64` | Pipeline/workflow run ID. | yes |
+| `jobID` | `int64` | Check run / job ID. | yes |
 | `status` | `string` | queued, in_progress, completed. | yes |
 | `conclusion` | `string` | Empty when not completed. | yes |
 | `queuedAt` | `ISOTimestamp` | When the check was created/queued. |  |
@@ -267,7 +267,7 @@ CloneRepoReq is the request body for POST /api/v1/server/repos.
 |-------|------|-------------|----------|
 | `url` | `string` | Git clone URL (HTTPS or SSH). | yes |
 | `path` | `string` | Target subdirectory under rootDir; defaults to repo basename. |  |
-| `depth` | `number` |  |  |
+| `depth` | `int` |  |  |
 
 ### RepoBranchesResp
 
@@ -323,8 +323,8 @@ DiffFileStat describes changes to a single file.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `path` | `string` |  | yes |
-| `added` | `number` |  | yes |
-| `deleted` | `number` |  | yes |
+| `added` | `int` |  | yes |
+| `deleted` | `int` |  | yes |
 | `binary` | `boolean` |  |  |
 
 ### Container
@@ -337,7 +337,7 @@ Container holds per-task container metadata.
 | `tailscale` | `string` | Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. |  |
 | `usb` | `boolean` |  |  |
 | `display` | `boolean` |  |  |
-| `vncPort` | `number` |  |  |
+| `vncPort` | `int` |  |  |
 
 ### Task
 
@@ -352,25 +352,25 @@ Task is the JSON representation sent to the frontend.
 | `state` | `string` |  | yes |
 | `stateUpdatedAt` | `ISOTimestamp` | When the task state last changed. | yes |
 | `diffStat` | `DiffStat` |  |  |
-| `costUSD` | `number` |  | yes |
-| `duration` | `number` | Seconds. | yes |
-| `numTurns` | `number` |  | yes |
-| `cumulativeInputTokens` | `number` |  | yes |
-| `cumulativeOutputTokens` | `number` |  | yes |
-| `cumulativeCacheCreationInputTokens` | `number` |  | yes |
-| `cumulativeCacheReadInputTokens` | `number` |  | yes |
-| `activeInputTokens` | `number` | Last turn's non-cached input tokens (including cache creation). | yes |
-| `activeCacheReadTokens` | `number` | Last turn's cache-read input tokens. | yes |
-| `cacheTTLSeconds` | `number` | Effective cache TTL from last API call (seconds); 0 = unknown. |  |
+| `costUSD` | `float64` |  | yes |
+| `duration` | `float64` | Seconds. | yes |
+| `numTurns` | `int` |  | yes |
+| `cumulativeInputTokens` | `int` |  | yes |
+| `cumulativeOutputTokens` | `int` |  | yes |
+| `cumulativeCacheCreationInputTokens` | `int` |  | yes |
+| `cumulativeCacheReadInputTokens` | `int` |  | yes |
+| `activeInputTokens` | `int` | Last turn's non-cached input tokens (including cache creation). | yes |
+| `activeCacheReadTokens` | `int` | Last turn's cache-read input tokens. | yes |
+| `cacheTTLSeconds` | `int` | Effective cache TTL from last API call (seconds); 0 = unknown. |  |
 | `cacheExpiresAt` | `ISOTimestamp` | When the prompt cache expires. |  |
-| `contextWindowLimit` | `number` | Model context window limit (tokens). | yes |
+| `contextWindowLimit` | `int` | Model context window limit (tokens). | yes |
 | `error` | `string` |  |  |
 | `result` | `string` |  |  |
 | `forgeOwner` | `string` |  |  |
 | `forgeRepo` | `string` |  |  |
-| `forgePR` | `number` |  |  |
+| `forgePR` | `int` |  |  |
 | `forgePRState` | `string` |  |  |
-| `forgeIssue` | `number` |  |  |
+| `forgeIssue` | `int` |  |  |
 | `ciStatus` | `string` |  |  |
 | `ciChecks` | `ForgeCheck[]` |  |  |
 | `owner` | `string` | username of creator; omitted in no-auth mode |  |
@@ -478,7 +478,7 @@ EventToolResult is emitted when a tool call completes.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `toolUseID` | `string` |  | yes |
-| `duration` | `number` | Seconds; server-computed; 0 if unknown. | yes |
+| `duration` | `float64` | Seconds; server-computed; 0 if unknown. | yes |
 | `error` | `string` |  |  |
 
 ### AskOption
@@ -518,11 +518,11 @@ or reasoning summaries (Codex). Zero when the harness does not report it.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `inputTokens` | `number` |  | yes |
-| `outputTokens` | `number` |  | yes |
-| `cacheCreationInputTokens` | `number` |  | yes |
-| `cacheReadInputTokens` | `number` |  | yes |
-| `reasoningOutputTokens` | `number` |  |  |
+| `inputTokens` | `int` |  | yes |
+| `outputTokens` | `int` |  | yes |
+| `cacheCreationInputTokens` | `int` |  | yes |
+| `cacheReadInputTokens` | `int` |  | yes |
+| `reasoningOutputTokens` | `int` |  |  |
 | `model` | `string` |  | yes |
 
 ### EventResult
@@ -535,10 +535,10 @@ EventResult is emitted when the task reaches a terminal state.
 | `isError` | `boolean` |  | yes |
 | `result` | `string` |  | yes |
 | `diffStat` | `DiffStat` |  |  |
-| `totalCostUSD` | `number` |  | yes |
-| `duration` | `number` | Seconds. | yes |
-| `durationAPI` | `number` | Seconds. | yes |
-| `numTurns` | `number` |  | yes |
+| `totalCostUSD` | `float64` |  | yes |
+| `duration` | `float64` | Seconds. | yes |
+| `durationAPI` | `float64` | Seconds. | yes |
+| `numTurns` | `int` |  | yes |
 | `usage` | `EventUsage` |  | yes |
 
 ### EventSystem
@@ -676,11 +676,11 @@ EventRateLimit is emitted when the agent's rate limit status changes.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `status` | `string` | "allowed", "allowed_warning", "rejected". | yes |
-| `resetsAt` | `number` | Unix epoch seconds; 0 if unknown. | yes |
+| `resetsAt` | `float64` | Unix epoch seconds; 0 if unknown. | yes |
 | `rateLimitType` | `string` | "five_hour", "seven_day", etc. | yes |
-| `utilization` | `number` | 0.0–1.0. | yes |
+| `utilization` | `float64` | 0.0–1.0. | yes |
 | `isUsingOverage` | `boolean` | True when extra/overage usage is active. |  |
-| `overageResetsAt` | `number` | Unix epoch seconds; 0 if not using overage. |  |
+| `overageResetsAt` | `float64` | Unix epoch seconds; 0 if not using overage. |  |
 
 ### EventStats
 
@@ -688,16 +688,16 @@ EventStats is a container resource usage snapshot emitted periodically.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `ts` | `number` |  | yes |
-| `cpuPerc` | `number` |  | yes |
+| `ts` | `int64` |  | yes |
+| `cpuPerc` | `float64` |  | yes |
 | `memUsed` | `uint64` |  | yes |
 | `memLimit` | `uint64` |  | yes |
-| `memPerc` | `number` |  | yes |
+| `memPerc` | `float64` |  | yes |
 | `netRx` | `uint64` |  | yes |
 | `netTx` | `uint64` |  | yes |
 | `blockRead` | `uint64` |  | yes |
 | `blockWrite` | `uint64` |  | yes |
-| `diskUsed` | `number` |  | yes |
+| `diskUsed` | `int64` |  | yes |
 
 ### EventMessage
 
@@ -707,7 +707,7 @@ EventMessage is a single SSE event in the backend-neutral stream
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `kind` | `string` |  | yes |
-| `ts` | `number` |  | yes |
+| `ts` | `int64` |  | yes |
 | `init` | `EventInit` |  |  |
 | `text` | `EventText` |  |  |
 | `textDelta` | `EventTextDelta` |  |  |
@@ -795,7 +795,7 @@ SyncResp is the response for POST /api/v1/tasks/{id}/sync.
 | `branch` | `string` |  |  |
 | `diffStat` | `DiffStat` |  |  |
 | `safetyIssues` | `SafetyIssue[]` |  |  |
-| `prNumber` | `number` | non-zero if a PR/MR was created |  |
+| `prNumber` | `int` | non-zero if a PR/MR was created |  |
 
 ### ForkTaskReq
 
@@ -823,12 +823,12 @@ ProcessInfo describes a single process running inside a task container.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `pid` | `number` |  | yes |
-| `ppid` | `number` |  | yes |
+| `pid` | `int` |  | yes |
+| `ppid` | `int` |  | yes |
 | `user` | `string` |  | yes |
 | `state` | `string` | Single-character state: R, S, D, Z, T, etc. | yes |
-| `cpu` | `number` |  | yes |
-| `mem` | `number` |  | yes |
+| `cpu` | `float64` |  | yes |
+| `mem` | `float64` |  | yes |
 | `time` | `string` | Cumulative CPU time. | yes |
 | `command` | `string` | Full command line. | yes |
 
@@ -885,7 +885,7 @@ QuotaRateLimit is a single rate-limit window snapshot from any provider.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `window` | `string` | "5h", "7d", "primary", "secondary", "rpm", "tpd", … | yes |
-| `usedPct` | `number` | 0–100 | yes |
+| `usedPct` | `float64` | 0–100 | yes |
 | `resetsAt` | `ISOTimestamp` | zero when unknown |  |
 
 ### QuotaBalance
@@ -895,9 +895,9 @@ QuotaBalance is a balance/credit snapshot from any provider.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `currency` | `string` | "USD", "CNY", "credits", … | yes |
-| `total` | `number` | total available balance | yes |
-| `granted` | `number` | unexpired promotional/grant balance |  |
-| `toppedUp` | `number` | self-funded recharge balance |  |
+| `total` | `float64` | total available balance | yes |
+| `granted` | `float64` | unexpired promotional/grant balance |  |
+| `toppedUp` | `float64` | self-funded recharge balance |  |
 
 ### QuotaExtraUsage
 
@@ -907,9 +907,9 @@ QuotaExtraUsage is pay-as-you-go usage info (Anthropic-style extra credits).
 |-------|------|-------------|----------|
 | `currency` | `string` | "USD", "CNY", … | yes |
 | `isEnabled` | `boolean` |  | yes |
-| `usedCredits` | `number` |  | yes |
-| `monthlyLimit` | `number` |  | yes |
-| `usedPct` | `number` |  | yes |
+| `usedCredits` | `float64` |  | yes |
+| `monthlyLimit` | `float64` |  | yes |
+| `usedPct` | `float64` |  | yes |
 
 ### ProviderQuota
 
@@ -933,9 +933,9 @@ LocalWindow is the aggregated local cost for a rolling time window.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `duration` | `string` | "1h", "6h", "24h" | yes |
-| `costUSD` | `number` |  | yes |
-| `inputTokens` | `number` |  | yes |
-| `outputTokens` | `number` |  | yes |
+| `costUSD` | `float64` |  | yes |
+| `inputTokens` | `int` |  | yes |
+| `outputTokens` | `int` |  | yes |
 
 ### LocalUsage
 
