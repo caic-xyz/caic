@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 	"github.com/coder/websocket"
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
@@ -53,6 +54,33 @@ const (
 	// inputFrameBytes is one 20ms frame of Gemini PCM output (24kHz S16LE).
 	inputFrameBytes = geminiSampleRate * 2 * int(frameDuration/time.Millisecond) / 1000 // 960 bytes
 )
+
+// geminiBidiMessage is a top-level Gemini BidiGenerateContent message.
+// Only the serverContent key is explicitly typed; jsonutil.Overflow captures
+// and preserves all other keys through round-trip re-marshal.
+type geminiBidiMessage struct {
+	jsonutil.Overflow
+
+	ServerContent *serverContent `json:"serverContent,omitempty"`
+}
+
+// geminiAudioChunk is the JSON shape for a Gemini realtime audio input chunk.
+// See https://ai.google.dev/api/generate-content#mediablob
+type geminiAudioChunk struct {
+	RealtimeInput struct {
+		Audio struct {
+			MimeType string `json:"mimeType"`
+			Data     string `json:"data"`
+		} `json:"audio"`
+	} `json:"realtimeInput"`
+}
+
+// dcError is the JSON envelope for errors sent over the WebRTC data channel.
+type dcError struct {
+	Error struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
 
 // Bridge manages active WebRTC voice sessions.
 type Bridge struct {
@@ -387,14 +415,10 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 			binary.LittleEndian.PutUint16(pcmBytes[i*2:], uint16(sample)) //nolint:gosec // PCM int16→uint16 reinterpret is intentional
 		}
 		b64 := base64.StdEncoding.EncodeToString(pcmBytes)
-		msg, err := json.Marshal(map[string]any{
-			"realtimeInput": map[string]any{
-				"audio": map[string]string{
-					"mimeType": fmt.Sprintf("audio/pcm;rate=%d", inputSampleRate),
-					"data":     b64,
-				},
-			},
-		})
+		chunk := geminiAudioChunk{}
+		chunk.RealtimeInput.Audio.MimeType = fmt.Sprintf("audio/pcm;rate=%d", inputSampleRate)
+		chunk.RealtimeInput.Audio.Data = b64
+		msg, err := json.Marshal(chunk)
 		if err != nil {
 			slog.WarnContext(ctx, "voicertc: marshal audio", "session", s.id, "err", err)
 			return
@@ -474,31 +498,25 @@ func (s *session) geminiRxLoop(ctx context.Context) {
 // audio stripped. On interrupted=true it clears the buffer immediately.
 // Returns (modifiedData, true) if audio was extracted, (nil, false) otherwise.
 func (s *session) handleAudioExtraction(data []byte) ([]byte, bool) {
-	var msg map[string]json.RawMessage
+	var msg geminiBidiMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return nil, false
 	}
-	scRaw, ok := msg["serverContent"]
-	if !ok {
+	if msg.ServerContent == nil {
 		return nil, false
 	}
 
-	var sc serverContent
-	if err := json.Unmarshal(scRaw, &sc); err != nil {
-		return nil, false
-	}
-
-	if sc.Interrupted != nil && *sc.Interrupted {
+	if msg.ServerContent.Interrupted != nil && *msg.ServerContent.Interrupted {
 		s.interruptAudio()
 	}
 
-	if sc.ModelTurn == nil {
+	if msg.ServerContent.ModelTurn == nil {
 		return nil, false
 	}
 
 	hadAudio := false
-	filteredParts := make([]modelPart, 0, len(sc.ModelTurn.Parts))
-	for _, part := range sc.ModelTurn.Parts {
+	filteredParts := make([]modelPart, 0, len(msg.ServerContent.ModelTurn.Parts))
+	for _, part := range msg.ServerContent.ModelTurn.Parts {
 		if part.InlineData == nil || part.InlineData.Data == "" {
 			filteredParts = append(filteredParts, part)
 			continue
@@ -522,12 +540,7 @@ func (s *session) handleAudioExtraction(data []byte) ([]byte, bool) {
 	}
 
 	// Rebuild the message without audio parts.
-	sc.ModelTurn.Parts = filteredParts
-	newSC, err := json.Marshal(sc)
-	if err != nil {
-		return nil, false
-	}
-	msg["serverContent"] = newSC
+	msg.ServerContent.ModelTurn.Parts = filteredParts
 	rebuilt, err := json.Marshal(msg)
 	if err != nil {
 		return nil, false
@@ -615,7 +628,9 @@ func (s *session) sendError(msg string) {
 	if dc == nil {
 		return
 	}
-	data, err := json.Marshal(map[string]any{"error": map[string]string{"message": msg}})
+	e := dcError{}
+	e.Error.Message = msg
+	data, err := json.Marshal(e)
 	if err != nil {
 		slog.Warn("voicertc: marshal error message", "session", s.id, "err", err)
 		return
@@ -666,6 +681,8 @@ func generateSessionID() string {
 
 // JSON types for parsing Gemini serverContent to extract audio.
 type serverContent struct {
+	jsonutil.Overflow
+
 	ModelTurn           *modelTurn     `json:"modelTurn,omitempty"`
 	TurnComplete        *bool          `json:"turnComplete,omitempty"`
 	Interrupted         *bool          `json:"interrupted,omitempty"`
