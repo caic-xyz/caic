@@ -193,14 +193,14 @@ class TaskRepository @Inject constructor(
                     when (event.kind) {
                         "snapshot" -> {
                             taskMap.clear()
-                            event.tasks?.forEach { taskMap[it.id] = it }
+                            event.snapshot?.forEach { taskMap[it.id] = it }
                         }
-                        "upsert" -> event.task?.let { taskMap[it.id] = it }
+                        "upsert" -> event.upsert?.let { taskMap[it.id] = it }
                         "patch" -> event.patch?.let { patch ->
                             val id = (patch["id"] as? JsonPrimitive)?.content ?: return@let
                             taskMap[id] = applyPatch(taskMap[id] ?: return@let, patch)
                         }
-                        "delete" -> event.id?.let { taskMap.remove(it) }
+                        "delete" -> event.delete?.let { taskMap.remove(it) }
                         "warning" -> {
                             event.warning?.let { _warnings.tryEmit(it) }
                             return

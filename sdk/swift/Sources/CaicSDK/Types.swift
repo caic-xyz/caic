@@ -142,6 +142,9 @@ public enum ErrorCodes {
     public static let internalError = "INTERNAL_ERROR"
 }
 
+/// DiffStat summarises the changes in a branch relative to its base.
+public typealias DiffStat = [DiffFileStat]
+
 /// Config reports server capabilities to the frontend.
 public struct Config: Codable {
     public let version: String?
@@ -352,7 +355,7 @@ public struct Task: Codable {
     public let state: String
     /// When the task state last changed.
     public let stateUpdatedAt: ISOTimestamp
-    public let diffStat: [DiffFileStat]?
+    public let diffStat: DiffStat?
     public let costUSD: Double
     /// Seconds.
     public let duration: Double
@@ -512,7 +515,7 @@ public struct EventResult: Codable {
     public let subtype: String
     public let isError: Bool
     public let result: String
-    public let diffStat: [DiffFileStat]?
+    public let diffStat: DiffStat?
     public let totalCostUSD: Double
     /// Seconds.
     public let duration: Double
@@ -551,7 +554,7 @@ public struct EventTodo: Codable {
 
 /// EventDiffStat is emitted when the relay reports updated diff statistics.
 public struct EventDiffStat: Codable {
-    public let diffStat: [DiffFileStat]?
+    public let diffStat: DiffStat?
 }
 
 /// EventError is emitted when the backend fails to parse an agent output line.
@@ -716,7 +719,7 @@ public struct SyncResp: Codable {
     /// "synced", "blocked", or "empty"
     public let status: String
     public let branch: String?
-    public let diffStat: [DiffFileStat]?
+    public let diffStat: DiffStat?
     public let safetyIssues: [SafetyIssue]?
     /// non-zero if a PR/MR was created
     public let prNumber: Int?

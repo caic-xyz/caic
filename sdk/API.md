@@ -351,7 +351,7 @@ Task is the JSON representation sent to the frontend.
 | `repos` | `TaskRepo[]` |  |  |
 | `state` | `string` |  | yes |
 | `stateUpdatedAt` | `ISOTimestamp` | When the task state last changed. | yes |
-| `diffStat` | `DiffFileStat[]` |  |  |
+| `diffStat` | `DiffStat` |  |  |
 | `costUSD` | `number` |  | yes |
 | `duration` | `number` | Seconds. | yes |
 | `numTurns` | `number` |  | yes |
@@ -534,7 +534,7 @@ EventResult is emitted when the task reaches a terminal state.
 | `subtype` | `string` |  | yes |
 | `isError` | `boolean` |  | yes |
 | `result` | `string` |  | yes |
-| `diffStat` | `DiffFileStat[]` |  |  |
+| `diffStat` | `DiffStat` |  |  |
 | `totalCostUSD` | `number` |  | yes |
 | `duration` | `number` | Seconds. | yes |
 | `durationAPI` | `number` | Seconds. | yes |
@@ -584,7 +584,7 @@ EventDiffStat is emitted when the relay reports updated diff statistics.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `diffStat` | `DiffFileStat[]` |  |  |
+| `diffStat` | `DiffStat` |  |  |
 
 ### EventError
 
@@ -793,7 +793,7 @@ SyncResp is the response for POST /api/v1/tasks/{id}/sync.
 |-------|------|-------------|----------|
 | `status` | `string` | "synced", "blocked", or "empty" | yes |
 | `branch` | `string` |  |  |
-| `diffStat` | `DiffFileStat[]` |  |  |
+| `diffStat` | `DiffStat` |  |  |
 | `safetyIssues` | `SafetyIssue[]` |  |  |
 | `prNumber` | `number` | non-zero if a PR/MR was created |  |
 

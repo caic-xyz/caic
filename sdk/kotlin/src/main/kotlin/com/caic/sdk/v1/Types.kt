@@ -126,6 +126,8 @@ object ErrorCodes {
     const val InternalError = "INTERNAL_ERROR"
 }
 
+typealias DiffStat = List<DiffFileStat>
+
 /** Config reports server capabilities to the frontend. */
 @Serializable
 data class Config(
@@ -310,7 +312,7 @@ data class Task(
     val repos: List<TaskRepo>? = null,
     val state: String,
     val stateUpdatedAt: Instant,
-    val diffStat: List<DiffFileStat>? = null,
+    val diffStat: DiffStat? = null,
     @SerialName("costUSD") val costUSD: Double,
     val duration: Double,
     val numTurns: Int,
@@ -453,7 +455,7 @@ data class EventResult(
     val subtype: String,
     val isError: Boolean,
     val result: String,
-    val diffStat: List<DiffFileStat>? = null,
+    val diffStat: DiffStat? = null,
     @SerialName("totalCostUSD") val totalCostUSD: Double,
     val duration: Double,
     @SerialName("durationAPI") val durationAPI: Double,
@@ -486,7 +488,7 @@ data class EventTodo(
 
 /** EventDiffStat is emitted when the relay reports updated diff statistics. */
 @Serializable
-data class EventDiffStat(val diffStat: List<DiffFileStat>? = null)
+data class EventDiffStat(val diffStat: DiffStat? = null)
 
 /** EventError is emitted when the backend fails to parse an agent output line. */
 @Serializable
@@ -643,7 +645,7 @@ data class SafetyIssue(
 data class SyncResp(
     val status: String,
     val branch: String? = null,
-    val diffStat: List<DiffFileStat>? = null,
+    val diffStat: DiffStat? = null,
     val safetyIssues: List<SafetyIssue>? = null,
     val prNumber: Int? = null,
 )

@@ -129,7 +129,7 @@ export interface EventResult {
   subtype: string;
   isError: boolean;
   result: string;
-  diffStat?: DiffFileStat[];
+  diffStat?: DiffStat;
   totalCostUSD: number /* float64 */;
   /** Seconds. */
   duration: number /* float64 */;
@@ -168,7 +168,7 @@ export interface EventTodo {
 
 /** EventDiffStat is emitted when the relay reports updated diff statistics. */
 export interface EventDiffStat {
-  diffStat?: DiffFileStat[];
+  diffStat?: DiffStat;
 }
 
 /** EventError is emitted when the backend fails to parse an agent output line. */
@@ -359,9 +359,7 @@ export type SyncTarget = string;
 export const SyncTargetBranch: SyncTarget = "branch";
 export const SyncTargetDefault: SyncTarget = "default";
 
-/**
- * DiffStat summarises the changes in a branch relative to its base.
- */
+/** DiffStat summarises the changes in a branch relative to its base. */
 export type DiffStat = DiffFileStat[];
 
 /** Config reports server capabilities to the frontend. */
@@ -590,7 +588,7 @@ export interface Task {
   state: string;
   /** When the task state last changed. */
   stateUpdatedAt: ISOTimestamp;
-  diffStat?: DiffFileStat[];
+  diffStat?: DiffStat;
   costUSD: number /* float64 */;
   /** Seconds. */
   duration: number /* float64 */;
@@ -713,7 +711,7 @@ export interface SyncResp {
   /** "synced", "blocked", or "empty" */
   status: string;
   branch?: string;
-  diffStat?: DiffFileStat[];
+  diffStat?: DiffStat;
   safetyIssues?: SafetyIssue[];
   /** non-zero if a PR/MR was created */
   prNumber?: number /* int */;
@@ -890,11 +888,13 @@ export interface VoiceRTCAnswerResp {
   sessionID: string;
 }
 
-/**
- * EmptyReq is used for endpoints that take no request body.
- */
-export type EmptyReq = any /* dto.EmptyReq */;
-/**
- * ErrorResponse is the JSON envelope for error responses.
- */
-export type ErrorResponse = any /* dto.ErrorResponse */;
+export interface ErrorDetails {
+  code: string;
+  message: string;
+}
+
+export interface ErrorResponse {
+  error: ErrorDetails;
+  details?: { [key: string]: any /* json.RawMessage */};
+}
+

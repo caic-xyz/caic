@@ -25,12 +25,6 @@ import (
 
 var pathParamRe = regexp.MustCompile(`\{(\w+)\}`)
 
-// skipErrorResponse is the skip set for TS generation, which emits
-// dto.ErrorResponse as `any` instead of a generated struct.
-var skipErrorResponse = map[reflect.Type]struct{}{
-	reflect.TypeFor[dto.ErrorResponse](): {},
-}
-
 // Error code constants.
 // errorCodeDefs is the single source of truth for all API error codes.
 // Kotlin/Swift constant names are derived from the code value
@@ -176,6 +170,19 @@ func loadDocs() (*docRegistry, error) {
 						stringAliases[typeSpec.Name.Name] = fn
 						reg.typeFile[typeSpec.Name.Name] = fn
 					}
+				case *ast.ArrayType:
+					// Named slice type.
+					fn := filepath.Base(fset.Position(typeSpec.Pos()).Filename)
+					reg.typeFile[typeSpec.Name.Name] = fn
+					var doc string
+					if typeSpec.Doc != nil {
+						doc = typeSpec.Doc.Text()
+					} else if genDecl.Doc != nil && len(genDecl.Specs) == 1 {
+						doc = genDecl.Doc.Text()
+					}
+					if doc = strings.TrimSpace(doc); doc != "" {
+						reg.typeDoc[typeSpec.Name.Name] = doc
+					}
 				}
 			}
 		}
@@ -276,9 +283,8 @@ func formatBlockDoc(doc, indent string) string {
 }
 
 // walkSDKTypes traverses struct types reachable from seeds in post-order
-// (leaves first), returning only dto or dto/v1 struct types. Types in skip
-// are excluded entirely (neither emitted nor traversed).
-func walkSDKTypes(seeds []reflect.Type, skip map[reflect.Type]struct{}) []reflect.Type {
+// (leaves first), returning only dto or dto/v1 struct types.
+func walkSDKTypes(seeds []reflect.Type) []reflect.Type {
 	seen := map[reflect.Type]struct{}{}
 	var order []reflect.Type
 
@@ -298,9 +304,6 @@ func walkSDKTypes(seeds []reflect.Type, skip map[reflect.Type]struct{}) []reflec
 		if t.Kind() != reflect.Struct || !isSDKPkg(t.PkgPath()) {
 			return
 		}
-		if _, ok := skip[t]; ok {
-			return
-		}
 		if _, ok := seen[t]; ok {
 			return
 		}
@@ -313,6 +316,30 @@ func walkSDKTypes(seeds []reflect.Type, skip map[reflect.Type]struct{}) []reflec
 
 	for _, t := range seeds {
 		walk(t)
+	}
+	return order
+}
+
+// collectNamedSlices returns named slice types from SDK packages that appear
+// as fields in the given struct types.
+func collectNamedSlices(structs []sdkType) []reflect.Type {
+	seen := map[reflect.Type]struct{}{}
+	var order []reflect.Type
+	for _, ks := range structs {
+		for i := range ks.t.NumField() {
+			ft := ks.t.Field(i).Type
+			if ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
+			if ft.Kind() != reflect.Slice || !isSDKPkg(ft.PkgPath()) {
+				continue
+			}
+			if _, ok := seen[ft]; ok {
+				continue
+			}
+			seen[ft] = struct{}{}
+			order = append(order, ft)
+		}
 	}
 	return order
 }
@@ -388,7 +415,7 @@ func discoverSSEStructs() []sdkType {
 		reflect.TypeFor[v1.TaskListEvent](),
 		reflect.TypeFor[v1.UsageResp](),
 	}
-	order := walkSDKTypes(seeds, nil)
+	order := walkSDKTypes(seeds)
 	result := make([]sdkType, len(order))
 	for i, t := range order {
 		result[i] = sdkType{t: t}
@@ -455,7 +482,7 @@ func writeTSSSEMethod(b *strings.Builder, r *v1.Route, params []string) {
 // types and returns them in dependency order (leaves first).
 func discoverKotlinStructs() []sdkType {
 	seeds := append(routeSeedTypes(), reflect.TypeFor[dto.ErrorResponse]())
-	order := walkSDKTypes(seeds, nil)
+	order := walkSDKTypes(seeds)
 	result := make([]sdkType, len(order))
 	for i, t := range order {
 		result[i] = sdkType{t: t, comment: sectionComments[t.Name()]}
@@ -824,12 +851,6 @@ func docGroupRoutes(routes []v1.Route) []docRouteGroup {
 	return result
 }
 
-// discoverDocTypes returns all dto struct types reachable from Routes in
-// dependency order (leaves first).
-func discoverDocTypes() []reflect.Type {
-	return walkSDKTypes(routeSeedTypes(), nil)
-}
-
 // goTypeToDoc maps a Go reflect.Type to a TypeScript-style string for docs.
 func goTypeToDoc(t reflect.Type) string {
 	if t.Kind() == reflect.Pointer {
@@ -851,6 +872,9 @@ func goTypeToDoc(t reflect.Type) string {
 	case reflect.Bool:
 		return "boolean"
 	case reflect.Slice:
+		if isSDKPkg(t.PkgPath()) {
+			return t.Name() // Named slice.
+		}
 		return goTypeToDoc(t.Elem()) + "[]"
 	case reflect.Struct:
 		return t.Name()
@@ -917,7 +941,7 @@ func buildSwiftPath(path string, queryParams []string) string {
 // and returns them in dependency order, annotated with Swift section comments.
 func discoverSwiftStructs() []sdkType {
 	seeds := append(routeSeedTypes(), reflect.TypeFor[dto.ErrorResponse]())
-	order := walkSDKTypes(seeds, nil)
+	order := walkSDKTypes(seeds)
 	result := make([]sdkType, len(order))
 	for i, t := range order {
 		result[i] = sdkType{t: t, comment: sectionComments[t.Name()]}
@@ -1148,10 +1172,11 @@ type docRegistry struct {
 	aliasNames map[string]struct{}          // set of alias type names for all target languages
 }
 
-// discoverTSStructs walks route types, skipping ErrorResponse, and annotates
+// discoverTSStructs walks route types and ErrorResponse, and annotates
 // each struct with its source file for section grouping.
 func (d *docRegistry) discoverTSStructs() []sdkType {
-	order := walkSDKTypes(routeSeedTypes(), skipErrorResponse)
+	seeds := append(routeSeedTypes(), reflect.TypeFor[dto.ErrorResponse]())
+	order := walkSDKTypes(seeds)
 	result := make([]sdkType, len(order))
 	for i, t := range order {
 		result[i] = sdkType{t: t, comment: d.typeFile[t.Name()]}
@@ -1198,6 +1223,9 @@ func (d *docRegistry) goTypeToTS(t reflect.Type) string {
 	case reflect.Bool:
 		return "boolean"
 	case reflect.Slice:
+		if isSDKPkg(t.PkgPath()) {
+			return t.Name() // Named slice.
+		}
 		return d.goTypeToTS(t.Elem()) + "[]"
 	case reflect.Map:
 		return "{ [key: " + d.goTypeToTS(t.Key()) + "]: " + d.goTypeToTS(t.Elem()) + "}"
@@ -1324,12 +1352,19 @@ func (d *docRegistry) generateTSTypes(outDir string) error {
 		seen[a.name] = struct{}{}
 	}
 
-	// DiffStat is a named slice type.
-	b.WriteString("/**\n")
-	b.WriteString(" * DiffStat summarises the changes in a branch relative to its base.\n")
-	b.WriteString(" */\n")
-	b.WriteString("export type DiffStat = DiffFileStat[];\n\n")
-	seen["DiffStat"] = struct{}{}
+	// Named slice types used as fields in discovered structs.
+	namedSlices := collectNamedSlices(allStructs)
+	for _, ns := range namedSlices {
+		name := ns.Name()
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		if doc := d.typeDoc[name]; doc != "" {
+			b.WriteString(formatBlockDoc(doc, ""))
+		}
+		fmt.Fprintf(&b, "export type %s = %s[];\n\n", name, goTypeToDoc(ns.Elem()))
+		seen[name] = struct{}{}
+	}
 
 	// Structs from types.go (and any ungrouped) in walk order.
 	for _, ks := range allStructs {
@@ -1341,16 +1376,6 @@ func (d *docRegistry) generateTSTypes(outDir string) error {
 		d.emitTSStruct(&b, ks.t)
 		b.WriteString("\n")
 	}
-
-	// ErrorResponse and EmptyReq type aliases (from dto package, not v1).
-	b.WriteString("/**\n")
-	b.WriteString(" * EmptyReq is used for endpoints that take no request body.\n")
-	b.WriteString(" */\n")
-	b.WriteString("export type EmptyReq = any /* dto.EmptyReq */;\n")
-	b.WriteString("/**\n")
-	b.WriteString(" * ErrorResponse is the JSON envelope for error responses.\n")
-	b.WriteString(" */\n")
-	b.WriteString("export type ErrorResponse = any /* dto.ErrorResponse */;\n")
 
 	return os.WriteFile(filepath.Join(outDir, "types.gen.ts"), []byte(b.String()), 0o600)
 }
@@ -1716,6 +1741,9 @@ func (d *docRegistry) goTypeToKotlin(t reflect.Type) string {
 	case reflect.Bool:
 		return "Boolean"
 	case reflect.Slice:
+		if isSDKPkg(t.PkgPath()) {
+			return t.Name() // Named slice.
+		}
 		return "List<" + d.goTypeToKotlin(t.Elem()) + ">"
 	case reflect.Map:
 		return "Map<" + d.goTypeToKotlin(t.Key()) + ", " + d.goTypeToKotlin(t.Elem()) + ">"
@@ -1844,7 +1872,14 @@ func (d *docRegistry) writeKotlinTypes(outDir string) error {
 	b.WriteString("}\n\n")
 
 	// Structs: auto-discovered from route types and their transitive fields.
-	for _, ks := range discoverKotlinStructs() {
+	kcStructs := discoverKotlinStructs()
+
+	// Named slice type aliases.
+	for _, ns := range collectNamedSlices(kcStructs) {
+		fmt.Fprintf(&b, "typealias %s = List<%s>\n\n", ns.Name(), d.goTypeToKotlin(ns.Elem()))
+	}
+
+	for _, ks := range kcStructs {
 		if ks.comment != "" {
 			fmt.Fprintf(&b, "// %s\n\n", ks.comment)
 		}
@@ -1905,7 +1940,9 @@ func (d *docRegistry) generateMarkdownDoc(outDir string) error {
 
 	// Types section.
 	b.WriteString("## Types\n\n")
-	for _, t := range discoverDocTypes() {
+	// Discover all dto struct types reachable from Routes in
+	// dependency order (leaves first).
+	for _, t := range walkSDKTypes(routeSeedTypes()) {
 		d.writeDocType(&b, t)
 	}
 
@@ -1975,6 +2012,9 @@ func (d *docRegistry) goTypeToSwift(t reflect.Type) string {
 	case reflect.Bool:
 		return "Bool"
 	case reflect.Slice:
+		if isSDKPkg(t.PkgPath()) {
+			return t.Name() // Named slice.
+		}
 		return "[" + d.goTypeToSwift(t.Elem()) + "]"
 	case reflect.Map:
 		return "[" + d.goTypeToSwift(t.Key()) + ": " + d.goTypeToSwift(t.Elem()) + "]"
@@ -2086,7 +2126,17 @@ public enum JSONValue: Codable, Equatable {
 	b.WriteString("}\n\n")
 
 	// Structs.
-	for _, ks := range discoverSwiftStructs() {
+	swStructs := discoverSwiftStructs()
+
+	// Named slice type aliases.
+	for _, ns := range collectNamedSlices(swStructs) {
+		if doc := d.typeDoc[ns.Name()]; doc != "" {
+			b.WriteString(formatSwiftDoc(doc, ""))
+		}
+		fmt.Fprintf(&b, "public typealias %s = [%s]\n\n", ns.Name(), d.goTypeToSwift(ns.Elem()))
+	}
+
+	for _, ks := range swStructs {
 		if ks.comment != "" {
 			fmt.Fprintf(&b, "// %s\n\n", ks.comment)
 		}
