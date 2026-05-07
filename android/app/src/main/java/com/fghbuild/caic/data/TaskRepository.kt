@@ -43,7 +43,11 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val DELAY_CAP = 30_000L
+private const val DELAY_CAP = 5_000L
+
+private const val INITIAL_DELAY_MS = 200L
+
+private const val DELAY_MULTIPLIER = 3.0 / 2.0
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
 private fun jitteredDelay(base: Long): Long = (base * (0.75 + Math.random() * 0.5)).toLong()
@@ -260,24 +264,26 @@ class TaskRepository @Inject constructor(
         return t?.let { IOException("SSE connection failed", it) }
     }
 
-    /** Reconnecting wrapper with exponential backoff (500ms initial, 1.5x, max 30s, ±25% jitter). Stops on 401. */
+    /** Reconnecting wrapper with exponential backoff (200ms initial, 1.5×, max 5s, ±25% jitter). Stops on 401. */
     private fun taskEventsReconnecting(baseURL: String, flag: MutableStateFlow<Boolean>): Flow<List<Task>> =
         reconnectingFlow(flag) { taskListEvents(baseURL) }
 
-    /** Reconnecting wrapper with exponential backoff (500ms initial, 1.5x, max 30s, ±25% jitter). Stops on 401. */
+    /** Reconnecting wrapper with exponential backoff (200ms initial, 1.5×, max 5s, ±25% jitter). Stops on 401. */
     private fun usageEventsReconnecting(baseURL: String, flag: MutableStateFlow<Boolean>): Flow<UsageResp> =
         reconnectingFlow(flag) { usageEvents(baseURL) }
 
     private fun <T> reconnectingFlow(flag: MutableStateFlow<Boolean>, connect: () -> Flow<T>): Flow<T> = flow {
-        var delayMs = 500L
+        var delayMs = INITIAL_DELAY_MS
         while (true) {
             try {
                 connect().onEach {
-                    delayMs = 500L
+                    delayMs = INITIAL_DELAY_MS
                     flag.value = true
                     updateConnected()
                 }.collect { emit(it) }
             } catch (e: CancellationException) {
+                flag.value = false
+                updateConnected()
                 throw e
             } catch (_: SseAuthException) {
                 flag.value = false
@@ -287,7 +293,7 @@ class TaskRepository @Inject constructor(
                 flag.value = false
                 updateConnected()
                 delay(jitteredDelay(delayMs))
-                delayMs = (delayMs * 3 / 2).coerceAtMost(DELAY_CAP)
+                delayMs = (delayMs * DELAY_MULTIPLIER.toLong()).coerceAtMost(DELAY_CAP)
             }
         }
     }

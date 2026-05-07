@@ -70,6 +70,48 @@ and run against the same fake backend (`go run -tags e2e`).
 - **Screenshots**: saved to `e2e/screenshots/android/` (frontend saves to
   `e2e/screenshots/frontend/`).
 
+### Running via make (recommended)
+
+```bash
+make android-e2e
+```
+
+This runs `scripts/android_e2e.py` which:
+1. Builds the fake Go backend (`go build -tags e2e`).
+2. Starts it on a free port.
+3. Sets up `adb reverse tcp:PORT tcp:PORT` so the device can reach the host.
+4. Runs `./gradlew connectedAndroidTest` with the dynamic baseUrl.
+5. Pulls and converts screenshots to webp.
+
+### Running manually (from Android Studio or adb)
+
+If you need to run a specific test or debug without the full script:
+
+```bash
+# 1. Start the fake backend
+cd /home/user/src/caic
+go build -tags e2e -o /tmp/caic-e2e ./backend/cmd/caic
+mkdir -p /tmp/caic-e2e-config
+echo '[server]
+http = ":8090"' > /tmp/caic-e2e-config/config.toml
+/tmp/caic-e2e -config-dir /tmp/caic-e2e-config &
+
+# 2. Set up the reverse tunnel (device localhost → host localhost)
+adb reverse tcp:8090 tcp:8090
+
+# 3. Run the test with the baseUrl argument
+cd android
+./gradlew connectedAndroidTest \
+    -Pandroid.testInstrumentationRunnerArguments.baseUrl=http://localhost:8090
+
+# 4. Cleanup
+kill %1
+adb reverse --remove tcp:8090
+```
+
+If you use a different port, update all three places (config.toml, adb reverse,
+and the gradle argument).
+
 ### Writing a new e2e test
 
 ```kotlin

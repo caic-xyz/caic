@@ -60,6 +60,13 @@ abstract class E2eTestBase {
                     val id = settingsRepository.addServer("E2E")
                     settingsRepository.switchServer(id)
                     settingsRepository.updateServerURL(baseUrl)
+                    // stateIn processes DataStore emissions asynchronously on
+                    // Dispatchers.IO. Wait until the StateFlow reflects the
+                    // final value before launching the Activity, otherwise
+                    // the ViewModel may read an intermediate empty URL.
+                    while (settingsRepository.settings.value.serverURL != baseUrl) {
+                        delay(50)
+                    }
                 }
                 base.evaluate()
             }
