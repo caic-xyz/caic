@@ -33,46 +33,79 @@ const (
 
 var pathParamRe = regexp.MustCompile(`\{(\w+)\}`)
 
+// skipErrorResponse is the skip set for TS generation, which emits
+// dto.ErrorResponse as `any` instead of a generated struct.
+var skipErrorResponse = map[reflect.Type]struct{}{
+	reflect.TypeFor[dto.ErrorResponse](): {},
+}
+
+// Error code constants.
+// docErrorCodes maps dto error codes to their HTTP status for API doc generation.
+var docErrorCodes = []struct {
+	code   dto.ErrorCode
+	status int
+}{
+	{dto.CodeBadRequest, 400},
+	{dto.CodeNotFound, 404},
+	{dto.CodeConflict, 409},
+	{dto.CodeInternalError, 500},
+}
+
+var kotlinErrorCodes = []aliasConstant{
+	{"BadRequest", string(dto.CodeBadRequest)},
+	{"NotFound", string(dto.CodeNotFound)},
+	{"Conflict", string(dto.CodeConflict)},
+	{"InternalError", string(dto.CodeInternalError)},
+}
+
+// kotlinSectionComments maps type names to section comments emitted before
+// the struct in the generated output.
+var kotlinSectionComments = map[string]string{
+	"EventMessage": "Backend-neutral event types",
+}
+
+// Type identity values for special-case mapping in goTypeToKotlin.
+var (
+	jsonRawMessageType = reflect.TypeFor[json.RawMessage]()
+	ksidIDType         = reflect.TypeFor[ksid.ID]()
+	diffStatType       = reflect.TypeFor[v1.DiffStat]()
+	mapStringAnyType   = reflect.TypeFor[map[string]any]()
+	timeType           = reflect.TypeFor[time.Time]()
+)
+
+// swiftReservedWords is the set of Swift keywords that require backtick escaping
+// when used as property names.
+var swiftReservedWords = map[string]struct{}{
+	"init": {}, "deinit": {}, "class": {}, "struct": {}, "enum": {},
+	"extension": {}, "protocol": {}, "var": {}, "let": {}, "func": {},
+	"return": {}, "if": {}, "else": {}, "switch": {}, "case": {},
+	"default": {}, "for": {}, "in": {}, "while": {}, "repeat": {},
+	"do": {}, "try": {}, "catch": {}, "throw": {}, "throws": {},
+	"import": {}, "typealias": {}, "where": {}, "guard": {},
+	"defer": {}, "break": {}, "continue": {}, "fallthrough": {},
+	"as": {}, "is": {}, "nil": {}, "true": {}, "false": {},
+	"self": {}, "Self": {}, "super": {}, "static": {}, "operator": {},
+	"type": {},
+}
+
+// swiftErrorCodes mirrors kotlinErrorCodes for Swift output.
+var swiftErrorCodes = []aliasConstant{
+	{"badRequest", string(dto.CodeBadRequest)},
+	{"notFound", string(dto.CodeNotFound)},
+	{"conflict", string(dto.CodeConflict)},
+	{"internalError", string(dto.CodeInternalError)},
+}
+
+// swiftSectionComments mirrors kotlinSectionComments for Swift output.
+var swiftSectionComments = map[string]string{
+	"EventMessage": "Backend-neutral event types",
+}
+
 // isSDKPkg reports whether pkgPath is dto or dto/v1 — the two packages
 // whose struct types are emitted into the generated SDK.
 func isSDKPkg(pkgPath string) bool {
 	return pkgPath == reflect.TypeFor[v1.StatusResp]().PkgPath() ||
 		pkgPath == reflect.TypeFor[dto.ErrorResponse]().PkgPath()
-}
-
-// docRegistry holds parsed documentation extracted from Go source files.
-type docRegistry struct {
-	typeDoc    map[string]string            // Go type name → doc comment text
-	typeFile   map[string]string            // Go type name → source filename (e.g. "events.go")
-	fieldDoc   map[string]map[string]string // Go type name → Go field name → doc comment text
-	aliases    []aliasInfo                  // named-string types with their constants
-	aliasNames map[string]struct{}          // set of alias type names for all target languages
-}
-
-// aliasInfo describes a Go named-string type and its constant values,
-// extracted from Go source files by loadDocs.
-type aliasInfo struct {
-	name      string          // e.g. "Harness"
-	file      string          // source filename, e.g. "types.go"
-	constants []aliasConstant // enum values
-}
-
-// aliasConstant is a single enum value for a string type alias.
-type aliasConstant struct {
-	name  string // const name from Go source, e.g. "HarnessClaude"
-	value string // wire value, e.g. "claude"
-}
-
-// shortName returns the const name with the type prefix stripped
-// (e.g. "HarnessClaude" → "Claude"). Used for Kotlin/Swift.
-func (a aliasInfo) shortName(c aliasConstant) string { return strings.TrimPrefix(c.name, a.name) }
-
-// plural returns the plural form for the type's constant namespace.
-func (a aliasInfo) plural() string {
-	if strings.HasSuffix(a.name, "s") {
-		return a.name + "es"
-	}
-	return a.name + "s"
 }
 
 // loadDocs parses Go source files in the current directory and extracts
@@ -248,36 +281,6 @@ func formatBlockDoc(doc, indent string) string {
 	return b.String()
 }
 
-func main() {
-	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-}
-
-func run() error {
-	docs, err := loadDocs()
-	if err != nil {
-		return fmt.Errorf("loading docs: %w", err)
-	}
-	if err := docs.generateTSTypes(tsDir); err != nil {
-		return err
-	}
-	if err := docs.generateTS(tsDir); err != nil {
-		return err
-	}
-	if err := docs.generateTSValidate(tsDir); err != nil {
-		return err
-	}
-	if err := docs.generateKotlin(kotlinDir); err != nil {
-		return err
-	}
-	if err := docs.generateSwift(swiftDir); err != nil {
-		return err
-	}
-	return docs.generateDoc(sdkDir)
-}
-
 // walkSDKTypes traverses struct types reachable from seeds in post-order
 // (leaves first), returning only dto or dto/v1 struct types. Types in skip
 // are excluded entirely (neither emitted nor traversed).
@@ -334,221 +337,6 @@ func routeSeedTypes() []reflect.Type {
 	return seeds
 }
 
-// skipErrorResponse is the skip set for TS generation, which emits
-// dto.ErrorResponse as `any` instead of a generated struct.
-var skipErrorResponse = map[reflect.Type]struct{}{
-	reflect.TypeFor[dto.ErrorResponse](): {},
-}
-
-// discoverTSStructs walks route types, skipping ErrorResponse, and annotates
-// each struct with its source file for section grouping.
-func (d *docRegistry) discoverTSStructs() []kotlinStruct {
-	order := walkSDKTypes(routeSeedTypes(), skipErrorResponse)
-	result := make([]kotlinStruct, len(order))
-	for i, t := range order {
-		result[i] = kotlinStruct{t: t, comment: d.typeFile[t.Name()]}
-	}
-	return result
-}
-
-// goTypeToTS maps a Go reflect.Type to its TypeScript type string.
-func (d *docRegistry) goTypeToTS(t reflect.Type) string {
-	if t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-
-	switch t {
-	case jsonRawMessageType:
-		return "any /* json.RawMessage */"
-	case ksidIDType:
-		return "string"
-	case timeType:
-		return "ISOTimestamp"
-	case diffStatType:
-		return "DiffFileStat[]"
-	case mapStringAnyType:
-		return "{ [key: string]: any /* json.RawMessage */}"
-	case reflect.TypeFor[map[string]bool]():
-		return "{ [key: string]: boolean}"
-	case reflect.TypeFor[map[string]string]():
-		return "{ [key: string]: string}"
-	}
-
-	if _, ok := d.aliasNames[t.Name()]; ok {
-		return t.Name()
-	}
-
-	switch t.Kind() {
-	case reflect.String:
-		return "string"
-	case reflect.Int:
-		return "number /* int */"
-	case reflect.Int64:
-		return "number /* int64 */"
-	case reflect.Uint64:
-		return "number /* uint64 */"
-	case reflect.Float64:
-		return "number /* float64 */"
-	case reflect.Bool:
-		return "boolean"
-	case reflect.Slice:
-		return d.goTypeToTS(t.Elem()) + "[]"
-	case reflect.Map:
-		return "{ [key: " + d.goTypeToTS(t.Key()) + "]: " + d.goTypeToTS(t.Elem()) + "}"
-	case reflect.Struct:
-		return t.Name()
-	default:
-		return "any"
-	}
-}
-
-// emitTSStruct writes a TypeScript interface to b.
-func (d *docRegistry) emitTSStruct(b *strings.Builder, t reflect.Type) {
-	if doc := d.typeDoc[t.Name()]; doc != "" {
-		b.WriteString(formatBlockDoc(doc, ""))
-	}
-	name := t.Name()
-	fmt.Fprintf(b, "export interface %s {\n", name)
-	for i := range t.NumField() {
-		sf := t.Field(i)
-		if !sf.IsExported() {
-			continue
-		}
-		tag := sf.Tag.Get("json")
-		if tag == "-" {
-			continue
-		}
-		jsonName, opts := parseJSONTag(tag)
-		if jsonName == "" {
-			jsonName = sf.Name
-		}
-		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
-		isPtr := sf.Type.Kind() == reflect.Pointer
-		optional := isPtr || (omit && !isPtr)
-		tsType := d.goTypeToTS(sf.Type)
-
-		// Field-level doc: block comment for multi-line, inline for single-line.
-		fdoc := ""
-		if fdocs, ok := d.fieldDoc[name]; ok {
-			fdoc = fdocs[sf.Name]
-		}
-		if fdoc != "" {
-			if strings.Contains(fdoc, "\n") {
-				b.WriteString(formatBlockDoc(fdoc, "  "))
-			} else {
-				fmt.Fprintf(b, "  /** %s */\n", fdoc)
-			}
-		}
-
-		if optional {
-			fmt.Fprintf(b, "  %s?: %s;\n", jsonName, tsType)
-		} else {
-			fmt.Fprintf(b, "  %s: %s;\n", jsonName, tsType)
-		}
-	}
-	b.WriteString("}\n")
-}
-
-// generateTSTypes generates sdk/ts/v1/types.gen.ts from the Go DTO structs.
-func (d *docRegistry) generateTSTypes(outDir string) error {
-	var b strings.Builder
-	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\n")
-	b.WriteString("/** ISO 8601 timestamp string (e.g. \"2026-04-13T12:00:00Z\"). */\n")
-	b.WriteString("export type ISOTimestamp = string & { readonly __brand: \"ISOTimestamp\" };\n\n")
-
-	allStructs := d.discoverTSStructs()
-
-	// Group structs by source file for section headers.
-	structsBySource := map[string][]kotlinStruct{}
-	for _, ks := range allStructs {
-		src := ks.comment
-		if src == "" {
-			src = "types.go"
-		}
-		structsBySource[src] = append(structsBySource[src], ks)
-	}
-
-	// We use the order from allStructs (walk order, leaves-first within each
-	// source file group) and filter for the current source file.
-	seen := map[string]struct{}{}
-
-	// Emit events.go section with its type aliases first.
-	if _, ok := structsBySource["events.go"]; ok {
-		b.WriteString("//////////\n")
-		b.WriteString("// source: events.go\n")
-		b.WriteString("/*\n")
-		b.WriteString("SSE event types sent to the frontend for task event streams.\n")
-		b.WriteString("*/\n\n")
-
-		for i := range d.aliases {
-			a := &d.aliases[i]
-			if a.file != "events.go" {
-				continue
-			}
-			if _, ok := seen[a.name]; ok {
-				continue
-			}
-			emitTSAlias(&b, *a)
-			seen[a.name] = struct{}{}
-		}
-
-		// Then structs in walk order, filtered to events.go.
-		for _, ks := range allStructs {
-			name := ks.t.Name()
-			if _, ok := seen[name]; ok || ks.comment != "events.go" {
-				continue
-			}
-			seen[name] = struct{}{}
-			d.emitTSStruct(&b, ks.t)
-			b.WriteString("\n")
-		}
-		delete(structsBySource, "events.go")
-	}
-
-	// Emit types.go section.
-	b.WriteString("\n//////////\n")
-	b.WriteString("// source: types.go\n\n")
-
-	// Type aliases from types.go (all non-events aliases).
-	for _, a := range d.aliases {
-		if _, ok := seen[a.name]; ok {
-			continue
-		}
-		emitTSAlias(&b, a)
-		seen[a.name] = struct{}{}
-	}
-
-	// DiffStat is a named slice type.
-	b.WriteString("/**\n")
-	b.WriteString(" * DiffStat summarises the changes in a branch relative to its base.\n")
-	b.WriteString(" */\n")
-	b.WriteString("export type DiffStat = DiffFileStat[];\n\n")
-	seen["DiffStat"] = struct{}{}
-
-	// Structs from types.go (and any ungrouped) in walk order.
-	for _, ks := range allStructs {
-		name := ks.t.Name()
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		seen[name] = struct{}{}
-		d.emitTSStruct(&b, ks.t)
-		b.WriteString("\n")
-	}
-
-	// ErrorResponse and EmptyReq type aliases (from dto package, not v1).
-	b.WriteString("/**\n")
-	b.WriteString(" * EmptyReq is used for endpoints that take no request body.\n")
-	b.WriteString(" */\n")
-	b.WriteString("export type EmptyReq = any /* dto.EmptyReq */;\n")
-	b.WriteString("/**\n")
-	b.WriteString(" * ErrorResponse is the JSON envelope for error responses.\n")
-	b.WriteString(" */\n")
-	b.WriteString("export type ErrorResponse = any /* dto.ErrorResponse */;\n")
-
-	return os.WriteFile(filepath.Join(outDir, "types.gen.ts"), []byte(b.String()), 0o600)
-}
-
 // emitTSAlias writes a type alias with its const values.
 func emitTSAlias(b *strings.Builder, a aliasInfo) {
 	fmt.Fprintf(b, "export type %s = string;\n", a.name)
@@ -561,40 +349,6 @@ func emitTSAlias(b *strings.Builder, a aliasInfo) {
 		fmt.Fprintf(b, "export const %s: %s = %q;\n", c.name, a.name, c.value)
 	}
 	b.WriteString("\n")
-}
-
-// tsFieldValidator returns a TypeScript expression that validates a value
-// at the given pathExpr. pathLit is a string literal for error messages.
-func (d *docRegistry) tsFieldValidator(t reflect.Type, pathExpr, pathLit string) string {
-	if t.Kind() == reflect.Pointer {
-		return d.tsFieldValidator(t.Elem(), pathExpr, pathLit)
-	}
-	if t == jsonRawMessageType {
-		return tsPrimitiveValidator(t, pathExpr, pathLit)
-	}
-	if t.Kind() == reflect.Slice {
-		elemFn := tsElemValidatorFunc(t.Elem(), pathLit+"[i]")
-		elemTS := d.goTypeToTS(t.Elem())
-		return fmt.Sprintf("validateArray(%s, %q, %s) as %s[]", pathExpr, pathLit, elemFn, elemTS)
-	}
-
-	if t.Kind() == reflect.Map {
-		valFn := tsElemValidatorFunc(t.Elem(), pathLit+"[k]")
-		keyTS := d.goTypeToTS(t.Key())
-		valTS := d.goTypeToTS(t.Elem())
-		return fmt.Sprintf("validateRecord(%s, %q, %s) as { [key: %s]: %s }", pathExpr, pathLit, valFn, keyTS, valTS)
-	}
-	if t.Kind() == reflect.Struct && isSDKPkg(t.PkgPath()) {
-		return fmt.Sprintf("validate%s(%s)", t.Name(), pathExpr)
-	}
-	return tsPrimitiveValidator(t, pathExpr, pathLit)
-}
-
-// tsFieldOptValidator is like tsFieldValidator but wraps the result to
-// return undefined when the value is null/undefined.
-func (d *docRegistry) tsFieldOptValidator(t reflect.Type, pathExpr, pathLit string) string {
-	inner := d.tsFieldValidator(t, pathExpr, pathLit)
-	return fmt.Sprintf("(%s === undefined || %s === null ? undefined : %s)", pathExpr, pathExpr, inner)
 }
 
 // tsPrimitiveValidator returns the validator expression for a primitive/special type.
@@ -632,43 +386,6 @@ func tsElemValidatorFunc(t reflect.Type, pathLit string) string {
 	return "(v) => " + tsPrimitiveValidator(t, "v", pathLit)
 }
 
-// emitTSValidator writes a validateXxx(raw: unknown): Xxx function for a struct.
-func (d *docRegistry) emitTSValidator(b *strings.Builder, t reflect.Type) {
-	name := t.Name()
-	fmt.Fprintf(b, "export function validate%s(raw: unknown): %s {\n", name, name)
-	fmt.Fprintf(b, "  const obj = asObject(raw, %q);\n", name)
-	fmt.Fprintf(b, "  return {\n")
-
-	for i := range t.NumField() {
-		sf := t.Field(i)
-		if !sf.IsExported() {
-			continue
-		}
-		tag := sf.Tag.Get("json")
-		if tag == "-" {
-			continue
-		}
-		jsonName, opts := parseJSONTag(tag)
-		if jsonName == "" {
-			jsonName = sf.Name
-		}
-		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
-		isPtr := sf.Type.Kind() == reflect.Pointer
-		optional := isPtr || (omit && !isPtr)
-
-		pathExpr := fmt.Sprintf("obj[%q]", jsonName)
-		pathLit := fmt.Sprintf("%s.%s", name, jsonName)
-		if optional {
-			fmt.Fprintf(b, "    %s: %s,\n", jsonName, d.tsFieldOptValidator(sf.Type, pathExpr, pathLit))
-		} else {
-			fmt.Fprintf(b, "    %s: %s,\n", jsonName, d.tsFieldValidator(sf.Type, pathExpr, pathLit))
-		}
-	}
-
-	b.WriteString("  };\n")
-	b.WriteString("}\n\n")
-}
-
 // discoverSSEStructs returns the structs reachable from the SSE event types
 // (EventMessage, TaskListEvent, UsageResp) in dependency order.
 func discoverSSEStructs() []kotlinStruct {
@@ -683,264 +400,6 @@ func discoverSSEStructs() []kotlinStruct {
 		result[i] = kotlinStruct{t: t}
 	}
 	return result
-}
-
-// generateTSValidate generates sdk/ts/v1/validate.gen.ts with runtime
-// validators for SSE-relevant DTO structs.
-func (d *docRegistry) generateTSValidate(outDir string) error {
-	var b strings.Builder
-	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\n\n")
-	b.WriteString("// Runtime schema validators for SSE payloads.\n")
-	b.WriteString("// Each validator checks structural correctness at runtime and throws\n")
-	b.WriteString("// TypeError on mismatch. Unknown kinds pass through for forward compat.\n\n")
-
-	// Collect all types referenced by validators.
-	needed := discoverSSEStructs()
-	refTypes := map[string]struct{}{}
-	for _, ks := range needed {
-		refTypes[ks.t.Name()] = struct{}{}
-	}
-	refTypes["EventMessage"] = struct{}{}
-	refTypes["TaskListEvent"] = struct{}{}
-	refTypes["UsageResp"] = struct{}{}
-	refTypes["ISOTimestamp"] = struct{}{}
-
-	if len(refTypes) > 0 {
-		sorted := make([]string, 0, len(refTypes))
-		for name := range refTypes {
-			sorted = append(sorted, name)
-		}
-		slices.Sort(sorted)
-		b.WriteString("import type { ")
-		for i, name := range sorted {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			b.WriteString(name)
-		}
-		b.WriteString(" } from \"./types.gen\";\n\n")
-	}
-
-	// Helper functions.
-	b.WriteString("// ---- helpers ----\n\n")
-	b.WriteString("function asObject(v: unknown, path: string): Record<string, unknown> {\n")
-	b.WriteString("  if (typeof v !== \"object\" || v === null || Array.isArray(v)) {\n")
-	b.WriteString("    throw new TypeError(path + \": expected object\");\n")
-	b.WriteString("  }\n")
-	b.WriteString("  return v as Record<string, unknown>;\n")
-	b.WriteString("}\n\n")
-	b.WriteString("function asString(v: unknown, path: string): string {\n")
-	b.WriteString("  if (typeof v !== \"string\") {\n")
-	b.WriteString("    throw new TypeError(path + \": expected string, got \" + typeof v);\n")
-	b.WriteString("  }\n")
-	b.WriteString("  return v;\n")
-	b.WriteString("}\n\n")
-	b.WriteString("function asNumber(v: unknown, path: string): number {\n")
-	b.WriteString("  if (typeof v !== \"number\" || Number.isNaN(v)) {\n")
-	b.WriteString("    throw new TypeError(path + \": expected number, got \" + typeof v);\n")
-	b.WriteString("  }\n")
-	b.WriteString("  return v;\n")
-	b.WriteString("}\n\n")
-	b.WriteString("function asBoolean(v: unknown, path: string): boolean {\n")
-	b.WriteString("  if (typeof v !== \"boolean\") {\n")
-	b.WriteString("    throw new TypeError(path + \": expected boolean, got \" + typeof v);\n")
-	b.WriteString("  }\n")
-	b.WriteString("  return v;\n")
-	b.WriteString("}\n\n")
-	b.WriteString("function validateArray(v: unknown, path: string, elemValidator: (v: unknown) => unknown): unknown[] {\n")
-	b.WriteString("  if (!Array.isArray(v)) {\n")
-	b.WriteString("    throw new TypeError(path + \": expected array, got \" + (v === null ? \"null\" : typeof v));\n")
-	b.WriteString("  }\n")
-	b.WriteString("  return v.map((e, i) => elemValidator(e));\n")
-	b.WriteString("}\n\n")
-	b.WriteString("function validateRecord(v: unknown, path: string, valValidator: (v: unknown) => unknown): Record<string, unknown> {\n")
-	b.WriteString("  if (typeof v !== \"object\" || v === null || Array.isArray(v)) {\n")
-	b.WriteString("    throw new TypeError(path + \": expected object, got \" + (v === null ? \"null\" : Array.isArray(v) ? \"array\" : typeof v));\n")
-	b.WriteString("  }\n")
-	b.WriteString("  const result: Record<string, unknown> = {};\n")
-	b.WriteString("  for (const k of Object.keys(v as Record<string, unknown>)) {\n")
-	b.WriteString("    result[k] = valValidator((v as Record<string, unknown>)[k]);\n")
-	b.WriteString("  }\n")
-	b.WriteString("  return result;\n")
-	b.WriteString("}\n\n")
-
-	// Generate validators for SSE-relevant structs: EventMessage sub-types,
-	// TaskListEvent's referenced types, and UsageResp's referenced types.
-	discriminated := map[string]struct{}{"EventMessage": {}, "TaskListEvent": {}, "UsageResp": {}}
-	emitted := map[string]struct{}{}
-
-	for _, ks := range needed {
-		name := ks.t.Name()
-		if _, ok := emitted[name]; ok {
-			continue
-		}
-		if _, ok := discriminated[name]; ok {
-			continue
-		}
-		emitted[name] = struct{}{}
-		d.emitTSValidator(&b, ks.t)
-	}
-
-	// EventMessage discriminated union validator.
-	b.WriteString("export function validateEventMessage(raw: unknown): EventMessage {\n")
-	b.WriteString("  const obj = asObject(raw, \"EventMessage\");\n")
-	b.WriteString("  const result: EventMessage = {\n")
-	b.WriteString("    kind: asString(obj[\"kind\"], \"EventMessage.kind\"),\n")
-	b.WriteString("    ts: asNumber(obj[\"ts\"], \"EventMessage.ts\"),\n")
-	b.WriteString("  };\n")
-	b.WriteString("  switch (result.kind) {\n")
-
-	// Build the dispatch table from EventMessage's fields.
-	evMsgType := reflect.TypeFor[v1.EventMessage]()
-	for i := range evMsgType.NumField() {
-		sf := evMsgType.Field(i)
-		jsonName, _ := parseJSONTag(sf.Tag.Get("json"))
-		if jsonName == "kind" || jsonName == "ts" {
-			continue
-		}
-		// Each field is a pointer to a struct; get the struct name.
-		fieldType := sf.Type.Elem()
-		kindValue := jsonName // The json name IS the kind value for most (e.g. "init", "text").
-		// Special case: diffStat kind is "diffStat", userInput kind is "userInput", etc.
-		// The field json names match the kind constants.
-		fmt.Fprintf(&b, "    case %q:\n", kindValue)
-		fmt.Fprintf(&b, "      result.%s = validate%s(obj[%q]);\n", jsonName, fieldType.Name(), jsonName)
-		b.WriteString("      break;\n")
-	}
-
-	b.WriteString("    // Unknown kinds pass through.\n")
-	b.WriteString("  }\n")
-	b.WriteString("  return result;\n")
-	b.WriteString("}\n\n")
-
-	// TaskListEvent discriminated union validator.
-	b.WriteString("export function validateTaskListEvent(raw: unknown): TaskListEvent {\n")
-	b.WriteString("  const obj = asObject(raw, \"TaskListEvent\");\n")
-	b.WriteString("  const kind = asString(obj[\"kind\"], \"TaskListEvent.kind\");\n")
-	b.WriteString("  const result: TaskListEvent = { kind };\n")
-	b.WriteString("  switch (kind) {\n")
-	b.WriteString("    case \"snapshot\":\n")
-	b.WriteString("      result.tasks = validateArray(obj[\"tasks\"], \"TaskListEvent.tasks\", validateTask) as Task[];\n")
-	b.WriteString("      break;\n")
-	b.WriteString("    case \"upsert\":\n")
-	b.WriteString("      result.task = validateTask(obj[\"task\"]);\n")
-	b.WriteString("      break;\n")
-	b.WriteString("    case \"patch\":\n")
-	b.WriteString("      result.patch = asObject(obj[\"patch\"], \"TaskListEvent.patch\");\n")
-	b.WriteString("      break;\n")
-	b.WriteString("    case \"delete\":\n")
-	b.WriteString("      result.id = asString(obj[\"id\"], \"TaskListEvent.id\");\n")
-	b.WriteString("      break;\n")
-	b.WriteString("    case \"repos\":\n")
-	b.WriteString("      result.repos = validateArray(obj[\"repos\"], \"TaskListEvent.repos\", validateRepo) as Repo[];\n")
-	b.WriteString("      break;\n")
-	b.WriteString("    case \"warning\":\n")
-	b.WriteString("      result.warning = asString(obj[\"warning\"], \"TaskListEvent.warning\");\n")
-	b.WriteString("      break;\n")
-	b.WriteString("    // Unknown kinds pass through.\n")
-	b.WriteString("  }\n")
-	b.WriteString("  return result;\n")
-	b.WriteString("}\n\n")
-
-	// UsageResp validator.
-	b.WriteString("export function validateUsageResp(raw: unknown): UsageResp {\n")
-	b.WriteString("  const obj = asObject(raw, \"UsageResp\");\n")
-	b.WriteString("  const result: UsageResp = {\n")
-	b.WriteString("    local: validateLocalUsage(obj[\"local\"]),\n")
-	b.WriteString("  };\n")
-	b.WriteString("  if (obj[\"providers\"] !== undefined && obj[\"providers\"] !== null) {\n")
-	b.WriteString("    result.providers = validateArray(obj[\"providers\"], \"UsageResp.providers\", validateProviderQuota) as ProviderQuota[];\n")
-	b.WriteString("  }\n")
-	b.WriteString("  return result;\n")
-	b.WriteString("}\n")
-
-	return os.WriteFile(filepath.Join(outDir, "validate.gen.ts"), []byte(b.String()), 0o600)
-}
-
-// generateTS generates the TypeScript API client as a createApiClient factory.
-func (*docRegistry) generateTS(outDir string) error {
-	// Collect all referenced types for the import statement.
-	types := map[string]struct{}{}
-	validators := map[string]struct{}{}
-	for i := range v1.Routes {
-		r := &v1.Routes[i]
-		if n := r.ReqName(); n != "" {
-			types[n] = struct{}{}
-		}
-		types[r.RespName()] = struct{}{}
-		if r.IsSSE {
-			validators["validate"+r.RespName()] = struct{}{}
-		}
-	}
-	types["ErrorResponse"] = struct{}{}
-
-	sorted := sortedKeys(types)
-
-	var b strings.Builder
-	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\n")
-	fmt.Fprintf(&b, "import type { %s } from \"./types.gen\";\n", strings.Join(sorted, ", "))
-	if len(validators) > 0 {
-		sortedVal := sortedKeys(validators)
-		fmt.Fprintf(&b, "import { %s } from \"./validate.gen\";\n", strings.Join(sortedVal, ", "))
-	}
-	b.WriteString("\n")
-
-	// APIError class.
-	b.WriteString(`export class APIError extends Error {
-  constructor(
-    public status: number,
-    public code: string,
-    public details?: Record<string, unknown>,
-  ) {
-    super(code);
-  }
-}
-
-`)
-
-	// FetchFn type and makeRequester factory.
-	b.WriteString(`export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
-
-function makeRequester(fetchFn: FetchFn) {
-  return async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const init: RequestInit = { method, headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(60_000) };
-    if (body !== undefined) init.body = JSON.stringify(body);
-    const res = await fetchFn(path, init);
-    if (!res.ok) {
-      const err = (await res.json()) as ErrorResponse;
-      const e = new APIError(res.status, err.error.code, err.details);
-      e.message = err.error.message;
-      throw e;
-    }
-    return res.json() as Promise<T>;
-  };
-}
-
-`)
-
-	// createApiClient factory function wrapping all methods.
-	b.WriteString("// createApiClient returns an API client bound to the given fetch function.\n")
-	b.WriteString("// When fetchFn is omitted, globalThis.fetch is used.\n")
-	b.WriteString("// eslint-disable-next-line @typescript-eslint/no-explicit-any\n")
-	b.WriteString("export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bind(globalThis)) {\n")
-	b.WriteString("  const request = makeRequester(fetchFn);\n")
-	b.WriteString("  return {\n")
-
-	// One method per route.
-	for i := range v1.Routes {
-		r := &v1.Routes[i]
-		params := extractPathParams(r.Path)
-		if r.IsSSE {
-			writeTSSSEMethod(&b, r, params)
-		} else {
-			writeTSJSONMethod(&b, r, params)
-		}
-	}
-
-	b.WriteString("  };\n")
-	b.WriteString("}\n")
-
-	return os.WriteFile(filepath.Join(outDir, "api.gen.ts"), []byte(b.String()), 0o600)
 }
 
 func writeTSJSONMethod(b *strings.Builder, r *v1.Route, params []string) {
@@ -998,62 +457,6 @@ func writeTSSSEMethod(b *strings.Builder, r *v1.Route, params []string) {
 	b.WriteString("    },\n")
 }
 
-// generateKotlin generates Types.kt and ApiClient.kt in outDir.
-func (d *docRegistry) generateKotlin(outDir string) error {
-	if err := os.MkdirAll(outDir, 0o750); err != nil {
-		return err
-	}
-	if err := d.writeKotlinTypes(outDir); err != nil {
-		return err
-	}
-	return writeKotlinClient(outDir)
-}
-
-// kotlinTypeAlias describes a `typealias X = String` with an optional
-// companion object holding constants.
-
-// kotlinStruct wraps a reflect.Type with an optional section comment that
-// appears before the struct in the generated output.
-type kotlinStruct struct {
-	t       reflect.Type
-	comment string // Emitted as `// comment` before the struct.
-}
-
-// kotlinField holds parsed information about a single struct field for Kotlin
-// code generation.
-type kotlinField struct {
-	jsonName   string // JSON key from the struct tag.
-	ktName     string // Kotlin property name (same as jsonName).
-	ktType     string // Kotlin type (e.g. "String", "List<Foo>").
-	nullable   bool   // Whether the field is T? = null.
-	serialName string // Non-empty when @SerialName annotation is needed.
-}
-
-// Error code constants.
-// docErrorCodes maps dto error codes to their HTTP status for API doc generation.
-var docErrorCodes = []struct {
-	code   dto.ErrorCode
-	status int
-}{
-	{dto.CodeBadRequest, 400},
-	{dto.CodeNotFound, 404},
-	{dto.CodeConflict, 409},
-	{dto.CodeInternalError, 500},
-}
-
-var kotlinErrorCodes = []aliasConstant{
-	{"BadRequest", string(dto.CodeBadRequest)},
-	{"NotFound", string(dto.CodeNotFound)},
-	{"Conflict", string(dto.CodeConflict)},
-	{"InternalError", string(dto.CodeInternalError)},
-}
-
-// kotlinSectionComments maps type names to section comments emitted before
-// the struct in the generated output.
-var kotlinSectionComments = map[string]string{
-	"EventMessage": "Backend-neutral event types",
-}
-
 // discoverKotlinStructs walks the dto struct types reachable from route
 // types and returns them in dependency order (leaves first).
 func discoverKotlinStructs() []kotlinStruct {
@@ -1064,104 +467,6 @@ func discoverKotlinStructs() []kotlinStruct {
 		result[i] = kotlinStruct{t: t, comment: kotlinSectionComments[t.Name()]}
 	}
 	return result
-}
-
-// Type identity values for special-case mapping in goTypeToKotlin.
-var (
-	jsonRawMessageType = reflect.TypeFor[json.RawMessage]()
-	ksidIDType         = reflect.TypeFor[ksid.ID]()
-	diffStatType       = reflect.TypeFor[v1.DiffStat]()
-	mapStringAnyType   = reflect.TypeFor[map[string]any]()
-	timeType           = reflect.TypeFor[time.Time]()
-)
-
-func (d *docRegistry) goTypeToKotlin(t reflect.Type) string {
-	// Unwrap pointer — nullability is handled by the caller.
-	if t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-
-	// Special cases.
-	switch t {
-	case jsonRawMessageType:
-		return "JsonElement"
-	case ksidIDType:
-		return "String"
-	case timeType:
-		return "Instant"
-	case diffStatType:
-		return "List<DiffFileStat>"
-	case mapStringAnyType:
-		return "Map<String, JsonElement>"
-	}
-
-	// Named string aliases (Harness, EventKind).
-	if _, ok := d.aliasNames[t.Name()]; ok {
-		return t.Name()
-	}
-
-	switch t.Kind() {
-	case reflect.String:
-		return "String"
-	case reflect.Int:
-		return "Int"
-	case reflect.Int64:
-		return "Long"
-	case reflect.Uint64:
-		return "Long" // JSON numbers; unsigned semantics not enforced at wire level.
-	case reflect.Float64:
-		return "Double"
-	case reflect.Bool:
-		return "Boolean"
-	case reflect.Slice:
-		return "List<" + d.goTypeToKotlin(t.Elem()) + ">"
-	case reflect.Map:
-		return "Map<" + d.goTypeToKotlin(t.Key()) + ", " + d.goTypeToKotlin(t.Elem()) + ">"
-	case reflect.Struct:
-		return t.Name()
-	default:
-		return t.Name()
-	}
-}
-
-// parseStructFields extracts kotlinField entries from a reflect.Type.
-func (d *docRegistry) parseStructFields(t reflect.Type) []kotlinField {
-	fields := make([]kotlinField, 0, t.NumField())
-	for i := range t.NumField() {
-		sf := t.Field(i)
-		if !sf.IsExported() {
-			continue
-		}
-		tag := sf.Tag.Get("json")
-		if tag == "-" {
-			continue
-		}
-		jsonName, opts := parseJSONTag(tag)
-		if jsonName == "" {
-			jsonName = sf.Name
-		}
-		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
-
-		ft := sf.Type
-		isPtr := ft.Kind() == reflect.Pointer
-
-		ktType := d.goTypeToKotlin(ft)
-		nullable := isPtr || (omit && !isPtr)
-
-		sn := ""
-		if needsSerialName(jsonName) {
-			sn = jsonName
-		}
-
-		fields = append(fields, kotlinField{
-			jsonName:   jsonName,
-			ktName:     jsonName,
-			ktType:     ktType,
-			nullable:   nullable,
-			serialName: sn,
-		})
-	}
-	return fields
 }
 
 // needsSerialName returns true when the JSON name contains a run of two or
@@ -1181,42 +486,6 @@ func needsSerialName(name string) bool {
 		}
 	}
 	return false
-}
-
-// emitKotlinStruct writes a @Serializable data class to b.
-func (d *docRegistry) emitKotlinStruct(b *strings.Builder, t reflect.Type) {
-	if doc := d.typeDoc[t.Name()]; doc != "" {
-		b.WriteString(formatBlockDoc(doc, ""))
-	}
-	fields := d.parseStructFields(t)
-	name := t.Name()
-
-	// Compact single-line form for structs with ≤2 fields and no @SerialName.
-	if len(fields) <= 2 && !fieldsNeedAnnotation(fields) {
-		b.WriteString("@Serializable\n")
-		fmt.Fprintf(b, "data class %s(", name)
-		for i := range fields {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			writeFieldDecl(b, &fields[i])
-		}
-		b.WriteString(")\n")
-		return
-	}
-
-	b.WriteString("@Serializable\n")
-	fmt.Fprintf(b, "data class %s(\n", name)
-	for i := range fields {
-		f := &fields[i]
-		b.WriteString("    ")
-		if f.serialName != "" {
-			fmt.Fprintf(b, "@SerialName(%q) ", f.serialName)
-		}
-		writeFieldDecl(b, f)
-		b.WriteString(",\n")
-	}
-	b.WriteString(")\n")
 }
 
 // writeFieldDecl writes a single "val name: Type" (with optional "? = null").
@@ -1245,59 +514,6 @@ func parseJSONTag(tag string) (name string, opts []string) {
 		return name, nil
 	}
 	return name, strings.Split(rest, ",")
-}
-
-func (d *docRegistry) writeKotlinTypes(outDir string) error {
-	var b strings.Builder
-	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\n")
-	b.WriteString("@file:UseSerializers(InstantSerializer::class)\n\n")
-	b.WriteString("package com.caic.sdk.v1\n\n")
-	b.WriteString("import java.time.Instant\n")
-	b.WriteString("import kotlinx.serialization.KSerializer\n")
-	b.WriteString("import kotlinx.serialization.SerialName\n")
-	b.WriteString("import kotlinx.serialization.Serializable\n")
-	b.WriteString("import kotlinx.serialization.UseSerializers\n")
-	b.WriteString("import kotlinx.serialization.descriptors.PrimitiveKind\n")
-	b.WriteString("import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor\n")
-	b.WriteString("import kotlinx.serialization.encoding.Decoder\n")
-	b.WriteString("import kotlinx.serialization.encoding.Encoder\n")
-	b.WriteString("import kotlinx.serialization.json.JsonElement\n\n")
-	// InstantSerializer: converts between ISO 8601 strings and java.time.Instant.
-	b.WriteString("/** Serializes [Instant] as an ISO 8601 string. */\n")
-	b.WriteString("object InstantSerializer : KSerializer<Instant> {\n")
-	b.WriteString("    override val descriptor = PrimitiveSerialDescriptor(\"Instant\", PrimitiveKind.STRING)\n")
-	b.WriteString("    override fun serialize(encoder: Encoder, value: Instant) = encoder.encodeString(value.toString())\n")
-	b.WriteString("    override fun deserialize(decoder: Decoder): Instant = Instant.parse(decoder.decodeString())\n")
-	b.WriteString("}\n\n")
-
-	// Type aliases with companion objects.
-	for i := range d.aliases {
-		a := &d.aliases[i]
-		fmt.Fprintf(&b, "typealias %s = String\n\n", a.name)
-		fmt.Fprintf(&b, "object %s {\n", a.plural())
-		for _, c := range a.constants {
-			fmt.Fprintf(&b, "    const val %s: %s = %q\n", a.shortName(c), a.name, c.value)
-		}
-		b.WriteString("}\n\n")
-	}
-
-	// Error codes.
-	b.WriteString("object ErrorCodes {\n")
-	for _, c := range kotlinErrorCodes {
-		fmt.Fprintf(&b, "    const val %s = %q\n", c.name, c.value)
-	}
-	b.WriteString("}\n\n")
-
-	// Structs: auto-discovered from route types and their transitive fields.
-	for _, ks := range discoverKotlinStructs() {
-		if ks.comment != "" {
-			fmt.Fprintf(&b, "// %s\n\n", ks.comment)
-		}
-		d.emitKotlinStruct(&b, ks.t)
-		b.WriteString("\n")
-	}
-
-	return os.WriteFile(filepath.Join(outDir, "Types.kt"), []byte(b.String()), 0o600)
 }
 
 func writeKotlinClient(outDir string) error {
@@ -1597,68 +813,6 @@ func buildTSPath(path string, params, queryParams []string) string {
 	return "`" + b.String() + "`"
 }
 
-// generateDoc generates sdk/API.md from the route table.
-func (d *docRegistry) generateDoc(outDir string) error {
-	var b strings.Builder
-	b.WriteString("# caic API Reference\n\n")
-	b.WriteString("<!-- Code generated by gen-api-sdk; DO NOT EDIT. -->\n\n")
-	b.WriteString("RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JSON events.\n\n")
-
-	groups := docGroupRoutes(v1.Routes)
-
-	// Route tables.
-	for _, g := range groups {
-		fmt.Fprintf(&b, "## %s\n\n", g.name)
-		b.WriteString("| Method | Path | Description | Request | Response |\n")
-		b.WriteString("|--------|------|-------------|---------|----------|\n")
-		for i := range g.routes {
-			r := &g.routes[i]
-			req := ""
-			if r.Req != nil {
-				req = "`" + r.ReqName() + "`"
-			}
-			resp := "`" + r.RespName() + "`"
-			if r.IsArray {
-				resp = "`" + r.RespName() + "[]`"
-			}
-			if r.IsSSE {
-				resp += " SSE"
-			}
-			fmt.Fprintf(&b, "| %s | `%s` | %s | %s | %s |\n", r.Method, r.Path, r.Doc, req, resp)
-		}
-		b.WriteString("\n")
-	}
-
-	// Errors section.
-	b.WriteString("## Errors\n\n")
-	b.WriteString("All errors return:\n\n")
-	b.WriteString("```json\n")
-	b.WriteString("{\n")
-	b.WriteString("  \"error\": { \"code\": \"<CODE>\", \"message\": \"...\" },\n")
-	b.WriteString("  \"details\": { ... }\n")
-	b.WriteString("}\n")
-	b.WriteString("```\n\n")
-	b.WriteString("| HTTP | Code |\n")
-	b.WriteString("|------|------|\n")
-	for _, e := range docErrorCodes {
-		fmt.Fprintf(&b, "| %d | `%s` |\n", e.status, e.code)
-	}
-	b.WriteString("\n")
-
-	// Types section.
-	b.WriteString("## Types\n\n")
-	for _, t := range discoverDocTypes() {
-		d.writeDocType(&b, t)
-	}
-
-	return os.WriteFile(filepath.Join(outDir, "API.md"), []byte(b.String()), 0o600)
-}
-
-type docRouteGroup struct {
-	name   string
-	routes []v1.Route
-}
-
 // docGroupRoutes groups routes by CategoryName(), preserving first-seen order.
 func docGroupRoutes(routes []v1.Route) []docRouteGroup {
 	seen := map[string]int{} // category name → index in result
@@ -1680,41 +834,6 @@ func docGroupRoutes(routes []v1.Route) []docRouteGroup {
 // dependency order (leaves first).
 func discoverDocTypes() []reflect.Type {
 	return walkSDKTypes(routeSeedTypes(), nil)
-}
-
-func (d *docRegistry) writeDocType(b *strings.Builder, t reflect.Type) {
-	fmt.Fprintf(b, "### %s\n\n", t.Name())
-	if typeDoc := d.typeDoc[t.Name()]; typeDoc != "" {
-		fmt.Fprintf(b, "%s\n\n", typeDoc)
-	}
-	b.WriteString("| Field | Type | Description | Required |\n")
-	b.WriteString("|-------|------|-------------|----------|\n")
-	for i := range t.NumField() {
-		sf := t.Field(i)
-		if !sf.IsExported() {
-			continue
-		}
-		tag := sf.Tag.Get("json")
-		if tag == "-" {
-			continue
-		}
-		jsonName, opts := parseJSONTag(tag)
-		if jsonName == "" {
-			jsonName = sf.Name
-		}
-		optional := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero") || sf.Type.Kind() == reflect.Pointer
-		typeName := goTypeToDoc(sf.Type)
-		req := "yes"
-		if optional {
-			req = ""
-		}
-		fieldDoc := ""
-		if fdocs, ok := d.fieldDoc[t.Name()]; ok {
-			fieldDoc = fdocs[sf.Name]
-		}
-		fmt.Fprintf(b, "| `%s` | `%s` | %s | %s |\n", jsonName, typeName, fieldDoc, req)
-	}
-	b.WriteString("\n")
 }
 
 // goTypeToDoc maps a Go reflect.Type to a TypeScript-style string for docs.
@@ -1750,82 +869,12 @@ func goTypeToDoc(t reflect.Type) string {
 	}
 }
 
-// --- Swift generation ---
-
-// swiftReservedWords is the set of Swift keywords that require backtick escaping
-// when used as property names.
-var swiftReservedWords = map[string]struct{}{
-	"init": {}, "deinit": {}, "class": {}, "struct": {}, "enum": {},
-	"extension": {}, "protocol": {}, "var": {}, "let": {}, "func": {},
-	"return": {}, "if": {}, "else": {}, "switch": {}, "case": {},
-	"default": {}, "for": {}, "in": {}, "while": {}, "repeat": {},
-	"do": {}, "try": {}, "catch": {}, "throw": {}, "throws": {},
-	"import": {}, "typealias": {}, "where": {}, "guard": {},
-	"defer": {}, "break": {}, "continue": {}, "fallthrough": {},
-	"as": {}, "is": {}, "nil": {}, "true": {}, "false": {},
-	"self": {}, "Self": {}, "super": {}, "static": {}, "operator": {},
-	"type": {},
-}
-
-// swiftErrorCodes mirrors kotlinErrorCodes for Swift output.
-var swiftErrorCodes = []aliasConstant{
-	{"badRequest", string(dto.CodeBadRequest)},
-	{"notFound", string(dto.CodeNotFound)},
-	{"conflict", string(dto.CodeConflict)},
-	{"internalError", string(dto.CodeInternalError)},
-}
-
-// swiftSectionComments mirrors kotlinSectionComments for Swift output.
-var swiftSectionComments = map[string]string{
-	"EventMessage": "Backend-neutral event types",
-}
-
 // swiftEscapeIdent wraps name in backticks if it is a Swift reserved word.
 func swiftEscapeIdent(name string) string {
 	if _, ok := swiftReservedWords[name]; ok {
 		return "`" + name + "`"
 	}
 	return name
-}
-
-// goTypeToSwift maps a Go reflect.Type to its Swift type string.
-func (d *docRegistry) goTypeToSwift(t reflect.Type) string {
-	if t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	switch t {
-	case jsonRawMessageType:
-		return "JSONValue"
-	case ksidIDType:
-		return "String"
-	case timeType:
-		return "ISOTimestamp"
-	case diffStatType:
-		return "[DiffFileStat]"
-	case mapStringAnyType:
-		return "[String: JSONValue]"
-	}
-	if _, ok := d.aliasNames[t.Name()]; ok {
-		return t.Name()
-	}
-	switch t.Kind() {
-	case reflect.String:
-		return "String"
-	case reflect.Int, reflect.Int64:
-		return "Int"
-	case reflect.Float64:
-		return "Double"
-	case reflect.Bool:
-		return "Bool"
-	case reflect.Slice:
-		return "[" + d.goTypeToSwift(t.Elem()) + "]"
-	case reflect.Map:
-		return "[" + d.goTypeToSwift(t.Key()) + ": " + d.goTypeToSwift(t.Elem()) + "]"
-	case reflect.Struct:
-		return t.Name()
-	default:
-		return t.Name()
-	}
 }
 
 // formatSwiftDoc formats a doc string as Swift triple-slash documentation comments.
@@ -1872,46 +921,6 @@ func buildSwiftPath(path string, queryParams []string) string {
 	return "\"" + b.String() + "\""
 }
 
-// emitSwiftStruct writes a public Codable struct to b.
-func (d *docRegistry) emitSwiftStruct(b *strings.Builder, t reflect.Type) {
-	if doc := d.typeDoc[t.Name()]; doc != "" {
-		b.WriteString(formatSwiftDoc(doc, ""))
-	}
-	name := t.Name()
-	fmt.Fprintf(b, "public struct %s: Codable {\n", name)
-	for i := range t.NumField() {
-		sf := t.Field(i)
-		if !sf.IsExported() {
-			continue
-		}
-		tag := sf.Tag.Get("json")
-		if tag == "-" {
-			continue
-		}
-		jsonName, opts := parseJSONTag(tag)
-		if jsonName == "" {
-			jsonName = sf.Name
-		}
-		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
-		isPtr := sf.Type.Kind() == reflect.Pointer
-		swiftType := d.goTypeToSwift(sf.Type)
-		optional := isPtr || (omit && !isPtr)
-		swiftName := swiftEscapeIdent(jsonName)
-
-		if fdocs, ok := d.fieldDoc[name]; ok {
-			if fdoc := fdocs[sf.Name]; fdoc != "" {
-				b.WriteString(formatSwiftDoc(fdoc, "    "))
-			}
-		}
-		if optional {
-			fmt.Fprintf(b, "    public let %s: %s?\n", swiftName, swiftType)
-		} else {
-			fmt.Fprintf(b, "    public let %s: %s\n", swiftName, swiftType)
-		}
-	}
-	b.WriteString("}\n")
-}
-
 // discoverSwiftStructs walks the dto struct types reachable from route types
 // and returns them in dependency order, annotated with Swift section comments.
 func discoverSwiftStructs() []kotlinStruct {
@@ -1922,78 +931,6 @@ func discoverSwiftStructs() []kotlinStruct {
 		result[i] = kotlinStruct{t: t, comment: swiftSectionComments[t.Name()]}
 	}
 	return result
-}
-
-func (d *docRegistry) writeSwiftTypes(outDir string) error {
-	var b strings.Builder
-	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\nimport Foundation\n\n")
-	b.WriteString("/// ISO 8601 timestamp string (e.g. \"2026-04-13T12:00:00Z\").\n")
-	b.WriteString("public typealias ISOTimestamp = String\n\n")
-
-	// JSONValue: a Codable enum for arbitrary JSON (used for json.RawMessage / map[string]any fields).
-	b.WriteString(`/// A Codable representation of an arbitrary JSON value.
-public enum JSONValue: Codable, Equatable {
-    case string(String)
-    case number(Double)
-    case bool(Bool)
-    case object([String: JSONValue])
-    case array([JSONValue])
-    case null
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.singleValueContainer()
-        if c.decodeNil() { self = .null; return }
-        if let v = try? c.decode(Bool.self) { self = .bool(v); return }
-        if let v = try? c.decode(Double.self) { self = .number(v); return }
-        if let v = try? c.decode(String.self) { self = .string(v); return }
-        if let v = try? c.decode([String: JSONValue].self) { self = .object(v); return }
-        if let v = try? c.decode([JSONValue].self) { self = .array(v); return }
-        throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown JSON value"))
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.singleValueContainer()
-        switch self {
-        case .string(let v): try c.encode(v)
-        case .number(let v): try c.encode(v)
-        case .bool(let v): try c.encode(v)
-        case .object(let v): try c.encode(v)
-        case .array(let v): try c.encode(v)
-        case .null: try c.encodeNil()
-        }
-    }
-}
-
-`)
-
-	// Type aliases with constant namespaces.
-	for i := range d.aliases {
-		a := &d.aliases[i]
-		fmt.Fprintf(&b, "public typealias %s = String\n\n", a.name)
-		fmt.Fprintf(&b, "public enum %s {\n", a.plural())
-		for _, c := range a.constants {
-			fmt.Fprintf(&b, "    public static let %s: %s = %q\n", a.shortName(c), a.name, c.value)
-		}
-		b.WriteString("}\n\n")
-	}
-
-	// Error codes.
-	b.WriteString("public enum ErrorCodes {\n")
-	for _, c := range swiftErrorCodes {
-		fmt.Fprintf(&b, "    public static let %s = %q\n", c.name, c.value)
-	}
-	b.WriteString("}\n\n")
-
-	// Structs.
-	for _, ks := range discoverSwiftStructs() {
-		if ks.comment != "" {
-			fmt.Fprintf(&b, "// %s\n\n", ks.comment)
-		}
-		d.emitSwiftStruct(&b, ks.t)
-		b.WriteString("\n")
-	}
-
-	return os.WriteFile(filepath.Join(outDir, "Types.swift"), []byte(b.String()), 0o600)
 }
 
 func writeSwiftJSONFunc(b *strings.Builder, r *v1.Route, params []string) {
@@ -2210,6 +1147,995 @@ public final class ApiClient {
 	return os.WriteFile(filepath.Join(outDir, "ApiClient.swift"), []byte(b.String()), 0o600)
 }
 
+func sortedKeys(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// docRegistry holds parsed documentation extracted from Go source files.
+type docRegistry struct {
+	typeDoc    map[string]string            // Go type name → doc comment text
+	typeFile   map[string]string            // Go type name → source filename (e.g. "events.go")
+	fieldDoc   map[string]map[string]string // Go type name → Go field name → doc comment text
+	aliases    []aliasInfo                  // named-string types with their constants
+	aliasNames map[string]struct{}          // set of alias type names for all target languages
+}
+
+// discoverTSStructs walks route types, skipping ErrorResponse, and annotates
+// each struct with its source file for section grouping.
+func (d *docRegistry) discoverTSStructs() []kotlinStruct {
+	order := walkSDKTypes(routeSeedTypes(), skipErrorResponse)
+	result := make([]kotlinStruct, len(order))
+	for i, t := range order {
+		result[i] = kotlinStruct{t: t, comment: d.typeFile[t.Name()]}
+	}
+	return result
+}
+
+// goTypeToTS maps a Go reflect.Type to its TypeScript type string.
+func (d *docRegistry) goTypeToTS(t reflect.Type) string {
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	switch t {
+	case jsonRawMessageType:
+		return "any /* json.RawMessage */"
+	case ksidIDType:
+		return "string"
+	case timeType:
+		return "ISOTimestamp"
+	case diffStatType:
+		return "DiffFileStat[]"
+	case mapStringAnyType:
+		return "{ [key: string]: any /* json.RawMessage */}"
+	case reflect.TypeFor[map[string]bool]():
+		return "{ [key: string]: boolean}"
+	case reflect.TypeFor[map[string]string]():
+		return "{ [key: string]: string}"
+	}
+
+	if _, ok := d.aliasNames[t.Name()]; ok {
+		return t.Name()
+	}
+
+	switch t.Kind() {
+	case reflect.String:
+		return "string"
+	case reflect.Int:
+		return "number /* int */"
+	case reflect.Int64:
+		return "number /* int64 */"
+	case reflect.Uint64:
+		return "number /* uint64 */"
+	case reflect.Float64:
+		return "number /* float64 */"
+	case reflect.Bool:
+		return "boolean"
+	case reflect.Slice:
+		return d.goTypeToTS(t.Elem()) + "[]"
+	case reflect.Map:
+		return "{ [key: " + d.goTypeToTS(t.Key()) + "]: " + d.goTypeToTS(t.Elem()) + "}"
+	case reflect.Struct:
+		return t.Name()
+	default:
+		return "any"
+	}
+}
+
+// emitTSStruct writes a TypeScript interface to b.
+func (d *docRegistry) emitTSStruct(b *strings.Builder, t reflect.Type) {
+	if doc := d.typeDoc[t.Name()]; doc != "" {
+		b.WriteString(formatBlockDoc(doc, ""))
+	}
+	name := t.Name()
+	fmt.Fprintf(b, "export interface %s {\n", name)
+	for i := range t.NumField() {
+		sf := t.Field(i)
+		if !sf.IsExported() {
+			continue
+		}
+		tag := sf.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		jsonName, opts := parseJSONTag(tag)
+		if jsonName == "" {
+			jsonName = sf.Name
+		}
+		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
+		isPtr := sf.Type.Kind() == reflect.Pointer
+		optional := isPtr || (omit && !isPtr)
+		tsType := d.goTypeToTS(sf.Type)
+
+		// Field-level doc: block comment for multi-line, inline for single-line.
+		fdoc := ""
+		if fdocs, ok := d.fieldDoc[name]; ok {
+			fdoc = fdocs[sf.Name]
+		}
+		if fdoc != "" {
+			if strings.Contains(fdoc, "\n") {
+				b.WriteString(formatBlockDoc(fdoc, "  "))
+			} else {
+				fmt.Fprintf(b, "  /** %s */\n", fdoc)
+			}
+		}
+
+		if optional {
+			fmt.Fprintf(b, "  %s?: %s;\n", jsonName, tsType)
+		} else {
+			fmt.Fprintf(b, "  %s: %s;\n", jsonName, tsType)
+		}
+	}
+	b.WriteString("}\n")
+}
+
+// generateTSTypes generates sdk/ts/v1/types.gen.ts from the Go DTO structs.
+func (d *docRegistry) generateTSTypes(outDir string) error {
+	var b strings.Builder
+	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\n")
+	b.WriteString("/** ISO 8601 timestamp string (e.g. \"2026-04-13T12:00:00Z\"). */\n")
+	b.WriteString("export type ISOTimestamp = string & { readonly __brand: \"ISOTimestamp\" };\n\n")
+
+	allStructs := d.discoverTSStructs()
+
+	// Group structs by source file for section headers.
+	structsBySource := map[string][]kotlinStruct{}
+	for _, ks := range allStructs {
+		src := ks.comment
+		if src == "" {
+			src = "types.go"
+		}
+		structsBySource[src] = append(structsBySource[src], ks)
+	}
+
+	// We use the order from allStructs (walk order, leaves-first within each
+	// source file group) and filter for the current source file.
+	seen := map[string]struct{}{}
+
+	// Emit events.go section with its type aliases first.
+	if _, ok := structsBySource["events.go"]; ok {
+		b.WriteString("//////////\n")
+		b.WriteString("// source: events.go\n")
+		b.WriteString("/*\n")
+		b.WriteString("SSE event types sent to the frontend for task event streams.\n")
+		b.WriteString("*/\n\n")
+
+		for i := range d.aliases {
+			a := &d.aliases[i]
+			if a.file != "events.go" {
+				continue
+			}
+			if _, ok := seen[a.name]; ok {
+				continue
+			}
+			emitTSAlias(&b, *a)
+			seen[a.name] = struct{}{}
+		}
+
+		// Then structs in walk order, filtered to events.go.
+		for _, ks := range allStructs {
+			name := ks.t.Name()
+			if _, ok := seen[name]; ok || ks.comment != "events.go" {
+				continue
+			}
+			seen[name] = struct{}{}
+			d.emitTSStruct(&b, ks.t)
+			b.WriteString("\n")
+		}
+		delete(structsBySource, "events.go")
+	}
+
+	// Emit types.go section.
+	b.WriteString("\n//////////\n")
+	b.WriteString("// source: types.go\n\n")
+
+	// Type aliases from types.go (all non-events aliases).
+	for _, a := range d.aliases {
+		if _, ok := seen[a.name]; ok {
+			continue
+		}
+		emitTSAlias(&b, a)
+		seen[a.name] = struct{}{}
+	}
+
+	// DiffStat is a named slice type.
+	b.WriteString("/**\n")
+	b.WriteString(" * DiffStat summarises the changes in a branch relative to its base.\n")
+	b.WriteString(" */\n")
+	b.WriteString("export type DiffStat = DiffFileStat[];\n\n")
+	seen["DiffStat"] = struct{}{}
+
+	// Structs from types.go (and any ungrouped) in walk order.
+	for _, ks := range allStructs {
+		name := ks.t.Name()
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		d.emitTSStruct(&b, ks.t)
+		b.WriteString("\n")
+	}
+
+	// ErrorResponse and EmptyReq type aliases (from dto package, not v1).
+	b.WriteString("/**\n")
+	b.WriteString(" * EmptyReq is used for endpoints that take no request body.\n")
+	b.WriteString(" */\n")
+	b.WriteString("export type EmptyReq = any /* dto.EmptyReq */;\n")
+	b.WriteString("/**\n")
+	b.WriteString(" * ErrorResponse is the JSON envelope for error responses.\n")
+	b.WriteString(" */\n")
+	b.WriteString("export type ErrorResponse = any /* dto.ErrorResponse */;\n")
+
+	return os.WriteFile(filepath.Join(outDir, "types.gen.ts"), []byte(b.String()), 0o600)
+}
+
+// tsFieldValidator returns a TypeScript expression that validates a value
+// at the given pathExpr. pathLit is a string literal for error messages.
+func (d *docRegistry) tsFieldValidator(t reflect.Type, pathExpr, pathLit string) string {
+	if t.Kind() == reflect.Pointer {
+		return d.tsFieldValidator(t.Elem(), pathExpr, pathLit)
+	}
+	if t == jsonRawMessageType {
+		return tsPrimitiveValidator(t, pathExpr, pathLit)
+	}
+	if t.Kind() == reflect.Slice {
+		elemFn := tsElemValidatorFunc(t.Elem(), pathLit+"[i]")
+		elemTS := d.goTypeToTS(t.Elem())
+		return fmt.Sprintf("validateArray(%s, %q, %s) as %s[]", pathExpr, pathLit, elemFn, elemTS)
+	}
+
+	if t.Kind() == reflect.Map {
+		valFn := tsElemValidatorFunc(t.Elem(), pathLit+"[k]")
+		keyTS := d.goTypeToTS(t.Key())
+		valTS := d.goTypeToTS(t.Elem())
+		return fmt.Sprintf("validateRecord(%s, %q, %s) as { [key: %s]: %s }", pathExpr, pathLit, valFn, keyTS, valTS)
+	}
+	if t.Kind() == reflect.Struct && isSDKPkg(t.PkgPath()) {
+		return fmt.Sprintf("validate%s(%s)", t.Name(), pathExpr)
+	}
+	return tsPrimitiveValidator(t, pathExpr, pathLit)
+}
+
+// tsFieldOptValidator is like tsFieldValidator but wraps the result to
+// return undefined when the value is null/undefined.
+func (d *docRegistry) tsFieldOptValidator(t reflect.Type, pathExpr, pathLit string) string {
+	inner := d.tsFieldValidator(t, pathExpr, pathLit)
+	return fmt.Sprintf("(%s === undefined || %s === null ? undefined : %s)", pathExpr, pathExpr, inner)
+}
+
+// emitTSValidator writes a validateXxx(raw: unknown): Xxx function for a struct.
+func (d *docRegistry) emitTSValidator(b *strings.Builder, t reflect.Type) {
+	name := t.Name()
+	fmt.Fprintf(b, "export function validate%s(raw: unknown): %s {\n", name, name)
+	fmt.Fprintf(b, "  const obj = asObject(raw, %q);\n", name)
+	fmt.Fprintf(b, "  return {\n")
+
+	for i := range t.NumField() {
+		sf := t.Field(i)
+		if !sf.IsExported() {
+			continue
+		}
+		tag := sf.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		jsonName, opts := parseJSONTag(tag)
+		if jsonName == "" {
+			jsonName = sf.Name
+		}
+		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
+		isPtr := sf.Type.Kind() == reflect.Pointer
+		optional := isPtr || (omit && !isPtr)
+
+		pathExpr := fmt.Sprintf("obj[%q]", jsonName)
+		pathLit := fmt.Sprintf("%s.%s", name, jsonName)
+		if optional {
+			fmt.Fprintf(b, "    %s: %s,\n", jsonName, d.tsFieldOptValidator(sf.Type, pathExpr, pathLit))
+		} else {
+			fmt.Fprintf(b, "    %s: %s,\n", jsonName, d.tsFieldValidator(sf.Type, pathExpr, pathLit))
+		}
+	}
+
+	b.WriteString("  };\n")
+	b.WriteString("}\n\n")
+}
+
+// generateTSValidate generates sdk/ts/v1/validate.gen.ts with runtime
+// validators for SSE-relevant DTO structs.
+func (d *docRegistry) generateTSValidate(outDir string) error {
+	var b strings.Builder
+	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\n\n")
+	b.WriteString("// Runtime schema validators for SSE payloads.\n")
+	b.WriteString("// Each validator checks structural correctness at runtime and throws\n")
+	b.WriteString("// TypeError on mismatch. Unknown kinds pass through for forward compat.\n\n")
+
+	// Collect all types referenced by validators.
+	needed := discoverSSEStructs()
+	refTypes := map[string]struct{}{}
+	for _, ks := range needed {
+		refTypes[ks.t.Name()] = struct{}{}
+	}
+	refTypes["EventMessage"] = struct{}{}
+	refTypes["TaskListEvent"] = struct{}{}
+	refTypes["UsageResp"] = struct{}{}
+	refTypes["ISOTimestamp"] = struct{}{}
+
+	if len(refTypes) > 0 {
+		sorted := make([]string, 0, len(refTypes))
+		for name := range refTypes {
+			sorted = append(sorted, name)
+		}
+		slices.Sort(sorted)
+		b.WriteString("import type { ")
+		for i, name := range sorted {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(name)
+		}
+		b.WriteString(" } from \"./types.gen\";\n\n")
+	}
+
+	// Helper functions.
+	b.WriteString("// ---- helpers ----\n\n")
+	b.WriteString("function asObject(v: unknown, path: string): Record<string, unknown> {\n")
+	b.WriteString("  if (typeof v !== \"object\" || v === null || Array.isArray(v)) {\n")
+	b.WriteString("    throw new TypeError(path + \": expected object\");\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return v as Record<string, unknown>;\n")
+	b.WriteString("}\n\n")
+	b.WriteString("function asString(v: unknown, path: string): string {\n")
+	b.WriteString("  if (typeof v !== \"string\") {\n")
+	b.WriteString("    throw new TypeError(path + \": expected string, got \" + typeof v);\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return v;\n")
+	b.WriteString("}\n\n")
+	b.WriteString("function asNumber(v: unknown, path: string): number {\n")
+	b.WriteString("  if (typeof v !== \"number\" || Number.isNaN(v)) {\n")
+	b.WriteString("    throw new TypeError(path + \": expected number, got \" + typeof v);\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return v;\n")
+	b.WriteString("}\n\n")
+	b.WriteString("function asBoolean(v: unknown, path: string): boolean {\n")
+	b.WriteString("  if (typeof v !== \"boolean\") {\n")
+	b.WriteString("    throw new TypeError(path + \": expected boolean, got \" + typeof v);\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return v;\n")
+	b.WriteString("}\n\n")
+	b.WriteString("function validateArray(v: unknown, path: string, elemValidator: (v: unknown) => unknown): unknown[] {\n")
+	b.WriteString("  if (!Array.isArray(v)) {\n")
+	b.WriteString("    throw new TypeError(path + \": expected array, got \" + (v === null ? \"null\" : typeof v));\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return v.map((e, i) => elemValidator(e));\n")
+	b.WriteString("}\n\n")
+	b.WriteString("function validateRecord(v: unknown, path: string, valValidator: (v: unknown) => unknown): Record<string, unknown> {\n")
+	b.WriteString("  if (typeof v !== \"object\" || v === null || Array.isArray(v)) {\n")
+	b.WriteString("    throw new TypeError(path + \": expected object, got \" + (v === null ? \"null\" : Array.isArray(v) ? \"array\" : typeof v));\n")
+	b.WriteString("  }\n")
+	b.WriteString("  const result: Record<string, unknown> = {};\n")
+	b.WriteString("  for (const k of Object.keys(v as Record<string, unknown>)) {\n")
+	b.WriteString("    result[k] = valValidator((v as Record<string, unknown>)[k]);\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return result;\n")
+	b.WriteString("}\n\n")
+
+	// Generate validators for SSE-relevant structs: EventMessage sub-types,
+	// TaskListEvent's referenced types, and UsageResp's referenced types.
+	discriminated := map[string]struct{}{"EventMessage": {}, "TaskListEvent": {}, "UsageResp": {}}
+	emitted := map[string]struct{}{}
+
+	for _, ks := range needed {
+		name := ks.t.Name()
+		if _, ok := emitted[name]; ok {
+			continue
+		}
+		if _, ok := discriminated[name]; ok {
+			continue
+		}
+		emitted[name] = struct{}{}
+		d.emitTSValidator(&b, ks.t)
+	}
+
+	// EventMessage discriminated union validator.
+	b.WriteString("export function validateEventMessage(raw: unknown): EventMessage {\n")
+	b.WriteString("  const obj = asObject(raw, \"EventMessage\");\n")
+	b.WriteString("  const result: EventMessage = {\n")
+	b.WriteString("    kind: asString(obj[\"kind\"], \"EventMessage.kind\"),\n")
+	b.WriteString("    ts: asNumber(obj[\"ts\"], \"EventMessage.ts\"),\n")
+	b.WriteString("  };\n")
+	b.WriteString("  switch (result.kind) {\n")
+
+	// Build the dispatch table from EventMessage's fields.
+	evMsgType := reflect.TypeFor[v1.EventMessage]()
+	for i := range evMsgType.NumField() {
+		sf := evMsgType.Field(i)
+		jsonName, _ := parseJSONTag(sf.Tag.Get("json"))
+		if jsonName == "kind" || jsonName == "ts" {
+			continue
+		}
+		// Each field is a pointer to a struct; get the struct name.
+		fieldType := sf.Type.Elem()
+		kindValue := jsonName // The json name IS the kind value for most (e.g. "init", "text").
+		// Special case: diffStat kind is "diffStat", userInput kind is "userInput", etc.
+		// The field json names match the kind constants.
+		fmt.Fprintf(&b, "    case %q:\n", kindValue)
+		fmt.Fprintf(&b, "      result.%s = validate%s(obj[%q]);\n", jsonName, fieldType.Name(), jsonName)
+		b.WriteString("      break;\n")
+	}
+
+	b.WriteString("    // Unknown kinds pass through.\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return result;\n")
+	b.WriteString("}\n\n")
+
+	// TaskListEvent discriminated union validator.
+	b.WriteString("export function validateTaskListEvent(raw: unknown): TaskListEvent {\n")
+	b.WriteString("  const obj = asObject(raw, \"TaskListEvent\");\n")
+	b.WriteString("  const kind = asString(obj[\"kind\"], \"TaskListEvent.kind\");\n")
+	b.WriteString("  const result: TaskListEvent = { kind };\n")
+	b.WriteString("  switch (kind) {\n")
+	b.WriteString("    case \"snapshot\":\n")
+	b.WriteString("      result.tasks = validateArray(obj[\"tasks\"], \"TaskListEvent.tasks\", validateTask) as Task[];\n")
+	b.WriteString("      break;\n")
+	b.WriteString("    case \"upsert\":\n")
+	b.WriteString("      result.task = validateTask(obj[\"task\"]);\n")
+	b.WriteString("      break;\n")
+	b.WriteString("    case \"patch\":\n")
+	b.WriteString("      result.patch = asObject(obj[\"patch\"], \"TaskListEvent.patch\");\n")
+	b.WriteString("      break;\n")
+	b.WriteString("    case \"delete\":\n")
+	b.WriteString("      result.id = asString(obj[\"id\"], \"TaskListEvent.id\");\n")
+	b.WriteString("      break;\n")
+	b.WriteString("    case \"repos\":\n")
+	b.WriteString("      result.repos = validateArray(obj[\"repos\"], \"TaskListEvent.repos\", validateRepo) as Repo[];\n")
+	b.WriteString("      break;\n")
+	b.WriteString("    case \"warning\":\n")
+	b.WriteString("      result.warning = asString(obj[\"warning\"], \"TaskListEvent.warning\");\n")
+	b.WriteString("      break;\n")
+	b.WriteString("    // Unknown kinds pass through.\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return result;\n")
+	b.WriteString("}\n\n")
+
+	// UsageResp validator.
+	b.WriteString("export function validateUsageResp(raw: unknown): UsageResp {\n")
+	b.WriteString("  const obj = asObject(raw, \"UsageResp\");\n")
+	b.WriteString("  const result: UsageResp = {\n")
+	b.WriteString("    local: validateLocalUsage(obj[\"local\"]),\n")
+	b.WriteString("  };\n")
+	b.WriteString("  if (obj[\"providers\"] !== undefined && obj[\"providers\"] !== null) {\n")
+	b.WriteString("    result.providers = validateArray(obj[\"providers\"], \"UsageResp.providers\", validateProviderQuota) as ProviderQuota[];\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return result;\n")
+	b.WriteString("}\n")
+
+	return os.WriteFile(filepath.Join(outDir, "validate.gen.ts"), []byte(b.String()), 0o600)
+}
+
+// generateTS generates the TypeScript API client as a createApiClient factory.
+func (*docRegistry) generateTS(outDir string) error {
+	// Collect all referenced types for the import statement.
+	types := map[string]struct{}{}
+	validators := map[string]struct{}{}
+	for i := range v1.Routes {
+		r := &v1.Routes[i]
+		if n := r.ReqName(); n != "" {
+			types[n] = struct{}{}
+		}
+		types[r.RespName()] = struct{}{}
+		if r.IsSSE {
+			validators["validate"+r.RespName()] = struct{}{}
+		}
+	}
+	types["ErrorResponse"] = struct{}{}
+
+	sorted := sortedKeys(types)
+
+	var b strings.Builder
+	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\n")
+	fmt.Fprintf(&b, "import type { %s } from \"./types.gen\";\n", strings.Join(sorted, ", "))
+	if len(validators) > 0 {
+		sortedVal := sortedKeys(validators)
+		fmt.Fprintf(&b, "import { %s } from \"./validate.gen\";\n", strings.Join(sortedVal, ", "))
+	}
+	b.WriteString("\n")
+
+	// APIError class.
+	b.WriteString(`export class APIError extends Error {
+  constructor(
+    public status: number,
+    public code: string,
+    public details?: Record<string, unknown>,
+  ) {
+    super(code);
+  }
+}
+
+`)
+
+	// FetchFn type and makeRequester factory.
+	b.WriteString(`export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+
+function makeRequester(fetchFn: FetchFn) {
+  return async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const init: RequestInit = { method, headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(60_000) };
+    if (body !== undefined) init.body = JSON.stringify(body);
+    const res = await fetchFn(path, init);
+    if (!res.ok) {
+      const err = (await res.json()) as ErrorResponse;
+      const e = new APIError(res.status, err.error.code, err.details);
+      e.message = err.error.message;
+      throw e;
+    }
+    return res.json() as Promise<T>;
+  };
+}
+
+`)
+
+	// createApiClient factory function wrapping all methods.
+	b.WriteString("// createApiClient returns an API client bound to the given fetch function.\n")
+	b.WriteString("// When fetchFn is omitted, globalThis.fetch is used.\n")
+	b.WriteString("// eslint-disable-next-line @typescript-eslint/no-explicit-any\n")
+	b.WriteString("export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bind(globalThis)) {\n")
+	b.WriteString("  const request = makeRequester(fetchFn);\n")
+	b.WriteString("  return {\n")
+
+	// One method per route.
+	for i := range v1.Routes {
+		r := &v1.Routes[i]
+		params := extractPathParams(r.Path)
+		if r.IsSSE {
+			writeTSSSEMethod(&b, r, params)
+		} else {
+			writeTSJSONMethod(&b, r, params)
+		}
+	}
+
+	b.WriteString("  };\n")
+	b.WriteString("}\n")
+
+	return os.WriteFile(filepath.Join(outDir, "api.gen.ts"), []byte(b.String()), 0o600)
+}
+
+// generateKotlin generates Types.kt and ApiClient.kt in outDir.
+func (d *docRegistry) generateKotlin(outDir string) error {
+	if err := os.MkdirAll(outDir, 0o750); err != nil {
+		return err
+	}
+	if err := d.writeKotlinTypes(outDir); err != nil {
+		return err
+	}
+	return writeKotlinClient(outDir)
+}
+
+func (d *docRegistry) goTypeToKotlin(t reflect.Type) string {
+	// Unwrap pointer — nullability is handled by the caller.
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	// Special cases.
+	switch t {
+	case jsonRawMessageType:
+		return "JsonElement"
+	case ksidIDType:
+		return "String"
+	case timeType:
+		return "Instant"
+	case diffStatType:
+		return "List<DiffFileStat>"
+	case mapStringAnyType:
+		return "Map<String, JsonElement>"
+	}
+
+	// Named string aliases (Harness, EventKind).
+	if _, ok := d.aliasNames[t.Name()]; ok {
+		return t.Name()
+	}
+
+	switch t.Kind() {
+	case reflect.String:
+		return "String"
+	case reflect.Int:
+		return "Int"
+	case reflect.Int64:
+		return "Long"
+	case reflect.Uint64:
+		return "Long" // JSON numbers; unsigned semantics not enforced at wire level.
+	case reflect.Float64:
+		return "Double"
+	case reflect.Bool:
+		return "Boolean"
+	case reflect.Slice:
+		return "List<" + d.goTypeToKotlin(t.Elem()) + ">"
+	case reflect.Map:
+		return "Map<" + d.goTypeToKotlin(t.Key()) + ", " + d.goTypeToKotlin(t.Elem()) + ">"
+	case reflect.Struct:
+		return t.Name()
+	default:
+		return t.Name()
+	}
+}
+
+// parseStructFields extracts kotlinField entries from a reflect.Type.
+func (d *docRegistry) parseStructFields(t reflect.Type) []kotlinField {
+	fields := make([]kotlinField, 0, t.NumField())
+	for i := range t.NumField() {
+		sf := t.Field(i)
+		if !sf.IsExported() {
+			continue
+		}
+		tag := sf.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		jsonName, opts := parseJSONTag(tag)
+		if jsonName == "" {
+			jsonName = sf.Name
+		}
+		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
+
+		ft := sf.Type
+		isPtr := ft.Kind() == reflect.Pointer
+
+		ktType := d.goTypeToKotlin(ft)
+		nullable := isPtr || (omit && !isPtr)
+
+		sn := ""
+		if needsSerialName(jsonName) {
+			sn = jsonName
+		}
+
+		fields = append(fields, kotlinField{
+			jsonName:   jsonName,
+			ktName:     jsonName,
+			ktType:     ktType,
+			nullable:   nullable,
+			serialName: sn,
+		})
+	}
+	return fields
+}
+
+// emitKotlinStruct writes a @Serializable data class to b.
+func (d *docRegistry) emitKotlinStruct(b *strings.Builder, t reflect.Type) {
+	if doc := d.typeDoc[t.Name()]; doc != "" {
+		b.WriteString(formatBlockDoc(doc, ""))
+	}
+	fields := d.parseStructFields(t)
+	name := t.Name()
+
+	// Compact single-line form for structs with ≤2 fields and no @SerialName.
+	if len(fields) <= 2 && !fieldsNeedAnnotation(fields) {
+		b.WriteString("@Serializable\n")
+		fmt.Fprintf(b, "data class %s(", name)
+		for i := range fields {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			writeFieldDecl(b, &fields[i])
+		}
+		b.WriteString(")\n")
+		return
+	}
+
+	b.WriteString("@Serializable\n")
+	fmt.Fprintf(b, "data class %s(\n", name)
+	for i := range fields {
+		f := &fields[i]
+		b.WriteString("    ")
+		if f.serialName != "" {
+			fmt.Fprintf(b, "@SerialName(%q) ", f.serialName)
+		}
+		writeFieldDecl(b, f)
+		b.WriteString(",\n")
+	}
+	b.WriteString(")\n")
+}
+
+func (d *docRegistry) writeKotlinTypes(outDir string) error {
+	var b strings.Builder
+	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\n")
+	b.WriteString("@file:UseSerializers(InstantSerializer::class)\n\n")
+	b.WriteString("package com.caic.sdk.v1\n\n")
+	b.WriteString("import java.time.Instant\n")
+	b.WriteString("import kotlinx.serialization.KSerializer\n")
+	b.WriteString("import kotlinx.serialization.SerialName\n")
+	b.WriteString("import kotlinx.serialization.Serializable\n")
+	b.WriteString("import kotlinx.serialization.UseSerializers\n")
+	b.WriteString("import kotlinx.serialization.descriptors.PrimitiveKind\n")
+	b.WriteString("import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor\n")
+	b.WriteString("import kotlinx.serialization.encoding.Decoder\n")
+	b.WriteString("import kotlinx.serialization.encoding.Encoder\n")
+	b.WriteString("import kotlinx.serialization.json.JsonElement\n\n")
+	// InstantSerializer: converts between ISO 8601 strings and java.time.Instant.
+	b.WriteString("/** Serializes [Instant] as an ISO 8601 string. */\n")
+	b.WriteString("object InstantSerializer : KSerializer<Instant> {\n")
+	b.WriteString("    override val descriptor = PrimitiveSerialDescriptor(\"Instant\", PrimitiveKind.STRING)\n")
+	b.WriteString("    override fun serialize(encoder: Encoder, value: Instant) = encoder.encodeString(value.toString())\n")
+	b.WriteString("    override fun deserialize(decoder: Decoder): Instant = Instant.parse(decoder.decodeString())\n")
+	b.WriteString("}\n\n")
+
+	// Type aliases with companion objects.
+	for i := range d.aliases {
+		a := &d.aliases[i]
+		fmt.Fprintf(&b, "typealias %s = String\n\n", a.name)
+		fmt.Fprintf(&b, "object %s {\n", a.plural())
+		for _, c := range a.constants {
+			fmt.Fprintf(&b, "    const val %s: %s = %q\n", a.shortName(c), a.name, c.value)
+		}
+		b.WriteString("}\n\n")
+	}
+
+	// Error codes.
+	b.WriteString("object ErrorCodes {\n")
+	for _, c := range kotlinErrorCodes {
+		fmt.Fprintf(&b, "    const val %s = %q\n", c.name, c.value)
+	}
+	b.WriteString("}\n\n")
+
+	// Structs: auto-discovered from route types and their transitive fields.
+	for _, ks := range discoverKotlinStructs() {
+		if ks.comment != "" {
+			fmt.Fprintf(&b, "// %s\n\n", ks.comment)
+		}
+		d.emitKotlinStruct(&b, ks.t)
+		b.WriteString("\n")
+	}
+
+	return os.WriteFile(filepath.Join(outDir, "Types.kt"), []byte(b.String()), 0o600)
+}
+
+// generateDoc generates sdk/API.md from the route table.
+func (d *docRegistry) generateDoc(outDir string) error {
+	var b strings.Builder
+	b.WriteString("# caic API Reference\n\n")
+	b.WriteString("<!-- Code generated by gen-api-sdk; DO NOT EDIT. -->\n\n")
+	b.WriteString("RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JSON events.\n\n")
+
+	groups := docGroupRoutes(v1.Routes)
+
+	// Route tables.
+	for _, g := range groups {
+		fmt.Fprintf(&b, "## %s\n\n", g.name)
+		b.WriteString("| Method | Path | Description | Request | Response |\n")
+		b.WriteString("|--------|------|-------------|---------|----------|\n")
+		for i := range g.routes {
+			r := &g.routes[i]
+			req := ""
+			if r.Req != nil {
+				req = "`" + r.ReqName() + "`"
+			}
+			resp := "`" + r.RespName() + "`"
+			if r.IsArray {
+				resp = "`" + r.RespName() + "[]`"
+			}
+			if r.IsSSE {
+				resp += " SSE"
+			}
+			fmt.Fprintf(&b, "| %s | `%s` | %s | %s | %s |\n", r.Method, r.Path, r.Doc, req, resp)
+		}
+		b.WriteString("\n")
+	}
+
+	// Errors section.
+	b.WriteString("## Errors\n\n")
+	b.WriteString("All errors return:\n\n")
+	b.WriteString("```json\n")
+	b.WriteString("{\n")
+	b.WriteString("  \"error\": { \"code\": \"<CODE>\", \"message\": \"...\" },\n")
+	b.WriteString("  \"details\": { ... }\n")
+	b.WriteString("}\n")
+	b.WriteString("```\n\n")
+	b.WriteString("| HTTP | Code |\n")
+	b.WriteString("|------|------|\n")
+	for _, e := range docErrorCodes {
+		fmt.Fprintf(&b, "| %d | `%s` |\n", e.status, e.code)
+	}
+	b.WriteString("\n")
+
+	// Types section.
+	b.WriteString("## Types\n\n")
+	for _, t := range discoverDocTypes() {
+		d.writeDocType(&b, t)
+	}
+
+	return os.WriteFile(filepath.Join(outDir, "API.md"), []byte(b.String()), 0o600)
+}
+
+func (d *docRegistry) writeDocType(b *strings.Builder, t reflect.Type) {
+	fmt.Fprintf(b, "### %s\n\n", t.Name())
+	if typeDoc := d.typeDoc[t.Name()]; typeDoc != "" {
+		fmt.Fprintf(b, "%s\n\n", typeDoc)
+	}
+	b.WriteString("| Field | Type | Description | Required |\n")
+	b.WriteString("|-------|------|-------------|----------|\n")
+	for i := range t.NumField() {
+		sf := t.Field(i)
+		if !sf.IsExported() {
+			continue
+		}
+		tag := sf.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		jsonName, opts := parseJSONTag(tag)
+		if jsonName == "" {
+			jsonName = sf.Name
+		}
+		optional := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero") || sf.Type.Kind() == reflect.Pointer
+		typeName := goTypeToDoc(sf.Type)
+		req := "yes"
+		if optional {
+			req = ""
+		}
+		fieldDoc := ""
+		if fdocs, ok := d.fieldDoc[t.Name()]; ok {
+			fieldDoc = fdocs[sf.Name]
+		}
+		fmt.Fprintf(b, "| `%s` | `%s` | %s | %s |\n", jsonName, typeName, fieldDoc, req)
+	}
+	b.WriteString("\n")
+}
+
+// goTypeToSwift maps a Go reflect.Type to its Swift type string.
+func (d *docRegistry) goTypeToSwift(t reflect.Type) string {
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch t {
+	case jsonRawMessageType:
+		return "JSONValue"
+	case ksidIDType:
+		return "String"
+	case timeType:
+		return "ISOTimestamp"
+	case diffStatType:
+		return "[DiffFileStat]"
+	case mapStringAnyType:
+		return "[String: JSONValue]"
+	}
+	if _, ok := d.aliasNames[t.Name()]; ok {
+		return t.Name()
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "String"
+	case reflect.Int, reflect.Int64:
+		return "Int"
+	case reflect.Float64:
+		return "Double"
+	case reflect.Bool:
+		return "Bool"
+	case reflect.Slice:
+		return "[" + d.goTypeToSwift(t.Elem()) + "]"
+	case reflect.Map:
+		return "[" + d.goTypeToSwift(t.Key()) + ": " + d.goTypeToSwift(t.Elem()) + "]"
+	case reflect.Struct:
+		return t.Name()
+	default:
+		return t.Name()
+	}
+}
+
+// emitSwiftStruct writes a public Codable struct to b.
+func (d *docRegistry) emitSwiftStruct(b *strings.Builder, t reflect.Type) {
+	if doc := d.typeDoc[t.Name()]; doc != "" {
+		b.WriteString(formatSwiftDoc(doc, ""))
+	}
+	name := t.Name()
+	fmt.Fprintf(b, "public struct %s: Codable {\n", name)
+	for i := range t.NumField() {
+		sf := t.Field(i)
+		if !sf.IsExported() {
+			continue
+		}
+		tag := sf.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		jsonName, opts := parseJSONTag(tag)
+		if jsonName == "" {
+			jsonName = sf.Name
+		}
+		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
+		isPtr := sf.Type.Kind() == reflect.Pointer
+		swiftType := d.goTypeToSwift(sf.Type)
+		optional := isPtr || (omit && !isPtr)
+		swiftName := swiftEscapeIdent(jsonName)
+
+		if fdocs, ok := d.fieldDoc[name]; ok {
+			if fdoc := fdocs[sf.Name]; fdoc != "" {
+				b.WriteString(formatSwiftDoc(fdoc, "    "))
+			}
+		}
+		if optional {
+			fmt.Fprintf(b, "    public let %s: %s?\n", swiftName, swiftType)
+		} else {
+			fmt.Fprintf(b, "    public let %s: %s\n", swiftName, swiftType)
+		}
+	}
+	b.WriteString("}\n")
+}
+
+func (d *docRegistry) writeSwiftTypes(outDir string) error {
+	var b strings.Builder
+	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\nimport Foundation\n\n")
+	b.WriteString("/// ISO 8601 timestamp string (e.g. \"2026-04-13T12:00:00Z\").\n")
+	b.WriteString("public typealias ISOTimestamp = String\n\n")
+
+	// JSONValue: a Codable enum for arbitrary JSON (used for json.RawMessage / map[string]any fields).
+	b.WriteString(`/// A Codable representation of an arbitrary JSON value.
+public enum JSONValue: Codable, Equatable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if c.decodeNil() { self = .null; return }
+        if let v = try? c.decode(Bool.self) { self = .bool(v); return }
+        if let v = try? c.decode(Double.self) { self = .number(v); return }
+        if let v = try? c.decode(String.self) { self = .string(v); return }
+        if let v = try? c.decode([String: JSONValue].self) { self = .object(v); return }
+        if let v = try? c.decode([JSONValue].self) { self = .array(v); return }
+        throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown JSON value"))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .string(let v): try c.encode(v)
+        case .number(let v): try c.encode(v)
+        case .bool(let v): try c.encode(v)
+        case .object(let v): try c.encode(v)
+        case .array(let v): try c.encode(v)
+        case .null: try c.encodeNil()
+        }
+    }
+}
+
+`)
+
+	// Type aliases with constant namespaces.
+	for i := range d.aliases {
+		a := &d.aliases[i]
+		fmt.Fprintf(&b, "public typealias %s = String\n\n", a.name)
+		fmt.Fprintf(&b, "public enum %s {\n", a.plural())
+		for _, c := range a.constants {
+			fmt.Fprintf(&b, "    public static let %s: %s = %q\n", a.shortName(c), a.name, c.value)
+		}
+		b.WriteString("}\n\n")
+	}
+
+	// Error codes.
+	b.WriteString("public enum ErrorCodes {\n")
+	for _, c := range swiftErrorCodes {
+		fmt.Fprintf(&b, "    public static let %s = %q\n", c.name, c.value)
+	}
+	b.WriteString("}\n\n")
+
+	// Structs.
+	for _, ks := range discoverSwiftStructs() {
+		if ks.comment != "" {
+			fmt.Fprintf(&b, "// %s\n\n", ks.comment)
+		}
+		d.emitSwiftStruct(&b, ks.t)
+		b.WriteString("\n")
+	}
+
+	return os.WriteFile(filepath.Join(outDir, "Types.swift"), []byte(b.String()), 0o600)
+}
+
 // generateSwift generates Types.swift and ApiClient.swift in outDir.
 func (d *docRegistry) generateSwift(outDir string) error {
 	if err := os.MkdirAll(outDir, 0o750); err != nil {
@@ -2221,11 +2147,80 @@ func (d *docRegistry) generateSwift(outDir string) error {
 	return writeSwiftClient(outDir)
 }
 
-func sortedKeys(m map[string]struct{}) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
+// aliasInfo describes a Go named-string type and its constant values,
+// extracted from Go source files by loadDocs.
+type aliasInfo struct {
+	name      string          // e.g. "Harness"
+	file      string          // source filename, e.g. "types.go"
+	constants []aliasConstant // enum values
+}
+
+// shortName returns the const name with the type prefix stripped
+// (e.g. "HarnessClaude" → "Claude"). Used for Kotlin/Swift.
+func (a aliasInfo) shortName(c aliasConstant) string { return strings.TrimPrefix(c.name, a.name) }
+
+// plural returns the plural form for the type's constant namespace.
+func (a aliasInfo) plural() string {
+	if strings.HasSuffix(a.name, "s") {
+		return a.name + "es"
 	}
-	slices.Sort(out)
-	return out
+	return a.name + "s"
+}
+
+// aliasConstant is a single enum value for a string type alias.
+type aliasConstant struct {
+	name  string // const name from Go source, e.g. "HarnessClaude"
+	value string // wire value, e.g. "claude"
+}
+
+// kotlinStruct wraps a reflect.Type with an optional section comment that
+// appears before the struct in the generated output.
+type kotlinStruct struct {
+	t       reflect.Type
+	comment string // Emitted as `// comment` before the struct.
+}
+
+// kotlinField holds parsed information about a single struct field for Kotlin
+// code generation.
+type kotlinField struct {
+	jsonName   string // JSON key from the struct tag.
+	ktName     string // Kotlin property name (same as jsonName).
+	ktType     string // Kotlin type (e.g. "String", "List<Foo>").
+	nullable   bool   // Whether the field is T? = null.
+	serialName string // Non-empty when @SerialName annotation is needed.
+}
+
+type docRouteGroup struct {
+	name   string
+	routes []v1.Route
+}
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	docs, err := loadDocs()
+	if err != nil {
+		return fmt.Errorf("loading docs: %w", err)
+	}
+	if err := docs.generateTSTypes(tsDir); err != nil {
+		return err
+	}
+	if err := docs.generateTS(tsDir); err != nil {
+		return err
+	}
+	if err := docs.generateTSValidate(tsDir); err != nil {
+		return err
+	}
+	if err := docs.generateKotlin(kotlinDir); err != nil {
+		return err
+	}
+	if err := docs.generateSwift(swiftDir); err != nil {
+		return err
+	}
+	return docs.generateDoc(sdkDir)
 }
