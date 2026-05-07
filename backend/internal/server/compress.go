@@ -48,6 +48,7 @@ func negotiateEncoding(accepted map[string]struct{}) string {
 // compressWriter wraps http.ResponseWriter to compress the response body.
 type compressWriter struct {
 	http.ResponseWriter
+
 	encoding     string
 	writer       io.WriteCloser
 	headerSent   bool

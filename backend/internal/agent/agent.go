@@ -188,6 +188,7 @@ func (c *conn) Close() error {
 // Session manages a running agent process. It embeds Conn for wire I/O.
 type Session struct {
 	Conn
+
 	cmd  *exec.Cmd
 	log  *slog.Logger
 	done chan struct{} // closed when readMessages goroutine exits

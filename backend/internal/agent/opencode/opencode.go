@@ -26,6 +26,7 @@ import (
 // protocol.
 type Backend struct {
 	agent.Base
+
 	mu      sync.Mutex
 	cache   *agent.HarnessCache
 	EnvVars []string // KEY=VALUE pairs for FetchModels SSH commands

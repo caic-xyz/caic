@@ -19,6 +19,7 @@ import (
 // Backend implements agent.Backend for Claude Code.
 type Backend struct {
 	agent.Base
+
 	widgetTracker *WidgetTracker
 	fieldWarner   *jsonutil.FieldWarner
 }

@@ -93,12 +93,12 @@ func (r *Record) AsResult() (*ResultRecord, error) {
 //
 //	{"type":"init","timestamp":"2026-02-13T19:00:05.416Z","session_id":"730077db-...","model":"auto-gemini-3"}
 type InitRecord struct {
+	jsonutil.Overflow
+
 	Type      string `json:"type"`
 	Timestamp string `json:"timestamp"`
 	SessionID string `json:"session_id"`
 	Model     string `json:"model"`
-
-	jsonutil.Overflow
 }
 
 var initRecordKnown = jsonutil.KnownFields(InitRecord{})
@@ -126,13 +126,13 @@ func (r *InitRecord) UnmarshalJSON(data []byte) error {
 //	{"type":"message","timestamp":"...","role":"user","content":"Say hello"}
 //	{"type":"message","timestamp":"...","role":"assistant","content":"Hello.","delta":true}
 type MessageRecord struct {
+	jsonutil.Overflow
+
 	Type      string `json:"type"`
 	Timestamp string `json:"timestamp"`
 	Role      string `json:"role"`    // "user" or "assistant"
 	Content   string `json:"content"` // Text content.
 	Delta     bool   `json:"delta,omitempty"`
-
-	jsonutil.Overflow
 }
 
 var messageRecordKnown = jsonutil.KnownFields(MessageRecord{})
@@ -159,13 +159,13 @@ func (r *MessageRecord) UnmarshalJSON(data []byte) error {
 //	{"type":"tool_use","timestamp":"...","tool_name":"read_file","tool_id":"read_file-...",
 //	 "parameters":{"file_path":"/etc/hostname"}}
 type ToolUseRecord struct {
+	jsonutil.Overflow
+
 	Type       string          `json:"type"`
 	Timestamp  string          `json:"timestamp"`
 	ToolName   string          `json:"tool_name"`
 	ToolID     string          `json:"tool_id"`
 	Parameters json.RawMessage `json:"parameters"`
-
-	jsonutil.Overflow
 }
 
 var toolUseRecordKnown = jsonutil.KnownFields(ToolUseRecord{})
@@ -196,14 +196,14 @@ func (r *ToolUseRecord) UnmarshalJSON(data []byte) error {
 //	{"type":"tool_result","timestamp":"...","tool_id":"read_file-...","status":"error",
 //	 "output":"Path not in workspace: ...","error":{"type":"invalid_tool_params","message":"Path not in workspace: ..."}}
 type ToolResultRecord struct {
+	jsonutil.Overflow
+
 	Type      string           `json:"type"`
 	Timestamp string           `json:"timestamp"`
 	ToolID    string           `json:"tool_id"`
 	Status    string           `json:"status"` // "success" or "error"
 	Output    string           `json:"output"`
 	Error     *ToolResultError `json:"error,omitempty"`
-
-	jsonutil.Overflow
 }
 
 var toolResultRecordKnown = jsonutil.KnownFields(ToolResultRecord{})
@@ -225,10 +225,10 @@ func (r *ToolResultRecord) UnmarshalJSON(data []byte) error {
 
 // ToolResultError describes a tool execution error.
 type ToolResultError struct {
+	jsonutil.Overflow
+
 	Type    string `json:"type"`
 	Message string `json:"message"`
-
-	jsonutil.Overflow
 }
 
 var toolResultErrorKnown = jsonutil.KnownFields(ToolResultError{})
@@ -256,12 +256,12 @@ func (e *ToolResultError) UnmarshalJSON(data []byte) error {
 //	 "stats":{"total_tokens":12359,"input_tokens":11744,"output_tokens":47,"cached":0,"input":11744,
 //	          "duration_ms":5322,"tool_calls":0}}
 type ResultRecord struct {
+	jsonutil.Overflow
+
 	Type      string       `json:"type"`
 	Timestamp string       `json:"timestamp"`
 	Status    string       `json:"status"` // "success" or "error"
 	Stats     *ResultStats `json:"stats"`
-
-	jsonutil.Overflow
 }
 
 var resultRecordKnown = jsonutil.KnownFields(ResultRecord{})
@@ -283,6 +283,8 @@ func (r *ResultRecord) UnmarshalJSON(data []byte) error {
 
 // ResultStats contains token usage and timing for the session.
 type ResultStats struct {
+	jsonutil.Overflow
+
 	TotalTokens  int   `json:"total_tokens"`
 	InputTokens  int   `json:"input_tokens"`
 	OutputTokens int   `json:"output_tokens"`
@@ -290,8 +292,6 @@ type ResultStats struct {
 	Input        int   `json:"input"` // Non-cached input tokens.
 	DurationMs   int64 `json:"duration_ms"`
 	ToolCalls    int   `json:"tool_calls"`
-
-	jsonutil.Overflow
 }
 
 var resultStatsKnown = jsonutil.KnownFields(ResultStats{})

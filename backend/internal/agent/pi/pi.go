@@ -191,6 +191,7 @@ type caicModelInfo struct {
 // during ReadMessages and auto-respond on stdin.
 type piConn struct {
 	agent.Conn
+
 	logW io.Writer
 	wire *piWireFormat
 }

@@ -13,6 +13,8 @@ import (
 // ContentBlock is a single block within a message's content array.
 // The Type field discriminates between variants.
 type ContentBlock struct {
+	jsonutil.Overflow
+
 	Type string `json:"type"`
 
 	// Text block (type="text").
@@ -30,8 +32,6 @@ type ContentBlock struct {
 	// Tool result block (type="tool_result").
 	ToolUseID string         `json:"tool_use_id,omitempty"`
 	Content   []ContentBlock `json:"content,omitempty"`
-
-	jsonutil.Overflow
 }
 
 var contentBlockKnown = jsonutil.KnownFields(ContentBlock{})
@@ -54,6 +54,8 @@ func (c *ContentBlock) UnmarshalJSON(data []byte) error {
 
 // APIMessage is the Anthropic API message object embedded in assistant records.
 type APIMessage struct {
+	jsonutil.Overflow
+
 	ID                string          `json:"id"`
 	Type              string          `json:"type"`
 	Model             string          `json:"model"`
@@ -64,8 +66,6 @@ type APIMessage struct {
 	Usage             *cc.MsgUsage    `json:"usage,omitempty"`
 	Container         json.RawMessage `json:"container,omitempty"`
 	ContextManagement json.RawMessage `json:"context_management,omitempty"`
-
-	jsonutil.Overflow
 }
 
 var apiMessageKnown = jsonutil.KnownFields(APIMessage{})
@@ -88,10 +88,10 @@ func (m *APIMessage) UnmarshalJSON(data []byte) error {
 // UserMessage is the message payload inside a user record.
 // Content can be a plain string or an array of content blocks (tool results).
 type UserMessage struct {
+	jsonutil.Overflow
+
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"` // string or []ContentBlock
-
-	jsonutil.Overflow
 }
 
 var userMessageKnown = jsonutil.KnownFields(UserMessage{})
@@ -133,11 +133,11 @@ func (m *UserMessage) ContentBlocks() ([]ContentBlock, bool) {
 
 // Todo is a task-tracking entry.
 type Todo struct {
+	jsonutil.Overflow
+
 	Content    string `json:"content"`
 	Status     string `json:"status"`
 	ActiveForm string `json:"activeForm"`
-
-	jsonutil.Overflow
 }
 
 var todoKnown = jsonutil.KnownFields(Todo{})
@@ -159,12 +159,12 @@ func (t *Todo) UnmarshalJSON(data []byte) error {
 
 // ThinkingMetadata controls extended thinking parameters.
 type ThinkingMetadata struct {
+	jsonutil.Overflow
+
 	MaxThinkingTokens int             `json:"maxThinkingTokens"`
 	Disabled          bool            `json:"disabled,omitempty"`
 	Level             string          `json:"level,omitempty"`
 	Triggers          json.RawMessage `json:"triggers,omitempty"`
-
-	jsonutil.Overflow
 }
 
 var thinkingMetadataKnown = jsonutil.KnownFields(ThinkingMetadata{})
@@ -186,6 +186,8 @@ func (t *ThinkingMetadata) UnmarshalJSON(data []byte) error {
 
 // ToolUseResult holds summary data from a completed subagent tool invocation.
 type ToolUseResult struct {
+	jsonutil.Overflow
+
 	Status            string          `json:"status"`
 	Prompt            string          `json:"prompt"`
 	AgentID           string          `json:"agentId"`
@@ -194,8 +196,6 @@ type ToolUseResult struct {
 	TotalTokens       int             `json:"totalTokens"`
 	TotalToolUseCount int             `json:"totalToolUseCount"`
 	Usage             *cc.MsgUsage    `json:"usage,omitempty"`
-
-	jsonutil.Overflow
 }
 
 var toolUseResultKnown = jsonutil.KnownFields(ToolUseResult{})

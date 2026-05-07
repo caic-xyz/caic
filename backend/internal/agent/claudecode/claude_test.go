@@ -111,8 +111,9 @@ func TestWritePrompt(t *testing.T) {
 // feeds pre-canned messages through ReadMessages.
 type fakeConn struct {
 	agent.Conn // embed to satisfy interface; unused methods will panic
-	messages   []agent.Message
-	sent       [][]byte
+
+	messages []agent.Message
+	sent     [][]byte
 }
 
 func (f *fakeConn) SendRaw(data []byte) error {

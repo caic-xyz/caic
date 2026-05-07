@@ -56,6 +56,7 @@ type AuthToken struct {
 // responseWriter wraps http.ResponseWriter to capture status code and response size.
 type responseWriter struct {
 	http.ResponseWriter
+
 	status int
 	size   int
 }

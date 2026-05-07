@@ -29,6 +29,7 @@ const bridgeScriptPath = agent.RelayDir + "/kilo_bridge.py"
 // Backend implements agent.Backend for Kilo Code.
 type Backend struct {
 	agent.Base
+
 	modelsMu sync.RWMutex
 }
 

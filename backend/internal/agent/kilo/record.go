@@ -92,12 +92,12 @@ func (r *Record) AsTurnClose() (*TurnCloseRecord, error) {
 //
 //	{"type":"system","subtype":"init","session_id":"ses_abc","model":"anthropic/claude-sonnet-4-20250514"}
 type InitRecord struct {
+	jsonutil.Overflow
+
 	Type      string `json:"type"`
 	Subtype   string `json:"subtype"`
 	SessionID string `json:"session_id"`
 	Model     string `json:"model"`
-
-	jsonutil.Overflow
 }
 
 var initRecordKnown = jsonutil.KnownFields(InitRecord{})
@@ -123,10 +123,10 @@ func (r *InitRecord) UnmarshalJSON(data []byte) error {
 //
 //	{"type":"message.part.updated","properties":{"part":{"id":"prt_1","type":"text","text":"Hello"}}}
 type PartUpdatedRecord struct {
+	jsonutil.Overflow
+
 	Type       string                `json:"type"`
 	Properties PartUpdatedProperties `json:"properties"`
-
-	jsonutil.Overflow
 }
 
 var partUpdatedRecordKnown = jsonutil.KnownFields(PartUpdatedRecord{})
@@ -154,6 +154,8 @@ type PartUpdatedProperties struct {
 // Part is a single part within a kilo message. The Type field discriminates
 // between text, tool, step-start, step-finish, and reasoning parts.
 type Part struct {
+	jsonutil.Overflow
+
 	ID        string      `json:"id"`
 	SessionID string      `json:"sessionID"`
 	MessageID string      `json:"messageID"`
@@ -176,8 +178,6 @@ type Part struct {
 	Attempt  json.RawMessage `json:"attempt,omitempty"`
 	Error    json.RawMessage `json:"error,omitempty"`
 	Auto     json.RawMessage `json:"auto,omitempty"`
-
-	jsonutil.Overflow
 }
 
 var partKnown = jsonutil.KnownFields(Part{})
@@ -205,6 +205,8 @@ type PartTime struct {
 
 // ToolState describes the state of a tool part.
 type ToolState struct {
+	jsonutil.Overflow
+
 	Status   string          `json:"status"`
 	Input    json.RawMessage `json:"input,omitempty"`
 	Output   json.RawMessage `json:"output,omitempty"`
@@ -212,8 +214,6 @@ type ToolState struct {
 	Title    string          `json:"title,omitempty"`
 	Time     json.RawMessage `json:"time,omitempty"`
 	Metadata json.RawMessage `json:"metadata,omitempty"`
-
-	jsonutil.Overflow
 }
 
 var toolStateKnown = jsonutil.KnownFields(ToolState{})
@@ -235,13 +235,13 @@ func (s *ToolState) UnmarshalJSON(data []byte) error {
 
 // StepTokens holds token usage for a step-finish part.
 type StepTokens struct {
+	jsonutil.Overflow
+
 	Total     int         `json:"total"`
 	Input     int         `json:"input"`
 	Output    int         `json:"output"`
 	Reasoning int         `json:"reasoning"`
 	Cache     *TokenCache `json:"cache,omitempty"`
-
-	jsonutil.Overflow
 }
 
 var stepTokensKnown = jsonutil.KnownFields(StepTokens{})
@@ -263,10 +263,10 @@ func (t *StepTokens) UnmarshalJSON(data []byte) error {
 
 // TokenCache holds cache read/write token counts.
 type TokenCache struct {
+	jsonutil.Overflow
+
 	Read  int `json:"read"`
 	Write int `json:"write"`
-
-	jsonutil.Overflow
 }
 
 var tokenCacheKnown = jsonutil.KnownFields(TokenCache{})
@@ -292,10 +292,10 @@ func (c *TokenCache) UnmarshalJSON(data []byte) error {
 //
 //	{"type":"message.part.delta","properties":{"sessionID":"ses_abc","messageID":"msg_1","partID":"prt_1","field":"text","delta":"Hello"}}
 type PartDeltaRecord struct {
+	jsonutil.Overflow
+
 	Type       string              `json:"type"`
 	Properties PartDeltaProperties `json:"properties"`
-
-	jsonutil.Overflow
 }
 
 var partDeltaRecordKnown = jsonutil.KnownFields(PartDeltaRecord{})
@@ -369,10 +369,10 @@ type SessionErrorData struct {
 //
 //	{"type":"session.turn.close","properties":{"sessionID":"ses_abc","reason":"completed"}}
 type TurnCloseRecord struct {
+	jsonutil.Overflow
+
 	Type       string              `json:"type"`
 	Properties TurnCloseProperties `json:"properties"`
-
-	jsonutil.Overflow
 }
 
 var turnCloseRecordKnown = jsonutil.KnownFields(TurnCloseRecord{})

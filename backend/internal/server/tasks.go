@@ -838,6 +838,7 @@ func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 // wsNetConn adapts a coder/websocket connection to net.Conn for io.Copy.
 type wsNetConn struct {
 	*websocket.Conn
+
 	ctx context.Context
 }
 

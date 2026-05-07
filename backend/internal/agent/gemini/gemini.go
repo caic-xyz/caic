@@ -12,6 +12,7 @@ import (
 // Backend implements agent.Backend for Gemini CLI.
 type Backend struct {
 	agent.Base
+
 	fw *jsonutil.FieldWarner
 }
 

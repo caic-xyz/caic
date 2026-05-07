@@ -12,6 +12,7 @@ linters:
     - dupl
     - dupword
     - durationcheck
+    - embeddedstructfieldcheck
     - errname
     - errorlint
     - exhaustive

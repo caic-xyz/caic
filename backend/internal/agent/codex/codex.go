@@ -28,6 +28,7 @@ import (
 // JSON-RPC 2.0 protocol.
 type Backend struct {
 	agent.Base
+
 	mu sync.Mutex
 }
 
