@@ -107,8 +107,7 @@ class GenScreenshotsTest : E2eTestBase() {
                 "App shows error state after task creation"
             }
             assert(!stillEmpty) {
-                "Task list still empty — SSE events may not have been received. " +
-                    "API lists ${api.listTasks().size} tasks."
+                "Task list still empty — SSE events may not have been received."
             }
             hasTask
         }
