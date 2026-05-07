@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -43,10 +45,37 @@ type docRegistry struct {
 	typeDoc  map[string]string            // Go type name → doc comment text
 	typeFile map[string]string            // Go type name → source filename (e.g. "events.go")
 	fieldDoc map[string]map[string]string // Go type name → Go field name → doc comment text
+	aliases  []aliasInfo                  // named-string types with their constants
+}
+
+// aliasInfo describes a Go named-string type and its constant values,
+// extracted from Go source files by loadDocs.
+type aliasInfo struct {
+	name      string          // e.g. "Harness"
+	file      string          // source filename, e.g. "types.go"
+	constants []aliasConstant // enum values
+}
+
+// aliasConstant is a single enum value for a string type alias.
+type aliasConstant struct {
+	name  string // const name from Go source, e.g. "HarnessClaude"
+	value string // wire value, e.g. "claude"
+}
+
+// shortName returns the const name with the type prefix stripped
+// (e.g. "HarnessClaude" → "Claude"). Used for Kotlin/Swift.
+func (a aliasInfo) shortName(c aliasConstant) string { return strings.TrimPrefix(c.name, a.name) }
+
+// plural returns the plural form for the type's constant namespace.
+func (a aliasInfo) plural() string {
+	if strings.HasSuffix(a.name, "s") {
+		return a.name + "es"
+	}
+	return a.name + "s"
 }
 
 // loadDocs parses Go source files in the current directory and extracts
-// documentation comments for types and their fields.
+// documentation comments, source file tracking, and alias type definitions.
 func loadDocs() (*docRegistry, error) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -69,10 +98,13 @@ func loadDocs() (*docRegistry, error) {
 		typeFile: map[string]string{},
 		fieldDoc: map[string]map[string]string{},
 	}
+
+	// Pass 1: collect struct types and string alias declarations.
+	stringAliases := map[string]string{} // type name → source file
 	for _, file := range files {
 		for _, decl := range file.Decls {
 			genDecl, ok := decl.(*ast.GenDecl)
-			if !ok {
+			if !ok || genDecl.Tok != token.TYPE {
 				continue
 			}
 			for _, spec := range genDecl.Specs {
@@ -80,42 +112,98 @@ func loadDocs() (*docRegistry, error) {
 				if !ok {
 					continue
 				}
-				structType, ok := typeSpec.Type.(*ast.StructType)
-				if !ok {
-					continue
-				}
-				// Type-level doc: prefer TypeSpec doc, fall back to GenDecl doc when there is
-				// only one spec in the declaration (the common case for struct types).
-				var doc string
-				if typeSpec.Doc != nil {
-					doc = typeSpec.Doc.Text()
-				} else if genDecl.Doc != nil && len(genDecl.Specs) == 1 {
-					doc = genDecl.Doc.Text()
-				}
-				reg.typeFile[typeSpec.Name.Name] = filepath.Base(fset.Position(typeSpec.Pos()).Filename)
-				if doc = strings.TrimSpace(doc); doc != "" {
-					reg.typeDoc[typeSpec.Name.Name] = doc
-				}
-				// Field-level docs: prefer leading doc comment, fall back to trailing line comment.
-				fieldDocs := map[string]string{}
-				for _, field := range structType.Fields.List {
-					var fdoc string
-					if field.Doc != nil {
-						fdoc = strings.TrimSpace(field.Doc.Text())
-					} else if field.Comment != nil {
-						fdoc = strings.TrimSpace(field.Comment.Text())
+				switch t := typeSpec.Type.(type) {
+				case *ast.StructType:
+					var doc string
+					if typeSpec.Doc != nil {
+						doc = typeSpec.Doc.Text()
+					} else if genDecl.Doc != nil && len(genDecl.Specs) == 1 {
+						doc = genDecl.Doc.Text()
 					}
-					if fdoc != "" {
-						for _, name := range field.Names {
-							fieldDocs[name.Name] = fdoc
+					fn := filepath.Base(fset.Position(typeSpec.Pos()).Filename)
+					reg.typeFile[typeSpec.Name.Name] = fn
+					if doc = strings.TrimSpace(doc); doc != "" {
+						reg.typeDoc[typeSpec.Name.Name] = doc
+					}
+					fieldDocs := map[string]string{}
+					for _, field := range t.Fields.List {
+						var fdoc string
+						if field.Doc != nil {
+							fdoc = strings.TrimSpace(field.Doc.Text())
+						} else if field.Comment != nil {
+							fdoc = strings.TrimSpace(field.Comment.Text())
+						}
+						if fdoc != "" {
+							for _, name := range field.Names {
+								fieldDocs[name.Name] = fdoc
+							}
 						}
 					}
-				}
-				if len(fieldDocs) > 0 {
-					reg.fieldDoc[typeSpec.Name.Name] = fieldDocs
+					if len(fieldDocs) > 0 {
+						reg.fieldDoc[typeSpec.Name.Name] = fieldDocs
+					}
+				case *ast.Ident:
+					if t.Name == "string" {
+						fn := filepath.Base(fset.Position(typeSpec.Pos()).Filename)
+						stringAliases[typeSpec.Name.Name] = fn
+						reg.typeFile[typeSpec.Name.Name] = fn
+					}
 				}
 			}
 		}
+	}
+
+	// Pass 2: collect constants for string alias types.
+	aliasConsts := map[string][]aliasConstant{}
+	for _, file := range files {
+		for _, decl := range file.Decls {
+			genDecl, ok := decl.(*ast.GenDecl)
+			if !ok || genDecl.Tok != token.CONST {
+				continue
+			}
+			var lastType string
+			for _, spec := range genDecl.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				typeName := lastType
+				if vs.Type != nil {
+					if ident, ok := vs.Type.(*ast.Ident); ok {
+						typeName = ident.Name
+						lastType = typeName
+					}
+				}
+				if _, isAlias := stringAliases[typeName]; !isAlias {
+					continue
+				}
+				for _, name := range vs.Names {
+					if len(vs.Values) == 0 {
+						continue
+					}
+					lit, ok := vs.Values[0].(*ast.BasicLit)
+					if !ok || lit.Kind != token.STRING {
+						continue
+					}
+					val, err := strconv.Unquote(lit.Value)
+					if err != nil {
+						continue
+					}
+					aliasConsts[typeName] = append(aliasConsts[typeName], aliasConstant{
+						name:  name.Name,
+						value: val,
+					})
+				}
+			}
+		}
+	}
+
+	for name, file := range stringAliases {
+		reg.aliases = append(reg.aliases, aliasInfo{
+			name:      name,
+			file:      file,
+			constants: aliasConsts[name],
+		})
 	}
 	return reg, nil
 }
@@ -162,6 +250,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("loading docs: %w", err)
 	}
+	buildAliasNameSets(docs)
 	if err := generateTSTypes(tsDir, docs); err != nil {
 		return err
 	}
@@ -276,8 +365,8 @@ func goTypeToTS(t reflect.Type) string {
 		return "{ [key: string]: string}"
 	}
 
-	if name, ok := tsAliasNames[t]; ok {
-		return name
+	if _, ok := tsAliasNames[t.Name()]; ok {
+		return t.Name()
 	}
 
 	switch t.Kind() {
@@ -382,12 +471,18 @@ func generateTSTypes(outDir string, docs *docRegistry) error {
 		b.WriteString("SSE event types sent to the frontend for task event streams.\n")
 		b.WriteString("*/\n\n")
 
-		// EventKind alias first.
-		emitTSAlias(&b, "EventKind")
-		seen["EventKind"] = struct{}{}
-		// Then ToolOutputContentType.
-		emitTSAlias(&b, "ToolOutputContentType")
-		seen["ToolOutputContentType"] = struct{}{}
+		for i := range docs.aliases {
+			a := &docs.aliases[i]
+			if a.file != "events.go" {
+				continue
+			}
+			if _, ok := seen[a.name]; ok {
+				continue
+			}
+			emitTSAlias(&b, *a)
+			seen[a.name] = struct{}{}
+		}
+
 		// Then structs in walk order, filtered to events.go.
 		for _, ks := range allStructs {
 			name := ks.t.Name()
@@ -406,10 +501,12 @@ func generateTSTypes(outDir string, docs *docRegistry) error {
 	b.WriteString("// source: types.go\n\n")
 
 	// Type aliases from types.go (all non-events aliases).
-	typesAliases := []string{"Forge", "Harness", "CIStatus", "CheckConclusion", "ForgePRState", "CheckStatus", "SyncTarget"}
-	for _, name := range typesAliases {
-		emitTSAlias(&b, name)
-		seen[name] = struct{}{}
+	for _, a := range docs.aliases {
+		if _, ok := seen[a.name]; ok {
+			continue
+		}
+		emitTSAlias(&b, a)
+		seen[a.name] = struct{}{}
 	}
 
 	// DiffStat is a named slice type.
@@ -444,23 +541,17 @@ func generateTSTypes(outDir string, docs *docRegistry) error {
 }
 
 // emitTSAlias writes a type alias with its const values.
-func emitTSAlias(b *strings.Builder, name string) {
-	for _, a := range tsAliases {
-		if a.name != name {
-			continue
-		}
-		fmt.Fprintf(b, "export type %s = string;\n", a.name)
-		if len(a.constants) > 0 {
-			b.WriteString("/**\n")
-			b.WriteString(" * Supported values.\n")
-			b.WriteString(" */\n")
-		}
-		for _, c := range a.constants {
-			fmt.Fprintf(b, "export const %s: %s = %q;\n", c.name, a.name, c.value)
-		}
-		b.WriteString("\n")
-		return
+func emitTSAlias(b *strings.Builder, a aliasInfo) {
+	fmt.Fprintf(b, "export type %s = string;\n", a.name)
+	if len(a.constants) > 0 {
+		b.WriteString("/**\n")
+		b.WriteString(" * Supported values.\n")
+		b.WriteString(" */\n")
 	}
+	for _, c := range a.constants {
+		fmt.Fprintf(b, "export const %s: %s = %q;\n", c.name, a.name, c.value)
+	}
+	b.WriteString("\n")
 }
 
 // tsFieldValidator returns a TypeScript expression that validates a value
@@ -925,15 +1016,24 @@ func generateKotlin(outDir string, docs *docRegistry) error {
 
 // kotlinTypeAlias describes a `typealias X = String` with an optional
 // companion object holding constants.
-type kotlinTypeAlias struct {
-	name      string
-	constants []kotlinConstant
-}
+// aliasNameSet records the names of Go named-string types for a target
+// language. Looked up by t.Name() in goTypeToTS/goTypeToKotlin/goTypeToSwift.
+var (
+	tsAliasNames     map[string]struct{}
+	kotlinAliasNames map[string]struct{}
+	swiftAliasNames  map[string]struct{}
+)
 
-// kotlinConstant is a single `const val Name: Type = "value"` entry.
-type kotlinConstant struct {
-	name  string
-	value string
+// buildAliasNameSets populates the alias name sets from docs.aliases.
+func buildAliasNameSets(docs *docRegistry) {
+	tsAliasNames = map[string]struct{}{}
+	kotlinAliasNames = map[string]struct{}{}
+	swiftAliasNames = map[string]struct{}{}
+	for _, a := range docs.aliases {
+		tsAliasNames[a.name] = struct{}{}
+		kotlinAliasNames[a.name] = struct{}{}
+		swiftAliasNames[a.name] = struct{}{}
+	}
 }
 
 // kotlinStruct wraps a reflect.Type with an optional section comment that
@@ -953,53 +1053,8 @@ type kotlinField struct {
 	serialName string // Non-empty when @SerialName annotation is needed.
 }
 
-// Type aliases: typealias + companion object with constants.
-var kotlinAliases = []kotlinTypeAlias{
-	{
-		name: "Harness",
-		constants: []kotlinConstant{
-			{"Claude", string(v1.HarnessClaude)},
-			{"Codex", string(v1.HarnessCodex)},
-			{"Gemini", string(v1.HarnessGemini)},
-			{"OpenCode", string(v1.HarnessOpenCode)},
-		},
-	},
-	{
-		name: "EventKind",
-		constants: []kotlinConstant{
-			{"Init", string(v1.EventKindInit)},
-			{"Text", string(v1.EventKindText)},
-			{"TextDelta", string(v1.EventKindTextDelta)},
-			{"ToolUse", string(v1.EventKindToolUse)},
-			{"ToolResult", string(v1.EventKindToolResult)},
-			{"Ask", string(v1.EventKindAsk)},
-			{"Usage", string(v1.EventKindUsage)},
-			{"Result", string(v1.EventKindResult)},
-			{"System", string(v1.EventKindSystem)},
-			{"UserInput", string(v1.EventKindUserInput)},
-			{"Todo", string(v1.EventKindTodo)},
-			{"DiffStat", string(v1.EventKindDiffStat)},
-			{"Thinking", string(v1.EventKindThinking)},
-			{"ThinkingDelta", string(v1.EventKindThinkingDelta)},
-			{"SubagentStart", string(v1.EventKindSubagentStart)},
-			{"SubagentEnd", string(v1.EventKindSubagentEnd)},
-			{"Log", string(v1.EventKindLog)},
-			{"ToolOutputDelta", string(v1.EventKindToolOutputDelta)},
-			{"Widget", string(v1.EventKindWidget)},
-			{"WidgetDelta", string(v1.EventKindWidgetDelta)},
-			{"RateLimit", string(v1.EventKindRateLimit)},
-		},
-	},
-}
-
-// Standalone type alias without constants.
-var kotlinStandaloneAliases = []struct {
-	name   string
-	target string
-}{}
-
 // Error code constants.
-var kotlinErrorCodes = []kotlinConstant{
+var kotlinErrorCodes = []aliasConstant{
 	{"BadRequest", string(dto.CodeBadRequest)},
 	{"NotFound", string(dto.CodeNotFound)},
 	{"Conflict", string(dto.CodeConflict)},
@@ -1024,132 +1079,6 @@ func discoverKotlinStructs() []kotlinStruct {
 	return result
 }
 
-// ---- TypeScript type alias definitions ----
-
-// tsAlias describes a `type Foo = string` with const values lived in the
-// same Go package as the alias.
-type tsAlias struct {
-	name      string
-	constants []kotlinConstant // reusing kotlinConstant: {name, value}
-}
-
-// tsAliases is the set of Go named-string types that emit a TypeScript
-// type alias with const values. Must match the Go source constants.
-var tsAliases = []tsAlias{
-	{
-		name: "Forge",
-		constants: []kotlinConstant{
-			{"ForgeGitHub", string(v1.ForgeGitHub)},
-			{"ForgeGitLab", string(v1.ForgeGitLab)},
-		},
-	},
-	{
-		name: "Harness",
-		constants: []kotlinConstant{
-			{"HarnessClaude", string(v1.HarnessClaude)},
-			{"HarnessCodex", string(v1.HarnessCodex)},
-			{"HarnessGemini", string(v1.HarnessGemini)},
-			{"HarnessKilo", string(v1.HarnessKilo)},
-			{"HarnessOpenCode", string(v1.HarnessOpenCode)},
-			{"HarnessPi", string(v1.HarnessPi)},
-		},
-	},
-	{
-		name: "CIStatus",
-		constants: []kotlinConstant{
-			{"CIStatusPending", string(v1.CIStatusPending)},
-			{"CIStatusSuccess", string(v1.CIStatusSuccess)},
-			{"CIStatusFailure", string(v1.CIStatusFailure)},
-		},
-	},
-	{
-		name: "CheckConclusion",
-		constants: []kotlinConstant{
-			{"CheckConclusionSuccess", string(v1.CheckConclusionSuccess)},
-			{"CheckConclusionFailure", string(v1.CheckConclusionFailure)},
-			{"CheckConclusionNeutral", string(v1.CheckConclusionNeutral)},
-			{"CheckConclusionSkipped", string(v1.CheckConclusionSkipped)},
-			{"CheckConclusionCancelled", string(v1.CheckConclusionCancelled)},
-			{"CheckConclusionTimedOut", string(v1.CheckConclusionTimedOut)},
-			{"CheckConclusionActionRequired", string(v1.CheckConclusionActionRequired)},
-			{"CheckConclusionStale", string(v1.CheckConclusionStale)},
-		},
-	},
-	{
-		name: "ForgePRState",
-		constants: []kotlinConstant{
-			{"ForgePRStateOpen", string(v1.ForgePRStateOpen)},
-			{"ForgePRStateClosed", string(v1.ForgePRStateClosed)},
-			{"ForgePRStateMerged", string(v1.ForgePRStateMerged)},
-		},
-	},
-	{
-		name: "CheckStatus",
-		constants: []kotlinConstant{
-			{"CheckStatusQueued", string(v1.CheckStatusQueued)},
-			{"CheckStatusInProgress", string(v1.CheckStatusInProgress)},
-			{"CheckStatusCompleted", string(v1.CheckStatusCompleted)},
-		},
-	},
-	{
-		name: "EventKind",
-		constants: []kotlinConstant{
-			{"EventKindInit", string(v1.EventKindInit)},
-			{"EventKindText", string(v1.EventKindText)},
-			{"EventKindTextDelta", string(v1.EventKindTextDelta)},
-			{"EventKindToolUse", string(v1.EventKindToolUse)},
-			{"EventKindToolResult", string(v1.EventKindToolResult)},
-			{"EventKindAsk", string(v1.EventKindAsk)},
-			{"EventKindUsage", string(v1.EventKindUsage)},
-			{"EventKindResult", string(v1.EventKindResult)},
-			{"EventKindSystem", string(v1.EventKindSystem)},
-			{"EventKindUserInput", string(v1.EventKindUserInput)},
-			{"EventKindTodo", string(v1.EventKindTodo)},
-			{"EventKindDiffStat", string(v1.EventKindDiffStat)},
-			{"EventKindError", string(v1.EventKindError)},
-			{"EventKindThinking", string(v1.EventKindThinking)},
-			{"EventKindThinkingDelta", string(v1.EventKindThinkingDelta)},
-			{"EventKindSubagentStart", string(v1.EventKindSubagentStart)},
-			{"EventKindSubagentEnd", string(v1.EventKindSubagentEnd)},
-			{"EventKindLog", string(v1.EventKindLog)},
-			{"EventKindToolOutputDelta", string(v1.EventKindToolOutputDelta)},
-			{"EventKindWidget", string(v1.EventKindWidget)},
-			{"EventKindWidgetDelta", string(v1.EventKindWidgetDelta)},
-			{"EventKindRateLimit", string(v1.EventKindRateLimit)},
-			{"EventKindStats", string(v1.EventKindStats)},
-		},
-	},
-	{
-		name: "ToolOutputContentType",
-		constants: []kotlinConstant{
-			{"ToolOutputText", string(v1.ToolOutputText)},
-			{"ToolOutputJSON", string(v1.ToolOutputJSON)},
-			{"ToolOutputMarkdown", string(v1.ToolOutputMarkdown)},
-		},
-	},
-	{
-		name: "SyncTarget",
-		constants: []kotlinConstant{
-			{"SyncTargetBranch", string(v1.SyncTargetBranch)},
-			{"SyncTargetDefault", string(v1.SyncTargetDefault)},
-		},
-	},
-}
-
-// tsAliasNames is the set of Go named-string types that map to their
-// TypeScript typealias name rather than "string" in interface fields.
-var tsAliasNames = map[reflect.Type]string{
-	reflect.TypeFor[v1.Forge]():                 "Forge",
-	reflect.TypeFor[v1.Harness]():               "Harness",
-	reflect.TypeFor[v1.CIStatus]():              "CIStatus",
-	reflect.TypeFor[v1.CheckConclusion]():       "CheckConclusion",
-	reflect.TypeFor[v1.ForgePRState]():          "ForgePRState",
-	reflect.TypeFor[v1.CheckStatus]():           "CheckStatus",
-	reflect.TypeFor[v1.EventKind]():             "EventKind",
-	reflect.TypeFor[v1.ToolOutputContentType](): "ToolOutputContentType",
-	reflect.TypeFor[v1.SyncTarget]():            "SyncTarget",
-}
-
 // Type identity values for special-case mapping in goTypeToKotlin.
 var (
 	jsonRawMessageType = reflect.TypeFor[json.RawMessage]()
@@ -1159,26 +1088,6 @@ var (
 	timeType           = reflect.TypeFor[time.Time]()
 )
 
-// kotlinAliasNames is the set of Go named-string types that map to their
-// Kotlin typealias name rather than "String".
-var kotlinAliasNames = map[reflect.Type]string{
-	reflect.TypeFor[v1.Harness]():   "Harness",
-	reflect.TypeFor[v1.EventKind](): "EventKind",
-}
-
-// kotlinPlural returns the plural object name for a type alias.
-var kotlinPluralOverrides = map[string]string{
-	"Harness": "Harnesses",
-}
-
-func kotlinPlural(name string) string {
-	if p, ok := kotlinPluralOverrides[name]; ok {
-		return p
-	}
-	return name + "s"
-}
-
-// goTypeToKotlin maps a Go reflect.Type to its Kotlin type string.
 func goTypeToKotlin(t reflect.Type) string {
 	// Unwrap pointer — nullability is handled by the caller.
 	if t.Kind() == reflect.Pointer {
@@ -1200,8 +1109,8 @@ func goTypeToKotlin(t reflect.Type) string {
 	}
 
 	// Named string aliases (Harness, EventKind).
-	if name, ok := kotlinAliasNames[t]; ok {
-		return name
+	if _, ok := kotlinAliasNames[t.Name()]; ok {
+		return t.Name()
 	}
 
 	switch t.Kind() {
@@ -1388,18 +1297,14 @@ func writeKotlinTypes(outDir string, docs *docRegistry) error {
 	b.WriteString("}\n\n")
 
 	// Type aliases with companion objects.
-	for _, a := range kotlinAliases {
+	for i := range docs.aliases {
+		a := &docs.aliases[i]
 		fmt.Fprintf(&b, "typealias %s = String\n\n", a.name)
-		fmt.Fprintf(&b, "object %s {\n", kotlinPlural(a.name))
+		fmt.Fprintf(&b, "object %s {\n", a.plural())
 		for _, c := range a.constants {
-			fmt.Fprintf(&b, "    const val %s: %s = %q\n", c.name, a.name, c.value)
+			fmt.Fprintf(&b, "    const val %s: %s = %q\n", a.shortName(c), a.name, c.value)
 		}
 		b.WriteString("}\n\n")
-	}
-
-	// Standalone type aliases.
-	for _, a := range kotlinStandaloneAliases {
-		fmt.Fprintf(&b, "typealias %s = %s\n\n", a.name, a.target)
 	}
 
 	// Error codes.
@@ -1888,55 +1793,8 @@ var swiftReservedWords = map[string]struct{}{
 	"type": {},
 }
 
-// swiftAliasNames is the set of Go named-string types that map to their
-// Swift typealias name rather than "String".
-var swiftAliasNames = map[reflect.Type]string{
-	reflect.TypeFor[v1.Harness]():   "Harness",
-	reflect.TypeFor[v1.EventKind](): "EventKind",
-}
-
-// swiftAliases describes typealias declarations with associated constant namespaces.
-// Mirrors kotlinAliases — reuses kotlinTypeAlias/kotlinConstant as generic data holders.
-var swiftAliases = []kotlinTypeAlias{
-	{
-		name: "Harness",
-		constants: []kotlinConstant{
-			{"Claude", string(v1.HarnessClaude)},
-			{"Codex", string(v1.HarnessCodex)},
-			{"Gemini", string(v1.HarnessGemini)},
-			{"OpenCode", string(v1.HarnessOpenCode)},
-		},
-	},
-	{
-		name: "EventKind",
-		constants: []kotlinConstant{
-			{"Init", string(v1.EventKindInit)},
-			{"Text", string(v1.EventKindText)},
-			{"TextDelta", string(v1.EventKindTextDelta)},
-			{"ToolUse", string(v1.EventKindToolUse)},
-			{"ToolResult", string(v1.EventKindToolResult)},
-			{"Ask", string(v1.EventKindAsk)},
-			{"Usage", string(v1.EventKindUsage)},
-			{"Result", string(v1.EventKindResult)},
-			{"System", string(v1.EventKindSystem)},
-			{"UserInput", string(v1.EventKindUserInput)},
-			{"Todo", string(v1.EventKindTodo)},
-			{"DiffStat", string(v1.EventKindDiffStat)},
-			{"Thinking", string(v1.EventKindThinking)},
-			{"ThinkingDelta", string(v1.EventKindThinkingDelta)},
-			{"SubagentStart", string(v1.EventKindSubagentStart)},
-			{"SubagentEnd", string(v1.EventKindSubagentEnd)},
-			{"Log", string(v1.EventKindLog)},
-			{"ToolOutputDelta", string(v1.EventKindToolOutputDelta)},
-			{"Widget", string(v1.EventKindWidget)},
-			{"WidgetDelta", string(v1.EventKindWidgetDelta)},
-			{"RateLimit", string(v1.EventKindRateLimit)},
-		},
-	},
-}
-
 // swiftErrorCodes mirrors kotlinErrorCodes for Swift output.
-var swiftErrorCodes = []kotlinConstant{
+var swiftErrorCodes = []aliasConstant{
 	{"badRequest", string(dto.CodeBadRequest)},
 	{"notFound", string(dto.CodeNotFound)},
 	{"conflict", string(dto.CodeConflict)},
@@ -1946,18 +1804,6 @@ var swiftErrorCodes = []kotlinConstant{
 // swiftSectionComments mirrors kotlinSectionComments for Swift output.
 var swiftSectionComments = map[string]string{
 	"EventMessage": "Backend-neutral event types",
-}
-
-// swiftPluralOverrides maps singular alias names to their plural namespace names.
-var swiftPluralOverrides = map[string]string{
-	"Harness": "Harnesses",
-}
-
-func swiftPlural(name string) string {
-	if p, ok := swiftPluralOverrides[name]; ok {
-		return p
-	}
-	return name + "s"
 }
 
 // swiftEscapeIdent wraps name in backticks if it is a Swift reserved word.
@@ -1985,8 +1831,8 @@ func goTypeToSwift(t reflect.Type) string {
 	case mapStringAnyType:
 		return "[String: JSONValue]"
 	}
-	if name, ok := swiftAliasNames[t]; ok {
-		return name
+	if _, ok := swiftAliasNames[t.Name()]; ok {
+		return t.Name()
 	}
 	switch t.Kind() {
 	case reflect.String:
@@ -2147,11 +1993,12 @@ public enum JSONValue: Codable, Equatable {
 `)
 
 	// Type aliases with constant namespaces.
-	for _, a := range swiftAliases {
+	for i := range docs.aliases {
+		a := &docs.aliases[i]
 		fmt.Fprintf(&b, "public typealias %s = String\n\n", a.name)
-		fmt.Fprintf(&b, "public enum %s {\n", swiftPlural(a.name))
+		fmt.Fprintf(&b, "public enum %s {\n", a.plural())
 		for _, c := range a.constants {
-			fmt.Fprintf(&b, "    public static let %s: %s = %q\n", c.name, a.name, c.value)
+			fmt.Fprintf(&b, "    public static let %s: %s = %q\n", a.shortName(c), a.name, c.value)
 		}
 		b.WriteString("}\n\n")
 	}
@@ -2405,11 +2252,6 @@ func sortedKeys(m map[string]struct{}) []string {
 	for k := range m {
 		out = append(out, k)
 	}
-	// Simple insertion sort for a small set.
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0 && out[j] < out[j-1]; j-- {
-			out[j], out[j-1] = out[j-1], out[j]
-		}
-	}
+	slices.Sort(out)
 	return out
 }

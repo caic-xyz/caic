@@ -21,15 +21,6 @@ object InstantSerializer : KSerializer<Instant> {
     override fun deserialize(decoder: Decoder): Instant = Instant.parse(decoder.decodeString())
 }
 
-typealias Harness = String
-
-object Harnesses {
-    const val Claude: Harness = "claude"
-    const val Codex: Harness = "codex"
-    const val Gemini: Harness = "gemini"
-    const val OpenCode: Harness = "opencode"
-}
-
 typealias EventKind = String
 
 object EventKinds {
@@ -45,6 +36,7 @@ object EventKinds {
     const val UserInput: EventKind = "userInput"
     const val Todo: EventKind = "todo"
     const val DiffStat: EventKind = "diffStat"
+    const val Error: EventKind = "error"
     const val Thinking: EventKind = "thinking"
     const val ThinkingDelta: EventKind = "thinkingDelta"
     const val SubagentStart: EventKind = "subagentStart"
@@ -54,6 +46,77 @@ object EventKinds {
     const val Widget: EventKind = "widget"
     const val WidgetDelta: EventKind = "widgetDelta"
     const val RateLimit: EventKind = "rateLimit"
+    const val Stats: EventKind = "stats"
+}
+
+typealias Harness = String
+
+object Harnesses {
+    const val Claude: Harness = "claude"
+    const val Codex: Harness = "codex"
+    const val Gemini: Harness = "gemini"
+    const val Kilo: Harness = "kilo"
+    const val OpenCode: Harness = "opencode"
+    const val Pi: Harness = "pi"
+}
+
+typealias CIStatus = String
+
+object CIStatuses {
+    const val Pending: CIStatus = "pending"
+    const val Success: CIStatus = "success"
+    const val Failure: CIStatus = "failure"
+}
+
+typealias SyncTarget = String
+
+object SyncTargets {
+    const val Branch: SyncTarget = "branch"
+    const val Default: SyncTarget = "default"
+}
+
+typealias ToolOutputContentType = String
+
+object ToolOutputContentTypes {
+    const val ToolOutputText: ToolOutputContentType = "text"
+    const val ToolOutputJSON: ToolOutputContentType = "json"
+    const val ToolOutputMarkdown: ToolOutputContentType = "markdown"
+}
+
+typealias Forge = String
+
+object Forges {
+    const val GitHub: Forge = "github"
+    const val GitLab: Forge = "gitlab"
+}
+
+typealias CheckConclusion = String
+
+object CheckConclusions {
+    const val Success: CheckConclusion = "success"
+    const val Failure: CheckConclusion = "failure"
+    const val Neutral: CheckConclusion = "neutral"
+    const val Skipped: CheckConclusion = "skipped"
+    const val Cancelled: CheckConclusion = "cancelled"
+    const val TimedOut: CheckConclusion = "timed_out"
+    const val ActionRequired: CheckConclusion = "action_required"
+    const val Stale: CheckConclusion = "stale"
+}
+
+typealias ForgePRState = String
+
+object ForgePRStates {
+    const val Open: ForgePRState = "open"
+    const val Closed: ForgePRState = "closed"
+    const val Merged: ForgePRState = "merged"
+}
+
+typealias CheckStatus = String
+
+object CheckStatuses {
+    const val Queued: CheckStatus = "queued"
+    const val InProgress: CheckStatus = "in_progress"
+    const val Completed: CheckStatus = "completed"
 }
 
 object ErrorCodes {
@@ -159,8 +222,8 @@ data class ForgeCheck(
     val repo: String,
     @SerialName("runID") val runID: Long,
     @SerialName("jobID") val jobID: Long,
-    val status: String,
-    val conclusion: String,
+    val status: CheckStatus,
+    val conclusion: CheckConclusion,
     val queuedAt: Instant? = null,
     val startedAt: Instant? = null,
     val completedAt: Instant? = null,
@@ -173,8 +236,8 @@ data class Repo(
     val branch: String,
     val baseBranch: BranchInfo,
     @SerialName("remoteURL") val remoteURL: String? = null,
-    val forge: String? = null,
-    val ci: String? = null,
+    val forge: Forge? = null,
+    val ci: CIStatus? = null,
     val ciChecks: List<ForgeCheck>? = null,
     val checksDate: Instant? = null,
 )
@@ -216,7 +279,7 @@ data class TaskRepo(
     val baseBranch: String? = null,
     val branch: String,
     @SerialName("remoteURL") val remoteURL: String? = null,
-    val forge: String? = null,
+    val forge: Forge? = null,
 )
 
 /** DiffFileStat describes changes to a single file. */
@@ -265,9 +328,9 @@ data class Task(
     val forgeOwner: String? = null,
     val forgeRepo: String? = null,
     @SerialName("forgePR") val forgePR: Int? = null,
-    @SerialName("forgePRState") val forgePRState: String? = null,
+    @SerialName("forgePRState") val forgePRState: ForgePRState? = null,
     val forgeIssue: Int? = null,
-    val ciStatus: String? = null,
+    val ciStatus: CIStatus? = null,
     val ciChecks: List<ForgeCheck>? = null,
     val owner: String? = null,
     val harness: Harness,
@@ -464,7 +527,7 @@ data class EventLog(val line: String)
 data class EventToolOutputDelta(
     @SerialName("toolUseID") val toolUseID: String,
     val delta: String,
-    val contentType: String? = null,
+    val contentType: ToolOutputContentType? = null,
     val formatted: String? = null,
 )
 
@@ -565,7 +628,7 @@ data class CILogResp(val stepName: String, val log: String)
 
 /** SyncReq is the request body for POST /api/v1/tasks/{id}/sync. */
 @Serializable
-data class SyncReq(val force: Boolean? = null, val target: String? = null)
+data class SyncReq(val force: Boolean? = null, val target: SyncTarget? = null)
 
 /** SafetyIssue describes a potential problem detected before pushing to origin. */
 @Serializable

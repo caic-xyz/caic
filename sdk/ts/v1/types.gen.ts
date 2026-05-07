@@ -297,13 +297,6 @@ export interface EventMessage {
 //////////
 // source: types.go
 
-export type Forge = string;
-/**
- * Supported values.
- */
-export const ForgeGitHub: Forge = "github";
-export const ForgeGitLab: Forge = "gitlab";
-
 export type Harness = string;
 /**
  * Supported values.
@@ -322,6 +315,20 @@ export type CIStatus = string;
 export const CIStatusPending: CIStatus = "pending";
 export const CIStatusSuccess: CIStatus = "success";
 export const CIStatusFailure: CIStatus = "failure";
+
+export type SyncTarget = string;
+/**
+ * Supported values.
+ */
+export const SyncTargetBranch: SyncTarget = "branch";
+export const SyncTargetDefault: SyncTarget = "default";
+
+export type Forge = string;
+/**
+ * Supported values.
+ */
+export const ForgeGitHub: Forge = "github";
+export const ForgeGitLab: Forge = "gitlab";
 
 export type CheckConclusion = string;
 /**
@@ -351,13 +358,6 @@ export type CheckStatus = string;
 export const CheckStatusQueued: CheckStatus = "queued";
 export const CheckStatusInProgress: CheckStatus = "in_progress";
 export const CheckStatusCompleted: CheckStatus = "completed";
-
-export type SyncTarget = string;
-/**
- * Supported values.
- */
-export const SyncTargetBranch: SyncTarget = "branch";
-export const SyncTargetDefault: SyncTarget = "default";
 
 /**
  * DiffStat summarises the changes in a branch relative to its base.

@@ -37,15 +37,6 @@ public enum JSONValue: Codable, Equatable {
     }
 }
 
-public typealias Harness = String
-
-public enum Harnesses {
-    public static let Claude: Harness = "claude"
-    public static let Codex: Harness = "codex"
-    public static let Gemini: Harness = "gemini"
-    public static let OpenCode: Harness = "opencode"
-}
-
 public typealias EventKind = String
 
 public enum EventKinds {
@@ -61,6 +52,7 @@ public enum EventKinds {
     public static let UserInput: EventKind = "userInput"
     public static let Todo: EventKind = "todo"
     public static let DiffStat: EventKind = "diffStat"
+    public static let Error: EventKind = "error"
     public static let Thinking: EventKind = "thinking"
     public static let ThinkingDelta: EventKind = "thinkingDelta"
     public static let SubagentStart: EventKind = "subagentStart"
@@ -70,6 +62,77 @@ public enum EventKinds {
     public static let Widget: EventKind = "widget"
     public static let WidgetDelta: EventKind = "widgetDelta"
     public static let RateLimit: EventKind = "rateLimit"
+    public static let Stats: EventKind = "stats"
+}
+
+public typealias Harness = String
+
+public enum Harnesses {
+    public static let Claude: Harness = "claude"
+    public static let Codex: Harness = "codex"
+    public static let Gemini: Harness = "gemini"
+    public static let Kilo: Harness = "kilo"
+    public static let OpenCode: Harness = "opencode"
+    public static let Pi: Harness = "pi"
+}
+
+public typealias CIStatus = String
+
+public enum CIStatuses {
+    public static let Pending: CIStatus = "pending"
+    public static let Success: CIStatus = "success"
+    public static let Failure: CIStatus = "failure"
+}
+
+public typealias SyncTarget = String
+
+public enum SyncTargets {
+    public static let Branch: SyncTarget = "branch"
+    public static let Default: SyncTarget = "default"
+}
+
+public typealias ToolOutputContentType = String
+
+public enum ToolOutputContentTypes {
+    public static let ToolOutputText: ToolOutputContentType = "text"
+    public static let ToolOutputJSON: ToolOutputContentType = "json"
+    public static let ToolOutputMarkdown: ToolOutputContentType = "markdown"
+}
+
+public typealias Forge = String
+
+public enum Forges {
+    public static let GitHub: Forge = "github"
+    public static let GitLab: Forge = "gitlab"
+}
+
+public typealias CheckConclusion = String
+
+public enum CheckConclusions {
+    public static let Success: CheckConclusion = "success"
+    public static let Failure: CheckConclusion = "failure"
+    public static let Neutral: CheckConclusion = "neutral"
+    public static let Skipped: CheckConclusion = "skipped"
+    public static let Cancelled: CheckConclusion = "cancelled"
+    public static let TimedOut: CheckConclusion = "timed_out"
+    public static let ActionRequired: CheckConclusion = "action_required"
+    public static let Stale: CheckConclusion = "stale"
+}
+
+public typealias ForgePRState = String
+
+public enum ForgePRStates {
+    public static let Open: ForgePRState = "open"
+    public static let Closed: ForgePRState = "closed"
+    public static let Merged: ForgePRState = "merged"
+}
+
+public typealias CheckStatus = String
+
+public enum CheckStatuses {
+    public static let Queued: CheckStatus = "queued"
+    public static let InProgress: CheckStatus = "in_progress"
+    public static let Completed: CheckStatus = "completed"
 }
 
 public enum ErrorCodes {
@@ -195,9 +258,9 @@ public struct ForgeCheck: Codable {
     /// Check run / job ID.
     public let jobID: Int
     /// queued, in_progress, completed.
-    public let status: String
+    public let status: CheckStatus
     /// Empty when not completed.
-    public let conclusion: String
+    public let conclusion: CheckConclusion
     /// When the check was created/queued.
     public let queuedAt: ISOTimestamp?
     /// When execution began.
@@ -213,8 +276,8 @@ public struct Repo: Codable {
     public let baseBranch: BranchInfo
     public let remoteURL: String?
     /// "github", "gitlab", or empty if unknown.
-    public let forge: String?
-    public let ci: String?
+    public let forge: Forge?
+    public let ci: CIStatus?
     public let ciChecks: [ForgeCheck]?
     public let checksDate: ISOTimestamp?
 }
@@ -258,7 +321,7 @@ public struct TaskRepo: Codable {
     public let branch: String
     public let remoteURL: String?
     /// "github", "gitlab", or empty if unknown.
-    public let forge: String?
+    public let forge: Forge?
 }
 
 /// DiffFileStat describes changes to a single file.
@@ -313,9 +376,9 @@ public struct Task: Codable {
     public let forgeOwner: String?
     public let forgeRepo: String?
     public let forgePR: Int?
-    public let forgePRState: String?
+    public let forgePRState: ForgePRState?
     public let forgeIssue: Int?
-    public let ciStatus: String?
+    public let ciStatus: CIStatus?
     public let ciChecks: [ForgeCheck]?
     /// username of creator; omitted in no-auth mode
     public let owner: String?
@@ -531,7 +594,7 @@ public struct EventLog: Codable {
 public struct EventToolOutputDelta: Codable {
     public let toolUseID: String
     public let delta: String
-    public let contentType: String?
+    public let contentType: ToolOutputContentType?
     /// Pretty-printed JSON or other transformation.
     public let formatted: String?
 }
@@ -636,7 +699,7 @@ public struct CILogResp: Codable {
 /// SyncReq is the request body for POST /api/v1/tasks/{id}/sync.
 public struct SyncReq: Codable {
     public let force: Bool?
-    public let target: String?
+    public let target: SyncTarget?
 }
 
 /// SafetyIssue describes a potential problem detected before pushing to origin.
