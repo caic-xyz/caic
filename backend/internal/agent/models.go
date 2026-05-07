@@ -1,5 +1,5 @@
-// Model list sorting: blacklist filtering, then latest version per family
-// deduplication. Superseded versions and blacklisted prefixes are dropped.
+// Model list sorting: blacklist filtering, then latest version per family deduplication.
+
 package agent
 
 import (

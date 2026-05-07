@@ -1,7 +1,5 @@
-// Request body decompression based on Content-Encoding.
-//
-// Wraps r.Body with the appropriate decompressor before handlers read it.
-// Supports zstd, brotli, and gzip.
+// Request body decompression based on Content-Encoding. Supports zstd, brotli, and gzip.
+
 package server
 
 import (

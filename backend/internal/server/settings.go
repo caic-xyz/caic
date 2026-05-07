@@ -1,4 +1,5 @@
-// Package server settings: loads and persists server configuration from settings.json.
+// Loads and persists server configuration from settings.json.
+
 package server
 
 import (

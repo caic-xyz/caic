@@ -1,9 +1,5 @@
-// Response compression middleware for API endpoints.
-//
-// Compresses responses using zstd, brotli, or gzip at fast compression
-// levels. SSE streams are compressed with per-event flushing to preserve
-// real-time delivery. Skips responses that already have a Content-Encoding
-// (precompressed static files).
+// Response compression middleware for API endpoints. Compresses using zstd, brotli, or gzip.
+
 package server
 
 import (

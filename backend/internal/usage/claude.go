@@ -1,5 +1,5 @@
-// Anthropic OAuth usage quota fetcher with caching, credential file watching,
-// and exponential backoff on errors. Implements ProviderFetcher.
+// Anthropic OAuth usage quota fetcher with caching, credential file watching, and exponential backoff.
+
 package usage
 
 import (

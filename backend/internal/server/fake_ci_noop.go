@@ -1,5 +1,6 @@
-// No-op fake CI stub for production builds.
 //go:build !e2e
+
+// No-op fake CI stub for production builds.
 
 package server
 

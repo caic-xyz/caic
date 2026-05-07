@@ -1,7 +1,5 @@
-// ProviderFetcher abstracts a single provider's quota API. Each concrete
-// implementation knows how to authenticate (OAuth token file watching or
-// static API key) and how to map the provider-specific response into the
-// generic ProviderQuota shape.
+// ProviderFetcher abstracts a single provider's quota API.
+
 package usage
 
 import (

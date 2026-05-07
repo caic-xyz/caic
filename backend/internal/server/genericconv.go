@@ -1,6 +1,5 @@
 // Backend-neutral conversion from agent.Message to v1.EventMessage for SSE.
-// Every backend (Claude, Gemini, Codex, …) uses this converter to produce the
-// event stream served on /api/v1/tasks/{id}/events and /api/v1/tasks/{id}/raw_events.
+
 package server
 
 import (

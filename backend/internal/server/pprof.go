@@ -1,4 +1,5 @@
 // Registers net/http/pprof handlers when profiling is enabled via Config.Pprof.
+
 package server
 
 import (

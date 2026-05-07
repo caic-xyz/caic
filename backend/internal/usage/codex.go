@@ -1,5 +1,5 @@
-// Codex OAuth usage quota fetcher with caching, credential file watching,
-// and exponential backoff on errors. Implements ProviderFetcher.
+// Codex OAuth usage quota fetcher with caching, credential file watching, and exponential backoff.
+
 package usage
 
 import (

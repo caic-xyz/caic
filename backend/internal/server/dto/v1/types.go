@@ -1,6 +1,5 @@
-// Exported request and response types for the caic API, including
-// usage/quota provider-agnostic types (ProviderQuota, QuotaRateLimit,
-// QuotaBalance, QuotaExtraUsage, LocalUsage).
+// Exported request and response types for the caic API.
+
 package v1
 
 import (

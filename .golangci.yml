@@ -22,6 +22,7 @@ linters:
     - funcorder
     - gocritic
     - gosec
+    - godoclint
     - godot
     - intrange
     - mirror

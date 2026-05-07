@@ -1,4 +1,5 @@
 // CI check-run evaluation and failure summary building for bot-driven CI workflows.
+
 package bot
 
 import (

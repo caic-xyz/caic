@@ -1,6 +1,5 @@
-// Local task cost aggregation for usage reporting. Computes rolling-window
-// cost and token sums across all tasks, regardless of harness or provider. Computes rolling-window
-// cost and token sums across all tasks, regardless of harness or provider.
+// Local task cost aggregation for usage reporting.
+
 package server
 
 import (

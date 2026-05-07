@@ -1,4 +1,5 @@
 // GitHub Releases API: fetch latest release and download assets.
+
 package github
 
 import (

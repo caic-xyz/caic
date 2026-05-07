@@ -1,4 +1,5 @@
 // JSON response writers for success and structured error responses.
+
 package server
 
 import (

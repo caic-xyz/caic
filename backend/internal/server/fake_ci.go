@@ -1,5 +1,6 @@
-// Fake CI simulation for e2e tests: sets a PR and cycles checks to success.
 //go:build e2e
+
+// Fake CI simulation for e2e tests: sets a PR and cycles checks to success.
 
 package server
 

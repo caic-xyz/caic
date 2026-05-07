@@ -1,6 +1,4 @@
-// Nightly auto-update: checks GitHub Releases and replaces the running binary.
-// The existing watchExecutable mechanism in main.go detects the file change and
-// triggers a graceful restart.
+// Package autoupdate provides nightly binary auto-update from GitHub Releases.
 package autoupdate
 
 import (

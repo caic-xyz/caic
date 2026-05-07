@@ -1,5 +1,5 @@
-// Generic HTTP handler wrappers that decode requests, validate, call a typed
-// handler function, and encode JSON responses or structured errors.
+// Generic HTTP handler wrappers that decode requests, validate, call a typed handler function, and encode JSON responses or structured errors.
+
 package server
 
 import (

@@ -1,4 +1,5 @@
-// Package autoupdate provides binary version detection and nightly auto-update.
+// Binary version detection and formatting.
+
 package autoupdate
 
 import (

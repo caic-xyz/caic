@@ -1,9 +1,5 @@
 // Precompressed static file handler for embedded frontend assets.
-//
-// At build time, each file in dist/ is brotli-compressed at maximum quality
-// and the original is deleted, so only .br files are embedded. This handler
-// serves .br directly when the client accepts it, and lazily transcodes to
-// gzip, zstd, or uncompressed for other clients, caching the result.
+
 package server
 
 import (

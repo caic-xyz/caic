@@ -1,4 +1,5 @@
 // Shared widget MCP server script embedded for deployment to containers.
+
 package agent
 
 import _ "embed"

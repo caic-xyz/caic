@@ -1,8 +1,5 @@
 // Tool output formatting utilities for the SSE event stream.
-//
-// These functions detect the content type of tool outputs and optionally
-// produce formatted versions (e.g. pretty-printed JSON, rendered markdown)
-// so clients can render them appropriately without duplicating logic.
+
 package server
 
 import (

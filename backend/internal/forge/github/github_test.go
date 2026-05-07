@@ -1,4 +1,5 @@
 // Tests for GitHub-specific log extraction.
+
 package github
 
 import (

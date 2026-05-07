@@ -1,5 +1,5 @@
-// OpenCode ACP parser. Converts ACP's JSON-RPC session/update notifications
-// into normalized agent.Message types.
+// OpenCode ACP parser. Converts ACP's JSON-RPC session/update notifications into normalized agent.Message types.
+
 package opencode
 
 import (

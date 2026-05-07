@@ -1,4 +1,5 @@
 // GitHub webhook IP ranges fetched from the GitHub meta API.
+
 package ipgeo
 
 import (
