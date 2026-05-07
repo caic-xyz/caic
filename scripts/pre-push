@@ -1,6 +1,8 @@
 #!/bin/bash
 # Pre-push hook: rejects binary executables, WIP commits, multiple-commit pushes, and lints on main pushes.
 
+set -e
+
 remote="$1"
 zero=$(git hash-object --stdin </dev/null | tr '0-9a-f' '0')
 

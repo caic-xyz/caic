@@ -396,8 +396,9 @@ func (c *genConfig) tsPrimitiveValidator(t reflect.Type, pathExpr, pathLit strin
 		return fmt.Sprintf("asNumber(%s, %q)", pathExpr, pathLit), nil
 	case reflect.Bool:
 		return fmt.Sprintf("asBoolean(%s, %q)", pathExpr, pathLit), nil
+	default:
+		return "", fmt.Errorf("tsPrimitiveValidator: unhandled kind %s for %s", t.Kind(), t)
 	}
-	return "", fmt.Errorf("tsPrimitiveValidator: unhandled kind %s for %s", t.Kind(), t)
 }
 
 // tsElemValidatorFunc returns a function expression (v: unknown) => validated
@@ -899,8 +900,9 @@ func (c *genConfig) goTypeToDoc(t reflect.Type) (string, error) {
 		return t.Name(), nil
 	case reflect.Map:
 		return "Record<string, unknown>", nil
+	default:
+		return "", fmt.Errorf("goTypeToDoc: unhandled kind %s for %s", t.Kind(), t)
 	}
-	return "", fmt.Errorf("goTypeToDoc: unhandled kind %s for %s", t.Kind(), t)
 }
 
 // swiftEscapeIdent wraps name in backticks if it is a Swift reserved word.
@@ -1247,8 +1249,9 @@ func (d *docRegistry) goTypeToTS(t reflect.Type) (string, error) {
 		return "{ [key: " + k + "]: " + v + "}", nil
 	case reflect.Struct:
 		return t.Name(), nil
+	default:
+		return "", fmt.Errorf("goTypeToTS: unhandled kind %s for %s", t.Kind(), t)
 	}
-	return "", fmt.Errorf("goTypeToTS: unhandled kind %s for %s", t.Kind(), t)
 }
 
 // emitTSStruct writes a TypeScript interface to b.
@@ -1818,8 +1821,9 @@ func (d *docRegistry) goTypeToKotlin(t reflect.Type) (string, error) {
 		return "Map<" + k + ", " + v + ">", nil
 	case reflect.Struct:
 		return t.Name(), nil
+	default:
+		return "", fmt.Errorf("goTypeToKotlin: unhandled kind %s for %s", t.Kind(), t)
 	}
-	return "", fmt.Errorf("goTypeToKotlin: unhandled kind %s for %s", t.Kind(), t)
 }
 
 // parseStructFields extracts kotlinField entries from a reflect.Type.
@@ -2113,8 +2117,9 @@ func (d *docRegistry) goTypeToSwift(t reflect.Type) (string, error) {
 		return "[" + k + ": " + v + "]", nil
 	case reflect.Struct:
 		return t.Name(), nil
+	default:
+		return "", fmt.Errorf("goTypeToSwift: unhandled kind %s for %s", t.Kind(), t)
 	}
-	return "", fmt.Errorf("goTypeToSwift: unhandled kind %s for %s", t.Kind(), t)
 }
 
 // emitSwiftStruct writes a public Codable struct to b.
