@@ -367,6 +367,12 @@ export class FunctionHandlers {
           if (historyTimer !== null) clearTimeout(historyTimer);
           historyTimer = setTimeout(settle, 1000);
         }
+      }, (_err) => {
+        if (!settled) {
+          settled = true;
+          es.close();
+          resolve(errorResult(`Invalid event received for task #${num}`));
+        }
       });
 
       // Fallback: settle after 5s regardless.

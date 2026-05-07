@@ -2,8 +2,8 @@
 import { createEffect, createSignal, For, Show, Switch, Match, onCleanup, lazy, Suspense } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useNavigate, useLocation } from "@solidjs/router";
-import type { Harness, HarnessInfo, Repo, Task, TaskListEvent, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp } from "@sdk/types.gen";
-import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI } from "./api";
+import type { Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp } from "@sdk/types.gen";
+import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, globalTaskEvents, globalUsageEvents } from "./api";
 import Dropdown from "./Dropdown";
 import RepoChipStrip from "./RepoChipStrip";
 import type { RepoEntry } from "./RepoChipStrip";
@@ -374,7 +374,69 @@ export default function App() {
     }
 
     function connectTasks() {
-      taskES = new EventSource("/api/v1/server/tasks/events");
+      // eslint-disable-next-line solid/reactivity -- globalTaskEvents is an SSE event handler
+      taskES = globalTaskEvents((event) => {
+        const checkAndNotify = (t: Task) => {
+          const needsInput = t.state === "waiting" || t.state === "asking" || t.state === "has_plan";
+          const prevState = prevStates.get(t.id);
+          const prevNeedsInput = prevState === "waiting" || prevState === "asking" || prevState === "has_plan";
+          if (needsInput && prevState === "running") {
+            notifyWaiting(t.id, t.title);
+          } else if (!needsInput && prevNeedsInput) {
+            dismissNotification(t.id);
+          }
+        };
+        if (event.kind === "snapshot" && event.tasks) {
+          prevStates = new Map(event.tasks.map((t) => [t.id, t.state]));
+          setTasks(event.tasks);
+        } else if (event.kind === "upsert" && event.task) {
+          const t = event.task;
+          checkAndNotify(t);
+          prevStates.set(t.id, t.state);
+          setTasks((prev) => {
+            const idx = prev.findIndex((p) => p.id === t.id);
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = t;
+              return next;
+            }
+            return [...prev, t].sort((a, b) => (a.id < b.id ? -1 : 1));
+          });
+        } else if (event.kind === "patch" && event.patch) {
+          const patch = event.patch as Record<string, unknown>;
+          const id = patch["id"] as string;
+          if (!id) return;
+          if (typeof patch["state"] === "string") {
+            const newState = patch["state"] as string;
+            const existing = tasks().find((t) => t.id === id);
+            if (existing) {
+              checkAndNotify({ ...existing, state: newState } as Task);
+            }
+            prevStates.set(id, newState);
+          }
+          setTasks((prev) => {
+            const idx = prev.findIndex((p) => p.id === id);
+            if (idx < 0) return prev;
+            const next = [...prev];
+            next[idx] = { ...next[idx], ...patch } as Task;
+            return next;
+          });
+        } else if (event.kind === "delete" && event.id) {
+          prevStates.delete(event.id);
+          setTasks((prev) => prev.filter((t) => t.id !== event.id));
+        } else if (event.kind === "repos" && event.repos) {
+          const updatedRepos = event.repos;
+          setRepos((prev) => {
+            // Merge updated CI status into existing repo order.
+            const byPath = new Map(updatedRepos.map((r) => [r.path, r]));
+            return prev.map((r) => byPath.get(r.path) ?? r);
+          });
+        } else if (event.kind === "warning" && event.warning) {
+          showWarning(event.warning);
+        }
+      }, (err) => {
+        console.error("[caic] invalid task list event", err);
+      });
       taskES.addEventListener("open", () => {
         onOpen();
         taskDelay = 500;
@@ -388,71 +450,6 @@ export default function App() {
             }
           })
           .catch(() => {});
-      });
-      taskES.addEventListener("message", (e) => {
-        try {
-          const event = JSON.parse(e.data) as TaskListEvent;
-          const checkAndNotify = (t: Task) => {
-            const needsInput = t.state === "waiting" || t.state === "asking" || t.state === "has_plan";
-            const prevState = prevStates.get(t.id);
-            const prevNeedsInput = prevState === "waiting" || prevState === "asking" || prevState === "has_plan";
-            if (needsInput && prevState === "running") {
-              notifyWaiting(t.id, t.title);
-            } else if (!needsInput && prevNeedsInput) {
-              dismissNotification(t.id);
-            }
-          };
-          if (event.kind === "snapshot" && event.tasks) {
-            prevStates = new Map(event.tasks.map((t) => [t.id, t.state]));
-            setTasks(event.tasks);
-          } else if (event.kind === "upsert" && event.task) {
-            const t = event.task;
-            checkAndNotify(t);
-            prevStates.set(t.id, t.state);
-            setTasks((prev) => {
-              const idx = prev.findIndex((p) => p.id === t.id);
-              if (idx >= 0) {
-                const next = [...prev];
-                next[idx] = t;
-                return next;
-              }
-              return [...prev, t].sort((a, b) => (a.id < b.id ? -1 : 1));
-            });
-          } else if (event.kind === "patch" && event.patch) {
-            const patch = event.patch as Record<string, unknown>;
-            const id = patch["id"] as string;
-            if (!id) return;
-            if (typeof patch["state"] === "string") {
-              const newState = patch["state"] as string;
-              const existing = tasks().find((t) => t.id === id);
-              if (existing) {
-                checkAndNotify({ ...existing, state: newState } as Task);
-              }
-              prevStates.set(id, newState);
-            }
-            setTasks((prev) => {
-              const idx = prev.findIndex((p) => p.id === id);
-              if (idx < 0) return prev;
-              const next = [...prev];
-              next[idx] = { ...next[idx], ...patch } as Task;
-              return next;
-            });
-          } else if (event.kind === "delete" && event.id) {
-            prevStates.delete(event.id);
-            setTasks((prev) => prev.filter((t) => t.id !== event.id));
-          } else if (event.kind === "repos" && event.repos) {
-            const updatedRepos = event.repos;
-            setRepos((prev) => {
-              // Merge updated CI status into existing repo order.
-              const byPath = new Map(updatedRepos.map((r) => [r.path, r]));
-              return prev.map((r) => byPath.get(r.path) ?? r);
-            });
-          } else if (event.kind === "warning" && event.warning) {
-            showWarning(event.warning);
-          }
-        } catch {
-          // Ignore unparseable messages.
-        }
       });
       taskES.onerror = () => {
         taskES?.close();
@@ -468,17 +465,14 @@ export default function App() {
     }
 
     function connectUsage() {
-      usageES = new EventSource("/api/v1/server/usage/events");
+      usageES = globalUsageEvents((event) => {
+        setUsage(event);
+      }, (err) => {
+        console.error("[caic] invalid usage event", err);
+      });
       usageES.addEventListener("open", () => {
         onOpen();
         usageDelay = 500;
-      });
-      usageES.addEventListener("message", (e) => {
-        try {
-          setUsage(JSON.parse(e.data) as UsageResp);
-        } catch {
-          // Ignore unparseable messages.
-        }
       });
       usageES.onerror = () => {
         usageES?.close();

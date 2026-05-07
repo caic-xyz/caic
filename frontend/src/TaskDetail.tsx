@@ -376,6 +376,8 @@ export default function TaskDetail(props: Props) {
         } else {
           buf.push(ev);
         }
+      }, (err) => {
+        console.error("[caic] invalid task event", err);
       });
       es.addEventListener("open", () => {
         delay = 500;

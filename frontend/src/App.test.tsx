@@ -6,6 +6,19 @@ import type { Repo, PreferencesResp, HarnessInfo } from "@sdk/types.gen";
 
 const navigateMock = vi.fn();
 
+// Stub EventSource to prevent real SSE connections.
+// FakeEventSource captures message listeners so tests can push SSE events.
+type MessageListener = (e: { data: string }) => void;
+const fakeESListeners: MessageListener[] = [];
+
+class FakeEventSource {
+  addEventListener = vi.fn((type: string, handler: MessageListener) => {
+    if (type === "message") fakeESListeners.push(handler);
+  });
+  close = vi.fn();
+  onerror: ((e: Event) => void) | null = null;
+}
+
 vi.mock("@solidjs/router", () => ({
   useNavigate: () => navigateMock,
   useLocation: () => ({ pathname: "/" }),
@@ -24,6 +37,8 @@ vi.mock("./api", () => ({
   stopTask: vi.fn(),
   purgeTask: vi.fn(),
   reviveTask: vi.fn(),
+  globalTaskEvents: vi.fn(() => new FakeEventSource()),
+  globalUsageEvents: vi.fn(() => new FakeEventSource()),
 }));
 
 vi.mock("./AuthContext", () => ({
@@ -37,18 +52,6 @@ vi.mock("./AuthContext", () => ({
   }),
 }));
 
-// Stub EventSource to prevent real SSE connections.
-// FakeEventSource captures message listeners so tests can push SSE events.
-type MessageListener = (e: { data: string }) => void;
-const fakeESListeners: MessageListener[] = [];
-
-class FakeEventSource {
-  addEventListener = vi.fn((type: string, handler: MessageListener) => {
-    if (type === "message") fakeESListeners.push(handler);
-  });
-  close = vi.fn();
-  onerror: ((e: Event) => void) | null = null;
-}
 vi.stubGlobal("EventSource", FakeEventSource);
 
 // Stub VoiceOverlay to avoid WebRTC/WebSocket connections in tests.
