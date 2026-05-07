@@ -438,7 +438,7 @@ field so the client knows which backend produced the stream.
 | `effort` | `string` | Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported. |  |
 | `agentVersion` | `string` |  | yes |
 | `sessionID` | `string` |  | yes |
-| `tools` | `string[]` |  | yes |
+| `tools` | `string[]` |  |  |
 | `cwd` | `string` |  | yes |
 | `harness` | `string` |  | yes |
 

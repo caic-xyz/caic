@@ -77,7 +77,7 @@ type EventInit struct {
 	Effort       string   `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty when not supported.
 	AgentVersion string   `json:"agentVersion"`
 	SessionID    string   `json:"sessionID"`
-	Tools        []string `json:"tools"`
+	Tools        []string `json:"tools,omitzero"`
 	Cwd          string   `json:"cwd"`
 	Harness      string   `json:"harness"`
 }

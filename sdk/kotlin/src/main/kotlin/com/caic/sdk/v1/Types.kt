@@ -317,7 +317,7 @@ data class EventInit(
     val effort: String? = null,
     val agentVersion: String,
     @SerialName("sessionID") val sessionID: String,
-    val tools: List<String>,
+    val tools: List<String>? = null,
     val cwd: String,
     val harness: String,
 )

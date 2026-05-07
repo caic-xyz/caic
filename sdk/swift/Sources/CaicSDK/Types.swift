@@ -376,7 +376,7 @@ public struct EventInit: Codable {
     public let effort: String?
     public let agentVersion: String
     public let sessionID: String
-    public let tools: [String]
+    public let tools: [String]?
     public let cwd: String
     public let harness: String
 }

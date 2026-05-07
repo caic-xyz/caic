@@ -2,7 +2,7 @@
 package com.fghbuild.caic.ui.tasklist
 
 import android.content.Intent
-import android.net.Uri
+import androidx.core.net.toUri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -119,7 +119,7 @@ private fun ProviderPill(pq: ProviderQuota, serverURL: String) {
     val context = LocalContext.current
     val modifier = if (pq.usageUrl.isNotBlank()) {
         Modifier.clickable {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(pq.usageUrl))
+            val intent = Intent(Intent.ACTION_VIEW, pq.usageUrl.toUri())
             context.startActivity(intent)
         }
     } else {

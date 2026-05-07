@@ -38,14 +38,14 @@ function asBoolean(v: unknown, path: string): boolean {
 
 function validateArray(v: unknown, path: string, elemValidator: (v: unknown) => unknown): unknown[] {
   if (!Array.isArray(v)) {
-    throw new TypeError(path + ": expected array, got " + typeof v);
+    throw new TypeError(path + ": expected array, got " + (v === null ? "null" : typeof v));
   }
   return v.map((e, i) => elemValidator(e));
 }
 
 function validateRecord(v: unknown, path: string, valValidator: (v: unknown) => unknown): Record<string, unknown> {
   if (typeof v !== "object" || v === null || Array.isArray(v)) {
-    throw new TypeError(path + ": expected object, got " + typeof v);
+    throw new TypeError(path + ": expected object, got " + (v === null ? "null" : Array.isArray(v) ? "array" : typeof v));
   }
   const result: Record<string, unknown> = {};
   for (const k of Object.keys(v as Record<string, unknown>)) {
@@ -61,7 +61,7 @@ export function validateEventInit(raw: unknown): EventInit {
     effort: (obj["effort"] === undefined || obj["effort"] === null ? undefined : asString(obj["effort"], "EventInit.effort")),
     agentVersion: asString(obj["agentVersion"], "EventInit.agentVersion"),
     sessionID: asString(obj["sessionID"], "EventInit.sessionID"),
-    tools: validateArray(obj["tools"], "EventInit.tools", (v) => asString(v, "EventInit.tools[i]")) as string[],
+    tools: (obj["tools"] === undefined || obj["tools"] === null ? undefined : validateArray(obj["tools"], "EventInit.tools", (v) => asString(v, "EventInit.tools[i]")) as string[]),
     cwd: asString(obj["cwd"], "EventInit.cwd"),
     harness: asString(obj["harness"], "EventInit.harness"),
   };
@@ -86,7 +86,7 @@ export function validateEventToolUse(raw: unknown): EventToolUse {
   return {
     toolUseID: asString(obj["toolUseID"], "EventToolUse.toolUseID"),
     name: asString(obj["name"], "EventToolUse.name"),
-    input: validateArray(obj["input"], "EventToolUse.input", (v) => v) as any[],
+    input: obj["input"],
     planContent: (obj["planContent"] === undefined || obj["planContent"] === null ? undefined : asString(obj["planContent"], "EventToolUse.planContent")),
     inputTruncated: (obj["inputTruncated"] === undefined || obj["inputTruncated"] === null ? undefined : asBoolean(obj["inputTruncated"], "EventToolUse.inputTruncated")),
     background: (obj["background"] === undefined || obj["background"] === null ? undefined : asBoolean(obj["background"], "EventToolUse.background")),

@@ -54,7 +54,7 @@ export interface EventInit {
   effort?: string;
   agentVersion: string;
   sessionID: string;
-  tools: string[];
+  tools?: string[];
   cwd: string;
   harness: string;
 }

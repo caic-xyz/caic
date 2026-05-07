@@ -448,6 +448,12 @@ func tsFieldValidator(t reflect.Type, pathExpr, pathLit string) string {
 		return tsFieldValidator(t.Elem(), pathExpr, pathLit)
 	}
 
+	// json.RawMessage is []byte (Kind == Slice) so it hits the Slice branch
+	// below. Bypass kind dispatch — it's validated as passthrough (any).
+	if t == jsonRawMessageType {
+		return tsPrimitiveValidator(t, pathExpr, pathLit)
+	}
+
 	rt := t
 
 	// Slice — cast result to expected type.
@@ -663,13 +669,13 @@ func generateTSValidate(outDir string, _ *docRegistry) error {
 	b.WriteString("}\n\n")
 	b.WriteString("function validateArray(v: unknown, path: string, elemValidator: (v: unknown) => unknown): unknown[] {\n")
 	b.WriteString("  if (!Array.isArray(v)) {\n")
-	b.WriteString("    throw new TypeError(path + \": expected array, got \" + typeof v);\n")
+	b.WriteString("    throw new TypeError(path + \": expected array, got \" + (v === null ? \"null\" : typeof v));\n")
 	b.WriteString("  }\n")
 	b.WriteString("  return v.map((e, i) => elemValidator(e));\n")
 	b.WriteString("}\n\n")
 	b.WriteString("function validateRecord(v: unknown, path: string, valValidator: (v: unknown) => unknown): Record<string, unknown> {\n")
 	b.WriteString("  if (typeof v !== \"object\" || v === null || Array.isArray(v)) {\n")
-	b.WriteString("    throw new TypeError(path + \": expected object, got \" + typeof v);\n")
+	b.WriteString("    throw new TypeError(path + \": expected object, got \" + (v === null ? \"null\" : Array.isArray(v) ? \"array\" : typeof v));\n")
 	b.WriteString("  }\n")
 	b.WriteString("  const result: Record<string, unknown> = {};\n")
 	b.WriteString("  for (const k of Object.keys(v as Record<string, unknown>)) {\n")
