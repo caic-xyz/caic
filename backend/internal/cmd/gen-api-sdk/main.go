@@ -41,6 +41,7 @@ func isSDKPkg(pkgPath string) bool {
 // docRegistry holds parsed documentation extracted from Go source files.
 type docRegistry struct {
 	typeDoc  map[string]string            // Go type name → doc comment text
+	typeFile map[string]string            // Go type name → source filename (e.g. "events.go")
 	fieldDoc map[string]map[string]string // Go type name → Go field name → doc comment text
 }
 
@@ -65,6 +66,7 @@ func loadDocs() (*docRegistry, error) {
 	}
 	reg := &docRegistry{
 		typeDoc:  map[string]string{},
+		typeFile: map[string]string{},
 		fieldDoc: map[string]map[string]string{},
 	}
 	for _, file := range files {
@@ -90,6 +92,7 @@ func loadDocs() (*docRegistry, error) {
 				} else if genDecl.Doc != nil && len(genDecl.Specs) == 1 {
 					doc = genDecl.Doc.Text()
 				}
+				reg.typeFile[typeSpec.Name.Name] = filepath.Base(fset.Position(typeSpec.Pos()).Filename)
 				if doc = strings.TrimSpace(doc); doc != "" {
 					reg.typeDoc[typeSpec.Name.Name] = doc
 				}
@@ -241,11 +244,11 @@ var skipErrorResponse = map[reflect.Type]struct{}{
 
 // discoverTSStructs walks route types, skipping ErrorResponse, and annotates
 // each struct with its source file for section grouping.
-func discoverTSStructs() []kotlinStruct {
+func discoverTSStructs(docs *docRegistry) []kotlinStruct {
 	order := walkSDKTypes(routeSeedTypes(), skipErrorResponse)
 	result := make([]kotlinStruct, len(order))
 	for i, t := range order {
-		result[i] = kotlinStruct{t: t, comment: tsSourceFiles[t.Name()]}
+		result[i] = kotlinStruct{t: t, comment: docs.typeFile[t.Name()]}
 	}
 	return result
 }
@@ -355,7 +358,7 @@ func generateTSTypes(outDir string, docs *docRegistry) error {
 	b.WriteString("/** ISO 8601 timestamp string (e.g. \"2026-04-13T12:00:00Z\"). */\n")
 	b.WriteString("export type ISOTimestamp = string & { readonly __brand: \"ISOTimestamp\" };\n\n")
 
-	allStructs := discoverTSStructs()
+	allStructs := discoverTSStructs(docs)
 
 	// Group structs by source file for section headers.
 	structsBySource := map[string][]kotlinStruct{}
@@ -1142,40 +1145,6 @@ var tsAliasNames = map[reflect.Type]string{
 	reflect.TypeFor[v1.EventKind]():             "EventKind",
 	reflect.TypeFor[v1.ToolOutputContentType](): "ToolOutputContentType",
 	reflect.TypeFor[v1.SyncTarget]():            "SyncTarget",
-}
-
-// tsSourceFiles maps Go type names to the source file comment emitted as a section header.
-var tsSourceFiles = map[string]string{
-	// events.go
-	"EventKind":             "events.go",
-	"EventMessage":          "events.go",
-	"EventInit":             "events.go",
-	"EventText":             "events.go",
-	"EventTextDelta":        "events.go",
-	"EventToolUse":          "events.go",
-	"EventToolResult":       "events.go",
-	"AskOption":             "events.go",
-	"AskQuestion":           "events.go",
-	"EventAsk":              "events.go",
-	"EventUsage":            "events.go",
-	"EventResult":           "events.go",
-	"EventSystem":           "events.go",
-	"EventUserInput":        "events.go",
-	"TodoItem":              "events.go",
-	"EventTodo":             "events.go",
-	"EventDiffStat":         "events.go",
-	"EventError":            "events.go",
-	"EventThinking":         "events.go",
-	"EventThinkingDelta":    "events.go",
-	"EventSubagentStart":    "events.go",
-	"EventSubagentEnd":      "events.go",
-	"EventLog":              "events.go",
-	"EventToolOutputDelta":  "events.go",
-	"ToolOutputContentType": "events.go",
-	"EventWidget":           "events.go",
-	"EventWidgetDelta":      "events.go",
-	"EventRateLimit":        "events.go",
-	"EventStats":            "events.go",
 }
 
 // Type identity values for special-case mapping in goTypeToKotlin.
