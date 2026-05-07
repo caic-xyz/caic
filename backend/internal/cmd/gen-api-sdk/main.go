@@ -23,14 +23,6 @@ import (
 	"github.com/maruel/ksid"
 )
 
-// Output directories relative to go:generate CWD (backend/internal/server/dto/v1/).
-const (
-	sdkDir    = "../../../../../sdk"
-	tsDir     = sdkDir + "/ts/v1"
-	kotlinDir = sdkDir + "/kotlin/src/main/kotlin/com/caic/sdk/v1"
-	swiftDir  = sdkDir + "/swift/Sources/CaicSDK"
-)
-
 var pathParamRe = regexp.MustCompile(`\{(\w+)\}`)
 
 // skipErrorResponse is the skip set for TS generation, which emits
@@ -40,8 +32,10 @@ var skipErrorResponse = map[reflect.Type]struct{}{
 }
 
 // Error code constants.
-// docErrorCodes maps dto error codes to their HTTP status for API doc generation.
-var docErrorCodes = []struct {
+// errorCodeDefs is the single source of truth for all API error codes.
+// Kotlin/Swift constant names are derived from the code value
+// (e.g. "BAD_REQUEST" → "BadRequest" / "badRequest").
+var errorCodeDefs = []struct {
 	code   dto.ErrorCode
 	status int
 }{
@@ -51,16 +45,9 @@ var docErrorCodes = []struct {
 	{dto.CodeInternalError, 500},
 }
 
-var kotlinErrorCodes = []aliasConstant{
-	{"BadRequest", string(dto.CodeBadRequest)},
-	{"NotFound", string(dto.CodeNotFound)},
-	{"Conflict", string(dto.CodeConflict)},
-	{"InternalError", string(dto.CodeInternalError)},
-}
-
-// kotlinSectionComments maps type names to section comments emitted before
-// the struct in the generated output.
-var kotlinSectionComments = map[string]string{
+// sectionComments maps type names to section comments emitted before
+// the type in generated Kotlin and Swift output.
+var sectionComments = map[string]string{
 	"EventMessage": "Backend-neutral event types",
 }
 
@@ -68,7 +55,6 @@ var kotlinSectionComments = map[string]string{
 var (
 	jsonRawMessageType = reflect.TypeFor[json.RawMessage]()
 	ksidIDType         = reflect.TypeFor[ksid.ID]()
-	diffStatType       = reflect.TypeFor[v1.DiffStat]()
 	mapStringAnyType   = reflect.TypeFor[map[string]any]()
 	timeType           = reflect.TypeFor[time.Time]()
 )
@@ -88,17 +74,25 @@ var swiftReservedWords = map[string]struct{}{
 	"type": {},
 }
 
-// swiftErrorCodes mirrors kotlinErrorCodes for Swift output.
-var swiftErrorCodes = []aliasConstant{
-	{"badRequest", string(dto.CodeBadRequest)},
-	{"notFound", string(dto.CodeNotFound)},
-	{"conflict", string(dto.CodeConflict)},
-	{"internalError", string(dto.CodeInternalError)},
+// snakeToPascal converts SCREAMING_SNAKE_CASE to PascalCase ("BAD_REQUEST" → "BadRequest").
+func snakeToPascal(s string) string {
+	parts := strings.Split(s, "_")
+	for i, p := range parts {
+		lower := strings.ToLower(p)
+		if len(lower) > 0 {
+			parts[i] = strings.ToUpper(lower[:1]) + lower[1:]
+		}
+	}
+	return strings.Join(parts, "")
 }
 
-// swiftSectionComments mirrors kotlinSectionComments for Swift output.
-var swiftSectionComments = map[string]string{
-	"EventMessage": "Backend-neutral event types",
+// snakeToCamel converts SCREAMING_SNAKE_CASE to camelCase ("BAD_REQUEST" → "badRequest").
+func snakeToCamel(s string) string {
+	pascal := snakeToPascal(s)
+	if pascal == "" {
+		return ""
+	}
+	return strings.ToLower(pascal[:1]) + pascal[1:]
 }
 
 // isSDKPkg reports whether pkgPath is dto or dto/v1 — the two packages
@@ -388,16 +382,16 @@ func tsElemValidatorFunc(t reflect.Type, pathLit string) string {
 
 // discoverSSEStructs returns the structs reachable from the SSE event types
 // (EventMessage, TaskListEvent, UsageResp) in dependency order.
-func discoverSSEStructs() []kotlinStruct {
+func discoverSSEStructs() []sdkType {
 	seeds := []reflect.Type{
 		reflect.TypeFor[v1.EventMessage](),
 		reflect.TypeFor[v1.TaskListEvent](),
 		reflect.TypeFor[v1.UsageResp](),
 	}
 	order := walkSDKTypes(seeds, nil)
-	result := make([]kotlinStruct, len(order))
+	result := make([]sdkType, len(order))
 	for i, t := range order {
-		result[i] = kotlinStruct{t: t}
+		result[i] = sdkType{t: t}
 	}
 	return result
 }
@@ -459,12 +453,12 @@ func writeTSSSEMethod(b *strings.Builder, r *v1.Route, params []string) {
 
 // discoverKotlinStructs walks the dto struct types reachable from route
 // types and returns them in dependency order (leaves first).
-func discoverKotlinStructs() []kotlinStruct {
+func discoverKotlinStructs() []sdkType {
 	seeds := append(routeSeedTypes(), reflect.TypeFor[dto.ErrorResponse]())
 	order := walkSDKTypes(seeds, nil)
-	result := make([]kotlinStruct, len(order))
+	result := make([]sdkType, len(order))
 	for i, t := range order {
-		result[i] = kotlinStruct{t: t, comment: kotlinSectionComments[t.Name()]}
+		result[i] = sdkType{t: t, comment: sectionComments[t.Name()]}
 	}
 	return result
 }
@@ -842,8 +836,6 @@ func goTypeToDoc(t reflect.Type) string {
 		return goTypeToDoc(t.Elem())
 	}
 	switch t {
-	case diffStatType:
-		return "DiffFileStat[]"
 	case ksidIDType:
 		return "string"
 	case timeType:
@@ -923,12 +915,12 @@ func buildSwiftPath(path string, queryParams []string) string {
 
 // discoverSwiftStructs walks the dto struct types reachable from route types
 // and returns them in dependency order, annotated with Swift section comments.
-func discoverSwiftStructs() []kotlinStruct {
+func discoverSwiftStructs() []sdkType {
 	seeds := append(routeSeedTypes(), reflect.TypeFor[dto.ErrorResponse]())
 	order := walkSDKTypes(seeds, nil)
-	result := make([]kotlinStruct, len(order))
+	result := make([]sdkType, len(order))
 	for i, t := range order {
-		result[i] = kotlinStruct{t: t, comment: swiftSectionComments[t.Name()]}
+		result[i] = sdkType{t: t, comment: sectionComments[t.Name()]}
 	}
 	return result
 }
@@ -1147,15 +1139,6 @@ public final class ApiClient {
 	return os.WriteFile(filepath.Join(outDir, "ApiClient.swift"), []byte(b.String()), 0o600)
 }
 
-func sortedKeys(m map[string]struct{}) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	slices.Sort(out)
-	return out
-}
-
 // docRegistry holds parsed documentation extracted from Go source files.
 type docRegistry struct {
 	typeDoc    map[string]string            // Go type name → doc comment text
@@ -1167,11 +1150,11 @@ type docRegistry struct {
 
 // discoverTSStructs walks route types, skipping ErrorResponse, and annotates
 // each struct with its source file for section grouping.
-func (d *docRegistry) discoverTSStructs() []kotlinStruct {
+func (d *docRegistry) discoverTSStructs() []sdkType {
 	order := walkSDKTypes(routeSeedTypes(), skipErrorResponse)
-	result := make([]kotlinStruct, len(order))
+	result := make([]sdkType, len(order))
 	for i, t := range order {
-		result[i] = kotlinStruct{t: t, comment: d.typeFile[t.Name()]}
+		result[i] = sdkType{t: t, comment: d.typeFile[t.Name()]}
 	}
 	return result
 }
@@ -1189,8 +1172,6 @@ func (d *docRegistry) goTypeToTS(t reflect.Type) string {
 		return "string"
 	case timeType:
 		return "ISOTimestamp"
-	case diffStatType:
-		return "DiffFileStat[]"
 	case mapStringAnyType:
 		return "{ [key: string]: any /* json.RawMessage */}"
 	case reflect.TypeFor[map[string]bool]():
@@ -1284,7 +1265,7 @@ func (d *docRegistry) generateTSTypes(outDir string) error {
 	allStructs := d.discoverTSStructs()
 
 	// Group structs by source file for section headers.
-	structsBySource := map[string][]kotlinStruct{}
+	structsBySource := map[string][]sdkType{}
 	for _, ks := range allStructs {
 		src := ks.comment
 		if src == "" {
@@ -1466,11 +1447,7 @@ func (d *docRegistry) generateTSValidate(outDir string) error {
 	refTypes["ISOTimestamp"] = struct{}{}
 
 	if len(refTypes) > 0 {
-		sorted := make([]string, 0, len(refTypes))
-		for name := range refTypes {
-			sorted = append(sorted, name)
-		}
-		slices.Sort(sorted)
+		sorted := slices.Sorted(maps.Keys(refTypes))
 		b.WriteString("import type { ")
 		for i, name := range sorted {
 			if i > 0 {
@@ -1634,13 +1611,13 @@ func (*docRegistry) generateTS(outDir string) error {
 	}
 	types["ErrorResponse"] = struct{}{}
 
-	sorted := sortedKeys(types)
+	sorted := slices.Sorted(maps.Keys(types))
 
 	var b strings.Builder
 	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\n")
 	fmt.Fprintf(&b, "import type { %s } from \"./types.gen\";\n", strings.Join(sorted, ", "))
 	if len(validators) > 0 {
-		sortedVal := sortedKeys(validators)
+		sortedVal := slices.Sorted(maps.Keys(validators))
 		fmt.Fprintf(&b, "import { %s } from \"./validate.gen\";\n", strings.Join(sortedVal, ", "))
 	}
 	b.WriteString("\n")
@@ -1728,8 +1705,6 @@ func (d *docRegistry) goTypeToKotlin(t reflect.Type) string {
 		return "String"
 	case timeType:
 		return "Instant"
-	case diffStatType:
-		return "List<DiffFileStat>"
 	case mapStringAnyType:
 		return "Map<String, JsonElement>"
 	}
@@ -1875,8 +1850,8 @@ func (d *docRegistry) writeKotlinTypes(outDir string) error {
 
 	// Error codes.
 	b.WriteString("object ErrorCodes {\n")
-	for _, c := range kotlinErrorCodes {
-		fmt.Fprintf(&b, "    const val %s = %q\n", c.name, c.value)
+	for _, e := range errorCodeDefs {
+		fmt.Fprintf(&b, "    const val %s = %q\n", snakeToPascal(string(e.code)), e.code)
 	}
 	b.WriteString("}\n\n")
 
@@ -1935,7 +1910,7 @@ func (d *docRegistry) generateMarkdownDoc(outDir string) error {
 	b.WriteString("```\n\n")
 	b.WriteString("| HTTP | Code |\n")
 	b.WriteString("|------|------|\n")
-	for _, e := range docErrorCodes {
+	for _, e := range errorCodeDefs {
 		fmt.Fprintf(&b, "| %d | `%s` |\n", e.status, e.code)
 	}
 	b.WriteString("\n")
@@ -1996,8 +1971,6 @@ func (d *docRegistry) goTypeToSwift(t reflect.Type) string {
 		return "String"
 	case timeType:
 		return "ISOTimestamp"
-	case diffStatType:
-		return "[DiffFileStat]"
 	case mapStringAnyType:
 		return "[String: JSONValue]"
 	}
@@ -2119,8 +2092,8 @@ public enum JSONValue: Codable, Equatable {
 
 	// Error codes.
 	b.WriteString("public enum ErrorCodes {\n")
-	for _, c := range swiftErrorCodes {
-		fmt.Fprintf(&b, "    public static let %s = %q\n", c.name, c.value)
+	for _, e := range errorCodeDefs {
+		fmt.Fprintf(&b, "    public static let %s = %q\n", snakeToCamel(string(e.code)), e.code)
 	}
 	b.WriteString("}\n\n")
 
@@ -2173,9 +2146,9 @@ type aliasConstant struct {
 	value string // wire value, e.g. "claude"
 }
 
-// kotlinStruct wraps a reflect.Type with an optional section comment that
+// sdkType wraps a reflect.Type with an optional section comment that
 // appears before the struct in the generated output.
-type kotlinStruct struct {
+type sdkType struct {
 	t       reflect.Type
 	comment string // Emitted as `// comment` before the struct.
 }
@@ -2203,6 +2176,13 @@ func main() {
 }
 
 func mainImpl() error {
+	// Output directories relative to go:generate CWD (backend/internal/server/dto/v1/).
+	const (
+		sdkDir    = "../../../../../sdk"
+		tsDir     = sdkDir + "/ts/v1"
+		kotlinDir = sdkDir + "/kotlin/src/main/kotlin/com/caic/sdk/v1"
+		swiftDir  = sdkDir + "/swift/Sources/CaicSDK"
+	)
 	docs, err := loadDocs()
 	if err != nil {
 		return fmt.Errorf("loading docs: %w", err)
