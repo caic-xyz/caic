@@ -705,10 +705,10 @@ data class TaskToolInputResp(
 @Serializable
 data class TaskListEvent(
     val kind: String,
-    val tasks: List<Task>? = null,
-    val task: Task? = null,
+    val snapshot: List<Task>? = null,
+    val upsert: Task? = null,
     val patch: Map<String, JsonElement>? = null,
-    val id: String? = null,
+    val delete: String? = null,
     val repos: List<Repo>? = null,
     val warning: String? = null,
 )

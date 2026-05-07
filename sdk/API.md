@@ -871,10 +871,10 @@ kind=="warning":  Warning holds a transient server warning message for the user.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `kind` | `string` |  | yes |
-| `tasks` | `Task[]` |  |  |
-| `task` | `Task` |  |  |
+| `snapshot` | `Task[]` |  |  |
+| `upsert` | `Task` |  |  |
 | `patch` | `Record<string, unknown>` |  |  |
-| `id` | `string` |  |  |
+| `delete` | `string` |  |  |
 | `repos` | `Repo[]` |  |  |
 | `warning` | `string` |  |  |
 

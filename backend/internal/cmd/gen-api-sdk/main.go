@@ -79,7 +79,7 @@ func snakeToPascal(s string) string {
 	parts := strings.Split(s, "_")
 	for i, p := range parts {
 		lower := strings.ToLower(p)
-		if len(lower) > 0 {
+		if lower != "" {
 			parts[i] = strings.ToUpper(lower[:1]) + lower[1:]
 		}
 	}
@@ -1389,6 +1389,66 @@ func (d *docRegistry) tsFieldOptValidator(t reflect.Type, pathExpr, pathLit stri
 	return fmt.Sprintf("(%s === undefined || %s === null ? undefined : %s)", pathExpr, pathExpr, inner)
 }
 
+// emitTSDiscriminator writes a discriminated union validator with a kind-based
+// dispatch. Fields without omitempty are base fields extracted before the switch
+// (except "kind", which is always the discriminator). Fields with omitempty or
+// pointer types are variant fields dispatched by their json name.
+func (d *docRegistry) emitTSDiscriminator(b *strings.Builder, t reflect.Type) {
+	name := t.Name()
+	fmt.Fprintf(b, "export function validate%s(raw: unknown): %s {\n", name, name)
+	fmt.Fprintf(b, "  const obj = asObject(raw, %q);\n", name)
+
+	// Collect base fields (non-pointer, no omitempty, not "kind").
+	baseFields := []tsFieldBinding{{"kind", fmt.Sprintf("asString(obj[%q], %q)", "kind", name+".kind")}}
+	var variantFields []tsFieldBinding
+
+	for i := range t.NumField() {
+		sf := t.Field(i)
+		if !sf.IsExported() {
+			continue
+		}
+		tag := sf.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		jsonName, opts := parseJSONTag(tag)
+		if jsonName == "" {
+			jsonName = sf.Name
+		}
+		if jsonName == "kind" {
+			continue
+		}
+		omit := slices.Contains(opts, "omitempty") || slices.Contains(opts, "omitzero")
+		isPtr := sf.Type.Kind() == reflect.Pointer
+		pathExpr := fmt.Sprintf("obj[%q]", jsonName)
+		pathLit := fmt.Sprintf("%s.%s", name, jsonName)
+
+		if !omit && !isPtr {
+			// Base field: extracted before the switch.
+			baseFields = append(baseFields, tsFieldBinding{jsonName, d.tsFieldValidator(sf.Type, pathExpr, pathLit)})
+		} else {
+			// Variant field: extracted in the switch.
+			variantFields = append(variantFields, tsFieldBinding{jsonName, d.tsFieldValidator(sf.Type, pathExpr, pathLit)})
+		}
+	}
+
+	b.WriteString("  const result: " + name + " = {\n")
+	for _, bf := range baseFields {
+		fmt.Fprintf(b, "    %s: %s,\n", bf.jsonName, bf.expr)
+	}
+	b.WriteString("  };\n")
+	b.WriteString("  switch (result.kind) {\n")
+	for _, vf := range variantFields {
+		fmt.Fprintf(b, "    case %q:\n", vf.jsonName)
+		fmt.Fprintf(b, "      result.%s = %s;\n", vf.jsonName, vf.expr)
+		b.WriteString("      break;\n")
+	}
+	b.WriteString("    // Unknown kinds pass through.\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return result;\n")
+	b.WriteString("}\n\n")
+}
+
 // emitTSValidator writes a validateXxx(raw: unknown): Xxx function for a struct.
 func (d *docRegistry) emitTSValidator(b *strings.Builder, t reflect.Type) {
 	name := t.Name()
@@ -1435,15 +1495,14 @@ func (d *docRegistry) generateTSValidate(outDir string) error {
 	b.WriteString("// Each validator checks structural correctness at runtime and throws\n")
 	b.WriteString("// TypeError on mismatch. Unknown kinds pass through for forward compat.\n\n")
 
-	// Collect all types referenced by validators.
+	// Collect all types referenced by validators. ISOTimestamp is the only
+	// type not discoverable from Go struct reflection (it's a TypeScript alias
+	// for time.Time).
 	needed := discoverSSEStructs()
 	refTypes := map[string]struct{}{}
 	for _, ks := range needed {
 		refTypes[ks.t.Name()] = struct{}{}
 	}
-	refTypes["EventMessage"] = struct{}{}
-	refTypes["TaskListEvent"] = struct{}{}
-	refTypes["UsageResp"] = struct{}{}
 	refTypes["ISOTimestamp"] = struct{}{}
 
 	if len(refTypes) > 0 {
@@ -1503,7 +1562,7 @@ func (d *docRegistry) generateTSValidate(outDir string) error {
 
 	// Generate validators for SSE-relevant structs: EventMessage sub-types,
 	// TaskListEvent's referenced types, and UsageResp's referenced types.
-	discriminated := map[string]struct{}{"EventMessage": {}, "TaskListEvent": {}, "UsageResp": {}}
+	discriminated := map[string]struct{}{"EventMessage": {}, "TaskListEvent": {}}
 	emitted := map[string]struct{}{}
 
 	for _, ks := range needed {
@@ -1512,84 +1571,13 @@ func (d *docRegistry) generateTSValidate(outDir string) error {
 			continue
 		}
 		if _, ok := discriminated[name]; ok {
+			d.emitTSDiscriminator(&b, ks.t)
+			emitted[name] = struct{}{}
 			continue
 		}
 		emitted[name] = struct{}{}
 		d.emitTSValidator(&b, ks.t)
 	}
-
-	// EventMessage discriminated union validator.
-	b.WriteString("export function validateEventMessage(raw: unknown): EventMessage {\n")
-	b.WriteString("  const obj = asObject(raw, \"EventMessage\");\n")
-	b.WriteString("  const result: EventMessage = {\n")
-	b.WriteString("    kind: asString(obj[\"kind\"], \"EventMessage.kind\"),\n")
-	b.WriteString("    ts: asNumber(obj[\"ts\"], \"EventMessage.ts\"),\n")
-	b.WriteString("  };\n")
-	b.WriteString("  switch (result.kind) {\n")
-
-	// Build the dispatch table from EventMessage's fields.
-	evMsgType := reflect.TypeFor[v1.EventMessage]()
-	for i := range evMsgType.NumField() {
-		sf := evMsgType.Field(i)
-		jsonName, _ := parseJSONTag(sf.Tag.Get("json"))
-		if jsonName == "kind" || jsonName == "ts" {
-			continue
-		}
-		// Each field is a pointer to a struct; get the struct name.
-		fieldType := sf.Type.Elem()
-		kindValue := jsonName // The json name IS the kind value for most (e.g. "init", "text").
-		// Special case: diffStat kind is "diffStat", userInput kind is "userInput", etc.
-		// The field json names match the kind constants.
-		fmt.Fprintf(&b, "    case %q:\n", kindValue)
-		fmt.Fprintf(&b, "      result.%s = validate%s(obj[%q]);\n", jsonName, fieldType.Name(), jsonName)
-		b.WriteString("      break;\n")
-	}
-
-	b.WriteString("    // Unknown kinds pass through.\n")
-	b.WriteString("  }\n")
-	b.WriteString("  return result;\n")
-	b.WriteString("}\n\n")
-
-	// TaskListEvent discriminated union validator.
-	b.WriteString("export function validateTaskListEvent(raw: unknown): TaskListEvent {\n")
-	b.WriteString("  const obj = asObject(raw, \"TaskListEvent\");\n")
-	b.WriteString("  const kind = asString(obj[\"kind\"], \"TaskListEvent.kind\");\n")
-	b.WriteString("  const result: TaskListEvent = { kind };\n")
-	b.WriteString("  switch (kind) {\n")
-	b.WriteString("    case \"snapshot\":\n")
-	b.WriteString("      result.tasks = validateArray(obj[\"tasks\"], \"TaskListEvent.tasks\", validateTask) as Task[];\n")
-	b.WriteString("      break;\n")
-	b.WriteString("    case \"upsert\":\n")
-	b.WriteString("      result.task = validateTask(obj[\"task\"]);\n")
-	b.WriteString("      break;\n")
-	b.WriteString("    case \"patch\":\n")
-	b.WriteString("      result.patch = asObject(obj[\"patch\"], \"TaskListEvent.patch\");\n")
-	b.WriteString("      break;\n")
-	b.WriteString("    case \"delete\":\n")
-	b.WriteString("      result.id = asString(obj[\"id\"], \"TaskListEvent.id\");\n")
-	b.WriteString("      break;\n")
-	b.WriteString("    case \"repos\":\n")
-	b.WriteString("      result.repos = validateArray(obj[\"repos\"], \"TaskListEvent.repos\", validateRepo) as Repo[];\n")
-	b.WriteString("      break;\n")
-	b.WriteString("    case \"warning\":\n")
-	b.WriteString("      result.warning = asString(obj[\"warning\"], \"TaskListEvent.warning\");\n")
-	b.WriteString("      break;\n")
-	b.WriteString("    // Unknown kinds pass through.\n")
-	b.WriteString("  }\n")
-	b.WriteString("  return result;\n")
-	b.WriteString("}\n\n")
-
-	// UsageResp validator.
-	b.WriteString("export function validateUsageResp(raw: unknown): UsageResp {\n")
-	b.WriteString("  const obj = asObject(raw, \"UsageResp\");\n")
-	b.WriteString("  const result: UsageResp = {\n")
-	b.WriteString("    local: validateLocalUsage(obj[\"local\"]),\n")
-	b.WriteString("  };\n")
-	b.WriteString("  if (obj[\"providers\"] !== undefined && obj[\"providers\"] !== null) {\n")
-	b.WriteString("    result.providers = validateArray(obj[\"providers\"], \"UsageResp.providers\", validateProviderQuota) as ProviderQuota[];\n")
-	b.WriteString("  }\n")
-	b.WriteString("  return result;\n")
-	b.WriteString("}\n")
 
 	return os.WriteFile(filepath.Join(outDir, "validate.gen.ts"), []byte(b.String()), 0o600)
 }
@@ -2144,6 +2132,13 @@ func (a aliasInfo) plural() string {
 type aliasConstant struct {
 	name  string // const name from Go source, e.g. "HarnessClaude"
 	value string // wire value, e.g. "claude"
+}
+
+// tsFieldBinding pairs a json field name with the TypeScript expression
+// used to validate it in a discriminated union dispatch.
+type tsFieldBinding struct {
+	jsonName string
+	expr     string
 }
 
 // sdkType wraps a reflect.Type with an optional section comment that

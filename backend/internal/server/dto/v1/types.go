@@ -223,13 +223,13 @@ type Task struct {
 // kind=="repos":    Repos holds the updated repo list (emitted when default-branch CI status changes).
 // kind=="warning":  Warning holds a transient server warning message for the user.
 type TaskListEvent struct {
-	Kind    string                     `json:"kind"`
-	Tasks   []Task                     `json:"tasks,omitempty"`
-	Task    *Task                      `json:"task,omitempty"`
-	Patch   map[string]json.RawMessage `json:"patch,omitempty"`
-	ID      string                     `json:"id,omitempty"`
-	Repos   []Repo                     `json:"repos,omitempty"`
-	Warning string                     `json:"warning,omitempty"`
+	Kind     string                     `json:"kind"`
+	Snapshot []Task                     `json:"snapshot,omitempty"`
+	Upsert   *Task                      `json:"upsert,omitempty"`
+	Patch    map[string]json.RawMessage `json:"patch,omitempty"`
+	Delete   string                     `json:"delete,omitempty"`
+	Repos    []Repo                     `json:"repos,omitempty"`
+	Warning  string                     `json:"warning,omitempty"`
 }
 
 // TaskToolInputResp is the response for GET /api/v1/tasks/{id}/tool/{toolUseID}.

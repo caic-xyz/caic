@@ -313,6 +313,87 @@ export function validateEventStats(raw: unknown): EventStats {
   };
 }
 
+export function validateEventMessage(raw: unknown): EventMessage {
+  const obj = asObject(raw, "EventMessage");
+  const result: EventMessage = {
+    kind: asString(obj["kind"], "EventMessage.kind"),
+    ts: asNumber(obj["ts"], "EventMessage.ts"),
+  };
+  switch (result.kind) {
+    case "init":
+      result.init = validateEventInit(obj["init"]);
+      break;
+    case "text":
+      result.text = validateEventText(obj["text"]);
+      break;
+    case "textDelta":
+      result.textDelta = validateEventTextDelta(obj["textDelta"]);
+      break;
+    case "toolUse":
+      result.toolUse = validateEventToolUse(obj["toolUse"]);
+      break;
+    case "toolResult":
+      result.toolResult = validateEventToolResult(obj["toolResult"]);
+      break;
+    case "ask":
+      result.ask = validateEventAsk(obj["ask"]);
+      break;
+    case "usage":
+      result.usage = validateEventUsage(obj["usage"]);
+      break;
+    case "result":
+      result.result = validateEventResult(obj["result"]);
+      break;
+    case "system":
+      result.system = validateEventSystem(obj["system"]);
+      break;
+    case "userInput":
+      result.userInput = validateEventUserInput(obj["userInput"]);
+      break;
+    case "todo":
+      result.todo = validateEventTodo(obj["todo"]);
+      break;
+    case "diffStat":
+      result.diffStat = validateEventDiffStat(obj["diffStat"]);
+      break;
+    case "error":
+      result.error = validateEventError(obj["error"]);
+      break;
+    case "thinking":
+      result.thinking = validateEventThinking(obj["thinking"]);
+      break;
+    case "thinkingDelta":
+      result.thinkingDelta = validateEventThinkingDelta(obj["thinkingDelta"]);
+      break;
+    case "subagentStart":
+      result.subagentStart = validateEventSubagentStart(obj["subagentStart"]);
+      break;
+    case "subagentEnd":
+      result.subagentEnd = validateEventSubagentEnd(obj["subagentEnd"]);
+      break;
+    case "log":
+      result.log = validateEventLog(obj["log"]);
+      break;
+    case "toolOutputDelta":
+      result.toolOutputDelta = validateEventToolOutputDelta(obj["toolOutputDelta"]);
+      break;
+    case "widget":
+      result.widget = validateEventWidget(obj["widget"]);
+      break;
+    case "widgetDelta":
+      result.widgetDelta = validateEventWidgetDelta(obj["widgetDelta"]);
+      break;
+    case "rateLimit":
+      result.rateLimit = validateEventRateLimit(obj["rateLimit"]);
+      break;
+    case "stats":
+      result.stats = validateEventStats(obj["stats"]);
+      break;
+    // Unknown kinds pass through.
+  }
+  return result;
+}
+
 export function validateTaskRepo(raw: unknown): TaskRepo {
   const obj = asObject(raw, "TaskRepo");
   return {
@@ -418,6 +499,35 @@ export function validateRepo(raw: unknown): Repo {
   };
 }
 
+export function validateTaskListEvent(raw: unknown): TaskListEvent {
+  const obj = asObject(raw, "TaskListEvent");
+  const result: TaskListEvent = {
+    kind: asString(obj["kind"], "TaskListEvent.kind"),
+  };
+  switch (result.kind) {
+    case "snapshot":
+      result.snapshot = validateArray(obj["snapshot"], "TaskListEvent.snapshot", validateTask) as Task[];
+      break;
+    case "upsert":
+      result.upsert = validateTask(obj["upsert"]);
+      break;
+    case "patch":
+      result.patch = validateRecord(obj["patch"], "TaskListEvent.patch", (v) => v) as { [key: string]: any /* json.RawMessage */ };
+      break;
+    case "delete":
+      result.delete = asString(obj["delete"], "TaskListEvent.delete");
+      break;
+    case "repos":
+      result.repos = validateArray(obj["repos"], "TaskListEvent.repos", validateRepo) as Repo[];
+      break;
+    case "warning":
+      result.warning = asString(obj["warning"], "TaskListEvent.warning");
+      break;
+    // Unknown kinds pass through.
+  }
+  return result;
+}
+
 export function validateQuotaRateLimit(raw: unknown): QuotaRateLimit {
   const obj = asObject(raw, "QuotaRateLimit");
   return {
@@ -479,122 +589,11 @@ export function validateLocalUsage(raw: unknown): LocalUsage {
   };
 }
 
-export function validateEventMessage(raw: unknown): EventMessage {
-  const obj = asObject(raw, "EventMessage");
-  const result: EventMessage = {
-    kind: asString(obj["kind"], "EventMessage.kind"),
-    ts: asNumber(obj["ts"], "EventMessage.ts"),
-  };
-  switch (result.kind) {
-    case "init":
-      result.init = validateEventInit(obj["init"]);
-      break;
-    case "text":
-      result.text = validateEventText(obj["text"]);
-      break;
-    case "textDelta":
-      result.textDelta = validateEventTextDelta(obj["textDelta"]);
-      break;
-    case "toolUse":
-      result.toolUse = validateEventToolUse(obj["toolUse"]);
-      break;
-    case "toolResult":
-      result.toolResult = validateEventToolResult(obj["toolResult"]);
-      break;
-    case "ask":
-      result.ask = validateEventAsk(obj["ask"]);
-      break;
-    case "usage":
-      result.usage = validateEventUsage(obj["usage"]);
-      break;
-    case "result":
-      result.result = validateEventResult(obj["result"]);
-      break;
-    case "system":
-      result.system = validateEventSystem(obj["system"]);
-      break;
-    case "userInput":
-      result.userInput = validateEventUserInput(obj["userInput"]);
-      break;
-    case "todo":
-      result.todo = validateEventTodo(obj["todo"]);
-      break;
-    case "diffStat":
-      result.diffStat = validateEventDiffStat(obj["diffStat"]);
-      break;
-    case "error":
-      result.error = validateEventError(obj["error"]);
-      break;
-    case "thinking":
-      result.thinking = validateEventThinking(obj["thinking"]);
-      break;
-    case "thinkingDelta":
-      result.thinkingDelta = validateEventThinkingDelta(obj["thinkingDelta"]);
-      break;
-    case "subagentStart":
-      result.subagentStart = validateEventSubagentStart(obj["subagentStart"]);
-      break;
-    case "subagentEnd":
-      result.subagentEnd = validateEventSubagentEnd(obj["subagentEnd"]);
-      break;
-    case "log":
-      result.log = validateEventLog(obj["log"]);
-      break;
-    case "toolOutputDelta":
-      result.toolOutputDelta = validateEventToolOutputDelta(obj["toolOutputDelta"]);
-      break;
-    case "widget":
-      result.widget = validateEventWidget(obj["widget"]);
-      break;
-    case "widgetDelta":
-      result.widgetDelta = validateEventWidgetDelta(obj["widgetDelta"]);
-      break;
-    case "rateLimit":
-      result.rateLimit = validateEventRateLimit(obj["rateLimit"]);
-      break;
-    case "stats":
-      result.stats = validateEventStats(obj["stats"]);
-      break;
-    // Unknown kinds pass through.
-  }
-  return result;
-}
-
-export function validateTaskListEvent(raw: unknown): TaskListEvent {
-  const obj = asObject(raw, "TaskListEvent");
-  const kind = asString(obj["kind"], "TaskListEvent.kind");
-  const result: TaskListEvent = { kind };
-  switch (kind) {
-    case "snapshot":
-      result.tasks = validateArray(obj["tasks"], "TaskListEvent.tasks", validateTask) as Task[];
-      break;
-    case "upsert":
-      result.task = validateTask(obj["task"]);
-      break;
-    case "patch":
-      result.patch = asObject(obj["patch"], "TaskListEvent.patch");
-      break;
-    case "delete":
-      result.id = asString(obj["id"], "TaskListEvent.id");
-      break;
-    case "repos":
-      result.repos = validateArray(obj["repos"], "TaskListEvent.repos", validateRepo) as Repo[];
-      break;
-    case "warning":
-      result.warning = asString(obj["warning"], "TaskListEvent.warning");
-      break;
-    // Unknown kinds pass through.
-  }
-  return result;
-}
-
 export function validateUsageResp(raw: unknown): UsageResp {
   const obj = asObject(raw, "UsageResp");
-  const result: UsageResp = {
+  return {
+    providers: (obj["providers"] === undefined || obj["providers"] === null ? undefined : validateArray(obj["providers"], "UsageResp.providers", validateProviderQuota) as ProviderQuota[]),
     local: validateLocalUsage(obj["local"]),
   };
-  if (obj["providers"] !== undefined && obj["providers"] !== null) {
-    result.providers = validateArray(obj["providers"], "UsageResp.providers", validateProviderQuota) as ProviderQuota[];
-  }
-  return result;
 }
+

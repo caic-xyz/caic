@@ -69,7 +69,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 		reposJSON, _ := json.Marshal(repos)
 
 		if first {
-			if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "snapshot", Tasks: out}); err != nil {
+			if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "snapshot", Snapshot: out}); err != nil {
 				slog.Warn("marshal task list snapshot", "err", err)
 				return
 			}
@@ -99,7 +99,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 					prevByID[id] = data
 					if prev == nil {
 						// New task: emit full object.
-						if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "upsert", Task: &out[i]}); err != nil {
+						if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "upsert", Upsert: &out[i]}); err != nil {
 							slog.Warn("marshal task upsert", "id", id, "err", err)
 							return
 						}
@@ -120,7 +120,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 			// Emit deletes for removed tasks.
 			for id := range prevByID {
 				if _, ok := currentIDs[id]; !ok {
-					if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "delete", ID: id}); err != nil {
+					if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "delete", Delete: id}); err != nil {
 						slog.Warn("marshal task delete", "id", id, "err", err)
 						return
 					}

@@ -784,10 +784,10 @@ export interface TaskToolInputResp {
  */
 export interface TaskListEvent {
   kind: string;
-  tasks?: Task[];
-  task?: Task;
+  snapshot?: Task[];
+  upsert?: Task;
   patch?: { [key: string]: any /* json.RawMessage */};
-  id?: string;
+  delete?: string;
   repos?: Repo[];
   warning?: string;
 }

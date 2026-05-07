@@ -386,11 +386,11 @@ export default function App() {
             dismissNotification(t.id);
           }
         };
-        if (event.kind === "snapshot" && event.tasks) {
-          prevStates = new Map(event.tasks.map((t) => [t.id, t.state]));
-          setTasks(event.tasks);
-        } else if (event.kind === "upsert" && event.task) {
-          const t = event.task;
+        if (event.kind === "snapshot" && event.snapshot) {
+          prevStates = new Map(event.snapshot.map((t) => [t.id, t.state]));
+          setTasks(event.snapshot);
+        } else if (event.kind === "upsert" && event.upsert) {
+          const t = event.upsert;
           checkAndNotify(t);
           prevStates.set(t.id, t.state);
           setTasks((prev) => {
@@ -421,9 +421,9 @@ export default function App() {
             next[idx] = { ...next[idx], ...patch } as Task;
             return next;
           });
-        } else if (event.kind === "delete" && event.id) {
-          prevStates.delete(event.id);
-          setTasks((prev) => prev.filter((t) => t.id !== event.id));
+        } else if (event.kind === "delete" && event.delete) {
+          prevStates.delete(event.delete);
+          setTasks((prev) => prev.filter((t) => t.id !== event.delete));
         } else if (event.kind === "repos" && event.repos) {
           const updatedRepos = event.repos;
           setRepos((prev) => {

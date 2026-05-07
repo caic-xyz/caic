@@ -783,10 +783,10 @@ public struct TaskToolInputResp: Codable {
 /// kind=="warning":  Warning holds a transient server warning message for the user.
 public struct TaskListEvent: Codable {
     public let kind: String
-    public let tasks: [Task]?
-    public let task: Task?
+    public let snapshot: [Task]?
+    public let upsert: Task?
     public let patch: [String: JSONValue]?
-    public let id: String?
+    public let delete: String?
     public let repos: [Repo]?
     public let warning: String?
 }
