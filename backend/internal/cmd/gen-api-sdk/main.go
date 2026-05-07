@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -162,6 +163,9 @@ func run() error {
 		return err
 	}
 	if err := generateTS(tsDir, docs); err != nil {
+		return err
+	}
+	if err := generateTSValidate(tsDir, docs); err != nil {
 		return err
 	}
 	if err := generateKotlin(kotlinDir, docs); err != nil {
@@ -435,6 +439,333 @@ func emitTSAlias(b *strings.Builder, name string) {
 		b.WriteString("\n")
 		return
 	}
+}
+
+// tsFieldValidator returns a TypeScript expression that validates a value
+// at the given pathExpr. pathLit is a string literal for error messages.
+func tsFieldValidator(t reflect.Type, pathExpr, pathLit string) string {
+	if t.Kind() == reflect.Pointer {
+		return tsFieldValidator(t.Elem(), pathExpr, pathLit)
+	}
+
+	rt := t
+
+	// Slice — cast result to expected type.
+	if rt.Kind() == reflect.Slice {
+		elemFn := tsElemValidatorFunc(rt.Elem(), pathLit+"[i]")
+		elemTS := goTypeToTS(rt.Elem())
+		return fmt.Sprintf("validateArray(%s, %q, %s) as %s[]", pathExpr, pathLit, elemFn, elemTS)
+	}
+
+	// Map — cast result.
+	if rt.Kind() == reflect.Map {
+		valFn := tsElemValidatorFunc(rt.Elem(), pathLit+"[k]")
+		keyTS := goTypeToTS(rt.Key())
+		valTS := goTypeToTS(rt.Elem())
+		return fmt.Sprintf("validateRecord(%s, %q, %s) as { [key: %s]: %s }", pathExpr, pathLit, valFn, keyTS, valTS)
+	}
+
+	// Struct
+	if rt.Kind() == reflect.Struct && isSDKPkg(rt.PkgPath()) {
+		return fmt.Sprintf("validate%s(%s)", rt.Name(), pathExpr)
+	}
+
+	return tsPrimitiveValidator(rt, pathExpr, pathLit)
+}
+
+// tsFieldOptValidator is like tsFieldValidator but wraps the result to
+// return undefined when the value is null/undefined.
+func tsFieldOptValidator(t reflect.Type, pathExpr, pathLit string) string {
+	inner := tsFieldValidator(t, pathExpr, pathLit)
+	return fmt.Sprintf("(%s === undefined || %s === null ? undefined : %s)", pathExpr, pathExpr, inner)
+}
+
+// tsPrimitiveValidator returns the validator expression for a primitive/special type.
+func tsPrimitiveValidator(t reflect.Type, pathExpr, pathLit string) string {
+	if t == timeType {
+		return fmt.Sprintf("asString(%s, %q) as ISOTimestamp", pathExpr, pathLit)
+	}
+	if t == ksidIDType {
+		return fmt.Sprintf("asString(%s, %q)", pathExpr, pathLit)
+	}
+	if t == jsonRawMessageType {
+		return pathExpr // any — no validation
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return fmt.Sprintf("asString(%s, %q)", pathExpr, pathLit)
+	case reflect.Int, reflect.Int64, reflect.Uint64, reflect.Float64:
+		return fmt.Sprintf("asNumber(%s, %q)", pathExpr, pathLit)
+	case reflect.Bool:
+		return fmt.Sprintf("asBoolean(%s, %q)", pathExpr, pathLit)
+	default:
+		return pathExpr
+	}
+}
+
+// tsElemValidatorFunc returns a function expression (v: unknown) => validated
+// for use as the element validator callback in validateArray/validateRecord.
+func tsElemValidatorFunc(t reflect.Type, pathLit string) string {
+	if t.Kind() == reflect.Pointer {
+		return tsElemValidatorFunc(t.Elem(), pathLit)
+	}
+
+	rt := t
+	if rt.Kind() == reflect.Struct && isSDKPkg(rt.PkgPath()) {
+		return "validate" + rt.Name()
+	}
+
+	return "(v) => " + tsPrimitiveValidator(rt, "v", pathLit)
+}
+
+// emitTSValidator writes a validateXxx(raw: unknown): Xxx function for a struct.
+func emitTSValidator(b *strings.Builder, t reflect.Type) {
+	name := t.Name()
+	fmt.Fprintf(b, "export function validate%s(raw: unknown): %s {\n", name, name)
+	fmt.Fprintf(b, "  const obj = asObject(raw, %q);\n", name)
+	fmt.Fprintf(b, "  return {\n")
+
+	for i := range t.NumField() {
+		sf := t.Field(i)
+		if !sf.IsExported() {
+			continue
+		}
+		tag := sf.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		jsonName, opts := parseJSONTag(tag)
+		if jsonName == "" {
+			jsonName = sf.Name
+		}
+		omit := opts.contains("omitempty") || opts.contains("omitzero")
+		isPtr := sf.Type.Kind() == reflect.Pointer
+		optional := isPtr || (omit && !isPtr)
+
+		pathExpr := fmt.Sprintf("obj[%q]", jsonName)
+		pathLit := fmt.Sprintf("%s.%s", name, jsonName)
+		if optional {
+			fmt.Fprintf(b, "    %s: %s,\n", jsonName, tsFieldOptValidator(sf.Type, pathExpr, pathLit))
+		} else {
+			fmt.Fprintf(b, "    %s: %s,\n", jsonName, tsFieldValidator(sf.Type, pathExpr, pathLit))
+		}
+	}
+
+	b.WriteString("  };\n")
+	b.WriteString("}\n\n")
+}
+
+// discoverSSEStructs returns the structs reachable from the SSE event types
+// (EventMessage, TaskListEvent, UsageResp) in dependency order.
+func discoverSSEStructs() []kotlinStruct {
+	seen := map[reflect.Type]bool{}
+	var order []reflect.Type
+
+	var walk func(t reflect.Type)
+	walk = func(t reflect.Type) {
+		if t.Kind() == reflect.Pointer {
+			t = t.Elem()
+		}
+		if t.Kind() == reflect.Slice {
+			walk(t.Elem())
+			return
+		}
+		if t.Kind() == reflect.Map {
+			walk(t.Elem())
+			return
+		}
+		if t.Kind() != reflect.Struct || !isSDKPkg(t.PkgPath()) {
+			return
+		}
+		if seen[t] {
+			return
+		}
+		seen[t] = true
+		for i := range t.NumField() {
+			walk(t.Field(i).Type)
+		}
+		order = append(order, t)
+	}
+
+	// Walk from SSE root types.
+	walk(reflect.TypeFor[v1.EventMessage]())
+	walk(reflect.TypeFor[v1.TaskListEvent]())
+	walk(reflect.TypeFor[v1.UsageResp]())
+
+	result := make([]kotlinStruct, len(order))
+	for i, t := range order {
+		result[i] = kotlinStruct{t: t}
+	}
+	return result
+}
+
+// generateTSValidate generates sdk/ts/v1/validate.gen.ts with runtime
+// validators for SSE-relevant DTO structs.
+func generateTSValidate(outDir string, _ *docRegistry) error {
+	var b strings.Builder
+	b.WriteString("// Code generated by gen-api-sdk. DO NOT EDIT.\n\n")
+	b.WriteString("// Runtime schema validators for SSE payloads.\n")
+	b.WriteString("// Each validator checks structural correctness at runtime and throws\n")
+	b.WriteString("// TypeError on mismatch. Unknown kinds pass through for forward compat.\n\n")
+
+	// Collect all types referenced by validators.
+	needed := discoverSSEStructs()
+	refTypes := map[string]bool{}
+	for _, ks := range needed {
+		refTypes[ks.t.Name()] = true
+	}
+	refTypes["EventMessage"] = true
+	refTypes["TaskListEvent"] = true
+	refTypes["UsageResp"] = true
+	refTypes["ISOTimestamp"] = true
+
+	if len(refTypes) > 0 {
+		sorted := make([]string, 0, len(refTypes))
+		for name := range refTypes {
+			sorted = append(sorted, name)
+		}
+		sort.Strings(sorted)
+		b.WriteString("import type { ")
+		for i, name := range sorted {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(name)
+		}
+		b.WriteString(" } from \"./types.gen\";\n\n")
+	}
+
+	// Helper functions.
+	b.WriteString("// ---- helpers ----\n\n")
+	b.WriteString("function asObject(v: unknown, path: string): Record<string, unknown> {\n")
+	b.WriteString("  if (typeof v !== \"object\" || v === null || Array.isArray(v)) {\n")
+	b.WriteString("    throw new TypeError(path + \": expected object\");\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return v as Record<string, unknown>;\n")
+	b.WriteString("}\n\n")
+	b.WriteString("function asString(v: unknown, path: string): string {\n")
+	b.WriteString("  if (typeof v !== \"string\") {\n")
+	b.WriteString("    throw new TypeError(path + \": expected string, got \" + typeof v);\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return v;\n")
+	b.WriteString("}\n\n")
+	b.WriteString("function asNumber(v: unknown, path: string): number {\n")
+	b.WriteString("  if (typeof v !== \"number\" || Number.isNaN(v)) {\n")
+	b.WriteString("    throw new TypeError(path + \": expected number, got \" + typeof v);\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return v;\n")
+	b.WriteString("}\n\n")
+	b.WriteString("function asBoolean(v: unknown, path: string): boolean {\n")
+	b.WriteString("  if (typeof v !== \"boolean\") {\n")
+	b.WriteString("    throw new TypeError(path + \": expected boolean, got \" + typeof v);\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return v;\n")
+	b.WriteString("}\n\n")
+	b.WriteString("function validateArray(v: unknown, path: string, elemValidator: (v: unknown) => unknown): unknown[] {\n")
+	b.WriteString("  if (!Array.isArray(v)) {\n")
+	b.WriteString("    throw new TypeError(path + \": expected array, got \" + typeof v);\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return v.map((e, i) => elemValidator(e));\n")
+	b.WriteString("}\n\n")
+	b.WriteString("function validateRecord(v: unknown, path: string, valValidator: (v: unknown) => unknown): Record<string, unknown> {\n")
+	b.WriteString("  if (typeof v !== \"object\" || v === null || Array.isArray(v)) {\n")
+	b.WriteString("    throw new TypeError(path + \": expected object, got \" + typeof v);\n")
+	b.WriteString("  }\n")
+	b.WriteString("  const result: Record<string, unknown> = {};\n")
+	b.WriteString("  for (const k of Object.keys(v as Record<string, unknown>)) {\n")
+	b.WriteString("    result[k] = valValidator((v as Record<string, unknown>)[k]);\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return result;\n")
+	b.WriteString("}\n\n")
+
+	// Generate validators for SSE-relevant structs: EventMessage sub-types,
+	// TaskListEvent's referenced types, and UsageResp's referenced types.
+	discriminated := map[string]bool{"EventMessage": true, "TaskListEvent": true, "UsageResp": true}
+	emitted := map[string]bool{}
+
+	for _, ks := range needed {
+		name := ks.t.Name()
+		if emitted[name] || discriminated[name] {
+			continue
+		}
+		emitted[name] = true
+		emitTSValidator(&b, ks.t)
+	}
+
+	// EventMessage discriminated union validator.
+	b.WriteString("export function validateEventMessage(raw: unknown): EventMessage {\n")
+	b.WriteString("  const obj = asObject(raw, \"EventMessage\");\n")
+	b.WriteString("  const result: EventMessage = {\n")
+	b.WriteString("    kind: asString(obj[\"kind\"], \"EventMessage.kind\"),\n")
+	b.WriteString("    ts: asNumber(obj[\"ts\"], \"EventMessage.ts\"),\n")
+	b.WriteString("  };\n")
+	b.WriteString("  switch (result.kind) {\n")
+
+	// Build the dispatch table from EventMessage's fields.
+	evMsgType := reflect.TypeFor[v1.EventMessage]()
+	for i := range evMsgType.NumField() {
+		sf := evMsgType.Field(i)
+		jsonName, _ := parseJSONTag(sf.Tag.Get("json"))
+		if jsonName == "kind" || jsonName == "ts" {
+			continue
+		}
+		// Each field is a pointer to a struct; get the struct name.
+		fieldType := sf.Type.Elem()
+		kindValue := jsonName // The json name IS the kind value for most (e.g. "init", "text").
+		// Special case: diffStat kind is "diffStat", userInput kind is "userInput", etc.
+		// The field json names match the kind constants.
+		fmt.Fprintf(&b, "    case %q:\n", kindValue)
+		fmt.Fprintf(&b, "      result.%s = validate%s(obj[%q]);\n", jsonName, fieldType.Name(), jsonName)
+		b.WriteString("      break;\n")
+	}
+
+	b.WriteString("    // Unknown kinds pass through.\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return result;\n")
+	b.WriteString("}\n\n")
+
+	// TaskListEvent discriminated union validator.
+	b.WriteString("export function validateTaskListEvent(raw: unknown): TaskListEvent {\n")
+	b.WriteString("  const obj = asObject(raw, \"TaskListEvent\");\n")
+	b.WriteString("  const kind = asString(obj[\"kind\"], \"TaskListEvent.kind\");\n")
+	b.WriteString("  const result: TaskListEvent = { kind };\n")
+	b.WriteString("  switch (kind) {\n")
+	b.WriteString("    case \"snapshot\":\n")
+	b.WriteString("      result.tasks = validateArray(obj[\"tasks\"], \"TaskListEvent.tasks\", validateTask) as Task[];\n")
+	b.WriteString("      break;\n")
+	b.WriteString("    case \"upsert\":\n")
+	b.WriteString("      result.task = validateTask(obj[\"task\"]);\n")
+	b.WriteString("      break;\n")
+	b.WriteString("    case \"patch\":\n")
+	b.WriteString("      result.patch = asObject(obj[\"patch\"], \"TaskListEvent.patch\");\n")
+	b.WriteString("      break;\n")
+	b.WriteString("    case \"delete\":\n")
+	b.WriteString("      result.id = asString(obj[\"id\"], \"TaskListEvent.id\");\n")
+	b.WriteString("      break;\n")
+	b.WriteString("    case \"repos\":\n")
+	b.WriteString("      result.repos = validateArray(obj[\"repos\"], \"TaskListEvent.repos\", validateRepo) as Repo[];\n")
+	b.WriteString("      break;\n")
+	b.WriteString("    case \"warning\":\n")
+	b.WriteString("      result.warning = asString(obj[\"warning\"], \"TaskListEvent.warning\");\n")
+	b.WriteString("      break;\n")
+	b.WriteString("    // Unknown kinds pass through.\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return result;\n")
+	b.WriteString("}\n\n")
+
+	// UsageResp validator.
+	b.WriteString("export function validateUsageResp(raw: unknown): UsageResp {\n")
+	b.WriteString("  const obj = asObject(raw, \"UsageResp\");\n")
+	b.WriteString("  const result: UsageResp = {\n")
+	b.WriteString("    local: validateLocalUsage(obj[\"local\"]),\n")
+	b.WriteString("  };\n")
+	b.WriteString("  if (obj[\"providers\"] !== undefined && obj[\"providers\"] !== null) {\n")
+	b.WriteString("    result.providers = validateArray(obj[\"providers\"], \"UsageResp.providers\", validateProviderQuota) as ProviderQuota[];\n")
+	b.WriteString("  }\n")
+	b.WriteString("  return result;\n")
+	b.WriteString("}\n")
+
+	return os.WriteFile(filepath.Join(outDir, "validate.gen.ts"), []byte(b.String()), 0o600)
 }
 
 // generateTS generates the TypeScript API client as a createApiClient factory.
