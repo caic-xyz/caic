@@ -37,6 +37,26 @@ func (s *HostState) ExternalURL() string {
 	return s.externalURL
 }
 
+// Middleware locks on the first FQDN request and rejects different FQDNs
+// afterward. Non-FQDN hosts (bare IPs, localhost) pass through unchecked.
+//
+// Behind a reverse proxy, X-Forwarded-Host and X-Forwarded-Proto are used
+// to determine the client-facing authority and scheme.
+func (s *HostState) Middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authority, scheme := effectiveHostAndScheme(r)
+		if !isFQDN(extractHost(authority)) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if locked := s.lock(authority, scheme); !strings.EqualFold(authority, locked) {
+			http.Error(w, "forbidden: invalid host", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // lock locks the host authority from the request. The caller must ensure the
 // host is a valid FQDN. If already locked, returns the existing value.
 func (s *HostState) lock(authority, scheme string) string {
@@ -57,26 +77,6 @@ func (s *HostState) lock(authority, scheme string) string {
 	s.externalURL = scheme + "://" + hostport
 	slog.Info("auto-locked external URL", "url", s.externalURL)
 	return s.lockedHost
-}
-
-// Middleware locks on the first FQDN request and rejects different FQDNs
-// afterward. Non-FQDN hosts (bare IPs, localhost) pass through unchecked.
-//
-// Behind a reverse proxy, X-Forwarded-Host and X-Forwarded-Proto are used
-// to determine the client-facing authority and scheme.
-func (s *HostState) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authority, scheme := effectiveHostAndScheme(r)
-		if !isFQDN(extractHost(authority)) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if locked := s.lock(authority, scheme); !strings.EqualFold(authority, locked) {
-			http.Error(w, "forbidden: invalid host", http.StatusForbidden)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 // effectiveHostAndScheme returns the client-facing authority and scheme.

@@ -31,14 +31,6 @@ type Client struct {
 
 var _ forge.Forge = (*Client)(nil)
 
-// apiBase returns the GitHub API base URL, using the override if set.
-func (c *Client) apiBase() string {
-	if c.baseURL != "" {
-		return c.baseURL
-	}
-	return "https://api.github.com"
-}
-
 // NewClient returns a Client that authenticates with token and throttles/retries
 // via throttle. The transport chain is: Header → Retry → throttle.
 // When token is empty, requests are unauthenticated (lower rate limits).
@@ -429,6 +421,14 @@ func (c *Client) PostComment(ctx context.Context, owner, repo string, issueNumbe
 
 // Name returns "GitHub".
 func (c *Client) Name() string { return "GitHub" }
+
+// apiBase returns the GitHub API base URL, using the override if set.
+func (c *Client) apiBase() string {
+	if c.baseURL != "" {
+		return c.baseURL
+	}
+	return "https://api.github.com"
+}
 
 // extractGitHubSteps returns the content of ##[group]…##[endgroup] sections
 // that contain at least one ##[error] line. Falls back to rawLog when no

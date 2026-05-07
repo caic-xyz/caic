@@ -168,6 +168,102 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 	}
 }
 
+// ApplyMonitorCIResult updates the task CI status, injects the CI summary
+// into the agent, and drives the seamless PR lifecycle:
+//   - CI failure: notify agent, then launch autoResync to push fixes and
+//     re-monitor so the loop repeats automatically.
+//   - CI success: squash-merge the PR via the forge API, then notify the agent.
+func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repo, sha string, result forgecache.Result) {
+	t := entry.GetTask()
+
+	// Dedup: skip if we already notified this task for this SHA.
+	if svc.cache.IsNotified(t.ID.String(), sha) {
+		slog.Info("applyMonitorCIResult: already notified, skipping", "task", t.ID, "sha", sha[:min(7, len(sha))])
+		t.SetCIStatus(result.Status, result.Checks)
+		svc.backend.NotifyTaskChange()
+		return
+	}
+
+	ciStatus := forge.CIStatusSuccess
+	var summary string
+	if result.Status == forge.CIStatusFailure {
+		ciStatus = forge.CIStatusFailure
+		summary = bot.FailureSummary(ctx, f, svc.provider, result)
+	} else {
+		// CI passed — attempt a squash merge.
+		snap := t.Snapshot()
+		if snap.ForgePR > 0 {
+			commitTitle := t.Title()
+			if commitTitle == "" {
+				if p := t.Primary(); p != nil {
+					commitTitle = p.Branch
+				}
+			}
+			commitMsg := lastResultText(t)
+			if mergeErr := f.MergePR(ctx, owner, repo, snap.ForgePR, commitTitle, commitMsg); mergeErr != nil {
+				slog.Warn("applyMonitorCIResult: merge PR", "task", t.ID, "pr", snap.ForgePR, "err", mergeErr)
+				summary = fmt.Sprintf("%s CI: all checks passed. Auto-merge of %s failed: %v", f.Name(), f.PRLabel(snap.ForgePR), mergeErr)
+			} else {
+				slog.Info("PR merged", "task", t.ID, "forge", f.Name(), "pr", snap.ForgePR)
+				summary = fmt.Sprintf("%s CI: all checks passed. %s merged successfully via squash commit.", f.Name(), f.PRLabel(snap.ForgePR))
+			}
+		} else {
+			summary = fmt.Sprintf("%s CI: all checks passed for %s/%s@%s.", f.Name(), owner, repo, sha[:min(7, len(sha))])
+		}
+	}
+	t.SetCIStatus(ciStatus, result.Checks)
+	svc.backend.NotifyTaskChange()
+	if err := t.SendInput(ctx, agent.Prompt{Text: summary}); err != nil {
+		slog.Warn("monitorCI: send input", "task", t.ID, "err", err)
+		// No active session — attempt auto-fix for CI failures if enabled.
+		if result.Status == forge.CIStatusFailure {
+			snap := t.Snapshot()
+			if snap.ForgePR > 0 {
+				svc.maybeAutoFix(ctx, t, f, summary)
+			}
+		}
+	}
+	if err := svc.cache.MarkNotified(t.ID.String(), sha); err != nil {
+		slog.Warn("applyMonitorCIResult: mark notified", "task", t.ID, "err", err)
+	}
+	// On CI failure: wait for the agent to finish its fix turn, then
+	// auto-sync the branch and restart CI monitoring.
+	if ciStatus == forge.CIStatusFailure {
+		go svc.autoResync(ctx, entry, f, owner, repo)
+	}
+}
+
+// PollCIForActiveRepos checks the default branch CI status for all repos that
+// have active (non-terminal) tasks. ctx must carry the user's auth token (via
+// context.WithoutCancel so it is not cancelled when the SSE request ends).
+// The outer timeout scales with repo count: 2 API calls per repo at 1 req/s
+// (via the throttled HTTP client) plus a 30-second buffer.
+func (svc *Service) PollCIForActiveRepos(ctx context.Context) {
+	active := svc.backend.ListActiveRepos()
+
+	total := time.Duration(2*len(active)+30) * time.Second
+	ctx, cancel := context.WithTimeout(ctx, total)
+	defer cancel()
+
+	for _, info := range active {
+		f := svc.backend.ForgeForInfo(ctx, &info)
+		if f == nil {
+			continue
+		}
+		rctx, rcancel := context.WithTimeout(ctx, 30*time.Second)
+		svc.pollRepoCIOnce(rctx, info, f)
+		rcancel()
+	}
+}
+
+// SetRepoCIStatus updates the in-memory CI state for a repo and notifies
+// SSE subscribers if the status changed.
+func (svc *Service) SetRepoCIStatus(relPath, sha string, result forgecache.Result) {
+	if svc.backend.SetRepoCIStatusIfChanged(relPath, sha, result) {
+		svc.backend.NotifyTaskChange()
+	}
+}
+
 // waitForAgentResult subscribes to task messages and blocks until the agent
 // emits a ResultMessage (end of turn) or ctx is cancelled. Returns true when
 // a ResultMessage arrives, false on cancellation or closed channel.
@@ -232,71 +328,6 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 	slog.Info("autoResync: restarting CI monitor", "task", t.ID, "sha", newSHA[:min(7, len(newSHA))])
 	svc.backend.NotifyTaskChange()
 	go svc.MonitorCI(ctx, entry, f, owner, repo, newSHA)
-}
-
-// ApplyMonitorCIResult updates the task CI status, injects the CI summary
-// into the agent, and drives the seamless PR lifecycle:
-//   - CI failure: notify agent, then launch autoResync to push fixes and
-//     re-monitor so the loop repeats automatically.
-//   - CI success: squash-merge the PR via the forge API, then notify the agent.
-func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repo, sha string, result forgecache.Result) {
-	t := entry.GetTask()
-
-	// Dedup: skip if we already notified this task for this SHA.
-	if svc.cache.IsNotified(t.ID.String(), sha) {
-		slog.Info("applyMonitorCIResult: already notified, skipping", "task", t.ID, "sha", sha[:min(7, len(sha))])
-		t.SetCIStatus(result.Status, result.Checks)
-		svc.backend.NotifyTaskChange()
-		return
-	}
-
-	ciStatus := forge.CIStatusSuccess
-	var summary string
-	if result.Status == forge.CIStatusFailure {
-		ciStatus = forge.CIStatusFailure
-		summary = bot.FailureSummary(ctx, f, svc.provider, result)
-	} else {
-		// CI passed — attempt a squash merge.
-		snap := t.Snapshot()
-		if snap.ForgePR > 0 {
-			commitTitle := t.Title()
-			if commitTitle == "" {
-				if p := t.Primary(); p != nil {
-					commitTitle = p.Branch
-				}
-			}
-			commitMsg := lastResultText(t)
-			if mergeErr := f.MergePR(ctx, owner, repo, snap.ForgePR, commitTitle, commitMsg); mergeErr != nil {
-				slog.Warn("applyMonitorCIResult: merge PR", "task", t.ID, "pr", snap.ForgePR, "err", mergeErr)
-				summary = fmt.Sprintf("%s CI: all checks passed. Auto-merge of %s failed: %v", f.Name(), f.PRLabel(snap.ForgePR), mergeErr)
-			} else {
-				slog.Info("PR merged", "task", t.ID, "forge", f.Name(), "pr", snap.ForgePR)
-				summary = fmt.Sprintf("%s CI: all checks passed. %s merged successfully via squash commit.", f.Name(), f.PRLabel(snap.ForgePR))
-			}
-		} else {
-			summary = fmt.Sprintf("%s CI: all checks passed for %s/%s@%s.", f.Name(), owner, repo, sha[:min(7, len(sha))])
-		}
-	}
-	t.SetCIStatus(ciStatus, result.Checks)
-	svc.backend.NotifyTaskChange()
-	if err := t.SendInput(ctx, agent.Prompt{Text: summary}); err != nil {
-		slog.Warn("monitorCI: send input", "task", t.ID, "err", err)
-		// No active session — attempt auto-fix for CI failures if enabled.
-		if result.Status == forge.CIStatusFailure {
-			snap := t.Snapshot()
-			if snap.ForgePR > 0 {
-				svc.maybeAutoFix(ctx, t, f, summary)
-			}
-		}
-	}
-	if err := svc.cache.MarkNotified(t.ID.String(), sha); err != nil {
-		slog.Warn("applyMonitorCIResult: mark notified", "task", t.ID, "err", err)
-	}
-	// On CI failure: wait for the agent to finish its fix turn, then
-	// auto-sync the branch and restart CI monitoring.
-	if ciStatus == forge.CIStatusFailure {
-		go svc.autoResync(ctx, entry, f, owner, repo)
-	}
 }
 
 // maybeAutoFix creates a new task to fix CI failures when auto-fix is enabled
@@ -376,35 +407,4 @@ func (svc *Service) pollRepoCIOnce(ctx context.Context, info RepoInfo, f forge.F
 		slog.Warn("pollRepoCIOnce: cache put", "repo", info.RelPath, "err", err)
 	}
 	svc.SetRepoCIStatus(info.RelPath, sha, result)
-}
-
-// PollCIForActiveRepos checks the default branch CI status for all repos that
-// have active (non-terminal) tasks. ctx must carry the user's auth token (via
-// context.WithoutCancel so it is not cancelled when the SSE request ends).
-// The outer timeout scales with repo count: 2 API calls per repo at 1 req/s
-// (via the throttled HTTP client) plus a 30-second buffer.
-func (svc *Service) PollCIForActiveRepos(ctx context.Context) {
-	active := svc.backend.ListActiveRepos()
-
-	total := time.Duration(2*len(active)+30) * time.Second
-	ctx, cancel := context.WithTimeout(ctx, total)
-	defer cancel()
-
-	for _, info := range active {
-		f := svc.backend.ForgeForInfo(ctx, &info)
-		if f == nil {
-			continue
-		}
-		rctx, rcancel := context.WithTimeout(ctx, 30*time.Second)
-		svc.pollRepoCIOnce(rctx, info, f)
-		rcancel()
-	}
-}
-
-// SetRepoCIStatus updates the in-memory CI state for a repo and notifies
-// SSE subscribers if the status changed.
-func (svc *Service) SetRepoCIStatus(relPath, sha string, result forgecache.Result) {
-	if svc.backend.SetRepoCIStatusIfChanged(relPath, sha, result) {
-		svc.backend.NotifyTaskChange()
-	}
 }

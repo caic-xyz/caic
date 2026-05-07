@@ -146,42 +146,78 @@ func (w *provisioningWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (r *Runner) initDefaults() {
-	r.initOnce.Do(func() {
-		if r.Backends == nil {
-			r.Backends = map[agent.Harness]agent.Backend{
-				agent.Claude:   claudecode.New(),
-				agent.Codex:    codex.New(),
-				agent.OpenCode: opencode.New(r.CacheDir, r.HarnessEnv[string(agent.OpenCode)]),
-				agent.Pi:       pi.New(r.CacheDir, r.HarnessEnv[string(agent.Pi)]),
-			}
-		}
-		if r.GitTimeout == 0 {
-			r.GitTimeout = time.Minute
-		}
-		if r.ContainerStartTimeout == 0 {
-			r.ContainerStartTimeout = time.Hour
-		}
-		repoName := filepath.Base(r.Dir)
-		if r.Dir == "" {
-			repoName = "(none)"
-		}
-		r.log = slog.With("repo", repoName)
-	})
-}
-
-// backend returns the Backend for the given agent name.
-func (r *Runner) backend(name agent.Harness) agent.Backend {
-	return r.Backends[name]
-}
-
-// containerDir returns the working directory path inside an md container.
-// md always mounts repos at /home/user/src/<basename>. Returns /home/user for no-repo runners.
-func (r *Runner) containerDir() string {
-	if r.Dir == "" {
-		return "/home/user"
+// writeLogTrailer appends a MetaResultMessage to the log file.
+func writeLogTrailer(w io.Writer, title string, res *Result) {
+	if w == nil {
+		return
 	}
-	return "/home/user/src/" + filepath.Base(r.Dir)
+	mr := agent.MetaResultMessage{
+		MessageType:              "caic_result",
+		State:                    res.State.String(),
+		Title:                    title,
+		CostUSD:                  res.CostUSD,
+		Duration:                 res.Duration.Seconds(),
+		NumTurns:                 res.NumTurns,
+		InputTokens:              res.Usage.InputTokens,
+		OutputTokens:             res.Usage.OutputTokens,
+		CacheCreationInputTokens: res.Usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     res.Usage.CacheReadInputTokens,
+		DiffStat:                 res.DiffStat,
+		AgentResult:              res.AgentResult,
+	}
+	if res.Err != nil {
+		mr.Error = res.Err.Error()
+	}
+	if data, err := json.Marshal(mr); err == nil {
+		_, _ = w.Write(append(data, '\n'))
+	}
+}
+
+// writeContextCleared appends a context_cleared system message to the log.
+// Called before closing the old log writer in RestartSession so that
+// RestoreMessages can reset plan state on server restart.
+func writeContextCleared(w io.Writer) {
+	msg := syntheticContextCleared()
+	if data, err := json.Marshal(msg); err == nil {
+		_, _ = w.Write(append(data, '\n'))
+	}
+}
+
+// maxBranchSeqNum finds the highest sequence number N among all branches
+// (local and remote) matching "caic-N". Returns -1 if no matching branches
+// exist. Checking both local and remote is necessary because stopped tasks
+// leave local branches that may never be pushed.
+func maxBranchSeqNum(ctx context.Context, dir string) (int, error) {
+	cmd := exec.CommandContext(ctx, "git", "branch", "-a", "--format=%(refname:short)")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return -1, fmt.Errorf("git branch -a: %w", err)
+	}
+	highest := -1
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		// Match "caic-N" (local) or "<remote>/caic-N" (remote).
+		// Use strings.Cut on "/caic-" for remote refs and
+		// strings.HasPrefix for local refs to avoid matching unrelated
+		// branch names that happen to contain "caic-".
+		var numStr string
+		if strings.HasPrefix(line, "caic-") {
+			numStr = line[len("caic-"):]
+		} else if _, after, ok := strings.Cut(line, "/caic-"); ok {
+			numStr = after
+		} else {
+			continue
+		}
+		n, err := strconv.Atoi(numStr)
+		if err != nil {
+			continue
+		}
+		if n > highest {
+			highest = n
+		}
+	}
+	return highest, nil
 }
 
 // Init sets nextID past any existing caic-* branches so that restarts don't
@@ -794,49 +830,6 @@ type setupResult struct {
 	TailscaleFQDN string
 }
 
-// allocateBranchLocked fetches origin, resolves the start point, and creates
-// the task branch. Must be called under branchMu. Used by AllocateBranch for
-// extra repos; primary repo branch allocation uses reserveBranchID + fetchAndCreateBranch.
-func (r *Runner) allocateBranchLocked(ctx context.Context, t *Task) (string, error) {
-	detached := context.WithoutCancel(ctx)
-	gitCtx, gitCancel := context.WithTimeout(detached, r.GitTimeout)
-	defer gitCancel()
-	// Fetch so that origin/<base> is up to date.
-	if err := gitutil.Fetch(gitCtx, r.Dir); err != nil {
-		return "", fmt.Errorf("fetch: %w", err)
-	}
-	// Resolve effective base branch: use task override if provided.
-	effectiveBase := r.BaseBranch
-	if p := t.Primary(); p != nil && p.BaseBranch != "" {
-		effectiveBase = p.BaseBranch
-	}
-	// Prefer the remote tracking ref, but fall back to the local branch when
-	// the base branch only exists locally (not yet pushed to origin).
-	startPoint := "origin/" + effectiveBase
-	if _, err := gitutil.RevParse(gitCtx, r.Dir, startPoint); err != nil {
-		startPoint = effectiveBase
-	}
-	// Assign a sequential branch name, skipping existing ones.
-	var branch string
-	var err error
-	for range 100 {
-		if gitCtx.Err() != nil {
-			return "", gitCtx.Err()
-		}
-		branch = fmt.Sprintf("caic-%d", r.nextID)
-		r.nextID++
-		r.log.Info("creating branch", "br", branch, "base", effectiveBase)
-		err = gitutil.CreateBranch(gitCtx, r.Dir, branch, startPoint)
-		if err == nil {
-			break
-		}
-	}
-	if err != nil {
-		return "", fmt.Errorf("create branch: %w", err)
-	}
-	return branch, nil
-}
-
 // AllocateBranch allocates a caic-N branch for this runner's repo using the
 // runner's base branch. Used by the server to allocate branches for extra repos
 // before starting a container.
@@ -847,119 +840,9 @@ func (r *Runner) AllocateBranch(ctx context.Context) (string, error) {
 	return r.allocateBranchLocked(ctx, &Task{})
 }
 
-// fetchAndCreateBranch fetches origin and creates the given branch from the
-// resolved base. Acquires branchMu to serialize git operations across concurrent
-// task setups on the same repo (git fetch/branch are not safe to run in parallel
-// on the same working tree). Container.Launch can still run concurrently since it
-// does not touch the repo.
-func (r *Runner) fetchAndCreateBranch(ctx context.Context, t *Task, branch string) error {
-	r.branchMu.Lock()
-	defer r.branchMu.Unlock()
-	gitCtx, gitCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
-	defer gitCancel()
-	if err := gitutil.Fetch(gitCtx, r.Dir); err != nil {
-		return fmt.Errorf("fetch: %w", err)
-	}
-	effectiveBase := r.BaseBranch
-	if p := t.Primary(); p != nil && p.BaseBranch != "" {
-		effectiveBase = p.BaseBranch
-	}
-	startPoint := "origin/" + effectiveBase
-	if _, err := gitutil.RevParse(gitCtx, r.Dir, startPoint); err != nil {
-		startPoint = effectiveBase
-	}
-	r.log.Info("creating branch", "br", branch, "base", effectiveBase)
-	if err := gitutil.CreateBranch(gitCtx, r.Dir, branch, startPoint); err != nil {
-		return fmt.Errorf("create branch: %w", err)
-	}
-	return nil
-}
-
-// setup reserves a branch name, starts the container (Phase A) and creates the
-// git branch concurrently, then completes container startup (Phase B).
-// Phase A (docker run) and git fetch+branch-create overlap, cutting the
-// branch-allocation time off the critical path.
-func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResult, error) {
-	// Reserve the branch ID instantly (under lock, ~µs). The branch itself is
-	// created concurrently with docker run in Phase A.
-	if r.Dir != "" {
-		r.branchMu.Lock()
-		t.Repos[0].Branch = fmt.Sprintf("caic-%d", r.nextID)
-		r.nextID++
-		r.branchMu.Unlock()
-	}
-
-	t.SetState(StateProvisioning)
-	detached := context.WithoutCancel(ctx)
-	var primaryBranch string
-	if p := t.Primary(); p != nil {
-		primaryBranch = p.Branch
-	}
-	r.log.Info("starting container", "br", primaryBranch, "img", t.DockerImage, "hns", t.Harness, "ts", t.Tailscale, "usb", t.USB, "dpy", t.Display)
-	tContainer := time.Now()
-	startCtx, startCancel := context.WithTimeout(detached, r.ContainerStartTimeout)
-	defer startCancel()
-
-	opts := &StartOptions{
-		DockerImage: t.DockerImage, Harness: t.Harness, Tailscale: t.Tailscale, USB: t.USB, Display: t.Display,
-		GitHubToken: t.GitHubToken,
-		LogWriter:   &provisioningWriter{ctx: ctx, t: t},
-	}
-
-	// Phase A: docker run + SSH config. Branch creation runs concurrently so
-	// git fetch overlaps with the container SSH boot time (~500 ms–3 s).
-	var repos []md.Repo
-	if r.Dir != "" {
-		repos = t.MDRepos()
-	}
-	var containerName string
-	r.log.Debug("runner", "msg", "provisioning phase A: launching container and creating branch", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "repos_count", len(repos))
-	eg, egCtx := errgroup.WithContext(startCtx)
-	eg.Go(func() error {
-		defer trace.StartRegion(egCtx, "container-launch").End()
-		r.log.Debug("runner", "msg", "calling container.Launch", "branch", primaryBranch)
-		name, err := r.Container.Launch(egCtx, repos, labels, opts)
-		if err != nil {
-			r.log.Error("runner", "msg", "container.Launch failed", "branch", primaryBranch, "err", err)
-			return err
-		}
-		r.log.Debug("runner", "msg", "container.Launch succeeded", "container", name)
-		containerName = name
-		return nil
-	})
-	if r.Dir != "" {
-		eg.Go(func() error {
-			defer trace.StartRegion(egCtx, "branch-create").End()
-			r.log.Debug("runner", "msg", "fetching and creating branch", "branch", primaryBranch)
-			err := r.fetchAndCreateBranch(egCtx, t, primaryBranch)
-			if err != nil {
-				r.log.Error("runner", "msg", "fetchAndCreateBranch failed", "branch", primaryBranch, "err", err)
-			} else {
-				r.log.Debug("runner", "msg", "fetchAndCreateBranch succeeded", "branch", primaryBranch)
-			}
-			return err
-		})
-	}
-	r.log.Debug("runner", "msg", "waiting for phase A errgroup")
-	if err := eg.Wait(); err != nil {
-		return setupResult{}, err
-	}
-	r.log.Debug("runner", "msg", "phase A complete", "container", containerName)
-
-	// Phase B: wait for SSH + push (branch now exists locally).
-	r.log.Debug("runner", "msg", "provisioning phase B: connecting via SSH", "container", containerName, "repos_count", len(repos))
-	tailscaleFQDN, err := r.Container.Connect(startCtx, containerName, repos, opts)
-	if err != nil {
-		r.log.Error("runner", "msg", "container.Connect failed", "container", containerName, "err", err)
-		return setupResult{}, fmt.Errorf("start container: %w", err)
-	}
-	r.log.Info("runner", "msg", "started", "br", primaryBranch, "dur", time.Since(tContainer), "container", containerName, "fqdn", tailscaleFQDN)
-	return setupResult{Container: containerName, TailscaleFQDN: tailscaleFQDN}, nil
-}
-
-// SyncToOrigin fetches changes from the container, runs safety checks, and
-// pushes the container's remote-tracking ref to origin. If safety issues are
-// found and force is false, it returns the issues without pushing.
+// SyncToOrigin pushes the given branch to origin and returns the diff stat and
+// any safety issues found. When force is false, safety issues that would be
+// overwritten by a force push are returned as errors.
 func (r *Runner) SyncToOrigin(ctx context.Context, branch, container string, force bool, extraRepos []md.Repo) (agent.DiffStat, []SafetyIssue, error) {
 	r.initDefaults()
 	if r.Dir == "" {
@@ -1231,6 +1114,216 @@ var mutatingTools = map[string]struct{}{
 	"NotebookEdit": {},
 }
 
+// BranchDiffStat fetches from the container and returns the host-side branch
+// diff stat (md diff --numstat). Unlike the relay's diff_watcher which only
+// tracks uncommitted changes, this captures the full branch diff relative to
+// the base. Used by adoptOne to restore the diff stat after server restart.
+func (r *Runner) BranchDiffStat(ctx context.Context, branch string, extraRepos []md.Repo) agent.DiffStat {
+	r.initDefaults()
+	if r.Container == nil || r.Dir == "" {
+		return nil
+	}
+	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
+	defer cancel()
+	r.branchMu.Lock()
+	defer r.branchMu.Unlock()
+	if err := r.Container.Fetch(fetchCtx, append([]md.Repo{{GitRoot: r.Dir, Branch: branch}}, extraRepos...)); err != nil {
+		r.log.Warn("fetch for branch diff stat failed", "br", branch, "err", err)
+		return nil
+	}
+	return r.diffStat(fetchCtx, branch)
+}
+
+// initDefaults populates default Backends, timeout values, and the logger.
+// Safe to call multiple times (sync.Once).
+func (r *Runner) initDefaults() {
+	r.initOnce.Do(func() {
+		if r.Backends == nil {
+			r.Backends = map[agent.Harness]agent.Backend{
+				agent.Claude:   claudecode.New(),
+				agent.Codex:    codex.New(),
+				agent.OpenCode: opencode.New(r.CacheDir, r.HarnessEnv[string(agent.OpenCode)]),
+				agent.Pi:       pi.New(r.CacheDir, r.HarnessEnv[string(agent.Pi)]),
+			}
+		}
+		if r.GitTimeout == 0 {
+			r.GitTimeout = time.Minute
+		}
+		if r.ContainerStartTimeout == 0 {
+			r.ContainerStartTimeout = time.Hour
+		}
+		repoName := filepath.Base(r.Dir)
+		if r.Dir == "" {
+			repoName = "(none)"
+		}
+		r.log = slog.With("repo", repoName)
+	})
+}
+
+// backend returns the Backend for the given agent name.
+func (r *Runner) backend(name agent.Harness) agent.Backend {
+	return r.Backends[name]
+}
+
+// containerDir returns the working directory path inside an md container.
+// md always mounts repos at /home/user/src/<basename>. Returns /home/user for no-repo runners.
+func (r *Runner) containerDir() string {
+	if r.Dir == "" {
+		return "/home/user"
+	}
+	return "/home/user/src/" + filepath.Base(r.Dir)
+}
+
+// allocateBranchLocked fetches origin, resolves the start point, and creates
+// the task branch. Must be called under branchMu.
+func (r *Runner) allocateBranchLocked(ctx context.Context, t *Task) (string, error) {
+	detached := context.WithoutCancel(ctx)
+	gitCtx, gitCancel := context.WithTimeout(detached, r.GitTimeout)
+	defer gitCancel()
+	// Fetch so that origin/<base> is up to date.
+	if err := gitutil.Fetch(gitCtx, r.Dir); err != nil {
+		return "", fmt.Errorf("fetch: %w", err)
+	}
+	// Resolve effective base branch: use task override if provided.
+	effectiveBase := r.BaseBranch
+	if p := t.Primary(); p != nil && p.BaseBranch != "" {
+		effectiveBase = p.BaseBranch
+	}
+	// Prefer the remote tracking ref, but fall back to the local branch when
+	// the base branch only exists locally (not yet pushed to origin).
+	startPoint := "origin/" + effectiveBase
+	if _, err := gitutil.RevParse(gitCtx, r.Dir, startPoint); err != nil {
+		startPoint = effectiveBase
+	}
+	// Assign a sequential branch name, skipping existing ones.
+	var branch string
+	var err error
+	for range 100 {
+		if gitCtx.Err() != nil {
+			return "", gitCtx.Err()
+		}
+		branch = fmt.Sprintf("caic-%d", r.nextID)
+		r.nextID++
+		r.log.Info("creating branch", "br", branch, "base", effectiveBase)
+		err = gitutil.CreateBranch(gitCtx, r.Dir, branch, startPoint)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return "", fmt.Errorf("create branch: %w", err)
+	}
+	return branch, nil
+}
+
+// fetchAndCreateBranch fetches origin and creates the given branch from the
+// resolved base. Acquires branchMu to serialize git operations across concurrent
+// task setups on the same repo.
+func (r *Runner) fetchAndCreateBranch(ctx context.Context, t *Task, branch string) error {
+	r.branchMu.Lock()
+	defer r.branchMu.Unlock()
+	gitCtx, gitCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
+	defer gitCancel()
+	if err := gitutil.Fetch(gitCtx, r.Dir); err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
+	effectiveBase := r.BaseBranch
+	if p := t.Primary(); p != nil && p.BaseBranch != "" {
+		effectiveBase = p.BaseBranch
+	}
+	startPoint := "origin/" + effectiveBase
+	if _, err := gitutil.RevParse(gitCtx, r.Dir, startPoint); err != nil {
+		startPoint = effectiveBase
+	}
+	r.log.Info("creating branch", "br", branch, "base", effectiveBase)
+	if err := gitutil.CreateBranch(gitCtx, r.Dir, branch, startPoint); err != nil {
+		return fmt.Errorf("create branch: %w", err)
+	}
+	return nil
+}
+
+// setup reserves a branch name, starts the container (Phase A) and creates the
+// git branch concurrently, then completes container startup (Phase B).
+// Phase A (docker run) and git fetch+branch-create overlap, cutting the
+// branch-allocation time off the critical path.
+func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResult, error) {
+	// Reserve the branch ID instantly (under lock, ~µs). The branch itself is
+	// created concurrently with docker run in Phase A.
+	if r.Dir != "" {
+		r.branchMu.Lock()
+		t.Repos[0].Branch = fmt.Sprintf("caic-%d", r.nextID)
+		r.nextID++
+		r.branchMu.Unlock()
+	}
+
+	t.SetState(StateProvisioning)
+	detached := context.WithoutCancel(ctx)
+	var primaryBranch string
+	if p := t.Primary(); p != nil {
+		primaryBranch = p.Branch
+	}
+	r.log.Info("starting container", "br", primaryBranch, "img", t.DockerImage, "hns", t.Harness, "ts", t.Tailscale, "usb", t.USB, "dpy", t.Display)
+	tContainer := time.Now()
+	startCtx, startCancel := context.WithTimeout(detached, r.ContainerStartTimeout)
+	defer startCancel()
+
+	opts := &StartOptions{
+		DockerImage: t.DockerImage, Harness: t.Harness, Tailscale: t.Tailscale, USB: t.USB, Display: t.Display,
+		GitHubToken: t.GitHubToken,
+		LogWriter:   &provisioningWriter{ctx: ctx, t: t},
+	}
+
+	// Phase A: docker run + SSH config. Branch creation runs concurrently so
+	// git fetch overlaps with the container SSH boot time (~500 ms–3 s).
+	var repos []md.Repo
+	if r.Dir != "" {
+		repos = t.MDRepos()
+	}
+	var containerName string
+	r.log.Debug("runner", "msg", "provisioning phase A: launching container and creating branch", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "repos_count", len(repos))
+	eg, egCtx := errgroup.WithContext(startCtx)
+	eg.Go(func() error {
+		defer trace.StartRegion(egCtx, "container-launch").End()
+		r.log.Debug("runner", "msg", "calling container.Launch", "branch", primaryBranch)
+		name, err := r.Container.Launch(egCtx, repos, labels, opts)
+		if err != nil {
+			r.log.Error("runner", "msg", "container.Launch failed", "branch", primaryBranch, "err", err)
+			return err
+		}
+		r.log.Debug("runner", "msg", "container.Launch succeeded", "container", name)
+		containerName = name
+		return nil
+	})
+	if r.Dir != "" {
+		eg.Go(func() error {
+			defer trace.StartRegion(egCtx, "branch-create").End()
+			r.log.Debug("runner", "msg", "fetching and creating branch", "branch", primaryBranch)
+			err := r.fetchAndCreateBranch(egCtx, t, primaryBranch)
+			if err != nil {
+				r.log.Error("runner", "msg", "fetchAndCreateBranch failed", "branch", primaryBranch, "err", err)
+			} else {
+				r.log.Debug("runner", "msg", "fetchAndCreateBranch succeeded", "branch", primaryBranch)
+			}
+			return err
+		})
+	}
+	r.log.Debug("runner", "msg", "waiting for phase A errgroup")
+	if err := eg.Wait(); err != nil {
+		return setupResult{}, err
+	}
+	r.log.Debug("runner", "msg", "phase A complete", "container", containerName)
+
+	// Phase B: wait for SSH + push (branch now exists locally).
+	r.log.Debug("runner", "msg", "provisioning phase B: connecting via SSH", "container", containerName, "repos_count", len(repos))
+	tailscaleFQDN, err := r.Container.Connect(startCtx, containerName, repos, opts)
+	if err != nil {
+		r.log.Error("runner", "msg", "container.Connect failed", "container", containerName, "err", err)
+		return setupResult{}, fmt.Errorf("start container: %w", err)
+	}
+	r.log.Info("runner", "msg", "started", "br", primaryBranch, "dur", time.Since(tContainer), "container", containerName, "fqdn", tailscaleFQDN)
+	return setupResult{Container: containerName, TailscaleFQDN: tailscaleFQDN}, nil
+}
+
 // logRelayDiag reads the relay daemon's relay.log from the container and logs
 // its tail. Called when GracefulStop times out to capture relay-side diagnostics.
 func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, container string) {
@@ -1321,26 +1414,6 @@ func (r *Runner) fetchDiffStatBranch(ctx context.Context, t *Task, branch string
 	}, false)
 }
 
-// BranchDiffStat fetches from the container and returns the host-side branch
-// diff stat (md diff --numstat). Unlike the relay's diff_watcher which only
-// tracks uncommitted changes, this captures the full branch diff relative to
-// the base. Used by adoptOne to restore the diff stat after server restart.
-func (r *Runner) BranchDiffStat(ctx context.Context, branch string, extraRepos []md.Repo) agent.DiffStat {
-	r.initDefaults()
-	if r.Container == nil || r.Dir == "" {
-		return nil
-	}
-	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
-	defer cancel()
-	r.branchMu.Lock()
-	defer r.branchMu.Unlock()
-	if err := r.Container.Fetch(fetchCtx, append([]md.Repo{{GitRoot: r.Dir, Branch: branch}}, extraRepos...)); err != nil {
-		r.log.Warn("fetch for branch diff stat failed", "br", branch, "err", err)
-		return nil
-	}
-	return r.diffStat(fetchCtx, branch)
-}
-
 // diffStat runs Diff("--numstat") and parses the output. Returns nil for no-repo runners.
 func (r *Runner) diffStat(ctx context.Context, branch string) agent.DiffStat {
 	if r.Dir == "" {
@@ -1414,75 +1487,3 @@ func (r *Runner) reopenLog(t *Task) (io.WriteCloser, error) {
 }
 
 // writeLogTrailer appends a MetaResultMessage to the log file.
-func writeLogTrailer(w io.Writer, title string, res *Result) {
-	if w == nil {
-		return
-	}
-	mr := agent.MetaResultMessage{
-		MessageType:              "caic_result",
-		State:                    res.State.String(),
-		Title:                    title,
-		CostUSD:                  res.CostUSD,
-		Duration:                 res.Duration.Seconds(),
-		NumTurns:                 res.NumTurns,
-		InputTokens:              res.Usage.InputTokens,
-		OutputTokens:             res.Usage.OutputTokens,
-		CacheCreationInputTokens: res.Usage.CacheCreationInputTokens,
-		CacheReadInputTokens:     res.Usage.CacheReadInputTokens,
-		DiffStat:                 res.DiffStat,
-		AgentResult:              res.AgentResult,
-	}
-	if res.Err != nil {
-		mr.Error = res.Err.Error()
-	}
-	if data, err := json.Marshal(mr); err == nil {
-		_, _ = w.Write(append(data, '\n'))
-	}
-}
-
-// writeContextCleared appends a context_cleared system message to the log.
-// Called before closing the old log writer in RestartSession so that
-// RestoreMessages can reset plan state on server restart.
-func writeContextCleared(w io.Writer) {
-	msg := syntheticContextCleared()
-	if data, err := json.Marshal(msg); err == nil {
-		_, _ = w.Write(append(data, '\n'))
-	}
-}
-
-// maxBranchSeqNum finds the highest sequence number N among all branches
-// (local and remote) matching "caic-N". Returns -1 if no matching branches
-// exist. Checking both local and remote is necessary because stopped tasks
-// leave local branches that may never be pushed.
-func maxBranchSeqNum(ctx context.Context, dir string) (int, error) {
-	cmd := exec.CommandContext(ctx, "git", "branch", "-a", "--format=%(refname:short)")
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		return -1, fmt.Errorf("git branch -a: %w", err)
-	}
-	highest := -1
-	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		line = strings.TrimSpace(line)
-		// Match "caic-N" (local) or "<remote>/caic-N" (remote).
-		// Use strings.Cut on "/caic-" for remote refs and
-		// strings.HasPrefix for local refs to avoid matching unrelated
-		// branch names that happen to contain "caic-".
-		var numStr string
-		if strings.HasPrefix(line, "caic-") {
-			numStr = line[len("caic-"):]
-		} else if _, after, ok := strings.Cut(line, "/caic-"); ok {
-			numStr = after
-		} else {
-			continue
-		}
-		n, err := strconv.Atoi(numStr)
-		if err != nil {
-			continue
-		}
-		if n > highest {
-			highest = n
-		}
-	}
-	return highest, nil
-}

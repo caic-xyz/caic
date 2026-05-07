@@ -265,6 +265,15 @@ var WidgetToolNames = map[string]struct{}{
 	"mcp__plugin_caic-widget_widget__show_widget": {}, // Plugin MCP-prefixed.
 }
 
+// WidgetMessage is emitted when the agent produces an interactive HTML widget
+// via a tool call (e.g. Claude's show_widget). The HTML is the complete,
+// renderable widget code.
+type WidgetMessage struct {
+	ToolUseID string `json:"id"`
+	Title     string `json:"title"`
+	HTML      string `json:"html"`
+}
+
 // widgetInput is the expected JSON schema for the show_widget tool's input.
 type widgetInput struct {
 	Title      string `json:"title"`
@@ -288,15 +297,6 @@ func NewWidgetMessage(toolUseID string, input json.RawMessage) *WidgetMessage {
 		Title:     w.Title,
 		HTML:      html,
 	}
-}
-
-// WidgetMessage is emitted when the agent produces an interactive HTML widget
-// via a tool call (e.g. Claude's show_widget). The HTML is the complete,
-// renderable widget code.
-type WidgetMessage struct {
-	ToolUseID string `json:"id"`
-	Title     string `json:"title"`
-	HTML      string `json:"html"`
 }
 
 // Type implements Message.

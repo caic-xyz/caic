@@ -197,13 +197,6 @@ type wireFormat struct {
 	fw          *jsonutil.FieldWarner
 }
 
-// allocID returns the next JSON-RPC request ID. Not thread-safe; callers
-// must hold mu or be in the single-threaded handshake phase.
-func (w *wireFormat) allocIDLocked() int64 {
-	w.nextID++
-	return w.nextID
-}
-
 // WritePrompt sends a session/prompt JSON-RPC request to begin a new turn.
 func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) error {
 	w.mu.Lock()
@@ -311,6 +304,13 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		}
 	}
 	return msgs, nil
+}
+
+// allocIDLocked returns the next JSON-RPC request ID. Not thread-safe; callers
+// must hold mu or be in the single-threaded handshake phase.
+func (w *wireFormat) allocIDLocked() int64 {
+	w.nextID++
+	return w.nextID
 }
 
 // handlePromptResponseLocked converts a session/prompt JSON-RPC response into

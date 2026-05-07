@@ -75,6 +75,25 @@ func (cw *compressWriter) Write(b []byte) (int, error) {
 	return cw.writer.Write(b)
 }
 
+// Flush flushes compressed data to the wire. Calls initOnce so that
+// Content-Encoding is set before the first flush sends headers.
+func (cw *compressWriter) Flush() {
+	cw.initOnce()
+	if cw.writer != nil {
+		if f, ok := cw.writer.(interface{ Flush() error }); ok {
+			_ = f.Flush()
+		}
+	}
+	if f, ok := cw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap returns the underlying ResponseWriter for http.ResponseController.
+func (cw *compressWriter) Unwrap() http.ResponseWriter {
+	return cw.ResponseWriter
+}
+
 // initOnce inspects response headers to decide whether to compress.
 // Called once before the first Write, WriteHeader, or Flush.
 func (cw *compressWriter) initOnce() {
@@ -114,23 +133,4 @@ func (cw *compressWriter) finish() {
 		return
 	}
 	_ = cw.writer.Close()
-}
-
-// Flush flushes compressed data to the wire. Calls initOnce so that
-// Content-Encoding is set before the first flush sends headers.
-func (cw *compressWriter) Flush() {
-	cw.initOnce()
-	if cw.writer != nil {
-		if f, ok := cw.writer.(interface{ Flush() error }); ok {
-			_ = f.Flush()
-		}
-	}
-	if f, ok := cw.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
-// Unwrap returns the underlying ResponseWriter for http.ResponseController.
-func (cw *compressWriter) Unwrap() http.ResponseWriter {
-	return cw.ResponseWriter
 }

@@ -236,6 +236,44 @@ type taskEntry struct {
 	loadedTaskOnce sync.Once
 }
 
+// Serve starts the HTTP server on an already-open listener and blocks until
+// ctx is cancelled. Opening the listener early (before calling New) lets the
+// caller detect port conflicts at startup instead of after lengthy
+// initialisation.
+func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+	handler, err := s.buildHandler()
+	if err != nil {
+		return err
+	}
+
+	srv := &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		BaseContext: func(_ net.Listener) context.Context {
+			return ctx
+		},
+	}
+	shutdownDone := make(chan struct{})
+	go func() { //nolint:gosec // G118: goroutine intentionally uses Background; parent ctx is already cancelled at shutdown
+		defer close(shutdownDone)
+		<-ctx.Done()
+		if s.voiceBridge != nil {
+			s.voiceBridge.CloseAll()
+		}
+		// Use Background because the parent ctx is already cancelled.
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = srv.Shutdown(shutdownCtx) //nolint:contextcheck // parent ctx is already cancelled at shutdown time
+		shutdownCancel()
+	}()
+	slog.Info("listening", "addr", ln.Addr())
+	err = srv.Serve(ln)
+	if errors.Is(err, http.ErrServerClosed) {
+		<-shutdownDone
+		return nil
+	}
+	return err
+}
+
 // buildHandler assembles the full HTTP handler. Extracted from Serve so that
 // route registration can be tested without a listener.
 func (s *Server) buildHandler() (http.Handler, error) {
@@ -354,44 +392,6 @@ func (s *Server) buildHandler() (http.Handler, error) {
 			"cc", cc,
 		)
 	}), nil
-}
-
-// Serve starts the HTTP server on an already-open listener and blocks until
-// ctx is cancelled. Opening the listener early (before calling New) lets the
-// caller detect port conflicts at startup instead of after lengthy
-// initialisation.
-func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
-	handler, err := s.buildHandler()
-	if err != nil {
-		return err
-	}
-
-	srv := &http.Server{
-		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
-		BaseContext: func(_ net.Listener) context.Context {
-			return ctx
-		},
-	}
-	shutdownDone := make(chan struct{})
-	go func() { //nolint:gosec // G118: goroutine intentionally uses Background; parent ctx is already cancelled at shutdown
-		defer close(shutdownDone)
-		<-ctx.Done()
-		if s.voiceBridge != nil {
-			s.voiceBridge.CloseAll()
-		}
-		// Use Background because the parent ctx is already cancelled.
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = srv.Shutdown(shutdownCtx) //nolint:contextcheck // parent ctx is already cancelled at shutdown time
-		shutdownCancel()
-	}()
-	slog.Info("listening", "addr", ln.Addr())
-	err = srv.Serve(ln)
-	if errors.Is(err, http.ErrServerClosed) {
-		<-shutdownDone
-		return nil
-	}
-	return err
 }
 
 // pollStats polls container resource stats every 5 seconds for all active tasks.

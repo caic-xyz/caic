@@ -19,6 +19,7 @@ linters:
     - exhaustive
     - fatcontext
     - forcetypeassert
+    - funcorder
     - gocritic
     - gosec
     - godot
@@ -44,6 +45,11 @@ linters:
     - usetesting
     - whitespace
   settings:
+    funcorder:
+      orders:
+        - constructor
+        - public
+        - private
     exhaustive:
       default-signifies-exhaustive: true
     gocritic:

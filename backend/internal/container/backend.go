@@ -39,40 +39,6 @@ func NewBackend(client *md.Client) *Backend {
 	}
 }
 
-func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) (client *md.Client, mdOpts *md.StartOpts) {
-	harnessMap := map[agent.Harness]md.Harness{
-		agent.Claude:   md.HarnessClaude,
-		agent.Codex:    md.HarnessCodex,
-		agent.Gemini:   md.HarnessGemini,
-		agent.Kilo:     md.HarnessKilo,
-		agent.OpenCode: md.HarnessOpencode,
-		agent.Pi:       md.HarnessPi,
-	}
-	mdHarness := harnessMap[opts.Harness]
-	harnessPaths := md.HarnessMounts[mdHarness]
-	image := opts.DockerImage
-	if image == "" {
-		image = md.DefaultBaseImage + ":latest"
-	}
-	client = b.Client
-	var extraEnv []string
-	extraEnv = append(extraEnv, b.HarnessEnv[string(opts.Harness)]...)
-	if opts.GitHubToken != "" {
-		extraEnv = append(extraEnv, "GITHUB_TOKEN="+opts.GitHubToken)
-	}
-	mdOpts = &md.StartOpts{
-		BaseImage:  image,
-		Labels:     labels,
-		AgentPaths: []md.AgentPaths{harnessPaths},
-		USB:        opts.USB,
-		Tailscale:  opts.Tailscale,
-		Display:    opts.Display,
-		ExtraEnv:   extraEnv,
-		MaxCPUs:    md.DefaultMaxCPUs(),
-	}
-	return client, mdOpts
-}
-
 // Launch implements task.ContainerBackend.
 func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, opts *task.StartOptions) (string, error) {
 	defer trace.StartRegion(ctx, "container.launch").End()
@@ -288,6 +254,41 @@ func (b *Backend) VNCPort(containerName string) int {
 		}
 	}
 	return 0
+}
+
+// mdStartOpts builds the md.StartOpts for a given harness and task options.
+func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) (client *md.Client, mdOpts *md.StartOpts) {
+	harnessMap := map[agent.Harness]md.Harness{
+		agent.Claude:   md.HarnessClaude,
+		agent.Codex:    md.HarnessCodex,
+		agent.Gemini:   md.HarnessGemini,
+		agent.Kilo:     md.HarnessKilo,
+		agent.OpenCode: md.HarnessOpencode,
+		agent.Pi:       md.HarnessPi,
+	}
+	mdHarness := harnessMap[opts.Harness]
+	harnessPaths := md.HarnessMounts[mdHarness]
+	image := opts.DockerImage
+	if image == "" {
+		image = md.DefaultBaseImage + ":latest"
+	}
+	client = b.Client
+	var extraEnv []string
+	extraEnv = append(extraEnv, b.HarnessEnv[string(opts.Harness)]...)
+	if opts.GitHubToken != "" {
+		extraEnv = append(extraEnv, "GITHUB_TOKEN="+opts.GitHubToken)
+	}
+	mdOpts = &md.StartOpts{
+		BaseImage:  image,
+		Labels:     labels,
+		AgentPaths: []md.AgentPaths{harnessPaths},
+		USB:        opts.USB,
+		Tailscale:  opts.Tailscale,
+		Display:    opts.Display,
+		ExtraEnv:   extraEnv,
+		MaxCPUs:    md.DefaultMaxCPUs(),
+	}
+	return client, mdOpts
 }
 
 // hostPort reads the Docker host port mapping for the given container port.

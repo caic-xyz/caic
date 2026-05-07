@@ -220,6 +220,129 @@ type Task struct {
 }
 
 // Primary returns a pointer to the primary RepoMount (Repos[0]), or nil for no-repo tasks.
+func syntheticContextCleared() *agent.SystemMessage {
+	return &agent.SystemMessage{
+		MessageType: "system",
+		Subtype:     "context_cleared",
+	}
+}
+
+// AttachSession stores a SessionHandle on the task. The caller must not hold
+// t.mu.
+func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
+	var images []agent.ImageData
+	if len(p.Images) > 0 {
+		images = make([]agent.ImageData, len(p.Images))
+		copy(images, p.Images)
+	}
+	return &agent.UserInputMessage{
+		Text:   p.Text,
+		Images: images,
+	}
+}
+
+// lastAgentMessage scans backwards through msgs, skipping non-semantic
+// messages (DiffStatMessage, TextDeltaMessage, RawMessage), and returns the
+// trailing ResultMessage if the last semantically meaningful message is a
+// result. Returns nil if it is not a ResultMessage (agent still producing
+// output) or msgs is empty.
+func lastAgentMessage(msgs []agent.Message) *agent.ResultMessage {
+	for _, msg := range slices.Backward(msgs) {
+		switch m := msg.(type) {
+		case *agent.DiffStatMessage:
+			continue // Relay metadata; skip.
+		case *agent.TextDeltaMessage:
+			continue // Streaming delta; skip.
+		case *agent.RawMessage:
+			continue // tool_progress, etc.; skip.
+		case *agent.UsageMessage:
+			continue // Token usage metadata; skip.
+		case *agent.ResultMessage:
+			return m
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+// lastTurnHasAsk reports whether the current turn contains an AskMessage.
+// It scans backwards from the end until it hits a previous turn's
+// ResultMessage boundary. The caller may include the current turn's
+// ResultMessage in the slice (it's the trigger for this check), so we skip
+// the first ResultMessage we encounter.
+func lastTurnHasAsk(msgs []agent.Message) bool {
+	skippedResult := false
+	for _, msg := range slices.Backward(msgs) {
+		switch msg.(type) {
+		case *agent.AskMessage:
+			return true
+		case *agent.ResultMessage:
+			if skippedResult {
+				return false
+			}
+			skippedResult = true
+		}
+	}
+	return false
+}
+
+// lastTurnHasExitPlan reports whether the current turn contains an ExitPlanMode
+// tool call. It scans backwards from the end until it hits a previous turn's
+// ResultMessage boundary, mirroring lastTurnHasAsk.
+func lastTurnHasExitPlan(msgs []agent.Message) bool {
+	skippedResult := false
+	for _, msg := range slices.Backward(msgs) {
+		switch m := msg.(type) {
+		case *agent.ToolUseMessage:
+			if m.Name == "ExitPlanMode" {
+				return true
+			}
+		case *agent.ResultMessage:
+			if skippedResult {
+				return false
+			}
+			skippedResult = true
+		}
+	}
+	return false
+}
+
+// sub is an SSE subscriber with a once-guarded close to prevent double-close
+// panics when both the fan-out (slow subscriber drop) and context cancellation
+// race to close the channel.
+type sub struct {
+	ch   chan agent.Message
+	once sync.Once
+}
+
+func (s *sub) close() {
+	s.once.Do(func() { close(s.ch) })
+}
+
+// computeCost returns the true USD cost for a Claude API result by adding the
+// cache-read surcharge that TotalCostUSD omits.
+//
+// Claude Code's TotalCostUSD correctly prices input, output, and cache-write
+// tokens but excludes cache_read_input_tokens. All Claude models share the same
+// structural price ratios, so we derive the per-token input price from
+// TotalCostUSD and the non-cache-read token counts, then add the missing term.
+//
+// If there are no non-cache-read tokens to derive a unit price from,
+// TotalCostUSD is returned unchanged.
+func computeCost(totalCostUSD float64, u agent.Usage) float64 {
+	// Express all non-cache-read tokens as an equivalent number of input tokens.
+	nonCREquiv := float64(u.InputTokens) + 5*float64(u.OutputTokens) + 1.25*float64(u.CacheCreationInputTokens)
+	if nonCREquiv == 0 {
+		return totalCostUSD
+	}
+	inputPricePerTok := totalCostUSD / nonCREquiv
+	return totalCostUSD + float64(u.CacheReadInputTokens)*0.10*inputPricePerTok
+}
+
+const titleSystemPrompt = "Summarize this coding task conversation in 3-8 words as a short title. Reply with ONLY the title, no quotes."
+
+// Primary returns a pointer to the primary RepoMount (Repos[0]), or nil for no-repo tasks.
 func (t *Task) Primary() *RepoMount {
 	if len(t.Repos) == 0 {
 		return nil
@@ -242,19 +365,6 @@ func (t *Task) ExtraMDRepos() []md.Repo {
 		return nil
 	}
 	return t.MDRepos()[1:]
-}
-
-// setState updates the state and records the transition time. The caller must
-// hold t.mu when called from a locked context, or ensure exclusive access.
-func (t *Task) setState(s State) {
-	if s == StateRunning && t.state != StateRunning {
-		t.turnStartedAt = time.Now().UTC()
-	} else if s != StateRunning {
-		t.turnStartedAt = time.Time{}
-	}
-	t.state = s
-	t.stateUpdatedAt = time.Now().UTC()
-	slog.Debug("container", "state", s, "task", t.ID, "ctr", t.Container)
 }
 
 // SetState updates the state under the mutex and records the transition time.
@@ -647,6 +757,323 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 	}
 }
 
+// AttachSession stores the SessionHandle under the mutex.
+func (t *Task) AttachSession(h *SessionHandle) {
+	t.mu.Lock()
+	t.handle = h
+	t.mu.Unlock()
+}
+
+// DetachSession atomically removes and returns the current SessionHandle,
+// or nil if no session is attached. The caller must not hold t.mu.
+func (t *Task) DetachSession() *SessionHandle {
+	t.mu.Lock()
+	h := t.handle
+	t.handle = nil
+	t.mu.Unlock()
+	return h
+}
+
+// SessionDone returns the Done channel for the current session, or nil if no
+// session is attached. The caller must not hold t.mu.
+func (t *Task) SessionDone() <-chan struct{} {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.handle == nil {
+		return nil
+	}
+	return t.handle.Session.Done()
+}
+
+// CloseAndDetachSession gracefully shuts down the current agent session and
+// returns the detached handle. Returns nil if no session was attached. Used by
+// RestartSession which needs the graceful drain before starting a new session.
+func (t *Task) CloseAndDetachSession(ctx context.Context) *SessionHandle {
+	h := t.DetachSession()
+	if h == nil {
+		return nil
+	}
+	_ = h.GracefulStop(ctx, 10*time.Second)
+	// Wait for ReadMessages to finish so callers can safely close MsgCh.
+	_ = h.Session.Wait()
+	return h
+}
+
+// ClearMessages injects a context_cleared boundary marker into the message
+// stream and resets live stats. Message history is preserved so that SSE
+// subscribers (including reconnecting clients) can see the full timeline.
+func (t *Task) ClearMessages(ctx context.Context) {
+	t.addMessage(ctx, syntheticContextCleared(), false)
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.sessionID = ""
+	t.priorCostUSD = t.liveCostUSD
+	t.priorNumTurns = t.liveNumTurns
+	t.priorDuration = t.liveDuration
+	t.inPlanMode = false
+	t.planFile = ""
+	t.planContent = ""
+	t.planDismissed = true
+	// Clear PlanContent on all ExitPlanMode messages so new subscribers
+	// do not see stale plan content after context is cleared.
+	for _, m := range t.msgs {
+		if tu, ok := m.(*agent.ToolUseMessage); ok && tu.Name == "ExitPlanMode" {
+			tu.PlanContent = ""
+		}
+	}
+}
+
+// Subscribe returns a snapshot of all past messages plus a live channel for
+// new messages. The caller must call unsubFn when done to release resources.
+func (t *Task) Subscribe(ctx context.Context) (history []agent.Message, live <-chan agent.Message, unsubFn func()) {
+	s := &sub{ch: make(chan agent.Message, 256)}
+
+	t.mu.Lock()
+	// Snapshot history under lock — no channel writes, so no deadlock risk
+	// regardless of history size.
+	history = append([]agent.Message(nil), t.msgs...)
+	t.subs = append(t.subs, s)
+	t.mu.Unlock()
+
+	unsub := func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		for i, ss := range t.subs {
+			if ss == s {
+				t.subs = append(t.subs[:i], t.subs[i+1:]...)
+				break
+			}
+		}
+	}
+
+	// Close channel when context is done.
+	go func() {
+		<-ctx.Done()
+		unsub()
+		s.close()
+	}()
+
+	return history, s.ch, unsub
+}
+
+// PushStats records a container stats snapshot and notifies live subscribers.
+func (t *Task) PushStats(s *ContainerStats) {
+	t.mu.Lock()
+	idx := (t.statsHead + t.statsLen) % statsRingSize
+	t.statsRing[idx] = *s
+	if t.statsLen < statsRingSize {
+		t.statsLen++
+	} else {
+		t.statsHead = (t.statsHead + 1) % statsRingSize
+	}
+	subs := append([]*statsSub(nil), t.statsSubs...)
+	val := *s
+	t.mu.Unlock()
+	for _, sub := range subs {
+		select {
+		case sub.ch <- val:
+		default:
+		}
+	}
+}
+
+// SubscribeStats returns a snapshot of the stats ring buffer and a channel that
+// receives only live stats arriving after the snapshot. The context cancellation
+// closes the channel and removes the subscriber.
+func (t *Task) SubscribeStats(ctx context.Context) (history []ContainerStats, live <-chan ContainerStats, unsubFn func()) {
+	s := &statsSub{ch: make(chan ContainerStats, 64)}
+	t.mu.Lock()
+	history = make([]ContainerStats, t.statsLen)
+	for i := range t.statsLen {
+		history[i] = t.statsRing[(t.statsHead+i)%statsRingSize]
+	}
+	t.statsSubs = append(t.statsSubs, s)
+	t.mu.Unlock()
+	unsub := func() {
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		for i, ss := range t.statsSubs {
+			if ss == s {
+				t.statsSubs = append(t.statsSubs[:i], t.statsSubs[i+1:]...)
+				break
+			}
+		}
+	}
+	go func() {
+		<-ctx.Done()
+		unsub()
+		s.close()
+	}()
+	return history, s.ch, unsub
+}
+
+// SessionStatus describes why SendInput could not deliver a message.
+//
+// Session lifecycle:
+//   - A session wraps an SSH process bridging the server to the in-container
+//     relay daemon. It is set by Runner.Start, Runner.Reconnect, or
+//     Runner.RestartSession.
+//   - The session is cleared by CloseSession (during restart), Kill (during
+//     purge), or lazily by SendInput when it detects the SSH process
+//     already exited (Done channel closed).
+//   - "none" means no session was ever attached for this task — either the task
+//     hasn't started, or the relay died and reconnect failed.
+//   - "exited" means a session existed but the underlying SSH process exited
+//     (relay or agent crashed, SSH dropped) before the user sent input.
+type SessionStatus string
+
+const (
+	// SessionNone indicates no session was set on the task.
+	SessionNone SessionStatus = "none"
+	// SessionExited indicates the session's SSH process had already exited.
+	SessionExited SessionStatus = "exited"
+)
+
+// SendInput sends a user message to the running agent.
+//
+// Returns an error if no session is active. The error includes the task state
+// and a SessionStatus so the caller can diagnose why the session is missing
+// (e.g. relay died vs. never connected). The session watcher now handles
+// dead-session detection proactively, so SendInput no longer does lazy
+// cleanup.
+func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
+	t.mu.Lock()
+	h := t.handle
+	sessionStatus := SessionNone
+	if h != nil {
+		select {
+		case <-h.Session.Done():
+			sessionStatus = SessionExited
+			h = nil
+		default:
+		}
+	}
+	state := t.state
+	if h != nil && (state == StateWaiting || state == StateAsking || state == StateHasPlan) {
+		t.setState(StateRunning)
+		// Plan content is preserved — the UI hides naturally while the
+		// task is Running (isWaiting is false). When the agent finishes,
+		// the plan reappears (original or updated via Write/Edit).
+		// ClearMessages (the "Clear and execute plan" path) is the only
+		// place that erases plan state.
+	}
+	t.mu.Unlock()
+	if h == nil {
+		return fmt.Errorf("no active session (state=%s session=%s)", state, sessionStatus)
+	}
+	t.addMessage(ctx, syntheticUserInput(p), false)
+	return h.Session.SendPrompt(p)
+}
+
+// SendCompact sends a compact command to the running agent without changing
+// the task state. Returns an error if no session is active or the backend
+// does not support compaction.
+func (t *Task) SendCompact(ctx context.Context, instructions string) error {
+	_ = ctx
+	t.mu.Lock()
+	h := t.handle
+	sessionStatus := SessionNone
+	if h != nil {
+		select {
+		case <-h.Session.Done():
+			sessionStatus = SessionExited
+			h = nil
+		default:
+		}
+	}
+	state := t.state
+	t.mu.Unlock()
+	if h == nil {
+		return fmt.Errorf("no active session (state=%s session=%s)", state, sessionStatus)
+	}
+	return h.Session.SendCompact(instructions)
+}
+
+// SetTitle sets the title under the mutex. Empty strings are ignored to
+// preserve the prompt-fallback invariant.
+func (t *Task) SetTitle(title string) {
+	if title == "" {
+		return
+	}
+	t.mu.Lock()
+	t.title = title
+	t.mu.Unlock()
+}
+
+// SetAgentVersion sets the agent version reported by the init message.
+// Used when restoring purged tasks from logs without full message parsing.
+func (t *Task) SetAgentVersion(v string) {
+	t.mu.Lock()
+	t.agentVersion = v
+	t.mu.Unlock()
+}
+
+// GenerateTitle asks the LLM for a short title from the prompt and any result
+// messages. No-op when the provider is unconfigured.
+func (t *Task) GenerateTitle(ctx context.Context) {
+	if t.Provider == nil {
+		return
+	}
+	msgs := t.Messages()
+	var b strings.Builder
+	for _, m := range msgs {
+		if v, ok := m.(*agent.ResultMessage); ok && v.Result != "" {
+			if b.Len() > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString("Result: ")
+			b.WriteString(v.Result)
+		}
+	}
+	// Prepend the original prompt.
+	// TODO: Use the images too.
+	input := "Prompt: " + t.InitialPrompt.Text
+	if b.Len() > 0 {
+		input += "\n" + b.String()
+	}
+	// Truncate to keep it working on most providers.
+	const maxChars = 50000
+	if len(input) > maxChars {
+		input = input[:maxChars]
+	}
+
+	start := time.Now()
+	res, err := t.Provider.GenSync(ctx,
+		genai.Messages{genai.NewTextMessage(input)},
+		&genai.GenOptionText{SystemPrompt: titleSystemPrompt},
+	)
+	d := time.Since(start).Round(time.Millisecond)
+	if err != nil {
+		slog.Warn("title failed", "task", t.ID, "err", err, "d", d)
+		return
+	}
+	// Strip surrounding quotes if the model adds them despite instructions.
+	title := strings.Trim(strings.TrimSpace(res.String()), "\"'`")
+	if title == "" {
+		slog.Warn("title", "task", t.ID, "d", d, "msg", "empty")
+		return
+	}
+	slog.Info("title", "task", t.ID, "title", title, "d", d)
+	t.SetTitle(title)
+}
+
+// setState updates the state and records the transition time. The caller must
+// hold t.mu when called from a locked context, or ensure exclusive access.
+func (t *Task) setState(s State) {
+	if s == StateRunning && t.state != StateRunning {
+		t.turnStartedAt = time.Now().UTC()
+	} else if s != StateRunning {
+		t.turnStartedAt = time.Time{}
+	}
+	t.state = s
+	t.stateUpdatedAt = time.Now().UTC()
+	slog.Debug("container", "state", s, "task", t.ID, "ctr", t.Container)
+}
+
+// addMessage appends a message to the task's message list under the mutex and
+// fans it out to subscribers. It also tracks metadata, updates state
+// transitions, and handles cost/duration accumulation.
 func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -822,430 +1249,3 @@ func (t *Task) trackToolUse(tu *agent.ToolUseMessage) {
 // syntheticContextCleared creates a SystemMessage marking a context-clear
 // boundary. Injected into the message stream so SSE subscribers see the
 // marker before history is wiped.
-func syntheticContextCleared() *agent.SystemMessage {
-	return &agent.SystemMessage{
-		MessageType: "system",
-		Subtype:     "context_cleared",
-	}
-}
-
-// AttachSession stores a SessionHandle on the task. The caller must not hold
-// t.mu.
-func (t *Task) AttachSession(h *SessionHandle) {
-	t.mu.Lock()
-	t.handle = h
-	t.mu.Unlock()
-}
-
-// DetachSession atomically removes and returns the current SessionHandle,
-// or nil if no session is attached. The caller must not hold t.mu.
-func (t *Task) DetachSession() *SessionHandle {
-	t.mu.Lock()
-	h := t.handle
-	t.handle = nil
-	t.mu.Unlock()
-	return h
-}
-
-// SessionDone returns the Done channel for the current session, or nil if no
-// session is attached. The caller must not hold t.mu.
-func (t *Task) SessionDone() <-chan struct{} {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.handle == nil {
-		return nil
-	}
-	return t.handle.Session.Done()
-}
-
-// CloseAndDetachSession gracefully shuts down the current agent session and
-// returns the detached handle. Returns nil if no session was attached. Used by
-// RestartSession which needs the graceful drain before starting a new session.
-func (t *Task) CloseAndDetachSession(ctx context.Context) *SessionHandle {
-	h := t.DetachSession()
-	if h == nil {
-		return nil
-	}
-	_ = h.GracefulStop(ctx, 10*time.Second)
-	// Wait for ReadMessages to finish so callers can safely close MsgCh.
-	_ = h.Session.Wait()
-	return h
-}
-
-// ClearMessages injects a context_cleared boundary marker into the message
-// stream and resets live stats. Message history is preserved so that SSE
-// subscribers (including reconnecting clients) can see the full timeline.
-func (t *Task) ClearMessages(ctx context.Context) {
-	t.addMessage(ctx, syntheticContextCleared(), false)
-
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.sessionID = ""
-	t.priorCostUSD = t.liveCostUSD
-	t.priorNumTurns = t.liveNumTurns
-	t.priorDuration = t.liveDuration
-	t.inPlanMode = false
-	t.planFile = ""
-	t.planContent = ""
-	t.planDismissed = true
-	// Clear PlanContent on all ExitPlanMode messages so new subscribers
-	// do not see stale plan content after context is cleared.
-	for _, m := range t.msgs {
-		if tu, ok := m.(*agent.ToolUseMessage); ok && tu.Name == "ExitPlanMode" {
-			tu.PlanContent = ""
-		}
-	}
-}
-
-// syntheticUserInput creates a UserInputMessage representing user-provided
-// text/image input. It is injected into the message stream so that the JSONL
-// log and SSE events contain an explicit record of every user message.
-func syntheticUserInput(p agent.Prompt) *agent.UserInputMessage {
-	var images []agent.ImageData
-	if len(p.Images) > 0 {
-		images = make([]agent.ImageData, len(p.Images))
-		copy(images, p.Images)
-	}
-	return &agent.UserInputMessage{
-		Text:   p.Text,
-		Images: images,
-	}
-}
-
-// lastAgentMessage scans backwards through msgs, skipping non-semantic
-// messages (DiffStatMessage, TextDeltaMessage, RawMessage), and returns the
-// trailing ResultMessage if the last semantically meaningful message is a
-// result. Returns nil if it is not a ResultMessage (agent still producing
-// output) or msgs is empty.
-func lastAgentMessage(msgs []agent.Message) *agent.ResultMessage {
-	for _, msg := range slices.Backward(msgs) {
-		switch m := msg.(type) {
-		case *agent.DiffStatMessage:
-			continue // Relay metadata; skip.
-		case *agent.TextDeltaMessage:
-			continue // Streaming delta; skip.
-		case *agent.RawMessage:
-			continue // tool_progress, etc.; skip.
-		case *agent.UsageMessage:
-			continue // Token usage metadata; skip.
-		case *agent.ResultMessage:
-			return m
-		default:
-			return nil
-		}
-	}
-	return nil
-}
-
-// lastTurnHasAsk reports whether the current turn contains an AskMessage.
-// It scans backwards from the end until it hits a previous turn's
-// ResultMessage boundary. The caller may include the current turn's
-// ResultMessage in the slice (it's the trigger for this check), so we skip
-// the first ResultMessage we encounter.
-func lastTurnHasAsk(msgs []agent.Message) bool {
-	skippedResult := false
-	for _, msg := range slices.Backward(msgs) {
-		switch msg.(type) {
-		case *agent.AskMessage:
-			return true
-		case *agent.ResultMessage:
-			if skippedResult {
-				return false
-			}
-			skippedResult = true
-		}
-	}
-	return false
-}
-
-// lastTurnHasExitPlan reports whether the current turn contains an ExitPlanMode
-// tool call. It scans backwards from the end until it hits a previous turn's
-// ResultMessage boundary, mirroring lastTurnHasAsk.
-func lastTurnHasExitPlan(msgs []agent.Message) bool {
-	skippedResult := false
-	for _, msg := range slices.Backward(msgs) {
-		switch m := msg.(type) {
-		case *agent.ToolUseMessage:
-			if m.Name == "ExitPlanMode" {
-				return true
-			}
-		case *agent.ResultMessage:
-			if skippedResult {
-				return false
-			}
-			skippedResult = true
-		}
-	}
-	return false
-}
-
-// sub is an SSE subscriber with a once-guarded close to prevent double-close
-// panics when both the fan-out (slow subscriber drop) and context cancellation
-// race to close the channel.
-type sub struct {
-	ch   chan agent.Message
-	once sync.Once
-}
-
-func (s *sub) close() {
-	s.once.Do(func() { close(s.ch) })
-}
-
-// Subscribe returns a snapshot of the message history and a channel that
-// receives only live messages arriving after the snapshot. The caller must
-// write the history to the client first, then range over the channel.
-// The returned function unsubscribes and must be called exactly once.
-func (t *Task) Subscribe(ctx context.Context) (history []agent.Message, live <-chan agent.Message, unsubFn func()) {
-	s := &sub{ch: make(chan agent.Message, 256)}
-
-	t.mu.Lock()
-	// Snapshot history under lock — no channel writes, so no deadlock risk
-	// regardless of history size.
-	history = append([]agent.Message(nil), t.msgs...)
-	t.subs = append(t.subs, s)
-	t.mu.Unlock()
-
-	unsub := func() {
-		t.mu.Lock()
-		defer t.mu.Unlock()
-		for i, ss := range t.subs {
-			if ss == s {
-				t.subs = append(t.subs[:i], t.subs[i+1:]...)
-				break
-			}
-		}
-	}
-
-	// Close channel when context is done.
-	go func() {
-		<-ctx.Done()
-		unsub()
-		s.close()
-	}()
-
-	return history, s.ch, unsub
-}
-
-// PushStats records a container stats snapshot and notifies live subscribers.
-func (t *Task) PushStats(s *ContainerStats) {
-	t.mu.Lock()
-	idx := (t.statsHead + t.statsLen) % statsRingSize
-	t.statsRing[idx] = *s
-	if t.statsLen < statsRingSize {
-		t.statsLen++
-	} else {
-		t.statsHead = (t.statsHead + 1) % statsRingSize
-	}
-	subs := append([]*statsSub(nil), t.statsSubs...)
-	val := *s
-	t.mu.Unlock()
-	for _, sub := range subs {
-		select {
-		case sub.ch <- val:
-		default:
-		}
-	}
-}
-
-// SubscribeStats returns a snapshot of the stats ring buffer and a channel that
-// receives only live stats arriving after the snapshot. The context cancellation
-// closes the channel and removes the subscriber.
-func (t *Task) SubscribeStats(ctx context.Context) (history []ContainerStats, live <-chan ContainerStats, unsubFn func()) {
-	s := &statsSub{ch: make(chan ContainerStats, 64)}
-	t.mu.Lock()
-	history = make([]ContainerStats, t.statsLen)
-	for i := range t.statsLen {
-		history[i] = t.statsRing[(t.statsHead+i)%statsRingSize]
-	}
-	t.statsSubs = append(t.statsSubs, s)
-	t.mu.Unlock()
-	unsub := func() {
-		t.mu.Lock()
-		defer t.mu.Unlock()
-		for i, ss := range t.statsSubs {
-			if ss == s {
-				t.statsSubs = append(t.statsSubs[:i], t.statsSubs[i+1:]...)
-				break
-			}
-		}
-	}
-	go func() {
-		<-ctx.Done()
-		unsub()
-		s.close()
-	}()
-	return history, s.ch, unsub
-}
-
-// SessionStatus describes why SendInput could not deliver a message.
-//
-// Session lifecycle:
-//   - A session wraps an SSH process bridging the server to the in-container
-//     relay daemon. It is set by Runner.Start, Runner.Reconnect, or
-//     Runner.RestartSession.
-//   - The session is cleared by CloseSession (during restart), Kill (during
-//     purge), or lazily by SendInput when it detects the SSH process
-//     already exited (Done channel closed).
-//   - "none" means no session was ever attached for this task — either the task
-//     hasn't started, or the relay died and reconnect failed.
-//   - "exited" means a session existed but the underlying SSH process exited
-//     (relay or agent crashed, SSH dropped) before the user sent input.
-type SessionStatus string
-
-const (
-	// SessionNone indicates no session was set on the task.
-	SessionNone SessionStatus = "none"
-	// SessionExited indicates the session's SSH process had already exited.
-	SessionExited SessionStatus = "exited"
-)
-
-// SendInput sends a user message to the running agent.
-//
-// Returns an error if no session is active. The error includes the task state
-// and a SessionStatus so the caller can diagnose why the session is missing
-// (e.g. relay died vs. never connected). The session watcher now handles
-// dead-session detection proactively, so SendInput no longer does lazy
-// cleanup.
-func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
-	t.mu.Lock()
-	h := t.handle
-	sessionStatus := SessionNone
-	if h != nil {
-		select {
-		case <-h.Session.Done():
-			sessionStatus = SessionExited
-			h = nil
-		default:
-		}
-	}
-	state := t.state
-	if h != nil && (state == StateWaiting || state == StateAsking || state == StateHasPlan) {
-		t.setState(StateRunning)
-		// Plan content is preserved — the UI hides naturally while the
-		// task is Running (isWaiting is false). When the agent finishes,
-		// the plan reappears (original or updated via Write/Edit).
-		// ClearMessages (the "Clear and execute plan" path) is the only
-		// place that erases plan state.
-	}
-	t.mu.Unlock()
-	if h == nil {
-		return fmt.Errorf("no active session (state=%s session=%s)", state, sessionStatus)
-	}
-	t.addMessage(ctx, syntheticUserInput(p), false)
-	return h.Session.SendPrompt(p)
-}
-
-// SendCompact sends a compact command to the running agent without changing
-// the task state. Returns an error if no session is active or the backend
-// does not support compaction.
-func (t *Task) SendCompact(ctx context.Context, instructions string) error {
-	_ = ctx
-	t.mu.Lock()
-	h := t.handle
-	sessionStatus := SessionNone
-	if h != nil {
-		select {
-		case <-h.Session.Done():
-			sessionStatus = SessionExited
-			h = nil
-		default:
-		}
-	}
-	state := t.state
-	t.mu.Unlock()
-	if h == nil {
-		return fmt.Errorf("no active session (state=%s session=%s)", state, sessionStatus)
-	}
-	return h.Session.SendCompact(instructions)
-}
-
-// computeCost returns the true USD cost for a Claude API result by adding the
-// cache-read surcharge that TotalCostUSD omits.
-//
-// Claude Code's TotalCostUSD correctly prices input, output, and cache-write
-// tokens but excludes cache_read_input_tokens. All Claude models share the same
-// structural price ratios (output = 5×input, cache-write = 1.25×input,
-// cache-read = 0.10×input), so we derive the per-token input price from
-// TotalCostUSD and the non-cache-read token counts, then add the missing term.
-//
-// If there are no non-cache-read tokens to derive a unit price from,
-// TotalCostUSD is returned unchanged.
-func computeCost(totalCostUSD float64, u agent.Usage) float64 {
-	// Express all non-cache-read tokens as an equivalent number of input tokens.
-	nonCREquiv := float64(u.InputTokens) + 5*float64(u.OutputTokens) + 1.25*float64(u.CacheCreationInputTokens)
-	if nonCREquiv == 0 {
-		return totalCostUSD
-	}
-	inputPricePerTok := totalCostUSD / nonCREquiv
-	return totalCostUSD + float64(u.CacheReadInputTokens)*0.10*inputPricePerTok
-}
-
-const titleSystemPrompt = "Summarize this coding task conversation in 3-8 words as a short title. Reply with ONLY the title, no quotes."
-
-// SetTitle sets the title under the mutex. Empty strings are ignored to
-// preserve the prompt-fallback invariant.
-func (t *Task) SetTitle(title string) {
-	if title == "" {
-		return
-	}
-	t.mu.Lock()
-	t.title = title
-	t.mu.Unlock()
-}
-
-// SetAgentVersion sets the agent version reported by the init message.
-// Used when restoring purged tasks from logs without full message parsing.
-func (t *Task) SetAgentVersion(v string) {
-	t.mu.Lock()
-	t.agentVersion = v
-	t.mu.Unlock()
-}
-
-// GenerateTitle asks the LLM for a short title from the prompt and any result
-// messages. No-op when the provider is unconfigured.
-func (t *Task) GenerateTitle(ctx context.Context) {
-	if t.Provider == nil {
-		return
-	}
-	msgs := t.Messages()
-	var b strings.Builder
-	for _, m := range msgs {
-		if v, ok := m.(*agent.ResultMessage); ok && v.Result != "" {
-			if b.Len() > 0 {
-				b.WriteByte('\n')
-			}
-			b.WriteString("Result: ")
-			b.WriteString(v.Result)
-		}
-	}
-	// Prepend the original prompt.
-	// TODO: Use the images too.
-	input := "Prompt: " + t.InitialPrompt.Text
-	if b.Len() > 0 {
-		input += "\n" + b.String()
-	}
-	// Truncate to keep it working on most providers.
-	const maxChars = 50000
-	if len(input) > maxChars {
-		input = input[:maxChars]
-	}
-
-	start := time.Now()
-	res, err := t.Provider.GenSync(ctx,
-		genai.Messages{genai.NewTextMessage(input)},
-		&genai.GenOptionText{SystemPrompt: titleSystemPrompt},
-	)
-	d := time.Since(start).Round(time.Millisecond)
-	if err != nil {
-		slog.Warn("title failed", "task", t.ID, "err", err, "d", d)
-		return
-	}
-	// Strip surrounding quotes if the model adds them despite instructions.
-	title := strings.Trim(strings.TrimSpace(res.String()), "\"'`")
-	if title == "" {
-		slog.Warn("title", "task", t.ID, "d", d, "msg", "empty")
-		return
-	}
-	slog.Info("title", "task", t.ID, "title", title, "d", d)
-	t.SetTitle(title)
-}

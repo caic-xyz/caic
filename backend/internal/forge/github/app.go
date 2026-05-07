@@ -106,33 +106,6 @@ func NewAppClient(appID int64, privateKeyPEM []byte, transport http.RoundTripper
 	return a, nil
 }
 
-// generateJWT creates a signed RS256 JWT for GitHub App authentication.
-func (a *AppClient) generateJWT() (string, error) {
-	now := time.Now()
-	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
-	payload, err := json.Marshal(struct {
-		IAT int64  `json:"iat"`
-		EXP int64  `json:"exp"`
-		ISS string `json:"iss"`
-	}{
-		IAT: now.Add(-60 * time.Second).Unix(),
-		EXP: now.Add(9 * time.Minute).Unix(),
-		ISS: strconv.FormatInt(a.AppID, 10),
-	})
-	if err != nil {
-		return "", err
-	}
-	encodedPayload := base64.RawURLEncoding.EncodeToString(payload)
-	signingInput := header + "." + encodedPayload
-	digest := sha256.Sum256([]byte(signingInput))
-	sig, err := rsa.SignPKCS1v15(rand.Reader, a.privateKey, crypto.SHA256, digest[:])
-	if err != nil {
-		return "", fmt.Errorf("github app: sign JWT: %w", err)
-	}
-	encodedSig := base64.RawURLEncoding.EncodeToString(sig)
-	return signingInput + "." + encodedSig, nil
-}
-
 // InstallationToken returns a cached or freshly-obtained installation access token.
 func (a *AppClient) InstallationToken(ctx context.Context, installationID int64) (string, error) {
 	a.mu.Lock()
@@ -242,4 +215,31 @@ func (a *AppClient) PostComment(ctx context.Context, installationID int64, owner
 		return err
 	}
 	return NewClient(token, a.Transport).PostComment(ctx, owner, repo, issueNumber, body)
+}
+
+// generateJWT creates a signed RS256 JWT for GitHub App authentication.
+func (a *AppClient) generateJWT() (string, error) {
+	now := time.Now()
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
+	payload, err := json.Marshal(struct {
+		IAT int64  `json:"iat"`
+		EXP int64  `json:"exp"`
+		ISS string `json:"iss"`
+	}{
+		IAT: now.Add(-60 * time.Second).Unix(),
+		EXP: now.Add(9 * time.Minute).Unix(),
+		ISS: strconv.FormatInt(a.AppID, 10),
+	})
+	if err != nil {
+		return "", err
+	}
+	encodedPayload := base64.RawURLEncoding.EncodeToString(payload)
+	signingInput := header + "." + encodedPayload
+	digest := sha256.Sum256([]byte(signingInput))
+	sig, err := rsa.SignPKCS1v15(rand.Reader, a.privateKey, crypto.SHA256, digest[:])
+	if err != nil {
+		return "", fmt.Errorf("github app: sign JWT: %w", err)
+	}
+	encodedSig := base64.RawURLEncoding.EncodeToString(sig)
+	return signingInput + "." + encodedSig, nil
 }
