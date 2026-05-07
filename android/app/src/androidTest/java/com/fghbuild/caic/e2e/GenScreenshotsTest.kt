@@ -70,6 +70,12 @@ class GenScreenshotsTest : E2eTestBase() {
             found
         }
 
+        // Confirm the UI shows the empty state before we populate it.
+        composeTestRule.waitUntil(5_000) {
+            composeTestRule.onAllNodesWithTag("empty-task-list")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+
         // Create the same 4 tasks as gen-android-screenshots.sh.
         val id1 = createTaskAPI("Fix token expiry bug in auth middleware")
         val id2 = createTaskAPI("Plan the rate limiting implementation for API endpoints")
@@ -82,10 +88,29 @@ class GenScreenshotsTest : E2eTestBase() {
         waitForTaskState(id3, "asking", 30_000)
         waitForTaskState(id4, "waiting", 30_000)
 
-        // Wait for the task list to load in the UI.
+        // Verify tasks are still present via API (guard against backend flakiness).
+        for (id in listOf(id1, id2, id3, id4)) {
+            val tasks = api.listTasks()
+            require(tasks.any { it.id == id }) { "Task $id missing from API after creation" }
+        }
+
+        // Wait for the empty state to disappear — the SSE stream should have
+        // delivered the task upserts by now. If it hasn't, surface diagnostics.
         composeTestRule.waitUntil(LOAD_TIMEOUT_MS) {
-            composeTestRule.onAllNodesWithTag("task-$id1")
+            val stillEmpty = composeTestRule.onAllNodesWithTag("empty-task-list")
                 .fetchSemanticsNodes().isNotEmpty()
+            val hasError = composeTestRule.onAllNodesWithTag("task-list-error")
+                .fetchSemanticsNodes().isNotEmpty()
+            val hasTask = composeTestRule.onAllNodesWithTag("task-$id1")
+                .fetchSemanticsNodes().isNotEmpty()
+            assert(!hasError) {
+                "App shows error state after task creation"
+            }
+            assert(!stillEmpty) {
+                "Task list still empty — SSE events may not have been received. " +
+                    "API lists ${api.listTasks().size} tasks."
+            }
+            hasTask
         }
 
         // Screenshot 1: Task list.

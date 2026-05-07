@@ -78,11 +78,11 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .testTag("task-${task.id}")
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = { showMenu = true },
-            ),
+            )
+            .testTag("task-${task.id}"),
     ) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             // Line 1: voice number + title + plan badge + feature badges (no state badge)

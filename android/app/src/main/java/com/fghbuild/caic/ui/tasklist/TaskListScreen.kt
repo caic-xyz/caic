@@ -317,7 +317,9 @@ private fun MainContent(
                         text = state.error,
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(vertical = 4.dp),
+                        modifier = Modifier
+                            .padding(vertical = 4.dp)
+                            .testTag("task-list-error"),
                     )
                 }
             }
@@ -326,7 +328,8 @@ private fun MainContent(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 32.dp),
+                            .padding(vertical = 32.dp)
+                            .testTag("empty-task-list"),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text("No tasks yet.", style = MaterialTheme.typography.bodyLarge)
