@@ -4,11 +4,11 @@ import { render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import UsageBadges from "./UsageBadges";
 import styles from "./UsageBadges.module.css";
-import type { UsageResp, ProviderQuota } from "@sdk/types.gen";
+import type { UsageResp, ProviderQuota, ISOTimestamp } from "@sdk/types.gen";
 
 const [now] = createSignal(Date.now());
 
-function makeRateLimit(window: string, usedPct: number, resetsAt?: string) {
+function makeRateLimit(window: string, usedPct: number, resetsAt?: ISOTimestamp) {
   return { window, usedPct, resetsAt };
 }
 
@@ -24,9 +24,10 @@ function makeProvider(overrides: Partial<ProviderQuota> = {}): ProviderQuota {
   return {
     provider: "test",
     label: "Test",
+    logoUrl: "",
     authKind: "apikey",
     ...overrides,
-  };
+  } as ProviderQuota;
 }
 
 function makeUsage(providers: ProviderQuota[]): UsageResp {

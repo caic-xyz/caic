@@ -273,7 +273,7 @@ export class FunctionHandlers {
     for (const w of usage.local.windows) {
       lines.push(`${w.duration} cost: ${fmtUSD(w.costUSD)} (${w.inputTokens + w.outputTokens} tokens)`);
     }
-    for (const pq of usage.providers) {
+    for (const pq of usage.providers ?? []) {
       const pParts: string[] = [];
       if (pq.balance) {
         pParts.push(formatBalance(pq.balance.currency, pq.balance.total));

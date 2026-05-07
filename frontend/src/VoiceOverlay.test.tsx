@@ -52,24 +52,17 @@ vi.mock("@material-symbols/svg-400/outlined/mic_off.svg?solid", () => ({ default
 vi.mock("@material-symbols/svg-400/outlined/call_end.svg?solid", () => ({ default: () => null }));
 vi.mock("@material-symbols/svg-400/outlined/close.svg?solid", () => ({ default: () => null }));
 
-import { VoiceSession } from "./VoiceSession";
 import VoiceOverlay from "./VoiceOverlay";
 
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
-function createMockSession(): VoiceSession {
-  return new (VoiceSession as unknown as new () => VoiceSession)();
-}
-
 describe("VoiceOverlay connection", () => {
   it("calls connect() on mic button click", async () => {
     const user = userEvent.setup();
-    const session = createMockSession();
     render(() => (
       <VoiceOverlay
-        session={session}
         tasks={() => []}
         recentRepo={() => "my-repo"}
         selectedHarness={() => "claude"}

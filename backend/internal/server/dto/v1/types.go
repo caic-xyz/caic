@@ -11,7 +11,6 @@ import (
 	"github.com/maruel/ksid"
 )
 
-//go:generate go tool tygo generate --config ../../../../../backend/tygo.yaml
 //go:generate go run github.com/caic-xyz/caic/backend/internal/cmd/gen-api-sdk
 
 // Forge identifies the code hosting forge.

@@ -5,7 +5,7 @@ import { Portal } from "solid-js/web";
 import styles from "./Tooltip.module.css";
 
 interface Props {
-  text: string;
+  text?: string;
   children: JSX.Element;
   class?: string;
   disabled?: boolean;
@@ -63,9 +63,11 @@ export default function Tooltip(props: Props) {
 
   const wrapperClass = () => `${styles.wrapper}${props.class ? ` ${props.class}` : ""}`;
 
+  const disabled = () => props.disabled || !props.text;
+
   return (
     <Show
-      when={!props.disabled}
+      when={!disabled()}
       fallback={<span class={wrapperClass()}>{props.children}</span>}
     >
       <span
@@ -83,7 +85,7 @@ export default function Tooltip(props: Props) {
         {props.children}
         <Show when={show()}>
           <Portal>
-            <span ref={popupRef} class={styles.popup}>{props.text}</span>
+            <span ref={popupRef} class={styles.popup}>{props.text ?? ""}</span>
           </Portal>
         </Show>
       </span>

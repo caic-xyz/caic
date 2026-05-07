@@ -5,6 +5,8 @@ declare module "@novnc/novnc" {
     scaleViewport: boolean;
     resizeSession: boolean;
     disconnect(): void;
+    addEventListener(event: string, handler: (e: Event) => void): void;
+    removeEventListener(event: string, handler: (e: Event) => void): void;
   }
   export default RFB;
 }
