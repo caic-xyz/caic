@@ -67,7 +67,7 @@ before running instrumented tests.
 make build          # Build Go server + frontend (runs types, pnpm build, go install)
 make dev            # Build and run server on :2242
 make frontend-dev   # Run Vite frontend dev server on :5173
-make types          # Generate types (go generate → tygo + gen-api-sdk)
+make types          # Generate types (go generate → gen-api-sdk)
 make test           # Go unit tests with coverage
 make frontend-e2e   # Playwright end-to-end tests (also type-checks e2e/ TypeScript)
 make android-e2e    # Run Android instrumented tests and generate screenshots

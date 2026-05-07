@@ -1,4 +1,4 @@
-// Request validation methods (excluded from tygo generation).
+// Request validation methods (excluded from SDK generation).
 package v1
 
 import (

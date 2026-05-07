@@ -1,5 +1,5 @@
 // SSE event types sent to the frontend for task event streams.
-// These structs are generated into TypeScript via tygo.
+// These structs are generated into TypeScript via gen-api-sdk.
 //
 // EventMessage is the backend-neutral SSE contract consumed by the frontend
 // via both /api/v1/tasks/{id}/events and /api/v1/tasks/{id}/raw_events.
