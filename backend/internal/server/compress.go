@@ -36,9 +36,9 @@ func compressMiddleware(next http.Handler) http.Handler {
 }
 
 // negotiateEncoding picks the best encoding the client accepts.
-func negotiateEncoding(accepted map[string]bool) string {
+func negotiateEncoding(accepted map[string]struct{}) string {
 	for _, enc := range []string{"zstd", "br", "gzip"} {
-		if accepted[enc] {
+		if _, ok := accepted[enc]; ok {
 			return enc
 		}
 	}

@@ -199,19 +199,19 @@ func TestStaticHandler(t *testing.T) {
 func TestParseAcceptEncoding(t *testing.T) {
 	tests := []struct {
 		header string
-		want   map[string]bool
+		want   map[string]struct{}
 	}{
-		{"gzip, br", map[string]bool{"gzip": true, "br": true}},
-		{"zstd;q=1.0, gzip;q=0.5", map[string]bool{"zstd": true, "gzip": true}},
-		{"", map[string]bool{}},
-		{"identity", map[string]bool{"identity": true}},
+		{"gzip, br", map[string]struct{}{"gzip": {}, "br": {}}},
+		{"zstd;q=1.0, gzip;q=0.5", map[string]struct{}{"zstd": {}, "gzip": {}}},
+		{"", map[string]struct{}{}},
+		{"identity", map[string]struct{}{"identity": {}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.header, func(t *testing.T) {
 			got := parseAcceptEncoding(tt.header)
-			for k, v := range tt.want {
-				if got[k] != v {
-					t.Errorf("parseAcceptEncoding(%q)[%q] = %v, want %v", tt.header, k, got[k], v)
+			for k := range tt.want {
+				if _, ok := got[k]; !ok {
+					t.Errorf("parseAcceptEncoding(%q) missing key %q", tt.header, k)
 				}
 			}
 			if len(got) != len(tt.want) {

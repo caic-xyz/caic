@@ -102,7 +102,7 @@ func scanDiffForSecrets(ctx context.Context, dir, branch, baseBranch string) ([]
 	}
 
 	var issues []SafetyIssue
-	seen := make(map[string]bool) // dedupe by file+kind
+	seen := make(map[string]struct{}) // dedupe by file+kind
 	var currentFile string
 
 	scanner := bufio.NewScanner(&stdout)
@@ -123,10 +123,10 @@ func scanDiffForSecrets(ctx context.Context, dir, branch, baseBranch string) ([]
 				continue
 			}
 			key := currentFile + ":" + sp.desc
-			if seen[key] {
+			if _, ok := seen[key]; ok {
 				continue
 			}
-			seen[key] = true
+			seen[key] = struct{}{}
 			slog.Warn("secret pattern matched", "file", currentFile, "pattern", sp.desc, "line", added)
 			issues = append(issues, SafetyIssue{
 				File:   currentFile,

@@ -372,7 +372,7 @@ func generateTSTypes(outDir string, docs *docRegistry) error {
 
 	// We use the order from allStructs (walk order, leaves-first within each
 	// source file group) and filter for the current source file.
-	seen := map[string]bool{}
+	seen := map[string]struct{}{}
 
 	// Emit events.go section with its type aliases first.
 	if _, ok := structsBySource["events.go"]; ok {
@@ -384,17 +384,17 @@ func generateTSTypes(outDir string, docs *docRegistry) error {
 
 		// EventKind alias first.
 		emitTSAlias(&b, "EventKind")
-		seen["EventKind"] = true
+		seen["EventKind"] = struct{}{}
 		// Then ToolOutputContentType.
 		emitTSAlias(&b, "ToolOutputContentType")
-		seen["ToolOutputContentType"] = true
+		seen["ToolOutputContentType"] = struct{}{}
 		// Then structs in walk order, filtered to events.go.
 		for _, ks := range allStructs {
 			name := ks.t.Name()
-			if seen[name] || ks.comment != "events.go" {
+			if _, ok := seen[name]; ok || ks.comment != "events.go" {
 				continue
 			}
-			seen[name] = true
+			seen[name] = struct{}{}
 			emitTSStruct(&b, ks.t, docs)
 			b.WriteString("\n")
 		}
@@ -409,7 +409,7 @@ func generateTSTypes(outDir string, docs *docRegistry) error {
 	typesAliases := []string{"Forge", "Harness", "CIStatus", "CheckConclusion", "ForgePRState", "CheckStatus", "SyncTarget"}
 	for _, name := range typesAliases {
 		emitTSAlias(&b, name)
-		seen[name] = true
+		seen[name] = struct{}{}
 	}
 
 	// DiffStat is a named slice type.
@@ -417,15 +417,15 @@ func generateTSTypes(outDir string, docs *docRegistry) error {
 	b.WriteString(" * DiffStat summarises the changes in a branch relative to its base.\n")
 	b.WriteString(" */\n")
 	b.WriteString("export type DiffStat = DiffFileStat[];\n\n")
-	seen["DiffStat"] = true
+	seen["DiffStat"] = struct{}{}
 
 	// Structs from types.go (and any ungrouped) in walk order.
 	for _, ks := range allStructs {
 		name := ks.t.Name()
-		if seen[name] {
+		if _, ok := seen[name]; ok {
 			continue
 		}
-		seen[name] = true
+		seen[name] = struct{}{}
 		emitTSStruct(&b, ks.t, docs)
 		b.WriteString("\n")
 	}
@@ -610,14 +610,14 @@ func generateTSValidate(outDir string, _ *docRegistry) error {
 
 	// Collect all types referenced by validators.
 	needed := discoverSSEStructs()
-	refTypes := map[string]bool{}
+	refTypes := map[string]struct{}{}
 	for _, ks := range needed {
-		refTypes[ks.t.Name()] = true
+		refTypes[ks.t.Name()] = struct{}{}
 	}
-	refTypes["EventMessage"] = true
-	refTypes["TaskListEvent"] = true
-	refTypes["UsageResp"] = true
-	refTypes["ISOTimestamp"] = true
+	refTypes["EventMessage"] = struct{}{}
+	refTypes["TaskListEvent"] = struct{}{}
+	refTypes["UsageResp"] = struct{}{}
+	refTypes["ISOTimestamp"] = struct{}{}
 
 	if len(refTypes) > 0 {
 		sorted := make([]string, 0, len(refTypes))
@@ -680,15 +680,18 @@ func generateTSValidate(outDir string, _ *docRegistry) error {
 
 	// Generate validators for SSE-relevant structs: EventMessage sub-types,
 	// TaskListEvent's referenced types, and UsageResp's referenced types.
-	discriminated := map[string]bool{"EventMessage": true, "TaskListEvent": true, "UsageResp": true}
-	emitted := map[string]bool{}
+	discriminated := map[string]struct{}{"EventMessage": {}, "TaskListEvent": {}, "UsageResp": {}}
+	emitted := map[string]struct{}{}
 
 	for _, ks := range needed {
 		name := ks.t.Name()
-		if emitted[name] || discriminated[name] {
+		if _, ok := emitted[name]; ok {
 			continue
 		}
-		emitted[name] = true
+		if _, ok := discriminated[name]; ok {
+			continue
+		}
+		emitted[name] = struct{}{}
 		emitTSValidator(&b, ks.t)
 	}
 
@@ -1872,17 +1875,17 @@ func goTypeToDoc(t reflect.Type) string {
 
 // swiftReservedWords is the set of Swift keywords that require backtick escaping
 // when used as property names.
-var swiftReservedWords = map[string]bool{
-	"init": true, "deinit": true, "class": true, "struct": true, "enum": true,
-	"extension": true, "protocol": true, "var": true, "let": true, "func": true,
-	"return": true, "if": true, "else": true, "switch": true, "case": true,
-	"default": true, "for": true, "in": true, "while": true, "repeat": true,
-	"do": true, "try": true, "catch": true, "throw": true, "throws": true,
-	"import": true, "typealias": true, "where": true, "guard": true,
-	"defer": true, "break": true, "continue": true, "fallthrough": true,
-	"as": true, "is": true, "nil": true, "true": true, "false": true,
-	"self": true, "Self": true, "super": true, "static": true, "operator": true,
-	"type": true,
+var swiftReservedWords = map[string]struct{}{
+	"init": {}, "deinit": {}, "class": {}, "struct": {}, "enum": {},
+	"extension": {}, "protocol": {}, "var": {}, "let": {}, "func": {},
+	"return": {}, "if": {}, "else": {}, "switch": {}, "case": {},
+	"default": {}, "for": {}, "in": {}, "while": {}, "repeat": {},
+	"do": {}, "try": {}, "catch": {}, "throw": {}, "throws": {},
+	"import": {}, "typealias": {}, "where": {}, "guard": {},
+	"defer": {}, "break": {}, "continue": {}, "fallthrough": {},
+	"as": {}, "is": {}, "nil": {}, "true": {}, "false": {},
+	"self": {}, "Self": {}, "super": {}, "static": {}, "operator": {},
+	"type": {},
 }
 
 // swiftAliasNames is the set of Go named-string types that map to their
@@ -1959,7 +1962,7 @@ func swiftPlural(name string) string {
 
 // swiftEscapeIdent wraps name in backticks if it is a Swift reserved word.
 func swiftEscapeIdent(name string) string {
-	if swiftReservedWords[name] {
+	if _, ok := swiftReservedWords[name]; ok {
 		return "`" + name + "`"
 	}
 	return name

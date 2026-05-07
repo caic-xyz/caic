@@ -259,10 +259,10 @@ const MaxWidgetHTMLBytes = 256 * 1024 // 256 KB
 // WidgetToolNames is the set of tool names that produce HTML widgets.
 // Each harness parser checks this set to decide whether a tool_use block
 // should emit WidgetMessage instead of ToolUseMessage.
-var WidgetToolNames = map[string]bool{
-	"show_widget":                                 true, // Direct tool name.
-	"mcp__widget__show_widget":                    true, // MCP-prefixed (server "widget", tool "show_widget").
-	"mcp__plugin_caic-widget_widget__show_widget": true, // Plugin MCP-prefixed.
+var WidgetToolNames = map[string]struct{}{
+	"show_widget":                                 {}, // Direct tool name.
+	"mcp__widget__show_widget":                    {}, // MCP-prefixed (server "widget", tool "show_widget").
+	"mcp__plugin_caic-widget_widget__show_widget": {}, // Plugin MCP-prefixed.
 }
 
 // widgetInput is the expected JSON schema for the show_widget tool's input.

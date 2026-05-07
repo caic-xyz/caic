@@ -64,7 +64,7 @@ func newStaticHandler(dist fs.FS) http.HandlerFunc {
 		accepted := parseAcceptEncoding(r.Header.Get("Accept-Encoding"))
 
 		// Fast path: serve .br directly.
-		if accepted["br"] {
+		if _, ok := accepted["br"]; ok {
 			serveBrotli(w, r, dist, clean, ct)
 			return
 		}
@@ -72,7 +72,7 @@ func newStaticHandler(dist fs.FS) http.HandlerFunc {
 		// Pick best accepted encoding, falling back to identity.
 		enc := "identity"
 		for _, candidate := range []string{"zstd", "gzip"} {
-			if accepted[candidate] {
+			if _, ok := accepted[candidate]; ok {
 				enc = candidate
 				break
 			}
@@ -196,8 +196,8 @@ func setStaticCacheControl(w http.ResponseWriter, clean string) {
 }
 
 // parseAcceptEncoding returns the set of encodings the client accepts.
-func parseAcceptEncoding(header string) map[string]bool {
-	accepted := make(map[string]bool)
+func parseAcceptEncoding(header string) map[string]struct{} {
+	accepted := make(map[string]struct{})
 	for part := range strings.SplitSeq(header, ",") {
 		enc := strings.TrimSpace(part)
 		// Strip quality parameter (e.g. "gzip;q=0.5").
@@ -205,7 +205,7 @@ func parseAcceptEncoding(header string) map[string]bool {
 			enc = enc[:i]
 		}
 		if enc != "" {
-			accepted[enc] = true
+			accepted[enc] = struct{}{}
 		}
 	}
 	return accepted

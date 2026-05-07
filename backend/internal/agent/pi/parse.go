@@ -126,7 +126,7 @@ func parseMessageUpdate(line []byte) ([]agent.Message, error) {
 			input, _ = json.Marshal(delta.ToolCall.Arguments)
 		}
 
-		if agent.WidgetToolNames[name] {
+		if _, ok := agent.WidgetToolNames[name]; ok {
 			return []agent.Message{agent.NewWidgetMessage(delta.ToolCall.ID, input)}, nil
 		}
 		return []agent.Message{&agent.ToolUseMessage{
@@ -164,7 +164,7 @@ func parseToolExecStart(line []byte) ([]agent.Message, error) {
 		input, _ = json.Marshal(ev.Args)
 	}
 
-	if agent.WidgetToolNames[name] {
+	if _, ok := agent.WidgetToolNames[name]; ok {
 		return []agent.Message{agent.NewWidgetMessage(ev.ToolCallID, input)}, nil
 	}
 	return []agent.Message{&agent.ToolUseMessage{
@@ -276,7 +276,7 @@ func normalizeToolName(name string) string {
 		return "NotebookEdit"
 	}
 	// Check widget tools before returning original.
-	if agent.WidgetToolNames[name] {
+	if _, ok := agent.WidgetToolNames[name]; ok {
 		return name
 	}
 	return name

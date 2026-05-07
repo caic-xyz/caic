@@ -85,7 +85,7 @@ type WidgetTracker struct {
 	lastHTMLLen map[int]int
 	// exceeded maps content block index → true when accumulated HTML exceeds
 	// agent.MaxWidgetHTMLBytes. No further deltas are emitted.
-	exceeded map[int]bool
+	exceeded map[int]struct{}
 }
 
 // NewWidgetTracker creates a new WidgetTracker.
@@ -94,7 +94,7 @@ func NewWidgetTracker() *WidgetTracker {
 		activeWidgets: make(map[int]string),
 		accum:         make(map[int]string),
 		lastHTMLLen:   make(map[int]int),
-		exceeded:      make(map[int]bool),
+		exceeded:      make(map[int]struct{}),
 	}
 }
 
@@ -106,7 +106,7 @@ func (wt *WidgetTracker) handleStreamEvent(w *cc.OutputStreamEventMsg) ([]agent.
 	case "content_block_start":
 		var cb cc.ContentBlockStart
 		if json.Unmarshal(w.Event.ContentBlock, &cb) == nil &&
-			cb.Type == "tool_use" && agent.WidgetToolNames[cb.Name] {
+			cb.Type == "tool_use" && func() bool { _, ok := agent.WidgetToolNames[cb.Name]; return ok }() {
 			wt.activeWidgets[w.Event.Index] = cb.ID
 		}
 		return nil, false
@@ -116,13 +116,13 @@ func (wt *WidgetTracker) handleStreamEvent(w *cc.OutputStreamEventMsg) ([]agent.
 			if !ok {
 				return nil, false
 			}
-			if wt.exceeded[w.Event.Index] {
+			if _, ok := wt.exceeded[w.Event.Index]; ok {
 				return nil, true // absorbed but no emission
 			}
 			wt.accum[w.Event.Index] += w.Event.Delta.PartialJSON
 			html := extractPartialWidgetCode(wt.accum[w.Event.Index])
 			if len(html) > agent.MaxWidgetHTMLBytes {
-				wt.exceeded[w.Event.Index] = true
+				wt.exceeded[w.Event.Index] = struct{}{}
 				return nil, true
 			}
 			prevLen := wt.lastHTMLLen[w.Event.Index]
@@ -346,7 +346,7 @@ func parseToolUseBlock(b *cc.OutputContentBlock) []agent.Message {
 				Todos:     input.Todos,
 			}}
 		}
-	case agent.WidgetToolNames[b.Name]:
+	case func() bool { _, ok := agent.WidgetToolNames[b.Name]; return ok }():
 		return []agent.Message{agent.NewWidgetMessage(b.ID, b.Input)}
 	}
 	return []agent.Message{&agent.ToolUseMessage{

@@ -144,14 +144,14 @@ OPENROUTER_API_KEY = "sk-or-test"
 		if len(piEnv) != 2 {
 			t.Fatalf("HarnessEnv[pi] = %v, want 2 entries", piEnv)
 		}
-		got := make(map[string]bool)
+		got := make(map[string]struct{})
 		for _, kv := range piEnv {
-			got[kv] = true
+			got[kv] = struct{}{}
 		}
-		if !got["GEMINI_API_KEY=AIza_test"] {
+		if _, ok := got["GEMINI_API_KEY=AIza_test"]; !ok {
 			t.Errorf("missing GEMINI_API_KEY=AIza_test in %v", piEnv)
 		}
-		if !got["OPENROUTER_API_KEY=sk-or-test"] {
+		if _, ok := got["OPENROUTER_API_KEY=sk-or-test"]; !ok {
 			t.Errorf("missing OPENROUTER_API_KEY=sk-or-test in %v", piEnv)
 		}
 	})

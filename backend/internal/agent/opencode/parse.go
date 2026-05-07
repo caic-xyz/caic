@@ -201,7 +201,7 @@ func parseToolCall(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Mess
 	}
 
 	// Check for widget tool.
-	if agent.WidgetToolNames[u.Title] {
+	if _, ok := agent.WidgetToolNames[u.Title]; ok {
 		return []agent.Message{agent.NewWidgetMessage(u.ToolCallID, u.RawInput)}, nil
 	}
 

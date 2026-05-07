@@ -612,7 +612,7 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var errs []error
-	claimed := make(map[string]bool, len(containers))
+	claimed := make(map[string]struct{}, len(containers))
 
 	for i := range s.repos {
 		ri := &s.repos[i]
@@ -623,7 +623,7 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 			if !ok {
 				continue
 			}
-			claimed[c.Name] = true
+			claimed[c.Name] = struct{}{}
 			wg.Go(func() {
 				if err := s.adoptOne(ctx, *ri, runner, c, branch, branchIDs, allLogs); err != nil {
 					mu.Lock()
@@ -639,7 +639,7 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 	// with no repos (md.Client.Container with zero Repo arguments).
 	if noRepoRunner := s.runners[""]; noRepoRunner != nil {
 		for _, c := range containers {
-			if claimed[c.Name] || !strings.HasPrefix(c.Name, "md-agent-") {
+			if _, ok := claimed[c.Name]; ok || !strings.HasPrefix(c.Name, "md-agent-") {
 				continue
 			}
 			wg.Go(func() {

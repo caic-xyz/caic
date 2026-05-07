@@ -50,11 +50,11 @@ func (r *CreateTaskReq) Validate() error {
 }
 
 // allowedImageTypes is the set of MIME types accepted for image uploads.
-var allowedImageTypes = map[string]bool{
-	"image/png":  true,
-	"image/jpeg": true,
-	"image/gif":  true,
-	"image/webp": true,
+var allowedImageTypes = map[string]struct{}{
+	"image/png":  {},
+	"image/jpeg": {},
+	"image/gif":  {},
+	"image/webp": {},
 }
 
 // pathSegmentRe matches valid path segments: starts with alphanumeric, then alphanumeric, dots, hyphens, or underscores.
@@ -179,7 +179,7 @@ func validateImages(images []ImageData) error {
 		if img.MediaType == "" {
 			return dto.BadRequest("image mediaType is required")
 		}
-		if !allowedImageTypes[img.MediaType] {
+		if _, ok := allowedImageTypes[img.MediaType]; !ok {
 			return dto.BadRequest("unsupported image mediaType: " + img.MediaType)
 		}
 		if img.Data == "" {

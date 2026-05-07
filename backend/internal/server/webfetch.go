@@ -49,11 +49,11 @@ func (s *Server) webFetch(ctx context.Context, req *v1.WebFetchReq) (*v1.WebFetc
 }
 
 // skipTags are elements whose text content should be discarded.
-var skipTags = map[atom.Atom]bool{
-	atom.Script:   true,
-	atom.Style:    true,
-	atom.Nav:      true,
-	atom.Noscript: true,
+var skipTags = map[atom.Atom]struct{}{
+	atom.Script:   {},
+	atom.Style:    {},
+	atom.Nav:      {},
+	atom.Noscript: {},
 }
 
 var collapseWS = regexp.MustCompile(`[ \t]+`)
@@ -72,7 +72,7 @@ func extractHTML(data []byte) (title, content string) {
 	var walk func(*html.Node)
 	walk = func(n *html.Node) {
 		if n.Type == html.ElementNode {
-			if skipTags[n.DataAtom] {
+			if _, ok := skipTags[n.DataAtom]; ok {
 				return
 			}
 			if n.DataAtom == atom.Title {

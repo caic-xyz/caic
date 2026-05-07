@@ -254,7 +254,7 @@ func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent
 		if err := unmarshalNotification(p.Item, &item, "McpToolCallItem", fw); err != nil {
 			return nil, fmt.Errorf("item/started mcpToolCall: %w", err)
 		}
-		if agent.WidgetToolNames[item.Tool] {
+		if _, ok := agent.WidgetToolNames[item.Tool]; ok {
 			return []agent.Message{agent.NewWidgetMessage(item.ID, item.Arguments)}, nil
 		}
 		return []agent.Message{&agent.ToolUseMessage{
