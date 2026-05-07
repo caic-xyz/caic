@@ -123,7 +123,11 @@ func parseMessageUpdate(line []byte) ([]agent.Message, error) {
 		// Marshal tool arguments as JSON for the input field.
 		var input json.RawMessage
 		if delta.ToolCall.Arguments != nil {
-			input, _ = json.Marshal(delta.ToolCall.Arguments)
+			var err error
+			input, err = json.Marshal(delta.ToolCall.Arguments)
+			if err != nil {
+				return nil, fmt.Errorf("marshal tool call arguments: %w", err)
+			}
 		}
 
 		if _, ok := agent.WidgetToolNames[name]; ok {
@@ -161,7 +165,11 @@ func parseToolExecStart(line []byte) ([]agent.Message, error) {
 
 	var input json.RawMessage
 	if ev.Args != nil {
-		input, _ = json.Marshal(ev.Args)
+		var err error
+		input, err = json.Marshal(ev.Args)
+		if err != nil {
+			return nil, fmt.Errorf("marshal tool exec args: %w", err)
+		}
 	}
 
 	if _, ok := agent.WidgetToolNames[name]; ok {

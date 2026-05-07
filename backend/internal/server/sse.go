@@ -66,7 +66,11 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 		ch := s.changed
 		s.mu.Unlock()
 
-		reposJSON, _ := json.Marshal(repos)
+		reposJSON, err := json.Marshal(repos)
+		if err != nil {
+			slog.Warn("marshal repos", "err", err)
+			return
+		}
 
 		if first {
 			if err := emitTaskListEvent(w, flusher, v1.TaskListEvent{Kind: "snapshot", Snapshot: out}); err != nil {
@@ -78,7 +82,11 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			for i := range out {
-				data, _ := json.Marshal(&out[i])
+				data, err := json.Marshal(&out[i])
+				if err != nil {
+					slog.Warn("marshal task entry", "err", err)
+					continue
+				}
 				prevByID[out[i].ID.String()] = data
 			}
 			prevReposJSON = reposJSON
@@ -204,7 +212,9 @@ func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 	resp := s.buildUsageResp(r.Context())
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.WarnContext(r.Context(), "encode usage response", "err", err)
+	}
 }
 
 // buildUsageResp assembles the full usage response: local task cost

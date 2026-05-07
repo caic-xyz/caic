@@ -112,11 +112,15 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 			// Persist to relay output so replay/adoption restores the
 			// context window (otherwise it falls back to the harness
 			// hardcoded default of 200k).
-			info, _ := json.Marshal(caicModelInfo{
+			info, err := json.Marshal(caicModelInfo{
 				Type:          "caic_model_info",
 				ContextWindow: cw,
 			})
-			_, _ = opts.LogW.Write(append(info, '\n'))
+			if err != nil {
+				slog.Warn("marshal caic_model_info", "err", err)
+			} else {
+				_, _ = opts.LogW.Write(append(info, '\n'))
+			}
 		}
 		rp.Stdout = br // hand the buffered reader to the next command
 	}

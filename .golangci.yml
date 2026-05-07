@@ -13,6 +13,7 @@ linters:
     - dupword
     - durationcheck
     - embeddedstructfieldcheck
+    - errchkjson
     - errname
     - errorlint
     - exhaustive

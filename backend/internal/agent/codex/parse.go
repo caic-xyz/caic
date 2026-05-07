@@ -230,7 +230,10 @@ func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent
 		if err := unmarshalNotification(p.Item, &item, "CommandExecutionItem", fw); err != nil {
 			return nil, fmt.Errorf("item/started commandExecution: %w", err)
 		}
-		input, _ := json.Marshal(map[string]string{"command": item.Command, "cwd": item.Cwd})
+		input, err := json.Marshal(map[string]string{"command": item.Command, "cwd": item.Cwd})
+		if err != nil {
+			return nil, fmt.Errorf("marshal Bash input: %w", err)
+		}
 		return []agent.Message{&agent.ToolUseMessage{
 			ToolUseID: item.ID,
 			Name:      "Bash",
@@ -242,7 +245,10 @@ func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent
 		if err := unmarshalNotification(p.Item, &item, "FileChangeItem", fw); err != nil {
 			return nil, fmt.Errorf("item/started fileChange: %w", err)
 		}
-		input, _ := json.Marshal(item.Changes)
+		input, err := json.Marshal(item.Changes)
+		if err != nil {
+			return nil, fmt.Errorf("marshal FileChange input: %w", err)
+		}
 		return []agent.Message{&agent.ToolUseMessage{
 			ToolUseID: item.ID,
 			Name:      toolNameForChanges(item.Changes),
@@ -283,7 +289,10 @@ func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent
 		if toolName == "" {
 			toolName = "collabAgent"
 		}
-		input, _ := json.Marshal(map[string]string{"prompt": item.Prompt})
+		input, err := json.Marshal(map[string]string{"prompt": item.Prompt})
+		if err != nil {
+			return nil, fmt.Errorf("marshal collabAgent input: %w", err)
+		}
 		return []agent.Message{&agent.ToolUseMessage{
 			ToolUseID: item.ID,
 			Name:      toolName,
@@ -295,7 +304,10 @@ func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent
 		if err := unmarshalNotification(p.Item, &item, "ImageGenerationItem", fw); err != nil {
 			return nil, fmt.Errorf("item/started imageGeneration: %w", err)
 		}
-		input, _ := json.Marshal(map[string]string{"revisedPrompt": item.RevisedPrompt})
+		input, err := json.Marshal(map[string]string{"revisedPrompt": item.RevisedPrompt})
+		if err != nil {
+			return nil, fmt.Errorf("marshal ImageGeneration input: %w", err)
+		}
 		return []agent.Message{&agent.ToolUseMessage{
 			ToolUseID: item.ID,
 			Name:      "ImageGeneration",
@@ -394,7 +406,10 @@ func parseItemCompleted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]age
 		if err := unmarshalNotification(p.Item, &item, "WebSearchItem", fw); err != nil {
 			return nil, fmt.Errorf("item/completed webSearch: %w", err)
 		}
-		input, _ := json.Marshal(map[string]string{"query": item.Query})
+		input, err := json.Marshal(map[string]string{"query": item.Query})
+		if err != nil {
+			return nil, fmt.Errorf("marshal WebSearch input: %w", err)
+		}
 		return []agent.Message{
 			&agent.ToolUseMessage{ToolUseID: item.ID, Name: "WebSearch", Input: input},
 			&agent.ToolResultMessage{ToolUseID: item.ID},

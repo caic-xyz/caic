@@ -387,7 +387,7 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 			binary.LittleEndian.PutUint16(pcmBytes[i*2:], uint16(sample)) //nolint:gosec // PCM int16→uint16 reinterpret is intentional
 		}
 		b64 := base64.StdEncoding.EncodeToString(pcmBytes)
-		msg, _ := json.Marshal(map[string]any{
+		msg, err := json.Marshal(map[string]any{
 			"realtimeInput": map[string]any{
 				"audio": map[string]string{
 					"mimeType": fmt.Sprintf("audio/pcm;rate=%d", inputSampleRate),
@@ -395,6 +395,10 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 				},
 			},
 		})
+		if err != nil {
+			slog.WarnContext(ctx, "voicertc: marshal audio", "session", s.id, "err", err)
+			return
+		}
 
 		s.mu.Lock()
 		wsConn := s.geminiWS
@@ -611,7 +615,11 @@ func (s *session) sendError(msg string) {
 	if dc == nil {
 		return
 	}
-	data, _ := json.Marshal(map[string]any{"error": map[string]string{"message": msg}})
+	data, err := json.Marshal(map[string]any{"error": map[string]string{"message": msg}})
+	if err != nil {
+		slog.Warn("voicertc: marshal error message", "session", s.id, "err", err)
+		return
+	}
 	_ = dc.SendText(string(data))
 }
 

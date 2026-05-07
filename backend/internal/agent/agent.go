@@ -625,11 +625,14 @@ func PlainTextWritePrompt(w io.Writer, p Prompt, logW io.Writer) error {
 	if _, err := w.Write(data); err != nil {
 		return err
 	}
-	entry, _ := json.Marshal(map[string]string{
+	entry, err := json.Marshal(map[string]string{
 		"type":    "user_input",
 		"content": p.Text,
 	})
-	_, err := logW.Write(append(entry, '\n'))
+	if err != nil {
+		return err
+	}
+	_, err = logW.Write(append(entry, '\n'))
 	return err
 }
 

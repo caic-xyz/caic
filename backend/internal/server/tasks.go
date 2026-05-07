@@ -775,7 +775,9 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v1.DiffResp{Diff: diff})
+	if err := json.NewEncoder(w).Encode(v1.DiffResp{Diff: diff}); err != nil {
+		slog.WarnContext(r.Context(), "encode diff response", "err", err)
+	}
 }
 
 // handleVNCWebSocket proxies a WebSocket connection to the container's VNC
@@ -887,7 +889,9 @@ func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(v1.ProcessListResp{Processes: v1Procs})
+	if err := json.NewEncoder(w).Encode(v1.ProcessListResp{Processes: v1Procs}); err != nil {
+		slog.WarnContext(r.Context(), "encode process list response", "err", err)
+	}
 }
 
 // handleSignalProcess sends a signal to a process inside the task's container.
