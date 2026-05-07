@@ -45,13 +45,61 @@ var sectionComments = map[string]string{
 	"EventMessage": "Backend-neutral event types",
 }
 
-// Type identity values for special-case mapping in goTypeToKotlin.
-var (
-	jsonRawMessageType = reflect.TypeFor[json.RawMessage]()
-	ksidIDType         = reflect.TypeFor[ksid.ID]()
-	mapStringAnyType   = reflect.TypeFor[map[string]any]()
-	timeType           = reflect.TypeFor[time.Time]()
-)
+// specialTypes defines custom mappings for Go types that need non-standard
+// serialization in the generated SDK clients. Each entry maps a Go reflect.Type
+// to its language-specific representation and optional TS validator template.
+type specialType struct {
+	t          reflect.Type
+	tsType     string // TypeScript type
+	ktType     string // Kotlin type
+	swiftType  string // Swift type
+	docType    string // API doc type
+	tsValidate string // TS validator format string: %[1]s=pathExpr, %[2]q=pathLit
+}
+
+var specialTypeMappings = []specialType{
+	{
+		t:          reflect.TypeFor[json.RawMessage](),
+		tsType:     "any /* json.RawMessage */",
+		ktType:     "JsonElement",
+		swiftType:  "JSONValue",
+		docType:    "object",
+		tsValidate: "%[1]s",
+	},
+	{
+		t:          reflect.TypeFor[ksid.ID](),
+		tsType:     "string",
+		ktType:     "String",
+		swiftType:  "String",
+		docType:    "string",
+		tsValidate: "asString(%[1]s, %[2]q)",
+	},
+	{
+		t:          reflect.TypeFor[time.Time](),
+		tsType:     "ISOTimestamp",
+		ktType:     "Instant",
+		swiftType:  "ISOTimestamp",
+		docType:    "ISOTimestamp",
+		tsValidate: "asString(%[1]s, %[2]q) as ISOTimestamp",
+	},
+	{
+		t:         reflect.TypeFor[map[string]any](),
+		tsType:    "{ [key: string]: any /* json.RawMessage */}",
+		ktType:    "Map<String, JsonElement>",
+		swiftType: "[String: JSONValue]",
+		docType:   "Record<string, unknown>",
+	},
+}
+
+// lookupSpecial returns the matching specialType entry for t, or nil.
+func lookupSpecial(t reflect.Type) *specialType {
+	for i := range specialTypeMappings {
+		if specialTypeMappings[i].t == t {
+			return &specialTypeMappings[i]
+		}
+	}
+	return nil
+}
 
 // swiftReservedWords is the set of Swift keywords that require backtick escaping
 // when used as property names.
@@ -373,15 +421,11 @@ func emitTSAlias(b *strings.Builder, a aliasInfo) {
 }
 
 // tsPrimitiveValidator returns the validator expression for a primitive/special type.
+// For special types with a tsValidate template, it formats the expression using
+// pathExpr and pathLit. Otherwise it falls back to kind-based validation.
 func tsPrimitiveValidator(t reflect.Type, pathExpr, pathLit string) string {
-	if t == timeType {
-		return fmt.Sprintf("asString(%s, %q) as ISOTimestamp", pathExpr, pathLit)
-	}
-	if t == ksidIDType {
-		return fmt.Sprintf("asString(%s, %q)", pathExpr, pathLit)
-	}
-	if t == jsonRawMessageType {
-		return pathExpr // any — no validation
+	if m := lookupSpecial(t); m != nil && m.tsValidate != "" {
+		return fmt.Sprintf(m.tsValidate, pathExpr, pathLit)
 	}
 	switch t.Kind() {
 	case reflect.String:
@@ -856,13 +900,8 @@ func goTypeToDoc(t reflect.Type) string {
 	if t.Kind() == reflect.Pointer {
 		return goTypeToDoc(t.Elem())
 	}
-	switch t {
-	case ksidIDType:
-		return "string"
-	case timeType:
-		return "ISOTimestamp"
-	case jsonRawMessageType:
-		return "object"
+	if m := lookupSpecial(t); m != nil {
+		return m.docType
 	}
 	switch t.Kind() {
 	case reflect.String:
@@ -1190,15 +1229,10 @@ func (d *docRegistry) goTypeToTS(t reflect.Type) string {
 		t = t.Elem()
 	}
 
+	if m := lookupSpecial(t); m != nil {
+		return m.tsType
+	}
 	switch t {
-	case jsonRawMessageType:
-		return "any /* json.RawMessage */"
-	case ksidIDType:
-		return "string"
-	case timeType:
-		return "ISOTimestamp"
-	case mapStringAnyType:
-		return "{ [key: string]: any /* json.RawMessage */}"
 	case reflect.TypeFor[map[string]bool]():
 		return "{ [key: string]: boolean}"
 	case reflect.TypeFor[map[string]string]():
@@ -1386,8 +1420,8 @@ func (d *docRegistry) tsFieldValidator(t reflect.Type, pathExpr, pathLit string)
 	if t.Kind() == reflect.Pointer {
 		return d.tsFieldValidator(t.Elem(), pathExpr, pathLit)
 	}
-	if t == jsonRawMessageType {
-		return tsPrimitiveValidator(t, pathExpr, pathLit)
+	if m := lookupSpecial(t); m != nil && m.tsValidate != "" {
+		return fmt.Sprintf(m.tsValidate, pathExpr, pathLit)
 	}
 	if t.Kind() == reflect.Slice {
 		elemFn := tsElemValidatorFunc(t.Elem(), pathLit+"[i]")
@@ -1711,15 +1745,8 @@ func (d *docRegistry) goTypeToKotlin(t reflect.Type) string {
 	}
 
 	// Special cases.
-	switch t {
-	case jsonRawMessageType:
-		return "JsonElement"
-	case ksidIDType:
-		return "String"
-	case timeType:
-		return "Instant"
-	case mapStringAnyType:
-		return "Map<String, JsonElement>"
+	if m := lookupSpecial(t); m != nil {
+		return m.ktType
 	}
 
 	// Named string aliases (Harness, EventKind).
@@ -1989,16 +2016,10 @@ func (d *docRegistry) goTypeToSwift(t reflect.Type) string {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
-	switch t {
-	case jsonRawMessageType:
-		return "JSONValue"
-	case ksidIDType:
-		return "String"
-	case timeType:
-		return "ISOTimestamp"
-	case mapStringAnyType:
-		return "[String: JSONValue]"
+	if m := lookupSpecial(t); m != nil {
+		return m.swiftType
 	}
+
 	if _, ok := d.aliasNames[t.Name()]; ok {
 		return t.Name()
 	}
