@@ -70,6 +70,7 @@ const baseProps = {
   onInputDraft: () => {},
   inputImages: [],
   onInputImages: () => {},
+  onError: () => {},
 };
 
 describe("TaskDetail", () => {

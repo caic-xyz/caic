@@ -75,6 +75,7 @@ interface Props {
   onRevive: (id: string) => void;
   onFork?: (id: string) => void;
   onClose: () => void;
+  onError: (message: string) => void;
   inputDraft: string;
   onInputDraft: (value: string) => void;
   inputImages: APIImageData[];
@@ -377,7 +378,8 @@ export default function TaskDetail(props: Props) {
           buf.push(ev);
         }
       }, (err) => {
-        console.error("[caic] invalid task event", err);
+        const msg = err instanceof Error ? err.message : String(err);
+        untrack(() => props.onError(`Task event error: ${msg}`));
       });
       es.addEventListener("open", () => {
         delay = 500;

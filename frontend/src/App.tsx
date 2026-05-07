@@ -435,7 +435,8 @@ export default function App() {
           showWarning(event.warning);
         }
       }, (err) => {
-        console.error("[caic] invalid task list event", err);
+        const msg = err instanceof Error ? err.message : String(err);
+        showWarning(`Task list event error: ${msg}`);
       });
       taskES.addEventListener("open", () => {
         onOpen();
@@ -468,7 +469,8 @@ export default function App() {
       usageES = globalUsageEvents((event) => {
         setUsage(event);
       }, (err) => {
-        console.error("[caic] invalid usage event", err);
+        const msg = err instanceof Error ? err.message : String(err);
+        showWarning(`Usage event error: ${msg}`);
       });
       usageES.addEventListener("open", () => {
         onOpen();
@@ -971,6 +973,7 @@ export default function App() {
                   onInputDraft={(v) => setInputDrafts((prev) => { const next = new Map(prev); next.set(id, v); return next; })}
                   inputImages={inputImageDrafts().get(id) ?? []}
                   onInputImages={(imgs) => setInputImageDrafts((prev) => { const next = new Map(prev); next.set(id, imgs); return next; })}
+                  onError={showWarning}
                 />
               </div>
             )}
