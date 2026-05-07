@@ -9,6 +9,7 @@ linters:
     - canonicalheader
     - contextcheck
     - copyloopvar
+    - dupl
     - dupword
     - durationcheck
     - errname

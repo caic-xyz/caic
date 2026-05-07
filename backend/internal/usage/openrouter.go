@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
@@ -29,14 +28,10 @@ type openRouterCreditsData struct {
 
 // OpenRouterFetcher fetches OpenRouter credit balance.
 type OpenRouterFetcher struct {
+	baseFetcher
+
 	client *http.Client
 	apiKey string
-
-	mu      sync.Mutex
-	cached  *v1.ProviderQuota
-	fetchAt time.Time
-	backoff time.Duration
-	errorAt time.Time
 }
 
 // NewOpenRouterFetcher creates a fetcher. Returns nil when apiKey is empty.
@@ -64,32 +59,7 @@ func (f *OpenRouterFetcher) UsageURL() string { return "https://openrouter.ai/se
 
 // Get returns the cached credit balance.
 func (f *OpenRouterFetcher) Get(ctx context.Context) *v1.ProviderQuota {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.cached != nil && time.Since(f.fetchAt) < CacheTTL {
-		return f.cached
-	}
-	if f.backoff > 0 && time.Since(f.errorAt) < f.backoff {
-		return f.cached
-	}
-	resp, err := f.fetch(ctx)
-	if err != nil {
-		slog.WarnContext(ctx, "failed to fetch OpenRouter credits", "err", err)
-		f.errorAt = time.Now()
-		if f.backoff == 0 {
-			f.backoff = backoffMin
-		} else {
-			f.backoff *= 2
-			if f.backoff > backoffMax {
-				f.backoff = backoffMax
-			}
-		}
-		return f.cached
-	}
-	f.backoff = 0
-	f.cached = resp
-	f.fetchAt = time.Now()
-	return resp
+	return f.get(ctx, f.fetch, "OpenRouter")
 }
 
 func (f *OpenRouterFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) {

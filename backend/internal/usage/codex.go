@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"sync"
 	"time"
 
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
@@ -55,17 +54,13 @@ type codexAuthJSON struct {
 // CodexFetcher fetches and caches Codex rate-limit and credit usage data. It
 // watches ~/.codex/auth.json for token changes.
 type CodexFetcher struct {
-	client   *http.Client
-	watcher  *fsnotify.Watcher
-	authPath string
+	baseFetcher
 
-	mu        sync.Mutex
+	client    *http.Client
+	watcher   *fsnotify.Watcher
+	authPath  string
 	token     string
 	accountID string
-	cached    *v1.ProviderQuota
-	fetchAt   time.Time
-	backoff   time.Duration
-	errorAt   time.Time
 }
 
 // NewCodexFetcher creates a fetcher and starts watching ~/.codex/auth.json.
@@ -110,34 +105,12 @@ func (f *CodexFetcher) UsageURL() string { return "https://chatgpt.com/codex/clo
 // Get returns the cached quota data, refreshing if stale.
 func (f *CodexFetcher) Get(ctx context.Context) *v1.ProviderQuota {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if f.token == "" {
+		f.mu.Unlock()
 		return nil
 	}
-	if f.cached != nil && time.Since(f.fetchAt) < CacheTTL {
-		return f.cached
-	}
-	if f.backoff > 0 && time.Since(f.errorAt) < f.backoff {
-		return f.cached
-	}
-	resp, err := f.fetch(ctx)
-	if err != nil {
-		slog.WarnContext(ctx, "failed to fetch Codex usage", "err", err)
-		f.errorAt = time.Now()
-		if f.backoff == 0 {
-			f.backoff = backoffMin
-		} else {
-			f.backoff *= 2
-			if f.backoff > backoffMax {
-				f.backoff = backoffMax
-			}
-		}
-		return f.cached
-	}
-	f.backoff = 0
-	f.cached = resp
-	f.fetchAt = time.Now()
-	return resp
+	f.mu.Unlock()
+	return f.get(ctx, f.fetch, "Codex")
 }
 
 func (f *CodexFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) {

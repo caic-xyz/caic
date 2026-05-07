@@ -168,51 +168,37 @@ func TestHandleTaskInput(t *testing.T) {
 	})
 }
 
+// testRestart is a helper for TestHandleRestart subtests.
+func testRestart(t *testing.T, state task.State, bodyJSON string, wantStatus int, wantCode dto.ErrorCode) {
+	s := newTestServer(t)
+	tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
+	tk.SetState(state)
+	s.tasks["t1"] = &taskEntry{
+		task: tk,
+		done: make(chan struct{}),
+	}
+
+	body := strings.NewReader(bodyJSON)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/restart", body)
+	req.SetPathValue("id", "t1")
+	w := httptest.NewRecorder()
+	handleWithTask(s, s.restartTask)(w, req)
+	if w.Code != wantStatus {
+		t.Errorf("status = %d, want %d", w.Code, wantStatus)
+	}
+	e := decodeError(t, w)
+	if e.Code != wantCode {
+		t.Errorf("code = %q, want %q", e.Code, wantCode)
+	}
+}
+
 func TestHandleRestart(t *testing.T) {
 	t.Run("NotWaiting", func(t *testing.T) {
-		s := newTestServer(t)
-		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
-		tk.SetState(task.StateRunning)
-		s.tasks["t1"] = &taskEntry{
-			task: tk,
-			done: make(chan struct{}),
-		}
-
-		body := strings.NewReader(`{"prompt":{"text":"new plan"}}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/restart", body)
-		req.SetPathValue("id", "t1")
-		w := httptest.NewRecorder()
-		handleWithTask(s, s.restartTask)(w, req)
-		if w.Code != http.StatusConflict {
-			t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
-		}
-		e := decodeError(t, w)
-		if e.Code != dto.CodeConflict {
-			t.Errorf("code = %q, want %q", e.Code, dto.CodeConflict)
-		}
+		testRestart(t, task.StateRunning, `{"prompt":{"text":"new plan"}}`, http.StatusConflict, dto.CodeConflict)
 	})
 
 	t.Run("EmptyPrompt", func(t *testing.T) {
-		s := newTestServer(t)
-		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
-		tk.SetState(task.StateWaiting)
-		s.tasks["t1"] = &taskEntry{
-			task: tk,
-			done: make(chan struct{}),
-		}
-
-		body := strings.NewReader(`{"prompt":{"text":""}}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/restart", body)
-		req.SetPathValue("id", "t1")
-		w := httptest.NewRecorder()
-		handleWithTask(s, s.restartTask)(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
-		}
-		e := decodeError(t, w)
-		if e.Code != dto.CodeBadRequest {
-			t.Errorf("code = %q, want %q", e.Code, dto.CodeBadRequest)
-		}
+		testRestart(t, task.StateWaiting, `{"prompt":{"text":""}}`, http.StatusBadRequest, dto.CodeBadRequest)
 	})
 }
 

@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
@@ -43,16 +42,12 @@ type anthropicExtraUsage struct {
 // watches ~/.claude/.credentials.json for token changes and applies
 // exponential backoff when fetches fail.
 type AnthropicFetcher struct {
+	baseFetcher
+
 	client   *http.Client
 	watcher  *fsnotify.Watcher
 	credPath string
-
-	mu      sync.Mutex
-	token   string
-	cached  *v1.ProviderQuota
-	fetchAt time.Time
-	backoff time.Duration
-	errorAt time.Time
+	token    string
 }
 
 // NewAnthropicFetcher creates a fetcher and starts watching
@@ -99,34 +94,12 @@ func (f *AnthropicFetcher) UsageURL() string { return "https://claude.ai/setting
 // no token is available.
 func (f *AnthropicFetcher) Get(ctx context.Context) *v1.ProviderQuota {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if f.token == "" {
+		f.mu.Unlock()
 		return nil
 	}
-	if f.cached != nil && time.Since(f.fetchAt) < CacheTTL {
-		return f.cached
-	}
-	if f.backoff > 0 && time.Since(f.errorAt) < f.backoff {
-		return f.cached
-	}
-	resp, err := f.fetch(ctx)
-	if err != nil {
-		slog.WarnContext(ctx, "failed to fetch Anthropic usage", "err", err)
-		f.errorAt = time.Now()
-		if f.backoff == 0 {
-			f.backoff = backoffMin
-		} else {
-			f.backoff *= 2
-			if f.backoff > backoffMax {
-				f.backoff = backoffMax
-			}
-		}
-		return f.cached
-	}
-	f.backoff = 0
-	f.cached = resp
-	f.fetchAt = time.Now()
-	return resp
+	f.mu.Unlock()
+	return f.get(ctx, f.fetch, "Anthropic")
 }
 
 func (f *AnthropicFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) {

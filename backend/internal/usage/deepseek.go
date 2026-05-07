@@ -7,9 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
@@ -31,14 +29,10 @@ type deepseekBalancePayload struct {
 // DeepSeekFetcher fetches DeepSeek balance via API key. The key is static
 // (from config/env), so no file watcher is needed.
 type DeepSeekFetcher struct {
+	baseFetcher
+
 	client *http.Client
 	apiKey string
-
-	mu      sync.Mutex
-	cached  *v1.ProviderQuota
-	fetchAt time.Time
-	backoff time.Duration
-	errorAt time.Time
 }
 
 // NewDeepSeekFetcher creates a fetcher with the given API key. Returns nil
@@ -67,32 +61,7 @@ func (f *DeepSeekFetcher) UsageURL() string { return "https://platform.deepseek.
 
 // Get returns the cached balance, refreshing if stale.
 func (f *DeepSeekFetcher) Get(ctx context.Context) *v1.ProviderQuota {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.cached != nil && time.Since(f.fetchAt) < CacheTTL {
-		return f.cached
-	}
-	if f.backoff > 0 && time.Since(f.errorAt) < f.backoff {
-		return f.cached
-	}
-	resp, err := f.fetch(ctx)
-	if err != nil {
-		slog.WarnContext(ctx, "failed to fetch DeepSeek balance", "err", err)
-		f.errorAt = time.Now()
-		if f.backoff == 0 {
-			f.backoff = backoffMin
-		} else {
-			f.backoff *= 2
-			if f.backoff > backoffMax {
-				f.backoff = backoffMax
-			}
-		}
-		return f.cached
-	}
-	f.backoff = 0
-	f.cached = resp
-	f.fetchAt = time.Now()
-	return resp
+	return f.get(ctx, f.fetch, "DeepSeek")
 }
 
 func (f *DeepSeekFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) {
