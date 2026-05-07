@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pre-push hook: rejects binary executables, WIP commits, and lints on main pushes.
+# Pre-push hook: rejects binary executables, WIP commits, multiple-commit pushes, and lints on main pushes.
 
 remote="$1"
 zero=$(git hash-object --stdin </dev/null | tr '0-9a-f' '0')
@@ -30,5 +30,13 @@ while read -r local_ref local_oid _remote_ref remote_oid; do
 	fi
 	if [ "$remote" = "origin" ] && [ "$_remote_ref" = "refs/heads/main" ]; then
 		make lint
+	fi
+
+	# Block pushes with more than one commit.
+	commit_count=$(git rev-list --count "$range" 2>/dev/null || true)
+	if [ -n "$commit_count" ] && [ "$commit_count" -gt 1 ]; then
+		echo >&2 "✗ Push blocked: $commit_count commits on $local_ref (limit is 1 per push)."
+		echo >&2 "  Squash with: git rebase -i HEAD~$commit_count"
+		exit 1
 	fi
 done
