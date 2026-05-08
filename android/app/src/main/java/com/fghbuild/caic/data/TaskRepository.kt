@@ -110,6 +110,7 @@ class TaskRepository @Inject constructor(
                 launch {
                     try {
                         taskEventsReconnecting(serverURL, _tasksConnected).collect { tasks ->
+                            Log.d(TAG, "_tasks updated: ${tasks.size} tasks: ${tasks.map { it.id }}")
                             _tasks.value = tasks
                         }
                     } catch (e: CancellationException) {
