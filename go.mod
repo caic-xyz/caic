@@ -1,6 +1,6 @@
 module github.com/caic-xyz/caic
 
-go 1.25.7
+go 1.26.2
 
 require (
 	github.com/andybalholm/brotli v1.2.1
@@ -10,6 +10,7 @@ require (
 	github.com/klauspost/compress v1.18.6
 	github.com/lmittmann/tint v1.1.3
 	github.com/maruel/genai v0.5.1
+	github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/roundtrippers v0.5.0
 	github.com/mattn/go-colorable v0.1.14

@@ -414,8 +414,6 @@ func TestTomlToServerConfig(t *testing.T) {
 	})
 }
 
-func ptr(s string) *string { return &s }
-
 func TestAutoUpdateSchedule(t *testing.T) {
 	t.Run("default schedule", func(t *testing.T) {
 		s, err := autoUpdateSchedule(&tomlConfig{})
@@ -428,7 +426,7 @@ func TestAutoUpdateSchedule(t *testing.T) {
 	})
 
 	t.Run("empty disables", func(t *testing.T) {
-		s, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: ptr("")}})
+		s, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: new(string)}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -438,7 +436,8 @@ func TestAutoUpdateSchedule(t *testing.T) {
 	})
 
 	t.Run("custom cron", func(t *testing.T) {
-		s, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: ptr("0 3 * * *")}})
+		cron := "0 3 * * *"
+		s, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: &cron}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -451,7 +450,8 @@ func TestAutoUpdateSchedule(t *testing.T) {
 	})
 
 	t.Run("invalid cron", func(t *testing.T) {
-		_, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: ptr("not a cron")}})
+		cron := "not a cron"
+		_, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: &cron}})
 		if err == nil {
 			t.Error("expected error for invalid cron")
 		}

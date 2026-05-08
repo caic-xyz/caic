@@ -5,11 +5,6 @@
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:2242
 
-# Enable CGo only when libopus is available (for WebRTC Opus codec).
-# Requires: libopus-dev (apt) or opus (brew).
-CGO_ENABLED?=$(shell command -v pkg-config >/dev/null 2>&1 && pkg-config --exists opus 2>/dev/null && echo 1 || echo 0)
-export CGO_ENABLED
-
 help:
 	@echo "caic - Manage multiple coding agents"
 	@echo ""

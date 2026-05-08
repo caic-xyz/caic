@@ -1,16 +1,12 @@
-// Opus codec wrappers using libopus via CGo. Built only when CGo is enabled.
-
-//go:build cgo && !windows
+// Opus codec wrappers using the pure-Go gopus library.
 
 package voicertc
 
 import (
 	"fmt"
 
-	"github.com/caic-xyz/caic/backend/internal/opus"
+	"github.com/maruel/gopus"
 )
-
-const codecAvailable = true
 
 const (
 	// maxFrameSamples is the max samples per decoded Opus frame (48kHz, 120ms).
@@ -20,22 +16,13 @@ const (
 	maxOpusPacketSize = 4000
 )
 
-// opusDecoder wraps libopus for Opus->PCM (16kHz mono output).
+// opusDecoder wraps gopus for Opus->PCM (16kHz mono output).
 type opusDecoder struct {
-	dec *opus.Decoder
+	dec *gopus.Decoder
 }
 
 func newDecoder() (*opusDecoder, error) {
-	dec, err := opus.NewDecoder(inputSampleRate, 1)
-	if err != nil {
-		return nil, fmt.Errorf("opus decoder: %w", err)
-	}
-	return &opusDecoder{dec: dec}, nil
-}
-
-// newDecoderAtRate creates an Opus decoder at the given sample rate (for tests).
-func newDecoderAtRate(sampleRate int) (*opusDecoder, error) {
-	dec, err := opus.NewDecoder(sampleRate, 1)
+	dec, err := gopus.NewDecoder(inputSampleRate, 1)
 	if err != nil {
 		return nil, fmt.Errorf("opus decoder: %w", err)
 	}
@@ -52,13 +39,13 @@ func (d *opusDecoder) Decode(pkt []byte) ([]int16, error) {
 	return pcm[:n], nil
 }
 
-// opusEncoder wraps libopus for PCM->Opus (48kHz mono, AppVoIP).
+// opusEncoder wraps gopus for PCM->Opus (48kHz mono, AppVoIP).
 type opusEncoder struct {
-	enc *opus.Encoder
+	enc *gopus.Encoder
 }
 
 func newEncoder() (*opusEncoder, error) {
-	enc, err := opus.NewEncoder(encoderSampleRate, 1, opus.AppVoIP)
+	enc, err := gopus.NewEncoder(encoderSampleRate, 1, gopus.AppVoIP)
 	if err != nil {
 		return nil, fmt.Errorf("opus encoder: %w", err)
 	}

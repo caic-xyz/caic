@@ -158,44 +158,40 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 		cancel: cancel,
 	}
 
-	// Set up RTP audio track (server → client) when codec is available.
-	if codecAvailable {
-		audioTrack, trackErr := webrtc.NewTrackLocalStaticSample(
-			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
-			"audio", "gemini-voice",
-		)
-		if trackErr != nil {
-			_ = pc.Close()
-			cancel()
-			return "", "", fmt.Errorf("create audio track: %w", trackErr)
-		}
-		if _, trackErr = pc.AddTrack(audioTrack); trackErr != nil {
-			_ = pc.Close()
-			cancel()
-			return "", "", fmt.Errorf("add audio track: %w", trackErr)
-		}
-		sess.audioTrack = audioTrack
+	// Set up RTP audio track (server → client).
+	audioTrack, trackErr := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
+		"audio", "gemini-voice",
+	)
+	if trackErr != nil {
+		_ = pc.Close()
+		cancel()
+		return "", "", fmt.Errorf("create audio track: %w", trackErr)
 	}
+	if _, trackErr = pc.AddTrack(audioTrack); trackErr != nil {
+		_ = pc.Close()
+		cancel()
+		return "", "", fmt.Errorf("add audio track: %w", trackErr)
+	}
+	sess.audioTrack = audioTrack
 
-	// Handle incoming audio track (client → server) when codec is available.
-	if codecAvailable {
-		pc.OnTrack(func(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
-			if track.Kind() != webrtc.RTPCodecTypeAudio {
-				return
-			}
-			slog.Info("voicertc: audio track received", "session", sess.id, "codec", track.Codec().MimeType)
-			sess.mu.Lock()
-			if sess.geminiWS != nil {
-				// Gemini already connected (data channel opened first). Start now.
-				sess.mu.Unlock()
-				go sess.audioRxLoop(sessionCtx, track)
-			} else {
-				// Gemini not connected yet. Store the track; dc.OnOpen will start it.
-				sess.pendingTrack = track
-				sess.mu.Unlock()
-			}
-		})
-	}
+	// Handle incoming audio track (client → server).
+	pc.OnTrack(func(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+		if track.Kind() != webrtc.RTPCodecTypeAudio {
+			return
+		}
+		slog.Info("voicertc: audio track received", "session", sess.id, "codec", track.Codec().MimeType)
+		sess.mu.Lock()
+		if sess.geminiWS != nil {
+			// Gemini already connected (data channel opened first). Start now.
+			sess.mu.Unlock()
+			go sess.audioRxLoop(sessionCtx, track)
+		} else {
+			// Gemini not connected yet. Store the track; dc.OnOpen will start it.
+			sess.pendingTrack = track
+			sess.mu.Unlock()
+		}
+	})
 
 	// Set up data channel handler. The client creates the "gemini" data channel.
 	// geminiReady is closed once the Gemini WebSocket is connected, unblocking
@@ -224,7 +220,7 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 			sess.pendingTrack = nil
 			sess.mu.Unlock()
 			close(geminiReady)
-			slog.Info("voicertc: gemini connected", "session", sess.id, "rtpAudio", codecAvailable)
+			slog.Info("voicertc: gemini connected", "session", sess.id)
 
 			// Start mic → Gemini forwarding if the track arrived before Gemini connected.
 			if track != nil {
@@ -447,7 +443,7 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 // the data channel. Otherwise everything goes through the data channel (passthrough).
 func (s *session) geminiRxLoop(ctx context.Context) {
 	var enc *opusEncoder
-	if codecAvailable && s.audioTrack != nil {
+	if s.audioTrack != nil {
 		var err error
 		enc, err = newEncoder()
 		if err != nil {

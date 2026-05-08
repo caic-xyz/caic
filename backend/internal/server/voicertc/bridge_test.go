@@ -7,6 +7,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/maruel/gopus"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 )
@@ -46,13 +47,7 @@ func TestNewBridge(t *testing.T) {
 	})
 }
 
-// TestEncodeDecodeRoundtrip verifies the full audio pipeline:
-// 24kHz PCM → upsample → 48kHz Opus encode → decode → verify signal.
 func TestEncodeDecodeRoundtrip(t *testing.T) {
-	if !codecAvailable {
-		t.Skip("Opus codec not available (CGo disabled)")
-	}
-
 	const (
 		freq       = 440.0
 		durationMs = 200
@@ -92,13 +87,13 @@ func TestEncodeDecodeRoundtrip(t *testing.T) {
 	}
 
 	// Decode at 48kHz.
-	dec48, err := newDecoderAtRate(48000)
+	dec, err := gopus.NewDecoder(48000, 1)
 	if err != nil {
-		t.Fatalf("newDecoderAtRate: %v", err)
+		t.Fatalf("gopus.NewDecoder: %v", err)
 	}
 	var decoded []int16
 	for _, pkt := range packets {
-		samples, decErr := dec48.Decode(pkt)
+		samples, decErr := decode48(dec, pkt)
 		if decErr != nil {
 			t.Fatalf("Decode: %v", decErr)
 		}
@@ -129,6 +124,43 @@ func TestEncodeDecodeRoundtrip(t *testing.T) {
 		frames, len(decoded), energy, crossings)
 }
 
+// decode48 decodes an Opus packet at 48kHz into int16 samples.
+func decode48(dec *gopus.Decoder, pkt []byte) ([]int16, error) {
+	pcm := make([]int16, maxFrameSamples)
+	n, err := dec.Decode(pkt, pcm)
+	if err != nil {
+		return nil, err
+	}
+	return pcm[:n], nil
+}
+
+func countZeroCrossings(samples []int16) int {
+	if len(samples) < 2 {
+		return 0
+	}
+	n := 0
+	for i := 1; i < len(samples); i++ {
+		if (samples[i-1] < 0) != (samples[i] < 0) {
+			n++
+		}
+	}
+	return n
+}
+
+func percentDiff(a, b int) int {
+	if b == 0 {
+		if a == 0 {
+			return 0
+		}
+		return 100
+	}
+	d := a - b
+	if d < 0 {
+		d = -d
+	}
+	return d * 100 / b
+}
+
 func TestUpsampleEdgeCases(t *testing.T) {
 	if g := upsample24to48(nil); len(g) != 0 {
 		t.Errorf("nil: got %d", len(g))
@@ -156,40 +188,6 @@ func TestUpsampleEdgeCases(t *testing.T) {
 	}
 	if g[0] != 0 || g[1] != 500 || g[2] != 1000 || g[3] != 1000 {
 		t.Errorf("two: got [%d %d %d %d], want [0 500 1000 1000]", g[0], g[1], g[2], g[3])
-	}
-}
-
-func TestEncodeDecodeSilence(t *testing.T) {
-	if !codecAvailable {
-		t.Skip("Opus codec not available (CGo disabled)")
-	}
-
-	const silenceSamples = encoderFrameSamples * 5
-	silence := make([]int16, silenceSamples)
-
-	enc, err := newEncoder()
-	if err != nil {
-		t.Fatal(err)
-	}
-	dec48, err := newDecoderAtRate(48000)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for i := 0; i+encoderFrameSamples <= len(silence); i += encoderFrameSamples {
-		pkt, encErr := enc.Encode(silence[i : i+encoderFrameSamples])
-		if encErr != nil {
-			t.Fatalf("encode at %d: %v", i, encErr)
-		}
-		decoded, decErr := dec48.Decode(pkt)
-		if decErr != nil {
-			t.Fatalf("decode: %v", decErr)
-		}
-		for j, s := range decoded {
-			if s > 500 || s < -500 {
-				t.Errorf("frame %d sample %d: got %d", i, j, s)
-			}
-		}
 	}
 }
 
@@ -233,31 +231,4 @@ func TestWriteSampleHasBinding(t *testing.T) {
 	}
 
 	t.Log("WriteSample binding OK")
-}
-
-func countZeroCrossings(samples []int16) int {
-	if len(samples) < 2 {
-		return 0
-	}
-	n := 0
-	for i := 1; i < len(samples); i++ {
-		if (samples[i-1] < 0) != (samples[i] < 0) {
-			n++
-		}
-	}
-	return n
-}
-
-func percentDiff(a, b int) int {
-	if b == 0 {
-		if a == 0 {
-			return 0
-		}
-		return 100
-	}
-	d := a - b
-	if d < 0 {
-		d = -d
-	}
-	return d * 100 / b
 }

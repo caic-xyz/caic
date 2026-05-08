@@ -318,8 +318,8 @@ func walkSDKTypes(seeds []reflect.Type) []reflect.Type {
 			return
 		}
 		seen[t] = struct{}{}
-		for i := range t.NumField() {
-			walk(t.Field(i).Type)
+		for f := range t.Fields() {
+			walk(f.Type)
 		}
 		order = append(order, t)
 	}
@@ -336,8 +336,8 @@ func collectNamedSlices(structs []sdkType) []reflect.Type {
 	seen := map[reflect.Type]struct{}{}
 	var order []reflect.Type
 	for _, ks := range structs {
-		for i := range ks.t.NumField() {
-			ft := ks.t.Field(i).Type
+		for f := range ks.t.Fields() {
+			ft := f.Type
 			if ft.Kind() == reflect.Pointer {
 				ft = ft.Elem()
 			}
@@ -1261,8 +1261,7 @@ func (d *docRegistry) emitTSStruct(b *strings.Builder, t reflect.Type) error {
 	}
 	name := t.Name()
 	fmt.Fprintf(b, "export interface %s {\n", name)
-	for i := range t.NumField() {
-		sf := t.Field(i)
+	for sf := range t.Fields() {
 		if !sf.IsExported() {
 			continue
 		}
@@ -1475,8 +1474,7 @@ func (d *docRegistry) emitTSDiscriminator(b *strings.Builder, t reflect.Type) er
 	baseFields := []tsFieldBinding{{"kind", fmt.Sprintf("asString(obj[%q], %q)", "kind", name+".kind")}}
 	var variantFields []tsFieldBinding
 
-	for i := range t.NumField() {
-		sf := t.Field(i)
+	for sf := range t.Fields() {
 		if !sf.IsExported() {
 			continue
 		}
@@ -1534,8 +1532,7 @@ func (d *docRegistry) emitTSValidator(b *strings.Builder, t reflect.Type) error 
 	fmt.Fprintf(b, "  const obj = asObject(raw, %q);\n", name)
 	fmt.Fprintf(b, "  return {\n")
 
-	for i := range t.NumField() {
-		sf := t.Field(i)
+	for sf := range t.Fields() {
 		if !sf.IsExported() {
 			continue
 		}
@@ -1829,8 +1826,7 @@ func (d *docRegistry) goTypeToKotlin(t reflect.Type) (string, error) {
 // parseStructFields extracts kotlinField entries from a reflect.Type.
 func (d *docRegistry) parseStructFields(t reflect.Type) ([]kotlinField, error) {
 	fields := make([]kotlinField, 0, t.NumField())
-	for i := range t.NumField() {
-		sf := t.Field(i)
+	for sf := range t.Fields() {
 		if !sf.IsExported() {
 			continue
 		}
@@ -2043,8 +2039,7 @@ func (d *docRegistry) writeDocType(b *strings.Builder, t reflect.Type) error {
 	}
 	b.WriteString("| Field | Type | Description | Required |\n")
 	b.WriteString("|-------|------|-------------|----------|\n")
-	for i := range t.NumField() {
-		sf := t.Field(i)
+	for sf := range t.Fields() {
 		if !sf.IsExported() {
 			continue
 		}
@@ -2129,8 +2124,7 @@ func (d *docRegistry) emitSwiftStruct(b *strings.Builder, t reflect.Type) error 
 	}
 	name := t.Name()
 	fmt.Fprintf(b, "public struct %s: Codable {\n", name)
-	for i := range t.NumField() {
-		sf := t.Field(i)
+	for sf := range t.Fields() {
 		if !sf.IsExported() {
 			continue
 		}

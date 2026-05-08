@@ -69,9 +69,10 @@ func (fw *FieldWarner) warnValue(ctx string, v reflect.Value) {
 		}
 	case reflect.Struct:
 		t := v.Type()
-		for i := range t.NumField() {
-			f := t.Field(i)
+		i := 0
+		for f := range t.Fields() {
 			fv := v.Field(i)
+			i++
 			if f.Type == overflowType && f.Anonymous {
 				// Found an embedded Overflow — warn its Extra.
 				extra := fv.FieldByName("Extra")
@@ -128,8 +129,7 @@ func KnownFields(v any) map[string]struct{} {
 
 // addJSONFields recursively collects JSON tag names from t's fields into s.
 func addJSONFields(t reflect.Type, s map[string]struct{}) {
-	for i := range t.NumField() {
-		f := t.Field(i)
+	for f := range t.Fields() {
 		if f.Anonymous {
 			addJSONFields(f.Type, s)
 			continue

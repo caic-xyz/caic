@@ -39,7 +39,6 @@
 # 0 (default) = enabled with OS-assigned ephemeral port.
 # >0 = enabled on that static port (open it in your firewall for UDP traffic).
 # -1 = disabled.
-# Requires libopus-dev at build time (CGO_ENABLED=1).
 # When GEMINI_API_KEY is not set in core.env, the voice bridge is disabled
 # regardless of this setting (effective default: -1).
 #webrtc_port = 0
