@@ -109,17 +109,17 @@ func TestScheduleNext(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 2026-04-09 03:00 → next should be 2026-04-09 04:50.
-	now := time.Date(2026, 4, 9, 3, 0, 0, 0, time.Local)
+	now := time.Date(2026, 4, 9, 3, 0, 0, 0, time.UTC)
 	next := s.Next(now)
-	want := time.Date(2026, 4, 9, 4, 50, 0, 0, time.Local)
+	want := time.Date(2026, 4, 9, 4, 50, 0, 0, time.UTC)
 	if !next.Equal(want) {
 		t.Errorf("Next(%v) = %v, want %v", now, next, want)
 	}
 
 	// 2026-04-09 05:00 → next should be 2026-04-10 04:50.
-	now = time.Date(2026, 4, 9, 5, 0, 0, 0, time.Local)
+	now = time.Date(2026, 4, 9, 5, 0, 0, 0, time.UTC)
 	next = s.Next(now)
-	want = time.Date(2026, 4, 10, 4, 50, 0, 0, time.Local)
+	want = time.Date(2026, 4, 10, 4, 50, 0, 0, time.UTC)
 	if !next.Equal(want) {
 		t.Errorf("Next(%v) = %v, want %v", now, next, want)
 	}
