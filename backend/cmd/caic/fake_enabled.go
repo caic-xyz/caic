@@ -63,6 +63,13 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 	}
 	defer func() { retErr = errors.Join(retErr, os.RemoveAll(fakeLogsDir)) }()
 	cfg.CacheDir = fakeLogsDir
+
+	// Pre-populate the harness model cache so refreshHarnessModels skips
+	// launching temporary containers for Pi and OpenCode model discovery.
+	if err := initFakeHarnessCache(fakeLogsDir); err != nil {
+		return fmt.Errorf("init fake harness cache: %w", err)
+	}
+
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
@@ -130,6 +137,17 @@ func initOneRepo(ctx context.Context, tmpDir, bareName, cloneName string) error 
 		if err := runGit(ctx, args...); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// initFakeHarnessCache pre-populates the harness model cache with fresh
+// dummy entries so refreshHarnessModels skips launching temp containers
+// for Pi and OpenCode model discovery during e2e tests.
+func initFakeHarnessCache(cacheDir string) error {
+	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
+	for _, h := range []agent.Harness{agent.Pi, agent.OpenCode} {
+		cache.SetModels(h, []string{"fake-model"})
 	}
 	return nil
 }
