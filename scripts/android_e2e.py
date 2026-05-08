@@ -5,11 +5,11 @@ Steps:
   1. Build the fake backend (go build -tags e2e).
   2. Find a free port and start the backend on it.
   3. Wait until the backend responds.
-  4. Set up adb reverse port forwarding.
-  5. Run connectedAndroidTest via Gradle with the dynamic port.
-  6. Pull and convert screenshots.
-  7. Dump logcat on failure for CI diagnostics.
-  8. Kill the backend on exit.
+  4. Run connectedAndroidTest via Gradle, passing 10.0.2.2:PORT
+     (emulator's host alias — no adb reverse needed).
+  5. Pull and convert screenshots.
+  6. Dump logcat on failure for CI diagnostics.
+  7. Kill the backend on exit.
 """
 
 import argparse
