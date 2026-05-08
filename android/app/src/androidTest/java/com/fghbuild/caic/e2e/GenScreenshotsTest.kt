@@ -5,7 +5,6 @@
 package com.fghbuild.caic.e2e
 
 import android.os.Environment
-import android.util.Log
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
