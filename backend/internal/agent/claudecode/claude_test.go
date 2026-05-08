@@ -14,7 +14,9 @@ import (
 )
 
 func TestWritePrompt(t *testing.T) {
+	t.Parallel()
 	t.Run("TextOnly", func(t *testing.T) {
+		t.Parallel()
 		var buf bytes.Buffer
 		var logBuf bytes.Buffer
 		var b Backend
@@ -30,6 +32,7 @@ func TestWritePrompt(t *testing.T) {
 	})
 
 	t.Run("WithImages", func(t *testing.T) {
+		t.Parallel()
 		var buf bytes.Buffer
 		var b Backend
 		images := []agent.ImageData{
@@ -75,6 +78,7 @@ func TestWritePrompt(t *testing.T) {
 	})
 
 	t.Run("ImagesOnly", func(t *testing.T) {
+		t.Parallel()
 		var buf bytes.Buffer
 		var b Backend
 		images := []agent.ImageData{
@@ -129,7 +133,9 @@ func (f *fakeConn) ReadMessages(_ io.Reader, msgCh chan<- agent.Message) error {
 }
 
 func TestEnvInjectorConn(t *testing.T) {
+	t.Parallel()
 	t.Run("InjectsOnStrippedEnv", func(t *testing.T) {
+		t.Parallel()
 		key := "sk-ant-container-key"
 		inner := &fakeConn{
 			// The relay emits caic_stripped_env after system/init.
@@ -173,6 +179,7 @@ func TestEnvInjectorConn(t *testing.T) {
 	})
 
 	t.Run("NoStrippedEnv", func(t *testing.T) {
+		t.Parallel()
 		// When no StrippedEnvMessage arrives, no injection occurs.
 		inner := &fakeConn{
 			messages: []agent.Message{

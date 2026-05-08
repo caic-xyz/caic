@@ -8,7 +8,9 @@ import (
 )
 
 func TestSortModels(t *testing.T) {
+	t.Parallel()
 	t.Run("dedup", func(t *testing.T) {
+		t.Parallel()
 		input := []string{
 			"openai/gpt-5",
 			"openai/gpt-5.5",
@@ -33,6 +35,7 @@ func TestSortModels(t *testing.T) {
 	})
 
 	t.Run("blacklist", func(t *testing.T) {
+		t.Parallel()
 		input := []string{
 			"openai/gpt-5.4",
 			"openai/o4-mini",
@@ -55,6 +58,7 @@ func TestSortModels(t *testing.T) {
 	})
 
 	t.Run("empty", func(t *testing.T) {
+		t.Parallel()
 		got := SortModels(nil)
 		if len(got) != 0 {
 			t.Errorf("got %v, want empty", got)
@@ -62,6 +66,7 @@ func TestSortModels(t *testing.T) {
 	})
 
 	t.Run("does_not_corrupt_input", func(t *testing.T) {
+		t.Parallel()
 		// SortModels must not modify the caller's backing array.
 		// Go 1.24's slices.DeleteFunc calls clear() on the tail,
 		// which would zero out elements in a shared backing array.
@@ -80,7 +85,9 @@ func TestSortModels(t *testing.T) {
 }
 
 func TestParseModelVersion(t *testing.T) {
+	t.Parallel()
 	t.Run("cases", func(t *testing.T) {
+		t.Parallel()
 		tests := []struct {
 			id       string
 			wantProv string

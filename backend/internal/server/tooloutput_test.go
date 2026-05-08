@@ -10,7 +10,9 @@ import (
 )
 
 func TestFormatToolOutput(t *testing.T) {
+	t.Parallel()
 	t.Run("empty", func(t *testing.T) {
+		t.Parallel()
 		ct, formatted := FormatToolOutput("")
 		if ct != v1.ToolOutputText {
 			t.Errorf("contentType = %q, want %q", ct, v1.ToolOutputText)
@@ -21,6 +23,7 @@ func TestFormatToolOutput(t *testing.T) {
 	})
 
 	t.Run("valid JSON object", func(t *testing.T) {
+		t.Parallel()
 		input := `{"name":"test","value":42}`
 		ct, formatted := FormatToolOutput(input)
 		if ct != v1.ToolOutputJSON {
@@ -41,6 +44,7 @@ func TestFormatToolOutput(t *testing.T) {
 	})
 
 	t.Run("valid JSON array", func(t *testing.T) {
+		t.Parallel()
 		input := `[1, 2, 3]`
 		ct, formatted := FormatToolOutput(input)
 		if ct != v1.ToolOutputJSON {
@@ -52,6 +56,7 @@ func TestFormatToolOutput(t *testing.T) {
 	})
 
 	t.Run("invalid JSON", func(t *testing.T) {
+		t.Parallel()
 		input := `{"name":"test",invalid}`
 		ct, formatted := FormatToolOutput(input)
 		if ct != v1.ToolOutputText {
@@ -63,6 +68,7 @@ func TestFormatToolOutput(t *testing.T) {
 	})
 
 	t.Run("markdown heading", func(t *testing.T) {
+		t.Parallel()
 		input := "# Hello World\n\nThis is markdown."
 		ct, formatted := FormatToolOutput(input)
 		if ct != v1.ToolOutputMarkdown {
@@ -74,6 +80,7 @@ func TestFormatToolOutput(t *testing.T) {
 	})
 
 	t.Run("markdown list", func(t *testing.T) {
+		t.Parallel()
 		input := "- Item 1\n- Item 2\n- Item 3"
 		ct, _ := FormatToolOutput(input)
 		if ct != v1.ToolOutputMarkdown {
@@ -82,6 +89,7 @@ func TestFormatToolOutput(t *testing.T) {
 	})
 
 	t.Run("markdown code fence", func(t *testing.T) {
+		t.Parallel()
 		input := "```\nsome code\n```"
 		ct, _ := FormatToolOutput(input)
 		if ct != v1.ToolOutputMarkdown {
@@ -90,6 +98,7 @@ func TestFormatToolOutput(t *testing.T) {
 	})
 
 	t.Run("plain text single line", func(t *testing.T) {
+		t.Parallel()
 		input := "Just some plain text output from a command."
 		ct, formatted := FormatToolOutput(input)
 		if ct != v1.ToolOutputText {
@@ -101,6 +110,7 @@ func TestFormatToolOutput(t *testing.T) {
 	})
 
 	t.Run("plain text multi-line", func(t *testing.T) {
+		t.Parallel()
 		input := "Line one\nLine two\nLine three"
 		ct, _ := FormatToolOutput(input)
 		// Multi-line text is detected as markdown (structured).
@@ -110,6 +120,7 @@ func TestFormatToolOutput(t *testing.T) {
 	})
 
 	t.Run("JSON with whitespace", func(t *testing.T) {
+		t.Parallel()
 		input := `  {"key": "value"}  `
 		ct, _ := FormatToolOutput(input)
 		if ct != v1.ToolOutputJSON {
@@ -118,6 +129,7 @@ func TestFormatToolOutput(t *testing.T) {
 	})
 
 	t.Run("JSON nested object", func(t *testing.T) {
+		t.Parallel()
 		input := `{"user":{"name":"Alice","age":30}}`
 		ct, formatted := FormatToolOutput(input)
 		if ct != v1.ToolOutputJSON {
@@ -130,7 +142,9 @@ func TestFormatToolOutput(t *testing.T) {
 }
 
 func TestFormatAsJSON(t *testing.T) {
+	t.Parallel()
 	t.Run("simple object", func(t *testing.T) {
+		t.Parallel()
 		ct, formatted := formatAsJSON(`{"a":1}`)
 		if ct != v1.ToolOutputJSON {
 			t.Errorf("contentType = %q, want %q", ct, v1.ToolOutputJSON)
@@ -141,6 +155,7 @@ func TestFormatAsJSON(t *testing.T) {
 	})
 
 	t.Run("simple array", func(t *testing.T) {
+		t.Parallel()
 		ct, formatted := formatAsJSON(`[1,2,3]`)
 		if ct != v1.ToolOutputJSON {
 			t.Errorf("contentType = %q, want %q", ct, v1.ToolOutputJSON)
@@ -151,6 +166,7 @@ func TestFormatAsJSON(t *testing.T) {
 	})
 
 	t.Run("not JSON - starts with text", func(t *testing.T) {
+		t.Parallel()
 		ct, formatted := formatAsJSON("hello world")
 		if ct != "" {
 			t.Errorf("contentType = %q, want empty", ct)
@@ -161,6 +177,7 @@ func TestFormatAsJSON(t *testing.T) {
 	})
 
 	t.Run("not JSON - invalid syntax", func(t *testing.T) {
+		t.Parallel()
 		ct, formatted := formatAsJSON(`{"key": "value",}`)
 		if ct != "" {
 			t.Errorf("contentType = %q, want empty", ct)
@@ -172,6 +189,7 @@ func TestFormatAsJSON(t *testing.T) {
 }
 
 func TestLooksLikeMarkdown(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -189,6 +207,7 @@ func TestLooksLikeMarkdown(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := looksLikeMarkdown(tt.input)
 			if got != tt.want {
 				t.Errorf("looksLikeMarkdown(%q) = %v, want %v", tt.input, got, tt.want)

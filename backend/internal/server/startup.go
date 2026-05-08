@@ -372,7 +372,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		region.End()
 	}
 
-	s.ipgeoChecker, err = ipgeo.NewChecker(ctx, cfg.IPGeoAllowlist, cfg.IPGeoDB)
+	s.ipgeoChecker, err = ipgeo.NewChecker(ctx, cfg.IPGeoAllowlist, cfg.IPGeoDB, "")
 	if err != nil {
 		return nil, fmt.Errorf("ipgeo: %w", err)
 	}

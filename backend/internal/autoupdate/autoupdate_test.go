@@ -12,6 +12,7 @@ import (
 )
 
 func TestIsNewer(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		latest, current string
 		want            bool
@@ -29,6 +30,7 @@ func TestIsNewer(t *testing.T) {
 		{"abc", "def", true},
 	} {
 		t.Run(tc.latest+"_vs_"+tc.current, func(t *testing.T) {
+			t.Parallel()
 			got := isNewer(tc.latest, tc.current)
 			if got != tc.want {
 				t.Errorf("isNewer(%q, %q) = %v, want %v", tc.latest, tc.current, got, tc.want)
@@ -38,6 +40,7 @@ func TestIsNewer(t *testing.T) {
 }
 
 func TestParseSemver(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		input               string
 		major, minor, patch int
@@ -52,6 +55,7 @@ func TestParseSemver(t *testing.T) {
 		{"", 0, 0, 0, false},
 	} {
 		t.Run(tc.input, func(t *testing.T) {
+			t.Parallel()
 			maj, mnr, pat, ok := parseSemver(tc.input)
 			if ok != tc.ok || maj != tc.major || mnr != tc.minor || pat != tc.patch {
 				t.Errorf("parseSemver(%q) = (%d,%d,%d,%v), want (%d,%d,%d,%v)",
@@ -62,7 +66,9 @@ func TestParseSemver(t *testing.T) {
 }
 
 func TestParseSchedule(t *testing.T) {
+	t.Parallel()
 	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
 		s, err := ParseSchedule("50 4 * * *")
 		if err != nil {
 			t.Fatal(err)
@@ -79,6 +85,7 @@ func TestParseSchedule(t *testing.T) {
 	})
 
 	t.Run("comma list", func(t *testing.T) {
+		t.Parallel()
 		s, err := ParseSchedule("0,30 * * * *")
 		if err != nil {
 			t.Fatal(err)
@@ -89,6 +96,7 @@ func TestParseSchedule(t *testing.T) {
 	})
 
 	t.Run("wrong field count", func(t *testing.T) {
+		t.Parallel()
 		_, err := ParseSchedule("50 4 *")
 		if err == nil {
 			t.Error("expected error")
@@ -96,6 +104,7 @@ func TestParseSchedule(t *testing.T) {
 	})
 
 	t.Run("out of range", func(t *testing.T) {
+		t.Parallel()
 		_, err := ParseSchedule("60 4 * * *")
 		if err == nil {
 			t.Error("expected error for minute=60")
@@ -104,6 +113,7 @@ func TestParseSchedule(t *testing.T) {
 }
 
 func TestScheduleNext(t *testing.T) {
+	t.Parallel()
 	s, err := ParseSchedule("50 4 * * *")
 	if err != nil {
 		t.Fatal(err)
@@ -126,6 +136,7 @@ func TestScheduleNext(t *testing.T) {
 }
 
 func TestPlatformStrings(t *testing.T) {
+	t.Parallel()
 	osStr, archStr := platformStrings()
 	if osStr == "" || archStr == "" {
 		t.Fatalf("platformStrings() = (%q, %q), both should be non-empty", osStr, archStr)
@@ -133,10 +144,12 @@ func TestPlatformStrings(t *testing.T) {
 }
 
 func TestExtractTarGzToFile(t *testing.T) {
+	t.Parallel()
 	content := []byte("binary content here")
 	data := makeTarGz(t, "caic", content)
 
 	t.Run("found", func(t *testing.T) {
+		t.Parallel()
 		tmp, err := os.CreateTemp(t.TempDir(), "test-*")
 		if err != nil {
 			t.Fatal(err)
@@ -155,6 +168,7 @@ func TestExtractTarGzToFile(t *testing.T) {
 	})
 
 	t.Run("not_found", func(t *testing.T) {
+		t.Parallel()
 		tmp, err := os.CreateTemp(t.TempDir(), "test-*")
 		if err != nil {
 			t.Fatal(err)

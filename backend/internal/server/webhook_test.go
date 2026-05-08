@@ -81,6 +81,7 @@ func signGitHub(body, secret []byte) string {
 }
 
 func TestHandleCheckSuiteEvent(t *testing.T) {
+	t.Parallel()
 	successRuns := []forge.CheckRun{
 		{Name: "ci", Status: forge.CheckRunStatusCompleted, Conclusion: forge.CheckRunConclusionSuccess},
 	}
@@ -89,6 +90,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	}
 
 	t.Run("updates CI status when SHA matches HEAD", func(t *testing.T) {
+		t.Parallel()
 		s := minimalServer(t)
 		s.repos = []repoInfo{{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}}
 		s.repoCIStatus = make(map[string]ci.RepoCIState)
@@ -114,6 +116,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	})
 
 	t.Run("ignores out-of-order delivery when SHA is not HEAD", func(t *testing.T) {
+		t.Parallel()
 		s := minimalServer(t)
 		s.repos = []repoInfo{{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}}
 		s.repoCIStatus = make(map[string]ci.RepoCIState)
@@ -141,9 +144,11 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 }
 
 func TestHandleGitHubWebhook(t *testing.T) {
+	t.Parallel()
 	secret := []byte("test-secret-abc123")
 
 	t.Run("ping event returns 200", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.githubWebhookSecret = secret
 
@@ -161,6 +166,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 	})
 
 	t.Run("bad signature returns 401", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.githubWebhookSecret = secret
 
@@ -178,6 +184,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 	})
 
 	t.Run("missing signature returns 401", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.githubWebhookSecret = secret
 
@@ -195,6 +202,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 	})
 
 	t.Run("completed check_run returns 204", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.githubWebhookSecret = secret
 
@@ -219,9 +227,11 @@ func TestHandleGitHubWebhook(t *testing.T) {
 }
 
 func TestHandleGitLabWebhook(t *testing.T) {
+	t.Parallel()
 	secret := []byte("gitlab-secret-xyz")
 
 	t.Run("valid pipeline event returns 204", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.gitlabWebhookSecret = secret
 
@@ -244,6 +254,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 	})
 
 	t.Run("bad token returns 401", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.gitlabWebhookSecret = secret
 
@@ -261,6 +272,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 	})
 
 	t.Run("non-terminal status returns 204 without dispatch", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.gitlabWebhookSecret = secret
 
@@ -283,6 +295,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 	})
 
 	t.Run("oversized body returns 413", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.gitlabWebhookSecret = secret
 
@@ -301,7 +314,9 @@ func TestHandleGitLabWebhook(t *testing.T) {
 }
 
 func TestBuildHandlerWebhookRoutes(t *testing.T) {
+	t.Parallel()
 	t.Run("gitlab webhook registered when secret set", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.gitlabWebhookSecret = []byte("secret")
 
@@ -330,6 +345,7 @@ func TestBuildHandlerWebhookRoutes(t *testing.T) {
 	})
 
 	t.Run("gitlab webhook not registered when secret unset", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		// gitlabWebhookSecret is nil (not configured).
 

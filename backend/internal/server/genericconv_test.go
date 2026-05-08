@@ -12,6 +12,7 @@ import (
 )
 
 func TestGenericConvertInitHasHarness(t *testing.T) {
+	t.Parallel()
 	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.InitMessage{
 		Model:     "claude-opus-4-6",
@@ -44,6 +45,7 @@ func TestGenericConvertInitHasHarness(t *testing.T) {
 }
 
 func TestGenericAskUserQuestionIsAsk(t *testing.T) {
+	t.Parallel()
 	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.AskMessage{
 		ToolUseID: "ask_1",
@@ -78,6 +80,7 @@ func TestGenericAskUserQuestionIsAsk(t *testing.T) {
 }
 
 func TestGenericTodoWriteIsTodo(t *testing.T) {
+	t.Parallel()
 	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.TodoMessage{
 		ToolUseID: "todo_1",
@@ -108,6 +111,7 @@ func TestGenericTodoWriteIsTodo(t *testing.T) {
 }
 
 func TestGenericToolTiming(t *testing.T) {
+	t.Parallel()
 	gt := newToolTimingTracker(agent.Claude)
 	t0 := time.Now()
 	t1 := t0.Add(500 * time.Millisecond)
@@ -132,6 +136,7 @@ func TestGenericToolTiming(t *testing.T) {
 }
 
 func TestGenericConvertTextAndUsage(t *testing.T) {
+	t.Parallel()
 	gt := newToolTimingTracker(agent.Gemini)
 
 	textMsg := &agent.TextMessage{Text: "hello"}
@@ -160,6 +165,7 @@ func TestGenericConvertTextAndUsage(t *testing.T) {
 }
 
 func TestGenericConvertResult(t *testing.T) {
+	t.Parallel()
 	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.ResultMessage{
 		MessageType:  "result",
@@ -183,6 +189,7 @@ func TestGenericConvertResult(t *testing.T) {
 }
 
 func TestGenericConvertStreamEvent(t *testing.T) {
+	t.Parallel()
 	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.TextDeltaMessage{Text: "Hi"}
 	events := gt.convertMessage(msg, time.Now())
@@ -198,6 +205,7 @@ func TestGenericConvertStreamEvent(t *testing.T) {
 }
 
 func TestGenericConvertUserInput(t *testing.T) {
+	t.Parallel()
 	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.UserInputMessage{
 		Text: "hello agent",
@@ -215,6 +223,7 @@ func TestGenericConvertUserInput(t *testing.T) {
 }
 
 func TestGenericConvertSystemMessage(t *testing.T) {
+	t.Parallel()
 	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.SystemMessage{
 		MessageType: "system",
@@ -230,6 +239,7 @@ func TestGenericConvertSystemMessage(t *testing.T) {
 }
 
 func TestGenericConvertThinking(t *testing.T) {
+	t.Parallel()
 	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.ThinkingMessage{Text: "let me think..."}
 	events := gt.convertMessage(msg, time.Now())
@@ -247,49 +257,66 @@ func TestGenericConvertThinking(t *testing.T) {
 	}
 }
 
-func TestGenericConvertSubagentStart(t *testing.T) {
-	gt := newToolTimingTracker(agent.Claude)
-	msg := &agent.SubagentStartMessage{TaskID: "task-1", Description: "Explore code"}
-	events := gt.convertMessage(msg, time.Now())
-	if len(events) != 1 {
-		t.Fatalf("got %d events, want 1", len(events))
-	}
-	if events[0].Kind != v1.EventKindSubagentStart {
-		t.Errorf("kind = %q, want %q", events[0].Kind, v1.EventKindSubagentStart)
-	}
-	if events[0].SubagentStart == nil {
-		t.Fatal("subagentStart payload is nil")
-	}
-	if events[0].SubagentStart.TaskID != "task-1" {
-		t.Errorf("taskID = %q, want %q", events[0].SubagentStart.TaskID, "task-1")
-	}
-	if events[0].SubagentStart.Description != "Explore code" {
-		t.Errorf("description = %q, want %q", events[0].SubagentStart.Description, "Explore code")
-	}
-}
+func TestGenericConvertSubagentEvents(t *testing.T) {
+	t.Parallel()
 
-func TestGenericConvertSubagentEnd(t *testing.T) {
-	gt := newToolTimingTracker(agent.Claude)
-	msg := &agent.SubagentEndMessage{TaskID: "task-1", Status: "completed"}
-	events := gt.convertMessage(msg, time.Now())
-	if len(events) != 1 {
-		t.Fatalf("got %d events, want 1", len(events))
+	tests := []struct {
+		name  string
+		msg   agent.Message
+		kind  v1.EventKind
+		check func(t *testing.T, ev v1.EventMessage)
+	}{
+		{
+			name: "start",
+			msg:  &agent.SubagentStartMessage{TaskID: "task-1", Description: "Explore code"},
+			kind: v1.EventKindSubagentStart,
+			check: func(t *testing.T, ev v1.EventMessage) {
+				if ev.SubagentStart == nil {
+					t.Fatal("subagentStart payload is nil")
+				}
+				if ev.SubagentStart.TaskID != "task-1" {
+					t.Errorf("taskID = %q, want %q", ev.SubagentStart.TaskID, "task-1")
+				}
+				if ev.SubagentStart.Description != "Explore code" {
+					t.Errorf("description = %q, want %q", ev.SubagentStart.Description, "Explore code")
+				}
+			},
+		},
+		{
+			name: "end",
+			msg:  &agent.SubagentEndMessage{TaskID: "task-1", Status: "completed"},
+			kind: v1.EventKindSubagentEnd,
+			check: func(t *testing.T, ev v1.EventMessage) {
+				if ev.SubagentEnd == nil {
+					t.Fatal("subagentEnd payload is nil")
+				}
+				if ev.SubagentEnd.TaskID != "task-1" {
+					t.Errorf("taskID = %q, want %q", ev.SubagentEnd.TaskID, "task-1")
+				}
+				if ev.SubagentEnd.Status != "completed" {
+					t.Errorf("status = %q, want %q", ev.SubagentEnd.Status, "completed")
+				}
+			},
+		},
 	}
-	if events[0].Kind != v1.EventKindSubagentEnd {
-		t.Errorf("kind = %q, want %q", events[0].Kind, v1.EventKindSubagentEnd)
-	}
-	if events[0].SubagentEnd == nil {
-		t.Fatal("subagentEnd payload is nil")
-	}
-	if events[0].SubagentEnd.TaskID != "task-1" {
-		t.Errorf("taskID = %q, want %q", events[0].SubagentEnd.TaskID, "task-1")
-	}
-	if events[0].SubagentEnd.Status != "completed" {
-		t.Errorf("status = %q, want %q", events[0].SubagentEnd.Status, "completed")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			gt := newToolTimingTracker(agent.Claude)
+			events := gt.convertMessage(tt.msg, time.Now())
+			if len(events) != 1 {
+				t.Fatalf("got %d events, want 1", len(events))
+			}
+			if events[0].Kind != tt.kind {
+				t.Errorf("kind = %q, want %q", events[0].Kind, tt.kind)
+			}
+			tt.check(t, events[0])
+		})
 	}
 }
 
 func TestGenericConvertRawMessageFiltered(t *testing.T) {
+	t.Parallel()
 	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.RawMessage{
 		MessageType: "tool_progress",
@@ -302,8 +329,10 @@ func TestGenericConvertRawMessageFiltered(t *testing.T) {
 }
 
 func TestToolInputTruncation(t *testing.T) {
-	gt := newToolTimingTracker(agent.Claude)
+	t.Parallel()
 	t.Run("SmallInputPassedThrough", func(t *testing.T) {
+		t.Parallel()
+		gt := newToolTimingTracker(agent.Claude)
 		msg := &agent.ToolUseMessage{ToolUseID: "t1", Name: "Read", Input: json.RawMessage(`{"file_path":"/etc/hosts"}`)}
 		events := gt.convertMessage(msg, time.Now())
 		if len(events) != 1 {
@@ -317,6 +346,8 @@ func TestToolInputTruncation(t *testing.T) {
 		}
 	})
 	t.Run("LargeInputTruncated", func(t *testing.T) {
+		t.Parallel()
+		gt := newToolTimingTracker(agent.Claude)
 		largeContent := make([]byte, inputTruncateThreshold+1)
 		for i := range largeContent {
 			largeContent[i] = 'x'
@@ -335,6 +366,8 @@ func TestToolInputTruncation(t *testing.T) {
 		}
 	})
 	t.Run("BackgroundTrue", func(t *testing.T) {
+		t.Parallel()
+		gt := newToolTimingTracker(agent.Claude)
 		msg := &agent.ToolUseMessage{ToolUseID: "t3", Name: "Bash", Input: json.RawMessage(`{"command":"sleep 60","run_in_background":true}`)}
 		events := gt.convertMessage(msg, time.Now())
 		if len(events) != 1 {
@@ -345,6 +378,8 @@ func TestToolInputTruncation(t *testing.T) {
 		}
 	})
 	t.Run("BackgroundAbsent", func(t *testing.T) {
+		t.Parallel()
+		gt := newToolTimingTracker(agent.Claude)
 		msg := &agent.ToolUseMessage{ToolUseID: "t4", Name: "Bash", Input: json.RawMessage(`{"command":"ls"}`)}
 		events := gt.convertMessage(msg, time.Now())
 		if len(events) != 1 {
@@ -355,6 +390,8 @@ func TestToolInputTruncation(t *testing.T) {
 		}
 	})
 	t.Run("BackgroundAgentTool", func(t *testing.T) {
+		t.Parallel()
+		gt := newToolTimingTracker(agent.Claude)
 		msg := &agent.ToolUseMessage{ToolUseID: "t5", Name: "Agent", Input: json.RawMessage(`{"prompt":"search","run_in_background":true}`)}
 		events := gt.convertMessage(msg, time.Now())
 		if len(events) != 1 {
@@ -367,6 +404,7 @@ func TestToolInputTruncation(t *testing.T) {
 }
 
 func TestGenericConvertWidget(t *testing.T) {
+	t.Parallel()
 	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.WidgetMessage{
 		ToolUseID: "wid_1",
@@ -396,6 +434,7 @@ func TestGenericConvertWidget(t *testing.T) {
 }
 
 func TestGenericConvertWidgetDelta(t *testing.T) {
+	t.Parallel()
 	gt := newToolTimingTracker(agent.Claude)
 	msg := &agent.WidgetDeltaMessage{
 		ToolUseID: "wid_2",
@@ -421,7 +460,9 @@ func TestGenericConvertWidgetDelta(t *testing.T) {
 }
 
 func TestFilterHistoryForReplay(t *testing.T) {
+	t.Parallel()
 	t.Run("RemovesTextDeltasBeforeText", func(t *testing.T) {
+		t.Parallel()
 		msgs := []agent.Message{
 			&agent.TextDeltaMessage{Text: "hel"},
 			&agent.TextDeltaMessage{Text: "lo"},
@@ -436,6 +477,7 @@ func TestFilterHistoryForReplay(t *testing.T) {
 		}
 	})
 	t.Run("RemovesThinkingDeltasBeforeThinking", func(t *testing.T) {
+		t.Parallel()
 		msgs := []agent.Message{
 			&agent.ThinkingDeltaMessage{Text: "think..."},
 			&agent.ThinkingMessage{Text: "think...done"},
@@ -449,6 +491,7 @@ func TestFilterHistoryForReplay(t *testing.T) {
 		}
 	})
 	t.Run("KeepsDeltasWithoutFinalMessage", func(t *testing.T) {
+		t.Parallel()
 		msgs := []agent.Message{
 			&agent.TextDeltaMessage{Text: "hel"},
 			&agent.TextDeltaMessage{Text: "lo"},
@@ -459,6 +502,7 @@ func TestFilterHistoryForReplay(t *testing.T) {
 		}
 	})
 	t.Run("PreservesOtherMessages", func(t *testing.T) {
+		t.Parallel()
 		msgs := []agent.Message{
 			&agent.ToolUseMessage{ToolUseID: "t1", Name: "Read", Input: json.RawMessage(`{}`)},
 			&agent.TextDeltaMessage{Text: "hi"},
@@ -480,6 +524,7 @@ func TestFilterHistoryForReplay(t *testing.T) {
 		}
 	})
 	t.Run("RemovesWidgetDeltasBeforeWidget", func(t *testing.T) {
+		t.Parallel()
 		msgs := []agent.Message{
 			&agent.WidgetDeltaMessage{ToolUseID: "w1", Delta: "<h1>"},
 			&agent.WidgetDeltaMessage{ToolUseID: "w1", Delta: "Hi</h1>"},
@@ -494,6 +539,7 @@ func TestFilterHistoryForReplay(t *testing.T) {
 		}
 	})
 	t.Run("MultipleTextBlocks", func(t *testing.T) {
+		t.Parallel()
 		msgs := []agent.Message{
 			&agent.TextDeltaMessage{Text: "a"},
 			&agent.TextMessage{Text: "a"},

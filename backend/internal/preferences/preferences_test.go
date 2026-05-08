@@ -10,13 +10,16 @@ import (
 )
 
 func TestValidate(t *testing.T) {
+	t.Parallel()
 	t.Run("valid_empty", func(t *testing.T) {
+		t.Parallel()
 		p := &Preferences{Version: currentVersion}
 		if err := p.Validate(); err != nil {
 			t.Fatal(err)
 		}
 	})
 	t.Run("valid_full", func(t *testing.T) {
+		t.Parallel()
 		p := &Preferences{
 			Version: 1,
 			Repositories: []RepoPrefs{
@@ -32,18 +35,21 @@ func TestValidate(t *testing.T) {
 		}
 	})
 	t.Run("wrong_version", func(t *testing.T) {
+		t.Parallel()
 		p := &Preferences{Version: 99}
 		if err := p.Validate(); err == nil {
 			t.Fatal("expected error for wrong version")
 		}
 	})
 	t.Run("empty_repo_path", func(t *testing.T) {
+		t.Parallel()
 		p := &Preferences{Version: 1, Repositories: []RepoPrefs{{Path: ""}}}
 		if err := p.Validate(); err == nil {
 			t.Fatal("expected error for empty repo path")
 		}
 	})
 	t.Run("duplicate_repo_path", func(t *testing.T) {
+		t.Parallel()
 		p := &Preferences{
 			Version: 1,
 			Repositories: []RepoPrefs{
@@ -56,6 +62,7 @@ func TestValidate(t *testing.T) {
 		}
 	})
 	t.Run("valid_cache_mappings", func(t *testing.T) {
+		t.Parallel()
 		p := &Preferences{
 			Version: 1,
 			Settings: Settings{
@@ -69,6 +76,7 @@ func TestValidate(t *testing.T) {
 		}
 	})
 	t.Run("cache_mapping_empty_host", func(t *testing.T) {
+		t.Parallel()
 		p := &Preferences{
 			Version: 1,
 			Settings: Settings{
@@ -82,6 +90,7 @@ func TestValidate(t *testing.T) {
 		}
 	})
 	t.Run("cache_mapping_empty_container", func(t *testing.T) {
+		t.Parallel()
 		p := &Preferences{
 			Version: 1,
 			Settings: Settings{
@@ -97,19 +106,23 @@ func TestValidate(t *testing.T) {
 }
 
 func TestUsersFileValidate(t *testing.T) {
+	t.Parallel()
 	t.Run("valid_empty_map", func(t *testing.T) {
+		t.Parallel()
 		f := &usersFile{Users: map[string]Preferences{}}
 		if err := f.Validate(); err != nil {
 			t.Fatal(err)
 		}
 	})
 	t.Run("valid_nil_map", func(t *testing.T) {
+		t.Parallel()
 		f := &usersFile{}
 		if err := f.Validate(); err != nil {
 			t.Fatal(err)
 		}
 	})
 	t.Run("valid_users", func(t *testing.T) {
+		t.Parallel()
 		f := &usersFile{Users: map[string]Preferences{
 			"alice": {Version: currentVersion},
 			"bob":   {Version: currentVersion},
@@ -119,6 +132,7 @@ func TestUsersFileValidate(t *testing.T) {
 		}
 	})
 	t.Run("empty_user_id", func(t *testing.T) {
+		t.Parallel()
 		f := &usersFile{Users: map[string]Preferences{
 			"": {Version: currentVersion},
 		}}
@@ -127,6 +141,7 @@ func TestUsersFileValidate(t *testing.T) {
 		}
 	})
 	t.Run("invalid_prefs_propagate", func(t *testing.T) {
+		t.Parallel()
 		f := &usersFile{Users: map[string]Preferences{
 			"alice": {Version: 99},
 		}}
@@ -137,7 +152,9 @@ func TestUsersFileValidate(t *testing.T) {
 }
 
 func TestUsers(t *testing.T) {
+	t.Parallel()
 	t.Run("round_trip", func(t *testing.T) {
+		t.Parallel()
 		fp := filepath.Join(t.TempDir(), "preferences.json")
 		s, err := Open(fp)
 		if err != nil {
@@ -207,6 +224,7 @@ func TestUsers(t *testing.T) {
 	})
 
 	t.Run("missing_file_returns_defaults", func(t *testing.T) {
+		t.Parallel()
 		fp := filepath.Join(t.TempDir(), "nonexistent", "preferences.json")
 		s, err := Open(fp)
 		if err != nil {
@@ -219,6 +237,7 @@ func TestUsers(t *testing.T) {
 	})
 
 	t.Run("update_persists_and_creates_dirs", func(t *testing.T) {
+		t.Parallel()
 		fp := filepath.Join(t.TempDir(), "sub", "deep", "preferences.json")
 		s, err := Open(fp)
 		if err != nil {
@@ -240,6 +259,7 @@ func TestUsers(t *testing.T) {
 	})
 
 	t.Run("users_are_isolated", func(t *testing.T) {
+		t.Parallel()
 		fp := filepath.Join(t.TempDir(), "preferences.json")
 		s, err := Open(fp)
 		if err != nil {
@@ -254,6 +274,7 @@ func TestUsers(t *testing.T) {
 	})
 
 	t.Run("update_rejects_invalid_prefs", func(t *testing.T) {
+		t.Parallel()
 		fp := filepath.Join(t.TempDir(), "preferences.json")
 		s, err := Open(fp)
 		if err != nil {
@@ -272,6 +293,7 @@ func TestUsers(t *testing.T) {
 	})
 
 	t.Run("get_returns_deep_copy", func(t *testing.T) {
+		t.Parallel()
 		fp := filepath.Join(t.TempDir(), "preferences.json")
 		s, err := Open(fp)
 		if err != nil {
@@ -315,7 +337,9 @@ func TestUsers(t *testing.T) {
 }
 
 func TestTouchRepo(t *testing.T) {
+	t.Parallel()
 	t.Run("new_repo_with_overrides", func(t *testing.T) {
+		t.Parallel()
 		before := time.Now().Unix()
 		p := &Preferences{Version: currentVersion}
 		p.TouchRepo("github/foo", &RepoPrefs{Harness: "claude", Model: "opus"})
@@ -338,6 +362,7 @@ func TestTouchRepo(t *testing.T) {
 		}
 	})
 	t.Run("move_to_front_preserves_existing", func(t *testing.T) {
+		t.Parallel()
 		p := &Preferences{
 			Version: 1,
 			Repositories: []RepoPrefs{
@@ -367,6 +392,7 @@ func TestTouchRepo(t *testing.T) {
 		}
 	})
 	t.Run("already_first", func(t *testing.T) {
+		t.Parallel()
 		p := &Preferences{
 			Version: 1,
 			Repositories: []RepoPrefs{
@@ -387,6 +413,7 @@ func TestTouchRepo(t *testing.T) {
 		}
 	})
 	t.Run("clear_model_after_touch", func(t *testing.T) {
+		t.Parallel()
 		// Simulate the server clearing model when the user selects "default".
 		// TouchRepo alone can't clear model (empty = don't override), so the
 		// caller must clear it explicitly after TouchRepo.
@@ -409,6 +436,7 @@ func TestTouchRepo(t *testing.T) {
 		}
 	})
 	t.Run("empty_overrides_preserve_all", func(t *testing.T) {
+		t.Parallel()
 		p := &Preferences{
 			Version: 1,
 			Repositories: []RepoPrefs{
@@ -424,11 +452,13 @@ func TestTouchRepo(t *testing.T) {
 }
 
 func TestRecentRepos(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
 	recent := now.Add(-3 * 24 * time.Hour).Unix() // 3 days ago — within window
 	old := now.Add(-10 * 24 * time.Hour).Unix()   // 10 days ago — outside window
 
 	t.Run("all_recent_under_min", func(t *testing.T) {
+		t.Parallel()
 		// Fewer than minRecentRepos repos, all old: all returned.
 		p := &Preferences{
 			Version: 1,
@@ -444,6 +474,7 @@ func TestRecentRepos(t *testing.T) {
 	})
 
 	t.Run("keeps_min_10_regardless_of_age", func(t *testing.T) {
+		t.Parallel()
 		repos := make([]RepoPrefs, 15)
 		for i := range repos {
 			repos[i] = RepoPrefs{Path: string(rune('a' + i)), LastUsed: old}
@@ -462,6 +493,7 @@ func TestRecentRepos(t *testing.T) {
 	})
 
 	t.Run("recent_beyond_min_included", func(t *testing.T) {
+		t.Parallel()
 		repos := make([]RepoPrefs, 12)
 		for i := range repos {
 			repos[i] = RepoPrefs{Path: string(rune('a' + i)), LastUsed: old}
@@ -479,6 +511,7 @@ func TestRecentRepos(t *testing.T) {
 	})
 
 	t.Run("no_timestamp_falls_back_to_min", func(t *testing.T) {
+		t.Parallel()
 		// Repos with no LastUsed (zero) beyond index 10 are excluded.
 		repos := make([]RepoPrefs, 15)
 		for i := range repos {

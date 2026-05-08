@@ -8,7 +8,9 @@ import (
 )
 
 func TestRecord(t *testing.T) {
+	t.Parallel()
 	t.Run("Init", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"init","timestamp":"2026-02-13T19:00:05.416Z","session_id":"730077db-6c7a-4e97-8285-252a9ad8ae87","model":"auto-gemini-3"}`
 		var rec Record
 		if err := json.Unmarshal([]byte(input), &rec); err != nil {
@@ -32,6 +34,7 @@ func TestRecord(t *testing.T) {
 		}
 	})
 	t.Run("UnknownFields", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"init","timestamp":"2026-02-13T19:00:05.416Z","session_id":"s","model":"m","new_field":"surprise"}`
 		var rec Record
 		if err := json.Unmarshal([]byte(input), &rec); err != nil {
@@ -51,7 +54,9 @@ func TestRecord(t *testing.T) {
 }
 
 func TestMessageRecord(t *testing.T) {
+	t.Parallel()
 	t.Run("User", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"message","timestamp":"2026-02-13T19:00:05.418Z","role":"user","content":"Say hello"}`
 		var rec Record
 		if err := json.Unmarshal([]byte(input), &rec); err != nil {
@@ -72,6 +77,7 @@ func TestMessageRecord(t *testing.T) {
 		}
 	})
 	t.Run("AssistantDelta", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"message","timestamp":"2026-02-13T19:00:10.729Z","role":"assistant","content":"Hello.","delta":true}`
 		var rec Record
 		if err := json.Unmarshal([]byte(input), &rec); err != nil {
@@ -91,6 +97,7 @@ func TestMessageRecord(t *testing.T) {
 }
 
 func TestToolUseRecord(t *testing.T) {
+	t.Parallel()
 	const input = `{"type":"tool_use","timestamp":"2026-02-13T19:00:22.912Z","tool_name":"read_file","tool_id":"read_file-1771009222912-ae333db2dcc5d8","parameters":{"file_path":"/etc/hostname"}}`
 	var rec Record
 	if err := json.Unmarshal([]byte(input), &rec); err != nil {
@@ -116,7 +123,9 @@ func TestToolUseRecord(t *testing.T) {
 }
 
 func TestToolResultRecord(t *testing.T) {
+	t.Parallel()
 	t.Run("Success", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"tool_result","timestamp":"2026-02-13T19:00:26.397Z","tool_id":"run_shell_command-123","status":"success","output":"md-caic-0"}`
 		var rec Record
 		if err := json.Unmarshal([]byte(input), &rec); err != nil {
@@ -137,6 +146,7 @@ func TestToolResultRecord(t *testing.T) {
 		}
 	})
 	t.Run("Error", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"tool_result","timestamp":"2026-02-13T19:00:22.918Z","tool_id":"read_file-123","status":"error","output":"Path not in workspace","error":{"type":"invalid_tool_params","message":"Path not in workspace"}}`
 		var rec Record
 		if err := json.Unmarshal([]byte(input), &rec); err != nil {
@@ -162,6 +172,7 @@ func TestToolResultRecord(t *testing.T) {
 }
 
 func TestResultRecord(t *testing.T) {
+	t.Parallel()
 	const input = `{"type":"result","timestamp":"2026-02-13T19:00:10.738Z","status":"success","stats":{"total_tokens":12359,"input_tokens":11744,"output_tokens":47,"cached":0,"input":11744,"duration_ms":5322,"tool_calls":0}}`
 	var rec Record
 	if err := json.Unmarshal([]byte(input), &rec); err != nil {

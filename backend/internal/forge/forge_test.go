@@ -8,7 +8,9 @@ import (
 )
 
 func TestReadLog(t *testing.T) {
+	t.Parallel()
 	t.Run("strips ANSI color codes", func(t *testing.T) {
+		t.Parallel()
 		input := "\x1b[31mERROR\x1b[0m: build failed\n\x1b[32mOK\x1b[0m"
 		got, err := ReadLog(strings.NewReader(input))
 		if err != nil {
@@ -21,6 +23,7 @@ func TestReadLog(t *testing.T) {
 	})
 
 	t.Run("preserves plain text", func(t *testing.T) {
+		t.Parallel()
 		input := "##[group]Run tests\ngo test ./...\n##[endgroup]"
 		got, err := ReadLog(strings.NewReader(input))
 		if err != nil {
@@ -32,6 +35,7 @@ func TestReadLog(t *testing.T) {
 	})
 
 	t.Run("strips bold and cursor codes", func(t *testing.T) {
+		t.Parallel()
 		input := "\x1b[1mBold\x1b[0m \x1b[2Kcleared"
 		got, err := ReadLog(strings.NewReader(input))
 		if err != nil {

@@ -98,8 +98,11 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 }
 
 func TestRunner(t *testing.T) {
+	t.Parallel()
 	t.Run("Init", func(t *testing.T) {
+		t.Parallel()
 		t.Run("Basic", func(t *testing.T) {
+			t.Parallel()
 			clone := initTestRepo(t, "main")
 			r := &Runner{
 				BaseBranch: "main",
@@ -113,6 +116,7 @@ func TestRunner(t *testing.T) {
 			}
 		})
 		t.Run("SkipsExisting", func(t *testing.T) {
+			t.Parallel()
 			clone := initTestRepo(t, "main")
 			// Pre-create branches and push to remote.
 			runGit(t, clone, "branch", "caic-0")
@@ -132,6 +136,7 @@ func TestRunner(t *testing.T) {
 			}
 		})
 		t.Run("SkipsLocalOnly", func(t *testing.T) {
+			t.Parallel()
 			// Local-only branches (e.g. from stopped tasks that were never
 			// pushed) must also be accounted for.
 			clone := initTestRepo(t, "main")
@@ -151,6 +156,7 @@ func TestRunner(t *testing.T) {
 			}
 		})
 		t.Run("IgnoresNonCaicPrefix", func(t *testing.T) {
+			t.Parallel()
 			// Branches like "foo-caic-9" must not be matched.
 			clone := initTestRepo(t, "main")
 			runGit(t, clone, "branch", "foo-caic-9")
@@ -170,7 +176,9 @@ func TestRunner(t *testing.T) {
 	})
 
 	t.Run("Setup", func(t *testing.T) {
+		t.Parallel()
 		t.Run("CustomBaseBranch", func(t *testing.T) {
+			t.Parallel()
 			// Verify that setup creates the task branch from t.BaseBranch
 			// when it differs from the runner's default BaseBranch.
 			clone := initTestRepo(t, "main")
@@ -215,6 +223,7 @@ func TestRunner(t *testing.T) {
 			}
 		})
 		t.Run("LocalOnlyBaseBranch", func(t *testing.T) {
+			t.Parallel()
 			// Verify that setup works when BaseBranch exists only locally
 			// (not pushed to origin).
 			clone := initTestRepo(t, "main")
@@ -260,7 +269,9 @@ func TestRunner(t *testing.T) {
 	})
 
 	t.Run("Cleanup", func(t *testing.T) {
+		t.Parallel()
 		t.Run("NoSessionUsesLiveStats", func(t *testing.T) {
+			t.Parallel()
 			// Simulate an adopted task after server restart: no active session, but
 			// live stats were restored from log messages. Cleanup should fall back to
 			// LiveStats for the result cost.
@@ -303,6 +314,7 @@ func TestRunner(t *testing.T) {
 		})
 
 		t.Run("StoppedTaskWritesTrailer", func(t *testing.T) {
+			t.Parallel()
 			// When a stopped task (no session handle) is purged, Cleanup must
 			// reopen the existing log and write a caic_result trailer so the
 			// task loads as "purged" (not "failed") on the next server restart.
@@ -352,6 +364,7 @@ func TestRunner(t *testing.T) {
 		})
 
 		t.Run("UsesLiveDiffStat", func(t *testing.T) {
+			t.Parallel()
 			clone := initTestRepo(t, "main")
 			r := &Runner{
 				BaseBranch: "main",
@@ -387,7 +400,9 @@ func TestRunner(t *testing.T) {
 	})
 
 	t.Run("openLog", func(t *testing.T) {
+		t.Parallel()
 		t.Run("CreatesFile", func(t *testing.T) {
+			t.Parallel()
 			dir := t.TempDir()
 			logDir := filepath.Join(dir, "logs")
 			r := &Runner{LogDir: logDir}
@@ -417,6 +432,7 @@ func TestRunner(t *testing.T) {
 	})
 
 	t.Run("ContainerDir", func(t *testing.T) {
+		t.Parallel()
 		tests := []struct {
 			dir  string
 			want string
@@ -435,7 +451,9 @@ func TestRunner(t *testing.T) {
 	})
 
 	t.Run("StartMessageDispatch", func(t *testing.T) {
+		t.Parallel()
 		t.Run("ResultMessage", func(t *testing.T) {
+			t.Parallel()
 			stub := &stubContainer{}
 			r := &Runner{Container: stub, Dir: "/repo"}
 			r.initDefaults()
@@ -471,8 +489,10 @@ func TestRunner(t *testing.T) {
 		})
 
 		t.Run("MutatingToolEmitsDiffStat", func(t *testing.T) {
+			t.Parallel()
 			for _, tool := range []string{"Edit", "Bash", "Write", "NotebookEdit"} {
 				t.Run(tool, func(t *testing.T) {
+					t.Parallel()
 					stub := &stubContainer{}
 					r := &Runner{Container: stub, Dir: "/repo"}
 					r.initDefaults()
@@ -522,6 +542,7 @@ func TestRunner(t *testing.T) {
 		})
 
 		t.Run("NonMutatingToolNoDiffStat", func(t *testing.T) {
+			t.Parallel()
 			stub := &stubContainer{}
 			r := &Runner{Container: stub}
 			r.initDefaults()
@@ -556,6 +577,7 @@ func TestRunner(t *testing.T) {
 		})
 
 		t.Run("SkipSideEffects", func(t *testing.T) {
+			t.Parallel()
 			stub := &stubContainer{}
 			r := &Runner{Container: stub, Dir: "/repo"}
 			r.initDefaults()
@@ -584,6 +606,7 @@ func TestRunner(t *testing.T) {
 		})
 
 		t.Run("DispatchDrainBeforeClose", func(t *testing.T) {
+			t.Parallel()
 			r := &Runner{}
 			r.initDefaults()
 
@@ -622,8 +645,10 @@ func TestRunner(t *testing.T) {
 	})
 
 	t.Run("RestartSession", func(t *testing.T) {
+		t.Parallel()
 		for _, startState := range []State{StateWaiting, StateAsking, StateHasPlan} {
 			t.Run(startState.String(), func(t *testing.T) {
+				t.Parallel()
 				logDir := t.TempDir()
 				backend := &testBackend{}
 
@@ -679,6 +704,7 @@ func TestRunner(t *testing.T) {
 	})
 
 	t.Run("RestartSession/LogContainsContextCleared", func(t *testing.T) {
+		t.Parallel()
 		logDir := t.TempDir()
 		backend := &testBackend{}
 
@@ -751,6 +777,7 @@ func TestRunner(t *testing.T) {
 	})
 
 	t.Run("BranchDiffStat", func(t *testing.T) {
+		t.Parallel()
 		sc := &stubContainer{}
 		r := &Runner{Container: sc, Dir: "/repo"}
 		ds := r.BranchDiffStat(t.Context(), "feature", nil)
@@ -762,6 +789,7 @@ func TestRunner(t *testing.T) {
 		}
 	})
 	t.Run("ReadRelayOutput_UnknownHarness", func(t *testing.T) {
+		t.Parallel()
 		r := &Runner{
 			Backends: map[agent.Harness]agent.Backend{
 				"test": &testBackend{},

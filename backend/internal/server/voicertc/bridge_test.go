@@ -13,7 +13,9 @@ import (
 )
 
 func TestNewBridge(t *testing.T) {
+	t.Parallel()
 	t.Run("NewBridge", func(t *testing.T) {
+		t.Parallel()
 		b, err := NewBridge(t.Context(), "test-key", 0)
 		if err != nil {
 			t.Fatal(err)
@@ -22,6 +24,7 @@ func TestNewBridge(t *testing.T) {
 	})
 
 	t.Run("PeerConnection", func(t *testing.T) {
+		t.Parallel()
 		b, err := NewBridge(t.Context(), "test-key", 0)
 		if err != nil {
 			t.Fatal(err)
@@ -48,6 +51,7 @@ func TestNewBridge(t *testing.T) {
 }
 
 func TestEncodeDecodeRoundtrip(t *testing.T) {
+	t.Parallel()
 	const (
 		freq       = 440.0
 		durationMs = 200
@@ -162,6 +166,7 @@ func percentDiff(a, b int) int {
 }
 
 func TestUpsampleEdgeCases(t *testing.T) {
+	t.Parallel()
 	if g := upsample24to48(nil); len(g) != 0 {
 		t.Errorf("nil: got %d", len(g))
 	}
@@ -192,6 +197,7 @@ func TestUpsampleEdgeCases(t *testing.T) {
 }
 
 func TestWriteSampleHasBinding(t *testing.T) {
+	t.Parallel()
 	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		t.Fatal(err)

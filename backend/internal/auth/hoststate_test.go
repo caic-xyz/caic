@@ -11,6 +11,7 @@ import (
 )
 
 func TestHostState(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		host string
@@ -28,6 +29,7 @@ func TestHostState(t *testing.T) {
 		{"X-Forwarded-Host with port", "127.0.0.1:8080", "caic.example.com:8443", "https", "https://caic.example.com:8443"},
 	} {
 		t.Run("lock "+tc.name, func(t *testing.T) {
+			t.Parallel()
 			state := &auth.HostState{}
 			h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 			r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
@@ -46,6 +48,7 @@ func TestHostState(t *testing.T) {
 	}
 
 	t.Run("RedirectURI resolves after lock", func(t *testing.T) {
+		t.Parallel()
 		host := &auth.HostState{}
 		ghOAuth := auth.GitHubConfig("id", "sec", host)
 		glOAuth := auth.GitLabConfig("id", "sec", "", host)
@@ -75,6 +78,7 @@ func TestHostState(t *testing.T) {
 	})
 
 	t.Run("static host state", func(t *testing.T) {
+		t.Parallel()
 		host := auth.NewHostState("https://caic.example.com:8443")
 		if got := host.ExternalURL(); got != "https://caic.example.com:8443" {
 			t.Errorf("ExternalURL = %q, want %q", got, "https://caic.example.com:8443")
@@ -86,6 +90,7 @@ func TestHostState(t *testing.T) {
 	})
 
 	t.Run("middleware allows IP", func(t *testing.T) {
+		t.Parallel()
 		state := &auth.HostState{}
 		called := false
 		h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
@@ -101,6 +106,7 @@ func TestHostState(t *testing.T) {
 	})
 
 	t.Run("middleware rejects different FQDN", func(t *testing.T) {
+		t.Parallel()
 		state := &auth.HostState{}
 		h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 
@@ -120,6 +126,7 @@ func TestHostState(t *testing.T) {
 	})
 
 	t.Run("middleware rejects different port", func(t *testing.T) {
+		t.Parallel()
 		state := &auth.HostState{}
 		h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 

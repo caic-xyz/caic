@@ -28,7 +28,9 @@ func echoHandler() http.HandlerFunc {
 }
 
 func TestDecompressMiddleware(t *testing.T) {
+	t.Parallel()
 	t.Run("Gzip", func(t *testing.T) {
+		t.Parallel()
 		var buf bytes.Buffer
 		gz, _ := gzip.NewWriterLevel(&buf, gzip.BestSpeed)
 		_, _ = gz.Write([]byte("hello gzip"))
@@ -49,6 +51,7 @@ func TestDecompressMiddleware(t *testing.T) {
 	})
 
 	t.Run("Zstd", func(t *testing.T) {
+		t.Parallel()
 		var buf bytes.Buffer
 		enc, _ := zstd.NewWriter(&buf)
 		_, _ = enc.Write([]byte("hello zstd"))
@@ -69,6 +72,7 @@ func TestDecompressMiddleware(t *testing.T) {
 	})
 
 	t.Run("Brotli", func(t *testing.T) {
+		t.Parallel()
 		var buf bytes.Buffer
 		bw := brotli.NewWriter(&buf)
 		_, _ = bw.Write([]byte("hello brotli"))
@@ -89,6 +93,7 @@ func TestDecompressMiddleware(t *testing.T) {
 	})
 
 	t.Run("Unsupported", func(t *testing.T) {
+		t.Parallel()
 		h := decompressMiddleware(echoHandler())
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader([]byte("data")))
 		req.Header.Set("Content-Encoding", "deflate")
@@ -101,6 +106,7 @@ func TestDecompressMiddleware(t *testing.T) {
 	})
 
 	t.Run("None", func(t *testing.T) {
+		t.Parallel()
 		h := decompressMiddleware(echoHandler())
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader([]byte("plain body")))
 		w := httptest.NewRecorder()

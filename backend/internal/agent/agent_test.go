@@ -127,7 +127,9 @@ func (testWire) ParseMessage(line []byte) ([]Message, error) {
 }
 
 func TestSession(t *testing.T) {
+	t.Parallel()
 	t.Run("Lifecycle", func(t *testing.T) {
+		t.Parallel()
 		stdinR, stdinW := io.Pipe()
 		stdoutR, stdoutW := io.Pipe()
 
@@ -206,7 +208,9 @@ func TestSession(t *testing.T) {
 		}
 	})
 	t.Run("SendRaw", func(t *testing.T) {
+		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
 			stdinR, stdinW := io.Pipe()
 			var logBuf bytes.Buffer
 			s := &Session{
@@ -235,6 +239,7 @@ func TestSession(t *testing.T) {
 			}
 		})
 		t.Run("error", func(t *testing.T) {
+			t.Parallel()
 			stdinR, stdinW := io.Pipe()
 			_ = stdinR.Close()
 			s := &Session{
@@ -247,6 +252,7 @@ func TestSession(t *testing.T) {
 		})
 	})
 	t.Run("CloseIdempotent", func(t *testing.T) {
+		t.Parallel()
 		stdinR, stdinW := io.Pipe()
 		go func() { _, _ = io.Copy(io.Discard, stdinR) }()
 		s := &Session{
@@ -256,6 +262,7 @@ func TestSession(t *testing.T) {
 		_ = s.Close()
 	})
 	t.Run("SignalKillNotError", func(t *testing.T) {
+		t.Parallel()
 		cmd := exec.CommandContext(t.Context(), "sleep", "60")
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
@@ -297,7 +304,9 @@ func TestSession(t *testing.T) {
 }
 
 func TestReadMessages(t *testing.T) {
+	t.Parallel()
 	t.Run("FullStream", func(t *testing.T) {
+		t.Parallel()
 		lines := []string{
 			`{"type":"system","subtype":"init","cwd":"/","session_id":"s","tools":[],"model":"m","claude_code_version":"1","uuid":"u"}`,
 			`{"type":"assistant","message":{"model":"m","id":"i","role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{}},"session_id":"s","uuid":"u"}`,
@@ -321,6 +330,7 @@ func TestReadMessages(t *testing.T) {
 		}
 	})
 	t.Run("StreamWithPartialMessages", func(t *testing.T) {
+		t.Parallel()
 		lines := []string{
 			`{"type":"system","subtype":"init","cwd":"/","session_id":"s","tools":[],"model":"m","claude_code_version":"1","uuid":"u"}`,
 			`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hel"}}}`,
@@ -352,6 +362,7 @@ func TestReadMessages(t *testing.T) {
 		}
 	})
 	t.Run("LogWriter", func(t *testing.T) {
+		t.Parallel()
 		lines := []string{
 			`{"type":"system","subtype":"init","cwd":"/","session_id":"s","tools":[],"model":"m","claude_code_version":"1","uuid":"u"}`,
 			`{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"ok","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}`,

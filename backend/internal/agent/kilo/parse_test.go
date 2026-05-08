@@ -10,7 +10,9 @@ import (
 )
 
 func TestParseMessage(t *testing.T) {
+	t.Parallel()
 	t.Run("Init", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"system","subtype":"init","session_id":"ses_abc","model":"anthropic/claude-sonnet-4-20250514"}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
@@ -32,6 +34,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("TextCompleted", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_1","sessionID":"ses_abc","messageID":"msg_1","type":"text","text":"Hello world","time":{"start":1234567889000,"end":1234567890000}}}}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
@@ -50,6 +53,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("ToolRunning", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_2","sessionID":"ses_abc","messageID":"msg_1","type":"tool","callID":"call_1","tool":"bash","state":{"status":"running","input":{"command":"ls"}}}}}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
@@ -71,6 +75,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("ToolCompleted", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_2","sessionID":"ses_abc","messageID":"msg_1","type":"tool","callID":"call_1","tool":"bash","state":{"status":"completed","input":{"command":"ls"},"output":"file1.txt\nfile2.txt"}}}}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
@@ -92,6 +97,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("ToolError", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_3","sessionID":"ses_abc","messageID":"msg_1","type":"tool","callID":"call_2","tool":"read","state":{"status":"error","input":{"file_path":"/etc/shadow"},"error":"Permission denied"}}}}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
@@ -113,6 +119,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("StepFinish", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_4","sessionID":"ses_abc","messageID":"msg_1","type":"step-finish","cost":0.003,"tokens":{"total":1500,"input":500,"output":1000,"reasoning":75,"cache":{"read":100,"write":50}}}}}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
@@ -149,6 +156,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("Reasoning", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_5","sessionID":"ses_abc","messageID":"msg_1","type":"reasoning","text":"Let me think...","time":{"start":1234567889000,"end":1234567890000}}}}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
@@ -167,6 +175,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("StepStart", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"message.part.updated","properties":{"part":{"id":"prt_6","sessionID":"ses_abc","messageID":"msg_1","type":"step-start","snapshot":"..."}}}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
@@ -185,6 +194,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("Delta", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"message.part.delta","properties":{"sessionID":"ses_abc","messageID":"msg_1","partID":"prt_1","field":"text","delta":"Hello"}}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
@@ -203,6 +213,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("SessionError", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"session.error","properties":{"sessionID":"ses_abc","error":{"name":"UnknownError","data":{"message":"Model not found: google/gemini-3.1-flash-lite-preview."}}}}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
@@ -224,6 +235,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("SessionErrorNoMessage", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"session.error","properties":{"sessionID":"ses_abc","error":{"name":"ProviderAuthError","data":{}}}}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
@@ -242,6 +254,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("TurnCloseError", func(t *testing.T) {
+		t.Parallel()
 		// Error details come from session.error; turn.close is passed through as raw.
 		const input = `{"type":"session.turn.close","properties":{"sessionID":"ses_abc","reason":"error"}}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
@@ -261,6 +274,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("TurnCloseCompleted", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"session.turn.close","properties":{"sessionID":"ses_abc","reason":"completed"}}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
@@ -279,6 +293,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("DiffStat", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"caic_diff_stat","diff_stat":[{"path":"main.go","added":10,"deleted":2}],"ts":1719500000.5}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
@@ -300,6 +315,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("UnknownType", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"session.turn.open","properties":{"sessionID":"ses_abc"}}`
 		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
 		if err != nil {
@@ -319,6 +335,7 @@ func TestParseMessage(t *testing.T) {
 }
 
 func TestKiloWireFormat(t *testing.T) {
+	t.Parallel()
 	// step-finish JSON for a single step.
 	stepFinish := []byte(`{"type":"message.part.updated","properties":{"part":{"id":"prt_1","sessionID":"ses_abc","messageID":"msg_1","type":"step-finish","cost":0.002,"tokens":{"total":300,"input":100,"output":200,"reasoning":10,"cache":{"read":20,"write":5}}}}}`)
 	turnCloseCompleted := []byte(`{"type":"session.turn.close","properties":{"sessionID":"ses_abc","reason":"completed"}}`)
@@ -335,6 +352,7 @@ func TestKiloWireFormat(t *testing.T) {
 	}
 
 	t.Run("SingleStepCompletion", func(t *testing.T) {
+		t.Parallel()
 		w := &kiloWireFormat{}
 
 		// step-finish → UsageMessage (not a terminal result)
@@ -376,6 +394,7 @@ func TestKiloWireFormat(t *testing.T) {
 	})
 
 	t.Run("MultiStepAccumulation", func(t *testing.T) {
+		t.Parallel()
 		w := &kiloWireFormat{}
 
 		stepFinish2 := []byte(`{"type":"message.part.updated","properties":{"part":{"id":"prt_2","sessionID":"ses_abc","messageID":"msg_2","type":"step-finish","cost":0.001,"tokens":{"total":150,"input":50,"output":100,"reasoning":0,"cache":{"read":0,"write":0}}}}}`)
@@ -406,6 +425,7 @@ func TestKiloWireFormat(t *testing.T) {
 	})
 
 	t.Run("ErrorSuppressesTurnClose", func(t *testing.T) {
+		t.Parallel()
 		w := &kiloWireFormat{}
 
 		// session.error → ResultMessage{IsError: true}, sets errorSeen
@@ -425,6 +445,7 @@ func TestKiloWireFormat(t *testing.T) {
 	})
 
 	t.Run("Interrupted", func(t *testing.T) {
+		t.Parallel()
 		w := &kiloWireFormat{}
 
 		parse(t, w, stepFinish)
@@ -449,6 +470,7 @@ func TestKiloWireFormat(t *testing.T) {
 	})
 
 	t.Run("StateResetsAfterTurnClose", func(t *testing.T) {
+		t.Parallel()
 		w := &kiloWireFormat{}
 
 		// First turn
@@ -473,6 +495,7 @@ func TestKiloWireFormat(t *testing.T) {
 	})
 
 	t.Run("ReasoningDeltaRoutedToThinkingDelta", func(t *testing.T) {
+		t.Parallel()
 		w := &kiloWireFormat{}
 
 		// First: a part.updated establishing the part as reasoning type.
@@ -495,6 +518,7 @@ func TestKiloWireFormat(t *testing.T) {
 	})
 
 	t.Run("TextDeltaUnaffectedByPartTracking", func(t *testing.T) {
+		t.Parallel()
 		w := &kiloWireFormat{}
 
 		// text part established
@@ -513,6 +537,7 @@ func TestKiloWireFormat(t *testing.T) {
 	})
 
 	t.Run("DeltaForUnknownPartIDRemainsTextDelta", func(t *testing.T) {
+		t.Parallel()
 		w := &kiloWireFormat{}
 
 		// delta arrives with no prior part.updated (e.g. mid-stream attach)
@@ -528,6 +553,7 @@ func TestKiloWireFormat(t *testing.T) {
 }
 
 func TestNormalizeToolName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		kilo string
 		want string
@@ -547,6 +573,7 @@ func TestNormalizeToolName(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.kilo, func(t *testing.T) {
+			t.Parallel()
 			if got := normalizeToolName(tt.kilo); got != tt.want {
 				t.Errorf("normalizeToolName(%q) = %q, want %q", tt.kilo, got, tt.want)
 			}

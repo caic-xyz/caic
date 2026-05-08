@@ -77,7 +77,7 @@ func newTestPrefs(t *testing.T) *preferences.Store {
 }
 
 func newTestServer(t *testing.T) *Server {
-	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "")
+	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
@@ -93,7 +93,9 @@ func newTestServer(t *testing.T) *Server {
 }
 
 func TestHandleTaskEvents(t *testing.T) {
+	t.Parallel()
 	t.Run("NotFound", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/tasks/99/raw_events", http.NoBody)
 		req.SetPathValue("id", "99")
@@ -109,6 +111,7 @@ func TestHandleTaskEvents(t *testing.T) {
 	})
 
 	t.Run("NonexistentID", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/tasks/abc/raw_events", http.NoBody)
 		req.SetPathValue("id", "abc")
@@ -125,47 +128,50 @@ func TestHandleTaskEvents(t *testing.T) {
 }
 
 func TestHandleTaskInput(t *testing.T) {
-	t.Run("NotRunning", func(t *testing.T) {
-		s := newTestServer(t)
-		s.tasks["t1"] = &taskEntry{
-			task: &task.Task{InitialPrompt: agent.Prompt{Text: "test"}},
-			done: make(chan struct{}),
-		}
+	t.Parallel()
 
-		body := strings.NewReader(`{"prompt":{"text":"hello"}}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/input", body)
-		req.SetPathValue("id", "t1")
-		w := httptest.NewRecorder()
-		handleWithTask(s, s.sendInput)(w, req)
-		if w.Code != http.StatusConflict {
-			t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
-		}
-		e := decodeError(t, w)
-		if e.Code != dto.CodeConflict {
-			t.Errorf("code = %q, want %q", e.Code, dto.CodeConflict)
-		}
-	})
+	tests := []struct {
+		name       string
+		bodyJSON   string
+		wantStatus int
+		wantCode   dto.ErrorCode
+	}{
+		{
+			name:       "NotRunning",
+			bodyJSON:   `{"prompt":{"text":"hello"}}`,
+			wantStatus: http.StatusConflict,
+			wantCode:   dto.CodeConflict,
+		},
+		{
+			name:       "EmptyPrompt",
+			bodyJSON:   `{"prompt":{"text":""}}`,
+			wantStatus: http.StatusBadRequest,
+			wantCode:   dto.CodeBadRequest,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			s := newTestServer(t)
+			s.tasks["t1"] = &taskEntry{
+				task: &task.Task{InitialPrompt: agent.Prompt{Text: "test"}},
+				done: make(chan struct{}),
+			}
 
-	t.Run("EmptyPrompt", func(t *testing.T) {
-		s := newTestServer(t)
-		s.tasks["t1"] = &taskEntry{
-			task: &task.Task{InitialPrompt: agent.Prompt{Text: "test"}},
-			done: make(chan struct{}),
-		}
-
-		body := strings.NewReader(`{"prompt":{"text":""}}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/input", body)
-		req.SetPathValue("id", "t1")
-		w := httptest.NewRecorder()
-		handleWithTask(s, s.sendInput)(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
-		}
-		e := decodeError(t, w)
-		if e.Code != dto.CodeBadRequest {
-			t.Errorf("code = %q, want %q", e.Code, dto.CodeBadRequest)
-		}
-	})
+			body := strings.NewReader(tt.bodyJSON)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/input", body)
+			req.SetPathValue("id", "t1")
+			w := httptest.NewRecorder()
+			handleWithTask(s, s.sendInput)(w, req)
+			if w.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", w.Code, tt.wantStatus)
+			}
+			e := decodeError(t, w)
+			if e.Code != tt.wantCode {
+				t.Errorf("code = %q, want %q", e.Code, tt.wantCode)
+			}
+		})
+	}
 }
 
 // testRestart is a helper for TestHandleRestart subtests.
@@ -193,17 +199,22 @@ func testRestart(t *testing.T, state task.State, bodyJSON string, wantStatus int
 }
 
 func TestHandleRestart(t *testing.T) {
+	t.Parallel()
 	t.Run("NotWaiting", func(t *testing.T) {
+		t.Parallel()
 		testRestart(t, task.StateRunning, `{"prompt":{"text":"new plan"}}`, http.StatusConflict, dto.CodeConflict)
 	})
 
 	t.Run("EmptyPrompt", func(t *testing.T) {
+		t.Parallel()
 		testRestart(t, task.StateWaiting, `{"prompt":{"text":""}}`, http.StatusBadRequest, dto.CodeBadRequest)
 	})
 }
 
 func TestHandlePurge(t *testing.T) {
+	t.Parallel()
 	t.Run("NotWaiting", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
 		// StatePending is the zero value, but set explicitly for clarity.
@@ -226,6 +237,7 @@ func TestHandlePurge(t *testing.T) {
 	})
 
 	t.Run("Waiting", func(t *testing.T) {
+		t.Parallel()
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateWaiting)
 		s := newTestServer(t)
@@ -256,6 +268,7 @@ func TestHandlePurge(t *testing.T) {
 	})
 
 	t.Run("CancelledContext", func(t *testing.T) {
+		t.Parallel()
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateRunning)
 		s := newTestServer(t)
@@ -281,7 +294,9 @@ func TestHandlePurge(t *testing.T) {
 }
 
 func TestHandleContainerDeath(t *testing.T) {
+	t.Parallel()
 	t.Run("ArchivesAsStopped", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		tk := &task.Task{
 			InitialPrompt: agent.Prompt{Text: "test"},
@@ -301,6 +316,7 @@ func TestHandleContainerDeath(t *testing.T) {
 	})
 
 	t.Run("UnknownContainer", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		// Should not panic or cause errors.
 		s.handleContainerDeath("unknown-container")
@@ -308,7 +324,9 @@ func TestHandleContainerDeath(t *testing.T) {
 }
 
 func TestHandleCreateTask(t *testing.T) {
+	t.Parallel()
 	t.Run("ReturnsID", func(t *testing.T) {
+		t.Parallel()
 		s := &Server{
 			ctx: t.Context(),
 			runners: map[string]*task.Runner{
@@ -342,6 +360,7 @@ func TestHandleCreateTask(t *testing.T) {
 	})
 
 	t.Run("MissingRepo", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		handler := handle(s.createTask)
 
@@ -360,6 +379,7 @@ func TestHandleCreateTask(t *testing.T) {
 	})
 
 	t.Run("UnknownRepo", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		handler := handle(s.createTask)
 
@@ -378,6 +398,7 @@ func TestHandleCreateTask(t *testing.T) {
 	})
 
 	t.Run("UnknownHarness", func(t *testing.T) {
+		t.Parallel()
 		s := &Server{
 			ctx: t.Context(),
 			runners: map[string]*task.Runner{
@@ -406,6 +427,7 @@ func TestHandleCreateTask(t *testing.T) {
 	})
 
 	t.Run("InvalidModel", func(t *testing.T) {
+		t.Parallel()
 		s := &Server{
 			ctx: t.Context(),
 			runners: map[string]*task.Runner{
@@ -438,6 +460,7 @@ func TestHandleCreateTask(t *testing.T) {
 	})
 
 	t.Run("ValidModel", func(t *testing.T) {
+		t.Parallel()
 		s := &Server{
 			ctx: t.Context(),
 			runners: map[string]*task.Runner{
@@ -471,6 +494,7 @@ func TestHandleCreateTask(t *testing.T) {
 	})
 
 	t.Run("WithImage", func(t *testing.T) {
+		t.Parallel()
 		s := &Server{
 			ctx: t.Context(),
 			runners: map[string]*task.Runner{
@@ -522,6 +546,7 @@ func TestHandleCreateTask(t *testing.T) {
 	})
 
 	t.Run("NoRepoTask", func(t *testing.T) {
+		t.Parallel()
 		// Regression: creating a task with no repos panicked with
 		// "makeslice: cap out of range" because len(req.Repos)-1 == -1.
 		s := &Server{
@@ -555,6 +580,7 @@ func TestHandleCreateTask(t *testing.T) {
 	})
 
 	t.Run("NoRepoRunnerMissing", func(t *testing.T) {
+		t.Parallel()
 		// When no repos are specified and no "" runner is configured, return
 		// a clear error instead of panicking.
 		s := newTestServer(t) // no "" runner
@@ -571,6 +597,7 @@ func TestHandleCreateTask(t *testing.T) {
 	})
 
 	t.Run("UnknownField", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		handler := handle(s.createTask)
 
@@ -590,6 +617,7 @@ func TestHandleCreateTask(t *testing.T) {
 }
 
 func TestHandleListRepos(t *testing.T) {
+	t.Parallel()
 	s := &Server{
 		repos: []repoInfo{
 			{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"},
@@ -642,7 +670,9 @@ func mustJSON(t *testing.T, v any) string {
 }
 
 func TestLoadPurgedTasks(t *testing.T) {
+	t.Parallel()
 	t.Run("OnStartup", func(t *testing.T) {
+		t.Parallel()
 		logDir := t.TempDir()
 
 		// Write 3 terminal task logs.
@@ -700,6 +730,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 	})
 
 	t.Run("TimeLimit", func(t *testing.T) {
+		t.Parallel()
 		logDir := t.TempDir()
 
 		// task 0: recent (purged)
@@ -745,6 +776,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 	})
 
 	t.Run("PerRepoLimit", func(t *testing.T) {
+		t.Parallel()
 		logDir := t.TempDir()
 
 		// Write 7 tasks for repo "a" and 3 for repo "b".
@@ -799,6 +831,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 	})
 
 	t.Run("CostInJSON", func(t *testing.T) {
+		t.Parallel()
 		logDir := t.TempDir()
 
 		meta := mustJSON(t, agent.MetaMessage{
@@ -855,6 +888,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 	})
 
 	t.Run("BackfillsCostFromMessages", func(t *testing.T) {
+		t.Parallel()
 		logDir := t.TempDir()
 
 		// Trailer has zero cost (e.g. session exited without final ResultMessage),
@@ -907,6 +941,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 	})
 
 	t.Run("SameBranchDifferentRepos", func(t *testing.T) {
+		t.Parallel()
 		logDir := t.TempDir()
 
 		// Two logs from different repos share the same branch name.
@@ -986,6 +1021,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 	})
 
 	t.Run("EmptyDir", func(t *testing.T) {
+		t.Parallel()
 		s := &Server{
 			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
 			tasks:   make(map[string]*taskEntry),
@@ -1001,6 +1037,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 	})
 
 	t.Run("PROutsideTailWindow", func(t *testing.T) {
+		t.Parallel()
 		// caic_pr early in the file with >64 KiB of messages after it.
 		// The header-only tail scan cannot see caic_pr; loadPurgedTasks
 		// must still restore it on the Task via LoadMessages.
@@ -1061,6 +1098,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 	})
 
 	t.Run("PerRepoLimit", func(t *testing.T) {
+		t.Parallel()
 		logDir := t.TempDir()
 
 		// Write 6 tasks for repo-a and 6 for repo-b; expect only the 5 most
@@ -1122,6 +1160,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 	})
 
 	t.Run("StateInference", func(t *testing.T) {
+		t.Parallel()
 		// Tasks without a caic_result trailer always load as "failed" —
 		// we cannot distinguish purged-without-trailer from interrupted.
 		// adoptContainers replaces stale entries with live state when a
@@ -1180,6 +1219,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 	})
 	t.Run("FeatureFlags", func(t *testing.T) {
+		t.Parallel()
 		logDir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "feat task",
@@ -1220,7 +1260,9 @@ func TestLoadPurgedTasks(t *testing.T) {
 }
 
 func TestComputeTaskPatch(t *testing.T) {
+	t.Parallel()
 	t.Run("ChangedFields", func(t *testing.T) {
+		t.Parallel()
 		old := `{"id":"abc","state":"running","costUSD":0.0}`
 		new_ := `{"id":"abc","state":"waiting","costUSD":1.5}`
 		patch, err := computeTaskPatch([]byte(old), []byte(new_))
@@ -1242,6 +1284,7 @@ func TestComputeTaskPatch(t *testing.T) {
 		}
 	})
 	t.Run("UnchangedFieldsOmitted", func(t *testing.T) {
+		t.Parallel()
 		old := `{"id":"abc","state":"running","repo":"myrepo"}`
 		new_ := `{"id":"abc","state":"waiting","repo":"myrepo"}`
 		patch, err := computeTaskPatch([]byte(old), []byte(new_))
@@ -1256,6 +1299,7 @@ func TestComputeTaskPatch(t *testing.T) {
 		}
 	})
 	t.Run("RemovedFieldSetToNull", func(t *testing.T) {
+		t.Parallel()
 		old := `{"id":"abc","error":"boom"}`
 		new_ := `{"id":"abc"}`
 		patch, err := computeTaskPatch([]byte(old), []byte(new_))
@@ -1267,6 +1311,7 @@ func TestComputeTaskPatch(t *testing.T) {
 		}
 	})
 	t.Run("AlwaysIncludesID", func(t *testing.T) {
+		t.Parallel()
 		old := `{"id":"xyz","state":"running"}`
 		new_ := `{"id":"xyz","state":"purged"}`
 		patch, err := computeTaskPatch([]byte(old), []byte(new_))
@@ -1280,7 +1325,9 @@ func TestComputeTaskPatch(t *testing.T) {
 }
 
 func TestHandleTaskRawEvents(t *testing.T) {
+	t.Parallel()
 	t.Run("PurgedTaskEvents", func(t *testing.T) {
+		t.Parallel()
 		logDir := t.TempDir()
 
 		// Write a purged task log with real agent messages.
@@ -1362,6 +1409,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 	})
 
 	t.Run("StreamEventTextDelta", func(t *testing.T) {
+		t.Parallel()
 		logDir := t.TempDir()
 
 		// Write a purged task log with stream events (text deltas) followed
@@ -1441,72 +1489,85 @@ func TestHandleTaskRawEvents(t *testing.T) {
 }
 
 func TestConfigValidate(t *testing.T) {
+	t.Parallel()
 	t.Run("both empty is valid", func(t *testing.T) {
+		t.Parallel()
 		if err := (&Config{}).Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
 	t.Run("PAT only is valid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitHubToken: "ghp_abc", GitLabToken: "glpat-abc"}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
 	t.Run("OAuth with ExternalURL and allowlist is valid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com", GitHubOAuthAllowedUsers: "alice,bob"}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
 	t.Run("ExternalURL auto is valid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{ExternalURL: "auto"}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
 	t.Run("OAuth with ExternalURL auto is valid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", GitHubOAuthAllowedUsers: "alice", ExternalURL: "auto"}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
 	t.Run("OAuth without ExternalURL is invalid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", GitHubOAuthAllowedUsers: "alice"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitHub OAuth without allowlist is invalid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitLab OAuth without allowlist is invalid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitLabOAuthClientID: "id", GitLabOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("OAuth with http ExternalURL is invalid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", GitHubOAuthAllowedUsers: "alice", ExternalURL: "http://caic.example.com"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("invalid ExternalURL is invalid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{ExternalURL: "not a url"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("ExternalURL with subpath is invalid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{ExternalURL: "https://caic.example.com/sub"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("ExternalURL with trailing slash is valid and stripped", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{ExternalURL: "https://caic.example.com/"}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
@@ -1516,48 +1577,56 @@ func TestConfigValidate(t *testing.T) {
 		}
 	})
 	t.Run("invalid GitLabURL is invalid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitLabURL: "not a url"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitLabURL with subpath is invalid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitLabURL: "https://gitlab.example.com/sub"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitHub OAuth ID without secret is invalid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitHubOAuthClientID: "id"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitHub OAuth secret without ID is invalid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitHubOAuthClientSecret: "sec"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitLab OAuth ID without secret is invalid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitLabOAuthClientID: "id"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitLab OAuth secret without ID is invalid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitLabOAuthClientSecret: "sec"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitHub PAT and OAuth together is invalid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitHubToken: "ghp_abc", GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", GitHubOAuthAllowedUsers: "alice", ExternalURL: "https://caic.example.com"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitLab PAT and OAuth together is invalid", func(t *testing.T) {
+		t.Parallel()
 		c := &Config{GitLabToken: "glpat-abc", GitLabOAuthClientID: "id", GitLabOAuthClientSecret: "sec", GitLabOAuthAllowedUsers: "alice", ExternalURL: "https://caic.example.com"}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
@@ -1566,7 +1635,9 @@ func TestConfigValidate(t *testing.T) {
 }
 
 func TestBuildHandler(t *testing.T) {
+	t.Parallel()
 	t.Run("auth disabled", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		if _, err := s.buildHandler(); err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -1574,6 +1645,7 @@ func TestBuildHandler(t *testing.T) {
 	})
 
 	t.Run("auth enabled", func(t *testing.T) {
+		t.Parallel()
 		// Regression: adding /api/v1/auth/ (unqualified) alongside GET / (qualified)
 		// caused a pattern conflict panic in Go 1.22+ ServeMux.
 		s := newTestServer(t)
@@ -1591,6 +1663,7 @@ func TestBuildHandler(t *testing.T) {
 	})
 
 	t.Run("static handler rejects non-GET", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		h, err := s.buildHandler()
 		if err != nil {
@@ -1607,6 +1680,7 @@ func TestBuildHandler(t *testing.T) {
 	})
 
 	t.Run("static host check rejects wrong host", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.hostState = auth.NewHostState("https://caic.example.com")
 		h, err := s.buildHandler()
@@ -1624,6 +1698,7 @@ func TestBuildHandler(t *testing.T) {
 	})
 
 	t.Run("static host check allows matching host", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.hostState = auth.NewHostState("https://caic.example.com")
 		h, err := s.buildHandler()
@@ -1641,6 +1716,7 @@ func TestBuildHandler(t *testing.T) {
 	})
 
 	t.Run("static host check is case insensitive", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.hostState = auth.NewHostState("https://caic.example.com")
 		h, err := s.buildHandler()
@@ -1658,6 +1734,7 @@ func TestBuildHandler(t *testing.T) {
 	})
 
 	t.Run("no host check when hostState nil", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		h, err := s.buildHandler()
 		if err != nil {
@@ -1674,6 +1751,7 @@ func TestBuildHandler(t *testing.T) {
 	})
 
 	t.Run("auto host check locks first FQDN", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
@@ -1710,6 +1788,7 @@ func TestBuildHandler(t *testing.T) {
 	})
 
 	t.Run("auto host check rejects same host on different port", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
@@ -1746,6 +1825,7 @@ func TestBuildHandler(t *testing.T) {
 	})
 
 	t.Run("auto host check allows IP before and after lock", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
@@ -1779,6 +1859,7 @@ func TestBuildHandler(t *testing.T) {
 	})
 
 	t.Run("auto host check allows localhost", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
@@ -1796,6 +1877,7 @@ func TestBuildHandler(t *testing.T) {
 	})
 
 	t.Run("auto host check is case insensitive", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
@@ -1822,6 +1904,7 @@ func TestBuildHandler(t *testing.T) {
 }
 
 func TestOAuthCallbackStateValidation(t *testing.T) {
+	t.Parallel()
 	// Spin up a fake OAuth token endpoint that returns a valid access token,
 	// and a fake userinfo endpoint.
 	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -1859,6 +1942,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 	}
 
 	t.Run("valid state round-trip succeeds", func(t *testing.T) {
+		t.Parallel()
 		// Simulate the start handler to get a valid state cookie.
 		startW := httptest.NewRecorder()
 		startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/auth/github/start", http.NoBody)
@@ -1900,7 +1984,9 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 }
 
 func TestForgeFor(t *testing.T) {
+	t.Parallel()
 	t.Run("PAT", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		s.forge.githubToken = "pat-token"
 		f := s.forge.forgeFor(t.Context(), forge.KindGitHub)
@@ -1910,6 +1996,7 @@ func TestForgeFor(t *testing.T) {
 	})
 
 	t.Run("no token returns nil", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		f := s.forge.forgeFor(t.Context(), forge.KindGitHub)
 		if f != nil {
@@ -1918,6 +2005,7 @@ func TestForgeFor(t *testing.T) {
 	})
 
 	t.Run("no token without user context returns nil even with auth store", func(t *testing.T) {
+		t.Parallel()
 		usersPath := filepath.Join(t.TempDir(), "users.json")
 		store, err := auth.Open(usersPath)
 		if err != nil {
@@ -1935,7 +2023,9 @@ func TestForgeFor(t *testing.T) {
 }
 
 func TestPrefsPerUser(t *testing.T) {
+	t.Parallel()
 	t.Run("separate users get separate preferences", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 
 		if err := s.prefs.Update("user-alice", func(p *preferences.Preferences) {
@@ -1955,6 +2045,7 @@ func TestPrefsPerUser(t *testing.T) {
 	})
 
 	t.Run("all users stored in single file", func(t *testing.T) {
+		t.Parallel()
 		path := filepath.Join(t.TempDir(), "preferences.json")
 		store, err := preferences.Open(path)
 		if err != nil {
@@ -1984,6 +2075,7 @@ func TestPrefsPerUser(t *testing.T) {
 	})
 
 	t.Run("default user in no-auth mode", func(t *testing.T) {
+		t.Parallel()
 		s := newTestServer(t)
 		// No auth in context — userIDFromCtx returns "default".
 		id := userIDFromCtx(t.Context())

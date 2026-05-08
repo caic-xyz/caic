@@ -9,7 +9,9 @@ import (
 )
 
 func TestParseDiffNumstat(t *testing.T) {
+	t.Parallel()
 	t.Run("Normal", func(t *testing.T) {
+		t.Parallel()
 		input := "10\t3\tsrc/main.go\n5\t0\tsrc/util.go\n"
 		ds := ParseDiffNumstat(input)
 		if len(ds) != 2 {
@@ -27,6 +29,7 @@ func TestParseDiffNumstat(t *testing.T) {
 	})
 
 	t.Run("Binary", func(t *testing.T) {
+		t.Parallel()
 		input := "-\t-\timage.png\n"
 		ds := ParseDiffNumstat(input)
 		if len(ds) != 1 {
@@ -42,6 +45,7 @@ func TestParseDiffNumstat(t *testing.T) {
 	})
 
 	t.Run("Empty", func(t *testing.T) {
+		t.Parallel()
 		if ds := ParseDiffNumstat(""); len(ds) != 0 {
 			t.Errorf("expected zero DiffStat, got %+v", ds)
 		}
@@ -51,6 +55,7 @@ func TestParseDiffNumstat(t *testing.T) {
 	})
 
 	t.Run("Mixed", func(t *testing.T) {
+		t.Parallel()
 		input := "10\t3\tsrc/main.go\n-\t-\tdata.bin\n2\t1\tREADME.md\n"
 		ds := ParseDiffNumstat(input)
 		if len(ds) != 3 {

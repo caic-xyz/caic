@@ -10,7 +10,9 @@ import (
 )
 
 func TestJSONRPCMessage(t *testing.T) {
+	t.Parallel()
 	t.Run("Notification", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{}}}`
 		var msg oc.JSONRPCMessage
 		if err := json.Unmarshal([]byte(input), &msg); err != nil {
@@ -24,6 +26,7 @@ func TestJSONRPCMessage(t *testing.T) {
 		}
 	})
 	t.Run("Response", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"jsonrpc":"2.0","id":1,"result":{"sessionId":"s1"}}`
 		var msg oc.JSONRPCMessage
 		if err := json.Unmarshal([]byte(input), &msg); err != nil {
@@ -34,6 +37,7 @@ func TestJSONRPCMessage(t *testing.T) {
 		}
 	})
 	t.Run("ErrorResponse", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"jsonrpc":"2.0","id":2,"error":{"code":-32600,"message":"invalid request"}}`
 		var msg oc.JSONRPCMessage
 		if err := json.Unmarshal([]byte(input), &msg); err != nil {
@@ -55,7 +59,9 @@ func TestJSONRPCMessage(t *testing.T) {
 }
 
 func TestAgentMessageChunkUpdate(t *testing.T) {
+	t.Parallel()
 	t.Run("Basic", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello"}}`
 		var u oc.AgentMessageChunkUpdate
 		if err := json.Unmarshal([]byte(input), &u); err != nil {
@@ -68,7 +74,9 @@ func TestAgentMessageChunkUpdate(t *testing.T) {
 }
 
 func TestToolCallUpdate(t *testing.T) {
+	t.Parallel()
 	t.Run("AllKnownFields", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"sessionUpdate":"tool_call","toolCallId":"c1","title":"bash","kind":"execute","status":"pending","locations":[{"path":"/tmp/a.go","line":10}],"rawInput":{"command":"ls"}}`
 		var u oc.ToolCallUpdate
 		if err := json.Unmarshal([]byte(input), &u); err != nil {
@@ -90,7 +98,9 @@ func TestToolCallUpdate(t *testing.T) {
 }
 
 func TestToolCallUpdateUpdate(t *testing.T) {
+	t.Parallel()
 	t.Run("CompletedWithContent", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"sessionUpdate":"tool_call_update","toolCallId":"c1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"done"}}]}`
 		var u oc.ToolCallUpdateUpdate
 		if err := json.Unmarshal([]byte(input), &u); err != nil {
@@ -104,6 +114,7 @@ func TestToolCallUpdateUpdate(t *testing.T) {
 		}
 	})
 	t.Run("WithRawOutput", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"sessionUpdate":"tool_call_update","toolCallId":"c1","status":"failed","rawOutput":{"output":"","error":"permission denied","metadata":{"code":1}}}`
 		var u oc.ToolCallUpdateUpdate
 		if err := json.Unmarshal([]byte(input), &u); err != nil {
@@ -117,6 +128,7 @@ func TestToolCallUpdateUpdate(t *testing.T) {
 		}
 	})
 	t.Run("DiffContent", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"sessionUpdate":"tool_call_update","toolCallId":"c1","status":"completed","content":[{"type":"diff","path":"main.go","oldText":"old","newText":"new"}]}`
 		var u oc.ToolCallUpdateUpdate
 		if err := json.Unmarshal([]byte(input), &u); err != nil {
@@ -133,7 +145,9 @@ func TestToolCallUpdateUpdate(t *testing.T) {
 }
 
 func TestPlanUpdate(t *testing.T) {
+	t.Parallel()
 	t.Run("Basic", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"sessionUpdate":"plan","entries":[{"priority":"medium","status":"completed","content":"step 1"},{"status":"pending","content":"step 2"}]}`
 		var u oc.PlanUpdate
 		if err := json.Unmarshal([]byte(input), &u); err != nil {
@@ -153,6 +167,7 @@ func TestPlanUpdate(t *testing.T) {
 		}
 	})
 	t.Run("CancelledStatus", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"sessionUpdate":"plan","entries":[{"status":"cancelled","content":"dropped"}]}`
 		var u oc.PlanUpdate
 		if err := json.Unmarshal([]byte(input), &u); err != nil {
@@ -165,7 +180,9 @@ func TestPlanUpdate(t *testing.T) {
 }
 
 func TestUsageUpdateUpdate(t *testing.T) {
+	t.Parallel()
 	t.Run("Basic", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"sessionUpdate":"usage_update","used":50000,"size":200000,"cost":{"amount":0.42,"currency":"USD"}}`
 		var u oc.UsageUpdateUpdate
 		if err := json.Unmarshal([]byte(input), &u); err != nil {
@@ -187,7 +204,9 @@ func TestUsageUpdateUpdate(t *testing.T) {
 }
 
 func TestContentBlock(t *testing.T) {
+	t.Parallel()
 	t.Run("Text", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"text","text":"hello"}`
 		var b oc.ContentBlock
 		if err := json.Unmarshal([]byte(input), &b); err != nil {
@@ -198,6 +217,7 @@ func TestContentBlock(t *testing.T) {
 		}
 	})
 	t.Run("Image", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"image","data":"aGVsbG8=","mimeType":"image/png","uri":"file:///tmp/img.png"}`
 		var b oc.ContentBlock
 		if err := json.Unmarshal([]byte(input), &b); err != nil {
@@ -208,6 +228,7 @@ func TestContentBlock(t *testing.T) {
 		}
 	})
 	t.Run("ResourceLink", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"type":"resource_link","uri":"file:///tmp/a.go","name":"a.go","mimeType":"text/x-go"}`
 		var b oc.ContentBlock
 		if err := json.Unmarshal([]byte(input), &b); err != nil {
@@ -220,7 +241,9 @@ func TestContentBlock(t *testing.T) {
 }
 
 func TestInitializeResult(t *testing.T) {
+	t.Parallel()
 	t.Run("WithCapabilities", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"protocolVersion":1,"AgentCapabilities":{"PromptCapabilities":{"image":true,"embeddedContext":true},"loadSession":true},"AgentInfo":{"name":"opencode","version":"0.5.0"}}`
 		var r oc.InitializeResult
 		if err := json.Unmarshal([]byte(input), &r); err != nil {
@@ -245,7 +268,9 @@ func TestInitializeResult(t *testing.T) {
 }
 
 func TestPromptResult(t *testing.T) {
+	t.Parallel()
 	t.Run("WithUsage", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"stopReason":"end_turn","usage":{"totalTokens":5000,"inputTokens":3000,"outputTokens":500,"thoughtTokens":200,"cachedReadTokens":100,"cachedWriteTokens":50}}`
 		var r oc.PromptResult
 		if err := json.Unmarshal([]byte(input), &r); err != nil {
@@ -267,7 +292,9 @@ func TestPromptResult(t *testing.T) {
 }
 
 func TestPermissionRequestParams(t *testing.T) {
+	t.Parallel()
 	t.Run("Basic", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"sessionId":"s1","toolCall":{"toolCallId":"c1","title":"bash","kind":"execute","rawInput":{"command":"rm -rf /"}},"options":[{"optionId":"o1","kind":"allow_once","name":"Allow"}]}`
 		var p oc.PermissionRequestParams
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
@@ -286,7 +313,9 @@ func TestPermissionRequestParams(t *testing.T) {
 }
 
 func TestCurrentModeUpdate(t *testing.T) {
+	t.Parallel()
 	t.Run("WithFields", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"sessionUpdate":"current_mode_update","modeId":"code","modeName":"Code Mode"}`
 		var u oc.CurrentModeUpdate
 		if err := json.Unmarshal([]byte(input), &u); err != nil {
@@ -302,7 +331,9 @@ func TestCurrentModeUpdate(t *testing.T) {
 }
 
 func TestToolCallRawOutput(t *testing.T) {
+	t.Parallel()
 	t.Run("Basic", func(t *testing.T) {
+		t.Parallel()
 		const input = `{"output":"success","error":"","metadata":{"exitCode":0}}`
 		var o oc.ToolCallRawOutput
 		if err := json.Unmarshal([]byte(input), &o); err != nil {

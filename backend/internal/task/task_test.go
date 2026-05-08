@@ -16,8 +16,11 @@ import (
 )
 
 func TestTask(t *testing.T) {
+	t.Parallel()
 	t.Run("Subscribe", func(t *testing.T) {
+		t.Parallel()
 		t.Run("SlowSubscriberThenCancel", func(t *testing.T) {
+			t.Parallel()
 			// Regression test: if the fan-out drops a slow subscriber
 			// (buffer full) and closes its channel, the context-done
 			// goroutine must not panic on a double close.
@@ -43,6 +46,7 @@ func TestTask(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 		})
 		t.Run("Replay", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			// Add messages before subscribing.
 			msg1 := &agent.SystemMessage{MessageType: "system", Subtype: "status"}
@@ -65,6 +69,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("ReplayLargeHistory", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			// Add more messages than any reasonable channel buffer to verify no deadlock.
 			const n = 1000
@@ -81,6 +86,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("MultipleListeners", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.addMessage(t.Context(), &agent.SystemMessage{MessageType: "system", Subtype: "init"}, false)
 
@@ -111,6 +117,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("Live", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 
 			_, ch, unsub := tk.Subscribe(t.Context())
@@ -133,7 +140,9 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("SendInput", func(t *testing.T) {
+		t.Parallel()
 		t.Run("PreservesPlanContent", func(t *testing.T) {
+			t.Parallel()
 			// When the user sends regular input (instead of clicking
 			// "Clear and execute plan"), planContent must be preserved
 			// so the plan UI reappears after the agent finishes. The
@@ -189,6 +198,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("EditUpdatesPlanContent", func(t *testing.T) {
+			t.Parallel()
 			// When the agent uses the Edit tool on a plan file, the
 			// in-memory planContent must be updated so the UI shows
 			// the revised plan.
@@ -213,6 +223,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("EditReplaceAll", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
@@ -229,6 +240,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("EditIgnoresNonPlanFile", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{
@@ -246,6 +258,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("EditAfterSendInputUpdatesPlan", func(t *testing.T) {
+			t.Parallel()
 			// Core regression test: user rejects plan and asks for
 			// improvement, agent edits the plan file.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -297,6 +310,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("NoSession", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateWaiting)
 			err := tk.SendInput(t.Context(), agent.Prompt{Text: "hello"})
@@ -312,6 +326,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("DeadSessionDetected", func(t *testing.T) {
+			t.Parallel()
 			// Simulate a session that has already finished (e.g. relay
 			// subprocess exited). SendInput should detect it and return
 			// "no active session" without changing state.
@@ -349,6 +364,7 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("AttachDetachSession", func(t *testing.T) {
+		t.Parallel()
 		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 		if tk.SessionDone() != nil {
 			t.Error("SessionDone() should be nil when no session attached")
@@ -388,7 +404,9 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("addMessage", func(t *testing.T) {
+		t.Parallel()
 		t.Run("TransitionsToWaiting", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			result := &agent.ResultMessage{MessageType: "result"}
@@ -398,6 +416,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("TransitionsToAsking", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			// Add an AskMessage.
@@ -412,6 +431,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("TransitionsToAskingWithPartialMessages", func(t *testing.T) {
+			t.Parallel()
 			// With --include-partial-messages, Claude Code emits multiple
 			// assistant snapshots per turn. AskUserQuestion appears in an
 			// earlier snapshot while the final one is text-only. The state
@@ -431,6 +451,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("TextMessageTransitionsWaitingToRunning", func(t *testing.T) {
+			t.Parallel()
 			// When the agent starts producing output while the task is
 			// waiting (e.g. relay reconnect after server restart), the
 			// state should transition back to running.
@@ -442,6 +463,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("ToolUseMessageTransitionsAskingToRunning", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateAsking)
 			tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "tu1", Name: "Read"}, false)
@@ -450,6 +472,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("ResultTransitionsWaitingToAsking", func(t *testing.T) {
+			t.Parallel()
 			// When watchSession sets Waiting before the ResultMessage is
 			// processed, the ResultMessage should still detect
 			// AskMessage and correct the state to Asking.
@@ -468,6 +491,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("TransitionsToHasPlan", func(t *testing.T) {
+			t.Parallel()
 			// ExitPlanMode + plan content + ResultMessage → StateHasPlan.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
@@ -484,6 +508,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("AskingTakesPriorityOverHasPlan", func(t *testing.T) {
+			t.Parallel()
 			// Both AskMessage and ExitPlanMode in same turn → StateAsking.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
@@ -504,6 +529,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("NoHasPlanWithoutPlanContent", func(t *testing.T) {
+			t.Parallel()
 			// ExitPlanMode without plan content → StateWaiting.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
@@ -516,6 +542,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("ExitPlanModeSnapshotsPlanContent", func(t *testing.T) {
+			t.Parallel()
 			// trackToolUse must snapshot planContent onto the ExitPlanMode
 			// ToolUseMessage so the SSE converter can include it.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -531,6 +558,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("NewExitPlanModeClearsPreviousPlanContent", func(t *testing.T) {
+			t.Parallel()
 			// When a second ExitPlanMode arrives, the first one's PlanContent
 			// must be cleared so the frontend doesn't list the stale plan.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -561,6 +589,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("HasPlanToRunningOnText", func(t *testing.T) {
+			t.Parallel()
 			// TextMessage while HasPlan → Running.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateHasPlan)
@@ -570,6 +599,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("TextMessageTransitionsStartingToRunning", func(t *testing.T) {
+			t.Parallel()
 			// When the agent subprocess produces output before
 			// Runner.Start calls SetState(Running), StateStarting
 			// must transition to Running so the subsequent
@@ -582,6 +612,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("NoTransitionForNonActiveStates", func(t *testing.T) {
+			t.Parallel()
 			// TextMessages should NOT transition terminal or
 			// setup states (except StateStarting, which is
 			// tested separately above).
@@ -597,7 +628,9 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("addMessageDiffStat", func(t *testing.T) {
+		t.Parallel()
 		t.Run("DiffStatMessage", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			ds := agent.DiffStat{
@@ -627,6 +660,7 @@ func TestTask(t *testing.T) {
 		})
 
 		t.Run("ResultMessageUpdatesLiveDiffStat", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			tk.addMessage(t.Context(), &agent.ResultMessage{
@@ -641,7 +675,9 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("RestoreMessagesDiffStat", func(t *testing.T) {
+		t.Parallel()
 		t.Run("DiffStatMessage", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StatePurged)
 			tk.RestoreMessages([]agent.Message{
@@ -662,6 +698,7 @@ func TestTask(t *testing.T) {
 		})
 
 		t.Run("ResultMessageAfterDiffStat", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StatePurged)
 			tk.RestoreMessages([]agent.Message{
@@ -681,6 +718,7 @@ func TestTask(t *testing.T) {
 		})
 
 		t.Run("DiffStatAfterResult", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StatePurged)
 			tk.RestoreMessages([]agent.Message{
@@ -707,6 +745,7 @@ func TestTask(t *testing.T) {
 		// diff. Callers (adoptOne) must compute the host-side diff stat
 		// separately after RestoreMessages.
 		t.Run("EmptyRelayDiffAfterCommit", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			// Simulate relay output: ResultMessage without DiffStat
@@ -738,6 +777,7 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("LiveUsageCumulative", func(t *testing.T) {
+		t.Parallel()
 		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 		tk.SetState(StateRunning)
 		tk.addMessage(t.Context(), &agent.ResultMessage{
@@ -771,6 +811,7 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("RestoreMessagesUsageCumulative", func(t *testing.T) {
+		t.Parallel()
 		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 		tk.SetState(StatePurged)
 		tk.RestoreMessages([]agent.Message{
@@ -801,6 +842,7 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("LiveCostCumulativeAcrossSessions", func(t *testing.T) {
+		t.Parallel()
 		// Cost, turns, and duration must accumulate across sessions separated
 		// by ClearMessages. computeCost uses TotalCostUSD as the base and adds
 		// the cache-read surcharge.
@@ -835,6 +877,7 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("LiveDurationAccumulatesWithinSession", func(t *testing.T) {
+		t.Parallel()
 		// Multiple result events within a single session (no ClearMessages/compact_boundary)
 		// must accumulate duration rather than overwriting with only the last invocation's value.
 		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -865,6 +908,7 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("LiveCostCumulativeAcrossThreeSessions", func(t *testing.T) {
+		t.Parallel()
 		// Regression: ClearMessages used += (double-count) instead of = assignment.
 		// Verify cost is correct after two ClearMessages calls.
 		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -901,6 +945,7 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("RestoreMessagesDurationAccumulatesWithinSession", func(t *testing.T) {
+		t.Parallel()
 		// RestoreMessages (reloadFromMsgs) must accumulate DurationMs across
 		// multiple result events within a single session.
 		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -921,6 +966,7 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("RestoreMessagesCostCumulativeAcrossSessions", func(t *testing.T) {
+		t.Parallel()
 		// RestoreMessages must sum cost/turns/duration across context_cleared
 		// boundaries, mirroring the live path.
 		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -955,6 +1001,7 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("LiveCostIncludesCacheRead", func(t *testing.T) {
+		t.Parallel()
 		// Regression: TotalCostUSD from Claude Code omits cache_read cost.
 		// computeCost must add the surcharge on top of TotalCostUSD.
 		// Setup: TotalCostUSD = $1.50 from 100K input tokens (price = $0.000015/tok).
@@ -976,6 +1023,7 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("CompactBoundaryAccumulatesStats", func(t *testing.T) {
+		t.Parallel()
 		// compact_boundary resets NumTurns, DurationMs, and TotalCostUSD in
 		// Claude Code's subsequent ResultMessages. Stats must be accumulated
 		// across the boundary, just like context_cleared.
@@ -999,6 +1047,7 @@ func TestTask(t *testing.T) {
 		}
 
 		t.Run("Live", func(t *testing.T) {
+			t.Parallel()
 			tk := newTask()
 			tk.addMessage(t.Context(), result1, false)
 			tk.addMessage(t.Context(), compact, false)
@@ -1016,6 +1065,7 @@ func TestTask(t *testing.T) {
 		})
 
 		t.Run("Restore", func(t *testing.T) {
+			t.Parallel()
 			tk := newTask()
 			tk.SetState(StatePurged)
 			tk.RestoreMessages([]agent.Message{result1, compact, result2})
@@ -1033,7 +1083,9 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("ClearMessages", func(t *testing.T) {
+		t.Parallel()
 		t.Run("ResetsPlanState", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			// Simulate an agent entering plan mode and writing a plan file.
@@ -1066,6 +1118,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("SuppressesPlanRewrite", func(t *testing.T) {
+			t.Parallel()
 			// After ClearMessages (restart), the agent may re-enter plan mode
 			// and write to .claude/plans/. The plan must not resurface.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -1106,6 +1159,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("ClearsExitPlanModePlanContent", func(t *testing.T) {
+			t.Parallel()
 			// After ClearMessages the ExitPlanMode message's PlanContent in
 			// history must be erased so new subscribers don't see stale plans.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -1128,6 +1182,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("SuppressionLiftsAfterTurn", func(t *testing.T) {
+			t.Parallel()
 			// After the restart turn completes, a subsequent user-initiated turn
 			// must be able to produce a plan again.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -1161,7 +1216,9 @@ func TestTask(t *testing.T) {
 	})
 
 	t.Run("RestoreMessages", func(t *testing.T) {
+		t.Parallel()
 		t.Run("Basic", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			msgs := []agent.Message{
@@ -1182,6 +1239,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("InfersAsking", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			msgs := []agent.Message{
@@ -1198,6 +1256,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("InfersHasPlan", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			msgs := []agent.Message{
@@ -1214,6 +1273,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("SkipsTrailingDiffStat", func(t *testing.T) {
+			t.Parallel()
 			// The relay emits DiffStatMessage after the ResultMessage.
 			// RestoreMessages should skip it and still infer Waiting.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -1232,6 +1292,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("NoResultKeepsState", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			msgs := []agent.Message{
@@ -1245,6 +1306,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("TerminalStatePreserved", func(t *testing.T) {
+			t.Parallel()
 			for _, state := range []State{StatePurged, StateFailed, StatePurging} {
 				tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 				tk.SetState(state)
@@ -1259,6 +1321,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("UsesLastSessionID", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			msgs := []agent.Message{
 				&agent.InitMessage{SessionID: "old"},
@@ -1272,6 +1335,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("RestoresPlanFile", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			msgs := []agent.Message{
@@ -1287,6 +1351,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("RestoresInPlanMode", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateRunning)
 			msgs := []agent.Message{
@@ -1315,6 +1380,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("ContextClearedResetsPlanState", func(t *testing.T) {
+			t.Parallel()
 			// Simulates relay output containing a plan, then a context_cleared
 			// marker (from ClearMessages on restart), then a new session without
 			// a plan. RestoreMessages must not carry over the stale plan.
@@ -1346,6 +1412,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("ContextClearedSuppressesPlanRewrite", func(t *testing.T) {
+			t.Parallel()
 			// After "Clear and execute plan", the agent may re-enter plan mode
 			// and write to .claude/plans/ during execution. The dismissed plan
 			// must not resurface when the turn completes.
@@ -1380,6 +1447,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("ContextClearedClearsExitPlanModePlanContent", func(t *testing.T) {
+			t.Parallel()
 			// context_cleared in history must zero PlanContent on preceding
 			// ExitPlanMode events so new subscribers see no stale plan.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -1402,6 +1470,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("PlanUpdateClearsPreviousExitPlanModePlanContent", func(t *testing.T) {
+			t.Parallel()
 			// When a plan is updated (two ExitPlanMode without context_cleared),
 			// only the latest ExitPlanMode should retain its PlanContent.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
@@ -1434,6 +1503,7 @@ func TestTask(t *testing.T) {
 			}
 		})
 		t.Run("Subscribe", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			msgs := []agent.Message{
 				&agent.TextMessage{Text: "msg1"},
@@ -1453,7 +1523,9 @@ func TestTask(t *testing.T) {
 }
 
 func TestState(t *testing.T) {
+	t.Parallel()
 	t.Run("String", func(t *testing.T) {
+		t.Parallel()
 		for _, tt := range []struct {
 			state State
 			want  string
@@ -1478,7 +1550,9 @@ func TestState(t *testing.T) {
 		}
 	})
 	t.Run("SetStateIf", func(t *testing.T) {
+		t.Parallel()
 		t.Run("Match", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{}
 			tk.SetState(StateRunning)
 			if !tk.SetStateIf(StateRunning, StateWaiting) {
@@ -1489,6 +1563,7 @@ func TestState(t *testing.T) {
 			}
 		})
 		t.Run("Mismatch", func(t *testing.T) {
+			t.Parallel()
 			tk := &Task{}
 			tk.SetState(StateAsking)
 			if tk.SetStateIf(StateRunning, StateWaiting) {

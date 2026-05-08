@@ -61,7 +61,9 @@ func claudeInit(t *testing.T, sessionID string) string {
 }
 
 func TestLoadLogs(t *testing.T) {
+	t.Parallel()
 	t.Run("Valid", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task1", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
 		asst := claudeAssistant(t, map[string]any{"type": "text", "text": "hello"})
@@ -88,6 +90,7 @@ func TestLoadLogs(t *testing.T) {
 		}
 	})
 	t.Run("NotExist", func(t *testing.T) {
+		t.Parallel()
 		tasks, err := LoadLogs(filepath.Join(t.TempDir(), "nope"))
 		if err != nil {
 			t.Fatal(err)
@@ -97,6 +100,7 @@ func TestLoadLogs(t *testing.T) {
 		}
 	})
 	t.Run("BadHeader", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		writeLogFile(t, dir, "bad.jsonl", `{"type":"not_meta"}`)
 
@@ -109,6 +113,7 @@ func TestLoadLogs(t *testing.T) {
 		}
 	})
 	t.Run("MultipleFiles", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 
 		meta1 := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "first", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude", StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
@@ -155,6 +160,7 @@ func TestLoadLogs(t *testing.T) {
 		}
 	})
 	t.Run("FeatureFlagsAllSet", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "feat task",
@@ -183,6 +189,7 @@ func TestLoadLogs(t *testing.T) {
 		}
 	})
 	t.Run("FeatureFlagsOmitted", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "plain task",
@@ -207,6 +214,7 @@ func TestLoadLogs(t *testing.T) {
 		}
 	})
 	t.Run("FeatureFlagsPartial", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "usb only",
@@ -232,6 +240,7 @@ func TestLoadLogs(t *testing.T) {
 		}
 	})
 	t.Run("ContextClearedResetsPlanState", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "plan task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
 		// Old session: agent enters plan mode and writes a plan file.
@@ -274,6 +283,7 @@ func TestLoadLogs(t *testing.T) {
 		}
 	})
 	t.Run("PRHeaderOnly", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "pr task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-1"}}, Harness: "claude"})
 		prMsg := mustJSON(t, agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "octocat", ForgeRepo: "hello", ForgePR: 42})
@@ -299,6 +309,7 @@ func TestLoadLogs(t *testing.T) {
 		}
 	})
 	t.Run("PRFullParse", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "pr task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-2"}}, Harness: "claude"})
 		asst := claudeAssistant(t, map[string]any{"type": "text", "text": "done"})
@@ -325,6 +336,7 @@ func TestLoadLogs(t *testing.T) {
 		}
 	})
 	t.Run("PROutsideTailWindow", func(t *testing.T) {
+		t.Parallel()
 		// caic_pr early in the file, followed by >64 KiB of messages,
 		// so the header-only tail scan cannot see it.
 		dir := t.TempDir()
@@ -373,6 +385,7 @@ func TestLoadLogs(t *testing.T) {
 }
 
 func TestParseState(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		in   string
 		want State
@@ -382,6 +395,7 @@ func TestParseState(t *testing.T) {
 		{"unknown", StateFailed},
 	} {
 		t.Run(tt.in, func(t *testing.T) {
+			t.Parallel()
 			if got := parseState(tt.in); got != tt.want {
 				t.Errorf("parseState(%q) = %v, want %v", tt.in, got, tt.want)
 			}

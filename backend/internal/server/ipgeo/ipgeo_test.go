@@ -11,6 +11,7 @@ import (
 )
 
 func TestGetClientIP(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		remoteAddr    string
@@ -27,6 +28,7 @@ func TestGetClientIP(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 			r.RemoteAddr = tt.remoteAddr
 			if tt.xForwardedFor != "" {
@@ -43,7 +45,9 @@ func TestGetClientIP(t *testing.T) {
 }
 
 func TestCountryCode(t *testing.T) {
+	t.Parallel()
 	t.Run("special addresses", func(t *testing.T) {
+		t.Parallel()
 		// A nil-reader Checker handles all special cases; public IPs return "".
 		c := &Checker{}
 		tests := []struct {
@@ -69,6 +73,7 @@ func TestCountryCode(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(tt.ip, func(t *testing.T) {
+				t.Parallel()
 				if got := c.CountryCode(tt.ip); got != tt.want {
 					t.Errorf("CountryCode(%q) = %q, want %q", tt.ip, got, tt.want)
 				}
@@ -76,6 +81,7 @@ func TestCountryCode(t *testing.T) {
 		}
 	})
 	t.Run("named CIDR groups", func(t *testing.T) {
+		t.Parallel()
 		c := &Checker{namedCIDRs: []namedPrefix{
 			{name: "github", prefix: netip.MustParsePrefix("192.30.252.0/22")},
 			{name: "github", prefix: netip.MustParsePrefix("185.199.108.0/22")},
@@ -95,6 +101,7 @@ func TestCountryCode(t *testing.T) {
 		}
 	})
 	t.Run("multiple named groups", func(t *testing.T) {
+		t.Parallel()
 		c := &Checker{namedCIDRs: []namedPrefix{
 			{name: "github", prefix: netip.MustParsePrefix("192.30.252.0/22")},
 			{name: "myservice", prefix: netip.MustParsePrefix("203.0.113.0/24")},
@@ -117,17 +124,21 @@ func mustParseAllowlist(t *testing.T, s string) *allowlist {
 }
 
 func TestParseAllowlist(t *testing.T) {
+	t.Parallel()
 	t.Run("error on empty", func(t *testing.T) {
+		t.Parallel()
 		if _, err := parseAllowlist(""); err == nil {
 			t.Error("expected error for empty string")
 		}
 	})
 	t.Run("error on whitespace only", func(t *testing.T) {
+		t.Parallel()
 		if _, err := parseAllowlist("  ,  "); err == nil {
 			t.Error("expected error for whitespace-only")
 		}
 	})
 	t.Run("allows listed country codes", func(t *testing.T) {
+		t.Parallel()
 		a := mustParseAllowlist(t, "CA,US,tailscale")
 		for _, cc := range []string{"CA", "US", "TAILSCALE", "tailscale", "ca"} {
 			if !a.allowed(cc) {
@@ -136,6 +147,7 @@ func TestParseAllowlist(t *testing.T) {
 		}
 	})
 	t.Run("blocks unlisted", func(t *testing.T) {
+		t.Parallel()
 		a := mustParseAllowlist(t, "CA")
 		for _, cc := range []string{"US", "GB", "local", "tailscale", ""} {
 			if a.allowed(cc) {
@@ -144,6 +156,7 @@ func TestParseAllowlist(t *testing.T) {
 		}
 	})
 	t.Run("0.0.0.0/0 and ::/0 allows all IPs", func(t *testing.T) {
+		t.Parallel()
 		a := mustParseAllowlist(t, "0.0.0.0/0,::/0")
 		for _, ip := range []string{"1.2.3.4", "8.8.8.8", "192.168.1.1", "::1", "2001:db8::1"} {
 			if !a.containsIP(ip) {
@@ -152,6 +165,7 @@ func TestParseAllowlist(t *testing.T) {
 		}
 	})
 	t.Run("CIDR entries matched by containsIP", func(t *testing.T) {
+		t.Parallel()
 		a := mustParseAllowlist(t, "CA,34.74.90.64/28,34.74.226.0/24")
 		if !a.allowed("CA") {
 			t.Error("CA should be allowed")
@@ -167,6 +181,7 @@ func TestParseAllowlist(t *testing.T) {
 		}
 	})
 	t.Run("CIDR-only allowlist does not affect allowed", func(t *testing.T) {
+		t.Parallel()
 		a := mustParseAllowlist(t, "34.74.90.64/28")
 		if a.allowed("US") {
 			t.Error("US should not be allowed in CIDR-only list")
@@ -176,6 +191,7 @@ func TestParseAllowlist(t *testing.T) {
 		}
 	})
 	t.Run("invalid CIDR returns error", func(t *testing.T) {
+		t.Parallel()
 		if _, err := parseAllowlist("CA,not-a-cidr/bad"); err == nil {
 			t.Error("expected error for invalid CIDR")
 		}
@@ -183,6 +199,7 @@ func TestParseAllowlist(t *testing.T) {
 }
 
 func TestNeedsDB(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		s    string
 		want bool
@@ -201,6 +218,7 @@ func TestNeedsDB(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.s, func(t *testing.T) {
+			t.Parallel()
 			a := mustParseAllowlist(t, tt.s)
 			if got := a.needsDB(); got != tt.want {
 				t.Errorf("needsDB() = %v, want %v", got, tt.want)
@@ -210,19 +228,18 @@ func TestNeedsDB(t *testing.T) {
 }
 
 func TestNewChecker(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"hooks": []string{"192.30.252.0/22", "185.199.108.0/22"},
 		})
 	}))
-	defer srv.Close()
-	origURL := githubMetaURL
-	githubMetaURL = srv.URL + "/meta"
-	defer func() { githubMetaURL = origURL }()
+	t.Cleanup(srv.Close)
 
 	t.Run("github in allowlist fetches CIDRs", func(t *testing.T) {
-		c, err := NewChecker(t.Context(), "local,tailscale,github", "")
+		t.Parallel()
+		c, err := NewChecker(t.Context(), "local,tailscale,github", "", srv.URL+"/meta")
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -234,7 +251,8 @@ func TestNewChecker(t *testing.T) {
 		}
 	})
 	t.Run("github not in allowlist skips fetch", func(t *testing.T) {
-		c, err := NewChecker(t.Context(), "local,tailscale", "")
+		t.Parallel()
+		c, err := NewChecker(t.Context(), "local,tailscale", "", "")
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -244,14 +262,14 @@ func TestNewChecker(t *testing.T) {
 		}
 	})
 	t.Run("fetch failure is non-fatal", func(t *testing.T) {
-		githubMetaURL = "http://127.0.0.1:0/meta" // unreachable
-		defer func() { githubMetaURL = srv.URL + "/meta" }()
-		if _, err := NewChecker(t.Context(), "local,tailscale,github", ""); err != nil {
+		t.Parallel()
+		if _, err := NewChecker(t.Context(), "local,tailscale,github", "", "http://127.0.0.1:0/meta"); err != nil {
 			t.Errorf("NewChecker should not fail on fetch error: %v", err)
 		}
 	})
 	t.Run("country code without DB returns error", func(t *testing.T) {
-		if _, err := NewChecker(t.Context(), "CA", ""); err == nil {
+		t.Parallel()
+		if _, err := NewChecker(t.Context(), "CA", "", ""); err == nil {
 			t.Error("expected error when country code given without DB path")
 		}
 	})

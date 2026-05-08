@@ -12,7 +12,9 @@ import (
 )
 
 func TestCheckSafety(t *testing.T) {
+	t.Parallel()
 	t.Run("LargeBinary", func(t *testing.T) {
+		t.Parallel()
 		ctx := t.Context()
 		clone := initTestRepo(t, "main")
 
@@ -45,6 +47,7 @@ func TestCheckSafety(t *testing.T) {
 	})
 
 	t.Run("SmallBinaryOK", func(t *testing.T) {
+		t.Parallel()
 		ctx := t.Context()
 		clone := initTestRepo(t, "main")
 
@@ -67,6 +70,7 @@ func TestCheckSafety(t *testing.T) {
 	})
 
 	t.Run("SecretDetection", func(t *testing.T) {
+		t.Parallel()
 		ctx := t.Context()
 		clone := initTestRepo(t, "main")
 
@@ -94,6 +98,7 @@ func TestCheckSafety(t *testing.T) {
 	})
 
 	t.Run("PrivateKey", func(t *testing.T) {
+		t.Parallel()
 		ctx := t.Context()
 		clone := initTestRepo(t, "main")
 
@@ -118,6 +123,7 @@ func TestCheckSafety(t *testing.T) {
 	})
 
 	t.Run("HardcodedCredential", func(t *testing.T) {
+		t.Parallel()
 		ctx := t.Context()
 		clone := initTestRepo(t, "main")
 
@@ -142,6 +148,7 @@ func TestCheckSafety(t *testing.T) {
 	})
 
 	t.Run("RemoteRef", func(t *testing.T) {
+		t.Parallel()
 		// After Container.Fetch, commits live at refs/remotes/<container>/<branch>,
 		// not a local branch. CheckSafety must work with full ref paths.
 		ctx := t.Context()
@@ -172,6 +179,7 @@ func TestCheckSafety(t *testing.T) {
 	})
 
 	t.Run("NoIssues", func(t *testing.T) {
+		t.Parallel()
 		ctx := t.Context()
 		clone := initTestRepo(t, "main")
 
@@ -194,6 +202,7 @@ func TestCheckSafety(t *testing.T) {
 }
 
 func TestHumanSize(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		in   int64
 		want string
@@ -214,6 +223,7 @@ func TestHumanSize(t *testing.T) {
 }
 
 func TestScanDiffForSecrets_Deduplication(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	clone := initTestRepo(t, "main")
 

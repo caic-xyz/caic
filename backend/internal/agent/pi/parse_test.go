@@ -10,10 +10,13 @@ import (
 )
 
 func TestHandleDoneResultText(t *testing.T) {
+	t.Parallel()
+
 	// handleDone is kept for future Pi protocol versions that may emit done
 	// deltas. The current Pi does not emit them, but the code path is tested.
 
 	t.Run("done populates Result field with accumulated text", func(t *testing.T) {
+		t.Parallel()
 		w := &piWireFormat{}
 		w.mu.Lock()
 		w.textAccum.WriteString("Hello from Pi")
@@ -44,6 +47,7 @@ func TestHandleDoneResultText(t *testing.T) {
 	})
 
 	t.Run("done with error reason marks ResultMessage", func(t *testing.T) {
+		t.Parallel()
 		w := &piWireFormat{}
 		w.mu.Lock()
 		w.textAccum.WriteString("partial error")
@@ -67,6 +71,7 @@ func TestHandleDoneResultText(t *testing.T) {
 	})
 
 	t.Run("done without text deltas falls back to message content", func(t *testing.T) {
+		t.Parallel()
 		w := &piWireFormat{}
 		doneLine := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"done","reason":"end_turn","message":{"role":"assistant","content":[{"type":"text","text":"Non-streamed result"}]}}}`)
 		msgs, err := w.ParseMessage(doneLine)
@@ -87,7 +92,9 @@ func TestHandleDoneResultText(t *testing.T) {
 }
 
 func TestHandleAgentEndResultText(t *testing.T) {
+	t.Parallel()
 	t.Run("agent_end includes accumulated text from text_delta events", func(t *testing.T) {
+		t.Parallel()
 		w := &piWireFormat{}
 		w.mu.Lock()
 		w.textAccum.WriteString("Session result text")
@@ -114,6 +121,7 @@ func TestHandleAgentEndResultText(t *testing.T) {
 	})
 
 	t.Run("agent_end falls back to message content when textAccum is empty", func(t *testing.T) {
+		t.Parallel()
 		w := &piWireFormat{}
 		// No streaming deltas — textAccum is empty.
 		agentEndLine := []byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"Fallback text"}],"usage":{"input":10,"output":5}}]}`)
@@ -131,6 +139,7 @@ func TestHandleAgentEndResultText(t *testing.T) {
 	})
 
 	t.Run("agent_end with empty textAccum and no assistant message has empty Result", func(t *testing.T) {
+		t.Parallel()
 		w := &piWireFormat{}
 		agentEndLine := []byte(`{"type":"agent_end","messages":[]}`)
 		msgs, err := w.ParseMessage(agentEndLine)
@@ -148,11 +157,13 @@ func TestHandleAgentEndResultText(t *testing.T) {
 }
 
 func TestCaicModelInfo(t *testing.T) {
+	t.Parallel()
 	// Verify caic_model_info sets modelCtxWindow on the wire format,
 	// which is then used by handleTurnEnd to emit the correct ContextWindow
 	// in UsageMessage.
 
 	t.Run("sets modelCtxWindow from caic_model_info line", func(t *testing.T) {
+		t.Parallel()
 		w := &piWireFormat{}
 
 		// Parse the synthetic caic_model_info line.
@@ -170,6 +181,7 @@ func TestCaicModelInfo(t *testing.T) {
 	})
 
 	t.Run("turn_end after caic_model_info has correct ContextWindow", func(t *testing.T) {
+		t.Parallel()
 		w := &piWireFormat{}
 
 		// Simulate replay order: caic_model_info first, then turn_end.
@@ -194,6 +206,7 @@ func TestCaicModelInfo(t *testing.T) {
 	})
 
 	t.Run("turn_end without caic_model_info defaults to 0", func(t *testing.T) {
+		t.Parallel()
 		w := &piWireFormat{}
 		turnEndLine := []byte(`{"type":"turn_end","message":{"role":"assistant","content":[],"usage":{"input":100,"output":50,"totalTokens":150}}}`)
 		msgs, err := w.ParseMessage(turnEndLine)
@@ -210,6 +223,7 @@ func TestCaicModelInfo(t *testing.T) {
 	})
 
 	t.Run("caic_model_info with zero context_window is ignored", func(t *testing.T) {
+		t.Parallel()
 		w := &piWireFormat{}
 		if _, err := w.ParseMessage([]byte(`{"type":"caic_model_info","context_window":0}`)); err != nil {
 			t.Fatal(err)
@@ -221,7 +235,9 @@ func TestCaicModelInfo(t *testing.T) {
 }
 
 func TestWireFormatDurationTracking(t *testing.T) {
+	t.Parallel()
 	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
 		w := &piWireFormat{}
 		w.mu.Lock()
 		w.startTime = time.Now().Add(-500 * time.Millisecond)
@@ -256,6 +272,7 @@ func TestWireFormatDurationTracking(t *testing.T) {
 	})
 
 	t.Run("no WritePrompt before agent_end", func(t *testing.T) {
+		t.Parallel()
 		w := &piWireFormat{}
 		agentEndLine := []byte(`{"type":"agent_end","messages":[]}`)
 		endMsgs, err := w.ParseMessage(agentEndLine)
@@ -272,6 +289,7 @@ func TestWireFormatDurationTracking(t *testing.T) {
 	})
 
 	t.Run("WritePrompt resets state between turns", func(t *testing.T) {
+		t.Parallel()
 		w := &piWireFormat{}
 
 		w.mu.Lock()

@@ -71,9 +71,13 @@ func Open(dbPath string) (*Checker, error) {
 
 // NewChecker builds a Checker from a comma-separated allowlist string and an
 // optional geo DB path. Named origins that require network fetches are resolved
-// automatically (e.g. "github" fetches IP ranges from api.github.com/meta).
+// automatically (e.g. "github" fetches IP ranges from the given githubURL, or
+// the default api.github.com/meta if githubURL is empty).
 // A fetch failure is logged as a warning and does not abort startup.
-func NewChecker(ctx context.Context, allowlistStr, dbPath string) (*Checker, error) {
+func NewChecker(ctx context.Context, allowlistStr, dbPath, githubURL string) (*Checker, error) {
+	if githubURL == "" {
+		githubURL = defaultGitHubMetaURL
+	}
 	al, err := parseAllowlist(allowlistStr)
 	if err != nil {
 		return nil, fmt.Errorf("allowlist: %w", err)
@@ -90,7 +94,7 @@ func NewChecker(ctx context.Context, allowlistStr, dbPath string) (*Checker, err
 		c.allowlist = al
 	}
 	if al.allowed("github") {
-		if prefixes, err := fetchGitHubHookCIDRs(ctx); err != nil {
+		if prefixes, err := fetchGitHubHookCIDRsFrom(ctx, githubURL); err != nil {
 			slog.Warn("failed to fetch GitHub hook CIDRs; webhook IPs will not be auto-allowed", "err", err)
 		} else {
 			for _, p := range prefixes {

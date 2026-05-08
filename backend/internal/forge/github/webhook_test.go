@@ -10,6 +10,7 @@ import (
 )
 
 func TestVerifySignature(t *testing.T) {
+	t.Parallel()
 	secret := []byte("mysecret")
 	body := []byte(`{"action":"opened"}`)
 
@@ -20,6 +21,7 @@ func TestVerifySignature(t *testing.T) {
 	}
 
 	t.Run("valid signature passes", func(t *testing.T) {
+		t.Parallel()
 		sig := validSig(secret, body)
 		if err := VerifySignature(secret, body, sig); err != nil {
 			t.Fatalf("expected no error, got: %v", err)
@@ -27,6 +29,7 @@ func TestVerifySignature(t *testing.T) {
 	})
 
 	t.Run("wrong secret fails", func(t *testing.T) {
+		t.Parallel()
 		sig := validSig([]byte("wrongsecret"), body)
 		if err := VerifySignature(secret, body, sig); err == nil {
 			t.Fatal("expected error, got nil")
@@ -34,6 +37,7 @@ func TestVerifySignature(t *testing.T) {
 	})
 
 	t.Run("tampered body fails", func(t *testing.T) {
+		t.Parallel()
 		sig := validSig(secret, body)
 		tampered := []byte(`{"action":"deleted"}`)
 		if err := VerifySignature(secret, tampered, sig); err == nil {
@@ -42,6 +46,7 @@ func TestVerifySignature(t *testing.T) {
 	})
 
 	t.Run("malformed sig format fails", func(t *testing.T) {
+		t.Parallel()
 		for _, bad := range []string{
 			"",
 			"nosigprefix",

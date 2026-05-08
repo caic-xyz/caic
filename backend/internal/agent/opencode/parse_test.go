@@ -12,7 +12,9 @@ import (
 )
 
 func TestParseMessage(t *testing.T) {
+	t.Parallel()
 	t.Run("AgentMessageChunk", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -41,6 +43,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("AgentThoughtChunk", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -69,6 +72,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("ToolCall", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -104,6 +108,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("ToolCallUpdateCompleted", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -136,6 +141,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("ToolCallUpdateFailed", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -171,6 +177,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("ToolCallInProgressWithOutput", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -206,6 +213,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("PlanUpdate", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -241,6 +249,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("UsageUpdate", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -271,6 +280,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("UserMessageChunk", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -299,6 +309,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("caicInit", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"type":       "caic_init",
 			"session_id": "ses_abc",
@@ -328,6 +339,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("CaicDiffStat", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"type": "caic_diff_stat",
 			"ts":   1719500000.5,
@@ -355,6 +367,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("JSONRPCResponse", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"id":      1,
@@ -377,6 +390,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("WidgetToolCall", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -412,6 +426,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("SessionInfoSkipped", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -433,6 +448,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("ToolCallFailedWithRawOutput", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -463,6 +479,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("ToolCallInProgressWithRawOutput", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -493,6 +510,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("CurrentModeUpdateWithDetail", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -525,6 +543,7 @@ func TestParseMessage(t *testing.T) {
 	})
 
 	t.Run("UnknownUpdateType", func(t *testing.T) {
+		t.Parallel()
 		input := mustJSON(t, map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
@@ -553,6 +572,7 @@ func TestParseMessage(t *testing.T) {
 }
 
 func TestNormalizeToolName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		title string
 		kind  oc.ToolKind
@@ -582,6 +602,7 @@ func TestNormalizeToolName(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.title+"_"+string(tt.kind), func(t *testing.T) {
+			t.Parallel()
 			got := normalizeToolName(tt.title, tt.kind)
 			if got != tt.want {
 				t.Errorf("normalizeToolName(%q, %q) = %q, want %q", tt.title, tt.kind, got, tt.want)
@@ -591,7 +612,9 @@ func TestNormalizeToolName(t *testing.T) {
 }
 
 func TestWireFormatPromptResponse(t *testing.T) {
+	t.Parallel()
 	t.Run("Success", func(t *testing.T) {
+		t.Parallel()
 		w := &wireFormat{sessionID: "ses_1"}
 		w.promptReqID = 5
 		input := mustJSON(t, map[string]any{
@@ -632,6 +655,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 	})
 
 	t.Run("Cancelled", func(t *testing.T) {
+		t.Parallel()
 		w := &wireFormat{sessionID: "ses_1"}
 		w.promptReqID = 7
 		input := mustJSON(t, map[string]any{
@@ -661,6 +685,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 	})
 
 	t.Run("Error", func(t *testing.T) {
+		t.Parallel()
 		w := &wireFormat{sessionID: "ses_1"}
 		w.promptReqID = 9
 		input := mustJSON(t, map[string]any{
@@ -691,6 +716,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 	})
 
 	t.Run("FallbackToAccumulatedUsage", func(t *testing.T) {
+		t.Parallel()
 		w := &wireFormat{sessionID: "ses_1"}
 		w.promptReqID = 3
 		w.totalUsage = agent.Usage{InputTokens: 1000, OutputTokens: 200}
@@ -719,6 +745,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 	})
 
 	t.Run("NonPromptResponse", func(t *testing.T) {
+		t.Parallel()
 		w := &wireFormat{sessionID: "ses_1"}
 		w.promptReqID = 5
 		input := mustJSON(t, map[string]any{
@@ -739,6 +766,7 @@ func TestWireFormatPromptResponse(t *testing.T) {
 	})
 
 	t.Run("SyntheticFinalMessages", func(t *testing.T) {
+		t.Parallel()
 		w := &wireFormat{sessionID: "ses_1"}
 		w.promptReqID = 10
 

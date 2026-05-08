@@ -10,7 +10,9 @@ import (
 )
 
 func TestEvaluateCheckRuns(t *testing.T) {
+	t.Parallel()
 	t.Run("all done success", func(t *testing.T) {
+		t.Parallel()
 		runs := []forge.CheckRun{
 			{Name: "build", Status: forge.CheckRunStatusCompleted, Conclusion: forge.CheckRunConclusionSuccess},
 			{Name: "test", Status: forge.CheckRunStatusCompleted, Conclusion: forge.CheckRunConclusionSuccess},
@@ -28,6 +30,7 @@ func TestEvaluateCheckRuns(t *testing.T) {
 	})
 
 	t.Run("not done returns checks", func(t *testing.T) {
+		t.Parallel()
 		now := time.Now()
 		runs := []forge.CheckRun{
 			{Name: "build", Status: forge.CheckRunStatusCompleted, Conclusion: forge.CheckRunConclusionSuccess, StartedAt: now, CompletedAt: now.Add(time.Minute)},
@@ -56,7 +59,9 @@ func TestEvaluateCheckRuns(t *testing.T) {
 }
 
 func TestInterimCIStatus(t *testing.T) {
+	t.Parallel()
 	t.Run("all pending returns pending", func(t *testing.T) {
+		t.Parallel()
 		runs := []forge.CheckRun{
 			{Name: "build", Status: forge.CheckRunStatusQueued},
 			{Name: "test", Status: forge.CheckRunStatusInProgress},
@@ -68,6 +73,7 @@ func TestInterimCIStatus(t *testing.T) {
 	})
 
 	t.Run("one failure among pending returns failure", func(t *testing.T) {
+		t.Parallel()
 		runs := []forge.CheckRun{
 			{Name: "build", Status: forge.CheckRunStatusCompleted, Conclusion: forge.CheckRunConclusionFailure},
 			{Name: "test", Status: forge.CheckRunStatusInProgress},
@@ -79,6 +85,7 @@ func TestInterimCIStatus(t *testing.T) {
 	})
 
 	t.Run("success and pending returns pending", func(t *testing.T) {
+		t.Parallel()
 		runs := []forge.CheckRun{
 			{Name: "build", Status: forge.CheckRunStatusCompleted, Conclusion: forge.CheckRunConclusionSuccess},
 			{Name: "test", Status: forge.CheckRunStatusQueued},
@@ -90,6 +97,7 @@ func TestInterimCIStatus(t *testing.T) {
 	})
 
 	t.Run("cancelled among pending returns failure", func(t *testing.T) {
+		t.Parallel()
 		runs := []forge.CheckRun{
 			{Name: "build", Status: forge.CheckRunStatusCompleted, Conclusion: forge.CheckRunConclusionCancelled},
 			{Name: "test", Status: forge.CheckRunStatusQueued},
@@ -102,7 +110,9 @@ func TestInterimCIStatus(t *testing.T) {
 }
 
 func TestCheckFromRun(t *testing.T) {
+	t.Parallel()
 	t.Run("preserves timing", func(t *testing.T) {
+		t.Parallel()
 		now := time.Now()
 		completed := now.Add(time.Minute)
 		run := forge.CheckRun{

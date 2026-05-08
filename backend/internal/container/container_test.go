@@ -23,6 +23,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestBranchFromContainer(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		container string
@@ -75,6 +76,7 @@ func TestBranchFromContainer(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			br, ok := BranchFromContainer(tt.container, tt.repo)
 			if ok != tt.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)

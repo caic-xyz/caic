@@ -10,7 +10,9 @@ import (
 )
 
 func TestCollectWatchDirs(t *testing.T) {
+	t.Parallel()
 	t.Run("skips dot-prefixed directories", func(t *testing.T) {
+		t.Parallel()
 		// Lay out a tree mirroring a workspace with checked-out repos. The
 		// poller must not descend into the .git internals — gitutil treats
 		// them as bare repos because they contain HEAD/objects/refs, which
@@ -38,6 +40,7 @@ func TestCollectWatchDirs(t *testing.T) {
 	})
 
 	t.Run("respects max depth", func(t *testing.T) {
+		t.Parallel()
 		root := t.TempDir()
 		makeDirs(t, root, []string{"a/b/c/d"})
 

@@ -17,7 +17,9 @@ func NewClientForTest(token, baseURL string) *Client {
 }
 
 func TestGetJobLog(t *testing.T) {
+	t.Parallel()
 	t.Run("follows redirect without Authorization header", func(t *testing.T) {
+		t.Parallel()
 		logContent := "##[group]Run tests\n##[error]FAIL: TestFoo\n##[endgroup]"
 
 		// Blob storage server: must NOT receive an Authorization header.
@@ -52,7 +54,9 @@ func TestGetJobLog(t *testing.T) {
 }
 
 func TestExtractGitHubSteps(t *testing.T) {
+	t.Parallel()
 	t.Run("extracts failing step", func(t *testing.T) {
+		t.Parallel()
 		log := strings.Join([]string{
 			"2024-01-01T00:00:00.1234567Z ##[group]Set up job",
 			"2024-01-01T00:00:01.0000000Z Preparing runner",
@@ -84,6 +88,7 @@ func TestExtractGitHubSteps(t *testing.T) {
 	})
 
 	t.Run("multiple failing steps", func(t *testing.T) {
+		t.Parallel()
 		log := strings.Join([]string{
 			"2024-01-01T00:00:00.1234567Z ##[group]Lint",
 			"2024-01-01T00:00:01.0000000Z ##[error]lint error found",
@@ -104,6 +109,7 @@ func TestExtractGitHubSteps(t *testing.T) {
 	})
 
 	t.Run("no groups returns raw log", func(t *testing.T) {
+		t.Parallel()
 		raw := "some plain log\nwithout groups"
 		result := extractGitHubSteps(raw)
 		if result != raw {
@@ -112,6 +118,7 @@ func TestExtractGitHubSteps(t *testing.T) {
 	})
 
 	t.Run("no errors returns raw log", func(t *testing.T) {
+		t.Parallel()
 		log := strings.Join([]string{
 			"2024-01-01T00:00:00.1234567Z ##[group]Build",
 			"2024-01-01T00:00:01.0000000Z compiling...",
@@ -124,6 +131,7 @@ func TestExtractGitHubSteps(t *testing.T) {
 	})
 
 	t.Run("lines without timestamps", func(t *testing.T) {
+		t.Parallel()
 		log := "##[group]Build\n##[error]fail\n##[endgroup]"
 		result := extractGitHubSteps(log)
 		if !strings.Contains(result, "Step: Build") {

@@ -10,7 +10,9 @@ import (
 )
 
 func TestLoadTOMLConfig(t *testing.T) {
+	t.Parallel()
 	t.Run("missing file returns default config", func(t *testing.T) {
+		t.Parallel()
 		tc, err := loadTOMLConfig(t.TempDir())
 		if err != nil {
 			t.Fatal(err)
@@ -25,6 +27,7 @@ func TestLoadTOMLConfig(t *testing.T) {
 	})
 
 	t.Run("parses all fields", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		content := `
 [core]
@@ -108,6 +111,7 @@ pprof = true
 	})
 
 	t.Run("parses harness env", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		content := `
 [harness.pi.env]
@@ -157,6 +161,7 @@ OPENROUTER_API_KEY = "sk-or-test"
 	})
 
 	t.Run("unknown field error", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		content := `bogus_field = "oops"` + "\n"
 		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0o600); err != nil {
@@ -173,7 +178,9 @@ OPENROUTER_API_KEY = "sk-or-test"
 }
 
 func TestGeoDBOrDefault(t *testing.T) {
+	t.Parallel()
 	t.Run("nil with default file returns default path", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		// Create the default file
 		if err := os.WriteFile(filepath.Join(dir, "GeoLite2-Country.mmdb"), []byte("mmdb"), 0o600); err != nil {
@@ -186,6 +193,7 @@ func TestGeoDBOrDefault(t *testing.T) {
 		}
 	})
 	t.Run("nil without default file returns empty", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		// Don't create the default file
 		got := geoDBOrDefault(nil, dir)
@@ -194,6 +202,7 @@ func TestGeoDBOrDefault(t *testing.T) {
 		}
 	})
 	t.Run("explicit value resolved relative to cfgDir", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		val := "custom.mmdb"
 		got := geoDBOrDefault(&val, dir)
@@ -203,6 +212,7 @@ func TestGeoDBOrDefault(t *testing.T) {
 		}
 	})
 	t.Run("explicit absolute path preserved", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		val := "/etc/mmdb/geo.mmdb"
 		got := geoDBOrDefault(&val, dir)
@@ -214,6 +224,7 @@ func TestGeoDBOrDefault(t *testing.T) {
 
 func TestTomlToServerConfig(t *testing.T) {
 	t.Run("reads config values", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		// Write a fake PEM file.
 		pemPath := filepath.Join(dir, "key.pem")
@@ -290,6 +301,7 @@ func TestTomlToServerConfig(t *testing.T) {
 	})
 
 	t.Run("geo_db defaults to GeoLite2-Country.mmdb if file exists", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		// Create the default file
 		if err := os.WriteFile(filepath.Join(dir, "GeoLite2-Country.mmdb"), []byte("mmdb"), 0o600); err != nil {
@@ -311,6 +323,7 @@ func TestTomlToServerConfig(t *testing.T) {
 	})
 
 	t.Run("geo_db is empty when unset and default file missing", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		tc := &tomlConfig{
 			Server: tomlServer{
@@ -327,6 +340,7 @@ func TestTomlToServerConfig(t *testing.T) {
 	})
 
 	t.Run("core env from config file", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		wantKey := "AIza_from_config"
 		tc := &tomlConfig{
@@ -381,6 +395,7 @@ func TestTomlToServerConfig(t *testing.T) {
 	})
 
 	t.Run("tailscale_api_key from core env", func(t *testing.T) {
+		t.Parallel()
 		dir := t.TempDir()
 		wantKey := "tskey_config"
 		tc := &tomlConfig{
@@ -415,7 +430,9 @@ func TestTomlToServerConfig(t *testing.T) {
 }
 
 func TestAutoUpdateSchedule(t *testing.T) {
+	t.Parallel()
 	t.Run("default schedule", func(t *testing.T) {
+		t.Parallel()
 		s, err := autoUpdateSchedule(&tomlConfig{})
 		if err != nil {
 			t.Fatal(err)
@@ -426,6 +443,7 @@ func TestAutoUpdateSchedule(t *testing.T) {
 	})
 
 	t.Run("empty disables", func(t *testing.T) {
+		t.Parallel()
 		s, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: new(string)}})
 		if err != nil {
 			t.Fatal(err)
@@ -436,6 +454,7 @@ func TestAutoUpdateSchedule(t *testing.T) {
 	})
 
 	t.Run("custom cron", func(t *testing.T) {
+		t.Parallel()
 		cron := "0 3 * * *"
 		s, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: &cron}})
 		if err != nil {
@@ -450,6 +469,7 @@ func TestAutoUpdateSchedule(t *testing.T) {
 	})
 
 	t.Run("invalid cron", func(t *testing.T) {
+		t.Parallel()
 		cron := "not a cron"
 		_, err := autoUpdateSchedule(&tomlConfig{Core: tomlCore{AutoUpdate: &cron}})
 		if err == nil {
@@ -459,19 +479,23 @@ func TestAutoUpdateSchedule(t *testing.T) {
 }
 
 func TestAllowOriginsOrDefault(t *testing.T) {
+	t.Parallel()
 	t.Run("nil returns default", func(t *testing.T) {
+		t.Parallel()
 		got := allowOriginsOrDefault(nil)
 		if len(got) != 3 || got[0] != "local" || got[1] != "tailscale" || got[2] != "github" {
 			t.Errorf("got %v, want [local tailscale github]", got)
 		}
 	})
 	t.Run("empty returns default", func(t *testing.T) {
+		t.Parallel()
 		got := allowOriginsOrDefault([]string{})
 		if len(got) != 3 {
 			t.Errorf("got %v, want default", got)
 		}
 	})
 	t.Run("explicit values preserved", func(t *testing.T) {
+		t.Parallel()
 		got := allowOriginsOrDefault([]string{"CA", "US"})
 		if len(got) != 2 || got[0] != "CA" || got[1] != "US" {
 			t.Errorf("got %v, want [CA US]", got)

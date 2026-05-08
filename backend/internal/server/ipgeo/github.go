@@ -30,16 +30,11 @@ func (p *retryPolicy403) ShouldRetry(ctx context.Context, start time.Time, try i
 	return p.ExponentialBackoff.ShouldRetry(ctx, start, try, err, resp)
 }
 
-// githubMetaURL is the URL of the GitHub meta API. It is a variable so tests
-// can override it without making network calls.
-var githubMetaURL = "https://api.github.com/meta"
+// defaultGitHubMetaURL is the canonical GitHub meta API endpoint.
+const defaultGitHubMetaURL = "https://api.github.com/meta"
 
-// fetchGitHubHookCIDRs fetches the GitHub meta API and returns the IP prefixes
-// used for webhook delivery.
-func fetchGitHubHookCIDRs(ctx context.Context) ([]netip.Prefix, error) {
-	return fetchGitHubHookCIDRsFrom(ctx, githubMetaURL)
-}
-
+// fetchGitHubHookCIDRsFrom fetches GitHub webhook IP ranges from a URL.
+// The URL parameter allows tests to substitute a local server.
 func fetchGitHubHookCIDRsFrom(ctx context.Context, url string) ([]netip.Prefix, error) {
 	client := &http.Client{
 		Transport: &roundtrippers.Retry{
