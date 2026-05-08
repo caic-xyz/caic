@@ -159,7 +159,9 @@ func TestTask(t *testing.T) {
 			}
 
 			// Attach a live session so SendInput succeeds past the handle check.
-			cmd := exec.CommandContext(t.Context(), "cat")
+			cmdCtx, cmdCancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cmdCancel()
+			cmd := exec.CommandContext(cmdCtx, "cat")
 			stdin, err := cmd.StdinPipe()
 			if err != nil {
 				t.Fatal(err)
@@ -173,7 +175,7 @@ func TestTask(t *testing.T) {
 			}
 			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewParser()}), stdout, make(chan agent.Message, 256), nil)
 			tk.AttachSession(&SessionHandle{Session: s})
-			defer func() { _ = stdin.Close(); _ = cmd.Wait() }()
+			defer func() { _ = stdin.Close(); _ = s.Wait() }()
 
 			// User sends a regular message instead of "Clear and execute plan".
 			_ = tk.SendInput(t.Context(), agent.Prompt{Text: "improve the plan"})
@@ -258,7 +260,9 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 
 			// Attach a live session.
-			cmd := exec.CommandContext(t.Context(), "cat")
+			cmdCtx, cmdCancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cmdCancel()
+			cmd := exec.CommandContext(cmdCtx, "cat")
 			stdin, err := cmd.StdinPipe()
 			if err != nil {
 				t.Fatal(err)
@@ -272,7 +276,7 @@ func TestTask(t *testing.T) {
 			}
 			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewParser()}), stdout, make(chan agent.Message, 256), nil)
 			tk.AttachSession(&SessionHandle{Session: s})
-			defer func() { _ = stdin.Close(); _ = cmd.Wait() }()
+			defer func() { _ = stdin.Close(); _ = s.Wait() }()
 
 			// User rejects plan and sends feedback.
 			_ = tk.SendInput(t.Context(), agent.Prompt{Text: "add error handling"})
@@ -313,7 +317,9 @@ func TestTask(t *testing.T) {
 			// "no active session" without changing state.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateWaiting)
-			cmd := exec.CommandContext(t.Context(), "true")
+			cmdCtx, cmdCancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cmdCancel()
+			cmd := exec.CommandContext(cmdCtx, "true")
 			stdin, err := cmd.StdinPipe()
 			if err != nil {
 				t.Fatal(err)
@@ -351,7 +357,9 @@ func TestTask(t *testing.T) {
 			t.Error("DetachSession() should return nil when no session attached")
 		}
 
-		cmd := exec.CommandContext(t.Context(), "cat")
+		cmdCtx, cmdCancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cmdCancel()
+		cmd := exec.CommandContext(cmdCtx, "cat")
 		stdin, _ := cmd.StdinPipe()
 		stdout, _ := cmd.StdoutPipe()
 		if err := cmd.Start(); err != nil {

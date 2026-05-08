@@ -26,6 +26,8 @@ export default defineConfig({
         "frontend/src/**/*.test.tsx",
         "frontend/src/css.d.ts",
         "frontend/src/novnc.d.ts",
+        "frontend/src/**/*.svg",
+        "frontend/src/**/*.module.css",
       ],
       thresholds: {
         // Informational only — not enforced.

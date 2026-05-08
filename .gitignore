@@ -1,12 +1,13 @@
 .env
 .env.*.local
 .env.local
+coverage.html
 coverage.out
-frontend/coverage/
 node_modules/
+/caic
 /dist/
 /emulator*.log
+/frontend/coverage/
 /package-lock.json
 /test-results/
 /tmp/
-/caic

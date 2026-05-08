@@ -58,8 +58,16 @@ test: $(FRONTEND_STAMP)
 	@pnpm test
 	@find . -name 'test_*.py' -exec python3 {} \;
 
-coverage:
+coverage: $(FRONTEND_STAMP)
 	@go test -coverprofile=coverage.out ./...
+	@echo ""
+	@echo "=== Go coverage ==="
+	@go tool cover -func=coverage.out | tail -1
+	@go tool cover -html=coverage.out -o coverage.html
+	@echo "  HTML report: coverage.html"
+	@echo ""
+	@echo "=== Frontend coverage ==="
+	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm test:coverage
 
 lint: lint-go lint-frontend lint-python lint-binaries lint-docs
 lint-all: lint-go lint-frontend lint-python lint-binaries lint-android lint-docs
