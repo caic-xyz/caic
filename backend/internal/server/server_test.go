@@ -1911,12 +1911,12 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"tok","token_type":"bearer"}`))
 	}))
-	defer tokenServer.Close()
+	t.Cleanup(tokenServer.Close)
 	userServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":42,"login":"testuser","avatar_url":"https://example.com/avatar.png"}`))
 	}))
-	defer userServer.Close()
+	t.Cleanup(userServer.Close)
 
 	secret := make([]byte, 32)
 	usersPath := filepath.Join(t.TempDir(), "users.json")
