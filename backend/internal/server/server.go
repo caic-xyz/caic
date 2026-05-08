@@ -107,6 +107,10 @@ type Config struct {
 	// do not resolve to an allowed value are rejected with 403. Requires
 	// IPGeoDB when any token is not "local" or "tailscale".
 	IPGeoAllowlist string
+
+	// Skip warmup of base images at startup. Used by e2e fake mode to avoid
+	// pulling Docker images that aren't needed for testing.
+	SkipWarmup bool
 }
 
 // Validate returns an error if the configuration is invalid.

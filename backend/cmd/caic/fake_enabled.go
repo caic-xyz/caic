@@ -69,6 +69,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 	if err := initFakeHarnessCache(fakeLogsDir); err != nil {
 		return fmt.Errorf("init fake harness cache: %w", err)
 	}
+	cfg.SkipWarmup = true
 
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", addr)

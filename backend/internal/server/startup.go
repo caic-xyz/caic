@@ -381,12 +381,14 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	}
 
 	s.watchContainerEvents(ctx)
-	go func() {
-		_, tk := trace.NewTask(ctx, "warmup-images")
-		defer tk.End()
-		trace.Log(ctx, "startup", "warmup-images: begin")
-		s.warmupImages()
-	}()
+	if !cfg.SkipWarmup {
+		go func() {
+			_, tk := trace.NewTask(ctx, "warmup-images")
+			defer tk.End()
+			trace.Log(ctx, "startup", "warmup-images: begin")
+			s.warmupImages()
+		}()
+	}
 	go func() {
 		_, tk := trace.NewTask(ctx, "refresh-harness-models")
 		defer tk.End()
