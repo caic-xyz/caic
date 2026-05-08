@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
+import android.util.Log
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -43,6 +44,8 @@ import java.net.HttpURLConnection.HTTP_UNAUTHORIZED
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+
+private const val TAG = "TaskRepository"
 
 private const val DELAY_CAP = 5_000L
 
@@ -203,7 +206,24 @@ class TaskRepository @Inject constructor(
                         "upsert" -> event.upsert?.let { taskMap[it.id] = it }
                         "patch" -> event.patch?.let { patch ->
                             val id = (patch["id"] as? JsonPrimitive)?.content ?: return@let
-                            taskMap[id] = applyPatch(taskMap[id] ?: return@let, patch)
+                            val existing = taskMap[id]
+                            if (existing == null) {
+                                // If we missed the upsert (e.g. dropped event on slow CI),
+                                // reconstruct a minimal Task from the patch fields and
+                                // merge the patch.  This prevents the task from being
+                                // permanently invisible after a single lost upsert.
+                                Log.w(TAG, "SSE patch for unknown task $id, reconstructing from patch")
+                                try {
+                                    taskMap[id] = json.decodeFromJsonElement<Task>(
+                                        patch.toMutableMap().also { it["id"] = JsonPrimitive(id) }.let(::JsonObject)
+                                    )
+                                } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                                    Log.w(TAG, "Failed to reconstruct task $id from patch: $e")
+                                    return@let
+                                }
+                            } else {
+                                taskMap[id] = applyPatch(existing, patch)
+                            }
                         }
                         "delete" -> event.delete?.let { taskMap.remove(it) }
                         "warning" -> {

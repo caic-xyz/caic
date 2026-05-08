@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.printToLog
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -106,15 +107,19 @@ class GenScreenshotsTest : E2eTestBase() {
             )
         }
 
+        // Check for id4 (last-created, sorts first in taskIdDesc) — the
+        // CI emulator viewport (320×640 at 160dpi) only fits the creation
+        // form + 3 task cards; id1 (smallest ksid) sorts last and falls
+        // outside the viewport, so its node is never composed.
         composeTestRule.waitUntil(LOAD_TIMEOUT_MS) {
             val stillEmpty = composeTestRule.onAllNodesWithTag("empty-task-list")
                 .fetchSemanticsNodes().isNotEmpty()
             val hasError = composeTestRule.onAllNodesWithTag("task-list-error")
                 .fetchSemanticsNodes().isNotEmpty()
-            val hasTask = composeTestRule.onAllNodesWithTag("task-$id1")
+            val hasTask = composeTestRule.onAllNodesWithTag("task-$id4")
                 .fetchSemanticsNodes().isNotEmpty()
             if (!hasTask && !hasError && !stillEmpty) {
-                Log.e("E2E", "No task-$id1, no error, no empty-list. Dumping tree:")
+                Log.e("E2E", "No task-$id4, no error, no empty-list. Dumping tree:")
                 composeTestRule.onRoot().printToLog("E2E")
             }
             org.junit.Assert.assertFalse(
@@ -131,8 +136,9 @@ class GenScreenshotsTest : E2eTestBase() {
         // Screenshot 1: Task list.
         takeScreenshot("task-list")
 
-        // Tap the first task to open detail view via testTag (immune to title changes).
-        composeTestRule.onNodeWithTag("task-$id1").performClick()
+        // id1 sorts last in taskIdDesc (smallest ksid, first-created) and may be
+        // outside the viewport on small screens. Scroll it into view before tapping.
+        composeTestRule.onNodeWithTag("task-$id1").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         Thread.sleep(SETTLE_DELAY_MS)
 

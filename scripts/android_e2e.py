@@ -5,9 +5,10 @@ Steps:
   1. Build the fake backend (go build -tags e2e).
   2. Find a free port and start the backend on it.
   3. Wait until the backend responds.
-  4. Set up adb reverse port forwarding.
-  5. Run connectedAndroidTest via Gradle with the dynamic port.
-  6. Pull and convert screenshots.
+  4. Run connectedAndroidTest via Gradle, passing 10.0.2.2:PORT
+     (emulator's host alias — no adb reverse needed).
+  5. Pull and convert screenshots.
+  6. Dump logcat on failure for CI diagnostics.
   7. Kill the backend on exit.
 """
 
@@ -156,13 +157,31 @@ def persist_logcat_for_artifact(logcat_path):
     return dest
 
 
+def is_emulator():
+    """Return True if the connected device is an emulator."""
+    result = subprocess.run(
+        ["adb", "shell", "getprop", "ro.build.characteristics"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    return "emulator" in result.stdout
+
+
 def run_tests(port):
+    # 10.0.2.2 is the emulator's host loopback alias — no adb reverse needed.
+    # Real devices need localhost + adb reverse.
+    if is_emulator():
+        host = "10.0.2.2"
+    else:
+        host = "localhost"
+        subprocess.check_call(["adb", "reverse", f"tcp:{port}", f"tcp:{port}"])
     result = subprocess.run(
         [
             "./gradlew",
             "--no-daemon",
             "connectedAndroidTest",
-            f"-Pandroid.testInstrumentationRunnerArguments.baseUrl=http://localhost:{port}",
+            f"-Pandroid.testInstrumentationRunnerArguments.baseUrl=http://{host}:{port}",
         ],
         cwd=os.path.join(ROOT_DIR, "android"),
     )
@@ -275,8 +294,6 @@ def main():
                     file=sys.stderr,
                 )
                 return 1
-            subprocess.check_call(["adb", "reverse", f"tcp:{port}", f"tcp:{port}"])
-
             print("Running Android E2E tests...")
             logcat_proc, logcat_path, logcat_file = start_logcat(tmp_dir)
             try:
