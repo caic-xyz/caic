@@ -101,15 +101,18 @@ All 24 tests pass on Pixel 8 Pro (API 33, ARM) and local emulator (API 36, x86_6
 The bug only reproduces on CI (API 35, x86_64 emulator) — slower frame times
 expose the event-drop race.
 
-## Next steps
+## Plan
 
-1. Get a clean CI run where emulator networking works (the `adb reverse` retry
-   may help, or may be a CI infrastructure issue).
-2. Inspect the diagnostic logs (SSE snapshot/upsert/patch + trySend failures) to
-   determine whether the patch reconstruction fix resolves the timeout.
-3. If the fix works: the root cause (first upsert dropped) is mitigated but not
-   fully understood — the OkHttp EventSource chunk-boundary theory should be
-   verified.
-4. **Workflow fix**: someone with a PAT or direct push to `main` needs to add
-   `backend/**` to the Android CI path triggers so backend changes that break
-   the e2e build are caught immediately.
+1. **Fix CI networking flakiness** — try `10.0.2.2` (emulator host alias, no
+   `adb reverse` needed) or `adb forward` instead of `adb reverse`. Unblocks
+   all further observation.
+2. **Read diagnostic logs** — the `Log.d` calls already in `TaskRepository.kt`
+   will show whether id1's upsert fires, whether `trySend` drops it, and
+   whether the patch reconstruction path triggers. This answers the question.
+3. **Server-side fallback** — if reconstruction works, have the fake backend
+   always emit a second upsert (not just a patch) for the first state change
+   after task creation, giving the client two shots.
+4. **OkHttp byte-level tracing** — add a `NetworkInterceptor` to log raw SSE
+   bytes if the event is confirmed lost before `channelFlow`.
+5. **Workflow fix** — someone with a PAT needs to add `backend/**` to the
+   Android CI path triggers.
