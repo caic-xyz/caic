@@ -106,7 +106,6 @@ class TaskListViewModel @Inject constructor(
     ) { arr ->
         @Suppress("UNCHECKED_CAST")
         val tasks = arr[0] as List<Task>
-        Log.d(TAG, "combine: ${tasks.size} tasks: ${tasks.map { it.id }}")
         val connected = arr[1] as Boolean
         val usage = arr[2] as UsageResp?
         val settings = arr[3] as com.fghbuild.caic.data.SettingsState
