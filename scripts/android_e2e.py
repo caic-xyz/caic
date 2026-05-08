@@ -157,15 +157,29 @@ def persist_logcat_for_artifact(logcat_path):
     return dest
 
 
+def is_emulator():
+    """Return True if the connected device is an emulator."""
+    result = subprocess.run(
+        ["adb", "shell", "getprop", "ro.build.characteristics"],
+        capture_output=True, text=True, timeout=5,
+    )
+    return "emulator" in result.stdout
+
+
 def run_tests(port):
-    # Use 10.0.2.2 (emulator alias for host loopback) instead of localhost.
-    # Avoids adb reverse which is flaky on CI runners.
+    # 10.0.2.2 is the emulator's host loopback alias — no adb reverse needed.
+    # Real devices need localhost + adb reverse.
+    if is_emulator():
+        host = "10.0.2.2"
+    else:
+        host = "localhost"
+        subprocess.check_call(["adb", "reverse", f"tcp:{port}", f"tcp:{port}"])
     result = subprocess.run(
         [
             "./gradlew",
             "--no-daemon",
             "connectedAndroidTest",
-            f"-Pandroid.testInstrumentationRunnerArguments.baseUrl=http://10.0.2.2:{port}",
+            f"-Pandroid.testInstrumentationRunnerArguments.baseUrl=http://{host}:{port}",
         ],
         cwd=os.path.join(ROOT_DIR, "android"),
     )
