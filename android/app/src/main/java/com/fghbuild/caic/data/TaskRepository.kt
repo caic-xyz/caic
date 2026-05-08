@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
@@ -182,7 +183,7 @@ class TaskRepository @Inject constructor(
     }
 
     /** SSE flow for the task list events endpoint. Maintains a local task map and applies patch events. */
-    private fun taskListEvents(baseURL: String): Flow<List<Task>> = callbackFlow {
+    private fun taskListEvents(baseURL: String): Flow<List<Task>> = channelFlow {
         val taskMap = LinkedHashMap<String, Task>()
         val request = Request.Builder()
             .url("$baseURL/api/v1/server/tasks/events")

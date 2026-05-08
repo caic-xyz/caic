@@ -5,10 +5,13 @@
 package com.fghbuild.caic.e2e
 
 import android.os.Environment
+import android.util.Log
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.printToLog
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
@@ -52,28 +55,35 @@ class GenScreenshotsTest : E2eTestBase() {
         // Clear stale screenshots from previous runs.
         screenshotDir.listFiles()?.forEach { it.delete() }
 
-        // Verify the server is configured before waiting for the connection dot.
         composeTestRule.waitUntil(CONNECTION_TIMEOUT_MS) {
-            var found = composeTestRule.onAllNodesWithTag("connection-dot")
+            val found = composeTestRule.onAllNodesWithTag("connection-dot")
                 .fetchSemanticsNodes().isNotEmpty()
             if (!found) {
                 val topBar = composeTestRule.onAllNodesWithTag("top-bar")
                     .fetchSemanticsNodes()
-                assert(topBar.isNotEmpty()) {
-                    "Top bar not composed — UI did not reach TaskListScreen"
-                }
                 val notConfig = composeTestRule.onAllNodesWithTag("not-configured")
-                assert(notConfig.fetchSemanticsNodes().isEmpty()) {
-                    "Server not configured — DataStore write from e2eConfigureRule never propagated"
-                }
+                    .fetchSemanticsNodes()
+                org.junit.Assert.assertTrue(
+                    "Top bar not composed",
+                    topBar.isNotEmpty(),
+                )
+                org.junit.Assert.assertTrue(
+                    "Server not configured. not-configured=${notConfig.isNotEmpty()}",
+                    notConfig.isEmpty(),
+                )
             }
             found
         }
 
-        // Confirm the UI shows the empty state before we populate it.
+        composeTestRule.waitForIdle()
         composeTestRule.waitUntil(5_000) {
-            composeTestRule.onAllNodesWithTag("empty-task-list")
+            val found = composeTestRule.onAllNodesWithTag("empty-task-list")
                 .fetchSemanticsNodes().isNotEmpty()
+            if (!found) {
+                Log.e("E2E", "empty-task-list missing. Dumping semantics tree:")
+                composeTestRule.onRoot().printToLog("E2E")
+            }
+            found
         }
 
         // Create the same 4 tasks as gen-android-screenshots.sh.
@@ -88,14 +98,14 @@ class GenScreenshotsTest : E2eTestBase() {
         waitForTaskState(id3, "asking", 30_000)
         waitForTaskState(id4, "waiting", 30_000)
 
-        // Verify tasks are still present via API (guard against backend flakiness).
         for (id in listOf(id1, id2, id3, id4)) {
             val tasks = api.listTasks()
-            require(tasks.any { it.id == id }) { "Task $id missing from API after creation" }
+            org.junit.Assert.assertTrue(
+                "Task $id missing from API after creation",
+                tasks.any { it.id == id },
+            )
         }
 
-        // Wait for the empty state to disappear — the SSE stream should have
-        // delivered the task upserts by now. If it hasn't, surface diagnostics.
         composeTestRule.waitUntil(LOAD_TIMEOUT_MS) {
             val stillEmpty = composeTestRule.onAllNodesWithTag("empty-task-list")
                 .fetchSemanticsNodes().isNotEmpty()
@@ -103,12 +113,18 @@ class GenScreenshotsTest : E2eTestBase() {
                 .fetchSemanticsNodes().isNotEmpty()
             val hasTask = composeTestRule.onAllNodesWithTag("task-$id1")
                 .fetchSemanticsNodes().isNotEmpty()
-            assert(!hasError) {
-                "App shows error state after task creation"
+            if (!hasTask && !hasError && !stillEmpty) {
+                Log.e("E2E", "No task-$id1, no error, no empty-list. Dumping tree:")
+                composeTestRule.onRoot().printToLog("E2E")
             }
-            assert(!stillEmpty) {
-                "Task list still empty — SSE events may not have been received."
-            }
+            org.junit.Assert.assertFalse(
+                "App shows error state after task creation",
+                hasError,
+            )
+            org.junit.Assert.assertFalse(
+                "Task list still empty",
+                stillEmpty,
+            )
             hasTask
         }
 

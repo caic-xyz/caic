@@ -57,7 +57,12 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 	}
 	defer func() { retErr = errors.Join(retErr, os.RemoveAll(fakeConfigDir)) }()
 	cfg.ConfigDir = fakeConfigDir
-	cfg.CacheDir = filepath.Join(os.TempDir(), "caic-e2e-logs")
+	fakeLogsDir, err := os.MkdirTemp("", "caic-e2e-logs-*")
+	if err != nil {
+		return err
+	}
+	defer func() { retErr = errors.Join(retErr, os.RemoveAll(fakeLogsDir)) }()
+	cfg.CacheDir = fakeLogsDir
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
