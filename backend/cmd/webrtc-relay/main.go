@@ -52,7 +52,7 @@ func mainImpl() error {
 		return fmt.Errorf("open users store: %w", err)
 	}
 
-	bridge, err := voicertc.NewBridge(geminiAPIKey, *udpPort)
+	bridge, err := voicertc.NewBridge(ctx, geminiAPIKey, *udpPort)
 	if err != nil {
 		return err
 	}
@@ -75,11 +75,11 @@ func mainImpl() error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	shutdownBase := context.WithoutCancel(ctx)
 	go func() {
 		<-ctx.Done()
-		// Use Background because the parent ctx is already cancelled.
-		shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = srv.Shutdown(shutCtx) //nolint:contextcheck // parent ctx is already cancelled at shutdown time
+		shutCtx, shutCancel := context.WithTimeout(shutdownBase, 5*time.Second)
+		_ = srv.Shutdown(shutCtx)
 		shutCancel()
 	}()
 

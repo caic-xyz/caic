@@ -49,7 +49,7 @@ func TestStaticHandler(t *testing.T) {
 	h := newStaticHandler(testFS(t))
 
 	t.Run("BrotliDirect", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/assets/app.js", http.NoBody)
 		req.Header.Set("Accept-Encoding", "br, gzip")
 		w := httptest.NewRecorder()
 		h(w, req)
@@ -70,7 +70,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("TranscodeZstd", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/assets/app.js", http.NoBody)
 		req.Header.Set("Accept-Encoding", "zstd")
 		w := httptest.NewRecorder()
 		h(w, req)
@@ -88,7 +88,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("TranscodeGzip", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/assets/app.js", http.NoBody)
 		req.Header.Set("Accept-Encoding", "gzip")
 		w := httptest.NewRecorder()
 		h(w, req)
@@ -106,7 +106,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("FallbackIdentity", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/favicon.svg", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/favicon.svg", http.NoBody)
 		w := httptest.NewRecorder()
 		h(w, req)
 
@@ -122,7 +122,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("SPAFallback", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/some/deep/route", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/some/deep/route", http.NoBody)
 		req.Header.Set("Accept-Encoding", "br")
 		w := httptest.NewRecorder()
 		h(w, req)
@@ -140,7 +140,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("VaryHeader", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/favicon.svg", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/favicon.svg", http.NoBody)
 		w := httptest.NewRecorder()
 		h(w, req)
 
@@ -150,7 +150,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("CacheControlAssets", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/assets/app.js", http.NoBody)
 		w := httptest.NewRecorder()
 		h(w, req)
 
@@ -160,7 +160,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("CacheControlRoot", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		w := httptest.NewRecorder()
 		h(w, req)
 
@@ -170,7 +170,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("RootServesIndex", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		w := httptest.NewRecorder()
 		h(w, req)
 
@@ -184,7 +184,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("BrotliPreferredOverZstd", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/assets/app.js", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/assets/app.js", http.NoBody)
 		req.Header.Set("Accept-Encoding", "zstd, br, gzip")
 		w := httptest.NewRecorder()
 		h(w, req)

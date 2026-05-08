@@ -30,7 +30,7 @@ func TestHostState(t *testing.T) {
 		t.Run("lock "+tc.name, func(t *testing.T) {
 			state := &auth.HostState{}
 			h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-			r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 			r.Host = tc.host
 			if tc.xfh != "" {
 				r.Header.Set("X-Forwarded-Host", tc.xfh)
@@ -60,7 +60,7 @@ func TestHostState(t *testing.T) {
 
 		// Lock via a request through the middleware.
 		h := host.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-		r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		r.Host = "caic.example.com"
 		r.Header.Set("X-Forwarded-Proto", "https")
 		h.ServeHTTP(httptest.NewRecorder(), r)
@@ -89,7 +89,7 @@ func TestHostState(t *testing.T) {
 		state := &auth.HostState{}
 		called := false
 		h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
-		r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		r.Host = "192.168.1.1:8080"
 		h.ServeHTTP(httptest.NewRecorder(), r)
 		if !called {
@@ -105,12 +105,12 @@ func TestHostState(t *testing.T) {
 		h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 
 		// Lock with first request.
-		r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		r.Host = "caic.example.com"
 		h.ServeHTTP(httptest.NewRecorder(), r)
 
 		// Different FQDN is rejected.
-		r = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		r = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		r.Host = "evil.example.com"
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
@@ -124,12 +124,12 @@ func TestHostState(t *testing.T) {
 		h := state.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 
 		// Lock on port 8080.
-		r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		r.Host = "caic.example.com:8080"
 		h.ServeHTTP(httptest.NewRecorder(), r)
 
 		// Same host, different port is rejected.
-		r = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		r = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		r.Host = "caic.example.com:9090"
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)

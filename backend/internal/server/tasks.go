@@ -796,7 +796,9 @@ func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 	slog.Info("vnc proxy start", "task", t.ID, "ctr", t.Container, "port", t.VNCPort)
 	vncAddr := fmt.Sprintf("127.0.0.1:%d", t.VNCPort)
 
-	vncConn, err := net.DialTimeout("tcp", vncAddr, 10*time.Second)
+	var d net.Dialer
+	d.Timeout = 10 * time.Second
+	vncConn, err := d.DialContext(r.Context(), "tcp", vncAddr)
 	if err != nil {
 		slog.Error("vnc websocket: dial failed", "addr", vncAddr, "err", err)
 		writeError(w, dto.InternalError("cannot reach container VNC"))

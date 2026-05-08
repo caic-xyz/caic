@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -140,7 +141,7 @@ func resolvePath(path, cfgDir string) string {
 
 // tomlToServerConfig converts a parsed TOML config into a server.Config.
 // cfgDir is used to resolve relative file paths.
-func tomlToServerConfig(tc *tomlConfig, cfgDir string) (cfg *server.Config, addr, root, logLevel string, err error) {
+func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg *server.Config, addr, root, logLevel string, err error) {
 	pem, err := resolveFilePath(tc.GitHub.AppPrivateKeyPEM, cfgDir)
 	if err != nil {
 		return nil, "", "", "", err
@@ -148,7 +149,7 @@ func tomlToServerConfig(tc *tomlConfig, cfgDir string) (cfg *server.Config, addr
 	// gh CLI fallback: when no token and no OAuth configured, try gh auth token.
 	ghToken := tc.GitHub.Token
 	if ghToken == "" && tc.GitHub.OAuthClientID == "" {
-		ghToken = resolveGitHubTokenFromGH()
+		ghToken = resolveGitHubTokenFromGH(ctx)
 	}
 	// Resolve core env vars: explicit config values take precedence over the host environment.
 	tailscaleAPIKey := coreEnvOrDefault(tc.Core.Env, "TAILSCALE_API_KEY")

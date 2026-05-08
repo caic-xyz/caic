@@ -6,6 +6,7 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"image"
 	"image/color"
@@ -25,10 +26,11 @@ type fakeVNCServer struct {
 }
 
 // startFakeVNC creates the fake VNC server and starts accepting connections.
-func startFakeVNC() (*fakeVNCServer, error) {
+func startFakeVNC(ctx context.Context) (*fakeVNCServer, error) {
 	img := generateFakeScreenshot()
 	w, h := img.Rect.Dx(), img.Rect.Dy()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}

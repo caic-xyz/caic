@@ -34,7 +34,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 		return err
 	}
 	defer func() { retErr = errors.Join(retErr, os.RemoveAll(tmpDir)) }()
-	clone, err := initFakeRepo(tmpDir)
+	clone, err := initFakeRepo(ctx, tmpDir)
 	if err != nil {
 		return fmt.Errorf("init fake repo: %w", err)
 	}
@@ -63,7 +63,8 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 	}
 	defer func() { retErr = errors.Join(retErr, os.RemoveAll(fakeLogsDir)) }()
 	cfg.CacheDir = fakeLogsDir
-	ln, err := net.Listen("tcp", addr)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
@@ -75,7 +76,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 	}
 
 	// Start a fake VNC server serving a generated IDE screenshot.
-	fvnc, err := startFakeVNC()
+	fvnc, err := startFakeVNC(ctx)
 	if err != nil {
 		return fmt.Errorf("start fake VNC: %w", err)
 	}
@@ -92,18 +93,18 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 // initFakeRepo creates two fake repos (clone and clone2) in tmpDir so that the
 // add-repo button is visible after the first repo is auto-selected on load.
 // Returns the path to the primary clone.
-func initFakeRepo(tmpDir string) (string, error) {
+func initFakeRepo(ctx context.Context, tmpDir string) (string, error) {
 	if err := initOneRepo(tmpDir, "remote.git", "clone"); err != nil {
 		return "", err
 	}
-	if err := initOneRepo(tmpDir, "remote2.git", "clone2"); err != nil {
+	if err := initOneRepo(ctx, tmpDir, "remote2.git", "clone2"); err != nil {
 		return "", err
 	}
 	return filepath.Join(tmpDir, "clone"), nil
 }
 
 // initOneRepo initialises a bare remote and a clone under tmpDir.
-func initOneRepo(tmpDir, bareName, cloneName string) error {
+func initOneRepo(ctx context.Context, tmpDir, bareName, cloneName string) error {
 	bare := filepath.Join(tmpDir, bareName)
 	clone := filepath.Join(tmpDir, cloneName)
 	for _, args := range [][]string{
@@ -113,7 +114,7 @@ func initOneRepo(tmpDir, bareName, cloneName string) error {
 		{"-C", clone, "config", "user.email", "test@test.com"},
 		{"-C", clone, "checkout", "-b", "main"},
 	} {
-		if err := runGit(args...); err != nil {
+		if err := runGit(ctx, args...); err != nil {
 			return err
 		}
 	}
@@ -126,15 +127,15 @@ func initOneRepo(tmpDir, bareName, cloneName string) error {
 		{"-C", clone, "remote", "add", "origin", bare},
 		{"-C", clone, "push", "-u", "origin", "main"},
 	} {
-		if err := runGit(args...); err != nil {
+		if err := runGit(ctx, args...); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func runGit(args ...string) error {
-	out, err := exec.Command("git", args...).CombinedOutput() //nolint:gosec // args are hardcoded git subcommands
+func runGit(ctx context.Context, args ...string) error {
+	out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput() //nolint:gosec // args are hardcoded git subcommands
 	if err != nil {
 		return fmt.Errorf("git %v: %w\n%s", args, err, out)
 	}
@@ -172,4 +173,4 @@ func (*fakeContainer) Fork(_ context.Context, _ string, _ []md.Repo, _ *task.For
 	return "fake-fork", nil, fmt.Errorf("fork not supported in fake mode")
 }
 
-func (fc *fakeContainer) VNCPort(_ string) int { return fc.vncPort }
+func (fc *fakeContainer) VNCPort(_ context.Context, _ string) int { return fc.vncPort }

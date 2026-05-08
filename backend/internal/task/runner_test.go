@@ -206,7 +206,7 @@ func TestRunner(t *testing.T) {
 			}
 
 			// The task branch must contain the feature commit (feature.txt).
-			out, execErr := exec.Command("git", "-C", clone, "show", tk.Repos[0].Branch+":feature.txt").Output() //nolint:gosec // controlled test args
+			out, execErr := exec.CommandContext(t.Context(), "git", "-C", clone, "show", tk.Repos[0].Branch+":feature.txt").Output() //nolint:gosec // controlled test args
 			if execErr != nil {
 				t.Fatalf("feature.txt not in task branch %s: %v", tk.Repos[0].Branch, execErr)
 			}
@@ -249,7 +249,7 @@ func TestRunner(t *testing.T) {
 			}
 
 			// The task branch must contain the local commit (local.txt).
-			out, execErr := exec.Command("git", "-C", clone, "show", tk.Repos[0].Branch+":local.txt").Output() //nolint:gosec // controlled test args
+			out, execErr := exec.CommandContext(t.Context(), "git", "-C", clone, "show", tk.Repos[0].Branch+":local.txt").Output() //nolint:gosec // controlled test args
 			if execErr != nil {
 				t.Fatalf("local.txt not in task branch %s: %v", tk.Repos[0].Branch, execErr)
 			}
@@ -808,7 +808,7 @@ func (s *stubContainer) Revive(_ context.Context, _ string, _ []md.Repo) error {
 func (s *stubContainer) Fork(_ context.Context, _ string, _ []md.Repo, _ *ForkOptions) (string, []md.Repo, error) {
 	return "stub-fork", nil, nil
 }
-func (s *stubContainer) VNCPort(_ string) int { return 0 }
+func (s *stubContainer) VNCPort(_ context.Context, _ string) int { return 0 }
 
 // recvMsg reads a single message from ch, respecting the test context and a
 // 1-second safety timeout.
@@ -850,7 +850,7 @@ func initTestRepo(t *testing.T, baseBranch string) string { //nolint:unparam // 
 }
 
 func runGit(t *testing.T, dir string, args ...string) {
-	cmd := exec.Command("git", args...) //nolint:gosec // test helper with controlled args
+	cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // test helper with controlled args
 	if dir != "" {
 		cmd.Dir = dir
 	}

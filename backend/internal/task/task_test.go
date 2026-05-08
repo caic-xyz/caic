@@ -159,7 +159,7 @@ func TestTask(t *testing.T) {
 			}
 
 			// Attach a live session so SendInput succeeds past the handle check.
-			cmd := exec.Command("cat")
+			cmd := exec.CommandContext(t.Context(), "cat")
 			stdin, err := cmd.StdinPipe()
 			if err != nil {
 				t.Fatal(err)
@@ -258,7 +258,7 @@ func TestTask(t *testing.T) {
 			tk.addMessage(t.Context(), &agent.ResultMessage{MessageType: "result"}, false)
 
 			// Attach a live session.
-			cmd := exec.Command("cat")
+			cmd := exec.CommandContext(t.Context(), "cat")
 			stdin, err := cmd.StdinPipe()
 			if err != nil {
 				t.Fatal(err)
@@ -313,7 +313,7 @@ func TestTask(t *testing.T) {
 			// "no active session" without changing state.
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
 			tk.SetState(StateWaiting)
-			cmd := exec.Command("true")
+			cmd := exec.CommandContext(t.Context(), "true")
 			stdin, err := cmd.StdinPipe()
 			if err != nil {
 				t.Fatal(err)
@@ -351,7 +351,7 @@ func TestTask(t *testing.T) {
 			t.Error("DetachSession() should return nil when no session attached")
 		}
 
-		cmd := exec.Command("cat")
+		cmd := exec.CommandContext(t.Context(), "cat")
 		stdin, _ := cmd.StdinPipe()
 		stdout, _ := cmd.StdoutPipe()
 		if err := cmd.Start(); err != nil {

@@ -35,7 +35,7 @@ func TestDecompressMiddleware(t *testing.T) {
 		_ = gz.Close()
 
 		h := decompressMiddleware(echoHandler())
-		req := httptest.NewRequest(http.MethodPost, "/", &buf)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", &buf)
 		req.Header.Set("Content-Encoding", "gzip")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -55,7 +55,7 @@ func TestDecompressMiddleware(t *testing.T) {
 		_ = enc.Close()
 
 		h := decompressMiddleware(echoHandler())
-		req := httptest.NewRequest(http.MethodPost, "/", &buf)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", &buf)
 		req.Header.Set("Content-Encoding", "zstd")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -75,7 +75,7 @@ func TestDecompressMiddleware(t *testing.T) {
 		_ = bw.Close()
 
 		h := decompressMiddleware(echoHandler())
-		req := httptest.NewRequest(http.MethodPost, "/", &buf)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", &buf)
 		req.Header.Set("Content-Encoding", "br")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -90,7 +90,7 @@ func TestDecompressMiddleware(t *testing.T) {
 
 	t.Run("Unsupported", func(t *testing.T) {
 		h := decompressMiddleware(echoHandler())
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte("data")))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader([]byte("data")))
 		req.Header.Set("Content-Encoding", "deflate")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -102,7 +102,7 @@ func TestDecompressMiddleware(t *testing.T) {
 
 	t.Run("None", func(t *testing.T) {
 		h := decompressMiddleware(echoHandler())
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader([]byte("plain body")))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader([]byte("plain body")))
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
 

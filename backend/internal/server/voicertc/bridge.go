@@ -93,21 +93,22 @@ type Bridge struct {
 
 // NewBridge creates a Bridge that multiplexes all WebRTC traffic through a
 // single UDP port. This avoids opening ephemeral port ranges in the firewall.
-func NewBridge(geminiAPIKey string, udpPort int) (*Bridge, error) {
+func NewBridge(ctx context.Context, geminiAPIKey string, udpPort int) (*Bridge, error) {
 	// Discover the host's default IPv4 address without netlink (which fails
 	// on hosts without IPv6 due to pion/anet's netlinkrib call).
-	hostIP, err := defaultIPv4()
+	hostIP, err := defaultIPv4(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("detect host IP: %w", err)
 	}
-	conn, err := net.ListenPacket("udp4", fmt.Sprintf(":%d", udpPort))
+	var lc net.ListenConfig
+	conn, err := lc.ListenPacket(ctx, "udp4", fmt.Sprintf(":%d", udpPort))
 	if err != nil {
 		return nil, fmt.Errorf("listen UDP4 :%d: %w", udpPort, err)
 	}
 	mux := ice.NewUDPMuxDefault(ice.UDPMuxParams{UDPConn: conn})
 	se := webrtc.SettingEngine{}
 	se.SetICEUDPMux(mux)
-	se.SetNet(newIPv4Net(hostIP))
+	se.SetNet(newIPv4Net(ctx, hostIP))
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
 	if err := se.SetICEAddressRewriteRules(webrtc.ICEAddressRewriteRule{
 		External:        []string{hostIP.String()},

@@ -3,7 +3,6 @@
 package ipgeo
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +27,7 @@ func TestGetClientIP(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 			r.RemoteAddr = tt.remoteAddr
 			if tt.xForwardedFor != "" {
 				r.Header.Set("X-Forwarded-For", tt.xForwardedFor)
@@ -223,7 +222,7 @@ func TestNewChecker(t *testing.T) {
 	defer func() { githubMetaURL = origURL }()
 
 	t.Run("github in allowlist fetches CIDRs", func(t *testing.T) {
-		c, err := NewChecker(context.Background(), "local,tailscale,github", "")
+		c, err := NewChecker(t.Context(), "local,tailscale,github", "")
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -235,7 +234,7 @@ func TestNewChecker(t *testing.T) {
 		}
 	})
 	t.Run("github not in allowlist skips fetch", func(t *testing.T) {
-		c, err := NewChecker(context.Background(), "local,tailscale", "")
+		c, err := NewChecker(t.Context(), "local,tailscale", "")
 		if err != nil {
 			t.Fatalf("NewChecker: %v", err)
 		}
@@ -247,12 +246,12 @@ func TestNewChecker(t *testing.T) {
 	t.Run("fetch failure is non-fatal", func(t *testing.T) {
 		githubMetaURL = "http://127.0.0.1:0/meta" // unreachable
 		defer func() { githubMetaURL = srv.URL + "/meta" }()
-		if _, err := NewChecker(context.Background(), "local,tailscale,github", ""); err != nil {
+		if _, err := NewChecker(t.Context(), "local,tailscale,github", ""); err != nil {
 			t.Errorf("NewChecker should not fail on fetch error: %v", err)
 		}
 	})
 	t.Run("country code without DB returns error", func(t *testing.T) {
-		if _, err := NewChecker(context.Background(), "CA", ""); err == nil {
+		if _, err := NewChecker(t.Context(), "CA", ""); err == nil {
 			t.Error("expected error when country code given without DB path")
 		}
 	})

@@ -253,16 +253,16 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 			return ctx
 		},
 	}
+	shutdownBase := context.WithoutCancel(ctx)
 	shutdownDone := make(chan struct{})
-	go func() { //nolint:gosec // G118: goroutine intentionally uses Background; parent ctx is already cancelled at shutdown
+	go func() {
 		defer close(shutdownDone)
 		<-ctx.Done()
 		if s.voiceBridge != nil {
 			s.voiceBridge.CloseAll()
 		}
-		// Use Background because the parent ctx is already cancelled.
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = srv.Shutdown(shutdownCtx) //nolint:contextcheck // parent ctx is already cancelled at shutdown time
+		shutdownCtx, shutdownCancel := context.WithTimeout(shutdownBase, 5*time.Second)
+		_ = srv.Shutdown(shutdownCtx)
 		shutdownCancel()
 	}()
 	slog.Info("listening", "addr", ln.Addr())

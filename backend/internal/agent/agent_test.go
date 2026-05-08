@@ -256,7 +256,7 @@ func TestSession(t *testing.T) {
 		_ = s.Close()
 	})
 	t.Run("SignalKillNotError", func(t *testing.T) {
-		cmd := exec.Command("sleep", "60")
+		cmd := exec.CommandContext(t.Context(), "sleep", "60")
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
 			t.Fatal(err)

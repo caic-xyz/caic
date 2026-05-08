@@ -235,7 +235,7 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 }
 
 // VNCPort implements task.ContainerBackend.
-func (b *Backend) VNCPort(containerName string) int {
+func (b *Backend) VNCPort(ctx context.Context, containerName string) int {
 	b.mu.Lock()
 	port := int(b.vncPorts[containerName])
 	b.mu.Unlock()
@@ -245,8 +245,8 @@ func (b *Backend) VNCPort(containerName string) int {
 	// Fallback: query Docker label on the container. Handles server
 	// restarts where the in-memory map is empty but the container
 	// is still running with a display.
-	if v, err := LabelValue(context.Background(), containerName, "md.display"); err == nil && v == "1" {
-		if hp, err := hostPort(containerName, "5901/tcp"); err == nil {
+	if v, err := LabelValue(ctx, containerName, "md.display"); err == nil && v == "1" {
+		if hp, err := hostPort(ctx, containerName, "5901/tcp"); err == nil {
 			b.mu.Lock()
 			b.vncPorts[containerName] = int32(hp) //nolint:gosec // port numbers are 1-65535, safe for int32
 			b.mu.Unlock()
@@ -292,8 +292,8 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) (client 
 }
 
 // hostPort reads the Docker host port mapping for the given container port.
-func hostPort(containerName, containerPort string) (int, error) {
-	cmd := exec.Command("docker", "port", containerName, containerPort) //nolint:gosec // containerName is internally-assigned
+func hostPort(ctx context.Context, containerName, containerPort string) (int, error) {
+	cmd := exec.CommandContext(ctx, "docker", "port", containerName, containerPort) //nolint:gosec // containerName is internally-assigned
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, err

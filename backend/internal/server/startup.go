@@ -190,7 +190,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 
 	var voiceBridge *voicertc.Bridge
 	if cfg.WebRTCPort >= 0 && cfg.GeminiAPIKey != "" {
-		voiceBridge, err = voicertc.NewBridge(cfg.GeminiAPIKey, cfg.WebRTCPort)
+		voiceBridge, err = voicertc.NewBridge(ctx, cfg.GeminiAPIKey, cfg.WebRTCPort)
 		if err != nil {
 			return nil, fmt.Errorf("voice bridge: %w", err)
 		}
@@ -988,7 +988,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 			}
 			tlog.Debug("auto-reconnect succeeded")
 			// Repopulate VNC port from Docker (not in container labels).
-			t.VNCPort = runner.Container.VNCPort(t.Container)
+			t.VNCPort = runner.Container.VNCPort(ctx, t.Container)
 			// Compute host-side diff stat after reconnect. Reconnect
 			// replays relay messages which may include stale
 			// DiffStatMessages (old relay code diffs against HEAD, not

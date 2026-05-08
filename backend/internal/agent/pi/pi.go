@@ -147,8 +147,8 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if b.cache != nil {
 		if _, fresh := b.cache.Models(agent.Pi); !fresh {
 			container := opts.Container
-			go func() { //nolint:gosec,contextcheck // intentionally detached from request context; must outlive Start()
-				fetchCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			go func() {
+				fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 				defer cancel()
 				if models, err := FetchModels(fetchCtx, container, b.EnvVars); err != nil {
 					slog.Warn("pi: background model fetch failed", "err", err)

@@ -13,7 +13,7 @@ import (
 
 func TestNewBridge(t *testing.T) {
 	t.Run("NewBridge", func(t *testing.T) {
-		b, err := NewBridge("test-key", 0)
+		b, err := NewBridge(t.Context(), "test-key", 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -21,7 +21,7 @@ func TestNewBridge(t *testing.T) {
 	})
 
 	t.Run("PeerConnection", func(t *testing.T) {
-		b, err := NewBridge("test-key", 0)
+		b, err := NewBridge(t.Context(), "test-key", 0)
 		if err != nil {
 			t.Fatal(err)
 		}

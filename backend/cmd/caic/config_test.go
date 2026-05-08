@@ -136,7 +136,7 @@ OPENROUTER_API_KEY = "sk-or-test"
 		}
 
 		// Verify tomlToServerConfig converts to KEY=VALUE slices.
-		cfg, _, _, _, err := tomlToServerConfig(&tc, dir)
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -247,7 +247,7 @@ func TestTomlToServerConfig(t *testing.T) {
 			},
 		}
 
-		cfg, addr, root, logLevel, err := tomlToServerConfig(tc, dir)
+		cfg, addr, root, logLevel, err := tomlToServerConfig(t.Context(), tc, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -300,7 +300,7 @@ func TestTomlToServerConfig(t *testing.T) {
 				GeoDB: nil, // not set in config
 			},
 		}
-		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -317,7 +317,7 @@ func TestTomlToServerConfig(t *testing.T) {
 				GeoDB: nil, // not set in config
 			},
 		}
-		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -336,7 +336,7 @@ func TestTomlToServerConfig(t *testing.T) {
 				},
 			},
 		}
-		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -350,7 +350,7 @@ func TestTomlToServerConfig(t *testing.T) {
 		envKey := "AIza_from_env"
 		t.Setenv("GEMINI_API_KEY", envKey)
 		tc := &tomlConfig{} // empty config, no core.env set
-		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -371,7 +371,7 @@ func TestTomlToServerConfig(t *testing.T) {
 				},
 			},
 		}
-		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -390,7 +390,7 @@ func TestTomlToServerConfig(t *testing.T) {
 				},
 			},
 		}
-		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -404,7 +404,7 @@ func TestTomlToServerConfig(t *testing.T) {
 		envKey := "tskey_env"
 		t.Setenv("TAILSCALE_API_KEY", envKey)
 		tc := &tomlConfig{} // empty config
-		cfg, _, _, _, err := tomlToServerConfig(tc, dir)
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
 		if err != nil {
 			t.Fatal(err)
 		}

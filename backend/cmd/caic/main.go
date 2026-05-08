@@ -119,13 +119,14 @@ Flags:
 	if err != nil {
 		return err
 	}
-	cfg, addr, root, logLevel, err := tomlToServerConfig(&tc, cfgDir)
+	cfg, addr, root, logLevel, err := tomlToServerConfig(ctx, &tc, cfgDir)
 	if err != nil {
 		return err
 	}
 	if *printURLFlag {
 		a := localizeAddr(addr)
-		ln, err := net.Listen("tcp", a)
+		var lc net.ListenConfig
+		ln, err := lc.Listen(ctx, "tcp", a)
 		if err != nil {
 			return fmt.Errorf("port %s is not available (already in use?)", a)
 		}
@@ -212,7 +213,8 @@ Flags:
 
 	// Open the listener early to detect port conflicts before lengthy
 	// initialisation (container discovery, repo scanning, etc.).
-	ln, err := net.Listen("tcp", addr)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
 	}
@@ -352,12 +354,12 @@ func configDir() string {
 
 // resolveGitHubTokenFromGH attempts to obtain a GitHub token from the gh CLI
 // (gh auth token). Returns "" if the CLI is not available or fails.
-func resolveGitHubTokenFromGH() string {
+func resolveGitHubTokenFromGH(ctx context.Context) string {
 	ghPath, err := exec.LookPath("gh")
 	if err != nil {
 		return ""
 	}
-	out, err := exec.Command(ghPath, "auth", "token").Output() //nolint:gosec // ghPath resolved via LookPath
+	out, err := exec.CommandContext(ctx, ghPath, "auth", "token").Output() //nolint:gosec // ghPath resolved via LookPath
 	if err != nil {
 		slog.Warn("GITHUB_TOKEN", "msg", "gh CLI found but gh auth token failed", "err", err, "out", string(out))
 		return ""

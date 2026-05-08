@@ -95,7 +95,7 @@ func newTestServer(t *testing.T) *Server {
 func TestHandleTaskEvents(t *testing.T) {
 	t.Run("NotFound", func(t *testing.T) {
 		s := newTestServer(t)
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/99/raw_events", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/tasks/99/raw_events", http.NoBody)
 		req.SetPathValue("id", "99")
 		w := httptest.NewRecorder()
 		s.handleTaskRawEvents(w, req)
@@ -110,7 +110,7 @@ func TestHandleTaskEvents(t *testing.T) {
 
 	t.Run("NonexistentID", func(t *testing.T) {
 		s := newTestServer(t)
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/abc/raw_events", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/tasks/abc/raw_events", http.NoBody)
 		req.SetPathValue("id", "abc")
 		w := httptest.NewRecorder()
 		s.handleTaskRawEvents(w, req)
@@ -133,7 +133,7 @@ func TestHandleTaskInput(t *testing.T) {
 		}
 
 		body := strings.NewReader(`{"prompt":{"text":"hello"}}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/input", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/input", body)
 		req.SetPathValue("id", "t1")
 		w := httptest.NewRecorder()
 		handleWithTask(s, s.sendInput)(w, req)
@@ -154,7 +154,7 @@ func TestHandleTaskInput(t *testing.T) {
 		}
 
 		body := strings.NewReader(`{"prompt":{"text":""}}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/input", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/input", body)
 		req.SetPathValue("id", "t1")
 		w := httptest.NewRecorder()
 		handleWithTask(s, s.sendInput)(w, req)
@@ -179,7 +179,7 @@ func testRestart(t *testing.T, state task.State, bodyJSON string, wantStatus int
 	}
 
 	body := strings.NewReader(bodyJSON)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/restart", body)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/restart", body)
 	req.SetPathValue("id", "t1")
 	w := httptest.NewRecorder()
 	handleWithTask(s, s.restartTask)(w, req)
@@ -212,7 +212,7 @@ func TestHandlePurge(t *testing.T) {
 			done: make(chan struct{}),
 		}
 
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/purge", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/purge", http.NoBody)
 		req.SetPathValue("id", "t1")
 		w := httptest.NewRecorder()
 		handleWithTask(s, s.purgeTask)(w, req)
@@ -235,7 +235,7 @@ func TestHandlePurge(t *testing.T) {
 			done: make(chan struct{}),
 		}
 
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/purge", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/purge", http.NoBody)
 		req.SetPathValue("id", "t1")
 		w := httptest.NewRecorder()
 		handleWithTask(s, s.purgeTask)(w, req)
@@ -267,9 +267,9 @@ func TestHandlePurge(t *testing.T) {
 
 		// Use an already-cancelled context to simulate shutdown scenario
 		// where BaseContext is cancelled before the handler completes.
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/t1/purge", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/purge", http.NoBody)
 		req = req.WithContext(ctx)
 		req.SetPathValue("id", "t1")
 		w := httptest.NewRecorder()
@@ -325,7 +325,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test task"},"repos":[{"name":"myrepo"}],"harness":"claude"}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -346,7 +346,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test task"}}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -364,7 +364,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"nonexistent"}],"harness":"claude"}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -389,7 +389,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"nonexistent"}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -421,7 +421,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"stub","model":"nonexistent"}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -454,7 +454,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"stub","model":"m1"}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -494,7 +494,7 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude"}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -538,7 +538,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude"}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -561,7 +561,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude"}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -575,7 +575,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repo":"r","harness":"claude","bogus":true}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -600,7 +600,7 @@ func TestHandleListRepos(t *testing.T) {
 		changed: make(chan struct{}),
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/server/repos", http.NoBody)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/server/repos", http.NoBody)
 	w := httptest.NewRecorder()
 	handle(s.listRepos)(w, req)
 
@@ -1336,7 +1336,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		// purged tasks instead of blocking until context deadline.
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
 		req.SetPathValue("id", taskID)
 		w := httptest.NewRecorder()
 		start := time.Now()
@@ -1419,7 +1419,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
-		req := httptest.NewRequest(http.MethodGet, "/api/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
 		req.SetPathValue("id", taskID)
 		w := httptest.NewRecorder()
 		s.handleTaskRawEvents(w, req)
@@ -1597,7 +1597,7 @@ func TestBuildHandler(t *testing.T) {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
 		for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
-			req := httptest.NewRequest(method, "/", http.NoBody)
+			req := httptest.NewRequestWithContext(t.Context(), method, "/", http.NoBody)
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, req)
 			if w.Code != http.StatusMethodNotAllowed {
@@ -1614,7 +1614,7 @@ func TestBuildHandler(t *testing.T) {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "evil.example.com"
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1631,7 +1631,7 @@ func TestBuildHandler(t *testing.T) {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "caic.example.com"
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1648,7 +1648,7 @@ func TestBuildHandler(t *testing.T) {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "CAIC.Example.COM"
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1664,7 +1664,7 @@ func TestBuildHandler(t *testing.T) {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "anything.example.com"
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1682,7 +1682,7 @@ func TestBuildHandler(t *testing.T) {
 		}
 
 		// First FQDN request locks the host.
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "caic.example.com"
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1691,7 +1691,7 @@ func TestBuildHandler(t *testing.T) {
 		}
 
 		// Same host is allowed.
-		req = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "caic.example.com"
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1700,7 +1700,7 @@ func TestBuildHandler(t *testing.T) {
 		}
 
 		// Different FQDN is rejected.
-		req = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "evil.example.com"
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1718,7 +1718,7 @@ func TestBuildHandler(t *testing.T) {
 		}
 
 		// Lock on port 8080.
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "caic.example.com:8080"
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1727,7 +1727,7 @@ func TestBuildHandler(t *testing.T) {
 		}
 
 		// Same host, different port is rejected.
-		req = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "caic.example.com:9090"
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1736,7 +1736,7 @@ func TestBuildHandler(t *testing.T) {
 		}
 
 		// Same host without port is also rejected.
-		req = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "caic.example.com"
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1754,7 +1754,7 @@ func TestBuildHandler(t *testing.T) {
 		}
 
 		// IP request before any FQDN — allowed.
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "192.168.1.1:8080"
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1763,13 +1763,13 @@ func TestBuildHandler(t *testing.T) {
 		}
 
 		// Lock a FQDN.
-		req = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "caic.example.com"
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, req)
 
 		// IP request after lock — still allowed.
-		req = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "192.168.1.1:8080"
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1786,7 +1786,7 @@ func TestBuildHandler(t *testing.T) {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "localhost:8080"
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1803,7 +1803,7 @@ func TestBuildHandler(t *testing.T) {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "CAIC.Example.COM"
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1811,7 +1811,7 @@ func TestBuildHandler(t *testing.T) {
 			t.Errorf("first FQDN should not be forbidden")
 		}
 
-		req = httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Host = "caic.example.com"
 		w = httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -1861,7 +1861,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 	t.Run("valid state round-trip succeeds", func(t *testing.T) {
 		// Simulate the start handler to get a valid state cookie.
 		startW := httptest.NewRecorder()
-		startReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/github/start", http.NoBody)
+		startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/auth/github/start", http.NoBody)
 		s.handleAuthStart("github")(startW, startReq)
 		if startW.Code != http.StatusFound {
 			t.Fatalf("start status = %d, want %d", startW.Code, http.StatusFound)
@@ -1886,7 +1886,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 		rawState := redirectURL.Query().Get("state")
 
 		// Build callback request with the state echoed back (as GitHub would).
-		cbReq := httptest.NewRequest(http.MethodGet,
+		cbReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 			"/api/v1/auth/github/callback?code=testcode&state="+url.QueryEscape(rawState), http.NoBody)
 		cbReq.AddCookie(stateCookie)
 		cbW := httptest.NewRecorder()

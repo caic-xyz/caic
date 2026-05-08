@@ -48,7 +48,7 @@ func precompressedHandler() http.HandlerFunc {
 func TestCompressMiddleware(t *testing.T) {
 	t.Run("Zstd", func(t *testing.T) {
 		h := compressMiddleware(jsonHandler())
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Header.Set("Accept-Encoding", "zstd")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -73,7 +73,7 @@ func TestCompressMiddleware(t *testing.T) {
 
 	t.Run("Brotli", func(t *testing.T) {
 		h := compressMiddleware(jsonHandler())
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Header.Set("Accept-Encoding", "br")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -93,7 +93,7 @@ func TestCompressMiddleware(t *testing.T) {
 
 	t.Run("Gzip", func(t *testing.T) {
 		h := compressMiddleware(jsonHandler())
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Header.Set("Accept-Encoding", "gzip")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -118,7 +118,7 @@ func TestCompressMiddleware(t *testing.T) {
 
 	t.Run("Preference", func(t *testing.T) {
 		h := compressMiddleware(jsonHandler())
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Header.Set("Accept-Encoding", "gzip, br, zstd")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -130,7 +130,7 @@ func TestCompressMiddleware(t *testing.T) {
 
 	t.Run("CompressesSSE", func(t *testing.T) {
 		h := compressMiddleware(sseHandler(t))
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Header.Set("Accept-Encoding", "zstd")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -155,7 +155,7 @@ func TestCompressMiddleware(t *testing.T) {
 
 	t.Run("SkipsPrecompressed", func(t *testing.T) {
 		h := compressMiddleware(precompressedHandler())
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Header.Set("Accept-Encoding", "zstd, br, gzip")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
@@ -170,7 +170,7 @@ func TestCompressMiddleware(t *testing.T) {
 
 	t.Run("NoAcceptEncoding", func(t *testing.T) {
 		h := compressMiddleware(jsonHandler())
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)
 
@@ -184,7 +184,7 @@ func TestCompressMiddleware(t *testing.T) {
 
 	t.Run("VaryHeader", func(t *testing.T) {
 		h := compressMiddleware(jsonHandler())
-		req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 		req.Header.Set("Accept-Encoding", "gzip")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, req)

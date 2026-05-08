@@ -14,14 +14,16 @@ import (
 // ipv4Net implements transport.Net using only IPv4 via Go's stdlib net
 // package, bypassing pion/stdnet's netlinkrib dependency.
 type ipv4Net struct {
+	ctx        context.Context
 	interfaces []*transport.Interface
 }
 
 // defaultIPv4 discovers the host's default IPv4 address by dialing a UDP
 // socket. No data is sent; the OS routing table selects the source address.
 // This avoids netlink calls that fail on hosts without IPv6.
-func defaultIPv4() (net.IP, error) {
-	c, err := net.Dial("udp4", "8.8.8.8:80")
+func defaultIPv4(ctx context.Context) (net.IP, error) {
+	var d net.Dialer
+	c, err := d.DialContext(ctx, "udp4", "8.8.8.8:80")
 	if err != nil {
 		return nil, err
 	}
@@ -37,14 +39,14 @@ func defaultIPv4() (net.IP, error) {
 //
 // This avoids netlink enumeration while giving pion a routable address
 // for ICE candidate gathering.
-func newIPv4Net(hostIP net.IP) *ipv4Net {
+func newIPv4Net(ctx context.Context, hostIP net.IP) *ipv4Net {
 	ifc := transport.NewInterface(net.Interface{
 		Index: 1,
 		Name:  "eth0",
 		Flags: net.FlagUp | net.FlagMulticast,
 	})
 	ifc.AddAddress(&net.IPNet{IP: hostIP, Mask: net.CIDRMask(32, 32)})
-	return &ipv4Net{interfaces: []*transport.Interface{ifc}}
+	return &ipv4Net{ctx: ctx, interfaces: []*transport.Interface{ifc}}
 }
 
 func (n *ipv4Net) Interfaces() ([]*transport.Interface, error) {
@@ -70,7 +72,8 @@ func (n *ipv4Net) InterfaceByName(name string) (*transport.Interface, error) {
 }
 
 func (n *ipv4Net) ListenPacket(network, address string) (net.PacketConn, error) {
-	return net.ListenPacket(network, address)
+	var lc net.ListenConfig
+	return lc.ListenPacket(n.ctx, network, address)
 }
 
 func (n *ipv4Net) ListenUDP(network string, locAddr *net.UDPAddr) (transport.UDPConn, error) {
@@ -86,7 +89,8 @@ func (n *ipv4Net) ListenTCP(network string, laddr *net.TCPAddr) (transport.TCPLi
 }
 
 func (n *ipv4Net) Dial(network, address string) (net.Conn, error) {
-	return net.Dial(network, address)
+	var d net.Dialer
+	return d.DialContext(n.ctx, network, address)
 }
 
 func (n *ipv4Net) DialUDP(network string, laddr, raddr *net.UDPAddr) (transport.UDPConn, error) {

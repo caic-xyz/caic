@@ -54,8 +54,8 @@ func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
 }
 
 // Start launches the embedded fake Python agent as a subprocess.
-func (b *Backend) Start(_ context.Context, opts *agent.Options) (*agent.Session, error) {
-	cmd := exec.Command("python3", "-u", "-c", string(Script)) //nolint:gosec // Script is an embedded constant
+func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	cmd := exec.CommandContext(ctx, "python3", "-u", "-c", string(Script)) //nolint:gosec // Script is an embedded constant
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
