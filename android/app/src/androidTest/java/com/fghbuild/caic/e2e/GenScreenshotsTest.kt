@@ -135,8 +135,9 @@ class GenScreenshotsTest : E2eTestBase() {
         // Screenshot 1: Task list.
         takeScreenshot("task-list")
 
-        // Tap the first task to open detail view via testTag (immune to title changes).
-        composeTestRule.onNodeWithTag("task-$id1").performClick()
+        // id1 sorts last in taskIdDesc (smallest ksid, first-created) and may be
+        // outside the viewport on small screens. Scroll it into view before tapping.
+        composeTestRule.onNodeWithTag("task-$id1").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         Thread.sleep(SETTLE_DELAY_MS)
 
