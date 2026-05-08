@@ -8,7 +8,8 @@ Steps:
   4. Set up adb reverse port forwarding.
   5. Run connectedAndroidTest via Gradle with the dynamic port.
   6. Pull and convert screenshots.
-  7. Kill the backend on exit.
+  7. Dump logcat on failure for CI diagnostics.
+  8. Kill the backend on exit.
 """
 
 import argparse
@@ -275,7 +276,37 @@ def main():
                     file=sys.stderr,
                 )
                 return 1
-            subprocess.check_call(["adb", "reverse", f"tcp:{port}", f"tcp:{port}"])
+            # adb reverse can fail silently on CI (emulator networking).
+            # Retry with backoff to give the emulator time to settle.
+            for attempt in range(3):
+                try:
+                    subprocess.run(
+                        ["adb", "reverse", "--remove", f"tcp:{port}"],
+                        capture_output=True,
+                        timeout=5,
+                    )
+                except Exception:
+                    pass
+                subprocess.check_call(
+                    ["adb", "reverse", f"tcp:{port}", f"tcp:{port}"],
+                    timeout=10,
+                )
+                # Verify by probing the port from inside the emulator.
+                try:
+                    result = subprocess.run(
+                        ["adb", "shell", f"(: </dev/tcp/localhost/{port}) 2>&1 || echo DEAD"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    if "DEAD" not in result.stdout:
+                        break
+                except Exception:
+                    pass
+                print(f"Reverse tunnel check failed (attempt {attempt + 1}/3), retrying...", file=sys.stderr)
+                time.sleep(2)
+            else:
+                print("Reverse tunnel could not be verified after 3 attempts", file=sys.stderr)
 
             print("Running Android E2E tests...")
             logcat_proc, logcat_path, logcat_file = start_logcat(tmp_dir)
