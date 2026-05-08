@@ -158,12 +158,14 @@ def persist_logcat_for_artifact(logcat_path):
 
 
 def run_tests(port):
+    # Use 10.0.2.2 (emulator alias for host loopback) instead of localhost.
+    # Avoids adb reverse which is flaky on CI runners.
     result = subprocess.run(
         [
             "./gradlew",
             "--no-daemon",
             "connectedAndroidTest",
-            f"-Pandroid.testInstrumentationRunnerArguments.baseUrl=http://localhost:{port}",
+            f"-Pandroid.testInstrumentationRunnerArguments.baseUrl=http://10.0.2.2:{port}",
         ],
         cwd=os.path.join(ROOT_DIR, "android"),
     )
