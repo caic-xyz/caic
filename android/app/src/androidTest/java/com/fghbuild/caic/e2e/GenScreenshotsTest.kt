@@ -106,15 +106,19 @@ class GenScreenshotsTest : E2eTestBase() {
             )
         }
 
+        // Check for id4 (last-created, sorts first in taskIdDesc) — the
+        // CI emulator viewport (320×640 at 160dpi) only fits the creation
+        // form + 3 task cards; id1 (smallest ksid) sorts last and falls
+        // outside the viewport, so its node is never composed.
         composeTestRule.waitUntil(LOAD_TIMEOUT_MS) {
             val stillEmpty = composeTestRule.onAllNodesWithTag("empty-task-list")
                 .fetchSemanticsNodes().isNotEmpty()
             val hasError = composeTestRule.onAllNodesWithTag("task-list-error")
                 .fetchSemanticsNodes().isNotEmpty()
-            val hasTask = composeTestRule.onAllNodesWithTag("task-$id1")
+            val hasTask = composeTestRule.onAllNodesWithTag("task-$id4")
                 .fetchSemanticsNodes().isNotEmpty()
             if (!hasTask && !hasError && !stillEmpty) {
-                Log.e("E2E", "No task-$id1, no error, no empty-list. Dumping tree:")
+                Log.e("E2E", "No task-$id4, no error, no empty-list. Dumping tree:")
                 composeTestRule.onRoot().printToLog("E2E")
             }
             org.junit.Assert.assertFalse(
