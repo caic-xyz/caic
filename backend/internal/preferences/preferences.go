@@ -158,6 +158,9 @@ type Settings struct {
 	// BaseImage overrides the default container base image. Empty means use
 	// the default.
 	BaseImage string `json:"baseImage,omitempty"`
+	// MaxCPUs limits the number of CPU cores the container may use.
+	// Passed as --cpus to docker/podman. Zero means use [md.DefaultMaxCPUs].
+	MaxCPUs int `json:"maxCPUs,omitempty"`
 	// GitHubTokenAccess controls the GitHub token injected into containers.
 	// Default ("" or "none") injects no token.
 	// "read-write" passes the parent token.

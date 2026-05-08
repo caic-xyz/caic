@@ -462,6 +462,9 @@ type UserSettings struct {
 	// BaseImage overrides the default container base image. Empty means use
 	// the default.
 	BaseImage string `json:"baseImage,omitempty"`
+	// MaxCPUs limits the number of CPU cores the container may use.
+	// Zero means use the system default (max(2, NumCPU-2)).
+	MaxCPUs int `json:"maxCPUs,omitempty"`
 	// GitHubTokenAccess controls the GitHub token injected into containers.
 	// "none" (default): no token. "read-write": passes the parent token.
 	GitHubTokenAccess string `json:"gitHubTokenAccess,omitempty"`

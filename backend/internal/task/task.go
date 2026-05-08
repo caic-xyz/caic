@@ -164,6 +164,7 @@ type Task struct {
 	Model         string        // User-requested model; passed to agent CLI.
 	Effort        string        // Thinking effort; passed to agent CLI. Empty = default.
 	DockerImage   string        // Custom Docker base image; empty means use the default.
+	MaxCPUs       int           // Max CPU cores for the container; 0 means use the default.
 	GitHubToken   string        // GitHub token to inject into the container; empty means none.
 	Tailscale     bool          // Enable Tailscale networking in the container.
 	USB           bool          // Enable USB passthrough in the container.

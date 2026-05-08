@@ -196,6 +196,9 @@ public struct UserSettings: Codable {
     /// BaseImage overrides the default container base image. Empty means use
     /// the default.
     public let baseImage: String?
+    /// MaxCPUs limits the number of CPU cores the container may use.
+    /// Zero means use the system default (max(2, NumCPU-2)).
+    public let maxCPUs: Int?
     /// GitHubTokenAccess controls the GitHub token injected into containers.
     /// "none" (default): no token. "read-write": passes the parent token.
     public let gitHubTokenAccess: String?

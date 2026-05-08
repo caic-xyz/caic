@@ -172,6 +172,7 @@ data class UserSettings(
     @SerialName("autoFixOnCIFailure") val autoFixOnCIFailure: Boolean,
     @SerialName("autoFixOnPROpen") val autoFixOnPROpen: Boolean,
     val baseImage: String? = null,
+    @SerialName("maxCPUs") val maxCPUs: Int? = null,
     val gitHubTokenAccess: String? = null,
     val useDefaultCaches: Boolean? = null,
     val wellKnownCaches: Map<String, Boolean>? = null,

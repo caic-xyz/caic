@@ -136,6 +136,7 @@ export default function App() {
   const [autoFixCI, setAutoFixCI] = createSignal(false);
   const [autoFixPR, setAutoFixPR] = createSignal(false);
   const [gitHubTokenAccess, setGitHubTokenAccess] = createSignal("");
+  const [maxCPUs, setMaxCPUs] = createSignal(0);
   const [useDefaultCaches, setUseDefaultCaches] = createSignal(true);
   const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
   const [wellKnownCachesList, setWellKnownCachesList] = createSignal<WellKnownCachesResp["wellKnown"]>([]);
@@ -148,6 +149,7 @@ export default function App() {
       autoFixOnCIFailure: autoFixCI(),
       autoFixOnPROpen: autoFixPR(),
       baseImage: selectedImage() || "",
+      maxCPUs: maxCPUs(),
       gitHubTokenAccess: gitHubTokenAccess() || undefined,
       useDefaultCaches: useDefaultCaches(),
       wellKnownCaches: wellKnownCaches() as Record<string, boolean>,
@@ -329,6 +331,7 @@ export default function App() {
           setAutoFixCI(prefs.settings.autoFixOnCIFailure);
           setAutoFixPR(prefs.settings.autoFixOnPROpen);
           setGitHubTokenAccess(prefs.settings.gitHubTokenAccess ?? "");
+          setMaxCPUs(prefs.settings.maxCPUs ?? 0);
           setUseDefaultCaches(prefs.settings.useDefaultCaches ?? true);
           setWellKnownCaches(prefs.settings.wellKnownCaches ?? {});
           setCacheMappings(prefs.settings.cacheMappings ?? []);
@@ -1089,6 +1092,21 @@ export default function App() {
                   }}
                 />
               </label>
+              <label class={styles.settingsLabel}>
+                CPU cores
+                <input
+                  type="number"
+                  class={styles.settingsInput}
+                  placeholder="Default"
+                  min="0"
+                  value={maxCPUs() || ""}
+                  onChange={(e) => setMaxCPUs(parseInt(e.currentTarget.value, 10) || 0)}
+                  onBlur={async () => {
+                    await updatePreferences(currentSettings());
+                  }}
+                />
+              </label>
+              <p class={styles.settingsDescription}>Maximum CPU cores for each container (0 = use default).</p>
               <label class={styles.settingsLabel}>
                 GitHub token access
                 <select

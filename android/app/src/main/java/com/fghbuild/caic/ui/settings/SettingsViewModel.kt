@@ -31,6 +31,7 @@ data class SettingsScreenState(
     val autoFixCI: Boolean = false,
     val autoFixPR: Boolean = false,
     val baseImage: String = "",
+    val maxCPUs: String = "",
     val gitHubTokenAccess: String = "",
     val useDefaultCaches: Boolean = true,
     val wellKnownCaches: Map<String, Boolean> = emptyMap(),
@@ -165,6 +166,7 @@ class SettingsViewModel @Inject constructor(
                         autoFixCI = prefs.settings.autoFixOnCIFailure,
                         autoFixPR = prefs.settings.autoFixOnPROpen ?: false,
                         baseImage = prefs.settings.baseImage ?: "",
+                        maxCPUs = prefs.settings.maxCPUs?.toString() ?: "",
                         gitHubTokenAccess = prefs.settings.gitHubTokenAccess ?: "",
                         useDefaultCaches = prefs.settings.useDefaultCaches ?: true,
                         wellKnownCaches = prefs.settings.wellKnownCaches ?: emptyMap(),
@@ -195,6 +197,15 @@ class SettingsViewModel @Inject constructor(
 
     fun saveBaseImage() {
         saveSettings { it.copy(baseImage = _state.value.baseImage.ifBlank { null }) }
+    }
+
+    fun updateMaxCPUs(cpus: String) {
+        _state.update { it.copy(maxCPUs = cpus) }
+    }
+
+    fun saveMaxCPUs() {
+        val v = _state.value.maxCPUs.toIntOrNull() ?: 0
+        saveSettings { it.copy(maxCPUs = if (v > 0) v else null) }
     }
 
     fun updateGitHubTokenAccess(access: String) {
@@ -255,6 +266,7 @@ class SettingsViewModel @Inject constructor(
                     autoFixOnCIFailure = snapshot.autoFixCI,
                     autoFixOnPROpen = snapshot.autoFixPR,
                     baseImage = snapshot.baseImage.ifBlank { null },
+                    maxCPUs = snapshot.maxCPUs.toIntOrNull(),
                     gitHubTokenAccess = snapshot.gitHubTokenAccess.ifEmpty { null },
                     useDefaultCaches = snapshot.useDefaultCaches,
                     wellKnownCaches = snapshot.wellKnownCaches.ifEmpty { null },

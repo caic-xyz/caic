@@ -161,6 +161,8 @@ Only effective when the GitHub App is configured. | yes |
 request when it is opened or reopened via a forge webhook. | yes |
 | `baseImage` | `string` | BaseImage overrides the default container base image. Empty means use
 the default. |  |
+| `maxCPUs` | `int` | MaxCPUs limits the number of CPU cores the container may use.
+Zero means use the system default (max(2, NumCPU-2)). |  |
 | `gitHubTokenAccess` | `string` | GitHubTokenAccess controls the GitHub token injected into containers.
 "none" (default): no token. "read-write": passes the parent token. |  |
 | `useDefaultCaches` | `boolean` | UseDefaultCaches controls whether default harness caches are mounted.

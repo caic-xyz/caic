@@ -36,6 +36,9 @@ type StartOptions struct {
 	Tailscale   bool
 	USB         bool
 	Display     bool
+	// MaxCPUs limits the number of CPU cores the container may use.
+	// Zero means use [md.DefaultMaxCPUs].
+	MaxCPUs int
 	// GitHubToken is the resolved GitHub token to inject into the container's
 	// environment. Empty means no token is injected.
 	GitHubToken string
@@ -84,6 +87,7 @@ type ForkOptions struct {
 	Labels     []string
 	Harness    agent.Harness
 	ExtraEnv   []string  // KEY=VALUE pairs for ~/.env.
+	MaxCPUs    int       // Max CPU cores; 0 means use the default.
 	LogWriter  io.Writer // Provisioning log output.
 }
 
@@ -1269,6 +1273,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string) (setupResu
 
 	opts := &StartOptions{
 		DockerImage: t.DockerImage, Harness: t.Harness, Tailscale: t.Tailscale, USB: t.USB, Display: t.Display,
+		MaxCPUs:     t.MaxCPUs,
 		GitHubToken: t.GitHubToken,
 		LogWriter:   &provisioningWriter{ctx: ctx, t: t},
 	}

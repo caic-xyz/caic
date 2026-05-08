@@ -137,6 +137,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		Model:         req.Model,
 		Effort:        req.Effort,
 		DockerImage:   dockerImage,
+		MaxCPUs:       prefs.Settings.MaxCPUs,
 		GitHubToken:   ghToken,
 		Tailscale:     req.Tailscale,
 		USB:           req.USB,
@@ -620,6 +621,7 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 		Model:         forkModel,
 		Effort:        forkEffort,
 		DockerImage:   source.DockerImage,
+		MaxCPUs:       source.MaxCPUs,
 		GitHubToken:   ghToken,
 		Tailscale:     source.Tailscale,
 		USB:           source.USB,
@@ -653,6 +655,7 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 			Labels:     []string{"caic=" + t.ID.String(), "harness=" + string(forkHarness)},
 			Harness:    forkHarness,
 			ExtraEnv:   extraEnv,
+			MaxCPUs:    source.MaxCPUs,
 		}
 		h, err := runner.ForkTask(ctx, source, t, forkOpts)
 		if err != nil {

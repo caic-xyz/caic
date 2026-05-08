@@ -187,6 +187,19 @@ fun SettingsScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            OutlinedTextField(
+                value = screenState.maxCPUs,
+                onValueChange = { viewModel.updateMaxCPUs(it) },
+                label = { Text("CPU cores") },
+                placeholder = { Text("Default") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "Maximum CPU cores for each container (0 = use default).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Text("GitHub token access", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
             GitHubTokenOptions.forEach { (value, label) ->
                 val selected = (screenState.gitHubTokenAccess.ifEmpty { "none" }) == value

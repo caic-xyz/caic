@@ -218,7 +218,7 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 		Labels:     opts.Labels,
 		AgentPaths: agentPaths,
 		ExtraEnv:   opts.ExtraEnv,
-		MaxCPUs:    md.DefaultMaxCPUs(),
+		MaxCPUs:    maxCPUsOrDefault(opts.MaxCPUs),
 	}
 	stdout, stderr := logWriters(opts.LogWriter, "fork")
 	slog.Debug("container", "msg", "calling ct.Fork", "source", name)
@@ -286,7 +286,7 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) (client 
 		Tailscale:  opts.Tailscale,
 		Display:    opts.Display,
 		ExtraEnv:   extraEnv,
-		MaxCPUs:    md.DefaultMaxCPUs(),
+		MaxCPUs:    maxCPUsOrDefault(opts.MaxCPUs),
 	}
 	return client, mdOpts
 }
@@ -309,4 +309,12 @@ func hostPort(ctx context.Context, containerName, containerPort string) (int, er
 // logWriters returns stdout and stderr writers for md task operations.
 func logWriters(w io.Writer, phase string) (stdout, stderr io.Writer) {
 	return w, &SlogWriter{Phase: phase}
+}
+
+// maxCPUsOrDefault returns cpus if non-zero, otherwise [md.DefaultMaxCPUs].
+func maxCPUsOrDefault(cpus int) int {
+	if cpus <= 0 {
+		return md.DefaultMaxCPUs()
+	}
+	return cpus
 }
