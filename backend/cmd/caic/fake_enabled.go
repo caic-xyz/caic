@@ -94,7 +94,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 // add-repo button is visible after the first repo is auto-selected on load.
 // Returns the path to the primary clone.
 func initFakeRepo(ctx context.Context, tmpDir string) (string, error) {
-	if err := initOneRepo(tmpDir, "remote.git", "clone"); err != nil {
+	if err := initOneRepo(ctx, tmpDir, "remote.git", "clone"); err != nil {
 		return "", err
 	}
 	if err := initOneRepo(ctx, tmpDir, "remote2.git", "clone2"); err != nil {
