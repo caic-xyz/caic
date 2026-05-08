@@ -110,7 +110,6 @@ class TaskRepository @Inject constructor(
                 launch {
                     try {
                         taskEventsReconnecting(serverURL, _tasksConnected).collect { tasks ->
-                            Log.d(TAG, "_tasks updated: ${tasks.size} tasks: ${tasks.map { it.id }}")
                             _tasks.value = tasks
                         }
                     } catch (e: CancellationException) {
@@ -203,12 +202,8 @@ class TaskRepository @Inject constructor(
                         "snapshot" -> {
                             taskMap.clear()
                             event.snapshot?.forEach { taskMap[it.id] = it }
-                            Log.d(TAG, "SSE snapshot: ${taskMap.size} tasks")
                         }
-                        "upsert" -> {
-                            event.upsert?.let { taskMap[it.id] = it }
-                            Log.d(TAG, "SSE upsert: ${event.upsert?.id}")
-                        }
+                        "upsert" -> event.upsert?.let { taskMap[it.id] = it }
                         "patch" -> event.patch?.let { patch ->
                             val id = (patch["id"] as? JsonPrimitive)?.content ?: return@let
                             val existing = taskMap[id]
@@ -236,10 +231,7 @@ class TaskRepository @Inject constructor(
                             return
                         }
                     }
-                    val sent = trySend(taskMap.values.toList())
-                    if (!sent.isSuccess) {
-                        Log.w(TAG, "SSE event dropped (channel full): ${event.kind} size=${taskMap.size}")
-                    }
+                    trySend(taskMap.values.toList())
                 } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
                     _warnings.tryEmit("Invalid task list event: ${e.message}")
                 }
@@ -318,8 +310,7 @@ class TaskRepository @Inject constructor(
                 flag.value = false
                 updateConnected()
                 return@flow // Stop retrying; collectLatest restarts after re-auth.
-            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-                Log.d(TAG, "SSE connection lost, reconnecting in ${delayMs}ms: $e")
+            } catch (_: Exception) {
                 flag.value = false
                 updateConnected()
                 delay(jitteredDelay(delayMs))
