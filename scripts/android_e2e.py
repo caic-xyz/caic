@@ -161,7 +161,9 @@ def is_emulator():
     """Return True if the connected device is an emulator."""
     result = subprocess.run(
         ["adb", "shell", "getprop", "ro.build.characteristics"],
-        capture_output=True, text=True, timeout=5,
+        capture_output=True,
+        text=True,
+        timeout=5,
     )
     return "emulator" in result.stdout
 
