@@ -240,6 +240,12 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker, fw *jsonutil.FieldW
 			return nil, err
 		}
 		return []agent.Message{&m}, nil
+	case "caic_exit":
+		var m agent.ExitMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, err
+		}
+		return []agent.Message{&m}, nil
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: string(env.Type), Raw: append([]byte(nil), line...)}}, nil
 	}

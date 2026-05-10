@@ -173,11 +173,25 @@ class _Daemon:
         except (OSError, ValueError) as e:
             logging.warning("reader_thread error: %s", e)
         finally:
+            exit_code = self.proc.poll()
             sz = self.output_file.tell() if not self.output_file.closed else -1
+            # Write caic_exit event before closing so the backend sees
+            # why the relay stopped without needing to parse relay.log.
+            ev = (
+                json.dumps(
+                    {
+                        "type": "caic_exit",
+                        "exit_code": exit_code if exit_code is not None else -1,
+                        "ts": time.time(),
+                    }
+                )
+                + "\n"
+            )
+            self.output_file.write(ev.encode())
             self.output_file.close()
             self.set_client(None, "subprocess_eof")
             self.diff_activity.set()
-            logging.info("reader_thread exited output_bytes=%d proc_poll=%s", sz, self.proc.poll())
+            logging.info("reader_thread exited output_bytes=%d exit_code=%s", sz, exit_code)
 
     def diff_watcher_thread(self):
         """Poll git diff on activity, with throttle + debounce.
@@ -407,9 +421,16 @@ def serve(cmd_args, work_dir, log_stdin=True, strip_env=(), shutdown_grace=_DEFA
     pid = os.fork()
     if pid > 0:
         # Parent: wait for socket to appear, then attach.
-        _wait_for_socket(30)
-        attach_client(offset=0)
-        return
+        try:
+            _wait_for_socket(30)
+            attach_client(offset=0)
+        finally:
+            # Reap the child if it exited (e.g. agent crash).
+            # WNOHANG: don't block if daemon is still running.
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
 
     # Child: become session leader so we survive SSH disconnects.
     os.setsid()

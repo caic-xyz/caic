@@ -53,6 +53,13 @@ func parseMessage(line []byte, _ *jsonutil.FieldWarner) ([]agent.Message, error)
 		}
 		return []agent.Message{&m}, nil
 
+	case "caic_exit":
+		var m agent.ExitMessage
+		if err := json.Unmarshal(line, &m); err != nil {
+			return nil, err
+		}
+		return []agent.Message{&m}, nil
+
 	case pi.EventMessageUpdate:
 		return parseMessageUpdate(line)
 
