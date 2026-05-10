@@ -92,8 +92,8 @@ android-build:
 	@cd android && ./gradlew --no-daemon assembleDebug
 
 android-setup-emulator:
-	@yes | sdkmanager --install "system-images;android-36;google_apis;x86_64"
-	@echo "no" | avdmanager create avd -n caic_test -k "system-images;android-36;google_apis;x86_64" -d "pixel_6" --force
+	@yes | sdkmanager --install "system-images;android-35;google_apis;x86_64"
+	@echo "no" | avdmanager create avd -n caic_test -k "system-images;android-35;google_apis;x86_64" -d "pixel_6" --force
 
 android-start-emulator:
 	@echo "Starting emulator caic_test..."

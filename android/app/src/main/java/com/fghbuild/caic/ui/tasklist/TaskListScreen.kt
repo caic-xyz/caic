@@ -305,7 +305,8 @@ private fun MainContent(
         LazyColumn(
             modifier = Modifier
                 .widthIn(max = 840.dp)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .testTag("task-list"),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {

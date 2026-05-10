@@ -7,11 +7,12 @@ package com.fghbuild.caic.e2e
 import android.os.Environment
 import android.util.Log
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.printToLog
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -136,9 +137,11 @@ class GenScreenshotsTest : E2eTestBase() {
         // Screenshot 1: Task list.
         takeScreenshot("task-list")
 
-        // id1 sorts last in taskIdDesc (smallest ksid, first-created) and may be
-        // outside the viewport on small screens. Scroll it into view before tapping.
-        composeTestRule.onNodeWithTag("task-$id1").performScrollTo().performClick()
+        // id1 sorts last in taskIdDesc (smallest ksid, first-created) and may not be
+        // composed on small screens. Use performScrollToNode on the container, which
+        // handles lazy items that are not yet in the composition tree.
+        composeTestRule.onNodeWithTag("task-list").performScrollToNode(hasTestTag("task-$id1"))
+        composeTestRule.onNodeWithTag("task-$id1").performClick()
         composeTestRule.waitForIdle()
         Thread.sleep(SETTLE_DELAY_MS)
 
