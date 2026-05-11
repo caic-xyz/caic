@@ -1,4 +1,5 @@
 ---
+# Widget Rendering
 name: widget
 description: >
   Render interactive HTML widgets inline in the conversation. Use when the user
