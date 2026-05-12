@@ -681,7 +681,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	}
 
 	// 4. Compute host-side diff stat once.
-	if ds := r.BranchDiffStat(ctx, primaryBranch, t.ExtraMDRepos()); len(ds) > 0 {
+	if ds := r.BranchDiffStat(ctx, t.MDRepos()); len(ds) > 0 {
 		t.SetLiveDiffStat(ds)
 	}
 	tlog.Info("agent ready after revive", "state", t.GetState())
@@ -844,10 +844,10 @@ func (r *Runner) AllocateBranch(ctx context.Context) (string, error) {
 	return r.allocateBranchLocked(ctx, &Task{})
 }
 
-// SyncToOrigin pushes the given branch to origin and returns the diff stat and
-// any safety issues found. When force is false, safety issues that would be
-// overwritten by a force push are returned as errors.
-func (r *Runner) SyncToOrigin(ctx context.Context, branch, container string, force bool, extraRepos []md.Repo) (agent.DiffStat, []SafetyIssue, error) {
+// SyncToOrigin pushes each repo's task branch to origin and returns the
+// combined diff stat across all repos and any safety issues found. Safety is
+// checked per-repo; when force is false, issues in any repo block the push.
+func (r *Runner) SyncToOrigin(ctx context.Context, repos []md.Repo, container string, force bool) (agent.DiffStat, []SafetyIssue, error) {
 	r.initDefaults()
 	if r.Dir == "" {
 		return nil, nil, errors.New("sync is not supported for no-repo tasks")
@@ -856,39 +856,72 @@ func (r *Runner) SyncToOrigin(ctx context.Context, branch, container string, for
 	fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 	defer fetchCancel()
 	r.branchMu.Lock()
-	r.log.Info("fetch", "br", branch)
-	if err := r.Container.Fetch(fetchCtx, append([]md.Repo{{GitRoot: r.Dir, Branch: branch}}, extraRepos...)); err != nil {
+	r.log.Info("fetch", "repos", len(repos))
+	if err := r.Container.Fetch(fetchCtx, repos); err != nil {
 		r.branchMu.Unlock()
 		region.End()
 		return nil, nil, err
 	}
-	ds := r.diffStat(fetchCtx, branch)
+	ds := r.diffStat(fetchCtx, repos)
 	r.branchMu.Unlock()
 	region.End()
 
-	ref := "refs/remotes/" + container + "/" + branch
-	safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
-	defer safetyCancel()
-	issues, err := CheckSafety(safetyCtx, r.Dir, ref, r.BaseBranch, ds)
-	if err != nil {
-		return ds, issues, fmt.Errorf("safety check: %w", err)
+	// Phase 1: safety check each repo, collect all issues.
+	multi := len(repos) > 1
+	var allIssues []SafetyIssue
+	for _, repo := range repos {
+		branch := repo.Branch
+		ref := "refs/remotes/" + container + "/" + branch
+		repoDS := extractRepoDS(ds, repo.Name(), multi)
+		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
+		issues, err := CheckSafety(safetyCtx, repo.GitRoot, ref, r.BaseBranch, repoDS)
+		safetyCancel()
+		if err != nil {
+			return ds, allIssues, fmt.Errorf("safety check %s: %w", repo.Name(), err)
+		}
+		allIssues = append(allIssues, issues...)
 	}
-	if len(issues) > 0 && !force {
-		return ds, issues, nil
+	if len(allIssues) > 0 && !force {
+		return ds, allIssues, nil
 	}
 
-	pushCtx, pushCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
-	defer pushCancel()
-	if err := gitutil.PushRef(pushCtx, r.Dir, ref, branch, true); err != nil {
-		return ds, issues, fmt.Errorf("push to origin: %w", err)
+	// Phase 2: push each repo.
+	for _, repo := range repos {
+		branch := repo.Branch
+		ref := "refs/remotes/" + container + "/" + branch
+		pushCtx, pushCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
+		if err := gitutil.PushRef(pushCtx, repo.GitRoot, ref, branch, true); err != nil {
+			pushCancel()
+			return ds, allIssues, fmt.Errorf("push %s to origin: %w", repo.Name(), err)
+		}
+		pushCancel()
 	}
-	return ds, issues, nil
+	return ds, allIssues, nil
 }
 
-// SyncToDefault fetches changes from the container, runs safety checks, and
-// squash-pushes onto the repo's default branch. Safety issues always block
-// (no force override). The commit message is built from the task title.
-func (r *Runner) SyncToDefault(ctx context.Context, branch, container, message string, extraRepos []md.Repo) (agent.DiffStat, []SafetyIssue, error) {
+// extractRepoDS filters the combined diff stat to entries belonging to repoName,
+// stripping the name prefix. When multi is false (single repo), ds is returned
+// unchanged since no prefix was applied.
+func extractRepoDS(ds agent.DiffStat, repoName string, multi bool) agent.DiffStat {
+	if !multi {
+		return ds
+	}
+	prefix := repoName + "/"
+	var result agent.DiffStat
+	for _, f := range ds {
+		if path, ok := strings.CutPrefix(f.Path, prefix); ok {
+			f.Path = path
+			result = append(result, f)
+		}
+	}
+	return result
+}
+
+// SyncToDefault fetches changes from the container, runs safety checks per repo,
+// and squash-pushes each repo's task branch onto its default branch. Safety
+// issues always block (no force override). The commit message is built from the
+// task title.
+func (r *Runner) SyncToDefault(ctx context.Context, repos []md.Repo, container, message string) (agent.DiffStat, []SafetyIssue, error) {
 	r.initDefaults()
 	if r.Dir == "" {
 		return nil, nil, errors.New("sync is not supported for no-repo tasks")
@@ -897,32 +930,47 @@ func (r *Runner) SyncToDefault(ctx context.Context, branch, container, message s
 	fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 	defer fetchCancel()
 	r.branchMu.Lock()
-	r.log.Info("fetch for default sync", "br", branch)
-	if err := r.Container.Fetch(fetchCtx, append([]md.Repo{{GitRoot: r.Dir, Branch: branch}}, extraRepos...)); err != nil {
+	r.log.Info("fetch for default sync", "repos", len(repos))
+	if err := r.Container.Fetch(fetchCtx, repos); err != nil {
 		r.branchMu.Unlock()
 		region.End()
 		return nil, nil, err
 	}
-	ds := r.diffStat(fetchCtx, branch)
+	ds := r.diffStat(fetchCtx, repos)
 	r.branchMu.Unlock()
 	region.End()
 
-	ref := "refs/remotes/" + container + "/" + branch
-	safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
-	defer safetyCancel()
-	issues, err := CheckSafety(safetyCtx, r.Dir, ref, r.BaseBranch, ds)
-	if err != nil {
-		return ds, issues, fmt.Errorf("safety check: %w", err)
+	// Phase 1: safety check each repo, collect all issues.
+	multi := len(repos) > 1
+	var allIssues []SafetyIssue
+	for _, repo := range repos {
+		branch := repo.Branch
+		ref := "refs/remotes/" + container + "/" + branch
+		repoDS := extractRepoDS(ds, repo.Name(), multi)
+		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
+		issues, err := CheckSafety(safetyCtx, repo.GitRoot, ref, r.BaseBranch, repoDS)
+		safetyCancel()
+		if err != nil {
+			return ds, allIssues, fmt.Errorf("safety check %s: %w", repo.Name(), err)
+		}
+		allIssues = append(allIssues, issues...)
 	}
-	if len(issues) > 0 {
-		return ds, issues, nil
+	if len(allIssues) > 0 {
+		return ds, allIssues, nil
 	}
-	squashCtx, squashCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
-	defer squashCancel()
-	if err := gitutil.SquashOnto(squashCtx, r.Dir, ref, r.BaseBranch, message); err != nil {
-		return ds, issues, fmt.Errorf("squash onto %s: %w", r.BaseBranch, err)
+
+	// Phase 2: squash each repo onto its default branch.
+	for _, repo := range repos {
+		branch := repo.Branch
+		ref := "refs/remotes/" + container + "/" + branch
+		squashCtx, squashCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
+		if err := gitutil.SquashOnto(squashCtx, repo.GitRoot, ref, r.BaseBranch, message); err != nil {
+			squashCancel()
+			return ds, allIssues, fmt.Errorf("squash %s onto %s: %w", repo.Name(), r.BaseBranch, err)
+		}
+		squashCancel()
 	}
-	return ds, issues, nil
+	return ds, allIssues, nil
 }
 
 // RestartSession closes the current agent session and starts a fresh one in
@@ -1078,9 +1126,11 @@ func (r *Runner) ReadRelayOutput(ctx context.Context, container string, agentNam
 	return b.ReadRelayOutput(ctx, container)
 }
 
-// DiffContent returns the unified diff for the given branch, optionally
-// filtered to a single file path. Holds branchMu during the fetch+diff.
-func (r *Runner) DiffContent(ctx context.Context, branch, path string) (string, error) {
+// DiffContent returns the unified diff for the given repos, optionally filtered
+// to a single file path. When there are multiple repos, file paths are prefixed
+// with `<repoName>/` so the frontend can distinguish changes from different
+// repos. Holds branchMu during fetch+diff.
+func (r *Runner) DiffContent(ctx context.Context, repos []md.Repo, path string) (string, error) {
 	r.initDefaults()
 	if r.Dir == "" {
 		return "", errors.New("diff is not supported for no-repo tasks")
@@ -1089,11 +1139,51 @@ func (r *Runner) DiffContent(ctx context.Context, branch, path string) (string, 
 	defer cancel()
 	r.branchMu.Lock()
 	defer r.branchMu.Unlock()
-	args := []string{}
-	if path != "" {
-		args = append(args, "--", path)
+	var buf strings.Builder
+	for _, repo := range repos {
+		args := []string{}
+		if path != "" {
+			args = append(args, "--", path)
+		}
+		diff, err := r.Container.Diff(ctx, repo, args...)
+		if err != nil {
+			r.log.Warn("diff failed", "repo", repo.Name(), "br", repo.Branch, "err", err)
+			continue
+		}
+		if diff == "" {
+			continue
+		}
+		if len(repos) > 1 {
+			diff = prependRepoToDiff(diff, repo.Name())
+		}
+		buf.WriteString(diff)
 	}
-	return r.Container.Diff(ctx, md.Repo{GitRoot: r.Dir, Branch: branch}, args...)
+	return buf.String(), nil
+}
+
+// prependRepoToDiff prepends `<repoName>/` to file paths in a unified diff so
+// that files from different repos are distinguishable when concatenated.
+func prependRepoToDiff(diff, repoName string) string {
+	lines := strings.Split(diff, "\n")
+	for i, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "diff --git "):
+			line = strings.Replace(line, " a/", " a/"+repoName+"/", 1)
+			line = strings.Replace(line, " b/", " b/"+repoName+"/", 1)
+			lines[i] = line
+		case strings.HasPrefix(line, "--- ") && !strings.HasPrefix(line, "--- /dev/null"):
+			idx := strings.IndexByte(line, ' ') + 1
+			lines[i] = line[:idx] + repoName + "/" + line[idx:]
+		case strings.HasPrefix(line, "+++ ") && !strings.HasPrefix(line, "+++ /dev/null"):
+			idx := strings.IndexByte(line, ' ') + 1
+			lines[i] = line[:idx] + repoName + "/" + line[idx:]
+		case strings.HasPrefix(line, "rename from "):
+			lines[i] = "rename from " + repoName + "/" + line[13:]
+		case strings.HasPrefix(line, "rename to "):
+			lines[i] = "rename to " + repoName + "/" + line[11:]
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // PurgeContainer stops and removes the md container identified by containerName,
@@ -1118,11 +1208,11 @@ var mutatingTools = map[string]struct{}{
 	"NotebookEdit": {},
 }
 
-// BranchDiffStat fetches from the container and returns the host-side branch
-// diff stat (md diff --numstat). Unlike the relay's diff_watcher which only
-// tracks uncommitted changes, this captures the full branch diff relative to
-// the base. Used by adoptOne to restore the diff stat after server restart.
-func (r *Runner) BranchDiffStat(ctx context.Context, branch string, extraRepos []md.Repo) agent.DiffStat {
+// BranchDiffStat fetches from the container and returns the per-repo branch diff
+// stat (md diff --numstat). Unlike the relay's diff_watcher which only tracks
+// uncommitted changes, this captures the full branch diff relative to the base.
+// Used by adoptOne to restore the diff stat after server restart.
+func (r *Runner) BranchDiffStat(ctx context.Context, repos []md.Repo) agent.DiffStat {
 	r.initDefaults()
 	if r.Container == nil || r.Dir == "" {
 		return nil
@@ -1131,11 +1221,11 @@ func (r *Runner) BranchDiffStat(ctx context.Context, branch string, extraRepos [
 	defer cancel()
 	r.branchMu.Lock()
 	defer r.branchMu.Unlock()
-	if err := r.Container.Fetch(fetchCtx, append([]md.Repo{{GitRoot: r.Dir, Branch: branch}}, extraRepos...)); err != nil {
-		r.log.Warn("fetch for branch diff stat failed", "br", branch, "err", err)
+	if err := r.Container.Fetch(fetchCtx, repos); err != nil {
+		r.log.Warn("fetch for branch diff stat failed", "err", err)
 		return nil
 	}
-	return r.diffStat(fetchCtx, branch)
+	return r.diffStat(fetchCtx, repos)
 }
 
 // initDefaults populates default Backends, timeout values, and the logger.
@@ -1352,12 +1442,8 @@ func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, container 
 // Returns the message channel and a done channel that closes when the
 // goroutine exits (after msgCh is fully drained).
 func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) (msgCh chan agent.Message, dispatchDone <-chan struct{}) {
-	// Capture branch and extra repos outside the goroutine to avoid races.
-	primaryBranch := ""
-	if p := t.Primary(); p != nil {
-		primaryBranch = p.Branch
-	}
-	extraRepos := t.ExtraMDRepos()
+	// Capture all repos outside the goroutine to avoid races.
+	allRepos := t.MDRepos()
 	msgCh = make(chan agent.Message, 256)
 	done := make(chan struct{})
 	dispatchDone = done
@@ -1375,17 +1461,17 @@ func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffe
 				if !skipSideEffects && r.Container != nil && r.Dir != "" {
 					if _, ok := pendingMutating[msg.ToolUseID]; ok {
 						delete(pendingMutating, msg.ToolUseID)
-						r.fetchDiffStatBranch(ctx, t, primaryBranch, extraRepos)
+						r.fetchDiffStatBranch(ctx, t, allRepos)
 					}
 				}
 			case *agent.ResultMessage:
 				if !skipSideEffects && r.Container != nil && r.Dir != "" {
 					fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 					r.branchMu.Lock()
-					if err := r.Container.Fetch(fetchCtx, append([]md.Repo{{GitRoot: r.Dir, Branch: primaryBranch}}, extraRepos...)); err != nil {
-						r.log.Warn("fetch on result failed", "br", primaryBranch, "err", err)
+					if err := r.Container.Fetch(fetchCtx, allRepos); err != nil {
+						r.log.Warn("fetch on result failed", "err", err)
 					}
-					msg.DiffStat = r.diffStat(fetchCtx, primaryBranch)
+					msg.DiffStat = r.diffStat(fetchCtx, allRepos)
 					r.branchMu.Unlock()
 					fetchCancel()
 				}
@@ -1398,18 +1484,17 @@ func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffe
 
 // fetchDiffStatBranch fetches from the container and emits a DiffStatMessage
 // into the task's message stream. Used after mutating tool results to keep the
-// live diff stat up to date. Branch and extraRepos are passed explicitly so
-// this can be called safely from a goroutine started before branch allocation.
-func (r *Runner) fetchDiffStatBranch(ctx context.Context, t *Task, branch string, extraRepos []md.Repo) {
+// live diff stat up to date across all repos.
+func (r *Runner) fetchDiffStatBranch(ctx context.Context, t *Task, repos []md.Repo) {
 	fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 	defer fetchCancel()
 	r.branchMu.Lock()
 	defer r.branchMu.Unlock()
-	if err := r.Container.Fetch(fetchCtx, append([]md.Repo{{GitRoot: r.Dir, Branch: branch}}, extraRepos...)); err != nil {
-		r.log.Warn("fetch on tool result failed", "br", branch, "err", err)
+	if err := r.Container.Fetch(fetchCtx, repos); err != nil {
+		r.log.Warn("fetch on tool result failed", "err", err)
 		return
 	}
-	ds := r.diffStat(fetchCtx, branch)
+	ds := r.diffStat(fetchCtx, repos)
 	if len(ds) == 0 {
 		return
 	}
@@ -1419,17 +1504,29 @@ func (r *Runner) fetchDiffStatBranch(ctx context.Context, t *Task, branch string
 	}, false)
 }
 
-// diffStat runs Diff("--numstat") and parses the output. Returns nil for no-repo runners.
-func (r *Runner) diffStat(ctx context.Context, branch string) agent.DiffStat {
+// diffStat runs Diff("--numstat") on each repo and returns the combined diff
+// stat. File paths are prefixed with `<repoName>/` when there are multiple repos
+// so the frontend can distinguish changes per repo.
+func (r *Runner) diffStat(ctx context.Context, repos []md.Repo) agent.DiffStat {
 	if r.Dir == "" {
 		return nil
 	}
-	numstat, err := r.Container.Diff(ctx, md.Repo{GitRoot: r.Dir, Branch: branch}, "--numstat")
-	if err != nil {
-		r.log.Warn("diff numstat failed", "br", branch, "err", err)
-		return nil
+	var result agent.DiffStat
+	for _, repo := range repos {
+		numstat, err := r.Container.Diff(ctx, repo, "--numstat")
+		if err != nil {
+			r.log.Warn("diff numstat failed", "repo", repo.Name(), "br", repo.Branch, "err", err)
+			continue
+		}
+		ds := ParseDiffNumstat(numstat)
+		if len(repos) > 1 {
+			for i := range ds {
+				ds[i].Path = repo.Name() + "/" + ds[i].Path
+			}
+		}
+		result = append(result, ds...)
 	}
-	return ParseDiffNumstat(numstat)
+	return result
 }
 
 // openLog creates a JSONL log file in LogDir and writes a metadata header as

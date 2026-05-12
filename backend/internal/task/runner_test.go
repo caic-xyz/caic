@@ -780,7 +780,7 @@ func TestRunner(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
 		r := &Runner{Container: sc, Dir: "/repo"}
-		ds := r.BranchDiffStat(t.Context(), "feature", nil)
+		ds := r.BranchDiffStat(t.Context(), []md.Repo{{GitRoot: "/repo", Branch: "feature"}})
 		if !sc.fetched {
 			t.Error("BranchDiffStat did not call Fetch")
 		}

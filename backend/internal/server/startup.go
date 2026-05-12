@@ -995,11 +995,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 			// replays relay messages which may include stale
 			// DiffStatMessages (old relay code diffs against HEAD, not
 			// base); the host-side diff captures the full branch diff.
-			var adoptPrimaryBranch string
-			if p := t.Primary(); p != nil {
-				adoptPrimaryBranch = p.Branch
-			}
-			if ds := runner.BranchDiffStat(ctx, adoptPrimaryBranch, t.ExtraMDRepos()); len(ds) > 0 {
+			if ds := runner.BranchDiffStat(ctx, t.MDRepos()); len(ds) > 0 {
 				t.SetLiveDiffStat(ds)
 			}
 			s.notifyTaskChange()

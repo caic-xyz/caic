@@ -71,12 +71,22 @@ fun DiffScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        task?.let {
-                            Text(
-                                text = it.repos?.firstOrNull()?.branch ?: "",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                        task?.repos?.let { repos ->
+                            if (repos.size == 1) {
+                                Text(
+                                    text = repos[0].branch,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                Text(
+                                    text = repos.joinToString("  ·  ") { "${it.name}@${it.branch}" },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 },

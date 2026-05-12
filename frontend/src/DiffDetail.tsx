@@ -39,8 +39,7 @@ function splitDiff(raw: string): FileDiff[] {
 interface Props {
   taskId: string;
   diffStat: DiffFileStat[];
-  repo: string;
-  branch: string;
+  repos?: { name: string; branch: string }[];
   taskPath: string;
 }
 
@@ -92,8 +91,15 @@ export default function DiffDetail(props: Props) {
           <ArrowBackIcon width={20} height={20} />
         </button>
         <span class={styles.headerMeta}>
-          <span class={styles.headerRepo}>{props.repo}</span>
-          <span class={styles.headerBranch}>{props.branch}</span>
+          <For each={props.repos ?? []}>
+            {(r, i) => (
+              <>
+                {i() > 0 ? ", " : ""}
+                <span class={styles.headerRepo}>{r.name}</span>
+                <span class={styles.headerBranch}>{r.branch}</span>
+              </>
+            )}
+          </For>
         </span>
       </div>
       <div class={styles.fileList}>

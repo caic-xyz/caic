@@ -704,7 +704,7 @@ func (s *Server) syncTask(ctx context.Context, entry *taskEntry, req *v1.SyncReq
 		if message == "" {
 			message = t.InitialPrompt.Text
 		}
-		ds, issues, err := runner.SyncToDefault(ctx, syncPrimaryBranch, t.Container, message, t.ExtraMDRepos())
+		ds, issues, err := runner.SyncToDefault(ctx, t.MDRepos(), t.Container, message)
 		if err != nil {
 			return nil, dto.InternalError(err.Error())
 		}
@@ -718,7 +718,7 @@ func (s *Server) syncTask(ctx context.Context, entry *taskEntry, req *v1.SyncReq
 	}
 
 	// Default: push to the task's own branch.
-	ds, issues, err := runner.SyncToOrigin(ctx, syncPrimaryBranch, t.Container, req.Force, t.ExtraMDRepos())
+	ds, issues, err := runner.SyncToOrigin(ctx, t.MDRepos(), t.Container, req.Force)
 	if err != nil {
 		return nil, dto.InternalError(err.Error())
 	}
@@ -761,10 +761,8 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	diffPrimaryName := ""
-	diffPrimaryBranch := ""
 	if p := t.Primary(); p != nil {
 		diffPrimaryName = p.Name
-		diffPrimaryBranch = p.Branch
 	}
 	runner, ok := s.runners[diffPrimaryName]
 	if !ok {
@@ -772,7 +770,7 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := r.URL.Query().Get("path")
-	diff, err := runner.DiffContent(r.Context(), diffPrimaryBranch, path)
+	diff, err := runner.DiffContent(r.Context(), t.MDRepos(), path)
 	if err != nil {
 		writeError(w, dto.InternalError(err.Error()))
 		return

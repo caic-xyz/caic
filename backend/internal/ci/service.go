@@ -313,7 +313,7 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 	}
 
 	slog.Info("autoResync: syncing branch", "task", t.ID, "br", p.Branch)
-	if _, _, err := runner.SyncToOrigin(ctx, p.Branch, t.Container, false, t.ExtraMDRepos()); err != nil {
+	if _, _, err := runner.SyncToOrigin(ctx, t.MDRepos(), t.Container, false); err != nil {
 		slog.Warn("autoResync: sync failed", "task", t.ID, "err", err)
 		return
 	}

@@ -899,8 +899,7 @@ export default function App() {
                   <DiffDetail
                     taskId={id}
                     diffStat={t?.diffStat ?? []}
-                    repo={t?.repos?.[0]?.name ?? ""}
-                    branch={t?.repos?.[0]?.branch ?? ""}
+                    repos={(t?.repos ?? []).map((r) => ({ name: r.name, branch: r.branch }))}
                     taskPath={tp}
                   />
                 </div>
