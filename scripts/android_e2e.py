@@ -260,6 +260,19 @@ def pull_screenshots():
 def main():
     argparse.ArgumentParser(description=__doc__).parse_args()
 
+    try:
+        subprocess.run(["java", "-version"], capture_output=True, check=True)
+    except (FileNotFoundError, subprocess.CalledProcessError, OSError):
+        print(
+            "Java is required. Install a JDK (17+) then run 'java -version' to verify:\n"
+            "  macOS:  brew install openjdk@21\n"
+            "          sudo ln -sfn $(brew --prefix)/opt/openjdk@21/libexec/openjdk.jdk \\\n"
+            "            /Library/Java/JavaVirtualMachines/openjdk-21.jdk\n"
+            "  Linux:  sudo apt install openjdk-21-jdk",
+            file=sys.stderr,
+        )
+        return 1
+
     port = find_free_port()
     tmp_dir = tempfile.mkdtemp(prefix="caic-e2e-")
     try:

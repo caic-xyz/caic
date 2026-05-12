@@ -22,7 +22,7 @@ help:
 	@echo "  make android-push   - Build, install, and start APK on connected device"
 	@echo "  make android-test   - Run Android unit tests"
 	@echo "  make android-e2e    - Run Android instrumented tests and generate screenshots"
-	@echo "  make android-setup-emulator - Install emulator image and create AVD"
+	@echo "  make android-setup-emulator - Install SDK tools, emulator, system image, create AVD"
 	@echo "  make android-start-emulator - Start the headless Android emulator"
 	@echo "  make android-stop-emulator  - Stop the running Android emulator"
 	@echo "  make frontend-e2e   - Run Playwright end-to-end tests"
@@ -92,19 +92,14 @@ android-build:
 	@cd android && ./gradlew --no-daemon assembleDebug
 
 android-setup-emulator:
-	@yes | sdkmanager --install "system-images;android-35;google_apis;x86_64"
-	@echo "no" | avdmanager create avd -n caic_test -k "system-images;android-35;google_apis;x86_64" -d "pixel_6" --force
+	@python3 scripts/android_setup_emulator.py
 
 android-start-emulator:
-	@echo "Starting emulator caic_test..."
-	@$${ANDROID_HOME}/emulator/emulator -avd caic_test \
-		-no-window -no-audio -gpu swiftshader_indirect -no-boot-anim -wipe-data > /dev/null 2>&1 & \
-		adb wait-for-device && \
-		echo "Emulator is ready."
+	@python3 scripts/android_start_emulator.py
 
 android-stop-emulator:
 	@echo "Stopping emulator..."
-	@adb emu kill || pkill -f emulator || true
+	@(command -v adb >/dev/null 2>&1 && adb emu kill) || pkill -f emulator || true
 
 android-push: android-build
 	@devices=$$(adb devices | awk '/\tdevice$$/{print $$1}'); \
