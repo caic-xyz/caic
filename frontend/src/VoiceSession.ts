@@ -406,6 +406,7 @@ export class VoiceSession {
       s.connected = false;
       s.listening = false;
       s.speaking = false;
+      s.muted = false;
       s.connectStatus = null;
       s.activeTool = null;
       s.micLevel = 0;
@@ -417,6 +418,10 @@ export class VoiceSession {
     this._update((s) => {
       s.muted = !s.muted;
     });
+    if (this._micStream) {
+      const enabled = !this.state.muted;
+      this._micStream.getAudioTracks().forEach((t) => { t.enabled = enabled; });
+    }
   }
 
   injectText(text: string): void {
