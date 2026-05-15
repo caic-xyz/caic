@@ -1,7 +1,7 @@
 // Voice overlay component: persistent bottom panel with mic button and voice controls.
 import { createEffect, createSignal, For, Show, untrack, onCleanup, onMount } from "solid-js";
 import type { Task } from "@sdk/types.gen";
-import { VoiceSession } from "./VoiceSession";
+import { voiceSession } from "./VoiceSession";
 import type { VoiceState, TranscriptEntry } from "./VoiceSession";
 import { setVoiceActive } from "./notifications";
 import { setVoiceConnected, setVoiceTaskNumberMap } from "./VoiceState";
@@ -24,7 +24,7 @@ const BAR_MIN_H = 3;
 const BAR_MAX_H = 20;
 
 export default function VoiceOverlay(props: Props) {
-  const session = new VoiceSession();
+  const session = voiceSession;
 
   let panelRef: HTMLDivElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
   const [spacerHeight, setSpacerHeight] = createSignal(0);
@@ -89,13 +89,8 @@ export default function VoiceOverlay(props: Props) {
   // Suppress browser notifications while voice is connected.
   createEffect(() => setVoiceActive(session.state.connected));
 
-  // Disconnect on component cleanup.
-  onCleanup(() => {
-    setVoiceActive(false);
-    setVoiceConnected(false);
-    setVoiceTaskNumberMap(null);
-    session.disconnect();
-  });
+  // No onCleanup disconnect — the singleton voice session survives component remounts.
+  // Only explicit user action or page unload (beforeunload handler) disconnects.
 
   // -----------------------------------------------------------------------
   // Panel state

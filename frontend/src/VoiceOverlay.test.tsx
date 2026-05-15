@@ -3,11 +3,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 
-const connectMock = vi.fn();
+const { connectMock, disconnectMock } = vi.hoisted(() => ({
+  connectMock: vi.fn(),
+  disconnectMock: vi.fn(),
+}));
 
 vi.mock("./VoiceSession", () => ({
-  VoiceSession: class {
-    state = {
+  voiceSession: {
+    state: {
       connectStatus: null,
       connected: false,
       listening: false,
@@ -21,17 +24,17 @@ vi.mock("./VoiceSession", () => ({
       audioOutputs: [],
       selectedInputId: "",
       selectedOutputId: "",
-    };
-    taskNumberMap = { update: vi.fn(), reset: vi.fn() };
-    excludedTaskIds = new Set<string>();
-    connect = connectMock;
-    disconnect = vi.fn();
-    toggleMute = vi.fn();
-    injectText = vi.fn();
-    clearTranscript = vi.fn();
-    enumerateDevices = vi.fn();
-    selectInputDevice = vi.fn();
-    selectOutputDevice = vi.fn();
+    },
+    taskNumberMap: { update: vi.fn(), reset: vi.fn() },
+    excludedTaskIds: new Set<string>(),
+    connect: connectMock,
+    disconnect: disconnectMock,
+    toggleMute: vi.fn(),
+    injectText: vi.fn(),
+    clearTranscript: vi.fn(),
+    enumerateDevices: vi.fn(),
+    selectInputDevice: vi.fn(),
+    selectOutputDevice: vi.fn(),
   },
 }));
 

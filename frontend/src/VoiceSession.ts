@@ -755,3 +755,13 @@ interface FunctionResponse {
 interface ToolCall {
   functionCalls?: FunctionCall[];
 }
+
+// Singleton — lives at module level so the WebRTC connection survives component remounts.
+export const voiceSession = new VoiceSession();
+
+// Disconnect on actual page unload (browser close/refresh).
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", () => {
+    voiceSession.disconnect();
+  });
+}
