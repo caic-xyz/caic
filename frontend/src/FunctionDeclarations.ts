@@ -1,5 +1,4 @@
-// Gemini function schema declarations for voice mode,
-// parallel to android/voice/FunctionDeclarations.kt.
+// Gemini Live functions/tools for voice mode, sync with android/app/src/main/java/com/fghbuild/caic/voice/FunctionDeclarations.kt
 
 type JsonSchema = Record<string, unknown>;
 
@@ -179,8 +178,8 @@ export function buildFunctionDeclarations(
       ),
     },
     {
-      name: "task_get_last_message_from_assistant",
-      description: "Get the last text message or question from a task by its number.",
+      name: "agent_last_message",
+      description: "Get latest agent message, question, or result. Call to check what the agent needs or relay to user.",
       parameters: objectSchema(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],

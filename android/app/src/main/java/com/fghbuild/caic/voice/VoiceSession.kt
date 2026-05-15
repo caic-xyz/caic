@@ -699,6 +699,11 @@ class VoiceSession @Inject constructor(
                 "After saying \"Ready\", stop and remain silent until the user speaks. " +
                 "Always speak fast.\n\n" +
                 "## Behavior guidelines\n" +
+                "- Do not ask follow-up questions like 'would you like me to…' " +
+                "or 'should I also…'. Answer the user's request and stop. " +
+                "Only ask a question if the user's request is genuinely ambiguous " +
+                "or you misunderstood something critical — then ask the single " +
+                "clarifying question needed and nothing else.\n" +
                 "- Be concise. The user is often away from the screen.\n" +
                 "- Summarize task status: state and what the agent is doing. " +
                 "Only mention elapsed time or cost when the user specifically asks.\n" +
@@ -709,6 +714,8 @@ class VoiceSession @Inject constructor(
                 "Confirm repo and prompt before creating.\n" +
                 "- Refer to tasks by its title.\n" +
                 "- Proactively notify the user when tasks finish or need input.\n" +
+                "- Free tools: agent_last_message, tasks_list, task_get_detail, get_usage. Call them whenever useful without asking.\n" +
+                "- When the user asks for a status update, call agent_last_message for each waiting/asking task to get latest output.\n" +
                 "- For safety issues during sync, describe each issue and ask whether to force."
     }
 }

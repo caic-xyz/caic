@@ -115,7 +115,7 @@ export class FunctionHandlers {
           return await this.handleGetUsage();
         case "clone_repo":
           return await this.handleCloneRepo(args);
-        case "task_get_last_message_from_assistant":
+        case "agent_last_message":
           return await this.handleGetLastMessage(args);
         case "web_search":
           return await this.handleWebSearch(args);

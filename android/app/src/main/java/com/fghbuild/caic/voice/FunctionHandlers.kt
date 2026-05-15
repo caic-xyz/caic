@@ -53,7 +53,7 @@ class FunctionHandlers(
                 "task_fork" -> handleForkTask(args)
                 "get_usage" -> handleGetUsage()
                 "clone_repo" -> handleCloneRepo(args)
-                "task_get_last_message_from_assistant" -> handleGetLastMessage(args)
+                "agent_last_message" -> handleGetLastMessage(args)
                 "web_search" -> handleWebSearch(args)
                 "web_fetch" -> handleWebFetch(args)
                 "task_fix_pr" -> handleTaskFixPR(args)

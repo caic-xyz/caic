@@ -1,4 +1,5 @@
-// Gemini Live function declaration structures for voice mode tool calling.
+// Gemini Live functions/tools for voice mode, sync with frontend/src/FunctionDeclarations.ts
+
 @file:Suppress("MatchingDeclarationName")
 
 package com.fghbuild.caic.voice
@@ -212,8 +213,8 @@ fun buildFunctionDeclarations(
         ),
     ),
     FunctionDeclaration(
-        name = "task_get_last_message_from_assistant",
-        description = "Get the last text message or question from a task by its number.",
+        name = "agent_last_message",
+        description = "Get latest agent message, question, or result. Call to check what the agent needs or relay to user.",
         parameters = objectSchema(
             "task_number" to intProp("The task number, e.g. 1 for task #1"),
             required = listOf("task_number"),
