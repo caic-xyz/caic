@@ -137,14 +137,15 @@ func (s *Server) ListActiveRepos() []ci.RepoInfo {
 }
 
 // repoHasActiveTasksLocked reports whether relPath has at least one non-terminal
-// task. Must be called with s.mu held.
+// task (result is nil until the task enters a terminal state).
+// Must be called with s.mu held.
 func (s *Server) repoHasActiveTasksLocked(relPath string) bool {
 	for _, e := range s.tasks {
-		if e.task.GetState() != task.StateWaiting {
+		if e.result != nil {
 			continue
 		}
 		for _, m := range e.task.Repos {
-			if s.runners[m.Name] != nil && s.runners[m.Name].Dir == relPath {
+			if m.Name == relPath {
 				return true
 			}
 		}
