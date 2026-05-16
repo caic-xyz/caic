@@ -22,9 +22,9 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
-          version: 10
+          version: 11
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
@@ -54,7 +54,7 @@ jobs:
         run: make frontend-e2e
       - name: Upload Coverage
         if: runner.os == 'Linux'
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.out
