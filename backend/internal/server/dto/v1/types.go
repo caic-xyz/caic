@@ -223,11 +223,11 @@ type Task struct {
 // kind=="warning":  Warning holds a transient server warning message for the user.
 type TaskListEvent struct {
 	Kind     string                     `json:"kind"`
-	Snapshot []Task                     `json:"snapshot,omitempty"`
+	Snapshot []Task                     `json:"snapshot,omitzero"`
 	Upsert   *Task                      `json:"upsert,omitempty"`
 	Patch    map[string]json.RawMessage `json:"patch,omitempty"`
 	Delete   string                     `json:"delete,omitempty"`
-	Repos    []Repo                     `json:"repos,omitempty"`
+	Repos    []Repo                     `json:"repos,omitzero"`
 	Warning  string                     `json:"warning,omitempty"`
 }
 
