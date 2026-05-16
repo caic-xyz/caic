@@ -360,6 +360,30 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 	})
 
+	t.Run("tailscale_api_key from core env", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		wantKey := "tskey_config"
+		tc := &tomlConfig{
+			Core: tomlCore{
+				Env: map[string]string{
+					"TAILSCALE_API_KEY": wantKey,
+				},
+			},
+		}
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.TailscaleAPIKey != wantKey {
+			t.Errorf("TailscaleAPIKey = %q, want %q", cfg.TailscaleAPIKey, wantKey)
+		}
+	})
+}
+
+// TestTomlToServerConfigEnvFallback tests env variable fallback behaviour
+// which uses t.Setenv and therefore cannot run in parallel.
+func TestTomlToServerConfigEnvFallback(t *testing.T) {
 	t.Run("core env from env variable fallback", func(t *testing.T) {
 		dir := t.TempDir()
 		envKey := "AIza_from_env"
@@ -392,26 +416,6 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 		if cfg.GeminiAPIKey != configKey {
 			t.Errorf("GeminiAPIKey = %q, want %q", cfg.GeminiAPIKey, configKey)
-		}
-	})
-
-	t.Run("tailscale_api_key from core env", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		wantKey := "tskey_config"
-		tc := &tomlConfig{
-			Core: tomlCore{
-				Env: map[string]string{
-					"TAILSCALE_API_KEY": wantKey,
-				},
-			},
-		}
-		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cfg.TailscaleAPIKey != wantKey {
-			t.Errorf("TailscaleAPIKey = %q, want %q", cfg.TailscaleAPIKey, wantKey)
 		}
 	})
 
