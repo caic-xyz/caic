@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -140,6 +141,26 @@ func TestPlatformStrings(t *testing.T) {
 	osStr, archStr := platformStrings()
 	if osStr == "" || archStr == "" {
 		t.Fatalf("platformStrings() = (%q, %q), both should be non-empty", osStr, archStr)
+	}
+	// Verify that archStr matches GoReleaser's default archive name convention,
+	// which uses Go architecture names (amd64, arm64), not Debian-style (x86_64).
+	// Test against known release assets.
+	knownAssets := []string{
+		"caic_0.8.1_linux_amd64.tar.gz",
+		"caic_0.8.1_linux_arm64.tar.gz",
+		"caic_0.8.1_darwin_all.tar.gz",
+		"caic_0.8.1_windows_amd64.zip",
+	}
+	matched := false
+	for _, a := range knownAssets {
+		if strings.Contains(strings.ToLower(a), strings.ToLower(osStr)) &&
+			strings.Contains(strings.ToLower(a), strings.ToLower(archStr)) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		t.Errorf("platformStrings() = (%q, %q) does not match any known release asset: %v", osStr, archStr, knownAssets)
 	}
 }
 

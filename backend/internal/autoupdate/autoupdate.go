@@ -364,7 +364,7 @@ func platformStrings() (osStr, archStr string) {
 	}
 	switch runtime.GOARCH {
 	case "amd64":
-		archStr = "x86_64"
+		archStr = "amd64"
 	case "arm64":
 		archStr = "arm64"
 	default:

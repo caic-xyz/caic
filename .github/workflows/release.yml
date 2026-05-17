@@ -68,3 +68,22 @@ jobs:
         env:
           GORELEASER_CURRENT_TAG: ${{ steps.get_version.outputs.VERSION }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Temporary: re-upload linux_amd64 as linux_x86_64 for buggy auto-update compat.
+      # Remove once all deployed instances have upgraded past the fix.
+      - name: Upload x86_64 compat archive
+        env:
+          TAG: ${{ steps.get_version.outputs.VERSION }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG_NO_V="${TAG#v}"
+          AMD64="caic_${TAG_NO_V}_linux_amd64.tar.gz"
+          COMPAT="caic_${TAG_NO_V}_linux_x86_64.tar.gz"
+          echo "Downloading $AMD64 and checksums..."
+          gh release download "$TAG" --repo caic-xyz/caic --pattern "$AMD64" --pattern checksums.txt --dir /tmp
+          echo "Uploading as $COMPAT..."
+          gh release upload "$TAG" "/tmp/$AMD64#$COMPAT" --repo caic-xyz/caic --clobber
+          # Append compat checksum (same sha256, just different filename)
+          SUM=$(grep "$AMD64" /tmp/checksums.txt | awk '{print $1}')
+          echo "$SUM  $COMPAT" >> /tmp/checksums.txt
+          gh release upload "$TAG" /tmp/checksums.txt --repo caic-xyz/caic --clobber
