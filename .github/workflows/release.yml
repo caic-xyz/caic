@@ -82,7 +82,8 @@ jobs:
           echo "Downloading $AMD64 and checksums..."
           gh release download "$TAG" --repo caic-xyz/caic --pattern "$AMD64" --pattern checksums.txt --dir /tmp
           echo "Uploading as $COMPAT..."
-          gh release upload "$TAG" "/tmp/$AMD64#$COMPAT" --repo caic-xyz/caic --clobber
+          cp "/tmp/$AMD64" "/tmp/$COMPAT"
+          gh release upload "$TAG" "/tmp/$COMPAT" --repo caic-xyz/caic --clobber
           # Append compat checksum (same sha256, just different filename)
           SUM=$(grep "$AMD64" /tmp/checksums.txt | awk '{print $1}')
           echo "$SUM  $COMPAT" >> /tmp/checksums.txt
