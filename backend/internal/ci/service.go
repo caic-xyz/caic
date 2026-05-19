@@ -237,11 +237,12 @@ func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f
 // have active (non-terminal) tasks. ctx must carry the user's auth token (via
 // context.WithoutCancel so it is not cancelled when the SSE request ends).
 // The outer timeout scales with repo count: 2 API calls per repo at 1 req/s
-// (via the throttled HTTP client) plus a 30-second buffer.
+// (via the throttled HTTP client) plus headroom for retry backoff.
 func (svc *Service) PollCIForActiveRepos(ctx context.Context) {
 	active := svc.backend.ListActiveRepos()
 
-	total := time.Duration(2*len(active)+30) * time.Second
+	// 5 s per API call gives room for the 1 QPS throttle plus Retry backoff.
+	total := time.Duration(5*len(active)+60) * time.Second
 	ctx, cancel := context.WithTimeout(ctx, total)
 	defer cancel()
 
@@ -250,7 +251,7 @@ func (svc *Service) PollCIForActiveRepos(ctx context.Context) {
 		if f == nil {
 			continue
 		}
-		rctx, rcancel := context.WithTimeout(ctx, 30*time.Second)
+		rctx, rcancel := context.WithTimeout(ctx, 60*time.Second)
 		svc.pollRepoCIOnce(rctx, info, f)
 		rcancel()
 	}
