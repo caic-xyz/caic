@@ -23,6 +23,7 @@ import UsageBadges from "./UsageBadges";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
+import PersonIcon from "@material-symbols/svg-400/outlined/person.svg?solid";
 import SettingsIcon from "@material-symbols/svg-400/outlined/settings.svg?solid";
 import TailscaleIcon from "./tailscale.svg?solid";
 import CloneRepoDialog from "./CloneRepoDialog";
@@ -703,42 +704,49 @@ export default function App() {
         <span class={styles.subtitle}>Coding Agents in Containers</span>
         <UsageBadges usage={usage} now={now} />
         <ConnectionDot connected={connected()} />
-        <Show when={auth.providers().length > 0 && auth.user()}>
-          {(() => {
-            const [menuOpen, setMenuOpen] = createSignal(false);
-            const user = () => auth.user() ?? { username: "", avatarURL: undefined };
-            const initials = () => user().username.slice(0, 2).toUpperCase();
-            return (
-              <Dropdown
-                open={menuOpen()}
-                onOpenChange={setMenuOpen}
-                class={styles.userMenu}
-                content={
-                  <div class={styles.userDropdown}>
+        {(() => {
+          const [menuOpen, setMenuOpen] = createSignal(false);
+          const hasAuth = () => auth.providers().length > 0;
+          const user = () => auth.user() ?? { username: "", avatarURL: undefined };
+          const initials = () => user().username.slice(0, 2).toUpperCase();
+          return (
+            <Dropdown
+              open={menuOpen()}
+              onOpenChange={setMenuOpen}
+              class={styles.userMenu}
+              content={
+                <div class={styles.userDropdown}>
+                  <Show when={hasAuth() && auth.user()}>
                     <span class={styles.dropdownUser}>{user().username}</span>
-                    <button class={styles.dropdownItem} onClick={() => { setMenuOpen(false); setSettingsOpen(true); }}>
-                      <SettingsIcon width="1em" height="1em" style={{ "vertical-align": "middle", "margin-right": "0.4em" }} />
-                      Settings
-                    </button>
+                  </Show>
+                  <button class={styles.dropdownItem} onClick={() => { setMenuOpen(false); setSettingsOpen(true); }}>
+                    <SettingsIcon width="1em" height="1em" style={{ "vertical-align": "middle", "margin-right": "0.4em" }} />
+                    Settings
+                  </button>
+                  <Show when={hasAuth() && auth.user()}>
                     <button class={styles.dropdownItem} onClick={() => { setMenuOpen(false); void auth.logout(); }}>Sign out</button>
-                  </div>
-                }
+                  </Show>
+                </div>
+              }
+            >
+              <button
+                class={styles.avatarButton}
+                onClick={() => setMenuOpen((v) => !v)}
+                title={hasAuth() && auth.user() ? user().username : "Menu"}
               >
-                <button
-                  class={styles.avatarButton}
-                  onClick={() => setMenuOpen((v) => !v)}
-                  title={user().username}
-                >
+                <Show when={hasAuth() && auth.user()} fallback={
+                  <PersonIcon width="1.3em" height="1.3em" />
+                }>
                   <Show when={user().avatarURL} keyed fallback={
                     <span class={styles.avatarInitials}>{initials()}</span>
                   }>
                     {(url) => <img src={url} alt={user().username} class={styles.avatarImg} />}
                   </Show>
-                </button>
-              </Dropdown>
-            );
-          })()}
-        </Show>
+                </Show>
+              </button>
+            </Dropdown>
+          );
+        })()}
       </div>
 
       <form onSubmit={(e) => { e.preventDefault(); submitTask(); }} class={`${styles.submitForm} ${selectedId() ? styles.hidden : ""}`}>
