@@ -365,6 +365,7 @@ export type DiffStat = DiffFileStat[];
 /** Config reports server capabilities to the frontend. */
 export interface Config {
   version?: string;
+  displayName: string;
   tailscaleAvailable: boolean;
   usbAvailable: boolean;
   displayAvailable: boolean;

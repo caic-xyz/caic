@@ -148,6 +148,7 @@ public typealias DiffStat = [DiffFileStat]
 /// Config reports server capabilities to the frontend.
 public struct Config: Codable {
     public let version: String?
+    public let displayName: String
     public let tailscaleAvailable: Bool
     public let usbAvailable: Bool
     public let displayAvailable: Bool

@@ -326,6 +326,8 @@ export default function App() {
           setTailscaleAvailable(config.tailscaleAvailable);
           setUSBAvailable(config.usbAvailable);
           setDisplayAvailable(config.displayAvailable);
+          const displayName = config.displayName || window.location.hostname.split('.')[0];
+          document.title = `${displayName} — caic`;
         }
         if (prefs?.settings) {
           setAutoFixCI(prefs.settings.autoFixOnCIFailure);

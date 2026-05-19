@@ -132,6 +132,7 @@ typealias DiffStat = List<DiffFileStat>
 @Serializable
 data class Config(
     val version: String? = null,
+    val displayName: String,
     val tailscaleAvailable: Boolean,
     val usbAvailable: Boolean,
     val displayAvailable: Boolean,

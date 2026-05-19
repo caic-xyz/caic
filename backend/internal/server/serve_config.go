@@ -32,8 +32,13 @@ import (
 )
 
 func (s *Server) getConfig(_ context.Context, _ *dto.EmptyReq) (*v1.Config, error) {
+	displayName, err := os.Hostname()
+	if err != nil {
+		slog.Warn("failed to get hostname", "err", err)
+	}
 	cfg := &v1.Config{
 		Version:            autoupdate.Version,
+		DisplayName:        displayName,
 		TailscaleAvailable: s.mdClient.TailscaleAPIKey != "",
 		USBAvailable:       runtime.GOOS == "linux",
 		DisplayAvailable:   true,

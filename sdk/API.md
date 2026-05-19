@@ -102,6 +102,7 @@ Config reports server capabilities to the frontend.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `version` | `string` |  |  |
+| `displayName` | `string` |  | yes |
 | `tailscaleAvailable` | `boolean` |  | yes |
 | `usbAvailable` | `boolean` |  | yes |
 | `displayAvailable` | `boolean` |  | yes |

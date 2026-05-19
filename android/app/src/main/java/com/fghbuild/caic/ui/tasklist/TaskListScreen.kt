@@ -126,7 +126,14 @@ fun TaskListScreen(
                     .testTag("top-bar"),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("caic", style = MaterialTheme.typography.titleMedium)
+                val displayName = state.config?.displayName?.ifBlank { null }
+                    ?: state.serverURL.takeIf { it.isNotBlank() }
+                        ?.let { runCatching { java.net.URI(it).host }.getOrNull() }
+                    ?: ""
+                Text(
+                    if (displayName.isNotEmpty()) "$displayName — caic" else "caic",
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 Spacer(Modifier.width(8.dp))
                 FlowRow(
                     modifier = Modifier.weight(1f),
