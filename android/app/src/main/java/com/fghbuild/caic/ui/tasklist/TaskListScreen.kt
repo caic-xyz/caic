@@ -480,23 +480,28 @@ private fun FeatureToggle(
     onCheckedChange: (Boolean) -> Unit,
     iconRes: Int,
     contentDescription: String,
+    enabled: Boolean = true,
+    unavailableDescription: String? = null,
 ) {
+    val desc = if (!enabled && unavailableDescription != null) unavailableDescription else contentDescription
     Row(
         modifier = Modifier
             .clip(MaterialTheme.shapes.small)
             .background(
-                if (checked) MaterialTheme.colorScheme.primary
+                if (!enabled) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                else if (checked) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceVariant
             )
-            .clickable { onCheckedChange(!checked) }
+            .then(if (enabled) Modifier.clickable { onCheckedChange(!checked) } else Modifier)
             .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             painter = painterResource(id = iconRes),
-            contentDescription = contentDescription,
+            contentDescription = desc,
             modifier = Modifier.size(chipIconSize),
-            tint = if (checked) MaterialTheme.colorScheme.onPrimary
+            tint = if (!enabled) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+            else if (checked) MaterialTheme.colorScheme.onPrimary
             else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -689,38 +694,38 @@ private fun TaskCreationRepoStrip(
                 onSelect = { viewModel.selectEffort(if (it == "Default effort") "" else it) },
             )
         }
-        if (state.tailscaleAvailable) {
-            FeatureToggle(
-                checked = state.tailscaleEnabled,
-                onCheckedChange = viewModel::setTailscaleEnabled,
-                iconRes = com.fghbuild.caic.R.drawable.ic_tailscale,
-                contentDescription = "Enable Tailscale networking",
-            )
-        }
-        if (state.usbAvailable) {
-            FeatureToggle(
-                checked = state.usbEnabled,
-                onCheckedChange = viewModel::setUSBEnabled,
-                iconRes = com.fghbuild.caic.R.drawable.ic_usb,
-                contentDescription = "Enable USB passthrough",
-            )
-        }
-        if (state.displayAvailable) {
-            FeatureToggle(
-                checked = state.displayEnabled,
-                onCheckedChange = viewModel::setDisplayEnabled,
-                iconRes = com.fghbuild.caic.R.drawable.ic_display,
-                contentDescription = "Enable virtual display",
-            )
-        }
-        if (state.sudoAvailable) {
-            FeatureToggle(
-                checked = state.sudoEnabled,
-                onCheckedChange = viewModel::setSudoEnabled,
-                iconRes = com.fghbuild.caic.R.drawable.ic_sudo,
-                contentDescription = "Enable root access via sudo",
-            )
-        }
+        FeatureToggle(
+            checked = state.tailscaleEnabled,
+            onCheckedChange = viewModel::setTailscaleEnabled,
+            iconRes = com.fghbuild.caic.R.drawable.ic_tailscale,
+            contentDescription = "Enable Tailscale networking",
+            enabled = state.tailscaleAvailable,
+            unavailableDescription = "Tailscale is not available on this server",
+        )
+        FeatureToggle(
+            checked = state.usbEnabled,
+            onCheckedChange = viewModel::setUSBEnabled,
+            iconRes = com.fghbuild.caic.R.drawable.ic_usb,
+            contentDescription = "Enable USB passthrough",
+            enabled = state.usbAvailable,
+            unavailableDescription = "USB passthrough is not available on this server",
+        )
+        FeatureToggle(
+            checked = state.displayEnabled,
+            onCheckedChange = viewModel::setDisplayEnabled,
+            iconRes = com.fghbuild.caic.R.drawable.ic_display,
+            contentDescription = "Enable virtual display",
+            enabled = state.displayAvailable,
+            unavailableDescription = "Virtual display is not available on this server",
+        )
+        FeatureToggle(
+            checked = state.sudoEnabled,
+            onCheckedChange = viewModel::setSudoEnabled,
+            iconRes = com.fghbuild.caic.R.drawable.ic_sudo,
+            contentDescription = "Enable root access via sudo",
+            enabled = state.sudoAvailable,
+            unavailableDescription = "Root access (sudo) is not available on this server",
+        )
     }
 }
 

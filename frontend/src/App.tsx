@@ -827,46 +827,42 @@ export default function App() {
             </For>
           </select>
         </Show>
-        <Show when={tailscaleAvailable()}>
-          <label class={styles.toggleChip} title="Enable Tailscale networking">
-            <input
-              type="checkbox"
-              checked={tailscaleEnabled()}
-              onChange={(e) => setTailscaleEnabled(e.currentTarget.checked)}
-            />
-            <TailscaleIcon width="1.2em" height="1.2em" />
-          </label>
-        </Show>
-        <Show when={usbAvailable()}>
-          <label class={styles.toggleChip} title="Enable USB passthrough">
-            <input
-              type="checkbox"
-              checked={usbEnabled()}
-              onChange={(e) => setUSBEnabled(e.currentTarget.checked)}
-            />
-            <USBIcon width="1.2em" height="1.2em" />
-          </label>
-        </Show>
-        <Show when={displayAvailable()}>
-          <label class={styles.toggleChip} title="Enable virtual display">
-            <input
-              type="checkbox"
-              checked={displayEnabled()}
-              onChange={(e) => setDisplayEnabled(e.currentTarget.checked)}
-            />
-            <DisplayIcon width="1.2em" height="1.2em" />
-          </label>
-        </Show>
-        <Show when={sudoAvailable()}>
-          <label class={styles.toggleChip} title="Enable root access">
-            <input
-              type="checkbox"
-              checked={sudoEnabled()}
-              onChange={(e) => setSudoEnabled(e.currentTarget.checked)}
-            />
-            <SudoIcon width="1.2em" height="1.2em" />
-          </label>
-        </Show>
+        <label class={styles.toggleChip} title={tailscaleAvailable() ? "Enable Tailscale networking" : "Tailscale is not available on this server"}>
+          <input
+            type="checkbox"
+            checked={tailscaleEnabled()}
+            disabled={!tailscaleAvailable()}
+            onChange={(e) => setTailscaleEnabled(e.currentTarget.checked)}
+          />
+          <TailscaleIcon width="1.2em" height="1.2em" />
+        </label>
+        <label class={styles.toggleChip} title={usbAvailable() ? "Enable USB passthrough" : "USB passthrough is not available on this server"}>
+          <input
+            type="checkbox"
+            checked={usbEnabled()}
+            disabled={!usbAvailable()}
+            onChange={(e) => setUSBEnabled(e.currentTarget.checked)}
+          />
+          <USBIcon width="1.2em" height="1.2em" />
+        </label>
+        <label class={styles.toggleChip} title={displayAvailable() ? "Enable virtual display" : "Virtual display is not available on this server"}>
+          <input
+            type="checkbox"
+            checked={displayEnabled()}
+            disabled={!displayAvailable()}
+            onChange={(e) => setDisplayEnabled(e.currentTarget.checked)}
+          />
+          <DisplayIcon width="1.2em" height="1.2em" />
+        </label>
+        <label class={styles.toggleChip} title={sudoAvailable() ? "Enable root access" : "Root access (sudo) is not available on this server"}>
+          <input
+            type="checkbox"
+            checked={sudoEnabled()}
+            disabled={!sudoAvailable()}
+            onChange={(e) => setSudoEnabled(e.currentTarget.checked)}
+          />
+          <SudoIcon width="1.2em" height="1.2em" />
+        </label>
         <PromptInput
           value={prompt()}
           onInput={setPrompt}
@@ -1328,7 +1324,8 @@ export default function App() {
           </div>
         </dialog>
       </Show>
-      <VoiceOverlay tasks={tasks} recentRepo={() => repos()[0]?.path ?? ""} selectedHarness={selectedHarness} selectedModel={selectedModel} />
+      <VoiceOverlay tasks={tasks} recentRepo={() => repos()[0]?.path ?? ""} selectedHarness={selectedHarness} selectedModel={selectedModel}
+        serverCaps={() => ({ tailscaleAvailable: tailscaleAvailable(), usbAvailable: usbAvailable(), displayAvailable: displayAvailable(), sudoAvailable: sudoAvailable() })} />
       <Portal>
         <div class={styles.toastContainer}>
           <For each={warnings()}>

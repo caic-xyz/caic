@@ -4,7 +4,7 @@ import { voiceRTCOffer, listHarnesses, listRepos } from "./api";
 import type { Task } from "@sdk/types.gen";
 import { FunctionHandlers } from "./FunctionHandlers";
 import { TaskNumberMap } from "./TaskNumberMap";
-import { buildFunctionDeclarations } from "./FunctionDeclarations";
+import { buildFunctionDeclarations, type ServerCapabilities } from "./FunctionDeclarations";
 import { formatElapsed, formatCost } from "./formatting";
 
 // Constants
@@ -245,7 +245,7 @@ export class VoiceSession {
   }
 
   /** Start a new voice session via WebRTC data channel through the caic backend. */
-  async connect(tasks: Task[], recentRepo: string, defaultHarness = "", defaultModel = ""): Promise<void> {
+  async connect(tasks: Task[], recentRepo: string, defaultHarness: string, defaultModel: string, caps: ServerCapabilities): Promise<void> {
     this._releaseAll();
     this._audioContext = new AudioContext({ sampleRate: 16000 });
     this._clearTranscript();
@@ -347,7 +347,7 @@ export class VoiceSession {
 
       dc.onopen = () => {
         this._setStatus("Waiting for server…");
-        this._sendSetup(harnessNames, repoPaths, defaultHarness);
+        this._sendSetup(harnessNames, repoPaths, defaultHarness, caps);
       };
 
       dc.onclose = () => {
@@ -503,8 +503,8 @@ export class VoiceSession {
   // Gemini setup message
   // -----------------------------------------------------------------------
 
-  private _sendSetup(harnesses: string[], repos: string[], defaultHarness: string): void {
-    const decls = buildFunctionDeclarations(harnesses, repos, defaultHarness || undefined);
+  private _sendSetup(harnesses: string[], repos: string[], defaultHarness: string, caps: ServerCapabilities): void {
+    const decls = buildFunctionDeclarations(harnesses, repos, defaultHarness || undefined, caps);
     const setup = {
       setup: {
         model: MODEL_NAME,

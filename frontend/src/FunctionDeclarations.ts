@@ -30,6 +30,13 @@ function objectSchema(properties: Record<string, JsonSchema>, required?: string[
 
 const emptyObjectSchema: JsonSchema = { type: "object", properties: {} };
 
+export interface ServerCapabilities {
+  tailscaleAvailable: boolean;
+  usbAvailable: boolean;
+  displayAvailable: boolean;
+  sudoAvailable: boolean;
+}
+
 export interface FunctionDeclaration {
   name: string;
   description: string;
@@ -38,8 +45,9 @@ export interface FunctionDeclaration {
 
 export function buildFunctionDeclarations(
   harnesses: string[],
-  repos: string[] = [],
-  defaultHarness?: string,
+  repos: string[],
+  defaultHarness: string | undefined,
+  caps: ServerCapabilities,
 ): FunctionDeclaration[] {
   const effectiveDefault = defaultHarness ?? harnesses[0];
   const harnessDesc = effectiveDefault
@@ -69,10 +77,18 @@ export function buildFunctionDeclarations(
             harnesses.length > 0
               ? enumProp(harnessDesc, harnesses)
               : stringProp(harnessDesc),
-          display: boolProp("Enable virtual display (VNC) for this task"),
-          tailscale: boolProp("Enable Tailscale networking for this task"),
-          usb: boolProp("Enable USB passthrough for this task"),
-          sudo: boolProp("Enable root access via sudo with a random password"),
+          display: boolProp(caps.displayAvailable
+            ? "Enable virtual display (VNC) for this task"
+            : "Enable virtual display (VNC) for this task (not available on this server)"),
+          tailscale: boolProp(caps.tailscaleAvailable
+            ? "Enable Tailscale networking for this task"
+            : "Enable Tailscale networking for this task (not available on this server)"),
+          usb: boolProp(caps.usbAvailable
+            ? "Enable USB passthrough for this task"
+            : "Enable USB passthrough for this task (not available on this server)"),
+          sudo: boolProp(caps.sudoAvailable
+            ? "Enable root access via sudo with a random password"
+            : "Enable root access via sudo with a random password (not available on this server)"),
         },
         ["prompt", "repos"],
       ),

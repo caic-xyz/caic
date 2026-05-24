@@ -72,6 +72,7 @@ class VoiceSession @Inject constructor(
     private var availableRepos: List<String> = emptyList()
     private var defaultHarness: String = ""
     private var defaultModel: String = ""
+    private var serverCaps: ServerCaps = ServerCaps()
     private var deviceCallback: AudioDeviceCallback? = null
     private var scoReceiver: BroadcastReceiver? = null
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -148,6 +149,13 @@ class VoiceSession @Inject constructor(
                 val apiClient = ApiClient(settings.serverURL, tokenProvider = { settingsRepository.settings.value.authToken })
                 availableHarnesses = apiClient.listHarnesses().map { it.name }
                 availableRepos = apiClient.listRepos().map { it.path }
+                val config = apiClient.getConfig()
+                serverCaps = ServerCaps(
+                    tailscaleAvailable = config.tailscaleAvailable,
+                    usbAvailable = config.usbAvailable,
+                    displayAvailable = config.displayAvailable,
+                    sudoAvailable = config.sudoAvailable,
+                )
                 val prefs = settingsRepository.serverPreferences.value
                 defaultHarness = prefs?.harness?.ifBlank { null }
                     ?: availableHarnesses.firstOrNull() ?: ""
@@ -378,12 +386,14 @@ class VoiceSession @Inject constructor(
     }
 
     private fun sendSetupMessage(voiceName: String) {
-        val setup = buildSetupMessage(voiceName, availableHarnesses, availableRepos)
+        val setup = buildSetupMessage(voiceName, availableHarnesses, availableRepos, serverCaps)
         Log.i(TAG, "sending setup message")
         send(setup)
     }
 
-    private fun buildSetupMessage(voiceName: String, harnesses: List<String>, repos: List<String>): String {
+    private fun buildSetupMessage(
+        voiceName: String, harnesses: List<String>, repos: List<String>, caps: ServerCaps,
+    ): String {
         val setup = BidiGenerateContentSetup(
             model = MODEL_NAME,
             generationConfig = GenerationConfig(
@@ -403,7 +413,7 @@ class VoiceSession @Inject constructor(
             tools = listOf(
                 Tool(
                     functionDeclarations = buildFunctionDeclarations(
-                        harnesses, repos, defaultHarness.ifBlank { null },
+                        harnesses, repos, defaultHarness.ifBlank { null }, caps,
                     ).map { fd ->
                         LiveFunctionDeclaration(
                             name = fd.name,

@@ -78,10 +78,18 @@ private fun objectSchema(
     }
 )
 
+data class ServerCaps(
+    val tailscaleAvailable: Boolean = false,
+    val usbAvailable: Boolean = false,
+    val displayAvailable: Boolean = false,
+    val sudoAvailable: Boolean = false,
+)
+
 fun buildFunctionDeclarations(
     harnesses: List<String>,
-    repos: List<String> = emptyList(),
-    defaultHarness: String? = null,
+    repos: List<String>,
+    defaultHarness: String?,
+    caps: ServerCaps,
 ): List<FunctionDeclaration> {
     val effectiveDefault = defaultHarness ?: harnesses.firstOrNull()
     val harnessDesc = if (effectiveDefault != null) {
@@ -114,10 +122,30 @@ fun buildFunctionDeclarations(
             } else {
                 stringProp(harnessDesc)
             },
-            "display" to boolProp("Enable virtual display (VNC) for this task"),
-            "tailscale" to boolProp("Enable Tailscale networking for this task"),
-            "usb" to boolProp("Enable USB passthrough for this task"),
-            "sudo" to boolProp("Enable root access via sudo with a random password"),
+            "display" to boolProp(
+                if (caps.displayAvailable)
+                    "Enable virtual display (VNC) for this task"
+                else
+                    "Enable virtual display (VNC) for this task (not available on this server)"
+            ),
+            "tailscale" to boolProp(
+                if (caps.tailscaleAvailable)
+                    "Enable Tailscale networking for this task"
+                else
+                    "Enable Tailscale networking for this task (not available on this server)"
+            ),
+            "usb" to boolProp(
+                if (caps.usbAvailable)
+                    "Enable USB passthrough for this task"
+                else
+                    "Enable USB passthrough for this task (not available on this server)"
+            ),
+            "sudo" to boolProp(
+                if (caps.sudoAvailable)
+                    "Enable root access via sudo with a random password"
+                else
+                    "Enable root access via sudo with a random password (not available on this server)"
+            ),
             required = listOf("prompt", "repos"),
         ),
     ),

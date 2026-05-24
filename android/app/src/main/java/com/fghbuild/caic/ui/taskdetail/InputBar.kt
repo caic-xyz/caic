@@ -141,6 +141,10 @@ fun InputBar(
     supportsCompact: Boolean = false,
     safetyIssues: List<SafetyIssue> = emptyList(),
     onForceSync: () -> Unit = {},
+    tailscaleAvailable: Boolean = true,
+    usbAvailable: Boolean = true,
+    displayAvailable: Boolean = true,
+    sudoAvailable: Boolean = true,
 ) {
     val busy = sending || pendingAction != null
     val hasContent = draft.isNotBlank() || pendingImages.isNotEmpty()
@@ -454,24 +458,32 @@ fun InputBar(
                                 onCheckedChange = { forkTailscale = it },
                                 iconRes = com.fghbuild.caic.R.drawable.ic_tailscale,
                                 contentDescription = "Enable Tailscale networking",
+                                enabled = tailscaleAvailable,
+                                unavailableDescription = "Tailscale is not available on this server",
                             )
                             FeatureToggle(
                                 checked = forkUsb,
                                 onCheckedChange = { forkUsb = it },
                                 iconRes = com.fghbuild.caic.R.drawable.ic_usb,
                                 contentDescription = "Enable USB passthrough",
+                                enabled = usbAvailable,
+                                unavailableDescription = "USB passthrough is not available on this server",
                             )
                             FeatureToggle(
                                 checked = forkDisplay,
                                 onCheckedChange = { forkDisplay = it },
                                 iconRes = com.fghbuild.caic.R.drawable.ic_display,
                                 contentDescription = "Enable virtual display",
+                                enabled = displayAvailable,
+                                unavailableDescription = "Virtual display is not available on this server",
                             )
                             FeatureToggle(
                                 checked = forkSudo,
                                 onCheckedChange = { forkSudo = it },
                                 iconRes = com.fghbuild.caic.R.drawable.ic_sudo,
                                 contentDescription = "Enable root access via sudo",
+                                enabled = sudoAvailable,
+                                unavailableDescription = "Root access (sudo) is not available on this server",
                             )
                         }
                         LaunchedEffect(Unit) { forkFocus.requestFocus() }
@@ -579,23 +591,28 @@ private fun FeatureToggle(
     onCheckedChange: (Boolean) -> Unit,
     iconRes: Int,
     contentDescription: String,
+    enabled: Boolean = true,
+    unavailableDescription: String? = null,
 ) {
+    val desc = if (!enabled && unavailableDescription != null) unavailableDescription else contentDescription
     Row(
         modifier = Modifier
             .clip(MaterialTheme.shapes.small)
             .background(
-                if (checked) MaterialTheme.colorScheme.primary
+                if (!enabled) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                else if (checked) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceVariant
             )
-            .clickable { onCheckedChange(!checked) }
+            .then(if (enabled) Modifier.clickable { onCheckedChange(!checked) } else Modifier)
             .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             painter = painterResource(id = iconRes),
-            contentDescription = contentDescription,
+            contentDescription = desc,
             modifier = Modifier.size(18.dp),
-            tint = if (checked) MaterialTheme.colorScheme.onPrimary
+            tint = if (!enabled) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+            else if (checked) MaterialTheme.colorScheme.onPrimary
             else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }

@@ -73,6 +73,10 @@ data class TaskDetailState(
     val allRepos: List<Repo> = emptyList(),
     val processes: List<ProcessInfo>? = null, // null = not yet loaded
     val streamWarning: String? = null,
+    val tailscaleAvailable: Boolean = false,
+    val usbAvailable: Boolean = false,
+    val displayAvailable: Boolean = false,
+    val sudoAvailable: Boolean = false,
 )
 
 private val TerminalStates = setOf("stopping", "stopped", "purging", "purged", "failed")
@@ -101,6 +105,10 @@ class TaskDetailViewModel @Inject constructor(
     private val _repos = MutableStateFlow<List<Repo>>(emptyList())
     private val _processes = MutableStateFlow<List<ProcessInfo>?>(null)
     private val _streamWarning = MutableStateFlow<String?>(null)
+    private val _tailscaleAvailable = MutableStateFlow(false)
+    private val _usbAvailable = MutableStateFlow(false)
+    private val _displayAvailable = MutableStateFlow(false)
+    private val _sudoAvailable = MutableStateFlow(false)
 
     private var sseJob: Job? = null
 
@@ -123,7 +131,7 @@ class TaskDetailViewModel @Inject constructor(
             taskRepository.tasks, _grouped, _isReady, _sending,
             _pendingAction, _actionError, _safetyIssues, _inputDraft,
             _pendingImages, _harnesses, _statsHistory, _repos, _processes,
-            _streamWarning,
+            _streamWarning, _tailscaleAvailable, _usbAvailable, _displayAvailable, _sudoAvailable,
         )
     ) { values ->
         val tasks = values[0] as List<Task>
@@ -141,6 +149,10 @@ class TaskDetailViewModel @Inject constructor(
         val repos = values[11] as List<Repo>
         val procs = values[12] as List<ProcessInfo>?
         val warning = values[13] as String?
+        val tailAvail = values[14] as Boolean
+        val usbAvail = values[15] as Boolean
+        val dispAvail = values[16] as Boolean
+        val sudoAvail = values[17] as Boolean
         val task = tasks.firstOrNull { it.id == taskId }
         val taskHarness = harnesses.firstOrNull { it.name == task?.harness }
         val imgSupport = task != null && taskHarness?.supportsImages == true
@@ -170,15 +182,36 @@ class TaskDetailViewModel @Inject constructor(
             allRepos = repos,
             processes = procs,
             streamWarning = warning,
+            tailscaleAvailable = tailAvail,
+            usbAvailable = usbAvail,
+            displayAvailable = dispAvail,
+            sudoAvailable = sudoAvail,
         )
     }.distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskDetailState())
 
     init {
         connectSSE()
+        loadConfig()
         loadHarnesses()
         loadRepos()
         observeWarnings()
+    }
+
+    private fun loadConfig() {
+        viewModelScope.launch {
+            val url = taskRepository.serverURL()
+            if (url.isBlank()) return@launch
+            try {
+                val cfg = apiClient().getConfig()
+                _tailscaleAvailable.value = cfg.tailscaleAvailable
+                _usbAvailable.value = cfg.usbAvailable
+                _displayAvailable.value = cfg.displayAvailable
+                _sudoAvailable.value = cfg.sudoAvailable
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                Log.w(TAG, "Failed to load server config", e)
+            }
+        }
     }
 
     /** Surface stream corruption warnings from [TaskRepository] as transient errors. */

@@ -636,6 +636,10 @@ fun TaskDetailScreen(
                         onCompact = viewModel::compactContext,
                         supportsCompact = state.supportsCompact,
                         safetyIssues = state.safetyIssues,
+                        tailscaleAvailable = state.tailscaleAvailable,
+                        usbAvailable = state.usbAvailable,
+                        displayAvailable = state.displayAvailable,
+                        sudoAvailable = state.sudoAvailable,
                         onForceSync = {
                             viewModel.dismissSafetyIssues()
                             viewModel.syncTask(force = true)
