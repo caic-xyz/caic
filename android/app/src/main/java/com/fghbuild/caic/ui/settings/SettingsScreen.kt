@@ -51,8 +51,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.caic.data.ServerConfig
 
 private val VoiceNames = listOf("Orus", "Puck", "Charon", "Kore", "Fenrir", "Aoede")
-private val GitHubTokenOptions = listOf("none" to "None (default)", "read-write" to "Read-write")
-
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
@@ -200,22 +198,6 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text("GitHub token access", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
-            GitHubTokenOptions.forEach { (value, label) ->
-                val selected = (screenState.gitHubTokenAccess.ifEmpty { "none" }) == value
-                ListItem(
-                    headlineContent = { Text(label) },
-                    leadingContent = { RadioButton(selected = selected, onClick = { viewModel.updateGitHubTokenAccess(value) }) },
-                    modifier = Modifier.clickable { viewModel.updateGitHubTokenAccess(value) },
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                )
-            }
-            Text(
-                "Controls whether the GitHub token is injected into containers.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             Text("Well-known caches", style = MaterialTheme.typography.titleMedium)
             screenState.wellKnownCachesList.forEach { cache ->

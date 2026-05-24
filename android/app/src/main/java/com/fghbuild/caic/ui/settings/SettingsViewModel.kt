@@ -32,7 +32,6 @@ data class SettingsScreenState(
     val autoFixPR: Boolean = false,
     val baseImage: String = "",
     val maxCPUs: String = "",
-    val gitHubTokenAccess: String = "",
     val useDefaultCaches: Boolean = true,
     val wellKnownCaches: Map<String, Boolean> = emptyMap(),
     val wellKnownCachesList: List<WellKnownCache> = emptyList(),
@@ -167,7 +166,6 @@ class SettingsViewModel @Inject constructor(
                         autoFixPR = prefs.settings.autoFixOnPROpen ?: false,
                         baseImage = prefs.settings.baseImage ?: "",
                         maxCPUs = prefs.settings.maxCPUs?.toString() ?: "",
-                        gitHubTokenAccess = prefs.settings.gitHubTokenAccess ?: "",
                         useDefaultCaches = prefs.settings.useDefaultCaches ?: true,
                         wellKnownCaches = prefs.settings.wellKnownCaches ?: emptyMap(),
                         wellKnownCachesList = caches?.wellKnown ?: emptyList(),
@@ -206,11 +204,6 @@ class SettingsViewModel @Inject constructor(
     fun saveMaxCPUs() {
         val v = _state.value.maxCPUs.toIntOrNull() ?: 0
         saveSettings { it.copy(maxCPUs = if (v > 0) v else null) }
-    }
-
-    fun updateGitHubTokenAccess(access: String) {
-        _state.update { it.copy(gitHubTokenAccess = access) }
-        saveSettings { it.copy(gitHubTokenAccess = access.ifEmpty { null }) }
     }
 
     fun updateUseDefaultCaches(enabled: Boolean) {
@@ -267,7 +260,6 @@ class SettingsViewModel @Inject constructor(
                     autoFixOnPROpen = snapshot.autoFixPR,
                     baseImage = snapshot.baseImage.ifBlank { null },
                     maxCPUs = snapshot.maxCPUs.toIntOrNull(),
-                    gitHubTokenAccess = snapshot.gitHubTokenAccess.ifEmpty { null },
                     useDefaultCaches = snapshot.useDefaultCaches,
                     wellKnownCaches = snapshot.wellKnownCaches.ifEmpty { null },
                     cacheMappings = snapshot.cacheMappings.ifEmpty { null },
@@ -281,7 +273,6 @@ class SettingsViewModel @Inject constructor(
                         autoFixCI = snapshot.autoFixCI,
                         autoFixPR = snapshot.autoFixPR,
                         baseImage = snapshot.baseImage,
-                        gitHubTokenAccess = snapshot.gitHubTokenAccess,
                         useDefaultCaches = snapshot.useDefaultCaches,
                         wellKnownCaches = snapshot.wellKnownCaches,
                         cacheMappings = snapshot.cacheMappings,

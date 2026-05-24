@@ -37,14 +37,15 @@ func (s *Server) getConfig(_ context.Context, _ *dto.EmptyReq) (*v1.Config, erro
 		slog.Warn("failed to get hostname", "err", err)
 	}
 	cfg := &v1.Config{
-		Version:            autoupdate.Version,
-		DisplayName:        displayName,
-		TailscaleAvailable: s.mdClient.TailscaleAPIKey != "",
-		USBAvailable:       runtime.GOOS == "linux",
-		DisplayAvailable:   true,
-		SudoAvailable:      true,
-		WebRTCAvailable:    s.voiceBridge != nil,
-		GitHubAppEnabled:   s.forge.githubApp != nil,
+		Version:              autoupdate.Version,
+		DisplayName:          displayName,
+		TailscaleAvailable:   s.mdClient.TailscaleAPIKey != "",
+		USBAvailable:         runtime.GOOS == "linux",
+		DisplayAvailable:     true,
+		SudoAvailable:        true,
+		GitHubTokenAvailable: s.forge.githubToken != "" || s.githubOAuth != nil,
+		WebRTCAvailable:      s.voiceBridge != nil,
+		GitHubAppEnabled:     s.forge.githubApp != nil,
 	}
 	if s.authEnabled() {
 		cfg.AuthProviders = s.authProviders()
@@ -80,7 +81,6 @@ func (s *Server) getPreferences(ctx context.Context, _ *dto.EmptyReq) (*v1.Prefe
 			AutoFixOnPROpen:    prefs.Settings.AutoFixOnPROpen,
 			BaseImage:          prefs.Settings.BaseImage,
 			MaxCPUs:            prefs.Settings.MaxCPUs,
-			GitHubTokenAccess:  string(prefs.Settings.GitHubTokenAccess),
 			UseDefaultCaches:   prefs.Settings.UseDefaultCaches,
 			WellKnownCaches:    prefs.Settings.WellKnownCaches,
 			CacheMappings:      cacheMappings,
@@ -94,7 +94,6 @@ func (s *Server) updatePreferences(ctx context.Context, req *v1.UpdatePreference
 		p.Settings.AutoFixOnPROpen = req.Settings.AutoFixOnPROpen
 		p.Settings.BaseImage = req.Settings.BaseImage
 		p.Settings.MaxCPUs = req.Settings.MaxCPUs
-		p.Settings.GitHubTokenAccess = preferences.GitHubTokenAccess(req.Settings.GitHubTokenAccess)
 		p.Settings.UseDefaultCaches = req.Settings.UseDefaultCaches
 		p.Settings.WellKnownCaches = req.Settings.WellKnownCaches
 		if req.Settings.CacheMappings != nil {

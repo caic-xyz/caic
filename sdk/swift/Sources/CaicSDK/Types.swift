@@ -153,6 +153,7 @@ public struct Config: Codable {
     public let usbAvailable: Bool
     public let displayAvailable: Bool
     public let sudoAvailable: Bool
+    public let gitHubTokenAvailable: Bool
     public let webrtcAvailable: Bool
     public let gitHubAppEnabled: Bool?
     /// e.g. ["github","gitlab"]
@@ -201,9 +202,6 @@ public struct UserSettings: Codable {
     /// MaxCPUs limits the number of CPU cores the container may use.
     /// Zero means use the system default (max(2, NumCPU-2)).
     public let maxCPUs: Int?
-    /// GitHubTokenAccess controls the GitHub token injected into containers.
-    /// "none" (default): no token. "read-write": passes the parent token.
-    public let gitHubTokenAccess: String?
     /// UseDefaultCaches controls whether default harness caches are mounted.
     /// When false, only custom CacheMappings are used.
     public let useDefaultCaches: Bool?
@@ -407,6 +405,8 @@ public struct Task: Codable {
     public let inPlanMode: Bool?
     public let planContent: String?
     public let container: Container
+    /// Per-task feature flags.
+    public let gitHubToken: Bool?
 }
 
 /// ImageData carries a single base64-encoded image.
@@ -441,6 +441,7 @@ public struct CreateTaskReq: Codable {
     public let usb: Bool?
     public let display: Bool?
     public let sudo: Bool?
+    public let gitHubToken: Bool?
 }
 
 /// EventInit is emitted once at the start of a session. It includes a Harness
@@ -754,6 +755,8 @@ public struct ForkTaskReq: Codable {
     public let display: Bool?
     /// Override sudo; nil means inherit from source.
     public let sudo: Bool?
+    /// Override gitHubToken; nil means inherit from source.
+    public let gitHubToken: Bool?
 }
 
 /// DiffResp is the response for GET /api/v1/tasks/{id}/diff.

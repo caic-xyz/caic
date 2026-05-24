@@ -53,11 +53,6 @@ func (p *Preferences) Validate() error {
 		}
 		seen[r.Path] = struct{}{}
 	}
-	switch p.Settings.GitHubTokenAccess {
-	case "", GitHubTokenReadWrite, GitHubTokenNone:
-	default:
-		return fmt.Errorf("invalid gitHubTokenAccess: %q", p.Settings.GitHubTokenAccess)
-	}
 	for i, m := range p.Settings.CacheMappings {
 		if m.HostPath == "" {
 			return fmt.Errorf("cacheMappings[%d]: empty hostPath", i)
@@ -136,17 +131,6 @@ func (p *Preferences) clone() Preferences {
 	return c
 }
 
-// GitHubTokenAccess controls which GitHub token, if any, is injected into
-// containers at runtime. Valid values are "" or "none" (default) and
-// "read-write".
-type GitHubTokenAccess string
-
-// GitHubTokenAccess values.
-const (
-	GitHubTokenNone      GitHubTokenAccess = "none"
-	GitHubTokenReadWrite GitHubTokenAccess = "read-write"
-)
-
 // Settings holds user-configurable behavioral settings.
 type Settings struct {
 	// AutoFixOnCIFailure automatically starts a new task to fix CI when a
@@ -161,10 +145,6 @@ type Settings struct {
 	// MaxCPUs limits the number of CPU cores the container may use.
 	// Passed as --cpus to docker/podman. Zero means use [md.DefaultMaxCPUs].
 	MaxCPUs int `json:"maxCPUs,omitempty"`
-	// GitHubTokenAccess controls the GitHub token injected into containers.
-	// Default ("" or "none") injects no token.
-	// "read-write" passes the parent token.
-	GitHubTokenAccess GitHubTokenAccess `json:"gitHubTokenAccess,omitempty"`
 	// UseDefaultCaches controls whether default harness caches are mounted.
 	// When false, only custom CacheMappings are used.
 	UseDefaultCaches bool `json:"useDefaultCaches,omitempty"`

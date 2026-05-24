@@ -109,7 +109,8 @@ fun InputBar(
         usb: Boolean,
         display: Boolean,
         sudo: Boolean,
-    ) -> Unit = { _, _, _, _, _, _, _, _, _ -> },
+        gitHubToken: Boolean,
+    ) -> Unit = { _, _, _, _, _, _, _, _, _, _ -> },
     taskState: String = "",
     taskTitle: String = "",
     taskRepo: String = "",
@@ -122,6 +123,7 @@ fun InputBar(
     taskUsb: Boolean = false,
     taskDisplay: Boolean = false,
     taskSudo: Boolean = false,
+    taskGitHubToken: Boolean = false,
     harnesses: List<HarnessInfo> = emptyList(),
     allRepos: List<Repo> = emptyList(),
     forkAvailableRecent: List<Repo> = emptyList(),
@@ -145,6 +147,7 @@ fun InputBar(
     usbAvailable: Boolean = true,
     displayAvailable: Boolean = true,
     sudoAvailable: Boolean = true,
+    gitHubTokenAvailable: Boolean = false,
 ) {
     val busy = sending || pendingAction != null
     val hasContent = draft.isNotBlank() || pendingImages.isNotEmpty()
@@ -379,6 +382,7 @@ fun InputBar(
             var forkUsb by remember { mutableStateOf(taskUsb) }
             var forkDisplay by remember { mutableStateOf(taskDisplay) }
             var forkSudo by remember { mutableStateOf(taskSudo) }
+            var forkGitHubToken by remember { mutableStateOf(taskGitHubToken) }
             val forkExtraPaths = forkExtraRepos.map { it.path }.toSet()
             AlertDialog(
                 onDismissRequest = { showForkDialog = false },
@@ -485,6 +489,14 @@ fun InputBar(
                                 enabled = sudoAvailable,
                                 unavailableDescription = "Root access (sudo) is not available on this server",
                             )
+                            FeatureToggle(
+                                checked = forkGitHubToken,
+                                onCheckedChange = { forkGitHubToken = it },
+                                iconRes = com.fghbuild.caic.R.drawable.ic_github,
+                                contentDescription = "Enable GitHub token",
+                                enabled = gitHubTokenAvailable,
+                                unavailableDescription = "GitHub token is not available on this server",
+                            )
                         }
                         LaunchedEffect(Unit) { forkFocus.requestFocus() }
                     }
@@ -501,7 +513,7 @@ fun InputBar(
                             val e = forkSelectedEffort.takeIf { it != taskEffort }
                             onFork(
                                 forkPrompt.trim(), h, m, e, extras,
-                                forkTailscale, forkUsb, forkDisplay, forkSudo,
+                                forkTailscale, forkUsb, forkDisplay, forkSudo, forkGitHubToken,
                             )
                         },
                         enabled = forkPrompt.isNotBlank(),

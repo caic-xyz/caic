@@ -58,15 +58,16 @@ type Prompt struct {
 
 // Config reports server capabilities to the frontend.
 type Config struct {
-	Version            string   `json:"version,omitempty"`
-	DisplayName        string   `json:"displayName"`
-	TailscaleAvailable bool     `json:"tailscaleAvailable"`
-	USBAvailable       bool     `json:"usbAvailable"`
-	DisplayAvailable   bool     `json:"displayAvailable"`
-	SudoAvailable      bool     `json:"sudoAvailable"`
-	WebRTCAvailable    bool     `json:"webrtcAvailable"`
-	GitHubAppEnabled   bool     `json:"gitHubAppEnabled,omitempty"`
-	AuthProviders      []string `json:"authProviders,omitempty"` // e.g. ["github","gitlab"]
+	Version              string   `json:"version,omitempty"`
+	DisplayName          string   `json:"displayName"`
+	TailscaleAvailable   bool     `json:"tailscaleAvailable"`
+	USBAvailable         bool     `json:"usbAvailable"`
+	DisplayAvailable     bool     `json:"displayAvailable"`
+	SudoAvailable        bool     `json:"sudoAvailable"`
+	GitHubTokenAvailable bool     `json:"gitHubTokenAvailable"`
+	WebRTCAvailable      bool     `json:"webrtcAvailable"`
+	GitHubAppEnabled     bool     `json:"gitHubAppEnabled,omitempty"`
+	AuthProviders        []string `json:"authProviders,omitempty"` // e.g. ["github","gitlab"]
 }
 
 // UserResp is returned by GET /api/v1/auth/me.
@@ -217,6 +218,8 @@ type Task struct {
 	InPlanMode    bool      `json:"inPlanMode,omitempty"`
 	PlanContent   string    `json:"planContent,omitempty"`
 	Container     Container `json:"container"`
+	// Per-task feature flags.
+	GitHubToken bool `json:"gitHubToken,omitempty"`
 }
 
 // TaskListEvent is a discriminated-union event for the task list SSE stream.
@@ -272,19 +275,21 @@ type CreateTaskReq struct {
 	USB           bool       `json:"usb,omitempty"`
 	Display       bool       `json:"display,omitempty"`
 	Sudo          bool       `json:"sudo,omitempty"`
+	GitHubToken   bool       `json:"gitHubToken,omitempty"`
 }
 
 // ForkTaskReq is the request body for POST /api/v1/tasks/{id}/fork.
 type ForkTaskReq struct {
-	Prompt     Prompt     `json:"prompt"`               // Initial prompt for the forked task.
-	Harness    Harness    `json:"harness,omitempty"`    // Override harness; empty means inherit from source.
-	Model      string     `json:"model,omitempty"`      // Override model; empty means inherit from source.
-	Effort     string     `json:"effort,omitempty"`     // Override thinking effort; empty means inherit from source.
-	ExtraRepos []RepoSpec `json:"extraRepos,omitempty"` // Additional repos to map into the fork.
-	Tailscale  *bool      `json:"tailscale,omitempty"`  // Override Tailscale; nil means inherit from source.
-	USB        *bool      `json:"usb,omitempty"`        // Override USB; nil means inherit from source.
-	Display    *bool      `json:"display,omitempty"`    // Override virtual display; nil means inherit from source.
-	Sudo       *bool      `json:"sudo,omitempty"`       // Override sudo; nil means inherit from source.
+	Prompt      Prompt     `json:"prompt"`                // Initial prompt for the forked task.
+	Harness     Harness    `json:"harness,omitempty"`     // Override harness; empty means inherit from source.
+	Model       string     `json:"model,omitempty"`       // Override model; empty means inherit from source.
+	Effort      string     `json:"effort,omitempty"`      // Override thinking effort; empty means inherit from source.
+	ExtraRepos  []RepoSpec `json:"extraRepos,omitempty"`  // Additional repos to map into the fork.
+	Tailscale   *bool      `json:"tailscale,omitempty"`   // Override Tailscale; nil means inherit from source.
+	USB         *bool      `json:"usb,omitempty"`         // Override USB; nil means inherit from source.
+	Display     *bool      `json:"display,omitempty"`     // Override virtual display; nil means inherit from source.
+	Sudo        *bool      `json:"sudo,omitempty"`        // Override sudo; nil means inherit from source.
+	GitHubToken *bool      `json:"gitHubToken,omitempty"` // Override gitHubToken; nil means inherit from source.
 }
 
 // BotFixCIReq is the request body for POST /api/v1/bot/fix-ci.
@@ -475,9 +480,6 @@ type UserSettings struct {
 	// MaxCPUs limits the number of CPU cores the container may use.
 	// Zero means use the system default (max(2, NumCPU-2)).
 	MaxCPUs int `json:"maxCPUs,omitempty"`
-	// GitHubTokenAccess controls the GitHub token injected into containers.
-	// "none" (default): no token. "read-write": passes the parent token.
-	GitHubTokenAccess string `json:"gitHubTokenAccess,omitempty"`
 	// UseDefaultCaches controls whether default harness caches are mounted.
 	// When false, only custom CacheMappings are used.
 	UseDefaultCaches bool `json:"useDefaultCaches,omitempty"`

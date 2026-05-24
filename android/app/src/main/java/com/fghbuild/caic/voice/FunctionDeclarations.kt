@@ -83,6 +83,7 @@ data class ServerCaps(
     val usbAvailable: Boolean = false,
     val displayAvailable: Boolean = false,
     val sudoAvailable: Boolean = false,
+    val gitHubTokenAvailable: Boolean = false,
 )
 
 fun buildFunctionDeclarations(
@@ -145,6 +146,12 @@ fun buildFunctionDeclarations(
                     "Enable root access via sudo with a random password"
                 else
                     "Enable root access via sudo with a random password (not available on this server)"
+            ),
+            "gitHubToken" to boolProp(
+                if (caps.gitHubTokenAvailable)
+                    "Enable GitHub token injection for this task"
+                else
+                    "Enable GitHub token injection for this task (not available on this server)"
             ),
             required = listOf("prompt", "repos"),
         ),

@@ -35,6 +35,7 @@ export interface ServerCapabilities {
   usbAvailable: boolean;
   displayAvailable: boolean;
   sudoAvailable: boolean;
+  gitHubTokenAvailable: boolean;
 }
 
 export interface FunctionDeclaration {
@@ -89,6 +90,9 @@ export function buildFunctionDeclarations(
           sudo: boolProp(caps.sudoAvailable
             ? "Enable root access via sudo with a random password"
             : "Enable root access via sudo with a random password (not available on this server)"),
+          gitHubToken: boolProp(caps.gitHubTokenAvailable
+            ? "Enable GitHub token injection for this task"
+            : "Enable GitHub token injection for this task (not available on this server)"),
         },
         ["prompt", "repos"],
       ),

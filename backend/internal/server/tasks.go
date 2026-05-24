@@ -124,10 +124,10 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		mounts[i] = task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir}
 	}
 
-	// Resolve docker image and GitHub token access from user preferences.
+	// Resolve docker image from user preferences.
 	prefs := s.prefs.Get(userIDFromCtx(ctx))
 	dockerImage := prefs.Settings.BaseImage
-	ghToken := s.resolveGitHubContainerToken(ctx, prefs.Settings.GitHubTokenAccess)
+	ghToken := s.resolveGitHubContainerToken(ctx, req.GitHubToken)
 
 	t := &task.Task{
 		ID:            ksid.NewID(),
@@ -613,8 +613,11 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 	}
 	mounts = append(mounts, extraMounts...)
 
-	prefs := s.prefs.Get(userIDFromCtx(ctx))
-	ghToken := s.resolveGitHubContainerToken(ctx, prefs.Settings.GitHubTokenAccess)
+	forkGitHubToken := source.GitHubToken != ""
+	if req.GitHubToken != nil {
+		forkGitHubToken = *req.GitHubToken
+	}
+	ghToken := s.resolveGitHubContainerToken(ctx, forkGitHubToken)
 
 	prompt := v1PromptToAgent(req.Prompt)
 	forkTailscale := source.Tailscale
@@ -1037,10 +1040,9 @@ func (s *Server) cleanupTask(entry *taskEntry, runner *task.Runner, reason task.
 }
 
 // resolveGitHubContainerToken returns the GitHub token to inject into a
-// container based on the user's access preference. Default ("" or "none")
-// returns empty. "read-write" passes the parent token.
-func (s *Server) resolveGitHubContainerToken(ctx context.Context, access preferences.GitHubTokenAccess) string {
-	if access != preferences.GitHubTokenReadWrite {
+// container when enabled is true, otherwise returns empty.
+func (s *Server) resolveGitHubContainerToken(ctx context.Context, enabled bool) string {
+	if !enabled {
 		return ""
 	}
 	// Resolve the parent token: prefer the OAuth user's token, fall back to
@@ -1152,6 +1154,7 @@ func (s *Server) toJSON(ctx context.Context, e *taskEntry) v1.Task {
 		SessionID:      snap.SessionID,
 		InPlanMode:     snap.InPlanMode,
 		PlanContent:    snap.PlanContent,
+		GitHubToken:    e.task.GitHubToken != "",
 		CostUSD:        costUSD,
 		NumTurns:       numTurns,
 		Duration:       duration.Seconds(),

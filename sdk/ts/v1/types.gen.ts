@@ -370,6 +370,7 @@ export interface Config {
   usbAvailable: boolean;
   displayAvailable: boolean;
   sudoAvailable: boolean;
+  gitHubTokenAvailable: boolean;
   webrtcAvailable: boolean;
   gitHubAppEnabled?: boolean;
   /** e.g. ["github","gitlab"] */
@@ -426,11 +427,6 @@ export interface UserSettings {
    * Zero means use the system default (max(2, NumCPU-2)).
    */
   maxCPUs?: number /* int */;
-  /**
-   * GitHubTokenAccess controls the GitHub token injected into containers.
-   * "none" (default): no token. "read-write": passes the parent token.
-   */
-  gitHubTokenAccess?: string;
   /**
    * UseDefaultCaches controls whether default harness caches are mounted.
    * When false, only custom CacheMappings are used.
@@ -642,6 +638,8 @@ export interface Task {
   inPlanMode?: boolean;
   planContent?: string;
   container: Container;
+  /** Per-task feature flags. */
+  gitHubToken?: boolean;
 }
 
 /** ImageData carries a single base64-encoded image. */
@@ -676,6 +674,7 @@ export interface CreateTaskReq {
   usb?: boolean;
   display?: boolean;
   sudo?: boolean;
+  gitHubToken?: boolean;
 }
 
 /** InputReq is the request body for POST /api/v1/tasks/{id}/input. */
@@ -748,6 +747,8 @@ export interface ForkTaskReq {
   display?: boolean;
   /** Override sudo; nil means inherit from source. */
   sudo?: boolean;
+  /** Override gitHubToken; nil means inherit from source. */
+  gitHubToken?: boolean;
 }
 
 /** DiffResp is the response for GET /api/v1/tasks/{id}/diff. */

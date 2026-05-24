@@ -69,9 +69,9 @@ type Config struct {
 	LLMProvider string
 	LLMModel    string
 
-	// GitHub — PAT and OAuth are mutually exclusive; App is independent.
-	GitHubToken             string // PAT; mutually exclusive with GitHubOAuthClientID
-	GitHubOAuthClientID     string // OAuth app client ID; mutually exclusive with GitHubToken
+	// GitHub — PAT for server-level API access (forges, autoupdate); OAuth for user login.
+	GitHubToken             string // PAT for GitHub API access
+	GitHubOAuthClientID     string // OAuth app client ID
 	GitHubOAuthClientSecret string
 	GitHubOAuthAllowedUsers string // comma-separated; required with OAuth
 	GitHubWebhookSecret     []byte // HMAC secret; enables POST /webhooks/github
@@ -147,10 +147,6 @@ func (c *Config) Validate() error {
 		if u.Path != "" && u.Path != "/" {
 			return fmt.Errorf("gitlab.url must not contain a path: %q", c.GitLabURL)
 		}
-	}
-	if c.GitHubToken != "" && c.GitHubOAuthClientID != "" {
-		return errors.New("github.token and github.oauth_client_id are mutually exclusive: " +
-			"remove github.token when using GitHub OAuth login")
 	}
 	if c.GitLabToken != "" && c.GitLabOAuthClientID != "" {
 		return errors.New("gitlab.token and gitlab.oauth_client_id are mutually exclusive: " +

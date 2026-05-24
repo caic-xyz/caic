@@ -147,6 +147,7 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 		return nil, "", "", "", err
 	}
 	// gh CLI fallback: when no token and no OAuth configured, try gh auth token.
+	// TODO: remove OAuth guard once gh auth token reliably provides a scoped PAT.
 	ghToken := tc.GitHub.Token
 	if ghToken == "" && tc.GitHub.OAuthClientID == "" {
 		ghToken = resolveGitHubTokenFromGH(ctx)

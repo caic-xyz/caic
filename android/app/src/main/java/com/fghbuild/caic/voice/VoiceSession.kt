@@ -155,6 +155,7 @@ class VoiceSession @Inject constructor(
                     usbAvailable = config.usbAvailable,
                     displayAvailable = config.displayAvailable,
                     sudoAvailable = config.sudoAvailable,
+                    gitHubTokenAvailable = config.gitHubTokenAvailable,
                 )
                 val prefs = settingsRepository.serverPreferences.value
                 defaultHarness = prefs?.harness?.ifBlank { null }

@@ -726,6 +726,14 @@ private fun TaskCreationRepoStrip(
             enabled = state.sudoAvailable,
             unavailableDescription = "Root access (sudo) is not available on this server",
         )
+        FeatureToggle(
+            checked = state.gitHubTokenEnabled,
+            onCheckedChange = viewModel::setGitHubTokenEnabled,
+            iconRes = com.fghbuild.caic.R.drawable.ic_github,
+            contentDescription = "Enable GitHub token",
+            enabled = state.gitHubTokenAvailable,
+            unavailableDescription = "GitHub token is not available on this server",
+        )
     }
 }
 

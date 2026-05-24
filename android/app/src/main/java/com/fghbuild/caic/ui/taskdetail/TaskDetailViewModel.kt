@@ -77,6 +77,7 @@ data class TaskDetailState(
     val usbAvailable: Boolean = false,
     val displayAvailable: Boolean = false,
     val sudoAvailable: Boolean = false,
+    val gitHubTokenAvailable: Boolean = false,
 )
 
 private val TerminalStates = setOf("stopping", "stopped", "purging", "purged", "failed")
@@ -109,6 +110,7 @@ class TaskDetailViewModel @Inject constructor(
     private val _usbAvailable = MutableStateFlow(false)
     private val _displayAvailable = MutableStateFlow(false)
     private val _sudoAvailable = MutableStateFlow(false)
+    private val _gitHubTokenAvailable = MutableStateFlow(false)
 
     private var sseJob: Job? = null
 
@@ -131,7 +133,7 @@ class TaskDetailViewModel @Inject constructor(
             taskRepository.tasks, _grouped, _isReady, _sending,
             _pendingAction, _actionError, _safetyIssues, _inputDraft,
             _pendingImages, _harnesses, _statsHistory, _repos, _processes,
-            _streamWarning, _tailscaleAvailable, _usbAvailable, _displayAvailable, _sudoAvailable,
+            _streamWarning, _tailscaleAvailable, _usbAvailable, _displayAvailable, _sudoAvailable, _gitHubTokenAvailable,
         )
     ) { values ->
         val tasks = values[0] as List<Task>
@@ -153,6 +155,7 @@ class TaskDetailViewModel @Inject constructor(
         val usbAvail = values[15] as Boolean
         val dispAvail = values[16] as Boolean
         val sudoAvail = values[17] as Boolean
+        val gitHubTokenAvail = values[18] as Boolean
         val task = tasks.firstOrNull { it.id == taskId }
         val taskHarness = harnesses.firstOrNull { it.name == task?.harness }
         val imgSupport = task != null && taskHarness?.supportsImages == true
@@ -186,6 +189,7 @@ class TaskDetailViewModel @Inject constructor(
             usbAvailable = usbAvail,
             displayAvailable = dispAvail,
             sudoAvailable = sudoAvail,
+            gitHubTokenAvailable = gitHubTokenAvail,
         )
     }.distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TaskDetailState())
@@ -208,6 +212,7 @@ class TaskDetailViewModel @Inject constructor(
                 _usbAvailable.value = cfg.usbAvailable
                 _displayAvailable.value = cfg.displayAvailable
                 _sudoAvailable.value = cfg.sudoAvailable
+                _gitHubTokenAvailable.value = cfg.gitHubTokenAvailable
             } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
                 Log.w(TAG, "Failed to load server config", e)
             }
@@ -489,6 +494,7 @@ class TaskDetailViewModel @Inject constructor(
         usb: Boolean = false,
         display: Boolean = false,
         sudo: Boolean = false,
+        gitHubToken: Boolean = false,
     ) {
         _pendingAction.value = "fork"
         viewModelScope.launch {
@@ -506,6 +512,7 @@ class TaskDetailViewModel @Inject constructor(
                         usb = usb,
                         display = display,
                         sudo = sudo,
+                        gitHubToken = gitHubToken,
                     ),
                 )
             } catch (e: Exception) {

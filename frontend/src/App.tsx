@@ -24,6 +24,7 @@ import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
+import TokenIcon from "./github.svg?solid";
 import PersonIcon from "@material-symbols/svg-400/outlined/person.svg?solid";
 import SettingsIcon from "@material-symbols/svg-400/outlined/settings.svg?solid";
 import TailscaleIcon from "./tailscale.svg?solid";
@@ -134,12 +135,13 @@ export default function App() {
   const [displayEnabled, setDisplayEnabled] = createSignal(false);
   const [sudoAvailable, setSudoAvailable] = createSignal(false);
   const [sudoEnabled, setSudoEnabled] = createSignal(false);
+  const [gitHubTokenAvailable, setGitHubTokenAvailable] = createSignal(false);
+  const [gitHubTokenEnabled, setGitHubTokenEnabled] = createSignal(false);
   const [recentCount, setRecentCount] = createSignal(0);
   const [actionId, setActionId] = createSignal<string | null>(null);
 
   const [autoFixCI, setAutoFixCI] = createSignal(false);
   const [autoFixPR, setAutoFixPR] = createSignal(false);
-  const [gitHubTokenAccess, setGitHubTokenAccess] = createSignal("");
   const [maxCPUs, setMaxCPUs] = createSignal(0);
   const [useDefaultCaches, setUseDefaultCaches] = createSignal(true);
   const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
@@ -154,7 +156,6 @@ export default function App() {
       autoFixOnPROpen: autoFixPR(),
       baseImage: selectedImage() || "",
       maxCPUs: maxCPUs(),
-      gitHubTokenAccess: gitHubTokenAccess() || undefined,
       useDefaultCaches: useDefaultCaches(),
       wellKnownCaches: wellKnownCaches() as Record<string, boolean>,
       cacheMappings: cacheMappings(),
@@ -318,13 +319,13 @@ export default function App() {
           setUSBAvailable(config.usbAvailable);
           setDisplayAvailable(config.displayAvailable);
           setSudoAvailable(config.sudoAvailable);
+          setGitHubTokenAvailable(config.gitHubTokenAvailable);
           const displayName = config.displayName || window.location.hostname.split('.')[0];
           document.title = `${displayName} — caic`;
         }
         if (prefs?.settings) {
           setAutoFixCI(prefs.settings.autoFixOnCIFailure);
           setAutoFixPR(prefs.settings.autoFixOnPROpen);
-          setGitHubTokenAccess(prefs.settings.gitHubTokenAccess ?? "");
           setMaxCPUs(prefs.settings.maxCPUs ?? 0);
           setUseDefaultCaches(prefs.settings.useDefaultCaches ?? true);
           setWellKnownCaches(prefs.settings.wellKnownCaches ?? {});
@@ -589,6 +590,7 @@ export default function App() {
   const [forkUSB, setForkUSB] = createSignal(false);
   const [forkDisplay, setForkDisplay] = createSignal(false);
   const [forkSudo, setForkSudo] = createSignal(false);
+  const [forkGitHubToken, setForkGitHubToken] = createSignal(false);
 
   // Repos available to add in the fork dialog (exclude already-selected extras and source task repos).
   const forkSourceRepoPaths = () => {
@@ -612,6 +614,7 @@ export default function App() {
     setForkUSB(task?.container?.usb ?? false);
     setForkDisplay(task?.container?.display ?? false);
     setForkSudo(task?.container?.sudo ?? false);
+    setForkGitHubToken(task?.gitHubToken ?? false);
   }
 
   async function submitFork() {
@@ -635,6 +638,7 @@ export default function App() {
         usb: forkUSB(),
         display: forkDisplay(),
         sudo: forkSudo(),
+        gitHubToken: forkGitHubToken(),
       });
       navigate(`/task/${resp.id}`);
     } catch {
@@ -668,9 +672,10 @@ export default function App() {
       const usb = usbEnabled();
       const disp = displayEnabled();
       const sudo = sudoEnabled();
+      const ght = gitHubTokenEnabled();
       const harness = selectedHarness();
       const repoSpecs = selRepos.length > 0 ? selRepos.map((r) => ({ name: r.path, ...(r.branch ? { baseBranch: r.branch } : {}) })) : undefined;
-      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repos: repoSpecs, harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}), ...(sudo ? { sudo: true } : {}) });
+      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repos: repoSpecs, harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}), ...(sudo ? { sudo: true } : {}), ...(ght ? { gitHubToken: true } : {}) });
       if (model) prefModels[harness] = model;
       else delete prefModels[harness];
       setPrompt("");
@@ -847,6 +852,15 @@ export default function App() {
             onChange={(e) => setSudoEnabled(e.currentTarget.checked)}
           />
           <SudoIcon width="1.2em" height="1.2em" />
+        </label>
+        <label class={styles.toggleChip} title={gitHubTokenAvailable() ? "Enable GitHub token" : "GitHub token is not available on this server"}>
+          <input
+            type="checkbox"
+            checked={gitHubTokenEnabled()}
+            disabled={!gitHubTokenAvailable()}
+            onChange={(e) => setGitHubTokenEnabled(e.currentTarget.checked)}
+          />
+          <TokenIcon width="1.2em" height="1.2em" />
         </label>
         <PromptInput
           value={prompt()}
@@ -1105,6 +1119,12 @@ export default function App() {
                 <SudoIcon width="1.2em" height="1.2em" />
               </label>
             </Show>
+            <Show when={gitHubTokenAvailable()}>
+              <label class={styles.toggleChip} title="Enable GitHub token">
+                <input type="checkbox" checked={forkGitHubToken()} onChange={(e) => setForkGitHubToken(e.currentTarget.checked)} />
+                <TokenIcon width="1.2em" height="1.2em" />
+              </label>
+            </Show>
           </div>
           <div class={styles.forkActions}>
             <button type="button" class={styles.forkCancel} onClick={() => setForkTaskId(null)}>Cancel</button>
@@ -1162,22 +1182,6 @@ export default function App() {
                 />
               </label>
               <p class={styles.settingsDescription}>Maximum CPU cores for each container (0 = use default).</p>
-              <label class={styles.settingsLabel}>
-                GitHub token access
-                <select
-                  class={styles.settingsInput}
-                  value={gitHubTokenAccess() || "none"}
-                  onChange={async (e) => {
-                    const val = e.currentTarget.value;
-                    setGitHubTokenAccess(val);
-                    await updatePreferences(currentSettings({ gitHubTokenAccess: val }));
-                  }}
-                >
-                  <option value="none">None (default)</option>
-                  <option value="read-write">Read-write</option>
-                </select>
-              </label>
-              <p class={styles.settingsDescription}>Controls whether the GitHub token is injected into containers.</p>
             </div>
             <div class={styles.settingsSection}>
               <h3 class={styles.settingsSectionTitle}>Well-known caches</h3>
@@ -1305,7 +1309,7 @@ export default function App() {
         </dialog>
       </Show>
       <VoiceOverlay tasks={tasks} recentRepo={() => repos()[0]?.path ?? ""} selectedHarness={selectedHarness} selectedModel={selectedModel}
-        serverCaps={() => ({ tailscaleAvailable: tailscaleAvailable(), usbAvailable: usbAvailable(), displayAvailable: displayAvailable(), sudoAvailable: sudoAvailable() })} />
+        serverCaps={() => ({ tailscaleAvailable: tailscaleAvailable(), usbAvailable: usbAvailable(), displayAvailable: displayAvailable(), sudoAvailable: sudoAvailable(), gitHubTokenAvailable: gitHubTokenAvailable() })} />
       <Portal>
         <div class={styles.toastContainer}>
           <For each={warnings()}>

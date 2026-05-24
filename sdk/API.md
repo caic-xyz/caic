@@ -107,6 +107,7 @@ Config reports server capabilities to the frontend.
 | `usbAvailable` | `boolean` |  | yes |
 | `displayAvailable` | `boolean` |  | yes |
 | `sudoAvailable` | `boolean` |  | yes |
+| `gitHubTokenAvailable` | `boolean` |  | yes |
 | `webrtcAvailable` | `boolean` |  | yes |
 | `gitHubAppEnabled` | `boolean` |  |  |
 | `authProviders` | `string[]` | e.g. ["github","gitlab"] |  |
@@ -165,8 +166,6 @@ request when it is opened or reopened via a forge webhook. | yes |
 the default. |  |
 | `maxCPUs` | `int` | MaxCPUs limits the number of CPU cores the container may use.
 Zero means use the system default (max(2, NumCPU-2)). |  |
-| `gitHubTokenAccess` | `string` | GitHubTokenAccess controls the GitHub token injected into containers.
-"none" (default): no token. "read-write": passes the parent token. |  |
 | `useDefaultCaches` | `boolean` | UseDefaultCaches controls whether default harness caches are mounted.
 When false, only custom CacheMappings are used. |  |
 | `wellKnownCaches` | `Record<string, unknown>` | WellKnownCaches maps cache name to enabled state. nil means use default
@@ -390,6 +389,7 @@ Task is the JSON representation sent to the frontend.
 | `inPlanMode` | `boolean` |  |  |
 | `planContent` | `string` |  |  |
 | `container` | `Container` |  | yes |
+| `gitHubToken` | `boolean` | Per-task feature flags. |  |
 
 ### ImageData
 
@@ -433,6 +433,7 @@ CreateTaskReq is the request body for POST /api/v1/tasks.
 | `usb` | `boolean` |  |  |
 | `display` | `boolean` |  |  |
 | `sudo` | `boolean` |  |  |
+| `gitHubToken` | `boolean` |  |  |
 
 ### EventInit
 
@@ -819,6 +820,7 @@ ForkTaskReq is the request body for POST /api/v1/tasks/{id}/fork.
 | `usb` | `boolean` | Override USB; nil means inherit from source. |  |
 | `display` | `boolean` | Override virtual display; nil means inherit from source. |  |
 | `sudo` | `boolean` | Override sudo; nil means inherit from source. |  |
+| `gitHubToken` | `boolean` | Override gitHubToken; nil means inherit from source. |  |
 
 ### DiffResp
 

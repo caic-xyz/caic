@@ -590,8 +590,8 @@ fun TaskDetailScreen(
                         onStop = viewModel::stopTask,
                         onPurge = viewModel::purgeTask,
                         onRevive = viewModel::reviveTask,
-                        onFork = { prompt, harness, model, effort, extraRepos, tailscale, usb, display, sudo ->
-                            viewModel.forkTask(prompt, harness, model, effort, extraRepos, tailscale, usb, display, sudo)
+                        onFork = { prompt, harness, model, effort, extraRepos, tailscale, usb, display, sudo, gitHubToken ->
+                            viewModel.forkTask(prompt, harness, model, effort, extraRepos, tailscale, usb, display, sudo, gitHubToken)
                         },
                         taskState = task?.state ?: "",
                         taskTitle = task?.title ?: "",
@@ -605,6 +605,7 @@ fun TaskDetailScreen(
                         taskUsb = task?.container?.usb == true,
                         taskDisplay = task?.container?.display == true,
                         taskSudo = task?.container?.sudo == true,
+                        taskGitHubToken = task?.gitHubToken == true,
                         harnesses = state.harnesses,
                         allRepos = state.allRepos,
                         forkAvailableRecent = run {
@@ -640,6 +641,7 @@ fun TaskDetailScreen(
                         usbAvailable = state.usbAvailable,
                         displayAvailable = state.displayAvailable,
                         sudoAvailable = state.sudoAvailable,
+                        gitHubTokenAvailable = state.gitHubTokenAvailable,
                         onForceSync = {
                             viewModel.dismissSafetyIssues()
                             viewModel.syncTask(force = true)

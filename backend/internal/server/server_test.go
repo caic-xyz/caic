@@ -1618,11 +1618,11 @@ func TestConfigValidate(t *testing.T) {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
-	t.Run("GitHub PAT and OAuth together is invalid", func(t *testing.T) {
+	t.Run("GitHub PAT and OAuth together is valid", func(t *testing.T) {
 		t.Parallel()
 		c := &Config{GitHubToken: "ghp_abc", GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", GitHubOAuthAllowedUsers: "alice", ExternalURL: "https://caic.example.com"}
-		if err := c.Validate(); err == nil {
-			t.Fatal("Validate() expected error, got nil")
+		if err := c.Validate(); err != nil {
+			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
 	t.Run("GitLab PAT and OAuth together is invalid", func(t *testing.T) {

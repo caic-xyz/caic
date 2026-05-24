@@ -476,6 +476,7 @@ export function validateTask(raw: unknown): Task {
     inPlanMode: (obj["inPlanMode"] === undefined || obj["inPlanMode"] === null ? undefined : asBoolean(obj["inPlanMode"], "Task.inPlanMode")),
     planContent: (obj["planContent"] === undefined || obj["planContent"] === null ? undefined : asString(obj["planContent"], "Task.planContent")),
     container: validateContainer(obj["container"]),
+    gitHubToken: (obj["gitHubToken"] === undefined || obj["gitHubToken"] === null ? undefined : asBoolean(obj["gitHubToken"], "Task.gitHubToken")),
   };
 }
 

@@ -137,6 +137,7 @@ data class Config(
     val usbAvailable: Boolean,
     val displayAvailable: Boolean,
     val sudoAvailable: Boolean,
+    val gitHubTokenAvailable: Boolean,
     val webrtcAvailable: Boolean,
     val gitHubAppEnabled: Boolean? = null,
     val authProviders: List<String>? = null,
@@ -175,7 +176,6 @@ data class UserSettings(
     @SerialName("autoFixOnPROpen") val autoFixOnPROpen: Boolean,
     val baseImage: String? = null,
     @SerialName("maxCPUs") val maxCPUs: Int? = null,
-    val gitHubTokenAccess: String? = null,
     val useDefaultCaches: Boolean? = null,
     val wellKnownCaches: Map<String, Boolean>? = null,
     val cacheMappings: List<CacheMappingResp>? = null,
@@ -350,6 +350,7 @@ data class Task(
     val inPlanMode: Boolean? = null,
     val planContent: String? = null,
     val container: Container,
+    val gitHubToken: Boolean? = null,
 )
 
 /** ImageData carries a single base64-encoded image. */
@@ -376,6 +377,7 @@ data class CreateTaskReq(
     val usb: Boolean? = null,
     val display: Boolean? = null,
     val sudo: Boolean? = null,
+    val gitHubToken: Boolean? = null,
 )
 
 /**
@@ -668,6 +670,7 @@ data class ForkTaskReq(
     val usb: Boolean? = null,
     val display: Boolean? = null,
     val sudo: Boolean? = null,
+    val gitHubToken: Boolean? = null,
 )
 
 /** DiffResp is the response for GET /api/v1/tasks/{id}/diff. */

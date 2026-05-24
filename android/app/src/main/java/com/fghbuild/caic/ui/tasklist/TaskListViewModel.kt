@@ -85,6 +85,8 @@ data class TaskListState(
     val displayEnabled: Boolean = false,
     val sudoAvailable: Boolean = false,
     val sudoEnabled: Boolean = false,
+    val gitHubTokenAvailable: Boolean = false,
+    val gitHubTokenEnabled: Boolean = false,
     val authRequired: Boolean = false,
     val authProviders: List<String> = emptyList(),
     val serverURL: String = "",
@@ -199,6 +201,8 @@ class TaskListViewModel @Inject constructor(
             displayEnabled = form.displayEnabled,
             sudoAvailable = form.sudoAvailable,
             sudoEnabled = form.sudoEnabled,
+            gitHubTokenAvailable = form.gitHubTokenAvailable,
+            gitHubTokenEnabled = form.gitHubTokenEnabled,
             authRequired = form.authRequired,
             authProviders = form.authProviders,
             serverURL = settings.serverURL,
@@ -281,6 +285,7 @@ class TaskListViewModel @Inject constructor(
                     usbAvailable = config.usbAvailable,
                     displayAvailable = config.displayAvailable,
                     sudoAvailable = config.sudoAvailable,
+                    gitHubTokenAvailable = config.gitHubTokenAvailable,
                     recentRepoCount = recentRepos.size,
                     selectedRepos = if (initialRepo.isNotBlank()) listOf(RepoEntry(initialRepo, "")) else emptyList(),
                     selectedHarness = selectedHarness,
@@ -369,6 +374,10 @@ class TaskListViewModel @Inject constructor(
         _formState.value = _formState.value.copy(sudoEnabled = enabled)
     }
 
+    fun setGitHubTokenEnabled(enabled: Boolean) {
+        _formState.value = _formState.value.copy(gitHubTokenEnabled = enabled)
+    }
+
     fun addImages(images: List<ImageData>) {
         _formState.value = _formState.value.copy(
             pendingImages = _formState.value.pendingImages + images,
@@ -427,6 +436,7 @@ class TaskListViewModel @Inject constructor(
                         usb = form.usbEnabled,
                         display = form.displayEnabled,
                         sudo = form.sudoEnabled,
+                        gitHubToken = form.gitHubTokenEnabled,
                     )
                 )
                 // Promote all selected repos to the front of the MRU list.
@@ -540,6 +550,8 @@ class TaskListViewModel @Inject constructor(
         val displayEnabled: Boolean = false,
         val sudoAvailable: Boolean = false,
         val sudoEnabled: Boolean = false,
+        val gitHubTokenAvailable: Boolean = false,
+        val gitHubTokenEnabled: Boolean = false,
         val authRequired: Boolean = false,
         val authProviders: List<String> = emptyList(),
         val user: UserResp? = null,

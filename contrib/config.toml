@@ -99,17 +99,18 @@
 #OPENAI_API_KEY = "sk-..."
 
 # ── GitHub ───────────────────────────────────────────────────────────────────
-# Choose one of PAT (token) or OAuth; GitHub App is independent.
+# PAT for server-level API access (forges, autoupdate). OAuth for user login.
+# GitHub App is independent and can be layered on either or both.
 
 [github]
-# PAT — single-user / headless. Mutually exclusive with OAuth.
+# PAT — server-level API access (forges, container token fallback).
 # Create at https://github.com/settings/personal-access-tokens/new
 # Required permissions: pull_requests:write, checks:read
-# If unset and gh CLI is in PATH (and OAuth is not configured), caic uses
-# the token from `gh auth token` automatically.
+# If unset and gh CLI is in PATH, caic uses the token from `gh auth token`
+# automatically.
 #token = ""
 
-# OAuth — multi-user login. Mutually exclusive with token.
+# OAuth — multi-user login.
 # See https://docs.caic.xyz/caic/github for OAuth app setup instructions.
 #oauth_client_id = ""
 #oauth_client_secret = ""
