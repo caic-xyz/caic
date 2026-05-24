@@ -187,11 +187,7 @@ export default function App() {
 
   const harnessSupportsImages = () => harnesses().find((h) => h.name === selectedHarness())?.supportsImages ?? false;
 
-  // Ref to the main prompt textarea for focusing after Escape.
-  let promptRef: HTMLElement | undefined;
-
   // Global keyboard shortcuts:
-  // - Escape: from diff view, return to task detail; from task detail, dismiss and focus prompt
   // - ArrowUp/ArrowDown: switch to previous/next task in sidebar order
   // - Shift+Delete: purge the currently selected task
   {
@@ -204,15 +200,6 @@ export default function App() {
           if (!terminalPurge.has(t.state) && confirmTaskAction("Purge", t.title, t.repos?.[0]?.branch ?? "")) {
             handlePurge(t.id);
           }
-        }
-        return;
-      }
-      if (e.key === "Escape" && selectedId() !== null) {
-        if (isDiffPath(location.pathname) || isProcessesPath(location.pathname) || isVncPath(location.pathname)) {
-          navigate(location.pathname.replace(/\/(diff|processes)$/, ""));
-        } else {
-          navigate("/");
-          promptRef?.focus();
         }
         return;
       }
@@ -867,7 +854,6 @@ export default function App() {
           onSubmit={submitTask}
           placeholder="Describe a task..."
           class={styles.promptInput}
-          ref={(el) => { promptRef = el; }}
           data-testid="prompt-input"
           supportsImages={harnessSupportsImages()}
           images={pendingImages()}
@@ -885,7 +871,7 @@ export default function App() {
           loading={cloning()}
           error={cloneError()}
           onClone={submitClone}
-          onClose={() => setCloneOpen(false)}
+          onClose={() => { setCloneOpen(false); setCloneError(""); }}
         />
       </Show>
 
@@ -1017,114 +1003,124 @@ export default function App() {
         </Switch>
       </div>
       <Show when={forkTaskId()}>
-        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events -- backdrop dismiss is supplementary to Cancel button */}
-        <div class={styles.forkOverlay} onClick={(e) => { if (e.target === e.currentTarget) setForkTaskId(null); }}>
-          <div class={styles.forkDialog} role="dialog" aria-modal="true">
-            <h2 class={styles.forkTitle}>Fork task</h2>
-            {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Escape key closes the dialog */}
-            <div onKeyDown={(e) => { if (e.key === "Escape") setForkTaskId(null); }}>
-              <AutoResizeTextarea
-                value={forkPrompt()}
-                onInput={setForkPrompt}
-                onSubmit={submitFork}
-                placeholder="Prompt for forked task"
-                class={styles.forkInput}
-                tabIndex={0}
-              />
-            </div>
-            <Show when={forkAvailableRecent().length > 0 || forkAvailableRest().length > 0 || forkExtraRepos().length > 0}>
-              <RepoChipStrip
-                repos={repos}
-                selectedRepos={forkExtraRepos}
-                onAdd={(path) => setForkExtraRepos((prev) => [...prev, { path, branch: "" }])}
-                onRemove={(path) => setForkExtraRepos((prev) => prev.filter((r) => r.path !== path))}
-                onSetBranch={(path, branch) => setForkExtraRepos((prev) => prev.map((r) => r.path === path ? { ...r, branch } : r))}
-                availableRecent={forkAvailableRecent}
-                availableRest={forkAvailableRest}
-                showClone={false}
-              />
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events -- native <dialog> handles Escape; click-to-dismiss on padding is supplementary */}
+        <dialog
+          ref={(el) => {
+            el.addEventListener("close", () => { setForkTaskId(null); });
+            const stopEscape = (e: KeyboardEvent) => {
+              if (e.key === "Escape") { e.stopPropagation(); e.stopImmediatePropagation(); }
+            };
+            el.addEventListener("keydown", stopEscape, true);
+            queueMicrotask(() => el.showModal());
+          }}
+          class={styles.forkDialog}
+          onClick={(e) => { if (e.target === e.currentTarget) setForkTaskId(null); }}
+        >
+          <h2 class={styles.forkTitle}>Fork task</h2>
+          <AutoResizeTextarea
+            value={forkPrompt()}
+            onInput={setForkPrompt}
+            onSubmit={submitFork}
+            placeholder="Prompt for forked task"
+            class={styles.forkInput}
+            tabIndex={0}
+          />
+          <Show when={forkAvailableRecent().length > 0 || forkAvailableRest().length > 0 || forkExtraRepos().length > 0}>
+            <RepoChipStrip
+              repos={repos}
+              selectedRepos={forkExtraRepos}
+              onAdd={(path) => setForkExtraRepos((prev) => [...prev, { path, branch: "" }])}
+              onRemove={(path) => setForkExtraRepos((prev) => prev.filter((r) => r.path !== path))}
+              onSetBranch={(path, branch) => setForkExtraRepos((prev) => prev.map((r) => r.path === path ? { ...r, branch } : r))}
+              availableRecent={forkAvailableRecent}
+              availableRest={forkAvailableRest}
+              showClone={false}
+            />
+          </Show>
+          <div class={styles.forkRow}>
+            <Show when={harnesses().length > 1}>
+              <select
+                value={forkHarness()}
+                onChange={(e) => {
+                  const h = e.currentTarget.value;
+                  setForkHarness(h);
+                  const models = harnesses().find((x) => x.name === h)?.models ?? [];
+                  setForkModel(models.includes(forkModel()) ? forkModel() : "");
+                  setForkEffort("");
+                }}
+                class={styles.modelSelect}
+              >
+                <For each={harnesses()}>
+                  {(h) => <option value={h.name}>{h.name}</option>}
+                </For>
+              </select>
             </Show>
-            <div class={styles.forkRow}>
-              <Show when={harnesses().length > 1}>
-                <select
-                  value={forkHarness()}
-                  onChange={(e) => {
-                    const h = e.currentTarget.value;
-                    setForkHarness(h);
-                    const models = harnesses().find((x) => x.name === h)?.models ?? [];
-                    setForkModel(models.includes(forkModel()) ? forkModel() : "");
-                    setForkEffort("");
-                  }}
-                  class={styles.modelSelect}
-                >
-                  <For each={harnesses()}>
-                    {(h) => <option value={h.name}>{h.name}</option>}
-                  </For>
-                </select>
-              </Show>
-              <Show when={(harnesses().find((h) => h.name === forkHarness())?.models ?? []).length > 0}>
-                <select
-                  value={forkModel()}
-                  onChange={(e) => setForkModel(e.currentTarget.value)}
-                  class={styles.modelSelect}
-                >
-                  <option value="">Default model</option>
-                  <For each={harnesses().find((h) => h.name === forkHarness())?.models ?? []}>
-                    {(m) => <option value={m}>{m}</option>}
-                  </For>
-                </select>
-              </Show>
-              <Show when={effortOptions(forkHarness()).length > 0}>
-                <select
-                  value={forkEffort()}
-                  onChange={(e) => setForkEffort(e.currentTarget.value)}
-                  class={styles.modelSelect}
-                >
-                  <option value="">Default effort</option>
-                  <For each={effortOptions(forkHarness())}>
-                    {(e) => <option value={e}>{e}</option>}
-                  </For>
-                </select>
-              </Show>
-            </div>
-            <div class={styles.forkRow}>
-              <Show when={tailscaleAvailable()}>
-                <label class={styles.toggleChip} title="Enable Tailscale networking">
-                  <input type="checkbox" checked={forkTailscale()} onChange={(e) => setForkTailscale(e.currentTarget.checked)} />
-                  <TailscaleIcon width="1.2em" height="1.2em" />
-                </label>
-              </Show>
-              <Show when={usbAvailable()}>
-                <label class={styles.toggleChip} title="Enable USB passthrough">
-                  <input type="checkbox" checked={forkUSB()} onChange={(e) => setForkUSB(e.currentTarget.checked)} />
-                  <USBIcon width="1.2em" height="1.2em" />
-                </label>
-              </Show>
-              <Show when={displayAvailable()}>
-                <label class={styles.toggleChip} title="Enable virtual display">
-                  <input type="checkbox" checked={forkDisplay()} onChange={(e) => setForkDisplay(e.currentTarget.checked)} />
-                  <DisplayIcon width="1.2em" height="1.2em" />
-                </label>
-              </Show>
-              <Show when={sudoAvailable()}>
-                <label class={styles.toggleChip} title="Enable root access">
-                  <input type="checkbox" checked={forkSudo()} onChange={(e) => setForkSudo(e.currentTarget.checked)} />
-                  <SudoIcon width="1.2em" height="1.2em" />
-                </label>
-              </Show>
-            </div>
-            <div class={styles.forkActions}>
-              <button type="button" class={styles.forkCancel} onClick={() => setForkTaskId(null)}>Cancel</button>
-              <Button type="button" onClick={submitFork} disabled={!forkPrompt().trim()}>Fork</Button>
-            </div>
+            <Show when={(harnesses().find((h) => h.name === forkHarness())?.models ?? []).length > 0}>
+              <select
+                value={forkModel()}
+                onChange={(e) => setForkModel(e.currentTarget.value)}
+                class={styles.modelSelect}
+              >
+                <option value="">Default model</option>
+                <For each={harnesses().find((h) => h.name === forkHarness())?.models ?? []}>
+                  {(m) => <option value={m}>{m}</option>}
+                </For>
+              </select>
+            </Show>
+            <Show when={effortOptions(forkHarness()).length > 0}>
+              <select
+                value={forkEffort()}
+                onChange={(e) => setForkEffort(e.currentTarget.value)}
+                class={styles.modelSelect}
+              >
+                <option value="">Default effort</option>
+                <For each={effortOptions(forkHarness())}>
+                  {(e) => <option value={e}>{e}</option>}
+                </For>
+              </select>
+            </Show>
           </div>
-        </div>
+          <div class={styles.forkRow}>
+            <Show when={tailscaleAvailable()}>
+              <label class={styles.toggleChip} title="Enable Tailscale networking">
+                <input type="checkbox" checked={forkTailscale()} onChange={(e) => setForkTailscale(e.currentTarget.checked)} />
+                <TailscaleIcon width="1.2em" height="1.2em" />
+              </label>
+            </Show>
+            <Show when={usbAvailable()}>
+              <label class={styles.toggleChip} title="Enable USB passthrough">
+                <input type="checkbox" checked={forkUSB()} onChange={(e) => setForkUSB(e.currentTarget.checked)} />
+                <USBIcon width="1.2em" height="1.2em" />
+              </label>
+            </Show>
+            <Show when={displayAvailable()}>
+              <label class={styles.toggleChip} title="Enable virtual display">
+                <input type="checkbox" checked={forkDisplay()} onChange={(e) => setForkDisplay(e.currentTarget.checked)} />
+                <DisplayIcon width="1.2em" height="1.2em" />
+              </label>
+            </Show>
+            <Show when={sudoAvailable()}>
+              <label class={styles.toggleChip} title="Enable root access">
+                <input type="checkbox" checked={forkSudo()} onChange={(e) => setForkSudo(e.currentTarget.checked)} />
+                <SudoIcon width="1.2em" height="1.2em" />
+              </label>
+            </Show>
+          </div>
+          <div class={styles.forkActions}>
+            <button type="button" class={styles.forkCancel} onClick={() => setForkTaskId(null)}>Cancel</button>
+            <Button type="button" onClick={submitFork} disabled={!forkPrompt().trim()}>Fork</Button>
+          </div>
+        </dialog>
       </Show>
       <Show when={settingsOpen()}>
         {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events -- native <dialog> handles Escape; click-to-dismiss on padding is supplementary */}
         <dialog
           ref={(el) => {
-            el.addEventListener("close", () => setSettingsOpen(false));
+            el.addEventListener("close", () => { setSettingsOpen(false); });
+            const stopEscape = (e: KeyboardEvent) => {
+              if (e.key === "Escape") { e.stopPropagation(); e.stopImmediatePropagation(); }
+            };
+            el.addEventListener("keydown", stopEscape, true);
             // showModal requires the element to be in the document; defer to next microtask.
             queueMicrotask(() => el.showModal());
           }}

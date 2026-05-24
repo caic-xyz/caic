@@ -1,5 +1,5 @@
 // Full-page process list viewer for a task's container.
-import { createSignal, createEffect, For, Show } from "solid-js";
+import { createSignal, createEffect, For, Show, onMount, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import type { ProcessInfo } from "@sdk/types.gen";
 import { getTaskProcesses, signalProcess } from "./api";
@@ -40,6 +40,15 @@ export default function ProcessDetail(props: Props) {
   };
 
   createEffect(refresh);
+
+  // Escape navigates back to the task detail.
+  onMount(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") navigate(props.taskPath);
+    };
+    document.addEventListener("keydown", onKey);
+    onCleanup(() => document.removeEventListener("keydown", onKey));
+  });
 
   const handleSignal = async (pid: number, sig: "SIGTERM" | "SIGKILL") => {
     setSignallingPid(pid);

@@ -25,6 +25,11 @@ export default function CloneRepoDialog(props: Props) {
 
   onMount(() => {
     dialogRef.addEventListener("close", () => props.onClose());
+    // Prevent Escape keydown from bubbling past the dialog to parent components.
+    const stopEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopPropagation(); e.stopImmediatePropagation(); }
+    };
+    dialogRef.addEventListener("keydown", stopEscape, true);
     dialogRef.showModal();
   });
 

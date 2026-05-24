@@ -152,6 +152,13 @@ export default function TaskDetail(props: Props) {
     if (!window.matchMedia('(hover: none) and (pointer: coarse)').matches) {
       promptRef?.focus();
     }
+
+    // Escape dismisses the task detail (navigates to /).
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") props.onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    onCleanup(() => document.removeEventListener("keydown", onKey));
   });
 
   // Auto-scroll: keep scrolled to bottom unless the user scrolled up.

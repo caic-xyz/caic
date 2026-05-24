@@ -37,6 +37,11 @@ export default function CameraCapture(props: Props) {
 
   onMount(async () => {
     dialogRef.addEventListener("close", () => props.onClose());
+    // Prevent Escape keydown from bubbling past the dialog to parent components.
+    const stopEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopPropagation(); e.stopImmediatePropagation(); }
+    };
+    dialogRef.addEventListener("keydown", stopEscape, true);
     dialogRef.showModal();
     await startCamera(facingMode());
     // Detect whether multiple cameras are available.

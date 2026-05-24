@@ -1,5 +1,5 @@
 // Full-page diff viewer for a task's file changes.
-import { createSignal, createEffect, createMemo, For, Show } from "solid-js";
+import { createSignal, createEffect, createMemo, For, Show, onMount, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import type { DiffFileStat } from "@sdk/types.gen";
 import { getTaskDiff } from "./api";
@@ -60,6 +60,15 @@ export default function DiffDetail(props: Props) {
       .then((d) => setFullDiff(d.diff))
       .catch((e) => setError(e instanceof Error ? e.message : "Unknown error"))
       .finally(() => setLoading(false));
+  });
+
+  // Escape navigates back to the task detail.
+  onMount(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") navigate(props.taskPath);
+    };
+    document.addEventListener("keydown", onKey);
+    onCleanup(() => document.removeEventListener("keydown", onKey));
   });
 
   const fileDiffs = createMemo(() => {
