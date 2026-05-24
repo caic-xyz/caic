@@ -172,22 +172,33 @@
   cursor: not-allowed;
 }
 
-.checkboxLabel {
+.toggleChip {
   display: flex;
   align-items: center;
-  gap: 0.3rem;
-  padding: 0.35rem 0;
-  font-size: 0.85rem;
-  line-height: 1.4;
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-variant);
   color: var(--color-text-secondary);
   cursor: pointer;
-  white-space: nowrap;
   user-select: none;
+  transition: background 0.15s, color 0.15s;
 }
 
-.checkboxLabel:has(input:disabled) {
+.toggleChip:has(input:checked) {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.toggleChip:has(input:disabled) {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.toggleChip input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
 }
 
 .promptInput {

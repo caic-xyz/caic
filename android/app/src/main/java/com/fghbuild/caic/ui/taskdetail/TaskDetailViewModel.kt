@@ -452,6 +452,10 @@ class TaskDetailViewModel @Inject constructor(
         model: String? = null,
         effort: String? = null,
         extraRepos: List<RepoSpec>? = null,
+        tailscale: Boolean = false,
+        usb: Boolean = false,
+        display: Boolean = false,
+        sudo: Boolean = false,
     ) {
         _pendingAction.value = "fork"
         viewModelScope.launch {
@@ -465,6 +469,10 @@ class TaskDetailViewModel @Inject constructor(
                         model = model?.ifBlank { null },
                         effort = effort?.ifBlank { null },
                         extraRepos = extraRepos,
+                        tailscale = tailscale,
+                        usb = usb,
+                        display = display,
+                        sudo = sudo,
                     ),
                 )
             } catch (e: Exception) {

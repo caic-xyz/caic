@@ -69,6 +69,10 @@ export function buildFunctionDeclarations(
             harnesses.length > 0
               ? enumProp(harnessDesc, harnesses)
               : stringProp(harnessDesc),
+          display: boolProp("Enable virtual display (VNC) for this task"),
+          tailscale: boolProp("Enable Tailscale networking for this task"),
+          usb: boolProp("Enable USB passthrough for this task"),
+          sudo: boolProp("Enable root access via sudo with a random password"),
         },
         ["prompt", "repos"],
       ),

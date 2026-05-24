@@ -665,6 +665,10 @@ data class ForkTaskReq(
     val model: String? = null,
     val effort: String? = null,
     val extraRepos: List<RepoSpec>? = null,
+    val tailscale: Boolean? = null,
+    val usb: Boolean? = null,
+    val display: Boolean? = null,
+    val sudo: Boolean? = null,
 )
 
 /** DiffResp is the response for GET /api/v1/tasks/{id}/diff. */

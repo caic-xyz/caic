@@ -590,8 +590,8 @@ fun TaskDetailScreen(
                         onStop = viewModel::stopTask,
                         onPurge = viewModel::purgeTask,
                         onRevive = viewModel::reviveTask,
-                        onFork = { prompt, harness, model, effort, extraRepos ->
-                            viewModel.forkTask(prompt, harness, model, effort, extraRepos)
+                        onFork = { prompt, harness, model, effort, extraRepos, tailscale, usb, display, sudo ->
+                            viewModel.forkTask(prompt, harness, model, effort, extraRepos, tailscale, usb, display, sudo)
                         },
                         taskState = task?.state ?: "",
                         taskTitle = task?.title ?: "",
@@ -601,6 +601,10 @@ fun TaskDetailScreen(
                         taskHarness = task?.harness ?: "",
                         taskModel = task?.model ?: "",
                         taskEffort = task?.effort ?: "",
+                        taskTailscale = task?.container?.tailscale != null,
+                        taskUsb = task?.container?.usb == true,
+                        taskDisplay = task?.container?.display == true,
+                        taskSudo = task?.container?.sudo == true,
                         harnesses = state.harnesses,
                         allRepos = state.allRepos,
                         forkAvailableRecent = run {

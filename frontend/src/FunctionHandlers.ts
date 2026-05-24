@@ -157,11 +157,19 @@ export class FunctionHandlers {
         : [];
     const model = optString(args, "model") ?? (this.defaultModel || undefined);
     const harness = optString(args, "harness") ?? this.defaultHarness;
+    const tailscale = optBool(args, "tailscale");
+    const usb = optBool(args, "usb");
+    const display = optBool(args, "display");
+    const sudo = optBool(args, "sudo");
     const resp = await createTask({
       initialPrompt: { text: prompt },
       repos: repoNames.length > 0 ? repoNames.map((r) => ({ name: r })) : undefined,
       harness,
       ...(model ? { model } : {}),
+      ...(tailscale ? { tailscale } : {}),
+      ...(usb ? { usb } : {}),
+      ...(display ? { display } : {}),
+      ...(sudo ? { sudo } : {}),
     });
     const excluded = this.excludedTaskIds();
     const tasks = (await listTasks()).filter((t) => !excluded.has(t.id));

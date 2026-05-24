@@ -749,6 +749,14 @@ public struct ForkTaskReq: Codable {
     public let effort: String?
     /// Additional repos to map into the fork.
     public let extraRepos: [RepoSpec]?
+    /// Override Tailscale; nil means inherit from source.
+    public let tailscale: Bool?
+    /// Override USB; nil means inherit from source.
+    public let usb: Bool?
+    /// Override virtual display; nil means inherit from source.
+    public let display: Bool?
+    /// Override sudo; nil means inherit from source.
+    public let sudo: Bool?
 }
 
 /// DiffResp is the response for GET /api/v1/tasks/{id}/diff.

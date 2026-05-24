@@ -600,6 +600,10 @@ export default function App() {
   const [forkModel, setForkModel] = createSignal("");
   const [forkEffort, setForkEffort] = createSignal("");
   const [forkExtraRepos, setForkExtraRepos] = createSignal<RepoEntry[]>([]);
+  const [forkTailscale, setForkTailscale] = createSignal(false);
+  const [forkUSB, setForkUSB] = createSignal(false);
+  const [forkDisplay, setForkDisplay] = createSignal(false);
+  const [forkSudo, setForkSudo] = createSignal(false);
 
   // Repos available to add in the fork dialog (exclude already-selected extras and source task repos).
   const forkSourceRepoPaths = () => {
@@ -619,6 +623,10 @@ export default function App() {
     setForkModel(task?.model ?? "");
     setForkEffort(task?.effort ?? "");
     setForkExtraRepos([]);
+    setForkTailscale(task?.container?.tailscale === "true" || task?.container?.tailscale?.startsWith("https://") || false);
+    setForkUSB(task?.container?.usb ?? false);
+    setForkDisplay(task?.container?.display ?? false);
+    setForkSudo(task?.container?.sudo ?? false);
   }
 
   async function submitFork() {
@@ -638,6 +646,10 @@ export default function App() {
         model: m !== (sourceTask?.model ?? "") ? m : undefined,
         effort: e !== (sourceTask?.effort ?? "") ? e : undefined,
         extraRepos: extras.length > 0 ? extras.map((r) => ({ name: r.path, ...(r.branch ? { baseBranch: r.branch } : {}) })) : undefined,
+        tailscale: forkTailscale(),
+        usb: forkUSB(),
+        display: forkDisplay(),
+        sudo: forkSudo(),
       });
       navigate(`/task/${resp.id}`);
     } catch {
@@ -816,7 +828,7 @@ export default function App() {
           </select>
         </Show>
         <Show when={tailscaleAvailable()}>
-          <label class={styles.checkboxLabel} title="Enable Tailscale networking">
+          <label class={styles.toggleChip} title="Enable Tailscale networking">
             <input
               type="checkbox"
               checked={tailscaleEnabled()}
@@ -826,7 +838,7 @@ export default function App() {
           </label>
         </Show>
         <Show when={usbAvailable()}>
-          <label class={styles.checkboxLabel} title="Enable USB passthrough">
+          <label class={styles.toggleChip} title="Enable USB passthrough">
             <input
               type="checkbox"
               checked={usbEnabled()}
@@ -836,7 +848,7 @@ export default function App() {
           </label>
         </Show>
         <Show when={displayAvailable()}>
-          <label class={styles.checkboxLabel} title="Enable virtual display">
+          <label class={styles.toggleChip} title="Enable virtual display">
             <input
               type="checkbox"
               checked={displayEnabled()}
@@ -846,7 +858,7 @@ export default function App() {
           </label>
         </Show>
         <Show when={sudoAvailable()}>
-          <label class={styles.checkboxLabel} title="Enable root access">
+          <label class={styles.toggleChip} title="Enable root access">
             <input
               type="checkbox"
               checked={sudoEnabled()}
@@ -1079,6 +1091,32 @@ export default function App() {
                     {(e) => <option value={e}>{e}</option>}
                   </For>
                 </select>
+              </Show>
+            </div>
+            <div class={styles.forkRow}>
+              <Show when={tailscaleAvailable()}>
+                <label class={styles.toggleChip} title="Enable Tailscale networking">
+                  <input type="checkbox" checked={forkTailscale()} onChange={(e) => setForkTailscale(e.currentTarget.checked)} />
+                  <TailscaleIcon width="1.2em" height="1.2em" />
+                </label>
+              </Show>
+              <Show when={usbAvailable()}>
+                <label class={styles.toggleChip} title="Enable USB passthrough">
+                  <input type="checkbox" checked={forkUSB()} onChange={(e) => setForkUSB(e.currentTarget.checked)} />
+                  <USBIcon width="1.2em" height="1.2em" />
+                </label>
+              </Show>
+              <Show when={displayAvailable()}>
+                <label class={styles.toggleChip} title="Enable virtual display">
+                  <input type="checkbox" checked={forkDisplay()} onChange={(e) => setForkDisplay(e.currentTarget.checked)} />
+                  <DisplayIcon width="1.2em" height="1.2em" />
+                </label>
+              </Show>
+              <Show when={sudoAvailable()}>
+                <label class={styles.toggleChip} title="Enable root access">
+                  <input type="checkbox" checked={forkSudo()} onChange={(e) => setForkSudo(e.currentTarget.checked)} />
+                  <SudoIcon width="1.2em" height="1.2em" />
+                </label>
               </Show>
             </div>
             <div class={styles.forkActions}>

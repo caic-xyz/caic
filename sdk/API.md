@@ -817,6 +817,10 @@ ForkTaskReq is the request body for POST /api/v1/tasks/{id}/fork.
 | `model` | `string` | Override model; empty means inherit from source. |  |
 | `effort` | `string` | Override thinking effort; empty means inherit from source. |  |
 | `extraRepos` | `RepoSpec[]` | Additional repos to map into the fork. |  |
+| `tailscale` | `boolean` | Override Tailscale; nil means inherit from source. |  |
+| `usb` | `boolean` | Override USB; nil means inherit from source. |  |
+| `display` | `boolean` | Override virtual display; nil means inherit from source. |  |
+| `sudo` | `boolean` | Override sudo; nil means inherit from source. |  |
 
 ### DiffResp
 

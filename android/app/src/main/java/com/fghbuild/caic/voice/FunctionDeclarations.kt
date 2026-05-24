@@ -114,6 +114,10 @@ fun buildFunctionDeclarations(
             } else {
                 stringProp(harnessDesc)
             },
+            "display" to boolProp("Enable virtual display (VNC) for this task"),
+            "tailscale" to boolProp("Enable Tailscale networking for this task"),
+            "usb" to boolProp("Enable USB passthrough for this task"),
+            "sudo" to boolProp("Enable root access via sudo with a random password"),
             required = listOf("prompt", "repos"),
         ),
     ),

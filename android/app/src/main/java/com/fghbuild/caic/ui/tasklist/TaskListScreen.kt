@@ -85,6 +85,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.BranchInfo
@@ -473,6 +474,33 @@ private fun SubGroupHeader(
     }
 }
 
+@Composable
+private fun FeatureToggle(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    iconRes: Int,
+    contentDescription: String,
+) {
+    Row(
+        modifier = Modifier
+            .clip(MaterialTheme.shapes.small)
+            .background(
+                if (checked) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.surfaceVariant
+            )
+            .clickable { onCheckedChange(!checked) }
+            .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(id = iconRes),
+            contentDescription = contentDescription,
+            modifier = Modifier.size(chipIconSize),
+            tint = if (checked) MaterialTheme.colorScheme.onPrimary
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 /** Returns valid effort levels for [harness], empty if unsupported. */
@@ -659,6 +687,38 @@ private fun TaskCreationRepoStrip(
                 selected = state.selectedEffort.ifBlank { "Default effort" },
                 options = listOf("Default effort") + effortOpts,
                 onSelect = { viewModel.selectEffort(if (it == "Default effort") "" else it) },
+            )
+        }
+        if (state.tailscaleAvailable) {
+            FeatureToggle(
+                checked = state.tailscaleEnabled,
+                onCheckedChange = viewModel::setTailscaleEnabled,
+                iconRes = com.fghbuild.caic.R.drawable.ic_tailscale,
+                contentDescription = "Enable Tailscale networking",
+            )
+        }
+        if (state.usbAvailable) {
+            FeatureToggle(
+                checked = state.usbEnabled,
+                onCheckedChange = viewModel::setUSBEnabled,
+                iconRes = com.fghbuild.caic.R.drawable.ic_usb,
+                contentDescription = "Enable USB passthrough",
+            )
+        }
+        if (state.displayAvailable) {
+            FeatureToggle(
+                checked = state.displayEnabled,
+                onCheckedChange = viewModel::setDisplayEnabled,
+                iconRes = com.fghbuild.caic.R.drawable.ic_display,
+                contentDescription = "Enable virtual display",
+            )
+        }
+        if (state.sudoAvailable) {
+            FeatureToggle(
+                checked = state.sudoEnabled,
+                onCheckedChange = viewModel::setSudoEnabled,
+                iconRes = com.fghbuild.caic.R.drawable.ic_sudo,
+                contentDescription = "Enable root access via sudo",
             )
         }
     }

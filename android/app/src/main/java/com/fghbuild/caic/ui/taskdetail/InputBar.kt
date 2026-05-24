@@ -66,6 +66,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import com.fghbuild.caic.R
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.HarnessInfo
@@ -98,7 +99,17 @@ fun InputBar(
     onStop: () -> Unit,
     onPurge: () -> Unit,
     onRevive: () -> Unit,
-    onFork: (prompt: String, harness: String?, model: String?, effort: String?, extraRepos: List<RepoSpec>?) -> Unit = { _, _, _, _, _ -> },
+    onFork: (
+        prompt: String,
+        harness: String?,
+        model: String?,
+        effort: String?,
+        extraRepos: List<RepoSpec>?,
+        tailscale: Boolean,
+        usb: Boolean,
+        display: Boolean,
+        sudo: Boolean,
+    ) -> Unit = { _, _, _, _, _, _, _, _, _ -> },
     taskState: String = "",
     taskTitle: String = "",
     taskRepo: String = "",
@@ -107,6 +118,10 @@ fun InputBar(
     taskHarness: String = "",
     taskModel: String = "",
     taskEffort: String = "",
+    taskTailscale: Boolean = false,
+    taskUsb: Boolean = false,
+    taskDisplay: Boolean = false,
+    taskSudo: Boolean = false,
     harnesses: List<HarnessInfo> = emptyList(),
     allRepos: List<Repo> = emptyList(),
     forkAvailableRecent: List<Repo> = emptyList(),
@@ -356,6 +371,10 @@ fun InputBar(
             var forkSelectedModel by remember { mutableStateOf(taskModel) }
             var forkSelectedEffort by remember { mutableStateOf(taskEffort) }
             var forkExtraRepos by remember { mutableStateOf(emptyList<RepoEntry>()) }
+            var forkTailscale by remember { mutableStateOf(taskTailscale) }
+            var forkUsb by remember { mutableStateOf(taskUsb) }
+            var forkDisplay by remember { mutableStateOf(taskDisplay) }
+            var forkSudo by remember { mutableStateOf(taskSudo) }
             val forkExtraPaths = forkExtraRepos.map { it.path }.toSet()
             AlertDialog(
                 onDismissRequest = { showForkDialog = false },
@@ -427,6 +446,34 @@ fun InputBar(
                                 },
                             )
                         }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            FeatureToggle(
+                                checked = forkTailscale,
+                                onCheckedChange = { forkTailscale = it },
+                                iconRes = com.fghbuild.caic.R.drawable.ic_tailscale,
+                                contentDescription = "Enable Tailscale networking",
+                            )
+                            FeatureToggle(
+                                checked = forkUsb,
+                                onCheckedChange = { forkUsb = it },
+                                iconRes = com.fghbuild.caic.R.drawable.ic_usb,
+                                contentDescription = "Enable USB passthrough",
+                            )
+                            FeatureToggle(
+                                checked = forkDisplay,
+                                onCheckedChange = { forkDisplay = it },
+                                iconRes = com.fghbuild.caic.R.drawable.ic_display,
+                                contentDescription = "Enable virtual display",
+                            )
+                            FeatureToggle(
+                                checked = forkSudo,
+                                onCheckedChange = { forkSudo = it },
+                                iconRes = com.fghbuild.caic.R.drawable.ic_sudo,
+                                contentDescription = "Enable root access via sudo",
+                            )
+                        }
                         LaunchedEffect(Unit) { forkFocus.requestFocus() }
                     }
                 },
@@ -440,7 +487,10 @@ fun InputBar(
                                 RepoSpec(name = it.path, baseBranch = it.branch.ifBlank { null })
                             }
                             val e = forkSelectedEffort.takeIf { it != taskEffort }
-                            onFork(forkPrompt.trim(), h, m, e, extras)
+                            onFork(
+                                forkPrompt.trim(), h, m, e, extras,
+                                forkTailscale, forkUsb, forkDisplay, forkSudo,
+                            )
                         },
                         enabled = forkPrompt.isNotBlank(),
                     ) { Text("Fork") }
@@ -519,6 +569,34 @@ private fun ImageThumbnail(img: ImageData, onRemove: () -> Unit) {
                 .size(16.dp)
                 .clickable(onClick = onRemove)
                 .testTag("remove-image"),
+        )
+    }
+}
+
+@Composable
+private fun FeatureToggle(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    iconRes: Int,
+    contentDescription: String,
+) {
+    Row(
+        modifier = Modifier
+            .clip(MaterialTheme.shapes.small)
+            .background(
+                if (checked) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.surfaceVariant
+            )
+            .clickable { onCheckedChange(!checked) }
+            .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            painter = painterResource(id = iconRes),
+            contentDescription = contentDescription,
+            modifier = Modifier.size(18.dp),
+            tint = if (checked) MaterialTheme.colorScheme.onPrimary
+            else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

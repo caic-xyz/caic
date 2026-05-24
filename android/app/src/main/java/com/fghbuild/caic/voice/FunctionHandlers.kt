@@ -87,12 +87,20 @@ class FunctionHandlers(
         }
         val model = args.optString("model") ?: defaultModel.ifBlank { null }
         val harness = args.optString("harness") ?: defaultHarness
+        val tailscale = args["tailscale"]?.jsonPrimitive?.booleanOrNull ?: false
+        val usb = args["usb"]?.jsonPrimitive?.booleanOrNull ?: false
+        val display = args["display"]?.jsonPrimitive?.booleanOrNull ?: false
+        val sudo = args["sudo"]?.jsonPrimitive?.booleanOrNull ?: false
         val resp = apiClient.createTask(
             CreateTaskReq(
                 initialPrompt = Prompt(text = prompt),
                 repos = repoNames.map { RepoSpec(name = it) },
                 model = model,
                 harness = harness,
+                tailscale = tailscale,
+                usb = usb,
+                display = display,
+                sudo = sudo,
             )
         )
         // Refresh the map so the new task gets a number.

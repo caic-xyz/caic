@@ -281,6 +281,10 @@ type ForkTaskReq struct {
 	Model      string     `json:"model,omitempty"`      // Override model; empty means inherit from source.
 	Effort     string     `json:"effort,omitempty"`     // Override thinking effort; empty means inherit from source.
 	ExtraRepos []RepoSpec `json:"extraRepos,omitempty"` // Additional repos to map into the fork.
+	Tailscale  *bool      `json:"tailscale,omitempty"`  // Override Tailscale; nil means inherit from source.
+	USB        *bool      `json:"usb,omitempty"`        // Override USB; nil means inherit from source.
+	Display    *bool      `json:"display,omitempty"`    // Override virtual display; nil means inherit from source.
+	Sudo       *bool      `json:"sudo,omitempty"`       // Override sudo; nil means inherit from source.
 }
 
 // BotFixCIReq is the request body for POST /api/v1/bot/fix-ci.

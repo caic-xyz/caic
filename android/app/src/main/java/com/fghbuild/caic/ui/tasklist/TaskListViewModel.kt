@@ -77,6 +77,14 @@ data class TaskListState(
     val error: String? = null,
     val pendingImages: List<ImageData> = emptyList(),
     val supportsImages: Boolean = false,
+    val tailscaleAvailable: Boolean = false,
+    val tailscaleEnabled: Boolean = false,
+    val usbAvailable: Boolean = false,
+    val usbEnabled: Boolean = false,
+    val displayAvailable: Boolean = false,
+    val displayEnabled: Boolean = false,
+    val sudoAvailable: Boolean = false,
+    val sudoEnabled: Boolean = false,
     val authRequired: Boolean = false,
     val authProviders: List<String> = emptyList(),
     val serverURL: String = "",
@@ -183,6 +191,14 @@ class TaskListViewModel @Inject constructor(
             error = form.error,
             pendingImages = form.pendingImages,
             supportsImages = imgSupport,
+            tailscaleAvailable = form.tailscaleAvailable,
+            tailscaleEnabled = form.tailscaleEnabled,
+            usbAvailable = form.usbAvailable,
+            usbEnabled = form.usbEnabled,
+            displayAvailable = form.displayAvailable,
+            displayEnabled = form.displayEnabled,
+            sudoAvailable = form.sudoAvailable,
+            sudoEnabled = form.sudoEnabled,
             authRequired = form.authRequired,
             authProviders = form.authProviders,
             serverURL = settings.serverURL,
@@ -261,6 +277,10 @@ class TaskListViewModel @Inject constructor(
                     repos = ordered,
                     harnesses = harnesses,
                     config = config,
+                    tailscaleAvailable = config.tailscaleAvailable,
+                    usbAvailable = config.usbAvailable,
+                    displayAvailable = config.displayAvailable,
+                    sudoAvailable = config.sudoAvailable,
                     recentRepoCount = recentRepos.size,
                     selectedRepos = if (initialRepo.isNotBlank()) listOf(RepoEntry(initialRepo, "")) else emptyList(),
                     selectedHarness = selectedHarness,
@@ -333,6 +353,22 @@ class TaskListViewModel @Inject constructor(
         _formState.value = _formState.value.copy(selectedEffort = effort)
     }
 
+    fun setTailscaleEnabled(enabled: Boolean) {
+        _formState.value = _formState.value.copy(tailscaleEnabled = enabled)
+    }
+
+    fun setUSBEnabled(enabled: Boolean) {
+        _formState.value = _formState.value.copy(usbEnabled = enabled)
+    }
+
+    fun setDisplayEnabled(enabled: Boolean) {
+        _formState.value = _formState.value.copy(displayEnabled = enabled)
+    }
+
+    fun setSudoEnabled(enabled: Boolean) {
+        _formState.value = _formState.value.copy(sudoEnabled = enabled)
+    }
+
     fun addImages(images: List<ImageData>) {
         _formState.value = _formState.value.copy(
             pendingImages = _formState.value.pendingImages + images,
@@ -387,6 +423,10 @@ class TaskListViewModel @Inject constructor(
                         harness = form.selectedHarness,
                         model = form.selectedModel.ifBlank { null },
                         effort = form.selectedEffort.ifBlank { null },
+                        tailscale = form.tailscaleEnabled,
+                        usb = form.usbEnabled,
+                        display = form.displayEnabled,
+                        sudo = form.sudoEnabled,
                     )
                 )
                 // Promote all selected repos to the front of the MRU list.
@@ -492,6 +532,14 @@ class TaskListViewModel @Inject constructor(
         val error: String? = null,
         val pendingImages: List<ImageData> = emptyList(),
         val prefModels: Map<String, String> = emptyMap(),
+        val tailscaleAvailable: Boolean = false,
+        val tailscaleEnabled: Boolean = false,
+        val usbAvailable: Boolean = false,
+        val usbEnabled: Boolean = false,
+        val displayAvailable: Boolean = false,
+        val displayEnabled: Boolean = false,
+        val sudoAvailable: Boolean = false,
+        val sudoEnabled: Boolean = false,
         val authRequired: Boolean = false,
         val authProviders: List<String> = emptyList(),
         val user: UserResp? = null,

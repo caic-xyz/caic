@@ -745,6 +745,14 @@ export interface ForkTaskReq {
   effort?: string;
   /** Additional repos to map into the fork. */
   extraRepos?: RepoSpec[];
+  /** Override Tailscale; nil means inherit from source. */
+  tailscale?: boolean;
+  /** Override USB; nil means inherit from source. */
+  usb?: boolean;
+  /** Override virtual display; nil means inherit from source. */
+  display?: boolean;
+  /** Override sudo; nil means inherit from source. */
+  sudo?: boolean;
 }
 
 /** DiffResp is the response for GET /api/v1/tasks/{id}/diff. */

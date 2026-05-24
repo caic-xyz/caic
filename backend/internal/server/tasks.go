@@ -617,6 +617,22 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 	ghToken := s.resolveGitHubContainerToken(ctx, prefs.Settings.GitHubTokenAccess)
 
 	prompt := v1PromptToAgent(req.Prompt)
+	forkTailscale := source.Tailscale
+	forkUSB := source.USB
+	forkDisplay := source.Display
+	forkSudo := source.Sudo
+	if req.Tailscale != nil {
+		forkTailscale = *req.Tailscale
+	}
+	if req.USB != nil {
+		forkUSB = *req.USB
+	}
+	if req.Display != nil {
+		forkDisplay = *req.Display
+	}
+	if req.Sudo != nil {
+		forkSudo = *req.Sudo
+	}
 	t := &task.Task{
 		ID:            ksid.NewID(),
 		InitialPrompt: prompt,
@@ -627,10 +643,10 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 		DockerImage:   source.DockerImage,
 		MaxCPUs:       source.MaxCPUs,
 		GitHubToken:   ghToken,
-		Tailscale:     source.Tailscale,
-		USB:           source.USB,
-		Display:       source.Display,
-		Sudo:          source.Sudo,
+		Tailscale:     forkTailscale,
+		USB:           forkUSB,
+		Display:       forkDisplay,
+		Sudo:          forkSudo,
 		StartedAt:     time.Now().UTC(),
 		OwnerID:       ownerID,
 		Provider:      s.provider,
@@ -654,10 +670,10 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 		defer tk.End()
 		forkOpts := &task.ForkOptions{
 			ExtraRepos: extraRepos,
-			Display:    source.Display,
-			Tailscale:  source.Tailscale,
-			USB:        source.USB,
-			Sudo:       source.Sudo,
+			Display:    forkDisplay,
+			Tailscale:  forkTailscale,
+			USB:        forkUSB,
+			Sudo:       forkSudo,
 			Labels:     []string{"caic=" + t.ID.String(), "harness=" + string(forkHarness)},
 			Harness:    forkHarness,
 			ExtraEnv:   extraEnv,
