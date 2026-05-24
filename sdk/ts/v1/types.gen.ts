@@ -406,11 +406,6 @@ export interface CacheMappingResp {
 /** UserSettings holds user-configurable behavioral settings. */
 export interface UserSettings {
   /**
-   * Sudo enables root access (password-based sudo) for the container's user account.
-   * Overridden by the per-task toggle when a task is created.
-   */
-  sudo: boolean;
-  /**
    * AutoFixOnCIFailure automatically starts a new task to fix CI when a
    * task's PR CI fails and the original task can no longer receive input.
    * Only effective when the GitHub App is configured.

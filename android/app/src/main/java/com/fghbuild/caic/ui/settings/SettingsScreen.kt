@@ -216,17 +216,6 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            ListItem(
-                headlineContent = { Text("Enable root access") },
-                supportingContent = { Text("Grant root access via sudo with a random password") },
-                trailingContent = {
-                    Switch(
-                        checked = screenState.sudo,
-                        onCheckedChange = { viewModel.updateSudo(it) },
-                    )
-                },
-            )
-
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             Text("Well-known caches", style = MaterialTheme.typography.titleMedium)
             screenState.wellKnownCachesList.forEach { cache ->

@@ -462,9 +462,6 @@ type CacheMappingResp struct {
 
 // UserSettings holds user-configurable behavioral settings.
 type UserSettings struct {
-	// Sudo enables root access (password-based sudo) for the container's user account.
-	// Overridden by the per-task toggle when a task is created.
-	Sudo bool `json:"sudo"`
 	// AutoFixOnCIFailure automatically starts a new task to fix CI when a
 	// task's PR CI fails and the original task can no longer receive input.
 	// Only effective when the GitHub App is configured.

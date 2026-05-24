@@ -142,7 +142,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		Tailscale:     req.Tailscale,
 		USB:           req.USB,
 		Display:       req.Display,
-		Sudo:          req.Sudo || prefs.Settings.Sudo,
+		Sudo:          req.Sudo,
 		StartedAt:     time.Now().UTC(),
 		OwnerID:       ownerID,
 		Provider:      s.provider,

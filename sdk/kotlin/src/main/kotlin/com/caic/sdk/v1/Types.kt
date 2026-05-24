@@ -171,7 +171,6 @@ data class CacheMappingResp(val hostPath: String, val containerPath: String)
 /** UserSettings holds user-configurable behavioral settings. */
 @Serializable
 data class UserSettings(
-    val sudo: Boolean,
     @SerialName("autoFixOnCIFailure") val autoFixOnCIFailure: Boolean,
     @SerialName("autoFixOnPROpen") val autoFixOnPROpen: Boolean,
     val baseImage: String? = null,

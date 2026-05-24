@@ -150,7 +150,6 @@ export default function App() {
   /** Build the current settings payload for updatePreferences, with optional overrides. */
   const currentSettings = (overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}) => ({
     settings: {
-      sudo: sudoEnabled(),
       autoFixOnCIFailure: autoFixCI(),
       autoFixOnPROpen: autoFixPR(),
       baseImage: selectedImage() || "",
@@ -343,7 +342,6 @@ export default function App() {
           setUseDefaultCaches(prefs.settings.useDefaultCaches ?? true);
           setWellKnownCaches(prefs.settings.wellKnownCaches ?? {});
           setCacheMappings(prefs.settings.cacheMappings ?? []);
-          if (prefs.settings.sudo) setSudoEnabled(true);
         }
         if (usageData) setUsage(usageData);
       } finally {
@@ -1168,20 +1166,6 @@ export default function App() {
                 />
               </label>
               <p class={styles.settingsDescription}>Maximum CPU cores for each container (0 = use default).</p>
-              <label class={styles.settingsLabel}>
-                <SudoIcon width="1em" height="1em" style={{ "vertical-align": "middle", "margin-right": "0.4em" }} />
-                Enable root access
-                <input
-                  type="checkbox"
-                  checked={sudoEnabled()}
-                  onChange={async (e) => {
-                    setSudoEnabled(e.currentTarget.checked);
-                    await updatePreferences(currentSettings());
-                  }}
-                  style={{ "margin-left": "0.5em" }}
-                />
-              </label>
-              <p class={styles.settingsDescription}>Grant root access via sudo with a random password. Retrieve with <code>md sudo-password</code>.</p>
               <label class={styles.settingsLabel}>
                 GitHub token access
                 <select

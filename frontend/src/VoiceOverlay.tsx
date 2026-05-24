@@ -2,7 +2,7 @@
 import { createEffect, createSignal, For, Show, untrack, onCleanup, onMount } from "solid-js";
 import type { Task } from "@sdk/types.gen";
 import { voiceSession } from "./VoiceSession";
-import type { VoiceState, TranscriptEntry } from "./VoiceSession";
+import type { VoiceState, TranscriptEntry, VoiceSession } from "./VoiceSession";
 import type { ServerCapabilities } from "./FunctionDeclarations";
 import { setVoiceActive } from "./notifications";
 import { setVoiceConnected, setVoiceTaskNumberMap } from "./VoiceState";
