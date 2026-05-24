@@ -428,6 +428,8 @@ export function validateContainer(raw: unknown): Container {
     tailscale: (obj["tailscale"] === undefined || obj["tailscale"] === null ? undefined : asString(obj["tailscale"], "Container.tailscale")),
     usb: (obj["usb"] === undefined || obj["usb"] === null ? undefined : asBoolean(obj["usb"], "Container.usb")),
     display: (obj["display"] === undefined || obj["display"] === null ? undefined : asBoolean(obj["display"], "Container.display")),
+    sudo: (obj["sudo"] === undefined || obj["sudo"] === null ? undefined : asBoolean(obj["sudo"], "Container.sudo")),
+    sudoPassword: (obj["sudoPassword"] === undefined || obj["sudoPassword"] === null ? undefined : asString(obj["sudoPassword"], "Container.sudoPassword")),
     vncPort: (obj["vncPort"] === undefined || obj["vncPort"] === null ? undefined : asNumber(obj["vncPort"], "Container.vncPort")),
   };
 }

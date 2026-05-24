@@ -136,6 +136,7 @@ data class Config(
     val tailscaleAvailable: Boolean,
     val usbAvailable: Boolean,
     val displayAvailable: Boolean,
+    val sudoAvailable: Boolean,
     val webrtcAvailable: Boolean,
     val gitHubAppEnabled: Boolean? = null,
     val authProviders: List<String>? = null,
@@ -170,6 +171,7 @@ data class CacheMappingResp(val hostPath: String, val containerPath: String)
 /** UserSettings holds user-configurable behavioral settings. */
 @Serializable
 data class UserSettings(
+    val sudo: Boolean,
     @SerialName("autoFixOnCIFailure") val autoFixOnCIFailure: Boolean,
     @SerialName("autoFixOnPROpen") val autoFixOnPROpen: Boolean,
     val baseImage: String? = null,
@@ -302,6 +304,8 @@ data class Container(
     val tailscale: String? = null,
     val usb: Boolean? = null,
     val display: Boolean? = null,
+    val sudo: Boolean? = null,
+    val sudoPassword: String? = null,
     val vncPort: Int? = null,
 )
 
@@ -372,6 +376,7 @@ data class CreateTaskReq(
     val tailscale: Boolean? = null,
     val usb: Boolean? = null,
     val display: Boolean? = null,
+    val sudo: Boolean? = null,
 )
 
 /**

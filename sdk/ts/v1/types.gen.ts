@@ -369,6 +369,7 @@ export interface Config {
   tailscaleAvailable: boolean;
   usbAvailable: boolean;
   displayAvailable: boolean;
+  sudoAvailable: boolean;
   webrtcAvailable: boolean;
   gitHubAppEnabled?: boolean;
   /** e.g. ["github","gitlab"] */
@@ -404,6 +405,11 @@ export interface CacheMappingResp {
 
 /** UserSettings holds user-configurable behavioral settings. */
 export interface UserSettings {
+  /**
+   * Sudo enables root access (password-based sudo) for the container's user account.
+   * Overridden by the per-task toggle when a task is created.
+   */
+  sudo: boolean;
   /**
    * AutoFixOnCIFailure automatically starts a new task to fix CI when a
    * task's PR CI fails and the original task can no longer receive input.
@@ -582,6 +588,9 @@ export interface Container {
   tailscale?: string;
   usb?: boolean;
   display?: boolean;
+  sudo?: boolean;
+  /** SudoPassword is the random sudo password, only populated when Sudo is true. */
+  sudoPassword?: string;
   vncPort?: number /* int */;
 }
 
@@ -671,6 +680,7 @@ export interface CreateTaskReq {
   tailscale?: boolean;
   usb?: boolean;
   display?: boolean;
+  sudo?: boolean;
 }
 
 /** InputReq is the request body for POST /api/v1/tasks/{id}/input. */

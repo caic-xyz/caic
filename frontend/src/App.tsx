@@ -23,6 +23,7 @@ import UsageBadges from "./UsageBadges";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
+import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
 import PersonIcon from "@material-symbols/svg-400/outlined/person.svg?solid";
 import SettingsIcon from "@material-symbols/svg-400/outlined/settings.svg?solid";
 import TailscaleIcon from "./tailscale.svg?solid";
@@ -131,6 +132,8 @@ export default function App() {
   const [usbEnabled, setUSBEnabled] = createSignal(false);
   const [displayAvailable, setDisplayAvailable] = createSignal(false);
   const [displayEnabled, setDisplayEnabled] = createSignal(false);
+  const [sudoAvailable, setSudoAvailable] = createSignal(false);
+  const [sudoEnabled, setSudoEnabled] = createSignal(false);
   const [recentCount, setRecentCount] = createSignal(0);
   const [actionId, setActionId] = createSignal<string | null>(null);
 
@@ -147,6 +150,7 @@ export default function App() {
   /** Build the current settings payload for updatePreferences, with optional overrides. */
   const currentSettings = (overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}) => ({
     settings: {
+      sudo: sudoEnabled(),
       autoFixOnCIFailure: autoFixCI(),
       autoFixOnPROpen: autoFixPR(),
       baseImage: selectedImage() || "",
@@ -327,6 +331,7 @@ export default function App() {
           setTailscaleAvailable(config.tailscaleAvailable);
           setUSBAvailable(config.usbAvailable);
           setDisplayAvailable(config.displayAvailable);
+          setSudoAvailable(config.sudoAvailable);
           const displayName = config.displayName || window.location.hostname.split('.')[0];
           document.title = `${displayName} — caic`;
         }
@@ -338,6 +343,7 @@ export default function App() {
           setUseDefaultCaches(prefs.settings.useDefaultCaches ?? true);
           setWellKnownCaches(prefs.settings.wellKnownCaches ?? {});
           setCacheMappings(prefs.settings.cacheMappings ?? []);
+          if (prefs.settings.sudo) setSudoEnabled(true);
         }
         if (usageData) setUsage(usageData);
       } finally {
@@ -664,9 +670,10 @@ export default function App() {
       const ts = tailscaleEnabled();
       const usb = usbEnabled();
       const disp = displayEnabled();
+      const sudo = sudoEnabled();
       const harness = selectedHarness();
       const repoSpecs = selRepos.length > 0 ? selRepos.map((r) => ({ name: r.path, ...(r.branch ? { baseBranch: r.branch } : {}) })) : undefined;
-      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repos: repoSpecs, harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}) });
+      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repos: repoSpecs, harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}), ...(sudo ? { sudo: true } : {}) });
       if (model) prefModels[harness] = model;
       else delete prefModels[harness];
       setPrompt("");
@@ -838,6 +845,16 @@ export default function App() {
             <DisplayIcon width="1.2em" height="1.2em" />
           </label>
         </Show>
+        <Show when={sudoAvailable()}>
+          <label class={styles.checkboxLabel} title="Enable root access">
+            <input
+              type="checkbox"
+              checked={sudoEnabled()}
+              onChange={(e) => setSudoEnabled(e.currentTarget.checked)}
+            />
+            <SudoIcon width="1.2em" height="1.2em" />
+          </label>
+        </Show>
         <PromptInput
           value={prompt()}
           onInput={setPrompt}
@@ -974,6 +991,7 @@ export default function App() {
                   model={selectedTask()?.model}
                   diffStat={selectedTask()?.diffStat}
                   vncPort={selectedTask()?.container.vncPort ?? 0}
+                  sudoPassword={selectedTask()?.container.sudoPassword}
                   supportsImages={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsImages}
                   supportsCompact={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsCompact}
                   onStop={handleStop}
@@ -1116,6 +1134,20 @@ export default function App() {
                 />
               </label>
               <p class={styles.settingsDescription}>Maximum CPU cores for each container (0 = use default).</p>
+              <label class={styles.settingsLabel}>
+                <SudoIcon width="1em" height="1em" style={{ "vertical-align": "middle", "margin-right": "0.4em" }} />
+                Enable root access
+                <input
+                  type="checkbox"
+                  checked={sudoEnabled()}
+                  onChange={async (e) => {
+                    setSudoEnabled(e.currentTarget.checked);
+                    await updatePreferences(currentSettings());
+                  }}
+                  style={{ "margin-left": "0.5em" }}
+                />
+              </label>
+              <p class={styles.settingsDescription}>Grant root access via sudo with a random password. Retrieve with <code>md sudo-password</code>.</p>
               <label class={styles.settingsLabel}>
                 GitHub token access
                 <select

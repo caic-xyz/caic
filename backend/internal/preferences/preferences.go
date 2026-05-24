@@ -149,6 +149,9 @@ const (
 
 // Settings holds user-configurable behavioral settings.
 type Settings struct {
+	// Sudo enables root access (password-based sudo) for the container's user account.
+	// A random password is generated per container; retrieve with `md sudo-password`.
+	Sudo bool `json:"sudo,omitempty"`
 	// AutoFixOnCIFailure automatically starts a new task to fix CI when a
 	// task's PR CI fails and the original task can no longer receive input.
 	AutoFixOnCIFailure bool `json:"autoFixOnCIFailure,omitempty"`

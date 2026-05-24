@@ -63,6 +63,7 @@ type Config struct {
 	TailscaleAvailable bool     `json:"tailscaleAvailable"`
 	USBAvailable       bool     `json:"usbAvailable"`
 	DisplayAvailable   bool     `json:"displayAvailable"`
+	SudoAvailable      bool     `json:"sudoAvailable"`
 	WebRTCAvailable    bool     `json:"webrtcAvailable"`
 	GitHubAppEnabled   bool     `json:"gitHubAppEnabled,omitempty"`
 	AuthProviders      []string `json:"authProviders,omitempty"` // e.g. ["github","gitlab"]
@@ -168,7 +169,10 @@ type Container struct {
 	Tailscale string `json:"tailscale,omitempty"` // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
 	USB       bool   `json:"usb,omitempty"`
 	Display   bool   `json:"display,omitempty"`
-	VNCPort   int    `json:"vncPort,omitempty"`
+	Sudo      bool   `json:"sudo,omitempty"`
+	// SudoPassword is the random sudo password, only populated when Sudo is true.
+	SudoPassword string `json:"sudoPassword,omitempty"`
+	VNCPort      int    `json:"vncPort,omitempty"`
 }
 
 // Task is the JSON representation sent to the frontend.
@@ -267,6 +271,7 @@ type CreateTaskReq struct {
 	Tailscale     bool       `json:"tailscale,omitempty"`
 	USB           bool       `json:"usb,omitempty"`
 	Display       bool       `json:"display,omitempty"`
+	Sudo          bool       `json:"sudo,omitempty"`
 }
 
 // ForkTaskReq is the request body for POST /api/v1/tasks/{id}/fork.
@@ -453,6 +458,9 @@ type CacheMappingResp struct {
 
 // UserSettings holds user-configurable behavioral settings.
 type UserSettings struct {
+	// Sudo enables root access (password-based sudo) for the container's user account.
+	// Overridden by the per-task toggle when a task is created.
+	Sudo bool `json:"sudo"`
 	// AutoFixOnCIFailure automatically starts a new task to fix CI when a
 	// task's PR CI fails and the original task can no longer receive input.
 	// Only effective when the GitHub App is configured.

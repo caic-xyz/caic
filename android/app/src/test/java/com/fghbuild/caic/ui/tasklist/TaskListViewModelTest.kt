@@ -67,7 +67,7 @@ class TaskListViewModelTest {
                 return when (path) {
                     "/api/v1/server/config" -> jsonResponse(
                         """{"displayName":"test-host","tailscaleAvailable":false,""" +
-                            """"usbAvailable":false,"displayAvailable":false,"webrtcAvailable":false}"""
+                            """"usbAvailable":false,"displayAvailable":false,"sudoAvailable":true,"webrtcAvailable":false}"""
                     )
                     "/api/v1/server/repos" -> jsonResponse(
                         """[
@@ -82,7 +82,7 @@ class TaskListViewModelTest {
                         ]"""
                     )
                     "/api/v1/server/preferences" -> jsonResponse(
-                        """{"repositories":[],"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false}}"""
+                        """{"repositories":[],"settings":{"sudo":false,"autoFixOnCIFailure":false,"autoFixOnPROpen":false}}"""
                     )
                     else -> MockResponse().setResponseCode(404)
                 }
@@ -157,7 +157,7 @@ class TaskListViewModelTest {
                 return when (path) {
                     "/api/v1/server/config" -> jsonResponse(
                         """{"displayName":"test-host","tailscaleAvailable":false,""" +
-                            """"usbAvailable":false,"displayAvailable":false,"webrtcAvailable":false}"""
+                            """"usbAvailable":false,"displayAvailable":false,"sudoAvailable":true,"webrtcAvailable":false}"""
                     )
                     "/api/v1/server/repos" -> jsonResponse(
                         """[{"path":"my-org/repo","branch":"main","baseBranch":{"name":"main"}}]"""
@@ -171,7 +171,7 @@ class TaskListViewModelTest {
                     "/api/v1/server/preferences" -> jsonResponse(
                         """{"repositories":[{"path":"my-org/repo"}],""" +
                             """"harness":"codex","models":{"codex":"o3"},""" +
-                            """"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false}}"""
+                            """"settings":{"sudo":false,"autoFixOnCIFailure":false,"autoFixOnPROpen":false}}"""
                     )
                     else -> MockResponse().setResponseCode(404)
                 }

@@ -806,9 +806,15 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		TailscaleFQDN: c.TailscaleFQDN(ctx),
 		USB:           c.USB,
 		Display:       c.Display,
+		Sudo:          c.Sudo,
 		VNCPort:       int(c.VNCPort),
 		Provider:      s.provider,
 		ForgeIssue:    forgeIssue,
+	}
+	if c.Sudo {
+		if pw, err := c.SudoPassword(ctx); err == nil {
+			t.SudoPassword = pw
+		}
 	}
 	t.SetStateAt(task.StateRunning, stateUpdatedAt)
 	// Set an immediate fallback title; GenerateTitle is fired async below

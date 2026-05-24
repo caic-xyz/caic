@@ -194,8 +194,13 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 		slog.Info("md", "phase", "fork", "src", name, "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	}
 	slog.Debug("container", "msg", "Fork starting", "source", name, "repos_count", len(repos))
-	ct := b.Client.Container(repos...)
-	ct.Name = name
+
+	// Look up the source container so Fork inherits Display, Tailscale,
+	// USB, and Sudo from the source unless explicitly overridden by opts.
+	ct, err := b.Client.Get(ctx, name)
+	if err != nil {
+		return "", nil, fmt.Errorf("source container %s: %w", name, err)
+	}
 	ct.State = "running"
 	harnessMap := map[agent.Harness]md.Harness{
 		agent.Claude:   md.HarnessClaude,
@@ -209,12 +214,13 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 	if mdH, ok := harnessMap[opts.Harness]; ok {
 		agentPaths = []md.AgentPaths{md.HarnessMounts[mdH]}
 	}
-	slog.Debug("container", "msg", "building fork options", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display)
+	slog.Debug("container", "msg", "building fork options", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo)
 	forkOpts := &md.ForkOpts{
 		ExtraRepos: opts.ExtraRepos,
 		Display:    opts.Display,
 		Tailscale:  opts.Tailscale,
 		USB:        opts.USB,
+		Sudo:       opts.Sudo,
 		Labels:     opts.Labels,
 		AgentPaths: agentPaths,
 		ExtraEnv:   opts.ExtraEnv,
@@ -288,6 +294,7 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) (client 
 		USB:        opts.USB,
 		Tailscale:  opts.Tailscale,
 		Display:    opts.Display,
+		Sudo:       opts.Sudo,
 		ExtraEnv:   extraEnv,
 		MaxCPUs:    maxCPUsOrDefault(opts.MaxCPUs),
 	}

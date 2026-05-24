@@ -64,7 +64,7 @@ func (s *Server) listTasks(ctx context.Context, _ *dto.EmptyReq) (*[]v1.Task, er
 		if ownerID != "" && e.task.OwnerID != "" && e.task.OwnerID != ownerID {
 			continue
 		}
-		out = append(out, s.toJSON(e))
+		out = append(out, s.toJSON(ctx, e))
 	}
 	s.mu.Unlock()
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -142,6 +142,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		Tailscale:     req.Tailscale,
 		USB:           req.USB,
 		Display:       req.Display,
+		Sudo:          req.Sudo || prefs.Settings.Sudo,
 		StartedAt:     time.Now().UTC(),
 		OwnerID:       ownerID,
 		Provider:      s.provider,
@@ -181,6 +182,9 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 			s.mu.Unlock()
 			close(entry.done)
 			return
+		}
+		if t.Sudo {
+			t.SudoPassword = s.sudoPassword(s.ctx, t)
 		}
 		s.mu.Lock()
 		s.taskChanged()
@@ -626,6 +630,7 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 		Tailscale:     source.Tailscale,
 		USB:           source.USB,
 		Display:       source.Display,
+		Sudo:          source.Sudo,
 		StartedAt:     time.Now().UTC(),
 		OwnerID:       ownerID,
 		Provider:      s.provider,
@@ -652,6 +657,7 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 			Display:    source.Display,
 			Tailscale:  source.Tailscale,
 			USB:        source.USB,
+			Sudo:       source.Sudo,
 			Labels:     []string{"caic=" + t.ID.String(), "harness=" + string(forkHarness)},
 			Harness:    forkHarness,
 			ExtraEnv:   extraEnv,
@@ -666,6 +672,9 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 			s.mu.Unlock()
 			close(forkEntry.done)
 			return
+		}
+		if t.Sudo {
+			t.SudoPassword = s.sudoPassword(s.ctx, t)
 		}
 		s.mu.Lock()
 		s.taskChanged()
@@ -1063,7 +1072,7 @@ func (s *Server) notifyTaskChange() {
 	s.mu.Unlock()
 }
 
-func (s *Server) toJSON(e *taskEntry) v1.Task {
+func (s *Server) toJSON(ctx context.Context, e *taskEntry) v1.Task {
 	// Read all volatile fields in a single locked snapshot to avoid
 	// data races with addMessage/RestoreMessages.
 	snap := e.task.Snapshot()
@@ -1110,11 +1119,13 @@ func (s *Server) toJSON(e *taskEntry) v1.Task {
 		Title:         snap.Title,
 		Repos:         taskRepos,
 		Container: v1.Container{
-			Name:      e.task.Container,
-			Tailscale: tailscaleURL(e.task),
-			USB:       e.task.USB,
-			Display:   e.task.Display,
-			VNCPort:   snap.VNCPort,
+			Name:         e.task.Container,
+			Tailscale:    tailscaleURL(e.task),
+			USB:          e.task.USB,
+			Display:      e.task.Display,
+			Sudo:         e.task.Sudo,
+			SudoPassword: s.sudoPassword(ctx, e.task),
+			VNCPort:      snap.VNCPort,
 		},
 		State:          snap.State.String(),
 		StateUpdatedAt: snap.StateUpdatedAt,
@@ -1212,4 +1223,21 @@ func (s *Server) effectiveBaseBranch(t *task.Task) string {
 		return runner.BaseBranch
 	}
 	return ""
+}
+
+func (s *Server) sudoPassword(ctx context.Context, t *task.Task) string {
+	if !t.Sudo || t.Container == "" {
+		return ""
+	}
+	if t.SudoPassword != "" {
+		return t.SudoPassword
+	}
+	ct := &md.Container{Client: s.mdClient, Name: t.Container}
+	pw, err := ct.SudoPassword(ctx)
+	if err != nil {
+		slog.Warn("sudo password lookup failed", "ctr", t.Container, "err", err)
+		return ""
+	}
+	t.SudoPassword = pw
+	return pw
 }

@@ -106,6 +106,7 @@ Config reports server capabilities to the frontend.
 | `tailscaleAvailable` | `boolean` |  | yes |
 | `usbAvailable` | `boolean` |  | yes |
 | `displayAvailable` | `boolean` |  | yes |
+| `sudoAvailable` | `boolean` |  | yes |
 | `webrtcAvailable` | `boolean` |  | yes |
 | `gitHubAppEnabled` | `boolean` |  |  |
 | `authProviders` | `string[]` | e.g. ["github","gitlab"] |  |
@@ -155,6 +156,8 @@ UserSettings holds user-configurable behavioral settings.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
+| `sudo` | `boolean` | Sudo enables root access (password-based sudo) for the container's user account.
+Overridden by the per-task toggle when a task is created. | yes |
 | `autoFixOnCIFailure` | `boolean` | AutoFixOnCIFailure automatically starts a new task to fix CI when a
 task's PR CI fails and the original task can no longer receive input.
 Only effective when the GitHub App is configured. | yes |
@@ -340,6 +343,8 @@ Container holds per-task container metadata.
 | `tailscale` | `string` | Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. |  |
 | `usb` | `boolean` |  |  |
 | `display` | `boolean` |  |  |
+| `sudo` | `boolean` |  |  |
+| `sudoPassword` | `string` | SudoPassword is the random sudo password, only populated when Sudo is true. |  |
 | `vncPort` | `int` |  |  |
 
 ### Task
@@ -429,6 +434,7 @@ CreateTaskReq is the request body for POST /api/v1/tasks.
 | `tailscale` | `boolean` |  |  |
 | `usb` | `boolean` |  |  |
 | `display` | `boolean` |  |  |
+| `sudo` | `boolean` |  |  |
 
 ### EventInit
 

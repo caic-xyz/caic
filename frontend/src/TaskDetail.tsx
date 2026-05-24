@@ -16,6 +16,7 @@ import ProgressPanel from "./ProgressPanel";
 import StatsIcon from "./StatsIcon";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
 import CopyIcon from "@material-symbols/svg-400/outlined/content_copy.svg?solid";
+import CheckIcon from "@material-symbols/svg-400/outlined/check.svg?solid";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import SyncIcon from "@material-symbols/svg-400/outlined/sync.svg?solid";
 import StopIcon from "@material-symbols/svg-400/outlined/stop_circle.svg?solid";
@@ -68,6 +69,7 @@ interface Props {
   model?: string;
   diffStat?: DiffFileStat[];
   vncPort?: number;
+  sudoPassword?: string;
   supportsImages?: boolean;
   supportsCompact?: boolean;
   onStop: (id: string) => void;
@@ -621,6 +623,26 @@ export default function TaskDetail(props: Props) {
         </Show>
         <Show when={(props.vncPort ?? 0) > 0}>
           <A class={styles.diffLink} href={`${location.pathname}/vnc`}>VNC</A>
+        </Show>
+        <Show when={props.sudoPassword}>
+          <span class={styles.sudoPassword}>
+            <span class={styles.sudoPasswordText}>{props.sudoPassword}</span>
+            <button
+              class={styles.sudoCopyBtn}
+              title="Copy password"
+              onClick={(e) => {
+                const btn = e.currentTarget;
+                if (props.sudoPassword) {
+                  navigator.clipboard.writeText(props.sudoPassword);
+                }
+                btn.classList.add(styles.copied);
+                setTimeout(() => btn.classList.remove(styles.copied), 1500);
+              }}
+            >
+              <CopyIcon width={14} height={14} class={styles.copyIcon} />
+              <CheckIcon width={14} height={14} class={styles.checkIcon} />
+            </button>
+          </span>
         </Show>
         <Show when={props.inPlanMode}>
           <span class={styles.planIndicator} title="Agent is in plan mode">Plan Mode</span>

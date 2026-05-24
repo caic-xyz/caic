@@ -59,7 +59,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,6 +71,15 @@ import com.fghbuild.caic.ui.theme.appColors
 import com.fghbuild.caic.ui.theme.isCacheStale
 import com.fghbuild.caic.ui.theme.staleStateColor
 import com.fghbuild.caic.ui.theme.stateColor
+import androidx.compose.runtime.rememberCoroutineScope
+import android.content.ClipData
+import androidx.compose.ui.platform.ClipEntry
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.Check
 import com.fghbuild.caic.ui.theme.waitingStates
 import com.fghbuild.caic.util.createCameraPhotoUri
 import com.fghbuild.caic.util.formatElapsed
@@ -390,6 +401,11 @@ fun TaskDetailScreen(
                                         style = MaterialTheme.typography.labelSmall,
                                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
                                     )
+                                }
+                                if (it.container.sudo == true) {
+                                    it.container.sudoPassword?.let { pw ->
+                                        SudoPasswordBadge(pw)
+                                    }
                                 }
                                 val forgeOwner = it.forgeOwner
                                 val forgeRepo = it.forgeRepo
@@ -1093,6 +1109,52 @@ private fun CICheckList(checks: List<ForgeCheck>, forge: String? = null) {
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SudoPasswordBadge(password: String) {
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    var copied by remember { mutableStateOf(false) }
+    Surface(
+        modifier = Modifier.clickable {
+            scope.launch {
+                clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("sudo password", password)))
+            }
+            copied = true
+        },
+        shape = RoundedCornerShape(4.dp),
+        color = if (copied) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.appColors.featureBadgeBg,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+        ) {
+            if (copied) {
+                Icon(
+                    imageVector = Icons.Filled.Check,
+                    contentDescription = "Copied",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(12.dp),
+                )
+                Spacer(modifier = Modifier.width(2.dp))
+            }
+            Text(
+                text = "sudo: $password",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (copied) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.appColors.featureBadgeFg,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+    if (copied) {
+        LaunchedEffect(Unit) {
+            delay(1500)
+            copied = false
         }
     }
 }

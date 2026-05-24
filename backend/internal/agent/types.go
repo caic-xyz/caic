@@ -411,6 +411,7 @@ type MetaMessage struct {
 	Tailscale   bool       `json:"tailscale,omitempty"`
 	USB         bool       `json:"usb,omitempty"`
 	Display     bool       `json:"display,omitempty"`
+	Sudo        bool       `json:"sudo,omitempty"`
 }
 
 // Type implements Message.

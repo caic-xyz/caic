@@ -169,6 +169,8 @@ type Task struct {
 	Tailscale     bool          // Enable Tailscale networking in the container.
 	USB           bool          // Enable USB passthrough in the container.
 	Display       bool          // Enable Xvfb display in the container.
+	Sudo          bool          // Enable root access (password-based sudo) in the container.
+	SudoPassword  string        // Random sudo password; empty if sudo is not enabled.
 	VNCPort       int           // VNC WebSocket port inside the container (0 = no VNC). Set during launch.
 	StartedAt     time.Time     // When the task was created.
 	OwnerID       string        // Internal user ID of the creator; empty in no-auth mode.

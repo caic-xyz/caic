@@ -868,7 +868,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
 		}
 		for _, e := range s.tasks {
-			j := s.toJSON(e)
+			j := s.toJSON(t.Context(), e)
 			if j.CostUSD != 1.23 {
 				t.Errorf("CostUSD = %f, want 1.23", j.CostUSD)
 			}
@@ -927,7 +927,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
 		}
 		for _, e := range s.tasks {
-			j := s.toJSON(e)
+			j := s.toJSON(t.Context(), e)
 			if j.CostUSD != 0.42 {
 				t.Errorf("CostUSD = %f, want 0.42 (should be backfilled from ResultMessage)", j.CostUSD)
 			}

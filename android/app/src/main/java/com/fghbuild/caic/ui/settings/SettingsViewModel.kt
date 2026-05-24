@@ -32,6 +32,7 @@ data class SettingsScreenState(
     val autoFixPR: Boolean = false,
     val baseImage: String = "",
     val maxCPUs: String = "",
+    val sudo: Boolean = false,
     val gitHubTokenAccess: String = "",
     val useDefaultCaches: Boolean = true,
     val wellKnownCaches: Map<String, Boolean> = emptyMap(),
@@ -167,6 +168,7 @@ class SettingsViewModel @Inject constructor(
                         autoFixPR = prefs.settings.autoFixOnPROpen ?: false,
                         baseImage = prefs.settings.baseImage ?: "",
                         maxCPUs = prefs.settings.maxCPUs?.toString() ?: "",
+                        sudo = prefs.settings.sudo,
                         gitHubTokenAccess = prefs.settings.gitHubTokenAccess ?: "",
                         useDefaultCaches = prefs.settings.useDefaultCaches ?: true,
                         wellKnownCaches = prefs.settings.wellKnownCaches ?: emptyMap(),
@@ -189,6 +191,11 @@ class SettingsViewModel @Inject constructor(
     fun updateAutoFixPR(enabled: Boolean) {
         _state.update { it.copy(autoFixPR = enabled) }
         saveSettings { it.copy(autoFixOnPROpen = enabled) }
+    }
+
+    fun updateSudo(enabled: Boolean) {
+        _state.update { it.copy(sudo = enabled) }
+        saveSettings { it.copy(sudo = enabled) }
     }
 
     fun updateBaseImage(image: String) {
@@ -263,6 +270,7 @@ class SettingsViewModel @Inject constructor(
                 val settings = settingsRepository.settings.value
                 val client = ApiClient(settings.serverURL, tokenProvider = { settings.authToken })
                 val current = UserSettings(
+                    sudo = snapshot.sudo,
                     autoFixOnCIFailure = snapshot.autoFixCI,
                     autoFixOnPROpen = snapshot.autoFixPR,
                     baseImage = snapshot.baseImage.ifBlank { null },
@@ -278,6 +286,7 @@ class SettingsViewModel @Inject constructor(
                 // Revert optimistic update on failure.
                 _state.update {
                     it.copy(
+                        sudo = snapshot.sudo,
                         autoFixCI = snapshot.autoFixCI,
                         autoFixPR = snapshot.autoFixPR,
                         baseImage = snapshot.baseImage,

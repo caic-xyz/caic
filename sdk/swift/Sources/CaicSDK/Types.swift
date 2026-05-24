@@ -152,6 +152,7 @@ public struct Config: Codable {
     public let tailscaleAvailable: Bool
     public let usbAvailable: Bool
     public let displayAvailable: Bool
+    public let sudoAvailable: Bool
     public let webrtcAvailable: Bool
     public let gitHubAppEnabled: Bool?
     /// e.g. ["github","gitlab"]
@@ -187,6 +188,9 @@ public struct CacheMappingResp: Codable {
 
 /// UserSettings holds user-configurable behavioral settings.
 public struct UserSettings: Codable {
+    /// Sudo enables root access (password-based sudo) for the container's user account.
+    /// Overridden by the per-task toggle when a task is created.
+    public let sudo: Bool
     /// AutoFixOnCIFailure automatically starts a new task to fix CI when a
     /// task's PR CI fails and the original task can no longer receive input.
     /// Only effective when the GitHub App is configured.
@@ -347,6 +351,9 @@ public struct Container: Codable {
     public let tailscale: String?
     public let usb: Bool?
     public let display: Bool?
+    public let sudo: Bool?
+    /// SudoPassword is the random sudo password, only populated when Sudo is true.
+    public let sudoPassword: String?
     public let vncPort: Int?
 }
 
@@ -436,6 +443,7 @@ public struct CreateTaskReq: Codable {
     public let tailscale: Bool?
     public let usb: Bool?
     public let display: Bool?
+    public let sudo: Bool?
 }
 
 /// EventInit is emitted once at the start of a session. It includes a Harness

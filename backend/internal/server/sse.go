@@ -47,7 +47,8 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Seed CI status immediately on connect (once); subsequent updates come from
 	// webhooks (App) or the ciTicker (polling).
-	go s.ciService.PollCIForActiveRepos(context.WithoutCancel(r.Context()))
+	ctx := r.Context()
+	go s.ciService.PollCIForActiveRepos(context.WithoutCancel(ctx))
 
 	// prevByID tracks the last marshalled JSON for each task ID.
 	prevByID := map[string][]byte{}
@@ -59,7 +60,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		out := make([]v1.Task, 0, len(s.tasks))
 		for _, e := range s.tasks {
-			out = append(out, s.toJSON(e))
+			out = append(out, s.toJSON(ctx, e))
 		}
 		repos := s.reposLocked()
 		newWarnings := s.warningsSince(lastWarnTime)

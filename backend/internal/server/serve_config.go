@@ -42,6 +42,7 @@ func (s *Server) getConfig(_ context.Context, _ *dto.EmptyReq) (*v1.Config, erro
 		TailscaleAvailable: s.mdClient.TailscaleAPIKey != "",
 		USBAvailable:       runtime.GOOS == "linux",
 		DisplayAvailable:   true,
+		SudoAvailable:      true,
 		WebRTCAvailable:    s.voiceBridge != nil,
 		GitHubAppEnabled:   s.forge.githubApp != nil,
 	}
@@ -75,6 +76,7 @@ func (s *Server) getPreferences(ctx context.Context, _ *dto.EmptyReq) (*v1.Prefe
 		Harness:      prefs.Harness,
 		Models:       prefs.Models,
 		Settings: v1.UserSettings{
+			Sudo:               prefs.Settings.Sudo,
 			AutoFixOnCIFailure: prefs.Settings.AutoFixOnCIFailure,
 			AutoFixOnPROpen:    prefs.Settings.AutoFixOnPROpen,
 			BaseImage:          prefs.Settings.BaseImage,
@@ -89,6 +91,7 @@ func (s *Server) getPreferences(ctx context.Context, _ *dto.EmptyReq) (*v1.Prefe
 
 func (s *Server) updatePreferences(ctx context.Context, req *v1.UpdatePreferencesReq) (*v1.PreferencesResp, error) {
 	if err := s.prefs.Update(userIDFromCtx(ctx), func(p *preferences.Preferences) {
+		p.Settings.Sudo = req.Settings.Sudo
 		p.Settings.AutoFixOnCIFailure = req.Settings.AutoFixOnCIFailure
 		p.Settings.AutoFixOnPROpen = req.Settings.AutoFixOnPROpen
 		p.Settings.BaseImage = req.Settings.BaseImage
