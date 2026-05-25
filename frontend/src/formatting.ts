@@ -100,11 +100,7 @@ export function toolCallDetail(name: string, input: Record<string, unknown>): st
     case "edit":
       return typeof input.file_path === "string" ? input.file_path.replace(/^.*\//, "") : "";
     case "bash":
-      if (typeof input.command === "string") {
-        const cmd = input.command.trimStart();
-        return cmd.length > 60 ? cmd.slice(0, 57) + "..." : cmd;
-      }
-      return "";
+      return typeof input.command === "string" ? input.command.trimStart() : "";
     case "grep":
       return typeof input.pattern === "string" ? input.pattern : "";
     case "glob":

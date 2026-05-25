@@ -4,6 +4,7 @@ package com.fghbuild.caic.ui.taskdetail
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -18,12 +19,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.EventKinds
 import com.caic.sdk.v1.EventMessage
@@ -50,6 +53,10 @@ fun ThinkingCard(events: List<EventMessage>, modifier: Modifier = Modifier) {
     }
     if (text.isBlank()) return
 
+    val excerpt = remember(text) {
+        text.lines().firstOrNull()?.trim() ?: ""
+    }
+
     var expanded by rememberSaveable(events.firstOrNull()?.ts) { mutableStateOf(false) }
 
     Row(
@@ -71,6 +78,7 @@ fun ThinkingCard(events: List<EventMessage>, modifier: Modifier = Modifier) {
                     .fillMaxWidth()
                     .clickable { expanded = !expanded }
                     .padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
                     text = "Thinking",
@@ -78,6 +86,16 @@ fun ThinkingCard(events: List<EventMessage>, modifier: Modifier = Modifier) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontStyle = FontStyle.Italic,
                 )
+                if (excerpt.isNotBlank()) {
+                    Text(
+                        text = excerpt,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                }
             }
             AnimatedVisibility(visible = expanded) {
                 Text(

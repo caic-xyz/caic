@@ -1132,13 +1132,22 @@ function ThinkingCard(props: { events: EventMessage[] }) {
     if (deltaBuffer.length > 0) parts.push(deltaBuffer.join(""));
     return parts.join("\n\n");
   });
+  const excerpt = createMemo(() => {
+    const t = text();
+    return t ? t.split("\n")[0].trim() : "";
+  });
   const key = () => "thinking:" + (props.events[0]?.ts ?? 0);
   const isOpen = () => detailsOpenState.get(key()) ?? false;
   return (
     <Show when={text()}>
       <details class={styles.thinkingBlock} open={isOpen()}
         onToggle={(e) => detailsOpenState.set(key(), e.currentTarget.open)}>
-        <summary>Thinking</summary>
+        <summary>
+          Thinking
+          <Show when={excerpt()}>
+            <span class={styles.thinkingExcerpt}>{excerpt()}</span>
+          </Show>
+        </summary>
         <pre class={styles.thinkingText}>{text()}</pre>
       </details>
     </Show>

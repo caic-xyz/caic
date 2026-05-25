@@ -680,6 +680,19 @@ a.ciStatus:hover {
   font-size: 0.8rem;
   color: var(--color-text-secondary);
   font-style: italic;
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.thinkingExcerpt {
+  margin-left: 0.5em;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  font-style: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .thinkingText {
@@ -856,6 +869,9 @@ a.ciStatus:hover {
   margin-left: 0.5em;
   font-size: 0.75rem;
   color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .toolDuration {

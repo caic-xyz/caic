@@ -32,18 +32,13 @@ fun formatDuration(seconds: Double): String = when {
     else -> "${String.format(Locale.US, "%.1f", seconds)}s"
 }
 
-private const val MAX_BASH_DETAIL = 60
-private const val BASH_TRUNCATE_AT = 57
-
-/** Extracts a brief detail string for a tool call, matching the web frontend. */
+/** Extracts a brief detail string for a tool call. Truncation is handled by the
+ * composable (maxLines=1 + TextOverflow.Ellipsis). */
 fun toolCallDetail(name: String, input: JsonElement): String? {
     val obj = input as? JsonObject ?: return null
     return when (name.lowercase()) {
         "read", "write", "edit", "notebookedit" -> obj.stringField("file_path")?.substringAfterLast('/')
-        "bash" -> {
-            val cmd = obj.stringField("command")?.trimStart() ?: return null
-            if (cmd.length > MAX_BASH_DETAIL) cmd.take(BASH_TRUNCATE_AT) + "..." else cmd
-        }
+        "bash" -> obj.stringField("command")?.trimStart()
         "grep", "glob" -> obj.stringField("pattern")
         "task" -> obj.stringField("description")
         "webfetch" -> obj.stringField("url")
