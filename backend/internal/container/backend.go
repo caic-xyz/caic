@@ -111,11 +111,11 @@ func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opt
 }
 
 // Diff implements task.ContainerBackend.
-func (b *Backend) Diff(ctx context.Context, repo md.Repo, args ...string) (string, error) {
+func (b *Backend) Diff(ctx context.Context, repo *md.Repo, args ...string) (string, error) {
 	defer trace.StartRegion(ctx, "container.diff").End()
 	slog.Info("md diff", "dir", repo.GitRoot, "br", repo.Branch, "args", args)
 	var stdout bytes.Buffer
-	if err := b.Client.Container(repo).Diff(ctx, &stdout, &SlogWriter{Phase: "diff"}, 0, args); err != nil {
+	if err := b.Client.Container(*repo).Diff(ctx, &stdout, &SlogWriter{Phase: "diff"}, 0, args); err != nil {
 		return "", err
 	}
 	return stdout.String(), nil

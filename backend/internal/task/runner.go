@@ -57,7 +57,7 @@ type ContainerBackend interface {
 	// Connect waits for SSH and pushes repos into the container identified
 	// by name (returned by Launch). Returns the optional Tailscale FQDN.
 	Connect(ctx context.Context, name string, repos []md.Repo, opts *StartOptions) (tailscaleFQDN string, err error)
-	Diff(ctx context.Context, repo md.Repo, args ...string) (string, error)
+	Diff(ctx context.Context, repo *md.Repo, args ...string) (string, error)
 	Fetch(ctx context.Context, repos []md.Repo) error
 	// Stop gracefully stops the container without removing it. The container
 	// can be restarted later with Revive.
@@ -1142,7 +1142,8 @@ func (r *Runner) DiffContent(ctx context.Context, repos []md.Repo, path string) 
 	r.branchMu.Lock()
 	defer r.branchMu.Unlock()
 	var buf strings.Builder
-	for _, repo := range repos {
+	for i := range repos {
+		repo := &repos[i]
 		args := []string{}
 		if path != "" {
 			args = append(args, "--", path)
@@ -1523,7 +1524,8 @@ func (r *Runner) diffStat(ctx context.Context, repos []md.Repo) agent.DiffStat {
 		return nil
 	}
 	var result agent.DiffStat
-	for _, repo := range repos {
+	for i := range repos {
+		repo := &repos[i]
 		numstat, err := r.Container.Diff(ctx, repo, "--numstat")
 		if err != nil {
 			r.log.Warn("diff numstat failed", "repo", repo.Name(), "br", repo.Branch, "err", err)
@@ -1560,7 +1562,7 @@ func (r *Runner) openLog(t *Task) (io.WriteCloser, error) {
 	// Write metadata header as the first line.
 	metaRepos := make([]agent.MetaRepo, len(t.Repos))
 	for i, r := range t.Repos {
-		metaRepos[i] = agent.MetaRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch}
+		metaRepos[i] = agent.MetaRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, MountedName: r.MountedName}
 	}
 	meta := agent.MetaMessage{
 		MessageType: "caic_meta",

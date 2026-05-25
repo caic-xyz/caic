@@ -220,7 +220,7 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 
 	repos := make([]RepoMount, len(meta.Repos))
 	for i, mr := range meta.Repos {
-		repos[i] = RepoMount{Name: mr.Name, BaseBranch: mr.BaseBranch, Branch: mr.Branch}
+		repos[i] = RepoMountFromMeta(mr, "")
 	}
 	lt := &LoadedTask{
 		path:              path,
@@ -388,7 +388,7 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 
 	repos := make([]RepoMount, len(meta.Repos))
 	for i, mr := range meta.Repos {
-		repos[i] = RepoMount{Name: mr.Name, BaseBranch: mr.BaseBranch, Branch: mr.Branch}
+		repos[i] = RepoMountFromMeta(mr, "")
 	}
 	lt := &LoadedTask{
 		Prompt:            meta.Prompt,

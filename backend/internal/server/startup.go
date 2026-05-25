@@ -331,6 +331,23 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		s.runners[results[i].info.RelPath] = results[i].runner
 	}
 
+	// Warn on repo basename collisions. Containers use qualified names
+	// (mountedName) so there is no runtime conflict, but users may be
+	// confused by short basenames appearing in container names.
+	{
+		seen := make(map[string]string) // basename → first RelPath
+		for i := range s.repos {
+			ri := &s.repos[i]
+			bn := filepath.Base(ri.AbsPath)
+			if first, exists := seen[bn]; exists {
+				slog.Warn("repo basename collision; containers will use qualified names",
+					"a", first, "b", ri.RelPath, "basename", bn)
+			} else {
+				seen[bn] = ri.RelPath
+			}
+		}
+	}
+
 	// Wire the bot with the server as its client.
 	// Eventually we may want to use a clearer observer pattern.
 	s.Bot = bot.New(ctx, s)
@@ -621,16 +638,35 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 
 	for i := range s.repos {
 		ri := &s.repos[i]
-		repoName := filepath.Base(ri.AbsPath)
 		runner := s.runners[ri.RelPath]
 		for _, c := range containers {
-			branch, ok := container.BranchFromContainer(c.Name, repoName)
-			if !ok {
+			// Match containers to repos via the md.repos Docker label.
+			var branch, mountedName string
+			var matched bool
+			for _, r := range c.Repos {
+				if r.Name() == ri.RelPath {
+					branch = r.Branch
+					mountedName = r.Name()
+					matched = true
+					break
+				}
+				// TODO(caic): remove after 2026-07-01.
+				// Legacy containers from before MountedName was
+				// introduced have no MountedName in the label.
+				// Fall back to matching by basename only.
+				if r.MountedName == "" && filepath.Base(r.GitRoot) == filepath.Base(ri.AbsPath) {
+					branch = r.Branch
+					mountedName = r.Name()
+					matched = true
+					break
+				}
+			}
+			if !matched {
 				continue
 			}
 			claimed[c.Name] = struct{}{}
 			wg.Go(func() {
-				if err := s.adoptOne(ctx, *ri, runner, c, branch, branchIDs, allLogs); err != nil {
+				if err := s.adoptOne(ctx, *ri, runner, c, branch, mountedName, branchIDs, allLogs); err != nil {
 					mu.Lock()
 					errs = append(errs, err)
 					mu.Unlock()
@@ -648,7 +684,7 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 				continue
 			}
 			wg.Go(func() {
-				if err := s.adoptOne(ctx, repoInfo{}, noRepoRunner, c, "", branchIDs, allLogs); err != nil {
+				if err := s.adoptOne(ctx, repoInfo{}, noRepoRunner, c, "", "", branchIDs, allLogs); err != nil {
 					mu.Lock()
 					errs = append(errs, err)
 					mu.Unlock()
@@ -668,7 +704,7 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 // whether the relay is alive, and registers the task. If the relay is
 // alive, it spawns a background goroutine to reattach. allLogs is the
 // pre-loaded set of JSONL log files (shared across all adoptOne calls).
-func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner, c *md.Container, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) error { //nolint:gocritic // repoInfo size increase from GitHub fields; refactor not worth it
+func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner, c *md.Container, branch, mountedName string, branchIDs map[string][]string, allLogs []*task.LoadedTask) error { //nolint:gocritic // repoInfo size increase from GitHub fields; refactor not worth it
 	ctx, adoptTask := trace.NewTask(ctx, "adopt-container")
 	defer adoptTask.End()
 	trace.Logf(ctx, "container", "%s repo=%s branch=%s", c.Name, ri.RelPath, branch)
@@ -792,14 +828,14 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		if lt != nil && lt.Primary() != nil {
 			primaryBaseBranch = lt.Primary().BaseBranch
 		}
-		adoptRepos = []task.RepoMount{{Name: ri.RelPath, BaseBranch: primaryBaseBranch, GitRoot: ri.AbsPath, Branch: branch}}
+		adoptRepos = []task.RepoMount{{Name: ri.RelPath, BaseBranch: primaryBaseBranch, GitRoot: ri.AbsPath, Branch: branch, MountedName: mountedName}}
 		if lt != nil {
 			for _, lm := range lt.Repos[1:] {
 				gitRoot := ""
 				if er, ok := s.runners[lm.Name]; ok {
 					gitRoot = er.Dir
 				}
-				adoptRepos = append(adoptRepos, task.RepoMount{Name: lm.Name, BaseBranch: lm.BaseBranch, Branch: lm.Branch, GitRoot: gitRoot})
+				adoptRepos = append(adoptRepos, task.RepoMount{Name: lm.Name, BaseBranch: lm.BaseBranch, Branch: lm.Branch, GitRoot: gitRoot, MountedName: filepath.Base(lm.Name)})
 			}
 		}
 	}

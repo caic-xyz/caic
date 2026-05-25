@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path/filepath"
 	"runtime/trace"
 	"slices"
 	"sort"
@@ -121,7 +122,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 	mounts := make([]task.RepoMount, len(req.Repos))
 	for i, rs := range req.Repos {
 		r := s.runners[rs.Name]
-		mounts[i] = task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir}
+		mounts[i] = task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir, MountedName: filepath.Base(rs.Name)}
 	}
 
 	// Resolve docker image from user preferences.
@@ -556,27 +557,18 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 
 	// Resolve harness and model: use overrides from the request, falling back to source.
 	forkHarness := source.Harness
-	forkModel := source.Model
-	forkEffort := source.Effort
 	if req.Harness != "" {
 		forkHarness = toAgentHarness(req.Harness)
+	}
+	forkModel := source.Model
+	forkEffort := source.Effort
+	if req.Model != "" {
 		backend, ok := runner.Backends[forkHarness]
 		if !ok {
-			return nil, dto.BadRequest("unknown harness: " + string(req.Harness))
-		}
-		if req.Model != "" && !slices.Contains(backend.Models(), req.Model) {
-			return nil, dto.BadRequest("unsupported model for " + string(req.Harness) + ": " + req.Model)
-		}
-		forkModel = req.Model
-		forkEffort = req.Effort
-	} else if req.Model != "" {
-		// Model override without harness override: validate against source harness.
-		backend, ok := runner.Backends[forkHarness]
-		if !ok {
-			return nil, dto.BadRequest("unknown harness: " + string(source.Harness))
+			return nil, dto.BadRequest("unknown harness: " + string(forkHarness))
 		}
 		if !slices.Contains(backend.Models(), req.Model) {
-			return nil, dto.BadRequest("unsupported model for " + string(source.Harness) + ": " + req.Model)
+			return nil, dto.BadRequest("unsupported model for " + string(forkHarness) + ": " + req.Model)
 		}
 		forkModel = req.Model
 		forkEffort = req.Effort
@@ -602,15 +594,14 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 		if !ok {
 			return nil, dto.BadRequest("unknown extra repo: " + rs.Name)
 		}
-		extraRepos = append(extraRepos, md.Repo{GitRoot: er.Dir, Branch: rs.BaseBranch})
-		extraMounts = append(extraMounts, task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir})
+		rm := task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir, MountedName: filepath.Base(rs.Name)}
+		extraMounts = append(extraMounts, rm)
+		extraRepos = append(extraRepos, rm.ToMDRepo())
 	}
 
 	// Build the fork task, copying config from source.
 	mounts := make([]task.RepoMount, len(source.Repos), len(source.Repos)+len(extraMounts))
-	for i, r := range source.Repos {
-		mounts[i] = task.RepoMount{Name: r.Name, BaseBranch: r.BaseBranch, GitRoot: r.GitRoot}
-	}
+	copy(mounts, source.Repos)
 	mounts = append(mounts, extraMounts...)
 
 	forkGitHubToken := source.GitHubToken

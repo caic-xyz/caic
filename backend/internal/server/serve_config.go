@@ -242,6 +242,15 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 		return nil, dto.Conflict("repo already registered: " + targetPath)
 	}
 
+	// Reject when the basename collides with an existing repo from a
+	// different parent directory.
+	bn := filepath.Base(targetPath)
+	for rel := range s.runners {
+		if rel != "" && filepath.Base(rel) == bn && rel != targetPath {
+			return nil, dto.Conflict("repo basename conflicts with existing: " + rel)
+		}
+	}
+
 	// Determine clone depth.
 	depth := req.Depth
 	if depth == 0 {

@@ -148,10 +148,34 @@ func (h *SessionHandle) Drain() {
 // RepoMount describes one repository in a task.
 // Repos[0] is primary; empty slice means no-repo task.
 type RepoMount struct {
-	Name       string // relative path, e.g. "github/caic"
-	BaseBranch string // branch to fork from; empty = runner default
-	Branch     string // allocated branch, e.g. "caic-0"
-	GitRoot    string // absolute host path; empty in purged-task entries
+	Name        string // relative path, e.g. "github/caic"
+	BaseBranch  string // branch to fork from; empty = runner default
+	Branch      string // allocated branch, e.g. "caic-0"
+	GitRoot     string // absolute host path; empty in purged-task entries
+	MountedName string // explicit mount-name override for md.Repo.MountedName
+}
+
+// ToMDRepo converts a RepoMount to an md.Repo for container operations.
+//
+// When MountedName is empty (legacy logs or pre-disambiguation containers),
+// md.Repo.Name() falls back to filepath.Base(GitRoot) automatically.
+func (r *RepoMount) ToMDRepo() md.Repo {
+	return md.Repo{
+		GitRoot:     r.GitRoot,
+		Branch:      r.Branch,
+		MountedName: r.MountedName,
+	}
+}
+
+// RepoMountFromMeta converts a MetaRepo (from JSONL log metadata) to a RepoMount.
+func RepoMountFromMeta(m agent.MetaRepo, gitRoot string) RepoMount {
+	return RepoMount{
+		Name:        m.Name,
+		BaseBranch:  m.BaseBranch,
+		Branch:      m.Branch,
+		MountedName: m.MountedName,
+		GitRoot:     gitRoot,
+	}
 }
 
 // Task represents a single unit of work.
@@ -357,7 +381,7 @@ func (t *Task) Primary() *RepoMount {
 func (t *Task) MDRepos() []md.Repo {
 	out := make([]md.Repo, len(t.Repos))
 	for i, r := range t.Repos {
-		out[i] = md.Repo{GitRoot: r.GitRoot, Branch: r.Branch}
+		out[i] = r.ToMDRepo()
 	}
 	return out
 }

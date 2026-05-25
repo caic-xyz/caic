@@ -817,7 +817,7 @@ func (s *stubContainer) Connect(_ context.Context, _ string, _ []md.Repo, _ *Sta
 	return "", nil
 }
 
-func (s *stubContainer) Diff(_ context.Context, _ md.Repo, _ ...string) (string, error) {
+func (s *stubContainer) Diff(_ context.Context, _ *md.Repo, _ ...string) (string, error) {
 	return "5\t1\tmain.go\n", nil
 }
 

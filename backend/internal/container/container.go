@@ -119,13 +119,3 @@ func WatchEvents(ctx context.Context, labelFilter string) (<-chan Event, error) 
 	}()
 	return ch, nil
 }
-
-// BranchFromContainer derives the git branch name from a container name by
-// stripping the "md-<repo>-" prefix.
-func BranchFromContainer(containerName, repoName string) (string, bool) {
-	prefix := "md-" + repoName + "-"
-	if !strings.HasPrefix(containerName, prefix) {
-		return "", false
-	}
-	return containerName[len(prefix):], true
-}
