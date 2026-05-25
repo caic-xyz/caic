@@ -813,8 +813,8 @@ func (s *stubContainer) Launch(_ context.Context, _ []md.Repo, _ []string, _ *St
 	return "stub", nil
 }
 
-func (s *stubContainer) Connect(_ context.Context, _ string, _ []md.Repo, _ *StartOptions) (string, error) {
-	return "", nil
+func (s *stubContainer) Connect(_ context.Context, _ string, _ []md.Repo, _ *StartOptions) (fqdn, authURL string, _ error) {
+	return "", "", nil
 }
 
 func (s *stubContainer) Diff(_ context.Context, _ *md.Repo, _ ...string) (string, error) {

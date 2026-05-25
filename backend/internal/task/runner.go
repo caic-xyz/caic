@@ -55,8 +55,9 @@ type ContainerBackend interface {
 	// Returns the container name assigned during launch.
 	Launch(ctx context.Context, repos []md.Repo, labels []string, opts *StartOptions) (name string, err error)
 	// Connect waits for SSH and pushes repos into the container identified
-	// by name (returned by Launch). Returns the optional Tailscale FQDN.
-	Connect(ctx context.Context, name string, repos []md.Repo, opts *StartOptions) (tailscaleFQDN string, err error)
+	// by name (returned by Launch). Returns the optional Tailscale FQDN and
+	// browser auth URL (when no pre-auth key was available).
+	Connect(ctx context.Context, name string, repos []md.Repo, opts *StartOptions) (tailscaleFQDN string, tailscaleAuthURL string, err error)
 	Diff(ctx context.Context, repo *md.Repo, args ...string) (string, error)
 	Fetch(ctx context.Context, repos []md.Repo) error
 	// Stop gracefully stops the container without removing it. The container
@@ -359,6 +360,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	}
 	t.Container = sr.Container
 	t.TailscaleFQDN = sr.TailscaleFQDN
+	t.TailscaleAuthURL = sr.TailscaleAuthURL
 	t.VNCPort = r.Container.VNCPort(ctx, sr.Container)
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
@@ -832,8 +834,9 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *For
 // setupResult holds the outputs of setup: the container name and optional Tailscale FQDN.
 // The primary branch is written directly into t.Repos[0].Branch during setup.
 type setupResult struct {
-	Container     string
-	TailscaleFQDN string
+	Container        string
+	TailscaleFQDN    string
+	TailscaleAuthURL string
 }
 
 // AllocateBranch allocates a caic-N branch for this runner's repo using the
@@ -1422,13 +1425,13 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string, resolvedGi
 
 	// Phase B: wait for SSH + push (branch now exists locally).
 	r.log.Debug("runner", "msg", "provisioning phase B: connecting via SSH", "container", containerName, "repos_count", len(repos))
-	tailscaleFQDN, err := r.Container.Connect(startCtx, containerName, repos, opts)
+	tailscaleFQDN, tailscaleAuthURL, err := r.Container.Connect(startCtx, containerName, repos, opts)
 	if err != nil {
 		r.log.Error("runner", "msg", "container.Connect failed", "container", containerName, "err", err)
 		return setupResult{}, fmt.Errorf("start container: %w", err)
 	}
 	r.log.Info("runner", "msg", "started", "br", primaryBranch, "dur", time.Since(tContainer), "container", containerName, "fqdn", tailscaleFQDN)
-	return setupResult{Container: containerName, TailscaleFQDN: tailscaleFQDN}, nil
+	return setupResult{Container: containerName, TailscaleFQDN: tailscaleFQDN, TailscaleAuthURL: tailscaleAuthURL}, nil
 }
 
 // logRelayDiag reads the relay daemon's relay.log from the container and logs

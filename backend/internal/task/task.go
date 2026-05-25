@@ -202,9 +202,10 @@ type Task struct {
 	Provider      genai.Provider
 
 	// Write-once fields — set during setup/adoption, never modified after.
-	Container     string
-	TailscaleFQDN string // Tailscale FQDN assigned to the container (empty if not available).
-	RelayOffset   int64  // Bytes received from relay output.jsonl, for reconnect.
+	Container        string
+	TailscaleFQDN    string // Tailscale FQDN assigned to the container (empty if not available).
+	TailscaleAuthURL string // Tailscale browser auth URL when no pre-auth key was available.
+	RelayOffset      int64  // Bytes received from relay output.jsonl, for reconnect.
 
 	// mu protects all fields below.
 	mu                    sync.Mutex

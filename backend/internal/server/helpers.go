@@ -173,10 +173,13 @@ func emitTaskListEvent(w http.ResponseWriter, flusher http.Flusher, ev v1.TaskLi
 }
 
 // tailscaleURL returns the Tailscale URL for the task, or "true" if enabled
-// but FQDN not yet known, or "" if disabled.
+// but neither FQDN nor auth URL known, or "" if disabled.
 func tailscaleURL(t *task.Task) string {
 	if t.TailscaleFQDN != "" {
 		return "https://" + t.TailscaleFQDN
+	}
+	if t.TailscaleAuthURL != "" {
+		return t.TailscaleAuthURL
 	}
 	if t.Tailscale {
 		return "true"

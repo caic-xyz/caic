@@ -81,7 +81,7 @@ func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, 
 }
 
 // Connect implements task.ContainerBackend.
-func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opts *task.StartOptions) (tailscaleFQDN string, err error) {
+func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opts *task.StartOptions) (tailscaleFQDN, tailscaleAuthURL string, err error) {
 	defer trace.StartRegion(ctx, "container.connect").End()
 	if len(repos) > 0 {
 		slog.Info("md", "phase", "connect", "dir", repos[0].GitRoot, "br", repos[0].Branch)
@@ -95,7 +95,7 @@ func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opt
 	b.mu.Unlock()
 	if !ok {
 		slog.Debug("container", "msg", "no pending container", "container", name)
-		return "", fmt.Errorf("no pending container %q", name)
+		return "", "", fmt.Errorf("no pending container %q", name)
 	}
 	slog.Debug("container", "msg", "found pending container", "container", name)
 	_, mdOpts := b.mdStartOpts(nil, opts)
@@ -104,10 +104,10 @@ func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opt
 	sr, err := c.Connect(ctx, stdout, stderr, mdOpts)
 	if err != nil {
 		slog.Error("container", "msg", "c.Connect failed", "container", name, "err", err)
-		return "", err
+		return "", "", err
 	}
-	slog.Debug("container", "msg", "c.Connect succeeded", "container", name, "fqdn", sr.TailscaleFQDN)
-	return sr.TailscaleFQDN, nil
+	slog.Debug("container", "msg", "c.Connect succeeded", "container", name, "fqdn", sr.TailscaleFQDN, "authurl", sr.TailscaleAuthURL)
+	return sr.TailscaleFQDN, sr.TailscaleAuthURL, nil
 }
 
 // Diff implements task.ContainerBackend.
