@@ -66,6 +66,7 @@ type LoadedTask struct {
 	Tailscale         bool
 	USB               bool
 	Display           bool
+	GitHubToken       bool
 	Model             string
 	AgentVersion      string
 	Msgs              []agent.Message
@@ -235,6 +236,7 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 		Tailscale:         meta.Tailscale,
 		USB:               meta.USB,
 		Display:           meta.Display,
+		GitHubToken:       meta.GitHubToken,
 	}
 
 	// Read the tail of the file to find caic_pr, caic_result, and

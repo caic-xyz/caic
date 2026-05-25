@@ -7,6 +7,7 @@ import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
+import TokenIcon from "./github.svg?solid";
 import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
 import RestoreIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
 import TimerIcon from "@material-symbols/svg-400/outlined/timer.svg?solid";
@@ -46,6 +47,7 @@ export interface TaskCardProps {
     sudo?: boolean;
     vncPort?: number;
   };
+  gitHubToken?: boolean;
   forgePR?: number;
   ciStatus?: CIStatus;
   ciChecks?: ForgeCheck[];
@@ -118,6 +120,9 @@ export default function TaskCard(props: TaskCardProps) {
           </Show>
           <Show when={props.container?.sudo}>
             <span class={styles.featureIconBadge} title="Sudo"><SudoIcon width="0.7rem" height="0.7rem" /></span>
+          </Show>
+          <Show when={props.gitHubToken}>
+            <span class={styles.featureIconBadge} title="GitHub token"><TokenIcon width="0.7rem" height="0.7rem" /></span>
           </Show>
           {/* Stopped: revive + purge buttons */}
           <Show when={props.state === "stopped"}>

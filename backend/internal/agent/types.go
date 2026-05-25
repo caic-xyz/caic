@@ -412,6 +412,7 @@ type MetaMessage struct {
 	USB         bool       `json:"usb,omitempty"`
 	Display     bool       `json:"display,omitempty"`
 	Sudo        bool       `json:"sudo,omitempty"`
+	GitHubToken bool       `json:"gitHubToken,omitempty"`
 }
 
 // Type implements Message.

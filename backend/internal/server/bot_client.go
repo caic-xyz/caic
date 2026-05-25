@@ -64,7 +64,7 @@ func (s *Server) CreateTask(ctx context.Context, req bot.TaskRequest) (string, e
 		InitialPrompt: agent.Prompt{Text: req.Prompt},
 		Repos:         []task.RepoMount{{Name: req.Repo, GitRoot: runner.Dir}},
 		Harness:       harness,
-		GitHubToken:   ghToken,
+		GitHubToken:   true,
 		StartedAt:     time.Now().UTC(),
 		Provider:      s.provider,
 		OwnerID:       req.OwnerID,
@@ -87,7 +87,7 @@ func (s *Server) CreateTask(ctx context.Context, req bot.TaskRequest) (string, e
 	s.notifyTaskChange()
 	s.mu.Unlock()
 	go func() {
-		h, err := runner.Start(s.ctx, t)
+		h, err := runner.Start(s.ctx, t, ghToken)
 		if err != nil {
 			result := task.Result{State: task.StateFailed, Err: err}
 			s.mu.Lock()

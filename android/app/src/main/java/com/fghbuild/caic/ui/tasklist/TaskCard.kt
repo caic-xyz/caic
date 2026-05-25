@@ -134,6 +134,7 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
                     if (task.container.usb == true) FeatureBadge("USB")
                     if (task.container.display == true) FeatureIconBadge(com.fghbuild.caic.R.drawable.ic_display, "Display")
                     if (task.container.sudo == true) FeatureBadge("sudo")
+                    if (task.gitHubToken == true) FeatureIconBadge(com.fghbuild.caic.R.drawable.ic_github, "GitHub token")
                 }
             }
 

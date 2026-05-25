@@ -67,7 +67,7 @@ class TaskListViewModelTest {
                 return when (path) {
                     "/api/v1/server/config" -> jsonResponse(
                         """{"displayName":"test-host","tailscaleAvailable":false,""" +
-                            """"usbAvailable":false,"displayAvailable":false,"sudoAvailable":true,"webrtcAvailable":false}"""
+                            """"usbAvailable":false,"displayAvailable":false,"sudoAvailable":true,"gitHubTokenAvailable":false,"webrtcAvailable":false}"""
                     )
                     "/api/v1/server/repos" -> jsonResponse(
                         """[
@@ -157,7 +157,7 @@ class TaskListViewModelTest {
                 return when (path) {
                     "/api/v1/server/config" -> jsonResponse(
                         """{"displayName":"test-host","tailscaleAvailable":false,""" +
-                            """"usbAvailable":false,"displayAvailable":false,"sudoAvailable":true,"webrtcAvailable":false}"""
+                            """"usbAvailable":false,"displayAvailable":false,"sudoAvailable":true,"gitHubTokenAvailable":false,"webrtcAvailable":false}"""
                     )
                     "/api/v1/server/repos" -> jsonResponse(
                         """[{"path":"my-org/repo","branch":"main","baseBranch":{"name":"main"}}]"""

@@ -138,7 +138,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		Effort:        req.Effort,
 		DockerImage:   dockerImage,
 		MaxCPUs:       prefs.Settings.MaxCPUs,
-		GitHubToken:   ghToken,
+		GitHubToken:   req.GitHubToken,
 		Tailscale:     req.Tailscale,
 		USB:           req.USB,
 		Display:       req.Display,
@@ -173,7 +173,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 			t.Repos[i+1].Branch = branch
 		}
 
-		h, err := primaryRunner.Start(s.ctx, t)
+		h, err := primaryRunner.Start(s.ctx, t, ghToken)
 		if err != nil {
 			result := task.Result{State: task.StateFailed, Err: err}
 			s.mu.Lock()
@@ -613,7 +613,7 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 	}
 	mounts = append(mounts, extraMounts...)
 
-	forkGitHubToken := source.GitHubToken != ""
+	forkGitHubToken := source.GitHubToken
 	if req.GitHubToken != nil {
 		forkGitHubToken = *req.GitHubToken
 	}
@@ -645,7 +645,7 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 		Effort:        forkEffort,
 		DockerImage:   source.DockerImage,
 		MaxCPUs:       source.MaxCPUs,
-		GitHubToken:   ghToken,
+		GitHubToken:   forkGitHubToken,
 		Tailscale:     forkTailscale,
 		USB:           forkUSB,
 		Display:       forkDisplay,
@@ -671,18 +671,19 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 	go func() { //nolint:contextcheck // intentionally using server context
 		ctx, tk := trace.NewTask(s.ctx, "task.fork:"+source.ID.String()+"->"+t.ID.String())
 		defer tk.End()
+		labels := task.MakeLabels(t)
 		forkOpts := &task.ForkOptions{
 			ExtraRepos: extraRepos,
 			Display:    forkDisplay,
 			Tailscale:  forkTailscale,
 			USB:        forkUSB,
 			Sudo:       forkSudo,
-			Labels:     []string{"caic=" + t.ID.String(), "harness=" + string(forkHarness)},
+			Labels:     labels,
 			Harness:    forkHarness,
 			ExtraEnv:   extraEnv,
 			MaxCPUs:    source.MaxCPUs,
 		}
-		h, err := runner.ForkTask(ctx, source, t, forkOpts)
+		h, err := runner.ForkTask(ctx, source, t, forkOpts, ghToken)
 		if err != nil {
 			result := task.Result{State: task.StateFailed, Err: err}
 			s.mu.Lock()
@@ -1154,7 +1155,7 @@ func (s *Server) toJSON(ctx context.Context, e *taskEntry) v1.Task {
 		SessionID:      snap.SessionID,
 		InPlanMode:     snap.InPlanMode,
 		PlanContent:    snap.PlanContent,
-		GitHubToken:    e.task.GitHubToken != "",
+		GitHubToken:    e.task.GitHubToken,
 		CostUSD:        costUSD,
 		NumTurns:       numTurns,
 		Duration:       duration.Seconds(),

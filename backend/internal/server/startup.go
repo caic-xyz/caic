@@ -545,6 +545,9 @@ func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
 			USB:           lt.USB,
 			Display:       lt.Display,
 		}
+		if lt.GitHubToken {
+			t.GitHubToken = true
+		}
 		t.SetStateAt(lt.State, lt.LastStateUpdateAt)
 		if lt.AgentVersion != "" {
 			t.SetAgentVersion(lt.AgentVersion)
@@ -670,11 +673,16 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	defer adoptTask.End()
 	trace.Logf(ctx, "container", "%s repo=%s branch=%s", c.Name, ri.RelPath, branch)
 
-	// Only adopt containers that caic started. The caic label is set at
+	// Only adopt containers that caic started. The caic.id label is set at
 	// container creation and is the authoritative proof of ownership.
 	caicLabelReg := trace.StartRegion(ctx, "caic-label")
 	trace.Logf(ctx, "adopt", "%s: label-caic", c.Name)
-	labelVal, err := container.LabelValue(ctx, c.Name, "caic")
+	labelVal, err := container.LabelValue(ctx, c.Name, "caic.id")
+	// TODO(2026-06-25): remove fallback to old "caic" label after all old containers have been
+	// cycled. All newly launched containers use "caic.id" exclusively.
+	if labelVal == "" && err == nil {
+		labelVal, err = container.LabelValue(ctx, c.Name, "caic")
+	}
 	caicLabelReg.End()
 	if err != nil {
 		return fmt.Errorf("label check for %s: %w", c.Name, err)
@@ -724,7 +732,11 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	// Read the harness from the container label (authoritative), falling
 	// back to the log file, then to Claude as the default.
 	trace.Logf(ctx, "adopt", "%s: label-harness", c.Name)
-	harnessLabel, _ := container.LabelValue(ctx, c.Name, "harness")
+	harnessLabel, _ := container.LabelValue(ctx, c.Name, "caic.harness")
+	// TODO: remove fallback to old "harness" label after 2026-06-25.
+	if harnessLabel == "" {
+		harnessLabel, _ = container.LabelValue(ctx, c.Name, "harness")
+	}
 	harnessName := agent.Harness(harnessLabel)
 	if harnessName == "" && lt != nil {
 		harnessName = lt.Harness
@@ -810,6 +822,11 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		VNCPort:       int(c.VNCPort),
 		Provider:      s.provider,
 		ForgeIssue:    forgeIssue,
+	}
+	// Restore GitHub token flag from log trailer (primary) or container label (fallback).
+	gtLabel, _ := container.LabelValue(ctx, c.Name, "caic.githubToken")
+	if (lt != nil && lt.GitHubToken) || gtLabel == "true" {
+		t.GitHubToken = true
 	}
 	if c.Sudo {
 		if pw, err := c.SudoPassword(ctx); err == nil {

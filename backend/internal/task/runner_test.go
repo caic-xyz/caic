@@ -209,7 +209,7 @@ func TestRunner(t *testing.T) {
 				Harness:       agent.Claude,
 			}
 
-			if _, err := r.setup(t.Context(), tk, nil); err != nil {
+			if _, err := r.setup(t.Context(), tk, nil, ""); err != nil {
 				t.Fatal(err)
 			}
 
@@ -253,7 +253,7 @@ func TestRunner(t *testing.T) {
 				Harness:       agent.Claude,
 			}
 
-			if _, err := r.setup(t.Context(), tk, nil); err != nil {
+			if _, err := r.setup(t.Context(), tk, nil, ""); err != nil {
 				t.Fatal(err)
 			}
 
