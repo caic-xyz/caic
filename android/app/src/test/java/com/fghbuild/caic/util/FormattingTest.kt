@@ -25,12 +25,10 @@ class FormattingTest {
             assertEquals("bar.kt", toolCallDetail("Read", input))
         }
 
-        t.run("Bash truncates long commands") {
+        t.run("Bash returns full command (truncation is handled by composable)") {
             val longCmd = "a".repeat(70)
             val input = JsonObject(mapOf("command" to JsonPrimitive(longCmd)))
-            val detail = toolCallDetail("Bash", input)!!
-            assertEquals(60, detail.length)
-            assertTrue(detail.endsWith("..."))
+            assertEquals(longCmd, toolCallDetail("Bash", input))
         }
 
         t.run("Bash keeps short commands") {
@@ -67,7 +65,4 @@ class FormattingTest {
         t.run("seconds") { assertEquals("1.5s", formatDuration(1.5)) }
     }
 
-    private fun assertTrue(condition: Boolean) {
-        org.junit.Assert.assertTrue(condition)
-    }
 }
