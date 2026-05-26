@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"path/filepath"
 	"runtime/trace"
 	"slices"
 	"sort"
@@ -122,7 +121,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 	mounts := make([]task.RepoMount, len(req.Repos))
 	for i, rs := range req.Repos {
 		r := s.runners[rs.Name]
-		mounts[i] = task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir, MountedName: filepath.Base(rs.Name)}
+		mounts[i] = task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir, MountedPath: "~/src/" + rs.Name}
 	}
 
 	// Resolve docker image from user preferences.
@@ -594,7 +593,7 @@ func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTas
 		if !ok {
 			return nil, dto.BadRequest("unknown extra repo: " + rs.Name)
 		}
-		rm := task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir, MountedName: filepath.Base(rs.Name)}
+		rm := task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir, MountedPath: "~/src/" + rs.Name}
 		extraMounts = append(extraMounts, rm)
 		extraRepos = append(extraRepos, rm.ToMDRepo())
 	}

@@ -436,7 +436,7 @@ func (s *Server) pushStats(ctx context.Context) {
 	for i, e := range active {
 		names[i] = e.name
 	}
-	statsMap, err := md.StatsAll(ctx, s.mdClient.Runtime, names)
+	statsMap, err := s.mdClient.StatsAll(ctx, names)
 	if err != nil {
 		return
 	}

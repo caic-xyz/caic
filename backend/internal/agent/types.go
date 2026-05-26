@@ -394,7 +394,7 @@ type MetaRepo struct {
 	Name        string `json:"name"`
 	BaseBranch  string `json:"base_branch,omitempty"`
 	Branch      string `json:"branch"`
-	MountedName string `json:"mounted_name,omitempty"`
+	MountedPath string `json:"mounted_path,omitempty"`
 }
 
 // MetaMessage is written as the first line of a JSONL log file. It captures

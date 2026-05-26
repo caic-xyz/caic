@@ -644,19 +644,25 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 			var branch, mountedName string
 			var matched bool
 			for _, r := range c.Repos {
-				if r.Name() == ri.RelPath {
+				// MountedPath is the full absolute POSIX path inside
+				// the container, e.g. "/home/user/src/github/caic".
+				// TODO(2026-07-01): once all old containers lacking
+				// mounted_path in their md.repos label have cycled
+				// out, remove the basenamePath and pure-basename
+				// fallbacks and keep only the fullPath match.
+				fullPath := "/home/user/src/" + ri.RelPath
+				basenamePath := "/home/user/src/" + filepath.Base(ri.AbsPath)
+				if r.MountedPath == fullPath || r.MountedPath == ri.RelPath || r.MountedPath == basenamePath {
 					branch = r.Branch
-					mountedName = r.Name()
+					mountedName = r.MountedPath
 					matched = true
 					break
 				}
-				// TODO(caic): remove after 2026-07-01.
-				// Legacy containers from before MountedName was
-				// introduced have no MountedName in the label.
-				// Fall back to matching by basename only.
-				if r.MountedName == "" && filepath.Base(r.GitRoot) == filepath.Base(ri.AbsPath) {
+				// Pure basename fallback: buggy containers where
+				// MountedPath was redundantly set to the basename.
+				if r.MountedPath == filepath.Base(ri.AbsPath) {
 					branch = r.Branch
-					mountedName = r.Name()
+					mountedName = r.MountedPath
 					matched = true
 					break
 				}
@@ -692,6 +698,30 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 			})
 		}
 		wg.Wait()
+	}
+
+	// Warn about caic-labelled containers that weren't matched to any repo.
+	// This catches MountedPath mismatches (e.g. old containers using
+	// mounted_name basenames that don't match the expected full path).
+	for _, c := range containers {
+		if _, ok := claimed[c.Name]; ok {
+			continue
+		}
+		if !strings.HasPrefix(c.Name, "md-") {
+			continue
+		}
+		labelVal, err := container.LabelValue(ctx, c.Name, "caic.id")
+		if labelVal == "" && err == nil {
+			labelVal, _ = container.LabelValue(ctx, c.Name, "caic")
+		}
+		if labelVal != "" {
+			slog.Error("adopt: caic container not matched to any repo",
+				"ctr", c.Name, "label", labelVal, "nrepos", len(c.Repos))
+			for _, r := range c.Repos {
+				slog.Error("adopt: unmatched repo detail",
+					"ctr", c.Name, "mounted_path", r.MountedPath, "branch", r.Branch)
+			}
+		}
 	}
 
 	return errors.Join(errs...)
@@ -828,14 +858,24 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		if lt != nil && lt.Primary() != nil {
 			primaryBaseBranch = lt.Primary().BaseBranch
 		}
-		adoptRepos = []task.RepoMount{{Name: ri.RelPath, BaseBranch: primaryBaseBranch, GitRoot: ri.AbsPath, Branch: branch, MountedName: mountedName}}
+		adoptRepos = []task.RepoMount{{Name: ri.RelPath, BaseBranch: primaryBaseBranch, GitRoot: ri.AbsPath, Branch: branch, MountedPath: mountedName}}
+		// Build a lookup of container repos by branch so secondary repos
+		// use the real MountedPath from the Docker label, not a guess.
+		containerRepoByBranch := make(map[string]string, len(c.Repos))
+		for _, cr := range c.Repos {
+			containerRepoByBranch[cr.Branch] = cr.MountedPath
+		}
 		if lt != nil {
 			for _, lm := range lt.Repos[1:] {
 				gitRoot := ""
 				if er, ok := s.runners[lm.Name]; ok {
 					gitRoot = er.Dir
 				}
-				adoptRepos = append(adoptRepos, task.RepoMount{Name: lm.Name, BaseBranch: lm.BaseBranch, Branch: lm.Branch, GitRoot: gitRoot, MountedName: filepath.Base(lm.Name)})
+				mp := containerRepoByBranch[lm.Branch]
+				if mp == "" {
+					mp = "~/src/" + lm.Name
+				}
+				adoptRepos = append(adoptRepos, task.RepoMount{Name: lm.Name, BaseBranch: lm.BaseBranch, Branch: lm.Branch, GitRoot: gitRoot, MountedPath: mp})
 			}
 		}
 	}

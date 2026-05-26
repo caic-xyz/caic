@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -63,7 +62,7 @@ func (s *Server) CreateTask(ctx context.Context, req bot.TaskRequest) (string, e
 	t := &task.Task{
 		ID:            ksid.NewID(),
 		InitialPrompt: agent.Prompt{Text: req.Prompt},
-		Repos:         []task.RepoMount{{Name: req.Repo, GitRoot: runner.Dir, MountedName: filepath.Base(req.Repo)}},
+		Repos:         []task.RepoMount{{Name: req.Repo, GitRoot: runner.Dir, MountedPath: "~/src/" + req.Repo}},
 		Harness:       harness,
 		GitHubToken:   true,
 		StartedAt:     time.Now().UTC(),

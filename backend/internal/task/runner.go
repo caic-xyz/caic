@@ -877,12 +877,12 @@ func (r *Runner) SyncToOrigin(ctx context.Context, repos []md.Repo, container st
 	for _, repo := range repos {
 		branch := repo.Branch
 		ref := "refs/remotes/" + container + "/" + branch
-		repoDS := extractRepoDS(ds, repo.Name(), multi)
+		repoDS := extractRepoDS(ds, repo.MountedPath, multi)
 		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 		issues, err := CheckSafety(safetyCtx, repo.GitRoot, ref, r.BaseBranch, repoDS)
 		safetyCancel()
 		if err != nil {
-			return ds, allIssues, fmt.Errorf("safety check %s: %w", repo.Name(), err)
+			return ds, allIssues, fmt.Errorf("safety check %s: %w", repo.MountedPath, err)
 		}
 		allIssues = append(allIssues, issues...)
 	}
@@ -897,7 +897,7 @@ func (r *Runner) SyncToOrigin(ctx context.Context, repos []md.Repo, container st
 		pushCtx, pushCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 		if err := gitutil.PushRef(pushCtx, repo.GitRoot, ref, branch, true); err != nil {
 			pushCancel()
-			return ds, allIssues, fmt.Errorf("push %s to origin: %w", repo.Name(), err)
+			return ds, allIssues, fmt.Errorf("push %s to origin: %w", repo.MountedPath, err)
 		}
 		pushCancel()
 	}
@@ -951,12 +951,12 @@ func (r *Runner) SyncToDefault(ctx context.Context, repos []md.Repo, container, 
 	for _, repo := range repos {
 		branch := repo.Branch
 		ref := "refs/remotes/" + container + "/" + branch
-		repoDS := extractRepoDS(ds, repo.Name(), multi)
+		repoDS := extractRepoDS(ds, repo.MountedPath, multi)
 		safetyCtx, safetyCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 		issues, err := CheckSafety(safetyCtx, repo.GitRoot, ref, r.BaseBranch, repoDS)
 		safetyCancel()
 		if err != nil {
-			return ds, allIssues, fmt.Errorf("safety check %s: %w", repo.Name(), err)
+			return ds, allIssues, fmt.Errorf("safety check %s: %w", repo.MountedPath, err)
 		}
 		allIssues = append(allIssues, issues...)
 	}
@@ -971,7 +971,7 @@ func (r *Runner) SyncToDefault(ctx context.Context, repos []md.Repo, container, 
 		squashCtx, squashCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 		if err := gitutil.SquashOnto(squashCtx, repo.GitRoot, ref, r.BaseBranch, message); err != nil {
 			squashCancel()
-			return ds, allIssues, fmt.Errorf("squash %s onto %s: %w", repo.Name(), r.BaseBranch, err)
+			return ds, allIssues, fmt.Errorf("squash %s onto %s: %w", repo.MountedPath, r.BaseBranch, err)
 		}
 		squashCancel()
 	}
@@ -1153,14 +1153,14 @@ func (r *Runner) DiffContent(ctx context.Context, repos []md.Repo, path string) 
 		}
 		diff, err := r.Container.Diff(ctx, repo, args...)
 		if err != nil {
-			r.log.Warn("diff failed", "repo", repo.Name(), "br", repo.Branch, "err", err)
+			r.log.Warn("diff failed", "repo", repo.MountedPath, "br", repo.Branch, "err", err)
 			continue
 		}
 		if diff == "" {
 			continue
 		}
 		if len(repos) > 1 {
-			diff = prependRepoToDiff(diff, repo.Name())
+			diff = prependRepoToDiff(diff, repo.MountedPath)
 		}
 		buf.WriteString(diff)
 	}
@@ -1343,8 +1343,18 @@ func (r *Runner) fetchAndCreateBranch(ctx context.Context, t *Task, branch strin
 }
 
 // MakeLabels builds Docker labels for a task's container.
+// The plain "caic" label is kept alongside "caic.id" for backward
+// compatibility with the Docker event watcher (watchContainerEvents
+// filters on label=caic). Once all old containers have cycled out,
+// both WatchEvents and the adoption fallback can be updated to use
+// "caic.id" exclusively, and this duplicate label can be removed.
+// TODO(2026-07-01): remove the plain "caic" label and update WatchEvents to filter on caic.id.
 func MakeLabels(t *Task) []string {
-	labels := []string{"caic.id=" + t.ID.String(), "caic.harness=" + string(t.Harness)}
+	labels := []string{
+		"caic.id=" + t.ID.String(),
+		"caic=" + t.ID.String(), // backward compat with WatchEvents
+		"caic.harness=" + string(t.Harness),
+	}
 	if t.GitHubToken {
 		labels = append(labels, "caic.githubToken=true")
 	}
@@ -1531,13 +1541,13 @@ func (r *Runner) diffStat(ctx context.Context, repos []md.Repo) agent.DiffStat {
 		repo := &repos[i]
 		numstat, err := r.Container.Diff(ctx, repo, "--numstat")
 		if err != nil {
-			r.log.Warn("diff numstat failed", "repo", repo.Name(), "br", repo.Branch, "err", err)
+			r.log.Warn("diff numstat failed", "repo", repo.MountedPath, "br", repo.Branch, "err", err)
 			continue
 		}
 		ds := ParseDiffNumstat(numstat)
 		if len(repos) > 1 {
 			for i := range ds {
-				ds[i].Path = repo.Name() + "/" + ds[i].Path
+				ds[i].Path = repo.MountedPath + "/" + ds[i].Path
 			}
 		}
 		result = append(result, ds...)
@@ -1565,7 +1575,7 @@ func (r *Runner) openLog(t *Task) (io.WriteCloser, error) {
 	// Write metadata header as the first line.
 	metaRepos := make([]agent.MetaRepo, len(t.Repos))
 	for i, r := range t.Repos {
-		metaRepos[i] = agent.MetaRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, MountedName: r.MountedName}
+		metaRepos[i] = agent.MetaRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, MountedPath: r.MountedPath}
 	}
 	meta := agent.MetaMessage{
 		MessageType: "caic_meta",

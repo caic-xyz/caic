@@ -152,18 +152,18 @@ type RepoMount struct {
 	BaseBranch  string // branch to fork from; empty = runner default
 	Branch      string // allocated branch, e.g. "caic-0"
 	GitRoot     string // absolute host path; empty in purged-task entries
-	MountedName string // explicit mount-name override for md.Repo.MountedName
+	MountedPath string // mount path inside the container (md.Repo.MountedPath)
 }
 
 // ToMDRepo converts a RepoMount to an md.Repo for container operations.
 //
-// When MountedName is empty (legacy logs or pre-disambiguation containers),
-// md.Repo.Name() falls back to filepath.Base(GitRoot) automatically.
+// When MountedPath is empty (legacy logs or pre-disambiguation containers),
+// md.Repo.MountedPath is populated automatically from GitRoot when empty.
 func (r *RepoMount) ToMDRepo() md.Repo {
 	return md.Repo{
 		GitRoot:     r.GitRoot,
 		Branch:      r.Branch,
-		MountedName: r.MountedName,
+		MountedPath: r.MountedPath,
 	}
 }
 
@@ -173,7 +173,7 @@ func RepoMountFromMeta(m agent.MetaRepo, gitRoot string) RepoMount {
 		Name:        m.Name,
 		BaseBranch:  m.BaseBranch,
 		Branch:      m.Branch,
-		MountedName: m.MountedName,
+		MountedPath: m.MountedPath,
 		GitRoot:     gitRoot,
 	}
 }

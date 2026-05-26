@@ -61,7 +61,10 @@ func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, 
 	slog.Debug("container", "msg", "harness verified", "harness", opts.Harness)
 	client, mdOpts := b.mdStartOpts(labels, opts)
 	slog.Debug("container", "msg", "creating container object", "repos_count", len(repos))
-	c := client.Container(repos...)
+	c, err := client.Container(repos...)
+	if err != nil {
+		return "", err
+	}
 	stdout, stderr := logWriters(opts.LogWriter, "launch")
 	slog.Debug("container", "msg", "calling c.Launch")
 	if err := c.Launch(ctx, stdout, stderr, mdOpts); err != nil {
@@ -115,7 +118,11 @@ func (b *Backend) Diff(ctx context.Context, repo *md.Repo, args ...string) (stri
 	defer trace.StartRegion(ctx, "container.diff").End()
 	slog.Info("md diff", "dir", repo.GitRoot, "br", repo.Branch, "args", args)
 	var stdout bytes.Buffer
-	if err := b.Client.Container(*repo).Diff(ctx, &stdout, &SlogWriter{Phase: "diff"}, 0, args); err != nil {
+	ct, err := b.Client.Container(*repo)
+	if err != nil {
+		return "", err
+	}
+	if err := ct.Diff(ctx, &stdout, &SlogWriter{Phase: "diff"}, 0, args); err != nil {
 		return "", err
 	}
 	return stdout.String(), nil
@@ -127,7 +134,10 @@ func (b *Backend) Fetch(ctx context.Context, repos []md.Repo) error {
 	if len(repos) > 0 {
 		slog.Info("md fetch", "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	}
-	ct := b.Client.Container(repos...)
+	ct, err := b.Client.Container(repos...)
+	if err != nil {
+		return err
+	}
 	for i := range repos {
 		if err := ct.Fetch(ctx, &SlogWriter{Phase: "fetch"}, &SlogWriter{Phase: "fetch"}, i, b.Provider); err != nil {
 			return err
@@ -140,7 +150,7 @@ func (b *Backend) Fetch(ctx context.Context, repos []md.Repo) error {
 func (b *Backend) Stop(ctx context.Context, name string) error {
 	defer trace.StartRegion(ctx, "container.stop").End()
 	slog.Info("md stop", "name", name)
-	ct := b.Client.Container()
+	ct, _ := b.Client.Container()
 	ct.Name = name
 	return ct.Stop(ctx)
 }
@@ -153,7 +163,10 @@ func (b *Backend) Purge(ctx context.Context, name string, repos []md.Repo) error
 	} else {
 		slog.Info("md purge", "name", name)
 	}
-	ct := b.Client.Container(repos...)
+	ct, err := b.Client.Container(repos...)
+	if err != nil {
+		return err
+	}
 	if len(repos) == 0 {
 		ct.Name = name
 	}
@@ -169,13 +182,15 @@ func (b *Backend) Revive(ctx context.Context, name string, repos []md.Repo) erro
 		slog.Info("md revive", "name", name)
 	}
 	slog.Debug("container", "msg", "Revive starting", "container", name, "repos_count", len(repos))
-	ct := b.Client.Container(repos...)
+	ct, err := b.Client.Container(repos...)
+	if err != nil {
+		return err
+	}
 	if len(repos) == 0 {
 		ct.Name = name
 	}
 	slog.Debug("container", "msg", "calling ct.Revive", "container", name)
-	err := ct.Revive(ctx, &SlogWriter{Phase: "revive"}, &SlogWriter{Phase: "revive"})
-	if err != nil {
+	if err = ct.Revive(ctx, &SlogWriter{Phase: "revive"}, &SlogWriter{Phase: "revive"}); err != nil {
 		slog.Error("container", "msg", "ct.Revive failed", "container", name, "err", err)
 		return err
 	}
