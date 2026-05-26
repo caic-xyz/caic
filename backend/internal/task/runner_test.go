@@ -435,15 +435,21 @@ func TestRunner(t *testing.T) {
 		t.Parallel()
 		tests := []struct {
 			dir  string
+			task *Task
 			want string
 		}{
-			{"/home/maruel/src/caic", "/home/user/src/caic"},
-			{"/home/alice/projects/myrepo", "/home/user/src/myrepo"},
-			{"/opt/repos/foo", "/home/user/src/foo"},
+			{task: &Task{Repos: []RepoMount{{MountedPath: "~/src/caic-xyz/md"}}}, want: "/home/user/src/caic-xyz/md"},
+			{dir: "/home/maruel/src/caic", want: "/home/user/src/caic"},
+			{dir: "/home/alice/projects/myrepo", want: "/home/user/src/myrepo"},
+			{dir: "/opt/repos/foo", want: "/home/user/src/foo"},
 		}
 		for _, tc := range tests {
 			r := &Runner{Dir: tc.dir}
-			got := r.containerDir()
+			tk := tc.task
+			if tk == nil {
+				tk = &Task{}
+			}
+			got := r.containerDir(tk)
 			if got != tc.want {
 				t.Errorf("containerDir(%q) = %q, want %q", tc.dir, got, tc.want)
 			}

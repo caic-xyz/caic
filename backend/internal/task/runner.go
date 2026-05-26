@@ -392,7 +392,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	region = trace.StartRegion(ctx, "agent-session")
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
 		Container:     t.Container,
-		Dir:           r.containerDir(),
+		Dir:           r.containerDir(t),
 		Model:         t.Model,
 		InitialPrompt: t.InitialPrompt,
 		MsgCh:         msgCh,
@@ -659,7 +659,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	t.SetState(StateRunning)
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
 		Container:       t.Container,
-		Dir:             r.containerDir(),
+		Dir:             r.containerDir(t),
 		Model:           t.Model,
 		ResumeSessionID: t.GetSessionID(),
 		MsgCh:           msgCh,
@@ -747,7 +747,7 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 	tlog.Info("starting session", "hns", t.Harness)
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
 		Container:     t.Container,
-		Dir:           r.containerDir(),
+		Dir:           r.containerDir(t),
 		Model:         t.Model,
 		InitialPrompt: prompt,
 		MsgCh:         msgCh,
@@ -1027,7 +1027,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	tlog.Info("restarting session", "hns", t.Harness)
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
 		Container:     t.Container,
-		Dir:           r.containerDir(),
+		Dir:           r.containerDir(t),
 		Model:         t.Model,
 		InitialPrompt: prompt,
 		MsgCh:         msgCh,
@@ -1099,7 +1099,7 @@ func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHand
 	tlog.Info("clearing context", "hns", t.Harness)
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
 		Container: t.Container,
-		Dir:       r.containerDir(),
+		Dir:       r.containerDir(t),
 		Model:     t.Model,
 		MsgCh:     msgCh,
 		LogW:      logW,
@@ -1266,8 +1266,16 @@ func (r *Runner) backend(name agent.Harness) agent.Backend {
 }
 
 // containerDir returns the working directory path inside an md container.
-// md always mounts repos at /home/user/src/<basename>. Returns /home/user for no-repo runners.
-func (r *Runner) containerDir() string {
+// Uses the task's primary repo MountedPath when available; otherwise falls back
+// to computing it from the runner's Dir basename (legacy). Returns /home/user
+// for no-repo runners.
+//
+// TODO(2026-07-01): remove the filepath.Base fallback once all pre-MountedPath
+// containers have cycled out.
+func (r *Runner) containerDir(t *Task) string {
+	if p := t.Primary(); p != nil && p.MountedPath != "" {
+		return strings.Replace(p.MountedPath, "~/", "/home/user/", 1)
+	}
 	if r.Dir == "" {
 		return "/home/user"
 	}
