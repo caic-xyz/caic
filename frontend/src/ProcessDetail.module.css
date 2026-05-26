@@ -1,4 +1,4 @@
-/* Styles for the full-page ProcessDetail component. */
+/* Styles for the full-page ProcessDetail component with tree view. */
 
 .container {
   display: flex;
@@ -98,6 +98,7 @@
 .cmd {
   white-space: normal;
   word-break: break-all;
+  min-width: 300px;
   max-width: 700px;
 }
 
@@ -110,9 +111,33 @@
   font-size: 0.75rem;
 }
 
-.actions {
+.actionsRow {
   display: flex;
+  align-items: center;
   gap: 0.25rem;
+}
+
+.treeToggle {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.toggleBtn {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s;
+}
+
+.toggleBtn:hover {
+  color: var(--color-text-secondary);
 }
 
 .signalBtn {

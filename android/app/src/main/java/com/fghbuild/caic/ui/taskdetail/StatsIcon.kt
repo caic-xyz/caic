@@ -1,6 +1,6 @@
 // StatsIcon renders a 2×2 bar-chart icon in the task header that opens a popup
-// showing container resource history (CPU, MEM, NET, DISK), running processes,
-// and per-turn perf data.
+// showing container resource history (CPU, MEM, NET, DISK), running processes
+// as a tree grouped by parent/child PID relationships, and per-turn perf data.
 package com.fghbuild.caic.ui.taskdetail
 
 import androidx.compose.foundation.background
@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -39,11 +40,14 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.EventStats
 import com.caic.sdk.v1.ProcessInfo
+import com.fghbuild.caic.util.ProcessNode
 import com.fghbuild.caic.util.Session
 import com.fghbuild.caic.util.Turn
+import com.fghbuild.caic.util.buildProcessTree
 import com.fghbuild.caic.util.formatDuration
 import com.fghbuild.caic.util.formatTokens
 import java.util.Locale
@@ -174,6 +178,211 @@ private fun stateColor(state: String): Color = when (state) {
     else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
+/** Column widths sized generously for accessibility (works at 1.5× font scale). */
+private data class ColWidths(
+    val actions: Dp = 140.dp,
+    val pid: Dp = 56.dp,
+    val state: Dp = 28.dp,
+    val cpu: Dp = 52.dp,
+    val mem: Dp = 52.dp,
+    val time: Dp = 68.dp,
+    val command: Dp = 400.dp,
+    val gap: Dp = 6.dp,
+)
+
+/** Composable row for the process table header. */
+@Composable
+private fun ProcessHeader(w: ColWidths, modifier: Modifier = Modifier) {
+    Row(modifier = modifier) {
+        Text(
+            text = "ACTIONS", style = MaterialTheme.typography.labelSmall,
+            softWrap = false, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(w.actions),
+        )
+        Spacer(modifier = Modifier.width(w.gap))
+        Text(
+            text = "PID", style = MaterialTheme.typography.labelSmall,
+            softWrap = false, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(w.pid),
+        )
+        Spacer(modifier = Modifier.width(w.gap))
+        Text(
+            text = "S", style = MaterialTheme.typography.labelSmall,
+            softWrap = false, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(w.state),
+        )
+        Spacer(modifier = Modifier.width(w.gap))
+        Text(
+            text = "CPU", style = MaterialTheme.typography.labelSmall,
+            softWrap = false, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(w.cpu),
+        )
+        Spacer(modifier = Modifier.width(w.gap))
+        Text(
+            text = "MEM", style = MaterialTheme.typography.labelSmall,
+            softWrap = false, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(w.mem),
+        )
+        Spacer(modifier = Modifier.width(w.gap))
+        Text(
+            text = "TIME", style = MaterialTheme.typography.labelSmall,
+            softWrap = false, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(w.time),
+        )
+        Spacer(modifier = Modifier.width(w.gap))
+        Text(
+            text = "COMMAND", style = MaterialTheme.typography.labelSmall,
+            softWrap = false, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(w.command),
+        )
+    }
+}
+
+/** Renders a single process row with TERM/KILL actions and tree indent. */
+@Composable
+private fun ProcessActions(
+    pid: Int,
+    onSignalProcess: (Int, String) -> Unit,
+    indentDp: Int,
+    hasChildren: Boolean,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+    width: androidx.compose.ui.unit.Dp,
+) {
+    val btnShape = RoundedCornerShape(3.dp)
+    Box(modifier = Modifier.width(width)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Spacer(modifier = Modifier.width(indentDp.dp))
+            if (hasChildren) {
+                Text(
+                    text = if (isExpanded) "\u25BC" else "\u25B6",
+                    style = MaterialTheme.typography.bodySmall,
+                    softWrap = false,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.clickable { onToggle() },
+                )
+            } else {
+                Spacer(modifier = Modifier.width(12.dp))
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = "TERM",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    softWrap = false,
+                    color = Color(0xFF856404),
+                    modifier = Modifier
+                        .background(Color(0x18FFC107), btnShape)
+                        .clickable { onSignalProcess(pid, "SIGTERM") }
+                        .padding(horizontal = 2.dp, vertical = 1.dp),
+                )
+                Text(
+                    text = "KILL",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    softWrap = false,
+                    color = Color(0xFFDC3545),
+                    modifier = Modifier
+                        .background(Color(0x18DC3545), btnShape)
+                        .clickable { onSignalProcess(pid, "SIGKILL") }
+                        .padding(horizontal = 2.dp, vertical = 1.dp),
+                )
+            }
+        }
+    }
+}
+
+/** Recursively renders a tree of process rows. */
+@Composable
+private fun ProcessTreeRows(
+    nodes: List<ProcessNode>,
+    depth: Int,
+    w: ColWidths,
+    expanded: MutableMap<Int, Boolean>,
+    onSignalProcess: (Int, String) -> Unit,
+    scrollState: androidx.compose.foundation.ScrollState,
+) {
+    for (node in nodes) {
+        val p = node.info
+        val hasChildren = node.children.isNotEmpty()
+        val isExpanded = expanded.getOrDefault(p.pid, true)
+        val indentDp = depth * 12
+
+        Row(
+            modifier = Modifier
+                .horizontalScroll(scrollState)
+                .padding(vertical = 1.dp),
+        ) {
+            ProcessActions(
+                pid = p.pid,
+                onSignalProcess = onSignalProcess,
+                indentDp = indentDp,
+                hasChildren = hasChildren,
+                isExpanded = isExpanded,
+                onToggle = { expanded[p.pid] = !isExpanded },
+                width = w.actions,
+            )
+            Spacer(modifier = Modifier.width(w.gap))
+            Text(
+                text = "${p.pid}",
+                style = MaterialTheme.typography.bodySmall,
+                softWrap = false,
+                modifier = Modifier.width(w.pid),
+            )
+            Spacer(modifier = Modifier.width(w.gap))
+            Text(
+                text = p.state,
+                style = MaterialTheme.typography.bodySmall,
+                color = stateColor(p.state),
+                softWrap = false,
+                modifier = Modifier.width(w.state),
+            )
+            Spacer(modifier = Modifier.width(w.gap))
+            Text(
+                text = String.format(Locale.US, "%.1f", p.cpu),
+                style = MaterialTheme.typography.bodySmall,
+                softWrap = false,
+                modifier = Modifier.width(w.cpu),
+            )
+            Spacer(modifier = Modifier.width(w.gap))
+            Text(
+                text = String.format(Locale.US, "%.1f", p.mem),
+                style = MaterialTheme.typography.bodySmall,
+                softWrap = false,
+                modifier = Modifier.width(w.mem),
+            )
+            Spacer(modifier = Modifier.width(w.gap))
+            Text(
+                text = p.time,
+                style = MaterialTheme.typography.bodySmall,
+                softWrap = false,
+                modifier = Modifier.width(w.time),
+            )
+            Spacer(modifier = Modifier.width(w.gap))
+            Text(
+                text = p.command,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                softWrap = true,
+                modifier = Modifier.width(w.command),
+            )
+        }
+
+        // Render children when expanded.
+        if (hasChildren && isExpanded) {
+            ProcessTreeRows(
+                nodes = node.children,
+                depth = depth + 1,
+                w = w,
+                expanded = expanded,
+                onSignalProcess = onSignalProcess,
+                scrollState = scrollState,
+            )
+        }
+    }
+}
+
 @Composable
 fun StatsIcon(
     stats: List<EventStats>,
@@ -194,6 +403,9 @@ fun StatsIcon(
     val diskRatio = latest?.let { (it.diskUsed.coerceAtLeast(0L).toFloat() / maxDisk.toFloat()).coerceIn(0f, 1f) } ?: 0f
 
     var expanded by remember { mutableStateOf(false) }
+
+    // Expand/collapse state per process PID. Default: all expanded (absent = expanded).
+    val processExpanded = remember { mutableStateMapOf<Int, Boolean>() }
 
     // Fetch processes when the popup opens.
     LaunchedEffect(expanded) {
@@ -340,110 +552,41 @@ fun StatsIcon(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else {
+                        val tree = remember(processes) { buildProcessTree(processes) }
+                        val colW = ColWidths()
                         val procScrollState = rememberScrollState()
                         val surfaceColor = MaterialTheme.colorScheme.surface
                         Box(
                             modifier = Modifier
                                 .clipToBounds()
                                 .drawWithContent {
-                                drawContent()
-                                if (procScrollState.canScrollForward) {
-                                    val fadeWidth = 32.dp.toPx()
-                                    drawRect(
-                                        brush = Brush.horizontalGradient(
-                                            0f to Color.Transparent,
-                                            1f to surfaceColor.copy(alpha = 0.9f),
-                                            startX = size.width - fadeWidth,
-                                            endX = size.width,
-                                        ),
-                                    )
-                                }
-                            },
+                                    drawContent()
+                                    if (procScrollState.canScrollForward) {
+                                        val fadeWidth = 32.dp.toPx()
+                                        drawRect(
+                                            brush = Brush.horizontalGradient(
+                                                0f to Color.Transparent,
+                                                1f to surfaceColor.copy(alpha = 0.9f),
+                                                startX = size.width - fadeWidth,
+                                                endX = size.width,
+                                            ),
+                                        )
+                                    }
+                                },
                         ) {
                             Column {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.horizontalScroll(procScrollState),
-                        ) {
-                            listOf(
-                                "ACTIONS" to 44, "PID" to 36,
-                                "S" to 20, "CPU" to 40, "MEM" to 40,
-                                "TIME" to 56, "COMMAND" to 280,
-                            ).forEach { (h, w) ->
-                                Text(
-                                    text = h,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    softWrap = false,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.width(w.dp),
+                                ProcessHeader(
+                                    w = colW,
+                                    modifier = Modifier.horizontalScroll(procScrollState),
                                 )
-                            }
-                        }
-                        processes.forEach { p ->
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                modifier = Modifier
-                                    .horizontalScroll(procScrollState)
-                                    .padding(vertical = 1.dp),
-                            ) {
-                                Column(
-                                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                                    modifier = Modifier.width(44.dp),
-                                ) {
-                                    val btnShape = RoundedCornerShape(3.dp)
-                                    Text(
-                                        text = "TERM",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = Color(0xFF856404),
-                                        modifier = Modifier
-                                            .background(Color(0x18FFC107), btnShape)
-                                            .clickable { onSignalProcess(p.pid, "SIGTERM") }
-                                            .padding(horizontal = 2.dp, vertical = 1.dp),
-                                    )
-                                    Text(
-                                        text = "KILL",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = Color(0xFFDC3545),
-                                        modifier = Modifier
-                                            .background(Color(0x18DC3545), btnShape)
-                                            .clickable { onSignalProcess(p.pid, "SIGKILL") }
-                                            .padding(horizontal = 2.dp, vertical = 1.dp),
-                                    )
-                                }
-                                Text(
-                                    text = "${p.pid}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.width(36.dp),
+                                ProcessTreeRows(
+                                    nodes = tree,
+                                    depth = 0,
+                                    w = colW,
+                                    expanded = processExpanded,
+                                    onSignalProcess = onSignalProcess,
+                                    scrollState = procScrollState,
                                 )
-                                Text(
-                                    text = p.state,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = stateColor(p.state),
-                                    modifier = Modifier.width(20.dp),
-                                )
-                                Text(
-                                    text = String.format(Locale.US, "%.1f", p.cpu),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.width(40.dp),
-                                )
-                                Text(
-                                    text = String.format(Locale.US, "%.1f", p.mem),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.width(40.dp),
-                                )
-                                Text(
-                                    text = p.time,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.width(56.dp),
-                                )
-                                Text(
-                                    text = p.command,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 2,
-                                    modifier = Modifier.width(280.dp),
-                                )
-                            }
-                        }
                             }
                         }
                     }

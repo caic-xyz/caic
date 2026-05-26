@@ -218,6 +218,10 @@ type Server struct {
 	repoCIStatus map[string]ci.RepoCIState // keyed by repoInfo.RelPath
 	changed      chan struct{}             // closed on task mutation; replaced under mu
 	warnings     []serverWarning           // ring buffer of recent CI warnings for SSE clients
+
+	// Fake hooks injected during e2e testing.
+	fakeProcesses func(ctx context.Context, containerName string) ([]task.ProcessInfo, error)
+	fakeSignal    func(ctx context.Context, containerName string, pid int, sig string) error
 }
 
 type taskEntry struct {

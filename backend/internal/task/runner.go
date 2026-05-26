@@ -78,6 +78,11 @@ type ContainerBackend interface {
 	// VNCPort returns the Docker host port mapped to the container's VNC
 	// port (5901). Returns 0 when the container has no display.
 	VNCPort(ctx context.Context, containerName string) int
+
+	// Processes returns the list of running processes inside the container.
+	Processes(ctx context.Context, containerName string) ([]ProcessInfo, error)
+	// Signal sends a signal (e.g. SIGTERM, SIGKILL) to a process inside the container.
+	Signal(ctx context.Context, containerName string, pid int, sig string) error
 }
 
 // ForkOptions holds parameters for forking a container.

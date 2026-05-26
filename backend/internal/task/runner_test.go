@@ -844,6 +844,14 @@ func (s *stubContainer) Fork(_ context.Context, _ string, _ []md.Repo, _ *ForkOp
 }
 func (s *stubContainer) VNCPort(_ context.Context, _ string) int { return 0 }
 
+func (s *stubContainer) Processes(_ context.Context, _ string) ([]ProcessInfo, error) {
+	return nil, nil
+}
+
+func (s *stubContainer) Signal(_ context.Context, _ string, _ int, _ string) error {
+	return nil
+}
+
 // recvMsg reads a single message from ch, respecting the test context and a
 // 1-second safety timeout.
 func recvMsg(t *testing.T, ch <-chan agent.Message) agent.Message {

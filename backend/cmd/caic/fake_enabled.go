@@ -93,6 +93,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 	fc := &fakeContainer{vncPort: fvnc.Port()}
 	fb := fake.New()
 	srv.SetRunnerOps(fc, map[agent.Harness]agent.Backend{fb.Harness(): fb})
+	srv.SetFakeProcesses(fakeProcesses, fakeSignal)
 	srv.SetUsageFetchers(fakeUsageFetchers())
 
 	return srv.Serve(ctx, ln)
@@ -193,3 +194,39 @@ func (*fakeContainer) Fork(_ context.Context, _ string, _ []md.Repo, _ *task.For
 }
 
 func (fc *fakeContainer) VNCPort(_ context.Context, _ string) int { return fc.vncPort }
+
+func (*fakeContainer) Processes(_ context.Context, _ string) ([]task.ProcessInfo, error) {
+	return fakeProcesses(nil, "")
+}
+
+func (*fakeContainer) Signal(_ context.Context, _ string, _ int, _ string) error {
+	return nil
+}
+
+// fakeProcesses returns a canned process tree for e2e screenshots:
+//   init(1)
+//     sshd(42)
+//       sshd-session(99)
+//         bash(100)
+//           node(200) — agent harness
+//           make(201)
+//             gcc(300)
+//             gcc(301)
+//           ps(202)
+func fakeProcesses(_ context.Context, _ string) ([]task.ProcessInfo, error) {
+	return []task.ProcessInfo{
+		{PID: 1, PPID: 0, User: "root", State: "S", CPU: 0.0, Mem: 0.1, Time: "0:00", Command: "/sbin/init"},
+		{PID: 42, PPID: 1, User: "root", State: "S", CPU: 0.0, Mem: 0.2, Time: "0:01", Command: "sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups"},
+		{PID: 99, PPID: 42, User: "root", State: "S", CPU: 0.0, Mem: 0.3, Time: "0:00", Command: "sshd: user [priv]"},
+		{PID: 100, PPID: 99, User: "user", State: "S", CPU: 0.1, Mem: 0.5, Time: "0:02", Command: "-bash"},
+		{PID: 200, PPID: 100, User: "user", State: "R", CPU: 45.2, Mem: 12.3, Time: "1:23", Command: "node /home/user/.npm/_npx/abc123/node_modules/.bin/claude --dangerously-skip-permissions"},
+		{PID: 201, PPID: 100, User: "user", State: "S", CPU: 0.0, Mem: 0.1, Time: "0:00", Command: "make -j$(nproc)"},
+		{PID: 300, PPID: 201, User: "user", State: "R", CPU: 98.7, Mem: 5.6, Time: "0:45", Command: "/usr/lib/gcc/x86_64-linux-gnu/14/cc1 -quiet -Iinclude -D_FORTIFY_SOURCE=2 src/main.c -o /tmp/ccXyz.s"},
+		{PID: 301, PPID: 201, User: "user", State: "R", CPU: 97.1, Mem: 4.8, Time: "0:42", Command: "/usr/lib/gcc/x86_64-linux-gnu/14/cc1 -quiet -Iinclude -D_FORTIFY_SOURCE=2 src/parser.c -o /tmp/ccAbc.s"},
+		{PID: 202, PPID: 100, User: "user", State: "R", CPU: 0.3, Mem: 0.1, Time: "0:00", Command: "ps -eo pid,ppid,user,stat,%cpu,%mem,time,args"},
+	}, nil
+}
+
+func fakeSignal(_ context.Context, _ string, _ int, _ string) error {
+	return nil
+}

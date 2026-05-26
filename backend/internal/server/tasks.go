@@ -898,7 +898,12 @@ func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, dto.Conflict("task has no container"))
 		return
 	}
-	procs, err := s.backend.Processes(r.Context(), t.Container)
+	var procs []task.ProcessInfo
+	if s.fakeProcesses != nil {
+		procs, err = s.fakeProcesses(r.Context(), t.Container)
+	} else {
+		procs, err = s.backend.Processes(r.Context(), t.Container)
+	}
 	if err != nil {
 		writeError(w, dto.InternalError(err.Error()))
 		return
@@ -948,9 +953,16 @@ func (s *Server) handleSignalProcess(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if err := s.backend.Signal(r.Context(), t.Container, pid, req.Signal); err != nil {
-		writeError(w, dto.InternalError(err.Error()))
-		return
+	if s.fakeSignal != nil {
+		if err := s.fakeSignal(r.Context(), t.Container, pid, req.Signal); err != nil {
+			writeError(w, dto.InternalError(err.Error()))
+			return
+		}
+	} else {
+		if err := s.backend.Signal(r.Context(), t.Container, pid, req.Signal); err != nil {
+			writeError(w, dto.InternalError(err.Error()))
+			return
+		}
 	}
 	slog.Info("signal sent", "task", t.ID, "container", t.Container, "pid", pid, "signal", req.Signal)
 	writeJSONResponse(w, &v1.StatusResp{Status: "signalled"}, nil)
@@ -1217,6 +1229,15 @@ func (s *Server) SetRunnerOps(c task.ContainerBackend, backends map[agent.Harnes
 // canned data without real API credentials.
 func (s *Server) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
 	s.usageFetchers = fetchers
+}
+
+// SetFakeProcesses injects fake process and signal hooks for e2e testing.
+func (s *Server) SetFakeProcesses(
+	processes func(ctx context.Context, containerName string) ([]task.ProcessInfo, error),
+	signal func(ctx context.Context, containerName string, pid int, sig string) error,
+) {
+	s.fakeProcesses = processes
+	s.fakeSignal = signal
 }
 
 // effectiveBaseBranch returns the branch the task was forked from: the task's

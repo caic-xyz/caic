@@ -9,23 +9,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-)
 
-// ProcessInfo describes a single process running inside a container.
-type ProcessInfo struct {
-	PID     int
-	PPID    int
-	User    string
-	State   string // Single-character: R, S, D, Z, T, etc.
-	CPU     float64
-	Mem     float64
-	Time    string // Cumulative CPU time.
-	Command string // Full command line.
-}
+	"github.com/caic-xyz/caic/backend/internal/task"
+)
 
 // Processes runs ps -eo pid,ppid,user,stat,%cpu,%mem,time,args --no-headers
 // inside the named container via SSH and returns the parsed process list.
-func (b *Backend) Processes(ctx context.Context, containerName string) ([]ProcessInfo, error) {
+func (b *Backend) Processes(ctx context.Context, containerName string) ([]task.ProcessInfo, error) {
 	ct, err := b.Client.Get(ctx, containerName)
 	if err != nil {
 		return nil, fmt.Errorf("get container %s: %w", containerName, err)
@@ -61,8 +51,8 @@ func (b *Backend) Signal(ctx context.Context, containerName string, pid int, sig
 // parsePSOutput parses the output of ps with the columns above. The last
 // column (args) may contain spaces; we split by whitespace for the first 7
 // fields and treat the remainder as the command.
-func parsePSOutput(out string) ([]ProcessInfo, error) {
-	var procs []ProcessInfo
+func parsePSOutput(out string) ([]task.ProcessInfo, error) {
+	var procs []task.ProcessInfo
 	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -90,7 +80,7 @@ func parsePSOutput(out string) ([]ProcessInfo, error) {
 		ppid, _ := strconv.Atoi(clean[1])
 		cpu, _ := strconv.ParseFloat(clean[4], 64)
 		mem, _ := strconv.ParseFloat(clean[5], 64)
-		procs = append(procs, ProcessInfo{
+		procs = append(procs, task.ProcessInfo{
 			PID:     pid,
 			PPID:    ppid,
 			User:    clean[2],
@@ -102,7 +92,7 @@ func parsePSOutput(out string) ([]ProcessInfo, error) {
 		})
 	}
 	// Filter out the ps process itself.
-	procs = slices.DeleteFunc(procs, func(p ProcessInfo) bool {
+	procs = slices.DeleteFunc(procs, func(p task.ProcessInfo) bool {
 		return strings.HasPrefix(p.Command, "ps ")
 	})
 	return procs, nil
