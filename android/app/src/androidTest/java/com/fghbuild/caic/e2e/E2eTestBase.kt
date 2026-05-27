@@ -12,6 +12,7 @@ package com.fghbuild.caic.e2e
 import androidx.test.platform.app.InstrumentationRegistry
 import com.caic.sdk.v1.ApiClient
 import com.caic.sdk.v1.CreateTaskReq
+import com.caic.sdk.v1.Harness
 import com.caic.sdk.v1.Prompt
 import com.caic.sdk.v1.RepoSpec
 import com.caic.sdk.v1.Task
@@ -83,7 +84,7 @@ abstract class E2eTestBase {
             CreateTaskReq(
                 initialPrompt = Prompt(text = prompt),
                 repos = listOf(RepoSpec(name = repos[0].path)),
-                harness = harnesses[0].name,
+                harness = Harness.Other(harnesses[0].name),
             ),
         )
         require(resp.id.isNotBlank()) { "createTask returned empty ID" }
@@ -100,7 +101,7 @@ abstract class E2eTestBase {
             while (true) {
                 val tasks = api.listTasks()
                 val task = tasks.firstOrNull { it.id == taskId }
-                if (task != null && task.state == state) return@withTimeout task
+                if (task != null && task.state.value == state) return@withTimeout task
                 delay(POLL_INTERVAL_MS)
             }
             @Suppress("UNREACHABLE_CODE")

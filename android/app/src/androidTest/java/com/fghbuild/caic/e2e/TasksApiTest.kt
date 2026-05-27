@@ -3,6 +3,7 @@ package com.fghbuild.caic.e2e
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.caic.sdk.v1.ApiException
+import com.caic.sdk.v1.Harness
 import com.caic.sdk.v1.InputReq
 import com.caic.sdk.v1.Prompt
 import com.caic.sdk.v1.RestartReq
@@ -85,7 +86,7 @@ class TasksApiTest : E2eTestBase() {
                 waitForCondition(10_000) {
                     val tasks = api.listTasks()
                     val task = tasks.firstOrNull { it.id == id }
-                    task?.ciStatus == "success"
+                    task?.ciStatus?.value == "success"
                 }
             }
         }
@@ -113,7 +114,7 @@ class TasksApiTest : E2eTestBase() {
                     api.createTask(
                         com.caic.sdk.v1.CreateTaskReq(
                             initialPrompt = Prompt(text = ""),
-                            harness = "fake",
+                            harness = Harness.Other("fake"),
                         ),
                     )
                     fail("Expected ApiException")
@@ -130,7 +131,7 @@ class TasksApiTest : E2eTestBase() {
                         com.caic.sdk.v1.CreateTaskReq(
                             initialPrompt = Prompt(text = "hello"),
                             repos = listOf(com.caic.sdk.v1.RepoSpec(name = "nonexistent")),
-                            harness = "fake",
+                            harness = Harness.Other("fake"),
                         ),
                     )
                     fail("Expected ApiException")
@@ -146,7 +147,7 @@ class TasksApiTest : E2eTestBase() {
                     api.createTask(
                         com.caic.sdk.v1.CreateTaskReq(
                             initialPrompt = Prompt(text = "hello"),
-                            harness = "does-not-exist",
+                            harness = Harness.Other("does-not-exist"),
                         ),
                     )
                     fail("Expected ApiException")
