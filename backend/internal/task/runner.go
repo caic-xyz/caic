@@ -110,6 +110,7 @@ type Result struct {
 type Runner struct {
 	BaseBranch            string
 	Dir                   string              // Absolute path to the git repository.
+	RepoName              string              // Relative repo path (e.g. "github/caic"); empty for no-repo runners.
 	GitTimeout            time.Duration       // Timeout for git/container ops; defaults to 1 minute.
 	ContainerStartTimeout time.Duration       // Timeout for container start (image pull); defaults to 1 hour.
 	LogDir                string              // Directory for raw JSONL session logs (required).
@@ -1200,7 +1201,11 @@ func (r *Runner) PurgeContainer(ctx context.Context, containerName, branch strin
 	defer cancel()
 	var repos []md.Repo
 	if r.Dir != "" {
-		repos = append([]md.Repo{{GitRoot: r.Dir, Branch: branch}}, extraRepos...)
+		rr := md.Repo{GitRoot: r.Dir, Branch: branch}
+		if r.RepoName != "" {
+			rr.MountedPath = "~/src/" + r.RepoName
+		}
+		repos = append([]md.Repo{rr}, extraRepos...)
 	}
 	return r.Container.Purge(ctx, containerName, repos)
 }

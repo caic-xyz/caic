@@ -299,6 +299,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 			runner := &task.Runner{
 				BaseBranch: branch,
 				Dir:        abs,
+				RepoName:   rel,
 				LogDir:     logDir,
 				CacheDir:   cfg.CacheDir,
 				HarnessEnv: cfg.HarnessEnv,
@@ -1438,6 +1439,7 @@ func (s *Server) syncReposInDir(ctx context.Context, dir string) {
 			runner := &task.Runner{
 				BaseBranch: branch,
 				Dir:        abs,
+				RepoName:   rel,
 				LogDir:     s.logDir,
 				CacheDir:   s.cacheDir,
 				HarnessEnv: s.backend.HarnessEnv,
