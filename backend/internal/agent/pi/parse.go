@@ -195,14 +195,7 @@ func parseToolExecUpdate(line []byte) ([]agent.Message, error) {
 	if err := json.Unmarshal(line, &ev); err != nil {
 		return nil, fmt.Errorf("unmarshal tool_execution_update: %w", err)
 	}
-	if ev.PartialResult == nil {
-		return nil, nil
-	}
-	// Try to extract a string from partialResult.
-	var s string
-	if json.Unmarshal(ev.PartialResult, &s) != nil {
-		s = string(ev.PartialResult)
-	}
+	s := ev.PartialResult.Text()
 	if s == "" {
 		return nil, nil
 	}
@@ -221,13 +214,8 @@ func parseToolExecEnd(line []byte) ([]agent.Message, error) {
 	msg := &agent.ToolResultMessage{ToolUseID: ev.ToolCallID}
 	if ev.IsError {
 		// Try to extract error string from result.
-		if ev.Result != nil {
-			var s string
-			if json.Unmarshal(ev.Result, &s) == nil && s != "" {
-				msg.Error = s
-			} else {
-				msg.Error = "tool execution failed"
-			}
+		if s := ev.Result.Text(); s != "" {
+			msg.Error = s
 		} else {
 			msg.Error = "tool execution failed"
 		}
