@@ -57,7 +57,7 @@ func New(cacheDir string, envVars []string) *Backend {
 	}
 	if cacheDir != "" {
 		b.cache = agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-		if models, _ := b.cache.Models(agent.Pi); len(models) > 0 {
+		if models, _ := b.cache.Models(agent.Pi, agent.APIKeyHash(envVars)); len(models) > 0 {
 			b.ModelList = agent.SortModels(models)
 		}
 	}
@@ -145,7 +145,8 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 
 	// Opportunistically refresh models in background using the task's container.
 	if b.cache != nil {
-		if _, fresh := b.cache.Models(agent.Pi); !fresh {
+		envHash := agent.APIKeyHash(b.EnvVars)
+		if _, fresh := b.cache.Models(agent.Pi, envHash); !fresh {
 			container := opts.Container
 			go func() {
 				fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
@@ -158,7 +159,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 					b.ModelList = sorted
 					b.mu.Unlock()
 					// Store raw models so the cache survives blacklist changes.
-					b.cache.SetModels(agent.Pi, models)
+					b.cache.SetModels(agent.Pi, models, envHash)
 				}
 			}()
 		}

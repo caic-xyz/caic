@@ -148,7 +148,7 @@ func initOneRepo(ctx context.Context, tmpDir, bareName, cloneName string) error 
 func initFakeHarnessCache(cacheDir string) error {
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 	for _, h := range []agent.Harness{agent.Pi, agent.OpenCode} {
-		cache.SetModels(h, []string{"fake-model"})
+		cache.SetModels(h, []string{"fake-model"}, "")
 	}
 	return nil
 }

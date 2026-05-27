@@ -53,7 +53,7 @@ func New(cacheDir string, envVars []string) *Backend {
 	}
 	if cacheDir != "" {
 		b.cache = agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-		if models, _ := b.cache.Models(agent.OpenCode); len(models) > 0 {
+		if models, _ := b.cache.Models(agent.OpenCode, agent.APIKeyHash(envVars)); len(models) > 0 {
 			b.ModelList = agent.SortModels(models)
 		}
 	}
@@ -121,7 +121,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		b.ModelList = agent.SortModels(hs.models)
 		b.mu.Unlock()
 		if b.cache != nil {
-			b.cache.SetModels(agent.OpenCode, hs.models)
+			b.cache.SetModels(agent.OpenCode, hs.models, agent.APIKeyHash(b.EnvVars))
 		}
 	}
 

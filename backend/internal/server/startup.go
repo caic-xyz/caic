@@ -1233,7 +1233,7 @@ func (s *Server) refreshHarnessModels() {
 		{agent.OpenCode, opencode.FetchModels},
 	}
 	for _, entry := range harnesses {
-		if _, fresh := cache.Models(entry.h); fresh {
+		if _, fresh := cache.Models(entry.h, agent.APIKeyHash(s.backend.HarnessEnv[string(entry.h)])); fresh {
 			continue
 		}
 		s.refreshOneHarness(cache, entry.h, entry.fetch)
@@ -1268,7 +1268,7 @@ func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, f
 		slog.Warn("model refresh: fetch failed", "harness", h, "err", err)
 		return
 	}
-	cache.SetModels(h, models)
+	cache.SetModels(h, models, agent.APIKeyHash(s.backend.HarnessEnv[string(h)]))
 	slog.Info("model cache refreshed", "harness", h, "count", len(models))
 
 	for _, r := range s.runners {
