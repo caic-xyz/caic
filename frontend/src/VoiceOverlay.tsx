@@ -422,7 +422,15 @@ function buildNotification(task: Task, session: VoiceSession): string | null {
       return `[Task #${num} (${shortName}) — stopped: container died]`;
     case "failed":
       return `[Task #${num} (${shortName}) — failed: ${task.error ?? "unknown"}]`;
-    default:
+    case "pending":
+    case "branching":
+    case "provisioning":
+    case "starting":
+    case "running":
+    case "pulling":
+    case "pushing":
+    case "stopping":
+    case "purging":
       return null;
   }
 }

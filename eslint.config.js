@@ -21,6 +21,7 @@ const sharedRules = {
   'no-shadow': 'off',
   '@typescript-eslint/no-shadow': ['error', { hoist: 'all' }],
   'no-console': ['error', { allow: ['warn', 'error'] }],
+  '@typescript-eslint/switch-exhaustiveness-check': 'error',
   'no-debugger': 'error',
   eqeqeq: ['error', 'always'],
   'no-var': 'error',

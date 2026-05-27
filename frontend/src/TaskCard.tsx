@@ -1,7 +1,7 @@
 // Compact card for a single task, used in the sidebar task list.
 import { For, Show, createSignal, onMount, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
-import type { DiffStat, CIStatus, ForgeCheck, TaskRepo } from "@sdk/types.gen";
+import type { DiffStat, CIStatus, ForgeCheck, TaskRepo, TaskState } from "@sdk/types.gen";
 import CIDot from "./CIDot";
 import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
@@ -17,7 +17,7 @@ import { formatElapsed, formatTokens, tokenColor, stateColor, staleStateColor, i
 export interface TaskCardProps {
   id: string;
   title: string;
-  state: string;
+  state: TaskState;
   stateUpdatedAt: string;
   repos?: TaskRepo[];
   harness?: string;
@@ -351,7 +351,7 @@ function StateDuration(props: { stateUpdatedAt: string; now: Accessor<number> })
   return <span>{formatElapsed(elapsed())}</span>;
 }
 
-function ThinkTime(props: { duration: number; state: string; stateUpdatedAt: string; turnStartedAt?: string; now: Accessor<number> }) {
+function ThinkTime(props: { duration: number; state: TaskState; stateUpdatedAt: string; turnStartedAt?: string; now: Accessor<number> }) {
   const thinkMs = () => {
     const base = props.duration * 1000;
     if (props.state === "running") {

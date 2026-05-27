@@ -1,6 +1,7 @@
 // Shared formatting utilities, parallel to android/util/Formatting.kt.
 // Note: formatElapsed takes milliseconds (JS timestamps); the Android
 // equivalent takes seconds. Call formatElapsed(seconds * 1000) for API durations.
+import type { TaskState } from "@sdk/types.gen";
 
 /** Returns the currency symbol for a currency code. Unknown codes return "??". */
 export function currencySign(currency: string): string {
@@ -47,7 +48,7 @@ export function tokenColor(current: number, limit: number): string {
   return "inherit";
 }
 
-export function stateColor(state: string): string {
+export function stateColor(state: TaskState): string {
   switch (state) {
     case "running":
     case "branching":
@@ -61,14 +62,16 @@ export function stateColor(state: string): string {
     case "failed":
       return "#f8d7da";
     case "purging":
-      return "#fde2c8";
     case "stopping":
       return "#fde2c8";
     case "purged":
       return "#e2e3e5";
     case "stopped":
       return "#c8daf0";
-    default:
+    case "pending":
+    case "waiting":
+    case "pulling":
+    case "pushing":
       return "#fff3cd";
   }
 }
@@ -91,7 +94,7 @@ function blendHex(hex: string, target: string, amount: number): string {
 }
 
 /** Returns a redder variant of the state color when the cache is stale. */
-export function staleStateColor(state: string): string {
+export function staleStateColor(state: TaskState): string {
   return blendHex(stateColor(state), "#dc3545", 0.25);
 }
 

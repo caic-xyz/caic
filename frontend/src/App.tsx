@@ -95,7 +95,7 @@ function ConnectionDot(props: { connected: boolean }) {
  * Returns the list of valid effort levels for a given harness.
  * Empty for harnesses that don't support thinking effort.
  */
-function effortOptions(harness: string): string[] {
+function effortOptions(harness: Harness): string[] {
   switch (harness) {
     case "claude":
       return ["low", "medium", "high", "max"];
@@ -103,9 +103,13 @@ function effortOptions(harness: string): string[] {
       return ["none", "minimal", "low", "medium", "high", "xhigh"];
     case "pi":
       return ["off", "minimal", "low", "medium", "high", "xhigh"];
-    default:
+    case "gemini":
+    case "kilo":
+    case "opencode":
       return [];
   }
+  // Exhaustive: harness may be an empty/unset signal value at render time.
+  return [];
 }
 
 export default function App() {
@@ -675,7 +679,7 @@ export default function App() {
       const ght = gitHubTokenEnabled();
       const harness = selectedHarness();
       const repoSpecs = selRepos.length > 0 ? selRepos.map((r) => ({ name: r.path, ...(r.branch ? { baseBranch: r.branch } : {}) })) : undefined;
-      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repos: repoSpecs, harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}), ...(sudo ? { sudo: true } : {}), ...(ght ? { gitHubToken: true } : {}) });
+      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repos: repoSpecs, harness: harness as Harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}), ...(sudo ? { sudo: true } : {}), ...(ght ? { gitHubToken: true } : {}) });
       if (model) prefModels[harness] = model;
       else delete prefModels[harness];
       setPrompt("");
@@ -805,14 +809,14 @@ export default function App() {
             </For>
           </select>
         </Show>
-        <Show when={effortOptions(selectedHarness()).length > 0}>
+        <Show when={effortOptions(selectedHarness() as Harness).length > 0}>
           <select
             value={selectedEffort()}
             onChange={(e) => setSelectedEffort(e.currentTarget.value)}
             class={styles.modelSelect}
           >
             <option value="">Default effort</option>
-            <For each={effortOptions(selectedHarness())}>
+            <For each={effortOptions(selectedHarness() as Harness)}>
               {(e) => <option value={e}>{e}</option>}
             </For>
           </select>
@@ -1081,14 +1085,14 @@ export default function App() {
                 </For>
               </select>
             </Show>
-            <Show when={effortOptions(forkHarness()).length > 0}>
+            <Show when={effortOptions(forkHarness() as Harness).length > 0}>
               <select
                 value={forkEffort()}
                 onChange={(e) => setForkEffort(e.currentTarget.value)}
                 class={styles.modelSelect}
               >
                 <option value="">Default effort</option>
-                <For each={effortOptions(forkHarness())}>
+                <For each={effortOptions(forkHarness() as Harness)}>
                   {(e) => <option value={e}>{e}</option>}
                 </For>
               </select>

@@ -16,7 +16,7 @@ import {
   botFixCI,
   botFixPR,
 } from "./api";
-import type { Task, EventMessage } from "@sdk/types.gen";
+import type { Task, EventMessage, Harness, SyncTarget } from "@sdk/types.gen";
 import { formatCost, formatElapsed, formatBalance } from "./formatting";
 import type { TaskNumberMap } from "./TaskNumberMap";
 
@@ -164,7 +164,7 @@ export class FunctionHandlers {
     const resp = await createTask({
       initialPrompt: { text: prompt },
       repos: repoNames.length > 0 ? repoNames.map((r) => ({ name: r })) : undefined,
-      harness,
+      harness: harness as Harness,
       ...(model ? { model } : {}),
       ...(tailscale ? { tailscale } : {}),
       ...(usb ? { usb } : {}),
@@ -224,7 +224,7 @@ export class FunctionHandlers {
     const target = targetRaw === "main" || targetRaw === "master" ? "default" : targetRaw;
     const resp = await syncTask(taskId, {
       ...(force ? { force } : {}),
-      ...(target ? { target } : {}),
+      ...(target ? { target: target as SyncTarget } : {}),
     });
     const verb = target === "default" ? `Pushed task #${num} to main` : `Synced task #${num}`;
     if (!resp.safetyIssues?.length) return textResult(`${verb}.`);
@@ -267,7 +267,7 @@ export class FunctionHandlers {
     const model = optString(args, "model");
     const resp = await forkTask(taskId, {
       prompt: { text: prompt },
-      ...(harness ? { harness } : {}),
+      ...(harness ? { harness: harness as Harness } : {}),
       ...(model ? { model } : {}),
     });
     return textResult(`Forked task #${num}. New task ID: ${resp.id}`);

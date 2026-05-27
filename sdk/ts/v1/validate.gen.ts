@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchInfo, Container, DiffFileStat, EventAsk, EventDiffStat, EventError, EventInit, EventLog, EventMessage, EventRateLimit, EventResult, EventStats, EventSubagentEnd, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, ForgeCheck, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaRateLimit, Repo, Task, TaskListEvent, TaskRepo, TodoItem, UsageResp } from "./types.gen";
+import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, CheckStatus, Container, DiffFileStat, EventAsk, EventDiffStat, EventError, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventResult, EventStats, EventSubagentEnd, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaRateLimit, Repo, Task, TaskListEvent, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
 
 // ---- helpers ----
 
@@ -263,7 +263,7 @@ export function validateEventToolOutputDelta(raw: unknown): EventToolOutputDelta
   return {
     toolUseID: asString(obj["toolUseID"], "EventToolOutputDelta.toolUseID"),
     delta: asString(obj["delta"], "EventToolOutputDelta.delta"),
-    contentType: (obj["contentType"] === undefined || obj["contentType"] === null ? undefined : asString(obj["contentType"], "EventToolOutputDelta.contentType")),
+    contentType: (obj["contentType"] === undefined || obj["contentType"] === null ? undefined : (asString(obj["contentType"], "EventToolOutputDelta.contentType") as ToolOutputContentType)),
     formatted: (obj["formatted"] === undefined || obj["formatted"] === null ? undefined : asString(obj["formatted"], "EventToolOutputDelta.formatted")),
   };
 }
@@ -316,7 +316,7 @@ export function validateEventStats(raw: unknown): EventStats {
 export function validateEventMessage(raw: unknown): EventMessage {
   const obj = asObject(raw, "EventMessage");
   const result: EventMessage = {
-    kind: asString(obj["kind"], "EventMessage.kind"),
+    kind: (asString(obj["kind"], "EventMessage.kind") as EventKind),
     ts: asNumber(obj["ts"], "EventMessage.ts"),
   };
   switch (result.kind) {
@@ -401,7 +401,7 @@ export function validateTaskRepo(raw: unknown): TaskRepo {
     baseBranch: (obj["baseBranch"] === undefined || obj["baseBranch"] === null ? undefined : asString(obj["baseBranch"], "TaskRepo.baseBranch")),
     branch: asString(obj["branch"], "TaskRepo.branch"),
     remoteURL: (obj["remoteURL"] === undefined || obj["remoteURL"] === null ? undefined : asString(obj["remoteURL"], "TaskRepo.remoteURL")),
-    forge: (obj["forge"] === undefined || obj["forge"] === null ? undefined : asString(obj["forge"], "TaskRepo.forge")),
+    forge: (obj["forge"] === undefined || obj["forge"] === null ? undefined : (asString(obj["forge"], "TaskRepo.forge") as Forge)),
   };
 }
 
@@ -413,8 +413,8 @@ export function validateForgeCheck(raw: unknown): ForgeCheck {
     repo: asString(obj["repo"], "ForgeCheck.repo"),
     runID: asNumber(obj["runID"], "ForgeCheck.runID"),
     jobID: asNumber(obj["jobID"], "ForgeCheck.jobID"),
-    status: asString(obj["status"], "ForgeCheck.status"),
-    conclusion: asString(obj["conclusion"], "ForgeCheck.conclusion"),
+    status: (asString(obj["status"], "ForgeCheck.status") as CheckStatus),
+    conclusion: (asString(obj["conclusion"], "ForgeCheck.conclusion") as CheckConclusion),
     queuedAt: (obj["queuedAt"] === undefined || obj["queuedAt"] === null ? undefined : asString(obj["queuedAt"], "ForgeCheck.queuedAt") as ISOTimestamp),
     startedAt: (obj["startedAt"] === undefined || obj["startedAt"] === null ? undefined : asString(obj["startedAt"], "ForgeCheck.startedAt") as ISOTimestamp),
     completedAt: (obj["completedAt"] === undefined || obj["completedAt"] === null ? undefined : asString(obj["completedAt"], "ForgeCheck.completedAt") as ISOTimestamp),
@@ -441,7 +441,7 @@ export function validateTask(raw: unknown): Task {
     initialPrompt: asString(obj["initialPrompt"], "Task.initialPrompt"),
     title: asString(obj["title"], "Task.title"),
     repos: (obj["repos"] === undefined || obj["repos"] === null ? undefined : validateArray(obj["repos"], "Task.repos", validateTaskRepo) as TaskRepo[]),
-    state: asString(obj["state"], "Task.state"),
+    state: (asString(obj["state"], "Task.state") as TaskState),
     stateUpdatedAt: asString(obj["stateUpdatedAt"], "Task.stateUpdatedAt") as ISOTimestamp,
     diffStat: (obj["diffStat"] === undefined || obj["diffStat"] === null ? undefined : validateArray(obj["diffStat"], "Task.diffStat", validateDiffFileStat) as DiffFileStat[]),
     costUSD: asNumber(obj["costUSD"], "Task.costUSD"),
@@ -461,12 +461,12 @@ export function validateTask(raw: unknown): Task {
     forgeOwner: (obj["forgeOwner"] === undefined || obj["forgeOwner"] === null ? undefined : asString(obj["forgeOwner"], "Task.forgeOwner")),
     forgeRepo: (obj["forgeRepo"] === undefined || obj["forgeRepo"] === null ? undefined : asString(obj["forgeRepo"], "Task.forgeRepo")),
     forgePR: (obj["forgePR"] === undefined || obj["forgePR"] === null ? undefined : asNumber(obj["forgePR"], "Task.forgePR")),
-    forgePRState: (obj["forgePRState"] === undefined || obj["forgePRState"] === null ? undefined : asString(obj["forgePRState"], "Task.forgePRState")),
+    forgePRState: (obj["forgePRState"] === undefined || obj["forgePRState"] === null ? undefined : (asString(obj["forgePRState"], "Task.forgePRState") as ForgePRState)),
     forgeIssue: (obj["forgeIssue"] === undefined || obj["forgeIssue"] === null ? undefined : asNumber(obj["forgeIssue"], "Task.forgeIssue")),
-    ciStatus: (obj["ciStatus"] === undefined || obj["ciStatus"] === null ? undefined : asString(obj["ciStatus"], "Task.ciStatus")),
+    ciStatus: (obj["ciStatus"] === undefined || obj["ciStatus"] === null ? undefined : (asString(obj["ciStatus"], "Task.ciStatus") as CIStatus)),
     ciChecks: (obj["ciChecks"] === undefined || obj["ciChecks"] === null ? undefined : validateArray(obj["ciChecks"], "Task.ciChecks", validateForgeCheck) as ForgeCheck[]),
     owner: (obj["owner"] === undefined || obj["owner"] === null ? undefined : asString(obj["owner"], "Task.owner")),
-    harness: asString(obj["harness"], "Task.harness"),
+    harness: (asString(obj["harness"], "Task.harness") as Harness),
     model: (obj["model"] === undefined || obj["model"] === null ? undefined : asString(obj["model"], "Task.model")),
     effort: (obj["effort"] === undefined || obj["effort"] === null ? undefined : asString(obj["effort"], "Task.effort")),
     agentVersion: (obj["agentVersion"] === undefined || obj["agentVersion"] === null ? undefined : asString(obj["agentVersion"], "Task.agentVersion")),
@@ -495,8 +495,8 @@ export function validateRepo(raw: unknown): Repo {
     branch: asString(obj["branch"], "Repo.branch"),
     baseBranch: validateBranchInfo(obj["baseBranch"]),
     remoteURL: (obj["remoteURL"] === undefined || obj["remoteURL"] === null ? undefined : asString(obj["remoteURL"], "Repo.remoteURL")),
-    forge: (obj["forge"] === undefined || obj["forge"] === null ? undefined : asString(obj["forge"], "Repo.forge")),
-    ci: (obj["ci"] === undefined || obj["ci"] === null ? undefined : asString(obj["ci"], "Repo.ci")),
+    forge: (obj["forge"] === undefined || obj["forge"] === null ? undefined : (asString(obj["forge"], "Repo.forge") as Forge)),
+    ci: (obj["ci"] === undefined || obj["ci"] === null ? undefined : (asString(obj["ci"], "Repo.ci") as CIStatus)),
     ciChecks: (obj["ciChecks"] === undefined || obj["ciChecks"] === null ? undefined : validateArray(obj["ciChecks"], "Repo.ciChecks", validateForgeCheck) as ForgeCheck[]),
     checksDate: (obj["checksDate"] === undefined || obj["checksDate"] === null ? undefined : asString(obj["checksDate"], "Repo.checksDate") as ISOTimestamp),
   };

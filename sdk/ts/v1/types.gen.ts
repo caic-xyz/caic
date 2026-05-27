@@ -8,7 +8,30 @@ export type ISOTimestamp = string & { readonly __brand: "ISOTimestamp" };
 SSE event types sent to the frontend for task event streams.
 */
 
-export type EventKind = string;
+export type EventKind =
+  | "init"
+  | "text"
+  | "textDelta"
+  | "toolUse"
+  | "toolResult"
+  | "ask"
+  | "usage"
+  | "result"
+  | "system"
+  | "userInput"
+  | "todo"
+  | "diffStat"
+  | "error"
+  | "thinking"
+  | "thinkingDelta"
+  | "subagentStart"
+  | "subagentEnd"
+  | "log"
+  | "toolOutputDelta"
+  | "widget"
+  | "widgetDelta"
+  | "rateLimit"
+  | "stats";
 /**
  * Supported values.
  */
@@ -36,7 +59,10 @@ export const EventKindWidgetDelta: EventKind = "widgetDelta";
 export const EventKindRateLimit: EventKind = "rateLimit";
 export const EventKindStats: EventKind = "stats";
 
-export type ToolOutputContentType = string;
+export type ToolOutputContentType =
+  | "text"
+  | "json"
+  | "markdown";
 /**
  * Supported values.
  */
@@ -297,7 +323,10 @@ export interface EventMessage {
 //////////
 // source: types.go
 
-export type CIStatus = string;
+export type CIStatus =
+  | "pending"
+  | "success"
+  | "failure";
 /**
  * Supported values.
  */
@@ -305,7 +334,15 @@ export const CIStatusPending: CIStatus = "pending";
 export const CIStatusSuccess: CIStatus = "success";
 export const CIStatusFailure: CIStatus = "failure";
 
-export type CheckConclusion = string;
+export type CheckConclusion =
+  | "success"
+  | "failure"
+  | "neutral"
+  | "skipped"
+  | "cancelled"
+  | "timed_out"
+  | "action_required"
+  | "stale";
 /**
  * Supported values.
  */
@@ -318,7 +355,10 @@ export const CheckConclusionTimedOut: CheckConclusion = "timed_out";
 export const CheckConclusionActionRequired: CheckConclusion = "action_required";
 export const CheckConclusionStale: CheckConclusion = "stale";
 
-export type CheckStatus = string;
+export type CheckStatus =
+  | "queued"
+  | "in_progress"
+  | "completed";
 /**
  * Supported values.
  */
@@ -326,14 +366,19 @@ export const CheckStatusQueued: CheckStatus = "queued";
 export const CheckStatusInProgress: CheckStatus = "in_progress";
 export const CheckStatusCompleted: CheckStatus = "completed";
 
-export type Forge = string;
+export type Forge =
+  | "github"
+  | "gitlab";
 /**
  * Supported values.
  */
 export const ForgeGitHub: Forge = "github";
 export const ForgeGitLab: Forge = "gitlab";
 
-export type ForgePRState = string;
+export type ForgePRState =
+  | "open"
+  | "closed"
+  | "merged";
 /**
  * Supported values.
  */
@@ -341,7 +386,13 @@ export const ForgePRStateOpen: ForgePRState = "open";
 export const ForgePRStateClosed: ForgePRState = "closed";
 export const ForgePRStateMerged: ForgePRState = "merged";
 
-export type Harness = string;
+export type Harness =
+  | "claude"
+  | "codex"
+  | "gemini"
+  | "kilo"
+  | "opencode"
+  | "pi";
 /**
  * Supported values.
  */
@@ -352,14 +403,31 @@ export const HarnessKilo: Harness = "kilo";
 export const HarnessOpenCode: Harness = "opencode";
 export const HarnessPi: Harness = "pi";
 
-export type SyncTarget = string;
+export type SyncTarget =
+  | "branch"
+  | "default";
 /**
  * Supported values.
  */
 export const SyncTargetBranch: SyncTarget = "branch";
 export const SyncTargetDefault: SyncTarget = "default";
 
-export type TaskState = string;
+export type TaskState =
+  | "pending"
+  | "branching"
+  | "provisioning"
+  | "starting"
+  | "running"
+  | "waiting"
+  | "asking"
+  | "has_plan"
+  | "pulling"
+  | "pushing"
+  | "stopping"
+  | "stopped"
+  | "purging"
+  | "failed"
+  | "purged";
 /**
  * Supported values.
  */

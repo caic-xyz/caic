@@ -370,7 +370,19 @@ func routeSeedTypes() []reflect.Type {
 
 // emitTSAlias writes a type alias with its const values.
 func emitTSAlias(b *strings.Builder, a aliasInfo) {
-	fmt.Fprintf(b, "export type %s = string;\n", a.name)
+	if len(a.constants) > 0 {
+		// Emit union type for exhaustiveness checking.
+		fmt.Fprintf(b, "export type %s =\n", a.name)
+		for i, c := range a.constants {
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			fmt.Fprintf(b, "  | %q", c.value)
+		}
+		b.WriteString(";\n")
+	} else {
+		fmt.Fprintf(b, "export type %s = string;\n", a.name)
+	}
 	if len(a.constants) > 0 {
 		b.WriteString("/**\n")
 		b.WriteString(" * Supported values.\n")
@@ -1448,7 +1460,14 @@ func (d *docRegistry) tsFieldValidator(t reflect.Type, pathExpr, pathLit string)
 	if t.Kind() == reflect.Struct && isSDKPkg(t.PkgPath()) {
 		return fmt.Sprintf("validate%s(%s)", t.Name(), pathExpr), nil
 	}
-	return d.cfg.tsPrimitiveValidator(t, pathExpr, pathLit)
+	expr, err := d.cfg.tsPrimitiveValidator(t, pathExpr, pathLit)
+	if err != nil {
+		return "", err
+	}
+	if _, ok := d.aliasNames[t.Name()]; ok {
+		return fmt.Sprintf("(%s as %s)", expr, t.Name()), nil
+	}
+	return expr, nil
 }
 
 // tsFieldOptValidator is like tsFieldValidator but wraps the result to
@@ -1471,7 +1490,25 @@ func (d *docRegistry) emitTSDiscriminator(b *strings.Builder, t reflect.Type) er
 	fmt.Fprintf(b, "  const obj = asObject(raw, %q);\n", name)
 
 	// Collect base fields (non-pointer, no omitempty, not "kind").
-	baseFields := []tsFieldBinding{{"kind", fmt.Sprintf("asString(obj[%q], %q)", "kind", name+".kind")}}
+	var kindExpr string
+	for sf := range t.Fields() {
+		if sf.IsExported() {
+			tag := sf.Tag.Get("json")
+			jsonName, _ := parseJSONTag(tag)
+			if jsonName == "kind" || (jsonName == "" && sf.Name == "Kind") {
+				expr := "asString(obj[\"kind\"], \"" + name + ".kind\")"
+				if _, ok := d.aliasNames[sf.Type.Name()]; ok {
+					expr = "(" + expr + " as " + sf.Type.Name() + ")"
+				}
+				kindExpr = expr
+				break
+			}
+		}
+	}
+	if kindExpr == "" {
+		kindExpr = "asString(obj[\"kind\"], \"" + name + ".kind\")"
+	}
+	baseFields := []tsFieldBinding{{"kind", kindExpr}}
 	var variantFields []tsFieldBinding
 
 	for sf := range t.Fields() {
@@ -1584,6 +1621,19 @@ func (d *docRegistry) generateTSValidate(outDir string) error {
 	refTypes := map[string]struct{}{}
 	for _, ks := range needed {
 		refTypes[ks.t.Name()] = struct{}{}
+		// Collect alias types used by struct fields (for union type casts).
+		for sf := range ks.t.Fields() {
+			if !sf.IsExported() {
+				continue
+			}
+			ft := sf.Type
+			if ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
+			if _, ok := d.aliasNames[ft.Name()]; ok {
+				refTypes[ft.Name()] = struct{}{}
+			}
+		}
 	}
 	refTypes["ISOTimestamp"] = struct{}{}
 
