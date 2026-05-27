@@ -204,15 +204,16 @@ func (*fakeContainer) Signal(_ context.Context, _ string, _ int, _ string) error
 }
 
 // fakeProcesses returns a canned process tree for e2e screenshots:
-//   init(1)
-//     sshd(42)
-//       sshd-session(99)
-//         bash(100)
-//           node(200) — agent harness
-//           make(201)
-//             gcc(300)
-//             gcc(301)
-//           ps(202)
+//
+//	init(1)
+//	  sshd(42)
+//	    sshd-session(99)
+//	      bash(100)
+//	        node(200) — agent harness
+//	        make(201)
+//	          gcc(300)
+//	          gcc(301)
+//	        ps(202)
 func fakeProcesses(_ context.Context, _ string) ([]task.ProcessInfo, error) {
 	return []task.ProcessInfo{
 		{PID: 1, PPID: 0, User: "root", State: "S", CPU: 0.0, Mem: 0.1, Time: "0:00", Command: "/sbin/init"},

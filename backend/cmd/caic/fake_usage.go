@@ -21,10 +21,10 @@ type fakeFetcher struct {
 	resp     v1.ProviderQuota
 }
 
-func (f *fakeFetcher) Provider() string                { return f.provider }
-func (f *fakeFetcher) Label() string                   { return f.label }
-func (f *fakeFetcher) AuthKind() string                { return f.authKind }
-func (f *fakeFetcher) UsageURL() string                { return "https://example.com" }
+func (f *fakeFetcher) Provider() string                        { return f.provider }
+func (f *fakeFetcher) Label() string                           { return f.label }
+func (f *fakeFetcher) AuthKind() string                        { return f.authKind }
+func (f *fakeFetcher) UsageURL() string                        { return "https://example.com" }
 func (f *fakeFetcher) Get(_ context.Context) *v1.ProviderQuota { return &f.resp }
 
 // fakeUsageFetchers returns canned Anthropic and Codex usage for e2e tests.

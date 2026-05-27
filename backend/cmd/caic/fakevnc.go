@@ -79,7 +79,7 @@ func (fv *fakeVNCServer) handle(conn net.Conn) {
 	}
 
 	// Security: offer "None" (type 1).
-	conn.Write([]byte{1, 1})           // number-of-types=1, type=1 (None)
+	conn.Write([]byte{1, 1}) // number-of-types=1, type=1 (None)
 	if _, err := io.ReadFull(conn, buf[:1]); err != nil {
 		return
 	}
@@ -98,17 +98,17 @@ func (fv *fakeVNCServer) handle(conn net.Conn) {
 	// Pixel format (16 bytes): 32-bit RGB, little-endian, red/green/blue at shifts 0/8/16.
 	// This matches Go's image.RGBA.Pix layout: [R, G, B, A, ...].
 	pf := []byte{
-		32,                        // bits-per-pixel
-		24,                        // depth
-		0,                         // big-endian-flag
-		1,                         // true-colour-flag
-		0, 255,                    // red-max
-		0, 255,                    // green-max
-		0, 255,                    // blue-max
-		16,                        // red-shift
-		8,                         // green-shift
-		0,                         // blue-shift
-		0, 0, 0,                   // padding
+		32,     // bits-per-pixel
+		24,     // depth
+		0,      // big-endian-flag
+		1,      // true-colour-flag
+		0, 255, // red-max
+		0, 255, // green-max
+		0, 255, // blue-max
+		16,      // red-shift
+		8,       // green-shift
+		0,       // blue-shift
+		0, 0, 0, // padding
 	}
 	si = append(si, pf...)
 	name := "caic-e2e"
@@ -165,8 +165,8 @@ func (fv *fakeVNCServer) handle(conn net.Conn) {
 // sendUpdate writes a FramebufferUpdate with one full-screen raw rectangle.
 func (fv *fakeVNCServer) sendUpdate(conn net.Conn) {
 	var hdr []byte
-	hdr = append(hdr, 0) // message-type = 0 (FramebufferUpdate)
-	hdr = append(hdr, 0) // padding
+	hdr = append(hdr, 0)                        // message-type = 0 (FramebufferUpdate)
+	hdr = append(hdr, 0)                        // padding
 	hdr = binary.BigEndian.AppendUint16(hdr, 1) // number of rectangles
 	// Rectangle: x, y, w, h, encoding-type (0 = raw).
 	hdr = binary.BigEndian.AppendUint16(hdr, 0)
@@ -182,20 +182,20 @@ func (fv *fakeVNCServer) sendUpdate(conn net.Conn) {
 
 // Colours used in the fake IDE screenshot.
 var (
-	cBG        = color.RGBA{30, 30, 30, 255}        // #1e1e1e editor background
-	cTitleBG   = color.RGBA{50, 50, 60, 255}        // title bar
-	cSidebarBG = color.RGBA{37, 37, 38, 255}        // sidebar
-	cStatusBG  = color.RGBA{0, 122, 204, 255}       // status bar (blue)
-	cBorder    = color.RGBA{60, 60, 70, 255}        // separator
-	cWhite     = color.RGBA{212, 212, 212, 255}     // text
-	cKeyword   = color.RGBA{86, 156, 214, 255}      // blue keyword
-	cString    = color.RGBA{206, 145, 120, 255}     // orange string
-	cComment   = color.RGBA{106, 153, 85, 255}      // green comment
-	cFunc      = color.RGBA{220, 220, 170, 255}     // yellow function
-	cType      = color.RGBA{78, 201, 176, 255}      // teal type
-	cCursor    = color.RGBA{255, 255, 255, 255}     // cursor
-	cActiveTab = color.RGBA{30, 30, 30, 255}        // active tab bg
-	cInactiveTab = color.RGBA{45, 45, 50, 255}      // inactive tab bg
+	cBG          = color.RGBA{30, 30, 30, 255}    // #1e1e1e editor background
+	cTitleBG     = color.RGBA{50, 50, 60, 255}    // title bar
+	cSidebarBG   = color.RGBA{37, 37, 38, 255}    // sidebar
+	cStatusBG    = color.RGBA{0, 122, 204, 255}   // status bar (blue)
+	cBorder      = color.RGBA{60, 60, 70, 255}    // separator
+	cWhite       = color.RGBA{212, 212, 212, 255} // text
+	cKeyword     = color.RGBA{86, 156, 214, 255}  // blue keyword
+	cString      = color.RGBA{206, 145, 120, 255} // orange string
+	cComment     = color.RGBA{106, 153, 85, 255}  // green comment
+	cFunc        = color.RGBA{220, 220, 170, 255} // yellow function
+	cType        = color.RGBA{78, 201, 176, 255}  // teal type
+	cCursor      = color.RGBA{255, 255, 255, 255} // cursor
+	cActiveTab   = color.RGBA{30, 30, 30, 255}    // active tab bg
+	cInactiveTab = color.RGBA{45, 45, 50, 255}    // inactive tab bg
 )
 
 func generateFakeScreenshot() *image.RGBA {
@@ -334,5 +334,3 @@ func fillRect(img *image.RGBA, x, y, w, h int, c color.RGBA) {
 func drawTextBar(img *image.RGBA, x, y, w, h int, c color.RGBA) {
 	fillRect(img, x, y, w, h, c)
 }
-
-
