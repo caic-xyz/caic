@@ -26,8 +26,12 @@ type ProcessInfo struct {
 // Processes runs ps -eo pid,ppid,user,stat,%cpu,%mem,time,args --no-headers
 // inside the named container via SSH and returns the parsed process list.
 func (b *Backend) Processes(ctx context.Context, containerName string) ([]ProcessInfo, error) {
+	ct, err := b.Client.Get(ctx, containerName)
+	if err != nil {
+		return nil, fmt.Errorf("get container %s: %w", containerName, err)
+	}
 	cmd := "ps -eo pid,ppid,user,stat,%cpu,%mem,time,args --no-headers"
-	sshArgs := b.Client.SSHCommand(containerName, cmd)
+	sshArgs := ct.SSHCommand(nil, cmd)
 
 	c := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // containerName is internally-assigned; cmd is a constant literal
 	out, err := c.Output()
@@ -40,8 +44,12 @@ func (b *Backend) Processes(ctx context.Context, containerName string) ([]Proces
 // Signal sends a signal (e.g. SIGTERM, SIGKILL) to a process inside the
 // named container via SSH using kill.
 func (b *Backend) Signal(ctx context.Context, containerName string, pid int, sig string) error {
+	ct, err := b.Client.Get(ctx, containerName)
+	if err != nil {
+		return fmt.Errorf("get container %s: %w", containerName, err)
+	}
 	cmd := fmt.Sprintf("kill -s %s %d", sig, pid)
-	sshArgs := b.Client.SSHCommand(containerName, cmd)
+	sshArgs := ct.SSHCommand(nil, cmd)
 	c := exec.CommandContext(ctx, sshArgs[0], sshArgs[1:]...) //nolint:gosec // containerName is internally-assigned; cmd uses fmt.Sprintf
 	out, err := c.CombinedOutput()
 	if err != nil {
