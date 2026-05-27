@@ -476,6 +476,9 @@ def serve(cmd_args, work_dir, log_stdin=True, strip_env=(), shutdown_grace=_DEFA
     if stripped_vars:
         logging.info("stripped env vars: %s", pending_env)
 
+    # EDITOR=true prevents git commit (and similar) from opening a text editor.
+    env["EDITOR"] = "true"
+
     proc = subprocess.Popen(
         cmd_args,
         cwd=work_dir,
