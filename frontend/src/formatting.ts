@@ -50,6 +50,9 @@ export function tokenColor(current: number, limit: number): string {
 export function stateColor(state: string): string {
   switch (state) {
     case "running":
+    case "branching":
+    case "provisioning":
+    case "starting":
       return "#d4edda";
     case "asking":
       return "#cce5ff";

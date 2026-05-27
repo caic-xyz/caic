@@ -14,7 +14,7 @@ import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.MarkdownTypography
 
 fun stateColor(state: String): Color = when (state) {
-    "running" -> Color(0xFFD4EDDA)
+    "running", "branching", "provisioning", "starting" -> Color(0xFFD4EDDA)
     "asking" -> Color(0xFFCCE5FF)
     "has_plan" -> Color(0xFFEDE9FE)
     "failed" -> Color(0xFFF8D7DA)
