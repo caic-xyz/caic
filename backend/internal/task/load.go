@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"iter"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -69,6 +71,7 @@ type LoadedTask struct {
 	GitHubToken       bool
 	Model             string
 	AgentVersion      string
+	LogSize           int64 // Byte size of the log file on disk; populated by LoadLogs.
 	Msgs              []agent.Message
 	Result            *Result
 
@@ -164,6 +167,94 @@ func (lt *LoadedTask) LoadMessages() error {
 	return nil
 }
 
+// maxTailLoadBytes is the maximum number of bytes to read from the tail of a
+// log file during on-demand loading. Files larger than this are read from the
+// tail only, skipping older messages to avoid OOM.
+const maxTailLoadBytes = 64 << 20 // 64 MiB
+
+// LoadMessagesTail loads messages from the log file, reading only the tail if
+// the file is larger than maxTailLoadBytes. This is used for on-demand loading
+// (SSE events endpoint) to avoid OOM on multi-GB log files. Metadata (PR,
+// result, diff stat) is always extracted from the tail since it's appended last.
+func (lt *LoadedTask) LoadMessagesTail() error {
+	if lt.Msgs != nil || lt.path == "" {
+		return nil
+	}
+	if lt.parseFn == nil {
+		return fmt.Errorf("no parser set for harness %q; call SetParser first", lt.Harness)
+	}
+	// For small files, use the regular full load.
+	if lt.LogSize <= maxTailLoadBytes {
+		return lt.LoadMessages()
+	}
+	slog.Info("load: reading tail only", "path", lt.path, "size", lt.LogSize, "tail", maxTailLoadBytes)
+	full, err := loadLogFileTail(lt.path, lt.parseFn, maxTailLoadBytes)
+	if err != nil {
+		return err
+	}
+	lt.Msgs = full.Msgs
+	lt.Title = full.Title
+	lt.State = full.State
+	lt.Result = full.Result
+	if full.ForgePR > 0 {
+		lt.ForgeOwner = full.ForgeOwner
+		lt.ForgeRepo = full.ForgeRepo
+		lt.ForgePR = full.ForgePR
+	}
+	if !full.LastStateUpdateAt.IsZero() {
+		lt.LastStateUpdateAt = full.LastStateUpdateAt
+	}
+	return nil
+}
+
+// StreamMessages streams the task's conversation messages directly from the log
+// file, yielding each in order without materializing them into Msgs. For logs
+// larger than maxTailLoadBytes only the tail is replayed (matching
+// LoadMessagesTail). Memory usage is O(1) regardless of log size, so it is the
+// preferred path for replaying terminal tasks to SSE clients without retaining
+// the full history in memory.
+func (lt *LoadedTask) StreamMessages() iter.Seq2[agent.Message, error] {
+	return func(yield func(agent.Message, error) bool) {
+		if lt.path == "" {
+			return
+		}
+		if lt.parseFn == nil {
+			yield(nil, fmt.Errorf("no parser set for harness %q; call SetParser first", lt.Harness))
+			return
+		}
+		var offset int64
+		if lt.LogSize > maxTailLoadBytes {
+			offset = lt.LogSize - maxTailLoadBytes
+		}
+		for m, e := range agent.StreamLogFile(lt.path, lt.replayParser(), offset) {
+			if !yield(m, e) {
+				return
+			}
+		}
+	}
+}
+
+// replayParser adapts the harness parser for replaying a task *log* file
+// (which interleaves agent messages with the caic_meta header and caic_*
+// control records) rather than raw relay output. It drops the metadata header
+// and the caic_pr/caic_result/caic_diff_stat control records — none of which
+// are conversation messages — and parses everything else with parseFn. This
+// mirrors the line handling in loadLogFile.
+func (lt *LoadedTask) replayParser() func([]byte) ([]agent.Message, error) {
+	return func(line []byte) ([]agent.Message, error) {
+		var env typeEnvelope
+		if err := json.Unmarshal(line, &env); err != nil {
+			return nil, nil //nolint:nilerr // malformed/non-object lines are skipped, matching loadLogFile.
+		}
+		switch env.Type {
+		case "caic_meta", "caic_pr", "caic_result", "caic_diff_stat":
+			return nil, nil
+		default:
+			return lt.parseFn(line)
+		}
+	}
+}
+
 // unmarshalMeta decodes a MetaMessage from JSON and warns about any unrecognised
 // fields (e.g. fields from an older log format that have since been removed).
 func unmarshalMeta(data []byte, m *agent.MetaMessage, fw *jsonutil.FieldWarner) error {
@@ -237,6 +328,7 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 		USB:               meta.USB,
 		Display:           meta.Display,
 		GitHubToken:       meta.GitHubToken,
+		LogSize:           info.Size(),
 	}
 
 	// Read the tail of the file to find caic_pr, caic_result, and
@@ -467,6 +559,131 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 		}
 	}
 
+	return lt, scanner.Err()
+}
+
+// loadLogFileTail reads only the tail of a log file. It always reads the first
+// line (metadata header), then seeks to (size - tailBytes) and parses only the
+// remaining lines. This avoids loading multi-GB files into memory.
+func loadLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error), tailBytes int64) (_ *LoadedTask, retErr error) {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err2 := f.Close(); retErr == nil {
+			retErr = err2
+		}
+	}()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
+
+	// First line must be the metadata header.
+	if !scanner.Scan() {
+		return nil, errNotLogFile
+	}
+	var meta agent.MetaMessage
+	if err := unmarshalMeta(scanner.Bytes(), &meta, &jsonutil.FieldWarner{}); err != nil {
+		return nil, errNotLogFile
+	}
+	if err := meta.Validate(); err != nil {
+		return nil, err
+	}
+
+	repos := make([]RepoMount, len(meta.Repos))
+	for i, mr := range meta.Repos {
+		repos[i] = RepoMountFromMeta(mr, "")
+	}
+	lt := &LoadedTask{
+		Prompt:            meta.Prompt,
+		Title:             meta.Title,
+		Repos:             repos,
+		Harness:           meta.Harness,
+		StartedAt:         meta.StartedAt,
+		LastStateUpdateAt: info.ModTime().UTC(),
+		State:             StateRunning,
+		ForgeIssue:        meta.ForgeIssue,
+	}
+
+	// Seek to the tail of the file.
+	offset := max(int64(0), info.Size()-tailBytes)
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("seek %s to %d: %w", path, offset, err)
+	}
+
+	// Reuse scanner from the seeked position. The first line after seek is
+	// likely partial (we're mid-line), so skip it unless we're at the start.
+	scanner = bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
+	skipFirst := offset > 0
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		if skipFirst {
+			skipFirst = false
+			continue
+		}
+		var envelope typeEnvelope
+		if err := json.Unmarshal(line, &envelope); err != nil {
+			continue
+		}
+		switch envelope.Type {
+		case "caic_pr":
+			var mp agent.MetaPRMessage
+			if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
+				lt.ForgeOwner = mp.ForgeOwner
+				lt.ForgeRepo = mp.ForgeRepo
+				lt.ForgePR = mp.ForgePR
+			}
+		case "caic_diff_stat":
+			var ds agent.DiffStatMessage
+			if json.Unmarshal(line, &ds) == nil && ds.Ts > 0 {
+				if t := tsToTime(ds.Ts); t.After(lt.LastStateUpdateAt) {
+					lt.LastStateUpdateAt = t
+				}
+			}
+		case "caic_result":
+			var mr agent.MetaResultMessage
+			if err := json.Unmarshal(line, &mr); err != nil {
+				return nil, fmt.Errorf("invalid caic_result: %w", err)
+			}
+			lt.State = parseState(mr.State)
+			if mr.Title != "" {
+				lt.Title = mr.Title
+			}
+			lt.Result = &Result{
+				State:    lt.State,
+				CostUSD:  mr.CostUSD,
+				Duration: time.Duration(mr.Duration * float64(time.Second)),
+				NumTurns: mr.NumTurns,
+				Usage: agent.Usage{
+					InputTokens:              mr.InputTokens,
+					OutputTokens:             mr.OutputTokens,
+					CacheCreationInputTokens: mr.CacheCreationInputTokens,
+					CacheReadInputTokens:     mr.CacheReadInputTokens,
+				},
+				DiffStat:    mr.DiffStat,
+				AgentResult: mr.AgentResult,
+			}
+			if mr.Error != "" {
+				lt.Result.Err = errors.New(mr.Error)
+			}
+		default:
+			parsed, err := parseFn(line)
+			if err != nil {
+				continue
+			}
+			lt.Msgs = append(lt.Msgs, parsed...)
+		}
+	}
 	return lt, scanner.Err()
 }
 

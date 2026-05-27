@@ -384,6 +384,46 @@ func TestLoadLogs(t *testing.T) {
 	})
 }
 
+func TestLoadedTask(t *testing.T) {
+	t.Parallel()
+	t.Run("StreamMessages", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "stream task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+		a1 := claudeAssistant(t, map[string]any{"type": "text", "text": "hello"})
+		pr := mustJSON(t, agent.MetaPRMessage{MessageType: "caic_pr", ForgeOwner: "o", ForgeRepo: "r", ForgePR: 5})
+		a2 := claudeAssistant(t, map[string]any{"type": "text", "text": "world"})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "waiting"})
+		writeLogFile(t, dir, "t.jsonl", meta, a1, pr, a2, trailer)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		setClaudeParser(tasks)
+		lt := tasks[0]
+
+		var streamed []agent.Message
+		for m, e := range lt.StreamMessages() {
+			if e != nil {
+				t.Fatal(e)
+			}
+			streamed = append(streamed, m)
+		}
+		if len(streamed) == 0 {
+			t.Fatal("no messages streamed")
+		}
+		// Streaming must yield exactly the conversation messages a full load
+		// produces — control records (caic_meta/pr/result) filtered out.
+		if err := lt.LoadMessages(); err != nil {
+			t.Fatal(err)
+		}
+		if len(streamed) != len(lt.Msgs) {
+			t.Fatalf("streamed %d messages, full load %d", len(streamed), len(lt.Msgs))
+		}
+	})
+}
+
 func TestParseState(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {

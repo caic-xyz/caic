@@ -53,11 +53,6 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 	return agent.AttachRelaySession(ctx, opts, b)
 }
 
-// ReadRelayOutput implements agent.Backend.
-func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agent.Message, int64, error) {
-	return agent.ReadRelayOutput(ctx, container, b.ParseMessage)
-}
-
 // WritePrompt writes a single user message to Gemini CLI's stdin.
 // Gemini CLI in -p mode reads plain text lines from stdin. Images are ignored.
 func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {

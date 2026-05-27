@@ -1126,17 +1126,6 @@ func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHand
 	return h, nil
 }
 
-// ReadRelayOutput reads the relay output.jsonl from the container using the
-// backend matching agentName to parse messages.
-func (r *Runner) ReadRelayOutput(ctx context.Context, container string, agentName agent.Harness) ([]agent.Message, int64, error) {
-	r.initDefaults()
-	b := r.backend(agentName)
-	if b == nil {
-		return nil, 0, fmt.Errorf("unknown harness %q", agentName)
-	}
-	return b.ReadRelayOutput(ctx, container)
-}
-
 // DiffContent returns the unified diff for the given repos, optionally filtered
 // to a single file path. When there are multiple repos, file paths are prefixed
 // with `<repoName>/` so the frontend can distinguish changes from different

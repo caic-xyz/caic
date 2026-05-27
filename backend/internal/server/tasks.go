@@ -232,9 +232,6 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Lazily load messages for purged tasks on first access.
-	s.loadTaskMessagesOnDemand(entry)
-
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, dto.InternalError("streaming not supported"))
@@ -245,6 +242,18 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	flusher.Flush()
+
+	// Terminal tasks have no live channel: replay their history straight from
+	// the on-disk log without materializing it into memory. This keeps server
+	// memory O(1) for the very large logs that previously failed to load.
+	state := entry.task.GetState()
+	if (state == task.StatePurged || state == task.StateFailed) && entry.loadedTask != nil {
+		s.streamHistoryFromDisk(w, flusher, entry)
+		return
+	}
+
+	// Lazily load messages for purged tasks on first access.
+	s.loadTaskMessagesOnDemand(entry)
 
 	history, live, unsub := entry.task.Subscribe(r.Context())
 	defer unsub()
@@ -281,7 +290,6 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
 	flusher.Flush()
 
-	state := entry.task.GetState()
 	if state == task.StatePurged || state == task.StateFailed {
 		return
 	}
@@ -311,6 +319,41 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// streamHistoryFromDisk replays a terminal task's conversation directly from
+// its log file, converting and flushing one message at a time so the full
+// history is never materialized in memory. It collapses streaming-delta runs
+// (matching the live path's filterHistoryForReplay) and emits a trailing
+// "ready" event. No subscriber is registered: terminal tasks produce no live
+// messages.
+func (s *Server) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flusher, entry *taskEntry) {
+	tracker := newToolTimingTracker(entry.task.Harness)
+	now := time.Now()
+	idx := 0
+	emit := func(msg agent.Message) {
+		evs := tracker.convertMessage(msg, now)
+		for i := range evs {
+			data, err := marshalEvent(&evs[i])
+			if err != nil {
+				slog.Warn("marshal SSE event", "err", err)
+				continue
+			}
+			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
+			idx++
+		}
+	}
+	push, flush := newReplayFilter(emit)
+	for msg, err := range entry.loadedTask.StreamMessages() {
+		if err != nil {
+			slog.Warn("stream history from disk", "task", entry.task.ID, "err", err)
+			break
+		}
+		push(msg)
+	}
+	flush()
+	_, _ = fmt.Fprint(w, "event: ready\ndata: {}\n\n")
+	flusher.Flush()
 }
 
 // handleTaskToolInput returns the full (untruncated) input for a tool call.

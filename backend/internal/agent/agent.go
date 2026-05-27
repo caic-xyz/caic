@@ -46,9 +46,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"iter"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -419,7 +421,7 @@ func RelayStatus(ctx context.Context, container string) (alive bool, detail stri
 			`echo "sock=$sock pid=$pid kill=$killok"; `+
 			`[ "$sock" -eq 1 ] && [ "$killok" -eq 1 ]`,
 		RelaySockPath, pidPath)
-	cmd := exec.CommandContext(ctx, "ssh", container, "sh", "-c", check) //nolint:gosec // container is not user-controlled
+	cmd := sshCmd(ctx, container, "sh", "-c", check)
 	out, err := cmd.CombinedOutput()
 	detail = strings.TrimSpace(string(out))
 	if err != nil {
@@ -442,8 +444,7 @@ func IsRelayRunning(ctx context.Context, container string) (bool, error) {
 // container. Returns empty string on any error (missing file, SSH failure).
 func ReadRelayLog(ctx context.Context, container string, maxBytes int) string {
 	// Use tail -c to cap the output; the log can be large after long sessions.
-	arg := fmt.Sprintf("tail -c %d %s 2>/dev/null", maxBytes, RelayLogPath)
-	cmd := exec.CommandContext(ctx, "ssh", container, arg) //nolint:gosec // container is not user-controlled
+	cmd := sshCmd(ctx, container, "tail", "-c", strconv.Itoa(maxBytes), RelayLogPath)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -462,7 +463,7 @@ func ReadPlan(ctx context.Context, container, planFile string) (string, error) {
 	if planFile != "" {
 		args = append(args, planFile)
 	}
-	cmd := exec.CommandContext(ctx, "ssh", args...) //nolint:gosec // args are not user-controlled.
+	cmd := sshCmd(ctx, args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("read plan: %w", err)
@@ -563,31 +564,170 @@ func StartSession(rp *RelayProcess, c Conn, opts *Options) (*Session, error) {
 	return s, nil
 }
 
-// ReadRelayOutput reads the complete output.jsonl from the container's relay
-// and parses each line using parseFn.
-func ReadRelayOutput(ctx context.Context, container string, parseFn func([]byte) ([]Message, error)) (msgs []Message, size int64, err error) {
-	cmd := exec.CommandContext(ctx, "ssh", container, "cat", RelayOutputPath) //nolint:gosec // args are not user-controlled.
+// sshTimeoutArgs are the default SSH options for relay operations.
+var sshTimeoutArgs = []string{"-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2"}
+
+// sshCmd creates an exec.Cmd with standard timeout args prepended.
+func sshCmd(ctx context.Context, extraArgs ...string) *exec.Cmd {
+	args := make([]string, 0, len(sshTimeoutArgs)+len(extraArgs))
+	args = append(args, sshTimeoutArgs...)
+	args = append(args, extraArgs...)
+	return exec.CommandContext(ctx, "ssh", args...) //nolint:gosec // args are not user-controlled.
+}
+
+// RelayOutputSize returns the byte size of the relay output.jsonl in the
+// container. This is fast (single stat call) and avoids transferring the file.
+func RelayOutputSize(ctx context.Context, container string) (int64, error) {
+	cmd := sshCmd(ctx, container, "stat", "-c", "%s", RelayOutputPath)
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, 0, fmt.Errorf("read relay output: %w", err)
+		return 0, fmt.Errorf("stat relay output: %w", err)
 	}
-	size = int64(len(out))
-	scanner := bufio.NewScanner(bytes.NewReader(out))
-	// 32 MiB max line: user input with base64 images can produce very long NDJSON lines.
-	scanner.Buffer(make([]byte, 0, 1<<20), 32<<20)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		parsed, parseErr := parseFn(line)
-		if parseErr != nil {
-			slog.Warn("relay", "msg", "skipping unparseable output line", "ctr", container, "err", parseErr)
-			continue
-		}
-		msgs = append(msgs, parsed...)
+	n, err := strconv.ParseInt(strings.TrimSpace(string(out)), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse relay size %q: %w", string(out), err)
 	}
-	return msgs, size, scanner.Err()
+	return n, nil
+}
+
+// ReadRelayTail reads only the tail of the relay output.jsonl from the
+// container and returns the parsed messages plus the total file size (for
+// RelayOffset). It streams the SSH output directly, so memory usage is O(1)
+// and no multi-GB transfer occurs during adoption.
+func ReadRelayTail(ctx context.Context, container string, parseFn func([]byte) ([]Message, error), maxBytes int64) (msgs []Message, size int64, err error) {
+	// Get total file size — instant stat call.
+	size, err = RelayOutputSize(ctx, container)
+	if err != nil {
+		return nil, 0, err
+	}
+	for m, e := range StreamRelay(ctx, container, parseFn, maxBytes, size) {
+		if e != nil {
+			return msgs, size, e
+		}
+		msgs = append(msgs, m)
+	}
+	return msgs, size, nil
+}
+
+// StreamRelay streams NDJSON messages from the relay output.jsonl in the
+// container over SSH, yielding each in order. When tailBytes > 0 and the file
+// is larger, only the last tailBytes are transferred (via tail -c) and the
+// partial first line is skipped; otherwise the whole file is streamed (cat).
+//
+// The SSH stdout is read incrementally, so memory usage is O(1) regardless of
+// file size. If the consumer stops early the ssh process is killed and reaped,
+// so no process leaks per abandoned reader.
+func StreamRelay(ctx context.Context, container string, parseFn func([]byte) ([]Message, error), tailBytes, size int64) iter.Seq2[Message, error] {
+	return func(yield func(Message, error) bool) {
+		tailed := tailBytes > 0 && size > tailBytes
+		var cmd *exec.Cmd
+		if tailed {
+			cmd = sshCmd(ctx, container, "tail", "-c", strconv.FormatInt(tailBytes, 10), RelayOutputPath)
+		} else {
+			cmd = sshCmd(ctx, container, "cat", RelayOutputPath)
+		}
+		pipe, err := cmd.StdoutPipe()
+		if err != nil {
+			yield(nil, fmt.Errorf("relay stdout pipe: %w", err))
+			return
+		}
+		if err := cmd.Start(); err != nil {
+			yield(nil, fmt.Errorf("start relay read: %w", err))
+			return
+		}
+		broke := false
+		for m, e := range yieldMessages(pipe, parseFn, tailed, container) {
+			if !yield(m, e) {
+				broke = true
+				break
+			}
+		}
+		if broke {
+			// Consumer stopped early: kill the process so Wait returns and the
+			// ssh child is reaped instead of lingering.
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			return
+		}
+		if err := cmd.Wait(); err != nil {
+			yield(nil, fmt.Errorf("relay read: %w", err))
+		}
+	}
+}
+
+// ndjsonScanner returns a bufio.Scanner configured for relay and log NDJSON.
+// Lines can be large: user input with base64 images produces multi-MB records,
+// so the buffer is capped at 32 MiB.
+func ndjsonScanner(r io.Reader) *bufio.Scanner {
+	s := bufio.NewScanner(r)
+	s.Buffer(make([]byte, 0, 1<<20), 32<<20)
+	return s
+}
+
+// yieldMessages parses NDJSON from r, yielding each parsed message in order.
+//
+// When skipFirst is set the first non-empty line is dropped — it is a partial
+// record left by tailing or seeking into the middle of a file. Unparseable
+// lines are logged (tagged with src) and skipped. A scanner read error is
+// reported as a terminal (nil, err) pair after the last good message.
+//
+// The reader is consumed lazily one line at a time, so memory usage is O(1)
+// regardless of total size. This is the shared core behind StreamLogFile
+// (disk) and StreamRelay (SSH).
+func yieldMessages(r io.Reader, parseFn func([]byte) ([]Message, error), skipFirst bool, src string) iter.Seq2[Message, error] {
+	return func(yield func(Message, error) bool) {
+		scanner := ndjsonScanner(r)
+		first := skipFirst
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			if first {
+				first = false
+				continue
+			}
+			parsed, parseErr := parseFn(line)
+			if parseErr != nil {
+				slog.Warn("relay", "msg", "skipping unparseable output line", "src", src, "err", parseErr)
+				continue
+			}
+			for _, m := range parsed {
+				if !yield(m, nil) {
+					return
+				}
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			yield(nil, err)
+		}
+	}
+}
+
+// StreamLogFile streams NDJSON messages from a local file, yielding each in
+// order. When offset > 0 the file is seeked there first and the partial first
+// line is skipped, so only the tail of a large log is replayed. Memory usage
+// is O(1) regardless of file size.
+func StreamLogFile(path string, parseFn func([]byte) ([]Message, error), offset int64) iter.Seq2[Message, error] {
+	return func(yield func(Message, error) bool) {
+		f, err := os.Open(filepath.Clean(path))
+		if err != nil {
+			yield(nil, fmt.Errorf("open %s: %w", path, err))
+			return
+		}
+		defer func() { _ = f.Close() }()
+		if offset > 0 {
+			if _, err := f.Seek(offset, io.SeekStart); err != nil {
+				yield(nil, fmt.Errorf("seek %s to %d: %w", path, offset, err))
+				return
+			}
+		}
+		for m, e := range yieldMessages(f, parseFn, offset > 0, path) {
+			if !yield(m, e) {
+				return
+			}
+		}
+	}
 }
 
 // AttachRelaySession connects to an already-running relay in the container

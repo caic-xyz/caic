@@ -82,8 +82,3 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 func (*Backend) AttachRelay(context.Context, *agent.Options) (*agent.Session, error) {
 	return nil, errors.New("fake backend does not support relay")
 }
-
-// ReadRelayOutput implements agent.Backend.
-func (*Backend) ReadRelayOutput(context.Context, string) ([]agent.Message, int64, error) {
-	return nil, 0, errors.New("fake backend does not support relay")
-}

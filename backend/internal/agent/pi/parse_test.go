@@ -9,6 +9,31 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
+func TestBackendNewParser(t *testing.T) {
+	t.Parallel()
+	// Regression: replay (relay output during adoption, and on-disk logs) uses
+	// NewParser. It must use the stateful wire format so agent_end produces a
+	// terminal ResultMessage; without it RestoreMessages cannot infer the
+	// waiting state and adopted pi tasks stay stuck as "running".
+	t.Run("synthesizes ResultMessage on agent_end", func(t *testing.T) {
+		t.Parallel()
+		agentEnd := []byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":10,"output":5}}]}`)
+		msgs, err := New("", nil).NewParser()(agentEnd)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var hasResult bool
+		for _, m := range msgs {
+			if _, ok := m.(*agent.ResultMessage); ok {
+				hasResult = true
+			}
+		}
+		if !hasResult {
+			t.Fatalf("NewParser produced no ResultMessage for agent_end: %#v", msgs)
+		}
+	})
+}
+
 func TestHandleDoneResultText(t *testing.T) {
 	t.Parallel()
 

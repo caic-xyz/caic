@@ -485,7 +485,7 @@ func (s *Server) loadTaskMessagesOnDemand(entry *taskEntry) {
 		return
 	}
 	entry.loadedTaskOnce.Do(func() {
-		if err := entry.loadedTask.LoadMessages(); err != nil {
+		if err := entry.loadedTask.LoadMessagesTail(); err != nil {
 			slog.Warn("lazy load messages failed", "task", entry.task.ID, "err", err)
 			return
 		}
@@ -822,16 +822,30 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		var relayErr error
 		relayStatusReg := trace.StartRegion(ctx, "relay-status")
 		trace.Logf(ctx, "adopt", "%s: relay-status", c.Name)
-		relayAlive, relayDiag, relayErr = agent.RelayStatus(ctx, c.Name)
+		relayCtx, relayCancel := context.WithTimeout(ctx, 30*time.Second)
+		relayAlive, relayDiag, relayErr = agent.RelayStatus(relayCtx, c.Name)
+		relayCancel()
 		relayStatusReg.End()
 		if relayErr != nil {
 			slog.Warn("relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", relayErr, "diag", relayDiag)
 		}
 		if relayAlive {
-			// Relay is alive — read authoritative output from container.
+			// Relay is alive — read only the tail of the output for message
+			// restoration. Files can be multi-GB; reading the entire thing
+			// would block startup for minutes and OOM the process.
 			relayReadReg := trace.StartRegion(ctx, "relay-read")
 			trace.Logf(ctx, "adopt", "%s: relay-read", c.Name)
-			relayMsgs, relaySize, relayErr = runner.ReadRelayOutput(ctx, c.Name, harnessName)
+			readCtx, readCancel := context.WithTimeout(ctx, 2*time.Minute)
+			if b := runner.Backends[harnessName]; b != nil {
+				// NewParser synthesizes the trailing ResultMessage (stateful wire
+				// format) — RestoreMessages needs it to infer the terminal
+				// (waiting/asking) state instead of leaving the task stuck as
+				// "running".
+				relayMsgs, relaySize, relayErr = agent.ReadRelayTail(readCtx, c.Name, b.NewParser(), 10<<20) // 10 MiB tail
+			} else {
+				relaySize, relayErr = agent.RelayOutputSize(readCtx, c.Name)
+			}
+			readCancel()
 			relayReadReg.End()
 			if relayErr != nil {
 				slog.Warn("relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", relayErr)
@@ -928,22 +942,32 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	}
 
 	// Restore messages from relay or logs.
-	if relayAlive && len(relayMsgs) > 0 {
-		// Relay output is authoritative — zero loss. It contains both
-		// Claude Code stdout and user inputs (logged by the relay).
-		t.RestoreMessages(relayMsgs)
+	if relayAlive {
+		// Always set the relay offset so attach resumes from the right place.
 		t.RelayOffset = relaySize
-		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(relayMsgs))
-	} else if lt != nil {
-		s.setParser(lt)
-		loadMsgsReg := trace.StartRegion(ctx, "load-messages")
-		if err := lt.LoadMessages(); err != nil {
-			slog.Warn("load messages failed", "repo", ri.RelPath, "br", branch, "err", err)
+		if len(relayMsgs) > 0 {
+			t.RestoreMessages(relayMsgs)
+			slog.Debug("relay", "msg", "restored from relay", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(relayMsgs))
 		}
-		loadMsgsReg.End()
-		if len(lt.Msgs) > 0 {
-			t.RestoreMessages(lt.Msgs)
-			slog.Warn("relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(lt.Msgs))
+	}
+	// Fall back to log messages only when relay is dead AND the log is
+	// small enough to parse quickly. Huge logs (multi-GB) would block
+	// startup for minutes; messages load lazily when the user opens the task.
+	const maxAdoptLogSize = 100 << 20 // 100 MiB
+	if !relayAlive || len(relayMsgs) == 0 {
+		if lt != nil && lt.LogSize <= maxAdoptLogSize {
+			s.setParser(lt)
+			loadMsgsReg := trace.StartRegion(ctx, "load-messages")
+			if err := lt.LoadMessages(); err != nil {
+				slog.Warn("load messages failed", "repo", ri.RelPath, "br", branch, "err", err)
+			}
+			loadMsgsReg.End()
+			if len(lt.Msgs) > 0 {
+				t.RestoreMessages(lt.Msgs)
+				slog.Warn("relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(lt.Msgs))
+			}
+		} else if lt != nil {
+			slog.Warn("relay", "msg", "skipping log restore, file too large", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "size", lt.LogSize)
 		}
 	}
 	// RestoreMessages may infer a new state (e.g. waiting) from trailing
@@ -956,7 +980,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	// the 64 KiB window. If the PR is still unset, do a full parse of the
 	// log to recover it. This covers both the relay-alive path (where
 	// LoadMessages was skipped) and the log-restore path.
-	if lt != nil && t.GetPR() == 0 {
+	if lt != nil && t.GetPR() == 0 && lt.LogSize <= maxAdoptLogSize {
 		if lt.ForgePR == 0 {
 			// Full parse not yet done; trigger it for PR metadata only.
 			_ = lt.LoadMessages()
@@ -1020,19 +1044,22 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 			s.taskChanged()
 			s.mu.Unlock()
 			entryRegistered = true
-			// Get the PR head SHA for CI monitoring.
+			// Start CI monitoring in background — GetDefaultBranchSHA is a
+			// forge API call that can block; must not stall adoption.
 			pr := t.Snapshot().ForgePR
 			if pr > 0 {
-				sha, err := f.GetDefaultBranchSHA(ctx, ri.ForgeOwner, ri.ForgeRepo, branch)
-				if err != nil {
-					slog.Warn("adopt: GetDefaultBranchSHA failed", "task", t.ID, "branch", branch, "err", err)
-				} else {
+				go func() {
+					sha, err := f.GetDefaultBranchSHA(s.ctx, ri.ForgeOwner, ri.ForgeRepo, branch)
+					if err != nil {
+						slog.Warn("adopt: GetDefaultBranchSHA failed", "task", t.ID, "branch", branch, "err", err)
+						return
+					}
 					slog.Info("adopt: starting monitorCI", "task", t.ID, "branch", branch, "sha", sha)
 					s.mu.Lock()
 					entry.monitorBranch = branch
 					s.mu.Unlock()
-					go s.ciService.MonitorCI(s.ctx, entry, f, ri.ForgeOwner, ri.ForgeRepo, sha) //nolint:contextcheck // CI monitoring must outlive the request
-				}
+					s.ciService.MonitorCI(s.ctx, entry, f, ri.ForgeOwner, ri.ForgeRepo, sha)
+				}()
 			}
 		}
 	}

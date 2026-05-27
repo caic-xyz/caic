@@ -20,11 +20,6 @@ type Backend interface {
 	// wire formats (e.g. codex) that need it before the first replay message.
 	AttachRelay(ctx context.Context, opts *Options) (*Session, error)
 
-	// ReadRelayOutput reads the complete output.jsonl from the container's
-	// relay and parses it into Messages. Also returns the byte count for
-	// use as an offset in AttachRelay.
-	ReadRelayOutput(ctx context.Context, container string) ([]Message, int64, error)
-
 	// Harness returns the harness identifier ("claude", "gemini", etc.)
 	Harness() Harness
 
@@ -45,15 +40,20 @@ type Backend interface {
 	// The model parameter is the model name reported by the agent at runtime.
 	ContextWindowLimit(model string) int
 
-	// NewParser returns a fresh parse function for offline log replay.
-	// Each call creates independent dedup state.
+	// NewParser returns a fresh parse function for replaying a harness's wire
+	// stream — both relay output.jsonl and on-disk log files. It uses the
+	// harness's full (stateful) wire format, so it synthesizes terminal
+	// messages such as the final ResultMessage (e.g. pi's agent_end → result)
+	// that the underlying stateless line parser would otherwise pass through as
+	// RawMessage. Correct state inference during adoption depends on that
+	// trailing ResultMessage. Each call creates independent state.
 	NewParser() func([]byte) ([]Message, error)
 }
 
 // Base provides default implementations for metadata-only Backend methods.
 // Embed it in backend-specific types to inherit the boilerplate. Each backend
-// must implement Start, AttachRelay, and ReadRelayOutput itself using the
-// package-level helpers (StartRelay, AttachRelaySession, ReadRelayOutput).
+// must implement Start and AttachRelay itself using the package-level helpers
+// (StartRelay, AttachRelaySession).
 type Base struct {
 	HarnessID     Harness
 	ModelList     []string

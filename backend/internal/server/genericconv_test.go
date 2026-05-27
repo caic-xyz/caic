@@ -11,6 +11,48 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 )
 
+func TestNewReplayFilter(t *testing.T) {
+	t.Parallel()
+	// newReplayFilter is the streaming form of filterHistoryForReplay; it must
+	// produce the same surviving messages, in order, for any sequence.
+	td := func() agent.Message { return &agent.TextDeltaMessage{} }
+	tf := func() agent.Message { return &agent.TextMessage{} }
+	hd := func() agent.Message { return &agent.ThinkingDeltaMessage{} }
+	hf := func() agent.Message { return &agent.ThinkingMessage{} }
+	tool := func() agent.Message { return &agent.ToolUseMessage{} }
+
+	cases := map[string][]agent.Message{
+		"deltas then final":      {td(), td(), tf()},
+		"deltas no final":        {td(), td()},
+		"thinking run":           {hd(), hf()},
+		"mixed delta kinds":      {td(), hd(), hf()},
+		"tool breaks run":        {td(), tool(), tf()},
+		"final without deltas":   {tf()},
+		"empty":                  {},
+		"trailing run then text": {tf(), td(), td()},
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			want := filterHistoryForReplay(in)
+			var got []agent.Message
+			push, flush := newReplayFilter(func(m agent.Message) { got = append(got, m) })
+			for _, m := range in {
+				push(m)
+			}
+			flush()
+			if len(got) != len(want) {
+				t.Fatalf("got %d messages, want %d", len(got), len(want))
+			}
+			for i := range want {
+				if got[i] != want[i] {
+					t.Errorf("message %d: got %T, want %T", i, got[i], want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestGenericConvertInitHasHarness(t *testing.T) {
 	t.Parallel()
 	gt := newToolTimingTracker(agent.Claude)

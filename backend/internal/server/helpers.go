@@ -205,6 +205,12 @@ func needsTitleRegen(t *task.Task, lt *task.LoadedTask) bool {
 	if lt == nil || lt.Title == "" {
 		return true // no saved title — must generate
 	}
+	// Skip the full log parse for large files — it would block startup
+	// for minutes. The title from the log header is good enough.
+	const maxLogSize = 100 << 20 // 100 MiB
+	if lt.LogSize > maxLogSize {
+		return false
+	}
 	// Load log messages to count completed turns the title was based on.
 	logResults := 0
 	if err := lt.LoadMessages(); err == nil {

@@ -7,8 +7,8 @@
 //
 // Per-session state (accumulated step cost/usage, turn-close terminal event)
 // is managed by kiloWireFormat, which wraps the stateless parseMessage function.
-// A fresh kiloWireFormat is created for every Start, AttachRelay, and
-// ReadRelayOutput call so that accumulators reset between sessions and replays.
+// A fresh kiloWireFormat is created for every Start, AttachRelay, and NewParser
+// call so that accumulators reset between sessions and replays.
 package kilo
 
 import (
@@ -37,8 +37,7 @@ var _ agent.Backend = (*Backend)(nil)
 
 // NewParser implements agent.Backend.
 func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
-	fw := &jsonutil.FieldWarner{}
-	return func(line []byte) ([]agent.Message, error) { return parseMessage(line, fw) }
+	return (&kiloWireFormat{fw: &jsonutil.FieldWarner{}}).ParseMessage
 }
 
 var defaultModels = []string{
@@ -89,13 +88,6 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 // so that accumulated state from a prior session does not bleed in.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	return agent.AttachRelaySession(ctx, opts, &kiloWireFormat{fw: &jsonutil.FieldWarner{}})
-}
-
-// ReadRelayOutput reads output.jsonl using a fresh kiloWireFormat so that
-// step-finish messages are correctly converted to UsageMessages and the
-// turn.close event produces the terminal ResultMessage.
-func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agent.Message, int64, error) {
-	return agent.ReadRelayOutput(ctx, container, (&kiloWireFormat{fw: &jsonutil.FieldWarner{}}).ParseMessage)
 }
 
 // WritePrompt writes a single user message to the bridge's stdin.

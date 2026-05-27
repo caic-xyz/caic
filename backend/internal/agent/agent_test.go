@@ -382,3 +382,46 @@ func TestReadMessages(t *testing.T) {
 		}
 	})
 }
+
+func TestYieldMessages(t *testing.T) {
+	t.Parallel()
+	lines := []string{
+		`{"type":"system","subtype":"init","cwd":"/","session_id":"s","tools":[],"model":"m","claude_code_version":"1","uuid":"u"}`,
+		`{"type":"assistant","message":{"model":"m","id":"i","role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{}},"session_id":"s","uuid":"u"}`,
+		`{"type":"result","subtype":"success","is_error":false,"duration_ms":100,"num_turns":1,"result":"hi","session_id":"s","total_cost_usd":0.01,"usage":{},"uuid":"u"}`,
+	}
+	collect := func(content string, skipFirst bool) ([]Message, error) {
+		var msgs []Message
+		for m, e := range yieldMessages(strings.NewReader(content), testParseFn, skipFirst, "ctr") {
+			if e != nil {
+				return msgs, e
+			}
+			msgs = append(msgs, m)
+		}
+		return msgs, nil
+	}
+
+	t.Run("Full", func(t *testing.T) {
+		t.Parallel()
+		msgs, err := collect(strings.Join(lines, "\n"), false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 3 {
+			t.Errorf("message count = %d, want 3", len(msgs))
+		}
+	})
+
+	t.Run("SkipFirstPartialLine", func(t *testing.T) {
+		t.Parallel()
+		// Simulate a tail that cut the first record mid-line: the partial
+		// fragment must be dropped, the remaining valid records kept.
+		msgs, err := collect(`ssage":{"model"...truncated`+"\n"+strings.Join(lines[1:], "\n"), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 2 {
+			t.Errorf("message count = %d, want 2", len(msgs))
+		}
+	})
+}

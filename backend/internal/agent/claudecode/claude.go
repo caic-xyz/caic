@@ -31,10 +31,12 @@ func (b *Backend) ParseMessage(line []byte) ([]agent.Message, error) {
 
 var _ agent.Backend = (*Backend)(nil)
 
-// NewParser implements agent.Backend.
+// NewParser implements agent.Backend. It tracks widget streaming deltas with
+// fresh per-call state.
 func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
+	wt := NewWidgetTracker()
 	fw := &jsonutil.FieldWarner{}
-	return func(line []byte) ([]agent.Message, error) { return parseMessage(line, fw) }
+	return func(line []byte) ([]agent.Message, error) { return parseMessageWithTracker(line, wt, fw) }
 }
 
 // New creates a Claude Code backend with wire format and parser configured.
@@ -122,11 +124,6 @@ func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
 // AttachRelay implements agent.Backend.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	return agent.AttachRelaySession(ctx, opts, b)
-}
-
-// ReadRelayOutput implements agent.Backend.
-func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agent.Message, int64, error) {
-	return agent.ReadRelayOutput(ctx, container, b.ParseMessage)
 }
 
 // WriteCompact implements agent.CompactCommand by sending /compact as a user

@@ -36,8 +36,7 @@ var _ agent.Backend = (*Backend)(nil)
 
 // NewParser implements agent.Backend.
 func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
-	fw := &jsonutil.FieldWarner{}
-	return func(line []byte) ([]agent.Message, error) { return parseMessage(line, fw) }
+	return (&wireFormat{fw: &jsonutil.FieldWarner{}}).ParseMessage
 }
 
 // New creates an OpenCode backend with parser configured. If cacheDir is
@@ -158,12 +157,6 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		}
 	}
 	return s, nil
-}
-
-// ReadRelayOutput reads relay output using a fresh wireFormat.
-func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agent.Message, int64, error) {
-	wire := &wireFormat{fw: &jsonutil.FieldWarner{}}
-	return agent.ReadRelayOutput(ctx, container, wire.ParseMessage)
 }
 
 // AttachRelay connects to an already-running relay in the container.

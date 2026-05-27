@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/oschwald/maxminddb-golang/v2"
 )
@@ -94,7 +95,10 @@ func NewChecker(ctx context.Context, allowlistStr, dbPath, githubURL string) (*C
 		c.allowlist = al
 	}
 	if al.allowed("github") {
-		if prefixes, err := fetchGitHubHookCIDRsFrom(ctx, githubURL); err != nil {
+		fetchCtx, fetchCancel := context.WithTimeout(ctx, 10*time.Second)
+		prefixes, err := fetchGitHubHookCIDRsFrom(fetchCtx, githubURL)
+		fetchCancel()
+		if err != nil {
 			slog.Warn("failed to fetch GitHub hook CIDRs; webhook IPs will not be auto-allowed", "err", err)
 		} else {
 			for _, p := range prefixes {

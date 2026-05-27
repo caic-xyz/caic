@@ -6,8 +6,8 @@
 //
 // Per-session state (accumulated usage, text/thinking buffers) is managed by
 // piWireFormat, which wraps the stateless parseMessage function. A fresh
-// piWireFormat is created for every Start, AttachRelay, and ReadRelayOutput
-// call so that accumulators reset between sessions and replays.
+// piWireFormat is created for every Start, AttachRelay, and NewParser call so
+// that accumulators reset between sessions and replays.
 //
 // Extension UI auto-response is handled by piConn, which wraps the default
 // Conn to intercept extension_ui_request messages during ReadMessages and
@@ -78,10 +78,10 @@ func (b *Backend) SetModels(models []string) {
 	b.ModelList = agent.SortModels(models)
 }
 
-// NewParser implements agent.Backend.
+// NewParser implements agent.Backend. It uses a fresh stateful piWireFormat so
+// terminal events (agent_end → ResultMessage) are synthesized during replay.
 func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
-	fw := &jsonutil.FieldWarner{}
-	return func(line []byte) ([]agent.Message, error) { return parseMessage(line, fw) }
+	return (&piWireFormat{fw: &jsonutil.FieldWarner{}}).ParseMessage
 }
 
 // Start launches a Pi RPC process via the relay daemon. It sends optional
@@ -171,12 +171,6 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	wire := &piWireFormat{fw: &jsonutil.FieldWarner{}}
 	return agent.AttachRelaySession(ctx, opts, wire)
-}
-
-// ReadRelayOutput reads relay output using a fresh piWireFormat.
-func (b *Backend) ReadRelayOutput(ctx context.Context, container string) ([]agent.Message, int64, error) {
-	wire := &piWireFormat{fw: &jsonutil.FieldWarner{}}
-	return agent.ReadRelayOutput(ctx, container, wire.ParseMessage)
 }
 
 // buildArgs constructs the Pi CLI arguments for RPC mode.
