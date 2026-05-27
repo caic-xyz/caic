@@ -356,3 +356,66 @@ func TestWireFormatDurationTracking(t *testing.T) {
 		}
 	})
 }
+
+func TestParsePromptCmd(t *testing.T) {
+	t.Parallel()
+
+	t.Run("text prompt", func(t *testing.T) {
+		t.Parallel()
+		line := []byte(`{"type":"prompt","message":"fix the bug"}`)
+		msgs, err := parseMessage(line, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		ui, ok := msgs[0].(*agent.UserInputMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.UserInputMessage", msgs[0])
+		}
+		if ui.Text != "fix the bug" {
+			t.Errorf("Text = %q, want %q", ui.Text, "fix the bug")
+		}
+	})
+
+	t.Run("prompt with images", func(t *testing.T) {
+		t.Parallel()
+		line := []byte(`{"type":"prompt","message":"describe this","images":[{"type":"image","mimeType":"image/png","data":"abc123"}]}`)
+		msgs, err := parseMessage(line, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		ui, ok := msgs[0].(*agent.UserInputMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.UserInputMessage", msgs[0])
+		}
+		if ui.Text != "describe this" {
+			t.Errorf("Text = %q, want %q", ui.Text, "describe this")
+		}
+		if len(ui.Images) != 1 {
+			t.Fatalf("got %d images, want 1", len(ui.Images))
+		}
+		if ui.Images[0].MediaType != "image/png" {
+			t.Errorf("MediaType = %q, want %q", ui.Images[0].MediaType, "image/png")
+		}
+		if ui.Images[0].Data != "abc123" {
+			t.Errorf("Data = %q, want %q", ui.Images[0].Data, "abc123")
+		}
+	})
+
+	t.Run("compact command is skipped", func(t *testing.T) {
+		t.Parallel()
+		line := []byte(`{"type":"compact","customInstructions":"summarize"}`)
+		msgs, err := parseMessage(line, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 0 {
+			t.Fatalf("got %d messages, want 0 (compact skipped)", len(msgs))
+		}
+	})
+}

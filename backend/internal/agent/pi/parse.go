@@ -25,6 +25,7 @@ type typeProbe struct {
 //   - A caic-injected JSON object with a "type" field (caic_diff_stat, etc.)
 //   - A Pi event dispatched by the "type" field (message_update, tool_execution_end, etc.)
 //   - A Pi response envelope (type:"response")
+//   - A Pi command sent on stdin (prompt, compact, etc.) — logged by the relay
 //
 // Emitted agent.Message types:
 //   - TextDeltaMessage     — message_update (text_delta)
@@ -33,6 +34,7 @@ type typeProbe struct {
 //   - ToolResultMessage    — tool_execution_end
 //   - ToolOutputDeltaMessage — tool_execution_update
 //   - DiffStatMessage      — caic_diff_stat injection
+//   - UserInputMessage     — prompt command (stdin logged by relay)
 //   - RawMessage           — unrecognised event types
 func parseMessage(line []byte, _ *jsonutil.FieldWarner) ([]agent.Message, error) {
 	var probe typeProbe
@@ -40,10 +42,29 @@ func parseMessage(line []byte, _ *jsonutil.FieldWarner) ([]agent.Message, error)
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
 
-	// caic-injected lines.
+	// caic-injected lines and stdin commands.
 	switch probe.Type {
 	case "caic_model_info":
 		// Handled by wireFormat.ParseMessage; skip in stateless replay.
+		return nil, nil
+
+	case pi.EventType(pi.CmdPrompt):
+		// Stdin prompt command logged by relay; convert to UserInputMessage.
+		var cmd pi.PromptCmd
+		if err := json.Unmarshal(line, &cmd); err != nil {
+			return nil, fmt.Errorf("unmarshal prompt cmd: %w", err)
+		}
+		ui := &agent.UserInputMessage{Text: cmd.Message}
+		for _, img := range cmd.Images {
+			ui.Images = append(ui.Images, agent.ImageData{
+				MediaType: img.MimeType,
+				Data:      img.Data,
+			})
+		}
+		return []agent.Message{ui}, nil
+
+	case pi.EventType(pi.CmdCompact):
+		// Stdin compact command logged by relay; skip during replay.
 		return nil, nil
 
 	case "caic_diff_stat":
