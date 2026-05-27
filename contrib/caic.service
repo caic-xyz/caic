@@ -18,6 +18,11 @@ WorkingDirectory=%h
 Restart=always
 RestartSec=1s
 
+# --- Resource Limits ---
+CPUQuota=200%
+MemoryMax=4G
+MemoryHigh=3G
+
 # --- Security Hardening ---
 
 # Filesystem isolation
