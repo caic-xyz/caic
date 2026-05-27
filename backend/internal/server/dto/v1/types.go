@@ -103,6 +103,28 @@ const (
 	CheckConclusionStale          CheckConclusion = "stale"
 )
 
+// TaskState is the lifecycle state of a task.
+type TaskState string
+
+// Task lifecycle states.
+const (
+	TaskStatePending      TaskState = "pending"
+	TaskStateBranching    TaskState = "branching"
+	TaskStateProvisioning TaskState = "provisioning"
+	TaskStateStarting     TaskState = "starting"
+	TaskStateRunning      TaskState = "running"
+	TaskStateWaiting      TaskState = "waiting"
+	TaskStateAsking       TaskState = "asking"
+	TaskStateHasPlan      TaskState = "has_plan"
+	TaskStatePulling      TaskState = "pulling"
+	TaskStatePushing      TaskState = "pushing"
+	TaskStateStopping     TaskState = "stopping"
+	TaskStateStopped      TaskState = "stopped"
+	TaskStatePurging      TaskState = "purging"
+	TaskStateFailed       TaskState = "failed"
+	TaskStatePurged       TaskState = "purged"
+)
+
 // ForgePRState is the state of a pull/merge request.
 type ForgePRState string
 
@@ -182,7 +204,7 @@ type Task struct {
 	InitialPrompt                      string       `json:"initialPrompt"`
 	Title                              string       `json:"title"`
 	Repos                              []TaskRepo   `json:"repos,omitempty"`
-	State                              string       `json:"state"`
+	State                              TaskState    `json:"state"`
 	StateUpdatedAt                     time.Time    `json:"stateUpdatedAt"` // When the task state last changed.
 	DiffStat                           DiffStat     `json:"diffStat,omitzero"`
 	CostUSD                            float64      `json:"costUSD"`

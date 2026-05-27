@@ -127,6 +127,26 @@ public enum SyncTargets {
     public static let Default: SyncTarget = "default"
 }
 
+public typealias TaskState = String
+
+public enum TaskStates {
+    public static let Pending: TaskState = "pending"
+    public static let Branching: TaskState = "branching"
+    public static let Provisioning: TaskState = "provisioning"
+    public static let Starting: TaskState = "starting"
+    public static let Running: TaskState = "running"
+    public static let Waiting: TaskState = "waiting"
+    public static let Asking: TaskState = "asking"
+    public static let HasPlan: TaskState = "has_plan"
+    public static let Pulling: TaskState = "pulling"
+    public static let Pushing: TaskState = "pushing"
+    public static let Stopping: TaskState = "stopping"
+    public static let Stopped: TaskState = "stopped"
+    public static let Purging: TaskState = "purging"
+    public static let Failed: TaskState = "failed"
+    public static let Purged: TaskState = "purged"
+}
+
 public typealias ToolOutputContentType = String
 
 public enum ToolOutputContentTypes {
@@ -358,7 +378,7 @@ public struct Task: Codable {
     public let initialPrompt: String
     public let title: String
     public let repos: [TaskRepo]?
-    public let state: String
+    public let state: TaskState
     /// When the task state last changed.
     public let stateUpdatedAt: ISOTimestamp
     public let diffStat: DiffStat?

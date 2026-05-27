@@ -1148,7 +1148,7 @@ func (s *Server) toJSON(ctx context.Context, e *taskEntry) v1.Task {
 			SudoPassword: s.sudoPassword(ctx, e.task),
 			VNCPort:      snap.VNCPort,
 		},
-		State:          snap.State.String(),
+		State:          toV1TaskState(ctx, snap.State),
 		StateUpdatedAt: snap.StateUpdatedAt,
 		Harness:        toV1Harness(e.task.Harness),
 		Model:          snap.Model,

@@ -3,7 +3,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"log/slog"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -356,6 +358,45 @@ func v1PromptToAgent(p v1.Prompt) agent.Prompt {
 // toV1Harness converts agent.Harness to v1.Harness at the server boundary.
 func toV1Harness(h agent.Harness) v1.Harness {
 	return v1.Harness(h)
+}
+
+// toV1TaskState converts task.State to v1.TaskState at the server boundary.
+func toV1TaskState(ctx context.Context, s task.State) v1.TaskState {
+	switch s {
+	case task.StatePending:
+		return v1.TaskStatePending
+	case task.StateBranching:
+		return v1.TaskStateBranching
+	case task.StateProvisioning:
+		return v1.TaskStateProvisioning
+	case task.StateStarting:
+		return v1.TaskStateStarting
+	case task.StateRunning:
+		return v1.TaskStateRunning
+	case task.StateWaiting:
+		return v1.TaskStateWaiting
+	case task.StateAsking:
+		return v1.TaskStateAsking
+	case task.StateHasPlan:
+		return v1.TaskStateHasPlan
+	case task.StatePulling:
+		return v1.TaskStatePulling
+	case task.StatePushing:
+		return v1.TaskStatePushing
+	case task.StateStopping:
+		return v1.TaskStateStopping
+	case task.StateStopped:
+		return v1.TaskStateStopped
+	case task.StatePurging:
+		return v1.TaskStatePurging
+	case task.StateFailed:
+		return v1.TaskStateFailed
+	case task.StatePurged:
+		return v1.TaskStatePurged
+	default:
+		slog.ErrorContext(ctx, "unknown task state", "state", int(s))
+		return v1.TaskStatePending
+	}
 }
 
 // toV1ForgePRState converts forge.PRState to v1.ForgePRState at the server boundary.

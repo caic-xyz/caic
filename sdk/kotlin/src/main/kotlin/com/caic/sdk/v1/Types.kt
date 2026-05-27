@@ -111,6 +111,26 @@ object SyncTargets {
     const val Default: SyncTarget = "default"
 }
 
+typealias TaskState = String
+
+object TaskStates {
+    const val Pending: TaskState = "pending"
+    const val Branching: TaskState = "branching"
+    const val Provisioning: TaskState = "provisioning"
+    const val Starting: TaskState = "starting"
+    const val Running: TaskState = "running"
+    const val Waiting: TaskState = "waiting"
+    const val Asking: TaskState = "asking"
+    const val HasPlan: TaskState = "has_plan"
+    const val Pulling: TaskState = "pulling"
+    const val Pushing: TaskState = "pushing"
+    const val Stopping: TaskState = "stopping"
+    const val Stopped: TaskState = "stopped"
+    const val Purging: TaskState = "purging"
+    const val Failed: TaskState = "failed"
+    const val Purged: TaskState = "purged"
+}
+
 typealias ToolOutputContentType = String
 
 object ToolOutputContentTypes {
@@ -315,7 +335,7 @@ data class Task(
     val initialPrompt: String,
     val title: String,
     val repos: List<TaskRepo>? = null,
-    val state: String,
+    val state: TaskState,
     val stateUpdatedAt: Instant,
     val diffStat: DiffStat? = null,
     @SerialName("costUSD") val costUSD: Double,

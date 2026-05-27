@@ -359,6 +359,26 @@ export type SyncTarget = string;
 export const SyncTargetBranch: SyncTarget = "branch";
 export const SyncTargetDefault: SyncTarget = "default";
 
+export type TaskState = string;
+/**
+ * Supported values.
+ */
+export const TaskStatePending: TaskState = "pending";
+export const TaskStateBranching: TaskState = "branching";
+export const TaskStateProvisioning: TaskState = "provisioning";
+export const TaskStateStarting: TaskState = "starting";
+export const TaskStateRunning: TaskState = "running";
+export const TaskStateWaiting: TaskState = "waiting";
+export const TaskStateAsking: TaskState = "asking";
+export const TaskStateHasPlan: TaskState = "has_plan";
+export const TaskStatePulling: TaskState = "pulling";
+export const TaskStatePushing: TaskState = "pushing";
+export const TaskStateStopping: TaskState = "stopping";
+export const TaskStateStopped: TaskState = "stopped";
+export const TaskStatePurging: TaskState = "purging";
+export const TaskStateFailed: TaskState = "failed";
+export const TaskStatePurged: TaskState = "purged";
+
 /** DiffStat summarises the changes in a branch relative to its base. */
 export type DiffStat = DiffFileStat[];
 
@@ -591,7 +611,7 @@ export interface Task {
   initialPrompt: string;
   title: string;
   repos?: TaskRepo[];
-  state: string;
+  state: TaskState;
   /** When the task state last changed. */
   stateUpdatedAt: ISOTimestamp;
   diffStat?: DiffStat;
