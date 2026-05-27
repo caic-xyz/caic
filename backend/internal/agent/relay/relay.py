@@ -431,6 +431,12 @@ def serve(cmd_args, work_dir, log_stdin=True, strip_env=(), shutdown_grace=_DEFA
                 os.waitpid(pid, os.WNOHANG)
             except ChildProcessError:
                 pass
+        # Exit the parent so it does not fall through into the child's
+        # daemon setup (os.setsid, FD redirect, etc.). Without this, the
+        # parent — already a session leader — crashes on os.setsid() with
+        # PermissionError, causing the SSH session to exit with status 1
+        # even when the relay shut down cleanly.
+        sys.exit(0)
 
     # Child: become session leader so we survive SSH disconnects.
     os.setsid()
