@@ -33,7 +33,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.caic.sdk.v1.EventKinds
+import com.caic.sdk.v1.EventKind
 import com.caic.sdk.v1.EventMessage
 import com.fghbuild.caic.ui.theme.markdownTypography
 import com.fghbuild.caic.util.GroupKind
@@ -123,15 +123,15 @@ fun MarkdownWithRawToggle(text: String, modifier: Modifier = Modifier) {
 @Composable
 fun TextMessageGroup(events: List<EventMessage>) {
     val thinkingEvents = remember(events) {
-        events.filter { it.kind == EventKinds.Thinking || it.kind == EventKinds.ThinkingDelta }
+        events.filter { it.kind == EventKind.Thinking || it.kind == EventKind.ThinkingDelta }
     }
     val text = remember(events) {
-        val finalEv = events.lastOrNull { it.kind == EventKinds.Text }
+        val finalEv = events.lastOrNull { it.kind == EventKind.Text }
         if (finalEv?.text != null) {
             finalEv.text!!.text
         } else {
             events
-                .filter { it.kind == EventKinds.TextDelta && it.textDelta != null }
+                .filter { it.kind == EventKind.TextDelta && it.textDelta != null }
                 .joinToString("") { it.textDelta!!.text }
         }
     }
@@ -147,7 +147,7 @@ fun TextMessageGroup(events: List<EventMessage>) {
                         kind = GroupKind.WIDGET,
                         events = events,
                         widgetHTML = text,
-                        widgetDone = events.any { it.kind == EventKinds.Text },
+                        widgetDone = events.any { it.kind == EventKind.Text },
                     )
                 }
                 WidgetCard(group = widgetGroup)

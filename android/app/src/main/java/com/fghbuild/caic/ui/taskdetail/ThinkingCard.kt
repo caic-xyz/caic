@@ -28,7 +28,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.caic.sdk.v1.EventKinds
+import com.caic.sdk.v1.EventKind
 import com.caic.sdk.v1.EventMessage
 import com.fghbuild.caic.ui.theme.appColors
 
@@ -41,9 +41,9 @@ fun ThinkingCard(events: List<EventMessage>, modifier: Modifier = Modifier) {
         val parts = mutableListOf<String>()
         val deltaBuffer = StringBuilder()
         for (ev in events) {
-            if (ev.kind == EventKinds.ThinkingDelta && ev.thinkingDelta != null) {
+            if (ev.kind == EventKind.ThinkingDelta && ev.thinkingDelta != null) {
                 deltaBuffer.append(ev.thinkingDelta!!.text)
-            } else if (ev.kind == EventKinds.Thinking && ev.thinking != null) {
+            } else if (ev.kind == EventKind.Thinking && ev.thinking != null) {
                 deltaBuffer.clear()
                 parts.add(ev.thinking!!.text)
             }

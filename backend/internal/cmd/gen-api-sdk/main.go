@@ -1978,14 +1978,37 @@ func (d *docRegistry) writeKotlinTypes(outDir string) error {
 	b.WriteString("    override fun deserialize(decoder: Decoder): Instant = Instant.parse(decoder.decodeString())\n")
 	b.WriteString("}\n\n")
 
-	// Type aliases with companion objects.
+	// Sealed interfaces with serializer for exhaustive when.
 	for i := range d.aliases {
 		a := &d.aliases[i]
-		fmt.Fprintf(&b, "typealias %s = String\n\n", a.name)
-		fmt.Fprintf(&b, "object %s {\n", a.plural())
+		// Sealed interface.
+		fmt.Fprintf(&b, "@Serializable(with = %sSerializer::class)\n", a.name)
+		fmt.Fprintf(&b, "sealed interface %s {\n", a.name)
+		fmt.Fprintf(&b, "    val value: String\n")
+		// Data objects for each known value.
 		for _, c := range a.constants {
-			fmt.Fprintf(&b, "    const val %s: %s = %q\n", a.shortName(c), a.name, c.value)
+			fmt.Fprintf(&b, "    @Serializable\n")
+			fmt.Fprintf(&b, "    data object %s : %s {\n", a.shortName(c), a.name)
+			fmt.Fprintf(&b, "        override val value = %q\n", c.value)
+			b.WriteString("    }\n")
 		}
+		// Catch-all for forward compatibility.
+		b.WriteString("    @Serializable\n")
+		fmt.Fprintf(&b, "    data class Other(override val value: String) : %s\n", a.name)
+		b.WriteString("}\n\n")
+		// Serializer.
+		fmt.Fprintf(&b, "object %sSerializer : KSerializer<%s> {\n", a.name, a.name)
+		b.WriteString("    override val descriptor = PrimitiveSerialDescriptor(\"" + a.name + "\", PrimitiveKind.STRING)\n")
+		fmt.Fprintf(&b, "    override fun serialize(encoder: Encoder, value: %s) = encoder.encodeString(value.value)\n", a.name)
+		fmt.Fprintf(&b, "    override fun deserialize(decoder: Decoder): %s {\n", a.name)
+		fmt.Fprintf(&b, "        val v = decoder.decodeString()\n")
+		fmt.Fprintf(&b, "        return when (v) {\n")
+		for _, c := range a.constants {
+			fmt.Fprintf(&b, "            %q -> %s.%s\n", c.value, a.name, a.shortName(c))
+		}
+		fmt.Fprintf(&b, "            else -> %s.Other(v)\n", a.name)
+		b.WriteString("        }\n")
+		b.WriteString("    }\n")
 		b.WriteString("}\n\n")
 	}
 

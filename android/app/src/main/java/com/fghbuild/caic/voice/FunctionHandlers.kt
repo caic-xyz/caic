@@ -7,18 +7,23 @@ import com.caic.sdk.v1.BotFixPRReq
 import com.caic.sdk.v1.CloneRepoReq
 import com.caic.sdk.v1.CreateTaskReq
 import com.caic.sdk.v1.ForkTaskReq
-import com.caic.sdk.v1.EventKinds
+import com.caic.sdk.v1.EventKind
+import com.caic.sdk.v1.ForgePRState
+import com.caic.sdk.v1.Harness
 import com.caic.sdk.v1.InputReq
 import com.caic.sdk.v1.Prompt
 import com.caic.sdk.v1.RepoSpec
 import com.caic.sdk.v1.SyncReq
+import com.caic.sdk.v1.SyncTarget
 import com.caic.sdk.v1.Task
+import com.caic.sdk.v1.TaskState
 import com.caic.sdk.v1.WebFetchReq
 import com.fghbuild.caic.data.TaskRepository
 import com.fghbuild.caic.data.TaskSSEEvent
 import com.fghbuild.caic.util.formatBalance
 import com.fghbuild.caic.util.formatCost
 import com.fghbuild.caic.util.formatElapsed
+import com.fghbuild.caic.util.toHarness
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -86,7 +91,8 @@ class FunctionHandlers(
             else -> emptyList()
         }
         val model = args.optString("model") ?: defaultModel.ifBlank { null }
-        val harness = args.optString("harness") ?: defaultHarness
+        val harnessStr = args.optString("harness") ?: defaultHarness
+        val harness = harnessStr.toHarness()
         val tailscale = args["tailscale"]?.jsonPrimitive?.booleanOrNull ?: false
         val usb = args["usb"]?.jsonPrimitive?.booleanOrNull ?: false
         val display = args["display"]?.jsonPrimitive?.booleanOrNull ?: false
@@ -130,11 +136,11 @@ class FunctionHandlers(
             append("Elapsed: ${formatElapsed(t.duration)}  ")
             appendLine("Cost: ${formatCost(t.costUSD)}")
             when {
-                t.state == "purged" && !t.result.isNullOrBlank() ->
+                t.state == TaskState.Purged && !t.result.isNullOrBlank() ->
                     appendLine("**Result:** ${t.result}")
-                t.state == "stopped" ->
+                t.state == TaskState.Stopped ->
                     appendLine("**Stopped:** container died")
-                t.state == "failed" && !t.error.isNullOrBlank() ->
+                t.state == TaskState.Failed && !t.error.isNullOrBlank() ->
                     appendLine("**Error:** ${t.error}")
             }
             t.diffStat?.takeIf { it.isNotEmpty() }?.let { diff ->
@@ -165,7 +171,14 @@ class FunctionHandlers(
         val num = args.requireInt("task_number")
         val force = args["force"]?.jsonPrimitive?.booleanOrNull ?: false
         val target = args.optString("target").let { if (it == "main" || it == "master") "default" else it }
-        val resp = apiClient.syncTask(taskId, SyncReq(force = force, target = target))
+        val targetEnum = target?.let { t ->
+            when (t) {
+                "default" -> SyncTarget.Default
+                "branch" -> SyncTarget.Branch
+                else -> SyncTarget.Other(t)
+            }
+        }
+        val resp = apiClient.syncTask(taskId, SyncReq(force = force, target = targetEnum))
         val issues = resp.safetyIssues
         val verb = if (target == "default") "Pushed task #$num to main" else "Synced task #$num"
         return if (issues.isNullOrEmpty()) {
@@ -201,7 +214,7 @@ class FunctionHandlers(
         val taskId = resolveTaskNumber(args) ?: return errorResult("Unknown task number")
         val num = args.requireInt("task_number")
         val prompt = args.requireString("prompt")
-        val harness = args.optString("harness")
+        val harness = args.optString("harness")?.toHarness()
         val model = args.optString("model")
         val resp = apiClient.forkTask(
             taskId,
@@ -246,12 +259,12 @@ class FunctionHandlers(
                 if (event is TaskSSEEvent.Event) events.add(event.msg)
             }
 
-        val message = events.lastOrNull { it.kind == EventKinds.Result }?.result?.result?.let { r ->
+        val message = events.lastOrNull { it.kind == EventKind.Result }?.result?.result?.let { r ->
             "Task #$num result: $r"
-        } ?: events.lastOrNull { it.kind == EventKinds.Ask }?.ask?.questions?.firstOrNull()?.let { q ->
+        } ?: events.lastOrNull { it.kind == EventKind.Ask }?.ask?.questions?.firstOrNull()?.let { q ->
             val opts = q.options.joinToString(", ") { it.label }
             "Task #$num is asking: ${q.question} Options: $opts"
-        } ?: events.lastOrNull { it.kind == EventKinds.Text }?.text?.text?.let { t ->
+        } ?: events.lastOrNull { it.kind == EventKind.Text }?.text?.text?.let { t ->
             "Last message from task #$num: $t"
         } ?: "No messages from task #$num yet."
         return textResult(message)
@@ -324,18 +337,18 @@ private fun taskSummaryLine(num: Int, t: Task): String {
     val extras = buildList {
         val pr = t.forgePR
         val prState = t.forgePRState
-        if (pr != null && pr > 0 && prState != "closed" && prState != "merged") add("PR #$pr")
-        if (!t.ciStatus.isNullOrBlank()) add("CI: ${t.ciStatus}")
+        if (pr != null && pr > 0 && prState != ForgePRState.Closed && prState != ForgePRState.Merged) add("PR #$pr")
+        if (t.ciStatus != null) add("CI: ${t.ciStatus!!.value}")
     }
     val extrasStr = if (extras.isNotEmpty()) ", ${extras.joinToString(", ")}" else ""
-    val base = "$num. **$name** — ${t.state}, ${formatElapsed(t.duration)}, " +
-        "${formatCost(t.costUSD)}, ${t.harness}${diffStatSummary(t)}$extrasStr"
+    val base = "$num. **$name** — ${t.state.value}, ${formatElapsed(t.duration)}, " +
+        "${formatCost(t.costUSD)}, ${t.harness.value}${diffStatSummary(t)}$extrasStr"
     return when {
-        t.state == "purged" && !t.result.isNullOrBlank() ->
+        t.state == TaskState.Purged && !t.result.isNullOrBlank() ->
             "$base — ${t.result!!.take(RESULT_SNIPPET_MAX)}"
-        t.state == "stopped" ->
+        t.state == TaskState.Stopped ->
             "$base — container died"
-        t.state == "failed" && !t.error.isNullOrBlank() ->
+        t.state == TaskState.Failed && !t.error.isNullOrBlank() ->
             "$base — ${t.error}"
         else -> base
     }

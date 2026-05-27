@@ -12,7 +12,7 @@ import com.caic.sdk.v1.EventInit
 import com.caic.sdk.v1.EventResult
 import com.caic.sdk.v1.EventUsage
 import com.caic.sdk.v1.EventUserInput
-import com.caic.sdk.v1.EventKinds
+import com.caic.sdk.v1.EventKind
 import com.caic.sdk.v1.EventThinking
 import com.caic.sdk.v1.EventThinkingDelta
 import com.caic.sdk.v1.EventWidget
@@ -27,28 +27,28 @@ import org.junit.Test
 
 class GroupingTest {
     private fun textDeltaEvent(text: String, ts: Long = 0) = EventMessage(
-        kind = EventKinds.TextDelta, ts = ts,
+        kind = EventKind.TextDelta, ts = ts,
         textDelta = EventTextDelta(text = text),
     )
 
     private fun textEvent(text: String, ts: Long = 0) = EventMessage(
-        kind = EventKinds.Text, ts = ts,
+        kind = EventKind.Text, ts = ts,
         text = EventText(text = text),
     )
 
     private fun toolUseEvent(id: String, name: String, ts: Long = 0) = EventMessage(
-        kind = EventKinds.ToolUse, ts = ts,
+        kind = EventKind.ToolUse, ts = ts,
         toolUse = EventToolUse(toolUseID = id, name = name, input = JsonObject(emptyMap())),
     )
 
     private fun toolResultEvent(id: String, duration: Double = 0.1, ts: Long = 0) = EventMessage(
-        kind = EventKinds.ToolResult, ts = ts,
+        kind = EventKind.ToolResult, ts = ts,
         toolResult = EventToolResult(toolUseID = id, duration = duration),
     )
 
     @Suppress("LongMethod")
     private fun resultEvent(ts: Long = 0) = EventMessage(
-        kind = EventKinds.Result, ts = ts,
+        kind = EventKind.Result, ts = ts,
         result = EventResult(
             subtype = "success", isError = false, result = "done",
             totalCostUSD = 0.01, duration = 1.0, durationAPI = 0.9,
@@ -60,7 +60,7 @@ class GroupingTest {
     )
 
     private fun askEvent(id: String, question: String, ts: Long = 0) = EventMessage(
-        kind = EventKinds.Ask, ts = ts,
+        kind = EventKind.Ask, ts = ts,
         ask = EventAsk(
             toolUseID = id,
             questions = listOf(AskQuestion(question = question, options = emptyList())),
@@ -68,7 +68,7 @@ class GroupingTest {
     )
 
     private fun userInputEvent(text: String, ts: Long = 0) = EventMessage(
-        kind = EventKinds.UserInput, ts = ts,
+        kind = EventKind.UserInput, ts = ts,
         userInput = EventUserInput(text = text),
     )
 
@@ -154,7 +154,7 @@ class GroupingTest {
             val groups = groupMessages(listOf(
                 toolUseEvent("t1", "Read"),
                 EventMessage(
-                    kind = EventKinds.Usage, ts = 0,
+                    kind = EventKind.Usage, ts = 0,
                     usage = EventUsage(
                         inputTokens = 100, outputTokens = 50,
                         cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
@@ -184,7 +184,7 @@ class GroupingTest {
             val groups = groupMessages(listOf(
                 toolUseEvent("t1", "Read"),
                 EventMessage(
-                    kind = EventKinds.Usage, ts = 0,
+                    kind = EventKind.Usage, ts = 0,
                     usage = EventUsage(
                         inputTokens = 100, outputTokens = 50,
                         cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
@@ -201,7 +201,7 @@ class GroupingTest {
 
         t.run("rateLimit warning creates OTHER group") {
             val groups = groupMessages(listOf(EventMessage(
-                kind = EventKinds.RateLimit, ts = 1,
+                kind = EventKind.RateLimit, ts = 1,
                 rateLimit = EventRateLimit(
                     status = "allowed_warning", resetsAt = 0.0,
                     rateLimitType = "five_hour", utilization = 0.8,
@@ -213,7 +213,7 @@ class GroupingTest {
 
         t.run("rateLimit allowed is filtered out") {
             val groups = groupMessages(listOf(EventMessage(
-                kind = EventKinds.RateLimit, ts = 1,
+                kind = EventKind.RateLimit, ts = 1,
                 rateLimit = EventRateLimit(
                     status = "allowed", resetsAt = 0.0,
                     rateLimitType = "five_hour", utilization = 0.3,
@@ -224,7 +224,7 @@ class GroupingTest {
 
         t.run("rateLimit rejected creates OTHER group") {
             val groups = groupMessages(listOf(EventMessage(
-                kind = EventKinds.RateLimit, ts = 1,
+                kind = EventKind.RateLimit, ts = 1,
                 rateLimit = EventRateLimit(
                     status = "rejected", resetsAt = 1711000000.0,
                     rateLimitType = "seven_day", utilization = 1.0,
@@ -264,7 +264,7 @@ class GroupingTest {
         t.run("durationMs uses result.duration directly (per-invocation, not cumulative)") {
             // ResultMessage.DurationMs is per-invocation wall-clock time for that turn.
             fun makeResult(duration: Double) = EventMessage(
-                kind = EventKinds.Result, ts = 0,
+                kind = EventKind.Result, ts = 0,
                 result = EventResult(
                     subtype = "success", isError = false, result = "done",
                     totalCostUSD = 0.01, duration = duration, durationAPI = duration * 0.9,
@@ -304,7 +304,7 @@ class GroupingTest {
             val groups = groupMessages(listOf(
                 toolUseEvent("t1", "Read"),
                 EventMessage(
-                    kind = EventKinds.Usage, ts = 0,
+                    kind = EventKind.Usage, ts = 0,
                     usage = EventUsage(
                         inputTokens = 100, outputTokens = 50,
                         cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
@@ -313,7 +313,7 @@ class GroupingTest {
                 textDeltaEvent("commentary"),
                 toolUseEvent("t2", "Bash"),
                 EventMessage(
-                    kind = EventKinds.Usage, ts = 0,
+                    kind = EventKind.Usage, ts = 0,
                     usage = EventUsage(
                         inputTokens = 200, outputTokens = 100,
                         cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
@@ -332,7 +332,7 @@ class GroupingTest {
             // In practice, an ask is always followed by a usage event from the
             // next assistant turn. The ask + usage together form a hard boundary.
             val usage = EventMessage(
-                kind = EventKinds.Usage, ts = 0,
+                kind = EventKind.Usage, ts = 0,
                 usage = EventUsage(
                     inputTokens = 100, outputTokens = 50,
                     cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
@@ -355,7 +355,7 @@ class GroupingTest {
         t.run("todo events are skipped and don't split tool groups") {
             val groups = groupMessages(listOf(
                 toolUseEvent("t1", "Read"),
-                EventMessage(kind = EventKinds.Todo, ts = 0),
+                EventMessage(kind = EventKind.Todo, ts = 0),
                 toolUseEvent("t2", "Bash"),
             ))
             assertEquals(1, groups.size)
@@ -367,11 +367,11 @@ class GroupingTest {
             // prevents the merge pass from absorbing thinking into the tool group.
             val groups = groupMessages(listOf(
                 EventMessage(
-                    kind = EventKinds.ThinkingDelta, ts = 0,
+                    kind = EventKind.ThinkingDelta, ts = 0,
                     thinkingDelta = EventThinkingDelta(text = "thinking..."),
                 ),
                 EventMessage(
-                    kind = EventKinds.Usage, ts = 0,
+                    kind = EventKind.Usage, ts = 0,
                     usage = EventUsage(
                         inputTokens = 100, outputTokens = 50,
                         cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
@@ -383,7 +383,7 @@ class GroupingTest {
             assertEquals(1, groups.size)
             assertEquals(GroupKind.ACTION, groups[0].kind)
             assertEquals(1, groups[0].toolCalls.size)
-            assertTrue(groups[0].events.any { it.kind == EventKinds.ThinkingDelta })
+            assertTrue(groups[0].events.any { it.kind == EventKind.ThinkingDelta })
         }
 
         t.run("thinking events are absorbed into an adjacent tool group") {
@@ -392,21 +392,21 @@ class GroupingTest {
             val groups = groupMessages(listOf(
                 toolUseEvent("t1", "Read"),
                 EventMessage(
-                    kind = EventKinds.Usage, ts = 0,
+                    kind = EventKind.Usage, ts = 0,
                     usage = EventUsage(
                         inputTokens = 100, outputTokens = 50,
                         cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
                     ),
                 ),
-                EventMessage(kind = EventKinds.Thinking, ts = 0, thinking = EventThinking("hmm")),
-                EventMessage(kind = EventKinds.SubagentStart, ts = 0),
+                EventMessage(kind = EventKind.Thinking, ts = 0, thinking = EventThinking("hmm")),
+                EventMessage(kind = EventKind.SubagentStart, ts = 0),
                 toolUseEvent("t2", "Bash"),
-                EventMessage(kind = EventKinds.SubagentEnd, ts = 0),
+                EventMessage(kind = EventKind.SubagentEnd, ts = 0),
             ))
             // Thinking is absorbed into the merged action group; no standalone thinking group.
             val toolGroup = groups.first { it.kind == GroupKind.ACTION }
             assertEquals(2, toolGroup.toolCalls.size)
-            assertTrue(toolGroup.events.any { it.kind == EventKinds.Thinking })
+            assertTrue(toolGroup.events.any { it.kind == EventKind.Thinking })
             // Subagent events don't create groups.
             assertTrue(groups.none { it.kind == GroupKind.OTHER })
         }
@@ -417,21 +417,21 @@ class GroupingTest {
             val groups = groupMessages(listOf(
                 toolUseEvent("t1", "Read"),
                 EventMessage(
-                    kind = EventKinds.Usage, ts = 0,
+                    kind = EventKind.Usage, ts = 0,
                     usage = EventUsage(
                         inputTokens = 100, outputTokens = 50,
                         cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
                     ),
                 ),
                 EventMessage(
-                    kind = EventKinds.ThinkingDelta, ts = 0,
+                    kind = EventKind.ThinkingDelta, ts = 0,
                     thinkingDelta = EventThinkingDelta(text = "analyzing..."),
                 ),
             ))
             assertEquals(1, groups.size)
             assertEquals(GroupKind.ACTION, groups[0].kind)
             assertEquals(1, groups[0].toolCalls.size)
-            assertTrue(groups[0].events.any { it.kind == EventKinds.ThinkingDelta })
+            assertTrue(groups[0].events.any { it.kind == EventKind.ThinkingDelta })
         }
 
         t.run("thinking before text after tool group is moved into the tool group") {
@@ -440,7 +440,7 @@ class GroupingTest {
             // ThinkingCard outside the tool group. The merge pass should extract
             // thinking events from the text group into the preceding tool group.
             val usage = EventMessage(
-                kind = EventKinds.Usage, ts = 0,
+                kind = EventKind.Usage, ts = 0,
                 usage = EventUsage(
                     inputTokens = 100, outputTokens = 50,
                     cacheCreationInputTokens = 0, cacheReadInputTokens = 0, model = "test",
@@ -450,7 +450,7 @@ class GroupingTest {
                 toolUseEvent("t1", "Read"),
                 usage,
                 EventMessage(
-                    kind = EventKinds.Thinking, ts = 0,
+                    kind = EventKind.Thinking, ts = 0,
                     thinking = EventThinking(text = "reflecting"),
                 ),
                 textDeltaEvent("The result is..."),
@@ -458,8 +458,8 @@ class GroupingTest {
             assertEquals(2, groups.size)
             val toolGroup = groups.first { it.kind == GroupKind.ACTION }
             val textGroup = groups.first { it.kind == GroupKind.TEXT }
-            assertTrue(toolGroup.events.any { it.kind == EventKinds.Thinking })
-            assertTrue(textGroup.events.none { it.kind == EventKinds.Thinking })
+            assertTrue(toolGroup.events.any { it.kind == EventKind.Thinking })
+            assertTrue(textGroup.events.none { it.kind == EventKind.Thinking })
         }
 
         t.run("thinking followed by text is absorbed into the text group") {
@@ -467,15 +467,15 @@ class GroupingTest {
             // Thinking block; it should be embedded inside the text group instead.
             val groups = groupMessages(listOf(
                 EventMessage(
-                    kind = EventKinds.ThinkingDelta, ts = 0,
+                    kind = EventKind.ThinkingDelta, ts = 0,
                     thinkingDelta = EventThinkingDelta(text = "thinking..."),
                 ),
                 textDeltaEvent("hello"),
             ))
             assertEquals(1, groups.size)
             assertEquals(GroupKind.TEXT, groups[0].kind)
-            assertTrue(groups[0].events.any { it.kind == EventKinds.ThinkingDelta })
-            assertTrue(groups[0].events.any { it.kind == EventKinds.TextDelta })
+            assertTrue(groups[0].events.any { it.kind == EventKind.ThinkingDelta })
+            assertTrue(groups[0].events.any { it.kind == EventKind.TextDelta })
         }
     }
 
@@ -484,11 +484,11 @@ class GroupingTest {
         t.run("widgetDelta events create a widget group") {
             val groups = groupMessages(listOf(
                 EventMessage(
-                    kind = EventKinds.WidgetDelta, ts = 0,
+                    kind = EventKind.WidgetDelta, ts = 0,
                     widgetDelta = EventWidgetDelta(toolUseID = "w1", delta = "<h1>"),
                 ),
                 EventMessage(
-                    kind = EventKinds.WidgetDelta, ts = 0,
+                    kind = EventKind.WidgetDelta, ts = 0,
                     widgetDelta = EventWidgetDelta(toolUseID = "w1", delta = "Hi</h1>"),
                 ),
             ))
@@ -502,11 +502,11 @@ class GroupingTest {
         t.run("widget event finalises widget group from deltas") {
             val groups = groupMessages(listOf(
                 EventMessage(
-                    kind = EventKinds.WidgetDelta, ts = 0,
+                    kind = EventKind.WidgetDelta, ts = 0,
                     widgetDelta = EventWidgetDelta(toolUseID = "w1", delta = "<h1>"),
                 ),
                 EventMessage(
-                    kind = EventKinds.Widget, ts = 0,
+                    kind = EventKind.Widget, ts = 0,
                     widget = EventWidget(toolUseID = "w1", title = "Chart", html = "<h1>Done</h1>"),
                 ),
             ))
@@ -519,7 +519,7 @@ class GroupingTest {
         t.run("widget event alone creates a widget group (replay)") {
             val groups = groupMessages(listOf(
                 EventMessage(
-                    kind = EventKinds.Widget, ts = 0,
+                    kind = EventKind.Widget, ts = 0,
                     widget = EventWidget(toolUseID = "w1", title = "Test", html = "<p>hi</p>"),
                 ),
             ))
@@ -532,7 +532,7 @@ class GroupingTest {
         t.run("toolResult for widget marks widgetDone") {
             val groups = groupMessages(listOf(
                 EventMessage(
-                    kind = EventKinds.WidgetDelta, ts = 0,
+                    kind = EventKind.WidgetDelta, ts = 0,
                     widgetDelta = EventWidgetDelta(toolUseID = "w1", delta = "<p>x</p>"),
                 ),
                 toolResultEvent("w1"),
@@ -574,7 +574,7 @@ class GroupingTest {
             val msgs = listOf(
                 userInputEvent("initial prompt", ts = 0),
                 EventMessage(
-                    kind = EventKinds.Init, ts = 1L,
+                    kind = EventKind.Init, ts = 1L,
                     init = EventInit(sessionID = "s1", model = "m", agentVersion = "1", tools = emptyList(), cwd = "/", harness = "claude"),
                 ),
                 textDeltaEvent("response", ts = 2),
@@ -590,7 +590,7 @@ class GroupingTest {
             // Simulate turn 1 completing, then turn 2 completing incrementally.
             // Both result events have per-invocation DurationMs (1s and 3s).
             fun makeResult(duration: Double, ts: Long) = EventMessage(
-                kind = EventKinds.Result, ts = ts,
+                kind = EventKind.Result, ts = ts,
                 result = EventResult(
                     subtype = "success", isError = false, result = "done",
                     totalCostUSD = 0.01, duration = duration, durationAPI = duration * 0.9,
@@ -660,7 +660,7 @@ class GroupingTest {
             assertEquals(1, state2.currentSessionCompletedTurns.size)
             assertNotNull(state2.currentTurn)
             val liveTurn = state2.currentTurn!!
-            assertTrue(liveTurn.groups.any { g -> g.events.any { it.kind == EventKinds.UserInput } })
+            assertTrue(liveTurn.groups.any { g -> g.events.any { it.kind == EventKind.UserInput } })
         }
 
         t.run("completed turn and live turn coexist after user reply") {
@@ -698,8 +698,8 @@ class GroupingTest {
             // The last completed turn contains the user reply and the second agent response.
             val lastTurn = state.currentSessionCompletedTurns.last()
             val allEvents = lastTurn.groups.flatMap { it.events }
-            assertTrue(allEvents.any { it.kind == EventKinds.UserInput })
-            assertTrue(allEvents.any { it.kind == EventKinds.TextDelta })
+            assertTrue(allEvents.any { it.kind == EventKind.UserInput })
+            assertTrue(allEvents.any { it.kind == EventKind.TextDelta })
         }
 
         t.run("currentSessionCompletedTurns has stable reference when no turn completes") {
@@ -715,7 +715,7 @@ class GroupingTest {
 
             // Add a thinking_delta — no turn completion, so completed turns must not change reference.
             val moreMsgs = msgs + listOf(
-                EventMessage(kind = EventKinds.ThinkingDelta, ts = 2, thinkingDelta = com.caic.sdk.v1.EventThinkingDelta(text = "hmm")),
+                EventMessage(kind = EventKind.ThinkingDelta, ts = 2, thinkingDelta = com.caic.sdk.v1.EventThinkingDelta(text = "hmm")),
             )
             val state2 = nextGrouped(state1, moreMsgs)
             assertEquals(0, state2.currentSessionCompletedTurns.size)
@@ -809,7 +809,7 @@ class GroupingTest {
         for (i in 0 until totalEvents / batchSize) {
             val newDeltas = (0 until batchSize).map { j ->
                 EventMessage(
-                    kind = EventKinds.ThinkingDelta,
+                    kind = EventKind.ThinkingDelta,
                     ts = 1777988039509 + (i * batchSize + j).toLong(),
                     thinkingDelta = EventThinkingDelta(text = "word${i * batchSize + j} "),
                 )
@@ -837,7 +837,7 @@ class GroupingTest {
         val msgs = mutableListOf<EventMessage>()
         // Init event at ~realistic offset from the trace.
         msgs.add(EventMessage(
-            kind = EventKinds.Init, ts = 1777988039000,
+            kind = EventKind.Init, ts = 1777988039000,
             init = EventInit(
                 model = "deepseek-v4-pro", agentVersion = "1.0",
                 sessionID = "bench-session", tools = emptyList(), cwd = "/home/user",
@@ -846,12 +846,12 @@ class GroupingTest {
         ))
         // One thinking_start, then many thinking_delta.
         msgs.add(EventMessage(
-            kind = EventKinds.Thinking, ts = 1777988039500,
+            kind = EventKind.Thinking, ts = 1777988039500,
             thinking = EventThinking(text = "Let me think about this..."),
         ))
         for (i in 0 until count) {
             msgs.add(EventMessage(
-                kind = EventKinds.ThinkingDelta,
+                kind = EventKind.ThinkingDelta,
                 ts = 1777988039509 + i.toLong(),
                 thinkingDelta = EventThinkingDelta(text = "word$i "),
             ))

@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import com.caic.sdk.v1.Task
+import com.caic.sdk.v1.TaskState
 import com.fghbuild.caic.MainActivity
 import com.fghbuild.caic.R
 import com.fghbuild.caic.voice.VoiceSession
@@ -18,7 +19,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private val ATTENTION_STATES = setOf("waiting", "asking", "has_plan")
+private val ATTENTION_STATES = setOf(TaskState.Waiting, TaskState.Asking, TaskState.HasPlan)
 
 @Singleton
 class TaskNotifier @Inject constructor(
@@ -33,7 +34,7 @@ class TaskNotifier @Inject constructor(
         job?.cancel()
         ensureChannel()
         job = scope.launch {
-            var prevStates = emptyMap<String, String>()
+            var prevStates = emptyMap<String, TaskState>()
             var initialized = false
             taskRepository.tasks.collect { tasks ->
                 val currentIds = tasks.map { it.id }.toSet()
@@ -42,7 +43,9 @@ class TaskNotifier @Inject constructor(
                         val needsInput = task.state in ATTENTION_STATES
                         val prevNeedsInput = prevStates[task.id] in ATTENTION_STATES
                         when {
-                            needsInput && prevStates[task.id] == "running" && !voiceSession.state.value.connected -> postNotification(task)
+                            needsInput &&
+                                prevStates[task.id] == TaskState.Running &&
+                                !voiceSession.state.value.connected -> postNotification(task)
                             !needsInput && prevNeedsInput -> nm.cancel(notificationId(task.id))
                         }
                     }

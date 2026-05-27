@@ -8,12 +8,14 @@ import com.caic.sdk.v1.BotFixCIReq
 import com.caic.sdk.v1.CloneRepoReq
 import com.caic.sdk.v1.Config
 import com.caic.sdk.v1.CreateTaskReq
+import com.caic.sdk.v1.Harness
 import com.caic.sdk.v1.HarnessInfo
 import com.caic.sdk.v1.ImageData
 import com.caic.sdk.v1.Prompt
 import com.caic.sdk.v1.Repo
 import com.caic.sdk.v1.RepoSpec
 import com.caic.sdk.v1.Task
+import com.caic.sdk.v1.TaskState
 import com.caic.sdk.v1.UserResp
 import com.caic.sdk.v1.BranchInfo
 import com.caic.sdk.v1.UsageResp
@@ -35,14 +37,12 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.util.Log
+import com.fghbuild.caic.util.toHarness
 import javax.inject.Inject
 
 
 private const val TAG = "TaskListViewModel"
 
-// Compare task IDs descending (newest first). Ksid strings use base32 Extended
-// Hex (0-9A-V), so lexicographic order matches numeric order only for equal-length
-// strings. Sort by length descending first, then lexicographically descending.
 private val taskIdDesc = compareByDescending<Task> { it.id?.length ?: 0 }
     .thenByDescending { it.id ?: "" }
 
@@ -136,8 +136,8 @@ class TaskListViewModel @Inject constructor(
             }
 
             val nextGroup = when (t.state) {
-                "purged", "failed" -> g.copy(purged = g.purged + t)
-                "stopped" -> g.copy(stopped = g.stopped + t)
+                is TaskState.Purged, is TaskState.Failed -> g.copy(purged = g.purged + t)
+                is TaskState.Stopped -> g.copy(stopped = g.stopped + t)
                 else -> g.copy(active = g.active + t)
             }
 
@@ -429,7 +429,7 @@ class TaskListViewModel @Inject constructor(
                         repos = form.selectedRepos.ifEmpty { null }?.map {
                             RepoSpec(name = it.path, baseBranch = it.branch.ifBlank { null })
                         },
-                        harness = form.selectedHarness,
+                        harness = form.selectedHarness.toHarness(),
                         model = form.selectedModel.ifBlank { null },
                         effort = form.selectedEffort.ifBlank { null },
                         tailscale = form.tailscaleEnabled,

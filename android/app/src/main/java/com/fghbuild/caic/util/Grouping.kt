@@ -8,7 +8,7 @@ import com.caic.sdk.v1.EventResult
 import com.caic.sdk.v1.EventToolResult
 import com.caic.sdk.v1.EventToolUse
 import com.caic.sdk.v1.TodoItem
-import com.caic.sdk.v1.EventKinds
+import com.caic.sdk.v1.EventKind
 import kotlin.math.max
 
 enum class GroupKind { TEXT, ACTION, ASK, USER_INPUT, WIDGET, OTHER }
@@ -60,8 +60,8 @@ data class Session(
 
 /** Returns true if this event starts a new session. */
 fun EventMessage.isSessionBoundary() =
-    kind == EventKinds.Init ||
-        (kind == EventKinds.System && system?.subtype == "compact_boundary")
+    kind == EventKind.Init ||
+        (kind == EventKind.System && system?.subtype == "compact_boundary")
 
 /** Mutable builder for ToolCall, used only inside groupMessages(). */
 private class MutableToolCall(
@@ -110,10 +110,10 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
 
     for (ev in msgs) {
         when (ev.kind) {
-            EventKinds.Text -> {
+            EventKind.Text -> {
                 val last = lastGroup()
                 if (last != null && last.kind == GroupKind.TEXT &&
-                    last.events.any { it.kind == EventKinds.TextDelta }
+                    last.events.any { it.kind == EventKind.TextDelta }
                 ) {
                     last.events.add(ev)
                 } else if (last != null && last.kind == GroupKind.ACTION && last.toolCalls.isEmpty()) {
@@ -128,7 +128,7 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
                     groups.add(MutableGroup(kind = GroupKind.TEXT, events = mutableListOf(ev)))
                 }
             }
-            EventKinds.TextDelta -> {
+            EventKind.TextDelta -> {
                 val last = lastGroup()
                 if (last != null && last.kind == GroupKind.TEXT) {
                     last.events.add(ev)
@@ -143,7 +143,7 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
                     groups.add(MutableGroup(kind = GroupKind.TEXT, events = mutableListOf(ev)))
                 }
             }
-            EventKinds.ToolUse -> {
+            EventKind.ToolUse -> {
                 val toolUse = ev.toolUse ?: continue
                 // All tool calls start as pending; done is set by toolResult or implicit-done pass.
                 val call = MutableToolCall(use = toolUse, done = false)
@@ -170,7 +170,7 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
                     usageSinceLastTool = false
                 }
             }
-            EventKinds.ToolResult -> {
+            EventKind.ToolResult -> {
                 val tr = ev.toolResult ?: continue
                 var matched = false
                 // Check widget groups first for matching toolResult.
@@ -201,11 +201,11 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
                     groups.add(MutableGroup(kind = GroupKind.ACTION, events = mutableListOf(ev)))
                 }
             }
-            EventKinds.Ask -> {
+            EventKind.Ask -> {
                 val ask = ev.ask ?: continue
                 groups.add(MutableGroup(kind = GroupKind.ASK, events = mutableListOf(ev), ask = ask))
             }
-            EventKinds.UserInput -> {
+            EventKind.UserInput -> {
                 // Look backwards past result/other groups to find the most recent
                 // unanswered ask group. The agent emits a result event after
                 // AskUserQuestion, so the ask group is typically not the last group.
@@ -222,7 +222,7 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
                     groups.add(MutableGroup(kind = GroupKind.USER_INPUT, events = mutableListOf(ev)))
                 }
             }
-            EventKinds.Usage -> {
+            EventKind.Usage -> {
                 usageSinceLastTool = true
                 val last = lastGroup()
                 if (last != null && (last.kind == GroupKind.TEXT || last.kind == GroupKind.ACTION)) {
@@ -231,19 +231,19 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
                     groups.add(MutableGroup(kind = GroupKind.OTHER, events = mutableListOf(ev)))
                 }
             }
-            EventKinds.Todo -> { /* Rendered by ProgressPanel directly; skip to avoid splitting tool groups. */ }
-            EventKinds.DiffStat -> { /* Metadata-only; skip. */ }
-            EventKinds.Thinking -> {
+            EventKind.Todo -> { /* Rendered by ProgressPanel directly; skip to avoid splitting tool groups. */ }
+            EventKind.DiffStat -> { /* Metadata-only; skip. */ }
+            EventKind.Thinking -> {
                 val last = lastGroup()
                 if (last != null && last.kind == GroupKind.ACTION && last.toolCalls.isEmpty() &&
-                    last.events.any { it.kind == EventKinds.ThinkingDelta }
+                    last.events.any { it.kind == EventKind.ThinkingDelta }
                 ) {
                     last.events.add(ev)
                 } else {
                     groups.add(MutableGroup(kind = GroupKind.ACTION, events = mutableListOf(ev)))
                 }
             }
-            EventKinds.ThinkingDelta -> {
+            EventKind.ThinkingDelta -> {
                 val last = lastGroup()
                 if (last != null && last.kind == GroupKind.ACTION && last.toolCalls.isEmpty()) {
                     last.events.add(ev)
@@ -251,7 +251,7 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
                     groups.add(MutableGroup(kind = GroupKind.ACTION, events = mutableListOf(ev)))
                 }
             }
-            EventKinds.ToolOutputDelta -> {
+            EventKind.ToolOutputDelta -> {
                 // Append to the most recent action group that owns this tool call so
                 // the accumulated output can be displayed inside its ToolCallCard.
                 val id = ev.toolOutputDelta?.toolUseID
@@ -266,7 +266,7 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
                     }
                 }
             }
-            EventKinds.System -> {
+            EventKind.System -> {
                 // compact_boundary is consumed by groupSessions() before reaching here.
                 // Thread status changes (active, idle, etc.) duplicate information already in the
                 // task state — skip them to avoid noisy OTHER groups.
@@ -276,7 +276,7 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
                     groups.add(MutableGroup(kind = GroupKind.OTHER, events = mutableListOf(ev)))
                 }
             }
-            EventKinds.WidgetDelta -> {
+            EventKind.WidgetDelta -> {
                 val id = ev.widgetDelta?.toolUseID
                 if (id != null) {
                     val existing = groups.lastOrNull { it.kind == GroupKind.WIDGET && it.widgetToolUseID == id }
@@ -293,7 +293,7 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
                     }
                 }
             }
-            EventKinds.Widget -> {
+            EventKind.Widget -> {
                 val widget = ev.widget ?: continue
                 val id = widget.toolUseID
                 val existing = groups.lastOrNull { it.kind == GroupKind.WIDGET && it.widgetToolUseID == id }
@@ -311,7 +311,7 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
                     ))
                 }
             }
-            EventKinds.RateLimit -> {
+            EventKind.RateLimit -> {
                 // Only surface warning/rejected statuses; "allowed" is not interesting.
                 val status = ev.rateLimit?.status
                 if (status != null && status != "allowed") {
@@ -320,7 +320,7 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
             }
             // Subagent lifecycle events are not rendered. Explicitly listed to
             // avoid creating OTHER groups that act as hard barriers.
-            EventKinds.SubagentStart, EventKinds.SubagentEnd -> {}
+            EventKind.SubagentStart, EventKind.SubagentEnd -> {}
             else -> {
                 groups.add(MutableGroup(kind = GroupKind.OTHER, events = mutableListOf(ev)))
             }
@@ -376,11 +376,11 @@ fun groupMessages(msgs: List<EventMessage>): List<MessageGroup> {
             val last = merged.lastOrNull()
             if (last != null && last.kind == GroupKind.ACTION && last.toolCalls.isNotEmpty()) {
                 val thinkingEvs = g.events.filter {
-                    it.kind == EventKinds.Thinking || it.kind == EventKinds.ThinkingDelta
+                    it.kind == EventKind.Thinking || it.kind == EventKind.ThinkingDelta
                 }
                 if (thinkingEvs.isNotEmpty()) {
                     last.events.addAll(thinkingEvs)
-                    g.events.removeAll { it.kind == EventKinds.Thinking || it.kind == EventKinds.ThinkingDelta }
+                    g.events.removeAll { it.kind == EventKind.Thinking || it.kind == EventKind.ThinkingDelta }
                 }
             }
         }
@@ -463,7 +463,7 @@ fun groupTurns(groups: List<MessageGroup>): List<Turn> {
         for (ev in g.events) {
             if (!hasTs) { firstTs = ev.ts; hasTs = true }
             lastTs = ev.ts
-            if (ev.kind == EventKinds.Result) {
+            if (ev.kind == EventKind.Result) {
                 hasResultEvent = true
                 resultPayload = ev.result
                 val durationMs = ((ev.result?.duration ?: 0.0) * 1000).toLong()
@@ -472,7 +472,7 @@ fun groupTurns(groups: List<MessageGroup>): List<Turn> {
                 }
             }
         }
-        if (g.kind == GroupKind.OTHER && g.events.any { it.kind == EventKinds.Result }) {
+        if (g.kind == GroupKind.OTHER && g.events.any { it.kind == EventKind.Result }) {
             flush()
         }
     }
@@ -504,7 +504,7 @@ fun groupSessions(msgs: List<EventMessage>): List<Session> {
     }
 
     fun flushAndCarry() {
-        val lastResultIdx = segment.indexOfLast { it.kind == EventKinds.Result }
+        val lastResultIdx = segment.indexOfLast { it.kind == EventKind.Result }
         val carry: List<EventMessage> = if (lastResultIdx in 0 until segment.size - 1) {
             segment.subList(lastResultIdx + 1, segment.size).toList().also {
                 while (segment.size > lastResultIdx + 1) segment.removeAt(segment.lastIndex)
@@ -516,7 +516,7 @@ fun groupSessions(msgs: List<EventMessage>): List<Session> {
 
     for (ev in msgs) {
         when {
-            ev.kind == EventKinds.Init -> {
+            ev.kind == EventKind.Init -> {
                 val newID = ev.init?.sessionID
                 if (newID != currentSessionID) {
                     if (boundaryEvent != null) flushAndCarry()
@@ -525,7 +525,7 @@ fun groupSessions(msgs: List<EventMessage>): List<Session> {
                 }
                 // Same sessionID: re-invocation within the same session; skip.
             }
-            ev.kind == EventKinds.System && ev.system?.subtype == "compact_boundary" -> {
+            ev.kind == EventKind.System && ev.system?.subtype == "compact_boundary" -> {
                 if (boundaryEvent != null) flushAndCarry()
                 boundaryEvent = ev
                 currentSessionID = null
@@ -556,7 +556,7 @@ fun turnSummary(turn: Turn): String {
 fun sessionSummary(session: Session): String {
     val parts = mutableListOf<String>()
     val boundary = session.boundaryEvent
-    if (boundary?.kind == EventKinds.Init && boundary.init != null) {
+    if (boundary?.kind == EventKind.Init && boundary.init != null) {
         parts.add("Session ${boundary.init!!.sessionID.take(8)}")
     } else {
         parts.add("Compacted session")
@@ -637,14 +637,15 @@ fun nextGrouped(prev: IncrementalGrouped, msgs: List<EventMessage>): Incremental
 
     // Compute todos and active agents from messages since last processed boundary.
     val newMsgs = msgs.subList(upTo, msgs.size)
-    val newTodo = newMsgs.lastOrNull { it.kind == EventKinds.Todo }?.todo?.todos
+    val newTodo = newMsgs.lastOrNull { it.kind == EventKind.Todo }?.todo?.todos
     val todos = newTodo ?: if (isReset) emptyList() else prev.todos
     val activeAgents = run {
         val map = if (isReset) mutableMapOf() else prev.activeAgents.toMutableMap()
         for (msg in newMsgs) {
             when (msg.kind) {
-                EventKinds.SubagentStart -> msg.subagentStart?.let { map[it.taskID] = it.description }
-                EventKinds.SubagentEnd -> msg.subagentEnd?.let { map.remove(it.taskID) }
+                EventKind.SubagentStart -> msg.subagentStart?.let { map[it.taskID] = it.description }
+                EventKind.SubagentEnd -> msg.subagentEnd?.let { map.remove(it.taskID) }
+                else -> {}
             }
         }
         map.toMap()
@@ -662,14 +663,14 @@ fun nextGrouped(prev: IncrementalGrouped, msgs: List<EventMessage>): Incremental
     for (i in newMsgs.indices) {
         val msg = newMsgs[i]
         val isNewBoundary = when {
-            msg.kind == EventKinds.System && msg.system?.subtype == "compact_boundary" -> true
-            msg.kind == EventKinds.Init && msg.init?.sessionID != scanSessionID -> true
+            msg.kind == EventKind.System && msg.system?.subtype == "compact_boundary" -> true
+            msg.kind == EventKind.Init && msg.init?.sessionID != scanSessionID -> true
             else -> false
         }
         if (isNewBoundary) {
             lastSessionBoundaryInNew = i
             lastBoundaryGlobalIdx = upTo + i
-            scanSessionID = if (msg.kind == EventKinds.Init) msg.init?.sessionID else null
+            scanSessionID = if (msg.kind == EventKind.Init) msg.init?.sessionID else null
         }
     }
     val sessionChanged = isReset || lastSessionBoundaryInNew >= 0
@@ -696,7 +697,7 @@ fun nextGrouped(prev: IncrementalGrouped, msgs: List<EventMessage>): Incremental
         val currentTurns = groupTurns(groups)
 
         val lastTurnComplete = currentTurns.lastOrNull()?.groups?.any { g ->
-            g.kind == GroupKind.OTHER && g.events.any { it.kind == EventKinds.Result }
+            g.kind == GroupKind.OTHER && g.events.any { it.kind == EventKind.Result }
         } ?: false
         val newlyCompleted = if (lastTurnComplete) currentTurns
             else if (currentTurns.size > 1) currentTurns.dropLast(1)
@@ -709,7 +710,7 @@ fun nextGrouped(prev: IncrementalGrouped, msgs: List<EventMessage>): Incremental
             var count = 0
             var boundary = msgs.size
             for (i in newCurrentSessionStart until msgs.size) {
-                if (msgs[i].kind == EventKinds.Result) {
+                if (msgs[i].kind == EventKind.Result) {
                     count++
                     if (count == newlyCompleted.size) {
                         boundary = i + 1
@@ -748,7 +749,7 @@ fun nextGrouped(prev: IncrementalGrouped, msgs: List<EventMessage>): Incremental
     val groups = groupMessages(currentSessionNewMsgs)
     val currentTurns = groupTurns(groups)
     val lastTurnComplete = currentTurns.lastOrNull()?.groups?.any { g ->
-        g.kind == GroupKind.OTHER && g.events.any { it.kind == EventKinds.Result }
+        g.kind == GroupKind.OTHER && g.events.any { it.kind == EventKind.Result }
     } ?: false
     val newlyCompleted = if (lastTurnComplete) currentTurns
         else if (currentTurns.size > 1) currentTurns.dropLast(1)
@@ -764,7 +765,7 @@ fun nextGrouped(prev: IncrementalGrouped, msgs: List<EventMessage>): Incremental
         var count = 0
         var boundary = msgs.size
         for (i in upTo until msgs.size) {
-            if (msgs[i].kind == EventKinds.Result) {
+            if (msgs[i].kind == EventKind.Result) {
                 count++
                 if (count == newlyCompleted.size) {
                     boundary = i + 1

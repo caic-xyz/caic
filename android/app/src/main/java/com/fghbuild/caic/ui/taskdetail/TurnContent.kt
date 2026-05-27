@@ -24,7 +24,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
-import com.caic.sdk.v1.EventKinds
+import com.caic.sdk.v1.EventKind
 import com.caic.sdk.v1.ImageData
 import com.fghbuild.caic.ui.theme.appColors
 import com.fghbuild.caic.ui.theme.markdownTypography
@@ -51,7 +51,7 @@ fun MessageGroupContent(
                 ThinkingCard(events = group.events)
             } else {
                 val thinkingEvents = group.events.filter {
-                    it.kind == EventKinds.Thinking || it.kind == EventKinds.ThinkingDelta
+                    it.kind == EventKind.Thinking || it.kind == EventKind.ThinkingDelta
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (thinkingEvents.isNotEmpty()) {
@@ -82,7 +82,7 @@ fun MessageGroupContent(
         GroupKind.OTHER -> {
             val event = group.events.firstOrNull()
             when {
-                event?.kind == EventKinds.Init -> {
+                event?.kind == EventKind.Init -> {
                     val init = event.init
                     if (init != null) {
                         val parts = mutableListOf("Session started")
@@ -97,7 +97,7 @@ fun MessageGroupContent(
                         )
                     }
                 }
-                event?.kind == EventKinds.Usage -> {
+                event?.kind == EventKind.Usage -> {
                     val usage = event.usage
                     if (usage != null) {
                         val totalIn = usage.inputTokens + usage.cacheCreationInputTokens + usage.cacheReadInputTokens
@@ -114,7 +114,7 @@ fun MessageGroupContent(
                         )
                     }
                 }
-                event?.kind == EventKinds.System && event.system?.subtype == "context_cleared" -> {
+                event?.kind == EventKind.System && event.system?.subtype == "context_cleared" -> {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     ) {
@@ -128,7 +128,7 @@ fun MessageGroupContent(
                         )
                     }
                 }
-                event?.kind == EventKinds.System && event.system?.subtype == "compact_boundary" -> {
+                event?.kind == EventKind.System && event.system?.subtype == "compact_boundary" -> {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     ) {
@@ -142,7 +142,7 @@ fun MessageGroupContent(
                         )
                     }
                 }
-                event?.kind == EventKinds.System && event.system?.subtype == "api_error" -> {
+                event?.kind == EventKind.System && event.system?.subtype == "api_error" -> {
                     Text(
                         text = "API error",
                         style = MaterialTheme.typography.labelSmall,
@@ -155,10 +155,10 @@ fun MessageGroupContent(
                             .padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }
-                event?.kind == EventKinds.System && event.system?.subtype == "step_start" -> {
+                event?.kind == EventKind.System && event.system?.subtype == "step_start" -> {
                     // suppress: no useful content to display
                 }
-                event?.kind == EventKinds.System && event.system?.subtype == "model_rerouted" -> {
+                event?.kind == EventKind.System && event.system?.subtype == "model_rerouted" -> {
                     val detail = event.system?.detail
                     val text = if (!detail.isNullOrBlank()) "Model rerouted: $detail" else "Model rerouted"
                     Text(
@@ -167,7 +167,7 @@ fun MessageGroupContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                event?.kind == EventKinds.RateLimit -> {
+                event?.kind == EventKind.RateLimit -> {
                     val rl = event.rateLimit
                     if (rl != null) {
                         val usingOverage = rl.isUsingOverage == true
@@ -211,7 +211,7 @@ fun MessageGroupContent(
                         )
                     }
                 }
-                event?.kind == EventKinds.System -> {
+                event?.kind == EventKind.System -> {
                     val subtype = event.system?.subtype
                     if (!subtype.isNullOrBlank()) {
                         Text(
@@ -221,7 +221,7 @@ fun MessageGroupContent(
                         )
                     }
                 }
-                event?.kind == EventKinds.Log -> {
+                event?.kind == EventKind.Log -> {
                     val line = event.log?.line
                     if (!line.isNullOrBlank()) {
                         Text(
@@ -232,7 +232,7 @@ fun MessageGroupContent(
                         )
                     }
                 }
-                event?.kind == EventKinds.Result -> {
+                event?.kind == EventKind.Result -> {
                     val result = event.result
                     if (result != null) {
                         ResultCard(result = result, onNavigateToDiff = onNavigateToDiff)

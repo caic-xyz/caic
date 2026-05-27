@@ -10,18 +10,19 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import com.caic.sdk.v1.TaskState
 import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.MarkdownTypography
 
-fun stateColor(state: String): Color = when (state) {
-    "running", "branching", "provisioning", "starting" -> Color(0xFFD4EDDA)
-    "asking" -> Color(0xFFCCE5FF)
-    "has_plan" -> Color(0xFFEDE9FE)
-    "failed" -> Color(0xFFF8D7DA)
-    "stopping" -> Color(0xFFFDE2C8)
-    "purging" -> Color(0xFFFDE2C8)
-    "purged" -> Color(0xFFE2E3E5)
-    "stopped" -> Color(0xFFC8DAF0)
+fun stateColor(state: TaskState): Color = when (state) {
+    is TaskState.Running, is TaskState.Branching, is TaskState.Provisioning, is TaskState.Starting -> Color(0xFFD4EDDA)
+    is TaskState.Asking -> Color(0xFFCCE5FF)
+    is TaskState.HasPlan -> Color(0xFFEDE9FE)
+    is TaskState.Failed -> Color(0xFFF8D7DA)
+    is TaskState.Stopping -> Color(0xFFFDE2C8)
+    is TaskState.Purging -> Color(0xFFFDE2C8)
+    is TaskState.Purged -> Color(0xFFE2E3E5)
+    is TaskState.Stopped -> Color(0xFFC8DAF0)
     else -> Color(0xFFFFF3CD)
 }
 
@@ -29,7 +30,7 @@ private val RedTarget = Color(0xFFDC3545)
 private const val STALE_BLEND = 0.25f
 
 /** Returns a redder variant of the state color when the prompt cache is stale. */
-fun staleStateColor(state: String): Color {
+fun staleStateColor(state: TaskState): Color {
     val base = stateColor(state)
     return Color(
         red = base.red + (RedTarget.red - base.red) * STALE_BLEND,
@@ -39,18 +40,18 @@ fun staleStateColor(state: String): Color {
 }
 
 /** True when the prompt cache has expired. Returns false when cacheExpiresAt is unset (no data from backend). */
-fun isCacheStale(state: String, cacheExpiresAt: java.time.Instant?): Boolean {
+fun isCacheStale(state: TaskState, cacheExpiresAt: java.time.Instant?): Boolean {
     if (cacheExpiresAt == null) return false
-    if (state in terminalStates || state in setOf("stopped", "stopping", "purging", "running")) return false
+    if (state in terminalStates || state in setOf(TaskState.Stopped, TaskState.Stopping, TaskState.Purging, TaskState.Running)) return false
     return System.currentTimeMillis() > cacheExpiresAt.toEpochMilli()
 }
 
 val activeStates = setOf(
-    "running", "branching", "provisioning", "starting",
-    "waiting", "asking", "has_plan", "stopping", "purging",
+    TaskState.Running, TaskState.Branching, TaskState.Provisioning, TaskState.Starting,
+    TaskState.Waiting, TaskState.Asking, TaskState.HasPlan, TaskState.Stopping, TaskState.Purging,
 )
-val terminalStates = setOf("failed", "purged")
-val waitingStates = setOf("waiting", "asking", "has_plan")
+val terminalStates = setOf(TaskState.Failed, TaskState.Purged)
+val waitingStates = setOf(TaskState.Waiting, TaskState.Asking, TaskState.HasPlan)
 
 private val LightColorScheme = lightColorScheme(
     primary = Color(0xFF4A90D9),         // --color-primary

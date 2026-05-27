@@ -69,25 +69,22 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.caic.sdk.v1.Forge
 import com.caic.sdk.v1.HarnessInfo
 import com.caic.sdk.v1.ImageData
 import com.caic.sdk.v1.Repo
 import com.caic.sdk.v1.RepoSpec
 import com.caic.sdk.v1.SafetyIssue
+import com.caic.sdk.v1.TaskState
 import com.fghbuild.caic.ui.common.AttachMenu
 import com.fghbuild.caic.ui.common.RepoChipStrip
 import com.fghbuild.caic.ui.common.RepoEntry
 import com.fghbuild.caic.ui.theme.appColors
+import com.fghbuild.caic.ui.theme.activeStates
+import com.fghbuild.caic.ui.theme.waitingStates
+import com.fghbuild.caic.util.effortOptions
 import com.fghbuild.caic.util.imageDataToBitmap
-
-@OptIn(ExperimentalMaterial3Api::class)
-/** Returns valid effort levels for [harness], empty if unsupported. */
-private fun effortOptions(harness: String): List<String> = when (harness) {
-    "claude" -> listOf("low", "medium", "high", "max")
-    "codex" -> listOf("none", "minimal", "low", "medium", "high", "xhigh")
-    "pi" -> listOf("off", "minimal", "low", "medium", "high", "xhigh")
-    else -> emptyList()
-}
+import com.fghbuild.caic.util.toHarness
 
 @Composable
 fun InputBar(
@@ -111,7 +108,7 @@ fun InputBar(
         sudo: Boolean,
         gitHubToken: Boolean,
     ) -> Unit = { _, _, _, _, _, _, _, _, _, _ -> },
-    taskState: String = "",
+    taskState: TaskState? = null,
     taskTitle: String = "",
     taskRepo: String = "",
     taskBranch: String = "",
@@ -130,7 +127,7 @@ fun InputBar(
     forkAvailableRest: List<Repo> = emptyList(),
     sending: Boolean,
     pendingAction: String?,
-    forge: String? = null,
+    forge: Forge? = null,
     forgePR: Int? = null,
     pendingImages: List<ImageData> = emptyList(),
     supportsImages: Boolean = false,
@@ -194,13 +191,11 @@ fun InputBar(
                 }
             }
         }
-        val syncLabel = when {
-            (forge == "github" || forge == "gitlab") && (forgePR == null || forgePR == 0) -> "Create PR"
+        val syncLabel = when (forge) {
+            is Forge.GitHub, is Forge.GitLab -> if (forgePR == null || forgePR == 0) "Create PR" else "Push"
             else -> "Push"
         }
-        val waitingStates = setOf("waiting", "asking", "has_plan")
-        val activeStates = setOf("waiting", "running", "asking", "has_plan")
-        val isStopped = taskState == "stopped"
+        val isStopped = taskState is TaskState.Stopped
         val isActive = taskState in activeStates
         val isWaiting = taskState in waitingStates
         var contextMenuExpanded by remember { mutableStateOf(false) }
@@ -266,19 +261,19 @@ fun InputBar(
                             text = { Text(syncLabel) },
                             leadingIcon = {
                                 when (forge) {
-                                    "github" -> Icon(painterResource(R.drawable.ic_github), contentDescription = null)
-                                    "gitlab" -> Icon(painterResource(R.drawable.ic_gitlab), contentDescription = null)
+                                    is Forge.GitHub -> Icon(painterResource(R.drawable.ic_github), contentDescription = null)
+                                    is Forge.GitLab -> Icon(painterResource(R.drawable.ic_gitlab), contentDescription = null)
                                     else -> Icon(Icons.Default.Sync, contentDescription = null)
                                 }
                             },
-                            enabled = taskState != "purging",
+                            enabled = taskState != TaskState.Purging,
                             onClick = { contextMenuExpanded = false; onSync() },
                         )
                         if (taskBaseBranch.isNotBlank()) {
                             DropdownMenuItem(
                                 text = { Text("Push to $taskBaseBranch") },
                                 leadingIcon = { Icon(Icons.Default.Sync, contentDescription = null) },
-                                enabled = taskState != "purging",
+                                enabled = taskState != TaskState.Purging,
                                 onClick = { contextMenuExpanded = false; onSyncToBaseBranch() },
                             )
                         }
@@ -290,7 +285,7 @@ fun InputBar(
                                 },
                                 onClick = {
                                     contextMenuExpanded = false
-                                    if (taskState == "running") showStopConfirm = true else onStop()
+                                    if (taskState is TaskState.Running) showStopConfirm = true else onStop()
                                 },
                                 modifier = Modifier.testTag("stop-task"),
                             )
@@ -443,7 +438,7 @@ fun InputBar(
                                 },
                             )
                         }
-                        val effortOpts = effortOptions(forkSelectedHarness)
+                        val effortOpts = effortOptions(forkSelectedHarness.toHarness())
                         if (effortOpts.isNotEmpty()) {
                             ForkDropdown(
                                 label = "Effort",

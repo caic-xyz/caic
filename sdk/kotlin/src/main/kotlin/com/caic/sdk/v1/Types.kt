@@ -21,122 +21,524 @@ object InstantSerializer : KSerializer<Instant> {
     override fun deserialize(decoder: Decoder): Instant = Instant.parse(decoder.decodeString())
 }
 
-typealias CIStatus = String
-
-object CIStatuses {
-    const val Pending: CIStatus = "pending"
-    const val Success: CIStatus = "success"
-    const val Failure: CIStatus = "failure"
+@Serializable(with = CIStatusSerializer::class)
+sealed interface CIStatus {
+    val value: String
+    @Serializable
+    data object Pending : CIStatus {
+        override val value = "pending"
+    }
+    @Serializable
+    data object Success : CIStatus {
+        override val value = "success"
+    }
+    @Serializable
+    data object Failure : CIStatus {
+        override val value = "failure"
+    }
+    @Serializable
+    data class Other(override val value: String) : CIStatus
 }
 
-typealias CheckConclusion = String
-
-object CheckConclusions {
-    const val Success: CheckConclusion = "success"
-    const val Failure: CheckConclusion = "failure"
-    const val Neutral: CheckConclusion = "neutral"
-    const val Skipped: CheckConclusion = "skipped"
-    const val Cancelled: CheckConclusion = "cancelled"
-    const val TimedOut: CheckConclusion = "timed_out"
-    const val ActionRequired: CheckConclusion = "action_required"
-    const val Stale: CheckConclusion = "stale"
+object CIStatusSerializer : KSerializer<CIStatus> {
+    override val descriptor = PrimitiveSerialDescriptor("CIStatus", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: CIStatus) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): CIStatus {
+        val v = decoder.decodeString()
+        return when (v) {
+            "pending" -> CIStatus.Pending
+            "success" -> CIStatus.Success
+            "failure" -> CIStatus.Failure
+            else -> CIStatus.Other(v)
+        }
+    }
 }
 
-typealias CheckStatus = String
-
-object CheckStatuses {
-    const val Queued: CheckStatus = "queued"
-    const val InProgress: CheckStatus = "in_progress"
-    const val Completed: CheckStatus = "completed"
+@Serializable(with = CheckConclusionSerializer::class)
+sealed interface CheckConclusion {
+    val value: String
+    @Serializable
+    data object Success : CheckConclusion {
+        override val value = "success"
+    }
+    @Serializable
+    data object Failure : CheckConclusion {
+        override val value = "failure"
+    }
+    @Serializable
+    data object Neutral : CheckConclusion {
+        override val value = "neutral"
+    }
+    @Serializable
+    data object Skipped : CheckConclusion {
+        override val value = "skipped"
+    }
+    @Serializable
+    data object Cancelled : CheckConclusion {
+        override val value = "cancelled"
+    }
+    @Serializable
+    data object TimedOut : CheckConclusion {
+        override val value = "timed_out"
+    }
+    @Serializable
+    data object ActionRequired : CheckConclusion {
+        override val value = "action_required"
+    }
+    @Serializable
+    data object Stale : CheckConclusion {
+        override val value = "stale"
+    }
+    @Serializable
+    data class Other(override val value: String) : CheckConclusion
 }
 
-typealias EventKind = String
-
-object EventKinds {
-    const val Init: EventKind = "init"
-    const val Text: EventKind = "text"
-    const val TextDelta: EventKind = "textDelta"
-    const val ToolUse: EventKind = "toolUse"
-    const val ToolResult: EventKind = "toolResult"
-    const val Ask: EventKind = "ask"
-    const val Usage: EventKind = "usage"
-    const val Result: EventKind = "result"
-    const val System: EventKind = "system"
-    const val UserInput: EventKind = "userInput"
-    const val Todo: EventKind = "todo"
-    const val DiffStat: EventKind = "diffStat"
-    const val Error: EventKind = "error"
-    const val Thinking: EventKind = "thinking"
-    const val ThinkingDelta: EventKind = "thinkingDelta"
-    const val SubagentStart: EventKind = "subagentStart"
-    const val SubagentEnd: EventKind = "subagentEnd"
-    const val Log: EventKind = "log"
-    const val ToolOutputDelta: EventKind = "toolOutputDelta"
-    const val Widget: EventKind = "widget"
-    const val WidgetDelta: EventKind = "widgetDelta"
-    const val RateLimit: EventKind = "rateLimit"
-    const val Stats: EventKind = "stats"
+object CheckConclusionSerializer : KSerializer<CheckConclusion> {
+    override val descriptor = PrimitiveSerialDescriptor("CheckConclusion", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: CheckConclusion) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): CheckConclusion {
+        val v = decoder.decodeString()
+        return when (v) {
+            "success" -> CheckConclusion.Success
+            "failure" -> CheckConclusion.Failure
+            "neutral" -> CheckConclusion.Neutral
+            "skipped" -> CheckConclusion.Skipped
+            "cancelled" -> CheckConclusion.Cancelled
+            "timed_out" -> CheckConclusion.TimedOut
+            "action_required" -> CheckConclusion.ActionRequired
+            "stale" -> CheckConclusion.Stale
+            else -> CheckConclusion.Other(v)
+        }
+    }
 }
 
-typealias Forge = String
-
-object Forges {
-    const val GitHub: Forge = "github"
-    const val GitLab: Forge = "gitlab"
+@Serializable(with = CheckStatusSerializer::class)
+sealed interface CheckStatus {
+    val value: String
+    @Serializable
+    data object Queued : CheckStatus {
+        override val value = "queued"
+    }
+    @Serializable
+    data object InProgress : CheckStatus {
+        override val value = "in_progress"
+    }
+    @Serializable
+    data object Completed : CheckStatus {
+        override val value = "completed"
+    }
+    @Serializable
+    data class Other(override val value: String) : CheckStatus
 }
 
-typealias ForgePRState = String
-
-object ForgePRStates {
-    const val Open: ForgePRState = "open"
-    const val Closed: ForgePRState = "closed"
-    const val Merged: ForgePRState = "merged"
+object CheckStatusSerializer : KSerializer<CheckStatus> {
+    override val descriptor = PrimitiveSerialDescriptor("CheckStatus", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: CheckStatus) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): CheckStatus {
+        val v = decoder.decodeString()
+        return when (v) {
+            "queued" -> CheckStatus.Queued
+            "in_progress" -> CheckStatus.InProgress
+            "completed" -> CheckStatus.Completed
+            else -> CheckStatus.Other(v)
+        }
+    }
 }
 
-typealias Harness = String
-
-object Harnesses {
-    const val Claude: Harness = "claude"
-    const val Codex: Harness = "codex"
-    const val Gemini: Harness = "gemini"
-    const val Kilo: Harness = "kilo"
-    const val OpenCode: Harness = "opencode"
-    const val Pi: Harness = "pi"
+@Serializable(with = EventKindSerializer::class)
+sealed interface EventKind {
+    val value: String
+    @Serializable
+    data object Init : EventKind {
+        override val value = "init"
+    }
+    @Serializable
+    data object Text : EventKind {
+        override val value = "text"
+    }
+    @Serializable
+    data object TextDelta : EventKind {
+        override val value = "textDelta"
+    }
+    @Serializable
+    data object ToolUse : EventKind {
+        override val value = "toolUse"
+    }
+    @Serializable
+    data object ToolResult : EventKind {
+        override val value = "toolResult"
+    }
+    @Serializable
+    data object Ask : EventKind {
+        override val value = "ask"
+    }
+    @Serializable
+    data object Usage : EventKind {
+        override val value = "usage"
+    }
+    @Serializable
+    data object Result : EventKind {
+        override val value = "result"
+    }
+    @Serializable
+    data object System : EventKind {
+        override val value = "system"
+    }
+    @Serializable
+    data object UserInput : EventKind {
+        override val value = "userInput"
+    }
+    @Serializable
+    data object Todo : EventKind {
+        override val value = "todo"
+    }
+    @Serializable
+    data object DiffStat : EventKind {
+        override val value = "diffStat"
+    }
+    @Serializable
+    data object Error : EventKind {
+        override val value = "error"
+    }
+    @Serializable
+    data object Thinking : EventKind {
+        override val value = "thinking"
+    }
+    @Serializable
+    data object ThinkingDelta : EventKind {
+        override val value = "thinkingDelta"
+    }
+    @Serializable
+    data object SubagentStart : EventKind {
+        override val value = "subagentStart"
+    }
+    @Serializable
+    data object SubagentEnd : EventKind {
+        override val value = "subagentEnd"
+    }
+    @Serializable
+    data object Log : EventKind {
+        override val value = "log"
+    }
+    @Serializable
+    data object ToolOutputDelta : EventKind {
+        override val value = "toolOutputDelta"
+    }
+    @Serializable
+    data object Widget : EventKind {
+        override val value = "widget"
+    }
+    @Serializable
+    data object WidgetDelta : EventKind {
+        override val value = "widgetDelta"
+    }
+    @Serializable
+    data object RateLimit : EventKind {
+        override val value = "rateLimit"
+    }
+    @Serializable
+    data object Stats : EventKind {
+        override val value = "stats"
+    }
+    @Serializable
+    data class Other(override val value: String) : EventKind
 }
 
-typealias SyncTarget = String
-
-object SyncTargets {
-    const val Branch: SyncTarget = "branch"
-    const val Default: SyncTarget = "default"
+object EventKindSerializer : KSerializer<EventKind> {
+    override val descriptor = PrimitiveSerialDescriptor("EventKind", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: EventKind) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): EventKind {
+        val v = decoder.decodeString()
+        return when (v) {
+            "init" -> EventKind.Init
+            "text" -> EventKind.Text
+            "textDelta" -> EventKind.TextDelta
+            "toolUse" -> EventKind.ToolUse
+            "toolResult" -> EventKind.ToolResult
+            "ask" -> EventKind.Ask
+            "usage" -> EventKind.Usage
+            "result" -> EventKind.Result
+            "system" -> EventKind.System
+            "userInput" -> EventKind.UserInput
+            "todo" -> EventKind.Todo
+            "diffStat" -> EventKind.DiffStat
+            "error" -> EventKind.Error
+            "thinking" -> EventKind.Thinking
+            "thinkingDelta" -> EventKind.ThinkingDelta
+            "subagentStart" -> EventKind.SubagentStart
+            "subagentEnd" -> EventKind.SubagentEnd
+            "log" -> EventKind.Log
+            "toolOutputDelta" -> EventKind.ToolOutputDelta
+            "widget" -> EventKind.Widget
+            "widgetDelta" -> EventKind.WidgetDelta
+            "rateLimit" -> EventKind.RateLimit
+            "stats" -> EventKind.Stats
+            else -> EventKind.Other(v)
+        }
+    }
 }
 
-typealias TaskState = String
-
-object TaskStates {
-    const val Pending: TaskState = "pending"
-    const val Branching: TaskState = "branching"
-    const val Provisioning: TaskState = "provisioning"
-    const val Starting: TaskState = "starting"
-    const val Running: TaskState = "running"
-    const val Waiting: TaskState = "waiting"
-    const val Asking: TaskState = "asking"
-    const val HasPlan: TaskState = "has_plan"
-    const val Pulling: TaskState = "pulling"
-    const val Pushing: TaskState = "pushing"
-    const val Stopping: TaskState = "stopping"
-    const val Stopped: TaskState = "stopped"
-    const val Purging: TaskState = "purging"
-    const val Failed: TaskState = "failed"
-    const val Purged: TaskState = "purged"
+@Serializable(with = ForgeSerializer::class)
+sealed interface Forge {
+    val value: String
+    @Serializable
+    data object GitHub : Forge {
+        override val value = "github"
+    }
+    @Serializable
+    data object GitLab : Forge {
+        override val value = "gitlab"
+    }
+    @Serializable
+    data class Other(override val value: String) : Forge
 }
 
-typealias ToolOutputContentType = String
+object ForgeSerializer : KSerializer<Forge> {
+    override val descriptor = PrimitiveSerialDescriptor("Forge", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: Forge) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): Forge {
+        val v = decoder.decodeString()
+        return when (v) {
+            "github" -> Forge.GitHub
+            "gitlab" -> Forge.GitLab
+            else -> Forge.Other(v)
+        }
+    }
+}
 
-object ToolOutputContentTypes {
-    const val ToolOutputText: ToolOutputContentType = "text"
-    const val ToolOutputJSON: ToolOutputContentType = "json"
-    const val ToolOutputMarkdown: ToolOutputContentType = "markdown"
+@Serializable(with = ForgePRStateSerializer::class)
+sealed interface ForgePRState {
+    val value: String
+    @Serializable
+    data object Open : ForgePRState {
+        override val value = "open"
+    }
+    @Serializable
+    data object Closed : ForgePRState {
+        override val value = "closed"
+    }
+    @Serializable
+    data object Merged : ForgePRState {
+        override val value = "merged"
+    }
+    @Serializable
+    data class Other(override val value: String) : ForgePRState
+}
+
+object ForgePRStateSerializer : KSerializer<ForgePRState> {
+    override val descriptor = PrimitiveSerialDescriptor("ForgePRState", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: ForgePRState) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): ForgePRState {
+        val v = decoder.decodeString()
+        return when (v) {
+            "open" -> ForgePRState.Open
+            "closed" -> ForgePRState.Closed
+            "merged" -> ForgePRState.Merged
+            else -> ForgePRState.Other(v)
+        }
+    }
+}
+
+@Serializable(with = HarnessSerializer::class)
+sealed interface Harness {
+    val value: String
+    @Serializable
+    data object Claude : Harness {
+        override val value = "claude"
+    }
+    @Serializable
+    data object Codex : Harness {
+        override val value = "codex"
+    }
+    @Serializable
+    data object Gemini : Harness {
+        override val value = "gemini"
+    }
+    @Serializable
+    data object Kilo : Harness {
+        override val value = "kilo"
+    }
+    @Serializable
+    data object OpenCode : Harness {
+        override val value = "opencode"
+    }
+    @Serializable
+    data object Pi : Harness {
+        override val value = "pi"
+    }
+    @Serializable
+    data class Other(override val value: String) : Harness
+}
+
+object HarnessSerializer : KSerializer<Harness> {
+    override val descriptor = PrimitiveSerialDescriptor("Harness", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: Harness) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): Harness {
+        val v = decoder.decodeString()
+        return when (v) {
+            "claude" -> Harness.Claude
+            "codex" -> Harness.Codex
+            "gemini" -> Harness.Gemini
+            "kilo" -> Harness.Kilo
+            "opencode" -> Harness.OpenCode
+            "pi" -> Harness.Pi
+            else -> Harness.Other(v)
+        }
+    }
+}
+
+@Serializable(with = SyncTargetSerializer::class)
+sealed interface SyncTarget {
+    val value: String
+    @Serializable
+    data object Branch : SyncTarget {
+        override val value = "branch"
+    }
+    @Serializable
+    data object Default : SyncTarget {
+        override val value = "default"
+    }
+    @Serializable
+    data class Other(override val value: String) : SyncTarget
+}
+
+object SyncTargetSerializer : KSerializer<SyncTarget> {
+    override val descriptor = PrimitiveSerialDescriptor("SyncTarget", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: SyncTarget) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): SyncTarget {
+        val v = decoder.decodeString()
+        return when (v) {
+            "branch" -> SyncTarget.Branch
+            "default" -> SyncTarget.Default
+            else -> SyncTarget.Other(v)
+        }
+    }
+}
+
+@Serializable(with = TaskStateSerializer::class)
+sealed interface TaskState {
+    val value: String
+    @Serializable
+    data object Pending : TaskState {
+        override val value = "pending"
+    }
+    @Serializable
+    data object Branching : TaskState {
+        override val value = "branching"
+    }
+    @Serializable
+    data object Provisioning : TaskState {
+        override val value = "provisioning"
+    }
+    @Serializable
+    data object Starting : TaskState {
+        override val value = "starting"
+    }
+    @Serializable
+    data object Running : TaskState {
+        override val value = "running"
+    }
+    @Serializable
+    data object Waiting : TaskState {
+        override val value = "waiting"
+    }
+    @Serializable
+    data object Asking : TaskState {
+        override val value = "asking"
+    }
+    @Serializable
+    data object HasPlan : TaskState {
+        override val value = "has_plan"
+    }
+    @Serializable
+    data object Pulling : TaskState {
+        override val value = "pulling"
+    }
+    @Serializable
+    data object Pushing : TaskState {
+        override val value = "pushing"
+    }
+    @Serializable
+    data object Stopping : TaskState {
+        override val value = "stopping"
+    }
+    @Serializable
+    data object Stopped : TaskState {
+        override val value = "stopped"
+    }
+    @Serializable
+    data object Purging : TaskState {
+        override val value = "purging"
+    }
+    @Serializable
+    data object Failed : TaskState {
+        override val value = "failed"
+    }
+    @Serializable
+    data object Purged : TaskState {
+        override val value = "purged"
+    }
+    @Serializable
+    data class Other(override val value: String) : TaskState
+}
+
+object TaskStateSerializer : KSerializer<TaskState> {
+    override val descriptor = PrimitiveSerialDescriptor("TaskState", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: TaskState) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): TaskState {
+        val v = decoder.decodeString()
+        return when (v) {
+            "pending" -> TaskState.Pending
+            "branching" -> TaskState.Branching
+            "provisioning" -> TaskState.Provisioning
+            "starting" -> TaskState.Starting
+            "running" -> TaskState.Running
+            "waiting" -> TaskState.Waiting
+            "asking" -> TaskState.Asking
+            "has_plan" -> TaskState.HasPlan
+            "pulling" -> TaskState.Pulling
+            "pushing" -> TaskState.Pushing
+            "stopping" -> TaskState.Stopping
+            "stopped" -> TaskState.Stopped
+            "purging" -> TaskState.Purging
+            "failed" -> TaskState.Failed
+            "purged" -> TaskState.Purged
+            else -> TaskState.Other(v)
+        }
+    }
+}
+
+@Serializable(with = ToolOutputContentTypeSerializer::class)
+sealed interface ToolOutputContentType {
+    val value: String
+    @Serializable
+    data object ToolOutputText : ToolOutputContentType {
+        override val value = "text"
+    }
+    @Serializable
+    data object ToolOutputJSON : ToolOutputContentType {
+        override val value = "json"
+    }
+    @Serializable
+    data object ToolOutputMarkdown : ToolOutputContentType {
+        override val value = "markdown"
+    }
+    @Serializable
+    data class Other(override val value: String) : ToolOutputContentType
+}
+
+object ToolOutputContentTypeSerializer : KSerializer<ToolOutputContentType> {
+    override val descriptor = PrimitiveSerialDescriptor("ToolOutputContentType", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: ToolOutputContentType) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): ToolOutputContentType {
+        val v = decoder.decodeString()
+        return when (v) {
+            "text" -> ToolOutputContentType.ToolOutputText
+            "json" -> ToolOutputContentType.ToolOutputJSON
+            "markdown" -> ToolOutputContentType.ToolOutputMarkdown
+            else -> ToolOutputContentType.Other(v)
+        }
+    }
 }
 
 object ErrorCodes {

@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.saveable.rememberSaveable
 import com.fghbuild.caic.util.ScreenshotService
 import com.fghbuild.caic.util.bitmapToImageData
+import com.fghbuild.caic.util.toHarness
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -83,8 +84,16 @@ import androidx.compose.material.icons.filled.Check
 import com.fghbuild.caic.ui.theme.waitingStates
 import com.fghbuild.caic.util.createCameraPhotoUri
 import com.fghbuild.caic.util.formatElapsed
-import com.caic.sdk.v1.EventKinds
+import com.caic.sdk.v1.CIStatus
+import com.caic.sdk.v1.CheckConclusion
+import com.caic.sdk.v1.CheckStatus
+import com.caic.sdk.v1.EventKind
+import com.caic.sdk.v1.Forge
 import com.caic.sdk.v1.ForgeCheck
+import com.caic.sdk.v1.ForgePRState
+import com.caic.sdk.v1.Harness
+import com.caic.sdk.v1.SyncTarget
+import com.caic.sdk.v1.TaskState
 import java.time.Instant
 import com.fghbuild.caic.util.GroupKind
 import kotlinx.serialization.json.JsonElement
@@ -96,7 +105,6 @@ import com.fghbuild.caic.util.isSessionBoundary
 import com.fghbuild.caic.util.sessionSummary
 import com.fghbuild.caic.util.turnSummary
 import com.fghbuild.caic.util.uriToImageData
-import com.caic.sdk.v1.EventKinds as SdkEventKinds
 
 /** Visual indent level for items inside expanded containers (session or turn). */
 private enum class Indent { Session, Turn }
@@ -228,7 +236,7 @@ private fun emitTurns(
                 }
                 if (toolGroupKey in expandedToolGroups) {
                     val thinkingEvents = group.events.filter {
-                        it.kind == SdkEventKinds.Thinking || it.kind == SdkEventKinds.ThinkingDelta
+                        it.kind == EventKind.Thinking || it.kind == EventKind.ThinkingDelta
                     }
                     if (thinkingEvents.isNotEmpty()) {
                         result.add(MsgItem.ThinkingItem(thinkingEvents, "${base}thinking", indent = groupIndent))
@@ -266,7 +274,7 @@ private fun buildLiveItems(
             }
             if (toolGroupKey in expandedToolGroups) {
                 val thinkingEvents = group.events.filter {
-                    it.kind == SdkEventKinds.Thinking || it.kind == SdkEventKinds.ThinkingDelta
+                    it.kind == EventKind.Thinking || it.kind == EventKind.ThinkingDelta
                 }
                 if (thinkingEvents.isNotEmpty()) {
                     result.add(MsgItem.ThinkingItem(thinkingEvents, "${base}thinking"))
@@ -397,7 +405,7 @@ fun TaskDetailScreen(
                                     color = badgeColor,
                                 ) {
                                     Text(
-                                        text = it.state,
+                                        text = it.state.value,
                                         style = MaterialTheme.typography.labelSmall,
                                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
                                     )
@@ -412,15 +420,15 @@ fun TaskDetailScreen(
                                 val forgePR = it.forgePR
                                 val forgePRState = it.forgePRState
                                 if (forgeOwner != null && forgeRepo != null && forgePR != null &&
-                                    forgePR > 0 && forgePRState != "closed" && forgePRState != "merged"
+                                    forgePR > 0 && forgePRState != ForgePRState.Closed && forgePRState != ForgePRState.Merged
                                 ) {
                                     val forge = it.repos?.firstOrNull()?.forge
-                                    val prURL = if (forge == "gitlab") {
+                                    val prURL = if (forge is Forge.GitLab) {
                                         "https://gitlab.com/$forgeOwner/$forgeRepo/-/merge_requests/$forgePR"
                                     } else {
                                         "https://github.com/$forgeOwner/$forgeRepo/pull/$forgePR"
                                     }
-                                    val prLabel = if (forge == "gitlab") "MR #$forgePR" else "PR #$forgePR"
+                                    val prLabel = if (forge is Forge.GitLab) "MR #$forgePR" else "PR #$forgePR"
                                     Text(
                                         text = "·",
                                         style = MaterialTheme.typography.bodySmall,
@@ -449,7 +457,7 @@ fun TaskDetailScreen(
                                     else -> Modifier
                                 }
                                 when (it.ciStatus) {
-                                    "pending" -> Column {
+                                    is CIStatus.Pending -> Column {
                                         Surface(
                                             shape = RoundedCornerShape(4.dp),
                                             color = appColors.warningBg,
@@ -466,7 +474,7 @@ fun TaskDetailScreen(
                                             CICheckList(checks = checks!!, forge = ciForge)
                                         }
                                     }
-                                    "success" -> Column {
+                                    is CIStatus.Success -> Column {
                                         Surface(
                                             shape = RoundedCornerShape(4.dp),
                                             color = appColors.successBg,
@@ -483,7 +491,7 @@ fun TaskDetailScreen(
                                             CICheckList(checks = checks!!, forge = ciForge)
                                         }
                                     }
-                                    "failure" -> Column {
+                                    is CIStatus.Failure -> Column {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -561,8 +569,10 @@ fun TaskDetailScreen(
             )
         },
         bottomBar = {
-            val noActionStates = setOf("stopping", "purging", "purged", "failed")
-            if (task?.state !in noActionStates) {
+            val noActionStates = setOf(TaskState.Stopping, TaskState.Purging, TaskState.Purged, TaskState.Failed)
+            if (task?.state != null && task.state in noActionStates) {
+                // no bottom bar for terminal states
+            } else {
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
                 Column(modifier = Modifier.widthIn(max = 840.dp)) {
                     state.actionError?.let { error ->
@@ -586,19 +596,20 @@ fun TaskDetailScreen(
                         onDraftChange = viewModel::updateInputDraft,
                         onSend = { requestNotificationPermission(); viewModel.sendInput() },
                         onSync = { viewModel.syncTask() },
-                        onSyncToBaseBranch = { viewModel.syncTask(target = "default") },
+                        onSyncToBaseBranch = { viewModel.syncTask(target = SyncTarget.Default) },
                         onStop = viewModel::stopTask,
                         onPurge = viewModel::purgeTask,
                         onRevive = viewModel::reviveTask,
                         onFork = { prompt, harness, model, effort, extraRepos, tailscale, usb, display, sudo, gitHubToken ->
-                            viewModel.forkTask(prompt, harness, model, effort, extraRepos, tailscale, usb, display, sudo, gitHubToken)
+                            val harnessEnum: Harness? = harness?.toHarness()
+                            viewModel.forkTask(prompt, harnessEnum, model, effort, extraRepos, tailscale, usb, display, sudo, gitHubToken)
                         },
-                        taskState = task?.state ?: "",
+                        taskState = task?.state ?: TaskState.Pending,
                         taskTitle = task?.title ?: "",
                         taskRepo = task?.repos?.firstOrNull()?.name ?: "",
                         taskBranch = task?.repos?.firstOrNull()?.branch ?: "",
                         taskBaseBranch = task?.repos?.firstOrNull()?.baseBranch ?: "",
-                        taskHarness = task?.harness ?: "",
+                        taskHarness = task?.harness?.value ?: "",
                         taskModel = task?.model ?: "",
                         taskEffort = task?.effort ?: "",
                         taskTailscale = task?.container?.tailscale != null,
@@ -986,7 +997,7 @@ private fun SessionHeader(session: Session, onCollapse: () -> Unit) {
 /** Inline separator for a session boundary (init or compact_boundary) in the current session. */
 @Composable
 private fun SessionBoundaryRow(event: com.caic.sdk.v1.EventMessage) {
-    if (event.kind == SdkEventKinds.Init) {
+    if (event.kind == EventKind.Init) {
         val init = event.init
         val label = if (init != null) {
             "Session started \u00b7 ${init.model} \u00b7 ${init.agentVersion} \u00b7 ${init.sessionID}"
@@ -1021,34 +1032,36 @@ private fun SessionBoundaryRow(event: com.caic.sdk.v1.EventMessage) {
 }
 
 /** Compute the CI badge label, showing completion progress when checks are available. */
-private fun ciLabel(status: String?, checks: List<ForgeCheck>?): String {
+private fun ciLabel(status: CIStatus?, checks: List<ForgeCheck>?): String {
     if (checks.isNullOrEmpty()) {
         return when (status) {
-            "pending" -> "CI: pending"
-            "success" -> "CI: passed"
-            "failure" -> "CI: failed"
+            is CIStatus.Pending -> "CI: pending"
+            is CIStatus.Success -> "CI: passed"
+            is CIStatus.Failure -> "CI: failed"
             else -> "CI"
         }
     }
-    if (status == "pending" || status == "failure") {
-        val done = checks.count { it.status == "completed" }
+    if (status is CIStatus.Pending || status is CIStatus.Failure) {
+        val done = checks.count { it.status is CheckStatus.Completed }
         if (done < checks.size) return "CI: $done/${checks.size}"
     }
     return when (status) {
-        "pending" -> "CI: pending"
-        "success" -> "CI: passed"
-        "failure" -> "CI: failed"
+        is CIStatus.Pending -> "CI: pending"
+        is CIStatus.Success -> "CI: passed"
+        is CIStatus.Failure -> "CI: failed"
         else -> "CI"
     }
 }
 
 /** Human-readable status label for a single CI check. */
 private fun checkStatusLabel(c: ForgeCheck): String = when {
-    c.status == "completed" -> {
-        if (c.conclusion == "success" || c.conclusion == "neutral" || c.conclusion == "skipped") "passed"
-        else c.conclusion.ifEmpty { "failed" }
+    c.status is CheckStatus.Completed -> {
+        if (c.conclusion is CheckConclusion.Success ||
+            c.conclusion is CheckConclusion.Neutral ||
+            c.conclusion is CheckConclusion.Skipped) "passed"
+        else c.conclusion.value.ifEmpty { "failed" }
     }
-    c.status == "in_progress" -> "running"
+    c.status is CheckStatus.InProgress -> "running"
     else -> "queued"
 }
 
@@ -1060,22 +1073,22 @@ private fun checkDuration(c: ForgeCheck): String {
     return formatElapsed(seconds)
 }
 
-private fun checkJobUrl(c: ForgeCheck, forge: String?): String? {
-    if (forge == "gitlab") return "https://gitlab.com/${c.owner}/${c.repo}/-/jobs/${c.jobID}"
+private fun checkJobUrl(c: ForgeCheck, forge: Forge?): String? {
+    if (forge is Forge.GitLab) return "https://gitlab.com/${c.owner}/${c.repo}/-/jobs/${c.jobID}"
     if (c.runID > 0 && c.jobID > 0) {
         return "https://github.com/${c.owner}/${c.repo}/actions/runs/${c.runID}/job/${c.jobID}"
     }
     return null
 }
 
-private fun ciActionsUrl(remoteURL: String?, forge: String?): String? {
+private fun ciActionsUrl(remoteURL: String?, forge: Forge?): String? {
     if (remoteURL == null) return null
-    return if (forge == "gitlab") "$remoteURL/-/pipelines" else "$remoteURL/actions"
+    return if (forge is Forge.GitLab) "$remoteURL/-/pipelines" else "$remoteURL/actions"
 }
 
 /** Expandable list of per-check detail rows for the CI badge. */
 @Composable
-private fun CICheckList(checks: List<ForgeCheck>, forge: String? = null) {
+private fun CICheckList(checks: List<ForgeCheck>, forge: Forge? = null) {
     val appColors = MaterialTheme.appColors
     val uriHandler = LocalUriHandler.current
     Column(
@@ -1085,10 +1098,10 @@ private fun CICheckList(checks: List<ForgeCheck>, forge: String? = null) {
         for (c in checks) {
             val label = checkStatusLabel(c)
             val color = when {
-                c.status == "completed" && (c.conclusion == "success" || c.conclusion == "neutral"
-                    || c.conclusion == "skipped") -> appColors.successText
-                c.status == "completed" -> MaterialTheme.colorScheme.error
-                c.status == "in_progress" -> appColors.warningText
+                c.status is CheckStatus.Completed && (c.conclusion is CheckConclusion.Success || c.conclusion is CheckConclusion.Neutral
+                    || c.conclusion is CheckConclusion.Skipped) -> appColors.successText
+                c.status is CheckStatus.Completed -> MaterialTheme.colorScheme.error
+                c.status is CheckStatus.InProgress -> appColors.warningText
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             }
             val jobUrl = checkJobUrl(c, forge)

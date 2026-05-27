@@ -56,11 +56,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.caic.sdk.v1.CIStatus
 import com.caic.sdk.v1.Task
+import com.caic.sdk.v1.TaskState
 import com.fghbuild.caic.ui.theme.appColors
 import com.fghbuild.caic.ui.theme.isCacheStale
 import com.fghbuild.caic.ui.theme.staleStateColor
 import com.fghbuild.caic.ui.theme.stateColor
+import com.fghbuild.caic.ui.theme.terminalStates
 import com.fghbuild.caic.util.formatCost
 import com.fghbuild.caic.util.formatElapsed
 import com.fghbuild.caic.util.formatTokens
@@ -68,7 +71,7 @@ import java.time.Instant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val TerminalStates = setOf("purged", "failed")
+private val TerminalStates = setOf(TaskState.Purged, TaskState.Failed)
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -262,7 +265,7 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
             val tokenCount = task.activeInputTokens + task.activeCacheReadTokens
             val tColor = tokenColor(tokenCount, task.contextWindowLimit)
             val metaParts = buildList {
-                if (!task.harness.isNullOrBlank()) add(task.harness to Color.Unspecified)
+                add(task.harness.value to Color.Unspecified)
                 task.model?.let { add(it to Color.Unspecified) }
                 if (tokenCount > 0) {
                     add("${formatTokens(tokenCount)}/${formatTokens(task.contextWindowLimit)}" to tColor)
@@ -408,7 +411,7 @@ private fun TimingBadges(task: Task, autoFixPR: Boolean) {
             )
             if (task.state !in TerminalStates) {
                 TickingElapsed(stateUpdatedAt = task.stateUpdatedAt)
-                if (task.duration > 0 || task.state == "running") {
+                if (task.duration > 0 || task.state is TaskState.Running) {
                     Text(
                         "/",
                         style = MaterialTheme.typography.bodySmall,
@@ -416,7 +419,7 @@ private fun TimingBadges(task: Task, autoFixPR: Boolean) {
                     )
                 }
             }
-            if (task.duration > 0 || task.state == "running") {
+            if (task.duration > 0 || task.state is TaskState.Running) {
                 TickingThinkTime(
                     duration = task.duration,
                     state = task.state,
@@ -473,7 +476,7 @@ private fun TimingIndicator(task: Task) {
             )
             if (task.state !in TerminalStates) {
                 TickingElapsed(stateUpdatedAt = task.stateUpdatedAt)
-                if (task.duration > 0 || task.state == "running") {
+                if (task.duration > 0 || task.state is TaskState.Running) {
                     Text(
                         "/",
                         style = MaterialTheme.typography.bodySmall,
@@ -481,7 +484,7 @@ private fun TimingIndicator(task: Task) {
                     )
                 }
             }
-            if (task.duration > 0 || task.state == "running") {
+            if (task.duration > 0 || task.state is TaskState.Running) {
                 TickingThinkTime(
                     duration = task.duration,
                     state = task.state,
@@ -512,19 +515,19 @@ private fun TickingElapsed(stateUpdatedAt: Instant) {
 }
 
 @Composable
-private fun TickingThinkTime(duration: Double, state: String, stateUpdatedAt: Instant, turnStartedAt: Instant?) {
+private fun TickingThinkTime(duration: Double, state: TaskState, stateUpdatedAt: Instant, turnStartedAt: Instant?) {
     val stateMs = remember(stateUpdatedAt) { stateUpdatedAt.toEpochMilli() }
     val turnMs = remember(turnStartedAt) { turnStartedAt?.toEpochMilli() ?: 0L }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(state) {
-        if (state == "running") {
+        if (state is TaskState.Running) {
             while (true) {
                 delay(1000)
                 now = System.currentTimeMillis()
             }
         }
     }
-    val totalSec = if (state == "running") {
+    val totalSec = if (state is TaskState.Running) {
         val start = if (turnMs > 0) turnMs else stateMs
         duration + (now - start).coerceAtLeast(0) / 1000.0
     } else {
@@ -579,7 +582,7 @@ private fun StateBadge(task: Task) {
     ) {
         Surface(shape = RoundedCornerShape(4.dp), color = color) {
             Text(
-                text = task.state,
+                text = task.state.value,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
             )
@@ -605,12 +608,12 @@ private fun VoiceNumberBadge(number: Int) {
 }
 
 @Composable
-private fun CiDot(status: String?) {
+private fun CiDot(status: CIStatus?) {
     val appColors = MaterialTheme.appColors
     val color = when (status) {
-        "pending" -> appColors.warningBorder
-        "success" -> appColors.success
-        "failure" -> MaterialTheme.colorScheme.error
+        is CIStatus.Pending -> appColors.warningBorder
+        is CIStatus.Success -> appColors.success
+        is CIStatus.Failure -> MaterialTheme.colorScheme.error
         else -> return
     }
     Box(

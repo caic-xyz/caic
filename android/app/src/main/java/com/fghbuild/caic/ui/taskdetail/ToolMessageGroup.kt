@@ -11,7 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.caic.sdk.v1.EventKinds
+import com.caic.sdk.v1.EventKind
 import com.caic.sdk.v1.EventMessage
 import com.fghbuild.caic.util.ToolCall
 import com.fghbuild.caic.util.toolCountSummary
@@ -30,7 +30,7 @@ fun ToolMessageGroup(
     val call = toolCalls[0]
     val outputDelta = remember(events, call.use.toolUseID) {
         events
-            .filter { it.kind == EventKinds.ToolOutputDelta && it.toolOutputDelta?.toolUseID == call.use.toolUseID }
+            .filter { it.kind == EventKind.ToolOutputDelta && it.toolOutputDelta?.toolUseID == call.use.toolUseID }
             .joinToString("") { it.toolOutputDelta?.delta ?: "" }
             .takeIf { it.isNotEmpty() }
     }

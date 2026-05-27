@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import android.util.Log
 import com.caic.sdk.v1.ApiClient
 import com.caic.sdk.v1.BotFixPRReq
+import com.caic.sdk.v1.EventKind
 import com.caic.sdk.v1.EventMessage
 import com.caic.sdk.v1.EventStats
 import kotlinx.serialization.json.JsonElement
@@ -17,12 +18,15 @@ import com.caic.sdk.v1.InputReq
 import com.caic.sdk.v1.ProcessInfo
 import com.caic.sdk.v1.Prompt
 import com.caic.sdk.v1.ForkTaskReq
+import com.caic.sdk.v1.Harness
 import com.caic.sdk.v1.Repo
 import com.caic.sdk.v1.RepoSpec
 import com.caic.sdk.v1.RestartReq
 import com.caic.sdk.v1.SafetyIssue
 import com.caic.sdk.v1.SyncReq
+import com.caic.sdk.v1.SyncTarget
 import com.caic.sdk.v1.Task
+import com.caic.sdk.v1.TaskState
 import com.fghbuild.caic.data.DraftStore
 import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.data.SseAuthException
@@ -80,7 +84,7 @@ data class TaskDetailState(
     val gitHubTokenAvailable: Boolean = false,
 )
 
-private val TerminalStates = setOf("stopping", "stopped", "purging", "purged", "failed")
+private val TerminalStates = setOf(TaskState.Stopping, TaskState.Stopped, TaskState.Purging, TaskState.Purged, TaskState.Failed)
 
 private const val TAG = "TaskDetailViewModel"
 
@@ -124,7 +128,7 @@ class TaskDetailViewModel @Inject constructor(
 
     /** Last 60 container resource snapshots extracted from the stats event stream. */
     private val _statsHistory: StateFlow<List<EventStats>> = _messages
-        .map { msgs -> msgs.mapNotNull { if (it.kind == "stats") it.stats else null }.takeLast(60) }
+        .map { msgs -> msgs.mapNotNull { if (it.kind == EventKind.Stats) it.stats else null }.takeLast(60) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     @Suppress("UNCHECKED_CAST")
@@ -157,7 +161,7 @@ class TaskDetailViewModel @Inject constructor(
         val sudoAvail = values[17] as Boolean
         val gitHubTokenAvail = values[18] as Boolean
         val task = tasks.firstOrNull { it.id == taskId }
-        val taskHarness = harnesses.firstOrNull { it.name == task?.harness }
+        val taskHarness = harnesses.firstOrNull { it.name == task?.harness?.value }
         val imgSupport = task != null && taskHarness?.supportsImages == true
         val compactSupport = task != null && taskHarness?.supportsCompact == true
         val msgCount = _messages.value.size
@@ -418,7 +422,7 @@ class TaskDetailViewModel @Inject constructor(
     }
 
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
-    fun syncTask(force: Boolean = false, target: String? = null) {
+    fun syncTask(force: Boolean = false, target: SyncTarget? = null) {
         _pendingAction.value = "sync"
         viewModelScope.launch {
             try {
@@ -486,7 +490,7 @@ class TaskDetailViewModel @Inject constructor(
     @Suppress("TooGenericExceptionCaught") // Error boundary: surface all API failures to UI.
     fun forkTask(
         prompt: String,
-        harness: String? = null,
+        harness: Harness? = null,
         model: String? = null,
         effort: String? = null,
         extraRepos: List<RepoSpec>? = null,

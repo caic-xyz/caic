@@ -90,6 +90,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.BranchInfo
 import com.caic.sdk.v1.ImageData
+import com.caic.sdk.v1.CIStatus
+import com.caic.sdk.v1.CheckConclusion
 import com.caic.sdk.v1.Repo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -98,6 +100,8 @@ import com.fghbuild.caic.ui.common.RepoChipStrip
 import com.fghbuild.caic.ui.login.LoginScreen
 import com.fghbuild.caic.util.ScreenshotService
 import com.fghbuild.caic.util.bitmapToImageData
+import com.fghbuild.caic.util.effortOptions
+import com.fghbuild.caic.util.toHarness
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.caic.util.createCameraPhotoUri
@@ -365,8 +369,8 @@ private fun MainContent(
                         val ciStatus = repoMeta?.ci
                         if (ciStatus != null) {
                             val dotColor = when (ciStatus) {
-                                "success" -> Color(0xFF28A745)
-                                "failure" -> Color(0xFFDC3545)
+                                is CIStatus.Success -> Color(0xFF28A745)
+                                is CIStatus.Failure -> Color(0xFFDC3545)
                                 else -> Color(0xFFFFC107)
                             }
                             val ciUrl = ciDotUrl(repoMeta)
@@ -379,9 +383,9 @@ private fun MainContent(
                                         if (ciUrl != null) Modifier.clickable { uriHandler.openUri(ciUrl) } else Modifier
                                     ),
                             )
-                            if (ciStatus == "failure" && state.autoFixCI) {
+                            if (ciStatus is CIStatus.Failure && state.autoFixCI) {
                                 AutoBadge()
-                            } else if (ciStatus == "failure" && !state.autoFixCI) {
+                            } else if (ciStatus is CIStatus.Failure && !state.autoFixCI) {
                                 FixCIButton(onClick = { viewModel.fixCI(group.repo) })
                             }
                         }
@@ -505,15 +509,6 @@ private fun FeatureToggle(
             else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-/** Returns valid effort levels for [harness], empty if unsupported. */
-private fun effortOptions(harness: String): List<String> = when (harness) {
-    "claude" -> listOf("low", "medium", "high", "max")
-    "codex" -> listOf("none", "minimal", "low", "medium", "high", "xhigh")
-    "pi" -> listOf("off", "minimal", "low", "medium", "high", "xhigh")
-    else -> emptyList()
 }
 
 @Composable
@@ -686,7 +681,7 @@ private fun TaskCreationRepoStrip(
                 onSelect = viewModel::selectModel,
             )
         }
-        val effortOpts = effortOptions(state.selectedHarness)
+        val effortOpts = effortOptions(state.selectedHarness.toHarness())
         if (effortOpts.isNotEmpty()) {
             DropdownField(
                 selected = state.selectedEffort.ifBlank { "Default effort" },
@@ -882,11 +877,14 @@ private fun FixCIButton(onClick: () -> Unit) {
 private val chipIconButtonSize = 32.dp
 private val chipIconSize = 18.dp
 
-private val nonPassingConclusions = setOf("failure", "cancelled", "timed_out", "action_required", "stale")
+private val nonPassingConclusions = setOf(
+    CheckConclusion.Failure, CheckConclusion.Cancelled, CheckConclusion.TimedOut,
+    CheckConclusion.ActionRequired, CheckConclusion.Stale,
+)
 
 private fun ciDotUrl(repo: Repo): String? {
     val isGitLab = repo.remoteURL?.contains("gitlab.com") == true
-    if (repo.ci == "failure") {
+    if (repo.ci is CIStatus.Failure) {
         val failed = repo.ciChecks?.find { it.conclusion in nonPassingConclusions }
         if (failed != null) {
             return if (isGitLab) {

@@ -3,8 +3,12 @@ package com.fghbuild.caic.voice
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.caic.sdk.v1.CIStatus
+import com.caic.sdk.v1.ForgePRState
 import com.caic.sdk.v1.Task
+import com.caic.sdk.v1.TaskState
 import com.fghbuild.caic.data.SettingsRepository
+import com.fghbuild.caic.ui.theme.terminalStates
 import com.fghbuild.caic.util.formatCost
 import com.fghbuild.caic.util.formatElapsed
 import com.fghbuild.caic.data.TaskRepository
@@ -31,8 +35,8 @@ class VoiceViewModel @Inject constructor(
     private val taskNumberMap: TaskNumberMap
         get() = voiceSessionManager.taskNumberMap
 
-    private var previousTaskStates: Map<String, String> = emptyMap()
-    private var previousCIStatuses: Map<String, String?> = emptyMap()
+    private var previousTaskStates: Map<String, TaskState> = emptyMap()
+    private var previousCIStatuses: Map<String, CIStatus?> = emptyMap()
 
     /** Task IDs that were already purged/failed when the voice session connected. */
     private var prePurgedIds: Set<String> = emptySet()
@@ -47,7 +51,7 @@ class VoiceViewModel @Inject constructor(
                     if (connected) {
                         val tasks = taskRepository.tasks.value
                         prePurgedIds = tasks
-                            .filter { it.state in setOf("stopping", "stopped", "purging", "purged", "failed") }
+                            .filter { it.state in terminalStates }
                             .map { it.id }
                             .toSet()
                         voiceSessionManager.excludedTaskIds = prePurgedIds
@@ -112,7 +116,7 @@ class VoiceViewModel @Inject constructor(
                 if (notification != null) voiceSessionManager.injectText(notification)
             }
             val prevCI = previousCIStatuses[task.id]
-            if (prevCI != null && prevCI != "failure" && task.ciStatus == "failure") {
+            if (prevCI != null && prevCI != CIStatus.Failure && task.ciStatus == CIStatus.Failure) {
                 val notification = buildCIFailureNotification(task)
                 if (notification != null) voiceSessionManager.injectText(notification)
             }
@@ -146,7 +150,10 @@ class VoiceViewModel @Inject constructor(
     private fun buildCIFailureNotification(task: Task): String? {
         val num = taskNumberMap.toNumber(task.id) ?: return null
         val shortName = task.title.ifBlank { task.id }
-        val pr = task.forgePR?.takeIf { it > 0 && task.forgePRState != "closed" && task.forgePRState != "merged" }?.let { " PR #$it" } ?: ""
+        val pr = task.forgePR?.takeIf {
+            it > 0 && task.forgePRState != ForgePRState.Closed &&
+                task.forgePRState != ForgePRState.Merged
+        }?.let { " PR #$it" } ?: ""
         return "[Task #$num ($shortName)$pr — CI: failure]"
     }
 
@@ -154,13 +161,13 @@ class VoiceViewModel @Inject constructor(
         val num = taskNumberMap.toNumber(task.id) ?: return null
         val shortName = task.title.ifBlank { task.id }
         return when (task.state) {
-            "asking", "waiting", "has_plan" ->
-                "[Task #$num ($shortName) — ${task.state}]"
-            "purged" ->
+            is TaskState.Asking, is TaskState.Waiting, is TaskState.HasPlan ->
+                "[Task #$num ($shortName) — ${task.state.value}]"
+            is TaskState.Purged ->
                 task.result?.let { "[Task #$num ($shortName) — completed: $it]" }
-            "stopped" ->
+            is TaskState.Stopped ->
                 "[Task #$num ($shortName) — stopped: container died]"
-            "failed" ->
+            is TaskState.Failed ->
                 "[Task #$num ($shortName) — failed: ${task.error ?: "unknown"}]"
             else -> null
         }
