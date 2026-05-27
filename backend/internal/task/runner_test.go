@@ -429,6 +429,51 @@ func TestRunner(t *testing.T) {
 				t.Errorf("filename = %q, want %q", name, want)
 			}
 		})
+		t.Run("ReopenNoDuplicateHeader", func(t *testing.T) {
+			t.Parallel()
+			// Reconnect appends via reopenLog, which must not write a second
+			// caic_meta header. Otherwise every server restart that re-adopts
+			// a running container duplicates the header.
+			logDir := filepath.Join(t.TempDir(), "logs")
+			r := &Runner{LogDir: logDir}
+			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}}
+
+			// Initial Start writes the header.
+			w, err := r.openLog(tk)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = w.Close()
+
+			// Several reconnects (simulating repeated server restarts) append
+			// without writing a new header.
+			for range 3 {
+				w, err := r.reopenLog(tk)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = w.Close()
+			}
+
+			name := tk.ID.String() + "-org-repo-caic-0.jsonl"
+			data, err := os.ReadFile(filepath.Join(logDir, name)) //nolint:gosec // path is test-controlled
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Count(string(data), `"type":"caic_meta"`); got != 1 {
+				t.Errorf("caic_meta count = %d, want 1", got)
+			}
+		})
+		t.Run("ReopenMissingFile", func(t *testing.T) {
+			t.Parallel()
+			// reopenLog must report os.ErrNotExist when no log exists yet so
+			// Reconnect can fall back to openLog (which writes the header).
+			r := &Runner{LogDir: filepath.Join(t.TempDir(), "logs")}
+			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}}
+			if _, err := r.reopenLog(tk); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("reopenLog err = %v, want os.ErrNotExist", err)
+			}
+		})
 	})
 
 	t.Run("ContainerDir", func(t *testing.T) {

@@ -289,7 +289,14 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 
 	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, skipSideEffects)
 
-	logW, err := r.openLog(t)
+	// Reconnect resumes an existing session, so append to its log without
+	// writing a new caic_meta header — otherwise every server restart that
+	// re-adopts a running container would append a duplicate header. Fall
+	// back to openLog (which writes the header) only if the log is missing.
+	logW, err := r.reopenLog(t)
+	if errors.Is(err, os.ErrNotExist) {
+		logW, err = r.openLog(t)
+	}
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
