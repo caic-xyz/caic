@@ -37,122 +37,262 @@ public enum JSONValue: Codable, Equatable {
     }
 }
 
-public typealias CIStatus = String
+public struct CIStatus: Codable, Equatable, Hashable {
+    public let value: String
 
-public enum CIStatuses {
-    public static let Pending: CIStatus = "pending"
-    public static let Success: CIStatus = "success"
-    public static let Failure: CIStatus = "failure"
+    public init(_ value: String) { self.value = value }
+
+    public static let Pending = CIStatus("pending")
+    public static let Success = CIStatus("success")
+    public static let Failure = CIStatus("failure")
+
+    public static func other(_ value: String) -> CIStatus { CIStatus(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
 }
 
-public typealias CheckConclusion = String
+public struct CheckConclusion: Codable, Equatable, Hashable {
+    public let value: String
 
-public enum CheckConclusions {
-    public static let Success: CheckConclusion = "success"
-    public static let Failure: CheckConclusion = "failure"
-    public static let Neutral: CheckConclusion = "neutral"
-    public static let Skipped: CheckConclusion = "skipped"
-    public static let Cancelled: CheckConclusion = "cancelled"
-    public static let TimedOut: CheckConclusion = "timed_out"
-    public static let ActionRequired: CheckConclusion = "action_required"
-    public static let Stale: CheckConclusion = "stale"
+    public init(_ value: String) { self.value = value }
+
+    public static let Success = CheckConclusion("success")
+    public static let Failure = CheckConclusion("failure")
+    public static let Neutral = CheckConclusion("neutral")
+    public static let Skipped = CheckConclusion("skipped")
+    public static let Cancelled = CheckConclusion("cancelled")
+    public static let TimedOut = CheckConclusion("timed_out")
+    public static let ActionRequired = CheckConclusion("action_required")
+    public static let Stale = CheckConclusion("stale")
+
+    public static func other(_ value: String) -> CheckConclusion { CheckConclusion(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
 }
 
-public typealias CheckStatus = String
+public struct CheckStatus: Codable, Equatable, Hashable {
+    public let value: String
 
-public enum CheckStatuses {
-    public static let Queued: CheckStatus = "queued"
-    public static let InProgress: CheckStatus = "in_progress"
-    public static let Completed: CheckStatus = "completed"
+    public init(_ value: String) { self.value = value }
+
+    public static let Queued = CheckStatus("queued")
+    public static let InProgress = CheckStatus("in_progress")
+    public static let Completed = CheckStatus("completed")
+
+    public static func other(_ value: String) -> CheckStatus { CheckStatus(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
 }
 
-public typealias EventKind = String
+public struct EventKind: Codable, Equatable, Hashable {
+    public let value: String
 
-public enum EventKinds {
-    public static let Init: EventKind = "init"
-    public static let Text: EventKind = "text"
-    public static let TextDelta: EventKind = "textDelta"
-    public static let ToolUse: EventKind = "toolUse"
-    public static let ToolResult: EventKind = "toolResult"
-    public static let Ask: EventKind = "ask"
-    public static let Usage: EventKind = "usage"
-    public static let Result: EventKind = "result"
-    public static let System: EventKind = "system"
-    public static let UserInput: EventKind = "userInput"
-    public static let Todo: EventKind = "todo"
-    public static let DiffStat: EventKind = "diffStat"
-    public static let Error: EventKind = "error"
-    public static let Thinking: EventKind = "thinking"
-    public static let ThinkingDelta: EventKind = "thinkingDelta"
-    public static let SubagentStart: EventKind = "subagentStart"
-    public static let SubagentEnd: EventKind = "subagentEnd"
-    public static let Log: EventKind = "log"
-    public static let ToolOutputDelta: EventKind = "toolOutputDelta"
-    public static let Widget: EventKind = "widget"
-    public static let WidgetDelta: EventKind = "widgetDelta"
-    public static let RateLimit: EventKind = "rateLimit"
-    public static let Stats: EventKind = "stats"
+    public init(_ value: String) { self.value = value }
+
+    public static let Init = EventKind("init")
+    public static let Text = EventKind("text")
+    public static let TextDelta = EventKind("textDelta")
+    public static let ToolUse = EventKind("toolUse")
+    public static let ToolResult = EventKind("toolResult")
+    public static let Ask = EventKind("ask")
+    public static let Usage = EventKind("usage")
+    public static let Result = EventKind("result")
+    public static let System = EventKind("system")
+    public static let UserInput = EventKind("userInput")
+    public static let Todo = EventKind("todo")
+    public static let DiffStat = EventKind("diffStat")
+    public static let Error = EventKind("error")
+    public static let Thinking = EventKind("thinking")
+    public static let ThinkingDelta = EventKind("thinkingDelta")
+    public static let SubagentStart = EventKind("subagentStart")
+    public static let SubagentEnd = EventKind("subagentEnd")
+    public static let Log = EventKind("log")
+    public static let ToolOutputDelta = EventKind("toolOutputDelta")
+    public static let Widget = EventKind("widget")
+    public static let WidgetDelta = EventKind("widgetDelta")
+    public static let RateLimit = EventKind("rateLimit")
+    public static let Stats = EventKind("stats")
+
+    public static func other(_ value: String) -> EventKind { EventKind(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
 }
 
-public typealias Forge = String
+public struct Forge: Codable, Equatable, Hashable {
+    public let value: String
 
-public enum Forges {
-    public static let GitHub: Forge = "github"
-    public static let GitLab: Forge = "gitlab"
+    public init(_ value: String) { self.value = value }
+
+    public static let GitHub = Forge("github")
+    public static let GitLab = Forge("gitlab")
+
+    public static func other(_ value: String) -> Forge { Forge(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
 }
 
-public typealias ForgePRState = String
+public struct ForgePRState: Codable, Equatable, Hashable {
+    public let value: String
 
-public enum ForgePRStates {
-    public static let Open: ForgePRState = "open"
-    public static let Closed: ForgePRState = "closed"
-    public static let Merged: ForgePRState = "merged"
+    public init(_ value: String) { self.value = value }
+
+    public static let Open = ForgePRState("open")
+    public static let Closed = ForgePRState("closed")
+    public static let Merged = ForgePRState("merged")
+
+    public static func other(_ value: String) -> ForgePRState { ForgePRState(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
 }
 
-public typealias Harness = String
+public struct Harness: Codable, Equatable, Hashable {
+    public let value: String
 
-public enum Harnesses {
-    public static let Claude: Harness = "claude"
-    public static let Codex: Harness = "codex"
-    public static let Gemini: Harness = "gemini"
-    public static let Kilo: Harness = "kilo"
-    public static let OpenCode: Harness = "opencode"
-    public static let Pi: Harness = "pi"
+    public init(_ value: String) { self.value = value }
+
+    public static let Claude = Harness("claude")
+    public static let Codex = Harness("codex")
+    public static let Gemini = Harness("gemini")
+    public static let Kilo = Harness("kilo")
+    public static let OpenCode = Harness("opencode")
+    public static let Pi = Harness("pi")
+
+    public static func other(_ value: String) -> Harness { Harness(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
 }
 
-public typealias SyncTarget = String
+public struct SyncTarget: Codable, Equatable, Hashable {
+    public let value: String
 
-public enum SyncTargets {
-    public static let Branch: SyncTarget = "branch"
-    public static let Default: SyncTarget = "default"
+    public init(_ value: String) { self.value = value }
+
+    public static let Branch = SyncTarget("branch")
+    public static let Default = SyncTarget("default")
+
+    public static func other(_ value: String) -> SyncTarget { SyncTarget(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
 }
 
-public typealias TaskState = String
+public struct TaskState: Codable, Equatable, Hashable {
+    public let value: String
 
-public enum TaskStates {
-    public static let Pending: TaskState = "pending"
-    public static let Branching: TaskState = "branching"
-    public static let Provisioning: TaskState = "provisioning"
-    public static let Starting: TaskState = "starting"
-    public static let Running: TaskState = "running"
-    public static let Waiting: TaskState = "waiting"
-    public static let Asking: TaskState = "asking"
-    public static let HasPlan: TaskState = "has_plan"
-    public static let Pulling: TaskState = "pulling"
-    public static let Pushing: TaskState = "pushing"
-    public static let Stopping: TaskState = "stopping"
-    public static let Stopped: TaskState = "stopped"
-    public static let Purging: TaskState = "purging"
-    public static let Failed: TaskState = "failed"
-    public static let Purged: TaskState = "purged"
+    public init(_ value: String) { self.value = value }
+
+    public static let Pending = TaskState("pending")
+    public static let Branching = TaskState("branching")
+    public static let Provisioning = TaskState("provisioning")
+    public static let Starting = TaskState("starting")
+    public static let Running = TaskState("running")
+    public static let Waiting = TaskState("waiting")
+    public static let Asking = TaskState("asking")
+    public static let HasPlan = TaskState("has_plan")
+    public static let Pulling = TaskState("pulling")
+    public static let Pushing = TaskState("pushing")
+    public static let Stopping = TaskState("stopping")
+    public static let Stopped = TaskState("stopped")
+    public static let Purging = TaskState("purging")
+    public static let Failed = TaskState("failed")
+    public static let Purged = TaskState("purged")
+
+    public static func other(_ value: String) -> TaskState { TaskState(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
 }
 
-public typealias ToolOutputContentType = String
+public struct ToolOutputContentType: Codable, Equatable, Hashable {
+    public let value: String
 
-public enum ToolOutputContentTypes {
-    public static let ToolOutputText: ToolOutputContentType = "text"
-    public static let ToolOutputJSON: ToolOutputContentType = "json"
-    public static let ToolOutputMarkdown: ToolOutputContentType = "markdown"
+    public init(_ value: String) { self.value = value }
+
+    public static let ToolOutputText = ToolOutputContentType("text")
+    public static let ToolOutputJSON = ToolOutputContentType("json")
+    public static let ToolOutputMarkdown = ToolOutputContentType("markdown")
+
+    public static func other(_ value: String) -> ToolOutputContentType { ToolOutputContentType(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
 }
 
 public enum ErrorCodes {

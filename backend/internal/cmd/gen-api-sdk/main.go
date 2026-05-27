@@ -2275,14 +2275,29 @@ public enum JSONValue: Codable, Equatable {
 
 `)
 
-	// Type aliases with constant namespaces.
+	// Structs with static cases for exhaustive switching.
 	for i := range d.aliases {
 		a := &d.aliases[i]
-		fmt.Fprintf(&b, "public typealias %s = String\n\n", a.name)
-		fmt.Fprintf(&b, "public enum %s {\n", a.plural())
+		// Struct declaration.
+		fmt.Fprintf(&b, "public struct %s: Codable, Equatable, Hashable {\n", a.name)
+		b.WriteString("    public let value: String\n\n")
+		b.WriteString("    public init(_ value: String) { self.value = value }\n\n")
+		// Known values.
 		for _, c := range a.constants {
-			fmt.Fprintf(&b, "    public static let %s: %s = %q\n", a.shortName(c), a.name, c.value)
+			fmt.Fprintf(&b, "    public static let %s = %s(%q)\n", a.shortName(c), a.name, c.value)
 		}
+		b.WriteString("\n")
+		// Catch-all for forward compatibility.
+		fmt.Fprintf(&b, "    public static func other(_ value: String) -> %s { %s(value) }\n\n", a.name, a.name)
+		// Codable: encode/decode as a plain string.
+		b.WriteString("    public init(from decoder: Decoder) throws {\n")
+		b.WriteString("        let c = try decoder.singleValueContainer()\n")
+		b.WriteString("        value = try c.decode(String.self)\n")
+		b.WriteString("    }\n\n")
+		b.WriteString("    public func encode(to encoder: Encoder) throws {\n")
+		b.WriteString("        var c = encoder.singleValueContainer()\n")
+		b.WriteString("        try c.encode(value)\n")
+		b.WriteString("    }\n")
 		b.WriteString("}\n\n")
 	}
 
@@ -2343,14 +2358,6 @@ type aliasInfo struct {
 // shortName returns the const name with the type prefix stripped
 // (e.g. "HarnessClaude" → "Claude"). Used for Kotlin/Swift.
 func (a aliasInfo) shortName(c aliasConstant) string { return strings.TrimPrefix(c.name, a.name) }
-
-// plural returns the plural form for the type's constant namespace.
-func (a aliasInfo) plural() string {
-	if strings.HasSuffix(a.name, "s") {
-		return a.name + "es"
-	}
-	return a.name + "s"
-}
 
 // aliasConstant is a single enum value for a string type alias.
 type aliasConstant struct {
