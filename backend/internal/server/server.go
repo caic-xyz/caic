@@ -64,6 +64,7 @@ type Config struct {
 	HarnessEnv      map[string][]string // per-harness KEY=VALUE env vars for containers
 	GeminiAPIKey    string              // required for Gemini Live audio
 	TailscaleAPIKey string              // required for Tailscale networking inside containers
+	Runtime         string              // container runtime: "docker" or "podman" (default: "docker")
 
 	// LLM features (title generation, commit descriptions).
 	LLMProvider string
@@ -157,6 +158,9 @@ func (c *Config) Validate() error {
 	}
 	if c.GitLabOAuthClientID != "" && c.GitLabOAuthAllowedUsers == "" {
 		return errors.New("gitlab.oauth_allowed_users is required when GitLab OAuth login is configured")
+	}
+	if c.Runtime != "" && c.Runtime != "docker" && c.Runtime != "podman" {
+		return fmt.Errorf("core.runtime must be \"docker\" or \"podman\", got %q", c.Runtime)
 	}
 	return nil
 }

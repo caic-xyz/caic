@@ -7,6 +7,12 @@
 # Parent directory containing git repositories managed by caic.
 #root = "."
 
+# Container runtime: "docker" or "podman". Default: "docker".
+# When set to "podman", caic uses podman for all container operations.
+# Note: sudo is not supported with rootless podman (running as non-root user).
+# Use docker if you need sudo-enabled containers.
+#runtime = "docker"
+
 # Auto-update schedule (cron expression, local time). Checks GitHub Releases
 # and replaces the binary on match. Set to "" to disable.
 # When not set, defaults to daily at 04:50.

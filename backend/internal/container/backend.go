@@ -5,9 +5,11 @@ package container
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"runtime/trace"
 	"strconv"
@@ -47,7 +49,7 @@ func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, 
 	} else {
 		slog.Info("md", "phase", "launch", "hns", opts.Harness)
 	}
-	slog.Debug("container", "msg", "Launch starting", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "repos_count", len(repos))
+	slog.DebugContext(ctx, "launch starting", "rt", b.Client.Runtime, "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "repos_count", len(repos))
 	if _, ok := map[agent.Harness]md.Harness{
 		agent.Claude:   md.HarnessClaude,
 		agent.Codex:    md.HarnessCodex,
@@ -58,20 +60,24 @@ func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, 
 	}[opts.Harness]; !ok {
 		return "", fmt.Errorf("unknown harness %q", opts.Harness)
 	}
-	slog.Debug("container", "msg", "harness verified", "harness", opts.Harness)
+	// Rootless podman does not support sudo (user namespace stacking prevents nested containers).
+	if opts.Sudo && b.Client.Runtime == "podman" && os.Getuid() != 0 {
+		return "", errors.New("sudo is not supported with rootless podman; use docker instead")
+	}
+	slog.DebugContext(ctx, "harness verified", "rt", b.Client.Runtime, "harness", opts.Harness)
 	client, mdOpts := b.mdStartOpts(labels, opts)
-	slog.Debug("container", "msg", "creating container object", "repos_count", len(repos))
+	slog.DebugContext(ctx, "creating container", "rt", b.Client.Runtime, "repos_count", len(repos))
 	c, err := client.Container(repos...)
 	if err != nil {
 		return "", err
 	}
 	stdout, stderr := logWriters(opts.LogWriter, "launch")
-	slog.Debug("container", "msg", "calling c.Launch")
+	slog.DebugContext(ctx, "launching", "rt", b.Client.Runtime)
 	if err := c.Launch(ctx, stdout, stderr, mdOpts); err != nil {
-		slog.Error("container", "msg", "c.Launch failed", "err", err)
+		slog.ErrorContext(ctx, "launch failed", "rt", b.Client.Runtime, "err", err)
 		return "", err
 	}
-	slog.Debug("container", "msg", "c.Launch succeeded", "container", c.Name)
+	slog.DebugContext(ctx, "launch succeeded", "rt", b.Client.Runtime, "ctr", c.Name)
 	b.mu.Lock()
 	if b.pendingContainers == nil {
 		b.pendingContainers = make(map[string]*md.Container)
@@ -79,7 +85,7 @@ func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, 
 	b.pendingContainers[c.Name] = c
 	b.vncPorts[c.Name] = c.VNCPort
 	b.mu.Unlock()
-	slog.Debug("container", "msg", "Launch returning", "container", c.Name)
+	slog.DebugContext(ctx, "launch returning", "rt", b.Client.Runtime, "ctr", c.Name)
 	return c.Name, nil
 }
 
@@ -89,7 +95,7 @@ func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opt
 	if len(repos) > 0 {
 		slog.Info("md", "phase", "connect", "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	}
-	slog.Debug("container", "msg", "Connect starting", "container", name, "repos_count", len(repos))
+	slog.DebugContext(ctx, "connect starting", "rt", b.Client.Runtime, "ctr", name, "repos_count", len(repos))
 	b.mu.Lock()
 	c, ok := b.pendingContainers[name]
 	if ok {
@@ -97,19 +103,19 @@ func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opt
 	}
 	b.mu.Unlock()
 	if !ok {
-		slog.Debug("container", "msg", "no pending container", "container", name)
+		slog.DebugContext(ctx, "no pending container", "rt", b.Client.Runtime, "ctr", name)
 		return "", "", fmt.Errorf("no pending container %q", name)
 	}
-	slog.Debug("container", "msg", "found pending container", "container", name)
+	slog.DebugContext(ctx, "found pending container", "rt", b.Client.Runtime, "ctr", name)
 	_, mdOpts := b.mdStartOpts(nil, opts)
 	stdout, stderr := logWriters(opts.LogWriter, "connect")
-	slog.Debug("container", "msg", "calling c.Connect", "container", name)
+	slog.DebugContext(ctx, "calling connect", "rt", b.Client.Runtime, "ctr", name)
 	sr, err := c.Connect(ctx, stdout, stderr, mdOpts)
 	if err != nil {
-		slog.Error("container", "msg", "c.Connect failed", "container", name, "err", err)
+		slog.ErrorContext(ctx, "connect failed", "rt", b.Client.Runtime, "ctr", name, "err", err)
 		return "", "", err
 	}
-	slog.Debug("container", "msg", "c.Connect succeeded", "container", name, "fqdn", sr.TailscaleFQDN, "authurl", sr.TailscaleAuthURL)
+	slog.DebugContext(ctx, "connect succeeded", "rt", b.Client.Runtime, "ctr", name, "fqdn", sr.TailscaleFQDN, "authurl", sr.TailscaleAuthURL)
 	return sr.TailscaleFQDN, sr.TailscaleAuthURL, nil
 }
 
@@ -181,7 +187,7 @@ func (b *Backend) Revive(ctx context.Context, name string, repos []md.Repo) erro
 	} else {
 		slog.Info("md revive", "name", name)
 	}
-	slog.Debug("container", "msg", "Revive starting", "container", name, "repos_count", len(repos))
+	slog.DebugContext(ctx, "revive starting", "rt", b.Client.Runtime, "ctr", name, "repos_count", len(repos))
 	ct, err := b.Client.Container(repos...)
 	if err != nil {
 		return err
@@ -189,13 +195,13 @@ func (b *Backend) Revive(ctx context.Context, name string, repos []md.Repo) erro
 	if len(repos) == 0 {
 		ct.Name = name
 	}
-	slog.Debug("container", "msg", "calling ct.Revive", "container", name)
+	slog.DebugContext(ctx, "calling revive", "rt", b.Client.Runtime, "ctr", name)
 	if err = ct.Revive(ctx, &SlogWriter{Phase: "revive"}, &SlogWriter{Phase: "revive"}); err != nil {
-		slog.Error("container", "msg", "ct.Revive failed", "container", name, "err", err)
+		slog.ErrorContext(ctx, "revive failed", "rt", b.Client.Runtime, "ctr", name, "err", err)
 		return err
 	}
-	slog.Debug("container", "msg", "Revive succeeded", "container", name)
-	// VNC port may have changed after restart (Docker port remapping).
+	slog.DebugContext(ctx, "revive succeeded", "rt", b.Client.Runtime, "ctr", name)
+	// VNC port may have changed after restart (port remapping).
 	b.mu.Lock()
 	b.vncPorts[name] = ct.VNCPort
 	b.mu.Unlock()
@@ -208,7 +214,11 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 	if len(repos) > 0 {
 		slog.Info("md", "phase", "fork", "src", name, "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	}
-	slog.Debug("container", "msg", "Fork starting", "source", name, "repos_count", len(repos))
+	// Rootless podman does not support sudo (user namespace stacking prevents nested containers).
+	if opts.Sudo && b.Client.Runtime == "podman" && os.Getuid() != 0 {
+		return "", nil, errors.New("sudo is not supported with rootless podman; use docker instead")
+	}
+	slog.DebugContext(ctx, "fork starting", "rt", b.Client.Runtime, "source", name, "repos_count", len(repos))
 
 	// Look up the source container so Fork inherits Display, Tailscale,
 	// USB, and Sudo from the source unless explicitly overridden by opts.
@@ -229,7 +239,7 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 	if mdH, ok := harnessMap[opts.Harness]; ok {
 		agentPaths = []md.AgentPaths{md.HarnessMounts[mdH]}
 	}
-	slog.Debug("container", "msg", "building fork options", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo)
+	slog.DebugContext(ctx, "building fork options", "rt", b.Client.Runtime, "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo)
 	forkOpts := &md.ForkOpts{
 		ExtraRepos: opts.ExtraRepos,
 		Display:    opts.Display,
@@ -242,13 +252,13 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 		MaxCPUs:    maxCPUsOrDefault(opts.MaxCPUs),
 	}
 	stdout, stderr := logWriters(opts.LogWriter, "fork")
-	slog.Debug("container", "msg", "calling ct.Fork", "source", name)
+	slog.DebugContext(ctx, "calling fork", "rt", b.Client.Runtime, "source", name)
 	forked, err := ct.Fork(ctx, stdout, stderr, forkOpts)
 	if err != nil {
-		slog.Error("container", "msg", "ct.Fork failed", "source", name, "err", err)
+		slog.ErrorContext(ctx, "fork failed", "rt", b.Client.Runtime, "source", name, "err", err)
 		return "", nil, err
 	}
-	slog.Debug("container", "msg", "Fork succeeded", "source", name, "fork", forked.Name)
+	slog.DebugContext(ctx, "fork succeeded", "rt", b.Client.Runtime, "source", name, "fork", forked.Name)
 	b.mu.Lock()
 	b.vncPorts[forked.Name] = forked.VNCPort
 	b.mu.Unlock()
@@ -263,11 +273,11 @@ func (b *Backend) VNCPort(ctx context.Context, containerName string) int {
 	if port != 0 {
 		return port
 	}
-	// Fallback: query Docker label on the container. Handles server
+	// Fallback: query container label. Handles server
 	// restarts where the in-memory map is empty but the container
 	// is still running with a display.
-	if v, err := LabelValue(ctx, containerName, "md.display"); err == nil && v == "1" {
-		if hp, err := hostPort(ctx, containerName, "5901/tcp"); err == nil {
+	if v, err := LabelValue(ctx, b.Client.Runtime, containerName, "md.display"); err == nil && v == "1" {
+		if hp, err := b.hostPort(ctx, containerName, "5901/tcp"); err == nil {
 			b.mu.Lock()
 			b.vncPorts[containerName] = int32(hp) //nolint:gosec // port numbers are 1-65535, safe for int32
 			b.mu.Unlock()
@@ -316,9 +326,9 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) (client 
 	return client, mdOpts
 }
 
-// hostPort reads the Docker host port mapping for the given container port.
-func hostPort(ctx context.Context, containerName, containerPort string) (int, error) {
-	cmd := exec.CommandContext(ctx, "docker", "port", containerName, containerPort) //nolint:gosec // containerName is internally-assigned
+// hostPort reads the container host port mapping for the given container port.
+func (b *Backend) hostPort(ctx context.Context, containerName, containerPort string) (int, error) {
+	cmd := exec.CommandContext(ctx, b.Client.Runtime, "port", containerName, containerPort) //nolint:gosec // containerName is internally-assigned
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, err
@@ -326,7 +336,7 @@ func hostPort(ctx context.Context, containerName, containerPort string) (int, er
 	// Output format: "0.0.0.0:32768" or "127.0.0.1:32768"
 	parts := strings.SplitN(strings.TrimSpace(string(out)), ":", 2)
 	if len(parts) != 2 {
-		return 0, fmt.Errorf("unexpected docker port output: %q", out)
+		return 0, fmt.Errorf("unexpected %s port output: %q", b.Client.Runtime, out)
 	}
 	return strconv.Atoi(parts[1])
 }

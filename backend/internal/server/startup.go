@@ -76,7 +76,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	defer startTask.End()
 
 	// container.New is instant; run it serially to simplify.
-	mdClient, err := container.New(cfg.TailscaleAPIKey, cfg.GitHubToken)
+	mdClient, err := container.New(cfg.TailscaleAPIKey, cfg.GitHubToken, cfg.Runtime)
 	if err != nil {
 		return nil, fmt.Errorf("init container library: %w", err)
 	}
@@ -374,7 +374,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	// Phase 4: Adopt containers (using pre-fetched list).
 	phase4 := trace.StartRegion(ctx, "adopt-containers")
 	if contRes.err != nil {
-		slog.Warn("list containers failed, skipping adoption", "err", contRes.err)
+		slog.Warn("list failed, skipping adoption", "rt", s.mdClient.Runtime, "err", contRes.err)
 	} else {
 		if err := s.adoptContainers(ctx, contRes.containers, logRes.logs); err != nil {
 			phase4.End()
@@ -711,16 +711,16 @@ func (s *Server) adoptContainers(ctx context.Context, containers []*md.Container
 		if !strings.HasPrefix(c.Name, "md-") {
 			continue
 		}
-		labelVal, err := container.LabelValue(ctx, c.Name, "caic.id")
+		labelVal, err := container.LabelValue(ctx, s.mdClient.Runtime, c.Name, "caic.id")
 		if labelVal == "" && err == nil {
-			labelVal, _ = container.LabelValue(ctx, c.Name, "caic")
+			labelVal, _ = container.LabelValue(ctx, s.mdClient.Runtime, c.Name, "caic")
 		}
 		if labelVal != "" {
-			slog.Error("adopt: caic container not matched to any repo",
-				"ctr", c.Name, "label", labelVal, "nrepos", len(c.Repos))
+			slog.Error("adopt: caic not matched to any repo",
+				"rt", s.mdClient.Runtime, "ctr", c.Name, "label", labelVal, "nrepos", len(c.Repos))
 			for _, r := range c.Repos {
 				slog.Error("adopt: unmatched repo detail",
-					"ctr", c.Name, "mounted_path", r.MountedPath, "branch", r.Branch)
+					"rt", s.mdClient.Runtime, "ctr", c.Name, "mounted_path", r.MountedPath, "branch", r.Branch)
 			}
 		}
 	}
@@ -744,18 +744,18 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	// container creation and is the authoritative proof of ownership.
 	caicLabelReg := trace.StartRegion(ctx, "caic-label")
 	trace.Logf(ctx, "adopt", "%s: label-caic", c.Name)
-	labelVal, err := container.LabelValue(ctx, c.Name, "caic.id")
+	labelVal, err := container.LabelValue(ctx, s.mdClient.Runtime, c.Name, "caic.id")
 	// TODO(2026-06-25): remove fallback to old "caic" label after all old containers have been
 	// cycled. All newly launched containers use "caic.id" exclusively.
 	if labelVal == "" && err == nil {
-		labelVal, err = container.LabelValue(ctx, c.Name, "caic")
+		labelVal, err = container.LabelValue(ctx, s.mdClient.Runtime, c.Name, "caic")
 	}
 	caicLabelReg.End()
 	if err != nil {
 		return fmt.Errorf("label check for %s: %w", c.Name, err)
 	}
 	if labelVal == "" {
-		slog.Info("container", "msg", "skipping non-caic", "repo", ri.RelPath, "ctr", c.Name, "br", branch)
+		slog.Info("skipping non-caic", "rt", s.mdClient.Runtime, "repo", ri.RelPath, "ctr", c.Name, "br", branch)
 		return nil
 	}
 	taskID, err := ksid.Parse(labelVal)
@@ -767,7 +767,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	// explicitly revive them via the UI or API when ready.
 	isExited := c.State == "exited"
 	if isExited {
-		slog.Info("container", "msg", "adopting exited container as stopped", "ctr", c.Name, "br", branch)
+		slog.Info("adopting exited as stopped", "rt", s.mdClient.Runtime, "ctr", c.Name, "br", branch)
 	}
 
 	// Find the log file for this task. For repo-based tasks, match by repo+branch
@@ -799,10 +799,10 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	// Read the harness from the container label (authoritative), falling
 	// back to the log file, then to Claude as the default.
 	trace.Logf(ctx, "adopt", "%s: label-harness", c.Name)
-	harnessLabel, _ := container.LabelValue(ctx, c.Name, "caic.harness")
+	harnessLabel, _ := container.LabelValue(ctx, s.mdClient.Runtime, c.Name, "caic.harness")
 	// TODO: remove fallback to old "harness" label after 2026-06-25.
 	if harnessLabel == "" {
-		harnessLabel, _ = container.LabelValue(ctx, c.Name, "harness")
+		harnessLabel, _ = container.LabelValue(ctx, s.mdClient.Runtime, c.Name, "harness")
 	}
 	harnessName := agent.Harness(harnessLabel)
 	if harnessName == "" && lt != nil {
@@ -915,7 +915,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		ForgeIssue:    forgeIssue,
 	}
 	// Restore GitHub token flag from log trailer (primary) or container label (fallback).
-	gtLabel, _ := container.LabelValue(ctx, c.Name, "caic.githubToken")
+	gtLabel, _ := container.LabelValue(ctx, s.mdClient.Runtime, c.Name, "caic.githubToken")
 	if (lt != nil && lt.GitHubToken) || gtLabel == "true" {
 		t.GitHubToken = true
 	}
@@ -1083,8 +1083,8 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 		go s.lookupExternalPR(&ri, branch, t, entry) //nolint:contextcheck // server-lifetime context is intentional; must outlive adoption
 	}
 
-	slog.Info("container", "msg", "adopted",
-		"repo", ri.RelPath, "ctr", c.Name, "br", branch,
+	slog.Info("adopted",
+		"rt", s.mdClient.Runtime, "repo", ri.RelPath, "ctr", c.Name, "br", branch,
 		"relay", relayAlive, "state", t.GetState(), "sess", t.GetSessionID())
 
 	// Only regenerate title if a new turn was completed since the log was
@@ -1099,7 +1099,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 	// If the relay is dead, the session is lost — no resume attempt.
 	// Skip reconnect for stopped tasks — container is not running.
 	if t.GetState() != task.StateStopped && relayAlive {
-		slog.Debug("container", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "ctr", c.Name)
+		slog.Debug("auto-reconnect starting", "rt", s.mdClient.Runtime, "repo", ri.RelPath, "br", branch, "ctr", c.Name)
 		go func() {
 			tlog := slog.With("repo", ri.RelPath, "br", branch, "ctr", t.Container)
 			h, err := runner.Reconnect(ctx, t, true)
@@ -1129,8 +1129,8 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 			s.watchSession(entry, runner, h)
 		}()
 	} else if !relayAlive && t.GetState() != task.StateStopped {
-		slog.Error("relay dead, stopping container",
-			"repo", ri.RelPath, "br", branch, "ctr", c.Name,
+		slog.Error("relay dead, stopping",
+			"rt", s.mdClient.Runtime, "repo", ri.RelPath, "br", branch, "ctr", c.Name,
 			"state", t.GetState())
 		t.SetState(task.StateStopping)
 		if err := runner.Container.Stop(ctx, c.Name); err != nil {
@@ -1173,17 +1173,17 @@ func (s *Server) lookupExternalPR(ri *repoInfo, branch string, t *task.Task, ent
 	s.ciService.MonitorCI(s.ctx, entry, f, ri.ForgeOwner, ri.ForgeRepo, sha)
 }
 
-// watchContainerEvents starts a single goroutine that listens for Docker
+// watchContainerEvents starts a single goroutine that listens for
 // container die events and triggers cleanup for the corresponding task.
 func (s *Server) watchContainerEvents(ctx context.Context) {
 	go func() {
 		for {
-			ch, err := container.WatchEvents(ctx, "caic")
+			ch, err := container.WatchEvents(ctx, s.mdClient.Runtime, "caic")
 			if err != nil {
 				if ctx.Err() != nil {
 					return
 				}
-				slog.Warn("docker events failed, retrying in 5s", "err", err)
+				slog.Warn("events failed, retrying in 5s", "rt", s.mdClient.Runtime, "err", err)
 				select {
 				case <-time.After(5 * time.Second):
 					continue
@@ -1198,7 +1198,7 @@ func (s *Server) watchContainerEvents(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			slog.Warn("docker events stream ended, reconnecting in 5s")
+			slog.Warn("events stream ended, reconnecting in 5s", "rt", s.mdClient.Runtime)
 			select {
 			case <-time.After(5 * time.Second):
 			case <-ctx.Done():
@@ -1271,7 +1271,7 @@ func (s *Server) refreshHarnessModels() {
 // refreshOneHarness launches a temporary container, fetches models, and
 // updates the cache and all runner backends.
 func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, fetch func(ctx context.Context, container string, env []string) ([]string, error)) {
-	slog.Info("model cache stale, fetching from temporary container", "harness", h)
+	slog.Info("model cache stale, fetching", "rt", s.mdClient.Runtime, "harness", h)
 	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
 	defer cancel()
 
@@ -1334,7 +1334,7 @@ func (s *Server) handleContainerDeath(containerName string) {
 	if p := t.Primary(); p != nil {
 		deathBranch = p.Branch
 	}
-	slog.Info("container", "msg", "died, archiving as stopped", "ctr", containerName, "task", t.ID, "br", deathBranch, "prev_state", state)
+	slog.Info("died, archiving as stopped", "rt", s.mdClient.Runtime, "ctr", containerName, "task", t.ID, "br", deathBranch, "prev_state", state)
 	// Detach any active session (SSH is dead).
 	t.DetachSession()
 	t.SetState(task.StateStopped)

@@ -27,6 +27,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/md"
 )
 
 // stubBackend implements agent.Backend for test map-membership checks.
@@ -76,6 +77,7 @@ func newTestPrefs(t *testing.T) *preferences.Store {
 	return store
 }
 
+// newTestServer creates a Server for tests.
 func newTestServer(t *testing.T) *Server {
 	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
@@ -295,9 +297,29 @@ func TestHandlePurge(t *testing.T) {
 
 func TestHandleContainerDeath(t *testing.T) {
 	t.Parallel()
+	// Initialize mdClient once before parallel subtests (can't use t.Setenv in parallel).
+	tmpDir := t.TempDir()
+	origHome, origXDG, origXDGData, origXDGState := os.Getenv("HOME"), os.Getenv("XDG_CONFIG_HOME"), os.Getenv("XDG_DATA_HOME"), os.Getenv("XDG_STATE_HOME")
+	os.Setenv("HOME", tmpDir)                                             //nolint:gosec,errcheck,usetesting // test setup
+	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpDir, ".config"))        //nolint:gosec,errcheck,usetesting // test setup
+	os.Setenv("XDG_DATA_HOME", filepath.Join(tmpDir, ".local", "share"))  //nolint:gosec,errcheck,usetesting // test setup
+	os.Setenv("XDG_STATE_HOME", filepath.Join(tmpDir, ".local", "state")) //nolint:gosec,errcheck,usetesting // test setup
+	mdClient, err := md.New(io.Discard)
+	os.Setenv("HOME", origHome)               //nolint:gosec,errcheck,usetesting // best-effort restore
+	os.Setenv("XDG_CONFIG_HOME", origXDG)     //nolint:gosec,errcheck,usetesting // best-effort restore
+	os.Setenv("XDG_DATA_HOME", origXDGData)   //nolint:gosec,errcheck,usetesting // best-effort restore
+	os.Setenv("XDG_STATE_HOME", origXDGState) //nolint:gosec,errcheck,usetesting // best-effort restore
+	if err != nil {
+		t.Fatalf("md.New: %v", err)
+	}
+	newServer := func(t *testing.T) *Server {
+		s := newTestServer(t)
+		s.mdClient = mdClient
+		return s
+	}
 	t.Run("ArchivesAsStopped", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newServer(t)
 		tk := &task.Task{
 			InitialPrompt: agent.Prompt{Text: "test"},
 			Repos:         []task.RepoMount{{Name: "r"}},
@@ -317,7 +339,7 @@ func TestHandleContainerDeath(t *testing.T) {
 
 	t.Run("UnknownContainer", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newServer(t)
 		// Should not panic or cause errors.
 		s.handleContainerDeath("unknown-container")
 	})
