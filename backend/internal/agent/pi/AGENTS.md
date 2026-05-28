@@ -5,7 +5,7 @@ Translates Pi's custom JSONL protocol over stdin/stdout into normalized `agent.M
 
 ## Protocol
 
-Pi CLI runs with `--mode rpc --no-session`. No handshake — subprocess is
+Pi CLI runs with `--mode rpc`. No handshake — subprocess is
 immediately ready to accept commands. Type-dispatched JSONL (not JSON-RPC 2.0).
 
 Prompts sent as `PromptCmd` with text + optional base64 images.

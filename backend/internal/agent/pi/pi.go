@@ -175,7 +175,7 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 
 // buildArgs constructs the Pi CLI arguments for RPC mode.
 func buildArgs() []string {
-	return []string{"pi", "--mode", "rpc", "--no-session"}
+	return []string{"pi", "--mode", "rpc"}
 }
 
 // caicModelInfo is written to output.jsonl during Start so replay/adoption
