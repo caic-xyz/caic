@@ -331,6 +331,7 @@ func (s *Server) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flush
 	tracker := newToolTimingTracker(entry.task.Harness)
 	now := time.Now()
 	idx := 0
+	bytesSinceFlush := 0
 	emit := func(msg agent.Message) {
 		evs := tracker.convertMessage(msg, now)
 		for i := range evs {
@@ -339,8 +340,13 @@ func (s *Server) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flush
 				slog.Warn("marshal SSE event", "err", err)
 				continue
 			}
-			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
+			n, _ := fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
 			idx++
+			bytesSinceFlush += n
+			if bytesSinceFlush >= 65536 {
+				flusher.Flush()
+				bytesSinceFlush = 0
+			}
 		}
 	}
 	push, flush := newReplayFilter(emit)
