@@ -1591,6 +1591,12 @@ func detectProviders(ctx context.Context, harnessEnv map[string][]string) []usag
 			fetchers = append(fetchers, f)
 		}
 	}
+	if _, ok := envKeys["XIAOMI_API_KEY"]; ok {
+		key := firstEnvValue(harnessEnv, "XIAOMI_API_KEY")
+		if f := usage.NewXiaomiFetcher(key); f != nil {
+			fetchers = append(fetchers, f)
+		}
+	}
 
 	slog.InfoContext(ctx, "provider usage fetchers", "count", len(fetchers))
 	return fetchers
