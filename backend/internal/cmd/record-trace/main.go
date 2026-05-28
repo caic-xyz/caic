@@ -62,6 +62,18 @@ func mainImpl() error {
 	if !ok {
 		return fmt.Errorf("unknown harness: %s", *harnessFlag)
 	}
+	if *scenarioFlag == "" {
+		return errors.New("--scenario is required")
+	}
+	promptText, ok := scenarios[*scenarioFlag]
+	if !ok {
+		return fmt.Errorf("unknown scenario: %s", *scenarioFlag)
+	}
+	outputPath := filepath.Clean(filepath.Join("testdata", *scenarioFlag+".jsonl"))
+	if _, err := os.Stat(outputPath); err == nil {
+		// Skip if the golden file already exists (idempotent for go generate).
+		return nil
+	}
 
 	// TODO: Make this configurable.
 	apiKey := os.Getenv("XIAOMI_API_KEY")
@@ -69,19 +81,8 @@ func mainImpl() error {
 		return errors.New("XIAOMI_API_KEY must be set")
 	}
 
-	if *scenarioFlag == "" {
-		return errors.New("--scenario is required")
-	}
-	s, ok := scenarios[*scenarioFlag]
-	if !ok {
-		return fmt.Errorf("unknown scenario: %s", *scenarioFlag)
-	}
-	promptText := s
-	outputPath := filepath.Join("testdata", *scenarioFlag+".jsonl")
-
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-
 	return recordTrace(ctx, *harnessFlag, cmdArgs, promptText, outputPath, *modelFlag, apiKey)
 }
 
@@ -89,10 +90,6 @@ func recordTrace(ctx context.Context, harness string, cmdArgs []string, promptTe
 	root, err := findRoot()
 	if err != nil {
 		return fmt.Errorf("find repo root: %w", err)
-	}
-	if _, err := os.Stat(filepath.Clean(outputPath)); err == nil {
-		// Skip if the golden file already exists (idempotent for go generate).
-		return nil
 	}
 
 	// Create temp workspace with a sample file.
