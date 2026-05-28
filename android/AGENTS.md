@@ -58,6 +58,59 @@ make android-e2e    # Android instrumented tests and generate screenshots
 
 Lint is strict: `warningsAsErrors = true`, `maxIssues: 0`.
 
+## Emulator Tips & Tricks
+
+### Quick Setup
+
+```bash
+# One-time setup (installs SDK, system image, creates AVD)
+make android-setup-emulator
+
+# Start/stop the emulator
+make android-start-emulator
+make android-stop-emulator
+
+# Build, install, and launch the app
+make android-push
+```
+
+### Connecting to Fake Backend
+
+The emulator uses `10.0.2.2` to reach the host machine. To test with the fake backend:
+
+```bash
+# Terminal 1: Start fake backend
+make dev-fake  # or: go run -tags e2e ./backend/cmd/caic -config-dir /tmp/caic-test
+
+# Terminal 2: Set up reverse tunnel (alternative to 10.0.2.2)
+adb reverse tcp:2242 tcp:2242
+```
+
+Then in the app Settings, add a server with URL `http://10.0.2.2:2242`.
+
+### UI Automation Gotchas
+
+- **Use `uiautomator dump`** to find element bounds before tapping:
+  ```bash
+  adb shell uiautomator dump /sdcard/ui.xml
+  adb pull /sdcard/ui.xml /tmp/ui.xml
+  grep -i "button\|EditText" /tmp/ui.xml
+  ```
+- **Compose elements** often don't have resource-ids. Use `content-desc` or bounds from the XML.
+- **Text input** goes to the focused field. Tap the target field first, then type.
+- **Keyboard dismissal**: `adb shell input keyevent KEYCODE_BACK`
+- **Clear app data**: `adb shell pm clear com.fghbuild.caic`
+
+### Screenshots
+
+```bash
+# Capture and pull screenshot
+adb shell screencap -p /sdcard/screenshot.png
+adb pull /sdcard/screenshot.png /tmp/screenshot.png
+```
+
+
+
 ## E2E Testing
 
 Android e2e tests mirror the frontend Playwright tests (`e2e/tests/*.spec.ts`)

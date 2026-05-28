@@ -8,7 +8,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -125,13 +124,13 @@ private fun ProviderPill(pq: ProviderQuota, serverURL: String) {
     } else {
         Modifier
     }
-    Row(
+    FlowRow(
         modifier = modifier
             .background(pillBg, RoundedCornerShape(4.dp))
             .border(0.5.dp, pillBorder, RoundedCornerShape(4.dp))
             .padding(horizontal = 5.dp, vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         if (pq.logoUrl.isNotBlank() && serverURL.isNotBlank()) {
             SvgUrlImage(
@@ -226,6 +225,8 @@ private fun BadgeText(
         style = style,
         color = colors.fg,
         fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        softWrap = false,
         modifier = Modifier
             .background(colors.bg, RoundedCornerShape(3.dp))
             .padding(horizontal = 4.dp, vertical = 1.dp),
