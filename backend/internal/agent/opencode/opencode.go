@@ -33,6 +33,7 @@ type Backend struct {
 }
 
 var _ agent.Backend = (*Backend)(nil)
+var _ agent.RecordHandshaker = (*Backend)(nil)
 
 // New creates an OpenCode backend with parser configured. If cacheDir is
 // non-empty, the model list is loaded from the on-disk harness cache.
@@ -53,6 +54,19 @@ func New(cacheDir string, envVars []string) *Backend {
 		}
 	}
 	return b
+}
+
+// RecordHandshake performs the ACP handshake (initialize → session/new →
+// optional set_model) over stdin/stdout for record-trace golden-file
+// generation. It returns a populated wireFormat and a buffered reader that
+// replaces the original stdout for subsequent reads.
+func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.Reader, model string) (agent.WireFormat, io.Reader, error) {
+	br := bufio.NewReaderSize(stdout, 1<<16)
+	hs, err := handshake(ctx, stdin, br, &agent.Options{Dir: "/workspace", Model: model})
+	if err != nil {
+		return nil, nil, err
+	}
+	return hs.wire, br, nil
 }
 
 // Models returns the current model list, updated dynamically after each handshake.

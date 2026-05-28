@@ -79,24 +79,19 @@ func mainImpl() error {
 		return nil
 	}
 
-	apiKey := os.Getenv(*apiKeyEnv)
-	if apiKey == "" {
-		return errors.New("--api-key-env must name an env var that is set")
-	}
-
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	return recordTrace(ctx, b, *apiKeyEnv, apiKey, promptText, outputPath, *modelFlag)
+	return recordTrace(ctx, b, *apiKeyEnv, promptText, outputPath, *modelFlag)
 }
 
-func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv, apiKey, promptText, outputPath, model string) error {
+func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv, promptText, outputPath, model string) error {
 	workDir, err := setupWorkspace()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(workDir) }()
 
-	ctr, err := startContainer(ctx, workDir, apiKeyEnv, apiKey)
+	ctr, err := startContainer(ctx, workDir, apiKeyEnv)
 	if err != nil {
 		return err
 	}
@@ -114,11 +109,19 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv, apiKey, prompt
 	if err != nil {
 		return err
 	}
-	if err := sendCommands(stdin, b, model, promptText); err != nil {
+	var wire agent.WireFormat
+	if hs, ok := b.(agent.RecordHandshaker); ok {
+		wire, stdout, err = hs.RecordHandshake(ctx, stdin, stdout, model)
+		if err != nil {
+			_ = cmd.Process.Kill()
+			return err
+		}
+	}
+	if err := sendCommands(stdin, b, model, promptText, wire); err != nil {
 		_ = cmd.Process.Kill()
 		return err
 	}
-	if err := waitAndShutdown(ctx, cmd, stdin, stdout, b, ctr); err != nil {
+	if err := waitAndShutdown(ctx, cmd, stdin, stdout, b, ctr, wire); err != nil {
 		return err
 	}
 	return writeGoldenFile(ctx, ctr, workDir, b.Harness(), promptText, outputPath)
@@ -139,18 +142,19 @@ func setupWorkspace() (string, error) {
 }
 
 // startContainer pulls the image and starts a container.
-func startContainer(ctx context.Context, workDir, apiKeyEnv, apiKey string) (string, error) {
+func startContainer(ctx context.Context, workDir, apiKeyEnv string) (string, error) {
 	slog.Info("Pulling image", "image", image)
 	if pullErr := runPodman(ctx, "pull", image); pullErr != nil {
 		return "", fmt.Errorf("pull image: %w", pullErr)
 	}
 
 	slog.Info("Starting container")
-	ctrBytes, runErr := exec.CommandContext(ctx, "podman", "run", "-d", "--rm", //nolint:gosec // podman args are safe
-		"-v", workDir+":/workspace:rw",
-		"-e", apiKeyEnv+"="+apiKey,
-		image, "sleep", "300",
-	).Output()
+	args := []string{"podman", "run", "-d", "--rm", "-v", workDir + ":/workspace:rw"}
+	if v := os.Getenv(apiKeyEnv); apiKeyEnv != "" && v != "" {
+		args = append(args, "-e", apiKeyEnv+"="+v)
+	}
+	args = append(args, image, "sleep", "300")
+	ctrBytes, runErr := exec.CommandContext(ctx, args[0], args[1:]...).Output() //nolint:gosec // podman args are safe
 	if runErr != nil {
 		return "", fmt.Errorf("start container: %w", runErr)
 	}
@@ -166,11 +170,12 @@ func deployRelay(ctx context.Context, ctr string) error {
 	return cmd.Run()
 }
 
-// detectBinDirs finds pi and node bin directories inside the container.
+// detectBinDirs finds agent binary directories inside the container.
 func detectBinDirs(ctx context.Context, ctr string) (string, error) {
 	cmd := exec.CommandContext(ctx, "podman", "exec", ctr, //nolint:gosec // podman args are safe
 		"bash", "-c",
 		`test -x /home/user/.local/share/pnpm/bin/pi && printf ':%s' /home/user/.local/share/pnpm/bin
+test -x /home/user/.opencode/bin/opencode && printf ':%s' /home/user/.opencode/bin
 set -- /home/user/.nvm/versions/node/v*/bin; test -x "$1/node" && printf ':%s' "$1"`,
 	)
 	out, err := cmd.Output()
@@ -211,19 +216,27 @@ func startRelayAgent(ctx context.Context, ctr string, b agent.Backend, model, bi
 }
 
 // sendCommands sends any pre-prompt harness setup and then the prompt.
-func sendCommands(stdin io.WriteCloser, b agent.Backend, model, promptText string) error {
-	if pp, ok := b.(agent.PrePromptWriter); ok {
-		if err := pp.WritePrePrompt(stdin, model, io.Discard); err != nil {
-			return err
+// When wire is non-nil (from a RecordHandshake), it is used instead of
+// NewWire() and PrePromptWriter is skipped (handshake already set up).
+func sendCommands(stdin io.WriteCloser, b agent.Backend, model, promptText string, wire agent.WireFormat) error {
+	if wire == nil {
+		if pp, ok := b.(agent.PrePromptWriter); ok {
+			if err := pp.WritePrePrompt(stdin, model, io.Discard); err != nil {
+				return err
+			}
 		}
+		wire = b.NewWire()
 	}
 	slog.Info("Sending prompt", "text", fmt.Sprintf("%.60s...", promptText))
-	return b.NewWire().WritePrompt(stdin, agent.Prompt{Text: promptText}, io.Discard)
+	return wire.WritePrompt(stdin, agent.Prompt{Text: promptText}, io.Discard)
 }
 
 // waitAndShutdown watches for a ResultMessage, then sends the null-byte sentinel and waits.
-func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, b agent.Backend, ctr string) error {
-	agentDone := watchResult(stdout, b.NewWire().ParseMessage)
+func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, b agent.Backend, ctr string, wire agent.WireFormat) error {
+	if wire == nil {
+		wire = b.NewWire()
+	}
+	agentDone := watchResult(stdout, wire.ParseMessage)
 
 	slog.Info("Waiting for agent to finish")
 	select {
@@ -257,7 +270,6 @@ func watchResult(stdout io.Reader, parse func([]byte) ([]agent.Message, error)) 
 			}
 			for _, m := range msgs {
 				if _, ok := m.(*agent.ResultMessage); ok {
-					_, _ = io.ReadAll(stdout)
 					return
 				}
 			}
