@@ -222,11 +222,7 @@ func (lt *LoadedTask) StreamMessages() iter.Seq2[agent.Message, error] {
 			yield(nil, fmt.Errorf("no parser set for harness %q; call SetParser first", lt.Harness))
 			return
 		}
-		var offset int64
-		if lt.LogSize > maxTailLoadBytes {
-			offset = lt.LogSize - maxTailLoadBytes
-		}
-		for m, e := range agent.StreamLogFile(lt.path, lt.replayParser(), offset) {
+		for m, e := range agent.StreamLogFile(lt.path, lt.replayParser(), 0) {
 			if !yield(m, e) {
 				return
 			}

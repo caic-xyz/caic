@@ -83,6 +83,27 @@ func TestBackendNewParser(t *testing.T) {
 			t.Fatalf("update3: got %d messages, want 0 (empty delta filtered)", len(msgs3))
 		}
 	})
+
+	t.Run("prompt command parses to UserInputMessage", func(t *testing.T) {
+		t.Parallel()
+		parser := New("", nil).NewParser()
+		line := []byte(`{"type":"prompt","message":"run rpi/446b-camera/build-annotate-cv.sh without docker","streamingBehavior":"steer"}`)
+		msgs, err := parser(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		ui, ok := msgs[0].(*agent.UserInputMessage)
+		if !ok {
+			t.Fatalf("got %T, want UserInputMessage", msgs[0])
+		}
+		want := "run rpi/446b-camera/build-annotate-cv.sh without docker"
+		if ui.Text != want {
+			t.Errorf("text: got %q, want %q", ui.Text, want)
+		}
+	})
 }
 
 func TestHandleDoneResultText(t *testing.T) {
