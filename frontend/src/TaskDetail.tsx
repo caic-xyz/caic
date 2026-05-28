@@ -3,7 +3,7 @@ import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, on
 import { A, useNavigate, useLocation } from "@solidjs/router";
 import { sendInput as apiSendInput, restartTask as apiRestartTask, clearContext as apiClearContext, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEvents, getTaskToolInput, botFixPR } from "./api";
 import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats } from "@sdk/types.gen";
-import { groupMessages, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "./grouping";
+import { groupMessagesInc, resetGroupIncCache, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "./grouping";
 import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "./formatting";
 import type { ToolCall } from "./grouping";
 import { SyncTargetDefault } from "@sdk/types.gen";
@@ -272,7 +272,7 @@ export default function TaskDetail(props: Props) {
   // they become session headers, not message groups.
   const currentGroups = createMemo(() => {
     const msgs = messages().slice(splitIdx()).filter((ev) => !isSessionBoundary(ev));
-    return groupMessages(msgs);
+    return groupMessagesInc(msgs);
   });
 
   // Past session items: stable during streaming (only change on turn completion or expansion toggle).
@@ -352,6 +352,7 @@ export default function TaskDetail(props: Props) {
     // Reset incremental grouping state for the new task.
     setSplitIdx(0);
     setCompletedMsgs([]);
+    resetGroupIncCache();
 
     let es: EventSource | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -426,6 +427,8 @@ export default function TaskDetail(props: Props) {
         rafId = null;
         pendingLive = [];
       }
+      // Reset incremental grouping cache on disconnect.
+      resetGroupIncCache();
     });
   });
 

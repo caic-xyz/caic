@@ -414,6 +414,102 @@ export function groupMessages(msgs: EventMessage[]): MessageGroup[] {
   return merged;
 }
 
+// Incremental wrapper around groupMessages: caches the previous result and
+// only processes new events when they are pure streaming deltas that extend
+// the last group. Falls back to full groupMessages on structural changes
+// (toolUse, toolResult, text, thinking, usage, etc.).
+//
+// For harnesses like pi that emit thousands of thinking_delta / text_delta /
+// toolcall_delta events per turn, this reduces per-frame work from O(n) to O(1).
+//
+// Uses a length-based cache rather than WeakMap because SolidJS signals create
+// a new array on each setMessages call, defeating identity-based caches.
+// Callers must reset _groupIncLen to 0 when the task changes.
+let _groupIncLen = 0;
+let _groupIncResult: MessageGroup[] | null = null;
+
+export function resetGroupIncCache(): void {
+  _groupIncLen = 0;
+  _groupIncResult = null;
+}
+
+export function groupMessagesInc(msgs: EventMessage[]): MessageGroup[] {
+  if (_groupIncResult && _groupIncLen <= msgs.length) {
+    const newEvents = msgs.slice(_groupIncLen);
+    // Check if all new events are pure streaming deltas that can extend the
+    // last group without structural regrouping.
+    const canExtend = newEvents.length > 0 && newEvents.every((ev) =>
+      ev.kind === "thinkingDelta" || ev.kind === "textDelta" ||
+      ev.kind === "toolOutputDelta" || ev.kind === "widgetDelta",
+    );
+    if (canExtend && _groupIncResult.length > 0) {
+      const lastGroup = _groupIncResult[_groupIncResult.length - 1];
+      for (const ev of newEvents) {
+        if (ev.kind === "thinkingDelta") {
+          if (lastGroup.kind === "action" && lastGroup.toolCalls.length === 0) {
+            lastGroup.events.push(ev);
+          } else {
+            _groupIncResult.push({ kind: "action", events: [ev], toolCalls: [] });
+          }
+        } else if (ev.kind === "textDelta") {
+          if (lastGroup.kind === "text") {
+            lastGroup.events.push(ev);
+          } else {
+            _groupIncResult.push({ kind: "text", events: [ev], toolCalls: [] });
+          }
+        } else if (ev.kind === "toolOutputDelta") {
+          const id = ev.toolOutputDelta?.toolUseID;
+          if (id) {
+            let found = false;
+            for (let i = _groupIncResult.length - 1; i >= 0; i--) {
+              const g = _groupIncResult[i];
+              if (g.kind !== "action") continue;
+              if (g.toolCalls.some((c) => c.use.toolUseID === id)) {
+                g.events.push(ev);
+                found = true;
+                break;
+              }
+            }
+            if (!found) {
+              // No matching tool group yet — fall back to full reprocess.
+              _groupIncResult = groupMessages(msgs);
+              _groupIncLen = msgs.length;
+              return _groupIncResult;
+            }
+          }
+        } else if (ev.kind === "widgetDelta") {
+          const id = ev.widgetDelta?.toolUseID;
+          if (id) {
+            let found = false;
+            for (let i = _groupIncResult.length - 1; i >= 0; i--) {
+              if (_groupIncResult[i].kind === "widget" && _groupIncResult[i].widgetToolUseID === id) {
+                _groupIncResult[i].events.push(ev);
+                _groupIncResult[i].widgetHTML = (_groupIncResult[i].widgetHTML ?? "") + (ev.widgetDelta?.delta ?? "");
+                found = true;
+                break;
+              }
+            }
+            if (!found) {
+              _groupIncResult.push({
+                kind: "widget", events: [ev], toolCalls: [],
+                widgetToolUseID: id,
+                widgetHTML: ev.widgetDelta?.delta ?? "",
+                widgetDone: false,
+              });
+            }
+          }
+        }
+      }
+      _groupIncLen = msgs.length;
+      return _groupIncResult;
+    }
+  }
+  // Structural change or cold path: full reprocess.
+  _groupIncResult = groupMessages(msgs);
+  _groupIncLen = msgs.length;
+  return _groupIncResult;
+}
+
 // Splits message groups into turns separated by "result" events.
 export function groupTurns(groups: MessageGroup[]): Turn[] {
   const turns: Turn[] = [];
