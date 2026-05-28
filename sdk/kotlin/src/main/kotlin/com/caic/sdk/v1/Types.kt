@@ -565,6 +565,20 @@ data class Config(
     val authProviders: List<String>? = null,
 )
 
+/** VersionResp is the response for GET /api/v1/server/version. */
+@Serializable
+data class VersionResp(
+    val current: String,
+    val latest: String? = null,
+    val updateAvailable: Boolean,
+    val checkError: String? = null,
+    val autoUpdateEnabled: Boolean,
+)
+
+/** UpdateResp is the response for POST /api/v1/server/update. */
+@Serializable
+data class UpdateResp(val status: String)
+
 /** UserResp is returned by GET /api/v1/auth/me. */
 @Serializable
 data class UserResp(

@@ -111,6 +111,14 @@ public final class ApiClient {
     public func getConfig() async throws -> Config {
         try await request("GET", path: "/api/v1/server/config")
     }
+    /// Returns the current server version and checks for available updates.
+    public func getVersion() async throws -> VersionResp {
+        try await request("GET", path: "/api/v1/server/version")
+    }
+    /// Triggers a background server auto-update to the latest release.
+    public func triggerUpdate() async throws -> UpdateResp {
+        try await request("POST", path: "/api/v1/server/update")
+    }
     /// Returns the authenticated user's profile.
     public func getMe() async throws -> UserResp {
         try await request("GET", path: "/api/v1/auth/me")

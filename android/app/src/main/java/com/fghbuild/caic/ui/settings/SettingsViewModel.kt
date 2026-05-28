@@ -8,6 +8,7 @@ import com.caic.sdk.v1.ApiClient
 import com.caic.sdk.v1.CacheMappingResp
 import com.caic.sdk.v1.UpdatePreferencesReq
 import com.caic.sdk.v1.UserSettings
+import com.caic.sdk.v1.VersionResp
 import com.caic.sdk.v1.WellKnownCache
 import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.data.SettingsState
@@ -37,6 +38,10 @@ data class SettingsScreenState(
     val wellKnownCachesList: List<WellKnownCache> = emptyList(),
     val cacheMappings: List<CacheMappingResp> = emptyList(),
     val serverVersion: String = "",
+    val versionInfo: VersionResp? = null,
+    val checkingUpdate: Boolean = false,
+    val updateStatus: String = "",
+    val updating: Boolean = false,
 )
 
 private const val DEBOUNCE_MS = 500L
@@ -173,6 +178,8 @@ class SettingsViewModel @Inject constructor(
                         serverVersion = config?.version ?: "",
                     )
                 }
+                // Fetch version info after preferences are loaded.
+                checkForUpdates()
             } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
                 Log.w(TAG, "Failed to load server preferences", e)
             }
@@ -247,6 +254,47 @@ class SettingsViewModel @Inject constructor(
 
     fun saveCacheMappings() {
         saveSettings { it.copy(cacheMappings = _state.value.cacheMappings.ifEmpty { null }) }
+    }
+
+    fun checkForUpdates() {
+        val settings = settingsRepository.settings.value
+        if (settings.serverURL.isBlank()) return
+        _state.update { it.copy(checkingUpdate = true, updateStatus = "") }
+        viewModelScope.launch {
+            try {
+                val client = ApiClient(settings.serverURL, tokenProvider = { settings.authToken })
+                val info = client.getVersion()
+                _state.update { it.copy(versionInfo = info, checkingUpdate = false) }
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                Log.w(TAG, "Version check failed", e)
+                _state.update { it.copy(checkingUpdate = false, updateStatus = "Check failed: ${e.message}") }
+            }
+        }
+    }
+
+    fun triggerUpdate() {
+        val settings = settingsRepository.settings.value
+        if (settings.serverURL.isBlank()) return
+        _state.update { it.copy(updating = true, updateStatus = "") }
+        viewModelScope.launch {
+            try {
+                val client = ApiClient(settings.serverURL, tokenProvider = { settings.authToken })
+                val resp = client.triggerUpdate()
+                _state.update {
+                    it.copy(
+                        updating = false,
+                        updateStatus = if (resp.status == "started") {
+                            "Update started. Server will restart shortly."
+                        } else {
+                            "Already up to date."
+                        },
+                    )
+                }
+            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                Log.w(TAG, "Update trigger failed", e)
+                _state.update { it.copy(updating = false, updateStatus = "Update failed: ${e.message}") }
+            }
+        }
     }
 
     private fun saveSettings(update: (UserSettings) -> UserSettings) {

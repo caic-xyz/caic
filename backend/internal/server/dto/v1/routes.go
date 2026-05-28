@@ -59,6 +59,20 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[Config](),
 	},
 	{
+		Name:   "getVersion",
+		Doc:    "Returns the current server version and checks for available updates.",
+		Method: "GET",
+		Path:   "/api/v1/server/version",
+		Resp:   reflect.TypeFor[VersionResp](),
+	},
+	{
+		Name:   "triggerUpdate",
+		Doc:    "Triggers a background server auto-update to the latest release.",
+		Method: "POST",
+		Path:   "/api/v1/server/update",
+		Resp:   reflect.TypeFor[UpdateResp](),
+	},
+	{
 		Name:   "getMe",
 		Doc:    "Returns the authenticated user's profile.",
 		Method: "GET",

@@ -320,6 +320,25 @@ public struct Config: Codable {
     public let authProviders: [String]?
 }
 
+/// VersionResp is the response for GET /api/v1/server/version.
+public struct VersionResp: Codable {
+    public let current: String
+    /// empty when check failed
+    public let latest: String?
+    /// true when Latest > Current
+    public let updateAvailable: Bool
+    /// non-empty when the GitHub check failed
+    public let checkError: String?
+    /// true when autoupdate schedule is configured
+    public let autoUpdateEnabled: Bool
+}
+
+/// UpdateResp is the response for POST /api/v1/server/update.
+public struct UpdateResp: Codable {
+    /// "started" or "already_up_to_date"
+    public let status: String
+}
+
 /// UserResp is returned by GET /api/v1/auth/me.
 public struct UserResp: Codable {
     public let id: String

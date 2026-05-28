@@ -53,6 +53,49 @@ func (s *Server) getConfig(_ context.Context, _ *dto.EmptyReq) (*v1.Config, erro
 	return cfg, nil
 }
 
+// getVersion returns the current server version and checks GitHub for the latest release.
+func (s *Server) getVersion(ctx context.Context, _ *dto.EmptyReq) (*v1.VersionResp, error) {
+	current := autoupdate.Version
+	gh := s.forge.githubClient()
+	resp := &v1.VersionResp{
+		Current:      current,
+		AutoUpdateOn: gh != nil && current != "" && !strings.HasPrefix(current, "devel-"),
+	}
+	if gh != nil {
+		latest, err := autoupdate.CheckLatest(ctx, gh)
+		if err != nil {
+			resp.CheckError = err.Error()
+		} else {
+			resp.Latest = latest
+			resp.UpdateAvail = autoupdate.IsNewer(latest, current)
+		}
+	}
+	return resp, nil
+}
+
+// triggerUpdate starts a background update check-and-install. Returns immediately.
+func (s *Server) triggerUpdate(ctx context.Context, _ *dto.EmptyReq) (*v1.UpdateResp, error) {
+	gh := s.forge.githubClient()
+	if gh == nil {
+		return nil, dto.InternalError("GitHub token not configured; cannot check for updates")
+	}
+	current := autoupdate.Version
+	latest, err := autoupdate.CheckLatest(ctx, gh)
+	if err != nil {
+		return nil, dto.InternalError("check latest version: " + err.Error())
+	}
+	if !autoupdate.IsNewer(latest, current) {
+		return &v1.UpdateResp{Status: "already_up_to_date"}, nil
+	}
+	go func() {
+		slog.Info("update triggered by user", "current", current, "latest", latest)
+		if err := autoupdate.CheckAndUpdate(s.ctx, gh); err != nil {
+			slog.Warn("background update failed", "err", err)
+		}
+	}()
+	return &v1.UpdateResp{Status: "started"}, nil
+}
+
 func (s *Server) getPreferences(ctx context.Context, _ *dto.EmptyReq) (*v1.PreferencesResp, error) {
 	prefs := s.prefs.Get(userIDFromCtx(ctx))
 	recent := prefs.RecentRepos(time.Now())

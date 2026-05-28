@@ -168,3 +168,12 @@ func (m *forgeManager) commenterFor(installationID int64) bot.Commenter {
 func newThrottle() http.RoundTripper {
 	return &roundtrippers.Throttle{QPS: 1, Transport: http.DefaultTransport}
 }
+
+// githubClient returns a GitHub API client authenticated with the configured PAT.
+// Returns nil when no GitHub token is configured.
+func (m *forgeManager) githubClient() *github.Client {
+	if m.githubToken == "" {
+		return nil
+	}
+	return github.NewClient(m.githubToken, m.githubPATThrottle)
+}

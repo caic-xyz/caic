@@ -5,6 +5,8 @@ export const api = createApiClient();
 
 export const {
   getConfig,
+  getVersion,
+  triggerUpdate,
   getMe,
   logout,
   getPreferences,

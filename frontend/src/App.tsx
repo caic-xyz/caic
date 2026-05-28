@@ -2,8 +2,8 @@
 import { createEffect, createSignal, For, Show, Switch, Match, onCleanup, lazy, Suspense } from "solid-js";
 import { Portal } from "solid-js/web";
 import { useNavigate, useLocation } from "@solidjs/router";
-import type { Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp } from "@sdk/types.gen";
-import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, globalTaskEvents, globalUsageEvents } from "./api";
+import type { Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
+import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
 import Dropdown from "./Dropdown";
 import RepoChipStrip from "./RepoChipStrip";
 import type { RepoEntry } from "./RepoChipStrip";
@@ -130,7 +130,6 @@ export default function App() {
   const [selectedHarness, setSelectedHarness] = createSignal("");
   const [sidebarOpen, setSidebarOpen] = createSignal(true);
   const [usage, setUsage] = createSignal<UsageResp | null>(null);
-  const [serverVersion, setServerVersion] = createSignal("");
   const [tailscaleAvailable, setTailscaleAvailable] = createSignal(false);
   const [tailscaleEnabled, setTailscaleEnabled] = createSignal(false);
   const [usbAvailable, setUSBAvailable] = createSignal(false);
@@ -152,6 +151,10 @@ export default function App() {
   const [wellKnownCachesList, setWellKnownCachesList] = createSignal<WellKnownCachesResp["wellKnown"]>([]);
   const [cacheMappings, setCacheMappings] = createSignal<CacheMappingResp[]>([]);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [versionInfo, setVersionInfo] = createSignal<VersionResp | null>(null);
+  const [updateStatus, setUpdateStatus] = createSignal<string>("");
+  const [checkingUpdate, setCheckingUpdate] = createSignal(false);
+  const [updating, setUpdating] = createSignal(false);
 
   /** Build the current settings payload for updatePreferences, with optional overrides. */
   const currentSettings = (overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}) => ({
@@ -238,6 +241,22 @@ export default function App() {
   // Track previous task states to detect transitions to "waiting".
   let prevStates = new Map<string, string>();
 
+  // Fetch version info when settings dialog opens.
+  createEffect(() => {
+    if (!settingsOpen()) return;
+    void (async () => {
+      setCheckingUpdate(true);
+      try {
+        const v = await getVersion();
+        setVersionInfo(v);
+      } catch {
+        // Version check failed — non-critical.
+      } finally {
+        setCheckingUpdate(false);
+      }
+    })();
+  });
+
   // Tick every second for live elapsed-time display.
   const [now, setNow] = createSignal(Date.now());
   {
@@ -318,7 +337,6 @@ export default function App() {
         }
         if (prefs?.settings?.baseImage) setSelectedImage(prefs.settings.baseImage);
         if (config) {
-          if (config.version) setServerVersion(config.version);
           setTailscaleAvailable(config.tailscaleAvailable);
           setUSBAvailable(config.usbAvailable);
           setDisplayAvailable(config.displayAvailable);
@@ -1306,9 +1324,56 @@ export default function App() {
               </label>
               <p class={styles.settingsDescription}>When a pull request is opened or reopened, automatically start a task to review and fix it.</p>
             </div>
-            <Show when={serverVersion()}>
-              <p class={styles.settingsVersion}>caic v{serverVersion()}</p>
-            </Show>
+            <div class={styles.settingsSection}>
+              <h3 class={styles.settingsSectionTitle}>Version</h3>
+              <Show when={versionInfo()} fallback={
+                <Show when={checkingUpdate()}>
+                  <p class={styles.settingsDescription}>Checking for updates…</p>
+                </Show>
+              }>
+                {(v) => (
+                  <>
+                    <p class={styles.settingsDescription}>
+                      Current: <strong>caic v{v().current}</strong>
+                      <Show when={v().latest}>
+                        {" — "}
+                        <Show when={v().updateAvailable} fallback={
+                          <>latest: v{v().latest} (up to date)</>
+                        }>
+                          latest: <strong>v{v().latest}</strong> (update available)
+                        </Show>
+                      </Show>
+                    </p>
+                    <Show when={v().checkError}>
+                      <p class={styles.settingsDescription} style={{ color: "var(--color-error)" }}>Check failed: {v().checkError}</p>
+                    </Show>
+                    <Show when={v().autoUpdateEnabled && v().updateAvailable}>
+                      <button
+                        class={styles.settingsButton}
+                        disabled={updating()}
+                        onClick={async () => {
+                          setUpdating(true);
+                          setUpdateStatus("");
+                          try {
+                            const resp = await triggerUpdate();
+                            setUpdateStatus(resp.status === "started" ? "Update started in background. The server will restart shortly." : "Already up to date.");
+                          } catch (e: unknown) {
+                            setUpdateStatus(e instanceof Error ? e.message : "Update failed");
+                          } finally {
+                            setUpdating(false);
+                          }
+                        }}
+                      >
+                        {updating() ? "Updating…" : "Update now"}
+                      </button>
+                    </Show>
+                    <Show when={updateStatus()}>
+                      <p class={styles.settingsDescription}>{updateStatus()}</p>
+                    </Show>
+                  </>
+                )}
+              </Show>
+            </div>
           </div>
         </dialog>
       </Show>

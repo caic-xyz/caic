@@ -44,7 +44,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -252,17 +251,60 @@ fun SettingsScreen(
                 Text("Add mapping")
             }
 
-            if (screenState.serverVersion.isNotEmpty()) {
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Text("Version", style = MaterialTheme.typography.titleMedium)
+            val versionInfo = screenState.versionInfo
+            if (screenState.checkingUpdate) {
+                Text(
+                    "Checking for updates…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else if (versionInfo != null) {
+                Text(
+                    buildString {
+                        append("Current: caic v${versionInfo.current}")
+                        if (versionInfo.latest != null) {
+                            if (versionInfo.updateAvailable) {
+                                append(" — latest: v${versionInfo.latest} (update available)")
+                            } else {
+                                append(" — latest: v${versionInfo.latest} (up to date)")
+                            }
+                        }
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (versionInfo.checkError != null) {
+                    Text(
+                        "Check failed: ${versionInfo.checkError}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (versionInfo.autoUpdateEnabled && versionInfo.updateAvailable) {
+                    Button(
+                        onClick = { viewModel.triggerUpdate() },
+                        enabled = !screenState.updating,
+                    ) {
+                        Text(if (screenState.updating) "Updating…" else "Update now")
+                    }
+                }
+                if (screenState.updateStatus.isNotEmpty()) {
+                    Text(
+                        screenState.updateStatus,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else if (screenState.serverVersion.isNotEmpty()) {
                 Text(
                     "caic v${screenState.serverVersion}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 16.dp),
-                    textAlign = TextAlign.Center,
                 )
             }
+
+            Spacer(modifier = Modifier.padding(bottom = 16.dp))
         }
     }
 }

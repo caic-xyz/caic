@@ -465,6 +465,25 @@ export interface Config {
   authProviders?: string[];
 }
 
+/** VersionResp is the response for GET /api/v1/server/version. */
+export interface VersionResp {
+  current: string;
+  /** empty when check failed */
+  latest?: string;
+  /** true when Latest > Current */
+  updateAvailable: boolean;
+  /** non-empty when the GitHub check failed */
+  checkError?: string;
+  /** true when autoupdate schedule is configured */
+  autoUpdateEnabled: boolean;
+}
+
+/** UpdateResp is the response for POST /api/v1/server/update. */
+export interface UpdateResp {
+  /** "started" or "already_up_to_date" */
+  status: string;
+}
+
 /** UserResp is returned by GET /api/v1/auth/me. */
 export interface UserResp {
   id: string;

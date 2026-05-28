@@ -86,6 +86,10 @@ class ApiClient(
     // JSON endpoints
     /** Returns server capabilities and feature flags. */
     suspend fun getConfig(): Config = request("GET", "/api/v1/server/config")
+    /** Returns the current server version and checks for available updates. */
+    suspend fun getVersion(): VersionResp = request("GET", "/api/v1/server/version")
+    /** Triggers a background server auto-update to the latest release. */
+    suspend fun triggerUpdate(): UpdateResp = request("POST", "/api/v1/server/update")
     /** Returns the authenticated user's profile. */
     suspend fun getMe(): UserResp = request("GET", "/api/v1/auth/me")
     /** Invalidates the current session. */

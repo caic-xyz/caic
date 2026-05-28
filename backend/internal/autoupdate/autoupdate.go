@@ -148,7 +148,7 @@ func Run(ctx context.Context, gh *github.Client, sched *Schedule) {
 			return
 		case <-time.After(delay):
 		}
-		if err := checkAndUpdate(ctx, gh); err != nil {
+		if err := CheckAndUpdate(ctx, gh); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
@@ -157,16 +157,25 @@ func Run(ctx context.Context, gh *github.Client, sched *Schedule) {
 	}
 }
 
-// checkAndUpdate fetches the latest GitHub release and, if newer, downloads and
+// CheckLatest returns the latest release version from GitHub. Returns "" on error.
+func CheckLatest(ctx context.Context, gh *github.Client) (string, error) {
+	rel, err := gh.LatestRelease(ctx, owner, repo)
+	if err != nil {
+		return "", fmt.Errorf("fetch latest release: %w", err)
+	}
+	return strings.TrimPrefix(rel.TagName, "v"), nil
+}
+
+// CheckAndUpdate fetches the latest GitHub release and, if newer, downloads and
 // installs it. Returns nil on successful update, an error otherwise.
-func checkAndUpdate(ctx context.Context, gh *github.Client) error {
+func CheckAndUpdate(ctx context.Context, gh *github.Client) error {
 	rel, err := gh.LatestRelease(ctx, owner, repo)
 	if err != nil {
 		return fmt.Errorf("fetch latest release: %w", err)
 	}
 	latest := strings.TrimPrefix(rel.TagName, "v")
 	current := strings.TrimPrefix(Version, "v")
-	if !isNewer(latest, current) {
+	if !IsNewer(latest, current) {
 		slog.Info("autoupdate: up to date", "current", current, "latest", latest)
 		return nil
 	}
@@ -377,9 +386,9 @@ func platformStrings() (osStr, archStr string) {
 	return osStr, archStr
 }
 
-// isNewer reports whether latest is a higher semver than current.
+// IsNewer reports whether latest is a higher semver than current.
 // Both are expected without a "v" prefix (e.g. "1.2.3").
-func isNewer(latest, current string) bool {
+func IsNewer(latest, current string) bool {
 	lMaj, lMin, lPatch, lok := parseSemver(latest)
 	cMaj, cMin, cPatch, cok := parseSemver(current)
 	if !lok || !cok {

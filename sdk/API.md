@@ -9,6 +9,8 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
 | GET | `/api/v1/server/config` | Returns server capabilities and feature flags. |  | `Config` |
+| GET | `/api/v1/server/version` | Returns the current server version and checks for available updates. |  | `VersionResp` |
+| POST | `/api/v1/server/update` | Triggers a background server auto-update to the latest release. |  | `UpdateResp` |
 | GET | `/api/v1/server/preferences` | Returns server and per-repository preferences. |  | `PreferencesResp` |
 | POST | `/api/v1/server/preferences` | Updates server settings and preferences. | `UpdatePreferencesReq` | `PreferencesResp` |
 | GET | `/api/v1/server/harnesses` | Lists available coding agent harnesses. |  | `HarnessInfo[]` |
@@ -111,6 +113,26 @@ Config reports server capabilities to the frontend.
 | `webrtcAvailable` | `boolean` |  | yes |
 | `gitHubAppEnabled` | `boolean` |  |  |
 | `authProviders` | `string[]` | e.g. ["github","gitlab"] |  |
+
+### VersionResp
+
+VersionResp is the response for GET /api/v1/server/version.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `current` | `string` |  | yes |
+| `latest` | `string` | empty when check failed |  |
+| `updateAvailable` | `boolean` | true when Latest > Current | yes |
+| `checkError` | `string` | non-empty when the GitHub check failed |  |
+| `autoUpdateEnabled` | `boolean` | true when autoupdate schedule is configured | yes |
+
+### UpdateResp
+
+UpdateResp is the response for POST /api/v1/server/update.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `status` | `string` | "started" or "already_up_to_date" | yes |
 
 ### UserResp
 

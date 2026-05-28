@@ -32,9 +32,9 @@ func TestIsNewer(t *testing.T) {
 	} {
 		t.Run(tc.latest+"_vs_"+tc.current, func(t *testing.T) {
 			t.Parallel()
-			got := isNewer(tc.latest, tc.current)
+			got := IsNewer(tc.latest, tc.current)
 			if got != tc.want {
-				t.Errorf("isNewer(%q, %q) = %v, want %v", tc.latest, tc.current, got, tc.want)
+				t.Errorf("IsNewer(%q, %q) = %v, want %v", tc.latest, tc.current, got, tc.want)
 			}
 		})
 	}

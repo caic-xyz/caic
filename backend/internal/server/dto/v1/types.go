@@ -578,6 +578,20 @@ type VoiceRTCAnswerResp struct {
 	SessionID string `json:"sessionID"`
 }
 
+// VersionResp is the response for GET /api/v1/server/version.
+type VersionResp struct {
+	Current      string `json:"current"`
+	Latest       string `json:"latest,omitempty"`     // empty when check failed
+	UpdateAvail  bool   `json:"updateAvailable"`      // true when Latest > Current
+	CheckError   string `json:"checkError,omitempty"` // non-empty when the GitHub check failed
+	AutoUpdateOn bool   `json:"autoUpdateEnabled"`    // true when autoupdate schedule is configured
+}
+
+// UpdateResp is the response for POST /api/v1/server/update.
+type UpdateResp struct {
+	Status string `json:"status"` // "started" or "already_up_to_date"
+}
+
 // EmptyReq is used for endpoints that take no request body.
 type EmptyReq = dto.EmptyReq
 

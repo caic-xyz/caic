@@ -284,6 +284,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	// Auth routes (exempt from RequireUser).
 	authMux := http.NewServeMux()
 	authMux.HandleFunc("GET /api/v1/server/config", handle(s.getConfig))
+	authMux.HandleFunc("GET /api/v1/server/version", handle(s.getVersion))
 	authMux.HandleFunc("GET /api/v1/auth/github/start", s.handleAuthStart("github"))
 	authMux.HandleFunc("GET /api/v1/auth/github/callback", s.handleAuthCallback("github"))
 	authMux.HandleFunc("GET /api/v1/auth/gitlab/start", s.handleAuthStart("gitlab"))
@@ -299,6 +300,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("GET /api/v1/server/caches", handle(s.listCaches))
 	apiMux.HandleFunc("GET /api/v1/server/repos", handle(s.listRepos))
 	apiMux.HandleFunc("POST /api/v1/server/repos", handle(s.cloneRepo))
+	apiMux.HandleFunc("POST /api/v1/server/update", handle(s.triggerUpdate))
 	apiMux.HandleFunc("GET /api/v1/server/repos/branches", s.handleListRepoBranches)
 	apiMux.HandleFunc("POST /api/v1/bot/fix-ci", handle(s.botFixCI))
 	apiMux.HandleFunc("POST /api/v1/bot/fix-pr", handle(s.botFixPR))
@@ -338,6 +340,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/auth/", authMux)
 	mux.HandleFunc("GET /api/v1/server/config", handle(s.getConfig))
+	mux.HandleFunc("GET /api/v1/server/version", handle(s.getVersion))
 	mux.HandleFunc("POST /webhooks/github", s.handleGitHubWebhook)
 	mux.HandleFunc("POST /webhooks/gitlab", s.handleGitLabWebhook)
 	mux.Handle("/api/v1/", protectedAPI)
