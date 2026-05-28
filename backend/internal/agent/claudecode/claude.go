@@ -31,14 +31,6 @@ func (b *Backend) ParseMessage(line []byte) ([]agent.Message, error) {
 
 var _ agent.Backend = (*Backend)(nil)
 
-// NewParser implements agent.Backend. It tracks widget streaming deltas with
-// fresh per-call state.
-func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
-	wt := NewWidgetTracker()
-	fw := &jsonutil.FieldWarner{}
-	return func(line []byte) ([]agent.Message, error) { return parseMessageWithTracker(line, wt, fw) }
-}
-
 // New creates a Claude Code backend with wire format and parser configured.
 func New() *Backend {
 	b := &Backend{
@@ -49,9 +41,9 @@ func New() *Backend {
 		HarnessID:     agent.Claude,
 		ModelList:     []string{"opus", "sonnet", "haiku"},
 		Images:        true,
+		Compact:       true,
 		ContextWindow: 180_000,
 	}
-	b.Wire = b
 	return b
 }
 
@@ -77,7 +69,8 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if stripAndInject {
 		opts.StripEnv = []string{"ANTHROPIC_API_KEY"}
 	}
-	rp, err := agent.PrepareRelay(ctx, opts, buildArgs(opts))
+	args := b.AgentArgs(agent.HarnessArgs{Model: opts.Model, Effort: opts.Effort, ResumeSessionID: opts.ResumeSessionID})
+	rp, err := agent.PrepareRelay(ctx, opts, args)
 	if err != nil {
 		return nil, err
 	}
@@ -121,9 +114,37 @@ func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
 	return err
 }
 
+// AgentArgs implements agent.Backend.
+func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
+	args := []string{
+		"claude", "-p",
+		"--input-format", "stream-json",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--dangerously-skip-permissions",
+		"--include-partial-messages",
+		"--plugin-dir", agent.WidgetPluginDir,
+	}
+	if a.Model != "" {
+		args = append(args, "--model", a.Model)
+	}
+	if a.Effort != "" {
+		args = append(args, "--effort", a.Effort)
+	}
+	if a.ResumeSessionID != "" {
+		args = append(args, "--resume", a.ResumeSessionID)
+	}
+	return args
+}
+
 // AttachRelay implements agent.Backend.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	return agent.AttachRelaySession(ctx, opts, b)
+}
+
+// NewWire implements agent.Backend.
+func (*Backend) NewWire() agent.WireFormat {
+	return New()
 }
 
 // WriteCompact implements agent.CompactCommand by sending /compact as a user
@@ -194,27 +215,4 @@ func hasOAuth() bool {
 	// Quick key check avoids unmarshaling the full config.
 	var m map[string]json.RawMessage
 	return json.Unmarshal(data, &m) == nil && m["oauthAccount"] != nil
-}
-
-// buildArgs constructs the Claude Code CLI arguments.
-func buildArgs(opts *agent.Options) []string {
-	args := []string{
-		"claude", "-p",
-		"--input-format", "stream-json",
-		"--output-format", "stream-json",
-		"--verbose",
-		"--dangerously-skip-permissions",
-		"--include-partial-messages",
-		"--plugin-dir", agent.WidgetPluginDir,
-	}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
-	}
-	if opts.Effort != "" {
-		args = append(args, "--effort", opts.Effort)
-	}
-	if opts.ResumeSessionID != "" {
-		args = append(args, "--resume", opts.ResumeSessionID)
-	}
-	return args
 }

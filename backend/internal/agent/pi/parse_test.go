@@ -9,16 +9,16 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
-func TestBackendNewParser(t *testing.T) {
+func TestBackendNewWire(t *testing.T) {
 	t.Parallel()
 	// Regression: replay (relay output during adoption, and on-disk logs) uses
-	// NewParser. It must use the stateful wire format so agent_end produces a
-	// terminal ResultMessage; without it RestoreMessages cannot infer the
-	// waiting state and adopted pi tasks stay stuck as "running".
+	// NewWire().ParseMessage. It must use the stateful wire format so agent_end
+	// produces a terminal ResultMessage; without it RestoreMessages cannot infer
+	// the waiting state and adopted pi tasks stay stuck as "running".
 	t.Run("synthesizes ResultMessage on agent_end", func(t *testing.T) {
 		t.Parallel()
 		agentEnd := []byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":10,"output":5}}]}`)
-		msgs, err := New("", nil).NewParser()(agentEnd)
+		msgs, err := New("", nil).NewWire().ParseMessage(agentEnd)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -29,13 +29,13 @@ func TestBackendNewParser(t *testing.T) {
 			}
 		}
 		if !hasResult {
-			t.Fatalf("NewParser produced no ResultMessage for agent_end: %#v", msgs)
+			t.Fatalf("NewWire().ParseMessage produced no ResultMessage for agent_end: %#v", msgs)
 		}
 	})
 
 	t.Run("tool_execution_update emits incremental deltas", func(t *testing.T) {
 		t.Parallel()
-		parser := New("", nil).NewParser()
+		parser := New("", nil).NewWire().ParseMessage
 
 		// Simulate two tool_execution_update events with accumulated text.
 		// The second event contains the full accumulated text (first + new).
@@ -86,7 +86,7 @@ func TestBackendNewParser(t *testing.T) {
 
 	t.Run("prompt command parses to UserInputMessage", func(t *testing.T) {
 		t.Parallel()
-		parser := New("", nil).NewParser()
+		parser := New("", nil).NewWire().ParseMessage
 		line := []byte(`{"type":"prompt","message":"run rpi/446b-camera/build-annotate-cv.sh without docker","streamingBehavior":"steer"}`)
 		msgs, err := parser(line)
 		if err != nil {

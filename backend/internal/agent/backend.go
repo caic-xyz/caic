@@ -2,7 +2,10 @@
 
 package agent
 
-import "context"
+import (
+	"context"
+	"io"
+)
 
 // Backend launches and communicates with a coding agent process.
 // Each implementation translates its native wire format into the shared
@@ -36,18 +39,32 @@ type Backend interface {
 	// SupportsCompact reports whether this backend supports context compaction.
 	SupportsCompact() bool
 
+	// AgentArgs returns the CLI arguments for launching this backend's agent
+	// subprocess, including the executable name and all session-specific flags
+	// derived from a. Empty fields in a are treated as "use default".
+	AgentArgs(a HarnessArgs) []string
+
+	// NewWire creates a fresh WireFormat for this backend. Each call returns
+	// independent state; suitable for use outside the normal container transport.
+	NewWire() WireFormat
+
 	// ContextWindowLimit returns the API prompt token limit for the given model.
 	// The model parameter is the model name reported by the agent at runtime.
 	ContextWindowLimit(model string) int
+}
 
-	// NewParser returns a fresh parse function for replaying a harness's wire
-	// stream — both relay output.jsonl and on-disk log files. It uses the
-	// harness's full (stateful) wire format, so it synthesizes terminal
-	// messages such as the final ResultMessage (e.g. pi's agent_end → result)
-	// that the underlying stateless line parser would otherwise pass through as
-	// RawMessage. Correct state inference during adoption depends on that
-	// trailing ResultMessage. Each call creates independent state.
-	NewParser() func([]byte) ([]Message, error)
+// HarnessArgs holds the session-specific parameters that influence the CLI
+// arguments passed to an agent subprocess.
+type HarnessArgs struct {
+	Model           string // Model name or alias; empty means use backend default.
+	Effort          string // Thinking effort level (e.g. "low", "high"); empty means default.
+	ResumeSessionID string // Agent session ID to resume; empty starts a new session.
+}
+
+// PrePromptWriter is implemented by backends that send initialization
+// commands to stdin before the first user prompt (e.g. Pi's set_model).
+type PrePromptWriter interface {
+	WritePrePrompt(w io.Writer, model string, logW io.Writer) error
 }
 
 // Base provides default implementations for metadata-only Backend methods.
@@ -59,7 +76,7 @@ type Base struct {
 	ModelList     []string
 	Images        bool
 	ContextWindow int
-	Wire          WireFormat // Used by SupportsCompact.
+	Compact       bool
 }
 
 // Harness implements Backend.
@@ -74,11 +91,8 @@ func (b *Base) SetModels(models []string) { b.ModelList = models }
 // SupportsImages implements Backend.
 func (b *Base) SupportsImages() bool { return b.Images }
 
-// SupportsCompact implements Backend by checking if Wire implements CompactCommand.
-func (b *Base) SupportsCompact() bool {
-	_, ok := b.Wire.(CompactCommand)
-	return ok
-}
+// SupportsCompact implements Backend.
+func (b *Base) SupportsCompact() bool { return b.Compact }
 
 // ContextWindowLimit implements Backend.
 func (b *Base) ContextWindowLimit(string) int { return b.ContextWindow }

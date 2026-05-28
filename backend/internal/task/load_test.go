@@ -15,7 +15,7 @@ import (
 
 func setClaudeParser(tasks []*LoadedTask) {
 	for _, lt := range tasks {
-		lt.SetParser(claudecode.New().NewParser())
+		lt.SetParser(claudecode.New().NewWire().ParseMessage)
 	}
 }
 

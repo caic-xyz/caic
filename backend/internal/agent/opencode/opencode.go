@@ -34,11 +34,6 @@ type Backend struct {
 
 var _ agent.Backend = (*Backend)(nil)
 
-// NewParser implements agent.Backend.
-func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
-	return (&wireFormat{fw: &jsonutil.FieldWarner{}}).ParseMessage
-}
-
 // New creates an OpenCode backend with parser configured. If cacheDir is
 // non-empty, the model list is loaded from the on-disk harness cache.
 // envVars are KEY=VALUE pairs passed to FetchModels SSH commands.
@@ -48,6 +43,7 @@ func New(cacheDir string, envVars []string) *Backend {
 		HarnessID:     agent.OpenCode,
 		ModelList:     []string{"anthropic/claude-sonnet-4"},
 		Images:        true,
+		Compact:       true,
 		ContextWindow: 200_000,
 	}
 	if cacheDir != "" {
@@ -84,7 +80,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		return nil, err
 	}
 
-	ocArgs := []string{"opencode", "acp"}
+	ocArgs := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
 
 	sshArgs := make([]string, 0, 8+len(ocArgs))
 	sshArgs = append(sshArgs, opts.Container, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin", "--")
@@ -159,10 +155,20 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	return s, nil
 }
 
+// AgentArgs implements agent.Backend.
+func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
+	return []string{"opencode", "acp"}
+}
+
 // AttachRelay connects to an already-running relay in the container.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	wire := &wireFormat{sessionID: opts.ResumeSessionID, fw: &jsonutil.FieldWarner{}}
 	return agent.AttachRelaySession(ctx, opts, wire)
+}
+
+// NewWire implements agent.Backend.
+func (*Backend) NewWire() agent.WireFormat {
+	return &wireFormat{fw: &jsonutil.FieldWarner{}}
 }
 
 // caicInit is written to output.jsonl during handshake so replay can

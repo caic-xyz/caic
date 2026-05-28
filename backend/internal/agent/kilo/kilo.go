@@ -7,7 +7,7 @@
 //
 // Per-session state (accumulated step cost/usage, turn-close terminal event)
 // is managed by kiloWireFormat, which wraps the stateless parseMessage function.
-// A fresh kiloWireFormat is created for every Start, AttachRelay, and NewParser
+// A fresh kiloWireFormat is created for every Start, AttachRelay, and NewWire
 // call so that accumulators reset between sessions and replays.
 package kilo
 
@@ -34,11 +34,6 @@ type Backend struct {
 }
 
 var _ agent.Backend = (*Backend)(nil)
-
-// NewParser implements agent.Backend.
-func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
-	return (&kiloWireFormat{fw: &jsonutil.FieldWarner{}}).ParseMessage
-}
 
 var defaultModels = []string{
 	"anthropic/claude-opus-4.6",
@@ -81,13 +76,27 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err := deployBridge(ctx, opts.Container); err != nil {
 		return nil, err
 	}
-	return agent.StartRelay(ctx, opts, buildBridgeArgs(opts), &kiloWireFormat{fw: &jsonutil.FieldWarner{}})
+	return agent.StartRelay(ctx, opts, b.AgentArgs(agent.HarnessArgs{Model: opts.Model}), &kiloWireFormat{fw: &jsonutil.FieldWarner{}})
+}
+
+// AgentArgs implements agent.Backend.
+func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
+	args := []string{"python3", "-u", bridgeScriptPath}
+	if a.Model != "" {
+		args = append(args, "--model", a.Model)
+	}
+	return args
 }
 
 // AttachRelay connects to an already-running relay using a fresh kiloWireFormat
 // so that accumulated state from a prior session does not bleed in.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	return agent.AttachRelaySession(ctx, opts, &kiloWireFormat{fw: &jsonutil.FieldWarner{}})
+}
+
+// NewWire implements agent.Backend.
+func (*Backend) NewWire() agent.WireFormat {
+	return &kiloWireFormat{fw: &jsonutil.FieldWarner{}}
 }
 
 // WritePrompt writes a single user message to the bridge's stdin.
@@ -105,15 +114,6 @@ func deployBridge(ctx context.Context, container string) error {
 		return fmt.Errorf("deploy kilo bridge: %w: %s", err, out)
 	}
 	return nil
-}
-
-// buildBridgeArgs constructs the command to run the bridge script.
-func buildBridgeArgs(opts *agent.Options) []string {
-	args := []string{"python3", "-u", bridgeScriptPath}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
-	}
-	return args
 }
 
 // kiloWireFormat is a stateful WireFormat for kilo sessions. It wraps the

@@ -47,14 +47,14 @@ func (stubBackend) ReadRelayOutput(context.Context, string) ([]agent.Message, in
 	return nil, 0, errors.New("stub")
 }
 
-func (stubBackend) NewParser() func([]byte) ([]agent.Message, error) {
-	return claudecode.New().NewParser()
-}
-
 func (stubBackend) Models() []string   { return []string{"m1", "m2"} }
 func (stubBackend) SetModels([]string) {}
 
 func (stubBackend) SupportsImages() bool { return false }
+
+func (stubBackend) AgentArgs(agent.HarnessArgs) []string { return nil }
+
+func (stubBackend) NewWire() agent.WireFormat { return claudecode.New() }
 
 func (stubBackend) SupportsCompact() bool { return false }
 

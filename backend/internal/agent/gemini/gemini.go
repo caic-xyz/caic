@@ -18,12 +18,6 @@ type Backend struct {
 
 var _ agent.Backend = (*Backend)(nil)
 
-// NewParser implements agent.Backend.
-func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
-	fw := &jsonutil.FieldWarner{}
-	return func(line []byte) ([]agent.Message, error) { return parseMessage(line, fw) }
-}
-
 // New creates a Gemini CLI backend with wire format and parser configured.
 func New() *Backend {
 	b := &Backend{
@@ -34,7 +28,6 @@ func New() *Backend {
 		ModelList:     []string{"gemini-3.1-pro", "gemini-3-flash"},
 		ContextWindow: 1_000_000,
 	}
-	b.Wire = b
 	return b
 }
 
@@ -45,7 +38,19 @@ func (b *Backend) ParseMessage(line []byte) ([]agent.Message, error) {
 
 // Start launches a Gemini CLI process via the relay daemon.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	return agent.StartRelay(ctx, opts, buildArgs(opts), b)
+	return agent.StartRelay(ctx, opts, b.AgentArgs(agent.HarnessArgs{Model: opts.Model, ResumeSessionID: opts.ResumeSessionID}), b)
+}
+
+// AgentArgs implements agent.Backend.
+func (*Backend) AgentArgs(a agent.HarnessArgs) []string {
+	args := []string{"gemini", "-p", "--output-format", "stream-json", "--yolo"}
+	if a.Model != "" {
+		args = append(args, "-m", a.Model)
+	}
+	if a.ResumeSessionID != "" {
+		args = append(args, "--resume", a.ResumeSessionID)
+	}
+	return args
 }
 
 // AttachRelay implements agent.Backend.
@@ -53,24 +58,13 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 	return agent.AttachRelaySession(ctx, opts, b)
 }
 
+// NewWire implements agent.Backend.
+func (*Backend) NewWire() agent.WireFormat {
+	return New()
+}
+
 // WritePrompt writes a single user message to Gemini CLI's stdin.
 // Gemini CLI in -p mode reads plain text lines from stdin. Images are ignored.
 func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
 	return agent.PlainTextWritePrompt(w, p, logW)
-}
-
-// buildArgs constructs the Gemini CLI arguments.
-func buildArgs(opts *agent.Options) []string {
-	args := []string{
-		"gemini", "-p",
-		"--output-format", "stream-json",
-		"--yolo",
-	}
-	if opts.Model != "" {
-		args = append(args, "-m", opts.Model)
-	}
-	if opts.ResumeSessionID != "" {
-		args = append(args, "--resume", opts.ResumeSessionID)
-	}
-	return args
 }

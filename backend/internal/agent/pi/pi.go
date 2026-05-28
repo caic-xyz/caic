@@ -6,7 +6,7 @@
 //
 // Per-session state (accumulated usage, text/thinking buffers) is managed by
 // piWireFormat, which wraps the stateless parseMessage function. A fresh
-// piWireFormat is created for every Start, AttachRelay, and NewParser call so
+// piWireFormat is created for every Start, AttachRelay, and NewWire call so
 // that accumulators reset between sessions and replays.
 //
 // Extension UI auto-response is handled by piConn, which wraps the default
@@ -53,6 +53,7 @@ func New(cacheDir string, envVars []string) *Backend {
 	b.Base = agent.Base{
 		HarnessID:     agent.Pi,
 		Images:        true,
+		Compact:       true,
 		ContextWindow: 200_000,
 	}
 	if cacheDir != "" {
@@ -78,19 +79,12 @@ func (b *Backend) SetModels(models []string) {
 	b.ModelList = agent.SortModels(models)
 }
 
-// NewParser implements agent.Backend. It uses a fresh stateful piWireFormat so
-// terminal events (agent_end → ResultMessage) are synthesized during replay.
-func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
-	return (&piWireFormat{fw: &jsonutil.FieldWarner{}}).ParseMessage
-}
-
 // Start launches a Pi RPC process via the relay daemon. It sends optional
 // set_model commands before the initial prompt.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	wire := &piWireFormat{fw: &jsonutil.FieldWarner{}}
-	b.Wire = wire
 
-	rp, err := agent.PrepareRelay(ctx, opts, buildArgs())
+	rp, err := agent.PrepareRelay(ctx, opts, b.AgentArgs(agent.HarnessArgs{Model: opts.Model}))
 	if err != nil {
 		return nil, err
 	}
@@ -167,15 +161,29 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	return sess, nil
 }
 
+// AgentArgs implements agent.Backend.
+func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
+	return []string{"pi", "--mode", "rpc"}
+}
+
 // AttachRelay connects to an already-running relay in the container.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	wire := &piWireFormat{fw: &jsonutil.FieldWarner{}}
 	return agent.AttachRelaySession(ctx, opts, wire)
 }
 
-// buildArgs constructs the Pi CLI arguments for RPC mode.
-func buildArgs() []string {
-	return []string{"pi", "--mode", "rpc"}
+// NewWire implements agent.Backend.
+func (*Backend) NewWire() agent.WireFormat {
+	return &piWireFormat{fw: &jsonutil.FieldWarner{}}
+}
+
+// WritePrePrompt implements agent.PrePromptWriter. It sends a set_model command
+// when model is non-empty.
+func (*Backend) WritePrePrompt(w io.Writer, model string, logW io.Writer) error {
+	if model != "" {
+		return writeSetModel(w, model, logW)
+	}
+	return nil
 }
 
 // caicModelInfo is written to output.jsonl during Start so replay/adoption

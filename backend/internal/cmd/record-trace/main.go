@@ -9,6 +9,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,20 +26,25 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	pi "github.com/maruel/genai/providers/pi"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/agent/codex"
+	"github.com/caic-xyz/caic/backend/internal/agent/gemini"
+	"github.com/caic-xyz/caic/backend/internal/agent/kilo"
+	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
+	"github.com/caic-xyz/caic/backend/internal/agent/pi"
+	"github.com/caic-xyz/caic/backend/internal/agent/relay"
 )
 
-const (
-	image   = "ghcr.io/caic-xyz/md-user:latest"
-	relayPy = "backend/internal/agent/relay/relay.py"
-)
+const image = "ghcr.io/caic-xyz/md-user:latest"
 
-// terminalEvent maps each harness to the JSON "type" value that signals
-// the agent has finished its work.
-var terminalEvent = map[string]string{
-	string(agent.Pi):     string(pi.EventAgentEnd),
-	string(agent.Claude): (&agent.ResultMessage{}).Type(),
-	string(agent.Codex):  (&agent.ResultMessage{}).Type(),
+// backends is the registry of supported harnesses for record-trace.
+var backends = map[string]agent.Backend{
+	string(agent.Pi):       pi.New("", nil),
+	string(agent.Claude):   claudecode.New(),
+	string(agent.Codex):    codex.New(),
+	string(agent.Gemini):   gemini.New(),
+	string(agent.Kilo):     kilo.New(),
+	string(agent.OpenCode): opencode.New("", nil),
 }
 
 var scenarios = map[string]string{
@@ -46,14 +52,8 @@ var scenarios = map[string]string{
 	"tool-error":     "Read the file nonexistent_file.txt",
 }
 
-var harnessCmd = map[string][]string{
-	string(agent.Pi):     {"pi", "--mode", "rpc"},
-	string(agent.Claude): {"claude", "--output-format", "stream-json", "--verbose"},
-	string(agent.Codex):  {"codex", "--full-auto"},
-}
-
 func mainImpl() error {
-	harnessFlag := flag.String("harness", "", "harness to record (pi, claudecode, codex)")
+	harnessFlag := flag.String("harness", "", "harness to record (pi, claude, codex, gemini, kilo, opencode)")
 	scenarioFlag := flag.String("scenario", "", "predefined scenario name")
 	modelFlag := flag.String("model", "", "model to use (e.g. xiaomi/mimo-v2.5)")
 	apiKeyEnv := flag.String("api-key-env", "", "env var name for API key")
@@ -62,7 +62,7 @@ func mainImpl() error {
 	if *harnessFlag == "" {
 		return errors.New("--harness is required")
 	}
-	cmdArgs, ok := harnessCmd[*harnessFlag]
+	b, ok := backends[*harnessFlag]
 	if !ok {
 		return fmt.Errorf("unknown harness: %s", *harnessFlag)
 	}
@@ -86,47 +86,42 @@ func mainImpl() error {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	return recordTrace(ctx, *harnessFlag, cmdArgs, promptText, outputPath, *modelFlag, apiKey)
+	return recordTrace(ctx, b, *apiKeyEnv, apiKey, promptText, outputPath, *modelFlag)
 }
 
-func recordTrace(ctx context.Context, harness string, cmdArgs []string, promptText, outputPath, model, apiKey string) error {
-	root, err := findRoot()
-	if err != nil {
-		return fmt.Errorf("find repo root: %w", err)
-	}
-
+func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv, apiKey, promptText, outputPath, model string) error {
 	workDir, err := setupWorkspace()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(workDir) }()
 
-	ctr, err := startContainer(ctx, workDir, apiKey)
+	ctr, err := startContainer(ctx, workDir, apiKeyEnv, apiKey)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		_ = exec.CommandContext(context.WithoutCancel(ctx), "podman", "stop", ctr).Run() //nolint:gosec // container ID from podman
 	}()
-	if err := deployRelay(ctx, ctr, root); err != nil {
+	if err := deployRelay(ctx, ctr); err != nil {
 		return err
 	}
 	binDirs, err := detectBinDirs(ctx, ctr)
 	if err != nil {
 		return fmt.Errorf("detect tool paths: %w", err)
 	}
-	cmd, stdin, stdout, err := startRelayAgent(ctx, ctr, harness, cmdArgs, binDirs)
+	cmd, stdin, stdout, err := startRelayAgent(ctx, ctr, b, model, binDirs)
 	if err != nil {
 		return err
 	}
-	if err := sendCommands(stdin, harness, model, promptText); err != nil {
+	if err := sendCommands(stdin, b, model, promptText); err != nil {
 		_ = cmd.Process.Kill()
 		return err
 	}
-	if err := waitAndShutdown(ctx, cmd, stdin, stdout, harness, ctr); err != nil {
+	if err := waitAndShutdown(ctx, cmd, stdin, stdout, b, ctr); err != nil {
 		return err
 	}
-	return writeGoldenFile(ctx, ctr, workDir, harness, promptText, outputPath)
+	return writeGoldenFile(ctx, ctr, workDir, b.Harness(), promptText, outputPath)
 }
 
 // setupWorkspace creates a temp directory with a sample main.go for the agent.
@@ -143,8 +138,8 @@ func setupWorkspace() (string, error) {
 	return workDir, nil
 }
 
-// startContainer pulls the image, starts a container.
-func startContainer(ctx context.Context, workDir, apiKey string) (ctr string, err error) {
+// startContainer pulls the image and starts a container.
+func startContainer(ctx context.Context, workDir, apiKeyEnv, apiKey string) (string, error) {
 	slog.Info("Pulling image", "image", image)
 	if pullErr := runPodman(ctx, "pull", image); pullErr != nil {
 		return "", fmt.Errorf("pull image: %w", pullErr)
@@ -153,7 +148,7 @@ func startContainer(ctx context.Context, workDir, apiKey string) (ctr string, er
 	slog.Info("Starting container")
 	ctrBytes, runErr := exec.CommandContext(ctx, "podman", "run", "-d", "--rm", //nolint:gosec // podman args are safe
 		"-v", workDir+":/workspace:rw",
-		"-e", "XIAOMI_API_KEY="+apiKey,
+		"-e", apiKeyEnv+"="+apiKey,
 		image, "sleep", "300",
 	).Output()
 	if runErr != nil {
@@ -162,26 +157,19 @@ func startContainer(ctx context.Context, workDir, apiKey string) (ctr string, er
 	return strings.TrimSpace(string(ctrBytes)), nil
 }
 
-// deployRelay copies relay.py into the container.
-func deployRelay(ctx context.Context, ctr, root string) error {
-	if err := runPodman(ctx, "exec", ctr, "mkdir", "-p", "/tmp/caic-relay"); err != nil {
-		return fmt.Errorf("mkdir relay dir: %w", err)
-	}
-	relaySrc := filepath.Join(root, relayPy)
-	if err := runPodman(ctx, "cp", relaySrc, ctr+":/tmp/caic-relay/relay.py"); err != nil {
-		return fmt.Errorf("copy relay.py: %w", err)
-	}
-	return nil
+// deployRelay pipes the embedded relay script into the container.
+func deployRelay(ctx context.Context, ctr string) error {
+	cmd := exec.CommandContext(ctx, "podman", "exec", "-i", ctr, //nolint:gosec // args from trusted source
+		"sh", "-c", "mkdir -p "+agent.RelayDir+" && cat > "+agent.RelayScriptPath)
+	cmd.Stdin = bytes.NewReader(relay.Script)
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
-// detectBinDirs finds pi and node bin directories inside the container by
-// checking well-known install paths. Returns a colon-separated PATH fragment.
+// detectBinDirs finds pi and node bin directories inside the container.
 func detectBinDirs(ctx context.Context, ctr string) (string, error) {
 	cmd := exec.CommandContext(ctx, "podman", "exec", ctr, //nolint:gosec // podman args are safe
 		"bash", "-c",
-		// Probe well-known install locations for pi and node. These
-		// directories are not on the default PATH in a non-interactive
-		// container, so command -v is unreliable.
 		`test -x /home/user/.local/share/pnpm/bin/pi && printf ':%s' /home/user/.local/share/pnpm/bin
 set -- /home/user/.nvm/versions/node/v*/bin; test -x "$1/node" && printf ':%s' "$1"`,
 	)
@@ -190,25 +178,22 @@ set -- /home/user/.nvm/versions/node/v*/bin; test -x "$1/node" && printf ':%s' "
 		return "", fmt.Errorf("detect paths: %w", err)
 	}
 	paths := strings.TrimSpace(string(out))
-	if paths == "" {
-		return "", nil
+	if paths != "" {
+		slog.Info("Detected tool paths in container", "paths", paths)
 	}
-	slog.Info("Detected tool paths in container", "paths", paths)
 	return paths, nil
 }
 
 // startRelayAgent launches the relay with the agent process inside the container.
-func startRelayAgent(ctx context.Context, ctr, harness string, cmdArgs []string, binDirs string) (*exec.Cmd, io.WriteCloser, io.Reader, error) {
-	slog.Info("Starting agent via relay", "harness", harness)
+func startRelayAgent(ctx context.Context, ctr string, b agent.Backend, model, binDirs string) (*exec.Cmd, io.WriteCloser, io.Reader, error) {
+	slog.Info("Starting agent via relay", "harness", b.Harness())
 	export := ""
 	if binDirs != "" {
 		export = "export PATH=" + binDirs + ":$PATH && "
 	}
-	bashCmd := export + "python3 /tmp/caic-relay/relay.py serve-attach --dir /workspace -- " + strings.Join(cmdArgs, " ")
-	relayFullCmd := []string{
-		"podman", "exec", "-i", ctr,
-		"bash", "-c", bashCmd,
-	}
+	agentArgs := b.AgentArgs(agent.HarnessArgs{Model: model})
+	bashCmd := export + "python3 " + agent.RelayScriptPath + " serve-attach --dir /workspace -- " + strings.Join(agentArgs, " ")
+	relayFullCmd := []string{"podman", "exec", "-i", ctr, "bash", "-c", bashCmd}
 
 	cmd := exec.CommandContext(ctx, relayFullCmd[0], relayFullCmd[1:]...) //nolint:gosec // args are not user-controlled
 	stdin, err := cmd.StdinPipe()
@@ -225,57 +210,20 @@ func startRelayAgent(ctx context.Context, ctr, harness string, cmdArgs []string,
 	return cmd, stdin, stdout, nil
 }
 
-// sendCommands optionally sends set_model (pi only) and always sends the prompt.
-func sendCommands(stdin io.WriteCloser, harness, model, promptText string) error {
-	if harness == string(agent.Pi) && model != "" {
-		if err := sendSetModel(stdin, model); err != nil {
+// sendCommands sends any pre-prompt harness setup and then the prompt.
+func sendCommands(stdin io.WriteCloser, b agent.Backend, model, promptText string) error {
+	if pp, ok := b.(agent.PrePromptWriter); ok {
+		if err := pp.WritePrePrompt(stdin, model, io.Discard); err != nil {
 			return err
 		}
 	}
-	return sendPrompt(stdin, promptText)
+	slog.Info("Sending prompt", "text", fmt.Sprintf("%.60s...", promptText))
+	return b.NewWire().WritePrompt(stdin, agent.Prompt{Text: promptText}, io.Discard)
 }
 
-// sendSetModel sends a set_model command to the pi agent.
-func sendSetModel(w io.WriteCloser, model string) error {
-	slog.Info("Setting model", "model", model)
-	provider, modelID := "", model
-	if p, m, ok := strings.Cut(model, "/"); ok {
-		provider, modelID = p, m
-	}
-	cmd := pi.SetModelCmd{
-		Type:     pi.CmdSetModel,
-		Provider: provider,
-		ModelID:  modelID,
-	}
-	data, err := json.Marshal(cmd)
-	if err != nil {
-		return fmt.Errorf("marshal set_model: %w", err)
-	}
-	if _, err := w.Write(append(data, '\n')); err != nil {
-		return fmt.Errorf("write set_model: %w", err)
-	}
-	return nil
-}
-
-// sendPrompt sends a prompt command via the relay.
-func sendPrompt(w io.WriteCloser, text string) error {
-	slog.Info("Sending prompt", "text", fmt.Sprintf("%.60s...", text))
-	cmdJSON, err := json.Marshal(map[string]string{
-		"type":    "prompt",
-		"message": text,
-	})
-	if err != nil {
-		return fmt.Errorf("marshal prompt: %w", err)
-	}
-	if _, err := w.Write(append(cmdJSON, '\n')); err != nil {
-		return fmt.Errorf("write prompt: %w", err)
-	}
-	return nil
-}
-
-// waitAndShutdown watches for the terminal event, then sends the null-byte sentinel and waits.
-func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, harness, ctr string) error {
-	agentDone := watchTerminalEvent(stdout, terminalEvent[harness])
+// waitAndShutdown watches for a ResultMessage, then sends the null-byte sentinel and waits.
+func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, stdout io.Reader, b agent.Backend, ctr string) error {
+	agentDone := watchResult(stdout, b.NewWire().ParseMessage)
 
 	slog.Info("Waiting for agent to finish")
 	select {
@@ -292,26 +240,26 @@ func waitAndShutdown(ctx context.Context, cmd *exec.Cmd, stdin io.WriteCloser, s
 	_ = stdin.Close()
 	_ = cmd.Wait()
 
-	// The relay may still be flushing output.jsonl to disk. Poll until
-	// the file is visible in the container.
-	return waitForFile(ctx, ctr, "/tmp/caic-relay/output.jsonl", 20*time.Second)
+	return waitForFile(ctx, ctr, agent.RelayOutputPath, 20*time.Second)
 }
 
-// watchTerminalEvent reads NDJSON from stdout and signals when the terminal event type is seen.
-func watchTerminalEvent(stdout io.Reader, termType string) <-chan struct{} {
+// watchResult reads NDJSON from stdout and signals when a ResultMessage is parsed.
+func watchResult(stdout io.Reader, parse func([]byte) ([]agent.Message, error)) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 1<<20), 32<<20)
 		for scanner.Scan() {
-			line := scanner.Bytes()
-			var probe struct {
-				Type string `json:"type"`
+			msgs, err := parse(scanner.Bytes())
+			if err != nil {
+				continue
 			}
-			if json.Unmarshal(line, &probe) == nil && probe.Type == termType {
-				_, _ = io.ReadAll(stdout)
-				return
+			for _, m := range msgs {
+				if _, ok := m.(*agent.ResultMessage); ok {
+					_, _ = io.ReadAll(stdout)
+					return
+				}
 			}
 		}
 	}()
@@ -319,10 +267,10 @@ func watchTerminalEvent(stdout io.Reader, termType string) <-chan struct{} {
 }
 
 // writeGoldenFile copies output.jsonl from the container, sanitizes it, and writes the golden file.
-func writeGoldenFile(ctx context.Context, ctr, workDir, harness, promptText, outputPath string) error {
+func writeGoldenFile(ctx context.Context, ctr, workDir string, harness agent.Harness, promptText, outputPath string) error {
 	slog.Info("Copying output.jsonl")
 	localOutput := filepath.Join(workDir, "output.jsonl")
-	if err := runPodman(ctx, "cp", ctr+":/tmp/caic-relay/output.jsonl", localOutput); err != nil {
+	if err := runPodman(ctx, "cp", ctr+":"+agent.RelayOutputPath, localOutput); err != nil {
 		return fmt.Errorf("copy output: %w", err)
 	}
 
@@ -348,24 +296,24 @@ func writeGoldenFile(ctx context.Context, ctr, workDir, harness, promptText, out
 	return nil
 }
 
-// buildGoldenContent prepends a caic_meta header and appends a caic_result footer to raw output.
-func buildGoldenContent(raw []byte, harness, promptText string) (string, error) {
-	meta := map[string]any{
-		"type":       "caic_meta",
-		"version":    1,
-		"prompt":     promptText,
-		"harness":    harness,
-		"repos":      []any{},
-		"started_at": time.Now().UTC().Format(time.RFC3339),
+// buildGoldenContent prepends a caic_meta header and appends a caic_result footer.
+func buildGoldenContent(raw []byte, harness agent.Harness, promptText string) (string, error) {
+	meta := agent.MetaMessage{
+		MessageType: "caic_meta",
+		Version:     1,
+		Prompt:      promptText,
+		Harness:     harness,
+		Repos:       []agent.MetaRepo{},
+		StartedAt:   time.Now().UTC(),
 	}
 	metaJSON, err := json.Marshal(meta)
 	if err != nil {
 		return "", fmt.Errorf("marshal meta: %w", err)
 	}
 
-	result := map[string]any{
-		"type":  "caic_result",
-		"state": "completed",
+	result := agent.MetaResultMessage{
+		MessageType: "caic_result",
+		State:       "completed",
 	}
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
@@ -416,23 +364,6 @@ func waitForFile(ctx context.Context, ctr, path string, timeout time.Duration) e
 			return fmt.Errorf("%s not found in container after %v", path, timeout)
 		}
 		time.Sleep(100 * time.Millisecond)
-	}
-}
-
-func findRoot() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", errors.New("go.mod not found")
-		}
-		dir = parent
 	}
 }
 

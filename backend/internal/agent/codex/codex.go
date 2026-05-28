@@ -34,11 +34,6 @@ type Backend struct {
 
 var _ agent.Backend = (*Backend)(nil)
 
-// NewParser implements agent.Backend.
-func (*Backend) NewParser() func([]byte) ([]agent.Message, error) {
-	return (&wireFormat{fw: &jsonutil.FieldWarner{}}).ParseMessage
-}
-
 // New creates a Codex CLI backend with parser configured.
 // ModelList starts with a single known-good model; it is replaced with the
 // live list returned by model/list on the first successful handshake.
@@ -47,6 +42,7 @@ func New() *Backend {
 		HarnessID:     agent.Codex,
 		ModelList:     []string{"gpt-5.4"},
 		Images:        true,
+		Compact:       true,
 		ContextWindow: 200_000,
 	}}
 }
@@ -73,7 +69,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	// 	return nil, err
 	// }
 
-	codexArgs := buildArgs(opts)
+	codexArgs := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
 
 	sshArgs := make([]string, 0, 8+len(codexArgs))
 	sshArgs = append(sshArgs, opts.Container, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin", "--")
@@ -123,6 +119,17 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	return s, nil
 }
 
+// AgentArgs implements agent.Backend.
+func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
+	// TODO: re-enable widget MCP plugin once it's fixed for codex
+	// return []string{
+	// 	"codex", "app-server",
+	// 	"-c", `mcp_servers.widget.command="python3"`,
+	// 	"-c", `mcp_servers.widget.args=["` + widgetMCPServerPath + `"]`,
+	// }
+	return []string{"codex", "app-server"}
+}
+
 // AttachRelay connects to an already-running relay in the container.
 // opts.ResumeSessionID is used to pre-populate the thread ID so that
 // WritePrompt works immediately without waiting for thread/started replay.
@@ -132,6 +139,11 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 	// appears in the replayed output.
 	wire := &wireFormat{threadID: opts.ResumeSessionID, effort: opts.Effort, fw: &jsonutil.FieldWarner{}}
 	return agent.AttachRelaySession(ctx, opts, wire)
+}
+
+// NewWire implements agent.Backend.
+func (*Backend) NewWire() agent.WireFormat {
+	return &wireFormat{fw: &jsonutil.FieldWarner{}}
 }
 
 // wireFormat implements agent.WireFormat for the codex app-server JSON-RPC
@@ -444,14 +456,3 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*cx.JSONRPCMessa
 // 	}
 // 	return nil
 // }
-
-// buildArgs constructs the Codex CLI app-server arguments.
-func buildArgs(_ *agent.Options) []string {
-	// TODO: re-enable widget MCP plugin once it's fixed for codex
-	// return []string{
-	// 	"codex", "app-server",
-	// 	"-c", `mcp_servers.widget.command="python3"`,
-	// 	"-c", `mcp_servers.widget.args=["` + widgetMCPServerPath + `"]`,
-	// }
-	return []string{"codex", "app-server"}
-}

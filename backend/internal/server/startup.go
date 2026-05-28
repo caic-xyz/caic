@@ -470,7 +470,7 @@ func (s *Server) loadPurgedTasks() error {
 func (s *Server) setParser(lt *task.LoadedTask) {
 	for _, r := range s.runners {
 		if b := r.Backends[lt.Harness]; b != nil {
-			lt.SetParser(b.NewParser())
+			lt.SetParser(b.NewWire().ParseMessage)
 			return
 		}
 	}
@@ -841,7 +841,7 @@ func (s *Server) adoptOne(ctx context.Context, ri repoInfo, runner *task.Runner,
 				// format) — RestoreMessages needs it to infer the terminal
 				// (waiting/asking) state instead of leaving the task stuck as
 				// "running".
-				relayMsgs, relaySize, relayErr = agent.ReadRelayTail(readCtx, c.Name, b.NewParser(), 10<<20) // 10 MiB tail
+				relayMsgs, relaySize, relayErr = agent.ReadRelayTail(readCtx, c.Name, b.NewWire().ParseMessage, 10<<20) // 10 MiB tail
 			} else {
 				relaySize, relayErr = agent.RelayOutputSize(readCtx, c.Name)
 			}

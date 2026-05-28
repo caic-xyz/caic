@@ -698,20 +698,20 @@ func TestParseMessage(t *testing.T) {
 	})
 }
 
-func TestBuildArgs(t *testing.T) {
+func TestAgentArgs(t *testing.T) {
 	t.Parallel()
 	t.Run("AppServer", func(t *testing.T) {
 		t.Parallel()
-		args := buildArgs(&agent.Options{InitialPrompt: agent.Prompt{Text: "fix the bug"}, Model: "o4-mini"})
+		args := New().AgentArgs(agent.HarnessArgs{Model: "o4-mini"})
 		if len(args) < 2 || args[0] != "codex" || args[1] != "app-server" {
 			t.Errorf("args[:2] = %v, want [codex app-server ...]", args)
 		}
 	})
 	t.Run("WidgetMCPConfig", func(t *testing.T) {
 		t.Parallel()
-		// Widget MCP is disabled for codex; buildArgs should return only
+		// Widget MCP is disabled for codex; AgentArgs should return only
 		// the base command without any -c flags.
-		args := buildArgs(&agent.Options{})
+		args := New().AgentArgs(agent.HarnessArgs{})
 		if slices.Contains(args, "-c") {
 			t.Errorf("unexpected -c flag in args %v; widget MCP is disabled for codex", args)
 		}

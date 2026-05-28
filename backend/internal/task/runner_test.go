@@ -39,7 +39,7 @@ func (b *testBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Se
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, &testWire{parse: claudecode.New().NewParser()}), stdout, opts.MsgCh, nil), nil
+	return agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, opts.MsgCh, nil), nil
 }
 
 func (b *testBackend) AttachRelay(context.Context, *agent.Options) (*agent.Session, error) {
@@ -50,15 +50,15 @@ func (b *testBackend) ReadRelayOutput(context.Context, string) ([]agent.Message,
 	return nil, 0, errors.New("test backend does not support relay")
 }
 
-func (b *testBackend) NewParser() func([]byte) ([]agent.Message, error) {
-	return claudecode.New().NewParser()
-}
-
 func (b *testBackend) Models() []string   { return []string{"test-model"} }
 func (b *testBackend) SetModels([]string) {}
 
 // SupportsImages always returns false in the test backend.
 func (b *testBackend) SupportsImages() bool { return false }
+
+func (b *testBackend) AgentArgs(agent.HarnessArgs) []string { return nil }
+
+func (b *testBackend) NewWire() agent.WireFormat { return claudecode.New() }
 
 func (b *testBackend) SupportsCompact() bool { return false }
 
