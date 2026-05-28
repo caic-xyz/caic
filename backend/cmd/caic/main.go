@@ -90,6 +90,7 @@ Flags:
 	cfgDirFlag := flag.String("config-dir", "", "config directory (default: ~/.config/caic)")
 	versionFlag := flag.Bool("version", false, "print version and exit")
 	printURLFlag := flag.Bool("print-url", false, "print the server URL and exit")
+	traceFlag := flag.String("trace", "", "preload a JSONL trace file as a terminal task (fake mode only)")
 	flag.Parse()
 	if *versionFlag {
 		fmt.Println(autoupdate.Version)
@@ -207,7 +208,7 @@ Flags:
 		return err
 	}
 	if isFakeMode {
-		return serveFake(ctx, addr, cfg)
+		return serveFake(ctx, addr, cfg, *traceFlag)
 	}
 	addr = localizeAddr(addr)
 

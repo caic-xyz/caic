@@ -20,16 +20,21 @@ func TestNewReplayFilter(t *testing.T) {
 	hd := func() agent.Message { return &agent.ThinkingDeltaMessage{} }
 	hf := func() agent.Message { return &agent.ThinkingMessage{} }
 	tool := func() agent.Message { return &agent.ToolUseMessage{} }
+	tod := func() agent.Message { return &agent.ToolOutputDeltaMessage{ToolUseID: "t1", Delta: "x"} }
+	tr := func() agent.Message { return &agent.ToolResultMessage{ToolUseID: "t1"} }
 
 	cases := map[string][]agent.Message{
-		"deltas then final":      {td(), td(), tf()},
-		"deltas no final":        {td(), td()},
-		"thinking run":           {hd(), hf()},
-		"mixed delta kinds":      {td(), hd(), hf()},
-		"tool breaks run":        {td(), tool(), tf()},
-		"final without deltas":   {tf()},
-		"empty":                  {},
-		"trailing run then text": {tf(), td(), td()},
+		"deltas then final":              {td(), td(), tf()},
+		"deltas no final":                {td(), td()},
+		"thinking run":                   {hd(), hf()},
+		"mixed delta kinds":              {td(), hd(), hf()},
+		"tool breaks run":                {td(), tool(), tf()},
+		"final without deltas":           {tf()},
+		"empty":                          {},
+		"trailing run then text":         {tf(), td(), td()},
+		"tool output deltas then result": {tod(), tod(), tr()},
+		"tool output deltas no result":   {tod(), tod()},
+		"tool result without deltas":     {tr()},
 	}
 	for name, in := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -590,6 +595,49 @@ func TestFilterHistoryForReplay(t *testing.T) {
 			&agent.TextMessage{Text: "b"},
 		}
 		got := filterHistoryForReplay(msgs)
+		if len(got) != 3 {
+			t.Fatalf("got %d messages, want 3", len(got))
+		}
+	})
+
+	t.Run("RemovesToolOutputDeltasBeforeToolResult", func(t *testing.T) {
+		t.Parallel()
+		msgs := []agent.Message{
+			&agent.ToolOutputDeltaMessage{ToolUseID: "t1", Delta: "a"},
+			&agent.ToolOutputDeltaMessage{ToolUseID: "t1", Delta: "b"},
+			&agent.ToolResultMessage{ToolUseID: "t1"},
+		}
+		got := filterHistoryForReplay(msgs)
+		if len(got) != 1 {
+			t.Fatalf("got %d messages, want 1", len(got))
+		}
+		if _, ok := got[0].(*agent.ToolResultMessage); !ok {
+			t.Errorf("got %T, want ToolResultMessage", got[0])
+		}
+	})
+
+	t.Run("KeepsToolOutputDeltasWithoutToolResult", func(t *testing.T) {
+		t.Parallel()
+		msgs := []agent.Message{
+			&agent.ToolOutputDeltaMessage{ToolUseID: "t1", Delta: "a"},
+			&agent.ToolOutputDeltaMessage{ToolUseID: "t1", Delta: "b"},
+		}
+		got := filterHistoryForReplay(msgs)
+		if len(got) != 2 {
+			t.Fatalf("got %d messages, want 2", len(got))
+		}
+	})
+
+	t.Run("ToolOutputDeltasMatchedByToolUseID", func(t *testing.T) {
+		t.Parallel()
+		msgs := []agent.Message{
+			&agent.ToolOutputDeltaMessage{ToolUseID: "t1", Delta: "a"},
+			&agent.ToolOutputDeltaMessage{ToolUseID: "t2", Delta: "b"},
+			&agent.ToolResultMessage{ToolUseID: "t1"},
+		}
+		got := filterHistoryForReplay(msgs)
+		// Only consecutive deltas immediately before the result are removed.
+		// The t2 delta breaks the run, so the t1 delta at index 0 is kept.
 		if len(got) != 3 {
 			t.Fatalf("got %d messages, want 3", len(got))
 		}

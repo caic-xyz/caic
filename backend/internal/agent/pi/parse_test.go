@@ -32,6 +32,57 @@ func TestBackendNewParser(t *testing.T) {
 			t.Fatalf("NewParser produced no ResultMessage for agent_end: %#v", msgs)
 		}
 	})
+
+	t.Run("tool_execution_update emits incremental deltas", func(t *testing.T) {
+		t.Parallel()
+		parser := New("", nil).NewParser()
+
+		// Simulate two tool_execution_update events with accumulated text.
+		// The second event contains the full accumulated text (first + new).
+		update1 := []byte(`{"type":"tool_execution_update","toolCallId":"t1","toolName":"bash","partialResult":{"content":[{"type":"text","text":"hello"}]}}`)
+		update2 := []byte(`{"type":"tool_execution_update","toolCallId":"t1","toolName":"bash","partialResult":{"content":[{"type":"text","text":"hello world"}]}}`)
+
+		msgs1, err := parser(update1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs1) != 1 {
+			t.Fatalf("update1: got %d messages, want 1", len(msgs1))
+		}
+		tod1, ok := msgs1[0].(*agent.ToolOutputDeltaMessage)
+		if !ok {
+			t.Fatalf("update1: got %T, want ToolOutputDeltaMessage", msgs1[0])
+		}
+		if tod1.Delta != "hello" {
+			t.Errorf("update1 delta: got %q, want %q", tod1.Delta, "hello")
+		}
+
+		msgs2, err := parser(update2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs2) != 1 {
+			t.Fatalf("update2: got %d messages, want 1", len(msgs2))
+		}
+		tod2, ok := msgs2[0].(*agent.ToolOutputDeltaMessage)
+		if !ok {
+			t.Fatalf("update2: got %T, want ToolOutputDeltaMessage", msgs2[0])
+		}
+		// Should be only the incremental part, not the full accumulated text.
+		if tod2.Delta != " world" {
+			t.Errorf("update2 delta: got %q, want %q", tod2.Delta, " world")
+		}
+
+		// Third update with same text should produce empty delta (filtered out).
+		update3 := []byte(`{"type":"tool_execution_update","toolCallId":"t1","toolName":"bash","partialResult":{"content":[{"type":"text","text":"hello world"}]}}`)
+		msgs3, err := parser(update3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs3) != 0 {
+			t.Fatalf("update3: got %d messages, want 0 (empty delta filtered)", len(msgs3))
+		}
+	})
 }
 
 func TestHandleDoneResultText(t *testing.T) {

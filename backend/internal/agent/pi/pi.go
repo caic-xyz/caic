@@ -275,6 +275,11 @@ type piWireFormat struct {
 
 	modelCtxWindow int64 // Model's context window from set_model response; 0 if unknown.
 
+	// Per-tool accumulated output length for computing incremental deltas.
+	// Pi's tool_execution_update events carry the full accumulated output;
+	// we track the previous length to emit only the new portion.
+	toolOutputLen map[string]int
+
 	fw *jsonutil.FieldWarner
 }
 
@@ -378,6 +383,8 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	}
 
 	// Accumulate text/thinking deltas for synthetic final messages.
+	// For tool output deltas, compute incremental deltas since Pi's
+	// tool_execution_update events carry the full accumulated output.
 	for _, msg := range msgs {
 		switch m := msg.(type) {
 		case *agent.TextDeltaMessage:
@@ -388,9 +395,31 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			w.mu.Lock()
 			w.thinkAccum.WriteString(m.Text)
 			w.mu.Unlock()
+		case *agent.ToolOutputDeltaMessage:
+			w.mu.Lock()
+			if w.toolOutputLen == nil {
+				w.toolOutputLen = make(map[string]int)
+			}
+			prev := w.toolOutputLen[m.ToolUseID]
+			if prev < len(m.Delta) {
+				m.Delta = m.Delta[prev:]
+				w.toolOutputLen[m.ToolUseID] = prev + len(m.Delta)
+			} else {
+				m.Delta = ""
+			}
+			w.mu.Unlock()
 		}
 	}
-	return msgs, nil
+	// Filter out empty messages after incremental delta computation.
+	n := 0
+	for _, msg := range msgs {
+		if tod, ok := msg.(*agent.ToolOutputDeltaMessage); ok && tod.Delta == "" {
+			continue
+		}
+		msgs[n] = msg
+		n++
+	}
+	return msgs[:n], nil
 }
 
 // handleDone converts a done delta into synthetic final messages + a

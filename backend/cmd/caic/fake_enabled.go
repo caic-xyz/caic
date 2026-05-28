@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -25,7 +27,7 @@ const isFakeMode = true
 
 // serveFake starts the HTTP server with fake container/agent ops and a temp
 // git repo. Used for e2e testing without md CLI or SSH.
-func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr error) {
+func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile string) (retErr error) {
 	addr = localizeAddr(addr)
 
 	// Always create a temp git repo — fake mode doesn't use real repos.
@@ -63,6 +65,27 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config) (retErr err
 	}
 	defer func() { retErr = errors.Join(retErr, os.RemoveAll(fakeLogsDir)) }()
 	cfg.CacheDir = fakeLogsDir
+
+	// If a trace file is specified, copy it to the tasks log directory so it
+	// gets loaded as a purged task on startup.
+	if traceFile != "" {
+		absTrace, err := filepath.Abs(traceFile)
+		if err != nil {
+			return fmt.Errorf("resolve trace path: %w", err)
+		}
+		if _, err := os.Stat(absTrace); err != nil {
+			return fmt.Errorf("trace file not found: %w", err)
+		}
+		tasksDir := filepath.Join(fakeLogsDir, "tasks")
+		if err := os.MkdirAll(tasksDir, 0o750); err != nil {
+			return fmt.Errorf("create tasks dir: %w", err)
+		}
+		dst := filepath.Join(tasksDir, "trace-replay-fake-fake.jsonl")
+		if err := os.Symlink(absTrace, dst); err != nil {
+			return fmt.Errorf("symlink trace file: %w", err)
+		}
+		slog.Info("preloaded trace file", "src", absTrace, "dst", dst)
+	}
 
 	// Pre-populate the harness model cache so refreshHarnessModels skips
 	// launching temporary containers for Pi and OpenCode model discovery.
@@ -152,6 +175,24 @@ func initFakeHarnessCache(cacheDir string) error {
 		cache.SetModels(h, []string{"fake-model"}, "")
 	}
 	return nil
+}
+
+// copyFile copies a file from src to dst.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 func runGit(ctx context.Context, args ...string) error {

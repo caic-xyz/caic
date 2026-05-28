@@ -439,7 +439,7 @@ func toV1SafetyIssues(issues []task.SafetyIssue) []v1.SafetyIssue {
 func filterHistoryForReplay(msgs []agent.Message) []agent.Message {
 	skip := make([]bool, len(msgs))
 	for i, msg := range msgs {
-		switch msg.(type) {
+		switch m := msg.(type) {
 		case *agent.TextMessage:
 			for j := i - 1; j >= 0; j-- {
 				if _, ok := msgs[j].(*agent.TextDeltaMessage); ok {
@@ -459,6 +459,14 @@ func filterHistoryForReplay(msgs []agent.Message) []agent.Message {
 		case *agent.WidgetMessage:
 			for j := i - 1; j >= 0; j-- {
 				if _, ok := msgs[j].(*agent.WidgetDeltaMessage); ok {
+					skip[j] = true
+				} else {
+					break
+				}
+			}
+		case *agent.ToolResultMessage:
+			for j := i - 1; j >= 0; j-- {
+				if td, ok := msgs[j].(*agent.ToolOutputDeltaMessage); ok && td.ToolUseID == m.ToolUseID {
 					skip[j] = true
 				} else {
 					break
@@ -485,6 +493,8 @@ func replayDeltaKind(m agent.Message) int {
 		return 2
 	case *agent.WidgetDeltaMessage:
 		return 3
+	case *agent.ToolOutputDeltaMessage:
+		return 4
 	}
 	return 0
 }
@@ -499,6 +509,8 @@ func replayFinalKind(m agent.Message) int {
 		return 2
 	case *agent.WidgetMessage:
 		return 3
+	case *agent.ToolResultMessage:
+		return 4
 	}
 	return 0
 }
