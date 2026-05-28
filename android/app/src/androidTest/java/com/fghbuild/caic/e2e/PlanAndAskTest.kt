@@ -31,7 +31,7 @@ class PlanAndAskTest : E2eTestBase() {
             runBlocking {
                 val id = createTaskAPI("FAKE_PLAN e2e test")
                 val task = waitForTaskState(id, "has_plan", 20_000)
-                assertEquals("has_plan", task.state)
+                assertEquals("has_plan", task.state.value)
 
                 // Restart with a new prompt to clear the plan (mirrors "Clear and execute plan").
                 api.restartTask(id, RestartReq(prompt = Prompt(text = "execute now")))
@@ -43,7 +43,7 @@ class PlanAndAskTest : E2eTestBase() {
             runBlocking {
                 val id = createTaskAPI("FAKE_ASK e2e test")
                 val task = waitForTaskState(id, "asking", 20_000)
-                assertEquals("asking", task.state)
+                assertEquals("asking", task.state.value)
 
                 // Answer the question — the agent processes it and returns to waiting.
                 api.sendInput(id, InputReq(prompt = Prompt(text = "In-memory (sync.Map)")))

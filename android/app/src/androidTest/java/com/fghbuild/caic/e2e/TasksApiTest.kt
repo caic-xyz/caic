@@ -36,7 +36,7 @@ class TasksApiTest : E2eTestBase() {
             runBlocking {
                 val id = createTaskAPI("api lifecycle test")
                 val task = waitForTaskState(id, "waiting")
-                assertEquals("fake", task.harness)
+                assertEquals("fake", task.harness.value)
                 assertTrue("numTurns should be >= 1", task.numTurns >= 1)
             }
         }
