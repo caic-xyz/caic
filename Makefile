@@ -1,6 +1,6 @@
 # Build, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
 
-.PHONY: help build dev fake-dev test coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix lint-docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-push android-test android-e2e android-setup-emulator android-start-emulator android-stop-emulator
+.PHONY: help build dev fake-dev test smoke coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix lint-docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-push android-test android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:2242
@@ -14,6 +14,7 @@ help:
 	@echo "  make fake-dev       - Run the server with fake backend (no containers)"
 	@echo "  make frontend-build - Build frontend assets (TypeScript → JavaScript)"
 	@echo "  make test           - Run unit tests"
+	@echo "  make smoke          - Run smoke test (end-to-end server lifecycle)"
 	@echo "  make lint           - Run linters (Go + frontend + Python + binaries + file index check)"
 	@echo "  make lint-fix       - Fix linting issues automatically (includes updating file indexes)"
 	@echo "  make git-hooks      - Install git pre-commit hooks"
@@ -52,6 +53,9 @@ test: $(FRONTEND_STAMP)
 	@go test -cover ./...
 	@pnpm test
 	@find . -name 'test_*.py' -exec python3 {} \;
+
+smoke:
+	@go test -tags="smoke e2e" -run TestSmoke -v -timeout 5m ./backend/cmd/caic/
 
 coverage: $(FRONTEND_STAMP)
 	@go test -coverprofile=coverage.out ./...
