@@ -8,5 +8,5 @@
 
 package pi
 
-//go:generate go run ../../cmd/record-trace --harness pi --scenario read-edit-bash --model xiaomi/mimo-v2.5
-//go:generate go run ../../cmd/record-trace --harness pi --scenario tool-error --model xiaomi/mimo-v2.5
+//go:generate go run ../../cmd/record-trace --harness pi --scenario read-edit-bash --model xiaomi/mimo-v2.5 --api-key-env XIAOMI_API_KEY
+//go:generate go run ../../cmd/record-trace --harness pi --scenario tool-error --model xiaomi/mimo-v2.5 --api-key-env XIAOMI_API_KEY
