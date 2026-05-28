@@ -11,12 +11,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,6 +31,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.text.AnnotatedString
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -70,10 +73,11 @@ fun MarkdownWithRawToggle(text: String, modifier: Modifier = Modifier) {
             if (showRaw) {
                 val clipboard = LocalClipboard.current
                 val scope = rememberCoroutineScope()
+                var copied by remember { mutableStateOf(false) }
                 Icon(
-                    imageVector = Icons.Outlined.ContentCopy,
-                    contentDescription = "Copy",
-                    tint = MaterialTheme.colorScheme.primary,
+                    imageVector = if (copied) Icons.Filled.Check else Icons.Outlined.ContentCopy,
+                    contentDescription = if (copied) "Copied" else "Copy",
+                    tint = if (copied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .size(32.dp)
                         .clip(MaterialTheme.shapes.small)
@@ -83,9 +87,16 @@ fun MarkdownWithRawToggle(text: String, modifier: Modifier = Modifier) {
                                     ClipEntry(ClipData.newPlainText("text", text))
                                 )
                             }
+                            copied = true
                         }
                         .padding(6.dp),
                 )
+                if (copied) {
+                    LaunchedEffect(Unit) {
+                        delay(1500)
+                        copied = false
+                    }
+                }
             }
         }
         if (showRaw) {

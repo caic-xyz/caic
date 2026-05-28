@@ -1331,6 +1331,7 @@ const marked = new Marked({
 function Markdown(props: { text: string }) {
   const html = createMemo(() => marked.parse(props.text) as string);
   const [raw, setRaw] = createSignal(false);
+  const [copied, setCopied] = createSignal(false);
   return (
     <div class={styles.markdownWrap}>
       <div class={styles.rawToolbar}>
@@ -1338,8 +1339,17 @@ function Markdown(props: { text: string }) {
           {raw() ? "rendered" : "raw"}
         </button>
         <Show when={raw()}>
-          <button class={styles.rawToolbarBtn} onClick={() => navigator.clipboard.writeText(props.text)} title="Copy to clipboard">
-            <CopyIcon width={14} height={14} />
+          <button
+            class={`${styles.rawCopyBtn} ${copied() ? styles.copied : ""}`}
+            onClick={() => {
+              navigator.clipboard.writeText(props.text);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            }}
+            title="Copy to clipboard"
+          >
+            <CopyIcon width={14} height={14} class={styles.copyIcon} />
+            <CheckIcon width={14} height={14} class={styles.checkIcon} />
           </button>
         </Show>
       </div>
