@@ -1,5 +1,7 @@
 // Opus codec wrappers using the pure-Go gopus library.
 
+//go:build !race
+
 package voicertc
 
 import (

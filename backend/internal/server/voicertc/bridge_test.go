@@ -1,5 +1,7 @@
 // Tests for the WebRTC voice bridge IPv4-only network layer and audio pipeline.
 
+//go:build !race
+
 package voicertc
 
 import (

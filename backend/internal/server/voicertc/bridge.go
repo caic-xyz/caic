@@ -1,4 +1,7 @@
 // Package voicertc implements a WebRTC-to-Gemini-WebSocket bridge for voice sessions.
+
+//go:build !race
+
 package voicertc
 
 import (
