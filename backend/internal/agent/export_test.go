@@ -336,6 +336,43 @@ func TestExportDiscussion(t *testing.T) {
 			assertContains(t, md, "**Duration**: 45s")
 		})
 
+		t.Run("skips_empty_tool_use", func(t *testing.T) {
+			t.Parallel()
+			path := writeJSONL(t, []string{
+				metaLine("task", "pi"),
+				`{"type":"text","text":"Before"}`,
+				`{"type":"tool_use","id":"t1","name":"Read","input":{}}`,
+				`{"type":"tool_use","id":"t2","name":"Read","input":{"path":"main.go"}}`,
+				`{"type":"text","text":"After"}`,
+			})
+
+			md, err := ExportDiscussion(path, exportParseFn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The empty ToolUseMessage should be skipped.
+			assertContains(t, md, "**File**: `main.go`")
+			// There should be exactly one Tool use line.
+			if strings.Count(md, "### 🔧 Tool:") != 1 {
+				t.Errorf("expected 1 tool use, got %d", strings.Count(md, "### 🔧 Tool:"))
+			}
+		})
+
+		t.Run("skips_null_tool_use_input", func(t *testing.T) {
+			t.Parallel()
+			path := writeJSONL(t, []string{
+				metaLine("task", "pi"),
+				`{"type":"tool_use","id":"t1","name":"Read","input":null}`,
+				`{"type":"text","text":"done"}`,
+			})
+
+			md, err := ExportDiscussion(path, exportParseFn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertNotContains(t, md, "### 🔧 Tool:")
+		})
+
 		t.Run("write_tool_preview", func(t *testing.T) {
 			t.Parallel()
 			path := writeJSONL(t, []string{
@@ -449,6 +486,31 @@ func TestExportDiscussion(t *testing.T) {
 			assertContains(t, md, "visible")
 		})
 	})
+}
+
+func TestIsInputEmpty(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		raw   json.RawMessage
+		empty bool
+	}{
+		{"nil", nil, true},
+		{"empty_slice", json.RawMessage{}, true},
+		{"empty_obj", json.RawMessage(`{}`), true},
+		{"null", json.RawMessage(`null`), true},
+		{"empty_str", json.RawMessage(`""`), true},
+		{"real_obj", json.RawMessage(`{"path":"x"}`), false},
+		{"real_str", json.RawMessage(`"hello"`), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isInputEmpty(tt.raw); got != tt.empty {
+				t.Errorf("isInputEmpty(%s) = %v, want %v", tt.raw, got, tt.empty)
+			}
+		})
+	}
 }
 
 func TestTrunc(t *testing.T) {

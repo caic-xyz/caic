@@ -11,7 +11,20 @@
 
 ### 🔧 Tool: `Read`
 
+**File**: `/workspace/main.go`
+
 ### 🔧 Tool: `Edit`
 
+**File**: `/workspace/main.go`
+
+```diff
+- Hello
++ Hi
+```
+
 ### 🔧 Tool: `Bash`
+
+```bash
+cat main.go
+```
 

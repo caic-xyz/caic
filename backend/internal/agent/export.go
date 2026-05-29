@@ -172,7 +172,14 @@ func renderDiscussion(meta *MetaMessage, result *MetaResultMessage, pr *MetaPRMe
 	b.WriteString("\n---\n\n")
 
 	// Conversation
+	seenTools := make(map[string]bool) // Track tool IDs to skip duplicates.
 	for _, msg := range msgs {
+		if tu, ok := msg.(*ToolUseMessage); ok && !isInputEmpty(tu.Input) {
+			if seenTools[tu.ToolUseID] {
+				continue
+			}
+			seenTools[tu.ToolUseID] = true
+		}
 		renderMsg(&b, msg)
 	}
 
@@ -220,6 +227,12 @@ func renderMsg(b *strings.Builder, msg Message) {
 		b.WriteString("\n\n</details>\n\n")
 
 	case *ToolUseMessage:
+		// Skip tool use messages whose input is empty or just {};
+		// some harnesses (e.g. OpenCode) announce tools before the
+		// real input arrives in a subsequent update.
+		if isInputEmpty(m.Input) {
+			return
+		}
 		fmt.Fprintf(b, "### 🔧 Tool: `%s`\n", m.Name)
 		renderToolInput(b, m.Name, m.Input)
 		b.WriteString("\n")
@@ -268,11 +281,11 @@ func renderToolInput(b *strings.Builder, name string, raw json.RawMessage) {
 		}
 
 	case "Edit":
-		if p := toolStr(inp, "path", "file_path"); p != "" {
+		if p := toolStr(inp, "path", "file_path", "filePath"); p != "" {
 			fmt.Fprintf(b, "\n**File**: `%s`\n", p)
 		}
-		old := toolStr(inp, "old_text", "old_string")
-		newText := toolStr(inp, "new_text", "new_string")
+		old := toolStr(inp, "old_text", "old_string", "oldString")
+		newText := toolStr(inp, "new_text", "new_string", "newString")
 		if old != "" || newText != "" {
 			b.WriteString("\n```diff\n")
 			if old != "" {
@@ -285,7 +298,7 @@ func renderToolInput(b *strings.Builder, name string, raw json.RawMessage) {
 		}
 
 	case "Write":
-		if p := toolStr(inp, "path", "file_path"); p != "" {
+		if p := toolStr(inp, "path", "file_path", "filePath"); p != "" {
 			fmt.Fprintf(b, "\n**File**: `%s`\n", p)
 		}
 		if c, ok := inp["content"].(string); ok && c != "" {
@@ -293,7 +306,7 @@ func renderToolInput(b *strings.Builder, name string, raw json.RawMessage) {
 		}
 
 	case "Read":
-		if p := toolStr(inp, "path", "file_path"); p != "" {
+		if p := toolStr(inp, "path", "file_path", "filePath"); p != "" {
 			fmt.Fprintf(b, "\n**File**: `%s`\n", p)
 		}
 
@@ -319,6 +332,18 @@ func renderToolInput(b *strings.Builder, name string, raw json.RawMessage) {
 		}
 		fmt.Fprintf(b, "\n```json\n%s\n```\n", summary)
 	}
+}
+
+// isInputEmpty reports whether raw is nil, "null", or "{}".
+func isInputEmpty(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return true
+	}
+	switch string(raw) {
+	case "{}", "null", `""`:
+		return true
+	}
+	return false
 }
 
 // toolStr returns the first non-empty value from the map under one of the

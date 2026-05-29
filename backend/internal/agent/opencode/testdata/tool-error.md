@@ -11,5 +11,7 @@
 
 ### 🔧 Tool: `Read`
 
+**File**: `/workspace/nonexistent_file.txt`
+
 ⚠️ Tool error: File not found: /workspace/nonexistent_file.txt
 

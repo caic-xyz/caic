@@ -176,6 +176,43 @@ func TestParseMessage(t *testing.T) {
 		}
 	})
 
+	t.Run("ToolCallInProgressWithRawInputNoContent", func(t *testing.T) {
+		t.Parallel()
+		input := mustJSON(t, map[string]any{
+			"jsonrpc": "2.0",
+			"method":  "session/update",
+			"params": map[string]any{
+				"sessionId": "ses_1",
+				"update": map[string]any{
+					"sessionUpdate": "tool_call_update",
+					"toolCallId":    "call_5",
+					"title":         "read",
+					"kind":          "read",
+					"status":        "in_progress",
+					"rawInput":      map[string]any{"filePath": "/workspace/main.go"},
+				},
+			},
+		})
+		msgs, err := parseMessage(input, &jsonutil.FieldWarner{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Should emit ToolUseMessage with the real input.
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		tu, ok := msgs[0].(*agent.ToolUseMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.ToolUseMessage", msgs[0])
+		}
+		if tu.Name != "Read" {
+			t.Errorf("Name = %q, want Read", tu.Name)
+		}
+		if string(tu.Input) != `{"filePath":"/workspace/main.go"}` {
+			t.Errorf("Input = %s, want filePath", tu.Input)
+		}
+	})
+
 	t.Run("ToolCallInProgressWithOutput", func(t *testing.T) {
 		t.Parallel()
 		input := mustJSON(t, map[string]any{
@@ -186,7 +223,10 @@ func TestParseMessage(t *testing.T) {
 				"update": map[string]any{
 					"sessionUpdate": "tool_call_update",
 					"toolCallId":    "call_1",
+					"title":         "bash",
+					"kind":          "execute",
 					"status":        "in_progress",
+					"rawInput":      map[string]any{"command": "ls"},
 					"content": []any{
 						map[string]any{
 							"type":    "content",
@@ -200,15 +240,23 @@ func TestParseMessage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(msgs) != 1 {
-			t.Fatalf("msgs = %d, want 1", len(msgs))
+		// Now emits both ToolUseMessage and ToolOutputDeltaMessage.
+		if len(msgs) != 2 {
+			t.Fatalf("msgs = %d, want 2 (ToolUse + ToolOutputDelta)", len(msgs))
 		}
-		td, ok := msgs[0].(*agent.ToolOutputDeltaMessage)
+		tu, ok := msgs[0].(*agent.ToolUseMessage)
 		if !ok {
-			t.Fatalf("type = %T, want *agent.ToolOutputDeltaMessage", msgs[0])
+			t.Fatalf("msgs[0] type = %T, want *agent.ToolUseMessage", msgs[0])
+		}
+		if tu.Name != "Bash" {
+			t.Errorf("Name = %q, want Bash", tu.Name)
+		}
+		td, ok := msgs[1].(*agent.ToolOutputDeltaMessage)
+		if !ok {
+			t.Fatalf("msgs[1] type = %T, want *agent.ToolOutputDeltaMessage", msgs[1])
 		}
 		if td.Delta != "output line" {
-			t.Errorf("Delta = %q", td.Delta)
+			t.Errorf("Delta = %q, want %q", td.Delta, "output line")
 		}
 	})
 

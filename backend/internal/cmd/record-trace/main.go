@@ -106,6 +106,13 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv, promptText, ou
 	if err := runPodman(ctx, "exec", ctr, "mkdir", "-p", agent.WidgetPluginDir); err != nil {
 		return fmt.Errorf("create widget plugin dir: %w", err)
 	}
+	// Codex needs stored credentials for WebSocket auth; the env var
+	// alone is not enough. Pipe the API key through codex login.
+	if b.Harness() == agent.Codex {
+		if err := setupCodexAuth(ctx, ctr, apiKeyEnv); err != nil {
+			return fmt.Errorf("codex auth setup: %w", err)
+		}
+	}
 	binDirs, err := detectBinDirs(ctx, ctr)
 	if err != nil {
 		return fmt.Errorf("detect tool paths: %w", err)
@@ -373,6 +380,22 @@ func runPodman(ctx context.Context, args ...string) error {
 	cmd := exec.CommandContext(ctx, "podman", args...) //nolint:gosec // args from trusted source
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// setupCodexAuth pipes the API key through codex login inside the container.
+// Codex requires credentials in its auth store for WebSocket transport;
+// the OPENAI_API_KEY env var alone is not sufficient.
+func setupCodexAuth(ctx context.Context, ctr, apiKeyEnv string) error {
+	apiKey := os.Getenv(apiKeyEnv)
+	if apiKey == "" {
+		return fmt.Errorf("%s is empty", apiKeyEnv)
+	}
+	cmd := exec.CommandContext(ctx, "podman", "exec", "-i", ctr, //nolint:gosec // podman args are safe
+		"bash", "-c", "codex login --with-api-key")
+	cmd.Stdin = strings.NewReader(apiKey)
+	cmd.Stderr = os.Stderr
+	slog.Info("Setting up codex auth in container")
 	return cmd.Run()
 }
 

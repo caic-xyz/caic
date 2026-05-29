@@ -219,6 +219,11 @@ func parseToolCall(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Mess
 }
 
 // parseToolCallUpdate handles tool_call_update session updates (progress/completion).
+//
+// When the update transitions to in_progress, it also emits a ToolUseMessage
+// with the real tool input. This is necessary because the initial tool_call
+// notification has an empty rawInput ({}); the actual arguments only arrive
+// in the tool_call_update.
 func parseToolCallUpdate(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	var u oc.ToolCallUpdateUpdate
 	if err := unmarshalNotification(data, &u, "ToolCallUpdateUpdate", fw); err != nil {
@@ -232,14 +237,23 @@ func parseToolCallUpdate(data json.RawMessage, fw *jsonutil.FieldWarner) ([]agen
 		errMsg := extractToolError(&u)
 		return []agent.Message{&agent.ToolResultMessage{ToolUseID: u.ToolCallID, Error: errMsg}}, nil
 	case oc.StatusInProgress:
-		// Emit output delta if content is available.
+		var msgs []agent.Message
+		// Emit a ToolUseMessage with the real input when available.
+		if len(u.RawInput) > 2 {
+			msgs = append(msgs, &agent.ToolUseMessage{
+				ToolUseID: u.ToolCallID,
+				Name:      normalizeToolName(u.Title, u.Kind),
+				Input:     u.RawInput,
+			})
+		}
+		// Also emit output delta if content is available.
 		if delta := extractToolOutputDelta(&u); delta != "" {
-			return []agent.Message{&agent.ToolOutputDeltaMessage{
+			msgs = append(msgs, &agent.ToolOutputDeltaMessage{
 				ToolUseID: u.ToolCallID,
 				Delta:     delta,
-			}}, nil
+			})
 		}
-		return nil, nil
+		return msgs, nil
 	default:
 		return nil, nil
 	}
