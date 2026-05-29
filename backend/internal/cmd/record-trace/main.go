@@ -129,7 +129,7 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv, promptText, ou
 	if err := waitAndShutdown(ctx, cmd, stdin, stdout, b, ctr, wire); err != nil {
 		return err
 	}
-	return writeGoldenFile(ctx, ctr, workDir, b.Harness(), promptText, outputPath)
+	return writeGoldenFile(ctx, ctr, workDir, b, promptText, outputPath)
 }
 
 // setupWorkspace creates a temp directory with a sample main.go for the agent.
@@ -284,8 +284,9 @@ func watchResult(stdout io.Reader, parse func([]byte) ([]agent.Message, error)) 
 	return done
 }
 
-// writeGoldenFile copies output.jsonl from the container, sanitizes it, and writes the golden file.
-func writeGoldenFile(ctx context.Context, ctr, workDir string, harness agent.Harness, promptText, outputPath string) error {
+// writeGoldenFile copies output.jsonl from the container, sanitizes it,
+// writes the JSONL trace, and generates the .golden.md markdown file.
+func writeGoldenFile(ctx context.Context, ctr, workDir string, b agent.Backend, promptText, outputPath string) error {
 	slog.Info("Copying output.jsonl")
 	localOutput := filepath.Join(workDir, "output.jsonl")
 	if err := runPodman(ctx, "cp", ctr+":"+agent.RelayOutputPath, localOutput); err != nil {
@@ -297,7 +298,7 @@ func writeGoldenFile(ctx context.Context, ctr, workDir string, harness agent.Har
 		return fmt.Errorf("read output: %w", err)
 	}
 
-	sanitized, err := buildGoldenContent(raw, harness, promptText)
+	sanitized, err := buildGoldenContent(raw, b.Harness(), promptText)
 	if err != nil {
 		return err
 	}
@@ -311,6 +312,17 @@ func writeGoldenFile(ctx context.Context, ctr, workDir string, harness agent.Har
 
 	lines := len(strings.Split(strings.TrimSpace(sanitized), "\n"))
 	slog.Info("Trace saved", "path", outputPath, "lines", lines)
+
+	// Generate the golden markdown file.
+	mdPath := strings.TrimSuffix(outputPath, ".jsonl") + ".md"
+	md, err := agent.ExportDiscussion(outputPath, b.NewWire().ParseMessage)
+	if err != nil {
+		return fmt.Errorf("export discussion: %w", err)
+	}
+	if err := os.WriteFile(filepath.Clean(mdPath), []byte(md), 0o600); err != nil {
+		return fmt.Errorf("write golden md: %w", err)
+	}
+	slog.Info("Golden markdown saved", "path", mdPath)
 	return nil
 }
 

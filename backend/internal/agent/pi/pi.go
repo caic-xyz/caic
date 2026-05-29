@@ -79,6 +79,11 @@ func (b *Backend) SetModels(models []string) {
 	b.ModelList = agent.SortModels(models)
 }
 
+// ExportDiscussion reads a JSONL log and returns the conversation as markdown.
+func (b *Backend) ExportDiscussion(path string) (string, error) {
+	return agent.ExportDiscussion(path, b.NewWire().ParseMessage)
+}
+
 // Start launches a Pi RPC process via the relay daemon. It sends optional
 // set_model commands before the initial prompt.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {

@@ -56,6 +56,11 @@ func New() *Backend {
 	return b
 }
 
+// ExportDiscussion reads a JSONL log and returns the conversation as markdown.
+func (b *Backend) ExportDiscussion(path string) (string, error) {
+	return agent.ExportDiscussion(path, b.NewWire().ParseMessage)
+}
+
 // Models returns the available model list (thread-safe).
 func (b *Backend) Models() []string {
 	b.modelsMu.RLock()

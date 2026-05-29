@@ -61,8 +61,8 @@ import (
 
 // ImageData carries a single base64-encoded image for multi-modal input.
 type ImageData struct {
-	MediaType string // e.g. "image/png", "image/jpeg"
-	Data      string // base64-encoded
+	MediaType string `json:"media_type"` // e.g. "image/png", "image/jpeg"
+	Data      string `json:"data"`       // base64-encoded
 }
 
 // Prompt bundles user text with optional images for a single interaction.

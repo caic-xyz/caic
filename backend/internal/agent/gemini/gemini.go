@@ -31,6 +31,11 @@ func New() *Backend {
 	return b
 }
 
+// ExportDiscussion reads a JSONL log and returns the conversation as markdown.
+func (b *Backend) ExportDiscussion(path string) (string, error) {
+	return agent.ExportDiscussion(path, b.NewWire().ParseMessage)
+}
+
 // ParseMessage implements agent.WireFormat.
 func (b *Backend) ParseMessage(line []byte) ([]agent.Message, error) {
 	return parseMessage(line, b.fw)
