@@ -101,6 +101,11 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv, promptText, ou
 	if err := deployRelay(ctx, ctr); err != nil {
 		return err
 	}
+	// Create empty widget plugin dir so harnesses that reference
+	// --plugin-dir (claude, gemini) don't crash on startup.
+	if err := runPodman(ctx, "exec", ctr, "mkdir", "-p", agent.WidgetPluginDir); err != nil {
+		return fmt.Errorf("create widget plugin dir: %w", err)
+	}
 	binDirs, err := detectBinDirs(ctx, ctr)
 	if err != nil {
 		return fmt.Errorf("detect tool paths: %w", err)
@@ -149,7 +154,7 @@ func startContainer(ctx context.Context, workDir, apiKeyEnv string) (string, err
 	}
 
 	slog.Info("Starting container")
-	args := []string{"podman", "run", "-d", "--rm", "-v", workDir + ":/workspace:rw"}
+	args := []string{"podman", "run", "-d", "--rm", "--userns", "keep-id", "--user", "user", "-v", workDir + ":/workspace:rw"}
 	if v := os.Getenv(apiKeyEnv); apiKeyEnv != "" && v != "" {
 		args = append(args, "-e", apiKeyEnv+"="+v)
 	}
@@ -174,7 +179,8 @@ func deployRelay(ctx context.Context, ctr string) error {
 func detectBinDirs(ctx context.Context, ctr string) (string, error) {
 	cmd := exec.CommandContext(ctx, "podman", "exec", ctr, //nolint:gosec // podman args are safe
 		"bash", "-c",
-		`test -x /home/user/.local/share/pnpm/bin/pi && printf ':%s' /home/user/.local/share/pnpm/bin
+		`test -d /home/user/.local/bin && printf ':%s' /home/user/.local/bin
+test -x /home/user/.local/share/pnpm/bin/pi && printf ':%s' /home/user/.local/share/pnpm/bin
 test -x /home/user/.opencode/bin/opencode && printf ':%s' /home/user/.opencode/bin
 set -- /home/user/.nvm/versions/node/v*/bin; test -x "$1/node" && printf ':%s' "$1"`,
 	)
