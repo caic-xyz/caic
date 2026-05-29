@@ -32,7 +32,10 @@ type Backend struct {
 	mu sync.Mutex
 }
 
-var _ agent.Backend = (*Backend)(nil)
+var (
+	_ agent.Backend          = (*Backend)(nil)
+	_ agent.RecordHandshaker = (*Backend)(nil)
+)
 
 // New creates a Codex CLI backend with parser configured.
 // ModelList starts with a single known-good model; it is replaced with the
@@ -52,6 +55,17 @@ func (b *Backend) Models() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.ModelList
+}
+
+// RecordHandshake performs the codex app-server JSON-RPC handshake
+// (initialize → initialized → thread/start) for golden-file trace recording.
+func (b *Backend) RecordHandshake(ctx context.Context, stdin io.Writer, stdout io.Reader, model string) (agent.WireFormat, io.Reader, error) {
+	br := bufio.NewReaderSize(stdout, 1<<16)
+	wire, _, err := handshake(ctx, stdin, br, &agent.Options{Dir: "/workspace", Model: model})
+	if err != nil {
+		return nil, nil, err
+	}
+	return wire, br, nil
 }
 
 // Start launches a Codex CLI app-server process via the relay daemon in the
