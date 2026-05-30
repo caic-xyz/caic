@@ -4,12 +4,12 @@ go 1.26.2
 
 require (
 	github.com/andybalholm/brotli v1.2.1
-	github.com/caic-xyz/md v0.13.2
+	github.com/caic-xyz/md v0.13.3
 	github.com/coder/websocket v1.8.14
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/klauspost/compress v1.18.6
 	github.com/lmittmann/tint v1.1.3
-	github.com/maruel/genai v0.5.4
+	github.com/maruel/genai v0.5.5
 	github.com/maruel/gopus v0.0.0-20260506115108-4c6355c2de38
 	github.com/maruel/ksid v0.1.1
 	github.com/maruel/roundtrippers v0.5.0
@@ -20,7 +20,7 @@ require (
 	github.com/pion/ice/v4 v4.2.5
 	github.com/pion/transport/v4 v4.0.1
 	github.com/pion/webrtc/v4 v4.2.12
-	golang.org/x/net v0.53.0
+	golang.org/x/net v0.55.0
 	golang.org/x/sync v0.20.0
 )
 
@@ -29,7 +29,7 @@ require (
 	github.com/buger/jsonparser v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
-	github.com/maruel/httpjson v0.5.0 // indirect
+	github.com/maruel/httpjson v0.5.2 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pion/datachannel v1.6.0 // indirect
 	github.com/pion/dtls/v3 v3.1.2 // indirect
@@ -46,8 +46,8 @@ require (
 	github.com/pion/turn/v5 v5.0.3 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.4 // indirect
-	golang.org/x/crypto v0.50.0 // indirect
-	golang.org/x/sys v0.43.0 // indirect
-	golang.org/x/term v0.42.0 // indirect
+	golang.org/x/crypto v0.51.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/term v0.43.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 )
