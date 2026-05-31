@@ -26,6 +26,18 @@ func TestIsNewer(t *testing.T) {
 		{"1.2.3", "2.0.0", false},
 		// Pre-release suffix.
 		{"1.2.4-rc1", "1.2.3", true},
+		// Release beats pre-release when major.minor.patch match.
+		{"0.9.1", "0.9.1-0.20260531142521-4f5c501dba07", true},
+		{"1.2.3", "1.2.3-rc1", true},
+		{"1.2.3-rc1", "1.2.3", false},
+		// Both pre-release, same semver: not newer.
+		{"1.2.3-rc2", "1.2.3-rc1", false},
+		{"1.2.3-rc1", "1.2.3-rc1", false},
+		// Build metadata (+dirty) is ignored for comparison.
+		{"1.2.3", "1.2.3+dirty", false},
+		{"1.2.3", "1.2.3-rc1+dirty", true},
+		// Same version.
+		{"1.2.3", "1.2.3", false},
 		// Non-semver falls back to string comparison.
 		{"abc", "abc", false},
 		{"abc", "def", true},
@@ -51,6 +63,7 @@ func TestParseSemver(t *testing.T) {
 		{"0.0.1", 0, 0, 1, true},
 		{"10.20.30", 10, 20, 30, true},
 		{"1.2.3-rc1", 1, 2, 3, true},
+		{"0.9.1-0.20260531142521-4f5c501dba07", 0, 9, 1, true},
 		{"1.2", 0, 0, 0, false},
 		{"abc", 0, 0, 0, false},
 		{"", 0, 0, 0, false},
@@ -101,6 +114,54 @@ func TestParseSchedule(t *testing.T) {
 		_, err := ParseSchedule("50 4 *")
 		if err == nil {
 			t.Error("expected error")
+		}
+	})
+
+	t.Run("step", func(t *testing.T) {
+		t.Parallel()
+		s, err := ParseSchedule("*/15 */2 * * *")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// */15 in minute (0-59): 0, 15, 30, 45.
+		if len(s.Minute) != 4 || s.Minute[0] != 0 || s.Minute[1] != 15 || s.Minute[2] != 30 || s.Minute[3] != 45 {
+			t.Errorf("Minute = %v, want [0 15 30 45]", s.Minute)
+		}
+		// */2 in hour (0-23): 0, 2, 4, ..., 22.
+		if len(s.Hour) != 12 || s.Hour[0] != 0 || s.Hour[11] != 22 {
+			t.Errorf("Hour = %v, want 12 values from 0 to 22", s.Hour)
+		}
+	})
+
+	t.Run("step_with_start", func(t *testing.T) {
+		t.Parallel()
+		s, err := ParseSchedule("5/10 * * * *")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// 5/10 in minute (0-59): 5, 15, 25, 35, 45, 55.
+		if len(s.Minute) != 6 || s.Minute[0] != 5 || s.Minute[5] != 55 {
+			t.Errorf("Minute = %v, want [5 15 25 35 45 55]", s.Minute)
+		}
+	})
+
+	t.Run("step_zero", func(t *testing.T) {
+		t.Parallel()
+		_, err := ParseSchedule("*/0 * * * *")
+		if err == nil {
+			t.Error("expected error for step=0")
+		}
+	})
+
+	t.Run("step_and_literal", func(t *testing.T) {
+		t.Parallel()
+		s, err := ParseSchedule("*/2,5 * * * *")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// */2: 0,2,4,...,58 + 5.
+		if len(s.Minute) != 31 {
+			t.Errorf("Minute len = %d, want 31", len(s.Minute))
 		}
 	})
 

@@ -46,7 +46,8 @@ type Schedule struct {
 }
 
 // ParseSchedule parses a 5-field cron expression (minute hour dom month dow).
-// Supports integers, comma-separated lists, and "*" (wildcard).
+// Supports integers, comma-separated lists, "*" (wildcard), and step values
+// ("*/N" or "start/N").
 func ParseSchedule(expr string) (Schedule, error) {
 	fields := strings.Fields(expr)
 	if len(fields) != 5 {
@@ -76,20 +77,44 @@ func ParseSchedule(expr string) (Schedule, error) {
 }
 
 // parseCronField parses a single cron field. Returns nil for "*".
+// Supports comma-separated values, "*/step" (every step units), and
+// "start/step" (from start to hi in steps).
 func parseCronField(field string, lo, hi int) ([]int, error) {
 	if field == "*" {
 		return nil, nil
 	}
 	var vals []int
 	for part := range strings.SplitSeq(field, ",") {
-		v, err := strconv.Atoi(strings.TrimSpace(part))
-		if err != nil {
-			return nil, fmt.Errorf("invalid value %q", part)
+		part = strings.TrimSpace(part)
+		startStr, stepStr, hasStep := strings.Cut(part, "/")
+		if hasStep {
+			step, err := strconv.Atoi(strings.TrimSpace(stepStr))
+			if err != nil {
+				return nil, fmt.Errorf("invalid step %q in %q", stepStr, part)
+			}
+			if step <= 0 {
+				return nil, fmt.Errorf("step must be positive in %q", part)
+			}
+			start := lo
+			if startStr != "*" {
+				start, err = strconv.Atoi(strings.TrimSpace(startStr))
+				if err != nil {
+					return nil, fmt.Errorf("invalid start value %q in %q", startStr, part)
+				}
+			}
+			for v := start; v <= hi; v += step {
+				vals = append(vals, v)
+			}
+		} else {
+			v, err := strconv.Atoi(part)
+			if err != nil {
+				return nil, fmt.Errorf("invalid value %q", part)
+			}
+			if v < lo || v > hi {
+				return nil, fmt.Errorf("value %d out of range [%d, %d]", v, lo, hi)
+			}
+			vals = append(vals, v)
 		}
-		if v < lo || v > hi {
-			return nil, fmt.Errorf("value %d out of range [%d, %d]", v, lo, hi)
-		}
-		vals = append(vals, v)
 	}
 	return vals, nil
 }
@@ -388,12 +413,18 @@ func platformStrings() (osStr, archStr string) {
 
 // IsNewer reports whether latest is a higher semver than current.
 // Both are expected without a "v" prefix (e.g. "1.2.3").
+// A release (no pre-release suffix) beats a pre-release (e.g. "1.2.3-rc1")
+// when the major.minor.patch numbers match.
 func IsNewer(latest, current string) bool {
-	lMaj, lMin, lPatch, lok := parseSemver(latest)
-	cMaj, cMin, cPatch, cok := parseSemver(current)
+	// Strip build metadata (+dirty, etc.) before comparing.
+	latestClean, _, _ := strings.Cut(latest, "+")
+	currentClean, _, _ := strings.Cut(current, "+")
+
+	lMaj, lMin, lPatch, lok := parseSemver(latestClean)
+	cMaj, cMin, cPatch, cok := parseSemver(currentClean)
 	if !lok || !cok {
 		// Fall back to string comparison if not valid semver.
-		return latest != current
+		return latestClean != currentClean
 	}
 	if lMaj != cMaj {
 		return lMaj > cMaj
@@ -401,7 +432,13 @@ func IsNewer(latest, current string) bool {
 	if lMin != cMin {
 		return lMin > cMin
 	}
-	return lPatch > cPatch
+	if lPatch != cPatch {
+		return lPatch > cPatch
+	}
+	// Same major.minor.patch: a release (no pre-release) beats a pre-release.
+	lPre := strings.Contains(latestClean, "-")
+	cPre := strings.Contains(currentClean, "-")
+	return !lPre && cPre
 }
 
 // parseSemver extracts major.minor.patch from a version string.
