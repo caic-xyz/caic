@@ -60,6 +60,35 @@ func TestManager(t *testing.T) {
 		})
 	})
 
+	t.Run("UnregisterRunner", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			r := &task.Runner{Dir: "/tmp/test"}
+			m.RegisterRunner("my/repo", r)
+			m.UnregisterRunner("my/repo")
+			if _, ok := m.Runner("my/repo"); ok {
+				t.Error("Runner() still returned runner after UnregisterRunner")
+			}
+		})
+		t.Run("valid_removes_only_matching", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			r1 := &task.Runner{Dir: "/tmp/a"}
+			r2 := &task.Runner{Dir: "/tmp/b"}
+			m.RegisterRunner("a", r1)
+			m.RegisterRunner("b", r2)
+			m.UnregisterRunner("a")
+			if _, ok := m.Runner("a"); ok {
+				t.Error("Runner(a) should be removed")
+			}
+			if got, ok := m.Runner("b"); !ok || got != r2 {
+				t.Error("Runner(b) should still be registered")
+			}
+		})
+	})
+
 	t.Run("GetEntry", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {
@@ -860,44 +889,723 @@ func TestManager(t *testing.T) {
 			}
 		})
 	})
-}
 
-func TestManager_Concurrency(t *testing.T) {
-	t.Parallel()
-	t.Run("valid_concurrent_insert_and_range", func(t *testing.T) {
+	t.Run("Concurrency", func(t *testing.T) {
 		t.Parallel()
-		m := New(Config{ServerCtx: t.Context()})
-		var wg sync.WaitGroup
-		for range 10 {
+		t.Run("valid_concurrent_insert_and_range", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			var wg sync.WaitGroup
+			for range 10 {
+				tk := &task.Task{
+					ID:            ksid.NewID(),
+					InitialPrompt: agent.Prompt{Text: "test"},
+				}
+				id := tk.ID.String()
+				wg.Go(func() {
+					m.Insert(id, NewEntry(tk))
+				})
+			}
+			for range 5 {
+				wg.Go(func() {
+					m.Range(func(id string, e *Entry) bool { return true })
+				})
+			}
+			wg.Wait()
+			if m.Len() != 10 {
+				t.Errorf("Len() = %d after concurrent inserts, want 10", m.Len())
+			}
+		})
+		t.Run("valid_concurrent_notify_change", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			var wg sync.WaitGroup
+			for range 50 {
+				wg.Go(func() {
+					m.NotifyTaskChange()
+				})
+			}
+			wg.Wait()
+		})
+	})
+	t.Run("ClearContext", func(t *testing.T) {
+		t.Parallel()
+		t.Run("error_wrong_state", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+			tk.SetState(task.StateStopped)
+			e := NewEntry(tk)
+			m.Insert(tk.ID.String(), e)
+			err := m.ClearContext(t.Context(), e)
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindConflict {
+				t.Fatalf("err = %v, want KindConflict", err)
+			}
+		})
+		t.Run("error_no_runner_backend", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+			tk.SetState(task.StateWaiting)
+			e := NewEntry(tk)
+			m.Insert(tk.ID.String(), e)
+			err := m.ClearContext(t.Context(), e)
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindInternal {
+				t.Fatalf("err = %v, want KindInternal", err)
+			}
+		})
+	})
+	t.Run("Compact", func(t *testing.T) {
+		t.Parallel()
+		t.Run("error_no_session", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+			tk.SetState(task.StateWaiting)
+			e := NewEntry(tk)
+			m.Insert(tk.ID.String(), e)
+			err := m.Compact(t.Context(), e, "shorten")
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindConflict {
+				t.Fatalf("err = %v, want KindConflict", err)
+			}
+		})
+	})
+	t.Run("SudoPassword", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid_no_sudo", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
-				InitialPrompt: agent.Prompt{Text: "test"},
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Sudo:          false,
+				Container:     "ctr-1",
 			}
-			id := tk.ID.String()
-			wg.Go(func() {
-				m.Insert(id, NewEntry(tk))
-			})
-		}
-		for range 5 {
-			wg.Go(func() {
-				m.Range(func(id string, e *Entry) bool { return true })
-			})
-		}
-		wg.Wait()
-		if m.Len() != 10 {
-			t.Errorf("Len() = %d after concurrent inserts, want 10", m.Len())
-		}
+			if got := m.SudoPassword(t.Context(), tk); got != "" {
+				t.Errorf("SudoPassword = %q, want empty for !Sudo", got)
+			}
+		})
+		t.Run("valid_no_container", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Sudo:          true,
+			}
+			if got := m.SudoPassword(t.Context(), tk); got != "" {
+				t.Errorf("SudoPassword = %q, want empty for empty Container", got)
+			}
+		})
+		t.Run("valid_cached", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Sudo:          true,
+				SudoPassword:  "cached-pw",
+				Container:     "ctr-1",
+			}
+			if got := m.SudoPassword(t.Context(), tk); got != "cached-pw" {
+				t.Errorf("SudoPassword = %q, want cached-pw", got)
+			}
+		})
 	})
-	t.Run("valid_concurrent_notify_change", func(t *testing.T) {
+	t.Run("HandleContainerDeath", func(t *testing.T) {
 		t.Parallel()
-		m := New(Config{ServerCtx: t.Context()})
-		var wg sync.WaitGroup
-		for range 50 {
-			wg.Go(func() {
-				m.NotifyTaskChange()
+		t.Run("valid_transitions_to_stopped", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Container:     "ctr-dead",
+				Repos:         []task.RepoMount{{Name: "repo/x", Branch: "caic-1"}},
+			}
+			tk.SetState(task.StateRunning)
+			m.Insert(tk.ID.String(), NewEntry(tk))
+			m.handleContainerDeath("ctr-dead")
+			if got := tk.GetState(); got != task.StateStopped {
+				t.Errorf("state = %v, want StateStopped", got)
+			}
+		})
+		t.Run("valid_skips_purged", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Container:     "ctr-purged",
+			}
+			tk.SetState(task.StatePurged)
+			m.Insert(tk.ID.String(), NewEntry(tk))
+			m.handleContainerDeath("ctr-purged")
+			if got := tk.GetState(); got != task.StatePurged {
+				t.Errorf("state = %v (should stay Purged)", got)
+			}
+		})
+		t.Run("valid_skips_stopping", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Container:     "ctr-stopping",
+			}
+			tk.SetState(task.StateStopping)
+			m.Insert(tk.ID.String(), NewEntry(tk))
+			m.handleContainerDeath("ctr-stopping")
+			if got := tk.GetState(); got != task.StateStopping {
+				t.Errorf("state = %v (should stay Stopping)", got)
+			}
+		})
+		t.Run("valid_skips_stopped", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Container:     "ctr-stopped",
+			}
+			tk.SetState(task.StateStopped)
+			m.Insert(tk.ID.String(), NewEntry(tk))
+			m.handleContainerDeath("ctr-stopped")
+			if got := tk.GetState(); got != task.StateStopped {
+				t.Errorf("state = %v (should stay Stopped)", got)
+			}
+		})
+		t.Run("valid_skips_wrong_container", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Container:     "ctr-alive",
+			}
+			tk.SetState(task.StateRunning)
+			m.Insert(tk.ID.String(), NewEntry(tk))
+			m.handleContainerDeath("ctr-other")
+			if got := tk.GetState(); got != task.StateRunning {
+				t.Errorf("state = %v (should stay Running)", got)
+			}
+		})
+	})
+	t.Run("LoadMessagesOnDemand", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid_no_loaded_task", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+			}
+			e := NewEntry(tk)
+			m.Insert(tk.ID.String(), e)
+			m.LoadMessagesOnDemand(e)
+		})
+	})
+	t.Run("LoadPurgedTasks", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid_empty", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			err := m.LoadPurgedTasks(nil)
+			if err != nil {
+				t.Fatalf("LoadPurgedTasks(nil): %v", err)
+			}
+			if m.Len() != 0 {
+				t.Errorf("Len() = %d after nil load, want 0", m.Len())
+			}
+		})
+		t.Run("valid_filters_old", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			old := time.Now().Add(-30 * 24 * time.Hour).UTC()
+			all := []*task.LoadedTask{
+				{
+					TaskID:            ksid.NewID().String(),
+					Prompt:            "old",
+					Harness:           "claude",
+					LastStateUpdateAt: old,
+					State:             task.StateStopped,
+				},
+			}
+			err := m.LoadPurgedTasks(all)
+			if err != nil {
+				t.Fatalf("LoadPurgedTasks: %v", err)
+			}
+			if m.Len() != 0 {
+				t.Errorf("Len() = %d after loading old task, want 0", m.Len())
+			}
+		})
+		t.Run("valid_creates_entries", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			m.RegisterRunner("repo/a", &task.Runner{})
+			now := time.Now().UTC()
+			id := ksid.NewID()
+			all := []*task.LoadedTask{
+				{
+					TaskID:            id.String(),
+					Prompt:            "test task",
+					Title:             "Test Title",
+					Harness:           "claude",
+					Repos:             []task.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
+					State:             task.StateStopped,
+					Result:            &task.Result{State: task.StateStopped},
+					StartedAt:         now.Add(-1 * time.Hour),
+					LastStateUpdateAt: now,
+					Tailscale:         true,
+					USB:               true,
+					Display:           true,
+					AgentVersion:      "1.2.3",
+					ForgePR:           42,
+					ForgeOwner:        "acme",
+					ForgeRepo:         "magic",
+				},
+			}
+			err := m.LoadPurgedTasks(all)
+			if err != nil {
+				t.Fatalf("LoadPurgedTasks: %v", err)
+			}
+			if m.Len() != 1 {
+				t.Fatalf("Len() = %d, want 1", m.Len())
+			}
+			e, ok := m.GetEntry(id.String())
+			if !ok {
+				t.Fatal("entry not found for expected ID")
+			}
+			tk := e.Task()
+			if tk.Tailscale != true || tk.USB != true || tk.Display != true {
+				t.Error("container flags not restored")
+			}
+			if tk.Title() != "Test Title" {
+				t.Errorf("Title = %q, want \"Test Title\"", tk.Title())
+			}
+			if tk.GetPR() != 42 {
+				t.Errorf("PR = %d, want 42", tk.GetPR())
+			}
+			if e.Result() == nil || e.Result().State != task.StateStopped {
+				t.Errorf("Result = %v, want StateStopped", e.Result())
+			}
+		})
+		t.Run("valid_running_becomes_failed", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			now := time.Now().UTC()
+			id := ksid.NewID()
+			all := []*task.LoadedTask{
+				{
+					TaskID:            id.String(),
+					Prompt:            "was running",
+					Repos:             []task.RepoMount{{Name: "repo/a"}},
+					State:             task.StateRunning,
+					LastStateUpdateAt: now,
+				},
+			}
+			err := m.LoadPurgedTasks(all)
+			if err != nil {
+				t.Fatalf("LoadPurgedTasks: %v", err)
+			}
+			e, _ := m.GetEntry(id.String())
+			if got := e.Task().GetState(); got != task.StateFailed {
+				t.Errorf("state = %v, want StateFailed (running→failed)", got)
+			}
+		})
+		t.Run("valid_max_per_repo", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			now := time.Now().UTC()
+			all := make([]*task.LoadedTask, 0, 7)
+			for i := range 7 {
+				all = append(all, &task.LoadedTask{
+					TaskID:            ksid.NewID().String(),
+					Prompt:            "task",
+					Repos:             []task.RepoMount{{Name: "repo/a"}},
+					State:             task.StateStopped,
+					LastStateUpdateAt: now.Add(time.Duration(i) * time.Second),
+				})
+			}
+			err := m.LoadPurgedTasks(all)
+			if err != nil {
+				t.Fatalf("LoadPurgedTasks: %v", err)
+			}
+			if got := m.Len(); got != 5 {
+				t.Errorf("Len() = %d, want 5 (maxPurgedPerRepo)", got)
+			}
+		})
+		t.Run("valid_fallback_title", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			now := time.Now().UTC()
+			id := ksid.NewID()
+			all := []*task.LoadedTask{
+				{
+					TaskID:            id.String(),
+					Prompt:            "this is the prompt",
+					LastStateUpdateAt: now,
+					State:             task.StateStopped,
+				},
+			}
+			_ = m.LoadPurgedTasks(all)
+			e, _ := m.GetEntry(id.String())
+			if got := e.Task().Title(); got != "this is the prompt" {
+				t.Errorf("Title = %q, want prompt fallback", got)
+			}
+		})
+		t.Run("valid_no_result_fallback_to_failed", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			now := time.Now().UTC()
+			id := ksid.NewID()
+			all := []*task.LoadedTask{
+				{
+					TaskID:            id.String(),
+					Prompt:            "test",
+					LastStateUpdateAt: now,
+				},
+			}
+			_ = m.LoadPurgedTasks(all)
+			e, _ := m.GetEntry(id.String())
+			if got := e.Result().State; got != task.StateFailed {
+				t.Errorf("Result.State = %v, want StateFailed (fallback)", got)
+			}
+		})
+		t.Run("valid_invalid_ksid_fallback", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			now := time.Now().UTC()
+			all := []*task.LoadedTask{
+				{
+					TaskID:            "invalid",
+					Prompt:            "test",
+					LastStateUpdateAt: now,
+					State:             task.StateStopped,
+				},
+			}
+			_ = m.LoadPurgedTasks(all)
+			if m.Len() != 1 {
+				t.Errorf("Len() = %d, want 1 (new ksid fallback)", m.Len())
+			}
+		})
+	})
+	t.Run("Sync", func(t *testing.T) {
+		t.Parallel()
+		t.Run("error_pending_no_container", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+			tk.SetState(task.StatePending)
+			e := NewEntry(tk)
+			m.Insert(tk.ID.String(), e)
+			_, err := m.Sync(t.Context(), e, SyncTargetOrigin, false)
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindConflict {
+				t.Fatalf("err = %v, want KindConflict", err)
+			}
+		})
+		t.Run("error_purging", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+			tk.SetState(task.StatePurging)
+			e := NewEntry(tk)
+			m.Insert(tk.ID.String(), e)
+			_, err := m.Sync(t.Context(), e, SyncTargetOrigin, false)
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindConflict {
+				t.Fatalf("err = %v, want KindConflict", err)
+			}
+		})
+		t.Run("error_provisioning_no_runner", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+			tk.SetState(task.StateProvisioning)
+			e := NewEntry(tk)
+			m.Insert(tk.ID.String(), e)
+			_, err := m.Sync(t.Context(), e, SyncTargetOrigin, false)
+			if err == nil {
+				t.Fatal("expected error for provisioning task without container")
+			}
+		})
+		t.Run("error_force_not_supported", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+			tk.SetState(task.StateRunning)
+			e := NewEntry(tk)
+			m.Insert(tk.ID.String(), e)
+			_, err := m.Sync(t.Context(), e, SyncTargetDefault, true)
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+		})
+	})
+	t.Run("Purge", func(t *testing.T) {
+		t.Parallel()
+		t.Run("error_wrong_state", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+			tk.SetState(task.StatePurged)
+			e := NewEntry(tk)
+			m.Insert(tk.ID.String(), e)
+			err := m.Purge(t.Context(), e)
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindConflict {
+				t.Fatalf("err = %v, want KindConflict", err)
+			}
+		})
+	})
+	t.Run("Stop", func(t *testing.T) {
+		t.Parallel()
+		t.Run("error_wrong_state", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+			tk.SetState(task.StateStopped)
+			e := NewEntry(tk)
+			m.Insert(tk.ID.String(), e)
+			err := m.Stop(t.Context(), e)
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindConflict {
+				t.Fatalf("err = %v, want KindConflict", err)
+			}
+		})
+	})
+	t.Run("Revive", func(t *testing.T) {
+		t.Parallel()
+		t.Run("error_wrong_state", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+			tk.SetState(task.StateRunning)
+			e := NewEntry(tk)
+			m.Insert(tk.ID.String(), e)
+			err := m.Revive(t.Context(), e)
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindConflict {
+				t.Fatalf("err = %v, want KindConflict", err)
+			}
+		})
+	})
+	t.Run("SendInput_Images", func(t *testing.T) {
+		t.Parallel()
+		t.Run("error_images_unsupported", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			m.RegisterRunner("repo/a", &task.Runner{
+				Dir:      "/tmp/repo",
+				Backends: map[agent.Harness]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
 			})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Repos:         []task.RepoMount{{Name: "repo/a"}},
+				Harness:       "fake",
+			}
+			tk.SetState(task.StateWaiting)
+			e := NewEntry(tk)
+			m.Insert(tk.ID.String(), e)
+			err := m.SendInput(t.Context(), e, agent.Prompt{Text: "go", Images: []agent.ImageData{{}}})
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+		})
+	})
+	t.Run("SetParser", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid_with_backend", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			m.RegisterRunner("repo/a", &task.Runner{
+				Backends: map[agent.Harness]agent.Backend{"claude": &fakeBackend{models: []string{"m1"}}},
+			})
+			lt := &task.LoadedTask{Harness: "claude"}
+			m.setParser(lt)
+			// No panic — setParser succeeded.
+		})
+		t.Run("valid_no_backend", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			lt := &task.LoadedTask{Harness: "gemini"}
+			m.setParser(lt)
+			// No panic — graceful no-op when no matching backend.
+		})
+	})
+	t.Run("LoadMessagesOnDemand_Purged", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid_with_loaded_task", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+			}
+			lt := &task.LoadedTask{TaskID: tk.ID.String()}
+			e := newPurgedEntry(tk, &task.Result{State: task.StatePurged}, lt)
+			m.Insert(tk.ID.String(), e)
+			// LoadMessagesOnce triggers the fn but LoadMessages will fail
+			// (no log file); this exercises the LoadMessagesOnce path.
+			m.LoadMessagesOnDemand(e)
+		})
+	})
+	t.Run("Create_Errors", func(t *testing.T) {
+		t.Parallel()
+		t.Run("error_unknown_harness", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			m.RegisterRunner("repo/a", &task.Runner{
+				Dir:      "/tmp/repo",
+				Backends: map[agent.Harness]agent.Backend{}, // no backends
+			})
+			_, err := m.Create(t.Context(), CreateParams{
+				Prompt:  agent.Prompt{Text: "hi"},
+				Repos:   []CreateRepo{{Name: "repo/a"}},
+				Harness: "bogus",
+			})
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+		})
+		t.Run("error_unsupported_model", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			m.RegisterRunner("repo/a", &task.Runner{
+				Dir:      "/tmp/repo",
+				Backends: map[agent.Harness]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
+			})
+			_, err := m.Create(t.Context(), CreateParams{
+				Prompt:  agent.Prompt{Text: "hi"},
+				Repos:   []CreateRepo{{Name: "repo/a"}},
+				Harness: "fake",
+				Model:   "unsupported-model",
+			})
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+		})
+		t.Run("error_unknown_extra_repo", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			m.RegisterRunner("repo/a", &task.Runner{
+				Dir:      "/tmp/repo",
+				Backends: map[agent.Harness]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
+			})
+			_, err := m.Create(t.Context(), CreateParams{
+				Prompt:  agent.Prompt{Text: "hi"},
+				Repos:   []CreateRepo{{Name: "repo/a"}, {Name: "ghost"}},
+				Harness: "fake",
+			})
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+		})
+	})
+	t.Run("Fork_Errors", func(t *testing.T) {
+		t.Parallel()
+
+		// forkSetup creates a Manager with a runner for "repo/a" and a source
+		// task in StateWaiting. Returns the Manager and the source Entry.
+		forkSetup := func(t *testing.T, sourceHarness agent.Harness, backends map[agent.Harness]agent.Backend) (*Manager, *Entry) {
+			m := New(Config{ServerCtx: t.Context()})
+			r := &task.Runner{Dir: "/tmp/repo", Backends: backends}
+			m.RegisterRunner("repo/a", r)
+			src := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "src"},
+				Repos:         []task.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
+				Harness:       sourceHarness,
+				Container:     "md-agent-src",
+			}
+			src.SetState(task.StateWaiting)
+			e := NewEntry(src)
+			m.Insert(src.ID.String(), e)
+			return m, e
 		}
-		wg.Wait()
+
+		defaultBackends := map[agent.Harness]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}}
+
+		t.Run("error_unknown_harness", func(t *testing.T) {
+			t.Parallel()
+			m, e := forkSetup(t, "fake", defaultBackends)
+			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "bogus"})
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+		})
+		t.Run("error_unsupported_model", func(t *testing.T) {
+			t.Parallel()
+			m, e := forkSetup(t, "fake", defaultBackends)
+			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, Model: "unsupported"})
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+		})
+		t.Run("error_model_with_new_harness", func(t *testing.T) {
+			t.Parallel()
+			backends := map[agent.Harness]agent.Backend{
+				"fake":  &fakeBackend{models: []string{"m1"}},
+				"fake2": &fakeBackend{models: []string{"m2"}},
+			}
+			m, e := forkSetup(t, "fake", backends)
+			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, Harness: "fake2", Model: "unsupported"})
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+		})
+		t.Run("error_no_container", func(t *testing.T) {
+			t.Parallel()
+			m, e := forkSetup(t, "fake", defaultBackends)
+			// Overwrite the container to empty.
+			e.Task().Container = ""
+			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindConflict {
+				t.Fatalf("err = %v, want KindConflict", err)
+			}
+		})
+		t.Run("error_wrong_state", func(t *testing.T) {
+			t.Parallel()
+			m, e := forkSetup(t, "fake", defaultBackends)
+			e.Task().SetState(task.StateProvisioning)
+			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindConflict {
+				t.Fatalf("err = %v, want KindConflict", err)
+			}
+		})
+		t.Run("error_unknown_extra_repo", func(t *testing.T) {
+			t.Parallel()
+			m, e := forkSetup(t, "fake", defaultBackends)
+			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, ExtraRepos: []ForkRepo{{Name: "ghost"}}})
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+		})
+		t.Run("error_unknown_harness_when_model_set", func(t *testing.T) {
+			t.Parallel()
+			m, e := forkSetup(t, "bogus", defaultBackends)
+			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}, Model: "m1"})
+			var te *Error
+			if !errors.As(err, &te) || te.Kind != KindBadRequest {
+				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+		})
 	})
 }
 
