@@ -158,9 +158,10 @@ func (s *Server) updatePreferences(ctx context.Context, req *v1.UpdatePreference
 func (s *Server) listHarnesses(_ context.Context, _ *dto.EmptyReq) (*[]v1.HarnessInfo, error) {
 	// Collect unique harness backends from all runners.
 	seen := make(map[agent.Harness]agent.Backend)
-	for _, r := range s.runners {
+	s.taskMgr.RangeRunners(func(_ string, r *task.Runner) bool {
 		maps.Copy(seen, r.Backends)
-	}
+		return true
+	})
 	out := make([]v1.HarnessInfo, 0, len(seen))
 	for h, b := range seen {
 		out = append(out, v1.HarnessInfo{Name: string(h), Models: b.Models(), SupportsImages: b.SupportsImages(), SupportsCompact: b.SupportsCompact()})
@@ -204,9 +205,7 @@ func (s *Server) listCaches(_ context.Context, _ *dto.EmptyReq) (*v1.WellKnownCa
 }
 
 func (s *Server) listRepos(_ context.Context, _ *dto.EmptyReq) (*[]v1.Repo, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.reposLocked(), nil
+	return s.repoList(), nil
 }
 
 func (s *Server) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
@@ -281,17 +280,23 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 	}
 
 	// Check if path already registered.
-	if _, ok := s.runners[targetPath]; ok {
+	if _, ok := s.taskMgr.Runner(targetPath); ok {
 		return nil, dto.Conflict("repo already registered: " + targetPath)
 	}
 
 	// Reject when the basename collides with an existing repo from a
 	// different parent directory.
 	bn := filepath.Base(targetPath)
-	for rel := range s.runners {
+	var basenameConflict string
+	s.taskMgr.RangeRunners(func(rel string, _ *task.Runner) bool {
 		if rel != "" && filepath.Base(rel) == bn && rel != targetPath {
-			return nil, dto.Conflict("repo basename conflicts with existing: " + rel)
+			basenameConflict = rel
+			return false
 		}
+		return true
+	})
+	if basenameConflict != "" {
+		return nil, dto.Conflict("repo basename conflicts with existing: " + basenameConflict)
 	}
 
 	// Determine clone depth.
@@ -343,8 +348,10 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 		cloneForgeKind, cloneForgeOwner, cloneForgeRepo, _ = forge.ParseRemoteURL(rawURL)
 	}
 	info := repoInfo{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote, ForgeKind: cloneForgeKind, ForgeOwner: cloneForgeOwner, ForgeRepo: cloneForgeRepo}
-	s.repos = append(s.repos, info)
-	s.runners[targetPath] = runner
+	// Add to the registry first, then register the runner (see repoRegistry's
+	// ordering invariant).
+	s.repoReg.add(&info)
+	s.taskMgr.RegisterRunner(targetPath, runner)
 	slog.Info("cloned repo", "url", req.URL, "path", targetPath)
 
 	return &v1.Repo{Path: targetPath, Branch: branch, BaseBranch: v1.BranchInfo{Name: branch, Remote: remoteName}, RemoteURL: gitutil.RemoteToHTTPS(remote), Forge: v1.Forge(cloneForgeKind)}, nil

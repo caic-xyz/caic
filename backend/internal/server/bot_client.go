@@ -6,15 +6,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
-	"time"
-
+	"maps"
 	"slices"
+	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/bot"
-	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/maruel/ksid"
+	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
 // ResolveRepo maps a forge full name ("owner/repo") to repo info.
@@ -24,17 +22,16 @@ func (s *Server) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 	if !ok {
 		return nil
 	}
-	for i := range s.repos {
-		if strings.EqualFold(s.repos[i].ForgeOwner, owner) && strings.EqualFold(s.repos[i].ForgeRepo, repo) {
-			return &bot.RepoInfo{
-				RelPath:    s.repos[i].RelPath,
-				ForgeKind:  s.repos[i].ForgeKind,
-				ForgeOwner: s.repos[i].ForgeOwner,
-				ForgeRepo:  s.repos[i].ForgeRepo,
-			}
-		}
+	info, found := s.repoReg.byForge(owner, repo)
+	if !found {
+		return nil
 	}
-	return nil
+	return &bot.RepoInfo{
+		RelPath:    info.RelPath,
+		ForgeKind:  info.ForgeKind,
+		ForgeOwner: info.ForgeOwner,
+		ForgeRepo:  info.ForgeRepo,
+	}
 }
 
 // CreateTask implements bot.Client. It creates and starts a task using the
@@ -44,110 +41,68 @@ func (s *Server) CreateTask(ctx context.Context, req bot.TaskRequest) (string, e
 	if !ok {
 		return "", fmt.Errorf("runner not found for repo %s", req.Repo)
 	}
-	// Pick harness: prefer agent.Claude if available, otherwise take the first one.
+	// Pick harness: prefer agent.Claude if available, otherwise the
+	// lexicographically first available harness. Sorting keeps the choice
+	// deterministic regardless of map iteration order.
 	var harness agent.Harness
 	if _, ok := runner.Backends[agent.Claude]; ok {
 		harness = agent.Claude
-	} else {
-		for h := range runner.Backends {
-			harness = h
-			break
-		}
+	} else if avail := slices.Sorted(maps.Keys(runner.Backends)); len(avail) > 0 {
+		harness = avail[0]
 	}
 	if harness == "" {
 		return "", fmt.Errorf("no backend available for repo %s", req.Repo)
 	}
-	// Bot tasks always get the GitHub token if available (needed for pushing CI fixes).
-	ghToken := s.resolveGitHubContainerToken(ctx, true)
-	t := &task.Task{
-		ID:            ksid.NewID(),
-		InitialPrompt: agent.Prompt{Text: req.Prompt},
-		Repos:         []task.RepoMount{{Name: req.Repo, GitRoot: runner.Dir, MountedPath: "~/src/" + req.Repo}},
-		Harness:       harness,
-		GitHubToken:   true,
-		StartedAt:     time.Now().UTC(),
-		Provider:      s.provider,
-		OwnerID:       req.OwnerID,
-		ForgeIssue:    req.IssueNumber,
-	}
+
+	// Resolve the forge owner/repo so ListPendingBotTasks can resolve the
+	// commenter. Only relevant for issue-triggered tasks.
+	var ownerResolved, repoResolved string
 	if req.IssueNumber > 0 {
-		// Set forge owner/repo so ListPendingBotTasks can resolve the commenter.
-		for i := range s.repos {
-			if s.repos[i].RelPath == req.Repo && s.repos[i].ForgeOwner != "" {
-				t.SetPR(s.repos[i].ForgeOwner, s.repos[i].ForgeRepo, 0)
-				break
-			}
+		if info, ok := s.repoReg.infoFor(req.Repo); ok && info.ForgeOwner != "" {
+			ownerResolved = info.ForgeOwner
+			repoResolved = info.ForgeRepo
 		}
 	}
-	t.SetTitle(req.Prompt)
-	go t.GenerateTitle(s.ctx) //nolint:contextcheck // fire-and-forget; must outlive request
-	entry := &taskEntry{task: t, done: make(chan struct{})}
-	s.mu.Lock()
-	s.tasks[t.ID.String()] = entry
-	s.notifyTaskChange()
-	s.mu.Unlock()
-	go func() {
-		h, err := runner.Start(s.ctx, t, ghToken)
-		if err != nil {
-			result := task.Result{State: task.StateFailed, Err: err}
-			s.mu.Lock()
-			entry.result = &result
-			s.notifyTaskChange()
-			s.mu.Unlock()
-			close(entry.done)
-			return
-		}
-		s.watchSession(entry, runner, h)
-	}()
-	slog.Info("bot task created", "id", t.ID, "repo", req.Repo, "harness", harness)
-	return t.ID.String(), nil
+
+	// Bot tasks always get the GitHub token if available (needed for pushing CI
+	// fixes). Resolve it in the request ctx so multi-user deployments use the
+	// caller's OAuth token rather than the server PAT.
+	ghToken := s.resolveGitHubContainerToken(ctx, true)
+
+	id, err := s.taskMgr.Create(ctx, tasks.CreateParams{
+		OwnerID:             req.OwnerID,
+		Prompt:              agent.Prompt{Text: req.Prompt},
+		Repos:               []tasks.CreateRepo{{Name: req.Repo}},
+		Harness:             harness,
+		GitHubToken:         true,
+		ResolvedGitHubToken: ghToken,
+		ForgeIssue:          req.IssueNumber,
+		ForgeOwner:          ownerResolved,
+		ForgeRepo:           repoResolved,
+	})
+	if err != nil {
+		return "", err
+	}
+	slog.Info("bot task created", "id", id, "repo", req.Repo, "harness", harness)
+	return id, nil
 }
 
 // WatchTaskCompletion implements bot.Client.
 func (s *Server) WatchTaskCompletion(ctx context.Context, taskID string) (state, result string, err error) {
-	s.mu.Lock()
-	entry, ok := s.tasks[taskID]
-	s.mu.Unlock()
-	if !ok {
-		return "", "", fmt.Errorf("task %s not found", taskID)
-	}
-	for {
-		st := entry.task.GetState()
-		switch st { //nolint:exhaustive // only terminal/idle states are relevant
-		case task.StateWaiting, task.StateStopped, task.StateFailed, task.StatePurged:
-			return st.String(), lastResultText(entry.task), nil
-		}
-		s.mu.Lock()
-		ch := s.changed
-		s.mu.Unlock()
-		select {
-		case <-ch:
-		case <-ctx.Done():
-			return "", "", ctx.Err()
-		}
-	}
+	return s.taskMgr.WatchTaskCompletion(ctx, taskID)
 }
 
 // ListPendingBotTasks implements bot.Client.
 func (s *Server) ListPendingBotTasks() []bot.PendingBotTask {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []bot.PendingBotTask
-	for id, entry := range s.tasks {
-		snap := entry.task.Snapshot()
-		if snap.ForgeIssue <= 0 {
-			continue
+	pending := s.taskMgr.ListPendingBotTasks()
+	out := make([]bot.PendingBotTask, len(pending))
+	for i, p := range pending {
+		out[i] = bot.PendingBotTask{
+			TaskID:      p.TaskID,
+			ForgeOwner:  p.ForgeOwner,
+			ForgeRepo:   p.ForgeRepo,
+			IssueNumber: p.IssueNumber,
 		}
-		st := snap.State
-		if st == task.StateWaiting || st == task.StateStopped || st == task.StateFailed || st == task.StatePurged {
-			continue // already terminal for bot purposes
-		}
-		out = append(out, bot.PendingBotTask{
-			TaskID:      id,
-			ForgeOwner:  snap.ForgeOwner,
-			ForgeRepo:   snap.ForgeRepo,
-			IssueNumber: snap.ForgeIssue,
-		})
 	}
 	return out
 }
@@ -164,16 +119,4 @@ func (s *Server) ResolveCommenter(ctx context.Context, owner string) bot.Comment
 		}
 	}
 	return s.forge.commenterFor(installID)
-}
-
-// lastResultText returns the Result field of the most recent ResultMessage in
-// the task's message history. Used as the squash-merge commit body.
-func lastResultText(t *task.Task) string {
-	msgs := t.Messages()
-	for _, msg := range slices.Backward(msgs) {
-		if rm, ok := msg.(*agent.ResultMessage); ok {
-			return rm.Result
-		}
-	}
-	return ""
 }

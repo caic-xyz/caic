@@ -5,16 +5,14 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
-	"runtime/trace"
-	"slices"
 	"sort"
 	"strconv"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -25,25 +23,27 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
-	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/gitutil"
 	"github.com/coder/websocket"
-	"github.com/maruel/ksid"
 )
 
-// reposLocked builds the current repo list including live CI status.
-// Must be called with s.mu held.
-func (s *Server) reposLocked() *[]v1.Repo {
-	out := make([]v1.Repo, len(s.repos))
-	for i := range s.repos {
-		r := &s.repos[i]
+// repoList builds the current repo list including live CI status. It snapshots
+// the registry (repos + CI status captured atomically) and needs no external
+// lock.
+func (s *Server) repoList() *[]v1.Repo {
+	snap := s.repoReg.snapshotWithCI()
+	out := make([]v1.Repo, len(snap))
+	for i := range snap {
+		r := &snap[i].info
 		repo := v1.Repo{Path: r.RelPath, Branch: r.BaseBranch, BaseBranch: v1.BranchInfo{Name: r.BaseBranch, Remote: r.BaseBranchRemote}, RemoteURL: gitutil.RemoteToHTTPS(r.Remote), Forge: v1.Forge(r.ForgeKind)}
-		if ciState, ok := s.repoCIStatus[r.RelPath]; ok {
-			repo.CI = v1.CIStatus(ciState.Status)
-			repo.CIChecks = make([]v1.ForgeCheck, len(ciState.Checks))
-			for i := range ciState.Checks {
-				repo.CIChecks[i] = checkToDTO(&ciState.Checks[i])
+		if snap[i].hasCI {
+			cs := snap[i].ci
+			repo.CI = v1.CIStatus(cs.Status)
+			repo.CIChecks = make([]v1.ForgeCheck, len(cs.Checks))
+			for j := range cs.Checks {
+				repo.CIChecks[j] = checkToDTO(&cs.Checks[j])
 			}
 		}
 		out[i] = repo
@@ -58,141 +58,59 @@ func (s *Server) listTasks(ctx context.Context, _ *dto.EmptyReq) (*[]v1.Task, er
 			ownerID = u.ID
 		}
 	}
-	s.mu.Lock()
-	out := make([]v1.Task, 0, len(s.tasks))
-	for _, e := range s.tasks {
-		if ownerID != "" && e.task.OwnerID != "" && e.task.OwnerID != ownerID {
-			continue
+	var out []v1.Task
+	s.taskMgr.Range(func(_ string, e *tasks.Entry) bool {
+		if ownerID != "" && e.Task().OwnerID != "" && e.Task().OwnerID != ownerID {
+			return true
 		}
 		out = append(out, s.toJSON(ctx, e))
-	}
-	s.mu.Unlock()
+		return true
+	})
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return &out, nil
 }
 
 func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.CreateTaskResp, error) {
-	// Resolve primary runner (first repo, or no-repo).
-	var primaryRunner *task.Runner
-	if len(req.Repos) > 0 {
-		r, ok := s.runners[req.Repos[0].Name]
-		if !ok {
-			return nil, dto.BadRequest("unknown repo: " + req.Repos[0].Name)
-		}
-		primaryRunner = r
-	} else {
-		r, ok := s.runners[""]
-		if !ok {
-			return nil, dto.InternalError("no-repo runner not available")
-		}
-		primaryRunner = r
-	}
-
-	// Validate and resolve extra repo runners.
-	extraRunners := make([]*task.Runner, 0, max(0, len(req.Repos)-1))
-	for _, rs := range req.Repos[min(1, len(req.Repos)):] {
-		er, ok := s.runners[rs.Name]
-		if !ok {
-			return nil, dto.BadRequest("unknown extra repo: " + rs.Name)
-		}
-		extraRunners = append(extraRunners, er)
-	}
-
-	harness := toAgentHarness(req.Harness)
-	backend, ok := primaryRunner.Backends[harness]
-	if !ok {
-		return nil, dto.BadRequest("unknown harness: " + string(req.Harness))
-	}
-
-	if req.Model != "" && !slices.Contains(backend.Models(), req.Model) {
-		return nil, dto.BadRequest("unsupported model for " + string(req.Harness) + ": " + req.Model)
-	}
-
-	if len(req.InitialPrompt.Images) > 0 && !backend.SupportsImages() {
-		return nil, dto.BadRequest(string(req.Harness) + " does not support images")
-	}
-
 	var ownerID string
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
 	}
 
-	// Build RepoMount slice — GitRoot filled immediately from runner.Dir.
-	mounts := make([]task.RepoMount, len(req.Repos))
-	for i, rs := range req.Repos {
-		r := s.runners[rs.Name]
-		mounts[i] = task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir, MountedPath: "~/src/" + rs.Name}
-	}
-
-	// Resolve docker image from user preferences.
+	// Docker image and max CPUs come from the user's preferences; the rest of
+	// validation (unknown repo/harness/model/images) lives in Manager.Create.
 	prefs := s.prefs.Get(userIDFromCtx(ctx))
-	dockerImage := prefs.Settings.BaseImage
-	ghToken := s.resolveGitHubContainerToken(ctx, req.GitHubToken)
 
-	t := &task.Task{
-		ID:            ksid.NewID(),
-		InitialPrompt: v1PromptToAgent(req.InitialPrompt),
-		Repos:         mounts,
-		Harness:       harness,
-		Model:         req.Model,
-		Effort:        req.Effort,
-		DockerImage:   dockerImage,
-		MaxCPUs:       prefs.Settings.MaxCPUs,
-		GitHubToken:   req.GitHubToken,
-		Tailscale:     req.Tailscale,
-		USB:           req.USB,
-		Display:       req.Display,
-		Sudo:          req.Sudo,
-		StartedAt:     time.Now().UTC(),
-		OwnerID:       ownerID,
-		Provider:      s.provider,
+	repos := make([]tasks.CreateRepo, len(req.Repos))
+	for i, r := range req.Repos {
+		repos[i] = tasks.CreateRepo{Name: r.Name, BaseBranch: r.BaseBranch}
 	}
-	t.SetTitle(req.InitialPrompt.Text)
-	go t.GenerateTitle(s.ctx) //nolint:contextcheck // fire-and-forget; must outlive request
-	entry := &taskEntry{task: t, done: make(chan struct{})}
 
-	s.mu.Lock()
-	s.tasks[t.ID.String()] = entry
-	s.taskChanged()
-	s.mu.Unlock()
+	id, err := s.taskMgr.Create(ctx, tasks.CreateParams{
+		OwnerID:             ownerID,
+		Prompt:              v1PromptToAgent(req.InitialPrompt),
+		Repos:               repos,
+		Harness:             toAgentHarness(req.Harness),
+		Model:               req.Model,
+		Effort:              req.Effort,
+		Tailscale:           req.Tailscale,
+		USB:                 req.USB,
+		Display:             req.Display,
+		Sudo:                req.Sudo,
+		GitHubToken:         req.GitHubToken,
+		ResolvedGitHubToken: s.resolveGitHubContainerToken(ctx, req.GitHubToken),
+		DockerImage:         prefs.Settings.BaseImage,
+		MaxCPUs:             prefs.Settings.MaxCPUs,
+	})
+	if err != nil {
+		return nil, toDTO(err)
+	}
 
-	// Run in background using the server context, not the request context.
-	go func() {
-		// Allocate branches for extra repos before starting the container.
-		for i, er := range extraRunners {
-			branch, err := er.AllocateBranch(s.ctx)
-			if err != nil {
-				result := task.Result{State: task.StateFailed, Err: fmt.Errorf("allocate branch for extra repo: %w", err)}
-				s.mu.Lock()
-				entry.result = &result
-				s.taskChanged()
-				s.mu.Unlock()
-				close(entry.done)
-				return
-			}
-			t.Repos[i+1].Branch = branch
-		}
+	entry, ok := s.taskMgr.GetEntry(id)
+	if !ok {
+		return nil, dto.InternalError("created task not found")
+	}
 
-		h, err := primaryRunner.Start(s.ctx, t, ghToken)
-		if err != nil {
-			result := task.Result{State: task.StateFailed, Err: err}
-			s.mu.Lock()
-			entry.result = &result
-			s.taskChanged()
-			s.mu.Unlock()
-			close(entry.done)
-			return
-		}
-		if t.Sudo {
-			t.SudoPassword = s.sudoPassword(s.ctx, t)
-		}
-		s.mu.Lock()
-		s.taskChanged()
-		s.mu.Unlock()
-		s.watchSession(entry, primaryRunner, h)
-	}()
-
-	go s.maybeFakeCI(t)
+	go s.maybeFakeCI(entry.Task())
 
 	if len(req.Repos) > 0 {
 		if err := s.prefs.Update(userIDFromCtx(ctx), func(p *preferences.Preferences) {
@@ -214,7 +132,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		}
 	}
 
-	return &v1.CreateTaskResp{Status: "accepted", ID: t.ID}, nil
+	return &v1.CreateTaskResp{Status: "accepted", ID: entry.Task().ID}, nil
 }
 
 // handleTaskRawEvents delegates to handleTaskEvents — both endpoints now
@@ -246,21 +164,21 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	// Terminal tasks have no live channel: replay their history straight from
 	// the on-disk log without materializing it into memory. This keeps server
 	// memory O(1) for the very large logs that previously failed to load.
-	state := entry.task.GetState()
-	if (state == task.StatePurged || state == task.StateFailed) && entry.loadedTask != nil {
+	state := entry.Task().GetState()
+	if (state == task.StatePurged || state == task.StateFailed) && entry.LoadedTask() != nil {
 		s.streamHistoryFromDisk(w, flusher, entry)
 		return
 	}
 
 	// Lazily load messages for purged tasks on first access.
-	s.loadTaskMessagesOnDemand(entry)
+	s.taskMgr.LoadMessagesOnDemand(entry)
 
-	history, live, unsub := entry.task.Subscribe(r.Context())
+	history, live, unsub := entry.Task().Subscribe(r.Context())
 	defer unsub()
-	statsHistory, statsLive, statsUnsub := entry.task.SubscribeStats(r.Context())
+	statsHistory, statsLive, statsUnsub := entry.Task().SubscribeStats(r.Context())
 	defer statsUnsub()
 
-	tracker := newToolTimingTracker(entry.task.Harness)
+	tracker := newToolTimingTracker(entry.Task().Harness)
 	idx := 0
 
 	writeEvents := func(events []v1.EventMessage) {
@@ -327,8 +245,8 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 // (matching the live path's filterHistoryForReplay) and emits a trailing
 // "ready" event. No subscriber is registered: terminal tasks produce no live
 // messages.
-func (s *Server) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flusher, entry *taskEntry) {
-	tracker := newToolTimingTracker(entry.task.Harness)
+func (s *Server) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flusher, entry *tasks.Entry) {
+	tracker := newToolTimingTracker(entry.Task().Harness)
 	now := time.Now()
 	idx := 0
 	bytesSinceFlush := 0
@@ -350,9 +268,9 @@ func (s *Server) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flush
 		}
 	}
 	push, flush := newReplayFilter(emit)
-	for msg, err := range entry.loadedTask.StreamMessages() {
+	for msg, err := range entry.LoadedTask().StreamMessages() {
 		if err != nil {
-			slog.Warn("stream history from disk", "task", entry.task.ID, "err", err)
+			slog.Warn("stream history from disk", "task", entry.Task().ID, "err", err)
 			break
 		}
 		push(msg)
@@ -376,8 +294,8 @@ func (s *Server) handleTaskToolInput(w http.ResponseWriter, r *http.Request) {
 		writeError(w, dto.BadRequest("toolUseID required"))
 		return
 	}
-	s.loadTaskMessagesOnDemand(entry)
-	history, _, unsub := entry.task.Subscribe(r.Context())
+	s.taskMgr.LoadMessagesOnDemand(entry)
+	history, _, unsub := entry.Task().Subscribe(r.Context())
 	unsub()
 	for _, msg := range history {
 		if tu, ok := msg.(*agent.ToolUseMessage); ok && tu.ToolUseID == toolUseID {
@@ -395,413 +313,184 @@ func (s *Server) handleTaskToolInput(w http.ResponseWriter, r *http.Request) {
 // The relay probe uses the server context (not the request context) because the
 // SSH round-trip may outlive a cancelled HTTP request, and we want the log line
 // regardless.
-func (s *Server) sendInput(ctx context.Context, entry *taskEntry, req *v1.InputReq) (*v1.StatusResp, error) {
-	if len(req.Prompt.Images) > 0 {
-		primaryName := ""
-		if p := entry.task.Primary(); p != nil {
-			primaryName = p.Name
-		}
-		runner := s.runners[primaryName]
-		if b := runner.Backends[entry.task.Harness]; b != nil && !b.SupportsImages() {
-			return nil, dto.BadRequest(string(entry.task.Harness) + " does not support images")
+func (s *Server) sendInput(ctx context.Context, entry *tasks.Entry, req *v1.InputReq) (*v1.StatusResp, error) {
+	err := s.taskMgr.SendInput(ctx, entry, v1PromptToAgent(req.Prompt))
+	if err == nil {
+		return &v1.StatusResp{Status: "sent"}, nil
+	}
+	if !errors.Is(err, tasks.ErrNoSession) {
+		return nil, toDTO(err)
+	}
+	// No active session: probe the relay daemon's liveness over SSH and return
+	// diagnostic details in the 409 response. NoSessionError.Error() preserves
+	// the original task.SendInput message verbatim.
+	t := entry.Task()
+	rs := relayNoContainer
+	if t.Container != "" {
+		probeCtx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+		alive, relayErr := agent.IsRelayRunning(probeCtx, t.Container) //nolint:contextcheck // diagnostic probe; must outlive request
+		cancel()
+		switch {
+		case relayErr != nil:
+			rs = relayCheckFailed
+		case alive:
+			rs = relayAlive
+		default:
+			rs = relayDead
 		}
 	}
-	if err := entry.task.SendInput(ctx, v1PromptToAgent(req.Prompt)); err != nil {
-		t := entry.task
-		rs := relayNoContainer
-		if t.Container != "" {
-			probeCtx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
-			alive, relayErr := agent.IsRelayRunning(probeCtx, t.Container) //nolint:contextcheck // diagnostic probe; must outlive request
-			cancel()
-			switch {
-			case relayErr != nil:
-				rs = relayCheckFailed
-			case alive:
-				rs = relayAlive
-			default:
-				rs = relayDead
-			}
-		}
-		taskState := t.GetState()
-		var primaryBranchLog string
-		if p := t.Primary(); p != nil {
-			primaryBranchLog = p.Branch
-		}
-		slog.Warn("no active session",
-			"task", t.ID,
-			"br", primaryBranchLog,
-			"ctr", t.Container,
-			"state", taskState,
-			"relay", rs,
-		)
-		return nil, dto.Conflict(err.Error()).
-			WithDetail("state", taskState.String()).
-			WithDetail("relay", string(rs))
+	taskState := t.GetState()
+	var primaryBranchLog string
+	if p := t.Primary(); p != nil {
+		primaryBranchLog = p.Branch
 	}
-	return &v1.StatusResp{Status: "sent"}, nil
+	slog.Warn("no active session",
+		"task", t.ID,
+		"br", primaryBranchLog,
+		"ctr", t.Container,
+		"state", taskState,
+		"relay", rs,
+	)
+	return nil, dto.Conflict(err.Error()).
+		WithDetail("state", taskState.String()).
+		WithDetail("relay", string(rs))
 }
 
-func (s *Server) restartTask(_ context.Context, entry *taskEntry, req *v1.RestartReq) (*v1.StatusResp, error) {
-	t := entry.task
-	if state := t.GetState(); state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan {
-		return nil, dto.Conflict("task is not waiting or asking")
+func (s *Server) restartTask(ctx context.Context, entry *tasks.Entry, req *v1.RestartReq) (*v1.StatusResp, error) {
+	if err := s.taskMgr.Restart(ctx, entry, v1PromptToAgent(req.Prompt)); err != nil {
+		return nil, toDTO(err)
 	}
-	prompt := v1PromptToAgent(req.Prompt)
-	if prompt.Text == "" {
-		// Read the plan file from the container.
-		plan, err := agent.ReadPlan(s.ctx, t.Container, t.GetPlanFile()) //nolint:contextcheck // intentionally using server context
-		if err != nil {
-			return nil, dto.BadRequest("no prompt provided and failed to read plan from container: " + err.Error())
-		}
-		prompt.Text = plan
-	}
-	primaryName := ""
-	if p := t.Primary(); p != nil {
-		primaryName = p.Name
-	}
-	runner := s.runners[primaryName]
-	// Use the server-lifetime context, not the HTTP request context.
-	// The new agent session must outlive this request.
-	h, err := runner.RestartSession(s.ctx, t, prompt) //nolint:contextcheck // intentionally using server context
-	if err != nil {
-		return nil, dto.InternalError(err.Error())
-	}
-	s.watchSession(entry, runner, h)
-	s.mu.Lock()
-	s.taskChanged()
-	s.mu.Unlock()
 	return &v1.StatusResp{Status: "restarted"}, nil
 }
 
-func (s *Server) clearContext(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
-	t := entry.task
-	if state := t.GetState(); state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan {
-		return nil, dto.Conflict("task is not waiting or asking")
+func (s *Server) clearContext(ctx context.Context, entry *tasks.Entry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
+	if err := s.taskMgr.ClearContext(ctx, entry); err != nil {
+		return nil, toDTO(err)
 	}
-	primaryName := ""
-	if p := t.Primary(); p != nil {
-		primaryName = p.Name
-	}
-	runner := s.runners[primaryName]
-	// Use the server-lifetime context, not the HTTP request context.
-	h, err := runner.ClearContextSession(s.ctx, t) //nolint:contextcheck // intentionally using server context
-	if err != nil {
-		return nil, dto.InternalError(err.Error())
-	}
-	s.watchSession(entry, runner, h)
-	s.mu.Lock()
-	s.taskChanged()
-	s.mu.Unlock()
 	return &v1.StatusResp{Status: "cleared"}, nil
 }
 
-func (s *Server) compactContext(ctx context.Context, entry *taskEntry, req *v1.CompactReq) (*v1.StatusResp, error) {
-	if err := entry.task.SendCompact(ctx, req.Instructions); err != nil {
-		return nil, dto.Conflict(err.Error())
+func (s *Server) compactContext(ctx context.Context, entry *tasks.Entry, req *v1.CompactReq) (*v1.StatusResp, error) {
+	if err := s.taskMgr.Compact(ctx, entry, req.Instructions); err != nil {
+		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "compacting"}, nil
 }
 
-func (s *Server) stopTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
-	state := entry.task.GetState()
-	if state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan && state != task.StateRunning {
-		return nil, dto.Conflict("task is not running or waiting")
+func (s *Server) stopTask(ctx context.Context, entry *tasks.Entry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
+	if err := s.taskMgr.Stop(ctx, entry); err != nil {
+		return nil, toDTO(err)
 	}
-	entry.task.SetState(task.StateStopping)
-	s.mu.Lock()
-	s.taskChanged()
-	s.mu.Unlock()
-	stopPrimaryName := ""
-	if p := entry.task.Primary(); p != nil {
-		stopPrimaryName = p.Name
-	}
-	runner := s.runners[stopPrimaryName]
-	id := entry.task.ID
-	slog.InfoContext(ctx, "stop requested", "task", id, "ctr", entry.task.Container, "state", state)
-	go func() {
-		runner.StopTask(s.ctx, entry.task)
-		slog.InfoContext(s.ctx, "stop completed", "task", id, "ctr", entry.task.Container, "final_state", entry.task.GetState())
-		s.mu.Lock()
-		s.taskChanged()
-		s.mu.Unlock()
-	}()
 	return &v1.StatusResp{Status: "stopping"}, nil
 }
 
-func (s *Server) purgeTask(ctx context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
-	state := entry.task.GetState()
-	if state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan && state != task.StateRunning && state != task.StateStopping && state != task.StateStopped {
-		return nil, dto.Conflict("task is not running or waiting")
+func (s *Server) purgeTask(ctx context.Context, entry *tasks.Entry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
+	if err := s.taskMgr.Purge(ctx, entry); err != nil {
+		return nil, toDTO(err)
 	}
-	entry.task.SetState(task.StatePurging)
-	s.mu.Lock()
-	s.taskChanged()
-	s.mu.Unlock()
-	purgePrimaryName := ""
-	if p := entry.task.Primary(); p != nil {
-		purgePrimaryName = p.Name
-	}
-	runner := s.runners[purgePrimaryName]
-	id := entry.task.ID
-	slog.InfoContext(ctx, "purge requested", "task", id, "ctr", entry.task.Container, "state", state)
-	go func() {
-		s.cleanupTask(entry, runner, task.StatePurged)
-		slog.InfoContext(s.ctx, "purge completed", "task", id, "final_state", entry.task.GetState())
-	}()
 	return &v1.StatusResp{Status: "purging"}, nil
 }
 
-func (s *Server) reviveTask(_ context.Context, entry *taskEntry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
-	state := entry.task.GetState()
-	if state != task.StateStopped {
-		return nil, dto.Conflict("task is not stopped")
+func (s *Server) reviveTask(ctx context.Context, entry *tasks.Entry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
+	if err := s.taskMgr.Revive(ctx, entry); err != nil {
+		return nil, toDTO(err)
 	}
-	revivePrimaryName := ""
-	if p := entry.task.Primary(); p != nil {
-		revivePrimaryName = p.Name
-	}
-	runner := s.runners[revivePrimaryName]
-	entry.task.SetState(task.StateProvisioning)
-	s.mu.Lock()
-	// Reset done channel so watchSession works on the revived task.
-	entry.done = make(chan struct{})
-	entry.result = nil
-	entry.cleanupOnce = sync.Once{}
-	s.taskChanged()
-	s.mu.Unlock()
-	go func() { //nolint:contextcheck // intentionally using server context
-		ctx, tk := trace.NewTask(s.ctx, "task.revive:"+entry.task.ID.String())
-		defer tk.End()
-		h, err := runner.ReviveTask(ctx, entry.task)
-		if err != nil {
-			slog.Warn("revive failed", "task", entry.task.ID, "err", err)
-			return
-		}
-		s.mu.Lock()
-		s.taskChanged()
-		s.mu.Unlock()
-		s.watchSession(entry, runner, h)
-	}()
 	return &v1.StatusResp{Status: "provisioning"}, nil
 }
 
-func (s *Server) forkTask(ctx context.Context, entry *taskEntry, req *v1.ForkTaskReq) (*v1.CreateTaskResp, error) {
-	source := entry.task
-	state := source.GetState()
-	switch state {
-	case task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan:
-	default:
-		return nil, dto.Conflict("task must be running or waiting to fork")
-	}
-	if source.Container == "" {
-		return nil, dto.Conflict("task has no container")
-	}
-	if len(source.Repos) == 0 {
-		return nil, dto.BadRequest("cannot fork a no-repo task")
-	}
-
-	primaryName := source.Primary().Name
-	runner := s.runners[primaryName]
-
-	// Resolve harness and model: use overrides from the request, falling back to source.
-	forkHarness := source.Harness
-	if req.Harness != "" {
-		forkHarness = toAgentHarness(req.Harness)
-	}
-	forkModel := source.Model
-	forkEffort := source.Effort
-	if req.Model != "" {
-		backend, ok := runner.Backends[forkHarness]
-		if !ok {
-			return nil, dto.BadRequest("unknown harness: " + string(forkHarness))
-		}
-		if !slices.Contains(backend.Models(), req.Model) {
-			return nil, dto.BadRequest("unsupported model for " + string(forkHarness) + ": " + req.Model)
-		}
-		forkModel = req.Model
-		forkEffort = req.Effort
-	}
+func (s *Server) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.ForkTaskReq) (*v1.CreateTaskResp, error) {
+	source := entry.Task()
 
 	var ownerID string
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
 	}
 
-	// Validate and resolve extra repos.
-	sourceRepoNames := make(map[string]struct{}, len(source.Repos))
-	for _, r := range source.Repos {
-		sourceRepoNames[r.Name] = struct{}{}
-	}
-	var extraRepos []md.Repo
-	var extraMounts []task.RepoMount
-	for _, rs := range req.ExtraRepos {
-		if _, overlap := sourceRepoNames[rs.Name]; overlap {
-			return nil, dto.BadRequest("extraRepos contains repo already in source task: " + rs.Name)
-		}
-		er, ok := s.runners[rs.Name]
-		if !ok {
-			return nil, dto.BadRequest("unknown extra repo: " + rs.Name)
-		}
-		rm := task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir, MountedPath: "~/src/" + rs.Name}
-		extraMounts = append(extraMounts, rm)
-		extraRepos = append(extraRepos, rm.ToMDRepo())
+	var harness agent.Harness
+	if req.Harness != "" {
+		harness = toAgentHarness(req.Harness)
 	}
 
-	// Build the fork task, copying config from source.
-	mounts := make([]task.RepoMount, len(source.Repos), len(source.Repos)+len(extraMounts))
-	copy(mounts, source.Repos)
-	mounts = append(mounts, extraMounts...)
+	extraRepos := make([]tasks.ForkRepo, len(req.ExtraRepos))
+	for i, rs := range req.ExtraRepos {
+		extraRepos[i] = tasks.ForkRepo{Name: rs.Name, BaseBranch: rs.BaseBranch}
+	}
 
-	forkGitHubToken := source.GitHubToken
+	// Deref the *bool overrides, defaulting to the source task's values.
+	gh := source.GitHubToken
 	if req.GitHubToken != nil {
-		forkGitHubToken = *req.GitHubToken
+		gh = *req.GitHubToken
 	}
-	ghToken := s.resolveGitHubContainerToken(ctx, forkGitHubToken)
-
-	prompt := v1PromptToAgent(req.Prompt)
-	forkTailscale := source.Tailscale
-	forkUSB := source.USB
-	forkDisplay := source.Display
-	forkSudo := source.Sudo
+	tailscale := source.Tailscale
 	if req.Tailscale != nil {
-		forkTailscale = *req.Tailscale
+		tailscale = *req.Tailscale
 	}
+	usb := source.USB
 	if req.USB != nil {
-		forkUSB = *req.USB
+		usb = *req.USB
 	}
+	display := source.Display
 	if req.Display != nil {
-		forkDisplay = *req.Display
+		display = *req.Display
 	}
+	sudo := source.Sudo
 	if req.Sudo != nil {
-		forkSudo = *req.Sudo
-	}
-	t := &task.Task{
-		ID:            ksid.NewID(),
-		InitialPrompt: prompt,
-		Repos:         mounts,
-		Harness:       forkHarness,
-		Model:         forkModel,
-		Effort:        forkEffort,
-		DockerImage:   source.DockerImage,
-		MaxCPUs:       source.MaxCPUs,
-		GitHubToken:   forkGitHubToken,
-		Tailscale:     forkTailscale,
-		USB:           forkUSB,
-		Display:       forkDisplay,
-		Sudo:          forkSudo,
-		StartedAt:     time.Now().UTC(),
-		OwnerID:       ownerID,
-		Provider:      s.provider,
-	}
-	t.SetTitle(req.Prompt.Text)
-	go t.GenerateTitle(s.ctx) //nolint:contextcheck // fire-and-forget; must outlive request
-	forkEntry := &taskEntry{task: t, done: make(chan struct{})}
-
-	s.mu.Lock()
-	s.tasks[t.ID.String()] = forkEntry
-	s.taskChanged()
-	s.mu.Unlock()
-
-	var extraEnv []string
-	if ghToken != "" {
-		extraEnv = append(extraEnv, "GITHUB_TOKEN="+ghToken)
+		sudo = *req.Sudo
 	}
 
-	go func() { //nolint:contextcheck // intentionally using server context
-		ctx, tk := trace.NewTask(s.ctx, "task.fork:"+source.ID.String()+"->"+t.ID.String())
-		defer tk.End()
-		labels := task.MakeLabels(t)
-		forkOpts := &task.ForkOptions{
-			ExtraRepos: extraRepos,
-			Display:    forkDisplay,
-			Tailscale:  forkTailscale,
-			USB:        forkUSB,
-			Sudo:       forkSudo,
-			Labels:     labels,
-			Harness:    forkHarness,
-			ExtraEnv:   extraEnv,
-			MaxCPUs:    source.MaxCPUs,
-		}
-		h, err := runner.ForkTask(ctx, source, t, forkOpts, ghToken)
-		if err != nil {
-			result := task.Result{State: task.StateFailed, Err: err}
-			s.mu.Lock()
-			forkEntry.result = &result
-			s.taskChanged()
-			s.mu.Unlock()
-			close(forkEntry.done)
-			return
-		}
-		if t.Sudo {
-			t.SudoPassword = s.sudoPassword(s.ctx, t)
-		}
-		s.mu.Lock()
-		s.taskChanged()
-		s.mu.Unlock()
-		s.watchSession(forkEntry, runner, h)
-	}()
+	newID, err := s.taskMgr.Fork(ctx, entry, tasks.ForkParams{
+		OwnerID:             ownerID,
+		Prompt:              v1PromptToAgent(req.Prompt),
+		Harness:             harness,
+		Model:               req.Model,
+		Effort:              req.Effort,
+		ExtraRepos:          extraRepos,
+		GitHubToken:         gh,
+		ResolvedGitHubToken: s.resolveGitHubContainerToken(ctx, gh),
+		Tailscale:           tailscale,
+		USB:                 usb,
+		Display:             display,
+		Sudo:                sudo,
+	})
+	if err != nil {
+		return nil, toDTO(err)
+	}
 
-	return &v1.CreateTaskResp{Status: "accepted", ID: t.ID}, nil
+	forkEntry, ok := s.taskMgr.GetEntry(newID)
+	if !ok {
+		return nil, dto.InternalError("forked task not found")
+	}
+	return &v1.CreateTaskResp{Status: "accepted", ID: forkEntry.Task().ID}, nil
 }
 
-func (s *Server) syncTask(ctx context.Context, entry *taskEntry, req *v1.SyncReq) (*v1.SyncResp, error) {
-	t := entry.task
-	switch t.GetState() {
-	case task.StatePending:
-		return nil, dto.Conflict("task has no container yet")
-	case task.StateStopping, task.StateStopped, task.StatePurging, task.StateFailed, task.StatePurged:
-		return nil, dto.Conflict("task is in a terminal state")
-	case task.StateBranching, task.StateProvisioning, task.StateStarting, task.StateRunning, task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StatePulling, task.StatePushing:
+func (s *Server) syncTask(ctx context.Context, entry *tasks.Entry, req *v1.SyncReq) (*v1.SyncResp, error) {
+	t := entry.Task()
+	target := tasks.SyncTargetOrigin
+	if req.Target == v1.SyncTargetDefault {
+		target = tasks.SyncTargetDefault
 	}
+	res, err := s.taskMgr.Sync(ctx, entry, target, req.Force)
+	if err != nil {
+		return nil, toDTO(err)
+	}
+	resp := &v1.SyncResp{Status: res.Status, Branch: res.Branch, DiffStat: toV1DiffStat(res.DiffStat), SafetyIssues: toV1SafetyIssues(res.SafetyIssues)}
+
+	// Default-branch sync never starts a PR flow.
+	if req.Target == v1.SyncTargetDefault {
+		return resp, nil
+	}
+
 	syncPrimaryName := ""
 	syncPrimaryBranch := ""
 	if p := t.Primary(); p != nil {
 		syncPrimaryName = p.Name
 		syncPrimaryBranch = p.Branch
 	}
-	runner := s.runners[syncPrimaryName]
-
-	if req.Target == v1.SyncTargetDefault {
-		if req.Force {
-			return nil, dto.BadRequest("force is not supported for default-branch sync")
-		}
-		// Look up the base branch for the response.
-		baseBranch := runner.BaseBranch
-		// Build commit message from task title, falling back to prompt.
-		message := t.Title()
-		if message == "" {
-			message = t.InitialPrompt.Text
-		}
-		ds, issues, err := runner.SyncToDefault(ctx, t.MDRepos(), t.Container, message)
-		if err != nil {
-			return nil, dto.InternalError(err.Error())
-		}
-		status := "synced"
-		if len(ds) == 0 {
-			status = "empty"
-		} else if len(issues) > 0 {
-			status = "blocked"
-		}
-		return &v1.SyncResp{Status: status, Branch: baseBranch, DiffStat: toV1DiffStat(ds), SafetyIssues: toV1SafetyIssues(issues)}, nil
-	}
-
-	// Default: push to the task's own branch.
-	ds, issues, err := runner.SyncToOrigin(ctx, t.MDRepos(), t.Container, req.Force)
-	if err != nil {
-		return nil, dto.InternalError(err.Error())
-	}
-	status := "synced"
-	if len(ds) == 0 {
-		status = "empty"
-	} else if len(issues) > 0 && !req.Force {
-		status = "blocked"
-	}
-	resp := &v1.SyncResp{Status: status, Branch: syncPrimaryBranch, DiffStat: toV1DiffStat(ds), SafetyIssues: toV1SafetyIssues(issues)}
-	if status != "blocked" {
-		if info := s.repoInfoFor(syncPrimaryName); info != nil {
-			if f := s.forge.forgeForInfo(ctx, info); f != nil {
+	if resp.Status != "blocked" {
+		if info, ok := s.repoInfoFor(syncPrimaryName); ok {
+			if f := s.forge.forgeForInfo(ctx, &info); f != nil {
 				ciInfo := s.RepoInfoFor(info.RelPath)
-				prNumber, err := s.ciService.StartPRFlow(ctx, entry, f, &ciInfo, syncPrimaryBranch, s.effectiveBaseBranch(t))
+				prNumber, err := s.ciService.StartPRFlow(ctx, entry, f, &ciInfo, syncPrimaryBranch, s.taskMgr.EffectiveBaseBranch(t))
 				if err != nil {
 					slog.Warn("sync: create PR", "repo", info.ForgeRepo, "branch", syncPrimaryBranch, "err", err)
 				} else {
@@ -823,7 +512,7 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	t := entry.task
+	t := entry.Task()
 	if t.Container == "" {
 		writeError(w, dto.Conflict("task has no container"))
 		return
@@ -832,7 +521,7 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 	if p := t.Primary(); p != nil {
 		diffPrimaryName = p.Name
 	}
-	runner, ok := s.runners[diffPrimaryName]
+	runner, ok := s.taskMgr.Runner(diffPrimaryName)
 	if !ok {
 		writeError(w, dto.InternalError("unknown repo"))
 		return
@@ -857,7 +546,7 @@ func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	t := entry.task
+	t := entry.Task()
 	if t.Container == "" || t.VNCPort == 0 {
 		writeError(w, dto.BadRequest("task has no VNC display"))
 		return
@@ -942,7 +631,7 @@ func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	t := entry.task
+	t := entry.Task()
 	if t.Container == "" {
 		writeError(w, dto.Conflict("task has no container"))
 		return
@@ -978,7 +667,7 @@ func (s *Server) handleSignalProcess(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	t := entry.task
+	t := entry.Task()
 	if t.Container == "" {
 		writeError(w, dto.Conflict("task has no container"))
 		return
@@ -1017,80 +706,6 @@ func (s *Server) handleSignalProcess(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, &v1.StatusResp{Status: "signalled"}, nil)
 }
 
-// watchSession monitors a single active session. When the session's SSH
-// process exits, it transitions the task to StateWaiting (the container and
-// relay daemon may still be alive — see Flow 2 in the relay shutdown protocol
-// in package agent). If entry.done fires first, the goroutine exits silently.
-func (s *Server) watchSession(entry *taskEntry, runner *task.Runner, h *task.SessionHandle) {
-	_ = runner // kept for interface consistency
-	go func() {
-		ctx, tk := trace.NewTask(s.ctx, "session.watch:"+entry.task.ID.String())
-		defer tk.End()
-		_ = ctx
-		done := h.Session.Done()
-		select {
-		case <-done:
-			// Session died. Check if this handle is still the task's current
-			// handle (restart may have replaced it). If stale, exit silently.
-			current := entry.task.SessionDone()
-			if current != done {
-				return
-			}
-			t := entry.task
-			t.DetachSession()
-			sessionErr := h.Session.Wait()
-			// Close the dispatch goroutine. CloseMsgCh is idempotent so this
-			// is safe even if StopTask races and closes MsgCh concurrently.
-			h.CloseMsgCh()
-			<-h.DispatchDone
-			if h.LogW != nil {
-				_ = h.LogW.Close()
-			}
-			watchPrimaryName := ""
-			watchPrimaryBranch := ""
-			if p := t.Primary(); p != nil {
-				watchPrimaryName = p.Name
-				watchPrimaryBranch = p.Branch
-			}
-			attrs := []any{"repo", watchPrimaryName, "br", watchPrimaryBranch, "ctr", t.Container}
-			if sessionErr != nil {
-				attrs = append(attrs, "err", sessionErr)
-				slog.Warn("session exited with error", attrs...)
-			} else {
-				slog.Info("session exited", attrs...)
-			}
-			// Only transition Running→Waiting. If addMessage() already set
-			// Asking (agent asked a question) or the task is Purging,
-			// don't clobber that state.
-			t.SetStateIf(task.StateRunning, task.StateWaiting)
-			s.notifyTaskChange()
-		case <-entry.done:
-		}
-	}()
-}
-
-// cleanupTask runs runner.Cleanup exactly once per task (guarded by
-// entry.cleanupOnce), stores the result, notifies SSE, and closes entry.done.
-func (s *Server) cleanupTask(entry *taskEntry, runner *task.Runner, reason task.State) {
-	entry.cleanupOnce.Do(func() {
-		start := time.Now()
-		t := entry.task
-		result := runner.Cleanup(s.ctx, t, reason)
-		elapsed := time.Since(start).Round(time.Millisecond)
-		if result.Err != nil {
-			slog.ErrorContext(s.ctx, "cleanup failed", "task", t.ID, "reason", reason, "dur", elapsed, "err", result.Err)
-		} else {
-			slog.InfoContext(s.ctx, "cleanup done", "task", t.ID, "reason", reason, "dur", elapsed,
-				"cost", result.CostUSD, "turns", result.NumTurns, "final_state", result.State)
-		}
-		s.mu.Lock()
-		entry.result = &result
-		s.taskChanged()
-		s.mu.Unlock()
-		close(entry.done)
-	})
-}
-
 // resolveGitHubContainerToken returns the GitHub token to inject into a
 // container when enabled is true, otherwise returns empty.
 func (s *Server) resolveGitHubContainerToken(ctx context.Context, enabled bool) string {
@@ -1110,17 +725,15 @@ func (s *Server) resolveGitHubContainerToken(ctx context.Context, enabled bool) 
 
 // getTask looks up a task by the {id} path parameter.
 // When auth is enabled, returns 403 if the task belongs to a different user.
-func (s *Server) getTask(r *http.Request) (*taskEntry, error) {
+func (s *Server) getTask(r *http.Request) (*tasks.Entry, error) {
 	id := r.PathValue("id")
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry, ok := s.tasks[id]
+	entry, ok := s.taskMgr.GetEntry(id)
 	if !ok {
 		return nil, dto.NotFound("task")
 	}
 	if s.authEnabled() {
 		if u, ok := auth.UserFromContext(r.Context()); ok {
-			if entry.task.OwnerID != "" && entry.task.OwnerID != u.ID {
+			if owner := entry.Task().OwnerID; owner != "" && owner != u.ID {
 				return nil, dto.Forbidden("task")
 			}
 		}
@@ -1128,28 +741,14 @@ func (s *Server) getTask(r *http.Request) (*taskEntry, error) {
 	return entry, nil
 }
 
-// taskChanged closes the current changed channel and replaces it. Must be
-// called while holding s.mu.
-func (s *Server) taskChanged() {
-	close(s.changed)
-	s.changed = make(chan struct{})
-}
-
-// notifyTaskChange signals that task data may have changed.
-func (s *Server) notifyTaskChange() {
-	s.mu.Lock()
-	s.taskChanged()
-	s.mu.Unlock()
-}
-
-func (s *Server) toJSON(ctx context.Context, e *taskEntry) v1.Task {
+func (s *Server) toJSON(ctx context.Context, e *tasks.Entry) v1.Task {
 	// Read all volatile fields in a single locked snapshot to avoid
 	// data races with addMessage/RestoreMessages.
-	snap := e.task.Snapshot()
+	snap := e.Task().Snapshot()
 
 	// Build Repos slice for API response.
-	taskRepos := make([]v1.TaskRepo, len(e.task.Repos))
-	for i, r := range e.task.Repos {
+	taskRepos := make([]v1.TaskRepo, len(e.Task().Repos))
+	for i, r := range e.Task().Repos {
 		taskRepos[i] = v1.TaskRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, RemoteURL: s.repoURL(r.Name), Forge: s.repoForge(r.Name)}
 	}
 	if len(taskRepos) == 0 {
@@ -1158,7 +757,7 @@ func (s *Server) toJSON(ctx context.Context, e *taskEntry) v1.Task {
 
 	// Derive primary name for context window lookup.
 	var primaryName string
-	if p := e.task.Primary(); p != nil {
+	if p := e.Task().Primary(); p != nil {
 		primaryName = p.Name
 	}
 
@@ -1168,50 +767,50 @@ func (s *Server) toJSON(ctx context.Context, e *taskEntry) v1.Task {
 	numTurns := snap.NumTurns
 	duration := snap.Duration
 	cumulativeUsage := snap.Usage
-	if e.result != nil {
+	if e.Result() != nil {
 		if costUSD == 0 {
-			costUSD = e.result.CostUSD
+			costUSD = e.Result().CostUSD
 		}
 		if numTurns == 0 {
-			numTurns = e.result.NumTurns
+			numTurns = e.Result().NumTurns
 		}
 		if duration == 0 {
-			duration = e.result.Duration
+			duration = e.Result().Duration
 		}
 		if cumulativeUsage == (agent.Usage{}) {
-			cumulativeUsage = e.result.Usage
+			cumulativeUsage = e.Result().Usage
 		}
 	}
 
 	j := v1.Task{
-		ID:            e.task.ID,
-		InitialPrompt: e.task.InitialPrompt.Text,
+		ID:            e.Task().ID,
+		InitialPrompt: e.Task().InitialPrompt.Text,
 		Title:         snap.Title,
 		Repos:         taskRepos,
 		Container: v1.Container{
-			Name:         e.task.Container,
-			Tailscale:    tailscaleURL(e.task),
-			USB:          e.task.USB,
-			Display:      e.task.Display,
-			Sudo:         e.task.Sudo,
-			SudoPassword: s.sudoPassword(ctx, e.task),
+			Name:         e.Task().Container,
+			Tailscale:    tailscaleURL(e.Task()),
+			USB:          e.Task().USB,
+			Display:      e.Task().Display,
+			Sudo:         e.Task().Sudo,
+			SudoPassword: s.taskMgr.SudoPassword(ctx, e.Task()),
 			VNCPort:      snap.VNCPort,
 		},
 		State:          toV1TaskState(ctx, snap.State),
 		StateUpdatedAt: snap.StateUpdatedAt,
-		Harness:        toV1Harness(e.task.Harness),
+		Harness:        toV1Harness(e.Task().Harness),
 		Model:          snap.Model,
-		Effort:         e.task.Effort,
+		Effort:         e.Task().Effort,
 		AgentVersion:   snap.AgentVersion,
 		SessionID:      snap.SessionID,
 		InPlanMode:     snap.InPlanMode,
 		PlanContent:    snap.PlanContent,
-		GitHubToken:    e.task.GitHubToken,
+		GitHubToken:    e.Task().GitHubToken,
 		CostUSD:        costUSD,
 		NumTurns:       numTurns,
 		Duration:       duration.Seconds(),
 	}
-	j.StartedAt = e.task.StartedAt
+	j.StartedAt = e.Task().StartedAt
 	j.TurnStartedAt = snap.TurnStartedAt
 	j.CumulativeInputTokens = cumulativeUsage.InputTokens
 	j.CumulativeOutputTokens = cumulativeUsage.OutputTokens
@@ -1225,17 +824,17 @@ func (s *Server) toJSON(ctx context.Context, e *taskEntry) v1.Task {
 	if snap.ContextWindowLimit > 0 {
 		j.ContextWindowLimit = snap.ContextWindowLimit
 	} else if primaryName != "" {
-		if r := s.runners[primaryName]; r != nil {
-			if b := r.Backends[e.task.Harness]; b != nil {
+		if r, ok := s.taskMgr.Runner(primaryName); ok {
+			if b := r.Backends[e.Task().Harness]; b != nil {
 				j.ContextWindowLimit = b.ContextWindowLimit(snap.Model)
 			}
 		}
 	}
-	if e.result != nil {
-		j.DiffStat = toV1DiffStat(e.result.DiffStat)
-		j.Result = e.result.AgentResult
-		if e.result.Err != nil {
-			j.Error = e.result.Err.Error()
+	if e.Result() != nil {
+		j.DiffStat = toV1DiffStat(e.Result().DiffStat)
+		j.Result = e.Result().AgentResult
+		if e.Result().Err != nil {
+			j.Error = e.Result().Err.Error()
 		}
 	} else {
 		j.DiffStat = toV1DiffStat(snap.DiffStat)
@@ -1252,25 +851,18 @@ func (s *Server) toJSON(ctx context.Context, e *taskEntry) v1.Task {
 			j.CIChecks[i] = checkToDTO(&snap.CIChecks[i])
 		}
 	}
-	if s.authStore != nil && e.task.OwnerID != "" {
-		if u, ok := s.authStore.FindByID(e.task.OwnerID); ok {
+	if s.authStore != nil && e.Task().OwnerID != "" {
+		if u, ok := s.authStore.FindByID(e.Task().OwnerID); ok {
 			j.Owner = u.Username
 		}
 	}
 	return j
 }
 
-// SetRunnerOps updates the container backend and agent runner backends
+// SetRunnerBackends updates the container backend and agent runner backends
 // for all runners.
-func (s *Server) SetRunnerOps(c task.ContainerBackend, backends map[agent.Harness]agent.Backend) {
-	for _, r := range s.runners {
-		if c != nil {
-			r.Container = c
-		}
-		if backends != nil {
-			r.Backends = backends
-		}
-	}
+func (s *Server) SetRunnerBackends(c task.ContainerBackend, backends map[agent.Harness]agent.Backend) {
+	s.taskMgr.SetRunnerBackends(c, backends)
 }
 
 // SetUsageFetchers replaces the provider usage fetchers used by the usage
@@ -1287,37 +879,4 @@ func (s *Server) SetFakeProcesses(
 ) {
 	s.fakeProcesses = processes
 	s.fakeSignal = signal
-}
-
-// effectiveBaseBranch returns the branch the task was forked from: the task's
-// own override if set, otherwise the runner's configured default.
-func (s *Server) effectiveBaseBranch(t *task.Task) string {
-	p := t.Primary()
-	if p == nil {
-		return ""
-	}
-	if p.BaseBranch != "" {
-		return p.BaseBranch
-	}
-	if runner, ok := s.GetRunner(p.Name); ok {
-		return runner.BaseBranch
-	}
-	return ""
-}
-
-func (s *Server) sudoPassword(ctx context.Context, t *task.Task) string {
-	if !t.Sudo || t.Container == "" {
-		return ""
-	}
-	if t.SudoPassword != "" {
-		return t.SudoPassword
-	}
-	ct := &md.Container{Client: s.mdClient, Name: t.Container}
-	pw, err := ct.SudoPassword(ctx)
-	if err != nil {
-		slog.Warn("sudo password lookup failed", "ctr", t.Container, "err", err)
-		return ""
-	}
-	t.SudoPassword = pw
-	return pw
 }

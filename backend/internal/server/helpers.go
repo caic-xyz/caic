@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -197,40 +196,6 @@ func roundDuration(d time.Duration) time.Duration {
 	return d.Round(time.Microsecond)
 }
 
-// needsTitleRegen reports whether the adopted task needs an LLM title
-// regeneration. It returns true when no usable title exists or when the
-// relay captured more completed turns (ResultMessages) than the log file,
-// indicating a turn finished while the server was down.
-func needsTitleRegen(t *task.Task, lt *task.LoadedTask) bool {
-	if lt == nil || lt.Title == "" {
-		return true // no saved title — must generate
-	}
-	// Skip the full log parse for large files — it would block startup
-	// for minutes. The title from the log header is good enough.
-	const maxLogSize = 100 << 20 // 100 MiB
-	if lt.LogSize > maxLogSize {
-		return false
-	}
-	// Load log messages to count completed turns the title was based on.
-	logResults := 0
-	if err := lt.LoadMessages(); err == nil {
-		logResults = countResultMessages(lt.Msgs)
-	}
-	restoredResults := countResultMessages(t.Messages())
-	return restoredResults > logResults
-}
-
-// countResultMessages counts the number of ResultMessages in msgs.
-func countResultMessages(msgs []agent.Message) int {
-	n := 0
-	for _, m := range msgs {
-		if _, ok := m.(*agent.ResultMessage); ok {
-			n++
-		}
-	}
-	return n
-}
-
 // authEnabled reports whether OAuth authentication is configured.
 func (s *Server) authEnabled() bool {
 	return s.authStore != nil
@@ -249,28 +214,22 @@ func (s *Server) authProviders() []string {
 }
 
 func (s *Server) repoURL(rel string) string {
-	for i := range s.repos {
-		if s.repos[i].RelPath == rel {
-			return gitutil.RemoteToHTTPS(s.repos[i].Remote)
-		}
+	if info, ok := s.repoReg.infoFor(rel); ok {
+		return gitutil.RemoteToHTTPS(info.Remote)
 	}
 	return ""
 }
 
 func (s *Server) repoForge(rel string) v1.Forge {
-	for i := range s.repos {
-		if s.repos[i].RelPath == rel {
-			return v1.Forge(s.repos[i].ForgeKind)
-		}
+	if info, ok := s.repoReg.infoFor(rel); ok {
+		return v1.Forge(info.ForgeKind)
 	}
 	return ""
 }
 
 func (s *Server) repoAbsPath(rel string) (string, bool) {
-	for i := range s.repos {
-		if s.repos[i].RelPath == rel {
-			return s.repos[i].AbsPath, true
-		}
+	if info, ok := s.repoReg.infoFor(rel); ok {
+		return info.AbsPath, true
 	}
 	return "", false
 }

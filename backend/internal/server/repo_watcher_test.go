@@ -1,4 +1,4 @@
-// Tests for the background repo watcher.
+// Tests for the background repo watcher's directory-collection helper.
 
 package server
 

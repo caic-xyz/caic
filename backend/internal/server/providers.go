@@ -1,4 +1,4 @@
-// Provider detection: usage-quota fetchers and the title-generation LLM provider.
+// Detection of usage-quota fetchers and the title-generation LLM provider.
 
 package server
 

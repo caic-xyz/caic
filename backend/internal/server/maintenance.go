@@ -1,4 +1,4 @@
-// Background maintenance: base-image warmup and harness model cache refresh.
+// Background maintenance: base-image warmup and harness model-cache refresh.
 
 package server
 
@@ -108,9 +108,10 @@ func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, f
 	cache.SetModels(h, models, agent.APIKeyHash(s.backend.HarnessEnv[string(h)]))
 	slog.Info("model cache refreshed", "harness", h, "count", len(models))
 
-	for _, r := range s.runners {
+	s.taskMgr.RangeRunners(func(_ string, r *task.Runner) bool {
 		if b, ok := r.Backends[h]; ok {
 			b.SetModels(models)
 		}
-	}
+		return true
+	})
 }

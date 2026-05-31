@@ -38,14 +38,14 @@ func NewService(cache *forgecache.Cache, provider genai.Provider, backend Backen
 // StartPRFlow creates a PR/MR for the synced branch, records it on the task,
 // and launches CI monitoring in a goroutine. Returns the PR number on success.
 func (svc *Service) StartPRFlow(ctx context.Context, entry TaskEntry, f forge.Forge, info *RepoInfo, branch, baseBranch string) (int, error) {
-	t := entry.GetTask()
+	t := entry.Task()
 	title := t.Title()
 	if title == "" {
 		title = t.InitialPrompt.Text
 	}
 	var body string
-	if entry.GetResult() != nil {
-		body = entry.GetResult().AgentResult
+	if entry.Result() != nil {
+		body = entry.Result().AgentResult
 	}
 	pr, err := f.CreatePR(ctx, info.ForgeOwner, info.ForgeRepo, branch, baseBranch, title, body)
 	if err != nil {
@@ -72,7 +72,7 @@ func (svc *Service) StartPRFlow(ctx context.Context, entry TaskEntry, f forge.Fo
 // subsequent updates are delivered via check_suite webhook events.
 // Without an App, it polls every 15 s.
 func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repo, sha string) {
-	t := entry.GetTask()
+	t := entry.Task()
 	slog.Info("monitorCI: start", "task", t.ID, "owner", owner, "repo", repo, "sha", sha, "hasApp", svc.backend.GitHubApp() != nil)
 
 	// Fast path: result already cached (e.g. after a server restart).
@@ -174,7 +174,7 @@ func (svc *Service) MonitorCI(ctx context.Context, entry TaskEntry, f forge.Forg
 //     re-monitor so the loop repeats automatically.
 //   - CI success: squash-merge the PR via the forge API, then notify the agent.
 func (svc *Service) ApplyMonitorCIResult(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repo, sha string, result forgecache.Result) {
-	t := entry.GetTask()
+	t := entry.Task()
 
 	// Dedup: skip if we already notified this task for this SHA.
 	if svc.cache.IsNotified(t.ID.String(), sha) {
@@ -291,7 +291,7 @@ func (svc *Service) waitForAgentResult(ctx context.Context, t *task.Task) bool {
 // Called after a CI failure so the loop closes: CI fails → agent fixes →
 // auto-push → CI re-runs → (repeat or merge on success).
 func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.Forge, owner, repo string) {
-	t := entry.GetTask()
+	t := entry.Task()
 	if !svc.waitForAgentResult(ctx, t) {
 		return
 	}

@@ -27,18 +27,18 @@ func (s *Server) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	t := entry.task
+	t := entry.Task()
 	snap := t.Snapshot()
 	ciPrimaryName := ""
 	if p := t.Primary(); p != nil {
 		ciPrimaryName = p.Name
 	}
-	info := s.repoInfoFor(ciPrimaryName)
-	if info == nil {
+	info, ok := s.repoInfoFor(ciPrimaryName)
+	if !ok {
 		writeError(w, dto.BadRequest("no repo info found"))
 		return
 	}
-	f := s.forge.forgeForInfo(r.Context(), info)
+	f := s.forge.forgeForInfo(r.Context(), &info)
 	if f == nil {
 		writeError(w, dto.BadRequest("no forge token configured for this repo"))
 		return
@@ -86,18 +86,16 @@ func (s *Server) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 // It fetches CI logs via the forge, builds a rich prompt using bot.FailureSummary,
 // and creates a new agent task — the same path as the automated maybeAutoFix.
 func (s *Server) botFixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateTaskResp, error) {
-	info := s.repoInfoFor(req.Repo)
-	if info == nil {
+	info, ok := s.repoInfoFor(req.Repo)
+	if !ok {
 		return nil, dto.BadRequest("repo not found")
 	}
-	f := s.forge.forgeForInfo(ctx, info)
+	f := s.forge.forgeForInfo(ctx, &info)
 	if f == nil {
 		return nil, dto.BadRequest("no forge token configured for this repo")
 	}
 
-	s.mu.Lock()
-	state := s.repoCIStatus[req.Repo]
-	s.mu.Unlock()
+	state := s.repoReg.ciStatusFor(req.Repo)
 
 	if state.Status != forge.CIStatusFailure {
 		return nil, dto.BadRequest("no CI failure on default branch")
@@ -142,13 +140,11 @@ func (s *Server) botFixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateT
 // It fetches CI logs via the forge using the task's existing CI checks,
 // builds a rich prompt using bot.FailureSummary, and sends it as input to the task.
 func (s *Server) botFixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.StatusResp, error) {
-	s.mu.Lock()
-	entry, ok := s.tasks[req.TaskID]
-	s.mu.Unlock()
+	entry, ok := s.taskMgr.GetEntry(req.TaskID)
 	if !ok {
 		return nil, dto.NotFound("task")
 	}
-	t := entry.task
+	t := entry.Task()
 	snap := t.Snapshot()
 	if snap.ForgePR == 0 {
 		return nil, dto.BadRequest("task has no associated PR")
@@ -157,11 +153,11 @@ func (s *Server) botFixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.StatusR
 	if primary == nil {
 		return nil, dto.BadRequest("task has no primary repo")
 	}
-	info := s.repoInfoFor(primary.Name)
-	if info == nil {
+	info, ok := s.repoInfoFor(primary.Name)
+	if !ok {
 		return nil, dto.BadRequest("repo not found")
 	}
-	f := s.forge.forgeForInfo(ctx, info)
+	f := s.forge.forgeForInfo(ctx, &info)
 	if f == nil {
 		return nil, dto.BadRequest("no forge token configured for this repo")
 	}

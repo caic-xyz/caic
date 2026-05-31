@@ -1,4 +1,4 @@
-// Background watcher that registers and deregisters repos as they appear and disappear under the repos root.
+// Background watcher that registers and deregisters repos as they appear and disappear.
 
 package server
 
@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +15,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/md/gitutil"
 )
+
+// repoDiscoveryDepth is the maximum directory levels below absRoot that
+// DiscoverRepos scans for git repositories, both at startup and during
+// background polling.
+const repoDiscoveryDepth = 3
 
 // repoInitResult holds the outcome of initialising a single newly-discovered
 // repository.
@@ -88,25 +92,16 @@ func (s *Server) syncReposInDir(ctx context.Context, dir string) {
 	}
 
 	// Deregister repos directly under dir that are no longer present.
-	s.mu.Lock()
-	var removed []string
-	s.repos = slices.DeleteFunc(s.repos, func(r repoInfo) bool {
+	removed := s.repoReg.removeMatching(func(r repoInfo) bool {
 		if filepath.Dir(r.AbsPath) != dir {
 			return false
 		}
-		if _, ok := currentSet[r.AbsPath]; ok {
-			return false
-		}
-		removed = append(removed, r.RelPath)
-		delete(s.runners, r.RelPath)
-		return true
+		_, present := currentSet[r.AbsPath]
+		return !present
 	})
-	registered := make(map[string]struct{}, len(s.repos))
-	for i := range s.repos {
-		registered[s.repos[i].AbsPath] = struct{}{}
-	}
-	s.mu.Unlock()
+	registered := s.repoReg.absPathSet()
 	for _, rel := range removed {
+		s.taskMgr.UnregisterRunner(rel)
 		slog.InfoContext(ctx, "deregistered removed repo", "path", rel)
 	}
 
@@ -129,10 +124,7 @@ func (s *Server) syncReposInDir(ctx context.Context, dir string) {
 				rel = filepath.Base(abs)
 			}
 			// Guard against a concurrent clone adding the same path.
-			s.mu.Lock()
-			_, exists := s.runners[rel]
-			s.mu.Unlock()
-			if exists {
+			if _, exists := s.taskMgr.Runner(rel); exists {
 				return
 			}
 			remoteName, err := gitutil.DefaultRemote(ctx, abs)
@@ -175,37 +167,30 @@ func (s *Server) syncReposInDir(ctx context.Context, dir string) {
 	}
 	wg.Wait()
 
-	s.mu.Lock()
 	for i := range results {
 		if results[i].runner == nil {
 			continue
 		}
 		rel := results[i].info.RelPath
-		if _, exists := s.runners[rel]; exists {
+		if _, exists := s.taskMgr.Runner(rel); exists {
 			continue
 		}
-		s.repos = append(s.repos, results[i].info)
-		s.runners[rel] = results[i].runner
+		// Add to the registry first, then register the runner (see
+		// repoRegistry's ordering invariant).
+		s.repoReg.add(&results[i].info)
+		s.taskMgr.RegisterRunner(rel, results[i].runner)
 	}
-	s.mu.Unlock()
 }
 
 // deregisterReposUnder removes all registered repositories whose absolute
 // path is within dir (used when dir itself has been deleted).
 func (s *Server) deregisterReposUnder(ctx context.Context, dir string) {
 	prefix := dir + string(filepath.Separator)
-	s.mu.Lock()
-	var removed []string
-	s.repos = slices.DeleteFunc(s.repos, func(r repoInfo) bool {
-		if !strings.HasPrefix(r.AbsPath, prefix) {
-			return false
-		}
-		removed = append(removed, r.RelPath)
-		delete(s.runners, r.RelPath)
-		return true
+	removed := s.repoReg.removeMatching(func(r repoInfo) bool {
+		return strings.HasPrefix(r.AbsPath, prefix)
 	})
-	s.mu.Unlock()
 	for _, rel := range removed {
+		s.taskMgr.UnregisterRunner(rel)
 		slog.InfoContext(ctx, "deregistered removed repo", "path", rel)
 	}
 }

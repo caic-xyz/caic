@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"runtime/trace"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +27,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/md"
 	"github.com/maruel/genai"
@@ -172,8 +172,8 @@ type Server struct {
 	// Core infrastructure.
 	ctx       context.Context // server-lifetime context; outlives individual HTTP requests
 	absRoot   string          // absolute path to the root repos directory
-	repos     []repoInfo
-	runners   map[string]*task.Runner // keyed by RelPath
+	repoReg   *repoRegistry   // owns the managed-repo set and per-repo CI status (self-locking)
+	taskMgr   *tasks.Manager  // task orchestration layer
 	mdClient  *md.Client
 	backend   *container.Backend // container backend for runner creation
 	logDir    string
@@ -216,32 +216,12 @@ type Server struct {
 	// User preferences — all users in a single file.
 	prefs *preferences.Store
 
-	// Guarded by mu.
-	mu           sync.Mutex
-	tasks        map[string]*taskEntry
-	repoCIStatus map[string]ci.RepoCIState // keyed by repoInfo.RelPath
-	changed      chan struct{}             // closed on task mutation; replaced under mu
-	warnings     []serverWarning           // ring buffer of recent CI warnings for SSE clients
+	mu       sync.Mutex
+	warnings []serverWarning // ring buffer of recent CI warnings for SSE clients; guarded by mu
 
 	// Fake hooks injected during e2e testing.
 	fakeProcesses func(ctx context.Context, containerName string) ([]task.ProcessInfo, error)
 	fakeSignal    func(ctx context.Context, containerName string, pid int, sig string) error
-}
-
-type taskEntry struct {
-	task        *task.Task
-	result      *task.Result
-	done        chan struct{}
-	cleanupOnce sync.Once // ensures exactly one cleanup runs per task
-	// CI monitoring: set when a PR is created; used by webhook handlers to
-	// find the task waiting for CI results.
-	monitorBranch string // branch being monitored (e.g. "caic-123"); empty when no CI monitoring active
-
-	// loadedTask holds the LoadedTask for purged tasks so messages can be
-	// lazily parsed from the log file on demand (e.g. when the user opens
-	// task detail and subscribes to events).
-	loadedTask     *task.LoadedTask
-	loadedTaskOnce sync.Once
 }
 
 // Serve starts the HTTP server on an already-open listener and blocks until
@@ -403,73 +383,6 @@ func (s *Server) buildHandler() (http.Handler, error) {
 			"cc", cc,
 		)
 	}), nil
-}
-
-// pollStats polls container resource stats every 5 seconds for all active tasks.
-func (s *Server) pollStats(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.pushStats(ctx)
-		}
-	}
-}
-
-func (s *Server) pushStats(ctx context.Context) {
-	defer trace.StartRegion(ctx, "poll-stats").End()
-	s.mu.Lock()
-	type entry struct {
-		task *task.Task
-		name string
-	}
-	var active []entry
-	for _, e := range s.tasks {
-		t := e.task
-		name := t.Container
-		if name == "" {
-			continue
-		}
-		st := t.GetState()
-		if st == task.StatePurged || st == task.StateFailed || st == task.StateStopped || st == task.StateStopping {
-			continue
-		}
-		active = append(active, entry{task: t, name: name})
-	}
-	s.mu.Unlock()
-	if len(active) == 0 {
-		return
-	}
-	names := make([]string, len(active))
-	for i, e := range active {
-		names[i] = e.name
-	}
-	statsMap, err := s.mdClient.StatsAll(ctx, names)
-	if err != nil {
-		return
-	}
-	now := time.Now()
-	for _, e := range active {
-		cs, ok := statsMap[e.name]
-		if !ok {
-			continue
-		}
-		e.task.PushStats(&task.ContainerStats{
-			Ts:         now,
-			CPUPerc:    cs.CPUPerc,
-			MemUsed:    cs.MemUsed,
-			MemLimit:   cs.MemLimit,
-			MemPerc:    cs.MemPerc,
-			NetRx:      cs.NetRx,
-			NetTx:      cs.NetTx,
-			BlockRead:  cs.BlockRead,
-			BlockWrite: cs.BlockWrite,
-			DiskUsed:   cs.DiskUsed,
-		})
-	}
 }
 
 func statsToEvent(cs *task.ContainerStats) v1.EventMessage {

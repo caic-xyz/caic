@@ -33,11 +33,11 @@ type RepoInfo struct {
 
 // TaskEntry is an abstract task handle for CI monitoring.
 type TaskEntry interface {
-	GetTask() *task.Task
-	GetMonitorBranch() string
+	Task() *task.Task
+	MonitorBranch() string
 	SetMonitorBranch(branch string)
 	SetResult(result *task.Result)
-	GetResult() *task.Result
+	Result() *task.Result
 	CloseDone()
 }
 

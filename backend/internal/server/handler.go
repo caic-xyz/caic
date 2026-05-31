@@ -6,13 +6,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
+	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
 // handle wraps a typed handler function into an http.HandlerFunc. It reads the
@@ -37,12 +40,12 @@ func handle[In any, PtrIn interface {
 	}
 }
 
-// handleWithTask wraps a typed handler that also needs the resolved *taskEntry.
+// handleWithTask wraps a typed handler that also needs the resolved *tasks.Entry.
 // It parses {id}, looks up the task via s.getTask, then proceeds like handle.
 func handleWithTask[In any, PtrIn interface {
 	*In
 	dto.Validatable
-}, Out any](s *Server, fn func(context.Context, *taskEntry, PtrIn) (*Out, error)) http.HandlerFunc {
+}, Out any](s *Server, fn func(context.Context, *tasks.Entry, PtrIn) (*Out, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		entry, err := s.getTask(r)
 		if err != nil {
@@ -60,10 +63,45 @@ func handleWithTask[In any, PtrIn interface {
 		}
 		out, err := fn(r.Context(), entry, in)
 		if err == nil {
-			s.notifyTaskChange()
+			s.taskMgr.NotifyTaskChange()
 		}
 		writeJSONResponse(w, out, err)
 	}
+}
+
+// toDTO maps a tasks.Error to the matching dto API error so the HTTP layer can
+// emit the correct status code. A nil error returns nil. An error that is
+// already a dto error (ErrorWithStatus) is returned unchanged. Any other error
+// falls back to a 500.
+func toDTO(err error) error {
+	if err == nil {
+		return nil
+	}
+	var te *tasks.Error
+	if errors.As(err, &te) {
+		// Map every kind via te.Error() so a wrapped cause (e.g. the plan-read
+		// failure on restart, or the compact no-session error) is preserved in
+		// the message. Error() == Msg when there is no wrapped error.
+		switch te.Kind {
+		case tasks.KindNotFound:
+			// dto.NotFound appends " not found"; trim it from the manager's
+			// message (e.g. "task X not found") to avoid a doubled suffix.
+			return dto.NotFound(strings.TrimSuffix(te.Error(), " not found"))
+		case tasks.KindConflict:
+			return dto.Conflict(te.Error())
+		case tasks.KindBadRequest:
+			return dto.BadRequest(te.Error())
+		case tasks.KindInternal:
+			return dto.InternalError(te.Error())
+		default:
+			return dto.InternalError(te.Error())
+		}
+	}
+	var ews dto.ErrorWithStatus
+	if errors.As(err, &ews) {
+		return err
+	}
+	return dto.InternalError(err.Error())
 }
 
 // readAndDecodeBody reads the request body and decodes JSON into input. It

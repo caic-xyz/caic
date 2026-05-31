@@ -229,7 +229,7 @@ func startSmokeServer(t *testing.T) (string, context.CancelFunc) {
 	// Inject fake backends.
 	fc := &fakeContainer{vncPort: 0}
 	fb := fake.New()
-	srv.SetRunnerOps(fc, map[agent.Harness]agent.Backend{fb.Harness(): fb})
+	srv.SetRunnerBackends(fc, map[agent.Harness]agent.Backend{fb.Harness(): fb})
 	srv.SetFakeProcesses(fakeProcesses, fakeSignal)
 	srv.SetUsageFetchers([]usage.ProviderFetcher{})
 

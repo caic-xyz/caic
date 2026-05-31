@@ -174,29 +174,8 @@ func (s *Server) webhookOnCI(ctx context.Context, kind forge.Kind, owner, repo, 
 		return
 	}
 
-	// Collect affected task entries and repo paths under the lock.
-	s.mu.Lock()
-	var affected []*taskEntry
-	for _, e := range s.tasks {
-		if e.monitorBranch != "" {
-			snap := e.task.Snapshot()
-			if snap.ForgeOwner == owner && snap.ForgeRepo == repo {
-				if p := e.task.Primary(); p != nil && p.Branch == e.monitorBranch {
-					affected = append(affected, e)
-				}
-			}
-		}
-	}
-	var affectedRepoPaths []string
-	for i := range s.repos { // s.repos is immutable after construction
-		info := &s.repos[i]
-		if info.ForgeOwner == owner && info.ForgeRepo == repo {
-			if s.repoCIStatus[info.RelPath].HeadSHA == sha {
-				affectedRepoPaths = append(affectedRepoPaths, info.RelPath)
-			}
-		}
-	}
-	s.mu.Unlock()
+	affected := s.taskMgr.FindTasksMonitoringBranch(owner, repo)
+	affectedRepoPaths := s.repoReg.forgePathsAtSHA(owner, repo, sha)
 
 	if len(affected) == 0 && len(affectedRepoPaths) == 0 {
 		return
@@ -221,8 +200,8 @@ func (s *Server) webhookOnCI(ctx context.Context, kind forge.Kind, owner, repo, 
 
 	for _, e := range affected {
 		if !done {
-			e.task.SetCIStatus(interimStatus, result.Checks)
-			s.notifyTaskChange()
+			e.Task().SetCIStatus(interimStatus, result.Checks)
+			s.taskMgr.NotifyTaskChange()
 			continue
 		}
 		if err := s.ciCache.Put(owner, repo, sha, result); err != nil {
@@ -318,44 +297,27 @@ func (s *Server) handlePRForExistingTask(ctx context.Context, ev *github.PullReq
 	prNumber := ev.PullRequest.Number
 	sha := ev.PullRequest.Head.SHA
 
-	// Find tasks matching this repo and branch.
-	s.mu.Lock()
-	var matchingEntries []*taskEntry
-	for _, e := range s.tasks {
-		snap := e.task.Snapshot()
-		if snap.ForgeOwner == owner && snap.ForgeRepo == repo {
-			// Check if the primary repo branch matches.
-			if p := e.task.Primary(); p != nil && p.Branch == branch {
-				matchingEntries = append(matchingEntries, e)
-			}
-		}
-	}
-	s.mu.Unlock()
-
+	matchingEntries := s.taskMgr.FindTasksMatchingBranch(owner, repo, branch)
 	for _, entry := range matchingEntries {
-		snap := entry.task.Snapshot()
+		snap := entry.Task().Snapshot()
 		if snap.ForgePR == 0 {
 			// Task has no PR yet — set the PR info.
 			slog.Info("webhook: associating external PR with existing task",
-				"task", entry.task.ID, "repo", owner+"/"+repo, "br", branch, "pr", prNumber)
-			entry.task.SetPR(owner, repo, prNumber)
+				"task", entry.Task().ID, "repo", owner+"/"+repo, "br", branch, "pr", prNumber)
+			entry.Task().SetPR(owner, repo, prNumber)
 			// Start CI monitoring.
-			ri := s.repoByForge(owner + "/" + repo)
-			if ri != nil {
+			if ri, ok := s.repoByForge(owner + "/" + repo); ok {
 				f := s.forge.forgeFor(ctx, ri.ForgeKind)
 				if f != nil {
-					s.mu.Lock()
-					entry.monitorBranch = branch
-					s.mu.Unlock()
+					entry.SetMonitorBranch(branch)
 					go s.ciService.MonitorCI(ctx, entry, f, owner, repo, sha)
 				}
 			}
 		} else if snap.ForgePR == prNumber && ev.Action == "synchronize" {
 			// PR already exists, but new commits were pushed — restart CI monitoring.
 			slog.Info("webhook: restarting CI monitor for PR",
-				"task", entry.task.ID, "repo", owner+"/"+repo, "br", branch, "pr", prNumber, "sha", sha[:min(7, len(sha))])
-			ri := s.repoByForge(owner + "/" + repo)
-			if ri != nil {
+				"task", entry.Task().ID, "repo", owner+"/"+repo, "br", branch, "pr", prNumber, "sha", sha[:min(7, len(sha))])
+			if ri, ok := s.repoByForge(owner + "/" + repo); ok {
 				go s.ciService.MonitorCI(ctx, entry, s.forge.forgeFor(ctx, ri.ForgeKind), owner, repo, sha)
 			}
 		}
@@ -370,16 +332,7 @@ func (s *Server) handlePRClosedEvent(ev *github.PullRequestEvent) {
 	}
 	prNumber := ev.PullRequest.Number
 
-	s.mu.Lock()
-	var matchingEntries []*taskEntry
-	for _, e := range s.tasks {
-		snap := e.task.Snapshot()
-		if snap.ForgeOwner == owner && snap.ForgeRepo == repo && snap.ForgePR == prNumber {
-			matchingEntries = append(matchingEntries, e)
-		}
-	}
-	s.mu.Unlock()
-
+	matchingEntries := s.taskMgr.FindTasksByPR(owner, repo, prNumber)
 	for _, entry := range matchingEntries {
 		// Determine state: "merged" if merged, otherwise "closed".
 		var state forge.PRState
@@ -388,9 +341,9 @@ func (s *Server) handlePRClosedEvent(ev *github.PullRequestEvent) {
 		} else {
 			state = forge.PRStateClosed
 		}
-		slog.Info("webhook: PR closed/merged", "task", entry.task.ID, "repo", owner+"/"+repo, "pr", prNumber, "state", state)
-		entry.task.SetPRState(state)
-		s.notifyTaskChange()
+		slog.Info("webhook: PR closed/merged", "task", entry.Task().ID, "repo", owner+"/"+repo, "pr", prNumber, "state", state)
+		entry.Task().SetPRState(state)
+		s.taskMgr.NotifyTaskChange()
 	}
 }
 
@@ -402,20 +355,10 @@ func (s *Server) handlePRReopenedEvent(ev *github.PullRequestEvent) {
 	}
 	prNumber := ev.PullRequest.Number
 
-	s.mu.Lock()
-	var matchingEntries []*taskEntry
-	for _, e := range s.tasks {
-		snap := e.task.Snapshot()
-		if snap.ForgeOwner == owner && snap.ForgeRepo == repo && snap.ForgePR == prNumber {
-			matchingEntries = append(matchingEntries, e)
-		}
-	}
-	s.mu.Unlock()
-
-	for _, entry := range matchingEntries {
-		slog.Info("webhook: PR reopened", "task", entry.task.ID, "repo", owner+"/"+repo, "pr", prNumber)
-		entry.task.SetPRState(forge.PRStateOpen)
-		s.notifyTaskChange()
+	for _, entry := range s.taskMgr.FindTasksByPR(owner, repo, prNumber) {
+		slog.Info("webhook: PR reopened", "task", entry.Task().ID, "repo", owner+"/"+repo, "pr", prNumber)
+		entry.Task().SetPRState(forge.PRStateOpen)
+		s.taskMgr.NotifyTaskChange()
 	}
 }
 
@@ -427,17 +370,7 @@ func (s *Server) handleGitLabMergeRequestEvent(ev *gitlab.MergeRequestEvent) {
 	}
 	mrIID := ev.ObjectAttributes.IID
 
-	s.mu.Lock()
-	var matchingEntries []*taskEntry
-	for _, e := range s.tasks {
-		snap := e.task.Snapshot()
-		if snap.ForgeOwner == owner && snap.ForgeRepo == repo && snap.ForgePR == mrIID {
-			matchingEntries = append(matchingEntries, e)
-		}
-	}
-	s.mu.Unlock()
-
-	for _, entry := range matchingEntries {
+	for _, entry := range s.taskMgr.FindTasksByPR(owner, repo, mrIID) {
 		state := forge.PRStateOpen
 		if ev.ObjectAttributes.State == "closed" {
 			if ev.ObjectAttributes.Merged {
@@ -446,9 +379,9 @@ func (s *Server) handleGitLabMergeRequestEvent(ev *gitlab.MergeRequestEvent) {
 				state = forge.PRStateClosed
 			}
 		}
-		slog.Info("webhook: GitLab MR state", "task", entry.task.ID, "repo", owner+"/"+repo, "mr", mrIID, "state", state)
-		entry.task.SetPRState(state)
-		s.notifyTaskChange()
+		slog.Info("webhook: GitLab MR state", "task", entry.Task().ID, "repo", owner+"/"+repo, "mr", mrIID, "state", state)
+		entry.Task().SetPRState(state)
+		s.taskMgr.NotifyTaskChange()
 	}
 }
 
@@ -497,8 +430,8 @@ func (s *Server) handleCheckSuiteEvent(ctx context.Context, ev *github.CheckSuit
 	if ev.Action != "completed" {
 		return
 	}
-	repo := s.repoByForge(ev.Repository.FullName)
-	if repo == nil {
+	repo, ok := s.repoByForge(ev.Repository.FullName)
+	if !ok {
 		return // not a repo we manage
 	}
 	s.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
@@ -541,20 +474,7 @@ func (s *Server) handleCheckSuiteEvent(ctx context.Context, ev *github.CheckSuit
 
 	// Deliver the result to any task monitoring this SHA.
 	// Match by branch since multiple commits can have the same SHA across different branches.
-	s.mu.Lock()
-	var waiting []*taskEntry
-	for _, entry := range s.tasks {
-		if entry.monitorBranch != "" {
-			snap := entry.task.Snapshot()
-			if snap.ForgeOwner == repo.ForgeOwner && snap.ForgeRepo == repo.ForgeRepo {
-				if p := entry.task.Primary(); p != nil && p.Branch == entry.monitorBranch {
-					waiting = append(waiting, entry)
-				}
-			}
-		}
-	}
-	s.mu.Unlock()
-	for _, entry := range waiting {
+	for _, entry := range s.taskMgr.FindTasksMonitoringBranch(repo.ForgeOwner, repo.ForgeRepo) {
 		go s.ciService.ApplyMonitorCIResult(s.ctx, entry, client, repo.ForgeOwner, repo.ForgeRepo, sha, result) //nolint:contextcheck // fire-and-forget; must outlive webhook request
 	}
 }
@@ -568,19 +488,13 @@ func (s *Server) storeInstallationIDFromFullName(fullName string, id int64) {
 	}
 }
 
-// repoByForge finds the repoInfo whose forge matches "owner/repo".
-func (s *Server) repoByForge(fullName string) *repoInfo {
+// repoByForge returns a copy of the repoInfo whose forge matches "owner/repo".
+func (s *Server) repoByForge(fullName string) (repoInfo, bool) {
 	owner, repo, ok := strings.Cut(fullName, "/")
 	if !ok {
-		return nil
+		return repoInfo{}, false
 	}
-	for i := range s.repos {
-		r := &s.repos[i]
-		if strings.EqualFold(r.ForgeOwner, owner) && strings.EqualFold(r.ForgeRepo, repo) {
-			return r
-		}
-	}
-	return nil
+	return s.repoReg.byForge(owner, repo)
 }
 
 // appInstallCommenter adapts githubAppClient.PostComment to bot.Commenter by

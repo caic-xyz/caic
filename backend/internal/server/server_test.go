@@ -27,7 +27,7 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/md"
+	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
 // stubBackend implements agent.Backend for test map-membership checks.
@@ -83,15 +83,54 @@ func newTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
-	return &Server{
+	s := &Server{
 		ctx:          t.Context(),
-		runners:      map[string]*task.Runner{},
-		tasks:        make(map[string]*taskEntry),
-		changed:      make(chan struct{}),
 		prefs:        newTestPrefs(t),
 		ipgeoChecker: checker,
 		forge:        newForgeManager("", "", nil),
 	}
+	s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+	return s
+}
+
+// insertTestTask registers a task in the test server's manager and returns the
+// entry. It registers the entry under the supplied path id as well as the
+// task's own ID string, so handlers that re-resolve via the Manager by
+// entry.Task().ID.String() find the same entry (in production the two always
+// coincide because Insert keys on t.ID.String()).
+func insertTestTask(t *testing.T, s *Server, id string, tk *task.Task) *tasks.Entry { //nolint:unparam // id is constant today; keep generic
+	e := tasks.NewEntry(tk)
+	s.taskMgr.Insert(id, e)
+	if taskID := tk.ID.String(); taskID != id {
+		s.taskMgr.Insert(taskID, e)
+	}
+	return e
+}
+
+// registerTestRunner registers a runner under relPath in the task Manager's
+// registry, the single owner of the runner set.
+func registerTestRunner(s *Server, relPath string, r *task.Runner) {
+	s.taskMgr.RegisterRunner(relPath, r)
+}
+
+// testEntries returns a snapshot of every registered task entry (test-only).
+func testEntries(s *Server) []*tasks.Entry {
+	var out []*tasks.Entry
+	s.taskMgr.Range(func(_ string, e *tasks.Entry) bool {
+		out = append(out, e)
+		return true
+	})
+	return out
+}
+
+// loadPurgedTasksForTest reads logs from disk and registers purged tasks via
+// the manager. Replaces the deleted Server.loadPurgedTasks helper.
+func loadPurgedTasksForTest(s *Server) error {
+	logs, err := task.LoadLogs(s.logDir)
+	if err != nil {
+		return err
+	}
+	return s.taskMgr.LoadPurgedTasks(logs)
 }
 
 func TestHandleTaskEvents(t *testing.T) {
@@ -155,10 +194,7 @@ func TestHandleTaskInput(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			s := newTestServer(t)
-			s.tasks["t1"] = &taskEntry{
-				task: &task.Task{InitialPrompt: agent.Prompt{Text: "test"}},
-				done: make(chan struct{}),
-			}
+			insertTestTask(t, s, "t1", &task.Task{InitialPrompt: agent.Prompt{Text: "test"}})
 
 			body := strings.NewReader(tt.bodyJSON)
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/input", body)
@@ -181,10 +217,7 @@ func testRestart(t *testing.T, state task.State, bodyJSON string, wantStatus int
 	s := newTestServer(t)
 	tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
 	tk.SetState(state)
-	s.tasks["t1"] = &taskEntry{
-		task: tk,
-		done: make(chan struct{}),
-	}
+	insertTestTask(t, s, "t1", tk)
 
 	body := strings.NewReader(bodyJSON)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/restart", body)
@@ -220,10 +253,7 @@ func TestHandlePurge(t *testing.T) {
 		s := newTestServer(t)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
 		// StatePending is the zero value, but set explicitly for clarity.
-		s.tasks["t1"] = &taskEntry{
-			task: tk,
-			done: make(chan struct{}),
-		}
+		insertTestTask(t, s, "t1", tk)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/purge", http.NoBody)
 		req.SetPathValue("id", "t1")
@@ -243,11 +273,8 @@ func TestHandlePurge(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateWaiting)
 		s := newTestServer(t)
-		s.runners["r"] = &task.Runner{BaseBranch: "main", Dir: t.TempDir()}
-		s.tasks["t1"] = &taskEntry{
-			task: tk,
-			done: make(chan struct{}),
-		}
+		registerTestRunner(s, "r", &task.Runner{BaseBranch: "main", Dir: t.TempDir()})
+		insertTestTask(t, s, "t1", tk)
 
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/purge", http.NoBody)
 		req.SetPathValue("id", "t1")
@@ -274,11 +301,8 @@ func TestHandlePurge(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateRunning)
 		s := newTestServer(t)
-		s.runners["r"] = &task.Runner{BaseBranch: "main", Dir: t.TempDir()}
-		s.tasks["t1"] = &taskEntry{
-			task: tk,
-			done: make(chan struct{}),
-		}
+		registerTestRunner(s, "r", &task.Runner{BaseBranch: "main", Dir: t.TempDir()})
+		insertTestTask(t, s, "t1", tk)
 
 		// Use an already-cancelled context to simulate shutdown scenario
 		// where BaseContext is cancelled before the handler completes.
@@ -295,73 +319,20 @@ func TestHandlePurge(t *testing.T) {
 	})
 }
 
-func TestHandleContainerDeath(t *testing.T) {
-	t.Parallel()
-	// Initialize mdClient once before parallel subtests (can't use t.Setenv in parallel).
-	tmpDir := t.TempDir()
-	origHome, origXDG, origXDGData, origXDGState := os.Getenv("HOME"), os.Getenv("XDG_CONFIG_HOME"), os.Getenv("XDG_DATA_HOME"), os.Getenv("XDG_STATE_HOME")
-	os.Setenv("HOME", tmpDir)                                             //nolint:gosec,errcheck,usetesting // test setup
-	os.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpDir, ".config"))        //nolint:gosec,errcheck,usetesting // test setup
-	os.Setenv("XDG_DATA_HOME", filepath.Join(tmpDir, ".local", "share"))  //nolint:gosec,errcheck,usetesting // test setup
-	os.Setenv("XDG_STATE_HOME", filepath.Join(tmpDir, ".local", "state")) //nolint:gosec,errcheck,usetesting // test setup
-	mdClient, err := md.New(io.Discard)
-	os.Setenv("HOME", origHome)               //nolint:gosec,errcheck,usetesting // best-effort restore
-	os.Setenv("XDG_CONFIG_HOME", origXDG)     //nolint:gosec,errcheck,usetesting // best-effort restore
-	os.Setenv("XDG_DATA_HOME", origXDGData)   //nolint:gosec,errcheck,usetesting // best-effort restore
-	os.Setenv("XDG_STATE_HOME", origXDGState) //nolint:gosec,errcheck,usetesting // best-effort restore
-	if err != nil {
-		t.Fatalf("md.New: %v", err)
-	}
-	newServer := func(t *testing.T) *Server {
-		s := newTestServer(t)
-		s.mdClient = mdClient
-		return s
-	}
-	t.Run("ArchivesAsStopped", func(t *testing.T) {
-		t.Parallel()
-		s := newServer(t)
-		tk := &task.Task{
-			InitialPrompt: agent.Prompt{Text: "test"},
-			Repos:         []task.RepoMount{{Name: "r"}},
-			Container:     "md-repo-caic-0",
-		}
-		tk.SetState(task.StateRunning)
-		s.runners["r"] = &task.Runner{BaseBranch: "main", Dir: t.TempDir()}
-		entry := &taskEntry{task: tk, done: make(chan struct{})}
-		s.tasks["t1"] = entry
-
-		s.handleContainerDeath("md-repo-caic-0")
-
-		if tk.GetState() != task.StateStopped {
-			t.Errorf("state = %v, want %v", tk.GetState(), task.StateStopped)
-		}
-	})
-
-	t.Run("UnknownContainer", func(t *testing.T) {
-		t.Parallel()
-		s := newServer(t)
-		// Should not panic or cause errors.
-		s.handleContainerDeath("unknown-container")
-	})
-}
-
 func TestHandleCreateTask(t *testing.T) {
 	t.Parallel()
 	t.Run("ReturnsID", func(t *testing.T) {
 		t.Parallel()
 		s := &Server{
-			ctx: t.Context(),
-			runners: map[string]*task.Runner{
-				"myrepo": {
-					BaseBranch: "main",
-					Dir:        t.TempDir(),
-					Backends:   map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}},
-				},
-			},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			prefs:   newTestPrefs(t),
+			ctx:   t.Context(),
+			prefs: newTestPrefs(t),
 		}
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "myrepo", &task.Runner{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
+			Backends:   map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}},
+		})
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test task"},"repos":[{"name":"myrepo"}],"harness":"claude"}`)
@@ -422,13 +393,11 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("UnknownHarness", func(t *testing.T) {
 		t.Parallel()
 		s := &Server{
-			ctx: t.Context(),
-			runners: map[string]*task.Runner{
-				"myrepo": {BaseBranch: "main", Dir: t.TempDir()},
-			},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
+			ctx:   t.Context(),
+			prefs: newTestPrefs(t),
 		}
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "myrepo", &task.Runner{BaseBranch: "main", Dir: t.TempDir()})
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"nonexistent"}`)
@@ -451,17 +420,15 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("InvalidModel", func(t *testing.T) {
 		t.Parallel()
 		s := &Server{
-			ctx: t.Context(),
-			runners: map[string]*task.Runner{
-				"myrepo": {
-					BaseBranch: "main",
-					Dir:        t.TempDir(),
-					Backends:   map[agent.Harness]agent.Backend{"stub": stubBackend{}},
-				},
-			},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
+			ctx:   t.Context(),
+			prefs: newTestPrefs(t),
 		}
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "myrepo", &task.Runner{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
+			Backends:   map[agent.Harness]agent.Backend{"stub": stubBackend{}},
+		})
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"stub","model":"nonexistent"}`)
@@ -484,18 +451,15 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("ValidModel", func(t *testing.T) {
 		t.Parallel()
 		s := &Server{
-			ctx: t.Context(),
-			runners: map[string]*task.Runner{
-				"myrepo": {
-					BaseBranch: "main",
-					Dir:        t.TempDir(),
-					Backends:   map[agent.Harness]agent.Backend{"stub": stubBackend{}},
-				},
-			},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			prefs:   newTestPrefs(t),
+			ctx:   t.Context(),
+			prefs: newTestPrefs(t),
 		}
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "myrepo", &task.Runner{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
+			Backends:   map[agent.Harness]agent.Backend{"stub": stubBackend{}},
+		})
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"stub","model":"m1"}`)
@@ -518,18 +482,15 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Run("WithImage", func(t *testing.T) {
 		t.Parallel()
 		s := &Server{
-			ctx: t.Context(),
-			runners: map[string]*task.Runner{
-				"myrepo": {
-					BaseBranch: "main",
-					Dir:        t.TempDir(),
-					Backends:   map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}},
-				},
-			},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			prefs:   newTestPrefs(t),
+			ctx:   t.Context(),
+			prefs: newTestPrefs(t),
 		}
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "myrepo", &task.Runner{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
+			Backends:   map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}},
+		})
 		handler := handle(s.createTask)
 
 		// Set docker image in user preferences.
@@ -556,14 +517,12 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 
 		// Verify the task uses the image from preferences.
-		s.mu.Lock()
-		entry := s.tasks[resp.ID.String()]
-		s.mu.Unlock()
+		entry, _ := s.taskMgr.GetEntry(resp.ID.String())
 		if entry == nil {
 			t.Fatal("task not found")
 		}
-		if entry.task.DockerImage != "ghcr.io/my/image:v1" {
-			t.Errorf("Image = %q, want %q", entry.task.DockerImage, "ghcr.io/my/image:v1")
+		if entry.Task().DockerImage != "ghcr.io/my/image:v1" {
+			t.Errorf("Image = %q, want %q", entry.Task().DockerImage, "ghcr.io/my/image:v1")
 		}
 	})
 
@@ -572,16 +531,13 @@ func TestHandleCreateTask(t *testing.T) {
 		// Regression: creating a task with no repos panicked with
 		// "makeslice: cap out of range" because len(req.Repos)-1 == -1.
 		s := &Server{
-			ctx: t.Context(),
-			runners: map[string]*task.Runner{
-				"": {
-					Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}},
-				},
-			},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			prefs:   newTestPrefs(t),
+			ctx:   t.Context(),
+			prefs: newTestPrefs(t),
 		}
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "", &task.Runner{
+			Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}},
+		})
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude"}`)
@@ -601,11 +557,12 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 	})
 
-	t.Run("NoRepoRunnerMissing", func(t *testing.T) {
+	t.Run("NoRepoRunnerNoBackend", func(t *testing.T) {
 		t.Parallel()
-		// When no repos are specified and no "" runner is configured, return
-		// a clear error instead of panicking.
-		s := newTestServer(t) // no "" runner
+		// The Manager always registers a no-repo runner, but a test server's
+		// no-repo runner has no backends. Creating a no-repo task with an
+		// unknown harness returns a clear 400 instead of panicking.
+		s := newTestServer(t) // no-repo runner has no backends
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude"}`)
@@ -613,8 +570,8 @@ func TestHandleCreateTask(t *testing.T) {
 		w := httptest.NewRecorder()
 		handler(w, req)
 
-		if w.Code != http.StatusInternalServerError {
-			t.Errorf("status = %d, want %d", w.Code, http.StatusInternalServerError)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
 	})
 
@@ -641,14 +598,12 @@ func TestHandleCreateTask(t *testing.T) {
 func TestHandleListRepos(t *testing.T) {
 	t.Parallel()
 	s := &Server{
-		repos: []repoInfo{
+		repoReg: newRepoRegistry([]repoInfo{
 			{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"},
 			{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"},
-		},
-		runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
-		tasks:   make(map[string]*taskEntry),
-		changed: make(chan struct{}),
+		}),
 	}
+	s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/server/repos", http.NoBody)
 	w := httptest.NewRecorder()
@@ -707,26 +662,24 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := &Server{
-			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			logDir:  logDir,
+			logDir: logDir,
 		}
-		if err := s.loadPurgedTasks(); err != nil {
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		if err := loadPurgedTasksForTest(s); err != nil {
 			t.Fatal(err)
 		}
 
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if len(s.tasks) != 3 {
-			t.Fatalf("len(tasks) = %d, want 3", len(s.tasks))
+		entries := testEntries(s)
+		if len(entries) != 3 {
+			t.Fatalf("len(entries) = %d, want 3", len(entries))
 		}
 
 		// Collect prompts sorted by ksid (time-sortable) to verify all loaded.
-		prompts := make([]string, 0, len(s.tasks))
-		var anyEntry *taskEntry
-		for _, e := range s.tasks {
-			prompts = append(prompts, e.task.InitialPrompt.Text)
+		prompts := make([]string, 0, len(entries))
+		var anyEntry *tasks.Entry
+		for _, e := range entries {
+			prompts = append(prompts, e.Task().InitialPrompt.Text)
 			if anyEntry == nil {
 				anyEntry = e
 			}
@@ -737,14 +690,14 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		// Verify result is populated on at least one entry.
-		if anyEntry.result == nil {
+		if anyEntry.Result() == nil {
 			t.Fatal("result is nil on a loaded entry")
 		}
 
 		// Verify done channel is closed (task is terminal).
-		for _, e := range s.tasks {
+		for _, e := range entries {
 			select {
-			case <-e.done:
+			case <-e.Done():
 			default:
 				t.Error("done channel not closed on a loaded entry")
 			}
@@ -776,23 +729,21 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := &Server{
-			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			logDir:  logDir,
+			logDir: logDir,
 		}
-		if err := s.loadPurgedTasks(); err != nil {
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		if err := loadPurgedTasksForTest(s); err != nil {
 			t.Fatal(err)
 		}
 
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if len(s.tasks) != 1 {
-			t.Fatalf("len(tasks) = %d, want 1 (old task should be filtered out)", len(s.tasks))
+		entries := testEntries(s)
+		if len(entries) != 1 {
+			t.Fatalf("len(entries) = %d, want 1 (old task should be filtered out)", len(entries))
 		}
-		for _, e := range s.tasks {
-			if e.task.InitialPrompt.Text != "recent task" {
-				t.Errorf("prompt = %q, want \"recent task\"", e.task.InitialPrompt.Text)
+		for _, e := range entries {
+			if e.Task().InitialPrompt.Text != "recent task" {
+				t.Errorf("prompt = %q, want \"recent task\"", e.Task().InitialPrompt.Text)
 			}
 		}
 	})
@@ -820,23 +771,20 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := &Server{
-			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			logDir:  logDir,
+			logDir: logDir,
 		}
-		if err := s.loadPurgedTasks(); err != nil {
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		if err := loadPurgedTasksForTest(s); err != nil {
 			t.Fatal(err)
 		}
 
-		s.mu.Lock()
-		defer s.mu.Unlock()
-
+		entries := testEntries(s)
 		// Count tasks per repo.
 		counts := map[string]int{}
-		for _, e := range s.tasks {
+		for _, e := range entries {
 			repo := ""
-			if p := e.task.Primary(); p != nil {
+			if p := e.Task().Primary(); p != nil {
 				repo = p.Name
 			}
 			counts[repo]++
@@ -847,8 +795,8 @@ func TestLoadPurgedTasks(t *testing.T) {
 		if counts["b"] != 3 {
 			t.Errorf("repo b: got %d tasks, want 3", counts["b"])
 		}
-		if len(s.tasks) != 8 {
-			t.Errorf("total tasks = %d, want 8 (5 from a + 3 from b)", len(s.tasks))
+		if len(entries) != 8 {
+			t.Errorf("total tasks = %d, want 8 (5 from a + 3 from b)", len(entries))
 		}
 	})
 
@@ -875,21 +823,19 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
 		s := &Server{
-			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			logDir:  logDir,
+			logDir: logDir,
 		}
-		if err := s.loadPurgedTasks(); err != nil {
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		if err := loadPurgedTasksForTest(s); err != nil {
 			t.Fatal(err)
 		}
 
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if len(s.tasks) != 1 {
-			t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
+		entries := testEntries(s)
+		if len(entries) != 1 {
+			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
-		for _, e := range s.tasks {
+		for _, e := range entries {
 			j := s.toJSON(t.Context(), e)
 			if j.CostUSD != 1.23 {
 				t.Errorf("CostUSD = %f, want 1.23", j.CostUSD)
@@ -934,21 +880,19 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
 		s := &Server{
-			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			logDir:  logDir,
+			logDir: logDir,
 		}
-		if err := s.loadPurgedTasks(); err != nil {
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		if err := loadPurgedTasksForTest(s); err != nil {
 			t.Fatal(err)
 		}
 
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if len(s.tasks) != 1 {
-			t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
+		entries := testEntries(s)
+		if len(entries) != 1 {
+			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
-		for _, e := range s.tasks {
+		for _, e := range entries {
 			j := s.toJSON(t.Context(), e)
 			if j.CostUSD != 0.42 {
 				t.Errorf("CostUSD = %f, want 0.42 (should be backfilled from ResultMessage)", j.CostUSD)
@@ -993,34 +937,32 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "b.jsonl", metaB, trailerB)
 
 		s := &Server{
-			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			logDir:  logDir,
+			logDir: logDir,
 		}
-		if err := s.loadPurgedTasks(); err != nil {
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		if err := loadPurgedTasksForTest(s); err != nil {
 			t.Fatal(err)
 		}
 
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if len(s.tasks) != 2 {
-			t.Fatalf("len(tasks) = %d, want 2", len(s.tasks))
+		entries := testEntries(s)
+		if len(entries) != 2 {
+			t.Fatalf("len(entries) = %d, want 2", len(entries))
 		}
 
 		// Verify each task has the title matching its own repo.
-		for _, e := range s.tasks {
+		for _, e := range entries {
 			var repoName string
-			if p := e.task.Primary(); p != nil {
+			if p := e.Task().Primary(); p != nil {
 				repoName = p.Name
 			}
 			switch repoName {
 			case "genai":
-				if got := e.task.Title(); got != "Optimize GenAI Provider" {
+				if got := e.Task().Title(); got != "Optimize GenAI Provider" {
 					t.Errorf("genai title = %q, want %q", got, "Optimize GenAI Provider")
 				}
 			case "md":
-				if got := e.task.Title(); got != "Skip Unnecessary Docker Image Rebuilds" {
+				if got := e.Task().Title(); got != "Skip Unnecessary Docker Image Rebuilds" {
 					t.Errorf("md title = %q, want %q", got, "Skip Unnecessary Docker Image Rebuilds")
 				}
 			default:
@@ -1030,13 +972,14 @@ func TestLoadPurgedTasks(t *testing.T) {
 
 		// Verify that branchIDs scoped by repo does not lose either entry.
 		// This mirrors the branchIDs construction in adoptContainers.
-		branchIDs := make(map[string][]string, len(s.tasks))
-		for id, e := range s.tasks {
-			if p := e.task.Primary(); p != nil && p.Branch != "" {
+		branchIDs := make(map[string][]string)
+		s.taskMgr.Range(func(id string, e *tasks.Entry) bool {
+			if p := e.Task().Primary(); p != nil && p.Branch != "" {
 				key := p.Name + "\x00" + p.Branch
 				branchIDs[key] = append(branchIDs[key], id)
 			}
-		}
+			return true
+		})
 		if len(branchIDs) != 2 {
 			t.Errorf("branchIDs has %d keys, want 2 (repo-scoped keys must not collide)", len(branchIDs))
 		}
@@ -1045,16 +988,17 @@ func TestLoadPurgedTasks(t *testing.T) {
 	t.Run("EmptyDir", func(t *testing.T) {
 		t.Parallel()
 		s := &Server{
-			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			logDir:  t.TempDir(),
+			logDir: t.TempDir(),
 		}
-		if err := s.loadPurgedTasks(); err != nil {
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		if err := loadPurgedTasksForTest(s); err != nil {
 			t.Fatal(err)
 		}
-		if len(s.tasks) != 0 {
-			t.Errorf("len(tasks) = %d, want 0", len(s.tasks))
+
+		entries := testEntries(s)
+		if len(entries) != 0 {
+			t.Errorf("len(tasks) = %d, want 0", len(entries))
 		}
 	})
 
@@ -1089,22 +1033,20 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", lines...)
 
 		s := &Server{
-			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			logDir:  logDir,
+			logDir: logDir,
 		}
-		if err := s.loadPurgedTasks(); err != nil {
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		if err := loadPurgedTasksForTest(s); err != nil {
 			t.Fatal(err)
 		}
 
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if len(s.tasks) != 1 {
-			t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
+		entries := testEntries(s)
+		if len(entries) != 1 {
+			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
-		for _, e := range s.tasks {
-			snap := e.task.Snapshot()
+		for _, e := range entries {
+			snap := e.Task().Snapshot()
 			// caic_pr is outside the 64 KiB tail window; without full
 			// message parse, PR metadata is not recovered.
 			if snap.ForgePR != 0 {
@@ -1150,25 +1092,23 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := &Server{
-			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			logDir:  logDir,
+			logDir: logDir,
 		}
-		if err := s.loadPurgedTasks(); err != nil {
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		if err := loadPurgedTasksForTest(s); err != nil {
 			t.Fatal(err)
 		}
 
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if len(s.tasks) != 10 {
-			t.Fatalf("len(tasks) = %d, want 10 (5 per repo)", len(s.tasks))
+		entries := testEntries(s)
+		if len(entries) != 10 {
+			t.Fatalf("len(entries) = %d, want 10 (5 per repo)", len(entries))
 		}
 
 		// Collect prompts and verify oldest task per repo was dropped.
-		prompts := make([]string, 0, len(s.tasks))
-		for _, e := range s.tasks {
-			prompts = append(prompts, e.task.InitialPrompt.Text)
+		prompts := make([]string, 0, len(entries))
+		for _, e := range entries {
+			prompts = append(prompts, e.Task().InitialPrompt.Text)
 		}
 		sort.Strings(prompts)
 		// "task 0" (oldest repo-a) and "task 6" (oldest repo-b) should be excluded.
@@ -1211,24 +1151,22 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "purged.jsonl", meta("purged task"), trailer)
 
 		s := &Server{
-			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			logDir:  logDir,
+			logDir: logDir,
 		}
-		if err := s.loadPurgedTasks(); err != nil {
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		if err := loadPurgedTasksForTest(s); err != nil {
 			t.Fatal(err)
 		}
 
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if len(s.tasks) != 3 {
-			t.Fatalf("len(tasks) = %d, want 3", len(s.tasks))
+		entries := testEntries(s)
+		if len(entries) != 3 {
+			t.Fatalf("len(entries) = %d, want 3", len(entries))
 		}
 
-		states := make(map[string]string, len(s.tasks))
-		for _, e := range s.tasks {
-			states[e.task.InitialPrompt.Text] = e.task.Snapshot().State.String()
+		states := make(map[string]string, len(entries))
+		for _, e := range entries {
+			states[e.Task().InitialPrompt.Text] = e.Task().Snapshot().State.String()
 		}
 		if got := states["waiting task"]; got != "failed" {
 			t.Errorf("waiting task state = %q, want \"failed\"", got)
@@ -1253,28 +1191,26 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "feat.jsonl", meta, trailer)
 
 		s := &Server{
-			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			logDir:  logDir,
+			logDir: logDir,
 		}
-		if err := s.loadPurgedTasks(); err != nil {
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		if err := loadPurgedTasksForTest(s); err != nil {
 			t.Fatal(err)
 		}
 
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if len(s.tasks) != 1 {
-			t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
+		entries := testEntries(s)
+		if len(entries) != 1 {
+			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
-		for _, e := range s.tasks {
-			if !e.task.Tailscale {
+		for _, e := range entries {
+			if !e.Task().Tailscale {
 				t.Error("Tailscale = false, want true")
 			}
-			if !e.task.USB {
+			if !e.Task().USB {
 				t.Error("USB = false, want true")
 			}
-			if !e.task.Display {
+			if !e.Task().Display {
 				t.Error("Display = false, want true")
 			}
 		}
@@ -1382,24 +1318,23 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, assistant, result, trailer)
 
 		s := &Server{
-			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			logDir:  logDir,
+			logDir: logDir,
 		}
-		if err := s.loadPurgedTasks(); err != nil {
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		if err := loadPurgedTasksForTest(s); err != nil {
 			t.Fatal(err)
 		}
 
-		s.mu.Lock()
-		if len(s.tasks) != 1 {
-			t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
+		entries := testEntries(s)
+		if len(entries) != 1 {
+			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
 		var taskID string
-		for id := range s.tasks {
+		s.taskMgr.Range(func(id string, _ *tasks.Entry) bool {
 			taskID = id
-		}
-		s.mu.Unlock()
+			return false
+		})
 
 		// Subscribe to events via SSE. The handler should return immediately for
 		// purged tasks instead of blocking until context deadline.
@@ -1468,24 +1403,23 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, msgStart, delta1, delta2, assistant, result, trailer)
 
 		s := &Server{
-			runners: map[string]*task.Runner{"": {Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}}},
-			tasks:   make(map[string]*taskEntry),
-			changed: make(chan struct{}),
-			logDir:  logDir,
+			logDir: logDir,
 		}
-		if err := s.loadPurgedTasks(); err != nil {
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		if err := loadPurgedTasksForTest(s); err != nil {
 			t.Fatal(err)
 		}
 
-		s.mu.Lock()
-		if len(s.tasks) != 1 {
-			t.Fatalf("len(tasks) = %d, want 1", len(s.tasks))
+		entries := testEntries(s)
+		if len(entries) != 1 {
+			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
 		var taskID string
-		for id := range s.tasks {
+		s.taskMgr.Range(func(id string, _ *tasks.Entry) bool {
 			taskID = id
-		}
-		s.mu.Unlock()
+			return false
+		})
 
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()

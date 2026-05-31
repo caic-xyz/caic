@@ -1,4 +1,4 @@
-// Server startup: New() constructor and purged-task loading from on-disk logs.
+// Server startup: the New() constructor and one-time task-log migration.
 
 package server
 
@@ -10,12 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/trace"
-	"slices"
 	"strings"
 	"sync"
-	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
@@ -27,17 +24,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/gitutil"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
-	"github.com/maruel/ksid"
 )
-
-// repoDiscoveryDepth is the maximum directory levels below absRoot that
-// DiscoverRepos scans for git repositories, both at startup and during
-// background polling.
-const repoDiscoveryDepth = 3
 
 // New creates a new Server. It discovers repos under rootDir, creates a Runner
 // per repo, and adopts preexisting containers.
@@ -191,7 +183,6 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	s := &Server{
 		ctx:                ctx,
 		absRoot:            absRoot,
-		runners:            make(map[string]*task.Runner, len(repoRes.paths)),
 		mdClient:           mdClient,
 		logDir:             logDir,
 		cacheDir:           cfg.CacheDir,
@@ -210,9 +201,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		forge:              newForgeManager(cfg.GitHubToken, cfg.GitLabToken, nil),
 		ciCache:            cache,
 		backend:            backend,
-		tasks:              make(map[string]*taskEntry),
-		repoCIStatus:       make(map[string]ci.RepoCIState),
-		changed:            make(chan struct{}),
+		repoReg:            newRepoRegistry(nil),
 	}
 	s.githubWebhookSecret = cfg.GitHubWebhookSecret
 	s.gitlabWebhookSecret = cfg.GitLabWebhookSecret
@@ -314,12 +303,27 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		})
 	}
 	wg.Wait()
+
+	// Construct the task manager before registering runners: the Manager is the
+	// single owner of the runner registry. New() registers a barebones no-repo
+	// runner; we overwrite it with the fully-initialized one below.
+	s.taskMgr = tasks.New(tasks.Config{
+		ServerCtx:  ctx,
+		LogDir:     logDir,
+		CacheDir:   cfg.CacheDir,
+		Backend:    backend,
+		MDClient:   mdClient,
+		HarnessEnv: cfg.HarnessEnv,
+		Prefs:      prefsStore,
+		Provider:   s.provider,
+	})
+
 	for i := range results {
 		if results[i].runner == nil {
 			continue
 		}
-		s.repos = append(s.repos, results[i].info)
-		s.runners[results[i].info.RelPath] = results[i].runner
+		s.repoReg.add(&results[i].info)
+		s.taskMgr.RegisterRunner(results[i].info.RelPath, results[i].runner)
 	}
 
 	// Warn on repo basename collisions. Containers use qualified names
@@ -327,8 +331,9 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	// confused by short basenames appearing in container names.
 	{
 		seen := make(map[string]string) // basename → first RelPath
-		for i := range s.repos {
-			ri := &s.repos[i]
+		snap := s.repoReg.snapshot()
+		for i := range snap {
+			ri := &snap[i]
 			bn := filepath.Base(ri.AbsPath)
 			if first, exists := seen[bn]; exists {
 				slog.Warn("repo basename collision; containers will use qualified names",
@@ -343,21 +348,22 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	// Eventually we may want to use a clearer observer pattern.
 	s.Bot = bot.New(ctx, s)
 
-	// Always register a no-repo runner (keyed by "") for tasks that don't
-	// need a git repository.
+	// Always register a no-repo runner (keyed by "") for tasks that don't need
+	// a git repository. This overwrites New()'s barebones no-repo runner with a
+	// fully-initialized one.
 	noRepoRunner := &task.Runner{LogDir: logDir, CacheDir: cfg.CacheDir, HarnessEnv: cfg.HarnessEnv, Container: backend}
 	_ = noRepoRunner.Init(ctx) // populates Backends; no-op for no-repo (no branches to scan)
-	s.runners[""] = noRepoRunner
+	s.taskMgr.RegisterRunner("", noRepoRunner)
+
+	s.taskMgr.Start()
 
 	// Phase 3: Load purged tasks from pre-loaded logs.
 	phase3 := trace.StartRegion(ctx, "load-purged-tasks")
 	if logRes.err != nil {
 		slog.Warn("load logs failed", "err", logRes.err)
-	} else {
-		if err := s.loadPurgedTasksFrom(logRes.logs); err != nil {
-			phase3.End()
-			return nil, fmt.Errorf("load purged tasks: %w", err)
-		}
+	} else if err := s.taskMgr.LoadPurgedTasks(logRes.logs); err != nil {
+		phase3.End()
+		return nil, fmt.Errorf("load purged tasks: %w", err)
 	}
 	phase3.End()
 
@@ -366,9 +372,33 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	if contRes.err != nil {
 		slog.Warn("list failed, skipping adoption", "rt", s.mdClient.Runtime, "err", contRes.err)
 	} else {
-		if err := s.adoptContainers(ctx, contRes.containers, logRes.logs); err != nil {
+		// Convert repos for Manager adoption.
+		snap := s.repoReg.snapshot()
+		adoptRepos := make([]tasks.AdoptRepo, len(snap))
+		for i := range snap {
+			r := &snap[i]
+			adoptRepos[i] = tasks.AdoptRepo{
+				RelPath:    r.RelPath,
+				AbsPath:    r.AbsPath,
+				ForgeKind:  string(r.ForgeKind),
+				ForgeOwner: r.ForgeOwner,
+				ForgeRepo:  r.ForgeRepo,
+			}
+		}
+		adopted, err := s.taskMgr.AdoptContainers(ctx, adoptRepos, contRes.containers, logRes.logs)
+		if err != nil {
 			phase4.End()
 			return nil, fmt.Errorf("adopt containers: %w", err)
+		}
+		// Wire up forge/CI monitoring for adopted tasks with PRs.
+		for i := range adopted {
+			at := &adopted[i]
+			if at.ForgeOwner != "" && at.Task.GetPR() > 0 && at.ForgeKind != "" {
+				s.wireAdoptedCIMonitoring(ctx, at)
+			}
+			if at.Task.ForgeIssue == 0 && at.Task.GetPR() == 0 && at.ForgeOwner != "" && at.Branch != "" && at.ForgeKind != "" {
+				go s.lookupExternalPRForTask(at) //nolint:contextcheck // server-lifetime context
+			}
 		}
 	}
 	phase4.End()
@@ -388,7 +418,6 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		slog.Info("ipgeo", "path", cfg.IPGeoDB, "list", cfg.IPGeoAllowlist)
 	}
 
-	s.watchContainerEvents(ctx)
 	if !cfg.SkipWarmup {
 		go func() {
 			_, tk := trace.NewTask(ctx, "warmup-images")
@@ -403,7 +432,6 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		trace.Log(ctx, "startup", "refresh-harness-models: begin")
 		s.refreshHarnessModels() //nolint:contextcheck // server-lifetime goroutine, uses s.ctx internally
 	}()
-	go s.pollStats(s.ctx) //nolint:contextcheck // server-lifetime context is intentional
 	go s.watchNewRepos()
 	{
 		region := trace.StartRegion(ctx, "ci-new-service")
@@ -443,148 +471,4 @@ func migrateTaskLogs(cacheDir, tasksDir string) {
 		}
 	}
 	slog.Info("migrated task logs", "n", len(jsonlFiles), "dst", tasksDir)
-}
-
-// loadPurgedTasks loads the last 5 purged tasks per repository from JSONL logs on disk.
-// Exported for testing; New() uses the parallelized variant.
-func (s *Server) loadPurgedTasks() error {
-	all, err := task.LoadLogs(s.logDir)
-	if err != nil {
-		return err
-	}
-	return s.loadPurgedTasksFrom(all)
-}
-
-// setParser sets the parse function on a LoadedTask from the first runner
-// that has a backend for the task's harness.
-func (s *Server) setParser(lt *task.LoadedTask) {
-	for _, r := range s.runners {
-		if b := r.Backends[lt.Harness]; b != nil {
-			lt.SetParser(b.NewWire().ParseMessage)
-			return
-		}
-	}
-}
-
-// loadTaskMessagesOnDemand triggers lazy message loading for purged tasks
-// the first time the full conversation is needed (e.g. when the user opens
-// task detail and subscribes to SSE events). Must be called before
-// Subscribe to populate the history snapshot.
-func (s *Server) loadTaskMessagesOnDemand(entry *taskEntry) {
-	if entry.loadedTask == nil {
-		return
-	}
-	entry.loadedTaskOnce.Do(func() {
-		if err := entry.loadedTask.LoadMessagesTail(); err != nil {
-			slog.Warn("lazy load messages failed", "task", entry.task.ID, "err", err)
-			return
-		}
-		entry.task.RestoreMessages(entry.loadedTask.Msgs)
-	})
-}
-
-// loadPurgedTasksFrom populates s.tasks from pre-loaded log data.
-//
-// It keeps tasks updated within the last few days and limits the result to the N most recent per repository.
-// Tasks without a caic_result trailer get a synthetic result; their state is inferred from messages and
-// finalised in the setup loop. adoptContainers removes all stale entries for any branch that has a live
-// container, so no-trailer tasks never duplicate adopted ones.
-func (s *Server) loadPurgedTasksFrom(all []*task.LoadedTask) error {
-	// Include all tasks updated within the last few days, with or without a
-	// caic_result trailer. Trailer-less tasks (interrupted or still-running)
-	// are deduplicated by adoptContainers which sweeps all stale entries for
-	// each branch it adopts.
-	const oldest = 14 * 24 * time.Hour
-	const maxPurgedPerRepo = 5
-	var purged []*task.LoadedTask
-	now := time.Now().UTC()
-	for _, lt := range all {
-		if now.Sub(lt.LastStateUpdateAt) > oldest {
-			continue
-		}
-		if lt.Result == nil {
-			lt.Result = &task.Result{State: task.StateFailed}
-		}
-		purged = append(purged, lt)
-	}
-	// Sort by last state update descending so the max-per-repo limit keeps the
-	// most recently active tasks, not just the most recently started ones.
-	slices.SortFunc(purged, func(a, b *task.LoadedTask) int {
-		return b.LastStateUpdateAt.Compare(a.LastStateUpdateAt)
-	})
-	perRepo := make(map[string]int)
-	kept := purged[:0]
-	for _, lt := range purged {
-		key := ""
-		if p := lt.Primary(); p != nil {
-			key = p.Name
-		}
-		if perRepo[key] < maxPurgedPerRepo {
-			perRepo[key]++
-			kept = append(kept, lt)
-		}
-	}
-	purged = kept
-	if len(purged) == 0 {
-		slog.Info("no purged tasks to load", "candidates", len(all))
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, lt := range purged {
-		taskID := ksid.NewID()
-		// The original ID is embedded in the log filename as the prefix before the
-		// first '-'. Real server IDs are 10–12 chars (current-era timestamps in
-		// base32). Reject short strings (e.g. "a" from test filenames) that parse
-		// to implausibly small values.
-		if len(lt.TaskID) >= 9 {
-			if parsed, parseErr := ksid.Parse(lt.TaskID); parseErr == nil && parsed != 0 {
-				taskID = parsed
-			}
-		}
-		t := &task.Task{
-			ID:            taskID,
-			InitialPrompt: agent.Prompt{Text: lt.Prompt},
-			Model:         lt.Model,
-			Repos:         lt.Repos, // GitRoot is empty for purged tasks
-			Harness:       lt.Harness,
-			StartedAt:     lt.StartedAt,
-			Tailscale:     lt.Tailscale,
-			USB:           lt.USB,
-			Display:       lt.Display,
-		}
-		if lt.GitHubToken {
-			t.GitHubToken = true
-		}
-		t.SetStateAt(lt.State, lt.LastStateUpdateAt)
-		if lt.AgentVersion != "" {
-			t.SetAgentVersion(lt.AgentVersion)
-		}
-		if lt.Title != "" {
-			t.SetTitle(lt.Title)
-		} else {
-			t.SetTitle(lt.Prompt)
-		}
-		// Purged tasks get all metadata from the caic_result trailer and
-		// the header-only tail scan (64 KiB). Full message parse is never
-		// needed. adoptContainers corrects the state for trailer-less tasks
-		// that are still running.
-		if lt.State == task.StateRunning {
-			t.SetState(task.StateFailed)
-		}
-		if lt.ForgePR > 0 {
-			t.SetPR(lt.ForgeOwner, lt.ForgeRepo, lt.ForgePR)
-		}
-		// Stats backfill from messages is handled by loadLogHeader's tail
-		// scan when the trailer has zero cost (see case "result").
-		// Set up the parser so messages can be lazily loaded on demand.
-		s.setParser(lt)
-		done := make(chan struct{})
-		close(done)
-		entry := &taskEntry{task: t, result: lt.Result, done: done, loadedTask: lt}
-		s.tasks[t.ID.String()] = entry
-	}
-	s.taskChanged()
-	slog.Info("loaded purged tasks from logs", "n", len(purged))
-	return nil
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
+	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
@@ -57,14 +58,15 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	first := true
 
 	for {
-		s.mu.Lock()
-		out := make([]v1.Task, 0, len(s.tasks))
-		for _, e := range s.tasks {
+		var out []v1.Task
+		s.taskMgr.Range(func(_ string, e *tasks.Entry) bool {
 			out = append(out, s.toJSON(ctx, e))
-		}
-		repos := s.reposLocked()
+			return true
+		})
+		ch := s.taskMgr.Changed()
+		repos := s.repoList()
+		s.mu.Lock()
 		newWarnings := s.warningsSince(lastWarnTime)
-		ch := s.changed
 		s.mu.Unlock()
 
 		reposJSON, err := json.Marshal(repos)
@@ -196,10 +198,7 @@ func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 			prev = data
 		}
 
-		s.mu.Lock()
-		ch := s.changed
-		s.mu.Unlock()
-
+		ch := s.taskMgr.Changed()
 		select {
 		case <-r.Context().Done():
 			return
@@ -221,9 +220,7 @@ func (s *Server) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 // buildUsageResp assembles the full usage response: local task cost
 // aggregation plus per-provider quota data from each registered fetcher.
 func (s *Server) buildUsageResp(ctx context.Context) v1.UsageResp {
-	s.mu.Lock()
-	local := computeLocalUsage(s.tasks, time.Now())
-	s.mu.Unlock()
+	local := computeLocalUsage(s.taskMgr, time.Now())
 
 	resp := v1.UsageResp{Local: local}
 	detached := context.WithoutCancel(ctx)
