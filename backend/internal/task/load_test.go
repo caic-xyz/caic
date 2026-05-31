@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -384,6 +385,22 @@ func TestLoadLogs(t *testing.T) {
 	})
 }
 
+func TestTsToTime(t *testing.T) {
+	t.Parallel()
+	// 1735689600.5 = 2025-01-01T00:00:00.5Z (exact in float64).
+	ts := 1735689600.5
+	got := tsToTime(ts)
+	if got.Year() != 2025 || got.Month() != time.January || got.Day() != 1 {
+		t.Errorf("tsToTime(%v) = %v", ts, got)
+	}
+	if got.Nanosecond() != 500000000 {
+		t.Errorf("tsToTime(%v).Nanosecond() = %d, want 500000000", ts, got.Nanosecond())
+	}
+	if got.Location() != time.UTC {
+		t.Error("tsToTime should return UTC")
+	}
+}
+
 func TestLoadedTask(t *testing.T) {
 	t.Parallel()
 	t.Run("StreamMessages", func(t *testing.T) {
@@ -422,6 +439,141 @@ func TestLoadedTask(t *testing.T) {
 			t.Fatalf("streamed %d messages, full load %d", len(streamed), len(lt.Msgs))
 		}
 	})
+
+	t.Run("Primary", func(t *testing.T) {
+		t.Parallel()
+		t.Run("NoRepos", func(t *testing.T) {
+			t.Parallel()
+			lt := &LoadedTask{}
+			if lt.Primary() != nil {
+				t.Error("Primary() should be nil for no-repo task")
+			}
+		})
+		t.Run("WithRepos", func(t *testing.T) {
+			t.Parallel()
+			lt := &LoadedTask{Repos: []RepoMount{{Name: "a/b", Branch: "caic-0"}}}
+			if p := lt.Primary(); p == nil || p.Name != "a/b" {
+				t.Errorf("Primary() = %+v, want a/b", p)
+			}
+		})
+	})
+
+	t.Run("LoadMessages", func(t *testing.T) {
+		t.Parallel()
+		t.Run("AlreadyLoaded", func(t *testing.T) {
+			t.Parallel()
+			lt := &LoadedTask{Msgs: []agent.Message{&agent.TextMessage{Text: "cached"}}}
+			if err := lt.LoadMessages(); err != nil {
+				t.Fatal(err)
+			}
+			if len(lt.Msgs) != 1 {
+				t.Errorf("Msgs mutated when already loaded")
+			}
+		})
+		t.Run("NoPath", func(t *testing.T) {
+			t.Parallel()
+			lt := &LoadedTask{}
+			lt.SetParser(claudecode.New().NewWire().ParseMessage)
+			if err := lt.LoadMessages(); err != nil {
+				t.Fatal(err)
+			}
+		})
+		t.Run("NoParser", func(t *testing.T) {
+			t.Parallel()
+			lt := &LoadedTask{path: "/does/not/exist.jsonl"}
+			if err := lt.LoadMessages(); err == nil {
+				t.Fatal("expected error when no parser is set")
+			}
+		})
+		t.Run("StreamNoParser", func(t *testing.T) {
+			t.Parallel()
+			lt := &LoadedTask{path: "/does/not/exist.jsonl"}
+			var gotErr bool
+			for _, e := range lt.StreamMessages() {
+				if e != nil {
+					gotErr = true
+				}
+			}
+			if !gotErr {
+				t.Error("StreamMessages without parser should yield an error")
+			}
+		})
+	})
+
+	t.Run("LoadMessagesTail", func(t *testing.T) {
+		t.Parallel()
+		t.Run("SmallFileFullLoad", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "task", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+			a1 := claudeAssistant(t, map[string]any{"type": "text", "text": "hello"})
+			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged", CostUSD: 0.42})
+			writeLogFile(t, dir, "t.jsonl", meta, a1, trailer)
+
+			tasks, err := LoadLogs(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lt := tasks[0]
+			setClaudeParser(tasks)
+			if err := lt.LoadMessagesTail(); err != nil {
+				t.Fatal(err)
+			}
+			if len(lt.Msgs) != 1 {
+				t.Errorf("Msgs len = %d, want 1", len(lt.Msgs))
+			}
+			if lt.Result == nil || lt.Result.CostUSD != 0.42 {
+				t.Errorf("Result = %+v", lt.Result)
+			}
+		})
+		t.Run("TailOnlyWhenSizeExceedsThreshold", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			meta := mustJSON(t, agent.MetaMessage{MessageType: "caic_meta", Version: 1, Prompt: "big", Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude"})
+			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
+
+			name := filepath.Join(dir, "big.jsonl")
+			f, err := os.OpenFile(filepath.Clean(name), os.O_CREATE|os.O_WRONLY, 0o600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = f.WriteString(meta + "\n")
+			filler := strings.Repeat("x", 1024)
+			for range (maxTailLoadBytes / 1024) + 5 {
+				a := claudeAssistant(t, map[string]any{"type": "text", "text": filler})
+				_, _ = f.WriteString(a + "\n")
+			}
+			_, _ = f.WriteString(trailer + "\n")
+			_ = f.Close()
+
+			lt := &LoadedTask{
+				path:    name,
+				Harness: "claude",
+				LogSize: maxTailLoadBytes + 1,
+			}
+			lt.SetParser(claudecode.New().NewWire().ParseMessage)
+			if err := lt.LoadMessagesTail(); err != nil {
+				t.Fatal(err)
+			}
+			if lt.State != StatePurged {
+				t.Errorf("State = %v, want StatePurged", lt.State)
+			}
+			if lt.Result == nil {
+				t.Fatal("Result not restored from tail")
+			}
+		})
+		t.Run("AlreadyLoaded", func(t *testing.T) {
+			t.Parallel()
+			lt := &LoadedTask{Msgs: []agent.Message{&agent.TextMessage{Text: "cached"}}}
+			lt.SetParser(claudecode.New().NewWire().ParseMessage)
+			if err := lt.LoadMessagesTail(); err != nil {
+				t.Fatal(err)
+			}
+			if len(lt.Msgs) != 1 {
+				t.Errorf("Msgs mutated when already loaded")
+			}
+		})
+	})
 }
 
 func TestParseState(t *testing.T) {
@@ -431,7 +583,9 @@ func TestParseState(t *testing.T) {
 		want State
 	}{
 		{"failed", StateFailed},
+		{"stopped", StateStopped},
 		{"purged", StatePurged},
+		{"terminated", StatePurged}, // backward compat
 		{"unknown", StateFailed},
 	} {
 		t.Run(tt.in, func(t *testing.T) {

@@ -1186,9 +1186,9 @@ func prependRepoToDiff(diff, repoName string) string {
 			idx := strings.IndexByte(line, ' ') + 1
 			lines[i] = line[:idx] + repoName + "/" + line[idx:]
 		case strings.HasPrefix(line, "rename from "):
-			lines[i] = "rename from " + repoName + "/" + line[13:]
+			lines[i] = "rename from " + repoName + "/" + line[12:]
 		case strings.HasPrefix(line, "rename to "):
-			lines[i] = "rename to " + repoName + "/" + line[11:]
+			lines[i] = "rename to " + repoName + "/" + line[10:]
 		}
 	}
 	return strings.Join(lines, "\n")

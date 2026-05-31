@@ -99,6 +99,100 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 
 func TestRunner(t *testing.T) {
 	t.Parallel()
+	t.Run("MakeLabels", func(t *testing.T) {
+		t.Parallel()
+		t.Run("Basic", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{
+				ID:      ksid.NewID(),
+				Harness: agent.Claude,
+			}
+			labels := MakeLabels(tk)
+			if len(labels) != 3 {
+				t.Fatalf("len = %d, want 3", len(labels))
+			}
+			if labels[0] != "caic.id="+tk.ID.String() {
+				t.Errorf("labels[0] = %q", labels[0])
+			}
+			if labels[1] != "caic="+tk.ID.String() {
+				t.Errorf("labels[1] = %q", labels[1])
+			}
+			if labels[2] != "caic.harness="+string(tk.Harness) {
+				t.Errorf("labels[2] = %q", labels[2])
+			}
+		})
+		t.Run("WithGitHubToken", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{
+				ID:          ksid.NewID(),
+				Harness:     agent.Claude,
+				GitHubToken: true,
+			}
+			labels := MakeLabels(tk)
+			if len(labels) != 4 {
+				t.Fatalf("len = %d, want 4", len(labels))
+			}
+			if labels[3] != "caic.githubToken=true" {
+				t.Errorf("labels[3] = %q, want %q", labels[3], "caic.githubToken=true")
+			}
+		})
+	})
+
+	t.Run("ProvisioningWriter", func(t *testing.T) {
+		t.Parallel()
+		tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+		_, ch, unsub := tk.Subscribe(t.Context())
+		t.Cleanup(unsub)
+
+		w := &provisioningWriter{ctx: t.Context(), t: tk}
+
+		n, err := w.Write([]byte("hel"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = n
+		select {
+		case <-ch:
+			t.Fatal("unexpected message for partial line")
+		default:
+		}
+
+		_, err = w.Write([]byte("lo\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg := recvMsg(t, ch)
+		lm, ok := msg.(*agent.LogMessage)
+		if !ok {
+			t.Fatalf("expected *agent.LogMessage, got %T", msg)
+		}
+		if lm.Line != "hello" {
+			t.Errorf("LogMessage.Line = %q, want %q", lm.Line, "hello")
+		}
+
+		_, err = w.Write([]byte("\n\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-ch:
+			t.Fatal("unexpected message for empty lines")
+		default:
+		}
+
+		_, err = w.Write([]byte("line1\nline2\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg1 := recvMsg(t, ch)
+		if lm, ok := msg1.(*agent.LogMessage); !ok || lm.Line != "line1" {
+			t.Errorf("msg1 = %+v", msg1)
+		}
+		msg2 := recvMsg(t, ch)
+		if lm, ok := msg2.(*agent.LogMessage); !ok || lm.Line != "line2" {
+			t.Errorf("msg2 = %+v", msg2)
+		}
+	})
 	t.Run("Init", func(t *testing.T) {
 		t.Parallel()
 		t.Run("Basic", func(t *testing.T) {
@@ -839,6 +933,85 @@ func TestRunner(t *testing.T) {
 			t.Errorf("BranchDiffStat = %+v, want [{main.go +5 -1}]", ds)
 		}
 	})
+	t.Run("BranchDiffStatNoContainer", func(t *testing.T) {
+		t.Parallel()
+		r := &Runner{}
+		if ds := r.BranchDiffStat(t.Context(), nil); ds != nil {
+			t.Errorf("BranchDiffStat with no container = %+v, want nil", ds)
+		}
+	})
+	t.Run("BranchDiffStatNoDir", func(t *testing.T) {
+		t.Parallel()
+		r := &Runner{Container: &stubContainer{}, Dir: ""}
+		if ds := r.BranchDiffStat(t.Context(), nil); ds != nil {
+			t.Errorf("BranchDiffStat with no dir = %+v, want nil", ds)
+		}
+	})
+}
+
+func TestExtractRepoDS(t *testing.T) {
+	t.Parallel()
+	ds := agent.DiffStat{
+		{Path: "a/b/main.go", Added: 10, Deleted: 3},
+		{Path: "a/b/util.go", Added: 5, Deleted: 0},
+	}
+	t.Run("Multi", func(t *testing.T) {
+		t.Parallel()
+		got := extractRepoDS(ds, "a/b", true)
+		if len(got) != 2 {
+			t.Fatalf("len = %d, want 2", len(got))
+		}
+		if got[0].Path != "main.go" || got[1].Path != "util.go" {
+			t.Errorf("got paths = %q, %q", got[0].Path, got[1].Path)
+		}
+	})
+	t.Run("Single", func(t *testing.T) {
+		t.Parallel()
+		got := extractRepoDS(ds, "a/b", false)
+		if len(got) != 2 || got[0].Path != "a/b/main.go" {
+			t.Errorf("single repo should return unchanged, got %+v", got)
+		}
+	})
+}
+
+func TestPrependRepoToDiff(t *testing.T) {
+	t.Parallel()
+	diff := `diff --git a/main.go b/main.go
+index 123..456 100644
+--- a/main.go
++++ b/main.go
+@@ -1,3 +1,3 @@
+ package main
+
+rename from old.go
+rename to new.go
+`
+	got := prependRepoToDiff(diff, "myrepo")
+	want := `diff --git a/myrepo/main.go b/myrepo/main.go
+index 123..456 100644
+--- myrepo/a/main.go
++++ myrepo/b/main.go
+@@ -1,3 +1,3 @@
+ package main
+
+rename from myrepo/old.go
+rename to myrepo/new.go
+`
+	if got != want {
+		t.Errorf("prependRepoToDiff =\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestPrependRepoToDiffDevNull(t *testing.T) {
+	t.Parallel()
+	// /dev/null paths must not get the prefix.
+	diff := `--- /dev/null
++++ /dev/null
+`
+	got := prependRepoToDiff(diff, "myrepo")
+	if got != diff {
+		t.Errorf("prependRepoToDiff with /dev/null =\n%s\nwant unchanged:\n%s", got, diff)
+	}
 }
 
 // stubContainer implements ContainerBackend for testing. Diff returns a fixed

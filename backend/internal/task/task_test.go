@@ -3,6 +3,7 @@
 package task
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/forge"
 )
 
 func TestTask(t *testing.T) {
@@ -1513,12 +1515,402 @@ func TestTask(t *testing.T) {
 
 			// A subscriber should see restored messages in the history snapshot.
 			history, _, unsub := tk.Subscribe(t.Context())
-			defer unsub()
+			t.Cleanup(unsub)
 
 			if len(history) != 2 {
 				t.Fatalf("history len = %d, want 2", len(history))
 			}
 		})
+	})
+
+	t.Run("ExtraMDRepos", func(t *testing.T) {
+		t.Parallel()
+		t.Run("NoRepos", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			if extra := tk.ExtraMDRepos(); extra != nil {
+				t.Fatalf("ExtraMDRepos with no repos = %+v, want nil", extra)
+			}
+		})
+		t.Run("OneRepo", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{Repos: []RepoMount{{Name: "a/b", Branch: "caic-0", GitRoot: "/foo"}}}
+			if extra := tk.ExtraMDRepos(); extra != nil {
+				t.Fatalf("ExtraMDRepos with one repo = %+v, want nil", extra)
+			}
+		})
+		t.Run("MultipleRepos", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{Repos: []RepoMount{
+				{Name: "a/b", Branch: "caic-0", GitRoot: "/foo"},
+				{Name: "c/d", Branch: "caic-1", GitRoot: "/bar"},
+			}}
+			extra := tk.ExtraMDRepos()
+			if len(extra) != 1 {
+				t.Fatalf("ExtraMDRepos len = %d, want 1", len(extra))
+			}
+			if extra[0].Branch != "caic-1" {
+				t.Errorf("extra[0].Branch = %q, want %q", extra[0].Branch, "caic-1")
+			}
+		})
+	})
+
+	t.Run("SetStateAt", func(t *testing.T) {
+		t.Parallel()
+		tk := &Task{}
+		now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		tk.SetStateAt(StateRunning, now)
+		if tk.GetState() != StateRunning {
+			t.Errorf("state = %v, want %v", tk.GetState(), StateRunning)
+		}
+		snap := tk.Snapshot()
+		if !snap.StateUpdatedAt.Equal(now) {
+			t.Errorf("StateUpdatedAt = %v, want %v", snap.StateUpdatedAt, now)
+		}
+		if !snap.TurnStartedAt.IsZero() {
+			t.Error("TurnStartedAt should be zero when SetStateAt is used")
+		}
+	})
+
+	t.Run("SetTurnStartedAt", func(t *testing.T) {
+		t.Parallel()
+		t.Run("Running", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.SetState(StateRunning)
+			now := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+			tk.SetTurnStartedAt(now)
+			if snap := tk.Snapshot(); !snap.TurnStartedAt.Equal(now) {
+				t.Errorf("TurnStartedAt = %v, want %v", snap.TurnStartedAt, now)
+			}
+		})
+		t.Run("NonRunning", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.SetState(StateWaiting)
+			now := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
+			tk.SetTurnStartedAt(now)
+			if snap := tk.Snapshot(); !snap.TurnStartedAt.IsZero() {
+				t.Errorf("TurnStartedAt = %v, want zero when non-running", snap.TurnStartedAt)
+			}
+		})
+	})
+
+	t.Run("GetModel", func(t *testing.T) {
+		t.Parallel()
+		t.Run("FallbackToModel", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{Model: "gpt-4"}
+			if got := tk.GetModel(); got != "gpt-4" {
+				t.Errorf("GetModel = %q, want %q", got, "gpt-4")
+			}
+		})
+		t.Run("UsesReportedModel", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{Model: "gpt-4"}
+			tk.addMessage(t.Context(), &agent.InitMessage{SessionID: "s1", Model: "claude-3-opus"}, false)
+			if got := tk.GetModel(); got != "claude-3-opus" {
+				t.Errorf("GetModel = %q, want %q", got, "claude-3-opus")
+			}
+		})
+	})
+
+	t.Run("SetPR", func(t *testing.T) {
+		t.Parallel()
+		tk := &Task{}
+		tk.SetPR("octocat", "hello-world", 42)
+		if got := tk.GetPR(); got != 42 {
+			t.Errorf("GetPR = %d, want 42", got)
+		}
+		snap := tk.Snapshot()
+		if snap.ForgeOwner != "octocat" {
+			t.Errorf("ForgeOwner = %q, want %q", snap.ForgeOwner, "octocat")
+		}
+		if snap.ForgeRepo != "hello-world" {
+			t.Errorf("ForgeRepo = %q, want %q", snap.ForgeRepo, "hello-world")
+		}
+		if snap.ForgePR != 42 {
+			t.Errorf("ForgePR = %d, want 42", snap.ForgePR)
+		}
+		if snap.ForgePRState != forge.PRStateOpen {
+			t.Errorf("ForgePRState = %q, want %q", snap.ForgePRState, forge.PRStateOpen)
+		}
+	})
+
+	t.Run("SetPRState", func(t *testing.T) {
+		t.Parallel()
+		tk := &Task{}
+		tk.SetPR("octocat", "hello-world", 42)
+		tk.SetPRState(forge.PRStateClosed)
+		snap := tk.Snapshot()
+		if snap.ForgePRState != forge.PRStateClosed {
+			t.Errorf("ForgePRState = %q, want %q", snap.ForgePRState, forge.PRStateClosed)
+		}
+	})
+
+	t.Run("SetCIStatus", func(t *testing.T) {
+		t.Parallel()
+		tk := &Task{}
+		checks := []forge.Check{{Name: "lint", Status: "success"}}
+		tk.SetCIStatus(forge.CIStatusPending, checks)
+		snap := tk.Snapshot()
+		if snap.CIStatus != forge.CIStatusPending {
+			t.Errorf("CIStatus = %v, want %v", snap.CIStatus, forge.CIStatusPending)
+		}
+		if len(snap.CIChecks) != 1 || snap.CIChecks[0].Name != "lint" {
+			t.Errorf("CIChecks = %+v", snap.CIChecks)
+		}
+	})
+
+	t.Run("SetTitle", func(t *testing.T) {
+		t.Parallel()
+		t.Run("SetsTitle", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.SetTitle("hello")
+			if tk.Title() != "hello" {
+				t.Errorf("Title = %q, want %q", tk.Title(), "hello")
+			}
+		})
+		t.Run("EmptyIgnored", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.SetTitle("first")
+			tk.SetTitle("")
+			if tk.Title() != "first" {
+				t.Errorf("Title = %q, want %q (empty string should be ignored)", tk.Title(), "first")
+			}
+		})
+	})
+
+	t.Run("SetAgentVersion", func(t *testing.T) {
+		t.Parallel()
+		tk := &Task{}
+		tk.SetAgentVersion("2.0.0")
+		snap := tk.Snapshot()
+		if snap.AgentVersion != "2.0.0" {
+			t.Errorf("AgentVersion = %q, want %q", snap.AgentVersion, "2.0.0")
+		}
+	})
+
+	t.Run("WriteToLog", func(t *testing.T) {
+		t.Parallel()
+		t.Run("NoSession", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.WriteToLog(&agent.TextMessage{Text: "hello"}) // no-op, no panic
+		})
+		t.Run("WithSession", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			var buf bytes.Buffer
+			h := &SessionHandle{LogW: nopCloser{&buf}}
+			tk.AttachSession(h)
+			tk.WriteToLog(&agent.TextMessage{Text: "hello"})
+			if !strings.Contains(buf.String(), `"text"`) {
+				t.Errorf("log buffer = %q, want text message", buf.String())
+			}
+		})
+	})
+
+	t.Run("PushStats", func(t *testing.T) {
+		t.Parallel()
+		t.Run("SubscribeStats", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.PushStats(&ContainerStats{CPUPerc: 50.0, MemUsed: 1024})
+			tk.PushStats(&ContainerStats{CPUPerc: 75.0, MemUsed: 2048})
+
+			ctx := t.Context()
+			history, live, unsub := tk.SubscribeStats(ctx)
+			t.Cleanup(unsub)
+
+			if len(history) != 2 {
+				t.Fatalf("history len = %d, want 2", len(history))
+			}
+			if history[0].CPUPerc != 50.0 {
+				t.Errorf("history[0].CPUPerc = %v, want 50.0", history[0].CPUPerc)
+			}
+			if history[1].CPUPerc != 75.0 {
+				t.Errorf("history[1].CPUPerc = %v, want 75.0", history[1].CPUPerc)
+			}
+
+			tk.PushStats(&ContainerStats{CPUPerc: 100.0, MemUsed: 4096})
+			timeout := time.After(time.Second)
+			select {
+			case s := <-live:
+				if s.CPUPerc != 100.0 {
+					t.Errorf("live.CPUPerc = %v, want 100.0", s.CPUPerc)
+				}
+			case <-timeout:
+				t.Fatal("timed out waiting for live stat")
+			}
+		})
+
+		t.Run("RingOverflow", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			for i := range 65 {
+				tk.PushStats(&ContainerStats{CPUPerc: float64(i)})
+			}
+			ctx := t.Context()
+			history, _, unsub := tk.SubscribeStats(ctx)
+			t.Cleanup(unsub)
+
+			if len(history) != statsRingSize {
+				t.Errorf("history len = %d, want %d (ring capped at size)", len(history), statsRingSize)
+			}
+			if history[0].CPUPerc != 5.0 {
+				t.Errorf("history[0].CPUPerc = %v, want 5.0 (oldest should be off by delta)", history[0].CPUPerc)
+			}
+			if history[len(history)-1].CPUPerc != 64.0 {
+				t.Errorf("history[last].CPUPerc = %v, want 64.0", history[len(history)-1].CPUPerc)
+			}
+		})
+	})
+
+	t.Run("SendCompact", func(t *testing.T) {
+		t.Parallel()
+		t.Run("NoSession", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateWaiting)
+			err := tk.SendCompact(t.Context(), "compact now")
+			if err == nil {
+				t.Fatal("expected error when no session is active")
+			}
+			if !strings.Contains(err.Error(), "session="+string(SessionNone)) {
+				t.Errorf("error = %q, want session=%s", err.Error(), SessionNone)
+			}
+		})
+		t.Run("DeadSession", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateWaiting)
+			cmdCtx, cmdCancel := context.WithTimeout(t.Context(), 5*time.Second)
+			t.Cleanup(cmdCancel)
+			cmd := exec.CommandContext(cmdCtx, "true")
+			stdin, _ := cmd.StdinPipe()
+			stdout, _ := cmd.StdoutPipe()
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.Message, 256), nil)
+			<-s.Done()
+			tk.AttachSession(&SessionHandle{Session: s})
+			err := tk.SendCompact(t.Context(), "compact now")
+			if err == nil {
+				t.Fatal("expected error for dead session")
+			}
+			if !strings.Contains(err.Error(), "session="+string(SessionExited)) {
+				t.Errorf("error = %q, want session=%s", err.Error(), SessionExited)
+			}
+		})
+	})
+
+	t.Run("SyntheticUserInput", func(t *testing.T) {
+		t.Parallel()
+		img := agent.ImageData{Data: "base64data", MediaType: "image/png"}
+		prompt := agent.Prompt{Text: "look at this", Images: []agent.ImageData{img}}
+		msg := syntheticUserInput(prompt)
+		if msg.Text != "look at this" {
+			t.Errorf("Text = %q, want %q", msg.Text, "look at this")
+		}
+		if len(msg.Images) != 1 {
+			t.Fatalf("Images len = %d, want 1", len(msg.Images))
+		}
+		if msg.Images[0].Data != "base64data" {
+			t.Errorf("Images[0].Data = %q, want %q", msg.Images[0].Data, "base64data")
+		}
+		prompt.Images[0].Data = "modified"
+		if msg.Images[0].Data != "base64data" {
+			t.Error("message images not independent copy")
+		}
+	})
+
+	t.Run("LastAgentMessage", func(t *testing.T) {
+		t.Parallel()
+		t.Run("Empty", func(t *testing.T) {
+			t.Parallel()
+			if lastAgentMessage(nil) != nil {
+				t.Error("lastAgentMessage(nil) should be nil")
+			}
+		})
+		t.Run("SkipsNonSemantic", func(t *testing.T) {
+			t.Parallel()
+			msgs := []agent.Message{
+				&agent.ResultMessage{MessageType: "result", Result: "done"},
+				&agent.DiffStatMessage{MessageType: "caic_diff_stat"},
+				&agent.TextDeltaMessage{Text: "partial"},
+				&agent.RawMessage{},
+				&agent.UsageMessage{},
+			}
+			got := lastAgentMessage(msgs)
+			if got == nil || got.Result != "done" {
+				t.Errorf("lastAgentMessage should find ResultMessage skipping non-semantic, got %+v", got)
+			}
+		})
+		t.Run("NonResultLast", func(t *testing.T) {
+			t.Parallel()
+			msgs := []agent.Message{
+				&agent.ResultMessage{MessageType: "result"},
+				&agent.TextMessage{Text: "mid output"},
+			}
+			if lastAgentMessage(msgs) != nil {
+				t.Error("lastAgentMessage should be nil when last semantic is not result")
+			}
+		})
+	})
+}
+
+// nopCloser wraps an io.Writer to implement io.WriteCloser with a no-op Close.
+type nopCloser struct{ io.Writer }
+
+func (nopCloser) Close() error { return nil }
+
+func TestSessionHandle(t *testing.T) {
+	t.Parallel()
+	t.Run("Drain", func(t *testing.T) {
+		t.Parallel()
+		cmdCtx, cmdCancel := context.WithTimeout(t.Context(), 5*time.Second)
+		t.Cleanup(cmdCancel)
+		cmd := exec.CommandContext(cmdCtx, "cat")
+		stdin, _ := cmd.StdinPipe()
+		stdout, _ := cmd.StdoutPipe()
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, &testWire{parse: claudecode.New().NewWire().ParseMessage}), stdout, make(chan agent.Message, 256), nil)
+		ch := make(chan agent.Message)
+		done := make(chan struct{})
+		go func() {
+			for range ch {
+			}
+			close(done)
+		}()
+		h := &SessionHandle{Session: s, MsgCh: ch, DispatchDone: done}
+		_ = stdin.Close()
+		h.Drain()
+		select {
+		case <-done:
+		default:
+			t.Error("DispatchDone should be closed after Drain")
+		}
+	})
+
+	t.Run("CloseMsgCh", func(t *testing.T) {
+		t.Parallel()
+		for range 2 {
+			h := &SessionHandle{MsgCh: make(chan agent.Message)}
+			h.CloseMsgCh()
+		}
+	})
+
+	t.Run("StatsSubClose", func(t *testing.T) {
+		t.Parallel()
+		s := &statsSub{ch: make(chan ContainerStats)}
+		s.close()
+		s.close() // double close must not panic.
 	})
 }
 
@@ -1542,7 +1934,10 @@ func TestState(t *testing.T) {
 			{StatePushing, "pushing"},
 			{StatePurging, "purging"},
 			{StateFailed, "failed"},
+			{StateStopping, "stopping"},
+			{StateStopped, "stopped"},
 			{StatePurged, "purged"},
+			{State(999), "unknown"},
 		} {
 			if got := tt.state.String(); got != tt.want {
 				t.Errorf("State(%d).String() = %q, want %q", tt.state, got, tt.want)
