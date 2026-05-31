@@ -1,4 +1,4 @@
-// Tests for startup helpers, including the background repo watcher.
+// Tests for the background repo watcher.
 
 package server
 
