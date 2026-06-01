@@ -49,10 +49,10 @@ detekt {
 }
 
 dependencies {
-    // Coroutines — Flow-based API for async BLE operations
-    implementation(libs.kotlinx.coroutines.core)
+    // Coroutines — Flow-based API for async BLE operations (exposed to consumers).
+    api(libs.kotlinx.coroutines.core)
 
-    // Unit tests (JVM, no Android) — mockable BLE interfaces in the future
+    // Unit tests (JVM with Robolectric shadows)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.robolectric)
