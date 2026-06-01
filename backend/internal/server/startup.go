@@ -13,6 +13,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/caic-xyz/md"
+	"github.com/caic-xyz/md/gitutil"
+	"github.com/maruel/genai"
+	"github.com/maruel/genai/providers"
+
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
@@ -25,10 +30,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
-	"github.com/caic-xyz/md"
-	"github.com/caic-xyz/md/gitutil"
-	"github.com/maruel/genai"
-	"github.com/maruel/genai/providers"
 )
 
 // New creates a new Server. It discovers repos under rootDir, creates a Runner
@@ -194,7 +195,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		githubAllowedUsers: githubAllowedUsers,
 		gitlabAllowedUsers: gitlabAllowedUsers,
 		hostState:          hostState,
-		usageFetchers:      detectProviders(ctx, cfg.HarnessEnv),
+		usageFetchers:      detectProviders(ctx, cfg.CoreEnv, cfg.HarnessEnv),
 		pprof:              cfg.Pprof,
 		geminiAPIKey:       cfg.GeminiAPIKey,
 		voiceBridge:        voiceBridge,
@@ -220,7 +221,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	// Determine LLM provider: use configured value or auto-detect
 	llmProvider := cfg.LLMProvider
 	if llmProvider == "" {
-		llmProvider = autoDetectLLMProvider(ctx, cfg.GeminiAPIKey)
+		llmProvider = autoDetectLLMProvider(ctx, cfg.CoreEnv, cfg.GeminiAPIKey)
 		if llmProvider != "" {
 			slog.Info("auto-detected LLM provider", "prov", llmProvider)
 		}
@@ -236,10 +237,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 			} else {
 				opts = append(opts, genai.ModelCheap)
 			}
-			// Pass API key if configured for the provider.
-			if llmProvider == "gemini" && cfg.GeminiAPIKey != "" {
-				opts = append(opts, genai.ProviderOptionAPIKey(cfg.GeminiAPIKey))
-			}
+			opts = appendProviderAPIKey(opts, llmProvider, cfg.CoreEnv, cfg.GeminiAPIKey)
 			if p, err := c.Factory(ctx, opts...); err != nil {
 				slog.Warn("LLM provider init failed", "prov", llmProvider, "err", err)
 			} else {

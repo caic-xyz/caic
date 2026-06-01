@@ -239,6 +239,7 @@ func TestTomlToServerConfig(t *testing.T) {
 				Root: "/repos",
 				Env: map[string]string{
 					"GEMINI_API_KEY":    "AIza_from_core_env",
+					"DEEPSEEK_API_KEY":  "sk_deepseek_from_core_env",
 					"TAILSCALE_API_KEY": "tskey_from_core_env",
 				},
 			},
@@ -295,6 +296,9 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 		if cfg.GeminiAPIKey != "AIza_from_core_env" {
 			t.Errorf("GeminiAPIKey = %q, want AIza_from_core_env", cfg.GeminiAPIKey)
+		}
+		if cfg.CoreEnv["DEEPSEEK_API_KEY"] != "sk_deepseek_from_core_env" {
+			t.Errorf("CoreEnv[DEEPSEEK_API_KEY] = %q, want sk_deepseek_from_core_env", cfg.CoreEnv["DEEPSEEK_API_KEY"])
 		}
 		if cfg.TailscaleAPIKey != "tskey_from_core_env" {
 			t.Errorf("TailscaleAPIKey = %q, want tskey_from_core_env", cfg.TailscaleAPIKey)

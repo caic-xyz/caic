@@ -5,28 +5,19 @@ package server
 import (
 	"context"
 	"log/slog"
+	"os"
 	"strings"
 
-	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
+
+	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
-// detectProviders scans harness environment variables for known API keys and
-// OAuth credential files, creating the appropriate ProviderFetcher for each
-// provider found. OAuth-based providers (Anthropic, Codex) are always
-// attempted since their credentials come from files, not env vars.
-func detectProviders(ctx context.Context, harnessEnv map[string][]string) []usage.ProviderFetcher {
-	// Collect all env vars across all harnesses.
-	envKeys := make(map[string]struct{})
-	for _, envs := range harnessEnv {
-		for _, e := range envs {
-			if k, _, ok := strings.Cut(e, "="); ok {
-				envKeys[k] = struct{}{}
-			}
-		}
-	}
-
+// detectProviders creates usage fetchers for configured providers. OAuth-based
+// providers watch credential files; API-key providers use genai provider
+// metadata to resolve the expected environment variable name.
+func detectProviders(ctx context.Context, coreEnv map[string]string, harnessEnv map[string][]string) []usage.ProviderFetcher {
 	var fetchers []usage.ProviderFetcher
 
 	// OAuth-based: always try these (they watch credential files).
@@ -37,22 +28,12 @@ func detectProviders(ctx context.Context, harnessEnv map[string][]string) []usag
 		fetchers = append(fetchers, f)
 	}
 
-	// API-key-based: detect from env vars.
-	if _, ok := envKeys["DEEPSEEK_API_KEY"]; ok {
-		key := firstEnvValue(harnessEnv, "DEEPSEEK_API_KEY")
-		if f := usage.NewDeepSeekFetcher(key); f != nil {
-			fetchers = append(fetchers, f)
+	for _, entry := range apiKeyUsageFetchers {
+		key := providerAPIKey(entry.provider, coreEnv, harnessEnv, "")
+		if key == "" {
+			continue
 		}
-	}
-	if _, ok := envKeys["OPENROUTER_API_KEY"]; ok {
-		key := firstEnvValue(harnessEnv, "OPENROUTER_API_KEY")
-		if f := usage.NewOpenRouterFetcher(key); f != nil {
-			fetchers = append(fetchers, f)
-		}
-	}
-	if _, ok := envKeys["XIAOMI_API_KEY"]; ok {
-		key := firstEnvValue(harnessEnv, "XIAOMI_API_KEY")
-		if f := usage.NewXiaomiFetcher(key); f != nil {
+		if f := entry.factory(key); f != nil {
 			fetchers = append(fetchers, f)
 		}
 	}
@@ -61,25 +42,11 @@ func detectProviders(ctx context.Context, harnessEnv map[string][]string) []usag
 	return fetchers
 }
 
-// firstEnvValue returns the value for the given key from the first harness
-// that defines it.
-func firstEnvValue(harnessEnv map[string][]string, key string) string {
-	for _, envs := range harnessEnv {
-		for _, e := range envs {
-			k, v, ok := strings.Cut(e, "=")
-			if ok && k == key {
-				return v
-			}
-		}
-	}
-	return ""
-}
-
 // autoDetectLLMProvider detects the best available LLM provider from the
 // genai providers registry by attempting to instantiate and ping each one.
 // It prefers locally-available providers (codex, opencode, claudecode) over
 // remote APIs (gemini). Returns "" if no suitable provider is found.
-func autoDetectLLMProvider(ctx context.Context, geminiAPIKey string) string {
+func autoDetectLLMProvider(ctx context.Context, coreEnv map[string]string, geminiAPIKey string) string {
 	// Preferred order: container-local providers first, then others.
 	preferred := []string{
 		"codex",
@@ -88,13 +55,13 @@ func autoDetectLLMProvider(ctx context.Context, geminiAPIKey string) string {
 		"gemini",
 	}
 	for _, name := range preferred {
-		if pingProvider(ctx, name, geminiAPIKey) {
+		if pingProvider(ctx, name, coreEnv, geminiAPIKey) {
 			return name
 		}
 	}
 	// Fallback: iterate over all providers and pick the first one that responds to ping.
 	for name := range providers.All {
-		if pingProvider(ctx, name, geminiAPIKey) {
+		if pingProvider(ctx, name, coreEnv, geminiAPIKey) {
 			return name
 		}
 	}
@@ -102,17 +69,14 @@ func autoDetectLLMProvider(ctx context.Context, geminiAPIKey string) string {
 }
 
 // pingProvider attempts to instantiate and ping a provider, returning true if successful.
-func pingProvider(ctx context.Context, name, geminiAPIKey string) bool {
+func pingProvider(ctx context.Context, name string, coreEnv map[string]string, geminiAPIKey string) bool {
 	c, ok := providers.All[name]
 	if !ok || c.Factory == nil {
 		return false
 	}
 	var opts []genai.ProviderOption
 	opts = append(opts, genai.ModelCheap)
-	// Pass API key if configured for the provider.
-	if name == "gemini" && geminiAPIKey != "" {
-		opts = append(opts, genai.ProviderOptionAPIKey(geminiAPIKey))
-	}
+	opts = appendProviderAPIKey(opts, name, coreEnv, geminiAPIKey)
 	p, err := c.Factory(ctx, opts...)
 	if err != nil {
 		slog.Debug("provider factory failed", "prov", name, "err", err)
@@ -127,4 +91,55 @@ func pingProvider(ctx context.Context, name, geminiAPIKey string) bool {
 	}
 	slog.Info("provider detected", "prov", name)
 	return true
+}
+
+func appendProviderAPIKey(
+	opts []genai.ProviderOption,
+	providerName string,
+	coreEnv map[string]string,
+	geminiAPIKey string,
+) []genai.ProviderOption {
+	key := providerAPIKey(providerName, coreEnv, nil, geminiAPIKey)
+	if key == "" {
+		return opts
+	}
+	return append(opts, genai.ProviderOptionAPIKey(key))
+}
+
+func providerAPIKey(providerName string, coreEnv map[string]string, harnessEnv map[string][]string, geminiAPIKey string) string {
+	c, ok := providers.All[providerName]
+	if !ok || c.APIKeyEnvVar == "" {
+		return ""
+	}
+	if key := configuredEnvValue(coreEnv, harnessEnv, c.APIKeyEnvVar); key != "" {
+		return key
+	}
+	if providerName == "gemini" {
+		return geminiAPIKey
+	}
+	return ""
+}
+
+func configuredEnvValue(coreEnv map[string]string, harnessEnv map[string][]string, envVar string) string {
+	if v, ok := coreEnv[envVar]; ok {
+		return v
+	}
+	for _, envs := range harnessEnv {
+		for _, e := range envs {
+			k, v, ok := strings.Cut(e, "=")
+			if ok && k == envVar {
+				return v
+			}
+		}
+	}
+	return os.Getenv(envVar)
+}
+
+var apiKeyUsageFetchers = []struct {
+	provider string
+	factory  func(string) usage.ProviderFetcher
+}{
+	{provider: "deepseek", factory: func(key string) usage.ProviderFetcher { return usage.NewDeepSeekFetcher(key) }},
+	{provider: "openrouter", factory: func(key string) usage.ProviderFetcher { return usage.NewOpenRouterFetcher(key) }},
+	{provider: "xiaomi", factory: func(key string) usage.ProviderFetcher { return usage.NewXiaomiFetcher(key) }},
 }

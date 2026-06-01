@@ -15,6 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caic-xyz/md"
+	"github.com/maruel/genai"
+
 	"github.com/caic-xyz/caic/backend/frontend"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
@@ -29,8 +32,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
-	"github.com/caic-xyz/md"
-	"github.com/maruel/genai"
 )
 
 type repoInfo struct {
@@ -62,6 +63,7 @@ type Config struct {
 
 	// Agent backends.
 	HarnessEnv      map[string][]string // per-harness KEY=VALUE env vars for containers
+	CoreEnv         map[string]string   // server-level KEY=VALUE env vars from [core.env]
 	GeminiAPIKey    string              // required for Gemini Live audio
 	TailscaleAPIKey string              // required for Tailscale networking inside containers
 	Runtime         string              // container runtime: "docker" or "podman" (default: "docker")

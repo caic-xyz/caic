@@ -9,9 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	toml "github.com/pelletier/go-toml/v2"
+
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/server"
-	toml "github.com/pelletier/go-toml/v2"
 )
 
 // tomlConfig mirrors the TOML file layout at ~/.config/caic/config.toml.
@@ -169,6 +170,7 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 		ConfigDir:               cfgDir,
 		CacheDir:                cacheDir(),
 		HarnessEnv:              harnessEnv,
+		CoreEnv:                 tc.Core.Env,
 		GeminiAPIKey:            geminiAPIKey,
 		TailscaleAPIKey:         tailscaleAPIKey,
 		Runtime:                 tc.Core.Runtime,
