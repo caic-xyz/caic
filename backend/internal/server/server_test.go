@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
@@ -131,6 +133,131 @@ func loadPurgedTasksForTest(s *Server) error {
 		return err
 	}
 	return s.taskMgr.LoadPurgedTasks(logs)
+}
+
+func newRunnerConstructionTestServer(t *testing.T, root string) *Server {
+	harnessEnv := map[string][]string{string(agent.Codex): {"CODEX_HOME=/tmp/codex"}}
+	backend := &container.Backend{HarnessEnv: harnessEnv}
+	logDir := filepath.Join(t.TempDir(), "logs")
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	s := &Server{
+		ctx:      t.Context(),
+		absRoot:  root,
+		logDir:   logDir,
+		cacheDir: cacheDir,
+		backend:  backend,
+		repoReg:  newRepoRegistry(nil),
+	}
+	s.taskMgr = tasks.New(tasks.Config{
+		ServerCtx:  t.Context(),
+		LogDir:     logDir,
+		CacheDir:   cacheDir,
+		Backend:    backend,
+		HarnessEnv: harnessEnv,
+	})
+	return s
+}
+
+func initCloneSourceRepo(t *testing.T) string {
+	repo := filepath.Join(t.TempDir(), "source")
+	runServerGit(t, "", "init", repo)
+	runServerGit(t, repo, "config", "user.email", "test@example.com")
+	runServerGit(t, repo, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("hello\n"), 0o600); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	runServerGit(t, repo, "add", "README.md")
+	runServerGit(t, repo, "commit", "-m", "init")
+	runServerGit(t, repo, "branch", "-M", "main")
+	return repo
+}
+
+func runServerGit(t *testing.T, dir string, args ...string) {
+	cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // test-only fixed arguments and temp paths
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+}
+
+func TestCloneRepo(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid runner construction and watcher overlap", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		source := initCloneSourceRepo(t)
+		s := newRunnerConstructionTestServer(t, root)
+
+		repo, err := s.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: source, Path: "./cloned"})
+		if err != nil {
+			t.Fatalf("cloneRepo: %v", err)
+		}
+		if repo.Path != "cloned" {
+			t.Fatalf("repo path = %q, want cloned", repo.Path)
+		}
+		runner, ok := s.taskMgr.Runner("cloned")
+		if !ok {
+			t.Fatal("cloned runner not registered")
+		}
+		if runner.RepoName != "cloned" {
+			t.Fatalf("RepoName = %q, want cloned", runner.RepoName)
+		}
+		if runner.Dir != filepath.Join(root, "cloned") {
+			t.Fatalf("Dir = %q, want cloned path", runner.Dir)
+		}
+		if runner.LogDir != s.logDir || runner.CacheDir != s.cacheDir {
+			t.Fatalf("runner dirs = log %q cache %q, want log %q cache %q", runner.LogDir, runner.CacheDir, s.logDir, s.cacheDir)
+		}
+		if runner.Container != s.backend {
+			t.Fatal("runner container backend was not wired")
+		}
+		if len(runner.HarnessEnv[string(agent.Codex)]) != 1 || runner.HarnessEnv[string(agent.Codex)][0] != "CODEX_HOME=/tmp/codex" {
+			t.Fatalf("HarnessEnv = %#v, want configured codex env", runner.HarnessEnv)
+		}
+		if len(runner.Backends) == 0 {
+			t.Fatal("runner backends were not initialized")
+		}
+
+		s.syncReposInDir(t.Context(), root)
+		if got := s.repoReg.snapshot(); len(got) != 1 || got[0].RelPath != "cloned" {
+			t.Fatalf("repo registry after watcher sync = %+v, want one cloned repo", got)
+		}
+		after, ok := s.taskMgr.Runner("cloned")
+		if !ok {
+			t.Fatal("runner disappeared after watcher sync")
+		}
+		if after != runner {
+			t.Fatal("watcher replaced an already registered clone runner")
+		}
+	})
+
+	t.Run("error cleans partial clone", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		parent := initCloneSourceRepo(t)
+		submodule := initCloneSourceRepo(t)
+		runServerGit(t, parent, "-c", "protocol.file.allow=always", "submodule", "add", submodule, "deps/sub")
+		runServerGit(t, parent, "commit", "-m", "add submodule")
+		if err := os.RemoveAll(submodule); err != nil {
+			t.Fatalf("remove submodule source: %v", err)
+		}
+		s := newRunnerConstructionTestServer(t, root)
+
+		if _, err := s.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: parent, Path: "broken"}); err == nil {
+			t.Fatal("cloneRepo succeeded, want submodule clone failure")
+		}
+		if _, err := os.Stat(filepath.Join(root, "broken")); !os.IsNotExist(err) {
+			t.Fatalf("partial clone path still exists: %v", err)
+		}
+		if got := s.repoReg.snapshot(); len(got) != 0 {
+			t.Fatalf("repo registry = %+v, want empty after failed clone", got)
+		}
+		if _, ok := s.taskMgr.Runner("broken"); ok {
+			t.Fatal("failed clone registered a runner")
+		}
+	})
 }
 
 func TestHandleTaskEvents(t *testing.T) {
@@ -617,10 +744,10 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("NoRepoRunnerNoBackend", func(t *testing.T) {
 		t.Parallel()
-		// The Manager always registers a no-repo runner, but a test server's
-		// no-repo runner has no backends. Creating a no-repo task with an
-		// unknown harness returns a clear 400 instead of panicking.
-		s := newTestServer(t) // no-repo runner has no backends
+		// Creating a no-repo task with no registered harness backends returns
+		// a clear 400 instead of panicking.
+		s := newTestServer(t)
+		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{}})
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude"}`)

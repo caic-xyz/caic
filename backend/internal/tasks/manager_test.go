@@ -51,6 +51,33 @@ func TestNew(t *testing.T) {
 		default:
 		}
 	})
+	t.Run("no-repo runner is fully constructed", func(t *testing.T) {
+		t.Parallel()
+		cfg := Config{
+			ServerCtx:  t.Context(),
+			LogDir:     "/tmp/logs",
+			CacheDir:   "/tmp/cache",
+			Backend:    &container.Backend{},
+			HarnessEnv: map[string][]string{string(agent.Codex): {"CODEX_HOME=/tmp/codex"}},
+		}
+		m := New(cfg)
+		r, ok := m.Runner("")
+		if !ok {
+			t.Fatal("no-repo runner not registered")
+		}
+		if r.LogDir != cfg.LogDir || r.CacheDir != cfg.CacheDir {
+			t.Fatalf("runner dirs = log %q cache %q, want log %q cache %q", r.LogDir, r.CacheDir, cfg.LogDir, cfg.CacheDir)
+		}
+		if r.Container != cfg.Backend {
+			t.Fatal("runner container backend was not wired")
+		}
+		if len(r.HarnessEnv[string(agent.Codex)]) != 1 || r.HarnessEnv[string(agent.Codex)][0] != "CODEX_HOME=/tmp/codex" {
+			t.Fatalf("HarnessEnv = %#v, want configured codex env", r.HarnessEnv)
+		}
+		if len(r.Backends) == 0 {
+			t.Fatal("runner backends were not initialized")
+		}
+	})
 }
 
 func TestManager(t *testing.T) {

@@ -294,6 +294,8 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 	// Defense-in-depth: ensure the resolved path is under absRoot.
 	if rel, err := filepath.Rel(s.absRoot, absTarget); err != nil || strings.HasPrefix(rel, "..") {
 		return nil, dto.BadRequest("path escapes root directory")
+	} else {
+		targetPath = rel
 	}
 
 	// Check if directory already exists.
@@ -351,32 +353,22 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 		return nil, dto.InternalError("cannot determine default branch: " + err.Error())
 	}
 	remote := gitutil.RemoteOriginURL(ctx, absTarget)
-
-	// Create and init runner.
-	runner := &task.Runner{
-		BaseBranch: branch,
-		Dir:        absTarget,
-		LogDir:     s.logDir,
-		Container:  s.backend,
-	}
-	if err := runner.Init(ctx); err != nil {
+	info := repoInfo{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
+	runner, err := s.newRunner(ctx, &info)
+	if err != nil {
 		_ = os.RemoveAll(absTarget)
 		return nil, dto.InternalError("failed to init runner: " + err.Error())
 	}
-
-	var cloneForgeKind forge.Kind
-	var cloneForgeOwner, cloneForgeRepo string
 	if rawURL, err := forge.RemoteURL(ctx, absTarget); err == nil {
-		cloneForgeKind, cloneForgeOwner, cloneForgeRepo, _ = forge.ParseRemoteURL(rawURL)
+		info.ForgeKind, info.ForgeOwner, info.ForgeRepo, _ = forge.ParseRemoteURL(rawURL)
 	}
-	info := repoInfo{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote, ForgeKind: cloneForgeKind, ForgeOwner: cloneForgeOwner, ForgeRepo: cloneForgeRepo}
 	// Add to the registry first, then register the runner (see repoRegistry's
 	// ordering invariant).
 	s.repoReg.add(&info)
 	s.taskMgr.RegisterRunner(targetPath, runner)
 	slog.Info("cloned repo", "url", req.URL, "path", targetPath)
 
-	return &v1.Repo{Path: targetPath, Branch: branch, BaseBranch: v1.BranchInfo{Name: branch, Remote: remoteName}, RemoteURL: gitutil.RemoteToHTTPS(remote), Forge: v1.Forge(cloneForgeKind)}, nil
+	return &v1.Repo{Path: targetPath, Branch: branch, BaseBranch: v1.BranchInfo{Name: branch, Remote: remoteName}, RemoteURL: gitutil.RemoteToHTTPS(remote), Forge: v1.Forge(info.ForgeKind)}, nil
 }
 
 // getVoiceToken returns a Gemini API credential for the Android voice client.

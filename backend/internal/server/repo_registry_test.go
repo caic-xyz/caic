@@ -3,6 +3,7 @@
 package server
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -56,6 +57,37 @@ func TestRepoRegistry(t *testing.T) {
 		}
 	})
 
+	t.Run("add is idempotent by rel path and abs path", func(t *testing.T) {
+		t.Parallel()
+		r := newRepoRegistry(nil)
+		r.add(&repoInfo{RelPath: "a", AbsPath: "/repo/a", BaseBranch: "main"})
+		r.add(&repoInfo{RelPath: "a", AbsPath: "/repo/a", BaseBranch: "trunk"})
+		if got := r.snapshot(); len(got) != 1 || got[0].BaseBranch != "trunk" {
+			t.Fatalf("same rel+abs add = %+v, want one updated repo", got)
+		}
+
+		if !r.setCIStatusIfChanged("a", ci.RepoCIState{Status: forge.CIStatusSuccess}) {
+			t.Fatal("initial CI status should report changed")
+		}
+		r.add(&repoInfo{RelPath: "nested/a", AbsPath: "/repo/a", BaseBranch: "main"})
+		got := r.snapshot()
+		if len(got) != 1 || got[0].RelPath != "nested/a" {
+			t.Fatalf("same abs add = %+v, want one repo with updated rel path", got)
+		}
+		if st := r.ciStatusFor("nested/a"); st.Status != forge.CIStatusSuccess {
+			t.Fatalf("migrated CI status = %q, want %q", st.Status, forge.CIStatusSuccess)
+		}
+		if st := r.ciStatusFor("a"); st.Status != "" {
+			t.Fatalf("old CI status = %q, want empty", st.Status)
+		}
+
+		r.add(&repoInfo{RelPath: "nested/a", AbsPath: "/repo/other", BaseBranch: "develop"})
+		got = r.snapshot()
+		if len(got) != 1 || got[0].AbsPath != "/repo/other" {
+			t.Fatalf("same rel add = %+v, want one repo with updated abs path", got)
+		}
+	})
+
 	t.Run("concurrent add and read are race-free", func(t *testing.T) {
 		t.Parallel()
 		r := newRepoRegistry(nil)
@@ -64,7 +96,7 @@ func TestRepoRegistry(t *testing.T) {
 			wg.Add(2)
 			go func() {
 				defer wg.Done()
-				info := repoInfo{RelPath: "r", ForgeOwner: "o", ForgeRepo: "p"}
+				info := repoInfo{RelPath: fmt.Sprintf("r-%d", i), AbsPath: fmt.Sprintf("/repo/%d", i), ForgeOwner: "o", ForgeRepo: "p"}
 				r.add(&info)
 			}()
 			go func() {

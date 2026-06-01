@@ -117,10 +117,27 @@ func (r *repoRegistry) forgePathsAtSHA(owner, repo, sha string) []string {
 	return out
 }
 
-// add appends a copy of info. The caller registers the task.Runner afterwards
-// (see the ordering invariant on repoRegistry).
+// add inserts or replaces a copy of info. RelPath and AbsPath are both stable
+// identities for a repo, so adding either identity twice is idempotent. The
+// caller registers the task.Runner afterwards (see the ordering invariant on
+// repoRegistry).
 func (r *repoRegistry) add(info *repoInfo) {
 	r.mu.Lock()
+	for i := range r.repos {
+		if r.repos[i].RelPath != info.RelPath && r.repos[i].AbsPath != info.AbsPath {
+			continue
+		}
+		oldRel := r.repos[i].RelPath
+		r.repos[i] = *info
+		if oldRel != info.RelPath {
+			if st, ok := r.ciStatus[oldRel]; ok {
+				r.ciStatus[info.RelPath] = st
+				delete(r.ciStatus, oldRel)
+			}
+		}
+		r.mu.Unlock()
+		return
+	}
 	r.repos = append(r.repos, *info)
 	r.mu.Unlock()
 }

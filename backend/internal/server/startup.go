@@ -1,4 +1,4 @@
-// Server startup: the New() constructor and one-time task-log migration.
+// Server startup, shared runner construction, and one-time task-log migration.
 
 package server
 
@@ -249,62 +249,28 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	}
 
 	// Phase 2: Runner init (parallel per-repo).
-	type repoResult struct {
-		info   repoInfo
-		runner *task.Runner
-	}
-	results := make([]repoResult, len(repoRes.paths))
+	results := make([]repoInitResult, len(repoRes.paths))
 	var wg sync.WaitGroup
 	for i, abs := range repoRes.paths {
 		wg.Go(func() {
 			defer trace.StartRegion(ctx, "repo-runner-init").End()
-			rel, err := filepath.Rel(absRoot, abs)
+			result, err := s.discoverRepoRunner(ctx, abs)
 			if err != nil {
-				rel = filepath.Base(abs)
-			}
-			remoteName, err := gitutil.DefaultRemote(ctx, abs)
-			if err != nil {
-				slog.Warn("skipping repo, cannot determine default remote", "path", abs, "err", err)
+				slog.Warn("skipping repo", "path", abs, "err", err)
 				return
 			}
-			branch, err := gitutil.DefaultBranch(ctx, abs, remoteName)
-			if err != nil {
-				slog.Warn("skipping repo, cannot determine default branch", "path", abs, "err", err)
-				return
+			if result.initErr != nil {
+				slog.Warn("runner init failed", "path", abs, "err", result.initErr)
 			}
-			remote := gitutil.RemoteOriginURL(ctx, abs)
-			runner := &task.Runner{
-				BaseBranch: branch,
-				Dir:        abs,
-				RepoName:   rel,
-				LogDir:     logDir,
-				CacheDir:   cfg.CacheDir,
-				HarnessEnv: cfg.HarnessEnv,
-				Container:  backend,
-			}
-			if err := runner.Init(ctx); err != nil {
-				slog.Warn("runner init failed", "path", abs, "err", err)
-			}
-			var forgeKind forge.Kind
-			var forgeOwner, forgeRepo string
-			if rawURL, err := forge.RemoteURL(ctx, abs); err == nil {
-				forgeKind, forgeOwner, forgeRepo, _ = forge.ParseRemoteURL(rawURL)
-			}
-			results[i] = repoResult{
-				info: repoInfo{
-					RelPath: rel, AbsPath: abs, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote,
-					ForgeKind: forgeKind, ForgeOwner: forgeOwner, ForgeRepo: forgeRepo,
-				},
-				runner: runner,
-			}
-			slog.Debug("discovered repo", "path", rel, "br", branch)
+			results[i] = result
+			slog.Debug("discovered repo", "path", result.info.RelPath, "br", result.info.BaseBranch)
 		})
 	}
 	wg.Wait()
 
 	// Construct the task manager before registering runners: the Manager is the
-	// single owner of the runner registry. New() registers a barebones no-repo
-	// runner; we overwrite it with the fully-initialized one below.
+	// single owner of the runner registry. New() registers a no-repo runner; we
+	// overwrite it below so server-owned runners all come from newRunner.
 	s.taskMgr = tasks.New(tasks.Config{
 		ServerCtx:  ctx,
 		LogDir:     logDir,
@@ -347,10 +313,8 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	s.Bot = bot.New(ctx, s)
 
 	// Always register a no-repo runner (keyed by "") for tasks that don't need
-	// a git repository. This overwrites New()'s barebones no-repo runner with a
-	// fully-initialized one.
-	noRepoRunner := &task.Runner{LogDir: logDir, CacheDir: cfg.CacheDir, HarnessEnv: cfg.HarnessEnv, Container: backend}
-	_ = noRepoRunner.Init(ctx) // populates Backends; no-op for no-repo (no branches to scan)
+	// a git repository.
+	noRepoRunner, _ := s.newRunner(ctx, nil) // populates Backends; no-op for no-repo (no branches to scan)
 	s.taskMgr.RegisterRunner("", noRepoRunner)
 
 	s.taskMgr.Start()
@@ -437,6 +401,65 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		region.End()
 	}
 	return s, nil
+}
+
+func (s *Server) discoverRepoRunner(ctx context.Context, abs string) (repoInitResult, error) {
+	rel := s.repoRelPath(abs)
+	remoteName, err := gitutil.DefaultRemote(ctx, abs)
+	if err != nil {
+		return repoInitResult{}, fmt.Errorf("cannot determine default remote: %w", err)
+	}
+	branch, err := gitutil.DefaultBranch(ctx, abs, remoteName)
+	if err != nil {
+		return repoInitResult{}, fmt.Errorf("cannot determine default branch: %w", err)
+	}
+	remote := gitutil.RemoteOriginURL(ctx, abs)
+	var forgeKind forge.Kind
+	var forgeOwner, forgeRepo string
+	if rawURL, err := forge.RemoteURL(ctx, abs); err == nil {
+		forgeKind, forgeOwner, forgeRepo, _ = forge.ParseRemoteURL(rawURL)
+	}
+	info := repoInfo{
+		RelPath:          rel,
+		AbsPath:          abs,
+		BaseBranch:       branch,
+		BaseBranchRemote: remoteName,
+		Remote:           remote,
+		ForgeKind:        forgeKind,
+		ForgeOwner:       forgeOwner,
+		ForgeRepo:        forgeRepo,
+	}
+	runner, initErr := s.newRunner(ctx, &info)
+	return repoInitResult{info: info, runner: runner, initErr: initErr}, nil
+}
+
+func (s *Server) repoRelPath(abs string) string {
+	rel, err := filepath.Rel(s.absRoot, abs)
+	if err != nil {
+		return filepath.Base(abs)
+	}
+	if rel == "." {
+		return ""
+	}
+	return rel
+}
+
+func (s *Server) newRunner(ctx context.Context, info *repoInfo) (*task.Runner, error) {
+	runner := &task.Runner{
+		LogDir:    s.logDir,
+		CacheDir:  s.cacheDir,
+		Container: s.backend,
+	}
+	if info != nil {
+		runner.BaseBranch = info.BaseBranch
+		runner.Dir = info.AbsPath
+		runner.RepoName = info.RelPath
+	}
+	if s.backend != nil {
+		runner.HarnessEnv = s.backend.HarnessEnv
+	}
+	err := runner.Init(ctx)
+	return runner, err
 }
 
 // migrateTaskLogs moves *.jsonl files from cacheDir into the tasks

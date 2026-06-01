@@ -135,11 +135,14 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 		runners:    make(map[string]*task.Runner),
 		changed:    make(chan struct{}),
 	}
-	m.runners[""] = &task.Runner{
+	noRepoRunner := &task.Runner{
+		LogDir:     cfg.LogDir,
 		CacheDir:   cfg.CacheDir,
 		HarnessEnv: cfg.HarnessEnv,
 		Container:  cfg.Backend,
 	}
+	_ = noRepoRunner.Init(cfg.ServerCtx)
+	m.runners[""] = noRepoRunner
 	return m
 }
 

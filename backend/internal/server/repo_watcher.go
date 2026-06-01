@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/md/gitutil"
 )
@@ -24,8 +23,9 @@ const repoDiscoveryDepth = 3
 // repoInitResult holds the outcome of initialising a single newly-discovered
 // repository.
 type repoInitResult struct {
-	info   repoInfo
-	runner *task.Runner
+	info    repoInfo
+	runner  *task.Runner
+	initErr error
 }
 
 // watchNewRepos polls absRoot and its subdirectories every 30 seconds for
@@ -119,50 +119,21 @@ func (s *Server) syncReposInDir(ctx context.Context, dir string) {
 	var wg sync.WaitGroup
 	for i, abs := range newPaths {
 		wg.Go(func() {
-			rel, err := filepath.Rel(s.absRoot, abs)
-			if err != nil {
-				rel = filepath.Base(abs)
-			}
+			rel := s.repoRelPath(abs)
 			// Guard against a concurrent clone adding the same path.
 			if _, exists := s.taskMgr.Runner(rel); exists {
 				return
 			}
-			remoteName, err := gitutil.DefaultRemote(ctx, abs)
+			result, err := s.discoverRepoRunner(ctx, abs)
 			if err != nil {
-				slog.DebugContext(ctx, "new repo: no remote, skipping", "path", abs, "err", err)
+				slog.WarnContext(ctx, "new repo: discovery failed", "path", abs, "err", err)
 				return
 			}
-			branch, err := gitutil.DefaultBranch(ctx, abs, remoteName)
-			if err != nil {
-				slog.WarnContext(ctx, "new repo: cannot determine default branch", "path", abs, "err", err)
-				return
+			if result.initErr != nil {
+				slog.WarnContext(ctx, "new repo: runner init failed", "path", abs, "err", result.initErr)
 			}
-			remote := gitutil.RemoteOriginURL(ctx, abs)
-			runner := &task.Runner{
-				BaseBranch: branch,
-				Dir:        abs,
-				RepoName:   rel,
-				LogDir:     s.logDir,
-				CacheDir:   s.cacheDir,
-				HarnessEnv: s.backend.HarnessEnv,
-				Container:  s.backend,
-			}
-			if err := runner.Init(ctx); err != nil {
-				slog.WarnContext(ctx, "new repo: runner init failed", "path", abs, "err", err)
-			}
-			var forgeKind forge.Kind
-			var forgeOwner, forgeRepo string
-			if rawURL, err := forge.RemoteURL(ctx, abs); err == nil {
-				forgeKind, forgeOwner, forgeRepo, _ = forge.ParseRemoteURL(rawURL)
-			}
-			results[i] = repoInitResult{
-				info: repoInfo{
-					RelPath: rel, AbsPath: abs, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote,
-					ForgeKind: forgeKind, ForgeOwner: forgeOwner, ForgeRepo: forgeRepo,
-				},
-				runner: runner,
-			}
-			slog.InfoContext(ctx, "discovered new repo", "path", rel, "br", branch)
+			results[i] = result
+			slog.InfoContext(ctx, "discovered new repo", "path", rel, "br", result.info.BaseBranch)
 		})
 	}
 	wg.Wait()
