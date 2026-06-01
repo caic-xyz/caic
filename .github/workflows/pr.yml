@@ -54,7 +54,7 @@ jobs:
         run: make frontend-e2e
       - name: Upload Coverage
         if: runner.os == 'Linux'
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.out
@@ -68,4 +68,9 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Smoke test
-        run: make smoke
+        run: go test -tags="smoke e2e" -run TestSmoke -v -timeout 5m -coverprofile=smoke-coverage.out ./backend/cmd/caic/
+      - name: Upload Smoke Coverage
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: smoke-coverage.out

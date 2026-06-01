@@ -68,4 +68,9 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Smoke test
-        run: make smoke
+        run: go test -tags="smoke e2e" -run TestSmoke -v -timeout 5m -coverprofile=smoke-coverage.out ./backend/cmd/caic/
+      - name: Upload Smoke Coverage
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: smoke-coverage.out
