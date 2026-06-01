@@ -83,7 +83,8 @@ class TaskListViewModelTest {
                         ]"""
                     )
                     "/api/v1/server/preferences" -> jsonResponse(
-                        """{"repositories":[],"settings":{"sudo":false,"autoFixOnCIFailure":false,"autoFixOnPROpen":false}}"""
+                        """{"repositories":[],"settings":{"sudo":false,"autoFixOnCIFailure":false,""" +
+                            """"autoFixOnPROpen":false,"useDefaultCaches":false}}"""
                     )
                     else -> MockResponse().setResponseCode(404)
                 }
@@ -173,7 +174,8 @@ class TaskListViewModelTest {
                     "/api/v1/server/preferences" -> jsonResponse(
                         """{"repositories":[{"path":"my-org/repo"}],""" +
                             """"harness":"codex","models":{"codex":"o3"},""" +
-                            """"settings":{"sudo":false,"autoFixOnCIFailure":false,"autoFixOnPROpen":false}}"""
+                            """"settings":{"sudo":false,"autoFixOnCIFailure":false,""" +
+                            """"autoFixOnPROpen":false,"useDefaultCaches":false}}"""
                     )
                     else -> MockResponse().setResponseCode(404)
                 }

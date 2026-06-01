@@ -171,14 +171,14 @@ fun MessageGroupContent(
                     val rl = event.rateLimit
                     if (rl != null) {
                         val usingOverage = rl.isUsingOverage == true
-                        val resetInstant = if (usingOverage && (rl.overageResetsAt?.epochSeconds ?: 0) > 0) {
+                        val resetInstant = if (usingOverage && (rl.overageResetsAt?.epochSecond ?: 0) > 0) {
                             rl.overageResetsAt
                         } else {
                             rl.resetsAt
                         }
-                        val resetsLabel = resetInstant?.takeIf { it.epochSeconds > 0 }?.let {
+                        val resetsLabel = resetInstant?.takeIf { it.epochSecond > 0 }?.let {
                             val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-                            " · resets ${fmt.format(java.util.Date(it.toEpochMilliseconds()))}"
+                            " · resets ${fmt.format(java.util.Date(it.toEpochMilli()))}"
                         } ?: ""
                         val isRejected = rl.status == "rejected"
                         val text = if (isRejected && usingOverage) {

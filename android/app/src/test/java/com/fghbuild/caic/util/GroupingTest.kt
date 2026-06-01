@@ -18,7 +18,7 @@ import com.caic.sdk.v1.EventThinkingDelta
 import com.caic.sdk.v1.EventWidget
 import com.caic.sdk.v1.EventRateLimit
 import com.caic.sdk.v1.EventWidgetDelta
-import kotlinx.datetime.Instant
+import java.time.Instant
 import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -227,7 +227,7 @@ class GroupingTest {
             val groups = groupMessages(listOf(EventMessage(
                 kind = EventKind.RateLimit, ts = 1,
                 rateLimit = EventRateLimit(
-                    status = "rejected", resetsAt = Instant.fromEpochSeconds(1711000000),
+                    status = "rejected", resetsAt = Instant.ofEpochSecond(1711000000),
                     rateLimitType = "seven_day", utilization = 1.0,
                 ),
             )))
