@@ -148,14 +148,14 @@ func (f *CodexFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) {
 	if raw.RateLimit != nil {
 		if w := raw.RateLimit.PrimaryWindow; w != nil {
 			out.RateLimits = append(out.RateLimits, v1.QuotaRateLimit{
-				Window:   "primary",
+				Window:   "5h",
 				UsedPct:  float64(w.UsedPercent),
 				ResetsAt: time.Unix(int64(w.ResetAt), 0).UTC(),
 			})
 		}
 		if w := raw.RateLimit.SecondaryWindow; w != nil {
 			out.RateLimits = append(out.RateLimits, v1.QuotaRateLimit{
-				Window:   "secondary",
+				Window:   "7d",
 				UsedPct:  float64(w.UsedPercent),
 				ResetsAt: time.Unix(int64(w.ResetAt), 0).UTC(),
 			})
