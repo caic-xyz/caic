@@ -1046,6 +1046,35 @@ func TestRunner(t *testing.T) {
 			t.Errorf("BranchDiffStat = %+v, want [{main.go +5 -1}]", ds)
 		}
 	})
+	t.Run("BranchDiffStatMultiRepoUsesFullRepoList", func(t *testing.T) {
+		t.Parallel()
+		sc := &stubContainer{}
+		r := &Runner{Container: sc, Dir: "/home/user/src/caic"}
+		repos := []md.Repo{
+			{GitRoot: "/home/user/src/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic"},
+			{GitRoot: "/home/user/src/genai", Branch: "caic-0", MountedPath: "/home/user/src/genai"},
+		}
+
+		ds := r.BranchDiffStat(t.Context(), repos)
+
+		if len(ds) != 2 {
+			t.Fatalf("BranchDiffStat len = %d, want 2", len(ds))
+		}
+		if len(sc.diffRepos) != 2 {
+			t.Fatalf("diff calls = %d, want 2", len(sc.diffRepos))
+		}
+		for i := range sc.diffRepos {
+			if len(sc.diffRepos[i]) != 2 {
+				t.Fatalf("diff call %d repos len = %d, want 2", i, len(sc.diffRepos[i]))
+			}
+			if sc.diffRepos[i][0].GitRoot != "/home/user/src/caic" {
+				t.Errorf("diff call %d primary GitRoot = %q, want /home/user/src/caic", i, sc.diffRepos[i][0].GitRoot)
+			}
+		}
+		if sc.diffIdxs[0] != 0 || sc.diffIdxs[1] != 1 {
+			t.Errorf("diff indexes = %v, want [0 1]", sc.diffIdxs)
+		}
+	})
 	t.Run("BranchDiffStatNoContainer", func(t *testing.T) {
 		t.Parallel()
 		r := &Runner{}
@@ -1130,9 +1159,11 @@ func TestPrependRepoToDiffDevNull(t *testing.T) {
 // stubContainer implements ContainerBackend for testing. Diff returns a fixed
 // numstat line; Fetch records that it was called.
 type stubContainer struct {
-	fetched  bool
-	fetchErr error // If set, Fetch returns this error.
-	stopped  bool
+	fetched   bool
+	fetchErr  error // If set, Fetch returns this error.
+	stopped   bool
+	diffRepos [][]md.Repo
+	diffIdxs  []int
 }
 
 func (s *stubContainer) Launch(_ context.Context, _ []md.Repo, _ []string, _ *StartOptions) (string, error) {
@@ -1143,7 +1174,9 @@ func (s *stubContainer) Connect(_ context.Context, _ string, _ []md.Repo, _ *Sta
 	return "", "", nil
 }
 
-func (s *stubContainer) Diff(_ context.Context, _ *md.Repo, _ ...string) (string, error) {
+func (s *stubContainer) Diff(_ context.Context, repos []md.Repo, repoIdx int, _ ...string) (string, error) {
+	s.diffRepos = append(s.diffRepos, append([]md.Repo(nil), repos...))
+	s.diffIdxs = append(s.diffIdxs, repoIdx)
 	return "5\t1\tmain.go\n", nil
 }
 

@@ -13,13 +13,14 @@ import (
 // Call records a single task.ContainerBackend invocation. Only the fields
 // relevant to the invoked Method are populated; the rest are zero.
 type Call struct {
-	Method string    // Method name, e.g. "Stop", "Purge", "Launch".
-	Name   string    // Container name argument, when the method takes one.
-	Repos  []md.Repo // Repos argument, when present.
-	Labels []string  // Labels argument (Launch).
-	Args   []string  // Variadic git args (Diff).
-	PID    int       // Process id (Signal).
-	Sig    string    // Signal name (Signal).
+	Method  string    // Method name, e.g. "Stop", "Purge", "Launch".
+	Name    string    // Container name argument, when the method takes one.
+	Repos   []md.Repo // Repos argument, when present.
+	Labels  []string  // Labels argument (Launch).
+	RepoIdx int       // Repository index, when the method operates on one repo.
+	Args    []string  // Variadic git args (Diff).
+	PID     int       // Process id (Signal).
+	Sig     string    // Signal name (Signal).
 }
 
 // FakeContainerBackend is a programmable task.ContainerBackend test double. The
@@ -32,7 +33,7 @@ type FakeContainerBackend struct {
 
 	LaunchFunc    func(ctx context.Context, repos []md.Repo, labels []string, opts *task.StartOptions) (string, error)
 	ConnectFunc   func(ctx context.Context, name string, repos []md.Repo, opts *task.StartOptions) (string, string, error)
-	DiffFunc      func(ctx context.Context, repo *md.Repo, args ...string) (string, error)
+	DiffFunc      func(ctx context.Context, repos []md.Repo, repoIdx int, args ...string) (string, error)
 	FetchFunc     func(ctx context.Context, repos []md.Repo) error
 	StopFunc      func(ctx context.Context, name string) error
 	PurgeFunc     func(ctx context.Context, name string, repos []md.Repo) error
@@ -88,10 +89,10 @@ func (f *FakeContainerBackend) Connect(ctx context.Context, name string, repos [
 }
 
 // Diff implements task.ContainerBackend.
-func (f *FakeContainerBackend) Diff(ctx context.Context, repo *md.Repo, args ...string) (string, error) {
-	f.record(&Call{Method: "Diff", Args: args})
+func (f *FakeContainerBackend) Diff(ctx context.Context, repos []md.Repo, repoIdx int, args ...string) (string, error) {
+	f.record(&Call{Method: "Diff", Repos: repos, RepoIdx: repoIdx, Args: args})
 	if f.DiffFunc != nil {
-		return f.DiffFunc(ctx, repo, args...)
+		return f.DiffFunc(ctx, repos, repoIdx, args...)
 	}
 	return "", nil
 }

@@ -222,15 +222,19 @@ func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opt
 }
 
 // Diff implements task.ContainerBackend.
-func (b *Backend) Diff(ctx context.Context, repo *md.Repo, args ...string) (string, error) {
+func (b *Backend) Diff(ctx context.Context, repos []md.Repo, repoIdx int, args ...string) (string, error) {
 	defer trace.StartRegion(ctx, "container.diff").End()
+	if repoIdx < 0 || repoIdx >= len(repos) {
+		return "", fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
+	}
+	repo := &repos[repoIdx]
 	slog.Info("md diff", "dir", repo.GitRoot, "br", repo.Branch, "args", args)
 	var stdout bytes.Buffer
-	ct, err := b.client.Container(*repo)
+	ct, err := b.client.Container(repos...)
 	if err != nil {
 		return "", err
 	}
-	if err := ct.Diff(ctx, &stdout, &SlogWriter{Phase: "diff"}, 0, args); err != nil {
+	if err := ct.Diff(ctx, &stdout, &SlogWriter{Phase: "diff"}, repoIdx, args); err != nil {
 		return "", err
 	}
 	return stdout.String(), nil

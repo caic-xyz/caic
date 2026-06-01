@@ -23,6 +23,7 @@ type fakeMDContainer struct {
 	vncPort int32
 	repos   []md.Repo
 	state   string
+	diffIdx int
 
 	launchErr  error
 	connectRes *md.StartResult
@@ -61,8 +62,9 @@ func (f *fakeMDContainer) Connect(_ context.Context, _, _ io.Writer, _ *md.Start
 	return &md.StartResult{}, nil
 }
 
-func (f *fakeMDContainer) Diff(_ context.Context, _, _ io.Writer, _ int, _ []string) error {
+func (f *fakeMDContainer) Diff(_ context.Context, _, _ io.Writer, repoIdx int, _ []string) error {
 	f.calls = append(f.calls, "Diff")
+	f.diffIdx = repoIdx
 	return nil
 }
 
@@ -103,6 +105,7 @@ type fakeMDClient struct {
 	getErr       error
 
 	containerCalls int
+	containerRepos []md.Repo
 }
 
 func (f *fakeMDClient) Runtime() string {
@@ -112,8 +115,9 @@ func (f *fakeMDClient) Runtime() string {
 	return f.runtime
 }
 
-func (f *fakeMDClient) Container(_ ...md.Repo) (mdContainer, error) {
+func (f *fakeMDClient) Container(repos ...md.Repo) (mdContainer, error) {
 	f.containerCalls++
+	f.containerRepos = append([]md.Repo(nil), repos...)
 	if f.containerErr != nil {
 		return nil, f.containerErr
 	}
@@ -182,6 +186,29 @@ func TestBackend(t *testing.T) {
 				t.Error("failed container should not be stored as pending")
 			}
 		})
+	})
+
+	t.Run("Diff", func(t *testing.T) {
+		t.Parallel()
+		ctr := &fakeMDContainer{}
+		fc := &fakeMDClient{container: ctr}
+		b := newTestBackend(fc)
+		repos := []md.Repo{
+			{GitRoot: "/home/user/src/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic"},
+			{GitRoot: "/home/user/src/genai", Branch: "caic-0", MountedPath: "/home/user/src/genai"},
+		}
+		if _, err := b.Diff(t.Context(), repos, 1, "--numstat"); err != nil {
+			t.Fatalf("Diff: %v", err)
+		}
+		if len(fc.containerRepos) != 2 {
+			t.Fatalf("Container repos len = %d, want 2", len(fc.containerRepos))
+		}
+		if fc.containerRepos[0].GitRoot != "/home/user/src/caic" || fc.containerRepos[1].GitRoot != "/home/user/src/genai" {
+			t.Fatalf("Container repos = %+v, want primary and secondary repos", fc.containerRepos)
+		}
+		if ctr.diffIdx != 1 {
+			t.Errorf("Diff repoIdx = %d, want 1", ctr.diffIdx)
+		}
 	})
 
 	t.Run("Connect", func(t *testing.T) {

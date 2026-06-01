@@ -221,7 +221,7 @@ func (*fakeContainer) Connect(_ context.Context, _ string, _ []md.Repo, _ *task.
 	return "", "", nil
 }
 
-func (*fakeContainer) Diff(_ context.Context, _ *md.Repo, _ ...string) (string, error) {
+func (*fakeContainer) Diff(_ context.Context, _ []md.Repo, _ int, _ ...string) (string, error) {
 	return "", nil
 }
 

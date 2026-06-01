@@ -60,7 +60,7 @@ type ContainerBackend interface {
 	// by name (returned by Launch). Returns the optional Tailscale FQDN and
 	// browser auth URL (when no pre-auth key was available).
 	Connect(ctx context.Context, name string, repos []md.Repo, opts *StartOptions) (tailscaleFQDN string, tailscaleAuthURL string, err error)
-	Diff(ctx context.Context, repo *md.Repo, args ...string) (string, error)
+	Diff(ctx context.Context, repos []md.Repo, repoIdx int, args ...string) (string, error)
 	Fetch(ctx context.Context, repos []md.Repo) error
 	// Stop gracefully stops the container without removing it. The container
 	// can be restarted later with Revive.
@@ -1198,7 +1198,7 @@ func (r *Runner) DiffContent(ctx context.Context, repos []md.Repo, path string) 
 		if path != "" {
 			args = append(args, "--", path)
 		}
-		diff, err := r.Container.Diff(ctx, repo, args...)
+		diff, err := r.Container.Diff(ctx, repos, i, args...)
 		if err != nil {
 			r.log.Warn("diff failed", "repo", repo.MountedPath, "br", repo.Branch, "err", err)
 			continue
@@ -1599,7 +1599,7 @@ func (r *Runner) diffStat(ctx context.Context, repos []md.Repo) agent.DiffStat {
 	var result agent.DiffStat
 	for i := range repos {
 		repo := &repos[i]
-		numstat, err := r.Container.Diff(ctx, repo, "--numstat")
+		numstat, err := r.Container.Diff(ctx, repos, i, "--numstat")
 		if err != nil {
 			r.log.Warn("diff numstat failed", "repo", repo.MountedPath, "br", repo.Branch, "err", err)
 			continue
