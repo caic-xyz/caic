@@ -116,7 +116,7 @@ func (s *Server) ListActiveRepos() []ci.RepoInfo {
 		if e.Result() != nil {
 			return true
 		}
-		for _, m := range e.Task().Repos {
+		for _, m := range e.Task().ReposSnapshot() {
 			active[m.Name] = struct{}{}
 		}
 		return true

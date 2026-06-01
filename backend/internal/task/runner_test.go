@@ -15,10 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/md"
 	"github.com/maruel/ksid"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 )
 
 // testBackend implements agent.Backend for tests. It launches a process that
@@ -345,9 +346,10 @@ func TestRunner(t *testing.T) {
 			}
 
 			// The task branch must contain the feature commit (feature.txt).
-			out, execErr := exec.CommandContext(t.Context(), "git", "-C", clone, "show", tk.Repos[0].Branch+":feature.txt").Output() //nolint:gosec // controlled test args
+			branch := tk.Primary().Branch
+			out, execErr := exec.CommandContext(t.Context(), "git", "-C", clone, "show", branch+":feature.txt").Output() //nolint:gosec // controlled test args
 			if execErr != nil {
-				t.Fatalf("feature.txt not in task branch %s: %v", tk.Repos[0].Branch, execErr)
+				t.Fatalf("feature.txt not in task branch %s: %v", branch, execErr)
 			}
 			if string(out) != "feat\n" {
 				t.Errorf("feature.txt content = %q, want %q", string(out), "feat\n")
@@ -389,9 +391,10 @@ func TestRunner(t *testing.T) {
 			}
 
 			// The task branch must contain the local commit (local.txt).
-			out, execErr := exec.CommandContext(t.Context(), "git", "-C", clone, "show", tk.Repos[0].Branch+":local.txt").Output() //nolint:gosec // controlled test args
+			branch := tk.Primary().Branch
+			out, execErr := exec.CommandContext(t.Context(), "git", "-C", clone, "show", branch+":local.txt").Output() //nolint:gosec // controlled test args
 			if execErr != nil {
-				t.Fatalf("local.txt not in task branch %s: %v", tk.Repos[0].Branch, execErr)
+				t.Fatalf("local.txt not in task branch %s: %v", branch, execErr)
 			}
 			if string(out) != "local\n" {
 				t.Errorf("local.txt content = %q, want %q", string(out), "local\n")

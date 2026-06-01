@@ -13,11 +13,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/md"
 	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/forge"
 )
 
 const statsRingSize = 60
@@ -183,31 +184,33 @@ type Task struct {
 	// Immutable fields — set at creation, never modified.
 	ID            ksid.ID
 	InitialPrompt agent.Prompt  // Initial prompt text and optional images.
-	Repos         []RepoMount   // index 0 = primary; empty = no-repo
 	Harness       agent.Harness // Agent harness ("claude", "gemini", etc.).
 	Model         string        // User-requested model; passed to agent CLI.
 	Effort        string        // Thinking effort; passed to agent CLI. Empty = default.
 	DockerImage   string        // Custom Docker base image; empty means use the default.
 	MaxCPUs       int           // Max CPU cores for the container; 0 means use the default.
-	GitHubToken   bool          // Inject GitHub token into the container's environment.
 	Tailscale     bool          // Enable Tailscale networking in the container.
 	USB           bool          // Enable USB passthrough in the container.
 	Display       bool          // Enable Xvfb display in the container.
 	Sudo          bool          // Enable root access (password-based sudo) in the container.
-	SudoPassword  string        // Random sudo password; empty if sudo is not enabled.
-	VNCPort       int           // VNC WebSocket port inside the container (0 = no VNC). Set during launch.
 	StartedAt     time.Time     // When the task was created.
 	OwnerID       string        // Internal user ID of the creator; empty in no-auth mode.
 	ForgeIssue    int           // Originating issue number for bot comment callbacks; 0 = none.
 	Provider      genai.Provider
 
-	// Write-once fields — set during setup/adoption, never modified after.
+	// Mutable task metadata. These fields are populated at construction, setup, or
+	// adoption. After a task is published in the Manager registry, access them
+	// through Task methods so readers and async lifecycle goroutines synchronize.
+	Repos            []RepoMount // index 0 = primary; empty = no-repo
 	Container        string
 	TailscaleFQDN    string // Tailscale FQDN assigned to the container (empty if not available).
 	TailscaleAuthURL string // Tailscale browser auth URL when no pre-auth key was available.
 	RelayOffset      int64  // Bytes received from relay output.jsonl, for reconnect.
+	SudoPassword     string // Random sudo password; empty if sudo is not enabled.
+	VNCPort          int    // VNC WebSocket port inside the container (0 = no VNC). Set during launch.
+	GitHubToken      bool   // Inject GitHub token into the container's environment.
 
-	// mu protects all fields below.
+	// mu protects mutable task metadata above and all fields below.
 	mu                    sync.Mutex
 	statsRing             [statsRingSize]ContainerStats
 	statsLen              int
@@ -370,16 +373,21 @@ func computeCost(totalCostUSD float64, u agent.Usage) float64 {
 
 const titleSystemPrompt = "Summarize this coding task conversation in 3-8 words as a short title. Reply with ONLY the title, no quotes."
 
-// Primary returns a pointer to the primary RepoMount (Repos[0]), or nil for no-repo tasks.
+// Primary returns a copy of the primary RepoMount (Repos[0]), or nil for no-repo tasks.
 func (t *Task) Primary() *RepoMount {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if len(t.Repos) == 0 {
 		return nil
 	}
-	return &t.Repos[0]
+	p := t.Repos[0]
+	return &p
 }
 
 // MDRepos returns all repos as []md.Repo for use with the container backend.
 func (t *Task) MDRepos() []md.Repo {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	out := make([]md.Repo, len(t.Repos))
 	for i, r := range t.Repos {
 		out[i] = r.ToMDRepo()
@@ -389,10 +397,91 @@ func (t *Task) MDRepos() []md.Repo {
 
 // ExtraMDRepos returns all repos after the primary as []md.Repo.
 func (t *Task) ExtraMDRepos() []md.Repo {
-	if len(t.Repos) <= 1 {
+	repos := t.MDRepos()
+	if len(repos) <= 1 {
 		return nil
 	}
-	return t.MDRepos()[1:]
+	return repos[1:]
+}
+
+// ReposSnapshot returns a copy of the task repo mounts.
+func (t *Task) ReposSnapshot() []RepoMount {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]RepoMount(nil), t.Repos...)
+}
+
+// SetRepoBranch updates the branch for a repo by index.
+func (t *Task) SetRepoBranch(i int, branch string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.Repos[i].Branch = branch
+}
+
+// ContainerName returns the current container name.
+func (t *Task) ContainerName() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.Container
+}
+
+// SetContainerInfo records container metadata assigned during setup or adoption.
+func (t *Task) SetContainerInfo(name, tailscaleFQDN, tailscaleAuthURL string, vncPort int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.Container = name
+	t.TailscaleFQDN = tailscaleFQDN
+	t.TailscaleAuthURL = tailscaleAuthURL
+	t.VNCPort = vncPort
+}
+
+// SetVNCPort records the current VNC host port.
+func (t *Task) SetVNCPort(port int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.VNCPort = port
+}
+
+// RelayOffsetValue returns the current relay log byte offset.
+func (t *Task) RelayOffsetValue() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.RelayOffset
+}
+
+// SetRelayOffset records the byte offset used when reconnecting to the relay.
+func (t *Task) SetRelayOffset(offset int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.RelayOffset = offset
+}
+
+// SudoLookupState returns the sudo lookup inputs and cached password.
+func (t *Task) SudoLookupState() (enabled bool, container, password string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.Sudo, t.Container, t.SudoPassword
+}
+
+// SetSudoPassword caches a sudo password on the task.
+func (t *Task) SetSudoPassword(password string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.SudoPassword = password
+}
+
+// GitHubTokenEnabled reports whether this task injects a GitHub token.
+func (t *Task) GitHubTokenEnabled() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.GitHubToken
+}
+
+// SetGitHubTokenEnabled records whether this task injects a GitHub token.
+func (t *Task) SetGitHubTokenEnabled(enabled bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.GitHubToken = enabled
 }
 
 // SetState updates the state under the mutex and records the transition time.
@@ -593,6 +682,18 @@ type Snapshot struct {
 	State              State
 	StateUpdatedAt     time.Time
 	TurnStartedAt      time.Time // non-zero only while state is Running
+	Repos              []RepoMount
+	Container          string
+	Tailscale          bool
+	TailscaleFQDN      string
+	TailscaleAuthURL   string
+	USB                bool
+	Display            bool
+	Sudo               bool
+	SudoPassword       string
+	VNCPort            int // VNC WebSocket port (0 = no VNC).
+	GitHubToken        bool
+	RelayOffset        int64
 	Title              string
 	SessionID          string
 	Model              string
@@ -616,7 +717,6 @@ type Snapshot struct {
 	ForgeIssue         int
 	CIStatus           forge.CIStatus
 	CIChecks           []forge.Check
-	VNCPort            int // VNC WebSocket port (0 = no VNC).
 }
 
 // Snapshot returns a consistent read of all volatile fields under the mutex.
@@ -631,6 +731,18 @@ func (t *Task) Snapshot() Snapshot {
 		State:              t.state,
 		StateUpdatedAt:     t.stateUpdatedAt,
 		TurnStartedAt:      t.turnStartedAt,
+		Repos:              append([]RepoMount(nil), t.Repos...),
+		Container:          t.Container,
+		Tailscale:          t.Tailscale,
+		TailscaleFQDN:      t.TailscaleFQDN,
+		TailscaleAuthURL:   t.TailscaleAuthURL,
+		USB:                t.USB,
+		Display:            t.Display,
+		Sudo:               t.Sudo,
+		SudoPassword:       t.SudoPassword,
+		VNCPort:            t.VNCPort,
+		GitHubToken:        t.GitHubToken,
+		RelayOffset:        t.RelayOffset,
 		Title:              t.title,
 		SessionID:          t.sessionID,
 		Model:              model,
@@ -654,7 +766,6 @@ func (t *Task) Snapshot() Snapshot {
 		ForgeIssue:         t.ForgeIssue,
 		CIStatus:           t.ciStatus,
 		CIChecks:           append([]forge.Check(nil), t.ciChecks...),
-		VNCPort:            t.VNCPort,
 	}
 }
 

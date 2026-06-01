@@ -16,6 +16,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/caic-xyz/md/gitutil"
+	"github.com/coder/websocket"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
@@ -25,8 +28,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
-	"github.com/caic-xyz/md/gitutil"
-	"github.com/coder/websocket"
 )
 
 // repoList builds the current repo list including live CI status. It snapshots
@@ -326,9 +327,10 @@ func (s *Server) sendInput(ctx context.Context, entry *tasks.Entry, req *v1.Inpu
 	// the original task.SendInput message verbatim.
 	t := entry.Task()
 	rs := relayNoContainer
-	if t.Container != "" {
+	containerName := t.ContainerName()
+	if containerName != "" {
 		probeCtx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
-		alive, relayErr := agent.IsRelayRunning(probeCtx, t.Container) //nolint:contextcheck // diagnostic probe; must outlive request
+		alive, relayErr := agent.IsRelayRunning(probeCtx, containerName) //nolint:contextcheck // diagnostic probe; must outlive request
 		cancel()
 		switch {
 		case relayErr != nil:
@@ -347,7 +349,7 @@ func (s *Server) sendInput(ctx context.Context, entry *tasks.Entry, req *v1.Inpu
 	slog.Warn("no active session",
 		"task", t.ID,
 		"br", primaryBranchLog,
-		"ctr", t.Container,
+		"ctr", containerName,
 		"state", taskState,
 		"relay", rs,
 	)
@@ -417,7 +419,7 @@ func (s *Server) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.ForkT
 	}
 
 	// Deref the *bool overrides, defaulting to the source task's values.
-	gh := source.GitHubToken
+	gh := source.GitHubTokenEnabled()
 	if req.GitHubToken != nil {
 		gh = *req.GitHubToken
 	}
@@ -513,7 +515,8 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t := entry.Task()
-	if t.Container == "" {
+	containerName := t.ContainerName()
+	if containerName == "" {
 		writeError(w, dto.Conflict("task has no container"))
 		return
 	}
@@ -547,12 +550,13 @@ func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t := entry.Task()
-	if t.Container == "" || t.VNCPort == 0 {
+	snap := t.Snapshot()
+	if snap.Container == "" || snap.VNCPort == 0 {
 		writeError(w, dto.BadRequest("task has no VNC display"))
 		return
 	}
-	slog.Info("vnc proxy start", "task", t.ID, "ctr", t.Container, "port", t.VNCPort)
-	vncAddr := fmt.Sprintf("127.0.0.1:%d", t.VNCPort)
+	slog.Info("vnc proxy start", "task", t.ID, "ctr", snap.Container, "port", snap.VNCPort)
+	vncAddr := fmt.Sprintf("127.0.0.1:%d", snap.VNCPort)
 
 	var d net.Dialer
 	d.Timeout = 10 * time.Second
@@ -632,15 +636,16 @@ func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t := entry.Task()
-	if t.Container == "" {
+	containerName := t.ContainerName()
+	if containerName == "" {
 		writeError(w, dto.Conflict("task has no container"))
 		return
 	}
 	var procs []task.ProcessInfo
 	if s.fakeProcesses != nil {
-		procs, err = s.fakeProcesses(r.Context(), t.Container)
+		procs, err = s.fakeProcesses(r.Context(), containerName)
 	} else {
-		procs, err = s.backend.Processes(r.Context(), t.Container)
+		procs, err = s.backend.Processes(r.Context(), containerName)
 	}
 	if err != nil {
 		writeError(w, dto.InternalError(err.Error()))
@@ -668,7 +673,8 @@ func (s *Server) handleSignalProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t := entry.Task()
-	if t.Container == "" {
+	containerName := t.ContainerName()
+	if containerName == "" {
 		writeError(w, dto.Conflict("task has no container"))
 		return
 	}
@@ -692,17 +698,17 @@ func (s *Server) handleSignalProcess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.fakeSignal != nil {
-		if err := s.fakeSignal(r.Context(), t.Container, pid, req.Signal); err != nil {
+		if err := s.fakeSignal(r.Context(), containerName, pid, req.Signal); err != nil {
 			writeError(w, dto.InternalError(err.Error()))
 			return
 		}
 	} else {
-		if err := s.backend.Signal(r.Context(), t.Container, pid, req.Signal); err != nil {
+		if err := s.backend.Signal(r.Context(), containerName, pid, req.Signal); err != nil {
 			writeError(w, dto.InternalError(err.Error()))
 			return
 		}
 	}
-	slog.Info("signal sent", "task", t.ID, "container", t.Container, "pid", pid, "signal", req.Signal)
+	slog.Info("signal sent", "task", t.ID, "container", containerName, "pid", pid, "signal", req.Signal)
 	writeJSONResponse(w, &v1.StatusResp{Status: "signalled"}, nil)
 }
 
@@ -747,8 +753,8 @@ func (s *Server) toJSON(ctx context.Context, e *tasks.Entry) v1.Task {
 	snap := e.Task().Snapshot()
 
 	// Build Repos slice for API response.
-	taskRepos := make([]v1.TaskRepo, len(e.Task().Repos))
-	for i, r := range e.Task().Repos {
+	taskRepos := make([]v1.TaskRepo, len(snap.Repos))
+	for i, r := range snap.Repos {
 		taskRepos[i] = v1.TaskRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, RemoteURL: s.repoURL(r.Name), Forge: s.repoForge(r.Name)}
 	}
 	if len(taskRepos) == 0 {
@@ -788,11 +794,11 @@ func (s *Server) toJSON(ctx context.Context, e *tasks.Entry) v1.Task {
 		Title:         snap.Title,
 		Repos:         taskRepos,
 		Container: v1.Container{
-			Name:         e.Task().Container,
-			Tailscale:    tailscaleURL(e.Task()),
-			USB:          e.Task().USB,
-			Display:      e.Task().Display,
-			Sudo:         e.Task().Sudo,
+			Name:         snap.Container,
+			Tailscale:    tailscaleURLFromSnapshot(&snap),
+			USB:          snap.USB,
+			Display:      snap.Display,
+			Sudo:         snap.Sudo,
 			SudoPassword: s.taskMgr.SudoPassword(ctx, e.Task()),
 			VNCPort:      snap.VNCPort,
 		},
@@ -805,7 +811,7 @@ func (s *Server) toJSON(ctx context.Context, e *tasks.Entry) v1.Task {
 		SessionID:      snap.SessionID,
 		InPlanMode:     snap.InPlanMode,
 		PlanContent:    snap.PlanContent,
-		GitHubToken:    e.Task().GitHubToken,
+		GitHubToken:    snap.GitHubToken,
 		CostUSD:        costUSD,
 		NumTurns:       numTurns,
 		Duration:       duration.Seconds(),

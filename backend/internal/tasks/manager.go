@@ -330,7 +330,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 				m.NotifyTaskChange()
 				return
 			}
-			t.Repos[i+1].Branch = branch
+			t.SetRepoBranch(i+1, branch)
 		}
 
 		ghToken := p.ResolvedGitHubToken
@@ -342,7 +342,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 			return
 		}
 		if t.Sudo {
-			t.SudoPassword = m.SudoPassword(m.serverCtx, t)
+			t.SetSudoPassword(m.SudoPassword(m.serverCtx, t))
 		}
 		m.NotifyTaskChange()
 		m.watchSession(entry, primaryRunner, h)
@@ -359,7 +359,7 @@ func (m *Manager) Purge(ctx context.Context, entry *Entry) error {
 	entry.task.SetState(task.StatePurging)
 	m.NotifyTaskChange()
 	runner := m.resolveRunner(entry.task)
-	slog.InfoContext(ctx, "purge requested", "task", entry.task.ID, "ctr", entry.task.Container, "state", state)
+	slog.InfoContext(ctx, "purge requested", "task", entry.task.ID, "ctr", entry.task.ContainerName(), "state", state)
 	go func() {
 		m.cleanupTask(entry, runner, task.StatePurged)
 		slog.InfoContext(m.serverCtx, "purge completed", "task", entry.task.ID, "final_state", entry.task.GetState())
@@ -376,10 +376,10 @@ func (m *Manager) Stop(ctx context.Context, entry *Entry) error {
 	entry.task.SetState(task.StateStopping)
 	m.NotifyTaskChange()
 	runner := m.resolveRunner(entry.task)
-	slog.InfoContext(ctx, "stop requested", "task", entry.task.ID, "ctr", entry.task.Container, "state", state)
+	slog.InfoContext(ctx, "stop requested", "task", entry.task.ID, "ctr", entry.task.ContainerName(), "state", state)
 	go func() {
 		runner.StopTask(m.serverCtx, entry.task)
-		slog.InfoContext(m.serverCtx, "stop completed", "task", entry.task.ID, "ctr", entry.task.Container, "final_state", entry.task.GetState())
+		slog.InfoContext(m.serverCtx, "stop completed", "task", entry.task.ID, "ctr", entry.task.ContainerName(), "final_state", entry.task.GetState())
 		m.NotifyTaskChange()
 	}()
 	return nil
@@ -417,7 +417,7 @@ func (m *Manager) Restart(ctx context.Context, entry *Entry, prompt agent.Prompt
 	}
 	if prompt.Text == "" {
 		// No prompt provided: fall back to the plan file from the container.
-		plan, err := agent.ReadPlan(m.serverCtx, t.Container, t.GetPlanFile()) //nolint:contextcheck // intentionally using server context
+		plan, err := agent.ReadPlan(m.serverCtx, t.ContainerName(), t.GetPlanFile()) //nolint:contextcheck // intentionally using server context
 		if err != nil {
 			return &Error{Kind: KindBadRequest, Msg: "no prompt provided and failed to read plan from container", Err: err}
 		}
@@ -473,7 +473,7 @@ func (m *Manager) SendInput(ctx context.Context, entry *Entry, prompt agent.Prom
 		taskState := t.GetState()
 		slog.WarnContext(ctx, "no active session",
 			"task", t.ID,
-			"ctr", t.Container,
+			"ctr", t.ContainerName(),
 			"state", taskState,
 		)
 		// Wrap so the handler can detect the no-session condition via
@@ -493,10 +493,11 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 	default:
 		return "", conflict("task must be running or waiting to fork")
 	}
-	if source.Container == "" {
+	if source.ContainerName() == "" {
 		return "", conflict("task has no container")
 	}
-	if len(source.Repos) == 0 {
+	sourceRepos := source.ReposSnapshot()
+	if len(sourceRepos) == 0 {
 		return "", badRequestf("cannot fork a no-repo task")
 	}
 
@@ -530,8 +531,8 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 	}
 
 	// Build mounts.
-	sourceRepoNames := make(map[string]struct{}, len(source.Repos))
-	for _, r := range source.Repos {
+	sourceRepoNames := make(map[string]struct{}, len(sourceRepos))
+	for _, r := range sourceRepos {
 		sourceRepoNames[r.Name] = struct{}{}
 	}
 	var extraMounts []task.RepoMount
@@ -549,8 +550,8 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		extraRepos = append(extraRepos, rm.ToMDRepo())
 	}
 
-	mounts := make([]task.RepoMount, len(source.Repos), len(source.Repos)+len(extraMounts))
-	copy(mounts, source.Repos)
+	mounts := make([]task.RepoMount, len(sourceRepos), len(sourceRepos)+len(extraMounts))
+	copy(mounts, sourceRepos)
 	mounts = append(mounts, extraMounts...)
 
 	t := &task.Task{
@@ -605,7 +606,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 			return
 		}
 		if t.Sudo {
-			t.SudoPassword = m.SudoPassword(m.serverCtx, t)
+			t.SetSudoPassword(m.SudoPassword(m.serverCtx, t))
 		}
 		m.NotifyTaskChange()
 		m.watchSession(forkEntry, runner, h)
@@ -643,18 +644,19 @@ func (m *Manager) EffectiveBaseBranch(t *task.Task) string {
 // fetched password is cached on the task so subsequent calls avoid the SSH
 // round-trip. A lookup failure is logged and returns "".
 func (m *Manager) SudoPassword(ctx context.Context, t *task.Task) string {
-	if !t.Sudo || t.Container == "" {
+	enabled, containerName, cached := t.SudoLookupState()
+	if !enabled || containerName == "" {
 		return ""
 	}
-	if t.SudoPassword != "" {
-		return t.SudoPassword
+	if cached != "" {
+		return cached
 	}
-	pw, err := m.mdClient.SudoPassword(ctx, t.Container)
+	pw, err := m.mdClient.SudoPassword(ctx, containerName)
 	if err != nil {
-		slog.WarnContext(ctx, "sudo password lookup failed", "ctr", t.Container, "err", err)
+		slog.WarnContext(ctx, "sudo password lookup failed", "ctr", containerName, "err", err)
 		return ""
 	}
-	t.SudoPassword = pw
+	t.SetSudoPassword(pw)
 	return pw
 }
 
@@ -1051,7 +1053,7 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 		if message == "" {
 			message = t.InitialPrompt.Text
 		}
-		ds, issues, err := runner.SyncToDefault(ctx, repos, t.Container, message)
+		ds, issues, err := runner.SyncToDefault(ctx, repos, t.ContainerName(), message)
 		if err != nil {
 			return nil, internalErr(err, "sync to default")
 		}
@@ -1065,7 +1067,7 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 	}
 
 	// Default: push to the task's own branch.
-	ds, issues, err := runner.SyncToOrigin(ctx, repos, t.Container, force)
+	ds, issues, err := runner.SyncToOrigin(ctx, repos, t.ContainerName(), force)
 	if err != nil {
 		return nil, internalErr(err, "sync to origin")
 	}
@@ -1123,7 +1125,7 @@ func (m *Manager) pushStats(ctx context.Context) {
 	var active []entry
 	for _, e := range m.tasks {
 		t := e.task
-		name := t.Container
+		name := t.ContainerName()
 		if name == "" {
 			continue
 		}
@@ -1206,7 +1208,7 @@ func (m *Manager) handleContainerDeath(containerName string) {
 	m.mu.Lock()
 	var found *Entry
 	for _, e := range m.tasks {
-		if e.task.Container != containerName {
+		if e.task.ContainerName() != containerName {
 			continue
 		}
 		found = e
@@ -1433,12 +1435,12 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	// Restore GitHub token flag from log trailer (primary) or container label (fallback).
 	gtLabel, _ := m.mdClient.LabelValue(ctx, c.Name, "caic.githubToken")
 	if (lt != nil && lt.GitHubToken) || gtLabel == "true" {
-		t.GitHubToken = true
+		t.SetGitHubTokenEnabled(true)
 	}
 	t.SetStateAt(task.StateRunning, stateUpdatedAt)
 	if c.Sudo {
 		if pw, err := c.SudoPassword(ctx); err == nil {
-			t.SudoPassword = pw
+			t.SetSudoPassword(pw)
 		}
 	}
 	if lt != nil && lt.Title != "" {
@@ -1459,7 +1461,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	// Restore messages from relay or logs.
 	if relayAlive && len(relayMsgs) > 0 {
 		t.RestoreMessages(relayMsgs)
-		t.RelayOffset = relaySize
+		t.SetRelayOffset(relaySize)
 		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(relayMsgs))
 	} else if lt != nil {
 		m.setParser(lt)
@@ -1530,7 +1532,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	if t.GetState() != task.StateStopped && relayAlive {
 		slog.Debug("container", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "ctr", c.Name)
 		go func() {
-			tlog := slog.With("repo", ri.RelPath, "br", branch, "ctr", t.Container)
+			tlog := slog.With("repo", ri.RelPath, "br", branch, "ctr", t.ContainerName())
 			h, err := runner.Reconnect(m.serverCtx, t, true)
 			if err != nil {
 				tlog.Warn("auto-reconnect failed", "err", err)
@@ -1545,7 +1547,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 				return
 			}
 			tlog.Debug("auto-reconnect succeeded")
-			t.VNCPort = runner.Container.VNCPort(m.serverCtx, t.Container)
+			t.SetVNCPort(runner.Container.VNCPort(m.serverCtx, t.ContainerName()))
 			if ds := runner.BranchDiffStat(m.serverCtx, taskReposForRunner(t, runner)); len(ds) > 0 {
 				t.SetLiveDiffStat(ds)
 			}
@@ -1629,7 +1631,7 @@ func (m *Manager) watchSession(entry *Entry, runner *task.Runner, h *task.Sessio
 				watchPrimaryName = p.Name
 				watchPrimaryBranch = p.Branch
 			}
-			attrs := []any{"repo", watchPrimaryName, "br", watchPrimaryBranch, "ctr", t.Container}
+			attrs := []any{"repo", watchPrimaryName, "br", watchPrimaryBranch, "ctr", t.ContainerName()}
 			if sessionErr != nil {
 				attrs = append(attrs, "err", sessionErr)
 				slog.Warn("session exited with error", attrs...)

@@ -636,10 +636,11 @@ func TestManager(t *testing.T) {
 			if tk.MaxCPUs != 7 {
 				t.Errorf("MaxCPUs = %d, want 7", tk.MaxCPUs)
 			}
-			if len(tk.Repos) != 1 {
-				t.Fatalf("len(Repos) = %d, want 1", len(tk.Repos))
+			repos := tk.ReposSnapshot()
+			if len(repos) != 1 {
+				t.Fatalf("len(Repos) = %d, want 1", len(repos))
 			}
-			if got := tk.Repos[0].MountedPath; got != "~/src/repo" {
+			if got := repos[0].MountedPath; got != "~/src/repo" {
 				t.Errorf("MountedPath = %q, want %q", got, "~/src/repo")
 			}
 		})
@@ -663,10 +664,11 @@ func TestManager(t *testing.T) {
 				t.Fatal("entry not found after Create")
 			}
 			tk := e.Task()
-			if len(tk.Repos) != 1 {
-				t.Fatalf("len(Repos) = %d, want 1", len(tk.Repos))
+			repos := tk.ReposSnapshot()
+			if len(repos) != 1 {
+				t.Fatalf("len(Repos) = %d, want 1", len(repos))
 			}
-			if got := tk.Repos[0].MountedPath; got != "~/src/my/repo" {
+			if got := repos[0].MountedPath; got != "~/src/my/repo" {
 				t.Errorf("MountedPath = %q, want %q", got, "~/src/my/repo")
 			}
 		})
@@ -1065,7 +1067,7 @@ func TestManager(t *testing.T) {
 			if got := m.SudoPassword(t.Context(), tk); got != "fetched-pw" {
 				t.Errorf("SudoPassword = %q, want fetched-pw", got)
 			}
-			if tk.SudoPassword != "fetched-pw" {
+			if snap := tk.Snapshot(); snap.SudoPassword != "fetched-pw" {
 				t.Error("password not cached on task after fetch")
 			}
 			// Second call must hit the cache, not the backend.
@@ -1093,8 +1095,8 @@ func TestManager(t *testing.T) {
 			if got := m.SudoPassword(t.Context(), tk); got != "" {
 				t.Errorf("SudoPassword = %q, want empty on fetch error", got)
 			}
-			if tk.SudoPassword != "" {
-				t.Errorf("task SudoPassword cached %q on error, want empty", tk.SudoPassword)
+			if snap := tk.Snapshot(); snap.SudoPassword != "" {
+				t.Errorf("task SudoPassword cached %q on error, want empty", snap.SudoPassword)
 			}
 		})
 	})
@@ -1288,8 +1290,9 @@ func TestManager(t *testing.T) {
 			if tk.Tailscale != true || tk.USB != true || tk.Display != true {
 				t.Error("container flags not restored")
 			}
-			if !tk.Sudo || !tk.GitHubToken {
-				t.Errorf("privileged flags not restored: sudo=%v gitHubToken=%v", tk.Sudo, tk.GitHubToken)
+			snap := tk.Snapshot()
+			if !snap.Sudo || !snap.GitHubToken {
+				t.Errorf("privileged flags not restored: sudo=%v gitHubToken=%v", snap.Sudo, snap.GitHubToken)
 			}
 			if tk.Model != "model-1" || tk.Effort != "high" {
 				t.Errorf("model/effort = %q/%q, want model-1/high", tk.Model, tk.Effort)
@@ -1714,7 +1717,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m, e := forkSetup(t, "fake", defaultBackends)
 			// Overwrite the container to empty.
-			e.Task().Container = ""
+			e.Task().SetContainerInfo("", "", "", 0)
 			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			var te *Error
 			if !errors.As(err, &te) || te.Kind != KindConflict {

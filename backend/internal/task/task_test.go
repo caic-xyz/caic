@@ -8,9 +8,13 @@ import (
 	"encoding/json"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
@@ -19,6 +23,70 @@ import (
 
 func TestTask(t *testing.T) {
 	t.Parallel()
+	t.Run("ConcurrentMetadataSnapshots", func(t *testing.T) {
+		t.Parallel()
+		tk := &Task{
+			ID:            ksid.NewID(),
+			InitialPrompt: agent.Prompt{Text: "test"},
+			Repos: []RepoMount{
+				{Name: "org/repo", Branch: "main"},
+				{Name: "org/extra", Branch: "main"},
+			},
+			Tailscale:   true,
+			Sudo:        true,
+			GitHubToken: true,
+		}
+
+		const iterations = 1000
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for _, write := range []func(int){
+			func(i int) { tk.SetRepoBranch(0, "task-"+strconv.Itoa(i)) },
+			func(i int) { tk.SetRepoBranch(1, "extra-"+strconv.Itoa(i)) },
+			func(i int) {
+				tk.SetContainerInfo("ctr-"+strconv.Itoa(i), "host.example", "https://auth.example", 5900+i)
+			},
+			func(i int) { tk.SetVNCPort(6000 + i) },
+			func(i int) { tk.SetRelayOffset(int64(i)) },
+			func(i int) { tk.SetSudoPassword("pw-" + strconv.Itoa(i)) },
+		} {
+			wg.Go(func() {
+				<-start
+				for i := range iterations {
+					write(i)
+				}
+			})
+		}
+		for range 4 {
+			wg.Go(func() {
+				<-start
+				for range iterations {
+					snap := tk.Snapshot()
+					if len(snap.Repos) > 0 {
+						snap.Repos[0].Branch = "mutated"
+					}
+					_ = tk.Primary()
+					_ = tk.MDRepos()
+					_ = tk.ExtraMDRepos()
+					_ = tk.ContainerName()
+					_ = tk.RelayOffsetValue()
+					_, _, _ = tk.SudoLookupState()
+					_ = tk.GitHubTokenEnabled()
+				}
+			})
+		}
+
+		close(start)
+		wg.Wait()
+
+		repos := tk.ReposSnapshot()
+		if len(repos) == 0 {
+			t.Fatal("ReposSnapshot returned no repos")
+		}
+		if repos[0].Branch == "mutated" {
+			t.Fatal("Snapshot exposed mutable repo storage")
+		}
+	})
 	t.Run("Subscribe", func(t *testing.T) {
 		t.Parallel()
 		t.Run("SlowSubscriberThenCancel", func(t *testing.T) {

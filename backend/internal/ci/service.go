@@ -9,12 +9,13 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/maruel/genai"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/maruel/genai"
 )
 
 // Service orchestrates CI monitoring, auto-fix loops, and PR creation for
@@ -314,7 +315,7 @@ func (svc *Service) autoResync(ctx context.Context, entry TaskEntry, f forge.For
 	}
 
 	slog.Info("autoResync: syncing branch", "task", t.ID, "br", p.Branch)
-	if _, _, err := runner.SyncToOrigin(ctx, t.MDRepos(), t.Container, false); err != nil {
+	if _, _, err := runner.SyncToOrigin(ctx, t.MDRepos(), t.ContainerName(), false); err != nil {
 		slog.Warn("autoResync: sync failed", "task", t.ID, "err", err)
 		return
 	}

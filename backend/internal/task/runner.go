@@ -19,14 +19,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caic-xyz/md"
+	"github.com/caic-xyz/md/gitutil"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
-	"github.com/caic-xyz/md"
-	"github.com/caic-xyz/md/gitutil"
-	"golang.org/x/sync/errgroup"
 )
 
 // StartOptions holds optional flags for container startup.
@@ -280,7 +281,8 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 	if t.HasSession() {
 		return nil, errors.New("session already active")
 	}
-	if t.Container == "" {
+	containerName := t.ContainerName()
+	if containerName == "" {
 		return nil, errors.New("no container to reconnect to")
 	}
 	// Remember the state inferred from restored messages so we don't
@@ -316,8 +318,8 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 		t.SetState(StateRunning)
 	}
 	session, err := r.backend(t.Harness).AttachRelay(ctx, &agent.Options{
-		Container:       t.Container,
-		RelayOffset:     t.RelayOffset,
+		Container:       containerName,
+		RelayOffset:     t.RelayOffsetValue(),
 		ResumeSessionID: t.GetSessionID(),
 		Effort:          t.Effort,
 		MsgCh:           msgCh,
@@ -328,7 +330,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 		close(msgCh)
 		<-dispatchDone
 		t.SetState(StateWaiting)
-		r.log.Error("attach relay failed", "br", primaryBranch, "ctr", t.Container, "err", err)
+		r.log.Error("attach relay failed", "br", primaryBranch, "ctr", containerName, "err", err)
 		return nil, fmt.Errorf("reconnect: %w", err)
 	}
 
@@ -372,15 +374,12 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 		t.SetState(StateFailed)
 		return nil, err
 	}
-	t.Container = sr.Container
-	t.TailscaleFQDN = sr.TailscaleFQDN
-	t.TailscaleAuthURL = sr.TailscaleAuthURL
-	t.VNCPort = r.Container.VNCPort(ctx, sr.Container)
+	t.SetContainerInfo(sr.Container, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Container.VNCPort(ctx, sr.Container))
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	r.log.Info("runner", "msg", "ready", "br", primaryBranch, "ctr", t.Container, "dur", time.Since(tStart))
+	r.log.Info("runner", "msg", "ready", "br", primaryBranch, "ctr", sr.Container, "dur", time.Since(tStart))
 
 	// 2. Start the agent session.
 	t.SetState(StateStarting)
@@ -401,11 +400,11 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	}
 
 	tSession := time.Now()
-	tlog := r.log.With("br", primaryBranch, "ctr", t.Container)
+	tlog := r.log.With("br", primaryBranch, "ctr", sr.Container)
 	tlog.Info("starting session", "hns", t.Harness)
 	region = trace.StartRegion(ctx, "agent-session")
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container:     t.Container,
+		Container:     sr.Container,
 		Dir:           r.containerDir(t),
 		Model:         t.Model,
 		Effort:        t.Effort,
@@ -458,7 +457,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	defer task.End()
 
 	start := time.Now()
-	name := t.Container
+	name := t.ContainerName()
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
@@ -550,7 +549,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	defer task.End()
 
 	start := time.Now()
-	name := t.Container
+	name := t.ContainerName()
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
@@ -633,27 +632,28 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	if r.Container == nil {
 		return nil, errors.New("runner has no container backend configured")
 	}
-	if t.Container == "" {
+	containerName := t.ContainerName()
+	if containerName == "" {
 		return nil, errors.New("no container to revive")
 	}
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	tlog := r.log.With("br", primaryBranch, "ctr", t.Container)
+	tlog := r.log.With("br", primaryBranch, "ctr", containerName)
 
 	// 1. Revive the container (docker start + SSH).
 	t.SetState(StateProvisioning)
 	repos := t.MDRepos()
 	tlog.Info("reviving container")
 	tlog.Debug("runner", "msg", "calling container.Revive", "repos_count", len(repos))
-	if err := r.Container.Revive(ctx, t.Container, repos); err != nil {
+	if err := r.Container.Revive(ctx, containerName, repos); err != nil {
 		tlog.Error("runner", "msg", "Revive failed", "err", err)
 		t.SetState(StateFailed)
 		return nil, fmt.Errorf("revive container: %w", err)
 	}
-	tlog.Debug("runner", "msg", "Revive succeeded", "container", t.Container)
-	t.VNCPort = r.Container.VNCPort(ctx, t.Container)
+	tlog.Debug("runner", "msg", "Revive succeeded", "container", containerName)
+	t.SetVNCPort(r.Container.VNCPort(ctx, containerName))
 
 	// 2. Start a new relay with --resume to continue the previous session.
 	// skipSideEffects=true: --resume replays all historical messages and
@@ -673,7 +673,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 
 	t.SetState(StateRunning)
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container:       t.Container,
+		Container:       containerName,
 		Dir:             r.containerDir(t),
 		Model:           t.Model,
 		Effort:          t.Effort,
@@ -743,14 +743,15 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 	ctx, task := trace.NewTask(ctx, "task.start-session:"+t.ID.String())
 	defer task.End()
 
-	if t.Container == "" {
+	containerName := t.ContainerName()
+	if containerName == "" {
 		return nil, errors.New("no container")
 	}
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	tlog := r.log.With("br", primaryBranch, "ctr", t.Container)
+	tlog := r.log.With("br", primaryBranch, "ctr", containerName)
 
 	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
 	logW, err := r.openLog(t)
@@ -762,7 +763,7 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 
 	tlog.Info("starting session", "hns", t.Harness)
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container:     t.Container,
+		Container:     containerName,
 		Dir:           r.containerDir(t),
 		Model:         t.Model,
 		Effort:        t.Effort,
@@ -799,7 +800,8 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *For
 	if r.Container == nil {
 		return nil, errors.New("runner has no container backend configured")
 	}
-	if source.Container == "" {
+	sourceContainer := source.ContainerName()
+	if sourceContainer == "" {
 		return nil, errors.New("source task has no container")
 	}
 
@@ -807,25 +809,24 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *For
 	if p := source.Primary(); p != nil {
 		sourcePrimaryBranch = p.Branch
 	}
-	tlog := r.log.With("src_br", sourcePrimaryBranch, "src_ctr", source.Container)
+	tlog := r.log.With("src_br", sourcePrimaryBranch, "src_ctr", sourceContainer)
 
 	// 1. Fork the container. Branch names are generated by md.
 	fork.SetState(StateProvisioning)
 	tlog.Info("forking container")
-	tlog.Debug("runner", "msg", "calling container.Fork", "source", source.Container, "harness", forkOpts.Harness, "tailscale", forkOpts.Tailscale, "usb", forkOpts.USB, "display", forkOpts.Display, "sudo", forkOpts.Sudo, "gitHubToken", fork.GitHubToken)
+	tlog.Debug("runner", "msg", "calling container.Fork", "source", sourceContainer, "harness", forkOpts.Harness, "tailscale", forkOpts.Tailscale, "usb", forkOpts.USB, "display", forkOpts.Display, "sudo", forkOpts.Sudo, "gitHubToken", fork.GitHubTokenEnabled())
 	forkOpts.LogWriter = &provisioningWriter{ctx: ctx, t: fork}
-	forkName, forkRepos, err := r.Container.Fork(ctx, source.Container, source.MDRepos(), forkOpts)
+	forkName, forkRepos, err := r.Container.Fork(ctx, sourceContainer, source.MDRepos(), forkOpts)
 	if err != nil {
-		tlog.Error("runner", "msg", "container.Fork failed", "source", source.Container, "err", err)
+		tlog.Error("runner", "msg", "container.Fork failed", "source", sourceContainer, "err", err)
 		fork.SetState(StateFailed)
 		return nil, fmt.Errorf("fork container: %w", err)
 	}
-	tlog.Debug("runner", "msg", "container.Fork succeeded", "source", source.Container, "fork", forkName)
-	fork.Container = forkName
-	fork.VNCPort = r.Container.VNCPort(ctx, forkName)
-	for i := range fork.Repos {
+	tlog.Debug("runner", "msg", "container.Fork succeeded", "source", sourceContainer, "fork", forkName)
+	fork.SetContainerInfo(forkName, "", "", r.Container.VNCPort(ctx, forkName))
+	for i := range fork.ReposSnapshot() {
 		if i < len(forkRepos) {
-			fork.Repos[i].Branch = forkRepos[i].Branch
+			fork.SetRepoBranch(i, forkRepos[i].Branch)
 		}
 	}
 	tlog.Info("fork container ready", "ctr", forkName)
@@ -849,7 +850,7 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *For
 }
 
 // setupResult holds the outputs of setup: the container name and optional Tailscale FQDN.
-// The primary branch is written directly into t.Repos[0].Branch during setup.
+// The primary branch is written into the task repo metadata during setup.
 type setupResult struct {
 	Container        string
 	TailscaleFQDN    string
@@ -1040,10 +1041,11 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	if p := t.Primary(); p != nil {
 		restartBranch = p.Branch
 	}
-	tlog := r.log.With("br", restartBranch, "ctr", t.Container)
+	containerName := t.ContainerName()
+	tlog := r.log.With("br", restartBranch, "ctr", containerName)
 	tlog.Info("restarting session", "hns", t.Harness)
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container:     t.Container,
+		Container:     containerName,
 		Dir:           r.containerDir(t),
 		Model:         t.Model,
 		Effort:        t.Effort,
@@ -1113,10 +1115,11 @@ func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHand
 	if p := t.Primary(); p != nil {
 		clearBranch = p.Branch
 	}
-	tlog := r.log.With("br", clearBranch, "ctr", t.Container)
+	containerName := t.ContainerName()
+	tlog := r.log.With("br", clearBranch, "ctr", containerName)
 	tlog.Info("clearing context", "hns", t.Harness)
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container: t.Container,
+		Container: containerName,
 		Dir:       r.containerDir(t),
 		Model:     t.Model,
 		Effort:    t.Effort,
@@ -1375,7 +1378,7 @@ func MakeLabels(t *Task) []string {
 		"caic=" + t.ID.String(), // backward compat with WatchEvents
 		"caic.harness=" + string(t.Harness),
 	}
-	if t.GitHubToken {
+	if t.GitHubTokenEnabled() {
 		labels = append(labels, "caic.githubToken=true")
 	}
 	return labels
@@ -1390,7 +1393,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string, resolvedGi
 	// created concurrently with docker run in Phase A.
 	if r.Dir != "" {
 		r.branchMu.Lock()
-		t.Repos[0].Branch = fmt.Sprintf("caic-%d", r.nextID)
+		t.SetRepoBranch(0, fmt.Sprintf("caic-%d", r.nextID))
 		r.nextID++
 		r.branchMu.Unlock()
 	}
@@ -1401,7 +1404,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string, resolvedGi
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	r.log.Info("starting container", "br", primaryBranch, "img", t.DockerImage, "hns", t.Harness, "ts", t.Tailscale, "usb", t.USB, "dpy", t.Display, "sudo", t.Sudo, "gitHubToken", t.GitHubToken)
+	r.log.Info("starting container", "br", primaryBranch, "img", t.DockerImage, "hns", t.Harness, "ts", t.Tailscale, "usb", t.USB, "dpy", t.Display, "sudo", t.Sudo, "gitHubToken", t.GitHubTokenEnabled())
 	tContainer := time.Now()
 	startCtx, startCancel := context.WithTimeout(detached, r.ContainerStartTimeout)
 	defer startCancel()
@@ -1593,8 +1596,9 @@ func (r *Runner) openLog(t *Task) (io.WriteCloser, error) {
 		return nil, fmt.Errorf("create log file: %w", err)
 	}
 	// Write metadata header as the first line.
-	metaRepos := make([]agent.MetaRepo, len(t.Repos))
-	for i, r := range t.Repos {
+	repos := t.ReposSnapshot()
+	metaRepos := make([]agent.MetaRepo, len(repos))
+	for i, r := range repos {
 		metaRepos[i] = agent.MetaRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, MountedPath: r.MountedPath}
 	}
 	meta := agent.MetaMessage{
@@ -1612,7 +1616,7 @@ func (r *Runner) openLog(t *Task) (io.WriteCloser, error) {
 		USB:         t.USB,
 		Display:     t.Display,
 		Sudo:        t.Sudo,
-		GitHubToken: t.GitHubToken,
+		GitHubToken: t.GitHubTokenEnabled(),
 	}
 	if data, err := json.Marshal(meta); err == nil {
 		_, _ = f.Write(append(data, '\n'))
