@@ -26,5 +26,5 @@ rootProject.name = "caic"
 include(":app")
 include(":sdk")
 project(":sdk").projectDir = file("../sdk/kotlin")
-include(":halo-ble")
-project(":halo-ble").projectDir = file("../sdk/halo-ble")
+include(":halo")
+project(":halo").projectDir = file("../sdk/halo")
