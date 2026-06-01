@@ -118,7 +118,7 @@ class DiffViewModel @Inject constructor(
         private val RENAME_RE = Regex("^rename to (.+)", RegexOption.MULTILINE)
 
         /** Extract the file path from a single diff section. */
-        private fun extractPath(section: String): String {
+        internal fun extractPath(section: String): String {
             PLUS_RE.find(section)?.groupValues?.get(1)
                 ?.takeIf { it != "/dev/null" }?.let { return it }
             MINUS_RE.find(section)?.groupValues?.get(1)

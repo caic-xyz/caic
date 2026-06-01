@@ -319,7 +319,7 @@ class FunctionHandlers(
     }
 }
 
-private fun diffStatSummary(t: Task): String {
+internal fun diffStatSummary(t: Task): String {
     val ds = t.diffStat ?: return ""
     if (ds.isEmpty()) return ""
     var added = 0
@@ -332,7 +332,7 @@ private fun diffStatSummary(t: Task): String {
     return ", +$added -$deleted in ${ds.size} $label"
 }
 
-private fun taskSummaryLine(num: Int, t: Task): String {
+internal fun taskSummaryLine(num: Int, t: Task): String {
     val name = t.title.ifBlank { t.id }
     val extras = buildList {
         val pr = t.forgePR
