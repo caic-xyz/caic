@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -703,17 +704,24 @@ func TestAgentArgs(t *testing.T) {
 	t.Run("AppServer", func(t *testing.T) {
 		t.Parallel()
 		args := New().AgentArgs(agent.HarnessArgs{Model: "o4-mini"})
-		if len(args) < 2 || args[0] != "codex" || args[1] != "app-server" {
-			t.Errorf("args[:2] = %v, want [codex app-server ...]", args)
+		want := []string{
+			"codex", "app-server",
+			"-c", `approval_policy="never"`,
+			"-c", `sandbox_mode="danger-full-access"`,
+		}
+		if !slices.Equal(args, want) {
+			t.Errorf("args = %v, want %v", args, want)
 		}
 	})
 	t.Run("WidgetMCPConfig", func(t *testing.T) {
 		t.Parallel()
-		// Widget MCP is disabled for codex; AgentArgs should return only
-		// the base command without any -c flags.
+		// Widget MCP is disabled for codex; AgentArgs should not include
+		// mcp_servers config.
 		args := New().AgentArgs(agent.HarnessArgs{})
-		if slices.Contains(args, "-c") {
-			t.Errorf("unexpected -c flag in args %v; widget MCP is disabled for codex", args)
+		for _, arg := range args {
+			if strings.Contains(arg, "mcp_servers") {
+				t.Errorf("unexpected widget MCP config in args %v", args)
+			}
 		}
 	})
 }

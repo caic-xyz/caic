@@ -143,10 +143,16 @@ func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
 	// TODO: re-enable widget MCP plugin once it's fixed for codex
 	// return []string{
 	// 	"codex", "app-server",
+	// 	"-c", `approval_policy="never"`,
+	// 	"-c", `sandbox_mode="danger-full-access"`,
 	// 	"-c", `mcp_servers.widget.command="python3"`,
 	// 	"-c", `mcp_servers.widget.args=["` + widgetMCPServerPath + `"]`,
 	// }
-	return []string{"codex", "app-server"}
+	return []string{
+		"codex", "app-server",
+		"-c", `approval_policy="never"`,
+		"-c", `sandbox_mode="danger-full-access"`,
+	}
 }
 
 // AttachRelay connects to an already-running relay in the container.
