@@ -4,7 +4,10 @@ package tasks
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -15,6 +18,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
@@ -1957,6 +1961,60 @@ func TestManager(t *testing.T) {
 			}
 			if m.Len() != 1 {
 				t.Errorf("manager Len = %d, want 1", m.Len())
+			}
+		})
+		t.Run("valid_loads_legacy_codex_session_metadata", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			fake := &fakeMD{labels: map[string]string{
+				"md-caic-caic-6\x00caic.id":      taskID.String(),
+				"md-caic-caic-6\x00caic.harness": string(agent.Codex),
+			}}
+			m := New(Config{ServerCtx: t.Context(), MDClient: fake})
+			m.RegisterRunner("caic-xyz/caic", &task.Runner{
+				Dir:      "/home/user/src/caic-xyz/caic",
+				Backends: map[agent.Harness]agent.Backend{agent.Codex: codex.New("", nil)},
+			})
+
+			logDir := t.TempDir()
+			meta, err := json.Marshal(agent.MetaMessage{
+				MessageType: "caic_meta",
+				Version:     1,
+				Prompt:      "legacy codex task",
+				Repos:       []agent.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-6"}},
+				Harness:     agent.Codex,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			init := `{"method":"thread/started","params":{"thread":{"id":"thread-from-started","cliVersion":"1.0","createdAt":1,"cwd":"/repo","modelProvider":"openai","path":"/repo","preview":"","source":"user","status":{"type":"idle"},"updatedAt":2}}}`
+			if err := os.WriteFile(filepath.Join(logDir, "legacy-codex.jsonl"), []byte(string(meta)+"\n"+init+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			logs, err := task.LoadLogs(logDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			adopted, err := m.AdoptContainers(t.Context(), []AdoptRepo{
+				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
+			}, []*md.Container{
+				{
+					Name:  "md-caic-caic-6",
+					State: "exited",
+					Repos: []md.Repo{
+						{GitRoot: "/home/user/src/caic-xyz/caic", Branch: "caic-6", MountedPath: "/home/user/src/caic-xyz/caic"},
+					},
+				},
+			}, logs)
+			if err != nil {
+				t.Fatalf("AdoptContainers: %v", err)
+			}
+			if len(adopted) != 1 {
+				t.Fatalf("adopted len = %d, want 1", len(adopted))
+			}
+			if got := adopted[0].Task.GetSessionID(); got != "thread-from-started" {
+				t.Errorf("SessionID = %q, want thread-from-started", got)
 			}
 		})
 	})

@@ -12,6 +12,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 )
 
 func setClaudeParser(tasks []*LoadedTask) {
@@ -312,6 +313,30 @@ func TestLoadLogs(t *testing.T) {
 		}
 		if lt.SessionID != "thread-old" {
 			t.Errorf("SessionID = %q, want thread-old", lt.SessionID)
+		}
+	})
+	t.Run("LoadSessionMetadataScansLegacyInitMessage", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "legacy codex task",
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.Codex,
+		})
+		init := `{"method":"thread/started","params":{"thread":{"id":"thread-from-started","cliVersion":"1.0","createdAt":1,"cwd":"/repo","modelProvider":"openai","path":"/repo","preview":"","source":"user","status":{"type":"idle"},"updatedAt":2}}}`
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
+		writeLogFile(t, dir, "legacy-codex.jsonl", meta, init, trailer)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lt := tasks[0]
+		lt.SetParser(codex.New("", nil).NewWire().ParseMessage)
+		if err := lt.LoadSessionMetadata(); err != nil {
+			t.Fatal(err)
+		}
+		if lt.SessionID != "thread-from-started" {
+			t.Errorf("SessionID = %q, want thread-from-started", lt.SessionID)
 		}
 	})
 	t.Run("LegacyCaicInitSessionMetadata", func(t *testing.T) {

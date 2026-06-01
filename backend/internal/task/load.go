@@ -184,7 +184,7 @@ func (lt *LoadedTask) LoadSessionMetadata() error {
 	if lt.SessionID != "" || lt.path == "" {
 		return nil
 	}
-	full, err := loadLogSessionMetadata(lt.path)
+	full, err := loadLogSessionMetadata(lt.path, lt.parseFn)
 	if err != nil {
 		return err
 	}
@@ -342,7 +342,27 @@ func applySessionMetadataLine(lt *LoadedTask, typ string, line []byte) bool {
 	}
 }
 
-func loadLogSessionMetadata(path string) (_ *LoadedTask, retErr error) {
+func applySessionMetadataMessages(lt *LoadedTask, msgs []agent.Message) bool {
+	for _, msg := range msgs {
+		init, ok := msg.(*agent.InitMessage)
+		if !ok {
+			continue
+		}
+		if init.SessionID != "" {
+			lt.SessionID = init.SessionID
+		}
+		if init.Model != "" {
+			lt.Model = init.Model
+		}
+		if init.Version != "" {
+			lt.AgentVersion = init.Version
+		}
+		return init.SessionID != ""
+	}
+	return false
+}
+
+func loadLogSessionMetadata(path string, parseFn func([]byte) ([]agent.Message, error)) (_ *LoadedTask, retErr error) {
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, err
@@ -366,6 +386,16 @@ func loadLogSessionMetadata(path string) (_ *LoadedTask, retErr error) {
 			continue
 		}
 		if applySessionMetadataLine(lt, env.Type, line) {
+			break
+		}
+		if parseFn == nil {
+			continue
+		}
+		msgs, err := parseFn(line)
+		if err != nil {
+			continue
+		}
+		if applySessionMetadataMessages(lt, msgs) {
 			break
 		}
 	}

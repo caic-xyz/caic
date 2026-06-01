@@ -1341,6 +1341,10 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	if harnessName == "" {
 		harnessName = agent.Claude
 	}
+	if lt != nil {
+		lt.Harness = harnessName
+		m.setParser(lt)
+	}
 
 	// Check relay liveness.
 	var relayAlive bool
