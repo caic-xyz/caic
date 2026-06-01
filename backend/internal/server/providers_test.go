@@ -27,7 +27,12 @@ func TestAppendProviderAPIKey(t *testing.T) {
 
 	t.Run("gemini compatibility key", func(t *testing.T) {
 		t.Parallel()
-		opts := appendProviderAPIKey(nil, "gemini", nil, "AIza_compat")
+		opts := appendProviderAPIKeyWithEnv(nil, "gemini", nil, "AIza_compat", func(name string) string {
+			if name == "GEMINI_API_KEY" {
+				return "AIza_env"
+			}
+			return ""
+		})
 
 		if !slices.ContainsFunc(opts, func(o genai.ProviderOption) bool {
 			v, ok := o.(genai.ProviderOptionAPIKey)

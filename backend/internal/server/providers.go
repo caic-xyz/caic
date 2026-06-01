@@ -99,7 +99,17 @@ func appendProviderAPIKey(
 	coreEnv map[string]string,
 	geminiAPIKey string,
 ) []genai.ProviderOption {
-	key := providerAPIKey(providerName, coreEnv, nil, geminiAPIKey)
+	return appendProviderAPIKeyWithEnv(opts, providerName, coreEnv, geminiAPIKey, os.Getenv)
+}
+
+func appendProviderAPIKeyWithEnv(
+	opts []genai.ProviderOption,
+	providerName string,
+	coreEnv map[string]string,
+	geminiAPIKey string,
+	getenv func(string) string,
+) []genai.ProviderOption {
+	key := providerAPIKeyWithEnv(providerName, coreEnv, nil, geminiAPIKey, getenv)
 	if key == "" {
 		return opts
 	}
@@ -107,20 +117,32 @@ func appendProviderAPIKey(
 }
 
 func providerAPIKey(providerName string, coreEnv map[string]string, harnessEnv map[string][]string, geminiAPIKey string) string {
+	return providerAPIKeyWithEnv(providerName, coreEnv, harnessEnv, geminiAPIKey, os.Getenv)
+}
+
+func providerAPIKeyWithEnv(
+	providerName string,
+	coreEnv map[string]string,
+	harnessEnv map[string][]string,
+	geminiAPIKey string,
+	getenv func(string) string,
+) string {
 	c, ok := providers.All[providerName]
 	if !ok || c.APIKeyEnvVar == "" {
 		return ""
 	}
-	if key := configuredEnvValue(coreEnv, harnessEnv, c.APIKeyEnvVar); key != "" {
+	if key := configuredAPIKey(coreEnv, harnessEnv, c.APIKeyEnvVar); key != "" {
 		return key
 	}
 	if providerName == "gemini" {
-		return geminiAPIKey
+		if geminiAPIKey != "" {
+			return geminiAPIKey
+		}
 	}
-	return ""
+	return getenv(c.APIKeyEnvVar)
 }
 
-func configuredEnvValue(coreEnv map[string]string, harnessEnv map[string][]string, envVar string) string {
+func configuredAPIKey(coreEnv map[string]string, harnessEnv map[string][]string, envVar string) string {
 	if v, ok := coreEnv[envVar]; ok {
 		return v
 	}
@@ -132,7 +154,7 @@ func configuredEnvValue(coreEnv map[string]string, harnessEnv map[string][]strin
 			}
 		}
 	}
-	return os.Getenv(envVar)
+	return ""
 }
 
 var apiKeyUsageFetchers = []struct {

@@ -130,7 +130,7 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 			return nil, fmt.Errorf("turn/completed params: %w", err)
 		}
 		switch p.Turn.Status {
-		case "failed", "interrupted":
+		case cx.TurnStatusFailed, cx.TurnStatusInterrupted:
 			errMsg := ""
 			if p.Turn.Error != nil {
 				errMsg = p.Turn.Error.Message
@@ -141,7 +141,7 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 				IsError:     true,
 				Result:      errMsg,
 			}}, nil
-		default: // "completed", "inProgress"
+		default: // completed, inProgress
 			return []agent.Message{&agent.ResultMessage{
 				MessageType: "result",
 				Subtype:     "result",
@@ -153,9 +153,6 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 
 	case cx.MethodItemCompleted:
 		return parseItemCompleted(&msg, fw)
-
-	case cx.MethodItemUpdated:
-		return []agent.Message{&agent.RawMessage{MessageType: string(msg.Method), Raw: append([]byte(nil), line...)}}, nil
 
 	case cx.MethodItemDelta:
 		var p cx.AgentMessageDeltaNotification
@@ -207,7 +204,7 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 		}
 		return []agent.Message{&agent.SystemMessage{
 			MessageType: "system",
-			Subtype:     p.Status.Type,
+			Subtype:     string(p.Status.Type),
 		}}, nil
 
 	case cx.MethodModelRerouted:
@@ -217,7 +214,7 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 		}
 		detail := p.FromModel + " → " + p.ToModel
 		if p.Reason != "" {
-			detail += " (" + p.Reason + ")"
+			detail += " (" + string(p.Reason) + ")"
 		}
 		return []agent.Message{&agent.SystemMessage{
 			MessageType: "system",
@@ -233,8 +230,8 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 
 // parseItemStarted handles item/started notifications.
 func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
-	var p cx.ItemNotification
-	if err := unmarshalNotification(msg.Params, &p, "ItemNotification", fw); err != nil {
+	var p cx.ItemStartedNotification
+	if err := unmarshalNotification(msg.Params, &p, "ItemStartedNotification", fw); err != nil {
 		return nil, fmt.Errorf("item/started params: %w", err)
 	}
 	var h cx.ItemHeader
@@ -309,7 +306,7 @@ func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent
 		if err := unmarshalNotification(p.Item, &item, "CollabAgentToolCallItem", fw); err != nil {
 			return nil, fmt.Errorf("item/started collabAgentToolCall: %w", err)
 		}
-		toolName := item.Tool
+		toolName := string(item.Tool)
 		if toolName == "" {
 			toolName = "collabAgent"
 		}
@@ -345,8 +342,8 @@ func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent
 
 // parseItemCompleted handles item/completed notifications.
 func parseItemCompleted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
-	var p cx.ItemNotification
-	if err := unmarshalNotification(msg.Params, &p, "ItemNotification", fw); err != nil {
+	var p cx.ItemCompletedNotification
+	if err := unmarshalNotification(msg.Params, &p, "ItemCompletedNotification", fw); err != nil {
 		return nil, fmt.Errorf("item/completed params: %w", err)
 	}
 	var h cx.ItemHeader
@@ -364,7 +361,7 @@ func parseItemCompleted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]age
 		if err := unmarshalNotification(p.Item, &item, "AgentMessageItem", fw); err != nil {
 			return nil, fmt.Errorf("item/completed agentMessage: %w", err)
 		}
-		return []agent.Message{&agent.TextMessage{Text: item.Text, Phase: item.Phase}}, nil
+		return []agent.Message{&agent.TextMessage{Text: item.Text, Phase: string(item.Phase)}}, nil
 
 	case cx.ItemTypeReasoning:
 		var item cx.ReasoningItem
@@ -419,7 +416,7 @@ func parseItemCompleted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]age
 			return nil, fmt.Errorf("item/completed collabAgentToolCall: %w", err)
 		}
 		m := &agent.ToolResultMessage{ToolUseID: item.ID}
-		if item.Status == "failed" {
+		if item.Status == cx.CollabAgentToolCallStatusFailed {
 			m.Error = "collab agent tool call failed"
 		}
 		return []agent.Message{m}, nil
@@ -486,7 +483,7 @@ func userInputFromContent(content json.RawMessage) *agent.UserInputMessage {
 // toolNameForChanges returns "Write" if any change has Kind.Type == "add", else "Edit".
 func toolNameForChanges(changes []cx.FileUpdateChange) string {
 	for _, c := range changes {
-		if c.Kind.Type == "add" {
+		if c.Kind.Type == cx.PatchChangeKindTypeAdd {
 			return "Write"
 		}
 	}

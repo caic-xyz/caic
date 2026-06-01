@@ -12,8 +12,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
 	cx "github.com/maruel/genai/providers/codex"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
 func TestNew(t *testing.T) {
@@ -267,12 +268,12 @@ func TestTurnCompletedNotification(t *testing.T) {
 	})
 }
 
-func TestItemNotification(t *testing.T) {
+func TestItemStartedNotification(t *testing.T) {
 	t.Parallel()
 	t.Run("RawItem", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"item":{"id":"item_1","type":"commandExecution","command":"ls"},"threadId":"t1","turnId":"turn_1"}`
-		var p cx.ItemNotification
+		var p cx.ItemStartedNotification
 		if err := json.Unmarshal([]byte(input), &p); err != nil {
 			t.Fatal(err)
 		}
@@ -342,9 +343,6 @@ func TestPerItemTypeStructs(t *testing.T) {
 		}
 		if item.Phase != "response" {
 			t.Errorf("Phase = %q", item.Phase)
-		}
-		if item.Status != "completed" {
-			t.Errorf("Status = %q", item.Status)
 		}
 	})
 	t.Run("Plan", func(t *testing.T) {

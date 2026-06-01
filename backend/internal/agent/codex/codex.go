@@ -268,19 +268,6 @@ type wireFormat struct {
 	fw                *jsonutil.FieldWarner
 }
 
-type reasoningSummary string
-
-const reasoningSummaryAuto reasoningSummary = "auto"
-
-// TODO: Move reasoningSummary and turnStartParams to genai once
-// github.com/maruel/genai/providers/codex exposes TurnStartParams.Summary.
-type turnStartParams struct {
-	ThreadID string             `json:"threadId"`
-	Input    []cx.TurnInput     `json:"input"`
-	Summary  reasoningSummary   `json:"summary,omitzero"`
-	Effort   cx.ReasoningEffort `json:"effort,omitzero"`
-}
-
 // WritePrompt sends a turn/start JSON-RPC request to begin a new turn with
 // the given user message. Images are sent as data URL items after the text item.
 func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) error {
@@ -291,10 +278,10 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 	}
 	id := w.nextID.Add(1)
 	input := make([]cx.TurnInput, 0, 1+len(p.Images))
-	input = append(input, cx.TurnInput{Type: "text", Text: p.Text})
+	input = append(input, cx.TurnInput{Type: cx.TurnInputTypeText, Text: p.Text})
 	for _, img := range p.Images {
 		input = append(input, cx.TurnInput{
-			Type: "image",
+			Type: cx.TurnInputTypeImage,
 			URL:  "data:" + img.MediaType + ";base64," + img.Data,
 		})
 	}
@@ -302,10 +289,10 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  "turn/start",
-		Params: turnStartParams{
+		Params: cx.TurnStartParams{
 			ThreadID: w.threadID,
 			Input:    input,
-			Summary:  reasoningSummaryAuto,
+			Summary:  cx.ReasoningSummaryAuto,
 			Effort:   cx.ReasoningEffort(w.effort),
 		},
 	}
