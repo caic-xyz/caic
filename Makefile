@@ -1,6 +1,6 @@
 # Build, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
 
-.PHONY: help build dev fake-dev test smoke coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix lint-docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-push android-test android-e2e android-setup-emulator android-start-emulator android-stop-emulator
+.PHONY: help build dev fake-dev test smoke coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix lint-docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-push android-test android-coverage android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:2242
@@ -9,26 +9,27 @@ help:
 	@echo "caic - Manage multiple coding agents"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  make build          - Build Go server (includes frontend build)"
-	@echo "  make dev            - Run the server in development mode (go run)"
-	@echo "  make fake-dev       - Run the server with fake backend (no containers)"
-	@echo "  make frontend-build - Build frontend assets (TypeScript → JavaScript)"
-	@echo "  make test           - Run unit tests"
-	@echo "  make smoke          - Run smoke test (end-to-end server lifecycle)"
-	@echo "  make lint           - Run linters (Go + frontend + Python + binaries + file index check)"
-	@echo "  make lint-fix       - Fix linting issues automatically (includes updating file indexes)"
-	@echo "  make git-hooks      - Install git pre-commit hooks"
-	@echo "  make frontend-dev   - Run frontend dev server (http://localhost:5173)"
-	@echo "  make android-build  - Build Android app (debug APK)"
-	@echo "  make android-push   - Build, install, and start APK on connected device"
-	@echo "  make android-test   - Run Android unit tests"
-	@echo "  make android-e2e    - Run Android instrumented tests and generate screenshots"
+	@echo "  make build                  - Build Go server (includes frontend build)"
+	@echo "  make dev                    - Run the server in development mode (go run)"
+	@echo "  make fake-dev               - Run the server with fake backend (no containers)"
+	@echo "  make frontend-build         - Build frontend assets (TypeScript → JavaScript)"
+	@echo "  make test                   - Run unit tests"
+	@echo "  make smoke                  - Run smoke test (end-to-end server lifecycle)"
+	@echo "  make lint                   - Run linters (Go + frontend + Python + binaries + file index check)"
+	@echo "  make lint-fix               - Fix linting issues automatically (includes updating file indexes)"
+	@echo "  make git-hooks              - Install git pre-commit hooks"
+	@echo "  make frontend-dev           - Run frontend dev server (http://localhost:5173)"
+	@echo "  make android-build          - Build Android app (debug APK)"
+	@echo "  make android-push           - Build, install, and start APK on connected device"
+	@echo "  make android-test           - Run Android unit tests"
+	@echo "  make android-coverage       - Run Android unit tests with JaCoCo coverage"
+	@echo "  make android-e2e            - Run Android instrumented tests and generate screenshots"
 	@echo "  make android-setup-emulator - Install SDK tools, emulator, system image, create AVD"
 	@echo "  make android-start-emulator - Start the headless Android emulator"
 	@echo "  make android-stop-emulator  - Stop the running Android emulator"
-	@echo "  make frontend-e2e   - Run Playwright end-to-end tests"
-	@echo "  make lint-android   - Run Android linters (detekt + lint)"
-	@echo "  make upgrade        - Upgrade Go and pnpm dependencies"
+	@echo "  make frontend-e2e           - Run Playwright end-to-end tests"
+	@echo "  make lint-android           - Run Android linters (detekt + lint)"
+	@echo "  make upgrade                - Upgrade Go and pnpm dependencies"
 
 $(FRONTEND_STAMP): pnpm-lock.yaml
 	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm install --frozen-lockfile --silent
@@ -118,6 +119,9 @@ android-push: android-build
 
 android-test:
 	@cd android && ./gradlew --no-daemon test
+
+android-coverage:
+	@cd android && ./gradlew --no-daemon :app:testDebugUnitTest :app:createDebugUnitTestCoverageReport :halo-ble:testDebugUnitTest :halo-ble:createDebugUnitTestCoverageReport
 
 android-e2e:
 	@python3 scripts/android_e2e.py

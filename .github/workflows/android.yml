@@ -45,6 +45,13 @@ jobs:
           retention-days: 7
       - name: Test
         run: make android-test
+      - name: Coverage
+        run: make android-coverage
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v6
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: android/app/build/reports/coverage/androidTest/debug/report.xml,sdk/halo-ble/build/reports/coverage/androidTest/debug/report.xml
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
