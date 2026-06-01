@@ -473,6 +473,9 @@ func (m *Manager) SendInput(ctx context.Context, entry *Entry, prompt agent.Prom
 		}
 	}
 	if err := entry.task.SendInput(ctx, prompt); err != nil {
+		if !errors.Is(err, task.ErrNoActiveSession) {
+			return conflictErr(err, "send input")
+		}
 		t := entry.task
 		taskState := t.GetState()
 		slog.WarnContext(ctx, "no active session",

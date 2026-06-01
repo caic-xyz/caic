@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os/exec"
 	"strconv"
@@ -20,6 +21,22 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 )
+
+type failingConn struct {
+	err error
+}
+
+func (c *failingConn) SendPrompt(agent.Prompt) error { return c.err }
+
+func (*failingConn) SendRaw([]byte) error { return nil }
+
+func (*failingConn) SendCompact(string) error { return nil }
+
+func (*failingConn) ReadMessages(io.Reader, chan<- agent.Message) error { return nil }
+
+func (*failingConn) SendStop(context.Context) {}
+
+func (*failingConn) Close() error { return nil }
 
 func TestTask(t *testing.T) {
 	t.Parallel()
@@ -211,6 +228,39 @@ func TestTask(t *testing.T) {
 
 	t.Run("SendInput", func(t *testing.T) {
 		t.Parallel()
+		t.Run("error_delivery_failure_preserves_waiting_state", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateWaiting)
+
+			cmdCtx, cmdCancel := context.WithCancel(t.Context())
+			cmd := exec.CommandContext(cmdCtx, "sleep", "60")
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			sendErr := errors.New("delivery failed")
+			s := agent.NewSession(cmd, &failingConn{err: sendErr}, stdout, make(chan agent.Message, 256), nil)
+			t.Cleanup(func() {
+				cmdCancel()
+				_ = s.Wait()
+			})
+			tk.AttachSession(&SessionHandle{Session: s})
+
+			err = tk.SendInput(t.Context(), agent.Prompt{Text: "follow up"})
+			if !errors.Is(err, sendErr) {
+				t.Fatalf("SendInput err = %v, want %v", err, sendErr)
+			}
+			if got := tk.GetState(); got != StateWaiting {
+				t.Errorf("state = %s, want %s", got, StateWaiting)
+			}
+			if msgs := tk.Messages(); len(msgs) != 0 {
+				t.Fatalf("messages = %d, want 0", len(msgs))
+			}
+		})
 		t.Run("PreservesPlanContent", func(t *testing.T) {
 			t.Parallel()
 			// When the user sends regular input (instead of clicking

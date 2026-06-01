@@ -5,6 +5,7 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -1114,6 +1115,10 @@ const (
 	SessionExited SessionStatus = "exited"
 )
 
+// ErrNoActiveSession reports that input cannot be delivered because no live
+// session is attached to the task.
+var ErrNoActiveSession = errors.New("no active session")
+
 // SendInput sends a user message to the running agent.
 //
 // Returns an error if no session is active. The error includes the task state
@@ -1134,20 +1139,23 @@ func (t *Task) SendInput(ctx context.Context, p agent.Prompt) error {
 		}
 	}
 	state := t.state
-	if h != nil && (state == StateWaiting || state == StateAsking || state == StateHasPlan) {
-		t.setState(StateRunning)
+	t.mu.Unlock()
+	if h == nil {
+		return fmt.Errorf("%w (state=%s session=%s)", ErrNoActiveSession, state, sessionStatus)
+	}
+	if err := h.Session.SendPrompt(p); err != nil {
+		return err
+	}
+	if state == StateWaiting || state == StateAsking || state == StateHasPlan {
+		t.SetStateIfAny(StateRunning, StateWaiting, StateAsking, StateHasPlan)
 		// Plan content is preserved — the UI hides naturally while the
 		// task is Running (isWaiting is false). When the agent finishes,
 		// the plan reappears (original or updated via Write/Edit).
 		// ClearMessages (the "Clear and execute plan" path) is the only
 		// place that erases plan state.
 	}
-	t.mu.Unlock()
-	if h == nil {
-		return fmt.Errorf("no active session (state=%s session=%s)", state, sessionStatus)
-	}
 	t.addMessage(ctx, syntheticUserInput(p), false)
-	return h.Session.SendPrompt(p)
+	return nil
 }
 
 // SendCompact sends a compact command to the running agent without changing

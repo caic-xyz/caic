@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -952,6 +954,55 @@ func TestManager(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "no active session") {
 				t.Errorf("err message %q lost underlying diagnostic", err.Error())
+			}
+		})
+		t.Run("error_delivery_failure_is_not_no_session", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}, Harness: agent.Codex}
+			tk.SetState(task.StateWaiting)
+
+			cmdCtx, cmdCancel := context.WithCancel(t.Context())
+			cmd := exec.CommandContext(cmdCtx, "sleep", "60")
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, codex.New("", nil).NewWire()), stdout, make(chan agent.Message, 256), nil)
+			t.Cleanup(func() {
+				cmdCancel()
+				_ = s.Wait()
+			})
+			tk.AttachSession(&task.SessionHandle{Session: s})
+
+			e := NewEntry(tk)
+			m.Insert(tk.ID.String(), e)
+			err = m.SendInput(t.Context(), e, agent.Prompt{Text: "go"})
+			if err == nil {
+				t.Fatal("expected delivery error")
+			}
+			if errors.Is(err, ErrNoSession) {
+				t.Fatalf("errors.Is(err, ErrNoSession) = true, err = %v", err)
+			}
+			var taskErr *Error
+			if !errors.As(err, &taskErr) {
+				t.Fatalf("err type = %T, want *Error", err)
+			}
+			if taskErr.Kind != KindConflict {
+				t.Errorf("Kind = %s, want %s", taskErr.Kind, KindConflict)
+			}
+			if got := tk.GetState(); got != task.StateWaiting {
+				t.Errorf("state = %s, want %s", got, task.StateWaiting)
+			}
+			if msgs := tk.Messages(); len(msgs) != 0 {
+				t.Fatalf("messages = %d, want 0", len(msgs))
 			}
 		})
 	})
