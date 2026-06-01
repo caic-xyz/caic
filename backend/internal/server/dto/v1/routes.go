@@ -11,7 +11,7 @@ import (
 type Route struct {
 	Name        string       // Function name, e.g. "listRepos"
 	Doc         string       // One-line description for SDK comments and docs.
-	Method      string       // "GET" or "POST"
+	Method      string       // HTTP method, e.g. "GET" or "POST"
 	Path        string       // "/api/v1/tasks/{id}/input"
 	Req         reflect.Type // Request body type; nil for no body.
 	Resp        reflect.Type // Response body type.
@@ -265,11 +265,12 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[CreateTaskResp](),
 	},
 	{
-		Name:   "getTaskDiff",
-		Doc:    "Returns the unified diff for a task's branch.",
-		Method: "GET",
-		Path:   "/api/v1/tasks/{id}/diff",
-		Resp:   reflect.TypeFor[DiffResp](),
+		Name:        "getTaskDiff",
+		Doc:         "Returns the unified diff for a task's branch.",
+		Method:      "GET",
+		Path:        "/api/v1/tasks/{id}/diff",
+		Resp:        reflect.TypeFor[DiffResp](),
+		QueryParams: []string{"path"},
 	},
 	{
 		Name:   "getTaskProcesses",
@@ -338,5 +339,12 @@ var Routes = []Route{
 		Path:   "/api/v1/voice/rtc/offer",
 		Req:    reflect.TypeFor[VoiceRTCOfferReq](),
 		Resp:   reflect.TypeFor[VoiceRTCAnswerResp](),
+	},
+	{
+		Name:   "closeVoiceRTC",
+		Doc:    "Closes a WebRTC voice bridge session.",
+		Method: "POST",
+		Path:   "/api/v1/voice/rtc/{sessionID}",
+		Resp:   reflect.TypeFor[StatusResp](),
 	},
 }

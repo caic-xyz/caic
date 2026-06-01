@@ -135,10 +135,10 @@ func (p *Preferences) clone() Preferences {
 type Settings struct {
 	// AutoFixOnCIFailure automatically starts a new task to fix CI when a
 	// task's PR CI fails and the original task can no longer receive input.
-	AutoFixOnCIFailure bool `json:"autoFixOnCIFailure,omitempty"`
+	AutoFixOnCIFailure bool `json:"autoFixOnCIFailure"`
 	// AutoFixOnPROpen automatically creates a task to review and fix a pull
 	// request when it is opened or reopened via a forge webhook.
-	AutoFixOnPROpen bool `json:"autoFixOnPROpen,omitempty"`
+	AutoFixOnPROpen bool `json:"autoFixOnPROpen"`
 	// BaseImage overrides the default container base image. Empty means use
 	// the default.
 	BaseImage string `json:"baseImage,omitempty"`
@@ -147,7 +147,7 @@ type Settings struct {
 	MaxCPUs int `json:"maxCPUs,omitempty"`
 	// UseDefaultCaches controls whether default harness caches are mounted.
 	// When false, only custom CacheMappings are used.
-	UseDefaultCaches bool `json:"useDefaultCaches,omitempty"`
+	UseDefaultCaches bool `json:"useDefaultCaches"`
 	// WellKnownCaches maps cache name to enabled state. nil means use default
 	// (all true), true means explicitly enabled, false means explicitly disabled.
 	WellKnownCaches map[string]bool `json:"wellKnownCaches,omitempty"`
@@ -256,7 +256,7 @@ const recentWindow = 7 * 24 * time.Hour
 const minRecentRepos = 10
 
 func newPreferences() *Preferences {
-	return &Preferences{Version: currentVersion}
+	return &Preferences{Version: currentVersion, Settings: Settings{UseDefaultCaches: true}}
 }
 
 // usersFile is the on-disk JSON format for the Store.

@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	"github.com/maruel/ksid"
+
+	"github.com/caic-xyz/caic/backend/internal/server/dto"
 )
 
 //go:generate go run github.com/caic-xyz/caic/backend/internal/cmd/gen-api-sdk
@@ -471,6 +472,7 @@ type ProcessListResp struct {
 // SignalProcessReq is the request body for POST /api/v1/tasks/{id}/processes/{pid}/signal.
 type SignalProcessReq struct {
 	Signal string `json:"signal"` // "SIGTERM" or "SIGKILL"
+	PID    int    `json:"-"      path:"pid"`
 }
 
 // RepoPrefsResp holds per-repository preferences.
@@ -504,7 +506,7 @@ type UserSettings struct {
 	MaxCPUs int `json:"maxCPUs,omitempty"`
 	// UseDefaultCaches controls whether default harness caches are mounted.
 	// When false, only custom CacheMappings are used.
-	UseDefaultCaches bool `json:"useDefaultCaches,omitempty"`
+	UseDefaultCaches bool `json:"useDefaultCaches"`
 	// WellKnownCaches maps cache name to enabled state. nil means use default
 	// (all true), true means explicitly enabled, false means explicitly disabled.
 	WellKnownCaches map[string]bool `json:"wellKnownCaches,omitempty"`
@@ -523,6 +525,8 @@ type PreferencesResp struct {
 // UpdatePreferencesReq is the request body for POST /api/v1/server/preferences.
 type UpdatePreferencesReq struct {
 	Settings UserSettings `json:"settings"`
+
+	settingsSet bool
 }
 
 // CloneRepoReq is the request body for POST /api/v1/server/repos.

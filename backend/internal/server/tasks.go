@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"sort"
-	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -101,6 +100,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		ResolvedGitHubToken: s.resolveGitHubContainerToken(ctx, req.GitHubToken),
 		DockerImage:         prefs.Settings.BaseImage,
 		MaxCPUs:             prefs.Settings.MaxCPUs,
+		CacheMounts:         cacheMountsFromSettings(prefs.Settings),
 	})
 	if err != nil {
 		return nil, toDTO(err)
@@ -666,50 +666,23 @@ func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
 
 // handleSignalProcess sends a signal to a process inside the task's container.
 // Reads the pid from the URL path and the signal name from the request body.
-func (s *Server) handleSignalProcess(w http.ResponseWriter, r *http.Request) {
-	entry, err := s.getTask(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
+func (s *Server) signalProcess(ctx context.Context, entry *tasks.Entry, req *v1.SignalProcessReq) (*v1.StatusResp, error) {
 	t := entry.Task()
 	containerName := t.ContainerName()
 	if containerName == "" {
-		writeError(w, dto.Conflict("task has no container"))
-		return
-	}
-	pidStr := r.PathValue("pid")
-	if pidStr == "" {
-		writeError(w, dto.BadRequest("pid is required"))
-		return
-	}
-	pid, convErr := strconv.Atoi(pidStr)
-	if convErr != nil || pid < 1 {
-		writeError(w, dto.BadRequest("invalid pid: "+pidStr))
-		return
-	}
-	var req v1.SignalProcessReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, dto.BadRequest("invalid request body"))
-		return
-	}
-	if err := req.Validate(); err != nil {
-		writeError(w, err)
-		return
+		return nil, dto.Conflict("task has no container")
 	}
 	if s.fakeSignal != nil {
-		if err := s.fakeSignal(r.Context(), containerName, pid, req.Signal); err != nil {
-			writeError(w, dto.InternalError(err.Error()))
-			return
+		if err := s.fakeSignal(ctx, containerName, req.PID, req.Signal); err != nil {
+			return nil, dto.InternalError(err.Error())
 		}
 	} else {
-		if err := s.backend.Signal(r.Context(), containerName, pid, req.Signal); err != nil {
-			writeError(w, dto.InternalError(err.Error()))
-			return
+		if err := s.backend.Signal(ctx, containerName, req.PID, req.Signal); err != nil {
+			return nil, dto.InternalError(err.Error())
 		}
 	}
-	slog.Info("signal sent", "task", t.ID, "container", containerName, "pid", pid, "signal", req.Signal)
-	writeJSONResponse(w, &v1.StatusResp{Status: "signalled"}, nil)
+	slog.Info("signal sent", "task", t.ID, "container", containerName, "pid", req.PID, "signal", req.Signal)
+	return &v1.StatusResp{Status: "signalled"}, nil
 }
 
 // resolveGitHubContainerToken returns the GitHub token to inject into a

@@ -3,6 +3,8 @@
 package v1
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -35,14 +37,14 @@ func TestValidate(t *testing.T) {
 		})
 		t.Run("ImagesOnly", func(t *testing.T) {
 			t.Parallel()
-			r := &InputReq{Prompt: Prompt{Images: []ImageData{{MediaType: "image/png", Data: "abc"}}}}
+			r := &InputReq{Prompt: Prompt{Images: []ImageData{{MediaType: "image/png", Data: "YQ=="}}}}
 			if err := r.Validate(); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
 		t.Run("InvalidImageMediaType", func(t *testing.T) {
 			t.Parallel()
-			r := &InputReq{Prompt: Prompt{Text: "x", Images: []ImageData{{MediaType: "image/bmp", Data: "abc"}}}}
+			r := &InputReq{Prompt: Prompt{Text: "x", Images: []ImageData{{MediaType: "image/bmp", Data: "YQ=="}}}}
 			assertBadRequest(t, r.Validate(), "unsupported image mediaType: image/bmp")
 		})
 		t.Run("MissingImageData", func(t *testing.T) {
@@ -52,8 +54,14 @@ func TestValidate(t *testing.T) {
 		})
 		t.Run("MissingImageMediaType", func(t *testing.T) {
 			t.Parallel()
-			r := &InputReq{Prompt: Prompt{Text: "x", Images: []ImageData{{Data: "abc"}}}}
+			r := &InputReq{Prompt: Prompt{Text: "x", Images: []ImageData{{Data: "YQ=="}}}}
 			assertBadRequest(t, r.Validate(), "image mediaType is required")
+		})
+		t.Run("ImageTooLarge", func(t *testing.T) {
+			t.Parallel()
+			data := strings.Repeat("A", base64.StdEncoding.EncodedLen(maxImageBytes+1))
+			r := &InputReq{Prompt: Prompt{Text: "x", Images: []ImageData{{MediaType: "image/png", Data: data}}}}
+			assertBadRequest(t, r.Validate(), "image data too large")
 		})
 	})
 
@@ -208,6 +216,43 @@ func TestValidate(t *testing.T) {
 			r := valid
 			r.Harness = ""
 			assertBadRequest(t, r.Validate(), "harness is required")
+		})
+	})
+
+	t.Run("UpdatePreferencesReq", func(t *testing.T) {
+		t.Parallel()
+		t.Run("Valid", func(t *testing.T) {
+			t.Parallel()
+			var r UpdatePreferencesReq
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"useDefaultCaches":true}}`), &r); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			if err := r.Validate(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+		t.Run("MissingSettings", func(t *testing.T) {
+			t.Parallel()
+			var r UpdatePreferencesReq
+			if err := json.Unmarshal([]byte(`{}`), &r); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			assertBadRequest(t, r.Validate(), "settings is required")
+		})
+		t.Run("UnknownCache", func(t *testing.T) {
+			t.Parallel()
+			var r UpdatePreferencesReq
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"useDefaultCaches":true,"wellKnownCaches":{"bogus":true}}}`), &r); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			assertBadRequest(t, r.Validate(), "unknown cache: bogus")
+		})
+		t.Run("UnknownTopLevelField", func(t *testing.T) {
+			t.Parallel()
+			var r UpdatePreferencesReq
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"useDefaultCaches":true},"bogus":true}`), &r); err == nil {
+				t.Fatal("expected unknown field error")
+			}
 		})
 	})
 }

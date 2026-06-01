@@ -1,7 +1,7 @@
 // Tests for groupMessages and groupTurns logic.
 import { describe, it, expect } from "vitest";
 import { groupMessages, groupMessagesInc, groupTurns, groupSessions, resetGroupIncCache, turnSummary, buildTurnItems, buildPastSessionItems } from "./grouping";
-import type { EventMessage } from "@sdk/types.gen";
+import type { EventMessage, ISOTimestamp } from "@sdk/types.gen";
 
 function toolUseEvent(id: string, name: string): EventMessage {
   return { kind: "toolUse", ts: 0, toolUse: { toolUseID: id, name, input: {} } };
@@ -267,7 +267,7 @@ describe("groupMessages", () => {
 
   it("rateLimit warning creates other group", () => {
     const groups = groupMessages([
-      { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed_warning", resetsAt: 0, rateLimitType: "five_hour", utilization: 0.8 } },
+      { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.8 } },
     ]);
     expect(groups).toHaveLength(1);
     expect(groups[0].kind).toBe("other");
@@ -275,14 +275,14 @@ describe("groupMessages", () => {
 
   it("rateLimit allowed is filtered out", () => {
     const groups = groupMessages([
-      { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed", resetsAt: 0, rateLimitType: "five_hour", utilization: 0.3 } },
+      { kind: "rateLimit", ts: 1, rateLimit: { status: "allowed", rateLimitType: "five_hour", utilization: 0.3 } },
     ]);
     expect(groups).toHaveLength(0);
   });
 
   it("rateLimit rejected creates other group", () => {
     const groups = groupMessages([
-      { kind: "rateLimit", ts: 1, rateLimit: { status: "rejected", resetsAt: 1711000000, rateLimitType: "seven_day", utilization: 1.0 } },
+      { kind: "rateLimit", ts: 1, rateLimit: { status: "rejected", resetsAt: "2024-03-21T04:26:40Z" as ISOTimestamp, rateLimitType: "seven_day", utilization: 1.0 } },
     ]);
     expect(groups).toHaveLength(1);
     expect(groups[0].kind).toBe("other");

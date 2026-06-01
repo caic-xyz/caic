@@ -171,15 +171,15 @@ fun MessageGroupContent(
                     val rl = event.rateLimit
                     if (rl != null) {
                         val usingOverage = rl.isUsingOverage == true
-                        val resetsEpoch = if (usingOverage && (rl.overageResetsAt ?: 0.0) > 0) {
-                            rl.overageResetsAt ?: 0.0
+                        val resetInstant = if (usingOverage && (rl.overageResetsAt?.epochSeconds ?: 0) > 0) {
+                            rl.overageResetsAt
                         } else {
                             rl.resetsAt
                         }
-                        val resetsLabel = if (resetsEpoch > 0) {
+                        val resetsLabel = resetInstant?.takeIf { it.epochSeconds > 0 }?.let {
                             val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
-                            " · resets ${fmt.format(java.util.Date((resetsEpoch * 1000).toLong()))}"
-                        } else ""
+                            " · resets ${fmt.format(java.util.Date(it.toEpochMilliseconds()))}"
+                        } ?: ""
                         val isRejected = rl.status == "rejected"
                         val text = if (isRejected && usingOverage) {
                             "Using extra usage (${rl.rateLimitType.ifBlank { "plan" }} limit reached)$resetsLabel"

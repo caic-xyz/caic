@@ -8,7 +8,10 @@
 // backend produced the stream.
 package v1
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 // EventKind identifies the type of SSE event.
 type EventKind string
@@ -254,12 +257,12 @@ type EventWidgetDelta struct {
 
 // EventRateLimit is emitted when the agent's rate limit status changes.
 type EventRateLimit struct {
-	Status          string  `json:"status"`                    // "allowed", "allowed_warning", "rejected".
-	ResetsAt        float64 `json:"resetsAt"`                  // Unix epoch seconds; 0 if unknown.
-	RateLimitType   string  `json:"rateLimitType"`             // "five_hour", "seven_day", etc.
-	Utilization     float64 `json:"utilization"`               // 0.0–1.0.
-	IsUsingOverage  bool    `json:"isUsingOverage,omitempty"`  // True when extra/overage usage is active.
-	OverageResetsAt float64 `json:"overageResetsAt,omitempty"` // Unix epoch seconds; 0 if not using overage.
+	Status          string    `json:"status"`                   // "allowed", "allowed_warning", "rejected".
+	ResetsAt        time.Time `json:"resetsAt,omitzero"`        // When the limit resets; zero if unknown.
+	RateLimitType   string    `json:"rateLimitType"`            // "five_hour", "seven_day", etc.
+	Utilization     float64   `json:"utilization"`              // 0.0–1.0.
+	IsUsingOverage  bool      `json:"isUsingOverage,omitempty"` // True when extra/overage usage is active.
+	OverageResetsAt time.Time `json:"overageResetsAt,omitzero"` // When overage resets; zero if not using overage.
 }
 
 // EventStats is a container resource usage snapshot emitted periodically.

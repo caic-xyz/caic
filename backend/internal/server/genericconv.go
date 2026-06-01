@@ -293,16 +293,25 @@ func (tt *toolTimingTracker) convertMessage(msg agent.Message, now time.Time) []
 			Ts:   ts,
 			RateLimit: &v1.EventRateLimit{
 				Status:          m.Status,
-				ResetsAt:        m.ResetsAt,
+				ResetsAt:        epochSecondsToTime(m.ResetsAt),
 				RateLimitType:   m.RateLimitType,
 				Utilization:     m.Utilization,
 				IsUsingOverage:  m.IsUsingOverage,
-				OverageResetsAt: m.OverageResetsAt,
+				OverageResetsAt: epochSecondsToTime(m.OverageResetsAt),
 			},
 		}}
 	default:
 		return nil
 	}
+}
+
+func epochSecondsToTime(seconds float64) time.Time {
+	if seconds <= 0 {
+		return time.Time{}
+	}
+	sec := int64(seconds)
+	nsec := int64((seconds - float64(sec)) * 1e9)
+	return time.Unix(sec, nsec).UTC()
 }
 
 // toV1AskQuestions converts agent.AskQuestion to v1.AskQuestion.

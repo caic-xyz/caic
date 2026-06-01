@@ -612,7 +612,7 @@ data class UserSettings(
     @SerialName("autoFixOnPROpen") val autoFixOnPROpen: Boolean,
     val baseImage: String? = null,
     @SerialName("maxCPUs") val maxCPUs: Int? = null,
-    val useDefaultCaches: Boolean? = null,
+    val useDefaultCaches: Boolean,
     val wellKnownCaches: Map<String, Boolean>? = null,
     val cacheMappings: List<CacheMappingResp>? = null,
 )
@@ -996,11 +996,11 @@ data class EventWidgetDelta(
 @Serializable
 data class EventRateLimit(
     val status: String,
-    val resetsAt: Double,
+    val resetsAt: Instant? = null,
     val rateLimitType: String,
     val utilization: Double,
     val isUsingOverage: Boolean? = null,
-    val overageResetsAt: Double? = null,
+    val overageResetsAt: Instant? = null,
 )
 
 /** EventStats is a container resource usage snapshot emitted periodically. */

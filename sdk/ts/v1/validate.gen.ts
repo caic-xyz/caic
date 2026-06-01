@@ -289,11 +289,11 @@ export function validateEventRateLimit(raw: unknown): EventRateLimit {
   const obj = asObject(raw, "EventRateLimit");
   return {
     status: asString(obj["status"], "EventRateLimit.status"),
-    resetsAt: asNumber(obj["resetsAt"], "EventRateLimit.resetsAt"),
+    resetsAt: (obj["resetsAt"] === undefined || obj["resetsAt"] === null ? undefined : asString(obj["resetsAt"], "EventRateLimit.resetsAt") as ISOTimestamp),
     rateLimitType: asString(obj["rateLimitType"], "EventRateLimit.rateLimitType"),
     utilization: asNumber(obj["utilization"], "EventRateLimit.utilization"),
     isUsingOverage: (obj["isUsingOverage"] === undefined || obj["isUsingOverage"] === null ? undefined : asBoolean(obj["isUsingOverage"], "EventRateLimit.isUsingOverage")),
-    overageResetsAt: (obj["overageResetsAt"] === undefined || obj["overageResetsAt"] === null ? undefined : asNumber(obj["overageResetsAt"], "EventRateLimit.overageResetsAt")),
+    overageResetsAt: (obj["overageResetsAt"] === undefined || obj["overageResetsAt"] === null ? undefined : asString(obj["overageResetsAt"], "EventRateLimit.overageResetsAt") as ISOTimestamp),
   };
 }
 

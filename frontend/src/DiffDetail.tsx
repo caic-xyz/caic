@@ -56,7 +56,7 @@ export default function DiffDetail(props: Props) {
     setLoading(true);
     setError(null);
     setCollapsedFiles(new Set<string>());
-    getTaskDiff(id)
+    getTaskDiff(id, "")
       .then((d) => setFullDiff(d.diff))
       .catch((e) => setError(e instanceof Error ? e.message : "Unknown error"))
       .finally(() => setLoading(false));

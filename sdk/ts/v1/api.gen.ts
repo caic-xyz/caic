@@ -112,7 +112,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     /** Forks a task by snapshotting its container and creating a new task on a derived branch. */
     forkTask: (id: string, req: ForkTaskReq): Promise<CreateTaskResp> => request<CreateTaskResp>("POST", `/api/v1/tasks/${id}/fork`, req),
     /** Returns the unified diff for a task's branch. */
-    getTaskDiff: (id: string): Promise<DiffResp> => request<DiffResp>("GET", `/api/v1/tasks/${id}/diff`),
+    getTaskDiff: (id: string, path: string): Promise<DiffResp> => request<DiffResp>("GET", `/api/v1/tasks/${id}/diff?path=${encodeURIComponent(path)}`),
     /** Returns the list of running processes inside the task's container. */
     getTaskProcesses: (id: string): Promise<ProcessListResp> => request<ProcessListResp>("GET", `/api/v1/tasks/${id}/processes`),
     /** Sends SIGTERM or SIGKILL to a process inside the task's container. */
@@ -151,5 +151,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     webFetch: (req: WebFetchReq): Promise<WebFetchResp> => request<WebFetchResp>("POST", "/api/v1/web/fetch", req),
     /** Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session. */
     voiceRTCOffer: (req: VoiceRTCOfferReq): Promise<VoiceRTCAnswerResp> => request<VoiceRTCAnswerResp>("POST", "/api/v1/voice/rtc/offer", req),
+    /** Closes a WebRTC voice bridge session. */
+    closeVoiceRTC: (sessionID: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/v1/voice/rtc/${sessionID}`),
   };
 }

@@ -185,19 +185,20 @@ func RepoMountFromMeta(m agent.MetaRepo, gitRoot string) RepoMount {
 type Task struct {
 	// Immutable fields — set at creation, never modified.
 	ID            ksid.ID
-	InitialPrompt agent.Prompt  // Initial prompt text and optional images.
-	Harness       agent.Harness // Agent harness ("claude", "gemini", etc.).
-	Model         string        // User-requested model; passed to agent CLI.
-	Effort        string        // Thinking effort; passed to agent CLI. Empty = default.
-	DockerImage   string        // Custom Docker base image; empty means use the default.
-	MaxCPUs       int           // Max CPU cores for the container; 0 means use the default.
-	Tailscale     bool          // Enable Tailscale networking in the container.
-	USB           bool          // Enable USB passthrough in the container.
-	Display       bool          // Enable Xvfb display in the container.
-	Sudo          bool          // Enable root access (password-based sudo) in the container.
-	StartedAt     time.Time     // When the task was created.
-	OwnerID       string        // Internal user ID of the creator; empty in no-auth mode.
-	ForgeIssue    int           // Originating issue number for bot comment callbacks; 0 = none.
+	InitialPrompt agent.Prompt    // Initial prompt text and optional images.
+	Harness       agent.Harness   // Agent harness ("claude", "gemini", etc.).
+	Model         string          // User-requested model; passed to agent CLI.
+	Effort        string          // Thinking effort; passed to agent CLI. Empty = default.
+	DockerImage   string          // Custom Docker base image; empty means use the default.
+	MaxCPUs       int             // Max CPU cores for the container; 0 means use the default.
+	CacheMounts   []md.CacheMount // Build cache mounts baked into the container image.
+	Tailscale     bool            // Enable Tailscale networking in the container.
+	USB           bool            // Enable USB passthrough in the container.
+	Display       bool            // Enable Xvfb display in the container.
+	Sudo          bool            // Enable root access (password-based sudo) in the container.
+	StartedAt     time.Time       // When the task was created.
+	OwnerID       string          // Internal user ID of the creator; empty in no-auth mode.
+	ForgeIssue    int             // Originating issue number for bot comment callbacks; 0 = none.
 	Provider      genai.Provider
 
 	// Mutable task metadata. These fields are populated at construction, setup, or

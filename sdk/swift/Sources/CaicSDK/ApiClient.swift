@@ -212,8 +212,8 @@ public final class ApiClient {
         try await request("POST", path: "/api/v1/tasks/\(id)/fork", body: try encoder.encode(req))
     }
     /// Returns the unified diff for a task's branch.
-    public func getTaskDiff(id: String) async throws -> DiffResp {
-        try await request("GET", path: "/api/v1/tasks/\(id)/diff")
+    public func getTaskDiff(id: String, path: String) async throws -> DiffResp {
+        try await request("GET", path: "/api/v1/tasks/\(id)/diff?path=\(path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path)")
     }
     /// Returns the list of running processes inside the task's container.
     public func getTaskProcesses(id: String) async throws -> ProcessListResp {
@@ -242,6 +242,10 @@ public final class ApiClient {
     /// Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session.
     public func voiceRTCOffer(req: VoiceRTCOfferReq) async throws -> VoiceRTCAnswerResp {
         try await request("POST", path: "/api/v1/voice/rtc/offer", body: try encoder.encode(req))
+    }
+    /// Closes a WebRTC voice bridge session.
+    public func closeVoiceRTC(sessionID: String) async throws -> StatusResp {
+        try await request("POST", path: "/api/v1/voice/rtc/\(sessionID)")
     }
 
     // SSE endpoints

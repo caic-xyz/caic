@@ -9,10 +9,11 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/md"
 	"github.com/maruel/genai"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // fakeMDContainer is a fake mdContainer that records driven operations and
@@ -262,7 +263,11 @@ func TestBackend(t *testing.T) {
 		t.Parallel()
 		b := newTestBackend(&fakeMDClient{})
 		b.HarnessEnv = map[string][]string{string(agent.Claude): {"FOO=bar"}}
-		opts := b.mdStartOpts([]string{"label-a"}, &task.StartOptions{Harness: agent.Claude, GitHubToken: "tok"})
+		opts := b.mdStartOpts([]string{"label-a"}, &task.StartOptions{
+			Harness:     agent.Claude,
+			GitHubToken: "tok",
+			Caches:      []md.CacheMount{{Name: "npm", HostPath: "~/.npm", ContainerPath: "/home/user/.npm"}},
+		})
 		if !slices.Contains(opts.ExtraEnv, "EDITOR=true") {
 			t.Errorf("ExtraEnv missing EDITOR=true: %v", opts.ExtraEnv)
 		}
@@ -280,6 +285,9 @@ func TestBackend(t *testing.T) {
 		}
 		if opts.MaxCPUs <= 0 {
 			t.Errorf("MaxCPUs = %d, want positive default", opts.MaxCPUs)
+		}
+		if len(opts.Caches) != 1 || opts.Caches[0].Name != "npm" {
+			t.Errorf("Caches = %+v, want npm passthrough", opts.Caches)
 		}
 	})
 

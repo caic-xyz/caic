@@ -137,7 +137,7 @@ class ApiClient(
     /** Forks a task by snapshotting its container and creating a new task on a derived branch. */
     suspend fun forkTask(id: String, req: ForkTaskReq): CreateTaskResp = request("POST", "/api/v1/tasks/$id/fork", json.encodeToString(req))
     /** Returns the unified diff for a task's branch. */
-    suspend fun getTaskDiff(id: String): DiffResp = request("GET", "/api/v1/tasks/$id/diff")
+    suspend fun getTaskDiff(id: String, path: String): DiffResp = request("GET", "/api/v1/tasks/$id/diff?path=$path")
     /** Returns the list of running processes inside the task's container. */
     suspend fun getTaskProcesses(id: String): ProcessListResp = request("GET", "/api/v1/tasks/$id/processes")
     /** Sends SIGTERM or SIGKILL to a process inside the task's container. */
@@ -152,6 +152,8 @@ class ApiClient(
     suspend fun webFetch(req: WebFetchReq): WebFetchResp = request("POST", "/api/v1/web/fetch", json.encodeToString(req))
     /** Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session. */
     suspend fun voiceRTCOffer(req: VoiceRTCOfferReq): VoiceRTCAnswerResp = request("POST", "/api/v1/voice/rtc/offer", json.encodeToString(req))
+    /** Closes a WebRTC voice bridge session. */
+    suspend fun closeVoiceRTC(sessionID: String): StatusResp = request("POST", "/api/v1/voice/rtc/$sessionID")
 
     // SSE endpoints
     /** Streams raw backend-specific task events via SSE. */

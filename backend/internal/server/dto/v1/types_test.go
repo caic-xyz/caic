@@ -4,6 +4,7 @@ package v1
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 )
 
@@ -85,4 +86,71 @@ func TestTaskListEvent(t *testing.T) {
 			t.Errorf(`delete = %v, want "abc123"`, raw["delete"])
 		}
 	})
+}
+
+func TestUserSettings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("falseSettingsRoundTrip", func(t *testing.T) {
+		t.Parallel()
+		data, err := json.Marshal(UserSettings{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(data, &raw); err != nil {
+			t.Fatal(err)
+		}
+		for _, field := range []string{"autoFixOnCIFailure", "autoFixOnPROpen", "useDefaultCaches"} {
+			got, ok := raw[field]
+			if !ok {
+				t.Fatalf("%q missing from JSON", field)
+			}
+			if got != false {
+				t.Fatalf("%q = %v, want false", field, got)
+			}
+		}
+	})
+}
+
+func TestRoutes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("getTaskDiffDeclaresPathQuery", func(t *testing.T) {
+		t.Parallel()
+		r := routeByName(t, "getTaskDiff")
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %q, want GET", r.Method)
+		}
+		if r.Path != "/api/v1/tasks/{id}/diff" {
+			t.Fatalf("path = %q, want diff path", r.Path)
+		}
+		if len(r.QueryParams) != 1 || r.QueryParams[0] != "path" {
+			t.Fatalf("QueryParams = %v, want [path]", r.QueryParams)
+		}
+	})
+
+	t.Run("closeVoiceRTCDeclared", func(t *testing.T) {
+		t.Parallel()
+		r := routeByName(t, "closeVoiceRTC")
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %q, want POST", r.Method)
+		}
+		if r.Path != "/api/v1/voice/rtc/{sessionID}" {
+			t.Fatalf("path = %q, want voice RTC close path", r.Path)
+		}
+		if r.RespName() != "StatusResp" {
+			t.Fatalf("response = %q, want StatusResp", r.RespName())
+		}
+	})
+}
+
+func routeByName(t *testing.T, name string) Route {
+	for i := range Routes {
+		if Routes[i].Name == name {
+			return Routes[i]
+		}
+	}
+	t.Fatalf("route %q not found", name)
+	return Route{}
 }

@@ -526,6 +526,64 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 	})
 
+	t.Run("WithCachePreferences", func(t *testing.T) {
+		t.Parallel()
+		s := &Server{
+			ctx:   t.Context(),
+			prefs: newTestPrefs(t),
+		}
+		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		registerTestRunner(s, "myrepo", &task.Runner{
+			BaseBranch: "main",
+			Dir:        t.TempDir(),
+			Backends:   map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}},
+		})
+		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
+			p.Settings.UseDefaultCaches = true
+			p.Settings.WellKnownCaches = map[string]bool{"go-mod": false, "npm": true}
+			p.Settings.CacheMappings = []preferences.CacheMapping{{HostPath: "/host/custom", ContainerPath: "/home/user/.custom"}}
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude"}`)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
+		w := httptest.NewRecorder()
+		handle(s.createTask)(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		var resp v1.CreateTaskResp
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		entry, _ := s.taskMgr.GetEntry(resp.ID.String())
+		if entry == nil {
+			t.Fatal("task not found")
+		}
+		var gotCustom, gotNPM, gotGoMod bool
+		for _, cm := range entry.Task().CacheMounts {
+			switch cm.Name {
+			case "custom:/home/user/.custom":
+				gotCustom = cm.HostPath == "/host/custom" && cm.ContainerPath == "/home/user/.custom"
+			case "npm":
+				gotNPM = true
+			case "go-mod":
+				gotGoMod = true
+			}
+		}
+		if !gotCustom {
+			t.Errorf("custom cache mapping missing from %+v", entry.Task().CacheMounts)
+		}
+		if !gotNPM {
+			t.Errorf("enabled npm cache missing from %+v", entry.Task().CacheMounts)
+		}
+		if gotGoMod {
+			t.Errorf("disabled go-mod cache present in %+v", entry.Task().CacheMounts)
+		}
+	})
+
 	t.Run("NoRepoTask", func(t *testing.T) {
 		t.Parallel()
 		// Regression: creating a task with no repos panicked with
@@ -591,6 +649,68 @@ func TestHandleCreateTask(t *testing.T) {
 		e := decodeError(t, w)
 		if e.Code != dto.CodeBadRequest {
 			t.Errorf("code = %q, want %q", e.Code, dto.CodeBadRequest)
+		}
+	})
+}
+
+func TestSignalProcess(t *testing.T) {
+	t.Parallel()
+
+	t.Run("strictDecodeRejectsUnknownField", func(t *testing.T) {
+		t.Parallel()
+		s := newTestServer(t)
+		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
+		tk.SetContainerInfo("ctr", "", "", 0)
+		insertTestTask(t, s, "t1", tk)
+		s.fakeSignal = func(context.Context, string, int, string) error {
+			t.Fatal("fakeSignal should not be called")
+			return nil
+		}
+
+		body := strings.NewReader(`{"signal":"SIGTERM","extra":true}`)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/processes/123/signal", body)
+		req.SetPathValue("id", "t1")
+		req.SetPathValue("pid", "123")
+		w := httptest.NewRecorder()
+		handleWithTask(s, s.signalProcess)(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		s := newTestServer(t)
+		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
+		tk.SetContainerInfo("ctr", "", "", 0)
+		insertTestTask(t, s, "t1", tk)
+		var gotPID int
+		var gotSignal string
+		s.fakeSignal = func(_ context.Context, containerName string, pid int, sig string) error {
+			if containerName != "ctr" {
+				t.Errorf("container = %q, want ctr", containerName)
+			}
+			gotPID = pid
+			gotSignal = sig
+			return nil
+		}
+
+		body := strings.NewReader(`{"signal":"SIGKILL"}`)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/processes/123/signal", body)
+		req.SetPathValue("id", "t1")
+		req.SetPathValue("pid", "123")
+		w := httptest.NewRecorder()
+		handleWithTask(s, s.signalProcess)(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		if gotPID != 123 {
+			t.Errorf("pid = %d, want 123", gotPID)
+		}
+		if gotSignal != "SIGKILL" {
+			t.Errorf("signal = %q, want SIGKILL", gotSignal)
 		}
 	})
 }

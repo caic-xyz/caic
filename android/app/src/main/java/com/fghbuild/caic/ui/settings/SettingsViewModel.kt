@@ -171,7 +171,7 @@ class SettingsViewModel @Inject constructor(
                         autoFixPR = prefs.settings.autoFixOnPROpen ?: false,
                         baseImage = prefs.settings.baseImage ?: "",
                         maxCPUs = prefs.settings.maxCPUs?.toString() ?: "",
-                        useDefaultCaches = prefs.settings.useDefaultCaches ?: true,
+                        useDefaultCaches = prefs.settings.useDefaultCaches,
                         wellKnownCaches = prefs.settings.wellKnownCaches ?: emptyMap(),
                         wellKnownCachesList = caches?.wellKnown ?: emptyList(),
                         cacheMappings = prefs.settings.cacheMappings ?: emptyList(),

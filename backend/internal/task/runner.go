@@ -34,6 +34,7 @@ import (
 type StartOptions struct {
 	DockerImage string
 	Harness     agent.Harness
+	Caches      []md.CacheMount
 	Tailscale   bool
 	USB         bool
 	Display     bool
@@ -1446,6 +1447,7 @@ func (r *Runner) setup(ctx context.Context, t *Task, labels []string, resolvedGi
 
 	opts := &StartOptions{
 		DockerImage: t.DockerImage, Harness: t.Harness, Tailscale: t.Tailscale, USB: t.USB, Display: t.Display, Sudo: t.Sudo,
+		Caches:      t.CacheMounts,
 		MaxCPUs:     t.MaxCPUs,
 		GitHubToken: resolvedGitHubToken,
 		LogWriter:   &provisioningWriter{ctx: ctx, t: t},

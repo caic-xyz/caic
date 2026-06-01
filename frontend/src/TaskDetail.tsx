@@ -922,7 +922,9 @@ function RateLimitBanner(props: { ev: EventMessage }) {
   const resetsLabel = () => {
     const r = rl()?.isUsingOverage ? rl()?.overageResetsAt : rl()?.resetsAt;
     if (!r) return "";
-    const d = new Date(r * 1000);
+    const resetMS = Date.parse(r);
+    if (!Number.isFinite(resetMS) || resetMS <= 0) return "";
+    const d = new Date(resetMS);
     return ` · resets ${d.toLocaleTimeString()}`;
   };
   const rejectedLabel = () => {

@@ -96,7 +96,7 @@ class DiffViewModel @Inject constructor(
                 val baseURL = taskRepository.serverURL()
                 if (baseURL.isBlank()) return@launch
                 val client = ApiClient(baseURL, tokenProvider = { settingsRepository.settings.value.authToken })
-                val resp = client.getTaskDiff(taskId)
+                val resp = client.getTaskDiff(taskId, "")
                 _fileDiffs.value = splitDiff(resp.diff)
             } catch (e: Exception) {
                 _error.value = e.message ?: "Unknown error"

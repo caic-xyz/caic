@@ -16,10 +16,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/md"
 	"github.com/maruel/genai"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // mdClient is the subset of *md.Client that Backend needs. Production wraps a
@@ -413,6 +414,7 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) *md.Star
 	}
 	return &md.StartOpts{
 		BaseImage:  image,
+		Caches:     opts.Caches,
 		Labels:     labels,
 		AgentPaths: []md.AgentPaths{harnessPaths},
 		USB:        opts.USB,

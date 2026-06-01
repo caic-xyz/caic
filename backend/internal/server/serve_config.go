@@ -20,6 +20,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caic-xyz/md"
+	"github.com/caic-xyz/md/gitutil"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/forge"
@@ -27,8 +30,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/md"
-	"github.com/caic-xyz/md/gitutil"
 )
 
 func (s *Server) getConfig(_ context.Context, _ *dto.EmptyReq) (*v1.Config, error) {
@@ -153,6 +154,27 @@ func (s *Server) updatePreferences(ctx context.Context, req *v1.UpdatePreference
 	}
 	// Return the updated preferences.
 	return s.getPreferences(ctx, nil)
+}
+
+func cacheMountsFromSettings(settings preferences.Settings) []md.CacheMount {
+	var caches []md.CacheMount
+	if settings.UseDefaultCaches {
+		names := slices.Sorted(maps.Keys(md.WellKnownCaches))
+		for _, name := range names {
+			if enabled, ok := settings.WellKnownCaches[name]; ok && !enabled {
+				continue
+			}
+			caches = append(caches, md.WellKnownCaches[name]...)
+		}
+	}
+	for _, m := range settings.CacheMappings {
+		caches = append(caches, md.CacheMount{
+			Name:          "custom:" + m.ContainerPath,
+			HostPath:      m.HostPath,
+			ContainerPath: m.ContainerPath,
+		})
+	}
+	return caches
 }
 
 func (s *Server) listHarnesses(_ context.Context, _ *dto.EmptyReq) (*[]v1.HarnessInfo, error) {

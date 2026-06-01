@@ -70,6 +70,7 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 |--------|------|-------------|---------|----------|
 | GET | `/api/v1/voice/token` | Returns a short-lived voice API token. |  | `VoiceTokenResp` |
 | POST | `/api/v1/voice/rtc/offer` | Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session. | `VoiceRTCOfferReq` | `VoiceRTCAnswerResp` |
+| POST | `/api/v1/voice/rtc/{sessionID}` | Closes a WebRTC voice bridge session. |  | `StatusResp` |
 
 ## Web
 
@@ -189,7 +190,7 @@ the default. |  |
 | `maxCPUs` | `int` | MaxCPUs limits the number of CPU cores the container may use.
 Zero means use the system default (max(2, NumCPU-2)). |  |
 | `useDefaultCaches` | `boolean` | UseDefaultCaches controls whether default harness caches are mounted.
-When false, only custom CacheMappings are used. |  |
+When false, only custom CacheMappings are used. | yes |
 | `wellKnownCaches` | `Record<string, unknown>` | WellKnownCaches maps cache name to enabled state. nil means use default
 (all true), true means explicitly enabled, false means explicitly disabled. |  |
 | `cacheMappings` | `CacheMappingResp[]` | CacheMappings are custom host-to-container directory mappings. |  |
@@ -706,11 +707,11 @@ EventRateLimit is emitted when the agent's rate limit status changes.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `status` | `string` | "allowed", "allowed_warning", "rejected". | yes |
-| `resetsAt` | `float64` | Unix epoch seconds; 0 if unknown. | yes |
+| `resetsAt` | `ISOTimestamp` | When the limit resets; zero if unknown. |  |
 | `rateLimitType` | `string` | "five_hour", "seven_day", etc. | yes |
 | `utilization` | `float64` | 0.0–1.0. | yes |
 | `isUsingOverage` | `boolean` | True when extra/overage usage is active. |  |
-| `overageResetsAt` | `float64` | Unix epoch seconds; 0 if not using overage. |  |
+| `overageResetsAt` | `ISOTimestamp` | When overage resets; zero if not using overage. |  |
 
 ### EventStats
 

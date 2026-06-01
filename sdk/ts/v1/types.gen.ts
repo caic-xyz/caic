@@ -261,16 +261,16 @@ export interface EventWidgetDelta {
 export interface EventRateLimit {
   /** "allowed", "allowed_warning", "rejected". */
   status: string;
-  /** Unix epoch seconds; 0 if unknown. */
-  resetsAt: number /* float64 */;
+  /** When the limit resets; zero if unknown. */
+  resetsAt?: ISOTimestamp;
   /** "five_hour", "seven_day", etc. */
   rateLimitType: string;
   /** 0.0–1.0. */
   utilization: number /* float64 */;
   /** True when extra/overage usage is active. */
   isUsingOverage?: boolean;
-  /** Unix epoch seconds; 0 if not using overage. */
-  overageResetsAt?: number /* float64 */;
+  /** When overage resets; zero if not using overage. */
+  overageResetsAt?: ISOTimestamp;
 }
 
 /** EventStats is a container resource usage snapshot emitted periodically. */
@@ -538,7 +538,7 @@ export interface UserSettings {
    * UseDefaultCaches controls whether default harness caches are mounted.
    * When false, only custom CacheMappings are used.
    */
-  useDefaultCaches?: boolean;
+  useDefaultCaches: boolean;
   /**
    * WellKnownCaches maps cache name to enabled state. nil means use default
    * (all true), true means explicitly enabled, false means explicitly disabled.

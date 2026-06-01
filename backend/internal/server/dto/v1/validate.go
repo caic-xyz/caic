@@ -3,10 +3,18 @@
 package v1
 
 import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"maps"
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/caic-xyz/md"
 
 	"github.com/caic-xyz/caic/backend/internal/server/dto"
 )
@@ -57,6 +65,11 @@ var allowedImageTypes = map[string]struct{}{
 	"image/gif":  {},
 	"image/webp": {},
 }
+
+const (
+	maxImageBytes       = 10 << 20
+	maxPromptImageBytes = 20 << 20
+)
 
 // pathSegmentRe matches valid path segments: starts with alphanumeric, then alphanumeric, dots, hyphens, or underscores.
 var pathSegmentRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
@@ -138,11 +151,49 @@ func (r *ForkTaskReq) Validate() error {
 	return validateImages(r.Prompt.Images)
 }
 
-// Validate is a no-op; all settings values are accepted.
-func (r *UpdatePreferencesReq) Validate() error { return nil }
+// UnmarshalJSON decodes UpdatePreferencesReq while preserving strict unknown
+// field behavior despite the custom settings-present check.
+func (r *UpdatePreferencesReq) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	settings, ok := raw["settings"]
+	r.settingsSet = ok
+	if ok {
+		d := json.NewDecoder(bytes.NewReader(settings))
+		d.DisallowUnknownFields()
+		if err := d.Decode(&r.Settings); err != nil {
+			return err
+		}
+		delete(raw, "settings")
+	}
+	if len(raw) > 0 {
+		keys := slices.Collect(maps.Keys(raw))
+		slices.Sort(keys)
+		return fmt.Errorf("json: unknown field %q", keys[0])
+	}
+	return nil
+}
+
+// Validate checks that the complete settings object is present and references valid cache names.
+func (r *UpdatePreferencesReq) Validate() error {
+	if !r.settingsSet {
+		return dto.BadRequest("settings is required")
+	}
+	for name := range r.Settings.WellKnownCaches {
+		if _, ok := md.WellKnownCaches[name]; !ok {
+			return dto.BadRequest("unknown cache: " + name)
+		}
+	}
+	return nil
+}
 
 // Validate checks that the signal is SIGTERM or SIGKILL.
 func (r *SignalProcessReq) Validate() error {
+	if r.PID < 1 {
+		return dto.BadRequest("invalid pid")
+	}
 	switch r.Signal {
 	case "SIGTERM", "SIGKILL":
 		return nil
@@ -174,8 +225,10 @@ func validateRepoSpecs(specs []RepoSpec, field string) error {
 	return nil
 }
 
-// validateImages checks that each ImageData entry has a valid media type and non-empty data.
+// validateImages checks that each ImageData entry has a valid media type,
+// valid base64 payload, and bounded decoded size.
 func validateImages(images []ImageData) error {
+	var total int
 	for _, img := range images {
 		if img.MediaType == "" {
 			return dto.BadRequest("image mediaType is required")
@@ -185,6 +238,13 @@ func validateImages(images []ImageData) error {
 		}
 		if img.Data == "" {
 			return dto.BadRequest("image data is required")
+		}
+		if base64.StdEncoding.DecodedLen(len(img.Data)) > maxImageBytes {
+			return dto.BadRequest("image data too large")
+		}
+		total += base64.StdEncoding.DecodedLen(len(img.Data))
+		if total > maxPromptImageBytes {
+			return dto.BadRequest("image data total too large")
 		}
 	}
 	return nil

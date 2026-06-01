@@ -16,11 +16,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
+
+	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 )
 
 func mainImpl() error {
@@ -64,7 +65,7 @@ func mainImpl() error {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	mux.HandleFunc("POST /offer", handleOffer(bridge))
-	mux.HandleFunc("DELETE /sessions/{sessionID}", handleClose(bridge))
+	mux.HandleFunc("POST /sessions/{sessionID}", handleClose(bridge))
 
 	// Wrap with auth middleware: validate JWT, require authenticated user.
 	handler := auth.RequireUser(auth.Middleware(store, secret)(mux))

@@ -383,7 +383,7 @@ public struct UserSettings: Codable {
     public let maxCPUs: Int?
     /// UseDefaultCaches controls whether default harness caches are mounted.
     /// When false, only custom CacheMappings are used.
-    public let useDefaultCaches: Bool?
+    public let useDefaultCaches: Bool
     /// WellKnownCaches maps cache name to enabled state. nil means use default
     /// (all true), true means explicitly enabled, false means explicitly disabled.
     public let wellKnownCaches: [String: Bool]?
@@ -808,16 +808,16 @@ public struct EventWidgetDelta: Codable {
 public struct EventRateLimit: Codable {
     /// "allowed", "allowed_warning", "rejected".
     public let status: String
-    /// Unix epoch seconds; 0 if unknown.
-    public let resetsAt: Double
+    /// When the limit resets; zero if unknown.
+    public let resetsAt: ISOTimestamp?
     /// "five_hour", "seven_day", etc.
     public let rateLimitType: String
     /// 0.0–1.0.
     public let utilization: Double
     /// True when extra/overage usage is active.
     public let isUsingOverage: Bool?
-    /// Unix epoch seconds; 0 if not using overage.
-    public let overageResetsAt: Double?
+    /// When overage resets; zero if not using overage.
+    public let overageResetsAt: ISOTimestamp?
 }
 
 /// EventStats is a container resource usage snapshot emitted periodically.
