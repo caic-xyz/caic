@@ -57,7 +57,7 @@ jobs:
         uses: codecov/codecov-action@v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage.out
+          files: coverage.out,frontend/coverage/lcov.info
 
   smoke:
     name: "smoke: ubuntu-latest"
