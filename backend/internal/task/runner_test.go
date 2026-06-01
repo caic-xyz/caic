@@ -3,6 +3,7 @@
 package task
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,13 +25,15 @@ import (
 // reads one line from stdin then exits. capturedCtx records the context passed
 // to Start so tests can assert context lifetime.
 type testBackend struct {
-	capturedCtx context.Context
+	capturedCtx  context.Context
+	capturedOpts agent.Options
 }
 
 func (b *testBackend) Harness() agent.Harness { return "test" }
 
 func (b *testBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	b.capturedCtx = ctx
+	b.capturedOpts = *opts
 	// Read one line from stdin then exit. Session.Stop writes \x00\n which
 	// satisfies the read, making Stop return immediately instead of timing out.
 	cmd := exec.CommandContext(ctx, "python3", "-c", "input()")
@@ -191,6 +194,40 @@ func TestRunner(t *testing.T) {
 		msg2 := recvMsg(t, ch)
 		if lm, ok := msg2.(*agent.LogMessage); !ok || lm.Line != "line2" {
 			t.Errorf("msg2 = %+v", msg2)
+		}
+	})
+	t.Run("StartPassesModelAndEffort", func(t *testing.T) {
+		t.Parallel()
+		backend := &testBackend{}
+		r := &Runner{
+			LogDir:    t.TempDir(),
+			Container: &stubContainer{},
+			Backends:  map[agent.Harness]agent.Backend{"test": backend},
+		}
+		tk := &Task{
+			ID:            ksid.NewID(),
+			InitialPrompt: agent.Prompt{Text: "test"},
+			Harness:       "test",
+			Model:         "model-1",
+			Effort:        "high",
+			StartedAt:     time.Now().UTC(),
+		}
+		h, err := r.Start(t.Context(), tk, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		stopCtx, stopCancel := context.WithTimeout(t.Context(), time.Second)
+		_ = h.Session.Stop(stopCtx)
+		stopCancel()
+		h.CloseMsgCh()
+		<-h.DispatchDone
+		_ = h.LogW.Close()
+
+		if backend.capturedOpts.Model != "model-1" {
+			t.Errorf("Model = %q, want model-1", backend.capturedOpts.Model)
+		}
+		if backend.capturedOpts.Effort != "high" {
+			t.Errorf("Effort = %q, want high", backend.capturedOpts.Effort)
 		}
 	})
 	t.Run("Init", func(t *testing.T) {
@@ -500,7 +537,13 @@ func TestRunner(t *testing.T) {
 			dir := t.TempDir()
 			logDir := filepath.Join(dir, "logs")
 			r := &Runner{LogDir: logDir}
-			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}}
+			tk := &Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "test"},
+				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
+				Model:         "model-1",
+				Effort:        "high",
+			}
 			w, err := r.openLog(tk)
 			if err != nil {
 				t.Fatal(err)
@@ -521,6 +564,20 @@ func TestRunner(t *testing.T) {
 			want := tk.ID.String() + "-org-repo-caic-0.jsonl"
 			if name != want {
 				t.Errorf("filename = %q, want %q", name, want)
+			}
+			data, err := os.ReadFile(filepath.Join(logDir, name)) //nolint:gosec // path is test-controlled
+			if err != nil {
+				t.Fatal(err)
+			}
+			var meta map[string]any
+			if err := json.Unmarshal(bytes.SplitN(data, []byte("\n"), 2)[0], &meta); err != nil {
+				t.Fatal(err)
+			}
+			if meta["model"] != "model-1" {
+				t.Errorf("meta model = %v, want model-1", meta["model"])
+			}
+			if meta["effort"] != "high" {
+				t.Errorf("meta effort = %v, want high", meta["effort"])
 			}
 		})
 		t.Run("ReopenNoDuplicateHeader", func(t *testing.T) {

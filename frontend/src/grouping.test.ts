@@ -1,6 +1,6 @@
 // Tests for groupMessages and groupTurns logic.
 import { describe, it, expect } from "vitest";
-import { groupMessages, groupTurns, groupSessions, turnSummary, buildTurnItems, buildPastSessionItems } from "./grouping";
+import { groupMessages, groupMessagesInc, groupTurns, groupSessions, resetGroupIncCache, turnSummary, buildTurnItems, buildPastSessionItems } from "./grouping";
 import type { EventMessage } from "@sdk/types.gen";
 
 function toolUseEvent(id: string, name: string): EventMessage {
@@ -177,6 +177,36 @@ describe("groupMessages", () => {
     expect(groups[0].kind).toBe("text");
     expect(groups[0].events.some((e) => e.kind === "thinkingDelta")).toBe(true);
     expect(groups[0].events.some((e) => e.kind === "textDelta")).toBe(true);
+  });
+
+  it("incremental grouping keeps streaming thinking presentation stable", () => {
+    const toolThenThinking = [
+      toolUseEvent("t1", "Read"),
+      toolResultEvent("t1"),
+      { kind: "thinkingDelta", ts: 1, thinkingDelta: { text: "analyzing" } },
+    ] satisfies EventMessage[];
+
+    resetGroupIncCache();
+    groupMessagesInc(toolThenThinking.slice(0, 2));
+    let inc = groupMessagesInc(toolThenThinking);
+    let full = groupMessages(toolThenThinking);
+    expect(inc).toEqual(full);
+    expect(inc).toHaveLength(1);
+    expect(inc[0].events.some((e) => e.kind === "thinkingDelta")).toBe(true);
+
+    const thinkingThenText = [
+      { kind: "thinkingDelta", ts: 1, thinkingDelta: { text: "thinking" } },
+      { kind: "textDelta", ts: 2, textDelta: { text: "answer" } },
+    ] satisfies EventMessage[];
+
+    resetGroupIncCache();
+    groupMessagesInc(thinkingThenText.slice(0, 1));
+    inc = groupMessagesInc(thinkingThenText);
+    full = groupMessages(thinkingThenText);
+    expect(inc).toEqual(full);
+    expect(inc).toHaveLength(1);
+    expect(inc[0].kind).toBe("text");
+    expect(inc[0].events.map((e) => e.kind)).toEqual(["thinkingDelta", "textDelta"]);
   });
 
   it("widgetDelta events create a widget group", () => {

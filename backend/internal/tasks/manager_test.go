@@ -1235,6 +1235,10 @@ func TestManager(t *testing.T) {
 					Tailscale:         true,
 					USB:               true,
 					Display:           true,
+					Sudo:              true,
+					GitHubToken:       true,
+					Model:             "model-1",
+					Effort:            "high",
 					AgentVersion:      "1.2.3",
 					ForgePR:           42,
 					ForgeOwner:        "acme",
@@ -1255,6 +1259,12 @@ func TestManager(t *testing.T) {
 			tk := e.Task()
 			if tk.Tailscale != true || tk.USB != true || tk.Display != true {
 				t.Error("container flags not restored")
+			}
+			if !tk.Sudo || !tk.GitHubToken {
+				t.Errorf("privileged flags not restored: sudo=%v gitHubToken=%v", tk.Sudo, tk.GitHubToken)
+			}
+			if tk.Model != "model-1" || tk.Effort != "high" {
+				t.Errorf("model/effort = %q/%q, want model-1/high", tk.Model, tk.Effort)
 			}
 			if tk.Title() != "Test Title" {
 				t.Errorf("Title = %q, want \"Test Title\"", tk.Title())

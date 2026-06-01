@@ -51,6 +51,35 @@ func TestParseMessage(t *testing.T) {
 			t.Fatalf("msgs = %d, want 0 (turn/started is suppressed)", len(msgs))
 		}
 	})
+	t.Run("ItemStartedUserMessage", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"u1","type":"userMessage","content":[{"type":"text","text":"original prompt","text_elements":[]}],"status":"inProgress"},"threadId":"t1","turnId":"turn_1"}}`
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		ui, ok := msgs[0].(*agent.UserInputMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.UserInputMessage", msgs[0])
+		}
+		if ui.Text != "original prompt" {
+			t.Errorf("Text = %q, want original prompt", ui.Text)
+		}
+	})
+	t.Run("ItemCompletedUserMessageSuppressed", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"id":"u1","type":"userMessage","content":[{"type":"text","text":"original prompt","text_elements":[]}],"status":"completed"},"threadId":"t1","turnId":"turn_1"}}`
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 0 {
+			t.Fatalf("msgs = %d, want 0 (completed userMessage duplicates item/started)", len(msgs))
+		}
+	})
 	t.Run("TurnCompleted", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"t1","turn":{"id":"turn_1","status":"completed"}}}`
@@ -771,6 +800,18 @@ func TestWireFormat(t *testing.T) {
 		err := w.WritePrompt(&buf, agent.Prompt{Text: "hello"}, nil)
 		if err == nil {
 			t.Fatal("expected error for missing thread ID")
+		}
+	})
+	t.Run("SuppressUserInput", func(t *testing.T) {
+		t.Parallel()
+		w := &wireFormat{suppressUserInput: true, fw: &jsonutil.FieldWarner{}}
+		const input = `{"jsonrpc":"2.0","method":"item/started","params":{"item":{"id":"u1","type":"userMessage","content":[{"type":"text","text":"original prompt"}]},"threadId":"t1","turnId":"turn_1"}}`
+		msgs, err := w.ParseMessage([]byte(input))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 0 {
+			t.Fatalf("msgs = %d, want 0", len(msgs))
 		}
 	})
 	t.Run("ParseMessageCapturesThreadID", func(t *testing.T) {

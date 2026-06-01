@@ -9,6 +9,10 @@
 
 ---
 
+## User
+
+Read main.go, edit the greeting on line 3 from "Hello" to "Hi", then run cat main.go.
+
 ## Assistant
 
 I’ll inspect `main.go`, change the greeting on line 3 from `Hello` to `Hi`, then verify the result by printing the file.

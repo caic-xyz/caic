@@ -443,16 +443,19 @@ export function groupMessagesInc(msgs: EventMessage[]): MessageGroup[] {
       ev.kind === "toolOutputDelta" || ev.kind === "widgetDelta",
     );
     if (canExtend && _groupIncResult.length > 0) {
-      const lastGroup = _groupIncResult[_groupIncResult.length - 1];
       for (const ev of newEvents) {
+        const lastGroup = _groupIncResult[_groupIncResult.length - 1];
         if (ev.kind === "thinkingDelta") {
-          if (lastGroup.kind === "action" && lastGroup.toolCalls.length === 0) {
+          if (lastGroup.kind === "action") {
             lastGroup.events.push(ev);
           } else {
             _groupIncResult.push({ kind: "action", events: [ev], toolCalls: [] });
           }
         } else if (ev.kind === "textDelta") {
           if (lastGroup.kind === "text") {
+            lastGroup.events.push(ev);
+          } else if (lastGroup.kind === "action" && lastGroup.toolCalls.length === 0) {
+            lastGroup.kind = "text";
             lastGroup.events.push(ev);
           } else {
             _groupIncResult.push({ kind: "text", events: [ev], toolCalls: [] });

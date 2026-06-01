@@ -9,6 +9,10 @@
 
 ---
 
+## User
+
+Read the file nonexistent_file.txt
+
 ## Assistant
 
 I’m checking whether `nonexistent_file.txt` exists in the workspace and, if not, I’ll tell you that directly.

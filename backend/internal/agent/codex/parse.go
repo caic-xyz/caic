@@ -231,6 +231,13 @@ func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent
 		return nil, fmt.Errorf("item/started header: %w", err)
 	}
 	switch h.Type {
+	case cx.ItemTypeUserMessage:
+		var item cx.UserMessageItem
+		if err := unmarshalNotification(p.Item, &item, "UserMessageItem", fw); err != nil {
+			return nil, fmt.Errorf("item/started userMessage: %w", err)
+		}
+		return []agent.Message{userInputFromContent(item.Content)}, nil
+
 	case cx.ItemTypeCommandExecution:
 		var item cx.CommandExecutionItem
 		if err := unmarshalNotification(p.Item, &item, "CommandExecutionItem", fw); err != nil {
@@ -336,6 +343,11 @@ func parseItemCompleted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]age
 		return nil, fmt.Errorf("item/completed header: %w", err)
 	}
 	switch h.Type {
+	case cx.ItemTypeUserMessage:
+		// Codex emits userMessage for both item/started and item/completed.
+		// The started item is enough to show the prompt and avoids duplicates.
+		return nil, nil
+
 	case cx.ItemTypeAgentMessage:
 		var item cx.AgentMessageItem
 		if err := unmarshalNotification(p.Item, &item, "AgentMessageItem", fw); err != nil {
@@ -435,6 +447,29 @@ func parseItemCompleted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]age
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: string(msg.Method), Raw: append(msg.Params[:0:0], msg.Params...)}}, nil
 	}
+}
+
+type userContentBlock struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func userInputFromContent(content json.RawMessage) *agent.UserInputMessage {
+	var blocks []userContentBlock
+	if err := json.Unmarshal(content, &blocks); err == nil {
+		var texts []string
+		for _, b := range blocks {
+			if b.Type == "text" && b.Text != "" {
+				texts = append(texts, b.Text)
+			}
+		}
+		return &agent.UserInputMessage{Text: strings.Join(texts, "\n")}
+	}
+	var text string
+	if err := json.Unmarshal(content, &text); err == nil {
+		return &agent.UserInputMessage{Text: text}
+	}
+	return &agent.UserInputMessage{}
 }
 
 // toolNameForChanges returns "Write" if any change has Kind.Type == "add", else "Edit".

@@ -166,7 +166,8 @@ func TestLoadLogs(t *testing.T) {
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "feat task",
 			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: "claude",
-			Tailscale: true, USB: true, Display: true,
+			Model: "model-1", Effort: "high",
+			Tailscale: true, USB: true, Display: true, Sudo: true, GitHubToken: true,
 		})
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, dir, "feat.jsonl", meta, trailer)
@@ -187,6 +188,18 @@ func TestLoadLogs(t *testing.T) {
 		}
 		if !lt.Display {
 			t.Error("Display = false, want true")
+		}
+		if lt.Model != "model-1" {
+			t.Errorf("Model = %q, want model-1", lt.Model)
+		}
+		if lt.Effort != "high" {
+			t.Errorf("Effort = %q, want high", lt.Effort)
+		}
+		if !lt.Sudo {
+			t.Error("Sudo = false, want true")
+		}
+		if !lt.GitHubToken {
+			t.Error("GitHubToken = false, want true")
 		}
 	})
 	t.Run("FeatureFlagsOmitted", func(t *testing.T) {

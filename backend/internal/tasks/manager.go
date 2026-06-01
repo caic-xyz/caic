@@ -969,12 +969,15 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 			ID:            taskID,
 			InitialPrompt: agent.Prompt{Text: lt.Prompt},
 			Model:         lt.Model,
+			Effort:        lt.Effort,
 			Repos:         lt.Repos,
 			Harness:       lt.Harness,
 			StartedAt:     lt.StartedAt,
 			Tailscale:     lt.Tailscale,
 			USB:           lt.USB,
 			Display:       lt.Display,
+			Sudo:          lt.Sudo,
+			GitHubToken:   lt.GitHubToken,
 		}
 		t.SetStateAt(lt.State, lt.LastStateUpdateAt)
 		if lt.AgentVersion != "" {
@@ -1339,6 +1342,12 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	if stateUpdatedAt.IsZero() {
 		stateUpdatedAt = time.Now().UTC()
 	}
+	var model string
+	var effort string
+	if lt != nil {
+		model = lt.Model
+		effort = lt.Effort
+	}
 
 	var adoptRepos []task.RepoMount
 	if ri.RelPath != "" {
@@ -1385,6 +1394,8 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		InitialPrompt: agent.Prompt{Text: prompt},
 		Repos:         adoptRepos,
 		Harness:       harnessName,
+		Model:         model,
+		Effort:        effort,
 		Container:     c.Name,
 		StartedAt:     startedAt,
 		Tailscale:     c.Tailscale,

@@ -126,10 +126,11 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		b.ModelList = sorted
 		b.mu.Unlock()
 	}
+	wire.suppressUserInput = true
 
 	log := slog.With("container", opts.Container)
 	s := agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, wire), br, opts.MsgCh, log)
-	if opts.InitialPrompt.Text != "" {
+	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
 			_ = s.Close()
 			return nil, fmt.Errorf("write prompt: %w", err)
@@ -162,7 +163,7 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 	// Pre-populate thread ID from the known session so WritePrompt works
 	// immediately. wireFormat.process() will update it again if thread/started
 	// appears in the replayed output.
-	wire := &wireFormat{threadID: opts.ResumeSessionID, effort: opts.Effort, fw: &jsonutil.FieldWarner{}}
+	wire := &wireFormat{threadID: opts.ResumeSessionID, effort: opts.Effort, suppressUserInput: true, fw: &jsonutil.FieldWarner{}}
 	return agent.AttachRelaySession(ctx, opts, wire)
 }
 
@@ -176,12 +177,13 @@ func (*Backend) NewWire() agent.WireFormat {
 // accumulated token usage from thread/tokenUsage/updated, and the reasoning
 // effort level.
 type wireFormat struct {
-	threadID   string
-	effort     string // Reasoning effort (e.g. "none", "low", "medium", "high").
-	nextID     atomic.Int64
-	mu         sync.Mutex
-	totalUsage agent.Usage // accumulated per-turn from thread/tokenUsage/updated
-	fw         *jsonutil.FieldWarner
+	threadID          string
+	effort            string // Reasoning effort (e.g. "none", "low", "medium", "high").
+	suppressUserInput bool
+	nextID            atomic.Int64
+	mu                sync.Mutex
+	totalUsage        agent.Usage // accumulated per-turn from thread/tokenUsage/updated
+	fw                *jsonutil.FieldWarner
 }
 
 // WritePrompt sends a turn/start JSON-RPC request to begin a new turn with
@@ -280,7 +282,11 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	if err != nil {
 		return nil, err
 	}
+	out := msgs[:0]
 	for _, msg := range msgs {
+		if _, ok := msg.(*agent.UserInputMessage); ok && w.suppressUserInput {
+			continue
+		}
 		// Capture thread ID from InitMessage (produced by thread/started).
 		if init, ok := msg.(*agent.InitMessage); ok && init.SessionID != "" {
 			w.mu.Lock()
@@ -294,8 +300,9 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 			w.totalUsage = agent.Usage{}
 			w.mu.Unlock()
 		}
+		out = append(out, msg)
 	}
-	return msgs, nil
+	return out, nil
 }
 
 // handshake performs the JSON-RPC initialize → initialized → model/list →

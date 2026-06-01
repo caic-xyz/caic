@@ -68,8 +68,10 @@ type LoadedTask struct {
 	Tailscale         bool
 	USB               bool
 	Display           bool
+	Sudo              bool
 	GitHubToken       bool
 	Model             string
+	Effort            string
 	AgentVersion      string
 	LogSize           int64 // Byte size of the log file on disk; populated by LoadLogs.
 	Msgs              []agent.Message
@@ -316,6 +318,8 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 		Title:             meta.Title,
 		Repos:             repos,
 		Harness:           meta.Harness,
+		Model:             meta.Model,
+		Effort:            meta.Effort,
 		StartedAt:         meta.StartedAt,
 		LastStateUpdateAt: info.ModTime().UTC(),
 		State:             StateRunning, // sentinel: overridden by caic_result trailer or loadPurgedTasksFrom
@@ -323,6 +327,7 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 		Tailscale:         meta.Tailscale,
 		USB:               meta.USB,
 		Display:           meta.Display,
+		Sudo:              meta.Sudo,
 		GitHubToken:       meta.GitHubToken,
 		LogSize:           info.Size(),
 	}
@@ -483,10 +488,17 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 		Title:             meta.Title,
 		Repos:             repos,
 		Harness:           meta.Harness,
+		Model:             meta.Model,
+		Effort:            meta.Effort,
 		StartedAt:         meta.StartedAt,
 		LastStateUpdateAt: mtime,
 		State:             StateRunning, // sentinel: overridden by caic_result trailer or loadPurgedTasksFrom
 		ForgeIssue:        meta.ForgeIssue,
+		Tailscale:         meta.Tailscale,
+		USB:               meta.USB,
+		Display:           meta.Display,
+		Sudo:              meta.Sudo,
+		GitHubToken:       meta.GitHubToken,
 	}
 
 	// Parse remaining lines as agent messages or the result trailer.
