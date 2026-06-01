@@ -39,14 +39,22 @@ func (s *stubAppClient) PostComment(_ context.Context, _ int64, _, _ string, _ i
 	return nil
 }
 
-// stubForge implements forge.Forge for tests. Only GetCheckRuns and
-// GetDefaultBranchSHA are used by handleCheckSuiteEvent.
+// stubForge implements forge.Forge for tests.
 type stubForge struct {
-	headSHA   string
-	checkRuns []forge.CheckRun
+	headSHA            string
+	headErr            error
+	checkRuns          []forge.CheckRun
+	findPR             forge.PR
+	findErr            error
+	defaultBranchCalls int
+	findPRCalls        int
 }
 
 func (f *stubForge) GetDefaultBranchSHA(_ context.Context, _, _, _ string) (string, error) {
+	f.defaultBranchCalls++
+	if f.headErr != nil {
+		return "", f.headErr
+	}
 	return f.headSHA, nil
 }
 func (f *stubForge) GetCheckRuns(_ context.Context, _, _, _ string) ([]forge.CheckRun, error) {
@@ -56,6 +64,13 @@ func (f *stubForge) CreatePR(_ context.Context, _, _, _, _, _, _ string) (forge.
 	return forge.PR{}, nil
 }
 func (f *stubForge) FindPRByBranch(_ context.Context, _, _, _ string) (forge.PR, error) {
+	f.findPRCalls++
+	if f.findErr != nil {
+		return forge.PR{}, f.findErr
+	}
+	if f.findPR.Number != 0 || f.findPR.HeadSHA != "" {
+		return f.findPR, nil
+	}
 	return forge.PR{}, fmt.Errorf("not implemented: %w", forge.ErrNotFound)
 }
 func (f *stubForge) PRURL(_, _ string, _ int) string         { return "" }

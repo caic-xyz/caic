@@ -28,9 +28,9 @@ func (s *Server) wireAdoptedCIMonitoring(ctx context.Context, at *tasks.AdoptedT
 	}
 	pr := at.Task.Snapshot().ForgePR
 	if pr > 0 {
-		sha, err := f.GetDefaultBranchSHA(ctx, at.ForgeOwner, at.ForgeRepo, at.Branch)
+		sha, err := adoptedHeadSHA(ctx, f, at)
 		if err != nil {
-			slog.Warn("adopt: GetDefaultBranchSHA failed", "task", at.Task.ID, "branch", at.Branch, "err", err)
+			slog.Warn("adopt: head SHA lookup failed", "task", at.Task.ID, "branch", at.Branch, "err", err)
 			return
 		}
 		slog.Info("adopt: starting monitorCI", "task", at.Task.ID, "branch", at.Branch, "sha", sha)
@@ -61,12 +61,31 @@ func (s *Server) lookupExternalPRForTask(at *tasks.AdoptedTask) {
 	slog.Info("adopt: found external PR", "repo", at.RelPath, "br", at.Branch, "pr", pr.Number)
 	at.Task.SetPR(at.ForgeOwner, at.ForgeRepo, pr.Number)
 	s.taskMgr.NotifyTaskChange()
-	sha, err := f.GetDefaultBranchSHA(s.ctx, at.ForgeOwner, at.ForgeRepo, at.Branch)
-	if err != nil {
-		slog.Warn("adopt: GetDefaultBranchSHA failed", "task", at.Task.ID, "branch", at.Branch, "err", err)
-		return
+	sha := pr.HeadSHA
+	if sha == "" {
+		var err error
+		sha, err = f.GetDefaultBranchSHA(s.ctx, at.ForgeOwner, at.ForgeRepo, at.Branch)
+		if err != nil {
+			slog.Warn("adopt: head SHA lookup failed", "task", at.Task.ID, "branch", at.Branch, "err", err)
+			return
+		}
 	}
 	slog.Info("adopt: starting monitorCI", "task", at.Task.ID, "branch", at.Branch, "sha", sha)
 	s.taskMgr.SetTaskMonitorBranch(at.Entry, at.Branch)
 	s.ciService.MonitorCI(s.ctx, at.Entry, f, at.ForgeOwner, at.ForgeRepo, sha)
+}
+
+func adoptedHeadSHA(ctx context.Context, f forge.Forge, at *tasks.AdoptedTask) (string, error) {
+	pr, err := f.FindPRByBranch(ctx, at.ForgeOwner, at.ForgeRepo, at.Branch)
+	if err == nil && pr.HeadSHA != "" {
+		if at.Task != nil && pr.Number > 0 {
+			at.Task.SetPR(at.ForgeOwner, at.ForgeRepo, pr.Number)
+		}
+		return pr.HeadSHA, nil
+	}
+	sha, err := f.GetDefaultBranchSHA(ctx, at.ForgeOwner, at.ForgeRepo, at.Branch)
+	if err != nil {
+		return "", err
+	}
+	return sha, nil
 }

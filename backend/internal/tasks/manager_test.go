@@ -1713,6 +1713,56 @@ func TestManager(t *testing.T) {
 		})
 	})
 
+	t.Run("AdoptContainers", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid_matches_only_primary_repo", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			fake := &fakeMD{labels: map[string]string{
+				"md-caic-caic-5\x00caic.id":      taskID.String(),
+				"md-caic-caic-5\x00caic.harness": string(agent.Claude),
+			}}
+			m := New(Config{ServerCtx: t.Context(), MDClient: fake})
+			m.RegisterRunner("caic-xyz/caic", &task.Runner{
+				Dir:      "/home/user/src/caic-xyz/caic",
+				Backends: map[agent.Harness]agent.Backend{agent.Claude: &fakeBackend{models: []string{"m1"}}},
+			})
+			m.RegisterRunner("caic-xyz/md", &task.Runner{
+				Dir:      "/home/user/src/caic-xyz/md",
+				Backends: map[agent.Harness]agent.Backend{agent.Claude: &fakeBackend{models: []string{"m1"}}},
+			})
+
+			adopted, err := m.AdoptContainers(t.Context(), []AdoptRepo{
+				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
+				{RelPath: "caic-xyz/md", AbsPath: "/home/user/src/caic-xyz/md"},
+			}, []*md.Container{
+				{
+					Name:  "md-caic-caic-5",
+					State: "exited",
+					Repos: []md.Repo{
+						{GitRoot: "/home/user/src/caic-xyz/caic", Branch: "caic-5", MountedPath: "/home/user/src/caic-xyz/caic"},
+						{GitRoot: "/home/user/src/caic-xyz/md", Branch: "caic-0", MountedPath: "/home/user/src/caic-xyz/md"},
+					},
+				},
+			}, nil)
+			if err != nil {
+				t.Fatalf("AdoptContainers: %v", err)
+			}
+			if len(adopted) != 1 {
+				t.Fatalf("adopted len = %d, want 1", len(adopted))
+			}
+			if adopted[0].RelPath != "caic-xyz/caic" {
+				t.Errorf("adopted RelPath = %q, want caic-xyz/caic", adopted[0].RelPath)
+			}
+			if adopted[0].Branch != "caic-5" {
+				t.Errorf("adopted Branch = %q, want caic-5", adopted[0].Branch)
+			}
+			if m.Len() != 1 {
+				t.Errorf("manager Len = %d, want 1", m.Len())
+			}
+		})
+	})
+
 	t.Run("pushStats", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_pushes_to_active_tasks", func(t *testing.T) {
@@ -1802,6 +1852,40 @@ func TestManager(t *testing.T) {
 				time.Sleep(time.Millisecond)
 			}
 		})
+	})
+}
+
+func TestTaskReposForRunner(t *testing.T) {
+	t.Parallel()
+	t.Run("valid_preserves_mounted_path", func(t *testing.T) {
+		t.Parallel()
+		r := &task.Runner{Dir: "/home/user/src/caic-xyz/caic"}
+		tk := &task.Task{
+			Repos: []task.RepoMount{
+				{Name: "caic-xyz/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic-xyz/caic"},
+				{Name: "caic-xyz/md", Branch: "caic-0", GitRoot: "/home/user/src/caic-xyz/md", MountedPath: "/home/user/src/caic-xyz/md"},
+			},
+		}
+
+		got := taskReposForRunner(tk, r)
+		if len(got) != 2 {
+			t.Fatalf("repos len = %d, want 2", len(got))
+		}
+		if got[0].GitRoot != "/home/user/src/caic-xyz/caic" {
+			t.Errorf("primary GitRoot = %q, want runner dir", got[0].GitRoot)
+		}
+		if got[0].MountedPath != "/home/user/src/caic-xyz/caic" {
+			t.Errorf("primary MountedPath = %q, want qualified mount", got[0].MountedPath)
+		}
+		if got[1].MountedPath != "/home/user/src/caic-xyz/md" {
+			t.Errorf("extra MountedPath = %q, want qualified mount", got[1].MountedPath)
+		}
+	})
+	t.Run("valid_no_repos", func(t *testing.T) {
+		t.Parallel()
+		if got := taskReposForRunner(&task.Task{}, &task.Runner{Dir: "/repo"}); got != nil {
+			t.Fatalf("repos = %+v, want nil", got)
+		}
 	})
 }
 

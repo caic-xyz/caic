@@ -707,23 +707,10 @@ func (m *Manager) AdoptContainers(ctx context.Context, repos []AdoptRepo, contai
 			continue
 		}
 		for _, c := range containers {
-			// Match containers to repos by checking MountedPath
-			var branch string
-			var matched bool
-			fullPath := "/home/user/src/" + ri.RelPath
-			basenamePath := "/home/user/src/" + filepath.Base(ri.AbsPath)
-			for _, r := range c.Repos {
-				if r.MountedPath == fullPath || r.MountedPath == ri.RelPath || r.MountedPath == basenamePath {
-					branch = r.Branch
-					matched = true
-					break
-				}
-				if r.MountedPath == filepath.Base(ri.AbsPath) {
-					branch = r.Branch
-					matched = true
-					break
-				}
+			if claimed[c.Name] {
+				continue
 			}
+			branch, matched := primaryBranchForAdoption(ri, c)
 			if !matched {
 				continue
 			}
@@ -769,6 +756,30 @@ func (m *Manager) AdoptContainers(ctx context.Context, repos []AdoptRepo, contai
 	}
 
 	return adopted, errors.Join(errs...)
+}
+
+func primaryBranchForAdoption(ri *AdoptRepo, c *md.Container) (string, bool) {
+	if len(c.Repos) == 0 {
+		return "", false
+	}
+	r := c.Repos[0]
+	if !mountedPathMatchesRepo(r.MountedPath, ri) {
+		return "", false
+	}
+	return r.Branch, true
+}
+
+func mountedPathMatchesRepo(mountedPath string, ri *AdoptRepo) bool {
+	relPath := filepath.ToSlash(ri.RelPath)
+	baseName := filepath.Base(ri.AbsPath)
+	return slices.Contains([]string{
+		"/home/user/src/" + relPath,
+		"~/src/" + relPath,
+		relPath,
+		"/home/user/src/" + baseName,
+		"~/src/" + baseName,
+		baseName,
+	}, mountedPath)
 }
 
 // needTitleRegen reports whether the adopted task needs an LLM title regeneration.
@@ -998,6 +1009,17 @@ func (m *Manager) LoadMessagesOnDemand(entry *Entry) {
 	m.loadTaskMessagesOnDemand(entry)
 }
 
+func taskReposForRunner(t *task.Task, runner *task.Runner) []md.Repo {
+	repos := t.MDRepos()
+	if len(repos) == 0 {
+		return nil
+	}
+	if repos[0].GitRoot == "" && runner != nil {
+		repos[0].GitRoot = runner.Dir
+	}
+	return repos
+}
+
 // Sync performs git push operations. It does NOT start the PR flow.
 func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, force bool) (*SyncResult, error) {
 	t := entry.task
@@ -1009,9 +1031,10 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 	}
 
 	runner := m.resolveRunner(t)
+	repos := taskReposForRunner(t, runner)
 	syncPrimaryBranch := ""
-	if p := t.Primary(); p != nil {
-		syncPrimaryBranch = p.Branch
+	if len(repos) > 0 {
+		syncPrimaryBranch = repos[0].Branch
 	}
 
 	if target == SyncTargetDefault {
@@ -1023,7 +1046,7 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 		if message == "" {
 			message = t.InitialPrompt.Text
 		}
-		ds, issues, err := runner.SyncToDefault(ctx, append([]md.Repo{{GitRoot: runner.Dir, Branch: syncPrimaryBranch}}, t.ExtraMDRepos()...), t.Container, message)
+		ds, issues, err := runner.SyncToDefault(ctx, repos, t.Container, message)
 		if err != nil {
 			return nil, internalErr(err, "sync to default")
 		}
@@ -1037,7 +1060,7 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 	}
 
 	// Default: push to the task's own branch.
-	ds, issues, err := runner.SyncToOrigin(ctx, append([]md.Repo{{GitRoot: runner.Dir, Branch: syncPrimaryBranch}}, t.ExtraMDRepos()...), t.Container, force)
+	ds, issues, err := runner.SyncToOrigin(ctx, repos, t.Container, force)
 	if err != nil {
 		return nil, internalErr(err, "sync to origin")
 	}
@@ -1325,11 +1348,8 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		}
 		// Derive MountedPath from container's Docker label.
 		var mountedPath string
-		for _, r := range c.Repos {
-			if r.Branch == branch {
-				mountedPath = r.MountedPath
-				break
-			}
+		if len(c.Repos) > 0 && c.Repos[0].Branch == branch {
+			mountedPath = c.Repos[0].MountedPath
 		}
 		if mountedPath == "" {
 			mountedPath = "~/src/" + ri.RelPath
@@ -1492,11 +1512,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 			}
 			tlog.Debug("auto-reconnect succeeded")
 			t.VNCPort = runner.Container.VNCPort(m.serverCtx, t.Container)
-			var adoptPrimaryBranch string
-			if p := t.Primary(); p != nil {
-				adoptPrimaryBranch = p.Branch
-			}
-			if ds := runner.BranchDiffStat(m.serverCtx, append([]md.Repo{{GitRoot: runner.Dir, Branch: adoptPrimaryBranch}}, t.ExtraMDRepos()...)); len(ds) > 0 {
+			if ds := runner.BranchDiffStat(m.serverCtx, taskReposForRunner(t, runner)); len(ds) > 0 {
 				t.SetLiveDiffStat(ds)
 			}
 			m.NotifyTaskChange()
