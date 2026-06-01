@@ -272,15 +272,16 @@ class HaloDevice(
         if (closeResp != "2") throw HaloException("Error closing file on device: $closeResp")
     }
 
-    // ---- Internal: raw GATT write (stub — wired to HaloConnection) ----
+    // ---- Raw GATT write (wired by HaloConnection.wireWriteSink) ----
 
-    internal data class RawWrite(
+    data class RawWrite(
         val characteristic: BluetoothGattCharacteristic,
         val data: ByteArray,
         val writeType: Int,
     )
 
-    internal var writeSink: suspend (RawWrite) -> Unit = { throw HaloException("HaloDevice not wired to a HaloConnection") }
+    @Suppress("MemberVisibilityCanBePrivate") // Public for test wiring via HaloConnection subclass override.
+    var writeSink: suspend (RawWrite) -> Unit = { throw HaloException("HaloDevice not wired to a HaloConnection") }
 
     private suspend fun sendRaw(write: RawWrite) {
         writeSink(write)

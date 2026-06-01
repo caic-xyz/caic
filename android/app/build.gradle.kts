@@ -68,6 +68,7 @@ detekt {
 
 dependencies {
     implementation(project(":sdk"))
+    implementation(project(":halo"))
 
     // Compose
     implementation(platform(libs.androidx.compose.bom))
