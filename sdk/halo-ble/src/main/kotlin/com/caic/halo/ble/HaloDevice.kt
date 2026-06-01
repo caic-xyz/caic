@@ -83,12 +83,10 @@ class HaloDevice(
         }
 
         if (awaitResponse) {
-            val response = withTimeoutOrNull(timeoutMs) {
+            sendRaw(RawWrite(tx, bytes, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
+            return withTimeoutOrNull(timeoutMs) {
                 stringResponse.first()
             } ?: throw HaloException("Timeout waiting for Lua string response")
-
-            sendRaw(RawWrite(tx, bytes, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
-            return response
         } else {
             sendRaw(RawWrite(tx, bytes, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
             return null
@@ -127,11 +125,10 @@ class HaloDevice(
         }
 
         if (awaitResponse) {
-            val response = withTimeoutOrNull(timeoutMs) {
+            sendRaw(RawWrite(tx, packet, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
+            withTimeoutOrNull(timeoutMs) {
                 dataResponse.first()
             } ?: throw HaloException("Timeout waiting for data response")
-
-            sendRaw(RawWrite(tx, packet, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
         } else {
             sendRaw(RawWrite(tx, packet, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
         }
@@ -218,11 +215,13 @@ class HaloDevice(
             payload.copyInto(packet, headerSize, sent, sent + chunkSize)
 
             // Each chunk waits for an application-level ACK from the device
-            val response = withTimeoutOrNull(5000) {
+            sendRaw(RawWrite(tx, packet, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
+
+            // Each chunk waits for an application-level ACK from the device
+            withTimeoutOrNull(5000) {
                 dataResponse.first()
             } ?: throw HaloException("Timeout waiting for message ACK (msgCode=0x${msgCode.toString(16)})")
 
-            sendRaw(RawWrite(tx, packet, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
             sent += chunkSize
         }
     }

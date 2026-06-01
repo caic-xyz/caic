@@ -30,6 +30,10 @@ android {
         warningsAsErrors = true
         abortOnError = true
     }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 detekt {
@@ -45,4 +49,5 @@ dependencies {
     // Unit tests (JVM, no Android) — mockable BLE interfaces in the future
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
 }
