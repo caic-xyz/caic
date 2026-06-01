@@ -732,7 +732,7 @@ func TestAgentArgs(t *testing.T) {
 	t.Parallel()
 	t.Run("AppServer", func(t *testing.T) {
 		t.Parallel()
-		args := New().AgentArgs(agent.HarnessArgs{Model: "o4-mini"})
+		args := New("", nil).AgentArgs(agent.HarnessArgs{Model: "o4-mini"})
 		want := []string{
 			"codex", "app-server",
 			"-c", `approval_policy="never"`,
@@ -746,7 +746,7 @@ func TestAgentArgs(t *testing.T) {
 		t.Parallel()
 		// Widget MCP is disabled for codex; AgentArgs should not include
 		// mcp_servers config.
-		args := New().AgentArgs(agent.HarnessArgs{})
+		args := New("", nil).AgentArgs(agent.HarnessArgs{})
 		for _, arg := range args {
 			if strings.Contains(arg, "mcp_servers") {
 				t.Errorf("unexpected widget MCP config in args %v", args)

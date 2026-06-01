@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/container"
@@ -66,6 +67,7 @@ func (s *Server) refreshHarnessModels() {
 		h     agent.Harness
 		fetch fetchFunc
 	}{
+		{agent.Codex, codex.FetchModels},
 		{agent.Pi, pi.FetchModels},
 		{agent.OpenCode, opencode.FetchModels},
 	}

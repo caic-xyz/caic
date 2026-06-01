@@ -6,13 +6,56 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	cx "github.com/maruel/genai/providers/codex"
 )
+
+func TestNew(t *testing.T) {
+	t.Parallel()
+	t.Run("empty_without_cache", func(t *testing.T) {
+		t.Parallel()
+		b := New("", nil)
+		if len(b.Models()) != 0 {
+			t.Fatalf("Models() = %v, want empty", b.Models())
+		}
+	})
+	t.Run("loads_cached_models", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		envVars := []string{"OPENAI_API_KEY=secret"}
+		cache := agent.OpenHarnessCache(filepath.Join(dir, "harnesses.json"))
+		cache.SetModels(agent.Codex, []string{"z-model", "a-model"}, agent.APIKeyHash(envVars))
+
+		b := New(dir, envVars)
+		if got, want := b.Models(), []string{"z-model", "a-model"}; !slices.Equal(got, want) {
+			t.Fatalf("Models() = %v, want %v", got, want)
+		}
+	})
+	t.Run("persists_discovered_models", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		envVars := []string{"OPENAI_API_KEY=secret"}
+		b := New(dir, envVars)
+
+		b.setDiscoveredModels([]string{"z-model", "a-model"})
+
+		cache := agent.OpenHarnessCache(filepath.Join(dir, "harnesses.json"))
+		got, fresh := cache.Models(agent.Codex, agent.APIKeyHash(envVars))
+		if !fresh {
+			t.Fatal("cached models are not fresh")
+		}
+		want := []string{"z-model", "a-model"}
+		if !slices.Equal(got, want) {
+			t.Fatalf("cached models = %v, want %v", got, want)
+		}
+	})
+}
 
 func TestJSONRPCMessage(t *testing.T) {
 	t.Parallel()
@@ -59,6 +102,38 @@ func TestJSONRPCMessage(t *testing.T) {
 		}
 		if msg.Error.Message != "invalid request" {
 			t.Errorf("Error.Message = %q", msg.Error.Message)
+		}
+	})
+}
+
+func TestFetchModels(t *testing.T) {
+	t.Parallel()
+	t.Run("protocol", func(t *testing.T) {
+		t.Parallel()
+		const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
+{"id":2,"result":{"data":[{"id":"gpt-5.4"},{"id":"gpt-5.3-codex"}],"nextCursor":null}}
+`
+		var stdin bytes.Buffer
+		var nextID atomic.Int64
+		models, err := fetchModelsFromAppServer(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), &nextID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantModels := []string{"gpt-5.4", "gpt-5.3-codex"}
+		if !slices.Equal(models, wantModels) {
+			t.Errorf("models = %v, want %v", models, wantModels)
+		}
+
+		lines := bytes.Split(bytes.TrimSpace(stdin.Bytes()), []byte{'\n'})
+		if len(lines) != 3 {
+			t.Fatalf("wrote %d requests, want 3:\n%s", len(lines), stdin.String())
+		}
+		var req cx.JSONRPCRequest
+		if err := json.Unmarshal(lines[2], &req); err != nil {
+			t.Fatal(err)
+		}
+		if req.Method != "model/list" {
+			t.Fatalf("method = %q, want model/list", req.Method)
 		}
 	})
 }

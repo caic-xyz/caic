@@ -1253,7 +1253,7 @@ func (r *Runner) initDefaults() {
 		if r.Backends == nil {
 			r.Backends = map[agent.Harness]agent.Backend{
 				agent.Claude:   claudecode.New(),
-				agent.Codex:    codex.New(),
+				agent.Codex:    codex.New(r.CacheDir, r.HarnessEnv[string(agent.Codex)]),
 				agent.OpenCode: opencode.New(r.CacheDir, r.HarnessEnv[string(agent.OpenCode)]),
 				agent.Pi:       pi.New(r.CacheDir, r.HarnessEnv[string(agent.Pi)]),
 			}

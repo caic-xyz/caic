@@ -41,7 +41,7 @@ const image = "ghcr.io/caic-xyz/md-user:latest"
 var backends = map[string]agent.Backend{
 	string(agent.Pi):       pi.New("", nil),
 	string(agent.Claude):   claudecode.New(),
-	string(agent.Codex):    codex.New(),
+	string(agent.Codex):    codex.New("", nil),
 	string(agent.Gemini):   gemini.New(),
 	string(agent.Kilo):     kilo.New(),
 	string(agent.OpenCode): opencode.New("", nil),

@@ -11,6 +11,8 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,7 +31,9 @@ import (
 type Backend struct {
 	agent.Base
 
-	mu sync.Mutex
+	mu      sync.Mutex
+	cache   *agent.HarnessCache
+	EnvVars []string // KEY=VALUE pairs used to scope cached model lists.
 }
 
 var (
@@ -37,17 +41,23 @@ var (
 	_ agent.RecordHandshaker = (*Backend)(nil)
 )
 
-// New creates a Codex CLI backend with parser configured.
-// ModelList starts with a single known-good model; it is replaced with the
-// live list returned by model/list on the first successful handshake.
-func New() *Backend {
-	return &Backend{Base: agent.Base{
+// New creates a Codex CLI backend with parser configured. If cacheDir is
+// non-empty, the model list is loaded from the on-disk harness cache.
+func New(cacheDir string, envVars []string) *Backend {
+	b := &Backend{EnvVars: envVars}
+	b.Base = agent.Base{
 		HarnessID:     agent.Codex,
-		ModelList:     []string{"gpt-5.4"},
 		Images:        true,
 		Compact:       true,
 		ContextWindow: 200_000,
-	}}
+	}
+	if cacheDir != "" {
+		b.cache = agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
+		if models, _ := b.cache.Models(agent.Codex, agent.APIKeyHash(envVars)); len(models) > 0 {
+			b.setModels(models)
+		}
+	}
+	return b
 }
 
 // ExportDiscussion reads a JSONL log and returns the conversation as markdown.
@@ -60,6 +70,11 @@ func (b *Backend) Models() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.ModelList
+}
+
+// SetModels replaces the model list with sorted models. Thread-safe.
+func (b *Backend) SetModels(models []string) {
+	b.setModels(models)
 }
 
 // RecordHandshake performs the codex app-server JSON-RPC handshake
@@ -121,10 +136,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		return nil, fmt.Errorf("codex handshake: %w", err)
 	}
 	if len(models) > 0 {
-		sorted := agent.SortModels(models)
-		b.mu.Lock()
-		b.ModelList = sorted
-		b.mu.Unlock()
+		b.setDiscoveredModels(models)
 	}
 	wire.suppressUserInput = true
 
@@ -149,11 +161,45 @@ func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
 	// 	"-c", `mcp_servers.widget.command="python3"`,
 	// 	"-c", `mcp_servers.widget.args=["` + widgetMCPServerPath + `"]`,
 	// }
-	return []string{
-		"codex", "app-server",
-		"-c", `approval_policy="never"`,
-		"-c", `sandbox_mode="danger-full-access"`,
+	return codexAppServerArgs()
+}
+
+// FetchModels SSHes into the given container, runs codex app-server, fetches
+// model/list, and returns the model ID list.
+// extraEnv holds KEY=VALUE pairs injected via the env command.
+func FetchModels(ctx context.Context, container string, extraEnv []string) ([]string, error) {
+	args := []string{container}
+	if len(extraEnv) > 0 {
+		args = append(args, "env")
+		args = append(args, extraEnv...)
 	}
+	args = append(args, codexAppServerArgs()...)
+
+	cmd := exec.CommandContext(ctx, "ssh", args...) //nolint:gosec // container is not user-controlled.
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdin pipe: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	cmd.Stderr = &agent.SlogWriter{Prefix: "codex model-list", Container: container}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start codex app-server: %w", err)
+	}
+	defer func() {
+		_ = stdin.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	nextID := atomic.Int64{}
+	models, err := fetchModelsFromAppServer(ctx, stdin, bufio.NewReaderSize(stdout, 1<<16), &nextID)
+	if err != nil {
+		return nil, fmt.Errorf("codex model/list: %w", err)
+	}
+	return models, nil
 }
 
 // AttachRelay connects to an already-running relay in the container.
@@ -170,6 +216,31 @@ func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.
 // NewWire implements agent.Backend.
 func (*Backend) NewWire() agent.WireFormat {
 	return &wireFormat{fw: &jsonutil.FieldWarner{}}
+}
+
+func codexAppServerArgs() []string {
+	return []string{
+		"codex", "app-server",
+		"-c", `approval_policy="never"`,
+		"-c", `sandbox_mode="danger-full-access"`,
+	}
+}
+
+func (b *Backend) setDiscoveredModels(models []string) {
+	models = b.setModels(models)
+	if b.cache != nil {
+		b.cache.SetModels(agent.Codex, models, agent.APIKeyHash(b.EnvVars))
+	}
+}
+
+func (b *Backend) setModels(models []string) []string {
+	models = agent.SortModels(models)
+	slices.Reverse(models)
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.ModelList = models
+	return models
 }
 
 // wireFormat implements agent.WireFormat for the codex app-server JSON-RPC
@@ -307,78 +378,16 @@ func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 
 // handshake performs the JSON-RPC initialize → initialized → model/list →
 // thread/start (or thread/resume) sequence and returns a wireFormat with the
-// thread ID set, plus the model IDs from model/list (may be nil on error).
+// thread ID set, plus the model IDs from model/list.
 func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts *agent.Options) (*wireFormat, []string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	w := &wireFormat{effort: opts.Effort, fw: &jsonutil.FieldWarner{}}
 
-	// 1. Send initialize request.
-	initReq := cx.JSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      w.nextID.Add(1),
-		Method:  "initialize",
-		Params: cx.InitializeParams{
-			ClientInfo: cx.ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
-			Capabilities: cx.Capabilities{
-				OptOutNotificationMethods: []cx.Method{
-					// Interactive terminal prompts (e.g. sudo password, interactive stdin);
-					// caic does not forward interactive terminal I/O to the agent.
-					cx.MethodCommandTerminalInteract,
-					// Incremental diff of a file being written; we surface the completed
-					// diff via item/completed fileChange instead.
-					cx.MethodFileChangeOutputDelta,
-					// Streaming pre-summary reasoning part markers; we prefer the
-					// incremental text via item/reasoning/summaryTextDelta.
-					cx.MethodReasoningSummaryPartAdded,
-					// Raw token-by-token reasoning text; we prefer the summarised form via
-					// item/reasoning/summaryTextDelta which is more readable.
-					cx.MethodReasoningTextDelta,
-					// Incremental plan text delta; we surface the final plan text via
-					// item/completed plan instead.
-					cx.MethodPlanDelta,
-					// Coarse git diff snapshot repeated on every file change; we use the
-					// caic-injected caic_diff_stat from the relay watcher instead.
-					cx.MethodTurnDiffUpdated,
-					// High-level plan snapshot updated on each tool call; redundant with
-					// item/plan which gives us the final plan text.
-					cx.MethodTurnPlanUpdated,
-					// Thread name set by the agent (cosmetic label); caic uses the user's
-					// initial prompt as the task title instead.
-					cx.MethodThreadNameUpdated,
-				},
-			},
-		},
-	}
-	if err := writeJSON(stdin, initReq); err != nil {
-		return nil, nil, fmt.Errorf("write initialize: %w", err)
-	}
-
-	// Read initialize response.
-	if _, err := readJSONRPCResponse(ctx, stdout); err != nil {
-		return nil, nil, fmt.Errorf("read initialize response: %w", err)
-	}
-
-	// 2. Send initialized notification.
-	if err := writeJSON(stdin, cx.JSONRPCNotification{JSONRPC: "2.0", Method: "initialized"}); err != nil {
-		return nil, nil, fmt.Errorf("write initialized: %w", err)
-	}
-
-	// 3. Fetch model list so the UI offers only valid model IDs.
-	var models []string
-	if err := writeJSON(stdin, cx.JSONRPCRequest{JSONRPC: "2.0", ID: w.nextID.Add(1), Method: "model/list", Params: struct{}{}}); err != nil {
-		return nil, nil, fmt.Errorf("write model/list: %w", err)
-	}
-	if mlResp, err := readJSONRPCResponse(ctx, stdout); err == nil && mlResp.Result != nil {
-		var mlResult cx.ModelListResult
-		if json.Unmarshal(mlResp.Result, &mlResult) == nil {
-			for i := range mlResult.Data {
-				if mlResult.Data[i].ID != "" {
-					models = append(models, mlResult.Data[i].ID)
-				}
-			}
-		}
+	models, err := fetchModelsFromAppServer(ctx, stdin, stdout, &w.nextID)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// 4. Send thread/start or thread/resume.
@@ -418,6 +427,84 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 	w.threadID = result.Thread.ID
 	return w, models, nil
+}
+
+func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, nextID *atomic.Int64) ([]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	initReq := cx.JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      nextID.Add(1),
+		Method:  "initialize",
+		Params: cx.InitializeParams{
+			ClientInfo: cx.ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
+			Capabilities: cx.Capabilities{
+				OptOutNotificationMethods: []cx.Method{
+					// Interactive terminal prompts (e.g. sudo password, interactive stdin);
+					// caic does not forward interactive terminal I/O to the agent.
+					cx.MethodCommandTerminalInteract,
+					// Incremental diff of a file being written; we surface the completed
+					// diff via item/completed fileChange instead.
+					cx.MethodFileChangeOutputDelta,
+					// Streaming pre-summary reasoning part markers; we prefer the
+					// incremental text via item/reasoning/summaryTextDelta.
+					cx.MethodReasoningSummaryPartAdded,
+					// Raw token-by-token reasoning text; we prefer the summarised form via
+					// item/reasoning/summaryTextDelta which is more readable.
+					cx.MethodReasoningTextDelta,
+					// Incremental plan text delta; we surface the final plan text via
+					// item/completed plan instead.
+					cx.MethodPlanDelta,
+					// Coarse git diff snapshot repeated on every file change; we use the
+					// caic-injected caic_diff_stat from the relay watcher instead.
+					cx.MethodTurnDiffUpdated,
+					// High-level plan snapshot updated on each tool call; redundant with
+					// item/plan which gives us the final plan text.
+					cx.MethodTurnPlanUpdated,
+					// Thread name set by the agent (cosmetic label); caic uses the user's
+					// initial prompt as the task title instead.
+					cx.MethodThreadNameUpdated,
+				},
+			},
+		},
+	}
+	if err := writeJSON(stdin, initReq); err != nil {
+		return nil, fmt.Errorf("write initialize: %w", err)
+	}
+
+	// Read initialize response.
+	if _, err := readJSONRPCResponse(ctx, stdout); err != nil {
+		return nil, fmt.Errorf("read initialize response: %w", err)
+	}
+
+	// 2. Send initialized notification.
+	if err := writeJSON(stdin, cx.JSONRPCNotification{JSONRPC: "2.0", Method: "initialized"}); err != nil {
+		return nil, fmt.Errorf("write initialized: %w", err)
+	}
+
+	// 3. Fetch model list so the UI offers only valid model IDs.
+	var models []string
+	if err := writeJSON(stdin, cx.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: "model/list", Params: struct{}{}}); err != nil {
+		return nil, fmt.Errorf("write model/list: %w", err)
+	}
+	mlResp, err := readJSONRPCResponse(ctx, stdout)
+	if err != nil {
+		return nil, fmt.Errorf("read model/list response: %w", err)
+	}
+	if mlResp.Result == nil {
+		return nil, errors.New("model/list response missing result")
+	}
+	var mlResult cx.ModelListResult
+	if err := json.Unmarshal(mlResp.Result, &mlResult); err != nil {
+		return nil, fmt.Errorf("parse model/list result: %w", err)
+	}
+	for i := range mlResult.Data {
+		if mlResult.Data[i].ID != "" {
+			models = append(models, mlResult.Data[i].ID)
+		}
+	}
+	return models, nil
 }
 
 // writeJSON marshals v as JSON and writes it followed by a newline.
