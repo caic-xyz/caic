@@ -121,7 +121,7 @@ android-test:
 	@cd android && ./gradlew --no-daemon test
 
 android-coverage:
-	@cd android && ./gradlew --no-daemon :app:testDebugUnitTest :app:createDebugUnitTestCoverageReport :halo-ble:testDebugUnitTest :halo-ble:createDebugUnitTestCoverageReport
+	@cd android && ./gradlew --no-daemon :app:testDebugUnitTest :app:createDebugUnitTestCoverageReport :halo:testDebugUnitTest :halo:createDebugUnitTestCoverageReport
 
 android-e2e:
 	@python3 scripts/android_e2e.py

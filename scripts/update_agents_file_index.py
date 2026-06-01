@@ -156,14 +156,13 @@ def discover_configs(all_files):
             oroot = os.path.dirname(other_target)
             if oroot == root:
                 continue
-            if not prefix:
-                child_rel = oroot
-            elif oroot.startswith(prefix):
+            if prefix:
+                if not oroot.startswith(prefix):
+                    continue
                 child_rel = oroot[len(prefix) :]
             else:
-                continue
-            if "/" not in child_rel:
-                exclude.add(child_rel)
+                child_rel = oroot
+            exclude.add(child_rel)
     return configs
 
 
@@ -186,11 +185,12 @@ def generate_index(target, exclude, all_files, all_configs):
             relpath = filepath
         # Check excluded subdirectories, but let sub-workspace AGENTS.md through.
         rel_parts = relpath.replace("\\", "/").split("/")
-        if rel_parts[0] in exclude and filepath not in all_configs:
-            continue
-        # Skip any file in a testdata/ directory.
         if "testdata" in rel_parts:
             continue
+        # A file is excluded if its path starts with any excluded prefix.
+        if any(relpath.startswith(ex + "/") or relpath == ex for ex in exclude):
+            if filepath not in all_configs:
+                continue
         desc = get_file_description(filepath)
         if desc is None:
             continue  # file type has no comment convention

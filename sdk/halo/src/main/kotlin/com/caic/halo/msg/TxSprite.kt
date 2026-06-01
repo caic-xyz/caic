@@ -1,4 +1,4 @@
-// Core message types for the Halo messaging protocol (haloside applications).
+// TxSprite: indexed-color sprite sent to the device — PNG decoding, palette quantization, 1/2/4bpp pixel packing.
 // Tx (host→device): typed messages sent via HaloDevice.sendMessage().
 // Rx (device→host): parsed from HaloDevice.dataResponse Flow.
 package com.caic.halo.msg
@@ -7,24 +7,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import java.io.ByteArrayOutputStream
 
-// =============================================================================
-// TX: Host → Device messages
-// =============================================================================
-
-/** Base type for messages the host sends to the device via [HaloDevice.sendMessage]. */
-interface TxMessage {
-    /** Serialize to the byte payload for sendMessage(). */
-    fun pack(): ByteArray
-}
-
-/**
- * An indexed-color sprite sent to the device for display.
- *
- * Wire format: width(2) + height(2) + compressed(1) + bpp(1) + numColors(1) +
- *              palette(3 × numColors) + packedPixelData.
- *
- * bpp: 1, 2, or 4 (derived from numColors ≤2, ≤4, ≤16).
- */
 data class TxSprite(
     val width: Int,
     val height: Int,
