@@ -525,6 +525,20 @@ func (t *Task) SetStateIf(expected, next State) bool {
 	return true
 }
 
+// SetStateIfAny atomically transitions the state to next only if the current
+// state is one of allowed. Returns the previous state and whether the
+// transition occurred.
+func (t *Task) SetStateIfAny(next State, allowed ...State) (prev State, changed bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	prev = t.state
+	if !slices.Contains(allowed, t.state) {
+		return prev, false
+	}
+	t.setState(next)
+	return prev, true
+}
+
 // SetStateUnless atomically transitions the state to next unless the current
 // state is one of excluded, in which case it is left unchanged. Returns the
 // previous state and whether the transition occurred. Performing the guard and

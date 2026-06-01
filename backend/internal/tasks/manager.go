@@ -352,11 +352,12 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 
 // Purge transitions a task to purging.
 func (m *Manager) Purge(ctx context.Context, entry *Entry) error {
-	state := entry.task.GetState()
-	if state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan && state != task.StateRunning && state != task.StateStopping && state != task.StateStopped {
+	state, changed := entry.task.SetStateIfAny(task.StatePurging,
+		task.StateWaiting, task.StateAsking, task.StateHasPlan,
+		task.StateRunning, task.StateStopping, task.StateStopped)
+	if !changed {
 		return conflict("task is not running or waiting")
 	}
-	entry.task.SetState(task.StatePurging)
 	m.NotifyTaskChange()
 	runner := m.resolveRunner(entry.task)
 	slog.InfoContext(ctx, "purge requested", "task", entry.task.ID, "ctr", entry.task.ContainerName(), "state", state)
@@ -369,11 +370,11 @@ func (m *Manager) Purge(ctx context.Context, entry *Entry) error {
 
 // Stop transitions a task to stopping.
 func (m *Manager) Stop(ctx context.Context, entry *Entry) error {
-	state := entry.task.GetState()
-	if state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan && state != task.StateRunning {
+	state, changed := entry.task.SetStateIfAny(task.StateStopping,
+		task.StateWaiting, task.StateAsking, task.StateHasPlan, task.StateRunning)
+	if !changed {
 		return conflict("task is not running or waiting")
 	}
-	entry.task.SetState(task.StateStopping)
 	m.NotifyTaskChange()
 	runner := m.resolveRunner(entry.task)
 	slog.InfoContext(ctx, "stop requested", "task", entry.task.ID, "ctr", entry.task.ContainerName(), "state", state)
@@ -387,12 +388,10 @@ func (m *Manager) Stop(ctx context.Context, entry *Entry) error {
 
 // Revive restarts a stopped task.
 func (m *Manager) Revive(ctx context.Context, entry *Entry) error {
-	state := entry.task.GetState()
-	if state != task.StateStopped {
+	if _, changed := entry.task.SetStateIfAny(task.StateProvisioning, task.StateStopped); !changed {
 		return conflict("task is not stopped")
 	}
 	runner := m.resolveRunner(entry.task)
-	entry.task.SetState(task.StateProvisioning)
 	entry.Reset()
 	m.NotifyTaskChange()
 	go func() { //nolint:contextcheck // background goroutine roots its own trace task on serverCtx
@@ -400,7 +399,10 @@ func (m *Manager) Revive(ctx context.Context, entry *Entry) error {
 		defer tk.End()
 		h, err := runner.ReviveTask(ctx, entry.task)
 		if err != nil {
-			slog.Warn("revive failed", "task", entry.task.ID, "err", err)
+			slog.WarnContext(ctx, "revive failed", "task", entry.task.ID, "err", err)
+			entry.task.SetState(task.StateFailed)
+			entry.Finish(&task.Result{State: task.StateFailed, Err: internalErr(err, "revive task")})
+			m.NotifyTaskChange()
 			return
 		}
 		m.NotifyTaskChange()
@@ -412,13 +414,15 @@ func (m *Manager) Revive(ctx context.Context, entry *Entry) error {
 // Restart restarts the agent session with a new prompt.
 func (m *Manager) Restart(ctx context.Context, entry *Entry, prompt agent.Prompt) error {
 	t := entry.task
-	if state := t.GetState(); state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan {
+	prevState, changed := t.SetStateIfAny(task.StateStarting, task.StateWaiting, task.StateAsking, task.StateHasPlan)
+	if !changed {
 		return conflict("task is not waiting or asking")
 	}
 	if prompt.Text == "" {
 		// No prompt provided: fall back to the plan file from the container.
 		plan, err := agent.ReadPlan(m.serverCtx, t.ContainerName(), t.GetPlanFile()) //nolint:contextcheck // intentionally using server context
 		if err != nil {
+			t.SetStateIf(task.StateStarting, prevState)
 			return &Error{Kind: KindBadRequest, Msg: "no prompt provided and failed to read plan from container", Err: err}
 		}
 		prompt.Text = plan
@@ -436,7 +440,7 @@ func (m *Manager) Restart(ctx context.Context, entry *Entry, prompt agent.Prompt
 // ClearContext clears the agent session context.
 func (m *Manager) ClearContext(ctx context.Context, entry *Entry) error {
 	t := entry.task
-	if state := t.GetState(); state != task.StateWaiting && state != task.StateAsking && state != task.StateHasPlan {
+	if _, changed := t.SetStateIfAny(task.StateStarting, task.StateWaiting, task.StateAsking, task.StateHasPlan); !changed {
 		return conflict("task is not waiting or asking")
 	}
 	runner := m.resolveRunner(t)

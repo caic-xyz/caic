@@ -533,6 +533,32 @@ func TestRunner(t *testing.T) {
 		})
 	})
 
+	t.Run("StopTask", func(t *testing.T) {
+		t.Parallel()
+		for _, state := range []State{StatePurging, StatePurged, StateFailed} {
+			t.Run(state.String(), func(t *testing.T) {
+				t.Parallel()
+				stub := &stubContainer{}
+				r := &Runner{Container: stub}
+				tk := &Task{
+					ID:            ksid.NewID(),
+					InitialPrompt: agent.Prompt{Text: "test"},
+					Container:     "ctr-1",
+				}
+				tk.SetState(state)
+
+				r.StopTask(t.Context(), tk)
+
+				if got := tk.GetState(); got != state {
+					t.Errorf("state = %v, want %v", got, state)
+				}
+				if stub.stopped {
+					t.Error("StopTask called backend Stop for terminal/cleanup state")
+				}
+			})
+		}
+	})
+
 	t.Run("openLog", func(t *testing.T) {
 		t.Parallel()
 		t.Run("CreatesFile", func(t *testing.T) {
@@ -1079,6 +1105,7 @@ func TestPrependRepoToDiffDevNull(t *testing.T) {
 type stubContainer struct {
 	fetched  bool
 	fetchErr error // If set, Fetch returns this error.
+	stopped  bool
 }
 
 func (s *stubContainer) Launch(_ context.Context, _ []md.Repo, _ []string, _ *StartOptions) (string, error) {
@@ -1101,7 +1128,10 @@ func (s *stubContainer) Fetch(_ context.Context, repos []md.Repo) error {
 	return nil
 }
 
-func (s *stubContainer) Stop(_ context.Context, _ string) error                { return nil }
+func (s *stubContainer) Stop(_ context.Context, _ string) error {
+	s.stopped = true
+	return nil
+}
 func (s *stubContainer) Purge(_ context.Context, _ string, _ []md.Repo) error  { return nil }
 func (s *stubContainer) Revive(_ context.Context, _ string, _ []md.Repo) error { return nil }
 

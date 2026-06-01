@@ -2070,4 +2070,37 @@ func TestState(t *testing.T) {
 			}
 		})
 	})
+	t.Run("SetStateIfAny", func(t *testing.T) {
+		t.Parallel()
+		t.Run("Transitions", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.SetState(StateAsking)
+			prev, changed := tk.SetStateIfAny(StateStarting, StateWaiting, StateAsking, StateHasPlan)
+			if !changed {
+				t.Fatal("changed = false, want true when state is allowed")
+			}
+			if prev != StateAsking {
+				t.Errorf("prev = %v, want %v", prev, StateAsking)
+			}
+			if tk.GetState() != StateStarting {
+				t.Errorf("state = %v, want %v", tk.GetState(), StateStarting)
+			}
+		})
+		t.Run("Rejected", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.SetState(StatePurging)
+			prev, changed := tk.SetStateIfAny(StateStopping, StateWaiting, StateRunning)
+			if changed {
+				t.Fatal("changed = true, want false when state is not allowed")
+			}
+			if prev != StatePurging {
+				t.Errorf("prev = %v, want %v", prev, StatePurging)
+			}
+			if tk.GetState() != StatePurging {
+				t.Errorf("state = %v, want %v (should be unchanged)", tk.GetState(), StatePurging)
+			}
+		})
+	})
 }

@@ -1476,6 +1476,81 @@ func TestManager(t *testing.T) {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
+		t.Run("valid_wins_race_with_stop", func(t *testing.T) {
+			t.Parallel()
+			stopStarted := make(chan struct{})
+			stopReturned := make(chan struct{})
+			releaseStop := make(chan struct{})
+			fake := &tasktest.FakeContainerBackend{
+				StopFunc: func(ctx context.Context, _ string) error {
+					close(stopStarted)
+					defer close(stopReturned)
+					select {
+					case <-releaseStop:
+						return nil
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				},
+			}
+			m := New(Config{ServerCtx: t.Context(), Backend: fake})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Container:     "ctr-1",
+			}
+			tk.SetState(task.StateRunning)
+			entry := NewEntry(tk)
+			m.Insert(tk.ID.String(), entry)
+
+			if err := m.Stop(t.Context(), entry); err != nil {
+				t.Fatalf("Stop: %v", err)
+			}
+			select {
+			case <-stopStarted:
+			case <-time.After(time.Second):
+				t.Fatal("StopTask did not reach backend Stop")
+			}
+
+			if err := m.Purge(t.Context(), entry); err != nil {
+				t.Fatalf("Purge: %v", err)
+			}
+			select {
+			case <-entry.Done():
+			case <-time.After(time.Second):
+				t.Fatal("purge did not close done")
+			}
+			stopDoneChanged := m.Changed()
+			close(releaseStop)
+			select {
+			case <-stopReturned:
+			case <-time.After(time.Second):
+				t.Fatal("backend Stop did not return")
+			}
+			select {
+			case <-stopDoneChanged:
+			case <-time.After(time.Second):
+				t.Fatal("StopTask completion did not notify")
+			}
+
+			deadline := time.Now().Add(time.Second)
+			for fake.Count("Stop") == 0 || fake.Count("Purge") == 0 {
+				if time.Now().After(deadline) {
+					t.Fatalf("backend calls = %+v, want Stop and Purge", fake.Calls())
+				}
+				time.Sleep(time.Millisecond)
+			}
+			deadline = time.Now().Add(time.Second)
+			for tk.GetState() != task.StatePurged {
+				if time.Now().After(deadline) {
+					t.Fatalf("state = %v, want StatePurged after StopTask finishes", tk.GetState())
+				}
+				time.Sleep(time.Millisecond)
+			}
+			if result := entry.Result(); result == nil || result.State != task.StatePurged {
+				t.Fatalf("Result = %v, want StatePurged", result)
+			}
+		})
 	})
 	t.Run("Stop", func(t *testing.T) {
 		t.Parallel()
@@ -1538,6 +1613,59 @@ func TestManager(t *testing.T) {
 			var te *Error
 			if !errors.As(err, &te) || te.Kind != KindConflict {
 				t.Fatalf("err = %v, want KindConflict", err)
+			}
+		})
+		t.Run("error_failure_closes_done_and_publishes_result", func(t *testing.T) {
+			t.Parallel()
+			releaseRevive := make(chan struct{})
+			fake := &tasktest.FakeContainerBackend{
+				ReviveFunc: func(ctx context.Context, _ string, _ []md.Repo) error {
+					select {
+					case <-releaseRevive:
+						return errors.New("revive boom")
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				},
+			}
+			m := New(Config{ServerCtx: t.Context(), Backend: fake})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Container:     "ctr-1",
+			}
+			tk.SetState(task.StateStopped)
+			entry := NewEntry(tk)
+			m.Insert(tk.ID.String(), entry)
+
+			firstChanged := m.Changed()
+			if err := m.Revive(t.Context(), entry); err != nil {
+				t.Fatalf("Revive: %v", err)
+			}
+			select {
+			case <-firstChanged:
+			case <-time.After(time.Second):
+				t.Fatal("initial revive transition did not notify")
+			}
+			failedChanged := m.Changed()
+			close(releaseRevive)
+
+			select {
+			case <-entry.Done():
+			case <-time.After(time.Second):
+				t.Fatal("failed revive did not close done")
+			}
+			select {
+			case <-failedChanged:
+			case <-time.After(time.Second):
+				t.Fatal("failed revive did not notify")
+			}
+			if got := tk.GetState(); got != task.StateFailed {
+				t.Fatalf("state = %v, want StateFailed", got)
+			}
+			result := entry.Result()
+			if result == nil || result.State != task.StateFailed || result.Err == nil {
+				t.Fatalf("Result = %v, want failed result with error", result)
 			}
 		})
 	})

@@ -556,6 +556,10 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	}
 	tlog := r.log.With("br", primaryBranch, "ctr", name)
 	tlog.InfoContext(ctx, "stop starting", "state", t.GetState())
+	if _, changed := t.SetStateUnless(StateStopping, StatePurging, StatePurged, StateFailed, StateStopped); !changed {
+		tlog.InfoContext(ctx, "stop skipped", "state", t.GetState())
+		return
+	}
 
 	h := t.DetachSession()
 
@@ -570,8 +574,6 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 			tlog.DebugContext(ctx, "stop: graceful stop succeeded", "dur", time.Since(gStart).Round(time.Millisecond))
 		}
 	}
-
-	t.SetState(StateStopping)
 
 	tlog.InfoContext(ctx, "stop: stopping container")
 	if name != "" && r.Container != nil {
@@ -594,7 +596,13 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 		tlog.DebugContext(ctx, "stop: session drained", "dur", time.Since(dStart).Round(time.Millisecond))
 	}
 
-	t.SetState(StateStopped)
+	if _, changed := t.SetStateUnless(StateStopped, StatePurging, StatePurged, StateFailed); !changed {
+		if h != nil && h.LogW != nil {
+			_ = h.LogW.Close()
+		}
+		tlog.InfoContext(ctx, "stop abandoned", "state", t.GetState())
+		return
+	}
 
 	// Write log trailer so the task reloads as "stopped" (not "failed")
 	// after a server restart, preserving live stats for the UI.
@@ -643,13 +651,15 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	tlog := r.log.With("br", primaryBranch, "ctr", containerName)
 
 	// 1. Revive the container (docker start + SSH).
-	t.SetState(StateProvisioning)
+	if state, changed := t.SetStateIfAny(StateProvisioning, StateStopped, StateProvisioning); !changed {
+		return nil, fmt.Errorf("cannot revive in state %s", state)
+	}
 	repos := t.MDRepos()
 	tlog.Info("reviving container")
 	tlog.Debug("runner", "msg", "calling container.Revive", "repos_count", len(repos))
 	if err := r.Container.Revive(ctx, containerName, repos); err != nil {
 		tlog.Error("runner", "msg", "Revive failed", "err", err)
-		t.SetState(StateFailed)
+		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("revive container: %w", err)
 	}
 	tlog.Debug("runner", "msg", "Revive succeeded", "container", containerName)
@@ -667,7 +677,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
-		t.SetState(StateFailed)
+		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("open log: %w", err)
 	}
 
@@ -685,7 +695,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 		_ = logW.Close()
 		close(msgCh)
 		<-dispatchDone
-		t.SetState(StateFailed)
+		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("resume session after revive: %w", err)
 	}
 
@@ -696,7 +706,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	// start a fresh idle relay so the task can accept new prompts.
 	h, err = r.EnsureSession(ctx, t, h, tlog)
 	if err != nil {
-		t.SetState(StateFailed)
+		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, err
 	}
 
@@ -1005,7 +1015,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	defer task.End()
 
 	state := t.GetState()
-	if state != StateWaiting && state != StateAsking && state != StateHasPlan {
+	if state != StateWaiting && state != StateAsking && state != StateHasPlan && state != StateStarting {
 		return nil, fmt.Errorf("cannot restart in state %s", state)
 	}
 
@@ -1028,7 +1038,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	// 3. Open new log segment.
 	logW, err := r.openLog(t)
 	if err != nil {
-		t.SetState(StateFailed)
+		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("open log: %w", err)
 	}
 
@@ -1057,7 +1067,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 		_ = logW.Close()
 		close(msgCh)
 		<-dispatchDone
-		t.SetState(StateFailed)
+		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("start session: %w", err)
 	}
 
@@ -1081,7 +1091,7 @@ func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHand
 	defer task.End()
 
 	state := t.GetState()
-	if state != StateWaiting && state != StateAsking && state != StateHasPlan {
+	if state != StateWaiting && state != StateAsking && state != StateHasPlan && state != StateStarting {
 		return nil, fmt.Errorf("cannot clear context in state %s", state)
 	}
 
@@ -1102,7 +1112,7 @@ func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHand
 	// 3. Open new log segment.
 	logW, err := r.openLog(t)
 	if err != nil {
-		t.SetState(StateFailed)
+		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("open log: %w", err)
 	}
 
@@ -1130,7 +1140,7 @@ func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHand
 		_ = logW.Close()
 		close(msgCh)
 		<-dispatchDone
-		t.SetState(StateFailed)
+		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
 		return nil, fmt.Errorf("start session: %w", err)
 	}
 
