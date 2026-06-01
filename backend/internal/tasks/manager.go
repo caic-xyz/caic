@@ -25,13 +25,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caic-xyz/md"
+	"github.com/maruel/genai"
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/md"
-	"github.com/maruel/genai"
-	"github.com/maruel/ksid"
 )
 
 // errTaskNotFound is returned when a task ID doesn't exist.
@@ -283,11 +284,12 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	}
 
 	// Build RepoMount slice. MountedPath follows the fixed "~/src/<name>"
-	// convention used by the container provisioner.
+	// convention used by the container provisioner. Use the basename unless
+	// another registered repo shares it.
 	mounts := make([]task.RepoMount, len(p.Repos))
 	for i, rs := range p.Repos {
 		r, _ := m.Runner(rs.Name)
-		mounts[i] = task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir, MountedPath: "~/src/" + rs.Name}
+		mounts[i] = task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: r.Dir, MountedPath: m.mountPathForRepo(rs.Name)}
 	}
 
 	t := &task.Task{
@@ -542,7 +544,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		if !ok {
 			return "", badRequestf("unknown extra repo: %s", rs.Name)
 		}
-		rm := task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir, MountedPath: "~/src/" + rs.Name}
+		rm := task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir, MountedPath: m.mountPathForRepo(rs.Name)}
 		extraMounts = append(extraMounts, rm)
 		extraRepos = append(extraRepos, rm.ToMDRepo())
 	}
@@ -1076,6 +1078,27 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 	return &SyncResult{Status: status, Branch: syncPrimaryBranch, DiffStat: ds, SafetyIssues: issues}, nil
 }
 
+func (m *Manager) mountPathForRepo(relPath string) string {
+	base := filepath.Base(relPath)
+	if !m.repoBasenameCollides(relPath) {
+		return "~/src/" + base
+	}
+	return "~/src/" + relPath
+}
+
+func (m *Manager) repoBasenameCollides(relPath string) bool {
+	base := filepath.Base(relPath)
+	collides := false
+	m.RangeRunners(func(other string, _ *task.Runner) bool {
+		if other != "" && other != relPath && filepath.Base(other) == base {
+			collides = true
+			return false
+		}
+		return true
+	})
+	return collides
+}
+
 // pollStats polls container resource stats every 5 seconds for all active tasks.
 func (m *Manager) pollStats(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
@@ -1361,7 +1384,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 			mountedPath = c.Repos[0].MountedPath
 		}
 		if mountedPath == "" {
-			mountedPath = "~/src/" + ri.RelPath
+			mountedPath = m.mountPathForRepo(ri.RelPath)
 		}
 		adoptRepos = []task.RepoMount{{Name: ri.RelPath, BaseBranch: primaryBaseBranch, GitRoot: ri.AbsPath, Branch: branch, MountedPath: mountedPath}}
 		if lt != nil {
@@ -1377,7 +1400,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 				}
 				mp := containerRepoByBranch[lm.Branch]
 				if mp == "" {
-					mp = "~/src/" + lm.Name
+					mp = m.mountPathForRepo(lm.Name)
 				}
 				adoptRepos = append(adoptRepos, task.RepoMount{Name: lm.Name, BaseBranch: lm.BaseBranch, Branch: lm.Branch, GitRoot: gitRoot, MountedPath: mp})
 			}

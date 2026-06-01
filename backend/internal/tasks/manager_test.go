@@ -11,12 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caic-xyz/md"
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
-	"github.com/caic-xyz/md"
-	"github.com/maruel/ksid"
 )
 
 func TestNew(t *testing.T) {
@@ -615,7 +616,7 @@ func TestManager(t *testing.T) {
 			})
 			return m
 		}
-		t.Run("valid_sets_mounted_path_and_max_cpus", func(t *testing.T) {
+		t.Run("valid_sets_basename_mounted_path_and_max_cpus", func(t *testing.T) {
 			t.Parallel()
 			m := newManagerWithRepo(t)
 			id, err := m.Create(t.Context(), CreateParams{
@@ -635,6 +636,33 @@ func TestManager(t *testing.T) {
 			if tk.MaxCPUs != 7 {
 				t.Errorf("MaxCPUs = %d, want 7", tk.MaxCPUs)
 			}
+			if len(tk.Repos) != 1 {
+				t.Fatalf("len(Repos) = %d, want 1", len(tk.Repos))
+			}
+			if got := tk.Repos[0].MountedPath; got != "~/src/repo" {
+				t.Errorf("MountedPath = %q, want %q", got, "~/src/repo")
+			}
+		})
+		t.Run("valid_sets_relative_mounted_path_for_basename_collision", func(t *testing.T) {
+			t.Parallel()
+			m := newManagerWithRepo(t)
+			m.RegisterRunner("other/repo", &task.Runner{
+				Dir:      "/tmp/other-repo",
+				Backends: map[agent.Harness]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
+			})
+			id, err := m.Create(t.Context(), CreateParams{
+				Prompt:  agent.Prompt{Text: "hi"},
+				Repos:   []CreateRepo{{Name: "my/repo", BaseBranch: "main"}},
+				Harness: "fake",
+			})
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			e, ok := m.GetEntry(id)
+			if !ok {
+				t.Fatal("entry not found after Create")
+			}
+			tk := e.Task()
 			if len(tk.Repos) != 1 {
 				t.Fatalf("len(Repos) = %d, want 1", len(tk.Repos))
 			}
