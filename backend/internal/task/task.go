@@ -436,6 +436,22 @@ func (t *Task) SetStateIf(expected, next State) bool {
 	return true
 }
 
+// SetStateUnless atomically transitions the state to next unless the current
+// state is one of excluded, in which case it is left unchanged. Returns the
+// previous state and whether the transition occurred. Performing the guard and
+// the transition under a single lock closes the check-then-set race that a
+// separate GetState/SetState pair leaves open against concurrent transitions.
+func (t *Task) SetStateUnless(next State, excluded ...State) (prev State, changed bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	prev = t.state
+	if slices.Contains(excluded, t.state) {
+		return prev, false
+	}
+	t.setState(next)
+	return prev, true
+}
+
 // GetState returns the current state under the mutex.
 func (t *Task) GetState() State {
 	t.mu.Lock()

@@ -37,15 +37,62 @@ import (
 // errTaskNotFound is returned when a task ID doesn't exist.
 var errTaskNotFound = &Error{Kind: KindNotFound, Msg: "task not found"}
 
+// MDBackend is the container-infrastructure seam Manager depends on. The
+// production implementation (NewMDBackend) wraps *md.Client together with the
+// container package's free functions; tests supply a fake. Folding the runtime
+// string and the container.WatchEvents/LabelValue free functions behind this
+// one interface is what lets SudoPassword, pushStats, watchContainerEvents, and
+// adoptOne be tested without Docker or SSH.
+type MDBackend interface {
+	// StatsAll returns resource stats for the named containers.
+	StatsAll(ctx context.Context, names []string) (map[string]*md.ContainerStats, error)
+	// SudoPassword fetches the sudo password for a container over SSH.
+	SudoPassword(ctx context.Context, name string) (string, error)
+	// LabelValue reads a single container label, returning "" when unset.
+	LabelValue(ctx context.Context, name, label string) (string, error)
+	// WatchEvents streams lifecycle events for containers matching labelFilter.
+	WatchEvents(ctx context.Context, labelFilter string) (<-chan container.Event, error)
+}
+
+// mdClientBackend is the production MDBackend, backed by *md.Client and the
+// container package free functions (which take the runtime as an argument).
+type mdClientBackend struct{ c *md.Client }
+
+// NewMDBackend wires a *md.Client into the MDBackend seam.
+func NewMDBackend(c *md.Client) MDBackend { return mdClientBackend{c} }
+
+// StatsAll implements MDBackend.
+func (b mdClientBackend) StatsAll(ctx context.Context, names []string) (map[string]*md.ContainerStats, error) {
+	return b.c.StatsAll(ctx, names)
+}
+
+// SudoPassword implements MDBackend by constructing an ephemeral md.Container.
+func (b mdClientBackend) SudoPassword(ctx context.Context, name string) (string, error) {
+	return (&md.Container{Client: b.c, Name: name}).SudoPassword(ctx)
+}
+
+// LabelValue implements MDBackend.
+func (b mdClientBackend) LabelValue(ctx context.Context, name, label string) (string, error) {
+	return container.LabelValue(ctx, b.c.Runtime, name, label)
+}
+
+// WatchEvents implements MDBackend.
+func (b mdClientBackend) WatchEvents(ctx context.Context, labelFilter string) (<-chan container.Event, error) {
+	return container.WatchEvents(ctx, b.c.Runtime, labelFilter)
+}
+
 // Config holds the dependencies Manager needs at construction.
 type Config struct {
 	// ServerCtx tracks the Manager's own lifetime. Used as the parent for
 	// background goroutines that must survive individual requests.
-	ServerCtx  context.Context
-	LogDir     string
-	CacheDir   string
-	Backend    *container.Backend
-	MDClient   *md.Client
+	ServerCtx context.Context
+	LogDir    string
+	CacheDir  string
+	// Backend is the per-task container lifecycle seam (launch/stop/purge/fork).
+	// Production passes *container.Backend (Docker); a future VM backend or a
+	// test fake can be substituted via this interface.
+	Backend    task.ContainerBackend
+	MDClient   MDBackend
 	HarnessEnv map[string][]string
 	Prefs      *preferences.Store
 	Provider   genai.Provider // nil-safe
@@ -58,8 +105,8 @@ type Manager struct {
 	serverCtx  context.Context // lifetime of the Manager; for goroutines that outlive requests
 	logDir     string
 	cacheDir   string
-	backend    *container.Backend
-	mdClient   *md.Client
+	backend    task.ContainerBackend
+	mdClient   MDBackend
 	harnessEnv map[string][]string
 	prefs      *preferences.Store
 	provider   genai.Provider
@@ -600,8 +647,7 @@ func (m *Manager) SudoPassword(ctx context.Context, t *task.Task) string {
 	if t.SudoPassword != "" {
 		return t.SudoPassword
 	}
-	ct := &md.Container{Client: m.mdClient, Name: t.Container}
-	pw, err := ct.SudoPassword(ctx)
+	pw, err := m.mdClient.SudoPassword(ctx, t.Container)
 	if err != nil {
 		slog.WarnContext(ctx, "sudo password lookup failed", "ctr", t.Container, "err", err)
 		return ""
@@ -1077,7 +1123,7 @@ func (m *Manager) pushStats(ctx context.Context) {
 func (m *Manager) watchContainerEvents(ctx context.Context) {
 	go func() {
 		for {
-			ch, err := container.WatchEvents(ctx, m.mdClient.Runtime, "caic")
+			ch, err := m.mdClient.WatchEvents(ctx, "caic")
 			if err != nil {
 				if ctx.Err() != nil {
 					return
@@ -1122,17 +1168,25 @@ func (m *Manager) handleContainerDeath(containerName string) {
 		return
 	}
 	t := found.task
-	state := t.GetState()
-	if state == task.StatePurged || state == task.StateFailed || state == task.StateStopped || state == task.StateStopping {
+	// Atomically archive as stopped unless the task is already terminal or in
+	// cleanup. StateStopping and StatePurging are both self-inflicted: Stop and
+	// Purge stop/remove the container, which itself emits the "die" event we are
+	// handling here. Acting on them would flap the task to StateStopped
+	// mid-cleanup and race the cleanup goroutine. Guarding and transitioning in
+	// one lock also prevents clobbering a state a concurrent Stop/Purge sets
+	// between our check and our write.
+	prevState, changed := t.SetStateUnless(task.StateStopped,
+		task.StatePurged, task.StateFailed, task.StateStopped,
+		task.StateStopping, task.StatePurging)
+	if !changed {
 		return
 	}
 	deathBranch := ""
 	if p := t.Primary(); p != nil {
 		deathBranch = p.Branch
 	}
-	slog.Info("container", "msg", "died, archiving as stopped", "ctr", containerName, "task", t.ID, "br", deathBranch, "prev_state", state)
+	slog.Info("container", "msg", "died, archiving as stopped", "ctr", containerName, "task", t.ID, "br", deathBranch, "prev_state", prevState)
 	t.DetachSession()
-	t.SetState(task.StateStopped)
 	m.NotifyTaskChange()
 }
 
@@ -1171,9 +1225,9 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 
 	// Only adopt containers that caic started. The caic.id label is set at
 	// container creation and is the authoritative proof of ownership.
-	labelVal, err := container.LabelValue(ctx, m.mdClient.Runtime, c.Name, "caic.id")
+	labelVal, err := m.mdClient.LabelValue(ctx, c.Name, "caic.id")
 	if labelVal == "" && err == nil {
-		labelVal, err = container.LabelValue(ctx, m.mdClient.Runtime, c.Name, "caic")
+		labelVal, err = m.mdClient.LabelValue(ctx, c.Name, "caic")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("label check for %s: %w", c.Name, err)
@@ -1214,9 +1268,9 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	var stateUpdatedAt time.Time
 
 	// Read harness from container label (authoritative), fall back to log.
-	harnessLabel, _ := container.LabelValue(ctx, m.mdClient.Runtime, c.Name, "caic.harness")
+	harnessLabel, _ := m.mdClient.LabelValue(ctx, c.Name, "caic.harness")
 	if harnessLabel == "" {
-		harnessLabel, _ = container.LabelValue(ctx, m.mdClient.Runtime, c.Name, "harness")
+		harnessLabel, _ = m.mdClient.LabelValue(ctx, c.Name, "harness")
 	}
 	harnessName := agent.Harness(harnessLabel)
 	if harnessName == "" && lt != nil {
@@ -1323,7 +1377,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		ForgeIssue:    forgeIssue,
 	}
 	// Restore GitHub token flag from log trailer (primary) or container label (fallback).
-	gtLabel, _ := container.LabelValue(ctx, m.mdClient.Runtime, c.Name, "caic.githubToken")
+	gtLabel, _ := m.mdClient.LabelValue(ctx, c.Name, "caic.githubToken")
 	if (lt != nil && lt.GitHubToken) || gtLabel == "true" {
 		t.GitHubToken = true
 	}

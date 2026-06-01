@@ -312,7 +312,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		LogDir:     logDir,
 		CacheDir:   cfg.CacheDir,
 		Backend:    backend,
-		MDClient:   mdClient,
+		MDClient:   tasks.NewMDBackend(mdClient),
 		HarnessEnv: cfg.HarnessEnv,
 		Prefs:      prefsStore,
 		Provider:   s.provider,

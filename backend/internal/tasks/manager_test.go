@@ -12,7 +12,10 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
+	"github.com/caic-xyz/md"
 	"github.com/maruel/ksid"
 )
 
@@ -1014,6 +1017,58 @@ func TestManager(t *testing.T) {
 				t.Errorf("SudoPassword = %q, want cached-pw", got)
 			}
 		})
+		t.Run("valid_fetches_then_caches", func(t *testing.T) {
+			t.Parallel()
+			fake := &fakeMD{
+				sudoFn: func(_ context.Context, name string) (string, error) {
+					if name != "ctr-1" {
+						t.Errorf("SudoPassword called with name %q, want ctr-1", name)
+					}
+					return "fetched-pw", nil
+				},
+			}
+			m := New(Config{ServerCtx: t.Context(), MDClient: fake})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Sudo:          true,
+				Container:     "ctr-1",
+			}
+			if got := m.SudoPassword(t.Context(), tk); got != "fetched-pw" {
+				t.Errorf("SudoPassword = %q, want fetched-pw", got)
+			}
+			if tk.SudoPassword != "fetched-pw" {
+				t.Error("password not cached on task after fetch")
+			}
+			// Second call must hit the cache, not the backend.
+			if got := m.SudoPassword(t.Context(), tk); got != "fetched-pw" {
+				t.Errorf("cached SudoPassword = %q, want fetched-pw", got)
+			}
+			if fake.sudoCalls != 1 {
+				t.Errorf("sudoCalls = %d, want 1 (second call should be cached)", fake.sudoCalls)
+			}
+		})
+		t.Run("valid_fetch_error_returns_empty", func(t *testing.T) {
+			t.Parallel()
+			fake := &fakeMD{
+				sudoFn: func(_ context.Context, _ string) (string, error) {
+					return "", errors.New("ssh boom")
+				},
+			}
+			m := New(Config{ServerCtx: t.Context(), MDClient: fake})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Sudo:          true,
+				Container:     "ctr-1",
+			}
+			if got := m.SudoPassword(t.Context(), tk); got != "" {
+				t.Errorf("SudoPassword = %q, want empty on fetch error", got)
+			}
+			if tk.SudoPassword != "" {
+				t.Errorf("task SudoPassword cached %q on error, want empty", tk.SudoPassword)
+			}
+		})
 	})
 	t.Run("HandleContainerDeath", func(t *testing.T) {
 		t.Parallel()
@@ -1046,6 +1101,24 @@ func TestManager(t *testing.T) {
 			m.handleContainerDeath("ctr-purged")
 			if got := tk.GetState(); got != task.StatePurged {
 				t.Errorf("state = %v (should stay Purged)", got)
+			}
+		})
+		t.Run("valid_skips_purging", func(t *testing.T) {
+			t.Parallel()
+			m := New(Config{ServerCtx: t.Context()})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Container:     "ctr-purging",
+			}
+			// A purge in progress: removing the container emits the very "die"
+			// event handled here. Acting on it would flap the task to Stopped
+			// mid-purge and race the cleanup goroutine.
+			tk.SetState(task.StatePurging)
+			m.Insert(tk.ID.String(), NewEntry(tk))
+			m.handleContainerDeath("ctr-purging")
+			if got := tk.GetState(); got != task.StatePurging {
+				t.Errorf("state = %v (should stay Purging)", got)
 			}
 		})
 		t.Run("valid_skips_stopping", func(t *testing.T) {
@@ -1378,6 +1451,38 @@ func TestManager(t *testing.T) {
 				t.Fatalf("err = %v, want KindConflict", err)
 			}
 		})
+		t.Run("valid_stops_container_backend", func(t *testing.T) {
+			t.Parallel()
+			// Backend is the interface seam, so a fake stands in for Docker.
+			fake := &tasktest.FakeContainerBackend{}
+			m := New(Config{ServerCtx: t.Context(), Backend: fake})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Container:     "ctr-1",
+			}
+			tk.SetState(task.StateRunning)
+			entry := NewEntry(tk)
+			m.Insert(tk.ID.String(), entry)
+
+			if err := m.Stop(t.Context(), entry); err != nil {
+				t.Fatalf("Stop: %v", err)
+			}
+
+			// Stop runs StopTask on a background goroutine; wait for the task to
+			// settle rather than sleeping a fixed duration.
+			deadline := time.Now().Add(2 * time.Second)
+			for tk.GetState() != task.StateStopped {
+				if time.Now().After(deadline) {
+					t.Fatalf("state = %v, want StateStopped", tk.GetState())
+				}
+				time.Sleep(time.Millisecond)
+			}
+			calls := fake.Calls()
+			if len(calls) != 1 || calls[0].Method != "Stop" || calls[0].Name != "ctr-1" {
+				t.Errorf("backend calls = %+v, want one Stop of ctr-1", calls)
+			}
+		})
 	})
 	t.Run("Revive", func(t *testing.T) {
 		t.Parallel()
@@ -1604,6 +1709,97 @@ func TestManager(t *testing.T) {
 			var te *Error
 			if !errors.As(err, &te) || te.Kind != KindBadRequest {
 				t.Fatalf("err = %v, want KindBadRequest", err)
+			}
+		})
+	})
+
+	t.Run("pushStats", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid_pushes_to_active_tasks", func(t *testing.T) {
+			t.Parallel()
+			fake := &fakeMD{
+				statsAllFn: func(_ context.Context, names []string) (map[string]*md.ContainerStats, error) {
+					out := make(map[string]*md.ContainerStats, len(names))
+					for _, n := range names {
+						out[n] = &md.ContainerStats{CPUPerc: 0.5, MemUsed: 100}
+					}
+					return out, nil
+				},
+			}
+			m := New(Config{ServerCtx: t.Context(), MDClient: fake})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Container:     "ctr-1",
+			}
+			tk.SetState(task.StateRunning)
+			m.Insert(tk.ID.String(), NewEntry(tk))
+
+			m.pushStats(t.Context())
+
+			// Assert the snapshot actually landed on the task's stats ring.
+			history, _, unsub := tk.SubscribeStats(t.Context())
+			unsub()
+			if len(history) != 1 {
+				t.Fatalf("stats history len = %d, want 1", len(history))
+			}
+			if history[0].CPUPerc != 0.5 || history[0].MemUsed != 100 {
+				t.Errorf("pushed stats = %+v, want CPUPerc=0.5 MemUsed=100", history[0])
+			}
+			if fake.statsAllCalls != 1 {
+				t.Errorf("statsAllCalls = %d, want 1", fake.statsAllCalls)
+			}
+		})
+		t.Run("valid_skips_inactive_states", func(t *testing.T) {
+			t.Parallel()
+			fake := &fakeMD{}
+			m := New(Config{ServerCtx: t.Context(), MDClient: fake})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Container:     "ctr-dead",
+			}
+			tk.SetState(task.StatePurged)
+			m.Insert(tk.ID.String(), NewEntry(tk))
+
+			m.pushStats(t.Context())
+
+			if fake.statsAllCalls != 0 {
+				t.Errorf("statsAllCalls = %d for purged task, want 0", fake.statsAllCalls)
+			}
+		})
+	})
+
+	t.Run("watchContainerEvents", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid_dispatches_death", func(t *testing.T) {
+			t.Parallel()
+			events := make(chan container.Event, 1)
+			fake := &fakeMD{events: events}
+			m := New(Config{ServerCtx: t.Context(), MDClient: fake})
+			tk := &task.Task{
+				ID:            ksid.NewID(),
+				InitialPrompt: agent.Prompt{Text: "x"},
+				Container:     "ctr-dead",
+				Repos:         []task.RepoMount{{Name: "repo/x", Branch: "caic-1"}},
+			}
+			tk.SetState(task.StateRunning)
+			m.Insert(tk.ID.String(), NewEntry(tk))
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			m.watchContainerEvents(ctx)
+
+			events <- container.Event{Name: "ctr-dead"}
+
+			// The watcher dispatches on its own goroutine; wait for the state
+			// transition rather than sleeping a fixed duration.
+			deadline := time.Now().Add(2 * time.Second)
+			for tk.GetState() != task.StateStopped {
+				if time.Now().After(deadline) {
+					t.Fatalf("state = %v, want StateStopped after container death", tk.GetState())
+				}
+				time.Sleep(time.Millisecond)
 			}
 		})
 	})

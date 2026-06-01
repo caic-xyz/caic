@@ -1969,4 +1969,37 @@ func TestState(t *testing.T) {
 			}
 		})
 	})
+	t.Run("SetStateUnless", func(t *testing.T) {
+		t.Parallel()
+		t.Run("Transitions", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.SetState(StateRunning)
+			prev, changed := tk.SetStateUnless(StateStopped, StatePurged, StateStopping)
+			if !changed {
+				t.Fatal("changed = false, want true when state not excluded")
+			}
+			if prev != StateRunning {
+				t.Errorf("prev = %v, want %v", prev, StateRunning)
+			}
+			if tk.GetState() != StateStopped {
+				t.Errorf("state = %v, want %v", tk.GetState(), StateStopped)
+			}
+		})
+		t.Run("Excluded", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{}
+			tk.SetState(StatePurging)
+			prev, changed := tk.SetStateUnless(StateStopped, StatePurging, StateStopping)
+			if changed {
+				t.Fatal("changed = true, want false when state excluded")
+			}
+			if prev != StatePurging {
+				t.Errorf("prev = %v, want %v", prev, StatePurging)
+			}
+			if tk.GetState() != StatePurging {
+				t.Errorf("state = %v, want %v (should be unchanged)", tk.GetState(), StatePurging)
+			}
+		})
+	})
 }
