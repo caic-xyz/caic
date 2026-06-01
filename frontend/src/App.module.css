@@ -109,6 +109,25 @@
   align-self: baseline;
 }
 
+.titleButton {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
+.titleButton:hover {
+  color: var(--color-primary);
+}
+
+.titleButton:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 0.2rem;
+}
+
 .subtitle {
   font-size: 0.85rem;
   color: var(--color-text-muted);
@@ -526,7 +545,7 @@
   }
 
   .subtitle {
-    font-size: 0.7rem;
+    display: none;
   }
 
   .submitForm {

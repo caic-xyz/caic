@@ -731,7 +731,9 @@ export default function App() {
     <Show when={auth.providers().length === 0 || auth.user()} fallback={<Login />}>
     <div class={styles.app}>
       <div class={styles.navbar}>
-        <h1 class={styles.title}>caic</h1>
+        <h1 class={styles.title}>
+          <button class={styles.titleButton} type="button" onClick={() => navigate("/")}>caic</button>
+        </h1>
         <span class={styles.subtitle}>Coding Agents in Containers</span>
         <UsageBadges usage={usage} now={now} />
         <ConnectionDot connected={connected()} />

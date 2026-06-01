@@ -133,12 +133,8 @@ fun TaskListScreen(
                     .testTag("top-bar"),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val displayName = state.config?.displayName?.ifBlank { null }
-                    ?: state.serverURL.takeIf { it.isNotBlank() }
-                        ?.let { runCatching { java.net.URI(it).host }.getOrNull() }
-                    ?: ""
                 Text(
-                    if (displayName.isNotEmpty()) "$displayName — caic" else "caic",
+                    taskListTitle(state.config?.displayName, state.serverURL),
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Spacer(Modifier.width(8.dp))
@@ -183,6 +179,12 @@ fun TaskListScreen(
         }
     }
 }
+
+internal fun taskListTitle(configDisplayName: String?, serverURL: String): String =
+    configDisplayName?.ifBlank { null }
+        ?: serverURL.takeIf { it.isNotBlank() }
+            ?.let { runCatching { java.net.URI(it).host }.getOrNull() }
+        ?: "caic"
 
 @Composable
 private fun ConnectionDot(connected: Boolean) {

@@ -98,6 +98,15 @@ beforeEach(() => {
 });
 
 describe("App repo chips: No repository", () => {
+  it("returns to the task list from the caic title", async () => {
+    const user = userEvent.setup();
+    render(() => <App />);
+
+    await user.click(screen.getByRole("button", { name: "caic" }));
+
+    expect(navigateMock).toHaveBeenCalledWith("/");
+  });
+
   it("has no chips after removing the last one", async () => {
     const user = userEvent.setup();
     render(() => <App />);
