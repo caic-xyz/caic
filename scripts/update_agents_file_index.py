@@ -24,6 +24,7 @@ import sys
 
 
 def get_git_files():
+    """Return the list of files tracked by git, or [] on failure."""
     try:
         result = subprocess.run(["git", "ls-files", "-z"], capture_output=True, text=True, check=True)
         return [f for f in result.stdout.split("\0") if f]
@@ -84,11 +85,9 @@ def get_file_description(filepath):
         return None
     fname = os.path.basename(filepath)
     match = next(((pat, p) for pat, p in comment_prefixes.items() if fnmatch.fnmatch(fname, pat)), None)
-    if match is None:
-        return None  # extension not recognised
-    _, prefix = match
+    _, prefix = match if match else (None, None)
     if not prefix:
-        return None  # explicitly excluded pattern
+        return None  # unrecognised extension or explicitly excluded pattern
     with open(filepath, encoding="utf-8") as f:
         lines = [f.readline() for _ in range(20)]
     in_copyright = False
@@ -260,6 +259,7 @@ def ensure_claude_symlinks(all_files: list[str], check: bool) -> int:
 
 
 def main() -> int:
+    """Parse arguments and update (or check) the file indexes."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--check",
