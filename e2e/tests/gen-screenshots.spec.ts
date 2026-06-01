@@ -146,17 +146,33 @@ test("generate documentation screenshots", async ({ page, api }) => {
         });
       }
 
-      // Encode frames to AVIF animation via ffmpeg.
-      const { execSync } = await import("child_process");
-      try {
-        execSync(
-          `ffmpeg -y -framerate 10 -i "${tmpDir}/frame-%03d.png" ` +
-            `-c:v libaom-av1 -crf 30 -b:v 0 -pix_fmt yuv420p ` +
-            `"${path.join(screenshotDir, "task-widget.avif")}"`,
-          { stdio: "pipe", timeout: 60_000 },
-        );
-      } catch (e) {
-        console.error("AVIF encoding failed:", (e as Error).message);
+      // AVIF encoding is for documentation assets and can be too slow for CI.
+      if (!process.env.CI) {
+        const { execFileSync } = await import("child_process");
+        try {
+          execFileSync(
+            "ffmpeg",
+            [
+              "-y",
+              "-framerate",
+              "10",
+              "-i",
+              `${tmpDir}/frame-%03d.png`,
+              "-c:v",
+              "libaom-av1",
+              "-crf",
+              "30",
+              "-b:v",
+              "0",
+              "-pix_fmt",
+              "yuv420p",
+              path.join(screenshotDir, "task-widget.avif"),
+            ],
+            { stdio: "pipe", timeout: 60_000 },
+          );
+        } catch (e) {
+          console.error("AVIF encoding failed:", (e as Error).message);
+        }
       }
       // Clean up frames.
       fs.rmSync(tmpDir, { recursive: true, force: true });
