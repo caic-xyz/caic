@@ -125,21 +125,21 @@ describe("UsageBadges", () => {
       const u = makeUsage([makeProvider({ extraUsage: makeExtra(true, 3, 140, 2.1) })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
-      expect(container.textContent).toContain("extra $3/$140");
+      expect(container.textContent).toContain("$3/$140");
     });
 
     it("shows CNY extra usage with ¥", () => {
       const u = makeUsage([makeProvider({ extraUsage: makeExtra(true, 50, 500, 10, "CNY") })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
-      expect(container.textContent).toContain("extra ¥50/¥500");
+      expect(container.textContent).toContain("¥50/¥500");
     });
 
     it("shows ?? for unknown currency in extra", () => {
       const u = makeUsage([makeProvider({ extraUsage: makeExtra(true, 10, 100, 10, "EUR") })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
-      expect(container.textContent).toContain("extra ??10/??100");
+      expect(container.textContent).toContain("??10/??100");
     });
 
     it("disabled extra has disabled class", () => {
@@ -153,7 +153,7 @@ describe("UsageBadges", () => {
       const u = makeUsage([makeProvider({ extraUsage: makeExtra(true, 0, 0, 0) })]);
       const [usage] = createSignal(u);
       const { container } = render(() => <UsageBadges usage={usage} now={now} />);
-      expect(container.textContent).not.toContain("extra");
+      expect(container.textContent).not.toContain("$0/$0");
     });
   });
 

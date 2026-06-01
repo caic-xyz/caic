@@ -193,14 +193,15 @@ private fun ExtraUsageBadge(label: String, extra: QuotaExtraUsage) {
     } else {
         pctColor(extra.usedPct)
     }
+    val usageLabel = "%s%d/%s%d".format(sign, used.toInt(), sign, limit.toInt())
     val tip = rememberTooltipState()
     TooltipBox(
         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
-        tooltip = { PlainTooltip { Text("$label: extra %s%d/%s%d".format(sign, used.toInt(), sign, limit.toInt())) } },
+        tooltip = { PlainTooltip { Text("$label: $usageLabel") } },
         state = tip,
     ) {
         BadgeText(
-            text = "extra %s%d/%s%d".format(sign, used.toInt(), sign, limit.toInt()),
+            text = usageLabel,
             colors = colors,
             strikethrough = !extra.isEnabled,
         )

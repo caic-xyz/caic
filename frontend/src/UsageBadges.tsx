@@ -38,7 +38,7 @@ function balanceClass(bal: QuotaBalance): string {
 
 function extraLabel(extra: QuotaExtraUsage): string {
   const s = currencySign(extra.currency);
-  return `extra ${s}${extra.usedCredits.toFixed(0)}/${s}${extra.monthlyLimit.toFixed(0)}`;
+  return `${s}${extra.usedCredits.toFixed(0)}/${s}${extra.monthlyLimit.toFixed(0)}`;
 }
 
 function extraTooltip(extra: QuotaExtraUsage): string {
