@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 )
 
@@ -21,6 +22,17 @@ const (
 	OpenCode Harness = "opencode"
 	Pi       Harness = "pi"
 )
+
+// RequiresResumeSessionID reports whether h needs a persisted session ID to
+// reconnect to an existing stateful agent session.
+func RequiresResumeSessionID(h Harness) bool {
+	switch h {
+	case Codex, OpenCode:
+		return true
+	default:
+		return false
+	}
+}
 
 // DiffFileStat describes changes to a single file.
 type DiffFileStat struct {
@@ -435,6 +447,36 @@ func (m *MetaMessage) Validate() error {
 		return errors.New("missing harness")
 	}
 	return nil
+}
+
+// MetaSessionMessage records the backend-native session identifier needed to
+// resume a stateful harness after server restart.
+type MetaSessionMessage struct {
+	MessageType  string `json:"type"`
+	SessionID    string `json:"session_id"`
+	Model        string `json:"model,omitempty"`
+	AgentVersion string `json:"agent_version,omitempty"`
+}
+
+// Type implements Message.
+func (m *MetaSessionMessage) Type() string { return "caic_session" }
+
+// WriteMetaSession writes a caic_session control record for init to w.
+func WriteMetaSession(w io.Writer, init *InitMessage) error {
+	if w == nil || init == nil || init.SessionID == "" {
+		return nil
+	}
+	data, err := json.Marshal(&MetaSessionMessage{
+		MessageType:  "caic_session",
+		SessionID:    init.SessionID,
+		Model:        init.Model,
+		AgentVersion: init.Version,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(append(data, '\n'))
+	return err
 }
 
 // MetaResultMessage is appended as the last line of a JSONL log file when a

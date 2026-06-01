@@ -74,7 +74,7 @@ func ExportDiscussion(path string, parseFn func([]byte) ([]Message, error)) (str
 				pr = &m
 			}
 
-		case "caic_diff_stat", "caic_exit", "caic_model_info", "caic_stripped_env":
+		case "caic_diff_stat", "caic_exit", "caic_model_info", "caic_stripped_env", "caic_session", "caic_init":
 			// Skip internal control records.
 
 		default:

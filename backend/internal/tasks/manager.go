@@ -1272,6 +1272,13 @@ func (m *Manager) resolveRunner(t *task.Task) *task.Runner {
 	return r
 }
 
+func applyLoadedSessionMetadata(t *task.Task, lt *task.LoadedTask) {
+	if lt == nil || t.GetSessionID() != "" {
+		return
+	}
+	t.SetSessionMetadata(lt.SessionID, lt.Model, lt.AgentVersion)
+}
+
 // adoptOne investigates a single container and registers it as a task.
 func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runner, c *md.Container, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
 	ctx, adoptTask := trace.NewTask(ctx, "adopt-container")
@@ -1376,6 +1383,11 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	if lt != nil {
 		model = lt.Model
 		effort = lt.Effort
+		if agent.RequiresResumeSessionID(harnessName) && lt.SessionID == "" {
+			if err := lt.LoadSessionMetadata(); err != nil {
+				slog.Warn("load session metadata failed", "repo", ri.RelPath, "br", branch, "err", err)
+			}
+		}
 	}
 
 	var adoptRepos []task.RepoMount
@@ -1465,6 +1477,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	// Restore messages from relay or logs.
 	if relayAlive && len(relayMsgs) > 0 {
 		t.RestoreMessages(relayMsgs)
+		applyLoadedSessionMetadata(t, lt)
 		t.SetRelayOffset(relaySize)
 		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(relayMsgs))
 	} else if lt != nil {
@@ -1474,9 +1487,11 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		}
 		if len(lt.Msgs) > 0 {
 			t.RestoreMessages(lt.Msgs)
+			applyLoadedSessionMetadata(t, lt)
 			slog.Warn("relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(lt.Msgs))
 		}
 	}
+	applyLoadedSessionMetadata(t, lt)
 	t.SetStateAt(t.GetState(), stateUpdatedAt)
 
 	// Full log parse for PR recovery.

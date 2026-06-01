@@ -9,9 +9,10 @@ import (
 	"strings"
 	"sync"
 
+	cx "github.com/maruel/genai/providers/codex"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
-	cx "github.com/maruel/genai/providers/codex"
 )
 
 // notificationKnownFields caches the known field sets for output wire types,
@@ -48,7 +49,7 @@ func unmarshalNotification(data []byte, v any, name string, fw *jsonutil.FieldWa
 //   - A JSON-RPC 2.0 response (has "id").
 //
 // Emitted agent.Message types:
-//   - InitMessage          — thread/started
+//   - InitMessage          — thread/started or caic_session injection
 //   - TextMessage          — item/completed agentMessage or plan
 //   - TextDeltaMessage     — item/agentMessage/delta
 //   - ThinkingMessage      — item/completed reasoning
@@ -70,6 +71,16 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 	// caic-injected lines have a "type" field (not "jsonrpc").
 	if probe.Type != "" {
 		switch probe.Type {
+		case "caic_session":
+			var m agent.MetaSessionMessage
+			if err := json.Unmarshal(line, &m); err != nil {
+				return nil, err
+			}
+			return []agent.Message{&agent.InitMessage{
+				SessionID: m.SessionID,
+				Model:     m.Model,
+				Version:   m.AgentVersion,
+			}}, nil
 		case "caic_diff_stat":
 			var m agent.DiffStatMessage
 			if err := json.Unmarshal(line, &m); err != nil {

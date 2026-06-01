@@ -569,6 +569,21 @@ func (t *Task) GetSessionID() string {
 	return t.sessionID
 }
 
+// SetSessionMetadata records persisted agent session metadata.
+func (t *Task) SetSessionMetadata(sessionID, model, agentVersion string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if sessionID != "" {
+		t.sessionID = sessionID
+	}
+	if model != "" && t.reportedModel == "" {
+		t.reportedModel = model
+	}
+	if agentVersion != "" {
+		t.agentVersion = agentVersion
+	}
+}
+
 // GetModel returns the agent-reported model if available, otherwise the
 // user-requested model. Read under the mutex.
 func (t *Task) GetModel() string {

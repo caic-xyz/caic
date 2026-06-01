@@ -559,6 +559,33 @@ func TestRunner(t *testing.T) {
 		}
 	})
 
+	t.Run("Reconnect", func(t *testing.T) {
+		t.Parallel()
+		t.Run("error_stateful_missing_session_id", func(t *testing.T) {
+			t.Parallel()
+			for _, harness := range []agent.Harness{agent.Codex, agent.OpenCode} {
+				t.Run(string(harness), func(t *testing.T) {
+					t.Parallel()
+					r := &Runner{}
+					tk := &Task{
+						ID:            ksid.NewID(),
+						InitialPrompt: agent.Prompt{Text: "test"},
+						Harness:       harness,
+						Container:     "ctr-1",
+					}
+					tk.SetState(StateRunning)
+					_, err := r.Reconnect(t.Context(), tk, true)
+					if err == nil {
+						t.Fatal("Reconnect returned nil error")
+					}
+					if !strings.Contains(err.Error(), "session ID missing") {
+						t.Fatalf("err = %v, want missing session ID", err)
+					}
+				})
+			}
+		})
+	})
+
 	t.Run("openLog", func(t *testing.T) {
 		t.Parallel()
 		t.Run("CreatesFile", func(t *testing.T) {

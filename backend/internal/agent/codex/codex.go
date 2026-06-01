@@ -140,6 +140,13 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		b.setDiscoveredModels(models)
 	}
 	wire.suppressUserInput = true
+	initMsg := &agent.InitMessage{SessionID: wire.threadID, Model: opts.Model}
+	opts.MsgCh <- initMsg
+	if err := agent.WriteMetaSession(opts.LogW, initMsg); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, fmt.Errorf("write session metadata: %w", err)
+	}
 
 	log := slog.With("container", opts.Container)
 	s := agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, wire), br, opts.MsgCh, log)
@@ -207,6 +214,9 @@ func FetchModels(ctx context.Context, container string, extraEnv []string) ([]st
 // opts.ResumeSessionID is used to pre-populate the thread ID so that
 // WritePrompt works immediately without waiting for thread/started replay.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	if opts.ResumeSessionID == "" {
+		return nil, errors.New("codex: missing thread ID for relay attach")
+	}
 	// Pre-populate thread ID from the known session so WritePrompt works
 	// immediately. wireFormat.process() will update it again if thread/started
 	// appears in the replayed output.

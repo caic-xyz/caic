@@ -17,9 +17,10 @@ import (
 	"sync"
 	"time"
 
+	oc "github.com/maruel/genai/providers/opencode"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
-	oc "github.com/maruel/genai/providers/opencode"
 )
 
 // Backend implements agent.Backend for OpenCode using the ACP JSON-RPC 2.0
@@ -150,19 +151,8 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		Version:   hs.agentVersion,
 	}
 	opts.MsgCh <- initMsg
-	// Persist a synthetic caic_init line to output.jsonl so replay
-	// reconstructs the InitMessage (handshake responses aren't logged).
-	data, err := json.Marshal(caicInit{
-		Type:      "caic_init",
-		SessionID: initMsg.SessionID,
-		Model:     initMsg.Model,
-		Version:   initMsg.Version,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("marshal caic_init: %w", err)
-	}
-	if _, err := opts.LogW.Write(append(data, '\n')); err != nil {
-		return nil, fmt.Errorf("write log: %w", err)
+	if err := agent.WriteMetaSession(opts.LogW, initMsg); err != nil {
+		return nil, fmt.Errorf("write session metadata: %w", err)
 	}
 
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
@@ -181,6 +171,9 @@ func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
 
 // AttachRelay connects to an already-running relay in the container.
 func (b *Backend) AttachRelay(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	if opts.ResumeSessionID == "" {
+		return nil, errors.New("opencode: missing session ID for relay attach")
+	}
 	wire := &wireFormat{sessionID: opts.ResumeSessionID, fw: &jsonutil.FieldWarner{}}
 	return agent.AttachRelaySession(ctx, opts, wire)
 }
@@ -190,8 +183,8 @@ func (*Backend) NewWire() agent.WireFormat {
 	return &wireFormat{fw: &jsonutil.FieldWarner{}}
 }
 
-// caicInit is written to output.jsonl during handshake so replay can
-// reconstruct an InitMessage (handshake responses aren't otherwise logged).
+// TODO: Trim caicInit after 2026-08 once legacy caic_init logs are old enough to ignore.
+// caicInit is the legacy pre-caic_session metadata record.
 type caicInit struct {
 	Type      string `json:"type"` // always "caic_init"
 	SessionID string `json:"session_id"`

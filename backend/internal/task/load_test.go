@@ -253,6 +253,90 @@ func TestLoadLogs(t *testing.T) {
 			t.Error("Display = true, want false")
 		}
 	})
+	t.Run("SessionMetadata", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "session task",
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.Codex,
+		})
+		session := mustJSON(t, agent.MetaSessionMessage{
+			MessageType:  "caic_session",
+			SessionID:    "thread-1",
+			Model:        "gpt-5.4",
+			AgentVersion: "1.2.3",
+		})
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
+		writeLogFile(t, dir, "session.jsonl", meta, session, trailer)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("len = %d, want 1", len(tasks))
+		}
+		lt := tasks[0]
+		if lt.SessionID != "thread-1" {
+			t.Errorf("SessionID = %q, want thread-1", lt.SessionID)
+		}
+		if lt.Model != "gpt-5.4" {
+			t.Errorf("Model = %q, want gpt-5.4", lt.Model)
+		}
+		if lt.AgentVersion != "1.2.3" {
+			t.Errorf("AgentVersion = %q, want 1.2.3", lt.AgentVersion)
+		}
+	})
+	t.Run("LoadSessionMetadataScansBeyondTail", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "long task",
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.Codex,
+		})
+		session := mustJSON(t, agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "thread-old"})
+		large := `{"text":"` + strings.Repeat("x", 70<<10) + `"}`
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
+		writeLogFile(t, dir, "long.jsonl", meta, session, large, trailer)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lt := tasks[0]
+		if lt.SessionID != "" {
+			t.Fatalf("SessionID = %q before explicit metadata scan, want empty", lt.SessionID)
+		}
+		if err := lt.LoadSessionMetadata(); err != nil {
+			t.Fatal(err)
+		}
+		if lt.SessionID != "thread-old" {
+			t.Errorf("SessionID = %q, want thread-old", lt.SessionID)
+		}
+	})
+	t.Run("LegacyCaicInitSessionMetadata", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		meta := mustJSON(t, agent.MetaMessage{
+			MessageType: "caic_meta", Version: 1, Prompt: "legacy task",
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.OpenCode,
+		})
+		init := `{"type":"caic_init","session_id":"ses-legacy","model":"m","version":"v"}`
+		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
+		writeLogFile(t, dir, "legacy.jsonl", meta, init, trailer)
+
+		tasks, err := LoadLogs(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lt := tasks[0]
+		if lt.SessionID != "ses-legacy" {
+			t.Errorf("SessionID = %q, want ses-legacy", lt.SessionID)
+		}
+		if lt.Model != "m" || lt.AgentVersion != "v" {
+			t.Errorf("model/version = %q/%q, want m/v", lt.Model, lt.AgentVersion)
+		}
+	})
 	t.Run("ContextClearedResetsPlanState", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()

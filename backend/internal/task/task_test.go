@@ -1760,6 +1760,21 @@ func TestTask(t *testing.T) {
 			t.Errorf("AgentVersion = %q, want %q", snap.AgentVersion, "2.0.0")
 		}
 	})
+	t.Run("SetSessionMetadata", func(t *testing.T) {
+		t.Parallel()
+		tk := &Task{Model: "requested"}
+		tk.SetSessionMetadata("session-1", "reported", "2.0.0")
+		if got := tk.GetSessionID(); got != "session-1" {
+			t.Errorf("SessionID = %q, want session-1", got)
+		}
+		snap := tk.Snapshot()
+		if snap.Model != "reported" {
+			t.Errorf("Model = %q, want reported", snap.Model)
+		}
+		if snap.AgentVersion != "2.0.0" {
+			t.Errorf("AgentVersion = %q, want 2.0.0", snap.AgentVersion)
+		}
+	})
 
 	t.Run("WriteToLog", func(t *testing.T) {
 		t.Parallel()

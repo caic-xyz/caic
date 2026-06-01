@@ -285,6 +285,10 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 	if containerName == "" {
 		return nil, errors.New("no container to reconnect to")
 	}
+	sessionID := t.GetSessionID()
+	if agent.RequiresResumeSessionID(t.Harness) && sessionID == "" {
+		return nil, fmt.Errorf("%s session ID missing; cannot reconnect", t.Harness)
+	}
 	// Remember the state inferred from restored messages so we don't
 	// blindly override it to StateRunning for an idle relay.
 	prevState := t.GetState()
@@ -320,7 +324,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 	session, err := r.backend(t.Harness).AttachRelay(ctx, &agent.Options{
 		Container:       containerName,
 		RelayOffset:     t.RelayOffsetValue(),
-		ResumeSessionID: t.GetSessionID(),
+		ResumeSessionID: sessionID,
 		Effort:          t.Effort,
 		MsgCh:           msgCh,
 		LogW:            logW,

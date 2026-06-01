@@ -411,6 +411,35 @@ func TestManager(t *testing.T) {
 		})
 	})
 
+	t.Run("applyLoadedSessionMetadata", func(t *testing.T) {
+		t.Parallel()
+		t.Run("valid_fills_missing_session", func(t *testing.T) {
+			t.Parallel()
+			tk := &task.Task{Model: "requested"}
+			lt := &task.LoadedTask{SessionID: "thread-1", Model: "reported", AgentVersion: "1.2.3"}
+			applyLoadedSessionMetadata(tk, lt)
+			if got := tk.GetSessionID(); got != "thread-1" {
+				t.Errorf("SessionID = %q, want thread-1", got)
+			}
+			snap := tk.Snapshot()
+			if snap.Model != "reported" {
+				t.Errorf("Model = %q, want reported", snap.Model)
+			}
+			if snap.AgentVersion != "1.2.3" {
+				t.Errorf("AgentVersion = %q, want 1.2.3", snap.AgentVersion)
+			}
+		})
+		t.Run("valid_preserves_live_session", func(t *testing.T) {
+			t.Parallel()
+			tk := &task.Task{}
+			tk.RestoreMessages([]agent.Message{&agent.InitMessage{SessionID: "live"}})
+			applyLoadedSessionMetadata(tk, &task.LoadedTask{SessionID: "persisted"})
+			if got := tk.GetSessionID(); got != "live" {
+				t.Errorf("SessionID = %q, want live", got)
+			}
+		})
+	})
+
 	t.Run("EffectiveBaseBranch", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_explicit", func(t *testing.T) {

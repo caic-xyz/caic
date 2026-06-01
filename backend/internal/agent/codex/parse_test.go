@@ -41,6 +41,27 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("Version = %q, want 1.0", init.Version)
 		}
 	})
+	t.Run("CaicSession", func(t *testing.T) {
+		t.Parallel()
+		const input = `{"type":"caic_session","session_id":"thread-1","model":"gpt-5.4","agent_version":"1.2.3"}`
+		msgs, err := parseMessage([]byte(input), &jsonutil.FieldWarner{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("msgs = %d, want 1", len(msgs))
+		}
+		init, ok := msgs[0].(*agent.InitMessage)
+		if !ok {
+			t.Fatalf("type = %T, want *agent.InitMessage", msgs[0])
+		}
+		if init.SessionID != "thread-1" {
+			t.Errorf("SessionID = %q, want thread-1", init.SessionID)
+		}
+		if init.Model != "gpt-5.4" || init.Version != "1.2.3" {
+			t.Errorf("model/version = %q/%q, want gpt-5.4/1.2.3", init.Model, init.Version)
+		}
+	})
 	t.Run("TurnStarted", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"t1","turn":{"id":"turn_1","status":"inProgress"}}}`

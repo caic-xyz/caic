@@ -51,6 +51,14 @@ type tailResult struct {
 	Usage        agent.Usage `json:"usage"`
 }
 
+// TODO: Trim legacyCaicInit after 2026-08 once legacy caic_init logs are old enough to ignore.
+// legacyCaicInit is the OpenCode pre-caic_session session metadata record.
+type legacyCaicInit struct {
+	SessionID string `json:"session_id"`
+	Model     string `json:"model"`
+	Version   string `json:"version"`
+}
+
 // LoadedTask holds the data reconstructed from a single JSONL log file.
 type LoadedTask struct {
 	TaskID            string // Task ID parsed from log filename; empty if unparseable.
@@ -72,6 +80,7 @@ type LoadedTask struct {
 	GitHubToken       bool
 	Model             string
 	Effort            string
+	SessionID         string // Backend-native session/thread ID required to resume stateful harnesses.
 	AgentVersion      string
 	LogSize           int64 // Byte size of the log file on disk; populated by LoadLogs.
 	Msgs              []agent.Message
@@ -161,11 +170,25 @@ func (lt *LoadedTask) LoadMessages() error {
 		return err
 	}
 	lt.Msgs = full.Msgs
+	lt.mergeSessionMetadata(full)
 	if full.ForgePR > 0 {
 		lt.ForgeOwner = full.ForgeOwner
 		lt.ForgeRepo = full.ForgeRepo
 		lt.ForgePR = full.ForgePR
 	}
+	return nil
+}
+
+// LoadSessionMetadata scans the log for backend-neutral session metadata.
+func (lt *LoadedTask) LoadSessionMetadata() error {
+	if lt.SessionID != "" || lt.path == "" {
+		return nil
+	}
+	full, err := loadLogSessionMetadata(lt.path)
+	if err != nil {
+		return err
+	}
+	lt.mergeSessionMetadata(full)
 	return nil
 }
 
@@ -198,6 +221,7 @@ func (lt *LoadedTask) LoadMessagesTail() error {
 	lt.Title = full.Title
 	lt.State = full.State
 	lt.Result = full.Result
+	lt.mergeSessionMetadata(full)
 	if full.ForgePR > 0 {
 		lt.ForgeOwner = full.ForgeOwner
 		lt.ForgeRepo = full.ForgeRepo
@@ -232,12 +256,27 @@ func (lt *LoadedTask) StreamMessages() iter.Seq2[agent.Message, error] {
 	}
 }
 
+func (lt *LoadedTask) mergeSessionMetadata(src *LoadedTask) {
+	if src == nil {
+		return
+	}
+	if lt.SessionID == "" {
+		lt.SessionID = src.SessionID
+	}
+	if lt.Model == "" {
+		lt.Model = src.Model
+	}
+	if lt.AgentVersion == "" {
+		lt.AgentVersion = src.AgentVersion
+	}
+}
+
 // replayParser adapts the harness parser for replaying a task *log* file
 // (which interleaves agent messages with the caic_meta header and caic_*
 // control records) rather than raw relay output. It drops the metadata header
-// and the caic_pr/caic_result/caic_diff_stat control records — none of which
-// are conversation messages — and parses everything else with parseFn. This
-// mirrors the line handling in loadLogFile.
+// and caic_* control records — none of which are conversation messages — and
+// parses everything else with parseFn. This mirrors the line handling in
+// loadLogFile.
 func (lt *LoadedTask) replayParser() func([]byte) ([]agent.Message, error) {
 	return func(line []byte) ([]agent.Message, error) {
 		var env typeEnvelope
@@ -245,7 +284,7 @@ func (lt *LoadedTask) replayParser() func([]byte) ([]agent.Message, error) {
 			return nil, nil //nolint:nilerr // malformed/non-object lines are skipped, matching loadLogFile.
 		}
 		switch env.Type {
-		case "caic_meta", "caic_pr", "caic_result", "caic_diff_stat":
+		case "caic_meta", "caic_pr", "caic_result", "caic_diff_stat", "caic_session", "caic_init":
 			return nil, nil
 		default:
 			return lt.parseFn(line)
@@ -264,6 +303,73 @@ func unmarshalMeta(data []byte, m *agent.MetaMessage, fw *jsonutil.FieldWarner) 
 		fw.Warn("caic_meta", jsonutil.CollectUnknown(raw, metaKnown))
 	}
 	return nil
+}
+
+func applySessionMetadataLine(lt *LoadedTask, typ string, line []byte) bool {
+	switch typ {
+	case "caic_session":
+		var m agent.MetaSessionMessage
+		if json.Unmarshal(line, &m) != nil {
+			return false
+		}
+		if m.SessionID != "" {
+			lt.SessionID = m.SessionID
+		}
+		if m.Model != "" {
+			lt.Model = m.Model
+		}
+		if m.AgentVersion != "" {
+			lt.AgentVersion = m.AgentVersion
+		}
+		return m.SessionID != ""
+	case "caic_init":
+		var m legacyCaicInit
+		if json.Unmarshal(line, &m) != nil {
+			return false
+		}
+		if m.SessionID != "" {
+			lt.SessionID = m.SessionID
+		}
+		if m.Model != "" {
+			lt.Model = m.Model
+		}
+		if m.Version != "" {
+			lt.AgentVersion = m.Version
+		}
+		return m.SessionID != ""
+	default:
+		return false
+	}
+}
+
+func loadLogSessionMetadata(path string) (_ *LoadedTask, retErr error) {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err2 := f.Close(); retErr == nil {
+			retErr = err2
+		}
+	}()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 4096), 32<<20)
+	lt := &LoadedTask{}
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var env typeEnvelope
+		if json.Unmarshal(line, &env) != nil {
+			continue
+		}
+		if applySessionMetadataLine(lt, env.Type, line) {
+			break
+		}
+	}
+	return lt, scanner.Err()
 }
 
 // loadLogHeader reads only the metadata header (first line) and the result
@@ -357,6 +463,8 @@ func loadLogHeader(path string) (_ *LoadedTask, retErr error) {
 			var typeEnv typeEnvelope
 			if json.Unmarshal(line, &typeEnv) == nil {
 				switch typeEnv.Type {
+				case "caic_session", "caic_init":
+					applySessionMetadataLine(lt, typeEnv.Type, line)
 				case "caic_pr":
 					var mp agent.MetaPRMessage
 					if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
@@ -514,6 +622,9 @@ func loadLogFile(path string, parseFn func([]byte) ([]agent.Message, error)) (_ 
 		}
 
 		switch envelope.Type {
+		case "caic_session", "caic_init":
+			applySessionMetadataLine(lt, envelope.Type, line)
+
 		case "caic_pr":
 			var mp agent.MetaPRMessage
 			if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
@@ -644,6 +755,9 @@ func loadLogFileTail(path string, parseFn func([]byte) ([]agent.Message, error),
 			continue
 		}
 		switch envelope.Type {
+		case "caic_session", "caic_init":
+			applySessionMetadataLine(lt, envelope.Type, line)
+
 		case "caic_pr":
 			var mp agent.MetaPRMessage
 			if json.Unmarshal(line, &mp) == nil && mp.ForgePR > 0 {
