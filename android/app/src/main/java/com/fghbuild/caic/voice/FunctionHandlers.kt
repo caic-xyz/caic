@@ -357,15 +357,15 @@ internal fun taskSummaryLine(num: Int, t: Task): String {
 private const val RESULT_SNIPPET_MAX = 120
 
 internal fun JsonObject.requireString(key: String): String =
-    this[key]?.jsonPrimitive?.content
+    (this[key] as? JsonPrimitive)?.content
         ?: throw IllegalArgumentException("Missing required parameter: $key")
 
 internal fun JsonObject.requireInt(key: String): Int =
-    this[key]?.jsonPrimitive?.intOrNull
+    (this[key] as? JsonPrimitive)?.intOrNull
         ?: throw IllegalArgumentException("Missing required integer parameter: $key")
 
 internal fun JsonObject.optString(key: String): String? =
-    this[key]?.jsonPrimitive?.content
+    (this[key] as? JsonPrimitive)?.content
 
 internal fun textResult(message: String): JsonElement =
     JsonObject(mapOf("result" to JsonPrimitive(message)))
