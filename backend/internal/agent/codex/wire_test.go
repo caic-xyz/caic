@@ -3,9 +3,14 @@
 package codex
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
+	"slices"
+	"strings"
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	cx "github.com/maruel/genai/providers/codex"
 )
 
@@ -54,6 +59,51 @@ func TestJSONRPCMessage(t *testing.T) {
 		}
 		if msg.Error.Message != "invalid request" {
 			t.Errorf("Error.Message = %q", msg.Error.Message)
+		}
+	})
+}
+
+func TestHandshake(t *testing.T) {
+	t.Parallel()
+	t.Run("model_list_params", func(t *testing.T) {
+		t.Parallel()
+		const responses = `{"id":1,"result":{"userAgent":"caic/0.1"}}
+{"id":2,"result":{"data":[{"id":"gpt-5.4"},{"id":"gpt-5.3-codex"}],"nextCursor":null}}
+{"id":3,"result":{"thread":{"id":"thread_1"}}}
+`
+		var stdin bytes.Buffer
+		w, models, err := handshake(t.Context(), &stdin, bufio.NewReader(strings.NewReader(responses)), &agent.Options{Dir: "/repo", Model: "gpt-5.4"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if w.threadID != "thread_1" {
+			t.Errorf("threadID = %q, want thread_1", w.threadID)
+		}
+		wantModels := []string{"gpt-5.4", "gpt-5.3-codex"}
+		if !slices.Equal(models, wantModels) {
+			t.Errorf("models = %v, want %v", models, wantModels)
+		}
+
+		lines := bytes.Split(bytes.TrimSpace(stdin.Bytes()), []byte{'\n'})
+		if len(lines) != 4 {
+			t.Fatalf("wrote %d requests, want 4:\n%s", len(lines), stdin.String())
+		}
+		var req cx.JSONRPCRequest
+		if err := json.Unmarshal(lines[2], &req); err != nil {
+			t.Fatal(err)
+		}
+		if req.Method != "model/list" {
+			t.Fatalf("method = %q, want model/list", req.Method)
+		}
+		if req.Params == nil {
+			t.Fatal("model/list params = nil, want empty object")
+		}
+		data, err := json.Marshal(req.Params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != "{}" {
+			t.Fatalf("model/list params = %s, want {}", data)
 		}
 	})
 }

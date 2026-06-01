@@ -360,7 +360,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 
 	// 3. Fetch model list so the UI offers only valid model IDs.
 	var models []string
-	if err := writeJSON(stdin, cx.JSONRPCRequest{JSONRPC: "2.0", ID: w.nextID.Add(1), Method: "model/list"}); err != nil {
+	if err := writeJSON(stdin, cx.JSONRPCRequest{JSONRPC: "2.0", ID: w.nextID.Add(1), Method: "model/list", Params: struct{}{}}); err != nil {
 		return nil, nil, fmt.Errorf("write model/list: %w", err)
 	}
 	if mlResp, err := readJSONRPCResponse(ctx, stdout); err == nil && mlResp.Result != nil {
