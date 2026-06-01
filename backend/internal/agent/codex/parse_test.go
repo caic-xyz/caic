@@ -9,9 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	cx "github.com/maruel/genai/providers/codex"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
-	cx "github.com/maruel/genai/providers/codex"
 )
 
 func TestParseMessage(t *testing.T) {
@@ -791,6 +792,31 @@ func TestWireFormat(t *testing.T) {
 		}
 		if elem["text"] != "fix the bug" {
 			t.Errorf("input[0].text = %v", elem["text"])
+		}
+		if params["summary"] != "auto" {
+			t.Errorf("summary = %v, want auto", params["summary"])
+		}
+	})
+	t.Run("WritePromptEffort", func(t *testing.T) {
+		t.Parallel()
+		w := &wireFormat{threadID: "t1", effort: "high"}
+		var buf bytes.Buffer
+		if err := w.WritePrompt(&buf, agent.Prompt{Text: "fix the bug"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		var req map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &req); err != nil {
+			t.Fatal(err)
+		}
+		params, ok := req["params"].(map[string]any)
+		if !ok {
+			t.Fatal("params not a map")
+		}
+		if params["summary"] != "auto" {
+			t.Errorf("summary = %v, want auto", params["summary"])
+		}
+		if params["effort"] != "high" {
+			t.Errorf("effort = %v, want high", params["effort"])
 		}
 	})
 	t.Run("WritePromptNoThreadID", func(t *testing.T) {

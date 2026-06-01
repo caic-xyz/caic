@@ -17,9 +17,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	cx "github.com/maruel/genai/providers/codex"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
-	cx "github.com/maruel/genai/providers/codex"
 )
 
 // TODO: re-enable once widget plugin is fixed for codex
@@ -257,6 +258,19 @@ type wireFormat struct {
 	fw                *jsonutil.FieldWarner
 }
 
+type reasoningSummary string
+
+const reasoningSummaryAuto reasoningSummary = "auto"
+
+// TODO: Move reasoningSummary and turnStartParams to genai once
+// github.com/maruel/genai/providers/codex exposes TurnStartParams.Summary.
+type turnStartParams struct {
+	ThreadID string             `json:"threadId"`
+	Input    []cx.TurnInput     `json:"input"`
+	Summary  reasoningSummary   `json:"summary,omitzero"`
+	Effort   cx.ReasoningEffort `json:"effort,omitzero"`
+}
+
 // WritePrompt sends a turn/start JSON-RPC request to begin a new turn with
 // the given user message. Images are sent as data URL items after the text item.
 func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) error {
@@ -278,7 +292,12 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  "turn/start",
-		Params:  cx.TurnStartParams{ThreadID: w.threadID, Input: input, Effort: cx.ReasoningEffort(w.effort)},
+		Params: turnStartParams{
+			ThreadID: w.threadID,
+			Input:    input,
+			Summary:  reasoningSummaryAuto,
+			Effort:   cx.ReasoningEffort(w.effort),
+		},
 	}
 	// Don't log to logW — stdin is not logged with --no-log-stdin.
 	return writeJSON(wr, req)
