@@ -30,7 +30,7 @@ func (s *Server) wireAdoptedCIMonitoring(ctx context.Context, at *tasks.AdoptedT
 	if pr > 0 {
 		sha, err := adoptedHeadSHA(ctx, f, at)
 		if err != nil {
-			slog.Warn("adopt: head SHA lookup failed", "task", at.Task.ID, "branch", at.Branch, "err", err)
+			slog.Info("adopt: skipping CI monitor; PR head SHA unavailable", "task", at.Task.ID, "branch", at.Branch, "repo", at.RelPath, "err", err)
 			return
 		}
 		slog.Info("adopt: starting monitorCI", "task", at.Task.ID, "branch", at.Branch, "sha", sha)
@@ -66,7 +66,7 @@ func (s *Server) lookupExternalPRForTask(at *tasks.AdoptedTask) {
 		var err error
 		sha, err = f.GetDefaultBranchSHA(s.ctx, at.ForgeOwner, at.ForgeRepo, at.Branch)
 		if err != nil {
-			slog.Warn("adopt: head SHA lookup failed", "task", at.Task.ID, "branch", at.Branch, "err", err)
+			slog.Info("adopt: skipping CI monitor; PR head SHA unavailable", "task", at.Task.ID, "branch", at.Branch, "repo", at.RelPath, "err", err)
 			return
 		}
 	}
