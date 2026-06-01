@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -1831,7 +1833,10 @@ func TestTask(t *testing.T) {
 		t.Run("NoSession", func(t *testing.T) {
 			t.Parallel()
 			tk := &Task{}
-			tk.WriteToLog(&agent.TextMessage{Text: "hello"}) // no-op, no panic
+			err := tk.WriteToLog(&agent.TextMessage{Text: "hello"})
+			if !errors.Is(err, ErrNoLog) {
+				t.Fatalf("WriteToLog err = %v, want ErrNoLog", err)
+			}
 		})
 		t.Run("WithSession", func(t *testing.T) {
 			t.Parallel()
@@ -1839,9 +1844,45 @@ func TestTask(t *testing.T) {
 			var buf bytes.Buffer
 			h := &SessionHandle{LogW: nopCloser{&buf}}
 			tk.AttachSession(h)
-			tk.WriteToLog(&agent.TextMessage{Text: "hello"})
+			if err := tk.WriteToLog(&agent.TextMessage{Text: "hello"}); err != nil {
+				t.Fatal(err)
+			}
 			if !strings.Contains(buf.String(), `"text"`) {
 				t.Errorf("log buffer = %q, want text message", buf.String())
+			}
+		})
+		t.Run("ReopensPersistedLogWithoutSession", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			tk := &Task{ID: ksid.NewID()}
+			path := filepath.Join(dir, "task.jsonl")
+			if err := os.WriteFile(path, []byte{}, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			tk.SetLogPath(path)
+
+			if err := tk.WriteToLog(&agent.MetaPRMessage{
+				MessageType: "caic_pr",
+				ForgeOwner:  "acme",
+				ForgeRepo:   "widget",
+				ForgePR:     42,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(path) //nolint:gosec // path is test-controlled.
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), `"type":"caic_pr"`) {
+				t.Fatalf("log = %q, want caic_pr", string(data))
+			}
+		})
+		t.Run("ReturnsAppendError", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{ID: ksid.NewID()}
+			tk.SetLogPath(filepath.Join(t.TempDir(), "missing", "task.jsonl"))
+			if err := tk.WriteToLog(&agent.TextMessage{Text: "hello"}); err == nil {
+				t.Fatal("WriteToLog err = nil, want append error")
 			}
 		})
 	})

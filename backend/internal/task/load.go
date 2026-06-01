@@ -98,6 +98,11 @@ func (lt *LoadedTask) Primary() *RepoMount {
 	return &lt.Repos[0]
 }
 
+// LogPath returns the absolute JSONL log path used to load the task.
+func (lt *LoadedTask) LogPath() string {
+	return lt.path
+}
+
 // LoadLogs scans logDir for *.jsonl files and loads task metadata.
 // Only the header and result trailer are parsed; call LoadMessages for
 // full conversation history. Call SetParser on each task before LoadMessages.

@@ -28,9 +28,10 @@ import (
 	"sync"
 	"time"
 
+	pi "github.com/maruel/genai/providers/pi"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
-	pi "github.com/maruel/genai/providers/pi"
 )
 
 // Backend implements agent.Backend for the Pi coding agent.
@@ -116,9 +117,10 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 				ContextWindow: cw,
 			})
 			if err != nil {
-				slog.Warn("marshal caic_model_info", "err", err)
-			} else {
-				_, _ = opts.LogW.Write(append(info, '\n'))
+				return nil, fmt.Errorf("marshal caic_model_info: %w", err)
+			}
+			if _, err := opts.LogW.Write(append(info, '\n')); err != nil {
+				return nil, fmt.Errorf("write caic_model_info: %w", err)
 			}
 		}
 		rp.Stdout = br // hand the buffered reader to the next command

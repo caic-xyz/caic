@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -213,6 +214,7 @@ type Task struct {
 
 	// mu protects mutable task metadata above and all fields below.
 	mu                    sync.Mutex
+	logPath               string // Absolute JSONL log path used for appending task metadata.
 	statsRing             [statsRingSize]ContainerStats
 	statsLen              int
 	statsHead             int
@@ -457,6 +459,13 @@ func (t *Task) SetRelayOffset(offset int64) {
 	t.RelayOffset = offset
 }
 
+// SetLogPath records the JSONL log path used for metadata appends.
+func (t *Task) SetLogPath(path string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.logPath = path
+}
+
 // SudoLookupState returns the sudo lookup inputs and cached password.
 func (t *Task) SudoLookupState() (enabled bool, container, password string) {
 	t.mu.Lock()
@@ -673,21 +682,30 @@ func (t *Task) GetPR() int {
 	return t.forgePR
 }
 
-// WriteToLog appends a JSON-encoded message to the session's JSONL log file.
-// It is a no-op if no session is attached.
-func (t *Task) WriteToLog(m agent.Message) {
+// WriteToLog appends a JSON-encoded message to the task's JSONL log file.
+func (t *Task) WriteToLog(m agent.Message) error {
 	t.mu.Lock()
 	h := t.handle
+	path := t.logPath
 	t.mu.Unlock()
-	if h == nil || h.LogW == nil {
-		return
-	}
 	data, err := agent.MarshalMessage(m)
 	if err != nil {
-		return
+		return err
 	}
 	data = append(data, '\n')
-	_, _ = h.LogW.Write(data)
+	if h != nil && h.LogW != nil {
+		_, err = h.LogW.Write(data)
+		return err
+	}
+	if path == "" {
+		return ErrNoLog
+	}
+	w, err := newTaskLogWriter(path, os.O_WRONLY|os.O_APPEND)
+	if err != nil {
+		return err
+	}
+	_, writeErr := w.Write(data)
+	return errors.Join(writeErr, w.Close())
 }
 
 // SetCIStatus updates the ciStatus and ciChecks fields under the mutex.

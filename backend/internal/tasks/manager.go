@@ -994,6 +994,9 @@ func (m *Manager) LoadPurgedTasks(all []*task.LoadedTask) error {
 		if lt.AgentVersion != "" {
 			t.SetAgentVersion(lt.AgentVersion)
 		}
+		if lt.LogPath() != "" {
+			t.SetLogPath(lt.LogPath())
+		}
 		if lt.Title != "" {
 			t.SetTitle(lt.Title)
 		} else {
@@ -1470,6 +1473,9 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		t.SetTitle(lt.Title)
 	} else {
 		t.SetTitle(prompt)
+	}
+	if lt != nil && lt.LogPath() != "" {
+		t.SetLogPath(lt.LogPath())
 	}
 
 	foundPRFromLog := false

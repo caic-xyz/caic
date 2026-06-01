@@ -54,12 +54,14 @@ func (svc *Service) StartPRFlow(ctx context.Context, entry TaskEntry, f forge.Fo
 	}
 	slog.Info("PR created", "task", t.ID, "forge", f.Name(), "owner", info.ForgeOwner, "repo", info.ForgeRepo, "pr", pr.Number)
 	t.SetPR(info.ForgeOwner, info.ForgeRepo, pr.Number)
-	t.WriteToLog(&agent.MetaPRMessage{
+	if err := t.WriteToLog(&agent.MetaPRMessage{
 		MessageType: "caic_pr",
 		ForgeOwner:  info.ForgeOwner,
 		ForgeRepo:   info.ForgeRepo,
 		ForgePR:     pr.Number,
-	})
+	}); err != nil {
+		return pr.Number, fmt.Errorf("write PR metadata: %w", err)
+	}
 	svc.backend.SetTaskMonitorBranch(entry, branch)
 	svc.backend.NotifyTaskChange()
 	go svc.MonitorCI(context.WithoutCancel(ctx), entry, f, info.ForgeOwner, info.ForgeRepo, pr.HeadSHA)

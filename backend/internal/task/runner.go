@@ -161,9 +161,9 @@ func (w *provisioningWriter) Write(p []byte) (int, error) {
 }
 
 // writeLogTrailer appends a MetaResultMessage to the log file.
-func writeLogTrailer(w io.Writer, title string, res *Result) {
+func writeLogTrailer(w io.Writer, title string, res *Result) error {
 	if w == nil {
-		return
+		return ErrNoLog
 	}
 	mr := agent.MetaResultMessage{
 		MessageType:              "caic_result",
@@ -182,19 +182,28 @@ func writeLogTrailer(w io.Writer, title string, res *Result) {
 	if res.Err != nil {
 		mr.Error = res.Err.Error()
 	}
-	if data, err := json.Marshal(mr); err == nil {
-		_, _ = w.Write(append(data, '\n'))
+	data, err := json.Marshal(mr)
+	if err != nil {
+		return err
 	}
+	_, err = w.Write(append(data, '\n'))
+	return err
 }
 
 // writeContextCleared appends a context_cleared system message to the log.
 // Called before closing the old log writer in RestartSession so that
 // RestoreMessages can reset plan state on server restart.
-func writeContextCleared(w io.Writer) {
-	msg := syntheticContextCleared()
-	if data, err := json.Marshal(msg); err == nil {
-		_, _ = w.Write(append(data, '\n'))
+func writeContextCleared(w io.Writer) error {
+	if w == nil {
+		return ErrNoLog
 	}
+	msg := syntheticContextCleared()
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(append(data, '\n'))
+	return err
 }
 
 // maxBranchSeqNum finds the highest sequence number N among all branches
@@ -534,7 +543,9 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 			tlog.WarnContext(ctx, "reopen log for trailer failed", "err", reopenErr)
 		}
 	}
-	writeLogTrailer(logW, t.Title(), &res)
+	if err := writeLogTrailer(logW, t.Title(), &res); err != nil {
+		tlog.WarnContext(ctx, "write log trailer failed", "err", err)
+	}
 	if logW != nil {
 		_ = logW.Close()
 		tlog.DebugContext(ctx, "cleanup: log trailer written and closed")
@@ -624,7 +635,9 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	if h != nil {
 		logW = h.LogW
 	}
-	writeLogTrailer(logW, t.Title(), &res)
+	if err := writeLogTrailer(logW, t.Title(), &res); err != nil {
+		tlog.WarnContext(ctx, "write log trailer failed", "err", err)
+	}
 	if logW != nil {
 		_ = logW.Close()
 	}
@@ -1031,8 +1044,12 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 		oldH.CloseMsgCh()
 		<-oldH.DispatchDone
 		if oldH.LogW != nil {
-			writeContextCleared(oldH.LogW)
-			_ = oldH.LogW.Close()
+			err := writeContextCleared(oldH.LogW)
+			err = errors.Join(err, oldH.LogW.Close())
+			if err != nil {
+				t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
+				return nil, fmt.Errorf("write context cleared: %w", err)
+			}
 		}
 	}
 
@@ -1105,8 +1122,12 @@ func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHand
 		oldH.CloseMsgCh()
 		<-oldH.DispatchDone
 		if oldH.LogW != nil {
-			writeContextCleared(oldH.LogW)
-			_ = oldH.LogW.Close()
+			err := writeContextCleared(oldH.LogW)
+			err = errors.Join(err, oldH.LogW.Close())
+			if err != nil {
+				t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
+				return nil, fmt.Errorf("write context cleared: %w", err)
+			}
 		}
 	}
 
@@ -1605,10 +1626,12 @@ func (r *Runner) openLog(t *Task) (io.WriteCloser, error) {
 		safeBranch = strings.ReplaceAll(p.Branch, "/", "-")
 	}
 	name := t.ID.String() + "-" + safeRepo + "-" + safeBranch + ".jsonl"
-	f, err := os.OpenFile(filepath.Join(r.LogDir, name), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // name is derived from ksid, not arbitrary user input.
+	path := filepath.Join(r.LogDir, name)
+	f, err := newTaskLogWriter(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 	if err != nil {
 		return nil, fmt.Errorf("create log file: %w", err)
 	}
+	t.SetLogPath(path)
 	// Write metadata header as the first line.
 	repos := t.ReposSnapshot()
 	metaRepos := make([]agent.MetaRepo, len(repos))
@@ -1632,8 +1655,14 @@ func (r *Runner) openLog(t *Task) (io.WriteCloser, error) {
 		Sudo:        t.Sudo,
 		GitHubToken: t.GitHubTokenEnabled(),
 	}
-	if data, err := json.Marshal(meta); err == nil {
-		_, _ = f.Write(append(data, '\n'))
+	data, err := json.Marshal(meta)
+	if err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("marshal log metadata: %w", err)
+	}
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		_ = f.Close()
+		return nil, fmt.Errorf("write log metadata: %w", err)
 	}
 	return f, nil
 }
@@ -1652,7 +1681,13 @@ func (r *Runner) reopenLog(t *Task) (io.WriteCloser, error) {
 		safeBranch = strings.ReplaceAll(p.Branch, "/", "-")
 	}
 	name := t.ID.String() + "-" + safeRepo + "-" + safeBranch + ".jsonl"
-	return os.OpenFile(filepath.Join(r.LogDir, name), os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // name is derived from ksid, not arbitrary user input.
+	path := filepath.Join(r.LogDir, name)
+	w, err := newTaskLogWriter(path, os.O_WRONLY|os.O_APPEND)
+	if err != nil {
+		return nil, err
+	}
+	t.SetLogPath(path)
+	return w, nil
 }
 
 // writeLogTrailer appends a MetaResultMessage to the log file.

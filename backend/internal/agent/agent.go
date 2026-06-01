@@ -301,10 +301,8 @@ func DefaultReadMessages(r io.Reader, dispatch func(Message), logW io.Writer, pa
 			continue
 		}
 		n++
-		if _, err := logW.Write(line); err != nil {
-			return fmt.Errorf("write log: %w", err)
-		}
-		if _, err := logW.Write([]byte{'\n'}); err != nil {
+		record := append(append([]byte(nil), line...), '\n')
+		if _, err := logW.Write(record); err != nil {
 			return fmt.Errorf("write log: %w", err)
 		}
 		msgs, err := parseFn(line)
