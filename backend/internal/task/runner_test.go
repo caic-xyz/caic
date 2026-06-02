@@ -1038,55 +1038,120 @@ func TestRunner(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
 		r := &Runner{Container: sc, Dir: "/repo"}
-		ds := r.BranchDiffStat(t.Context(), []runtime.Repo{{HostPath: "/repo", Branch: "feature"}})
+		tk := &Task{Repos: []RepoMount{{GitRoot: "/repo", Branch: "feature"}}}
+		tk.SetContainerInfo("ctr-1", "", "", 0)
+		ds := r.BranchDiffStat(t.Context(), tk)
 		if !sc.fetched {
 			t.Error("BranchDiffStat did not call Fetch")
+		}
+		if len(sc.fetchIDs) != 1 || sc.fetchIDs[0] != "ctr-1" {
+			t.Errorf("fetch IDs = %v, want [ctr-1]", sc.fetchIDs)
 		}
 		if len(ds) != 1 || ds[0].Path != "main.go" || ds[0].Added != 5 || ds[0].Deleted != 1 {
 			t.Errorf("BranchDiffStat = %+v, want [{main.go +5 -1}]", ds)
 		}
 	})
-	t.Run("BranchDiffStatMultiRepoUsesFullRepoList", func(t *testing.T) {
+	t.Run("BranchDiffStatMultiRepoUsesInstanceID", func(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
 		r := &Runner{Container: sc, Dir: "/home/user/src/caic"}
-		repos := []runtime.Repo{
-			{HostPath: "/home/user/src/caic", Branch: "caic-7", MountPath: "/home/user/src/caic"},
-			{HostPath: "/home/user/src/genai", Branch: "caic-0", MountPath: "/home/user/src/genai"},
+		tk := &Task{
+			Repos: []RepoMount{
+				{GitRoot: "/home/user/src/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic"},
+				{GitRoot: "/home/user/src/genai", Branch: "caic-0", MountedPath: "/home/user/src/genai"},
+			},
 		}
+		tk.SetContainerInfo("ctr-2", "", "", 0)
 
-		ds := r.BranchDiffStat(t.Context(), repos)
+		ds := r.BranchDiffStat(t.Context(), tk)
 
 		if len(ds) != 2 {
 			t.Fatalf("BranchDiffStat len = %d, want 2", len(ds))
 		}
-		if len(sc.diffRepos) != 2 {
-			t.Fatalf("diff calls = %d, want 2", len(sc.diffRepos))
+		if len(sc.diffIDs) != 2 {
+			t.Fatalf("diff calls = %d, want 2", len(sc.diffIDs))
 		}
-		for i := range sc.diffRepos {
-			if len(sc.diffRepos[i]) != 2 {
-				t.Fatalf("diff call %d repos len = %d, want 2", i, len(sc.diffRepos[i]))
-			}
-			if sc.diffRepos[i][0].HostPath != "/home/user/src/caic" {
-				t.Errorf("diff call %d primary HostPath = %q, want /home/user/src/caic", i, sc.diffRepos[i][0].HostPath)
+		for i, id := range sc.diffIDs {
+			if id != "ctr-2" {
+				t.Errorf("diff call %d id = %q, want ctr-2", i, id)
 			}
 		}
 		if sc.diffIdxs[0] != 0 || sc.diffIdxs[1] != 1 {
 			t.Errorf("diff indexes = %v, want [0 1]", sc.diffIdxs)
 		}
+		if ds[1].Path != "/home/user/src/genai/main.go" {
+			t.Errorf("second path = %q, want /home/user/src/genai/main.go", ds[1].Path)
+		}
 	})
 	t.Run("BranchDiffStatNoContainer", func(t *testing.T) {
 		t.Parallel()
 		r := &Runner{}
-		if ds := r.BranchDiffStat(t.Context(), nil); ds != nil {
+		if ds := r.BranchDiffStat(t.Context(), &Task{}); ds != nil {
 			t.Errorf("BranchDiffStat with no container = %+v, want nil", ds)
 		}
 	})
 	t.Run("BranchDiffStatNoDir", func(t *testing.T) {
 		t.Parallel()
 		r := &Runner{Container: &stubContainer{}, Dir: ""}
-		if ds := r.BranchDiffStat(t.Context(), nil); ds != nil {
+		if ds := r.BranchDiffStat(t.Context(), &Task{}); ds != nil {
 			t.Errorf("BranchDiffStat with no dir = %+v, want nil", ds)
+		}
+	})
+}
+
+func TestRunnerTaskRuntime(t *testing.T) {
+	t.Parallel()
+	t.Run("valid_preserves_mounted_path", func(t *testing.T) {
+		t.Parallel()
+		r := &Runner{Dir: "/home/user/src/caic-xyz/caic"}
+		tk := &Task{
+			Repos: []RepoMount{
+				{Name: "caic-xyz/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic-xyz/caic"},
+				{Name: "caic-xyz/md", Branch: "caic-0", GitRoot: "/home/user/src/caic-xyz/md", MountedPath: "/home/user/src/caic-xyz/md"},
+			},
+		}
+		tk.SetContainerInfo("ctr-1", "", "", 0)
+
+		id, repos, err := r.taskRuntime(tk)
+		if err != nil {
+			t.Fatalf("taskRuntime: %v", err)
+		}
+		if id != "ctr-1" {
+			t.Errorf("id = %q, want ctr-1", id)
+		}
+		if len(repos) != 2 {
+			t.Fatalf("repos len = %d, want 2", len(repos))
+		}
+		if repos[0].HostPath != "/home/user/src/caic-xyz/caic" {
+			t.Errorf("primary HostPath = %q, want runner dir", repos[0].HostPath)
+		}
+		if repos[0].MountPath != "/home/user/src/caic-xyz/caic" {
+			t.Errorf("primary MountPath = %q, want qualified mount", repos[0].MountPath)
+		}
+		if repos[1].MountPath != "/home/user/src/caic-xyz/md" {
+			t.Errorf("extra MountPath = %q, want qualified mount", repos[1].MountPath)
+		}
+	})
+	t.Run("valid_no_repos", func(t *testing.T) {
+		t.Parallel()
+		r := &Runner{Dir: "/repo"}
+		tk := &Task{}
+		tk.SetContainerInfo("ctr-1", "", "", 0)
+		id, repos, err := r.taskRuntime(tk)
+		if err != nil {
+			t.Fatalf("taskRuntime: %v", err)
+		}
+		if id != "ctr-1" {
+			t.Errorf("id = %q, want ctr-1", id)
+		}
+		if repos != nil {
+			t.Fatalf("repos = %+v, want nil", repos)
+		}
+	})
+	t.Run("error_no_instance", func(t *testing.T) {
+		t.Parallel()
+		if _, _, err := (&Runner{}).taskRuntime(&Task{}); err == nil {
+			t.Fatal("want error")
 		}
 	})
 }
@@ -1159,11 +1224,12 @@ func TestPrependRepoToDiffDevNull(t *testing.T) {
 // stubContainer implements ContainerBackend for testing. Diff returns a fixed
 // numstat line; Fetch records that it was called.
 type stubContainer struct {
-	fetched   bool
-	fetchErr  error // If set, Fetch returns this error.
-	stopped   bool
-	diffRepos [][]runtime.Repo
-	diffIdxs  []int
+	fetched  bool
+	fetchErr error // If set, Fetch returns this error.
+	stopped  bool
+	diffIDs  []runtime.InstanceID
+	fetchIDs []runtime.InstanceID
+	diffIdxs []int
 }
 
 func (s *stubContainer) Launch(_ context.Context, _ []runtime.Repo, _ []string, _ *StartOptions) (runtime.InstanceID, error) {
@@ -1174,14 +1240,15 @@ func (s *stubContainer) Connect(_ context.Context, _ runtime.InstanceID, _ []run
 	return runtime.ConnectionInfo{}, nil
 }
 
-func (s *stubContainer) Diff(_ context.Context, repos []runtime.Repo, repoIdx int, _ ...string) (string, error) {
-	s.diffRepos = append(s.diffRepos, append([]runtime.Repo(nil), repos...))
+func (s *stubContainer) Diff(_ context.Context, id runtime.InstanceID, repoIdx int, _ ...string) (string, error) {
+	s.diffIDs = append(s.diffIDs, id)
 	s.diffIdxs = append(s.diffIdxs, repoIdx)
 	return "5\t1\tmain.go\n", nil
 }
 
-func (s *stubContainer) Fetch(_ context.Context, repos []runtime.Repo) error {
+func (s *stubContainer) Fetch(_ context.Context, id runtime.InstanceID) error {
 	s.fetched = true
+	s.fetchIDs = append(s.fetchIDs, id)
 	if s.fetchErr != nil {
 		return s.fetchErr
 	}
@@ -1192,10 +1259,10 @@ func (s *stubContainer) Stop(_ context.Context, _ runtime.InstanceID) error {
 	s.stopped = true
 	return nil
 }
-func (s *stubContainer) Purge(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo) error {
+func (s *stubContainer) Purge(_ context.Context, _ runtime.InstanceID) error {
 	return nil
 }
-func (s *stubContainer) Revive(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo) error {
+func (s *stubContainer) Revive(_ context.Context, _ runtime.InstanceID) error {
 	return nil
 }
 

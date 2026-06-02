@@ -33,11 +33,11 @@ type FakeContainerBackend struct {
 
 	LaunchFunc    func(ctx context.Context, repos []runtime.Repo, labels []string, opts *task.StartOptions) (runtime.InstanceID, error)
 	ConnectFunc   func(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *task.StartOptions) (runtime.ConnectionInfo, error)
-	DiffFunc      func(ctx context.Context, repos []runtime.Repo, repoIdx int, args ...string) (string, error)
-	FetchFunc     func(ctx context.Context, repos []runtime.Repo) error
+	DiffFunc      func(ctx context.Context, id runtime.InstanceID, repoIdx int, args ...string) (string, error)
+	FetchFunc     func(ctx context.Context, id runtime.InstanceID) error
 	StopFunc      func(ctx context.Context, id runtime.InstanceID) error
-	PurgeFunc     func(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo) error
-	ReviveFunc    func(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo) error
+	PurgeFunc     func(ctx context.Context, id runtime.InstanceID) error
+	ReviveFunc    func(ctx context.Context, id runtime.InstanceID) error
 	ForkFunc      func(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *task.ForkOptions) (runtime.InstanceID, []runtime.Repo, error)
 	VNCPortFunc   func(ctx context.Context, id runtime.InstanceID) int
 	ProcessesFunc func(ctx context.Context, id runtime.InstanceID) ([]runtime.ProcessInfo, error)
@@ -89,19 +89,19 @@ func (f *FakeContainerBackend) Connect(ctx context.Context, id runtime.InstanceI
 }
 
 // Diff implements task.ContainerBackend.
-func (f *FakeContainerBackend) Diff(ctx context.Context, repos []runtime.Repo, repoIdx int, args ...string) (string, error) {
-	f.record(&Call{Method: "Diff", Repos: repos, RepoIdx: repoIdx, Args: args})
+func (f *FakeContainerBackend) Diff(ctx context.Context, id runtime.InstanceID, repoIdx int, args ...string) (string, error) {
+	f.record(&Call{Method: "Diff", Name: string(id), RepoIdx: repoIdx, Args: args})
 	if f.DiffFunc != nil {
-		return f.DiffFunc(ctx, repos, repoIdx, args...)
+		return f.DiffFunc(ctx, id, repoIdx, args...)
 	}
 	return "", nil
 }
 
 // Fetch implements task.ContainerBackend.
-func (f *FakeContainerBackend) Fetch(ctx context.Context, repos []runtime.Repo) error {
-	f.record(&Call{Method: "Fetch", Repos: repos})
+func (f *FakeContainerBackend) Fetch(ctx context.Context, id runtime.InstanceID) error {
+	f.record(&Call{Method: "Fetch", Name: string(id)})
 	if f.FetchFunc != nil {
-		return f.FetchFunc(ctx, repos)
+		return f.FetchFunc(ctx, id)
 	}
 	return nil
 }
@@ -116,19 +116,19 @@ func (f *FakeContainerBackend) Stop(ctx context.Context, id runtime.InstanceID) 
 }
 
 // Purge implements task.ContainerBackend.
-func (f *FakeContainerBackend) Purge(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo) error {
-	f.record(&Call{Method: "Purge", Name: string(id), Repos: repos})
+func (f *FakeContainerBackend) Purge(ctx context.Context, id runtime.InstanceID) error {
+	f.record(&Call{Method: "Purge", Name: string(id)})
 	if f.PurgeFunc != nil {
-		return f.PurgeFunc(ctx, id, repos)
+		return f.PurgeFunc(ctx, id)
 	}
 	return nil
 }
 
 // Revive implements task.ContainerBackend.
-func (f *FakeContainerBackend) Revive(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo) error {
-	f.record(&Call{Method: "Revive", Name: string(id), Repos: repos})
+func (f *FakeContainerBackend) Revive(ctx context.Context, id runtime.InstanceID) error {
+	f.record(&Call{Method: "Revive", Name: string(id)})
 	if f.ReviveFunc != nil {
-		return f.ReviveFunc(ctx, id, repos)
+		return f.ReviveFunc(ctx, id)
 	}
 	return nil
 }

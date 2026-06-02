@@ -225,19 +225,20 @@ func (b *Backend) Connect(ctx context.Context, id runtime.InstanceID, repos []ru
 }
 
 // Diff implements task.ContainerBackend.
-func (b *Backend) Diff(ctx context.Context, repos []runtime.Repo, repoIdx int, args ...string) (string, error) {
+func (b *Backend) Diff(ctx context.Context, id runtime.InstanceID, repoIdx int, args ...string) (string, error) {
 	defer trace.StartRegion(ctx, "container.diff").End()
+	name := string(id)
+	ct, err := b.client.Get(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	repos := ct.Repos()
 	if repoIdx < 0 || repoIdx >= len(repos) {
 		return "", fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
 	}
 	repo := &repos[repoIdx]
-	slog.Info("md diff", "dir", repo.HostPath, "br", repo.Branch, "args", args)
+	slog.Info("md diff", "ctr", name, "dir", repo.GitRoot, "br", repo.Branch, "args", args)
 	var stdout bytes.Buffer
-	mdRepos := toMDRepos(repos)
-	ct, err := b.client.Container(mdRepos...)
-	if err != nil {
-		return "", err
-	}
 	if err := ct.Diff(ctx, &stdout, &SlogWriter{Phase: "diff"}, repoIdx, args); err != nil {
 		return "", err
 	}
@@ -245,15 +246,16 @@ func (b *Backend) Diff(ctx context.Context, repos []runtime.Repo, repoIdx int, a
 }
 
 // Fetch implements task.ContainerBackend.
-func (b *Backend) Fetch(ctx context.Context, repos []runtime.Repo) error {
+func (b *Backend) Fetch(ctx context.Context, id runtime.InstanceID) error {
 	defer trace.StartRegion(ctx, "container.fetch").End()
-	if len(repos) > 0 {
-		slog.Info("md fetch", "dir", repos[0].HostPath, "br", repos[0].Branch)
-	}
-	mdRepos := toMDRepos(repos)
-	ct, err := b.client.Container(mdRepos...)
+	name := string(id)
+	ct, err := b.client.Get(ctx, name)
 	if err != nil {
 		return err
+	}
+	repos := ct.Repos()
+	if len(repos) > 0 {
+		slog.Info("md fetch", "ctr", name, "dir", repos[0].GitRoot, "br", repos[0].Branch)
 	}
 	for i := range repos {
 		if err := ct.Fetch(ctx, &SlogWriter{Phase: "fetch"}, &SlogWriter{Phase: "fetch"}, i, b.Provider); err != nil {
@@ -268,53 +270,46 @@ func (b *Backend) Stop(ctx context.Context, id runtime.InstanceID) error {
 	defer trace.StartRegion(ctx, "container.stop").End()
 	name := string(id)
 	slog.Info("md stop", "name", name)
-	ct, err := b.client.Container()
+	ct, err := b.client.Get(ctx, name)
 	if err != nil {
 		return err
 	}
-	ct.SetName(name)
 	return ct.Stop(ctx)
 }
 
 // Purge implements task.ContainerBackend.
-func (b *Backend) Purge(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo) error {
+func (b *Backend) Purge(ctx context.Context, id runtime.InstanceID) error {
 	defer trace.StartRegion(ctx, "container.purge").End()
 	name := string(id)
-	if len(repos) > 0 {
-		slog.Info("md purge", "dir", repos[0].HostPath, "br", repos[0].Branch)
-	} else {
-		slog.Info("md purge", "name", name)
-	}
-	mdRepos := toMDRepos(repos)
-	ct, err := b.client.Container(mdRepos...)
+	ct, err := b.client.Get(ctx, name)
 	if err != nil {
 		return err
 	}
-	if len(repos) == 0 {
-		ct.SetName(name)
+	ctRepos := ct.Repos()
+	if len(ctRepos) > 0 {
+		slog.Info("md purge", "ctr", name, "dir", ctRepos[0].GitRoot, "br", ctRepos[0].Branch)
+	} else {
+		slog.Info("md purge", "name", name)
 	}
 	return ct.Purge(ctx, &SlogWriter{Phase: "purge"}, &SlogWriter{Phase: "purge"})
 }
 
 // Revive implements task.ContainerBackend.
-func (b *Backend) Revive(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo) error {
+func (b *Backend) Revive(ctx context.Context, id runtime.InstanceID) error {
 	defer trace.StartRegion(ctx, "container.revive").End()
 	name := string(id)
-	if len(repos) > 0 {
-		slog.Info("md revive", "dir", repos[0].HostPath, "br", repos[0].Branch, "ctr", name)
-	} else {
-		slog.Info("md revive", "name", name)
-	}
 	rt := b.client.Runtime()
-	slog.DebugContext(ctx, "revive starting", "rt", rt, "ctr", name, "repos_count", len(repos))
-	mdRepos := toMDRepos(repos)
-	ct, err := b.client.Container(mdRepos...)
+	ct, err := b.client.Get(ctx, name)
 	if err != nil {
 		return err
 	}
-	if len(repos) == 0 {
-		ct.SetName(name)
+	ctRepos := ct.Repos()
+	if len(ctRepos) > 0 {
+		slog.Info("md revive", "ctr", name, "dir", ctRepos[0].GitRoot, "br", ctRepos[0].Branch)
+	} else {
+		slog.Info("md revive", "name", name)
 	}
+	slog.DebugContext(ctx, "revive starting", "rt", rt, "ctr", name, "repos_count", len(ctRepos))
 	slog.DebugContext(ctx, "calling revive", "rt", rt, "ctr", name)
 	if err = ct.Revive(ctx, &SlogWriter{Phase: "revive"}, &SlogWriter{Phase: "revive"}); err != nil {
 		slog.ErrorContext(ctx, "revive failed", "rt", rt, "ctr", name, "err", err)

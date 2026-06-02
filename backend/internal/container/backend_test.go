@@ -107,6 +107,8 @@ type fakeMDClient struct {
 
 	containerCalls int
 	containerRepos []md.Repo
+	getCalls       int
+	getName        string
 }
 
 func (f *fakeMDClient) Runtime() string {
@@ -128,9 +130,14 @@ func (f *fakeMDClient) Container(repos ...md.Repo) (mdContainer, error) {
 	return &fakeMDContainer{}, nil
 }
 
-func (f *fakeMDClient) Get(_ context.Context, _ string) (mdContainer, error) {
+func (f *fakeMDClient) Get(_ context.Context, name string) (mdContainer, error) {
+	f.getCalls++
+	f.getName = name
 	if f.getErr != nil {
 		return nil, f.getErr
+	}
+	if f.getResult == nil {
+		return &fakeMDContainer{}, nil
 	}
 	return f.getResult, nil
 }
@@ -191,24 +198,51 @@ func TestBackend(t *testing.T) {
 
 	t.Run("Diff", func(t *testing.T) {
 		t.Parallel()
-		ctr := &fakeMDContainer{}
-		fc := &fakeMDClient{container: ctr}
+		ctr := &fakeMDContainer{repos: []md.Repo{
+			{GitRoot: "/home/user/src/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic"},
+			{GitRoot: "/home/user/src/genai", Branch: "caic-0", MountedPath: "/home/user/src/genai"},
+		}}
+		fc := &fakeMDClient{getResult: ctr}
 		b := newTestBackend(fc)
-		repos := []runtime.Repo{
-			{HostPath: "/home/user/src/caic", Branch: "caic-7", MountPath: "/home/user/src/caic"},
-			{HostPath: "/home/user/src/genai", Branch: "caic-0", MountPath: "/home/user/src/genai"},
-		}
-		if _, err := b.Diff(t.Context(), repos, 1, "--numstat"); err != nil {
+		if _, err := b.Diff(t.Context(), "ctr-1", 1, "--numstat"); err != nil {
 			t.Fatalf("Diff: %v", err)
 		}
-		if len(fc.containerRepos) != 2 {
-			t.Fatalf("Container repos len = %d, want 2", len(fc.containerRepos))
+		if fc.getCalls != 1 || fc.getName != "ctr-1" {
+			t.Fatalf("Get calls = %d name = %q, want 1 ctr-1", fc.getCalls, fc.getName)
 		}
-		if fc.containerRepos[0].GitRoot != "/home/user/src/caic" || fc.containerRepos[1].GitRoot != "/home/user/src/genai" {
-			t.Fatalf("Container repos = %+v, want primary and secondary repos", fc.containerRepos)
+		if fc.containerCalls != 0 {
+			t.Fatalf("Container() called %d times, want 0", fc.containerCalls)
 		}
 		if ctr.diffIdx != 1 {
 			t.Errorf("Diff repoIdx = %d, want 1", ctr.diffIdx)
+		}
+	})
+
+	t.Run("Fetch", func(t *testing.T) {
+		t.Parallel()
+		ctr := &fakeMDContainer{repos: []md.Repo{
+			{GitRoot: "/home/user/src/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic"},
+			{GitRoot: "/home/user/src/genai", Branch: "caic-0", MountedPath: "/home/user/src/genai"},
+		}}
+		fc := &fakeMDClient{getResult: ctr}
+		b := newTestBackend(fc)
+		if err := b.Fetch(t.Context(), "ctr-1"); err != nil {
+			t.Fatalf("Fetch: %v", err)
+		}
+		if fc.getCalls != 1 || fc.getName != "ctr-1" {
+			t.Fatalf("Get calls = %d name = %q, want 1 ctr-1", fc.getCalls, fc.getName)
+		}
+		if fc.containerCalls != 0 {
+			t.Fatalf("Container() called %d times, want 0", fc.containerCalls)
+		}
+		gotFetchCalls := 0
+		for _, call := range ctr.calls {
+			if call == "Fetch" {
+				gotFetchCalls++
+			}
+		}
+		if gotFetchCalls != 2 {
+			t.Errorf("Fetch calls = %d, want 2", gotFetchCalls)
 		}
 	})
 
@@ -243,16 +277,61 @@ func TestBackend(t *testing.T) {
 
 	t.Run("Stop", func(t *testing.T) {
 		t.Parallel()
-		ctr := &fakeMDContainer{}
-		b := newTestBackend(&fakeMDClient{container: ctr})
+		ctr := &fakeMDContainer{name: "ctr-1"}
+		fc := &fakeMDClient{getResult: ctr}
+		b := newTestBackend(fc)
 		if err := b.Stop(t.Context(), "ctr-1"); err != nil {
 			t.Fatalf("Stop: %v", err)
 		}
-		if ctr.name != "ctr-1" {
-			t.Errorf("SetName not applied: name = %q, want ctr-1", ctr.name)
+		if fc.getCalls != 1 || fc.getName != "ctr-1" {
+			t.Fatalf("Get calls = %d name = %q, want 1 ctr-1", fc.getCalls, fc.getName)
+		}
+		if fc.containerCalls != 0 {
+			t.Fatalf("Container() called %d times, want 0", fc.containerCalls)
 		}
 		if !slices.Contains(ctr.calls, "Stop") {
 			t.Errorf("Stop not called, calls=%v", ctr.calls)
+		}
+	})
+
+	t.Run("Purge", func(t *testing.T) {
+		t.Parallel()
+		ctr := &fakeMDContainer{name: "ctr-1", repos: []md.Repo{{GitRoot: "/repo", Branch: "caic-0", MountedPath: "/repo"}}}
+		fc := &fakeMDClient{getResult: ctr}
+		b := newTestBackend(fc)
+		if err := b.Purge(t.Context(), "ctr-1"); err != nil {
+			t.Fatalf("Purge: %v", err)
+		}
+		if fc.getCalls != 1 || fc.getName != "ctr-1" {
+			t.Fatalf("Get calls = %d name = %q, want 1 ctr-1", fc.getCalls, fc.getName)
+		}
+		if fc.containerCalls != 0 {
+			t.Fatalf("Container() called %d times, want 0", fc.containerCalls)
+		}
+		if !slices.Contains(ctr.calls, "Purge") {
+			t.Errorf("Purge not called, calls=%v", ctr.calls)
+		}
+	})
+
+	t.Run("Revive", func(t *testing.T) {
+		t.Parallel()
+		ctr := &fakeMDContainer{name: "ctr-1", vncPort: 5903, repos: []md.Repo{{GitRoot: "/repo", Branch: "caic-0", MountedPath: "/repo"}}}
+		fc := &fakeMDClient{getResult: ctr}
+		b := newTestBackend(fc)
+		if err := b.Revive(t.Context(), "ctr-1"); err != nil {
+			t.Fatalf("Revive: %v", err)
+		}
+		if fc.getCalls != 1 || fc.getName != "ctr-1" {
+			t.Fatalf("Get calls = %d name = %q, want 1 ctr-1", fc.getCalls, fc.getName)
+		}
+		if fc.containerCalls != 0 {
+			t.Fatalf("Container() called %d times, want 0", fc.containerCalls)
+		}
+		if !slices.Contains(ctr.calls, "Revive") {
+			t.Errorf("Revive not called, calls=%v", ctr.calls)
+		}
+		if b.vncPorts["ctr-1"] != 5903 {
+			t.Errorf("revived vncPort = %d, want 5903", b.vncPorts["ctr-1"])
 		}
 	})
 

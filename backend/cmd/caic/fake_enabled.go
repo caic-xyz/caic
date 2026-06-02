@@ -221,16 +221,16 @@ func (*fakeContainer) Connect(_ context.Context, _ runtime.InstanceID, _ []runti
 	return runtime.ConnectionInfo{}, nil
 }
 
-func (*fakeContainer) Diff(_ context.Context, _ []runtime.Repo, _ int, _ ...string) (string, error) {
+func (*fakeContainer) Diff(_ context.Context, _ runtime.InstanceID, _ int, _ ...string) (string, error) {
 	return "", nil
 }
 
-func (*fakeContainer) Fetch(_ context.Context, _ []runtime.Repo) error    { return nil }
-func (*fakeContainer) Stop(_ context.Context, _ runtime.InstanceID) error { return nil }
-func (*fakeContainer) Purge(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo) error {
+func (*fakeContainer) Fetch(_ context.Context, _ runtime.InstanceID) error { return nil }
+func (*fakeContainer) Stop(_ context.Context, _ runtime.InstanceID) error  { return nil }
+func (*fakeContainer) Purge(_ context.Context, _ runtime.InstanceID) error {
 	return nil
 }
-func (*fakeContainer) Revive(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo) error {
+func (*fakeContainer) Revive(_ context.Context, _ runtime.InstanceID) error {
 	return nil
 }
 

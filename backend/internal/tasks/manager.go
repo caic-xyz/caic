@@ -996,17 +996,6 @@ func (m *Manager) LoadMessagesOnDemand(entry *Entry) {
 	m.loadTaskMessagesOnDemand(entry)
 }
 
-func taskReposForRunner(t *task.Task, runner *task.Runner) []runtime.Repo {
-	repos := t.RuntimeRepos()
-	if len(repos) == 0 {
-		return nil
-	}
-	if repos[0].HostPath == "" && runner != nil {
-		repos[0].HostPath = runner.Dir
-	}
-	return repos
-}
-
 // Sync performs git push operations. It does NOT start the PR flow.
 func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, force bool) (*SyncResult, error) {
 	t := entry.task
@@ -1018,10 +1007,9 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 	}
 
 	runner := m.resolveRunner(t)
-	repos := taskReposForRunner(t, runner)
 	syncPrimaryBranch := ""
-	if len(repos) > 0 {
-		syncPrimaryBranch = repos[0].Branch
+	if p := t.Primary(); p != nil {
+		syncPrimaryBranch = p.Branch
 	}
 
 	if target == SyncTargetDefault {
@@ -1033,7 +1021,7 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 		if message == "" {
 			message = t.InitialPrompt.Text
 		}
-		ds, issues, err := runner.SyncToDefault(ctx, repos, t.ContainerName(), message)
+		ds, issues, err := runner.SyncToDefault(ctx, t, message)
 		if err != nil {
 			return nil, internalErr(err, "sync to default")
 		}
@@ -1047,7 +1035,7 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 	}
 
 	// Default: push to the task's own branch.
-	ds, issues, err := runner.SyncToOrigin(ctx, repos, t.ContainerName(), force)
+	ds, issues, err := runner.SyncToOrigin(ctx, t, force)
 	if err != nil {
 		return nil, internalErr(err, "sync to origin")
 	}
@@ -1550,7 +1538,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 			}
 			tlog.Debug("auto-reconnect succeeded")
 			t.SetVNCPort(runner.Container.VNCPort(m.serverCtx, runtime.InstanceID(t.ContainerName())))
-			if ds := runner.BranchDiffStat(m.serverCtx, taskReposForRunner(t, runner)); len(ds) > 0 {
+			if ds := runner.BranchDiffStat(m.serverCtx, t); len(ds) > 0 {
 				t.SetLiveDiffStat(ds)
 			}
 			m.NotifyTaskChange()

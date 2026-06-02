@@ -1731,7 +1731,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			releaseRevive := make(chan struct{})
 			fake := &tasktest.FakeContainerBackend{
-				ReviveFunc: func(ctx context.Context, _ runtime.InstanceID, _ []runtime.Repo) error {
+				ReviveFunc: func(ctx context.Context, _ runtime.InstanceID) error {
 					select {
 					case <-releaseRevive:
 						return errors.New("revive boom")
@@ -2187,40 +2187,6 @@ func TestManager(t *testing.T) {
 				time.Sleep(time.Millisecond)
 			}
 		})
-	})
-}
-
-func TestTaskReposForRunner(t *testing.T) {
-	t.Parallel()
-	t.Run("valid_preserves_mounted_path", func(t *testing.T) {
-		t.Parallel()
-		r := &task.Runner{Dir: "/home/user/src/caic-xyz/caic"}
-		tk := &task.Task{
-			Repos: []task.RepoMount{
-				{Name: "caic-xyz/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic-xyz/caic"},
-				{Name: "caic-xyz/md", Branch: "caic-0", GitRoot: "/home/user/src/caic-xyz/md", MountedPath: "/home/user/src/caic-xyz/md"},
-			},
-		}
-
-		got := taskReposForRunner(tk, r)
-		if len(got) != 2 {
-			t.Fatalf("repos len = %d, want 2", len(got))
-		}
-		if got[0].HostPath != "/home/user/src/caic-xyz/caic" {
-			t.Errorf("primary HostPath = %q, want runner dir", got[0].HostPath)
-		}
-		if got[0].MountPath != "/home/user/src/caic-xyz/caic" {
-			t.Errorf("primary MountPath = %q, want qualified mount", got[0].MountPath)
-		}
-		if got[1].MountPath != "/home/user/src/caic-xyz/md" {
-			t.Errorf("extra MountPath = %q, want qualified mount", got[1].MountPath)
-		}
-	})
-	t.Run("valid_no_repos", func(t *testing.T) {
-		t.Parallel()
-		if got := taskReposForRunner(&task.Task{}, &task.Runner{Dir: "/repo"}); got != nil {
-			t.Fatalf("repos = %+v, want nil", got)
-		}
 	})
 }
 

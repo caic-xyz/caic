@@ -537,7 +537,7 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := r.URL.Query().Get("path")
-	diff, err := runner.DiffContent(r.Context(), t.RuntimeRepos(), path)
+	diff, err := runner.DiffContent(r.Context(), t, path)
 	if err != nil {
 		writeError(w, api.InternalError(err.Error()))
 		return
