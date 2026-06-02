@@ -6,11 +6,11 @@
 
 package com.caic.halo.ble
 
-import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattService
+import android.bluetooth.BluetoothManager
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -22,6 +22,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows
 import java.util.UUID
 
@@ -43,7 +44,8 @@ class HaloConnectionTest {
 
     @Before
     fun setUp() {
-        val adapter = BluetoothAdapter.getDefaultAdapter()
+        val adapter = RuntimeEnvironment.getApplication()
+            .getSystemService(BluetoothManager::class.java).adapter
         btDevice = adapter.getRemoteDevice("00:11:22:33:44:55")
         Shadows.shadowOf(btDevice).setName("Halo AB")
 

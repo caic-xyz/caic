@@ -8,9 +8,12 @@ import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.data.TaskNotifier
 import com.fghbuild.caic.data.TaskRepository
 import com.fghbuild.caic.voice.VoiceSession
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -45,6 +48,7 @@ class TaskListViewModelTest {
 
     private val testDispatcher = UnconfinedTestDispatcher()
     private lateinit var server: MockWebServer
+    private lateinit var viewModel: TaskListViewModel
 
     @Before
     fun setUp() {
@@ -53,6 +57,14 @@ class TaskListViewModelTest {
 
     @After
     fun tearDown() {
+        // Cancel the ViewModel's long-lived coroutines (SSE reconnect loops, flow
+        // collectors) and wait for them to finish before resetting Main. Otherwise
+        // their continuations dispatch through Dispatchers.Main concurrently with
+        // resetMain(), causing a flaky IllegalStateException ("Main is used
+        // concurrently with setting it").
+        if (::viewModel.isInitialized) {
+            runBlocking { viewModel.viewModelScope.coroutineContext.job.cancelAndJoin() }
+        }
         Dispatchers.resetMain()
         if (::server.isInitialized) server.shutdown()
     }
@@ -109,7 +121,7 @@ class TaskListViewModelTest {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val voiceSession = VoiceSession(context, settingsRepository, taskRepository)
         val taskNotifier = TaskNotifier(context, taskRepository, voiceSession)
-        val viewModel = TaskListViewModel(taskRepository, settingsRepository, taskNotifier)
+        viewModel = TaskListViewModel(taskRepository, settingsRepository, taskNotifier)
 
         // Wait for loadFormData to complete (real HTTP to MockWebServer).
         val state = withTimeout(5000) {
@@ -198,7 +210,7 @@ class TaskListViewModelTest {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val voiceSession = VoiceSession(context, settingsRepository, taskRepository)
         val taskNotifier = TaskNotifier(context, taskRepository, voiceSession)
-        val viewModel = TaskListViewModel(taskRepository, settingsRepository, taskNotifier)
+        viewModel = TaskListViewModel(taskRepository, settingsRepository, taskNotifier)
 
         val state = withTimeout(5000) {
             viewModel.state.first { it.repos.isNotEmpty() }

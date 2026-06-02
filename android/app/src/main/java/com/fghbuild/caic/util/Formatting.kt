@@ -61,4 +61,4 @@ fun currencySign(currency: String): String = when (currency) {
 
 /** Formats a monetary balance value. */
 fun formatBalance(currency: String, total: Double): String =
-    "%s%.2f".format(currencySign(currency), total)
+    String.format(Locale.getDefault(), "%s%.2f", currencySign(currency), total)

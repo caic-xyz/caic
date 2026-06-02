@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import java.util.Locale
 
 class FormattingTest {
     private val t = object {
@@ -15,6 +16,16 @@ class FormattingTest {
             } catch (e: AssertionError) {
                 throw AssertionError("Subtest '$name' failed: ${e.message}", e)
             }
+        }
+    }
+
+    private fun withDefaultLocale(locale: Locale, block: () -> Unit) {
+        val previousLocale = Locale.getDefault()
+        try {
+            Locale.setDefault(locale)
+            block()
+        } finally {
+            Locale.setDefault(previousLocale)
         }
     }
 
@@ -98,10 +109,18 @@ class FormattingTest {
 
     @Test
     fun testFormatBalance() {
-        t.run("USD format") { assertEquals("$1.50", formatBalance("USD", 1.5)) }
-        t.run("CNY format") { assertEquals("¥100.00", formatBalance("CNY", 100.0)) }
-        t.run("unknown currency uses ??") { assertEquals("??0.00", formatBalance("EUR", 0.0)) }
-        t.run("large values") { assertEquals("$1234567.89", formatBalance("USD", 1234567.89)) }
+        withDefaultLocale(Locale.US) {
+            t.run("USD format") { assertEquals("$1.50", formatBalance("USD", 1.5)) }
+            t.run("CNY format") { assertEquals("¥100.00", formatBalance("CNY", 100.0)) }
+            t.run("unknown currency uses ??") { assertEquals("??0.00", formatBalance("EUR", 0.0)) }
+            t.run("large values") { assertEquals("$1234567.89", formatBalance("USD", 1234567.89)) }
+        }
     }
 
+    @Test
+    fun testFormatBalanceUsesDefaultLocale() {
+        withDefaultLocale(Locale.CANADA_FRENCH) {
+            assertEquals("$1,50", formatBalance("USD", 1.5))
+        }
+    }
 }
