@@ -1,0 +1,67 @@
+/* Shared form controls: model/effort selects and capability toggle chips,
+   used by the new-task form (MainLayout) and the fork dialog (App shell). */
+
+.modelSelect {
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-input);
+  color: inherit;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.modelSelect:hover:not(:disabled) {
+  background: var(--color-bg-input-hover);
+}
+
+.modelSelect:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-primary-ring);
+}
+
+.modelSelect:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggleChip {
+  display: flex;
+  align-items: center;
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-variant);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s;
+}
+
+.toggleChip:has(input:checked) {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.toggleChip:has(input:disabled) {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.toggleChip input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+/* Mobile: <=768px */
+@media (max-width: 768px) {
+  .modelSelect {
+    box-sizing: border-box;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}

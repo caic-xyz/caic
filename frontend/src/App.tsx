@@ -1,26 +1,17 @@
-// Main application component for caic web UI.
-import { createEffect, createSignal, For, Show, Switch, Match, onCleanup, lazy, Suspense } from "solid-js";
+// Application shell: top-level chrome (navbar, dialogs, voice, toasts) wrapping the routed panes.
+import { createSignal, For, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
-import { useNavigate, useLocation } from "@solidjs/router";
-import type { Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
-import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
+import type { Harness } from "@sdk/types.gen";
+import { AppStateProvider, useAppState } from "./AppState";
+import { effortOptions } from "./effortOptions";
 import Dropdown from "./Dropdown";
 import RepoChipStrip from "./RepoChipStrip";
-import type { RepoEntry } from "./RepoChipStrip";
-import { useAuth } from "./AuthContext";
 import Login from "./Login";
-import TaskDetail from "./TaskDetail";
-import DiffDetail from "./DiffDetail";
-import ProcessDetail from "./ProcessDetail";
-const VncViewer = lazy(() => import("./VncViewer"));
-import TaskList from "./TaskList";
-import { confirmTaskAction } from "./TaskCard";
-import PromptInput from "./PromptInput";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
-import { requestNotificationPermission, notifyWaiting, dismissNotification } from "./notifications";
 import UsageBadges from "./UsageBadges";
-import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
+import VoiceOverlay from "./VoiceOverlay";
+import CloneRepoDialog from "./CloneRepoDialog";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
@@ -28,64 +19,8 @@ import TokenIcon from "./github.svg?solid";
 import PersonIcon from "@material-symbols/svg-400/outlined/person.svg?solid";
 import SettingsIcon from "@material-symbols/svg-400/outlined/settings.svg?solid";
 import TailscaleIcon from "./tailscale.svg?solid";
-import CloneRepoDialog from "./CloneRepoDialog";
-import SettingsPage from "./SettingsPage";
-import { voiceConnected, getVoiceTaskNumber } from "./VoiceState";
-import VoiceOverlay from "./VoiceOverlay";
 import styles from "./App.module.css";
-
-/** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
-function jitteredDelay(base: number): number {
-  return base * (0.75 + Math.random() * 0.5);
-}
-
-/** Max slug length in the URL (characters after the "+"). */
-const MAX_SLUG = 80;
-
-/** Build a URL-safe slug from arbitrary text: lowercase, non-alnum replaced with "-", collapsed. */
-function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
-/** Build the path portion for a task URL: /task/@{id}+{slug}. */
-function taskPath(id: string, repo: string, branch: string, query: string): string {
-  const repoName = repo.split("/").pop() ?? repo;
-  const parts = [repoName, branch, query].filter(Boolean).map(slugify).join("-");
-  const slug = parts.slice(0, MAX_SLUG).replace(/-$/, "");
-  return `/task/@${id}+${slug}`;
-}
-
-/** Extract the task ID from a /task/@{id}+{slug} or /task/@{id}+{slug}/diff or /processes pathname, or null. */
-function taskIdFromPath(pathname: string): string | null {
-  const prefix = "/task/@";
-  if (!pathname.startsWith(prefix)) return null;
-  const rest = pathname.slice(prefix.length).replace(/\/(diff|processes|vnc)$/, "");
-  const plus = rest.indexOf("+");
-  return plus === -1 ? rest : rest.slice(0, plus);
-}
-
-/** True when the pathname ends with /diff (diff view route). */
-function isDiffPath(pathname: string): boolean {
-  return pathname.startsWith("/task/@") && pathname.endsWith("/diff");
-}
-
-/** True when the pathname ends with /processes (process list route). */
-function isProcessesPath(pathname: string): boolean {
-  return pathname.startsWith("/task/@") && pathname.endsWith("/processes");
-}
-
-/** True when the pathname ends with /vnc (VNC viewer route). */
-function isVncPath(pathname: string): boolean {
-  return pathname.startsWith("/task/@") && pathname.endsWith("/vnc");
-}
-
-/** True when the pathname is the settings page route. */
-function isSettingsPath(pathname: string): boolean {
-  return pathname === "/settings";
-}
+import controls from "./controls.module.css";
 
 function ConnectionDot(props: { connected: boolean }) {
   return (
@@ -97,670 +32,21 @@ function ConnectionDot(props: { connected: boolean }) {
   );
 }
 
-/**
- * Returns the list of valid effort levels for a given harness.
- * Empty for harnesses that don't support thinking effort.
- */
-function effortOptions(harness: Harness): string[] {
-  switch (harness) {
-    case "claude":
-      return ["low", "medium", "high", "max"];
-    case "codex":
-      return ["none", "minimal", "low", "medium", "high", "xhigh"];
-    case "pi":
-      return ["off", "minimal", "low", "medium", "high", "xhigh"];
-    case "gemini":
-    case "kilo":
-    case "opencode":
-      return [];
-  }
-  // Exhaustive: harness may be an empty/unset signal value at render time.
-  return [];
-}
-
-export default function App() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const auth = useAuth();
-
-  const [prompt, setPrompt] = createSignal("");
-  const [tasks, setTasks] = createSignal<Task[]>([]);
-  const [submitting, setSubmitting] = createSignal(false);
-  const [initializing, setInitializing] = createSignal(true);
-  const [repos, setRepos] = createSignal<Repo[]>([]);
-  const [selectedRepos, setSelectedRepos] = createSignal<RepoEntry[]>([]);
-  const [selectedModel, setSelectedModel] = createSignal("");
-  const [selectedEffort, setSelectedEffort] = createSignal("");
-  const [selectedImage, setSelectedImage] = createSignal("");
-  const [harnesses, setHarnesses] = createSignal<HarnessInfo[]>([]);
-  const [selectedHarness, setSelectedHarness] = createSignal("");
-  const [sidebarOpen, setSidebarOpen] = createSignal(true);
-  const [usage, setUsage] = createSignal<UsageResp | null>(null);
-  const [tailscaleAvailable, setTailscaleAvailable] = createSignal(false);
-  const [tailscaleEnabled, setTailscaleEnabled] = createSignal(false);
-  const [usbAvailable, setUSBAvailable] = createSignal(false);
-  const [usbEnabled, setUSBEnabled] = createSignal(false);
-  const [displayAvailable, setDisplayAvailable] = createSignal(false);
-  const [displayEnabled, setDisplayEnabled] = createSignal(false);
-  const [sudoAvailable, setSudoAvailable] = createSignal(false);
-  const [sudoEnabled, setSudoEnabled] = createSignal(false);
-  const [gitHubTokenAvailable, setGitHubTokenAvailable] = createSignal(false);
-  const [gitHubTokenEnabled, setGitHubTokenEnabled] = createSignal(false);
-  const [recentCount, setRecentCount] = createSignal(0);
-  const [actionId, setActionId] = createSignal<string | null>(null);
-
-  const [autoFixCI, setAutoFixCI] = createSignal(false);
-  const [autoFixPR, setAutoFixPR] = createSignal(false);
-  const [maxCPUs, setMaxCPUs] = createSignal(0);
-  const [useDefaultCaches, setUseDefaultCaches] = createSignal(true);
-  const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
-  const [wellKnownCachesList, setWellKnownCachesList] = createSignal<WellKnownCachesResp["wellKnown"]>([]);
-  const [cacheMappings, setCacheMappings] = createSignal<CacheMappingResp[]>([]);
-  const [versionInfo, setVersionInfo] = createSignal<VersionResp | null>(null);
-  const [versionCheckError, setVersionCheckError] = createSignal("");
-  const [updateStatus, setUpdateStatus] = createSignal<string>("");
-  const [checkingUpdate, setCheckingUpdate] = createSignal(false);
-  const [updating, setUpdating] = createSignal(false);
-
-  /** Build the current settings payload for updatePreferences, with optional overrides. */
-  const currentSettings = (overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}) => ({
-    settings: {
-      autoFixOnCIFailure: autoFixCI(),
-      autoFixOnPROpen: autoFixPR(),
-      baseImage: selectedImage() || "",
-      maxCPUs: maxCPUs(),
-      useDefaultCaches: useDefaultCaches(),
-      wellKnownCaches: wellKnownCaches() as Record<string, boolean>,
-      cacheMappings: cacheMappings(),
-      ...overrides,
-    },
-  });
-
-  // Clone repo dialog state.
-  const [cloneOpen, setCloneOpen] = createSignal(false);
-  const [cloning, setCloning] = createSignal(false);
-  const [cloneError, setCloneError] = createSignal("");
-
-  // Images attached to the new-task prompt.
-  const [pendingImages, setPendingImages] = createSignal<APIImageData[]>([]);
-
-  // Per-task input drafts survive task switching.
-  const [inputDrafts, setInputDrafts] = createSignal<Map<string, string>>(new Map());
-
-  // Per-task image drafts survive task switching.
-  const [inputImageDrafts, setInputImageDrafts] = createSignal<Map<string, APIImageData[]>>(new Map());
-
-  // Transient server warnings shown as auto-dismissing toasts.
-  const [warnings, setWarnings] = createSignal<{ id: number; message: string }[]>([]);
-  let nextWarningId = 0;
-  function showWarning(message: string) {
-    const id = nextWarningId++;
-    setWarnings((prev) => [...prev, { id, message }]);
-    setTimeout(() => setWarnings((prev) => prev.filter((w) => w.id !== id)), 8000);
-  }
-
-  const harnessSupportsImages = () => harnesses().find((h) => h.name === selectedHarness())?.supportsImages ?? false;
-
-  // Global keyboard shortcuts:
-  // - ArrowUp/ArrowDown: switch to previous/next task in sidebar order
-  // - Shift+Delete: purge the currently selected task
-  {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Delete" && e.shiftKey && selectedId() !== null) {
-        const t = selectedTask();
-        if (t) {
-          e.preventDefault();
-          const terminalPurge = new Set(["stopping", "purging", "purged", "failed"]);
-          if (!terminalPurge.has(t.state) && confirmTaskAction("Purge", t.title, t.repos?.[0]?.branch ?? "")) {
-            handlePurge(t.id);
-          }
-        }
-        return;
-      }
-      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-      // Don't intercept when typing in an input/textarea.
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      // Query visible task cards in DOM (visual) order to match the grouped sidebar layout.
-      const cards = Array.from(document.querySelectorAll<HTMLElement>("[data-task-id]"));
-      if (cards.length === 0) return;
-      const curIdx = cards.findIndex((el) => el.dataset.taskId === selectedId());
-      let nextIdx: number;
-      if (e.key === "ArrowUp") {
-        nextIdx = curIdx <= 0 ? cards.length - 1 : curIdx - 1;
-      } else {
-        nextIdx = curIdx === -1 || curIdx >= cards.length - 1 ? 0 : curIdx + 1;
-      }
-      const card = cards[nextIdx];
-      const id = card.dataset.taskId;
-      if (!id) return;
-      const task = tasks().find((t) => t.id === id);
-      if (!task) return;
-      navigate(taskPath(task.id, task.repos?.[0]?.name ?? "", task.repos?.[0]?.branch ?? "", task.title));
-      card.focus();
-      e.preventDefault();
-    };
-    document.addEventListener("keydown", onKey);
-    onCleanup(() => document.removeEventListener("keydown", onKey));
-  }
-
-  // Track previous task states to detect transitions to "waiting".
-  let prevStates = new Map<string, string>();
-
-  // Fetch version info when the settings page opens.
-  createEffect(() => {
-    if (!isSettingsPath(location.pathname)) return;
-    void (async () => {
-      setCheckingUpdate(true);
-      setVersionCheckError("");
-      try {
-        const v = await getVersion();
-        setVersionInfo(v);
-      } catch (e: unknown) {
-        setVersionCheckError(e instanceof Error ? e.message : "Version check failed");
-      } finally {
-        setCheckingUpdate(false);
-      }
-    })();
-  });
-
-  // Tick every second for live elapsed-time display.
-  const [now, setNow] = createSignal(Date.now());
-  {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    onCleanup(() => clearInterval(timer));
-  }
-
-  const selectedId = (): string | null => taskIdFromPath(location.pathname);
-  const selectedTask = (): Task | null => {
-    const id = selectedId();
-    return id !== null ? (tasks().find((t) => t.id === id) ?? null) : null;
-  };
-
-  // Re-open sidebar when task view is closed while sidebar is collapsed.
-  createEffect(() => {
-    if (selectedId() === null) setSidebarOpen(true);
-  });
-
-  // Redirect to home when a task URL points to a non-existent task.
-  // Guard on connected() to avoid spurious redirects during reconnection.
-  createEffect(() => {
-    if (connected() && selectedId() !== null && tasks().length > 0 && selectedTask() === null) {
-      navigate("/", { replace: true });
-    }
-  });
-
-  // Repos available to add (not already selected).
-  const availableRecent = () => repos().slice(0, recentCount()).filter((r) => !selectedRepos().some((s) => s.path === r.path));
-  const availableRest = () => repos().slice(recentCount()).filter((r) => !selectedRepos().some((s) => s.path === r.path));
-
-  // In-memory per-harness model preferences from the server.
-  let prefModels: Record<string, string> = {};
-
-  const isAuthenticated = () => auth.ready() && (auth.providers().length === 0 || auth.user() !== null);
-
-  // Load initial data once authentication is confirmed.
-  let dataLoaded = false;
-  createEffect(() => {
-    if (!isAuthenticated() || dataLoaded) return;
-    dataLoaded = true;
-    void (async () => {
-      try {
-        const [data, prefs, h, config, usageData, cachesData] = await Promise.all([
-          listRepos(),
-          getPreferences().catch(() => null),
-          listHarnesses().catch(() => [] as HarnessInfo[]),
-          getConfig().catch(() => null),
-          getUsage().catch(() => null),
-          listCaches().catch(() => null) as Promise<WellKnownCachesResp | null>,
-        ]);
-        if (cachesData) setWellKnownCachesList(cachesData.wellKnown);
-        const recentPaths = prefs?.repositories.map((r) => r.path) ?? [];
-        const recentSet = new Set(recentPaths);
-        const recentRepos = recentPaths.reduce<Repo[]>((acc, r) => {
-          const repo = data.find((d) => d.path === r);
-          if (repo) acc.push(repo);
-          return acc;
-        }, []);
-        const rest = data.filter((d) => !recentSet.has(d.path));
-        const ordered = [...recentRepos, ...rest];
-        setRepos(ordered);
-        setRecentCount(recentRepos.length);
-        if (ordered.length > 0) {
-          const first = recentRepos[0]?.path ?? ordered[0].path;
-          setSelectedRepos([{ path: first, branch: "" }]);
-        }
-        {
-          setHarnesses(h);
-          prefModels = prefs?.models ?? {};
-          const prefHarness = prefs?.harness ?? "";
-          const harness = prefHarness && h.find((x) => x.name === prefHarness)
-            ? prefHarness
-            : h[0]?.name ?? "";
-          setSelectedHarness(harness);
-          const models = h.find((x) => x.name === harness)?.models ?? [];
-          const lastModel = prefModels[harness];
-          if (lastModel && models.includes(lastModel)) setSelectedModel(lastModel);
-        }
-        if (prefs?.settings?.baseImage) setSelectedImage(prefs.settings.baseImage);
-        if (config) {
-          setTailscaleAvailable(config.tailscaleAvailable);
-          setUSBAvailable(config.usbAvailable);
-          setDisplayAvailable(config.displayAvailable);
-          setSudoAvailable(config.sudoAvailable);
-          setGitHubTokenAvailable(config.gitHubTokenAvailable);
-          const displayName = config.displayName || window.location.hostname.split('.')[0];
-          document.title = `${displayName} — caic`;
-        }
-        if (prefs?.settings) {
-          setAutoFixCI(prefs.settings.autoFixOnCIFailure);
-          setAutoFixPR(prefs.settings.autoFixOnPROpen);
-          setMaxCPUs(prefs.settings.maxCPUs ?? 0);
-          setUseDefaultCaches(prefs.settings.useDefaultCaches ?? true);
-          setWellKnownCaches(prefs.settings.wellKnownCaches ?? {});
-          setCacheMappings(prefs.settings.cacheMappings ?? []);
-        }
-        if (usageData) setUsage(usageData);
-      } finally {
-        setInitializing(false);
-      }
-    })();
-  });
-
-  // Subscribe to task list updates via SSE with automatic reconnection.
-  // Backoff: 500ms × 1.5 each failure, capped at 30s with ±25% jitter, reset on success.
-  // On 401, stop retrying and clear auth state so the login page shows.
-  // On reconnect, check if the frontend was rebuilt and reload if so.
-  // Pauses reconnection when tab is hidden or browser goes offline.
-  const [connected, setConnected] = createSignal(true);
-  {
-    let taskES: EventSource | null = null;
-    let usageES: EventSource | null = null;
-    let taskTimer: ReturnType<typeof setTimeout> | null = null;
-    let usageTimer: ReturnType<typeof setTimeout> | null = null;
-    let taskDelay = 500;
-    let usageDelay = 500;
-
-    /** Probe whether the server is returning 401. EventSource doesn't expose status codes. */
-    async function checkUnauthorized(): Promise<boolean> {
-      try {
-        const res = await fetch("/api/v1/auth/me", { signal: AbortSignal.timeout(5000) });
-        if (res.status === 401) {
-          auth.clearUser();
-          return true;
-        }
-      } catch {
-        // Network error — not a 401.
-      }
-      return false;
-    }
-    const initialScriptSrc = document.querySelector<HTMLScriptElement>("script[src^='/assets/']")?.src ?? "";
-
-    function onOpen() {
-      setConnected(true);
-    }
-
-    function connectTasks() {
-      // eslint-disable-next-line solid/reactivity -- globalTaskEvents is an SSE event handler
-      taskES = globalTaskEvents((event) => {
-        const checkAndNotify = (t: Task) => {
-          const needsInput = t.state === "waiting" || t.state === "asking" || t.state === "has_plan";
-          const prevState = prevStates.get(t.id);
-          const prevNeedsInput = prevState === "waiting" || prevState === "asking" || prevState === "has_plan";
-          if (needsInput && prevState === "running") {
-            notifyWaiting(t.id, t.title);
-          } else if (!needsInput && prevNeedsInput) {
-            dismissNotification(t.id);
-          }
-        };
-        if (event.kind === "snapshot" && event.snapshot) {
-          prevStates = new Map(event.snapshot.map((t) => [t.id, t.state]));
-          setTasks(event.snapshot);
-        } else if (event.kind === "upsert" && event.upsert) {
-          const t = event.upsert;
-          checkAndNotify(t);
-          prevStates.set(t.id, t.state);
-          setTasks((prev) => {
-            const idx = prev.findIndex((p) => p.id === t.id);
-            if (idx >= 0) {
-              const next = [...prev];
-              next[idx] = t;
-              return next;
-            }
-            return [...prev, t].sort((a, b) => (a.id < b.id ? -1 : 1));
-          });
-        } else if (event.kind === "patch" && event.patch) {
-          const patch = event.patch as Record<string, unknown>;
-          const id = patch["id"] as string;
-          if (!id) return;
-          if (typeof patch["state"] === "string") {
-            const newState = patch["state"] as string;
-            const existing = tasks().find((t) => t.id === id);
-            if (existing) {
-              checkAndNotify({ ...existing, state: newState } as Task);
-            }
-            prevStates.set(id, newState);
-          }
-          setTasks((prev) => {
-            const idx = prev.findIndex((p) => p.id === id);
-            if (idx < 0) return prev;
-            const next = [...prev];
-            next[idx] = { ...next[idx], ...patch } as Task;
-            return next;
-          });
-        } else if (event.kind === "delete" && event.delete) {
-          prevStates.delete(event.delete);
-          setTasks((prev) => prev.filter((t) => t.id !== event.delete));
-        } else if (event.kind === "repos" && event.repos) {
-          const updatedRepos = event.repos;
-          setRepos((prev) => {
-            // Merge updated CI status into existing repo order.
-            const byPath = new Map(updatedRepos.map((r) => [r.path, r]));
-            return prev.map((r) => byPath.get(r.path) ?? r);
-          });
-        } else if (event.kind === "warning" && event.warning) {
-          showWarning(event.warning);
-        }
-      }, (err) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        showWarning(`Task list event error: ${msg}`);
-      });
-      taskES.addEventListener("open", () => {
-        onOpen();
-        taskDelay = 500;
-        // Check if frontend was rebuilt while disconnected.
-        fetch("/index.html")
-          .then((r) => r.text())
-          .then((html) => {
-            const m = html.match(/<script[^>]+src="([^"]*\/assets\/[^"]+)"/);
-            if (m && initialScriptSrc && !initialScriptSrc.endsWith(m[1])) {
-              window.location.reload();
-            }
-          })
-          .catch(() => {});
-      });
-      taskES.onerror = () => {
-        taskES?.close();
-        taskES = null;
-        setConnected(false);
-        if (taskTimer !== null) clearTimeout(taskTimer);
-        checkUnauthorized().then((is401) => {
-          if (is401) return; // Stop retrying; effect restarts after re-login.
-          taskTimer = setTimeout(connectTasks, jitteredDelay(taskDelay));
-          taskDelay = Math.min(taskDelay * 1.5, 30_000);
-        });
-      };
-    }
-
-    function connectUsage() {
-      usageES = globalUsageEvents((event) => {
-        setUsage(event);
-      }, (err) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        showWarning(`Usage event error: ${msg}`);
-      });
-      usageES.addEventListener("open", () => {
-        onOpen();
-        usageDelay = 500;
-      });
-      usageES.onerror = () => {
-        usageES?.close();
-        usageES = null;
-        if (usageTimer !== null) clearTimeout(usageTimer);
-        checkUnauthorized().then((is401) => {
-          if (is401) return;
-          usageTimer = setTimeout(connectUsage, jitteredDelay(usageDelay));
-          usageDelay = Math.min(usageDelay * 1.5, 30_000);
-        });
-      };
-    }
-
-    function closeAll() {
-      taskES?.close();
-      taskES = null;
-      usageES?.close();
-      usageES = null;
-      if (taskTimer !== null) clearTimeout(taskTimer);
-      taskTimer = null;
-      if (usageTimer !== null) clearTimeout(usageTimer);
-      usageTimer = null;
-    }
-
-    function connectAll() {
-      closeAll();
-      taskDelay = 500;
-      usageDelay = 500;
-      connectTasks();
-      connectUsage();
-    }
-
-    /** Pause reconnection when tab is hidden or offline; reconnect immediately when back. */
-    function onVisibilityChange() {
-      if (document.hidden) {
-        closeAll();
-        setConnected(false);
-      } else if (navigator.onLine) {
-        connectAll();
-      }
-    }
-
-    function onOnline() {
-      if (!document.hidden) connectAll();
-    }
-
-    function onOffline() {
-      closeAll();
-      setConnected(false);
-    }
-
-    createEffect(() => {
-      if (!isAuthenticated()) return;
-      connectAll();
-      document.addEventListener("visibilitychange", onVisibilityChange);
-      window.addEventListener("online", onOnline);
-      window.addEventListener("offline", onOffline);
-      onCleanup(() => {
-        closeAll();
-        document.removeEventListener("visibilitychange", onVisibilityChange);
-        window.removeEventListener("online", onOnline);
-        window.removeEventListener("offline", onOffline);
-      });
-    });
-  }
-
-  // Clear stale actionId once the server state reflects the transition.
-  createEffect(() => {
-    const tid = actionId();
-    if (!tid) return;
-    const t = tasks().find((task) => task.id === tid);
-    if (t && (t.state === "purging" || t.state === "purged" || t.state === "failed" || t.state === "stopping" || t.state === "stopped" || t.state === "provisioning")) {
-      setActionId(null);
-    }
-  });
-
-  async function handleStop(id: string) {
-    if (actionId()) return;
-    setActionId(id);
-    try {
-      await stopTask(id);
-    } catch {
-      setActionId(null);
-    }
-  }
-
-  async function handlePurge(id: string) {
-    if (actionId()) return;
-    setActionId(id);
-    try {
-      await purgeTask(id);
-    } catch {
-      setActionId(null);
-    }
-  }
-
-  async function handleRevive(id: string) {
-    if (actionId()) return;
-    setActionId(id);
-    try {
-      await reviveTask(id);
-    } catch {
-      setActionId(null);
-    }
-  }
-
-  // Fork dialog state.
-  const [forkTaskId, setForkTaskId] = createSignal<string | null>(null);
-  const [forkPrompt, setForkPrompt] = createSignal("");
-  const [forkHarness, setForkHarness] = createSignal("");
-  const [forkModel, setForkModel] = createSignal("");
-  const [forkEffort, setForkEffort] = createSignal("");
-  const [forkExtraRepos, setForkExtraRepos] = createSignal<RepoEntry[]>([]);
-  const [forkTailscale, setForkTailscale] = createSignal(false);
-  const [forkUSB, setForkUSB] = createSignal(false);
-  const [forkDisplay, setForkDisplay] = createSignal(false);
-  const [forkSudo, setForkSudo] = createSignal(false);
-  const [forkGitHubToken, setForkGitHubToken] = createSignal(false);
-
-  // Repos available to add in the fork dialog (exclude already-selected extras and source task repos).
-  const forkSourceRepoPaths = () => {
-    const id = forkTaskId();
-    if (!id) return new Set<string>();
-    const task = tasks().find((t) => t.id === id);
-    return new Set((task?.repos ?? []).map((r) => r.name));
-  };
-  const forkAvailableRecent = () => repos().slice(0, recentCount()).filter((r) => !forkSourceRepoPaths().has(r.path) && !forkExtraRepos().some((s) => s.path === r.path));
-  const forkAvailableRest = () => repos().slice(recentCount()).filter((r) => !forkSourceRepoPaths().has(r.path) && !forkExtraRepos().some((s) => s.path === r.path));
-
-  function handleFork(id: string) {
-    const task = tasks().find((t) => t.id === id);
-    setForkTaskId(id);
-    setForkPrompt("");
-    setForkHarness(task?.harness ?? selectedHarness());
-    setForkModel(task?.model ?? "");
-    setForkEffort(task?.effort ?? "");
-    setForkExtraRepos([]);
-    setForkTailscale(task?.runtime?.tailscale === "true" || task?.runtime?.tailscale?.startsWith("https://") || false);
-    setForkUSB(task?.runtime?.usb ?? false);
-    setForkDisplay(task?.runtime?.display ?? false);
-    setForkSudo(task?.runtime?.sudo ?? false);
-    setForkGitHubToken(task?.gitHubToken ?? false);
-  }
-
-  async function submitFork() {
-    const id = forkTaskId();
-    const text = forkPrompt().trim();
-    if (!id || !text) return;
-    setForkTaskId(null);
-    try {
-      const h = forkHarness();
-      const m = forkModel();
-      const e = forkEffort();
-      const extras = forkExtraRepos();
-      const sourceTask = tasks().find((t) => t.id === id);
-      const resp = await forkTask(id, {
-        prompt: { text },
-        harness: h !== (sourceTask?.harness ?? "") ? h as Harness : undefined,
-        model: m !== (sourceTask?.model ?? "") ? m : undefined,
-        effort: e !== (sourceTask?.effort ?? "") ? e : undefined,
-        extraRepos: extras.length > 0 ? extras.map((r) => ({ name: r.path, ...(r.branch ? { baseBranch: r.branch } : {}) })) : undefined,
-        tailscale: forkTailscale(),
-        usb: forkUSB(),
-        display: forkDisplay(),
-        sudo: forkSudo(),
-        gitHubToken: forkGitHubToken(),
-      });
-      navigate(`/task/${resp.id}`);
-    } catch {
-      // Fork failed — no state to clean up.
-    }
-  }
-
-  async function submitTask() {
-    const p = prompt().trim();
-    const imgs = pendingImages();
-    const selRepos = selectedRepos();
-    if (!p && imgs.length === 0) return;
-    requestNotificationPermission();
-    setSubmitting(true);
-    {
-      // Optimistic reorder: move the primary repo to the front of the recent list.
-      const primary = selRepos[0]?.path;
-      if (primary) {
-        const current = repos();
-        const idx = current.findIndex((r) => r.path === primary);
-        if (idx > 0) {
-          setRepos([current[idx], ...current.slice(0, idx), ...current.slice(idx + 1)]);
-        }
-        setRecentCount(Math.min(recentCount() + (idx > recentCount() - 1 ? 1 : 0), current.length));
-      }
-    }
-    try {
-      const model = selectedModel();
-      const effort = selectedEffort();
-      const ts = tailscaleEnabled();
-      const usb = usbEnabled();
-      const disp = displayEnabled();
-      const sudo = sudoEnabled();
-      const ght = gitHubTokenEnabled();
-      const harness = selectedHarness();
-      const repoSpecs = selRepos.length > 0 ? selRepos.map((r) => ({ name: r.path, ...(r.branch ? { baseBranch: r.branch } : {}) })) : undefined;
-      const data = await createTask({ initialPrompt: { text: p, ...(imgs.length > 0 ? { images: imgs } : {}) }, repos: repoSpecs, harness: harness as Harness, ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(ts ? { tailscale: true } : {}), ...(usb ? { usb: true } : {}), ...(disp ? { display: true } : {}), ...(sudo ? { sudo: true } : {}), ...(ght ? { gitHubToken: true } : {}) });
-      if (model) prefModels[harness] = model;
-      else delete prefModels[harness];
-      setPrompt("");
-      setPendingImages([]);
-      navigate(taskPath(data.id, selRepos[0]?.path ?? "", "", p));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function submitClone(url: string, path?: string) {
-    setCloning(true);
-    setCloneError("");
-    try {
-      const repo = await cloneRepo({ url, ...(path ? { path } : {}) });
-      // Insert at the start of "All repositories" (after recent repos) without
-      // incrementing recentCount. The repo becomes "recent" when the first task
-      // is created for it via submitTask's optimistic reorder.
-      const rc = recentCount();
-      setRepos((prev) => [...prev.slice(0, rc), repo, ...prev.slice(rc)]);
-      setSelectedRepos([{ path: repo.path, branch: "" }]);
-      setCloneOpen(false);
-    } catch (e: unknown) {
-      setCloneError(e instanceof Error ? e.message : "Clone failed");
-    } finally {
-      setCloning(false);
-    }
-  }
-
-  async function saveSettings(overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}) {
-    await updatePreferences(currentSettings(overrides));
-  }
-
-  async function triggerServerUpdate() {
-    setUpdating(true);
-    setUpdateStatus("");
-    try {
-      const resp = await triggerUpdate();
-      setUpdateStatus(resp.status === "started" ? "Update started in background. The server will restart shortly." : "Already up to date.");
-    } catch (e: unknown) {
-      setUpdateStatus(e instanceof Error ? e.message : "Update failed");
-    } finally {
-      setUpdating(false);
-    }
-  }
+/** Top-level chrome: navbar, modals, overlays, and the routed detail panes. */
+function Shell(props: { children?: JSX.Element }) {
+  const s = useAppState();
+  const auth = s.auth;
 
   return (
     <Show when={auth.providers().length === 0 || auth.user()} fallback={<Login />}>
     <div class={styles.app}>
       <div class={styles.navbar}>
         <h1 class={styles.title}>
-          <button class={styles.titleButton} type="button" onClick={() => navigate("/")}>caic</button>
+          <button class={styles.titleButton} type="button" onClick={() => s.navigate("/")}>caic</button>
         </h1>
         <span class={styles.subtitle}>Coding Agents in Containers</span>
-        <UsageBadges usage={usage} now={now} />
-        <ConnectionDot connected={connected()} />
+        <UsageBadges usage={s.usage} now={s.now} />
+        <ConnectionDot connected={s.connected()} />
         {(() => {
           const [menuOpen, setMenuOpen] = createSignal(false);
           const hasAuth = () => auth.providers().length > 0;
@@ -776,7 +62,7 @@ export default function App() {
                   <Show when={hasAuth() && auth.user()}>
                     <span class={styles.dropdownUser}>{user().username}</span>
                   </Show>
-                  <button type="button" class={styles.dropdownItem} onClick={() => { setMenuOpen(false); navigate("/settings"); }}>
+                  <button type="button" class={styles.dropdownItem} onClick={() => { setMenuOpen(false); s.navigate("/settings"); }}>
                     <SettingsIcon width="1em" height="1em" style={{ "vertical-align": "middle", "margin-right": "0.4em" }} />
                     Settings
                   </button>
@@ -806,295 +92,22 @@ export default function App() {
         })()}
       </div>
 
-      <form onSubmit={(e) => { e.preventDefault(); submitTask(); }} class={`${styles.submitForm} ${selectedId() || isSettingsPath(location.pathname) ? styles.hidden : ""}`}>
-        <RepoChipStrip
-          repos={repos}
-          selectedRepos={selectedRepos}
-          onAdd={(path) => { if (!selectedRepos().some((r) => r.path === path)) setSelectedRepos((prev) => [...prev, { path, branch: "" }]); }}
-          onRemove={(path) => setSelectedRepos((prev) => prev.filter((r) => r.path !== path))}
-          onSetBranch={(path, branch) => setSelectedRepos((prev) => prev.map((r) => r.path === path ? { ...r, branch } : r))}
-          availableRecent={availableRecent}
-          availableRest={availableRest}
-          onClone={() => { setCloneOpen(true); setCloneError(""); }}
-          data-testid="repo-chips"
-        />
-        <Show when={harnesses().length > 1}>
-          <select
-            value={selectedHarness()}
-            onChange={(e) => {
-              const h = e.currentTarget.value;
-              setSelectedHarness(h);
-              const models = harnesses().find((x) => x.name === h)?.models ?? [];
-              const lastModel = prefModels[h];
-              setSelectedModel(lastModel && models.includes(lastModel) ? lastModel : "");
-              setSelectedEffort("");
-            }}
-            class={styles.modelSelect}
-          >
-            <For each={harnesses()}>
-              {(h) => <option value={h.name}>{h.name}</option>}
-            </For>
-          </select>
-        </Show>
-        <Show when={(harnesses().find((h) => h.name === selectedHarness())?.models ?? []).length > 0}>
-          <select
-            value={selectedModel()}
-            onChange={(e) => {
-              const m = e.currentTarget.value;
-              setSelectedModel(m);
-              if (m) prefModels[selectedHarness()] = m;
-              else delete prefModels[selectedHarness()];
-            }}
-            class={styles.modelSelect}
-          >
-            <option value="">Default model</option>
-            <For each={harnesses().find((h) => h.name === selectedHarness())?.models ?? []}>
-              {(m) => <option value={m}>{m}</option>}
-            </For>
-          </select>
-        </Show>
-        <Show when={effortOptions(selectedHarness() as Harness).length > 0}>
-          <select
-            value={selectedEffort()}
-            onChange={(e) => setSelectedEffort(e.currentTarget.value)}
-            class={styles.modelSelect}
-          >
-            <option value="">Default effort</option>
-            <For each={effortOptions(selectedHarness() as Harness)}>
-              {(e) => <option value={e}>{e}</option>}
-            </For>
-          </select>
-        </Show>
-        <label class={styles.toggleChip} title={tailscaleAvailable() ? "Enable Tailscale networking" : "Tailscale is not available on this server"}>
-          <input
-            type="checkbox"
-            checked={tailscaleEnabled()}
-            disabled={!tailscaleAvailable()}
-            onChange={(e) => setTailscaleEnabled(e.currentTarget.checked)}
-          />
-          <TailscaleIcon width="1.2em" height="1.2em" />
-        </label>
-        <label class={styles.toggleChip} title={usbAvailable() ? "Enable USB passthrough" : "USB passthrough is not available on this server"}>
-          <input
-            type="checkbox"
-            checked={usbEnabled()}
-            disabled={!usbAvailable()}
-            onChange={(e) => setUSBEnabled(e.currentTarget.checked)}
-          />
-          <USBIcon width="1.2em" height="1.2em" />
-        </label>
-        <label class={styles.toggleChip} title={displayAvailable() ? "Enable virtual display" : "Virtual display is not available on this server"}>
-          <input
-            type="checkbox"
-            checked={displayEnabled()}
-            disabled={!displayAvailable()}
-            onChange={(e) => setDisplayEnabled(e.currentTarget.checked)}
-          />
-          <DisplayIcon width="1.2em" height="1.2em" />
-        </label>
-        <label class={styles.toggleChip} title={sudoAvailable() ? "Enable root access" : "Root access (sudo) is not available on this server"}>
-          <input
-            type="checkbox"
-            checked={sudoEnabled()}
-            disabled={!sudoAvailable()}
-            onChange={(e) => setSudoEnabled(e.currentTarget.checked)}
-          />
-          <SudoIcon width="1.2em" height="1.2em" />
-        </label>
-        <label class={styles.toggleChip} title={gitHubTokenAvailable() ? "Enable GitHub token" : "GitHub token is not available on this server"}>
-          <input
-            type="checkbox"
-            checked={gitHubTokenEnabled()}
-            disabled={!gitHubTokenAvailable()}
-            onChange={(e) => setGitHubTokenEnabled(e.currentTarget.checked)}
-          />
-          <TokenIcon width="1.2em" height="1.2em" />
-        </label>
-        <PromptInput
-          value={prompt()}
-          onInput={setPrompt}
-          onSubmit={submitTask}
-          placeholder="Describe a task..."
-          class={styles.promptInput}
-          data-testid="prompt-input"
-          supportsImages={harnessSupportsImages()}
-          images={pendingImages()}
-          onImagesChange={setPendingImages}
-          sendButton={
-            <Button type="submit" disabled={initializing() || submitting() || (!prompt().trim() && pendingImages().length === 0)} loading={initializing() || submitting()} title="Start a new container with this prompt" data-testid="submit-task">
-              <SendIcon width="1.2em" height="1.2em" />
-            </Button>
-          }
-        />
-      </form>
+      {props.children}
 
-      <Show when={cloneOpen()}>
+      <Show when={s.cloneOpen()}>
         <CloneRepoDialog
-          loading={cloning()}
-          error={cloneError()}
-          onClone={submitClone}
-          onClose={() => { setCloneOpen(false); setCloneError(""); }}
+          loading={s.cloning()}
+          error={s.cloneError()}
+          onClone={s.submitClone}
+          onClose={() => { s.setCloneOpen(false); s.setCloneError(""); }}
         />
       </Show>
 
-      <div class={styles.layout}>
-        <Show when={!isSettingsPath(location.pathname)}>
-          <TaskList
-            tasks={tasks}
-            repos={repos}
-            selectedId={selectedId()}
-            sidebarOpen={sidebarOpen}
-            setSidebarOpen={setSidebarOpen}
-            now={now}
-            onSelect={(id) => {
-              const found = tasks().find((t) => t.id === id);
-              navigate(found ? taskPath(found.id, found.repos?.[0]?.name ?? "", found.repos?.[0]?.branch ?? "", found.title) : `/task/@${id}`);
-            }}
-            onStop={handleStop}
-            onPurge={handlePurge}
-            onRevive={handleRevive}
-            actionId={actionId}
-            onDiffClick={(id) => {
-              const found = tasks().find((t) => t.id === id);
-              if (found?.diffStat?.length) {
-                navigate(taskPath(found.id, found.repos?.[0]?.name ?? "", found.repos?.[0]?.branch ?? "", found.title) + "/diff");
-              }
-            }}
-            autoFixCI={autoFixCI}
-            autoFixPR={autoFixPR}
-            onFixCI={(repoPath) => {
-              botFixCI({ repo: repoPath }).then((data) => {
-                navigate(taskPath(data.id, repoPath, "", `Fix CI: ${repoPath}`));
-              });
-            }}
-            voiceConnected={voiceConnected}
-            getTaskNumber={getVoiceTaskNumber}
-          />
-        </Show>
-
-        <Switch>
-          <Match when={isSettingsPath(location.pathname)}>
-            <SettingsPage
-              selectedImage={selectedImage}
-              setSelectedImage={setSelectedImage}
-              maxCPUs={maxCPUs}
-              setMaxCPUs={setMaxCPUs}
-              wellKnownCaches={wellKnownCaches}
-              setWellKnownCaches={setWellKnownCaches}
-              wellKnownCachesList={wellKnownCachesList}
-              cacheMappings={cacheMappings}
-              setCacheMappings={setCacheMappings}
-              autoFixCI={autoFixCI}
-              setAutoFixCI={setAutoFixCI}
-              autoFixPR={autoFixPR}
-              setAutoFixPR={setAutoFixPR}
-              versionInfo={versionInfo}
-              versionCheckError={versionCheckError}
-              checkingUpdate={checkingUpdate}
-              updating={updating}
-              updateStatus={updateStatus}
-              saveSettings={saveSettings}
-              triggerServerUpdate={triggerServerUpdate}
-            />
-          </Match>
-          <Match when={isDiffPath(location.pathname) && selectedId()} keyed>
-            {(id) => {
-              const t = selectedTask();
-              const tp = t ? taskPath(t.id, t.repos?.[0]?.name ?? "", t.repos?.[0]?.branch ?? "", t.title) : `/task/@${id}`;
-              return (
-                <div class={styles.detailPane}>
-                  <DiffDetail
-                    taskId={id}
-                    diffStat={t?.diffStat ?? []}
-                    repos={(t?.repos ?? []).map((r) => ({ name: r.name, branch: r.branch }))}
-                    taskPath={tp}
-                  />
-                </div>
-              );
-            }}
-          </Match>
-          <Match when={isProcessesPath(location.pathname) && selectedId()} keyed>
-            {(id) => {
-              const t = selectedTask();
-              const tp = t ? taskPath(t.id, t.repos?.[0]?.name ?? "", t.repos?.[0]?.branch ?? "", t.title) : `/task/@${id}`;
-              return (
-                <div class={styles.detailPane}>
-                  <ProcessDetail
-                    taskId={id}
-                    repo={t?.repos?.[0]?.name ?? ""}
-                    branch={t?.repos?.[0]?.branch ?? ""}
-                    taskPath={tp}
-                  />
-                </div>
-              );
-            }}
-          </Match>
-          <Match when={isVncPath(location.pathname) && selectedId()} keyed>
-            {(id) => {
-              const t = selectedTask();
-              const tp = t ? taskPath(t.id, t.repos?.[0]?.name ?? "", t.repos?.[0]?.branch ?? "", t.title) : `/task/@${id}`;
-              return (
-                <div class={styles.detailPane}>
-                  <Suspense fallback={<div style={{ padding: "1rem", color: "var(--color-text-muted)" }}>Loading VNC viewer…</div>}>
-                    <VncViewer
-                      taskId={id}
-                      repo={t?.repos?.[0]?.name ?? ""}
-                      branch={t?.repos?.[0]?.branch ?? ""}
-                      taskPath={tp}
-                    />
-                  </Suspense>
-                </div>
-              );
-            }}
-          </Match>
-          <Match when={selectedId()} keyed>
-            {(id) => (
-              <div class={styles.detailPane}>
-                <TaskDetail
-                  taskId={id}
-                  taskState={selectedTask()?.state ?? "pending"}
-                  title={selectedTask()?.title}
-                  initialPrompt={selectedTask()?.initialPrompt}
-                  inPlanMode={selectedTask()?.inPlanMode}
-                  planContent={selectedTask()?.planContent}
-                  repo={selectedTask()?.repos?.[0]?.name ?? ""}
-                  remoteURL={selectedTask()?.repos?.[0]?.remoteURL}
-                  forge={selectedTask()?.repos?.[0]?.forge}
-                  branch={selectedTask()?.repos?.[0]?.branch ?? ""}
-                  baseBranch={selectedTask()?.repos?.[0]?.baseBranch ?? "main"}
-                  forgeOwner={selectedTask()?.forgeOwner}
-                  forgeRepo={selectedTask()?.forgeRepo}
-                  forgePR={selectedTask()?.forgePR}
-                  ciStatus={selectedTask()?.ciStatus}
-                  ciChecks={selectedTask()?.ciChecks}
-                  harness={selectedTask()?.harness ?? ""}
-                  model={selectedTask()?.model}
-                  diffStat={selectedTask()?.diffStat}
-                  vncPort={selectedTask()?.runtime.vncPort ?? 0}
-                  sudoPassword={selectedTask()?.runtime.sudoPassword}
-                  supportsImages={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsImages}
-                  supportsCompact={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsCompact}
-                  onStop={handleStop}
-                  onPurge={handlePurge}
-                  onRevive={handleRevive}
-                  onFork={handleFork}
-                  onClose={() => navigate("/")}
-                  inputDraft={inputDrafts().get(id) ?? ""}
-                  onInputDraft={(v) => setInputDrafts((prev) => { const next = new Map(prev); next.set(id, v); return next; })}
-                  inputImages={inputImageDrafts().get(id) ?? []}
-                  onInputImages={(imgs) => setInputImageDrafts((prev) => { const next = new Map(prev); next.set(id, imgs); return next; })}
-                  onError={showWarning}
-                />
-              </div>
-            )}
-          </Match>
-        </Switch>
-      </div>
-      <Show when={forkTaskId()}>
+      <Show when={s.forkTaskId()}>
         {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events -- native <dialog> handles Escape; click-to-dismiss on padding is supplementary */}
         <dialog
           ref={(el) => {
-            el.addEventListener("close", () => { setForkTaskId(null); });
+            el.addEventListener("close", () => { s.setForkTaskId(null); });
             const stopEscape = (e: KeyboardEvent) => {
               if (e.key === "Escape") { e.stopPropagation(); e.stopImmediatePropagation(); }
             };
@@ -1102,119 +115,125 @@ export default function App() {
             queueMicrotask(() => el.showModal());
           }}
           class={styles.forkDialog}
-          onClick={(e) => { if (e.target === e.currentTarget) setForkTaskId(null); }}
+          onClick={(e) => { if (e.target === e.currentTarget) s.setForkTaskId(null); }}
         >
           <h2 class={styles.forkTitle}>Fork task</h2>
           <AutoResizeTextarea
-            value={forkPrompt()}
-            onInput={setForkPrompt}
-            onSubmit={submitFork}
+            value={s.forkPrompt()}
+            onInput={s.setForkPrompt}
+            onSubmit={s.submitFork}
             placeholder="Prompt for forked task"
             class={styles.forkInput}
             tabIndex={0}
           />
-          <Show when={forkAvailableRecent().length > 0 || forkAvailableRest().length > 0 || forkExtraRepos().length > 0}>
+          <Show when={s.forkAvailableRecent().length > 0 || s.forkAvailableRest().length > 0 || s.forkExtraRepos().length > 0}>
             <RepoChipStrip
-              repos={repos}
-              selectedRepos={forkExtraRepos}
-              onAdd={(path) => setForkExtraRepos((prev) => [...prev, { path, branch: "" }])}
-              onRemove={(path) => setForkExtraRepos((prev) => prev.filter((r) => r.path !== path))}
-              onSetBranch={(path, branch) => setForkExtraRepos((prev) => prev.map((r) => r.path === path ? { ...r, branch } : r))}
-              availableRecent={forkAvailableRecent}
-              availableRest={forkAvailableRest}
+              repos={s.repos}
+              selectedRepos={s.forkExtraRepos}
+              onAdd={(path) => s.setForkExtraRepos((prev) => [...prev, { path, branch: "" }])}
+              onRemove={(path) => s.setForkExtraRepos((prev) => prev.filter((r) => r.path !== path))}
+              onSetBranch={(path, branch) => s.setForkExtraRepos((prev) => prev.map((r) => r.path === path ? { ...r, branch } : r))}
+              availableRecent={s.forkAvailableRecent}
+              availableRest={s.forkAvailableRest}
               showClone={false}
             />
           </Show>
           <div class={styles.forkRow}>
-            <Show when={harnesses().length > 1}>
+            <Show when={s.harnesses().length > 1}>
               <select
-                value={forkHarness()}
+                value={s.forkHarness()}
                 onChange={(e) => {
                   const h = e.currentTarget.value;
-                  setForkHarness(h);
-                  const models = harnesses().find((x) => x.name === h)?.models ?? [];
-                  setForkModel(models.includes(forkModel()) ? forkModel() : "");
-                  setForkEffort("");
+                  s.setForkHarness(h);
+                  const models = s.harnesses().find((x) => x.name === h)?.models ?? [];
+                  s.setForkModel(models.includes(s.forkModel()) ? s.forkModel() : "");
+                  s.setForkEffort("");
                 }}
-                class={styles.modelSelect}
+                class={controls.modelSelect}
               >
-                <For each={harnesses()}>
+                <For each={s.harnesses()}>
                   {(h) => <option value={h.name}>{h.name}</option>}
                 </For>
               </select>
             </Show>
-            <Show when={(harnesses().find((h) => h.name === forkHarness())?.models ?? []).length > 0}>
+            <Show when={(s.harnesses().find((h) => h.name === s.forkHarness())?.models ?? []).length > 0}>
               <select
-                value={forkModel()}
-                onChange={(e) => setForkModel(e.currentTarget.value)}
-                class={styles.modelSelect}
+                value={s.forkModel()}
+                onChange={(e) => s.setForkModel(e.currentTarget.value)}
+                class={controls.modelSelect}
               >
                 <option value="">Default model</option>
-                <For each={harnesses().find((h) => h.name === forkHarness())?.models ?? []}>
+                <For each={s.harnesses().find((h) => h.name === s.forkHarness())?.models ?? []}>
                   {(m) => <option value={m}>{m}</option>}
                 </For>
               </select>
             </Show>
-            <Show when={effortOptions(forkHarness() as Harness).length > 0}>
+            <Show when={effortOptions(s.forkHarness() as Harness).length > 0}>
               <select
-                value={forkEffort()}
-                onChange={(e) => setForkEffort(e.currentTarget.value)}
-                class={styles.modelSelect}
+                value={s.forkEffort()}
+                onChange={(e) => s.setForkEffort(e.currentTarget.value)}
+                class={controls.modelSelect}
               >
                 <option value="">Default effort</option>
-                <For each={effortOptions(forkHarness() as Harness)}>
+                <For each={effortOptions(s.forkHarness() as Harness)}>
                   {(e) => <option value={e}>{e}</option>}
                 </For>
               </select>
             </Show>
           </div>
           <div class={styles.forkRow}>
-            <Show when={tailscaleAvailable()}>
-              <label class={styles.toggleChip} title="Enable Tailscale networking">
-                <input type="checkbox" checked={forkTailscale()} onChange={(e) => setForkTailscale(e.currentTarget.checked)} />
+            <Show when={s.tailscaleAvailable()}>
+              <label class={controls.toggleChip} title="Enable Tailscale networking">
+                <input type="checkbox" checked={s.forkTailscale()} onChange={(e) => s.setForkTailscale(e.currentTarget.checked)} />
                 <TailscaleIcon width="1.2em" height="1.2em" />
               </label>
             </Show>
-            <Show when={usbAvailable()}>
-              <label class={styles.toggleChip} title="Enable USB passthrough">
-                <input type="checkbox" checked={forkUSB()} onChange={(e) => setForkUSB(e.currentTarget.checked)} />
+            <Show when={s.usbAvailable()}>
+              <label class={controls.toggleChip} title="Enable USB passthrough">
+                <input type="checkbox" checked={s.forkUSB()} onChange={(e) => s.setForkUSB(e.currentTarget.checked)} />
                 <USBIcon width="1.2em" height="1.2em" />
               </label>
             </Show>
-            <Show when={displayAvailable()}>
-              <label class={styles.toggleChip} title="Enable virtual display">
-                <input type="checkbox" checked={forkDisplay()} onChange={(e) => setForkDisplay(e.currentTarget.checked)} />
+            <Show when={s.displayAvailable()}>
+              <label class={controls.toggleChip} title="Enable virtual display">
+                <input type="checkbox" checked={s.forkDisplay()} onChange={(e) => s.setForkDisplay(e.currentTarget.checked)} />
                 <DisplayIcon width="1.2em" height="1.2em" />
               </label>
             </Show>
-            <Show when={sudoAvailable()}>
-              <label class={styles.toggleChip} title="Enable root access">
-                <input type="checkbox" checked={forkSudo()} onChange={(e) => setForkSudo(e.currentTarget.checked)} />
+            <Show when={s.sudoAvailable()}>
+              <label class={controls.toggleChip} title="Enable root access">
+                <input type="checkbox" checked={s.forkSudo()} onChange={(e) => s.setForkSudo(e.currentTarget.checked)} />
                 <SudoIcon width="1.2em" height="1.2em" />
               </label>
             </Show>
-            <Show when={gitHubTokenAvailable()}>
-              <label class={styles.toggleChip} title="Enable GitHub token">
-                <input type="checkbox" checked={forkGitHubToken()} onChange={(e) => setForkGitHubToken(e.currentTarget.checked)} />
+            <Show when={s.gitHubTokenAvailable()}>
+              <label class={controls.toggleChip} title="Enable GitHub token">
+                <input type="checkbox" checked={s.forkGitHubToken()} onChange={(e) => s.setForkGitHubToken(e.currentTarget.checked)} />
                 <TokenIcon width="1.2em" height="1.2em" />
               </label>
             </Show>
           </div>
           <div class={styles.forkActions}>
-            <button type="button" class={styles.forkCancel} onClick={() => setForkTaskId(null)}>Cancel</button>
-            <Button type="button" onClick={submitFork} disabled={!forkPrompt().trim()}>Fork</Button>
+            <button type="button" class={styles.forkCancel} onClick={() => s.setForkTaskId(null)}>Cancel</button>
+            <Button type="button" onClick={s.submitFork} disabled={!s.forkPrompt().trim()}>Fork</Button>
           </div>
         </dialog>
       </Show>
-      <VoiceOverlay tasks={tasks} recentRepo={() => repos()[0]?.path ?? ""} selectedHarness={selectedHarness} selectedModel={selectedModel}
-        serverCaps={() => ({ tailscaleAvailable: tailscaleAvailable(), usbAvailable: usbAvailable(), displayAvailable: displayAvailable(), sudoAvailable: sudoAvailable(), gitHubTokenAvailable: gitHubTokenAvailable() })} />
+
+      <VoiceOverlay
+        tasks={s.tasks}
+        recentRepo={() => s.repos()[0]?.path ?? ""}
+        selectedHarness={s.selectedHarness}
+        selectedModel={s.selectedModel}
+        serverCaps={s.serverCaps}
+      />
       <Portal>
         <div class={styles.toastContainer}>
-          <For each={warnings()}>
+          <For each={s.warnings()}>
             {(w) => (
               <div class={styles.toast}>
                 <span>{w.message}</span>
-                <button class={styles.toastDismiss} onClick={() => setWarnings((prev) => prev.filter((x) => x.id !== w.id))}>×</button>
+                <button class={styles.toastDismiss} onClick={() => s.dismissWarning(w.id)}>×</button>
               </div>
             )}
           </For>
@@ -1222,5 +241,14 @@ export default function App() {
       </Portal>
     </div>
     </Show>
+  );
+}
+
+/** Router layout for "/": provides the app store and renders the shell around routed panes. */
+export default function App(props: { children?: JSX.Element }) {
+  return (
+    <AppStateProvider>
+      <Shell>{props.children}</Shell>
+    </AppStateProvider>
   );
 }

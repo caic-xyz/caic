@@ -4,9 +4,6 @@ import { render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import type { Repo, PreferencesResp, HarnessInfo } from "@sdk/types.gen";
 
-const navigateMock = vi.fn();
-let pathname = "/";
-
 // Stub EventSource to prevent real SSE connections.
 // FakeEventSource captures message listeners so tests can push SSE events.
 type MessageListener = (e: { data: string }) => void;
@@ -19,15 +16,6 @@ class FakeEventSource {
   close = vi.fn();
   onerror: ((e: Event) => void) | null = null;
 }
-
-vi.mock("@solidjs/router", () => ({
-  useNavigate: () => navigateMock,
-  useLocation: () => ({
-    get pathname() {
-      return pathname;
-    },
-  }),
-}));
 
 vi.mock("./api", () => ({
   listRepos: vi.fn(),
@@ -47,6 +35,14 @@ vi.mock("./api", () => ({
   reviveTask: vi.fn(),
   globalTaskEvents: vi.fn(() => new FakeEventSource()),
   globalUsageEvents: vi.fn(() => new FakeEventSource()),
+  // Used by TaskDetail once a created task navigates into its detail route.
+  taskEvents: vi.fn(() => new FakeEventSource()),
+  sendInput: vi.fn(),
+  restartTask: vi.fn(),
+  clearContext: vi.fn(() => Promise.resolve({ status: "cleared" })),
+  compactContext: vi.fn(() => Promise.resolve({ status: "compacting" })),
+  syncTask: vi.fn(),
+  getTaskDiff: vi.fn(),
 }));
 
 vi.mock("./AuthContext", () => ({
@@ -71,8 +67,17 @@ function dispatchSSE(data: unknown) {
 }
 
 // Imports must follow vi.mock declarations.
-import App from "./App";
+import { MemoryRouter, createMemoryHistory } from "@solidjs/router";
+import { appRoutes } from "./routes";
 import * as api from "./api";
+
+/** Render the full app at an initial route, returning the memory history for assertions. */
+function renderApp(initial = "/") {
+  const history = createMemoryHistory();
+  history.set({ value: initial });
+  const utils = render(() => <MemoryRouter history={history}>{appRoutes()}</MemoryRouter>);
+  return { history, ...utils };
+}
 
 const repoA: Repo = { path: "repos/a", branch: "main", baseBranch: { name: "main" }, remoteURL: "" };
 const repoB: Repo = { path: "repos/b", branch: "main", baseBranch: { name: "main" }, remoteURL: "" };
@@ -86,8 +91,6 @@ function chipPathValues(): string[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  pathname = "/";
-  navigateMock.mockClear();
   fakeESListeners.length = 0;
   vi.mocked(api.listRepos).mockResolvedValue([repoA, repoB]);
   vi.mocked(api.getPreferences).mockResolvedValue({
@@ -115,26 +118,26 @@ beforeEach(() => {
 describe("App repo chips: No repository", () => {
   it("returns to the task list from the caic title", async () => {
     const user = userEvent.setup();
-    render(() => <App />);
+    const { history } = renderApp("/settings");
 
     await user.click(screen.getByRole("button", { name: "caic" }));
 
-    expect(navigateMock).toHaveBeenCalledWith("/");
+    expect(history.get()).toBe("/");
   });
 
   it("navigates to the settings page from the user menu", async () => {
     const user = userEvent.setup();
-    render(() => <App />);
+    const { history } = renderApp("/");
 
     await user.click(screen.getByRole("button", { name: "Menu" }));
     await user.click(screen.getByRole("button", { name: "Settings" }));
 
-    expect(navigateMock).toHaveBeenCalledWith("/settings");
+    expect(history.get()).toBe("/settings");
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
   });
 
   it("renders settings as a routed page instead of a dialog", async () => {
-    pathname = "/settings";
-    render(() => <App />);
+    renderApp("/settings");
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -143,7 +146,7 @@ describe("App repo chips: No repository", () => {
 
   it("has no chips after removing the last one", async () => {
     const user = userEvent.setup();
-    render(() => <App />);
+    renderApp();
 
     // Wait for initial load: repos/a chip should appear.
     await waitFor(() => {
@@ -159,7 +162,7 @@ describe("App repo chips: No repository", () => {
 
   it("stays empty after repos SSE event updates CI status", async () => {
     const user = userEvent.setup();
-    render(() => <App />);
+    renderApp();
 
     await waitFor(() => {
       expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument();
@@ -180,7 +183,7 @@ describe("App repo chips: No repository", () => {
 
   it("creates task without repos when no chips are selected", async () => {
     const user = userEvent.setup();
-    render(() => <App />);
+    renderApp();
 
     await waitFor(() => {
       expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument();
@@ -206,7 +209,7 @@ describe("App repo chip ordering", () => {
       harness: "",
       settings: { baseImage: "" },
     } as unknown as PreferencesResp);
-    render(() => <App />);
+    renderApp();
 
     await waitFor(() => {
       expect(screen.getByTestId("chip-label-repos/b")).toBeInTheDocument();
@@ -216,7 +219,7 @@ describe("App repo chip ordering", () => {
 
   it("cloned repo appears in add-dropdown (not Recent) before first task", async () => {
     const user = userEvent.setup();
-    render(() => <App />);
+    renderApp();
 
     // Wait for initial load: repos/a chip visible.
     await waitFor(() => {
@@ -259,7 +262,7 @@ describe("App repo chip ordering", () => {
 
   it("cloned repo moves to Recent section in add-dropdown after first task", async () => {
     const user = userEvent.setup();
-    render(() => <App />);
+    renderApp();
 
     await waitFor(() => {
       expect(screen.getByTestId("chip-label-repos/a")).toBeInTheDocument();

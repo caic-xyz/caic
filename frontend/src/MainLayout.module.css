@@ -1,0 +1,48 @@
+/* Styles for the new-task form in the main layout. */
+
+.submitForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  align-items: flex-start;
+  max-height: 15rem;
+  opacity: 1;
+  overflow: hidden;
+  transition: max-height 150ms ease-out, opacity 150ms ease-out, margin-bottom 150ms ease-out;
+}
+
+.promptInput {
+  flex: 1;
+  padding: 0.35rem 0.5rem;
+  resize: none;
+  font: inherit;
+  line-height: 1.4;
+  max-height: 10rem;
+  overflow-y: auto;
+}
+
+.hidden {
+  max-height: 0;
+  opacity: 0;
+  margin-bottom: 0;
+  pointer-events: none;
+  transition: none;
+}
+
+/* Mobile: <=768px */
+@media (max-width: 768px) {
+  .submitForm {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .submitForm.hidden {
+    max-height: 0;
+    overflow: hidden;
+  }
+
+  .promptInput {
+    min-height: 2.5rem;
+  }
+}
