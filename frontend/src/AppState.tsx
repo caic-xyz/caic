@@ -4,9 +4,9 @@ import { createContext, createEffect, createSignal, onCleanup, useContext, type 
 import { useNavigate, useLocation } from "@solidjs/router";
 import type { Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
 import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
-import type { RepoEntry } from "./RepoChipStrip";
+import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
-import { confirmTaskAction } from "./TaskCard";
+import { confirmTaskAction } from "./components/TaskCard";
 import { requestNotificationPermission, notifyWaiting, dismissNotification } from "./notifications";
 import { taskPath, taskIdFromPath } from "./taskPath";
 

@@ -52,7 +52,7 @@ vi.mock("./api", () => ({
 
 // Import after mocks are set up.
 import TaskDetail from "./TaskDetail";
-import { taskEvents } from "./api";
+import { taskEvents } from "../api";
 
 const baseProps = {
   taskId: "abc",

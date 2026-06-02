@@ -1,7 +1,7 @@
 // Compact card for a single task, used in the sidebar task list.
 import { For, Show, createSignal, onMount, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
-import type { DiffStat, CIStatus, ForgeCheck, TaskRepo, TaskState } from "@sdk/types.gen";
+import type { DiffStat, CIStatus, ForgeCheck, RuntimeInstance, TaskRepo, TaskState } from "@sdk/types.gen";
 import CIDot from "./CIDot";
 import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
@@ -12,7 +12,7 @@ import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
 import RestoreIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
 import TimerIcon from "@material-symbols/svg-400/outlined/timer.svg?solid";
 import styles from "./TaskCard.module.css";
-import { formatElapsed, formatTokens, tokenColor, stateColor, staleStateColor, isCacheStale } from "./formatting";
+import { formatElapsed, formatTokens, tokenColor, stateColor, staleStateColor, isCacheStale } from "../formatting";
 
 export interface TaskCardProps {
   id: string;
@@ -39,14 +39,7 @@ export interface TaskCardProps {
   diffStat?: DiffStat;
   error?: string;
   inPlanMode?: boolean;
-  runtime?: {
-    name: string;
-    tailscale?: string;
-    usb?: boolean;
-    display?: boolean;
-    sudo?: boolean;
-    vncPort?: number;
-  };
+  runtime?: RuntimeInstance;
   gitHubToken?: boolean;
   forgePR?: number;
   ciStatus?: CIStatus;

@@ -4,21 +4,21 @@ import { Portal } from "solid-js/web";
 import type { Harness } from "@sdk/types.gen";
 import { AppStateProvider, useAppState } from "./AppState";
 import { effortOptions } from "./effortOptions";
-import Dropdown from "./Dropdown";
-import RepoChipStrip from "./RepoChipStrip";
-import Login from "./Login";
-import AutoResizeTextarea from "./AutoResizeTextarea";
-import Button from "./Button";
-import UsageBadges from "./UsageBadges";
-import VoiceOverlay from "./VoiceOverlay";
-import CloneRepoDialog from "./CloneRepoDialog";
+import Dropdown from "./components/Dropdown";
+import RepoChipStrip from "./components/RepoChipStrip";
+import LoginPage from "./pages/LoginPage";
+import AutoResizeTextarea from "./components/AutoResizeTextarea";
+import Button from "./components/Button";
+import UsageBadges from "./components/UsageBadges";
+import VoiceOverlay from "./components/VoiceOverlay";
+import CloneRepoDialog from "./components/CloneRepoDialog";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
-import TokenIcon from "./github.svg?solid";
+import TokenIcon from "./components/github.svg?solid";
 import PersonIcon from "@material-symbols/svg-400/outlined/person.svg?solid";
 import SettingsIcon from "@material-symbols/svg-400/outlined/settings.svg?solid";
-import TailscaleIcon from "./tailscale.svg?solid";
+import TailscaleIcon from "./components/tailscale.svg?solid";
 import styles from "./App.module.css";
 import controls from "./controls.module.css";
 
@@ -38,7 +38,7 @@ function Shell(props: { children?: JSX.Element }) {
   const auth = s.auth;
 
   return (
-    <Show when={auth.providers().length === 0 || auth.user()} fallback={<Login />}>
+    <Show when={auth.providers().length === 0 || auth.user()} fallback={<LoginPage />}>
     <div class={styles.app}>
       <div class={styles.navbar}>
         <h1 class={styles.title}>

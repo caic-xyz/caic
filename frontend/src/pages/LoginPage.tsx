@@ -1,8 +1,8 @@
-// Login page: shows OAuth provider buttons when auth is enabled and user is not logged in.
+// LoginPage shows OAuth provider buttons when auth is enabled and user is not logged in.
 import { For } from "solid-js";
-import { useAuth } from "./AuthContext";
-import GitHubIcon from "./github.svg?solid";
-import GitLabIcon from "./gitlab.svg?solid";
+import { useAuth } from "../AuthContext";
+import GitHubIcon from "../components/github.svg?solid";
+import GitLabIcon from "../components/gitlab.svg?solid";
 
 function providerIcon(provider: string) {
   if (provider === "github") return <GitHubIcon width="1.4em" height="1.4em" />;
@@ -16,7 +16,7 @@ function providerLabel(provider: string): string {
   return `Sign in with ${provider}`;
 }
 
-export default function Login() {
+export default function LoginPage() {
   const { providers } = useAuth();
 
   return (

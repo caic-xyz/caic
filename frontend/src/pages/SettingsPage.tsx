@@ -1,13 +1,13 @@
-// Route pane for /settings — full-page application settings, fed from the app store.
-import SettingsPage from "./SettingsPage";
-import { useAppState } from "./AppState";
-import styles from "./layout.module.css";
+// SettingsPage is the /settings route, wiring application state into the settings form.
+import SettingsForm from "../components/SettingsForm";
+import { useAppState } from "../AppState";
+import styles from "../layout.module.css";
 
-export default function SettingsPane() {
+export default function SettingsPage() {
   const s = useAppState();
   return (
     <div class={styles.layout}>
-      <SettingsPage
+      <SettingsForm
         selectedImage={s.selectedImage}
         setSelectedImage={s.setSelectedImage}
         maxCPUs={s.maxCPUs}

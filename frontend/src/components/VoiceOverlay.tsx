@@ -1,11 +1,11 @@
 // Voice overlay component: persistent bottom panel with mic button and voice controls.
 import { createEffect, createSignal, For, Show, untrack, onCleanup, onMount } from "solid-js";
 import type { Task } from "@sdk/types.gen";
-import { voiceSession } from "./VoiceSession";
-import type { VoiceState, TranscriptEntry, VoiceSession } from "./VoiceSession";
-import type { ServerCapabilities } from "./FunctionDeclarations";
-import { setVoiceActive } from "./notifications";
-import { setVoiceConnected, setVoiceTaskNumberMap } from "./VoiceState";
+import { voiceSession } from "../VoiceSession";
+import type { VoiceState, TranscriptEntry, VoiceSession } from "../VoiceSession";
+import type { ServerCapabilities } from "../FunctionDeclarations";
+import { setVoiceActive } from "../notifications";
+import { setVoiceConnected, setVoiceTaskNumberMap } from "../VoiceState";
 import styles from "./VoiceOverlay.module.css";
 import MicIcon from "@material-symbols/svg-400/outlined/mic.svg?solid";
 import MicOffIcon from "@material-symbols/svg-400/outlined/mic_off.svg?solid";

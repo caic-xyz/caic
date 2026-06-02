@@ -1,7 +1,7 @@
 // Reusable prompt input with image support: paste, drag & drop, attach button, and preview strip.
 import { createSignal, For, Show, type JSX } from "solid-js";
 import type { ImageData as APIImageData } from "@sdk/types.gen";
-import { captureScreen, fileToImageData, imagesFromClipboard } from "./images";
+import { captureScreen, fileToImageData, imagesFromClipboard } from "../images";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import Button from "./Button";
 import CameraCapture from "./CameraCapture";

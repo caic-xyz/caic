@@ -4,7 +4,7 @@
 import { createSignal, createEffect, createMemo, For, Show, onMount, onCleanup } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import type { ProcessInfo } from "@sdk/types.gen";
-import { getTaskProcesses, signalProcess } from "./api";
+import { getTaskProcesses, signalProcess } from "../api";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 import ChevronRightIcon from "@material-symbols/svg-400/outlined/chevron_right.svg?solid";
 import ExpandIcon from "@material-symbols/svg-400/outlined/expand.svg?solid";

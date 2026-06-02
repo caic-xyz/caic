@@ -1,11 +1,11 @@
-// SettingsPage renders the full-page application settings view.
+// SettingsForm renders the application settings controls.
 import { For, Show, type Accessor, type Setter } from "solid-js";
 import type { CacheMappingResp, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
-import styles from "./SettingsPage.module.css";
+import styles from "./SettingsForm.module.css";
 
 type SettingsOverrides = Partial<UpdatePreferencesReq["settings"]>;
 
-interface SettingsPageProps {
+interface SettingsFormProps {
   selectedImage: Accessor<string>;
   setSelectedImage: Setter<string>;
   maxCPUs: Accessor<number>;
@@ -28,7 +28,7 @@ interface SettingsPageProps {
   triggerServerUpdate: () => Promise<void>;
 }
 
-export default function SettingsPage(props: SettingsPageProps) {
+export default function SettingsForm(props: SettingsFormProps) {
   const updateCacheMapping = (index: number, update: Partial<CacheMappingResp>) => {
     props.setCacheMappings((prev) => prev.map((mapping, i) => (
       i === index ? { ...mapping, ...update } : mapping

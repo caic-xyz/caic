@@ -54,6 +54,24 @@ def _py_docstring(lines, i):
     return ""
 
 
+def _c_style_block_comment(lines: list[str], i: int) -> str:
+    """Extract the description from a C-style block comment starting at lines[i]."""
+    comment_parts = []
+    for line_index, line in enumerate(lines[i:]):
+        text = line.strip()
+        if line_index == 0:
+            text = text[2:].strip()
+        end = text.find("*/")
+        if end >= 0:
+            text = text[:end].strip()
+        text = text.lstrip("*").strip()
+        if text:
+            comment_parts.append(text)
+        if end >= 0:
+            break
+    return " ".join(comment_parts)
+
+
 def get_file_description(filepath):
     """Return the description for a file, or None if not applicable.
 
@@ -66,6 +84,7 @@ def get_file_description(filepath):
         "*.d.ts": None,
         "pnpm-lock.yaml": None,
         "*.cjs": "//",
+        "*.css": "/*",
         "*.go": "//",
         "*.js": "//",
         "*.kt": "//",
@@ -100,6 +119,8 @@ def get_file_description(filepath):
             continue
         if fname.endswith(".py") and (sline.startswith('"""') or sline.startswith("'''")):
             return _py_docstring(lines, i)
+        if prefix == "/*" and sline.startswith(prefix):
+            return _c_style_block_comment(lines, i)
         # Skip common directives/metadata that aren't descriptions.
         if sline.startswith(f"{prefix}go:"):
             continue

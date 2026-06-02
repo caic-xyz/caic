@@ -1,17 +1,17 @@
 // TaskDetail renders the real-time agent output stream for a single task.
 import { createSignal, createMemo, createEffect, For, Index, Show, onCleanup, onMount, untrack, Switch, Match, type Accessor } from "solid-js";
 import { A, useNavigate, useLocation } from "@solidjs/router";
-import { sendInput as apiSendInput, restartTask as apiRestartTask, clearContext as apiClearContext, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEvents, getTaskToolInput, botFixPR } from "./api";
+import { sendInput as apiSendInput, restartTask as apiRestartTask, clearContext as apiClearContext, compactContext as apiCompactContext, syncTask as apiSyncTask, taskEvents, getTaskToolInput, botFixPR } from "../api";
 import type { EventMessage, EventResult, AskQuestion, EventAsk, EventTextDelta, SafetyIssue, ImageData as APIImageData, SyncTarget, DiffFileStat, ForgeCheck, EventStats } from "@sdk/types.gen";
-import { groupMessagesInc, resetGroupIncCache, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "./grouping";
-import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "./formatting";
-import type { ToolCall } from "./grouping";
+import { groupMessagesInc, resetGroupIncCache, groupSessions, isSessionBoundary, buildPastSessionItems, buildTurnItems, toolCountSummary, turnSummary, sessionSummary, type MsgItem, type MessageGroup, type Session } from "../grouping";
+import { formatDuration, formatElapsed, formatTokens, toolCallDetail } from "../formatting";
+import type { ToolCall } from "../grouping";
 import { SyncTargetDefault } from "@sdk/types.gen";
 import { Marked } from "marked";
 import AutoResizeTextarea from "./AutoResizeTextarea";
 import PromptInput from "./PromptInput";
 import Button from "./Button";
-import { requestNotificationPermission } from "./notifications";
+import { requestNotificationPermission } from "../notifications";
 import ProgressPanel from "./ProgressPanel";
 import StatsIcon from "./StatsIcon";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";

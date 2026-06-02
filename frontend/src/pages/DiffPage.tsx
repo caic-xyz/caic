@@ -1,12 +1,12 @@
-// Route pane for /task/:taskId/processes — full-page process tree viewer.
+// DiffPage is the /task/:taskId/diff route for a task's file changes.
 import { Show } from "solid-js";
 import { useParams } from "@solidjs/router";
-import ProcessDetail from "./ProcessDetail";
-import { useAppState } from "./AppState";
-import { taskIdFromParam, taskPath } from "./taskPath";
-import styles from "./layout.module.css";
+import DiffDetail from "../components/DiffDetail";
+import { useAppState } from "../AppState";
+import { taskIdFromParam, taskPath } from "../taskPath";
+import styles from "../layout.module.css";
 
-export default function ProcessesPane() {
+export default function DiffPage() {
   const s = useAppState();
   const params = useParams();
   const id = () => taskIdFromParam(params.taskId);
@@ -21,10 +21,10 @@ export default function ProcessesPane() {
         };
         return (
           <div class={styles.detailPane}>
-            <ProcessDetail
+            <DiffDetail
               taskId={taskId}
-              repo={t()?.repos?.[0]?.name ?? ""}
-              branch={t()?.repos?.[0]?.branch ?? ""}
+              diffStat={t()?.diffStat ?? []}
+              repos={(t()?.repos ?? []).map((r) => ({ name: r.name, branch: r.branch }))}
               taskPath={tp()}
             />
           </div>

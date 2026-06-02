@@ -5,9 +5,9 @@ import RepoChipStrip from "./RepoChipStrip";
 import PromptInput from "./PromptInput";
 import Button from "./Button";
 import TaskList from "./TaskList";
-import { useAppState } from "./AppState";
-import { effortOptions } from "./effortOptions";
-import { voiceConnected, getVoiceTaskNumber } from "./VoiceState";
+import { useAppState } from "../AppState";
+import { effortOptions } from "../effortOptions";
+import { voiceConnected, getVoiceTaskNumber } from "../VoiceState";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
@@ -15,8 +15,8 @@ import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid
 import TokenIcon from "./github.svg?solid";
 import TailscaleIcon from "./tailscale.svg?solid";
 import styles from "./MainLayout.module.css";
-import controls from "./controls.module.css";
-import layout from "./layout.module.css";
+import controls from "../controls.module.css";
+import layout from "../layout.module.css";
 
 export default function MainLayout(props: { children?: JSX.Element }) {
   const s = useAppState();

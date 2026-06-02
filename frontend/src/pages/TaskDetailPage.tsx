@@ -1,12 +1,12 @@
-// Route pane for /task/:taskId — renders the live agent output stream for a task.
+// TaskDetailPage is the /task/:taskId route for the live agent output stream.
 import { Show } from "solid-js";
 import { useParams } from "@solidjs/router";
-import TaskDetail from "./TaskDetail";
-import { useAppState } from "./AppState";
-import { taskIdFromParam } from "./taskPath";
-import styles from "./layout.module.css";
+import TaskDetail from "../components/TaskDetail";
+import { useAppState } from "../AppState";
+import { taskIdFromParam } from "../taskPath";
+import styles from "../layout.module.css";
 
-export default function TaskDetailPane() {
+export default function TaskDetailPage() {
   const s = useAppState();
   const params = useParams();
   const id = () => taskIdFromParam(params.taskId);

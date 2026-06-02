@@ -2,7 +2,7 @@
 import { createEffect, createSignal, For, Show, onCleanup } from "solid-js";
 import { Portal } from "solid-js/web";
 import type { BranchInfo, Repo } from "@sdk/types.gen";
-import { listRepoBranches } from "./api";
+import { listRepoBranches } from "../api";
 import styles from "./RepoChipStrip.module.css";
 
 export type RepoEntry = { path: string; branch: string };
