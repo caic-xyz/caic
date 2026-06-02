@@ -28,11 +28,11 @@ func InitRepo(ctx context.Context, tmpDir string) (string, error) {
 }
 
 // InitHarnessCache pre-populates the harness model cache with fresh dummy
-// entries so refreshHarnessModels skips launching temp containers for Pi and
-// OpenCode model discovery during smoke and e2e tests.
+// entries so refreshHarnessModels skips launching temp containers for real
+// harness model discovery during smoke and e2e tests.
 func InitHarnessCache(cacheDir string) error {
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-	for _, h := range []agent.Harness{agent.Pi, agent.OpenCode} {
+	for _, h := range []agent.Harness{agent.Codex, agent.Pi, agent.OpenCode} {
 		cache.SetModels(h, []string{"fake-model"}, "")
 	}
 	return nil

@@ -73,6 +73,7 @@ type Config struct {
 	// LLM features (title generation, commit descriptions).
 	LLMProvider string
 	LLMModel    string
+	DisableLLM  bool
 
 	// GitHub — PAT for server-level API access (forges, autoupdate); OAuth for user login.
 	GitHubToken             string // PAT for GitHub API access

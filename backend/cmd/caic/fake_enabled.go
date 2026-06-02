@@ -60,6 +60,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 	}
 	defer func() { retErr = errors.Join(retErr, os.RemoveAll(fakeLogsDir)) }()
 	cfg.CacheDir = fakeLogsDir
+	cfg.DisableLLM = true
 
 	// If a trace file is specified, copy it to the tasks log directory so it
 	// gets loaded as a purged task on startup.
@@ -83,7 +84,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 	}
 
 	// Pre-populate the harness model cache so refreshHarnessModels skips
-	// launching temporary containers for Pi and OpenCode model discovery.
+	// launching temporary containers for real harness model discovery.
 	if err := smoketest.InitHarnessCache(fakeLogsDir); err != nil {
 		return fmt.Errorf("init fake harness cache: %w", err)
 	}

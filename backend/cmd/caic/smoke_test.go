@@ -207,6 +207,7 @@ func startSmokeServer(t *testing.T) (string, context.CancelFunc) {
 		ConfigDir:      configDir,
 		CacheDir:       cacheDir,
 		SkipWarmup:     true,
+		DisableLLM:     true,
 		Runtime:        "docker",
 		IPGeoAllowlist: "0.0.0.0/0,::/0",
 	}

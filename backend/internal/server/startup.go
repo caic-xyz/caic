@@ -220,16 +220,16 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		}
 	}
 
-	// Determine LLM provider: use configured value or auto-detect
+	// Determine LLM provider: use configured value or auto-detect.
 	llmProvider := cfg.LLMProvider
-	if llmProvider == "" {
+	if !cfg.DisableLLM && llmProvider == "" {
 		llmProvider = autoDetectLLMProvider(ctx, cfg.CoreEnv, cfg.GeminiAPIKey)
 		if llmProvider != "" {
 			slog.Info("auto-detected LLM provider", "prov", llmProvider)
 		}
 	}
 
-	if llmProvider != "" {
+	if !cfg.DisableLLM && llmProvider != "" {
 		if c, ok := providers.All[llmProvider]; !ok || c.Factory == nil {
 			slog.Warn("unknown LLM provider for title generation", "prov", llmProvider)
 		} else {
