@@ -26,6 +26,13 @@ class ResizeObserverStub {
 }
 globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
 
+// jsdom logs "not implemented" warnings for scrollTo; tests only need it to
+// exist for components that restore scroll position during route changes.
+Object.defineProperty(window, "scrollTo", {
+  writable: true,
+  value: () => {},
+});
+
 // jsdom does not implement HTMLDialogElement.showModal / close; stub them so
 // components using native <dialog> (CloneRepoDialog, CameraCapture) don't
 // throw when calling showModal in onMount.

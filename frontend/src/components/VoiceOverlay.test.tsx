@@ -8,7 +8,7 @@ const { connectMock, disconnectMock } = vi.hoisted(() => ({
   disconnectMock: vi.fn(),
 }));
 
-vi.mock("./VoiceSession", () => ({
+vi.mock("../VoiceSession", () => ({
   voiceSession: {
     state: {
       connectStatus: null,
@@ -38,11 +38,11 @@ vi.mock("./VoiceSession", () => ({
   },
 }));
 
-vi.mock("./notifications", () => ({
+vi.mock("../notifications", () => ({
   setVoiceActive: vi.fn(),
 }));
 
-vi.mock("./VoiceState", () => ({
+vi.mock("../VoiceState", () => ({
   voiceConnected: vi.fn(() => false),
   setVoiceConnected: vi.fn(),
   setVoiceTaskNumberMap: vi.fn(),

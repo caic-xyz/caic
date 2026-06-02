@@ -26,7 +26,7 @@ vi.mock("@solidjs/router", () => ({
 }));
 
 // Mock the API module to stub out EventSource (SSE) and other network calls.
-vi.mock("./api", () => ({
+vi.mock("../api", () => ({
   taskEvents: vi.fn((_id: string, _cb: unknown) => {
     const fakeES = {
       addEventListener: vi.fn((_event: string, _handler: () => void) => {}),
