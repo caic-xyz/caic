@@ -31,9 +31,7 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          build-root-directory: android
+        uses: gradle/actions/setup-gradle@v6
       - name: Accept Android SDK Licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
       - name: Lint
@@ -83,9 +81,7 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          build-root-directory: android
+        uses: gradle/actions/setup-gradle@v6
       - name: Accept Android SDK Licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
       - name: Enable KVM
@@ -108,13 +104,6 @@ jobs:
           script: |
             adb shell 'while ! pm list packages > /dev/null 2>&1; do echo "Waiting for package manager..."; sleep 2; done'
             make android-e2e
-      - name: Upload Coverage
-        if: always()
-        uses: codecov/codecov-action@v6
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          flags: android-e2e
-          files: android/app/build/reports/coverage/androidTest/debug/report.xml,sdk/halo/build/reports/coverage/androidTest/debug/report.xml
       - name: Upload E2E logs on failure
         if: failure()
         uses: actions/upload-artifact@v7
