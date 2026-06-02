@@ -74,6 +74,7 @@ lint-all: lint-go lint-frontend lint-python lint-binaries lint-android lint-docs
 
 lint-docs:
 	@python3 scripts/update_agents_file_index.py --check
+	@python3 scripts/update_backend_architecture.py --check
 
 lint-go:
 	@which golangci-lint > /dev/null || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
@@ -132,6 +133,7 @@ lint-fix: $(FRONTEND_STAMP)
 	@ruff check --fix .
 	@ruff format .
 	@./scripts/update_agents_file_index.py
+	@./scripts/update_backend_architecture.py
 
 git-hooks:
 	@mkdir -p .git/hooks
