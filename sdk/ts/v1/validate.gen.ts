@@ -424,7 +424,7 @@ export function validateForgeCheck(raw: unknown): ForgeCheck {
 export function validateRuntimeInstance(raw: unknown): RuntimeInstance {
   const obj = asObject(raw, "RuntimeInstance");
   return {
-    name: asString(obj["name"], "RuntimeInstance.name"),
+    id: asString(obj["id"], "RuntimeInstance.id"),
     tailscale: (obj["tailscale"] === undefined || obj["tailscale"] === null ? undefined : asString(obj["tailscale"], "RuntimeInstance.tailscale")),
     usb: (obj["usb"] === undefined || obj["usb"] === null ? undefined : asBoolean(obj["usb"], "RuntimeInstance.usb")),
     display: (obj["display"] === undefined || obj["display"] === null ? undefined : asBoolean(obj["display"], "RuntimeInstance.display")),

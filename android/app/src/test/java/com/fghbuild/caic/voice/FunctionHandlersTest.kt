@@ -43,7 +43,7 @@ class FunctionHandlersTest {
                     cumulativeCacheCreationInputTokens = 0, cumulativeCacheReadInputTokens = 0,
                     activeInputTokens = 0, activeCacheReadTokens = 0, contextWindowLimit = 200_000,
                     harness = Harness.Claude,
-                    runtime = RuntimeInstance(name = "ctr"),
+                    runtime = RuntimeInstance(id = "ctr"),
                 )
             )
         )
@@ -104,7 +104,7 @@ class FunctionHandlersTest {
                     "cumulativeCacheCreationInputTokens":0,"cumulativeCacheReadInputTokens":0,
                     "activeInputTokens":0,"activeCacheReadTokens":0,
                     "contextWindowLimit":200000,"harness":"claude",
-                    "runtime":{"name":"ctr"}
+                    "runtime":{"id":"ctr"}
                 }]
                 """,
             ),
@@ -131,7 +131,7 @@ class FunctionHandlersTest {
                     "cumulativeCacheCreationInputTokens":0,"cumulativeCacheReadInputTokens":0,
                     "activeInputTokens":0,"activeCacheReadTokens":0,
                     "contextWindowLimit":200000,"harness":"claude",
-                    "runtime":{"name":"ctr"}
+                    "runtime":{"id":"ctr"}
                 }]
                 """,
             ),
@@ -211,7 +211,7 @@ class FunctionHandlersTest {
                     "cumulativeCacheCreationInputTokens":0,"cumulativeCacheReadInputTokens":0,
                     "activeInputTokens":0,"activeCacheReadTokens":0,
                     "contextWindowLimit":200000,"harness":"claude",
-                    "runtime":{"name":"ctr"}
+                    "runtime":{"id":"ctr"}
                 }]
             """.trimIndent()))
         val h = handlers()

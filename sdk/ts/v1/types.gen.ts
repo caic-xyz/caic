@@ -680,8 +680,8 @@ export interface DiffFileStat {
 
 /** RuntimeInstance holds per-task runtime metadata. */
 export interface RuntimeInstance {
-  /** Runtime instance name/ID. */
-  name: string;
+  /** Runtime instance ID. */
+  id: string;
   /** Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. */
   tailscale?: string;
   usb?: boolean;

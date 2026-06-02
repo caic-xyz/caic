@@ -23,7 +23,7 @@ type CreateParams struct {
 	Display     bool
 	Sudo        bool
 	GitHubToken bool                 // inject GitHub token into the runtime environment
-	DockerImage string               // resolved base image
+	BaseImage   string               // resolved base image
 	MaxCPUs     int                  // max CPU cores; 0 means use the default
 	CacheMounts []runtime.CacheMount // resolved build cache mounts
 

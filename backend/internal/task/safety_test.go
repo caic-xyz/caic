@@ -149,7 +149,7 @@ func TestCheckSafety(t *testing.T) {
 
 	t.Run("RemoteRef", func(t *testing.T) {
 		t.Parallel()
-		// After Container.Fetch, commits live at refs/remotes/<container>/<branch>,
+		// After Runtime.Fetch, commits live at refs/remotes/<runtime>/<branch>,
 		// not a local branch. CheckSafety must work with full ref paths.
 		ctx := t.Context()
 		clone := initTestRepo(t, "main")
@@ -161,7 +161,7 @@ func TestCheckSafety(t *testing.T) {
 		runGit(t, clone, "add", "new.go")
 		runGit(t, clone, "commit", "-m", "add file")
 
-		// Simulate what Container.Fetch does: store the commit under a remote ref.
+		// Simulate what Runtime.Fetch does: store the commit under a remote ref.
 		runGit(t, clone, "update-ref", "refs/remotes/md-caic-0/caic-0", "caic-0")
 		// Delete the local branch so only the remote ref remains.
 		runGit(t, clone, "checkout", "main")

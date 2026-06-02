@@ -519,8 +519,8 @@ public struct DiffFileStat: Codable {
 
 /// RuntimeInstance holds per-task runtime metadata.
 public struct RuntimeInstance: Codable {
-    /// Runtime instance name/ID.
-    public let name: String
+    /// Runtime instance ID.
+    public let id: String
     /// Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
     public let tailscale: String?
     public let usb: Bool?

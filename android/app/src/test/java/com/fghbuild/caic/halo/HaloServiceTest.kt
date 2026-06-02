@@ -164,6 +164,6 @@ class HaloServiceTest {
         activeCacheReadTokens = 0,
         contextWindowLimit = 0,
         harness = Harness.Claude,
-        runtime = RuntimeInstance(name = "test"),
+        runtime = RuntimeInstance(id = "test"),
     )
 }

@@ -28,7 +28,7 @@ class TaskDetailBodyTest {
         id = "t1",
         initialPrompt = prompt,
         title = "Test task",
-        runtime = RuntimeInstance(name = "c1"),
+        runtime = RuntimeInstance(id = "c1"),
         state = state,
         stateUpdatedAt = Instant.EPOCH,
         costUSD = 0.0,

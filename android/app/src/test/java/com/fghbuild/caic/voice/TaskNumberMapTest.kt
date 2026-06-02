@@ -29,7 +29,7 @@ class TaskNumberMapTest {
         activeCacheReadTokens = 0,
         contextWindowLimit = 0,
         harness = Harness.Claude,
-        runtime = RuntimeInstance(name = "test-ctr"),
+        runtime = RuntimeInstance(id = "test-ctr"),
     )
 
     @Test

@@ -189,7 +189,7 @@ type TaskRepo struct {
 
 // RuntimeInstance holds per-task runtime metadata.
 type RuntimeInstance struct {
-	Name      string `json:"name"`                // Runtime instance name/ID.
+	ID        string `json:"id"`                  // Runtime instance ID.
 	Tailscale string `json:"tailscale,omitempty"` // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
 	USB       bool   `json:"usb,omitempty"`
 	Display   bool   `json:"display,omitempty"`

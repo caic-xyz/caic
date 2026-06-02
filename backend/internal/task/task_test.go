@@ -64,7 +64,7 @@ func TestTask(t *testing.T) {
 			func(i int) { tk.SetRepoBranch(0, "task-"+strconv.Itoa(i)) },
 			func(i int) { tk.SetRepoBranch(1, "extra-"+strconv.Itoa(i)) },
 			func(i int) {
-				tk.SetContainerInfo("ctr-"+strconv.Itoa(i), "host.example", "https://auth.example", 5900+i)
+				tk.SetRuntimeInstanceInfo(runtime.InstanceID("ctr-"+strconv.Itoa(i)), "host.example", "https://auth.example", 5900+i)
 			},
 			func(i int) { tk.SetVNCPort(6000 + i) },
 			func(i int) { tk.SetRelayOffset(int64(i)) },
@@ -88,7 +88,7 @@ func TestTask(t *testing.T) {
 					_ = tk.Primary()
 					_ = tk.RuntimeRepos()
 					_ = tk.ExtraRuntimeRepos()
-					_ = tk.ContainerName()
+					_ = tk.RuntimeInstanceID()
 					_ = tk.RelayOffsetValue()
 					_, _, _ = tk.SudoLookupState()
 					_ = tk.GitHubTokenEnabled()

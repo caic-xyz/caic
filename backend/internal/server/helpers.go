@@ -18,7 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 )
 
-// relayStatus describes the state of the in-container relay daemon, probed
+// relayStatus describes the state of the runtime-instance relay daemon, probed
 // over SSH when SendInput fails. Combined with the task state and session
 // status (from task.SendInput's error), the three values pinpoint why input
 // delivery failed:
@@ -28,14 +28,14 @@ import (
 //     is still running; reconnect should recover.
 //   - state=running session=none  relay=alive → state-machine bug: state says
 //     running but no Go-side session object exists.
-//   - state=pending session=none  relay=no-container → task never started.
+//   - state=pending session=none  relay=no-instance → task never started.
 type relayStatus string
 
 const (
 	relayAlive       relayStatus = "alive"        // Relay socket exists; daemon is running.
 	relayDead        relayStatus = "dead"         // No socket; daemon exited or was never started.
-	relayCheckFailed relayStatus = "check-failed" // SSH probe failed (container unreachable).
-	relayNoContainer relayStatus = "no-container" // Task has no container yet.
+	relayCheckFailed relayStatus = "check-failed" // SSH probe failed (runtime instance unreachable).
+	relayNoInstance  relayStatus = "no-instance"  // Task has no runtime instance yet.
 )
 
 // CreateAuthTokenConfig is the request for POST /v1alpha/auth_tokens.

@@ -1,5 +1,5 @@
 // Package task orchestrates a single coding agent task: branch creation,
-// container lifecycle, agent execution, and git integration.
+// instance lifecycle, agent execution, and git integration.
 package task
 
 import (
@@ -39,19 +39,19 @@ type State int
 const (
 	StatePending      State = iota
 	StateBranching          // Creating git branch.
-	StateProvisioning       // Starting docker container.
+	StateProvisioning       // Starting runtime instance.
 	StateStarting           // Launching agent session.
 	StateRunning            // Agent is executing.
 	StateWaiting            // Agent completed a turn, awaiting user input or purge.
 	StateAsking             // Agent asked a question (AskUserQuestion), needs answer.
 	StateHasPlan            // Agent finished planning (ExitPlanMode with plan content), awaiting approval.
-	StatePulling            // Pulling changes from container.
+	StatePulling            // Pulling changes from instance.
 	StatePushing            // Pushing to origin.
-	StateStopping           // Graceful stop in progress (container being stopped, preserved for revival).
-	StateStopped            // Container stopped but not deleted; can be revived.
+	StateStopping           // Graceful stop in progress (instance being stopped, preserved for revival).
+	StateStopped            // Runtime stopped but not deleted; can be revived.
 	StatePurging            // User requested purge; cleanup in progress.
 	StateFailed             // Failed at some stage.
-	StatePurged             // Container deleted, task is final.
+	StatePurged             // Runtime deleted, task is final.
 )
 
 func (s State) String() string {
@@ -116,7 +116,7 @@ func (h *SessionHandle) CloseMsgCh() {
 // agent never produces a ResultMessage in this path — callers should use
 // live stats from the Task instead.
 //
-// On timeout, the caller should kill the container/SSH, then call Drain to
+// On timeout, the caller should kill the instance/SSH, then call Drain to
 // unblock the read loop.
 func (h *SessionHandle) GracefulStop(ctx context.Context, timeout time.Duration) error {
 	stopCtx, stopCancel := context.WithTimeout(ctx, timeout)
@@ -126,7 +126,7 @@ func (h *SessionHandle) GracefulStop(ctx context.Context, timeout time.Duration)
 }
 
 // Drain waits for the session read loop to finish (useful after a timeout
-// where the container was killed externally), then closes the message channel
+// where the instance was killed externally), then closes the message channel
 // and waits for the dispatch goroutine to complete.
 func (h *SessionHandle) Drain() {
 	_ = h.Session.Wait()
@@ -175,13 +175,13 @@ type Task struct {
 	Harness       agent.Harness        // Agent harness ("claude", "gemini", etc.).
 	Model         string               // User-requested model; passed to agent CLI.
 	Effort        string               // Thinking effort; passed to agent CLI. Empty = default.
-	DockerImage   string               // Custom Docker base image; empty means use the default.
-	MaxCPUs       int                  // Max CPU cores for the container; 0 means use the default.
+	BaseImage     string               // Custom runtime base image; empty means use the default.
+	MaxCPUs       int                  // Max CPU cores for the instance; 0 means use the default.
 	CacheMounts   []runtime.CacheMount // Build cache mounts baked into the runtime image.
-	Tailscale     bool                 // Enable Tailscale networking in the container.
-	USB           bool                 // Enable USB passthrough in the container.
-	Display       bool                 // Enable Xvfb display in the container.
-	Sudo          bool                 // Enable root access (password-based sudo) in the container.
+	Tailscale     bool                 // Enable Tailscale networking in the instance.
+	USB           bool                 // Enable USB passthrough in the instance.
+	Display       bool                 // Enable Xvfb display in the instance.
+	Sudo          bool                 // Enable root access (password-based sudo) in the instance.
 	StartedAt     time.Time            // When the task was created.
 	OwnerID       string               // Internal user ID of the creator; empty in no-auth mode.
 	ForgeIssue    int                  // Originating issue number for bot comment callbacks; 0 = none.
@@ -191,16 +191,16 @@ type Task struct {
 	// adoption. After a task is published in the Manager registry, access them
 	// through Task methods so readers and async lifecycle goroutines synchronize.
 	Repos            []RepoMount // index 0 = primary; empty = no-repo
-	Container        string
-	TailscaleFQDN    string // Tailscale FQDN assigned to the container (empty if not available).
-	TailscaleAuthURL string // Tailscale browser auth URL when no pre-auth key was available.
-	RelayOffset      int64  // Bytes received from relay output.jsonl, for reconnect.
-	SudoPassword     string // Random sudo password; empty if sudo is not enabled.
-	VNCPort          int    // VNC WebSocket port inside the container (0 = no VNC). Set during launch.
-	GitHubToken      bool   // Inject GitHub token into the container's environment.
+	TailscaleFQDN    string      // Tailscale FQDN assigned to the instance (empty if not available).
+	TailscaleAuthURL string      // Tailscale browser auth URL when no pre-auth key was available.
+	RelayOffset      int64       // Bytes received from relay output.jsonl, for reconnect.
+	SudoPassword     string      // Random sudo password; empty if sudo is not enabled.
+	VNCPort          int         // VNC WebSocket port inside the instance (0 = no VNC). Set during launch.
+	GitHubToken      bool        // Inject GitHub token into the instance's environment.
 
 	// mu protects mutable task metadata above and all fields below.
 	mu                    sync.Mutex
+	runtimeInstanceID     runtime.InstanceID
 	logPath               string // Absolute JSONL log path used for appending task metadata.
 	statsRing             [statsRingSize]runtime.Stats
 	statsLen              int
@@ -212,7 +212,7 @@ type Task struct {
 	reportedModel         string    // Model reported by SystemInitMessage (may differ from Model).
 	agentVersion          string    // Agent version, captured from SystemInitMessage.
 	reportedContextWindow int       // Context window size reported by the agent (0 = unknown).
-	planFile              string    // Path to plan file inside container, captured from Write tool_use.
+	planFile              string    // Path to plan file inside instance, captured from Write tool_use.
 	planContent           string    // Content of the plan file, captured from Write tool_use input.
 	planDismissed         bool      // True after ClearMessages; suppresses plan tracking until the next ResultMessage.
 	inPlanMode            bool      // True while the agent is in plan mode (between EnterPlanMode and ExitPlanMode).
@@ -408,18 +408,18 @@ func (t *Task) SetRepoBranch(i int, branch string) {
 	t.Repos[i].Branch = branch
 }
 
-// ContainerName returns the current container name.
-func (t *Task) ContainerName() string {
+// RuntimeInstanceID returns the current runtime instance ID.
+func (t *Task) RuntimeInstanceID() runtime.InstanceID {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.Container
+	return t.runtimeInstanceID
 }
 
-// SetContainerInfo records container metadata assigned during setup or adoption.
-func (t *Task) SetContainerInfo(name, tailscaleFQDN, tailscaleAuthURL string, vncPort int) {
+// SetRuntimeInstanceInfo records runtime instance metadata assigned during setup or adoption.
+func (t *Task) SetRuntimeInstanceInfo(id runtime.InstanceID, tailscaleFQDN, tailscaleAuthURL string, vncPort int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.Container = name
+	t.runtimeInstanceID = id
 	t.TailscaleFQDN = tailscaleFQDN
 	t.TailscaleAuthURL = tailscaleAuthURL
 	t.VNCPort = vncPort
@@ -454,10 +454,10 @@ func (t *Task) SetLogPath(path string) {
 }
 
 // SudoLookupState returns the sudo lookup inputs and cached password.
-func (t *Task) SudoLookupState() (enabled bool, container, password string) {
+func (t *Task) SudoLookupState() (enabled bool, id runtime.InstanceID, password string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.Sudo, t.Container, t.SudoPassword
+	return t.Sudo, t.runtimeInstanceID, t.SudoPassword
 }
 
 // SetSudoPassword caches a sudo password on the task.
@@ -718,7 +718,7 @@ type Snapshot struct {
 	StateUpdatedAt     time.Time
 	TurnStartedAt      time.Time // non-zero only while state is Running
 	Repos              []RepoMount
-	Container          string
+	RuntimeInstanceID  runtime.InstanceID
 	Tailscale          bool
 	TailscaleFQDN      string
 	TailscaleAuthURL   string
@@ -767,7 +767,7 @@ func (t *Task) Snapshot() Snapshot {
 		StateUpdatedAt:     t.stateUpdatedAt,
 		TurnStartedAt:      t.turnStartedAt,
 		Repos:              append([]RepoMount(nil), t.Repos...),
-		Container:          t.Container,
+		RuntimeInstanceID:  t.runtimeInstanceID,
 		Tailscale:          t.Tailscale,
 		TailscaleFQDN:      t.TailscaleFQDN,
 		TailscaleAuthURL:   t.TailscaleAuthURL,
@@ -823,7 +823,7 @@ func (t *Task) Messages() []agent.Message {
 //   - Trailing ResultMessage (no ask) → StateWaiting
 //   - No trailing ResultMessage → state unchanged (agent was mid-output)
 //
-// Called during both log loading (loadPurgedTasks) and container adoption
+// Called during both log loading (loadPurgedTasks) and instance adoption
 // (adoptOne). For adoption, the caller must handle the case where state
 // remains StateRunning with no relay alive — see adoptOne.
 func (t *Task) RestoreMessages(msgs []agent.Message) {
@@ -1101,7 +1101,7 @@ func (t *Task) SubscribeStats(ctx context.Context) (history []runtime.Stats, liv
 // SessionStatus describes why SendInput could not deliver a message.
 //
 // Session lifecycle:
-//   - A session wraps an SSH process bridging the server to the in-container
+//   - A session wraps an SSH process bridging the server to the in-instance
 //     relay daemon. It is set by Runner.Start, Runner.Reconnect, or
 //     Runner.RestartSession.
 //   - The session is cleared by CloseSession (during restart), Kill (during
@@ -1265,7 +1265,7 @@ func (t *Task) setState(s State) {
 	}
 	t.state = s
 	t.stateUpdatedAt = time.Now().UTC()
-	slog.Debug("container", "state", s, "task", t.ID, "ctr", t.Container)
+	slog.Debug("instance", "state", s, "task", t.ID, "instance", t.runtimeInstanceID)
 }
 
 // addMessage appends a message to the task's message list under the mutex and

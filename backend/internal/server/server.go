@@ -217,7 +217,7 @@ type Server struct {
 	taskMgr        *tasks.Manager  // task orchestration layer
 	mdClient       *md.Client
 	backend        *mdruntime.Backend // required md runtime backend for runner creation and maintenance
-	runtimeBackend runtime.Backend    // runtime backend used by route-level container operations
+	runtimeBackend runtime.Backend    // runtime backend used by route-level runtime operations
 	agentBackends  map[agent.Harness]agent.Backend
 	logDir         string
 	cacheDir       string

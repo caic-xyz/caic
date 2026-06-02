@@ -217,8 +217,8 @@ func TestCloneRepo(t *testing.T) {
 		if runner.LogDir != s.logDir || runner.CacheDir != s.cacheDir {
 			t.Fatalf("runner dirs = log %q cache %q, want log %q cache %q", runner.LogDir, runner.CacheDir, s.logDir, s.cacheDir)
 		}
-		if runner.Container != s.backend {
-			t.Fatal("runner container backend was not wired")
+		if runner.Runtime != s.backend {
+			t.Fatal("runner instance backend was not wired")
 		}
 		if len(runner.HarnessEnv[string(agent.Codex)]) != 1 || runner.HarnessEnv[string(agent.Codex)][0] != "CODEX_HOME=/tmp/codex" {
 			t.Fatalf("HarnessEnv = %#v, want configured codex env", runner.HarnessEnv)
@@ -655,8 +655,8 @@ func TestHandleCreateTask(t *testing.T) {
 		if entry == nil {
 			t.Fatal("task not found")
 		}
-		if entry.Task().DockerImage != "ghcr.io/my/image:v1" {
-			t.Errorf("Image = %q, want %q", entry.Task().DockerImage, "ghcr.io/my/image:v1")
+		if entry.Task().BaseImage != "ghcr.io/my/image:v1" {
+			t.Errorf("Image = %q, want %q", entry.Task().BaseImage, "ghcr.io/my/image:v1")
 		}
 	})
 
@@ -794,7 +794,7 @@ func TestSignalProcess(t *testing.T) {
 		t.Parallel()
 		s := newTestServer(t)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
-		tk.SetContainerInfo("ctr", "", "", 0)
+		tk.SetRuntimeInstanceInfo("ctr", "", "", 0)
 		insertTestTask(t, s, "t1", tk)
 		s.runtimeBackend = &tasktest.FakeRuntimeBackend{
 			SignalFunc: func(context.Context, runtime.InstanceID, int, string) error {
@@ -819,14 +819,14 @@ func TestSignalProcess(t *testing.T) {
 		t.Parallel()
 		s := newTestServer(t)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
-		tk.SetContainerInfo("ctr", "", "", 0)
+		tk.SetRuntimeInstanceInfo("ctr", "", "", 0)
 		insertTestTask(t, s, "t1", tk)
 		var gotPID int
 		var gotSignal string
 		s.runtimeBackend = &tasktest.FakeRuntimeBackend{
 			SignalFunc: func(_ context.Context, id runtime.InstanceID, pid int, sig string) error {
 				if id != "ctr" {
-					t.Errorf("container = %q, want ctr", id)
+					t.Errorf("instance = %q, want ctr", id)
 				}
 				gotPID = pid
 				gotSignal = sig
@@ -1174,7 +1174,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			MessageType: "caic_meta", Version: 1,
 			Prompt: "optimize genai provider", Repos: []agent.MetaRepo{{Name: "genai", Branch: "caic-0"}},
 			Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-			Title: "Skip Unnecessary MD Container Build",
+			Title: "Skip Unnecessary MD Runtime Build",
 		})
 		trailerA := mustJSON(t, agent.MetaResultMessage{
 			MessageType: "caic_result", State: "purged",
@@ -1384,7 +1384,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		// Tasks without a caic_result trailer always load as "failed" —
 		// we cannot distinguish purged-without-trailer from interrupted.
 		// adoptContainers replaces stale entries with live state when a
-		// container is still running.
+		// instance is still running.
 		logDir := t.TempDir()
 
 		meta := func(prompt string) string {
@@ -1398,7 +1398,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			MessageType: "result", Subtype: "success", Result: "done",
 		})
 
-		// no trailer + ResultMessage present → "failed" (container may be gone)
+		// no trailer + ResultMessage present → "failed" (instance may be gone)
 		writeLogFile(t, logDir, "waiting.jsonl", meta("waiting task"), resultMsg)
 
 		// no trailer + no ResultMessage → "failed"

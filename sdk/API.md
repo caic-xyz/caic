@@ -359,7 +359,7 @@ RuntimeInstance holds per-task runtime metadata.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `name` | `string` | Runtime instance name/ID. | yes |
+| `id` | `string` | Runtime instance ID. | yes |
 | `tailscale` | `string` | Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. |  |
 | `usb` | `boolean` |  |  |
 | `display` | `boolean` |  |  |

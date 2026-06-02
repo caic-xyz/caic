@@ -100,7 +100,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		Sudo:                req.Sudo,
 		GitHubToken:         req.GitHubToken,
 		ResolvedGitHubToken: s.resolveGitHubContainerToken(ctx, req.GitHubToken),
-		DockerImage:         prefs.Settings.BaseImage,
+		BaseImage:           prefs.Settings.BaseImage,
 		MaxCPUs:             prefs.Settings.MaxCPUs,
 		CacheMounts:         cacheMountsFromSettings(prefs.Settings),
 	})
@@ -328,11 +328,11 @@ func (s *Server) sendInput(ctx context.Context, entry *tasks.Entry, req *v1.Inpu
 	// diagnostic details in the 409 response. NoSessionError.Error() preserves
 	// the original task.SendInput message verbatim.
 	t := entry.Task()
-	rs := relayNoContainer
-	containerName := t.ContainerName()
-	if containerName != "" {
+	rs := relayNoInstance
+	instanceID := t.RuntimeInstanceID()
+	if instanceID != "" {
 		probeCtx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
-		alive, relayErr := agent.IsRelayRunning(probeCtx, containerName) //nolint:contextcheck // diagnostic probe; must outlive request
+		alive, relayErr := agent.IsRelayRunning(probeCtx, string(instanceID)) //nolint:contextcheck // diagnostic probe; must outlive request
 		cancel()
 		switch {
 		case relayErr != nil:
@@ -351,7 +351,7 @@ func (s *Server) sendInput(ctx context.Context, entry *tasks.Entry, req *v1.Inpu
 	slog.Warn("no active session",
 		"task", t.ID,
 		"br", primaryBranchLog,
-		"ctr", containerName,
+		"instance", instanceID,
 		"state", taskState,
 		"relay", rs,
 	)
@@ -522,9 +522,9 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t := entry.Task()
-	containerName := t.ContainerName()
-	if containerName == "" {
-		writeError(w, api.Conflict("task has no container"))
+	instanceID := t.RuntimeInstanceID()
+	if instanceID == "" {
+		writeError(w, api.Conflict("task has no instance"))
 		return
 	}
 	diffPrimaryName := ""
@@ -548,7 +548,7 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleVNCWebSocket proxies a WebSocket connection to the container's VNC
+// handleVNCWebSocket proxies a WebSocket connection to the instance's VNC
 // TCP port via the Docker host port mapping. Used by noVNC in the frontend.
 func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 	entry, err := s.getTask(r)
@@ -558,11 +558,11 @@ func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	t := entry.Task()
 	snap := t.Snapshot()
-	if snap.Container == "" || snap.VNCPort == 0 {
+	if snap.RuntimeInstanceID == "" || snap.VNCPort == 0 {
 		writeError(w, api.BadRequest("task has no VNC display"))
 		return
 	}
-	slog.Info("vnc proxy start", "task", t.ID, "ctr", snap.Container, "port", snap.VNCPort)
+	slog.Info("vnc proxy start", "task", t.ID, "instance", snap.RuntimeInstanceID, "port", snap.VNCPort)
 	vncAddr := fmt.Sprintf("127.0.0.1:%d", snap.VNCPort)
 
 	var d net.Dialer
@@ -570,7 +570,7 @@ func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 	vncConn, err := d.DialContext(r.Context(), "tcp", vncAddr)
 	if err != nil {
 		slog.Error("vnc websocket: dial failed", "addr", vncAddr, "err", err)
-		writeError(w, api.InternalError("cannot reach container VNC"))
+		writeError(w, api.InternalError("cannot reach instance VNC"))
 		return
 	}
 	defer func() { _ = vncConn.Close() }()
@@ -635,7 +635,7 @@ func (w wsNetConn) Write(b []byte) (int, error) {
 }
 
 // handleGetProcesses returns the list of running processes inside the task's
-// container by running ps via SSH.
+// instance by running ps via SSH.
 func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
 	entry, err := s.getTask(r)
 	if err != nil {
@@ -643,16 +643,16 @@ func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t := entry.Task()
-	containerName := t.ContainerName()
-	if containerName == "" {
-		writeError(w, api.Conflict("task has no container"))
+	instanceID := t.RuntimeInstanceID()
+	if instanceID == "" {
+		writeError(w, api.Conflict("task has no instance"))
 		return
 	}
 	if s.runtimeBackend == nil {
 		writeError(w, api.InternalError("runtime backend not configured"))
 		return
 	}
-	procs, err := s.runtimeBackend.Processes(r.Context(), runtime.InstanceID(containerName))
+	procs, err := s.runtimeBackend.Processes(r.Context(), instanceID)
 	if err != nil {
 		writeError(w, api.InternalError(err.Error()))
 		return
@@ -663,26 +663,26 @@ func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleSignalProcess sends a signal to a process inside the task's container.
+// handleSignalProcess sends a signal to a process inside the task's instance.
 // Reads the pid from the URL path and the signal name from the request body.
 func (s *Server) signalProcess(ctx context.Context, entry *tasks.Entry, req *v1.SignalProcessReq) (*v1.StatusResp, error) {
 	t := entry.Task()
-	containerName := t.ContainerName()
-	if containerName == "" {
-		return nil, api.Conflict("task has no container")
+	instanceID := t.RuntimeInstanceID()
+	if instanceID == "" {
+		return nil, api.Conflict("task has no instance")
 	}
 	if s.runtimeBackend == nil {
 		return nil, api.InternalError("runtime backend not configured")
 	}
-	if err := s.runtimeBackend.Signal(ctx, runtime.InstanceID(containerName), req.PID, req.Signal); err != nil {
+	if err := s.runtimeBackend.Signal(ctx, instanceID, req.PID, req.Signal); err != nil {
 		return nil, api.InternalError(err.Error())
 	}
-	slog.Info("signal sent", "task", t.ID, "container", containerName, "pid", req.PID, "signal", req.Signal)
+	slog.Info("signal sent", "task", t.ID, "instance", instanceID, "pid", req.PID, "signal", req.Signal)
 	return &v1.StatusResp{Status: "signalled"}, nil
 }
 
 // resolveGitHubContainerToken returns the GitHub token to inject into a
-// container when enabled is true, otherwise returns empty.
+// instance when enabled is true, otherwise returns empty.
 func (s *Server) resolveGitHubContainerToken(ctx context.Context, enabled bool) string {
 	if !enabled {
 		return ""
@@ -744,7 +744,7 @@ func (s *Server) taskResolvers() v1conv.TaskResolvers {
 	}
 }
 
-// SetRunnerBackends updates the container backend and agent runner backends
+// SetRunnerBackends updates the instance backend and agent runner backends
 // for all runners.
 func (s *Server) SetRunnerBackends(c runtime.Backend, backends map[agent.Harness]agent.Backend) {
 	s.taskMgr.SetRunnerBackends(c, backends)

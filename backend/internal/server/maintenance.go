@@ -19,7 +19,7 @@ import (
 )
 
 // warmupInterval controls how often warmupImages re-checks for new base image
-// versions. It also sets DigestCacheTTL so that container starts between
+// versions. It also sets DigestCacheTTL so that runtime instance starts between
 // warmup cycles reuse the cached digest instead of hitting the registry.
 const warmupInterval = 6 * time.Hour
 
@@ -58,7 +58,7 @@ func (s *Server) warmupImages() {
 }
 
 // refreshHarnessModels checks if any harness caches are stale and refreshes
-// them by launching a temporary container. Runs once at startup.
+// them by launching a temporary runtime instance. Runs once at startup.
 func (s *Server) refreshHarnessModels() {
 	cache := agent.OpenHarnessCache(filepath.Join(s.cacheDir, "harnesses.json"))
 
@@ -79,7 +79,7 @@ func (s *Server) refreshHarnessModels() {
 	}
 }
 
-// refreshOneHarness launches a temporary container, fetches models, and
+// refreshOneHarness launches a temporary runtime instance, fetches models, and
 // updates the cache and all runner backends.
 func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, fetcher agent.ModelFetcher) {
 	backend := s.runtimeBackend

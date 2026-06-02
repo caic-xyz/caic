@@ -1,5 +1,5 @@
 // Package tasks orchestrates task lifecycle management: creation, execution,
-// session watching, stats polling, and container adoption.
+// session watching, stats polling, and instance adoption.
 //
 // It sits between the HTTP adapter (internal/server) and the domain layer
 // (internal/task). The one-letter difference from the singular "task" package
@@ -44,7 +44,7 @@ type Config struct {
 	ServerCtx context.Context
 	LogDir    string
 	CacheDir  string
-	// Backend is the per-task container lifecycle seam (launch/stop/purge/fork).
+	// Backend is the per-task instance lifecycle seam (launch/stop/purge/fork).
 	// Production passes *mdruntime.Backend (md over Docker/Podman); a future VM backend or a
 	// test fake can be substituted via this interface.
 	Backend    runtime.Backend
@@ -57,7 +57,7 @@ type Config struct {
 	Provider   genai.Provider // nil-safe
 }
 
-// Manager owns the task and runner registries, container adoption, session
+// Manager owns the task and runner registries, instance adoption, session
 // watching, and stats polling.
 type Manager struct {
 	// Immutable after construction.
@@ -101,7 +101,7 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 		LogDir:     cfg.LogDir,
 		CacheDir:   cfg.CacheDir,
 		HarnessEnv: cfg.HarnessEnv,
-		Container:  cfg.Backend,
+		Runtime:    cfg.Backend,
 		Backends:   cfg.Backends,
 	}
 	_ = noRepoRunner.Init(cfg.ServerCtx)
@@ -109,7 +109,7 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 	return m
 }
 
-// Start launches background goroutines: container event watching and stats polling.
+// Start launches background goroutines: instance event watching and stats polling.
 // Must be called once after New, after runners have been registered.
 func (m *Manager) Start() {
 	go m.watchRuntimeEvents(m.serverCtx)
@@ -250,7 +250,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 	}
 
 	// Build RepoMount slice. MountedPath follows the fixed "~/src/<name>"
-	// convention used by the container provisioner. Use the basename unless
+	// convention used by the instance provisioner. Use the basename unless
 	// another registered repo shares it.
 	mounts := make([]task.RepoMount, len(p.Repos))
 	for i, rs := range p.Repos {
@@ -265,7 +265,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 		Harness:       p.Harness,
 		Model:         p.Model,
 		Effort:        p.Effort,
-		DockerImage:   p.DockerImage,
+		BaseImage:     p.BaseImage,
 		MaxCPUs:       p.MaxCPUs,
 		CacheMounts:   slices.Clone(p.CacheMounts),
 		GitHubToken:   p.GitHubToken,
@@ -327,7 +327,7 @@ func (m *Manager) Purge(ctx context.Context, entry *Entry) error {
 	}
 	m.NotifyTaskChange()
 	runner := m.resolveRunner(entry.task)
-	slog.InfoContext(ctx, "purge requested", "task", entry.task.ID, "ctr", entry.task.ContainerName(), "state", state)
+	slog.InfoContext(ctx, "purge requested", "task", entry.task.ID, "instance", entry.task.RuntimeInstanceID(), "state", state)
 	go func() {
 		m.cleanupTask(entry, runner, task.StatePurged)
 		slog.InfoContext(m.serverCtx, "purge completed", "task", entry.task.ID, "final_state", entry.task.GetState())
@@ -344,10 +344,10 @@ func (m *Manager) Stop(ctx context.Context, entry *Entry) error {
 	}
 	m.NotifyTaskChange()
 	runner := m.resolveRunner(entry.task)
-	slog.InfoContext(ctx, "stop requested", "task", entry.task.ID, "ctr", entry.task.ContainerName(), "state", state)
+	slog.InfoContext(ctx, "stop requested", "task", entry.task.ID, "instance", entry.task.RuntimeInstanceID(), "state", state)
 	go func() {
 		runner.StopTask(m.serverCtx, entry.task)
-		slog.InfoContext(m.serverCtx, "stop completed", "task", entry.task.ID, "ctr", entry.task.ContainerName(), "final_state", entry.task.GetState())
+		slog.InfoContext(m.serverCtx, "stop completed", "task", entry.task.ID, "instance", entry.task.RuntimeInstanceID(), "final_state", entry.task.GetState())
 		m.NotifyTaskChange()
 	}()
 	return nil
@@ -386,11 +386,11 @@ func (m *Manager) Restart(ctx context.Context, entry *Entry, prompt agent.Prompt
 		return conflict("task is not waiting or asking")
 	}
 	if prompt.Text == "" {
-		// No prompt provided: fall back to the plan file from the container.
-		plan, err := agent.ReadPlan(m.serverCtx, t.ContainerName(), t.GetPlanFile()) //nolint:contextcheck // intentionally using server context
+		// No prompt provided: fall back to the plan file from the instance.
+		plan, err := agent.ReadPlan(m.serverCtx, string(t.RuntimeInstanceID()), t.GetPlanFile()) //nolint:contextcheck // intentionally using server context
 		if err != nil {
 			t.SetStateIf(task.StateStarting, prevState)
-			return &Error{Kind: KindBadRequest, Msg: "no prompt provided and failed to read plan from container", Err: err}
+			return &Error{Kind: KindBadRequest, Msg: "no prompt provided and failed to read plan from instance", Err: err}
 		}
 		prompt.Text = plan
 	}
@@ -447,7 +447,7 @@ func (m *Manager) SendInput(ctx context.Context, entry *Entry, prompt agent.Prom
 		taskState := t.GetState()
 		slog.WarnContext(ctx, "no active session",
 			"task", t.ID,
-			"ctr", t.ContainerName(),
+			"instance", t.RuntimeInstanceID(),
 			"state", taskState,
 		)
 		// Wrap so the handler can detect the no-session condition via
@@ -458,7 +458,7 @@ func (m *Manager) SendInput(ctx context.Context, entry *Entry, prompt agent.Prom
 	return nil
 }
 
-// Fork creates a new task from a running task's container.
+// Fork creates a new task from a running task's instance.
 func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (string, error) { //nolint:gocritic // ForkParams is a request-shaped value bag
 	source := sourceEntry.task
 	state := source.GetState()
@@ -467,8 +467,8 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 	default:
 		return "", conflict("task must be running or waiting to fork")
 	}
-	if source.ContainerName() == "" {
-		return "", conflict("task has no container")
+	if source.RuntimeInstanceID() == "" {
+		return "", conflict("task has no instance")
 	}
 	sourceRepos := source.ReposSnapshot()
 	if len(sourceRepos) == 0 {
@@ -535,7 +535,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		Harness:       forkHarness,
 		Model:         forkModel,
 		Effort:        forkEffort,
-		DockerImage:   source.DockerImage,
+		BaseImage:     source.BaseImage,
 		MaxCPUs:       source.MaxCPUs,
 		CacheMounts:   slices.Clone(source.CacheMounts),
 		GitHubToken:   p.GitHubToken,
@@ -613,22 +613,22 @@ func (m *Manager) EffectiveBaseBranch(t *task.Task) string {
 }
 
 // SudoPassword returns the cached sudo password for a task, fetching it from
-// the container on first access.
+// the instance on first access.
 //
-// Returns "" when the task does not use sudo or has no container yet. The
+// Returns "" when the task does not use sudo or has no instance yet. The
 // fetched password is cached on the task so subsequent calls avoid the SSH
 // round-trip. A lookup failure is logged and returns "".
 func (m *Manager) SudoPassword(ctx context.Context, t *task.Task) string {
-	enabled, containerName, cached := t.SudoLookupState()
-	if !enabled || containerName == "" {
+	enabled, instanceID, cached := t.SudoLookupState()
+	if !enabled || instanceID == "" {
 		return ""
 	}
 	if cached != "" {
 		return cached
 	}
-	pw, err := m.privilege.SudoPassword(ctx, runtime.InstanceID(containerName))
+	pw, err := m.privilege.SudoPassword(ctx, instanceID)
 	if err != nil {
-		slog.WarnContext(ctx, "sudo password lookup failed", "ctr", containerName, "err", err)
+		slog.WarnContext(ctx, "sudo password lookup failed", "instance", instanceID, "err", err)
 		return ""
 	}
 	t.SetSudoPassword(pw)
@@ -641,7 +641,7 @@ func (m *Manager) SetRunnerBackends(c runtime.Backend, backends map[agent.Harnes
 	defer m.mu.Unlock()
 	for _, r := range m.runners {
 		if c != nil {
-			r.Container = c
+			r.Runtime = c
 		}
 		if backends != nil {
 			r.Backends = backends
@@ -1001,7 +1001,7 @@ func (m *Manager) Sync(ctx context.Context, entry *Entry, target SyncTarget, for
 	t := entry.task
 	switch t.GetState() { //nolint:exhaustive // only terminal/blocked states are relevant
 	case task.StatePending:
-		return nil, conflict("task has no container yet")
+		return nil, conflict("task has no instance yet")
 	case task.StateStopping, task.StateStopped, task.StatePurging, task.StateFailed, task.StatePurged:
 		return nil, conflict("task is in a terminal state")
 	}
@@ -1088,12 +1088,12 @@ func (m *Manager) pushStats(ctx context.Context) {
 	m.mu.Lock()
 	type entry struct {
 		task *task.Task
-		name string
+		name runtime.InstanceID
 	}
 	var active []entry
 	for _, e := range m.tasks {
 		t := e.task
-		name := t.ContainerName()
+		name := t.RuntimeInstanceID()
 		if name == "" {
 			continue
 		}
@@ -1109,7 +1109,7 @@ func (m *Manager) pushStats(ctx context.Context) {
 	}
 	ids := make([]runtime.InstanceID, len(active))
 	for i, e := range active {
-		ids[i] = runtime.InstanceID(e.name)
+		ids[i] = e.name
 	}
 	statsMap, err := m.monitor.StatsAll(ctx, ids)
 	if err != nil {
@@ -1118,7 +1118,7 @@ func (m *Manager) pushStats(ctx context.Context) {
 	}
 	now := time.Now()
 	for _, e := range active {
-		cs, ok := statsMap[runtime.InstanceID(e.name)]
+		cs, ok := statsMap[e.name]
 		if !ok {
 			continue
 		}
@@ -1156,7 +1156,7 @@ func (m *Manager) watchRuntimeEvents(ctx context.Context) {
 				}
 			}
 			for ev := range ch {
-				m.handleContainerDeath(string(ev.InstanceID))
+				m.handleRuntimeInstanceExit(ev.InstanceID)
 			}
 			if ctx.Err() != nil {
 				return
@@ -1171,12 +1171,12 @@ func (m *Manager) watchRuntimeEvents(ctx context.Context) {
 	}()
 }
 
-// handleContainerDeath looks up a task by runtime instance name and archives it.
-func (m *Manager) handleContainerDeath(containerName string) {
+// handleRuntimeInstanceExit looks up a task by runtime instance name and archives it.
+func (m *Manager) handleRuntimeInstanceExit(instanceID runtime.InstanceID) {
 	m.mu.Lock()
 	var found *Entry
 	for _, e := range m.tasks {
-		if e.task.ContainerName() != containerName {
+		if e.task.RuntimeInstanceID() != instanceID {
 			continue
 		}
 		found = e
@@ -1204,7 +1204,7 @@ func (m *Manager) handleContainerDeath(containerName string) {
 	if p := t.Primary(); p != nil {
 		deathBranch = p.Branch
 	}
-	slog.Info("container", "msg", "died, archiving as stopped", "ctr", containerName, "task", t.ID, "br", deathBranch, "prev_state", prevState)
+	slog.Info("instance", "msg", "died, archiving as stopped", "instance", instanceID, "task", t.ID, "br", deathBranch, "prev_state", prevState)
 	t.DetachSession()
 	m.NotifyTaskChange()
 }
@@ -1245,9 +1245,9 @@ func applyLoadedSessionMetadata(t *task.Task, lt *task.LoadedTask) {
 
 // adoptOne investigates a single runtime instance and registers it as a task.
 func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runner, c *runtime.Instance, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
-	ctx, adoptTask := trace.NewTask(ctx, "adopt-container")
+	ctx, adoptTask := trace.NewTask(ctx, "adopt-instance")
 	defer adoptTask.End()
-	trace.Logf(ctx, "container", "%s repo=%s branch=%s", c.ID, ri.RelPath, branch)
+	trace.Logf(ctx, "instance", "%s repo=%s branch=%s", c.ID, ri.RelPath, branch)
 
 	// Only adopt runtime instances that caic started. MetadataTaskID is set at
 	// creation and is the authoritative proof of ownership.
@@ -1259,7 +1259,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		return nil, fmt.Errorf("metadata check for %s: %w", c.ID, err)
 	}
 	if taskIDVal == "" {
-		slog.Info("container", "msg", "skipping non-caic", "repo", ri.RelPath, "ctr", c.ID, "br", branch)
+		slog.Info("instance", "msg", "skipping non-caic", "repo", ri.RelPath, "instance", c.ID, "br", branch)
 		return nil, nil //nolint:nilnil // non-caic runtime instances are intentionally skipped
 	}
 	taskID, err := ksid.Parse(taskIDVal)
@@ -1269,7 +1269,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 
 	isExited := c.State == "exited"
 	if isExited {
-		slog.Info("container", "msg", "adopting exited container as stopped", "ctr", c.ID, "br", branch)
+		slog.Info("instance", "msg", "adopting exited instance as stopped", "instance", c.ID, "br", branch)
 	}
 
 	// Find the log file for this task.
@@ -1319,19 +1319,19 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		var relayErr error
 		relayAlive, relayDiag, relayErr = agent.RelayStatus(ctx, string(c.ID))
 		if relayErr != nil {
-			slog.Warn("relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "ctr", c.ID, "err", relayErr, "diag", relayDiag)
+			slog.Warn("relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr, "diag", relayDiag)
 		}
 		if relayAlive {
 			b, ok := runner.Backends[harnessName]
 			if !ok {
-				slog.Warn("relay", "msg", "no backend for harness", "harness", harnessName, "ctr", c.ID)
+				slog.Warn("relay", "msg", "no backend for harness", "harness", harnessName, "instance", c.ID)
 				relayAlive = false
 			} else {
 				readCtx, readCancel := context.WithTimeout(ctx, 30*time.Second)
 				relayMsgs, relaySize, relayErr = agent.ReadRelayTail(readCtx, string(c.ID), b.NewWire().ParseMessage, 10<<20) // 10 MiB tail
 				readCancel()
 				if relayErr != nil {
-					slog.Warn("relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "ctr", c.ID, "err", relayErr)
+					slog.Warn("relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr)
 					relayAlive = false
 				}
 			}
@@ -1374,7 +1374,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		}
 		adoptRepos = []task.RepoMount{{Name: ri.RelPath, BaseBranch: primaryBaseBranch, GitRoot: ri.AbsPath, Branch: branch, MountedPath: mountedPath}}
 		if lt != nil {
-			// Build lookup of container repos by branch for MountedPath.
+			// Build lookup of instance repos by branch for MountedPath.
 			containerRepoByBranch := make(map[string]string, len(c.Repos))
 			for _, cr := range c.Repos {
 				containerRepoByBranch[cr.Branch] = cr.MountPath
@@ -1405,7 +1405,6 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		Harness:       harnessName,
 		Model:         model,
 		Effort:        effort,
-		Container:     string(c.ID),
 		StartedAt:     startedAt,
 		Tailscale:     c.Tailscale,
 		TailscaleFQDN: c.TailscaleFQDN,
@@ -1416,6 +1415,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		Provider:      m.provider,
 		ForgeIssue:    forgeIssue,
 	}
+	t.SetRuntimeInstanceInfo(c.ID, c.TailscaleFQDN, "", c.VNCPort)
 	// Restore GitHub token flag from log trailer (primary) or runtime metadata (fallback).
 	gtLabel, _ := m.inventory.Metadata(ctx, c.ID, runtime.MetadataGitHubToken)
 	if (lt != nil && lt.GitHubToken) || gtLabel == "true" {
@@ -1450,7 +1450,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		t.RestoreMessages(relayMsgs)
 		applyLoadedSessionMetadata(t, lt)
 		t.SetRelayOffset(relaySize)
-		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "ctr", c.ID, "msgs", len(relayMsgs))
+		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "instance", c.ID, "msgs", len(relayMsgs))
 	} else if lt != nil {
 		m.setParser(lt)
 		if err := lt.LoadMessages(); err != nil {
@@ -1459,7 +1459,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		if len(lt.Msgs) > 0 {
 			t.RestoreMessages(lt.Msgs)
 			applyLoadedSessionMetadata(t, lt)
-			slog.Warn("relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "ctr", c.ID, "msgs", len(lt.Msgs))
+			slog.Warn("relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "instance", c.ID, "msgs", len(lt.Msgs))
 		}
 	}
 	applyLoadedSessionMetadata(t, lt)
@@ -1485,13 +1485,13 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	} else if !relayAlive {
 		relayLog := agent.ReadRelayLog(ctx, string(c.ID), 4096)
 		if relayLog != "" {
-			slog.Warn("relay", "msg", "log from dead relay", "ctr", c.ID, "br", branch, "diag", relayDiag, "log", relayLog)
+			slog.Warn("relay", "msg", "log from dead relay", "instance", c.ID, "br", branch, "diag", relayDiag, "log", relayLog)
 		}
 		trace.Logf(ctx, "adopt", "%s: relay-dead", c.ID)
 		if t.GetState() == task.StateRunning {
 			t.SetStateAt(task.StateWaiting, stateUpdatedAt)
 			slog.Warn("relay", "msg", "dead, marking waiting",
-				"repo", ri.RelPath, "br", branch, "ctr", c.ID,
+				"repo", ri.RelPath, "br", branch, "instance", c.ID,
 				"sess", t.GetSessionID(), "msgs", len(t.Messages()))
 		}
 	}
@@ -1509,8 +1509,8 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	m.taskChanged()
 	m.mu.Unlock()
 
-	slog.Info("container", "msg", "adopted",
-		"repo", ri.RelPath, "ctr", c.ID, "br", branch,
+	slog.Info("instance", "msg", "adopted",
+		"repo", ri.RelPath, "instance", c.ID, "br", branch,
 		"relay", relayAlive, "state", t.GetState(), "sess", t.GetSessionID())
 
 	// Only regenerate title if a new turn was completed.
@@ -1520,9 +1520,9 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 
 	// Auto-reconnect in background.
 	if t.GetState() != task.StateStopped && relayAlive {
-		slog.Debug("container", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "ctr", c.ID)
+		slog.Debug("instance", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "instance", c.ID)
 		go func() {
-			tlog := slog.With("repo", ri.RelPath, "br", branch, "ctr", t.ContainerName())
+			tlog := slog.With("repo", ri.RelPath, "br", branch, "instance", t.RuntimeInstanceID())
 			h, err := runner.Reconnect(m.serverCtx, t, true)
 			if err != nil {
 				tlog.Warn("auto-reconnect failed", "err", err)
@@ -1537,7 +1537,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 				return
 			}
 			tlog.Debug("auto-reconnect succeeded")
-			t.SetVNCPort(runner.Container.VNCPort(m.serverCtx, runtime.InstanceID(t.ContainerName())))
+			t.SetVNCPort(runner.Runtime.VNCPort(m.serverCtx, t.RuntimeInstanceID()))
 			if ds := runner.BranchDiffStat(m.serverCtx, t); len(ds) > 0 {
 				t.SetLiveDiffStat(ds)
 			}
@@ -1545,12 +1545,12 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 			m.watchSession(entry, runner, h)
 		}()
 	} else if !relayAlive && t.GetState() != task.StateStopped {
-		slog.Error("relay dead, stopping container",
-			"repo", ri.RelPath, "br", branch, "ctr", c.ID,
+		slog.Error("relay dead, stopping instance",
+			"repo", ri.RelPath, "br", branch, "instance", c.ID,
 			"state", t.GetState())
 		t.SetState(task.StateStopping)
-		if err := runner.Container.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
-			slog.Error("stop failed", "repo", ri.RelPath, "br", branch, "ctr", c.ID, "err", err)
+		if err := runner.Runtime.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
+			slog.Error("stop failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
 		}
 		t.SetState(task.StateStopped)
 	}
@@ -1621,7 +1621,7 @@ func (m *Manager) watchSession(entry *Entry, runner *task.Runner, h *task.Sessio
 				watchPrimaryName = p.Name
 				watchPrimaryBranch = p.Branch
 			}
-			attrs := []any{"repo", watchPrimaryName, "br", watchPrimaryBranch, "ctr", t.ContainerName()}
+			attrs := []any{"repo", watchPrimaryName, "br", watchPrimaryBranch, "instance", t.RuntimeInstanceID()}
 			if sessionErr != nil {
 				attrs = append(attrs, "err", sessionErr)
 				slog.Warn("session exited with error", attrs...)

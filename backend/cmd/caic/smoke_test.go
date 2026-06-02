@@ -150,9 +150,9 @@ func TestSmoke(t *testing.T) {
 		t.Logf("task %s reached 'stopped'", taskID)
 
 		// Purge the task.
-		containerName := task.Runtime.Name
+		containerName := task.Runtime.ID
 		if containerName == "" {
-			t.Fatalf("task %s has no runtime name before purge", taskID)
+			t.Fatalf("task %s has no runtime ID before purge", taskID)
 		}
 		postJSON(t, baseURL, "/api/v1/tasks/"+taskID+"/purge", nil, nil)
 		waitForState("purged")

@@ -47,7 +47,7 @@ func detectProviders(ctx context.Context, coreEnv map[string]string, harnessEnv 
 // It prefers locally-available providers (codex, opencode, claudecode) over
 // remote APIs (gemini). Returns "" if no suitable provider is found.
 func autoDetectLLMProvider(ctx context.Context, coreEnv map[string]string, geminiAPIKey string) string {
-	// Preferred order: container-local providers first, then others.
+	// Preferred order: runtime-local providers first, then others.
 	preferred := []string{
 		"codex",
 		"opencode",

@@ -391,7 +391,7 @@ func TestBackend(t *testing.T) {
 			t.Errorf("Labels missing passthrough: %v", opts.Labels)
 		}
 		if opts.BaseImage == "" {
-			t.Error("BaseImage should default when DockerImage empty")
+			t.Error("BaseImage should default when BaseImage empty")
 		}
 		if opts.MaxCPUs <= 0 {
 			t.Errorf("MaxCPUs = %d, want positive default", opts.MaxCPUs)

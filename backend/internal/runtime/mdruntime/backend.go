@@ -223,7 +223,7 @@ func (b *Backend) Connect(ctx context.Context, id runtime.InstanceID, opts *runt
 
 // Diff implements runtime.Backend.
 func (b *Backend) Diff(ctx context.Context, id runtime.InstanceID, repoIdx int, args ...string) (string, error) {
-	defer trace.StartRegion(ctx, "container.diff").End()
+	defer trace.StartRegion(ctx, "instance.diff").End()
 	name := string(id)
 	ct, err := b.client.Get(ctx, name)
 	if err != nil {
@@ -244,7 +244,7 @@ func (b *Backend) Diff(ctx context.Context, id runtime.InstanceID, repoIdx int, 
 
 // Fetch implements runtime.Backend.
 func (b *Backend) Fetch(ctx context.Context, id runtime.InstanceID) error {
-	defer trace.StartRegion(ctx, "container.fetch").End()
+	defer trace.StartRegion(ctx, "instance.fetch").End()
 	name := string(id)
 	ct, err := b.client.Get(ctx, name)
 	if err != nil {
@@ -264,7 +264,7 @@ func (b *Backend) Fetch(ctx context.Context, id runtime.InstanceID) error {
 
 // Stop implements runtime.Backend.
 func (b *Backend) Stop(ctx context.Context, id runtime.InstanceID) error {
-	defer trace.StartRegion(ctx, "container.stop").End()
+	defer trace.StartRegion(ctx, "instance.stop").End()
 	name := string(id)
 	slog.Info("md stop", "name", name)
 	ct, err := b.client.Get(ctx, name)
@@ -276,7 +276,7 @@ func (b *Backend) Stop(ctx context.Context, id runtime.InstanceID) error {
 
 // Purge implements runtime.Backend.
 func (b *Backend) Purge(ctx context.Context, id runtime.InstanceID) error {
-	defer trace.StartRegion(ctx, "container.purge").End()
+	defer trace.StartRegion(ctx, "instance.purge").End()
 	name := string(id)
 	ct, err := b.client.Get(ctx, name)
 	if err != nil {
@@ -293,7 +293,7 @@ func (b *Backend) Purge(ctx context.Context, id runtime.InstanceID) error {
 
 // Revive implements runtime.Backend.
 func (b *Backend) Revive(ctx context.Context, id runtime.InstanceID) error {
-	defer trace.StartRegion(ctx, "container.revive").End()
+	defer trace.StartRegion(ctx, "instance.revive").End()
 	name := string(id)
 	rt := b.client.Runtime()
 	ct, err := b.client.Get(ctx, name)
@@ -322,7 +322,7 @@ func (b *Backend) Revive(ctx context.Context, id runtime.InstanceID) error {
 
 // Fork implements runtime.Backend.
 func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
-	defer trace.StartRegion(ctx, "container.fork").End()
+	defer trace.StartRegion(ctx, "instance.fork").End()
 	name := string(id)
 	if len(repos) > 0 {
 		slog.Info("md", "phase", "fork", "src", name, "dir", repos[0].HostPath, "br", repos[0].Branch)
@@ -334,11 +334,11 @@ func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runti
 	}
 	slog.DebugContext(ctx, "fork starting", "rt", rt, "source", name, "repos_count", len(repos))
 
-	// Look up the source container so Fork inherits Display, Tailscale,
+	// Look up the source instance so Fork inherits Display, Tailscale,
 	// USB, and Sudo from the source unless explicitly overridden by opts.
 	ct, err := b.client.Get(ctx, name)
 	if err != nil {
-		return "", nil, fmt.Errorf("source container %s: %w", name, err)
+		return "", nil, fmt.Errorf("source instance %s: %w", name, err)
 	}
 	ct.SetState("running")
 	var agentPaths []md.AgentPaths
@@ -374,20 +374,20 @@ func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runti
 
 // VNCPort implements runtime.Backend.
 func (b *Backend) VNCPort(ctx context.Context, id runtime.InstanceID) int {
-	containerName := string(id)
+	instanceID := string(id)
 	b.mu.Lock()
-	port := int(b.vncPorts[containerName])
+	port := int(b.vncPorts[instanceID])
 	b.mu.Unlock()
 	if port != 0 {
 		return port
 	}
-	// Fallback: query container label. Handles server
-	// restarts where the in-memory map is empty but the container
+	// Fallback: query instance label. Handles server
+	// restarts where the in-memory map is empty but the instance
 	// is still running with a display.
-	if v, err := labelValue(ctx, b.client.Runtime(), containerName, string(runtime.MetadataDisplayCapability)); err == nil && v == "1" {
-		if hp, err := b.hostPort(ctx, containerName, "5901/tcp"); err == nil {
+	if v, err := labelValue(ctx, b.client.Runtime(), instanceID, string(runtime.MetadataDisplayCapability)); err == nil && v == "1" {
+		if hp, err := b.hostPort(ctx, instanceID, "5901/tcp"); err == nil {
 			b.mu.Lock()
-			b.vncPorts[containerName] = int32(hp) //nolint:gosec // port numbers are 1-65535, safe for int32
+			b.vncPorts[instanceID] = int32(hp) //nolint:gosec // port numbers are 1-65535, safe for int32
 			b.mu.Unlock()
 			return hp
 		}
@@ -408,7 +408,7 @@ var harnessMap = map[agent.Harness]md.Harness{
 // mdStartOpts builds the md.StartOpts for a given harness and task options.
 func (b *Backend) mdStartOpts(opts *runtime.StartOptions) *md.StartOpts {
 	harnessPaths := md.HarnessMounts[harnessMap[opts.Harness]]
-	image := opts.DockerImage
+	image := opts.BaseImage
 	if image == "" {
 		image = md.DefaultBaseImage + ":latest"
 	}
@@ -498,9 +498,9 @@ func metadataLabels(metadata runtime.Metadata) []string {
 	return labels
 }
 
-// hostPort reads the container host port mapping for the given container port.
-func (b *Backend) hostPort(ctx context.Context, containerName, containerPort string) (int, error) {
-	cmd := exec.CommandContext(ctx, b.client.Runtime(), "port", containerName, containerPort) //nolint:gosec // containerName is internally-assigned
+// hostPort reads the instance host port mapping for the given instance port.
+func (b *Backend) hostPort(ctx context.Context, instanceID, containerPort string) (int, error) {
+	cmd := exec.CommandContext(ctx, b.client.Runtime(), "port", instanceID, containerPort) //nolint:gosec // instanceID is internally-assigned
 	out, err := cmd.Output()
 	if err != nil {
 		return 0, err

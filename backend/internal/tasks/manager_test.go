@@ -68,8 +68,8 @@ func TestNew(t *testing.T) {
 		if r.LogDir != cfg.LogDir || r.CacheDir != cfg.CacheDir {
 			t.Fatalf("runner dirs = log %q cache %q, want log %q cache %q", r.LogDir, r.CacheDir, cfg.LogDir, cfg.CacheDir)
 		}
-		if r.Container != cfg.Backend {
-			t.Fatal("runner container backend was not wired")
+		if r.Runtime != cfg.Backend {
+			t.Fatal("runner instance backend was not wired")
 		}
 		if len(r.HarnessEnv[string(agent.Codex)]) != 1 || r.HarnessEnv[string(agent.Codex)][0] != "CODEX_HOME=/tmp/codex" {
 			t.Fatalf("HarnessEnv = %#v, want configured codex env", r.HarnessEnv)
@@ -736,9 +736,9 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("valid_sudo_resolution_no_container", func(t *testing.T) {
 			t.Parallel()
-			// With no container backend, Start fails in the background
+			// With no instance backend, Start fails in the background
 			// goroutine and the task transitions to Failed. SudoPassword
-			// short-circuits to "" because Container is empty; this exercises
+			// short-circuits to "" because Runtime is empty; this exercises
 			// the goroutine's sudo branch without an SSH round-trip.
 			m := newManagerWithRepo(t)
 			id, err := m.Create(t.Context(), CreateParams{
@@ -829,7 +829,7 @@ func TestManager(t *testing.T) {
 	t.Run("Fork", func(t *testing.T) {
 		t.Parallel()
 		// newForkManager returns a Manager with a source task that has a
-		// container, plus a runner with a fake backend.
+		// instance, plus a runner with a fake backend.
 		newForkManager := func(t *testing.T) (*Manager, *Entry) {
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterRunner("my/repo", &task.Runner{
@@ -841,10 +841,10 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "src"},
 				Repos:         []task.RepoMount{{Name: "my/repo", Branch: "caic-1", GitRoot: "/tmp/my-repo"}},
 				Harness:       "fake",
-				Container:     "md-agent-src",
 				MaxCPUs:       5,
 				GitHubToken:   true,
 			}
+			src.SetRuntimeInstanceInfo("md-agent-src", "", "", 0)
 			src.SetState(task.StateWaiting)
 			e := NewEntry(src)
 			m.Insert(src.ID.String(), e)
@@ -911,8 +911,8 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "src"},
 				Harness:       "fake",
-				Container:     "md-agent-src",
 			}
+			src.SetRuntimeInstanceInfo("md-agent-src", "", "", 0)
 			src.SetState(task.StateWaiting)
 			e := NewEntry(src)
 			m.Insert(src.ID.String(), e)
@@ -928,7 +928,7 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("error_empty_prompt_no_container", func(t *testing.T) {
 			t.Parallel()
-			// Empty prompt triggers the plan-file fallback; with no container,
+			// Empty prompt triggers the plan-file fallback; with no instance,
 			// agent.ReadPlan fails and Restart returns KindBadRequest.
 			m := New(Config{ServerCtx: t.Context()})
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
@@ -1125,8 +1125,8 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Sudo:          false,
-				Container:     "ctr-1",
 			}
+			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
 			if got := m.SudoPassword(t.Context(), tk); got != "" {
 				t.Errorf("SudoPassword = %q, want empty for !Sudo", got)
 			}
@@ -1140,7 +1140,7 @@ func TestManager(t *testing.T) {
 				Sudo:          true,
 			}
 			if got := m.SudoPassword(t.Context(), tk); got != "" {
-				t.Errorf("SudoPassword = %q, want empty for empty Container", got)
+				t.Errorf("SudoPassword = %q, want empty for empty Runtime", got)
 			}
 		})
 		t.Run("valid_cached", func(t *testing.T) {
@@ -1151,8 +1151,8 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Sudo:          true,
 				SudoPassword:  "cached-pw",
-				Container:     "ctr-1",
 			}
+			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
 			if got := m.SudoPassword(t.Context(), tk); got != "cached-pw" {
 				t.Errorf("SudoPassword = %q, want cached-pw", got)
 			}
@@ -1173,8 +1173,8 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Sudo:          true,
-				Container:     "ctr-1",
 			}
+			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
 			if got := m.SudoPassword(t.Context(), tk); got != "fetched-pw" {
 				t.Errorf("SudoPassword = %q, want fetched-pw", got)
 			}
@@ -1201,8 +1201,8 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Sudo:          true,
-				Container:     "ctr-1",
 			}
+			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
 			if got := m.SudoPassword(t.Context(), tk); got != "" {
 				t.Errorf("SudoPassword = %q, want empty on fetch error", got)
 			}
@@ -1211,7 +1211,7 @@ func TestManager(t *testing.T) {
 			}
 		})
 	})
-	t.Run("HandleContainerDeath", func(t *testing.T) {
+	t.Run("HandleRuntimeInstanceExit", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_transitions_to_stopped", func(t *testing.T) {
 			t.Parallel()
@@ -1219,12 +1219,12 @@ func TestManager(t *testing.T) {
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
-				Container:     "ctr-dead",
 				Repos:         []task.RepoMount{{Name: "repo/x", Branch: "caic-1"}},
 			}
+			tk.SetRuntimeInstanceInfo("ctr-dead", "", "", 0)
 			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID.String(), NewEntry(tk))
-			m.handleContainerDeath("ctr-dead")
+			m.handleRuntimeInstanceExit("ctr-dead")
 			if got := tk.GetState(); got != task.StateStopped {
 				t.Errorf("state = %v, want StateStopped", got)
 			}
@@ -1235,11 +1235,11 @@ func TestManager(t *testing.T) {
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
-				Container:     "ctr-purged",
 			}
+			tk.SetRuntimeInstanceInfo("ctr-purged", "", "", 0)
 			tk.SetState(task.StatePurged)
 			m.Insert(tk.ID.String(), NewEntry(tk))
-			m.handleContainerDeath("ctr-purged")
+			m.handleRuntimeInstanceExit("ctr-purged")
 			if got := tk.GetState(); got != task.StatePurged {
 				t.Errorf("state = %v (should stay Purged)", got)
 			}
@@ -1250,14 +1250,14 @@ func TestManager(t *testing.T) {
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
-				Container:     "ctr-purging",
 			}
-			// A purge in progress: removing the container emits the very "die"
+			tk.SetRuntimeInstanceInfo("ctr-purging", "", "", 0)
+			// A purge in progress: removing the instance emits the very "die"
 			// event handled here. Acting on it would flap the task to Stopped
 			// mid-purge and race the cleanup goroutine.
 			tk.SetState(task.StatePurging)
 			m.Insert(tk.ID.String(), NewEntry(tk))
-			m.handleContainerDeath("ctr-purging")
+			m.handleRuntimeInstanceExit("ctr-purging")
 			if got := tk.GetState(); got != task.StatePurging {
 				t.Errorf("state = %v (should stay Purging)", got)
 			}
@@ -1268,11 +1268,11 @@ func TestManager(t *testing.T) {
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
-				Container:     "ctr-stopping",
 			}
+			tk.SetRuntimeInstanceInfo("ctr-stopping", "", "", 0)
 			tk.SetState(task.StateStopping)
 			m.Insert(tk.ID.String(), NewEntry(tk))
-			m.handleContainerDeath("ctr-stopping")
+			m.handleRuntimeInstanceExit("ctr-stopping")
 			if got := tk.GetState(); got != task.StateStopping {
 				t.Errorf("state = %v (should stay Stopping)", got)
 			}
@@ -1283,11 +1283,11 @@ func TestManager(t *testing.T) {
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
-				Container:     "ctr-stopped",
 			}
+			tk.SetRuntimeInstanceInfo("ctr-stopped", "", "", 0)
 			tk.SetState(task.StateStopped)
 			m.Insert(tk.ID.String(), NewEntry(tk))
-			m.handleContainerDeath("ctr-stopped")
+			m.handleRuntimeInstanceExit("ctr-stopped")
 			if got := tk.GetState(); got != task.StateStopped {
 				t.Errorf("state = %v (should stay Stopped)", got)
 			}
@@ -1298,11 +1298,11 @@ func TestManager(t *testing.T) {
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
-				Container:     "ctr-alive",
 			}
+			tk.SetRuntimeInstanceInfo("ctr-alive", "", "", 0)
 			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID.String(), NewEntry(tk))
-			m.handleContainerDeath("ctr-other")
+			m.handleRuntimeInstanceExit("ctr-other")
 			if got := tk.GetState(); got != task.StateRunning {
 				t.Errorf("state = %v (should stay Running)", got)
 			}
@@ -1399,7 +1399,7 @@ func TestManager(t *testing.T) {
 			}
 			tk := e.Task()
 			if tk.Tailscale != true || tk.USB != true || tk.Display != true {
-				t.Error("container flags not restored")
+				t.Error("instance flags not restored")
 			}
 			snap := tk.Snapshot()
 			if !snap.Sudo || !snap.GitHubToken {
@@ -1555,7 +1555,7 @@ func TestManager(t *testing.T) {
 			m.Insert(tk.ID.String(), e)
 			_, err := m.Sync(t.Context(), e, SyncTargetOrigin, false)
 			if err == nil {
-				t.Fatal("expected error for provisioning task without container")
+				t.Fatal("expected error for provisioning task without instance")
 			}
 		})
 		t.Run("error_force_not_supported", func(t *testing.T) {
@@ -1608,8 +1608,8 @@ func TestManager(t *testing.T) {
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
-				Container:     "ctr-1",
 			}
+			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
 			tk.SetState(task.StateRunning)
 			entry := NewEntry(tk)
 			m.Insert(tk.ID.String(), entry)
@@ -1686,8 +1686,8 @@ func TestManager(t *testing.T) {
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
-				Container:     "ctr-1",
 			}
+			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
 			tk.SetState(task.StateRunning)
 			entry := NewEntry(tk)
 			m.Insert(tk.ID.String(), entry)
@@ -1743,8 +1743,8 @@ func TestManager(t *testing.T) {
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
-				Container:     "ctr-1",
 			}
+			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
 			tk.SetState(task.StateStopped)
 			entry := NewEntry(tk)
 			m.Insert(tk.ID.String(), entry)
@@ -1911,8 +1911,8 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "src"},
 				Repos:         []task.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
 				Harness:       sourceHarness,
-				Container:     "md-agent-src",
 			}
+			src.SetRuntimeInstanceInfo("md-agent-src", "", "", 0)
 			src.SetState(task.StateWaiting)
 			e := NewEntry(src)
 			m.Insert(src.ID.String(), e)
@@ -1955,8 +1955,8 @@ func TestManager(t *testing.T) {
 		t.Run("error_no_container", func(t *testing.T) {
 			t.Parallel()
 			m, e := forkSetup(t, "fake", defaultBackends)
-			// Overwrite the container to empty.
-			e.Task().SetContainerInfo("", "", "", 0)
+			// Overwrite the instance to empty.
+			e.Task().SetRuntimeInstanceInfo("", "", "", 0)
 			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			var te *Error
 			if !errors.As(err, &te) || te.Kind != KindConflict {
@@ -2114,8 +2114,8 @@ func TestManager(t *testing.T) {
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
-				Container:     "ctr-1",
 			}
+			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
 			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID.String(), NewEntry(tk))
 
@@ -2141,8 +2141,8 @@ func TestManager(t *testing.T) {
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
-				Container:     "ctr-dead",
 			}
+			tk.SetRuntimeInstanceInfo("ctr-dead", "", "", 0)
 			tk.SetState(task.StatePurged)
 			m.Insert(tk.ID.String(), NewEntry(tk))
 
@@ -2164,9 +2164,9 @@ func TestManager(t *testing.T) {
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
-				Container:     "ctr-dead",
 				Repos:         []task.RepoMount{{Name: "repo/x", Branch: "caic-1"}},
 			}
+			tk.SetRuntimeInstanceInfo("ctr-dead", "", "", 0)
 			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID.String(), NewEntry(tk))
 
@@ -2181,7 +2181,7 @@ func TestManager(t *testing.T) {
 			deadline := time.Now().Add(2 * time.Second)
 			for tk.GetState() != task.StateStopped {
 				if time.Now().After(deadline) {
-					t.Fatalf("state = %v, want StateStopped after container death", tk.GetState())
+					t.Fatalf("state = %v, want StateStopped after instance death", tk.GetState())
 				}
 				time.Sleep(time.Millisecond)
 			}

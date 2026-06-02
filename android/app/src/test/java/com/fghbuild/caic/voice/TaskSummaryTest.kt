@@ -45,7 +45,7 @@ class TaskSummaryTest {
         activeCacheReadTokens = 0,
         contextWindowLimit = 200_000,
         harness = harness,
-        runtime = RuntimeInstance(name = "ctr"),
+        runtime = RuntimeInstance(id = "ctr"),
         diffStat = diffStat,
         result = result,
         error = error,

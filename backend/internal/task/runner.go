@@ -40,18 +40,18 @@ type Result struct {
 
 // Runner manages the serialization of setup and push operations.
 type Runner struct {
-	BaseBranch            string
-	Dir                   string              // Absolute path to the git repository.
-	RepoName              string              // Relative repo path (e.g. "github/caic"); empty for no-repo runners.
-	GitTimeout            time.Duration       // Timeout for git/container ops; defaults to 1 minute.
-	ContainerStartTimeout time.Duration       // Timeout for container start (image pull); defaults to 1 hour.
-	LogDir                string              // Directory for raw JSONL session logs (required).
-	CacheDir              string              // Cache directory (e.g. ~/.cache/caic) for harness model lists.
-	HarnessEnv            map[string][]string // Per-harness KEY=VALUE env vars for containers.
+	BaseBranch          string
+	Dir                 string              // Absolute path to the git repository.
+	RepoName            string              // Relative repo path (e.g. "github/caic"); empty for no-repo runners.
+	GitTimeout          time.Duration       // Timeout for git/instance ops; defaults to 1 minute.
+	RuntimeStartTimeout time.Duration       // Timeout for instance start (image pull); defaults to 1 hour.
+	LogDir              string              // Directory for raw JSONL session logs (required).
+	CacheDir            string              // Cache directory (e.g. ~/.cache/caic) for harness model lists.
+	HarnessEnv          map[string][]string // Per-harness KEY=VALUE env vars for containers.
 
-	// Container provides runtime instance lifecycle operations. Must be set
+	// Runtime provides runtime instance lifecycle operations. Must be set
 	// before calling Start.
-	Container runtime.Backend
+	Runtime runtime.Backend
 	// Backends maps harness names to their Backend implementations. The runner
 	// selects the backend matching Task.Harness.
 	Backends map[agent.Harness]agent.Backend
@@ -63,7 +63,7 @@ type Runner struct {
 }
 
 // provisioningWriter is an io.Writer that converts line-by-line output from the
-// container backend into LogMessage events stored on the task for SSE streaming.
+// instance backend into LogMessage events stored on the task for SSE streaming.
 type provisioningWriter struct {
 	ctx context.Context
 	t   *Task
@@ -195,7 +195,7 @@ func (r *Runner) Init(ctx context.Context) error {
 // SessionHandle so the caller can start a session watcher.
 //
 // Strategy:
-//  1. Check if the relay daemon is alive (Unix socket exists in container).
+//  1. Check if the relay daemon is alive (Unix socket exists in instance).
 //  2. If alive, attach to the relay. This is the preferred path because it
 //     reconnects to the still-running agent process with zero message loss.
 //  3. If attaching fails (relay died between check and attach), fall back to
@@ -216,9 +216,9 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 	if t.HasSession() {
 		return nil, errors.New("session already active")
 	}
-	containerName := t.ContainerName()
-	if containerName == "" {
-		return nil, errors.New("no container to reconnect to")
+	instanceID := t.RuntimeInstanceID()
+	if instanceID == "" {
+		return nil, errors.New("no instance to reconnect to")
 	}
 	sessionID := t.GetSessionID()
 	if agent.RequiresResumeSessionID(t.Harness) && sessionID == "" {
@@ -232,7 +232,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 
 	// Reconnect resumes an existing session, so append to its log without
 	// writing a new caic_meta header — otherwise every server restart that
-	// re-adopts a running container would append a duplicate header. Fall
+	// re-adopts a running instance would append a duplicate header. Fall
 	// back to openLog (which writes the header) only if the log is missing.
 	logW, err := r.reopenLog(t)
 	if errors.Is(err, os.ErrNotExist) {
@@ -257,7 +257,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 		t.SetState(StateRunning)
 	}
 	session, err := r.backend(t.Harness).AttachRelay(ctx, &agent.Options{
-		Container:       containerName,
+		Container:       string(instanceID),
 		RelayOffset:     t.RelayOffsetValue(),
 		ResumeSessionID: sessionID,
 		Effort:          t.Effort,
@@ -269,7 +269,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 		close(msgCh)
 		<-dispatchDone
 		t.SetState(StateWaiting)
-		r.log.Error("attach relay failed", "br", primaryBranch, "ctr", containerName, "err", err)
+		r.log.Error("attach relay failed", "br", primaryBranch, "instance", instanceID, "err", err)
 		return nil, fmt.Errorf("reconnect: %w", err)
 	}
 
@@ -278,13 +278,13 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 	return h, nil
 }
 
-// Start performs branch/container setup, starts the agent session, and sends
+// Start performs branch/instance setup, starts the agent session, and sends
 // the initial prompt. Returns the SessionHandle so the caller can start a
 // session watcher.
 //
 // Sequence:
 //  1. Create a new git branch from origin/<BaseBranch> (or the local branch if not on origin).
-//  2. Start an md container on that branch.
+//  2. Start an md instance on that branch.
 //  3. Deploy the relay script and launch the agent (claude/gemini) via the
 //     relay daemon. The relay owns the agent's stdin/stdout and persists
 //     across SSH disconnects.
@@ -296,15 +296,15 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	ctx, task := trace.NewTask(ctx, "task.start:"+t.ID.String())
 	defer task.End()
 
-	if r.Container == nil {
-		return nil, errors.New("runner has no container backend configured")
+	if r.Runtime == nil {
+		return nil, errors.New("runner has no instance backend configured")
 	}
 	if r.Dir != "" {
 		t.SetState(StateBranching)
 	}
 
 	tStart := time.Now()
-	// 1. Create branch (serialized) + start container (concurrent).
+	// 1. Create branch (serialized) + start instance (concurrent).
 	r.log.Info("setup task")
 	region := trace.StartRegion(ctx, "setup")
 	sr, err := r.setup(ctx, t, MakeMetadata(t), resolvedGitHubToken)
@@ -313,12 +313,12 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 		t.SetState(StateFailed)
 		return nil, err
 	}
-	t.SetContainerInfo(sr.Container, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Container.VNCPort(ctx, runtime.InstanceID(sr.Container)))
+	t.SetRuntimeInstanceInfo(sr.InstanceID, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Runtime.VNCPort(ctx, sr.InstanceID))
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	r.log.Info("runner", "msg", "ready", "br", primaryBranch, "ctr", sr.Container, "dur", time.Since(tStart))
+	r.log.Info("runner", "msg", "ready", "br", primaryBranch, "instance", sr.InstanceID, "dur", time.Since(tStart))
 
 	// 2. Start the agent session.
 	t.SetState(StateStarting)
@@ -339,11 +339,11 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	}
 
 	tSession := time.Now()
-	tlog := r.log.With("br", primaryBranch, "ctr", sr.Container)
+	tlog := r.log.With("br", primaryBranch, "instance", sr.InstanceID)
 	tlog.Info("starting session", "hns", t.Harness)
 	region = trace.StartRegion(ctx, "agent-session")
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container:     sr.Container,
+		Container:     string(sr.InstanceID),
 		Dir:           r.containerDir(t),
 		Model:         t.Model,
 		Effort:        t.Effort,
@@ -376,9 +376,9 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 
 // Cleanup is the single shutdown path for a task (Flow 1 in the relay
 // shutdown protocol — see package agent). It sends the null-byte sentinel
-// to trigger graceful agent exit, then purges the container.
+// to trigger graceful agent exit, then purges the instance.
 //
-// This is only called for intentional purge (user action or container
+// This is only called for intentional purge (user action or instance
 // death), never during backend restart. On restart, the relay daemon stays
 // alive and the server reconnects via adoptOne → Reconnect.
 //
@@ -386,8 +386,8 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 //  1. Detach the session handle from the task.
 //  2. If a session exists: Stop (sends \x00, waits up to 20s), then Close.
 //  3. Set task state to reason (StatePurged or StateFailed).
-//  4. Purge the container (stop + remove + cleanup git remotes/SSH config).
-//  5. If graceful wait timed out, drain session now (container dead, SSH severed).
+//  4. Purge the instance (stop + remove + cleanup git remotes/SSH config).
+//  5. If graceful wait timed out, drain session now (instance dead, SSH severed).
 //  6. Close msgCh and logW, write log trailer.
 //  7. Build and return Result.
 func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
@@ -396,12 +396,12 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	defer task.End()
 
 	start := time.Now()
-	name := t.ContainerName()
+	name := t.RuntimeInstanceID()
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	tlog := r.log.With("br", primaryBranch, "ctr", name)
+	tlog := r.log.With("br", primaryBranch, "instance", name)
 	tlog.InfoContext(ctx, "cleanup starting", "reason", reason, "state", t.GetState(), "has_session", t.HasSession())
 
 	h := t.DetachSession()
@@ -413,7 +413,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 		gStart := time.Now()
 		if err := h.GracefulStop(ctx, 20*time.Second); err != nil {
 			tlog.WarnContext(ctx, "graceful stop timed out", "err", err, "dur", time.Since(gStart).Round(time.Millisecond))
-			r.logRelayDiag(ctx, tlog, name)
+			r.logRelayDiag(ctx, tlog, string(name))
 		} else {
 			tlog.DebugContext(ctx, "cleanup: graceful stop succeeded", "dur", time.Since(gStart).Round(time.Millisecond))
 		}
@@ -421,22 +421,22 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 
 	t.SetState(reason)
 
-	if name != "" && r.Container != nil {
-		tlog.InfoContext(ctx, "cleanup: purging container")
+	if name != "" && r.Runtime != nil {
+		tlog.InfoContext(ctx, "cleanup: purging instance")
 		pStart := time.Now()
 		purgeCtx, purgeCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
-		err := r.Container.Purge(purgeCtx, runtime.InstanceID(name))
+		err := r.Runtime.Purge(purgeCtx, name)
 		purgeCancel()
 		if err != nil {
-			tlog.WarnContext(ctx, "purge container failed", "err", err, "dur", time.Since(pStart).Round(time.Millisecond))
+			tlog.WarnContext(ctx, "purge instance failed", "err", err, "dur", time.Since(pStart).Round(time.Millisecond))
 		} else {
-			tlog.DebugContext(ctx, "cleanup: container purged", "dur", time.Since(pStart).Round(time.Millisecond))
+			tlog.DebugContext(ctx, "cleanup: instance purged", "dur", time.Since(pStart).Round(time.Millisecond))
 		}
 	} else {
-		tlog.DebugContext(ctx, "cleanup: no container to purge", "name", name, "has_backend", r.Container != nil)
+		tlog.DebugContext(ctx, "cleanup: no instance to purge", "name", name, "has_backend", r.Runtime != nil)
 	}
 
-	// Drain the session: if graceful stop timed out, the container purge
+	// Drain the session: if graceful stop timed out, the instance purge
 	// above severed SSH so this unblocks.
 	if h != nil {
 		dStart := time.Now()
@@ -484,8 +484,8 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	return res
 }
 
-// StopTask gracefully shuts down the agent session and stops the container
-// without removing it. The container can be revived later. Unlike Cleanup,
+// StopTask gracefully shuts down the agent session and stops the instance
+// without removing it. The instance can be revived later. Unlike Cleanup,
 // this preserves git remotes and SSH config.
 func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	r.initDefaults()
@@ -493,12 +493,12 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	defer task.End()
 
 	start := time.Now()
-	name := t.ContainerName()
+	name := t.RuntimeInstanceID()
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	tlog := r.log.With("br", primaryBranch, "ctr", name)
+	tlog := r.log.With("br", primaryBranch, "instance", name)
 	tlog.InfoContext(ctx, "stop starting", "state", t.GetState())
 	if _, changed := t.SetStateUnless(StateStopping, StatePurging, StatePurged, StateFailed, StateStopped); !changed {
 		tlog.InfoContext(ctx, "stop skipped", "state", t.GetState())
@@ -513,25 +513,25 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 		gStart := time.Now()
 		if err := h.GracefulStop(ctx, 20*time.Second); err != nil {
 			tlog.WarnContext(ctx, "graceful stop timed out", "err", err, "dur", time.Since(gStart).Round(time.Millisecond))
-			r.logRelayDiag(ctx, tlog, name)
+			r.logRelayDiag(ctx, tlog, string(name))
 		} else {
 			tlog.DebugContext(ctx, "stop: graceful stop succeeded", "dur", time.Since(gStart).Round(time.Millisecond))
 		}
 	}
 
-	tlog.InfoContext(ctx, "stop: stopping container")
-	if name != "" && r.Container != nil {
+	tlog.InfoContext(ctx, "stop: stopping instance")
+	if name != "" && r.Runtime != nil {
 		cStart := time.Now()
-		if err := r.Container.Stop(ctx, runtime.InstanceID(name)); err != nil {
-			tlog.WarnContext(ctx, "stop: container Stop failed", "err", err, "dur", time.Since(cStart).Round(time.Millisecond))
+		if err := r.Runtime.Stop(ctx, name); err != nil {
+			tlog.WarnContext(ctx, "stop: instance Stop failed", "err", err, "dur", time.Since(cStart).Round(time.Millisecond))
 		} else {
-			tlog.DebugContext(ctx, "stop: container Stop succeeded", "dur", time.Since(cStart).Round(time.Millisecond))
+			tlog.DebugContext(ctx, "stop: instance Stop succeeded", "dur", time.Since(cStart).Round(time.Millisecond))
 		}
 	} else {
-		tlog.DebugContext(ctx, "stop: no container to stop", "name", name, "has_backend", r.Container != nil)
+		tlog.DebugContext(ctx, "stop: no instance to stop", "name", name, "has_backend", r.Runtime != nil)
 	}
 
-	// Drain session after container is stopped, then wait for the dispatch
+	// Drain session after instance is stopped, then wait for the dispatch
 	// goroutine to finish processing all buffered messages so that t.msgs
 	// is complete before the state transitions to StateStopped.
 	if h != nil {
@@ -574,8 +574,8 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 		"cost", res.CostUSD, "turns", res.NumTurns)
 }
 
-// ReviveTask restarts a stopped container and resumes the agent session.
-// The container's filesystem is preserved from the previous run. After
+// ReviveTask restarts a stopped instance and resumes the agent session.
+// The instance's filesystem is preserved from the previous run. After
 // docker-start + SSH, a new relay is started with --resume to continue
 // the previous session.
 func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error) {
@@ -583,32 +583,32 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	ctx, task := trace.NewTask(ctx, "task.revive:"+t.ID.String())
 	defer task.End()
 
-	if r.Container == nil {
-		return nil, errors.New("runner has no container backend configured")
+	if r.Runtime == nil {
+		return nil, errors.New("runner has no instance backend configured")
 	}
-	containerName := t.ContainerName()
-	if containerName == "" {
-		return nil, errors.New("no container to revive")
+	instanceID := t.RuntimeInstanceID()
+	if instanceID == "" {
+		return nil, errors.New("no instance to revive")
 	}
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	tlog := r.log.With("br", primaryBranch, "ctr", containerName)
+	tlog := r.log.With("br", primaryBranch, "instance", instanceID)
 
-	// 1. Revive the container (docker start + SSH).
+	// 1. Revive the instance (docker start + SSH).
 	if state, changed := t.SetStateIfAny(StateProvisioning, StateStopped, StateProvisioning); !changed {
 		return nil, fmt.Errorf("cannot revive in state %s", state)
 	}
-	tlog.Info("reviving container")
-	tlog.Debug("runner", "msg", "calling container.Revive")
-	if err := r.Container.Revive(ctx, runtime.InstanceID(containerName)); err != nil {
+	tlog.Info("reviving instance")
+	tlog.Debug("runner", "msg", "calling instance.Revive")
+	if err := r.Runtime.Revive(ctx, instanceID); err != nil {
 		tlog.Error("runner", "msg", "Revive failed", "err", err)
 		t.SetStateUnless(StateFailed, StatePurging, StatePurged, StateStopping, StateStopped)
-		return nil, fmt.Errorf("revive container: %w", err)
+		return nil, fmt.Errorf("revive instance: %w", err)
 	}
-	tlog.Debug("runner", "msg", "Revive succeeded", "container", containerName)
-	t.SetVNCPort(r.Container.VNCPort(ctx, runtime.InstanceID(containerName)))
+	tlog.Debug("runner", "msg", "Revive succeeded", "instance", instanceID)
+	t.SetVNCPort(r.Runtime.VNCPort(ctx, instanceID))
 
 	// 2. Start a new relay with --resume to continue the previous session.
 	// skipSideEffects=true: --resume replays all historical messages and
@@ -628,7 +628,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 
 	t.SetState(StateRunning)
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container:       containerName,
+		Container:       string(instanceID),
 		Dir:             r.containerDir(t),
 		Model:           t.Model,
 		Effort:          t.Effort,
@@ -689,7 +689,7 @@ func (r *Runner) EnsureSession(ctx context.Context, t *Task, h *SessionHandle, t
 	}
 }
 
-// StartSession starts a fresh relay+agent session on an existing container.
+// StartSession starts a fresh relay+agent session on an existing instance.
 // If prompt is non-empty, it is sent as the initial input and the task
 // transitions to StateRunning. If prompt is empty, the agent starts idle
 // and the task stays in its current state (typically StateWaiting).
@@ -698,15 +698,15 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 	ctx, task := trace.NewTask(ctx, "task.start-session:"+t.ID.String())
 	defer task.End()
 
-	containerName := t.ContainerName()
-	if containerName == "" {
-		return nil, errors.New("no container")
+	instanceID := t.RuntimeInstanceID()
+	if instanceID == "" {
+		return nil, errors.New("no instance")
 	}
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	tlog := r.log.With("br", primaryBranch, "ctr", containerName)
+	tlog := r.log.With("br", primaryBranch, "instance", instanceID)
 
 	msgCh, dispatchDone := r.startMessageDispatch(ctx, t, false)
 	logW, err := r.openLog(t)
@@ -718,7 +718,7 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 
 	tlog.Info("starting session", "hns", t.Harness)
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container:     containerName,
+		Container:     string(instanceID),
 		Dir:           r.containerDir(t),
 		Model:         t.Model,
 		Effort:        t.Effort,
@@ -743,50 +743,50 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 	return h, nil
 }
 
-// ForkTask snapshots the source task's container and starts an idle agent
-// session in the forked container. The new task must already have its ID,
+// ForkTask snapshots the source task's instance and starts an idle agent
+// session in the forked instance. The new task must already have its ID,
 // Harness, Model, and other immutable fields set. The method fills in
-// Container, Repos[*].Branch, and starts the session.
+// Runtime, Repos[*].Branch, and starts the session.
 func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *runtime.ForkOptions, resolvedGitHubToken string) (*SessionHandle, error) {
 	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.fork:"+source.ID.String()+"->"+fork.ID.String())
 	defer task.End()
 
-	if r.Container == nil {
-		return nil, errors.New("runner has no container backend configured")
+	if r.Runtime == nil {
+		return nil, errors.New("runner has no instance backend configured")
 	}
-	sourceContainer := source.ContainerName()
-	if sourceContainer == "" {
-		return nil, errors.New("source task has no container")
+	sourceInstanceID := source.RuntimeInstanceID()
+	if sourceInstanceID == "" {
+		return nil, errors.New("source task has no instance")
 	}
 
 	var sourcePrimaryBranch string
 	if p := source.Primary(); p != nil {
 		sourcePrimaryBranch = p.Branch
 	}
-	tlog := r.log.With("src_br", sourcePrimaryBranch, "src_ctr", sourceContainer)
+	tlog := r.log.With("src_br", sourcePrimaryBranch, "src_instance", sourceInstanceID)
 
 	// 1. Fork the runtime instance. Branch names are generated by the runtime adapter.
 	fork.SetState(StateProvisioning)
-	tlog.Info("forking container")
-	tlog.Debug("runner", "msg", "calling container.Fork", "source", sourceContainer, "harness", forkOpts.Harness, "tailscale", forkOpts.Tailscale, "usb", forkOpts.USB, "display", forkOpts.Display, "sudo", forkOpts.Sudo, "gitHubToken", fork.GitHubTokenEnabled())
+	tlog.Info("forking instance")
+	tlog.Debug("runner", "msg", "calling instance.Fork", "source", sourceInstanceID, "harness", forkOpts.Harness, "tailscale", forkOpts.Tailscale, "usb", forkOpts.USB, "display", forkOpts.Display, "sudo", forkOpts.Sudo, "gitHubToken", fork.GitHubTokenEnabled())
 	forkOpts.LogWriter = &provisioningWriter{ctx: ctx, t: fork}
-	forkName, forkRepos, err := r.Container.Fork(ctx, runtime.InstanceID(sourceContainer), source.RuntimeRepos(), forkOpts)
+	forkName, forkRepos, err := r.Runtime.Fork(ctx, sourceInstanceID, source.RuntimeRepos(), forkOpts)
 	if err != nil {
-		tlog.Error("runner", "msg", "container.Fork failed", "source", sourceContainer, "err", err)
+		tlog.Error("runner", "msg", "instance.Fork failed", "source", sourceInstanceID, "err", err)
 		fork.SetState(StateFailed)
-		return nil, fmt.Errorf("fork container: %w", err)
+		return nil, fmt.Errorf("fork instance: %w", err)
 	}
-	tlog.Debug("runner", "msg", "container.Fork succeeded", "source", sourceContainer, "fork", forkName)
-	fork.SetContainerInfo(string(forkName), "", "", r.Container.VNCPort(ctx, forkName))
+	tlog.Debug("runner", "msg", "instance.Fork succeeded", "source", sourceInstanceID, "fork", forkName)
+	fork.SetRuntimeInstanceInfo(forkName, "", "", r.Runtime.VNCPort(ctx, forkName))
 	for i := range fork.ReposSnapshot() {
 		if i < len(forkRepos) {
 			fork.SetRepoBranch(i, forkRepos[i].Branch)
 		}
 	}
-	tlog.Info("fork container ready", "ctr", forkName)
+	tlog.Info("fork instance ready", "instance", forkName)
 
-	// 2. Clean relay state from the source container's snapshot so the
+	// 2. Clean relay state from the source instance's snapshot so the
 	// forked task starts with an empty output.jsonl.
 	if err := agent.CleanRelayState(ctx, string(forkName)); err != nil {
 		tlog.Warn("clean relay state failed (non-fatal)", "err", err)
@@ -800,21 +800,21 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 		fork.SetState(StateFailed)
 		return nil, fmt.Errorf("start session on fork: %w", err)
 	}
-	tlog.Info("fork session running", "ctr", forkName)
+	tlog.Info("fork session running", "instance", forkName)
 	return h, nil
 }
 
-// setupResult holds the outputs of setup: the container name and optional Tailscale FQDN.
+// setupResult holds the outputs of setup: the instance name and optional Tailscale FQDN.
 // The primary branch is written into the task repo metadata during setup.
 type setupResult struct {
-	Container        string
+	InstanceID       runtime.InstanceID
 	TailscaleFQDN    string
 	TailscaleAuthURL string
 }
 
 // AllocateBranch allocates a caic-N branch for this runner's repo using the
 // runner's base branch. Used by the server to allocate branches for extra repos
-// before starting a container.
+// before starting a instance.
 func (r *Runner) AllocateBranch(ctx context.Context) (string, error) {
 	r.initDefaults()
 	r.branchMu.Lock()
@@ -839,7 +839,7 @@ func (r *Runner) SyncToOrigin(ctx context.Context, t *Task, force bool) (agent.D
 	defer fetchCancel()
 	r.branchMu.Lock()
 	r.log.Info("fetch", "repos", len(repos))
-	if err := r.Container.Fetch(fetchCtx, id); err != nil {
+	if err := r.Runtime.Fetch(fetchCtx, id); err != nil {
 		r.branchMu.Unlock()
 		region.End()
 		return nil, nil, err
@@ -899,7 +899,7 @@ func extractRepoDS(ds agent.DiffStat, repoName string, multi bool) agent.DiffSta
 	return result
 }
 
-// SyncToDefault fetches changes from the container, runs safety checks per repo,
+// SyncToDefault fetches changes from the instance, runs safety checks per repo,
 // and squash-pushes each repo's task branch onto its default branch. Safety
 // issues always block (no force override). The commit message is built from the
 // task title.
@@ -917,7 +917,7 @@ func (r *Runner) SyncToDefault(ctx context.Context, t *Task, message string) (ag
 	defer fetchCancel()
 	r.branchMu.Lock()
 	r.log.Info("fetch for default sync", "repos", len(repos))
-	if err := r.Container.Fetch(fetchCtx, id); err != nil {
+	if err := r.Runtime.Fetch(fetchCtx, id); err != nil {
 		r.branchMu.Unlock()
 		region.End()
 		return nil, nil, err
@@ -960,7 +960,7 @@ func (r *Runner) SyncToDefault(ctx context.Context, t *Task, message string) (ag
 }
 
 // RestartSession closes the current agent session and starts a fresh one in
-// the same container with a new prompt. Returns the new SessionHandle so the
+// the same instance with a new prompt. Returns the new SessionHandle so the
 // caller can start a session watcher.
 func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Prompt) (*SessionHandle, error) {
 	r.initDefaults()
@@ -1008,11 +1008,11 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	if p := t.Primary(); p != nil {
 		restartBranch = p.Branch
 	}
-	containerName := t.ContainerName()
-	tlog := r.log.With("br", restartBranch, "ctr", containerName)
+	instanceID := t.RuntimeInstanceID()
+	tlog := r.log.With("br", restartBranch, "instance", instanceID)
 	tlog.Info("restarting session", "hns", t.Harness)
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container:     containerName,
+		Container:     string(instanceID),
 		Dir:           r.containerDir(t),
 		Model:         t.Model,
 		Effort:        t.Effort,
@@ -1040,7 +1040,7 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 }
 
 // ClearContextSession closes the current agent session and starts a fresh one
-// in the same container without a prompt. The task transitions to StateWaiting
+// in the same instance without a prompt. The task transitions to StateWaiting
 // so the user can send a new message when ready.
 func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHandle, error) {
 	r.initDefaults()
@@ -1086,11 +1086,11 @@ func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHand
 	if p := t.Primary(); p != nil {
 		clearBranch = p.Branch
 	}
-	containerName := t.ContainerName()
-	tlog := r.log.With("br", clearBranch, "ctr", containerName)
+	instanceID := t.RuntimeInstanceID()
+	tlog := r.log.With("br", clearBranch, "instance", instanceID)
 	tlog.Info("clearing context", "hns", t.Harness)
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container: containerName,
+		Container: string(instanceID),
 		Dir:       r.containerDir(t),
 		Model:     t.Model,
 		Effort:    t.Effort,
@@ -1137,7 +1137,7 @@ func (r *Runner) DiffContent(ctx context.Context, t *Task, path string) (string,
 		if path != "" {
 			args = append(args, "--", path)
 		}
-		diff, err := r.Container.Diff(ctx, id, i, args...)
+		diff, err := r.Runtime.Diff(ctx, id, i, args...)
 		if err != nil {
 			r.log.Warn("diff failed", "repo", repo.MountPath, "br", repo.Branch, "err", err)
 			continue
@@ -1179,7 +1179,7 @@ func prependRepoToDiff(diff, repoName string) string {
 }
 
 // mutatingTools lists tool names whose execution may change files in the
-// container, warranting a diff stat refresh after their result arrives.
+// instance, warranting a diff stat refresh after their result arrives.
 var mutatingTools = map[string]struct{}{
 	"Bash":         {},
 	"Edit":         {},
@@ -1187,13 +1187,13 @@ var mutatingTools = map[string]struct{}{
 	"NotebookEdit": {},
 }
 
-// BranchDiffStat fetches from the container and returns the per-repo branch diff
+// BranchDiffStat fetches from the instance and returns the per-repo branch diff
 // stat (md diff --numstat). Unlike the relay's diff_watcher which only tracks
 // uncommitted changes, this captures the full branch diff relative to the base.
 // Used by adoptOne to restore the diff stat after server restart.
 func (r *Runner) BranchDiffStat(ctx context.Context, t *Task) agent.DiffStat {
 	r.initDefaults()
-	if r.Container == nil || r.Dir == "" {
+	if r.Runtime == nil || r.Dir == "" {
 		return nil
 	}
 	id, repos, err := r.taskRuntime(t)
@@ -1205,7 +1205,7 @@ func (r *Runner) BranchDiffStat(ctx context.Context, t *Task) agent.DiffStat {
 	defer cancel()
 	r.branchMu.Lock()
 	defer r.branchMu.Unlock()
-	if err := r.Container.Fetch(fetchCtx, id); err != nil {
+	if err := r.Runtime.Fetch(fetchCtx, id); err != nil {
 		r.log.Warn("fetch for branch diff stat failed", "err", err)
 		return nil
 	}
@@ -1216,7 +1216,7 @@ func (r *Runner) taskRuntime(t *Task) (runtime.InstanceID, []runtime.Repo, error
 	if t == nil {
 		return "", nil, errors.New("task is nil")
 	}
-	id := runtime.InstanceID(t.ContainerName())
+	id := t.RuntimeInstanceID()
 	if id == "" {
 		return "", nil, errors.New("task has no runtime instance")
 	}
@@ -1240,8 +1240,8 @@ func (r *Runner) initDefaults() {
 		if r.GitTimeout == 0 {
 			r.GitTimeout = time.Minute
 		}
-		if r.ContainerStartTimeout == 0 {
-			r.ContainerStartTimeout = time.Hour
+		if r.RuntimeStartTimeout == 0 {
+			r.RuntimeStartTimeout = time.Hour
 		}
 		repoName := filepath.Base(r.Dir)
 		if r.Dir == "" {
@@ -1256,7 +1256,7 @@ func (r *Runner) backend(name agent.Harness) agent.Backend {
 	return r.Backends[name]
 }
 
-// containerDir returns the working directory path inside an md container.
+// containerDir returns the working directory path inside an md instance.
 // Uses the task's primary repo MountedPath when available; otherwise falls back
 // to computing it from the runner's Dir basename (legacy). Returns /home/user
 // for no-repo runners.
@@ -1358,8 +1358,8 @@ func MakeMetadata(t *Task) runtime.Metadata {
 	return metadata
 }
 
-// setup reserves a branch name, starts the container (Phase A) and creates the
-// git branch concurrently, then completes container startup (Phase B).
+// setup reserves a branch name, starts the instance (Phase A) and creates the
+// git branch concurrently, then completes instance startup (Phase B).
 // Phase A (docker run) and git fetch+branch-create overlap, cutting the
 // branch-allocation time off the critical path.
 func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, resolvedGitHubToken string) (setupResult, error) {
@@ -1378,14 +1378,14 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	r.log.Info("starting container", "br", primaryBranch, "img", t.DockerImage, "hns", t.Harness, "ts", t.Tailscale, "usb", t.USB, "dpy", t.Display, "sudo", t.Sudo, "gitHubToken", t.GitHubTokenEnabled())
+	r.log.Info("starting instance", "br", primaryBranch, "img", t.BaseImage, "hns", t.Harness, "ts", t.Tailscale, "usb", t.USB, "dpy", t.Display, "sudo", t.Sudo, "gitHubToken", t.GitHubTokenEnabled())
 	tContainer := time.Now()
-	startCtx, startCancel := context.WithTimeout(detached, r.ContainerStartTimeout)
+	startCtx, startCancel := context.WithTimeout(detached, r.RuntimeStartTimeout)
 	defer startCancel()
 
 	opts := &runtime.StartOptions{
-		Metadata:    metadata,
-		DockerImage: t.DockerImage, Harness: t.Harness, Tailscale: t.Tailscale, USB: t.USB, Display: t.Display, Sudo: t.Sudo,
+		Metadata:  metadata,
+		BaseImage: t.BaseImage, Harness: t.Harness, Tailscale: t.Tailscale, USB: t.USB, Display: t.Display, Sudo: t.Sudo,
 		Caches:      t.CacheMounts,
 		MaxCPUs:     t.MaxCPUs,
 		GitHubToken: resolvedGitHubToken,
@@ -1393,24 +1393,24 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	}
 
 	// Phase A: docker run + SSH config. Branch creation runs concurrently so
-	// git fetch overlaps with the container SSH boot time (~500 ms–3 s).
+	// git fetch overlaps with the instance SSH boot time (~500 ms–3 s).
 	var repos []runtime.Repo
 	if r.Dir != "" {
 		repos = t.RuntimeRepos()
 	}
-	var containerName string
-	r.log.Debug("runner", "msg", "provisioning phase A: launching container and creating branch", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo, "repos_count", len(repos))
+	var instanceID runtime.InstanceID
+	r.log.Debug("runner", "msg", "provisioning phase A: launching instance and creating branch", "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo, "repos_count", len(repos))
 	eg, egCtx := errgroup.WithContext(startCtx)
 	eg.Go(func() error {
-		defer trace.StartRegion(egCtx, "container-launch").End()
-		r.log.Debug("runner", "msg", "calling container.Launch", "branch", primaryBranch)
-		id, err := r.Container.Launch(egCtx, repos, opts)
+		defer trace.StartRegion(egCtx, "instance-launch").End()
+		r.log.Debug("runner", "msg", "calling instance.Launch", "branch", primaryBranch)
+		id, err := r.Runtime.Launch(egCtx, repos, opts)
 		if err != nil {
-			r.log.Error("runner", "msg", "container.Launch failed", "branch", primaryBranch, "err", err)
+			r.log.Error("runner", "msg", "instance.Launch failed", "branch", primaryBranch, "err", err)
 			return err
 		}
-		r.log.Debug("runner", "msg", "container.Launch succeeded", "container", id)
-		containerName = string(id)
+		r.log.Debug("runner", "msg", "instance.Launch succeeded", "instance", id)
+		instanceID = id
 		return nil
 	})
 	if r.Dir != "" {
@@ -1430,26 +1430,26 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	if err := eg.Wait(); err != nil {
 		return setupResult{}, err
 	}
-	r.log.Debug("runner", "msg", "phase A complete", "container", containerName)
+	r.log.Debug("runner", "msg", "phase A complete", "instance", instanceID)
 
 	// Phase B: wait for SSH + push (branch now exists locally).
-	r.log.Debug("runner", "msg", "provisioning phase B: connecting via SSH", "container", containerName)
-	conn, err := r.Container.Connect(startCtx, runtime.InstanceID(containerName), opts)
+	r.log.Debug("runner", "msg", "provisioning phase B: connecting via SSH", "instance", instanceID)
+	conn, err := r.Runtime.Connect(startCtx, instanceID, opts)
 	if err != nil {
-		r.log.Error("runner", "msg", "container.Connect failed", "container", containerName, "err", err)
-		return setupResult{}, fmt.Errorf("start container: %w", err)
+		r.log.Error("runner", "msg", "instance.Connect failed", "instance", instanceID, "err", err)
+		return setupResult{}, fmt.Errorf("start instance: %w", err)
 	}
-	r.log.Info("runner", "msg", "started", "br", primaryBranch, "dur", time.Since(tContainer), "container", containerName, "fqdn", conn.TailscaleFQDN)
-	return setupResult{Container: containerName, TailscaleFQDN: conn.TailscaleFQDN, TailscaleAuthURL: conn.TailscaleAuthURL}, nil
+	r.log.Info("runner", "msg", "started", "br", primaryBranch, "dur", time.Since(tContainer), "instance", instanceID, "fqdn", conn.TailscaleFQDN)
+	return setupResult{InstanceID: instanceID, TailscaleFQDN: conn.TailscaleFQDN, TailscaleAuthURL: conn.TailscaleAuthURL}, nil
 }
 
-// logRelayDiag reads the relay daemon's relay.log from the container and logs
+// logRelayDiag reads the relay daemon's relay.log from the instance and logs
 // its tail. Called when GracefulStop times out to capture relay-side diagnostics.
-func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, container string) {
-	if r.Container == nil || container == "" {
+func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, instance string) {
+	if r.Runtime == nil || instance == "" {
 		return
 	}
-	tail := agent.ReadRelayLog(ctx, container, 4096)
+	tail := agent.ReadRelayLog(ctx, instance, 4096)
 	if tail == "" {
 		tlog.Warn("relay.log empty or unreadable")
 		return
@@ -1458,7 +1458,7 @@ func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, container 
 }
 
 // startMessageDispatch starts a goroutine that reads from msgCh and dispatches
-// to t.addMessage. For ResultMessages, it fetches from the container first and
+// to t.addMessage. For ResultMessages, it fetches from the instance first and
 // attaches the diff stat. For tool results following a mutating tool (Edit,
 // Bash, Write, NotebookEdit), it also fetches and emits a DiffStatMessage.
 // When skipSideEffects is true, fetch+diff and title generation are suppressed
@@ -1468,7 +1468,7 @@ func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, container 
 func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) (msgCh chan agent.Message, dispatchDone <-chan struct{}) {
 	// Capture all repos outside the goroutine to avoid races.
 	allRepos := t.RuntimeRepos()
-	instanceID := runtime.InstanceID(t.ContainerName())
+	instanceID := t.RuntimeInstanceID()
 	msgCh = make(chan agent.Message, 256)
 	done := make(chan struct{})
 	dispatchDone = done
@@ -1483,17 +1483,17 @@ func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffe
 					pendingMutating[msg.ToolUseID] = struct{}{}
 				}
 			case *agent.ToolResultMessage:
-				if !skipSideEffects && r.Container != nil && r.Dir != "" {
+				if !skipSideEffects && r.Runtime != nil && r.Dir != "" {
 					if _, ok := pendingMutating[msg.ToolUseID]; ok {
 						delete(pendingMutating, msg.ToolUseID)
 						r.fetchDiffStatBranch(ctx, t, instanceID, allRepos)
 					}
 				}
 			case *agent.ResultMessage:
-				if !skipSideEffects && r.Container != nil && r.Dir != "" {
+				if !skipSideEffects && r.Runtime != nil && r.Dir != "" {
 					fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
 					r.branchMu.Lock()
-					if err := r.Container.Fetch(fetchCtx, instanceID); err != nil {
+					if err := r.Runtime.Fetch(fetchCtx, instanceID); err != nil {
 						r.log.Warn("fetch on result failed", "err", err)
 					}
 					msg.DiffStat = r.diffStat(fetchCtx, instanceID, allRepos)
@@ -1507,7 +1507,7 @@ func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffe
 	return msgCh, dispatchDone
 }
 
-// fetchDiffStatBranch fetches from the container and emits a DiffStatMessage
+// fetchDiffStatBranch fetches from the instance and emits a DiffStatMessage
 // into the task's message stream. Used after mutating tool results to keep the
 // live diff stat up to date across all repos.
 func (r *Runner) fetchDiffStatBranch(ctx context.Context, t *Task, id runtime.InstanceID, repos []runtime.Repo) {
@@ -1515,7 +1515,7 @@ func (r *Runner) fetchDiffStatBranch(ctx context.Context, t *Task, id runtime.In
 	defer fetchCancel()
 	r.branchMu.Lock()
 	defer r.branchMu.Unlock()
-	if err := r.Container.Fetch(fetchCtx, id); err != nil {
+	if err := r.Runtime.Fetch(fetchCtx, id); err != nil {
 		r.log.Warn("fetch on tool result failed", "err", err)
 		return
 	}
@@ -1539,7 +1539,7 @@ func (r *Runner) diffStat(ctx context.Context, id runtime.InstanceID, repos []ru
 	var result agent.DiffStat
 	for i := range repos {
 		repo := &repos[i]
-		numstat, err := r.Container.Diff(ctx, id, i, "--numstat")
+		numstat, err := r.Runtime.Diff(ctx, id, i, "--numstat")
 		if err != nil {
 			r.log.Warn("diff numstat failed", "repo", repo.MountPath, "br", repo.Branch, "err", err)
 			continue

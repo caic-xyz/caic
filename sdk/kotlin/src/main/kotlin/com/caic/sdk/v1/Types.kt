@@ -735,7 +735,7 @@ data class DiffFileStat(
 /** RuntimeInstance holds per-task runtime metadata. */
 @Serializable
 data class RuntimeInstance(
-    val name: String,
+    val id: String,
     val tailscale: String? = null,
     val usb: Boolean? = null,
     val display: Boolean? = null,

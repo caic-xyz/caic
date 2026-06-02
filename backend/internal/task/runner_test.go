@@ -201,9 +201,9 @@ func TestRunner(t *testing.T) {
 		t.Parallel()
 		backend := &testBackend{}
 		r := &Runner{
-			LogDir:    t.TempDir(),
-			Container: &stubContainer{},
-			Backends:  map[agent.Harness]agent.Backend{"test": backend},
+			LogDir:   t.TempDir(),
+			Runtime:  &stubContainer{},
+			Backends: map[agent.Harness]agent.Backend{"test": backend},
 		}
 		tk := &Task{
 			ID:            ksid.NewID(),
@@ -330,7 +330,7 @@ func TestRunner(t *testing.T) {
 				BaseBranch: "main",
 				Dir:        clone,
 				LogDir:     logDir,
-				Container:  stub,
+				Runtime:    stub,
 			}
 			r.initDefaults()
 
@@ -375,7 +375,7 @@ func TestRunner(t *testing.T) {
 				BaseBranch: "main",
 				Dir:        clone,
 				LogDir:     logDir,
-				Container:  stub,
+				Runtime:    stub,
 			}
 			r.initDefaults()
 
@@ -539,12 +539,12 @@ func TestRunner(t *testing.T) {
 			t.Run(state.String(), func(t *testing.T) {
 				t.Parallel()
 				stub := &stubContainer{}
-				r := &Runner{Container: stub}
+				r := &Runner{Runtime: stub}
 				tk := &Task{
 					ID:            ksid.NewID(),
 					InitialPrompt: agent.Prompt{Text: "test"},
-					Container:     "ctr-1",
 				}
+				tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
 				tk.SetState(state)
 
 				r.StopTask(t.Context(), tk)
@@ -571,8 +571,8 @@ func TestRunner(t *testing.T) {
 						ID:            ksid.NewID(),
 						InitialPrompt: agent.Prompt{Text: "test"},
 						Harness:       harness,
-						Container:     "ctr-1",
 					}
+					tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
 					tk.SetState(StateRunning)
 					_, err := r.Reconnect(t.Context(), tk, true)
 					if err == nil {
@@ -640,7 +640,7 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			// Reconnect appends via reopenLog, which must not write a second
 			// caic_meta header. Otherwise every server restart that re-adopts
-			// a running container duplicates the header.
+			// a running instance duplicates the header.
 			logDir := filepath.Join(t.TempDir(), "logs")
 			r := &Runner{LogDir: logDir}
 			tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Name: "org/repo", Branch: "caic-0"}}}
@@ -713,7 +713,7 @@ func TestRunner(t *testing.T) {
 		t.Run("ResultMessage", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := &Runner{Container: stub, Dir: "/repo"}
+			r := &Runner{Runtime: stub, Dir: "/repo"}
 			r.initDefaults()
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -752,7 +752,7 @@ func TestRunner(t *testing.T) {
 				t.Run(tool, func(t *testing.T) {
 					t.Parallel()
 					stub := &stubContainer{}
-					r := &Runner{Container: stub, Dir: "/repo"}
+					r := &Runner{Runtime: stub, Dir: "/repo"}
 					r.initDefaults()
 
 					tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -802,7 +802,7 @@ func TestRunner(t *testing.T) {
 		t.Run("NonMutatingToolNoDiffStat", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := &Runner{Container: stub}
+			r := &Runner{Runtime: stub}
 			r.initDefaults()
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -837,7 +837,7 @@ func TestRunner(t *testing.T) {
 		t.Run("SkipSideEffects", func(t *testing.T) {
 			t.Parallel()
 			stub := &stubContainer{}
-			r := &Runner{Container: stub, Dir: "/repo"}
+			r := &Runner{Runtime: stub, Dir: "/repo"}
 			r.initDefaults()
 
 			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []RepoMount{{Branch: "caic-0"}}}
@@ -920,8 +920,8 @@ func TestRunner(t *testing.T) {
 					InitialPrompt: agent.Prompt{Text: "old prompt"},
 					Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 					Harness:       "test",
-					Container:     "fake-container",
 				}
+				tk.SetRuntimeInstanceInfo("fake-instance", "", "", 0)
 				tk.SetState(startState)
 
 				h, err := r.RestartSession(t.Context(), tk, agent.Prompt{Text: "new plan"})
@@ -976,11 +976,11 @@ func TestRunner(t *testing.T) {
 			InitialPrompt: agent.Prompt{Text: "test"},
 			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 			Harness:       "test",
-			Container:     "fake-container",
 		}
+		tk.SetRuntimeInstanceInfo("fake-instance", "", "", 0)
 
 		// Create an initial session with a log writer by using the backend
-		// directly (Runner.Start needs a container backend).
+		// directly (Runner.Start needs a instance backend).
 		logW, err := r.openLog(tk)
 		if err != nil {
 			t.Fatal(err)
@@ -1037,9 +1037,9 @@ func TestRunner(t *testing.T) {
 	t.Run("BranchDiffStat", func(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
-		r := &Runner{Container: sc, Dir: "/repo"}
+		r := &Runner{Runtime: sc, Dir: "/repo"}
 		tk := &Task{Repos: []RepoMount{{GitRoot: "/repo", Branch: "feature"}}}
-		tk.SetContainerInfo("ctr-1", "", "", 0)
+		tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
 		ds := r.BranchDiffStat(t.Context(), tk)
 		if !sc.fetched {
 			t.Error("BranchDiffStat did not call Fetch")
@@ -1054,14 +1054,14 @@ func TestRunner(t *testing.T) {
 	t.Run("BranchDiffStatMultiRepoUsesInstanceID", func(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
-		r := &Runner{Container: sc, Dir: "/home/user/src/caic"}
+		r := &Runner{Runtime: sc, Dir: "/home/user/src/caic"}
 		tk := &Task{
 			Repos: []RepoMount{
 				{GitRoot: "/home/user/src/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic"},
 				{GitRoot: "/home/user/src/genai", Branch: "caic-0", MountedPath: "/home/user/src/genai"},
 			},
 		}
-		tk.SetContainerInfo("ctr-2", "", "", 0)
+		tk.SetRuntimeInstanceInfo("ctr-2", "", "", 0)
 
 		ds := r.BranchDiffStat(t.Context(), tk)
 
@@ -1087,12 +1087,12 @@ func TestRunner(t *testing.T) {
 		t.Parallel()
 		r := &Runner{}
 		if ds := r.BranchDiffStat(t.Context(), &Task{}); ds != nil {
-			t.Errorf("BranchDiffStat with no container = %+v, want nil", ds)
+			t.Errorf("BranchDiffStat with no instance = %+v, want nil", ds)
 		}
 	})
 	t.Run("BranchDiffStatNoDir", func(t *testing.T) {
 		t.Parallel()
-		r := &Runner{Container: &stubContainer{}, Dir: ""}
+		r := &Runner{Runtime: &stubContainer{}, Dir: ""}
 		if ds := r.BranchDiffStat(t.Context(), &Task{}); ds != nil {
 			t.Errorf("BranchDiffStat with no dir = %+v, want nil", ds)
 		}
@@ -1110,7 +1110,7 @@ func TestRunnerTaskRuntime(t *testing.T) {
 				{Name: "caic-xyz/md", Branch: "caic-0", GitRoot: "/home/user/src/caic-xyz/md", MountedPath: "/home/user/src/caic-xyz/md"},
 			},
 		}
-		tk.SetContainerInfo("ctr-1", "", "", 0)
+		tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
 
 		id, repos, err := r.taskRuntime(tk)
 		if err != nil {
@@ -1136,7 +1136,7 @@ func TestRunnerTaskRuntime(t *testing.T) {
 		t.Parallel()
 		r := &Runner{Dir: "/repo"}
 		tk := &Task{}
-		tk.SetContainerInfo("ctr-1", "", "", 0)
+		tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
 		id, repos, err := r.taskRuntime(tk)
 		if err != nil {
 			t.Fatalf("taskRuntime: %v", err)

@@ -315,7 +315,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 
 	// Warn on repo basename collisions. Containers use qualified names
 	// (mountedName) so there is no runtime conflict, but users may be
-	// confused by short basenames appearing in container names.
+	// confused by short basenames appearing in instance names.
 	{
 		seen := make(map[string]string) // basename → first RelPath
 		snap := s.repoReg.snapshot()
@@ -473,7 +473,7 @@ func (s *Server) newRunner(ctx context.Context, info *repoInfo) (*task.Runner, e
 		CacheDir:   s.cacheDir,
 		Backends:   s.agentBackends,
 		HarnessEnv: s.backend.HarnessEnv,
-		Container:  s.runtimeBackend,
+		Runtime:    s.runtimeBackend,
 	}
 	if info != nil {
 		runner.BaseBranch = info.BaseBranch

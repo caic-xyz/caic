@@ -249,7 +249,7 @@ func (s *Server) handleIssuesEvent(ctx context.Context, ev *github.IssuesEvent) 
 
 // handlePullRequestEvent creates a task when a PR is opened or reopened,
 // updates PR state when closed, or updates an existing task if a PR is
-// opened for a branch that already has a container/task but no PR yet.
+// opened for a branch that already has a runtime instance/task but no PR yet.
 // Trigger: action=="opened", "reopened", or "closed".
 func (s *Server) handlePullRequestEvent(ctx context.Context, ev *github.PullRequestEvent) {
 	// Create a new task to review/fix the PR if auto-fix on PR open is enabled.
