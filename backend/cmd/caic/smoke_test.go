@@ -23,8 +23,8 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/fake"
-	"github.com/caic-xyz/caic/backend/internal/server"
 	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 

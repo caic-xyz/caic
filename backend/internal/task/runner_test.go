@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caic-xyz/md"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // testBackend implements agent.Backend for tests. It launches a process that
@@ -1038,7 +1038,7 @@ func TestRunner(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
 		r := &Runner{Container: sc, Dir: "/repo"}
-		ds := r.BranchDiffStat(t.Context(), []md.Repo{{GitRoot: "/repo", Branch: "feature"}})
+		ds := r.BranchDiffStat(t.Context(), []runtime.Repo{{HostPath: "/repo", Branch: "feature"}})
 		if !sc.fetched {
 			t.Error("BranchDiffStat did not call Fetch")
 		}
@@ -1050,9 +1050,9 @@ func TestRunner(t *testing.T) {
 		t.Parallel()
 		sc := &stubContainer{}
 		r := &Runner{Container: sc, Dir: "/home/user/src/caic"}
-		repos := []md.Repo{
-			{GitRoot: "/home/user/src/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic"},
-			{GitRoot: "/home/user/src/genai", Branch: "caic-0", MountedPath: "/home/user/src/genai"},
+		repos := []runtime.Repo{
+			{HostPath: "/home/user/src/caic", Branch: "caic-7", MountPath: "/home/user/src/caic"},
+			{HostPath: "/home/user/src/genai", Branch: "caic-0", MountPath: "/home/user/src/genai"},
 		}
 
 		ds := r.BranchDiffStat(t.Context(), repos)
@@ -1067,8 +1067,8 @@ func TestRunner(t *testing.T) {
 			if len(sc.diffRepos[i]) != 2 {
 				t.Fatalf("diff call %d repos len = %d, want 2", i, len(sc.diffRepos[i]))
 			}
-			if sc.diffRepos[i][0].GitRoot != "/home/user/src/caic" {
-				t.Errorf("diff call %d primary GitRoot = %q, want /home/user/src/caic", i, sc.diffRepos[i][0].GitRoot)
+			if sc.diffRepos[i][0].HostPath != "/home/user/src/caic" {
+				t.Errorf("diff call %d primary HostPath = %q, want /home/user/src/caic", i, sc.diffRepos[i][0].HostPath)
 			}
 		}
 		if sc.diffIdxs[0] != 0 || sc.diffIdxs[1] != 1 {
@@ -1162,25 +1162,25 @@ type stubContainer struct {
 	fetched   bool
 	fetchErr  error // If set, Fetch returns this error.
 	stopped   bool
-	diffRepos [][]md.Repo
+	diffRepos [][]runtime.Repo
 	diffIdxs  []int
 }
 
-func (s *stubContainer) Launch(_ context.Context, _ []md.Repo, _ []string, _ *StartOptions) (string, error) {
+func (s *stubContainer) Launch(_ context.Context, _ []runtime.Repo, _ []string, _ *StartOptions) (runtime.InstanceID, error) {
 	return "stub", nil
 }
 
-func (s *stubContainer) Connect(_ context.Context, _ string, _ []md.Repo, _ *StartOptions) (fqdn, authURL string, _ error) {
-	return "", "", nil
+func (s *stubContainer) Connect(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *StartOptions) (runtime.ConnectionInfo, error) {
+	return runtime.ConnectionInfo{}, nil
 }
 
-func (s *stubContainer) Diff(_ context.Context, repos []md.Repo, repoIdx int, _ ...string) (string, error) {
-	s.diffRepos = append(s.diffRepos, append([]md.Repo(nil), repos...))
+func (s *stubContainer) Diff(_ context.Context, repos []runtime.Repo, repoIdx int, _ ...string) (string, error) {
+	s.diffRepos = append(s.diffRepos, append([]runtime.Repo(nil), repos...))
 	s.diffIdxs = append(s.diffIdxs, repoIdx)
 	return "5\t1\tmain.go\n", nil
 }
 
-func (s *stubContainer) Fetch(_ context.Context, repos []md.Repo) error {
+func (s *stubContainer) Fetch(_ context.Context, repos []runtime.Repo) error {
 	s.fetched = true
 	if s.fetchErr != nil {
 		return s.fetchErr
@@ -1188,23 +1188,27 @@ func (s *stubContainer) Fetch(_ context.Context, repos []md.Repo) error {
 	return nil
 }
 
-func (s *stubContainer) Stop(_ context.Context, _ string) error {
+func (s *stubContainer) Stop(_ context.Context, _ runtime.InstanceID) error {
 	s.stopped = true
 	return nil
 }
-func (s *stubContainer) Purge(_ context.Context, _ string, _ []md.Repo) error  { return nil }
-func (s *stubContainer) Revive(_ context.Context, _ string, _ []md.Repo) error { return nil }
+func (s *stubContainer) Purge(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo) error {
+	return nil
+}
+func (s *stubContainer) Revive(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo) error {
+	return nil
+}
 
-func (s *stubContainer) Fork(_ context.Context, _ string, _ []md.Repo, _ *ForkOptions) (string, []md.Repo, error) {
+func (s *stubContainer) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
 	return "stub-fork", nil, nil
 }
-func (s *stubContainer) VNCPort(_ context.Context, _ string) int { return 0 }
+func (s *stubContainer) VNCPort(_ context.Context, _ runtime.InstanceID) int { return 0 }
 
-func (s *stubContainer) Processes(_ context.Context, _ string) ([]ProcessInfo, error) {
+func (s *stubContainer) Processes(_ context.Context, _ runtime.InstanceID) ([]runtime.ProcessInfo, error) {
 	return nil, nil
 }
 
-func (s *stubContainer) Signal(_ context.Context, _ string, _ int, _ string) error {
+func (s *stubContainer) Signal(_ context.Context, _ runtime.InstanceID, _ int, _ string) error {
 	return nil
 }
 

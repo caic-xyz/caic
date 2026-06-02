@@ -187,9 +187,9 @@ type TaskRepo struct {
 	Forge      Forge  `json:"forge,omitempty"` // "github", "gitlab", or empty if unknown.
 }
 
-// Container holds per-task container metadata.
-type Container struct {
-	Name      string `json:"name"`                // Container name/ID.
+// RuntimeInstance holds per-task runtime metadata.
+type RuntimeInstance struct {
+	Name      string `json:"name"`                // Runtime instance name/ID.
 	Tailscale string `json:"tailscale,omitempty"` // Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
 	USB       bool   `json:"usb,omitempty"`
 	Display   bool   `json:"display,omitempty"`
@@ -231,16 +231,16 @@ type Task struct {
 	CIChecks                           []ForgeCheck `json:"ciChecks,omitempty"`
 	Owner                              string       `json:"owner,omitempty"` // username of creator; omitted in no-auth mode
 	// Per-task harness/agent metadata.
-	Harness       Harness   `json:"harness"`
-	Model         string    `json:"model,omitempty"`
-	Effort        string    `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
-	AgentVersion  string    `json:"agentVersion,omitempty"`
-	SessionID     string    `json:"sessionID,omitempty"`
-	StartedAt     time.Time `json:"startedAt,omitzero"`     // When the task was created.
-	TurnStartedAt time.Time `json:"turnStartedAt,omitzero"` // When the current turn started; zero when not running.
-	InPlanMode    bool      `json:"inPlanMode,omitempty"`
-	PlanContent   string    `json:"planContent,omitempty"`
-	Container     Container `json:"container"`
+	Harness       Harness         `json:"harness"`
+	Model         string          `json:"model,omitempty"`
+	Effort        string          `json:"effort,omitempty"` // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
+	AgentVersion  string          `json:"agentVersion,omitempty"`
+	SessionID     string          `json:"sessionID,omitempty"`
+	StartedAt     time.Time       `json:"startedAt,omitzero"`     // When the task was created.
+	TurnStartedAt time.Time       `json:"turnStartedAt,omitzero"` // When the current turn started; zero when not running.
+	InPlanMode    bool            `json:"inPlanMode,omitempty"`
+	PlanContent   string          `json:"planContent,omitempty"`
+	Runtime       RuntimeInstance `json:"runtime"`
 	// Per-task feature flags.
 	GitHubToken bool `json:"gitHubToken,omitempty"`
 }
@@ -452,7 +452,7 @@ type DiffResp struct {
 	Diff string `json:"diff"`
 }
 
-// ProcessInfo describes a single process running inside a task container.
+// ProcessInfo describes a single process running inside a task runtime instance.
 type ProcessInfo struct {
 	PID     int     `json:"pid"`
 	PPID    int     `json:"ppid"`
@@ -498,10 +498,10 @@ type UserSettings struct {
 	// AutoFixOnPROpen automatically creates a task to review and fix a pull
 	// request when it is opened or reopened via a forge webhook.
 	AutoFixOnPROpen bool `json:"autoFixOnPROpen"`
-	// BaseImage overrides the default container base image. Empty means use
+	// BaseImage overrides the default runtime base image. Empty means use
 	// the default.
 	BaseImage string `json:"baseImage,omitempty"`
-	// MaxCPUs limits the number of CPU cores the container may use.
+	// MaxCPUs limits the number of CPU cores the runtime instance may use.
 	// Zero means use the system default (max(2, NumCPU-2)).
 	MaxCPUs int `json:"maxCPUs,omitempty"`
 	// UseDefaultCaches controls whether default harness caches are mounted.
@@ -510,7 +510,7 @@ type UserSettings struct {
 	// WellKnownCaches maps cache name to enabled state. nil means use default
 	// (all true), true means explicitly enabled, false means explicitly disabled.
 	WellKnownCaches map[string]bool `json:"wellKnownCaches,omitempty"`
-	// CacheMappings are custom host-to-container directory mappings.
+	// CacheMappings are custom host-to-runtime directory mappings.
 	CacheMappings []CacheMappingResp `json:"cacheMappings,omitempty"`
 }
 
@@ -562,7 +562,7 @@ type RepoBranchesResp struct {
 type WellKnownCache struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
-	Mounts      []string `json:"mounts"` // List of container paths
+	Mounts      []string `json:"mounts"` // List of runtime mount paths
 }
 
 // WellKnownCachesResp is the response for GET /api/v1/server/caches.

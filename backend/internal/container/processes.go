@@ -10,12 +10,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // Processes runs ps -eo pid,ppid,user,stat,%cpu,%mem,time,args --no-headers
 // inside the named container via SSH and returns the parsed process list.
-func (b *Backend) Processes(ctx context.Context, containerName string) ([]task.ProcessInfo, error) {
+func (b *Backend) Processes(ctx context.Context, id runtime.InstanceID) ([]runtime.ProcessInfo, error) {
+	containerName := string(id)
 	ct, err := b.client.Get(ctx, containerName)
 	if err != nil {
 		return nil, fmt.Errorf("get container %s: %w", containerName, err)
@@ -33,7 +34,8 @@ func (b *Backend) Processes(ctx context.Context, containerName string) ([]task.P
 
 // Signal sends a signal (e.g. SIGTERM, SIGKILL) to a process inside the
 // named container via SSH using kill.
-func (b *Backend) Signal(ctx context.Context, containerName string, pid int, sig string) error {
+func (b *Backend) Signal(ctx context.Context, id runtime.InstanceID, pid int, sig string) error {
+	containerName := string(id)
 	ct, err := b.client.Get(ctx, containerName)
 	if err != nil {
 		return fmt.Errorf("get container %s: %w", containerName, err)
@@ -51,8 +53,8 @@ func (b *Backend) Signal(ctx context.Context, containerName string, pid int, sig
 // parsePSOutput parses the output of ps with the columns above. The last
 // column (args) may contain spaces; we split by whitespace for the first 7
 // fields and treat the remainder as the command.
-func parsePSOutput(out string) ([]task.ProcessInfo, error) {
-	var procs []task.ProcessInfo
+func parsePSOutput(out string) ([]runtime.ProcessInfo, error) {
+	var procs []runtime.ProcessInfo
 	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -80,7 +82,7 @@ func parsePSOutput(out string) ([]task.ProcessInfo, error) {
 		ppid, _ := strconv.Atoi(clean[1])
 		cpu, _ := strconv.ParseFloat(clean[4], 64)
 		mem, _ := strconv.ParseFloat(clean[5], 64)
-		procs = append(procs, task.ProcessInfo{
+		procs = append(procs, runtime.ProcessInfo{
 			PID:     pid,
 			PPID:    ppid,
 			User:    clean[2],
@@ -92,7 +94,7 @@ func parsePSOutput(out string) ([]task.ProcessInfo, error) {
 		})
 	}
 	// Filter out the ps process itself.
-	procs = slices.DeleteFunc(procs, func(p task.ProcessInfo) bool {
+	procs = slices.DeleteFunc(procs, func(p runtime.ProcessInfo) bool {
 		return strings.HasPrefix(p.Command, "ps ")
 	})
 	return procs, nil

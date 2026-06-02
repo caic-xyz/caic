@@ -9,13 +9,14 @@ import (
 	"slices"
 	"time"
 
+	"github.com/caic-xyz/md"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/md"
 )
 
 // warmupInterval controls how often warmupImages re-checks for new base image
@@ -98,11 +99,11 @@ func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, f
 	defer func() {
 		_ = s.backend.Purge(context.WithoutCancel(ctx), name, nil)
 	}()
-	if _, _, err := s.backend.Connect(ctx, name, nil, &task.StartOptions{Harness: h, LogWriter: w}); err != nil {
+	if _, err := s.backend.Connect(ctx, name, nil, &task.StartOptions{Harness: h, LogWriter: w}); err != nil {
 		slog.Warn("model refresh: connect failed", "harness", h, "err", err)
 		return
 	}
-	models, err := fetch(ctx, name, s.backend.HarnessEnv[string(h)])
+	models, err := fetch(ctx, string(name), s.backend.HarnessEnv[string(h)])
 	if err != nil {
 		slog.Warn("model refresh: fetch failed", "harness", h, "err", err)
 		return

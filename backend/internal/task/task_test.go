@@ -22,6 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 type failingConn struct {
@@ -85,8 +86,8 @@ func TestTask(t *testing.T) {
 						snap.Repos[0].Branch = "mutated"
 					}
 					_ = tk.Primary()
-					_ = tk.MDRepos()
-					_ = tk.ExtraMDRepos()
+					_ = tk.RuntimeRepos()
+					_ = tk.ExtraRuntimeRepos()
 					_ = tk.ContainerName()
 					_ = tk.RelayOffsetValue()
 					_, _, _ = tk.SudoLookupState()
@@ -1643,20 +1644,20 @@ func TestTask(t *testing.T) {
 		})
 	})
 
-	t.Run("ExtraMDRepos", func(t *testing.T) {
+	t.Run("ExtraRuntimeRepos", func(t *testing.T) {
 		t.Parallel()
 		t.Run("NoRepos", func(t *testing.T) {
 			t.Parallel()
 			tk := &Task{}
-			if extra := tk.ExtraMDRepos(); extra != nil {
-				t.Fatalf("ExtraMDRepos with no repos = %+v, want nil", extra)
+			if extra := tk.ExtraRuntimeRepos(); extra != nil {
+				t.Fatalf("ExtraRuntimeRepos with no repos = %+v, want nil", extra)
 			}
 		})
 		t.Run("OneRepo", func(t *testing.T) {
 			t.Parallel()
 			tk := &Task{Repos: []RepoMount{{Name: "a/b", Branch: "caic-0", GitRoot: "/foo"}}}
-			if extra := tk.ExtraMDRepos(); extra != nil {
-				t.Fatalf("ExtraMDRepos with one repo = %+v, want nil", extra)
+			if extra := tk.ExtraRuntimeRepos(); extra != nil {
+				t.Fatalf("ExtraRuntimeRepos with one repo = %+v, want nil", extra)
 			}
 		})
 		t.Run("MultipleRepos", func(t *testing.T) {
@@ -1665,9 +1666,9 @@ func TestTask(t *testing.T) {
 				{Name: "a/b", Branch: "caic-0", GitRoot: "/foo"},
 				{Name: "c/d", Branch: "caic-1", GitRoot: "/bar"},
 			}}
-			extra := tk.ExtraMDRepos()
+			extra := tk.ExtraRuntimeRepos()
 			if len(extra) != 1 {
-				t.Fatalf("ExtraMDRepos len = %d, want 1", len(extra))
+				t.Fatalf("ExtraRuntimeRepos len = %d, want 1", len(extra))
 			}
 			if extra[0].Branch != "caic-1" {
 				t.Errorf("extra[0].Branch = %q, want %q", extra[0].Branch, "caic-1")
@@ -1892,8 +1893,8 @@ func TestTask(t *testing.T) {
 		t.Run("SubscribeStats", func(t *testing.T) {
 			t.Parallel()
 			tk := &Task{}
-			tk.PushStats(&ContainerStats{CPUPerc: 50.0, MemUsed: 1024})
-			tk.PushStats(&ContainerStats{CPUPerc: 75.0, MemUsed: 2048})
+			tk.PushStats(&runtime.Stats{CPUPerc: 50.0, MemUsed: 1024})
+			tk.PushStats(&runtime.Stats{CPUPerc: 75.0, MemUsed: 2048})
 
 			ctx := t.Context()
 			history, live, unsub := tk.SubscribeStats(ctx)
@@ -1909,7 +1910,7 @@ func TestTask(t *testing.T) {
 				t.Errorf("history[1].CPUPerc = %v, want 75.0", history[1].CPUPerc)
 			}
 
-			tk.PushStats(&ContainerStats{CPUPerc: 100.0, MemUsed: 4096})
+			tk.PushStats(&runtime.Stats{CPUPerc: 100.0, MemUsed: 4096})
 			timeout := time.After(time.Second)
 			select {
 			case s := <-live:
@@ -1925,7 +1926,7 @@ func TestTask(t *testing.T) {
 			t.Parallel()
 			tk := &Task{}
 			for i := range 65 {
-				tk.PushStats(&ContainerStats{CPUPerc: float64(i)})
+				tk.PushStats(&runtime.Stats{CPUPerc: float64(i)})
 			}
 			ctx := t.Context()
 			history, _, unsub := tk.SubscribeStats(ctx)
@@ -2082,7 +2083,7 @@ func TestSessionHandle(t *testing.T) {
 
 	t.Run("StatsSubClose", func(t *testing.T) {
 		t.Parallel()
-		s := &statsSub{ch: make(chan ContainerStats)}
+		s := &statsSub{ch: make(chan runtime.Stats)}
 		s.close()
 		s.close() // double close must not panic.
 	})

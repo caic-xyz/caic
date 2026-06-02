@@ -126,21 +126,21 @@ class ApiClient(
     suspend fun compactContext(id: String, req: CompactReq): StatusResp = request("POST", "/api/v1/tasks/$id/compact", json.encodeToString(req))
     /** Requests graceful stop of a running task. */
     suspend fun stopTask(id: String): StatusResp = request("POST", "/api/v1/tasks/$id/stop")
-    /** Permanently deletes a task and its container. */
+    /** Permanently deletes a task and its runtime instance. */
     suspend fun purgeTask(id: String): StatusResp = request("POST", "/api/v1/tasks/$id/purge")
-    /** Reconnects to an orphaned task container. */
+    /** Reconnects to an orphaned task runtime instance. */
     suspend fun reviveTask(id: String): StatusResp = request("POST", "/api/v1/tasks/$id/revive")
     /** Returns the log tail of a failed CI check run. */
     suspend fun getTaskCILog(id: String, jobID: String): CILogResp = request("GET", "/api/v1/tasks/$id/ci-log?jobID=$jobID")
     /** Pushes task changes to the remote repository. */
     suspend fun syncTask(id: String, req: SyncReq): SyncResp = request("POST", "/api/v1/tasks/$id/sync", json.encodeToString(req))
-    /** Forks a task by snapshotting its container and creating a new task on a derived branch. */
+    /** Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. */
     suspend fun forkTask(id: String, req: ForkTaskReq): CreateTaskResp = request("POST", "/api/v1/tasks/$id/fork", json.encodeToString(req))
     /** Returns the unified diff for a task's branch. */
     suspend fun getTaskDiff(id: String, path: String): DiffResp = request("GET", "/api/v1/tasks/$id/diff?path=$path")
-    /** Returns the list of running processes inside the task's container. */
+    /** Returns the list of running processes inside the task's runtime instance. */
     suspend fun getTaskProcesses(id: String): ProcessListResp = request("GET", "/api/v1/tasks/$id/processes")
-    /** Sends SIGTERM or SIGKILL to a process inside the task's container. */
+    /** Sends SIGTERM or SIGKILL to a process inside the task's runtime instance. */
     suspend fun signalProcess(id: String, pid: String, req: SignalProcessReq): StatusResp = request("POST", "/api/v1/tasks/$id/processes/$pid/signal", json.encodeToString(req))
     /** Returns the full (untruncated) input for a tool call. */
     suspend fun getTaskToolInput(id: String, toolUseID: String): TaskToolInputResp = request("GET", "/api/v1/tasks/$id/tool/$toolUseID")

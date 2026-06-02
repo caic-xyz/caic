@@ -12,21 +12,45 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/md"
+
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // New creates an md.Client for container operations.
-// runtime selects the container runtime ("docker" or "podman"); empty means auto-detect.
-func New(tailscaleAPIKey, githubToken, runtime string) (*md.Client, error) {
+// runtimeName selects the container runtime ("docker" or "podman"); empty means auto-detect.
+func New(tailscaleAPIKey, githubToken, runtimeName string) (*md.Client, error) {
 	c, err := md.New(&SlogWriter{Phase: "init"})
 	if err != nil {
 		return nil, err
 	}
-	if runtime != "" {
-		c.Runtime = runtime
+	if runtimeName != "" {
+		c.Runtime = runtimeName
 	}
 	c.TailscaleAPIKey = tailscaleAPIKey
 	c.GithubToken = githubToken
 	return c, nil
+}
+
+// InstancesFromMD converts md container handles to runtime-neutral instances.
+func InstancesFromMD(ctx context.Context, containers []*md.Container) []runtime.Instance {
+	if len(containers) == 0 {
+		return nil
+	}
+	out := make([]runtime.Instance, len(containers))
+	for i, c := range containers {
+		out[i] = runtime.Instance{
+			ID:            runtime.InstanceID(c.Name),
+			State:         c.State,
+			Repos:         fromMDRepos(c.Repos),
+			Tailscale:     c.Tailscale,
+			TailscaleFQDN: c.TailscaleFQDN(ctx),
+			USB:           c.USB,
+			Display:       c.Display,
+			Sudo:          c.Sudo,
+			VNCPort:       int(c.VNCPort),
+		}
+	}
+	return out
 }
 
 // SlogWriter is an io.Writer that logs each complete line via slog.Info.
@@ -56,23 +80,18 @@ func (w *SlogWriter) Write(p []byte) (int, error) {
 // LabelValue returns the value of a container label on a running container.
 //
 // Returns empty string if the label is not set.
-func LabelValue(ctx context.Context, runtime, containerName, label string) (string, error) {
+func LabelValue(ctx context.Context, runtimeName, containerName, label string) (string, error) {
 	format := fmt.Sprintf("{{index .Config.Labels %q}}", label)
-	cmd := exec.CommandContext(ctx, runtime, "inspect", containerName, "--format", format) //nolint:gosec // containerName and format are not user-controlled.
+	cmd := exec.CommandContext(ctx, runtimeName, "inspect", containerName, "--format", format) //nolint:gosec // containerName and format are not user-controlled.
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("%s inspect label %q on %s: %w", runtime, label, containerName, err)
+		return "", fmt.Errorf("%s inspect label %q on %s: %w", runtimeName, label, containerName, err)
 	}
 	v := strings.TrimSpace(string(out))
 	if v == "<no value>" {
 		return "", nil
 	}
 	return v, nil
-}
-
-// Event represents a container lifecycle event.
-type Event struct {
-	Name string // Container name.
 }
 
 // containerEvent is the JSON structure emitted by `<runtime> events --format '{{json .}}'`.
@@ -87,20 +106,20 @@ type containerEvent struct {
 // and sends an Event for each death. The caller handles reconnection
 // on stream errors. The channel is closed when the context is cancelled or
 // the events process exits.
-func WatchEvents(ctx context.Context, runtime, labelFilter string) (<-chan Event, error) {
-	cmd := exec.CommandContext(ctx, runtime, "events", //nolint:gosec // labelFilter is a trusted constant
+func WatchEvents(ctx context.Context, containerRuntime, labelFilter string) (<-chan runtime.Event, error) {
+	cmd := exec.CommandContext(ctx, containerRuntime, "events", //nolint:gosec // labelFilter is a trusted constant
 		"--filter", "event=die",
 		"--filter", "label="+labelFilter,
 		"--format", "{{json .}}",
 	)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("%s events stdout: %w", runtime, err)
+		return nil, fmt.Errorf("%s events stdout: %w", containerRuntime, err)
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("%s events start: %w", runtime, err)
+		return nil, fmt.Errorf("%s events start: %w", containerRuntime, err)
 	}
-	ch := make(chan Event, 16)
+	ch := make(chan runtime.Event, 16)
 	go func() {
 		defer close(ch)
 		defer func() { _ = cmd.Wait() }()
@@ -115,7 +134,7 @@ func WatchEvents(ctx context.Context, runtime, labelFilter string) (<-chan Event
 				continue
 			}
 			select {
-			case ch <- Event{Name: name}:
+			case ch <- runtime.Event{InstanceID: runtime.InstanceID(name)}:
 			case <-ctx.Done():
 				return
 			}

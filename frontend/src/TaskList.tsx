@@ -197,7 +197,7 @@ export default function TaskList(props: TaskListProps) {
       diffStat={t().diffStat}
       error={t().error}
       inPlanMode={t().inPlanMode}
-      container={t().container}
+      runtime={t().runtime}
       gitHubToken={t().gitHubToken}
       forgePR={t().forgePR}
       ciStatus={t().ciStatus}
@@ -286,4 +286,3 @@ export default function TaskList(props: TaskListProps) {
     </>
   );
 }
-

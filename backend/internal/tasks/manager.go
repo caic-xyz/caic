@@ -25,61 +25,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/md"
 	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // errTaskNotFound is returned when a task ID doesn't exist.
 var errTaskNotFound = &Error{Kind: KindNotFound, Msg: "task not found"}
 
-// MDBackend is the container-infrastructure seam Manager depends on. The
-// production implementation (NewMDBackend) wraps *md.Client together with the
-// container package's free functions; tests supply a fake. Folding the runtime
-// string and the container.WatchEvents/LabelValue free functions behind this
-// one interface is what lets SudoPassword, pushStats, watchContainerEvents, and
-// adoptOne be tested without Docker or SSH.
-type MDBackend interface {
-	// StatsAll returns resource stats for the named containers.
-	StatsAll(ctx context.Context, names []string) (map[string]*md.ContainerStats, error)
-	// SudoPassword fetches the sudo password for a container over SSH.
-	SudoPassword(ctx context.Context, name string) (string, error)
-	// LabelValue reads a single container label, returning "" when unset.
-	LabelValue(ctx context.Context, name, label string) (string, error)
-	// WatchEvents streams lifecycle events for containers matching labelFilter.
-	WatchEvents(ctx context.Context, labelFilter string) (<-chan container.Event, error)
-}
-
-// mdClientBackend is the production MDBackend, backed by *md.Client and the
-// container package free functions (which take the runtime as an argument).
-type mdClientBackend struct{ c *md.Client }
-
-// NewMDBackend wires a *md.Client into the MDBackend seam.
-func NewMDBackend(c *md.Client) MDBackend { return mdClientBackend{c} }
-
-// StatsAll implements MDBackend.
-func (b mdClientBackend) StatsAll(ctx context.Context, names []string) (map[string]*md.ContainerStats, error) {
-	return b.c.StatsAll(ctx, names)
-}
-
-// SudoPassword implements MDBackend by constructing an ephemeral md.Container.
-func (b mdClientBackend) SudoPassword(ctx context.Context, name string) (string, error) {
-	return (&md.Container{Client: b.c, Name: name}).SudoPassword(ctx)
-}
-
-// LabelValue implements MDBackend.
-func (b mdClientBackend) LabelValue(ctx context.Context, name, label string) (string, error) {
-	return container.LabelValue(ctx, b.c.Runtime, name, label)
-}
-
-// WatchEvents implements MDBackend.
-func (b mdClientBackend) WatchEvents(ctx context.Context, labelFilter string) (<-chan container.Event, error) {
-	return container.WatchEvents(ctx, b.c.Runtime, labelFilter)
+// RuntimeInfoBackend is the runtime metadata and monitoring seam Manager depends on.
+type RuntimeInfoBackend interface {
+	StatsAll(ctx context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]*runtime.Stats, error)
+	SudoPassword(ctx context.Context, id runtime.InstanceID) (string, error)
+	LabelValue(ctx context.Context, id runtime.InstanceID, label string) (string, error)
+	WatchEvents(ctx context.Context, labelFilter string) (<-chan runtime.Event, error)
 }
 
 // Config holds the dependencies Manager needs at construction.
@@ -92,25 +55,25 @@ type Config struct {
 	// Backend is the per-task container lifecycle seam (launch/stop/purge/fork).
 	// Production passes *container.Backend (Docker); a future VM backend or a
 	// test fake can be substituted via this interface.
-	Backend    task.ContainerBackend
-	MDClient   MDBackend
-	HarnessEnv map[string][]string
-	Prefs      *preferences.Store
-	Provider   genai.Provider // nil-safe
+	Backend     task.ContainerBackend
+	RuntimeInfo RuntimeInfoBackend
+	HarnessEnv  map[string][]string
+	Prefs       *preferences.Store
+	Provider    genai.Provider // nil-safe
 }
 
 // Manager owns the task and runner registries, container adoption, session
 // watching, and stats polling.
 type Manager struct {
 	// Immutable after construction.
-	serverCtx  context.Context // lifetime of the Manager; for goroutines that outlive requests
-	logDir     string
-	cacheDir   string
-	backend    task.ContainerBackend
-	mdClient   MDBackend
-	harnessEnv map[string][]string
-	prefs      *preferences.Store
-	provider   genai.Provider
+	serverCtx   context.Context // lifetime of the Manager; for goroutines that outlive requests
+	logDir      string
+	cacheDir    string
+	backend     task.ContainerBackend
+	runtimeInfo RuntimeInfoBackend
+	harnessEnv  map[string][]string
+	prefs       *preferences.Store
+	provider    genai.Provider
 
 	// Guarded by mu.
 	mu      sync.Mutex
@@ -123,17 +86,17 @@ type Manager struct {
 // Call RegisterRunner for each repo, then Start.
 func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passed once at construction
 	m := &Manager{
-		serverCtx:  cfg.ServerCtx,
-		logDir:     cfg.LogDir,
-		cacheDir:   cfg.CacheDir,
-		backend:    cfg.Backend,
-		mdClient:   cfg.MDClient,
-		harnessEnv: cfg.HarnessEnv,
-		prefs:      cfg.Prefs,
-		provider:   cfg.Provider,
-		tasks:      make(map[string]*Entry),
-		runners:    make(map[string]*task.Runner),
-		changed:    make(chan struct{}),
+		serverCtx:   cfg.ServerCtx,
+		logDir:      cfg.LogDir,
+		cacheDir:    cfg.CacheDir,
+		backend:     cfg.Backend,
+		runtimeInfo: cfg.RuntimeInfo,
+		harnessEnv:  cfg.HarnessEnv,
+		prefs:       cfg.Prefs,
+		provider:    cfg.Provider,
+		tasks:       make(map[string]*Entry),
+		runners:     make(map[string]*task.Runner),
+		changed:     make(chan struct{}),
 	}
 	noRepoRunner := &task.Runner{
 		LogDir:     cfg.LogDir,
@@ -547,7 +510,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		sourceRepoNames[r.Name] = struct{}{}
 	}
 	var extraMounts []task.RepoMount
-	var extraRepos []md.Repo
+	var extraRepos []runtime.Repo
 	for _, rs := range p.ExtraRepos {
 		if _, overlap := sourceRepoNames[rs.Name]; overlap {
 			return "", badRequestf("extraRepos contains repo already in source task: %s", rs.Name)
@@ -558,7 +521,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		}
 		rm := task.RepoMount{Name: rs.Name, BaseBranch: rs.BaseBranch, GitRoot: er.Dir, MountedPath: m.mountPathForRepo(rs.Name)}
 		extraMounts = append(extraMounts, rm)
-		extraRepos = append(extraRepos, rm.ToMDRepo())
+		extraRepos = append(extraRepos, rm.ToRuntimeRepo())
 	}
 
 	mounts := make([]task.RepoMount, len(sourceRepos), len(sourceRepos)+len(extraMounts))
@@ -663,7 +626,7 @@ func (m *Manager) SudoPassword(ctx context.Context, t *task.Task) string {
 	if cached != "" {
 		return cached
 	}
-	pw, err := m.mdClient.SudoPassword(ctx, containerName)
+	pw, err := m.runtimeInfo.SudoPassword(ctx, runtime.InstanceID(containerName))
 	if err != nil {
 		slog.WarnContext(ctx, "sudo password lookup failed", "ctr", containerName, "err", err)
 		return ""
@@ -692,11 +655,11 @@ func (m *Manager) SetTaskMonitorBranch(entry *Entry, branch string) {
 	entry.SetMonitorBranch(branch)
 }
 
-// AdoptContainers discovers preexisting md containers and creates task entries
+// AdoptContainers discovers preexisting runtime instances and creates task entries
 // for them. Returns the list of adopted tasks so the caller (Server) can wire
 // up forge/CI post-adoption.
-func (m *Manager) AdoptContainers(ctx context.Context, repos []AdoptRepo, containers []*md.Container, allLogs []*task.LoadedTask) ([]AdoptedTask, error) {
-	if containers == nil {
+func (m *Manager) AdoptContainers(ctx context.Context, repos []AdoptRepo, instances []runtime.Instance, allLogs []*task.LoadedTask) ([]AdoptedTask, error) {
+	if instances == nil {
 		return nil, nil
 	}
 
@@ -714,7 +677,7 @@ func (m *Manager) AdoptContainers(ctx context.Context, repos []AdoptRepo, contai
 	var mu sync.Mutex
 	var errs []error
 	var adopted []AdoptedTask
-	claimed := make(map[string]bool, len(containers))
+	claimed := make(map[runtime.InstanceID]bool, len(instances))
 
 	for i := range repos {
 		ri := &repos[i]
@@ -722,15 +685,16 @@ func (m *Manager) AdoptContainers(ctx context.Context, repos []AdoptRepo, contai
 		if runner == nil {
 			continue
 		}
-		for _, c := range containers {
-			if claimed[c.Name] {
+		for i := range instances {
+			c := &instances[i]
+			if claimed[c.ID] {
 				continue
 			}
 			branch, matched := primaryBranchForAdoption(ri, c)
 			if !matched {
 				continue
 			}
-			claimed[c.Name] = true
+			claimed[c.ID] = true
 			wg.Go(func() {
 				at, err := m.adoptOne(ctx, *ri, runner, c, branch, branchIDs, allLogs)
 				if err != nil {
@@ -750,8 +714,9 @@ func (m *Manager) AdoptContainers(ctx context.Context, repos []AdoptRepo, contai
 
 	// Adopt no-repo containers.
 	if noRepoRunner, ok := m.Runner(""); ok {
-		for _, c := range containers {
-			if claimed[c.Name] || !strings.HasPrefix(c.Name, "md-agent-") {
+		for i := range instances {
+			c := &instances[i]
+			if claimed[c.ID] || !strings.HasPrefix(string(c.ID), "md-agent-") {
 				continue
 			}
 			wg.Go(func() {
@@ -774,12 +739,12 @@ func (m *Manager) AdoptContainers(ctx context.Context, repos []AdoptRepo, contai
 	return adopted, errors.Join(errs...)
 }
 
-func primaryBranchForAdoption(ri *AdoptRepo, c *md.Container) (string, bool) {
+func primaryBranchForAdoption(ri *AdoptRepo, c *runtime.Instance) (string, bool) {
 	if len(c.Repos) == 0 {
 		return "", false
 	}
 	r := c.Repos[0]
-	if !mountedPathMatchesRepo(r.MountedPath, ri) {
+	if !mountedPathMatchesRepo(r.MountPath, ri) {
 		return "", false
 	}
 	return r.Branch, true
@@ -1031,13 +996,13 @@ func (m *Manager) LoadMessagesOnDemand(entry *Entry) {
 	m.loadTaskMessagesOnDemand(entry)
 }
 
-func taskReposForRunner(t *task.Task, runner *task.Runner) []md.Repo {
-	repos := t.MDRepos()
+func taskReposForRunner(t *task.Task, runner *task.Runner) []runtime.Repo {
+	repos := t.RuntimeRepos()
 	if len(repos) == 0 {
 		return nil
 	}
-	if repos[0].GitRoot == "" && runner != nil {
-		repos[0].GitRoot = runner.Dir
+	if repos[0].HostPath == "" && runner != nil {
+		repos[0].HostPath = runner.Dir
 	}
 	return repos
 }
@@ -1154,22 +1119,22 @@ func (m *Manager) pushStats(ctx context.Context) {
 	if len(active) == 0 {
 		return
 	}
-	names := make([]string, len(active))
+	ids := make([]runtime.InstanceID, len(active))
 	for i, e := range active {
-		names[i] = e.name
+		ids[i] = runtime.InstanceID(e.name)
 	}
-	statsMap, err := m.mdClient.StatsAll(ctx, names)
+	statsMap, err := m.runtimeInfo.StatsAll(ctx, ids)
 	if err != nil {
 		slog.Debug("stats poll failed", "err", err)
 		return
 	}
 	now := time.Now()
 	for _, e := range active {
-		cs, ok := statsMap[e.name]
+		cs, ok := statsMap[runtime.InstanceID(e.name)]
 		if !ok {
 			continue
 		}
-		e.task.PushStats(&task.ContainerStats{
+		e.task.PushStats(&runtime.Stats{
 			Ts:         now,
 			CPUPerc:    cs.CPUPerc,
 			MemUsed:    cs.MemUsed,
@@ -1189,7 +1154,7 @@ func (m *Manager) pushStats(ctx context.Context) {
 func (m *Manager) watchContainerEvents(ctx context.Context) {
 	go func() {
 		for {
-			ch, err := m.mdClient.WatchEvents(ctx, "caic")
+			ch, err := m.runtimeInfo.WatchEvents(ctx, "caic")
 			if err != nil {
 				if ctx.Err() != nil {
 					return
@@ -1203,7 +1168,7 @@ func (m *Manager) watchContainerEvents(ctx context.Context) {
 				}
 			}
 			for ev := range ch {
-				m.handleContainerDeath(ev.Name)
+				m.handleContainerDeath(string(ev.InstanceID))
 			}
 			if ctx.Err() != nil {
 				return
@@ -1291,32 +1256,32 @@ func applyLoadedSessionMetadata(t *task.Task, lt *task.LoadedTask) {
 }
 
 // adoptOne investigates a single container and registers it as a task.
-func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runner, c *md.Container, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
+func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runner, c *runtime.Instance, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
 	ctx, adoptTask := trace.NewTask(ctx, "adopt-container")
 	defer adoptTask.End()
-	trace.Logf(ctx, "container", "%s repo=%s branch=%s", c.Name, ri.RelPath, branch)
+	trace.Logf(ctx, "container", "%s repo=%s branch=%s", c.ID, ri.RelPath, branch)
 
 	// Only adopt containers that caic started. The caic.id label is set at
 	// container creation and is the authoritative proof of ownership.
-	labelVal, err := m.mdClient.LabelValue(ctx, c.Name, "caic.id")
+	labelVal, err := m.runtimeInfo.LabelValue(ctx, c.ID, "caic.id")
 	if labelVal == "" && err == nil {
-		labelVal, err = m.mdClient.LabelValue(ctx, c.Name, "caic")
+		labelVal, err = m.runtimeInfo.LabelValue(ctx, c.ID, "caic")
 	}
 	if err != nil {
-		return nil, fmt.Errorf("label check for %s: %w", c.Name, err)
+		return nil, fmt.Errorf("label check for %s: %w", c.ID, err)
 	}
 	if labelVal == "" {
-		slog.Info("container", "msg", "skipping non-caic", "repo", ri.RelPath, "ctr", c.Name, "br", branch)
+		slog.Info("container", "msg", "skipping non-caic", "repo", ri.RelPath, "ctr", c.ID, "br", branch)
 		return nil, nil //nolint:nilnil // non-caic containers are intentionally skipped
 	}
 	taskID, err := ksid.Parse(labelVal)
 	if err != nil {
-		return nil, fmt.Errorf("parse caic label %q on %s: %w", labelVal, c.Name, err)
+		return nil, fmt.Errorf("parse caic label %q on %s: %w", labelVal, c.ID, err)
 	}
 
 	isExited := c.State == "exited"
 	if isExited {
-		slog.Info("container", "msg", "adopting exited container as stopped", "ctr", c.Name, "br", branch)
+		slog.Info("container", "msg", "adopting exited container as stopped", "ctr", c.ID, "br", branch)
 	}
 
 	// Find the log file for this task.
@@ -1341,9 +1306,9 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	var stateUpdatedAt time.Time
 
 	// Read harness from container label (authoritative), fall back to log.
-	harnessLabel, _ := m.mdClient.LabelValue(ctx, c.Name, "caic.harness")
+	harnessLabel, _ := m.runtimeInfo.LabelValue(ctx, c.ID, "caic.harness")
 	if harnessLabel == "" {
-		harnessLabel, _ = m.mdClient.LabelValue(ctx, c.Name, "harness")
+		harnessLabel, _ = m.runtimeInfo.LabelValue(ctx, c.ID, "harness")
 	}
 	harnessName := agent.Harness(harnessLabel)
 	if harnessName == "" && lt != nil {
@@ -1364,21 +1329,21 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	var relayDiag string
 	if !isExited {
 		var relayErr error
-		relayAlive, relayDiag, relayErr = agent.RelayStatus(ctx, c.Name)
+		relayAlive, relayDiag, relayErr = agent.RelayStatus(ctx, string(c.ID))
 		if relayErr != nil {
-			slog.Warn("relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", relayErr, "diag", relayDiag)
+			slog.Warn("relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "ctr", c.ID, "err", relayErr, "diag", relayDiag)
 		}
 		if relayAlive {
 			b, ok := runner.Backends[harnessName]
 			if !ok {
-				slog.Warn("relay", "msg", "no backend for harness", "harness", harnessName, "ctr", c.Name)
+				slog.Warn("relay", "msg", "no backend for harness", "harness", harnessName, "ctr", c.ID)
 				relayAlive = false
 			} else {
 				readCtx, readCancel := context.WithTimeout(ctx, 30*time.Second)
-				relayMsgs, relaySize, relayErr = agent.ReadRelayTail(readCtx, c.Name, b.NewWire().ParseMessage, 10<<20) // 10 MiB tail
+				relayMsgs, relaySize, relayErr = agent.ReadRelayTail(readCtx, string(c.ID), b.NewWire().ParseMessage, 10<<20) // 10 MiB tail
 				readCancel()
 				if relayErr != nil {
-					slog.Warn("relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", relayErr)
+					slog.Warn("relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "ctr", c.ID, "err", relayErr)
 					relayAlive = false
 				}
 			}
@@ -1414,7 +1379,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		// Derive MountedPath from container's Docker label.
 		var mountedPath string
 		if len(c.Repos) > 0 && c.Repos[0].Branch == branch {
-			mountedPath = c.Repos[0].MountedPath
+			mountedPath = c.Repos[0].MountPath
 		}
 		if mountedPath == "" {
 			mountedPath = m.mountPathForRepo(ri.RelPath)
@@ -1424,7 +1389,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 			// Build lookup of container repos by branch for MountedPath.
 			containerRepoByBranch := make(map[string]string, len(c.Repos))
 			for _, cr := range c.Repos {
-				containerRepoByBranch[cr.Branch] = cr.MountedPath
+				containerRepoByBranch[cr.Branch] = cr.MountPath
 			}
 			for _, lm := range lt.Repos[1:] {
 				gitRoot := ""
@@ -1452,25 +1417,25 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		Harness:       harnessName,
 		Model:         model,
 		Effort:        effort,
-		Container:     c.Name,
+		Container:     string(c.ID),
 		StartedAt:     startedAt,
 		Tailscale:     c.Tailscale,
-		TailscaleFQDN: c.TailscaleFQDN(ctx),
+		TailscaleFQDN: c.TailscaleFQDN,
 		USB:           c.USB,
 		Display:       c.Display,
 		Sudo:          c.Sudo,
-		VNCPort:       int(c.VNCPort),
+		VNCPort:       c.VNCPort,
 		Provider:      m.provider,
 		ForgeIssue:    forgeIssue,
 	}
 	// Restore GitHub token flag from log trailer (primary) or container label (fallback).
-	gtLabel, _ := m.mdClient.LabelValue(ctx, c.Name, "caic.githubToken")
+	gtLabel, _ := m.runtimeInfo.LabelValue(ctx, c.ID, "caic.githubToken")
 	if (lt != nil && lt.GitHubToken) || gtLabel == "true" {
 		t.SetGitHubTokenEnabled(true)
 	}
 	t.SetStateAt(task.StateRunning, stateUpdatedAt)
 	if c.Sudo {
-		if pw, err := c.SudoPassword(ctx); err == nil {
+		if pw, err := m.runtimeInfo.SudoPassword(ctx, c.ID); err == nil {
 			t.SetSudoPassword(pw)
 		}
 	}
@@ -1497,7 +1462,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		t.RestoreMessages(relayMsgs)
 		applyLoadedSessionMetadata(t, lt)
 		t.SetRelayOffset(relaySize)
-		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(relayMsgs))
+		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "ctr", c.ID, "msgs", len(relayMsgs))
 	} else if lt != nil {
 		m.setParser(lt)
 		if err := lt.LoadMessages(); err != nil {
@@ -1506,7 +1471,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		if len(lt.Msgs) > 0 {
 			t.RestoreMessages(lt.Msgs)
 			applyLoadedSessionMetadata(t, lt)
-			slog.Warn("relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "msgs", len(lt.Msgs))
+			slog.Warn("relay", "msg", "restored from log", "repo", ri.RelPath, "br", branch, "ctr", c.ID, "msgs", len(lt.Msgs))
 		}
 	}
 	applyLoadedSessionMetadata(t, lt)
@@ -1530,15 +1495,15 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	if isExited {
 		t.SetState(task.StateStopped)
 	} else if !relayAlive {
-		relayLog := agent.ReadRelayLog(ctx, c.Name, 4096)
+		relayLog := agent.ReadRelayLog(ctx, string(c.ID), 4096)
 		if relayLog != "" {
-			slog.Warn("relay", "msg", "log from dead relay", "ctr", c.Name, "br", branch, "diag", relayDiag, "log", relayLog)
+			slog.Warn("relay", "msg", "log from dead relay", "ctr", c.ID, "br", branch, "diag", relayDiag, "log", relayLog)
 		}
-		trace.Logf(ctx, "adopt", "%s: relay-dead", c.Name)
+		trace.Logf(ctx, "adopt", "%s: relay-dead", c.ID)
 		if t.GetState() == task.StateRunning {
 			t.SetStateAt(task.StateWaiting, stateUpdatedAt)
 			slog.Warn("relay", "msg", "dead, marking waiting",
-				"repo", ri.RelPath, "br", branch, "ctr", c.Name,
+				"repo", ri.RelPath, "br", branch, "ctr", c.ID,
 				"sess", t.GetSessionID(), "msgs", len(t.Messages()))
 		}
 	}
@@ -1557,7 +1522,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	m.mu.Unlock()
 
 	slog.Info("container", "msg", "adopted",
-		"repo", ri.RelPath, "ctr", c.Name, "br", branch,
+		"repo", ri.RelPath, "ctr", c.ID, "br", branch,
 		"relay", relayAlive, "state", t.GetState(), "sess", t.GetSessionID())
 
 	// Only regenerate title if a new turn was completed.
@@ -1567,7 +1532,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 
 	// Auto-reconnect in background.
 	if t.GetState() != task.StateStopped && relayAlive {
-		slog.Debug("container", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "ctr", c.Name)
+		slog.Debug("container", "msg", "auto-reconnect starting", "repo", ri.RelPath, "br", branch, "ctr", c.ID)
 		go func() {
 			tlog := slog.With("repo", ri.RelPath, "br", branch, "ctr", t.ContainerName())
 			h, err := runner.Reconnect(m.serverCtx, t, true)
@@ -1584,7 +1549,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 				return
 			}
 			tlog.Debug("auto-reconnect succeeded")
-			t.SetVNCPort(runner.Container.VNCPort(m.serverCtx, t.ContainerName()))
+			t.SetVNCPort(runner.Container.VNCPort(m.serverCtx, runtime.InstanceID(t.ContainerName())))
 			if ds := runner.BranchDiffStat(m.serverCtx, taskReposForRunner(t, runner)); len(ds) > 0 {
 				t.SetLiveDiffStat(ds)
 			}
@@ -1593,11 +1558,11 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		}()
 	} else if !relayAlive && t.GetState() != task.StateStopped {
 		slog.Error("relay dead, stopping container",
-			"repo", ri.RelPath, "br", branch, "ctr", c.Name,
+			"repo", ri.RelPath, "br", branch, "ctr", c.ID,
 			"state", t.GetState())
 		t.SetState(task.StateStopping)
-		if err := runner.Container.Stop(m.serverCtx, c.Name); err != nil { //nolint:contextcheck // adoption must outlive request
-			slog.Error("stop failed", "repo", ri.RelPath, "br", branch, "ctr", c.Name, "err", err)
+		if err := runner.Container.Stop(m.serverCtx, c.ID); err != nil { //nolint:contextcheck // adoption must outlive request
+			slog.Error("stop failed", "repo", ri.RelPath, "br", branch, "ctr", c.ID, "err", err)
 		}
 		t.SetState(task.StateStopped)
 	}

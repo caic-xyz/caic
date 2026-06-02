@@ -11,9 +11,10 @@ import (
 	"strings"
 	"time"
 
-	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
+
+	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
 )
 
 const (

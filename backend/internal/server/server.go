@@ -26,9 +26,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
@@ -221,7 +221,7 @@ type Server struct {
 	warnings []serverWarning // ring buffer of recent CI warnings for SSE clients; guarded by mu
 
 	// Fake hooks injected during e2e testing.
-	fakeProcesses func(ctx context.Context, containerName string) ([]task.ProcessInfo, error)
+	fakeProcesses func(ctx context.Context, containerName string) ([]runtime.ProcessInfo, error)
 	fakeSignal    func(ctx context.Context, containerName string, pid int, sig string) error
 }
 

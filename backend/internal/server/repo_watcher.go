@@ -11,8 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/md/gitutil"
+
+	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // repoDiscoveryDepth is the maximum directory levels below absRoot that

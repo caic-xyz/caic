@@ -1,7 +1,7 @@
 // Unit tests for HaloService: pure functions (primaryTask, stateLabel, buildStatusString, diffTasks).
 package com.fghbuild.caic.halo
 
-import com.caic.sdk.v1.Container
+import com.caic.sdk.v1.RuntimeInstance
 import com.caic.sdk.v1.Harness
 import com.caic.sdk.v1.Task
 import com.caic.sdk.v1.TaskState
@@ -164,6 +164,6 @@ class HaloServiceTest {
         activeCacheReadTokens = 0,
         contextWindowLimit = 0,
         harness = Harness.Claude,
-        container = Container(name = "test"),
+        runtime = RuntimeInstance(name = "test"),
     )
 }

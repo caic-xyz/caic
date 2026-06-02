@@ -375,10 +375,10 @@ public struct UserSettings: Codable {
     /// AutoFixOnPROpen automatically creates a task to review and fix a pull
     /// request when it is opened or reopened via a forge webhook.
     public let autoFixOnPROpen: Bool
-    /// BaseImage overrides the default container base image. Empty means use
+    /// BaseImage overrides the default runtime base image. Empty means use
     /// the default.
     public let baseImage: String?
-    /// MaxCPUs limits the number of CPU cores the container may use.
+    /// MaxCPUs limits the number of CPU cores the runtime instance may use.
     /// Zero means use the system default (max(2, NumCPU-2)).
     public let maxCPUs: Int?
     /// UseDefaultCaches controls whether default harness caches are mounted.
@@ -387,7 +387,7 @@ public struct UserSettings: Codable {
     /// WellKnownCaches maps cache name to enabled state. nil means use default
     /// (all true), true means explicitly enabled, false means explicitly disabled.
     public let wellKnownCaches: [String: Bool]?
-    /// CacheMappings are custom host-to-container directory mappings.
+    /// CacheMappings are custom host-to-runtime directory mappings.
     public let cacheMappings: [CacheMappingResp]?
 }
 
@@ -416,7 +416,7 @@ public struct HarnessInfo: Codable {
 public struct WellKnownCache: Codable {
     public let name: String
     public let description: String
-    /// List of container paths
+    /// List of runtime mount paths
     public let mounts: [String]
 }
 
@@ -517,9 +517,9 @@ public struct DiffFileStat: Codable {
     public let binary: Bool?
 }
 
-/// Container holds per-task container metadata.
-public struct Container: Codable {
-    /// Container name/ID.
+/// RuntimeInstance holds per-task runtime metadata.
+public struct RuntimeInstance: Codable {
+    /// Runtime instance name/ID.
     public let name: String
     /// Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown.
     public let tailscale: String?
@@ -583,7 +583,7 @@ public struct Task: Codable {
     public let turnStartedAt: ISOTimestamp?
     public let inPlanMode: Bool?
     public let planContent: String?
-    public let container: Container
+    public let runtime: RuntimeInstance
     /// Per-task feature flags.
     public let gitHubToken: Bool?
 }
@@ -775,7 +775,7 @@ public struct EventSubagentEnd: Codable {
     public let status: String
 }
 
-/// EventLog is a provisioning/startup log line from the container backend.
+/// EventLog is a provisioning/startup log line from the runtime backend.
 public struct EventLog: Codable {
     public let line: String
 }
@@ -820,7 +820,7 @@ public struct EventRateLimit: Codable {
     public let overageResetsAt: ISOTimestamp?
 }
 
-/// EventStats is a container resource usage snapshot emitted periodically.
+/// EventStats is a runtime resource usage snapshot emitted periodically.
 public struct EventStats: Codable {
     public let ts: Int
     public let cpuPerc: Double
@@ -943,7 +943,7 @@ public struct DiffResp: Codable {
     public let diff: String
 }
 
-/// ProcessInfo describes a single process running inside a task container.
+/// ProcessInfo describes a single process running inside a task runtime instance.
 public struct ProcessInfo: Codable {
     public let pid: Int
     public let ppid: Int

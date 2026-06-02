@@ -39,7 +39,7 @@ export interface TaskCardProps {
   diffStat?: DiffStat;
   error?: string;
   inPlanMode?: boolean;
-  container?: {
+  runtime?: {
     name: string;
     tailscale?: string;
     usb?: boolean;
@@ -68,7 +68,7 @@ const terminalStates = new Set(["stopping", "stopped", "purging", "purged", "fai
 
 /** Confirm a destructive task action (purge or stop) with a dialog. */
 export function confirmTaskAction(action: "Purge" | "Stop", title: string, branch: string): boolean {
-  return window.confirm(`${action} container?\n\n${title}\nbranch: ${branch}`);
+  return window.confirm(`${action} runtime instance?\n\n${title}\nbranch: ${branch}`);
 }
 
 
@@ -106,19 +106,19 @@ export default function TaskCard(props: TaskCardProps) {
           <strong ref={titleRef} class={styles.title}>{props.title}</strong>
         </Tooltip>
         <span class={styles.stateGroup}>
-          <Show when={props.container?.tailscale} keyed>
+          <Show when={props.runtime?.tailscale} keyed>
             {(ts) => ts.startsWith("https://")
               ? <a class={styles.featureIconBadge} href={ts} target="_blank" rel="noopener" title="Tailscale" onClick={(e) => e.stopPropagation()}><TailscaleIcon width="0.7rem" height="0.7rem" /></a>
               : <span class={styles.featureIconBadge} title="Tailscale"><TailscaleIcon width="0.7rem" height="0.7rem" /></span>
             }
           </Show>
-          <Show when={props.container?.usb}>
+          <Show when={props.runtime?.usb}>
             <span class={styles.featureBadge} title="USB">USB</span>
           </Show>
-          <Show when={props.container?.display}>
+          <Show when={props.runtime?.display}>
             <span class={styles.featureIconBadge} title="Display"><DisplayIcon width="0.7rem" height="0.7rem" /></span>
           </Show>
-          <Show when={props.container?.sudo}>
+          <Show when={props.runtime?.sudo}>
             <span class={styles.featureIconBadge} title="Sudo"><SudoIcon width="0.7rem" height="0.7rem" /></span>
           </Show>
           <Show when={props.gitHubToken}>

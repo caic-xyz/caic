@@ -632,10 +632,10 @@ export default function App() {
     setForkModel(task?.model ?? "");
     setForkEffort(task?.effort ?? "");
     setForkExtraRepos([]);
-    setForkTailscale(task?.container?.tailscale === "true" || task?.container?.tailscale?.startsWith("https://") || false);
-    setForkUSB(task?.container?.usb ?? false);
-    setForkDisplay(task?.container?.display ?? false);
-    setForkSudo(task?.container?.sudo ?? false);
+    setForkTailscale(task?.runtime?.tailscale === "true" || task?.runtime?.tailscale?.startsWith("https://") || false);
+    setForkUSB(task?.runtime?.usb ?? false);
+    setForkDisplay(task?.runtime?.display ?? false);
+    setForkSudo(task?.runtime?.sudo ?? false);
     setForkGitHubToken(task?.gitHubToken ?? false);
   }
 
@@ -1020,8 +1020,8 @@ export default function App() {
                   harness={selectedTask()?.harness ?? ""}
                   model={selectedTask()?.model}
                   diffStat={selectedTask()?.diffStat}
-                  vncPort={selectedTask()?.container.vncPort ?? 0}
-                  sudoPassword={selectedTask()?.container.sudoPassword}
+                  vncPort={selectedTask()?.runtime.vncPort ?? 0}
+                  sudoPassword={selectedTask()?.runtime.sudoPassword}
                   supportsImages={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsImages}
                   supportsCompact={harnesses().find((h) => h.name === (selectedTask()?.harness ?? ""))?.supportsCompact}
                   onStop={handleStop}

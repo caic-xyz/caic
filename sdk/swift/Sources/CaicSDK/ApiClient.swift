@@ -191,11 +191,11 @@ public final class ApiClient {
     public func stopTask(id: String) async throws -> StatusResp {
         try await request("POST", path: "/api/v1/tasks/\(id)/stop")
     }
-    /// Permanently deletes a task and its container.
+    /// Permanently deletes a task and its runtime instance.
     public func purgeTask(id: String) async throws -> StatusResp {
         try await request("POST", path: "/api/v1/tasks/\(id)/purge")
     }
-    /// Reconnects to an orphaned task container.
+    /// Reconnects to an orphaned task runtime instance.
     public func reviveTask(id: String) async throws -> StatusResp {
         try await request("POST", path: "/api/v1/tasks/\(id)/revive")
     }
@@ -207,7 +207,7 @@ public final class ApiClient {
     public func syncTask(id: String, req: SyncReq) async throws -> SyncResp {
         try await request("POST", path: "/api/v1/tasks/\(id)/sync", body: try encoder.encode(req))
     }
-    /// Forks a task by snapshotting its container and creating a new task on a derived branch.
+    /// Forks a task by snapshotting its runtime instance and creating a new task on a derived branch.
     public func forkTask(id: String, req: ForkTaskReq) async throws -> CreateTaskResp {
         try await request("POST", path: "/api/v1/tasks/\(id)/fork", body: try encoder.encode(req))
     }
@@ -215,11 +215,11 @@ public final class ApiClient {
     public func getTaskDiff(id: String, path: String) async throws -> DiffResp {
         try await request("GET", path: "/api/v1/tasks/\(id)/diff?path=\(path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path)")
     }
-    /// Returns the list of running processes inside the task's container.
+    /// Returns the list of running processes inside the task's runtime instance.
     public func getTaskProcesses(id: String) async throws -> ProcessListResp {
         try await request("GET", path: "/api/v1/tasks/\(id)/processes")
     }
-    /// Sends SIGTERM or SIGKILL to a process inside the task's container.
+    /// Sends SIGTERM or SIGKILL to a process inside the task's runtime instance.
     public func signalProcess(id: String, pid: String, req: SignalProcessReq) async throws -> StatusResp {
         try await request("POST", path: "/api/v1/tasks/\(id)/processes/\(pid)/signal", body: try encoder.encode(req))
     }

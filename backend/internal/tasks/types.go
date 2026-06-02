@@ -3,9 +3,8 @@
 package tasks
 
 import (
-	"github.com/caic-xyz/md"
-
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
@@ -23,10 +22,10 @@ type CreateParams struct {
 	USB         bool
 	Display     bool
 	Sudo        bool
-	GitHubToken bool            // inject GitHub token into container
-	DockerImage string          // resolved base image
-	MaxCPUs     int             // max CPU cores; 0 means use the default
-	CacheMounts []md.CacheMount // resolved build cache mounts
+	GitHubToken bool                 // inject GitHub token into container
+	DockerImage string               // resolved base image
+	MaxCPUs     int                  // max CPU cores; 0 means use the default
+	CacheMounts []runtime.CacheMount // resolved build cache mounts
 
 	// ResolvedGitHubToken is the actual token string, resolved by the caller in
 	// the request ctx; passed to runner.Start. The caller resolves it (preferring

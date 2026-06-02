@@ -228,14 +228,14 @@ var Routes = []Route{
 	},
 	{
 		Name:   "purgeTask",
-		Doc:    "Permanently deletes a task and its container.",
+		Doc:    "Permanently deletes a task and its runtime instance.",
 		Method: "POST",
 		Path:   "/api/v1/tasks/{id}/purge",
 		Resp:   reflect.TypeFor[StatusResp](),
 	},
 	{
 		Name:   "reviveTask",
-		Doc:    "Reconnects to an orphaned task container.",
+		Doc:    "Reconnects to an orphaned task runtime instance.",
 		Method: "POST",
 		Path:   "/api/v1/tasks/{id}/revive",
 		Resp:   reflect.TypeFor[StatusResp](),
@@ -258,7 +258,7 @@ var Routes = []Route{
 	},
 	{
 		Name:   "forkTask",
-		Doc:    "Forks a task by snapshotting its container and creating a new task on a derived branch.",
+		Doc:    "Forks a task by snapshotting its runtime instance and creating a new task on a derived branch.",
 		Method: "POST",
 		Path:   "/api/v1/tasks/{id}/fork",
 		Req:    reflect.TypeFor[ForkTaskReq](),
@@ -274,14 +274,14 @@ var Routes = []Route{
 	},
 	{
 		Name:   "getTaskProcesses",
-		Doc:    "Returns the list of running processes inside the task's container.",
+		Doc:    "Returns the list of running processes inside the task's runtime instance.",
 		Method: "GET",
 		Path:   "/api/v1/tasks/{id}/processes",
 		Resp:   reflect.TypeFor[ProcessListResp](),
 	},
 	{
 		Name:   "signalProcess",
-		Doc:    "Sends SIGTERM or SIGKILL to a process inside the task's container.",
+		Doc:    "Sends SIGTERM or SIGKILL to a process inside the task's runtime instance.",
 		Method: "POST",
 		Path:   "/api/v1/tasks/{id}/processes/{pid}/signal",
 		Req:    reflect.TypeFor[SignalProcessReq](),

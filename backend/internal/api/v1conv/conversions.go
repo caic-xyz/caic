@@ -9,6 +9,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
@@ -162,8 +163,8 @@ func ForgeCheck(c *forge.Check) v1.ForgeCheck {
 	}
 }
 
-// ProcessInfos converts task process info to API DTOs.
-func ProcessInfos(procs []task.ProcessInfo) []v1.ProcessInfo {
+// ProcessInfos converts runtime process info to API DTOs.
+func ProcessInfos(procs []runtime.ProcessInfo) []v1.ProcessInfo {
 	out := make([]v1.ProcessInfo, len(procs))
 	for i, p := range procs {
 		out[i] = v1.ProcessInfo{
@@ -180,8 +181,8 @@ func ProcessInfos(procs []task.ProcessInfo) []v1.ProcessInfo {
 	return out
 }
 
-// StatsEvent converts container stats to an API event.
-func StatsEvent(cs *task.ContainerStats) v1.EventMessage {
+// StatsEvent converts runtime stats to an API event.
+func StatsEvent(cs *runtime.Stats) v1.EventMessage {
 	return v1.EventMessage{
 		Kind: v1.EventKindStats,
 		Ts:   cs.Ts.UnixMilli(),

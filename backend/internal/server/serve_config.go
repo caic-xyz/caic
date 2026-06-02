@@ -29,6 +29,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	caicruntime "github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
@@ -156,22 +157,31 @@ func (s *Server) updatePreferences(ctx context.Context, req *v1.UpdatePreference
 	return s.getPreferences(ctx, nil)
 }
 
-func cacheMountsFromSettings(settings preferences.Settings) []md.CacheMount {
-	var caches []md.CacheMount
+func cacheMountsFromSettings(settings preferences.Settings) []caicruntime.CacheMount {
+	var caches []caicruntime.CacheMount
 	if settings.UseDefaultCaches {
 		names := slices.Sorted(maps.Keys(md.WellKnownCaches))
 		for _, name := range names {
 			if enabled, ok := settings.WellKnownCaches[name]; ok && !enabled {
 				continue
 			}
-			caches = append(caches, md.WellKnownCaches[name]...)
+			for _, c := range md.WellKnownCaches[name] {
+				caches = append(caches, caicruntime.CacheMount{
+					Name:        c.Name,
+					Description: c.Description,
+					HostPath:    c.HostPath,
+					MountPath:   c.ContainerPath,
+					ReadOnly:    c.ReadOnly,
+					Shallow:     c.Shallow,
+				})
+			}
 		}
 	}
 	for _, m := range settings.CacheMappings {
-		caches = append(caches, md.CacheMount{
-			Name:          "custom:" + m.ContainerPath,
-			HostPath:      m.HostPath,
-			ContainerPath: m.ContainerPath,
+		caches = append(caches, caicruntime.CacheMount{
+			Name:      "custom:" + m.ContainerPath,
+			HostPath:  m.HostPath,
+			MountPath: m.ContainerPath,
 		})
 	}
 	return caches

@@ -15,32 +15,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/md"
 	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 const statsRingSize = 60
 
-// ContainerStats is a snapshot of container resource usage.
-type ContainerStats struct {
-	Ts         time.Time
-	CPUPerc    float64
-	MemUsed    uint64
-	MemLimit   uint64
-	MemPerc    float64
-	NetRx      uint64
-	NetTx      uint64
-	BlockRead  uint64
-	BlockWrite uint64
-	DiskUsed   int64
-}
-
 type statsSub struct {
-	ch   chan ContainerStats
+	ch   chan runtime.Stats
 	once sync.Once
 }
 
@@ -155,18 +141,18 @@ type RepoMount struct {
 	BaseBranch  string // branch to fork from; empty = runner default
 	Branch      string // allocated branch, e.g. "caic-0"
 	GitRoot     string // absolute host path; empty in purged-task entries
-	MountedPath string // mount path inside the container (md.Repo.MountedPath)
+	MountedPath string // mount path inside the runtime instance
 }
 
-// ToMDRepo converts a RepoMount to an md.Repo for container operations.
+// ToRuntimeRepo converts a RepoMount to a runtime Repo.
 //
-// When MountedPath is empty (legacy logs or pre-disambiguation containers),
-// md.Repo.MountedPath is populated automatically from GitRoot when empty.
-func (r *RepoMount) ToMDRepo() md.Repo {
-	return md.Repo{
-		GitRoot:     r.GitRoot,
-		Branch:      r.Branch,
-		MountedPath: r.MountedPath,
+// When MountedPath is empty, the runtime adapter may populate it from HostPath.
+func (r *RepoMount) ToRuntimeRepo() runtime.Repo {
+	return runtime.Repo{
+		HostPath:   r.GitRoot,
+		MountPath:  r.MountedPath,
+		Branch:     r.Branch,
+		BaseBranch: r.BaseBranch,
 	}
 }
 
@@ -185,20 +171,20 @@ func RepoMountFromMeta(m agent.MetaRepo, gitRoot string) RepoMount {
 type Task struct {
 	// Immutable fields — set at creation, never modified.
 	ID            ksid.ID
-	InitialPrompt agent.Prompt    // Initial prompt text and optional images.
-	Harness       agent.Harness   // Agent harness ("claude", "gemini", etc.).
-	Model         string          // User-requested model; passed to agent CLI.
-	Effort        string          // Thinking effort; passed to agent CLI. Empty = default.
-	DockerImage   string          // Custom Docker base image; empty means use the default.
-	MaxCPUs       int             // Max CPU cores for the container; 0 means use the default.
-	CacheMounts   []md.CacheMount // Build cache mounts baked into the container image.
-	Tailscale     bool            // Enable Tailscale networking in the container.
-	USB           bool            // Enable USB passthrough in the container.
-	Display       bool            // Enable Xvfb display in the container.
-	Sudo          bool            // Enable root access (password-based sudo) in the container.
-	StartedAt     time.Time       // When the task was created.
-	OwnerID       string          // Internal user ID of the creator; empty in no-auth mode.
-	ForgeIssue    int             // Originating issue number for bot comment callbacks; 0 = none.
+	InitialPrompt agent.Prompt         // Initial prompt text and optional images.
+	Harness       agent.Harness        // Agent harness ("claude", "gemini", etc.).
+	Model         string               // User-requested model; passed to agent CLI.
+	Effort        string               // Thinking effort; passed to agent CLI. Empty = default.
+	DockerImage   string               // Custom Docker base image; empty means use the default.
+	MaxCPUs       int                  // Max CPU cores for the container; 0 means use the default.
+	CacheMounts   []runtime.CacheMount // Build cache mounts baked into the runtime image.
+	Tailscale     bool                 // Enable Tailscale networking in the container.
+	USB           bool                 // Enable USB passthrough in the container.
+	Display       bool                 // Enable Xvfb display in the container.
+	Sudo          bool                 // Enable root access (password-based sudo) in the container.
+	StartedAt     time.Time            // When the task was created.
+	OwnerID       string               // Internal user ID of the creator; empty in no-auth mode.
+	ForgeIssue    int                  // Originating issue number for bot comment callbacks; 0 = none.
 	Provider      genai.Provider
 
 	// Mutable task metadata. These fields are populated at construction, setup, or
@@ -216,7 +202,7 @@ type Task struct {
 	// mu protects mutable task metadata above and all fields below.
 	mu                    sync.Mutex
 	logPath               string // Absolute JSONL log path used for appending task metadata.
-	statsRing             [statsRingSize]ContainerStats
+	statsRing             [statsRingSize]runtime.Stats
 	statsLen              int
 	statsHead             int
 	statsSubs             []*statsSub
@@ -388,20 +374,20 @@ func (t *Task) Primary() *RepoMount {
 	return &p
 }
 
-// MDRepos returns all repos as []md.Repo for use with the container backend.
-func (t *Task) MDRepos() []md.Repo {
+// RuntimeRepos returns all repos for use with the runtime backend.
+func (t *Task) RuntimeRepos() []runtime.Repo {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	out := make([]md.Repo, len(t.Repos))
+	out := make([]runtime.Repo, len(t.Repos))
 	for i, r := range t.Repos {
-		out[i] = r.ToMDRepo()
+		out[i] = r.ToRuntimeRepo()
 	}
 	return out
 }
 
-// ExtraMDRepos returns all repos after the primary as []md.Repo.
-func (t *Task) ExtraMDRepos() []md.Repo {
-	repos := t.MDRepos()
+// ExtraRuntimeRepos returns all repos after the primary.
+func (t *Task) ExtraRuntimeRepos() []runtime.Repo {
+	repos := t.RuntimeRepos()
 	if len(repos) <= 1 {
 		return nil
 	}
@@ -1061,8 +1047,8 @@ func (t *Task) Subscribe(ctx context.Context) (history []agent.Message, live <-c
 	return history, s.ch, unsub
 }
 
-// PushStats records a container stats snapshot and notifies live subscribers.
-func (t *Task) PushStats(s *ContainerStats) {
+// PushStats records a runtime stats snapshot and notifies live subscribers.
+func (t *Task) PushStats(s *runtime.Stats) {
 	t.mu.Lock()
 	idx := (t.statsHead + t.statsLen) % statsRingSize
 	t.statsRing[idx] = *s
@@ -1085,10 +1071,10 @@ func (t *Task) PushStats(s *ContainerStats) {
 // SubscribeStats returns a snapshot of the stats ring buffer and a channel that
 // receives only live stats arriving after the snapshot. The context cancellation
 // closes the channel and removes the subscriber.
-func (t *Task) SubscribeStats(ctx context.Context) (history []ContainerStats, live <-chan ContainerStats, unsubFn func()) {
-	s := &statsSub{ch: make(chan ContainerStats, 64)}
+func (t *Task) SubscribeStats(ctx context.Context) (history []runtime.Stats, live <-chan runtime.Stats, unsubFn func()) {
+	s := &statsSub{ch: make(chan runtime.Stats, 64)}
 	t.mu.Lock()
-	history = make([]ContainerStats, t.statsLen)
+	history = make([]runtime.Stats, t.statsLen)
 	for i := range t.statsLen {
 		history[i] = t.statsRing[(t.statsHead+i)%statsRingSize]
 	}

@@ -20,11 +20,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 	"github.com/coder/websocket"
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
+
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 const (

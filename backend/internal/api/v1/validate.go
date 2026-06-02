@@ -27,7 +27,7 @@ func (r *InputReq) Validate() error {
 	return validateImages(r.Prompt.Images)
 }
 
-// Validate is a no-op; prompt is optional (read from container plan file if empty).
+// Validate is a no-op; prompt is optional (read from runtime plan file if empty).
 func (r *RestartReq) Validate() error { return nil }
 
 // Validate is a no-op; instructions are optional.

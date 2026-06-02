@@ -4,7 +4,7 @@
 // Each validator checks structural correctness at runtime and throws
 // TypeError on mismatch. Unknown kinds pass through for forward compat.
 
-import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, CheckStatus, Container, DiffFileStat, EventAsk, EventDiffStat, EventError, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventResult, EventStats, EventSubagentEnd, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaRateLimit, Repo, Task, TaskListEvent, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
+import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, CheckStatus, DiffFileStat, EventAsk, EventDiffStat, EventError, EventInit, EventKind, EventLog, EventMessage, EventRateLimit, EventResult, EventStats, EventSubagentEnd, EventSubagentStart, EventSystem, EventText, EventTextDelta, EventThinking, EventThinkingDelta, EventTodo, EventToolOutputDelta, EventToolResult, EventToolUse, EventUsage, EventUserInput, EventWidget, EventWidgetDelta, Forge, ForgeCheck, ForgePRState, Harness, ISOTimestamp, ImageData, LocalUsage, LocalWindow, ProviderQuota, QuotaBalance, QuotaExtraUsage, QuotaRateLimit, Repo, RuntimeInstance, Task, TaskListEvent, TaskRepo, TaskState, TodoItem, ToolOutputContentType, UsageResp } from "./types.gen";
 
 // ---- helpers ----
 
@@ -421,16 +421,16 @@ export function validateForgeCheck(raw: unknown): ForgeCheck {
   };
 }
 
-export function validateContainer(raw: unknown): Container {
-  const obj = asObject(raw, "Container");
+export function validateRuntimeInstance(raw: unknown): RuntimeInstance {
+  const obj = asObject(raw, "RuntimeInstance");
   return {
-    name: asString(obj["name"], "Container.name"),
-    tailscale: (obj["tailscale"] === undefined || obj["tailscale"] === null ? undefined : asString(obj["tailscale"], "Container.tailscale")),
-    usb: (obj["usb"] === undefined || obj["usb"] === null ? undefined : asBoolean(obj["usb"], "Container.usb")),
-    display: (obj["display"] === undefined || obj["display"] === null ? undefined : asBoolean(obj["display"], "Container.display")),
-    sudo: (obj["sudo"] === undefined || obj["sudo"] === null ? undefined : asBoolean(obj["sudo"], "Container.sudo")),
-    sudoPassword: (obj["sudoPassword"] === undefined || obj["sudoPassword"] === null ? undefined : asString(obj["sudoPassword"], "Container.sudoPassword")),
-    vncPort: (obj["vncPort"] === undefined || obj["vncPort"] === null ? undefined : asNumber(obj["vncPort"], "Container.vncPort")),
+    name: asString(obj["name"], "RuntimeInstance.name"),
+    tailscale: (obj["tailscale"] === undefined || obj["tailscale"] === null ? undefined : asString(obj["tailscale"], "RuntimeInstance.tailscale")),
+    usb: (obj["usb"] === undefined || obj["usb"] === null ? undefined : asBoolean(obj["usb"], "RuntimeInstance.usb")),
+    display: (obj["display"] === undefined || obj["display"] === null ? undefined : asBoolean(obj["display"], "RuntimeInstance.display")),
+    sudo: (obj["sudo"] === undefined || obj["sudo"] === null ? undefined : asBoolean(obj["sudo"], "RuntimeInstance.sudo")),
+    sudoPassword: (obj["sudoPassword"] === undefined || obj["sudoPassword"] === null ? undefined : asString(obj["sudoPassword"], "RuntimeInstance.sudoPassword")),
+    vncPort: (obj["vncPort"] === undefined || obj["vncPort"] === null ? undefined : asNumber(obj["vncPort"], "RuntimeInstance.vncPort")),
   };
 }
 
@@ -475,7 +475,7 @@ export function validateTask(raw: unknown): Task {
     turnStartedAt: (obj["turnStartedAt"] === undefined || obj["turnStartedAt"] === null ? undefined : asString(obj["turnStartedAt"], "Task.turnStartedAt") as ISOTimestamp),
     inPlanMode: (obj["inPlanMode"] === undefined || obj["inPlanMode"] === null ? undefined : asBoolean(obj["inPlanMode"], "Task.inPlanMode")),
     planContent: (obj["planContent"] === undefined || obj["planContent"] === null ? undefined : asString(obj["planContent"], "Task.planContent")),
-    container: validateContainer(obj["container"]),
+    runtime: validateRuntimeInstance(obj["runtime"]),
     gitHubToken: (obj["gitHubToken"] === undefined || obj["gitHubToken"] === null ? undefined : asBoolean(obj["gitHubToken"], "Task.gitHubToken")),
   };
 }

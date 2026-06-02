@@ -215,7 +215,7 @@ type EventSubagentEnd struct {
 	Status string `json:"status"` // "completed", "failed", "stopped"
 }
 
-// EventLog is a provisioning/startup log line from the container backend.
+// EventLog is a provisioning/startup log line from the runtime backend.
 type EventLog struct {
 	Line string `json:"line"`
 }
@@ -265,7 +265,7 @@ type EventRateLimit struct {
 	OverageResetsAt time.Time `json:"overageResetsAt,omitzero"` // When overage resets; zero if not using overage.
 }
 
-// EventStats is a container resource usage snapshot emitted periodically.
+// EventStats is a runtime resource usage snapshot emitted periodically.
 type EventStats struct {
 	Ts         int64   `json:"ts"`
 	CPUPerc    float64 `json:"cpuPerc"`

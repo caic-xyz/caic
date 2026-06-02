@@ -101,21 +101,21 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
     compactContext: (id: string, req: CompactReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/v1/tasks/${id}/compact`, req),
     /** Requests graceful stop of a running task. */
     stopTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/v1/tasks/${id}/stop`),
-    /** Permanently deletes a task and its container. */
+    /** Permanently deletes a task and its runtime instance. */
     purgeTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/v1/tasks/${id}/purge`),
-    /** Reconnects to an orphaned task container. */
+    /** Reconnects to an orphaned task runtime instance. */
     reviveTask: (id: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/v1/tasks/${id}/revive`),
     /** Returns the log tail of a failed CI check run. */
     getTaskCILog: (id: string, jobID: string): Promise<CILogResp> => request<CILogResp>("GET", `/api/v1/tasks/${id}/ci-log?jobID=${encodeURIComponent(jobID)}`),
     /** Pushes task changes to the remote repository. */
     syncTask: (id: string, req: SyncReq): Promise<SyncResp> => request<SyncResp>("POST", `/api/v1/tasks/${id}/sync`, req),
-    /** Forks a task by snapshotting its container and creating a new task on a derived branch. */
+    /** Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. */
     forkTask: (id: string, req: ForkTaskReq): Promise<CreateTaskResp> => request<CreateTaskResp>("POST", `/api/v1/tasks/${id}/fork`, req),
     /** Returns the unified diff for a task's branch. */
     getTaskDiff: (id: string, path: string): Promise<DiffResp> => request<DiffResp>("GET", `/api/v1/tasks/${id}/diff?path=${encodeURIComponent(path)}`),
-    /** Returns the list of running processes inside the task's container. */
+    /** Returns the list of running processes inside the task's runtime instance. */
     getTaskProcesses: (id: string): Promise<ProcessListResp> => request<ProcessListResp>("GET", `/api/v1/tasks/${id}/processes`),
-    /** Sends SIGTERM or SIGKILL to a process inside the task's container. */
+    /** Sends SIGTERM or SIGKILL to a process inside the task's runtime instance. */
     signalProcess: (id: string, pid: string, req: SignalProcessReq): Promise<StatusResp> => request<StatusResp>("POST", `/api/v1/tasks/${id}/processes/${pid}/signal`, req),
     /** Returns the full (untruncated) input for a tool call. */
     getTaskToolInput: (id: string, toolUseID: string): Promise<TaskToolInputResp> => request<TaskToolInputResp>("GET", `/api/v1/tasks/${id}/tool/${toolUseID}`),

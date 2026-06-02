@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caic-xyz/md"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
 	"github.com/caic-xyz/caic/backend/internal/container"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 )
@@ -1161,14 +1161,15 @@ func TestManager(t *testing.T) {
 		t.Run("valid_fetches_then_caches", func(t *testing.T) {
 			t.Parallel()
 			fake := &fakeMD{
-				sudoFn: func(_ context.Context, name string) (string, error) {
+				sudoFn: func(_ context.Context, id runtime.InstanceID) (string, error) {
+					name := string(id)
 					if name != "ctr-1" {
 						t.Errorf("SudoPassword called with name %q, want ctr-1", name)
 					}
 					return "fetched-pw", nil
 				},
 			}
-			m := New(Config{ServerCtx: t.Context(), MDClient: fake})
+			m := New(Config{ServerCtx: t.Context(), RuntimeInfo: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
@@ -1192,11 +1193,11 @@ func TestManager(t *testing.T) {
 		t.Run("valid_fetch_error_returns_empty", func(t *testing.T) {
 			t.Parallel()
 			fake := &fakeMD{
-				sudoFn: func(_ context.Context, _ string) (string, error) {
+				sudoFn: func(_ context.Context, _ runtime.InstanceID) (string, error) {
 					return "", errors.New("ssh boom")
 				},
 			}
-			m := New(Config{ServerCtx: t.Context(), MDClient: fake})
+			m := New(Config{ServerCtx: t.Context(), RuntimeInfo: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
@@ -1593,7 +1594,7 @@ func TestManager(t *testing.T) {
 			stopReturned := make(chan struct{})
 			releaseStop := make(chan struct{})
 			fake := &tasktest.FakeContainerBackend{
-				StopFunc: func(ctx context.Context, _ string) error {
+				StopFunc: func(ctx context.Context, _ runtime.InstanceID) error {
 					close(stopStarted)
 					defer close(stopReturned)
 					select {
@@ -1730,7 +1731,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			releaseRevive := make(chan struct{})
 			fake := &tasktest.FakeContainerBackend{
-				ReviveFunc: func(ctx context.Context, _ string, _ []md.Repo) error {
+				ReviveFunc: func(ctx context.Context, _ runtime.InstanceID, _ []runtime.Repo) error {
 					select {
 					case <-releaseRevive:
 						return errors.New("revive boom")
@@ -2002,7 +2003,7 @@ func TestManager(t *testing.T) {
 				"md-caic-caic-5\x00caic.id":      taskID.String(),
 				"md-caic-caic-5\x00caic.harness": string(agent.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), MDClient: fake})
+			m := New(Config{ServerCtx: t.Context(), RuntimeInfo: fake})
 			m.RegisterRunner("caic-xyz/caic", &task.Runner{
 				Dir:      "/home/user/src/caic-xyz/caic",
 				Backends: map[agent.Harness]agent.Backend{agent.Claude: &fakeBackend{models: []string{"m1"}}},
@@ -2015,13 +2016,13 @@ func TestManager(t *testing.T) {
 			adopted, err := m.AdoptContainers(t.Context(), []AdoptRepo{
 				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
 				{RelPath: "caic-xyz/md", AbsPath: "/home/user/src/caic-xyz/md"},
-			}, []*md.Container{
+			}, []runtime.Instance{
 				{
-					Name:  "md-caic-caic-5",
+					ID:    "md-caic-caic-5",
 					State: "exited",
-					Repos: []md.Repo{
-						{GitRoot: "/home/user/src/caic-xyz/caic", Branch: "caic-5", MountedPath: "/home/user/src/caic-xyz/caic"},
-						{GitRoot: "/home/user/src/caic-xyz/md", Branch: "caic-0", MountedPath: "/home/user/src/caic-xyz/md"},
+					Repos: []runtime.Repo{
+						{HostPath: "/home/user/src/caic-xyz/caic", Branch: "caic-5", MountPath: "/home/user/src/caic-xyz/caic"},
+						{HostPath: "/home/user/src/caic-xyz/md", Branch: "caic-0", MountPath: "/home/user/src/caic-xyz/md"},
 					},
 				},
 			}, nil)
@@ -2048,7 +2049,7 @@ func TestManager(t *testing.T) {
 				"md-caic-caic-6\x00caic.id":      taskID.String(),
 				"md-caic-caic-6\x00caic.harness": string(agent.Codex),
 			}}
-			m := New(Config{ServerCtx: t.Context(), MDClient: fake})
+			m := New(Config{ServerCtx: t.Context(), RuntimeInfo: fake})
 			m.RegisterRunner("caic-xyz/caic", &task.Runner{
 				Dir:      "/home/user/src/caic-xyz/caic",
 				Backends: map[agent.Harness]agent.Backend{agent.Codex: codex.New("", nil)},
@@ -2076,12 +2077,12 @@ func TestManager(t *testing.T) {
 
 			adopted, err := m.AdoptContainers(t.Context(), []AdoptRepo{
 				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
-			}, []*md.Container{
+			}, []runtime.Instance{
 				{
-					Name:  "md-caic-caic-6",
+					ID:    "md-caic-caic-6",
 					State: "exited",
-					Repos: []md.Repo{
-						{GitRoot: "/home/user/src/caic-xyz/caic", Branch: "caic-6", MountedPath: "/home/user/src/caic-xyz/caic"},
+					Repos: []runtime.Repo{
+						{HostPath: "/home/user/src/caic-xyz/caic", Branch: "caic-6", MountPath: "/home/user/src/caic-xyz/caic"},
 					},
 				},
 			}, logs)
@@ -2102,15 +2103,15 @@ func TestManager(t *testing.T) {
 		t.Run("valid_pushes_to_active_tasks", func(t *testing.T) {
 			t.Parallel()
 			fake := &fakeMD{
-				statsAllFn: func(_ context.Context, names []string) (map[string]*md.ContainerStats, error) {
-					out := make(map[string]*md.ContainerStats, len(names))
-					for _, n := range names {
-						out[n] = &md.ContainerStats{CPUPerc: 0.5, MemUsed: 100}
+				statsAllFn: func(_ context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]*runtime.Stats, error) {
+					out := make(map[runtime.InstanceID]*runtime.Stats, len(ids))
+					for _, id := range ids {
+						out[id] = &runtime.Stats{CPUPerc: 0.5, MemUsed: 100}
 					}
 					return out, nil
 				},
 			}
-			m := New(Config{ServerCtx: t.Context(), MDClient: fake})
+			m := New(Config{ServerCtx: t.Context(), RuntimeInfo: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
@@ -2137,7 +2138,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_skips_inactive_states", func(t *testing.T) {
 			t.Parallel()
 			fake := &fakeMD{}
-			m := New(Config{ServerCtx: t.Context(), MDClient: fake})
+			m := New(Config{ServerCtx: t.Context(), RuntimeInfo: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
@@ -2158,9 +2159,9 @@ func TestManager(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_dispatches_death", func(t *testing.T) {
 			t.Parallel()
-			events := make(chan container.Event, 1)
+			events := make(chan runtime.Event, 1)
 			fake := &fakeMD{events: events}
-			m := New(Config{ServerCtx: t.Context(), MDClient: fake})
+			m := New(Config{ServerCtx: t.Context(), RuntimeInfo: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
@@ -2174,7 +2175,7 @@ func TestManager(t *testing.T) {
 			defer cancel()
 			m.watchContainerEvents(ctx)
 
-			events <- container.Event{Name: "ctr-dead"}
+			events <- runtime.Event{InstanceID: "ctr-dead"}
 
 			// The watcher dispatches on its own goroutine; wait for the state
 			// transition rather than sleeping a fixed duration.
@@ -2205,14 +2206,14 @@ func TestTaskReposForRunner(t *testing.T) {
 		if len(got) != 2 {
 			t.Fatalf("repos len = %d, want 2", len(got))
 		}
-		if got[0].GitRoot != "/home/user/src/caic-xyz/caic" {
-			t.Errorf("primary GitRoot = %q, want runner dir", got[0].GitRoot)
+		if got[0].HostPath != "/home/user/src/caic-xyz/caic" {
+			t.Errorf("primary HostPath = %q, want runner dir", got[0].HostPath)
 		}
-		if got[0].MountedPath != "/home/user/src/caic-xyz/caic" {
-			t.Errorf("primary MountedPath = %q, want qualified mount", got[0].MountedPath)
+		if got[0].MountPath != "/home/user/src/caic-xyz/caic" {
+			t.Errorf("primary MountPath = %q, want qualified mount", got[0].MountPath)
 		}
-		if got[1].MountedPath != "/home/user/src/caic-xyz/md" {
-			t.Errorf("extra MountedPath = %q, want qualified mount", got[1].MountedPath)
+		if got[1].MountPath != "/home/user/src/caic-xyz/md" {
+			t.Errorf("extra MountPath = %q, want qualified mount", got[1].MountPath)
 		}
 	})
 	t.Run("valid_no_repos", func(t *testing.T) {

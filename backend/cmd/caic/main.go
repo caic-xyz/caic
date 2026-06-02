@@ -20,14 +20,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/autoupdate"
-	"github.com/caic-xyz/caic/backend/internal/forge/github"
-	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/fsnotify/fsnotify"
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
+
+	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/autoupdate"
+	"github.com/caic-xyz/caic/backend/internal/forge/github"
+	"github.com/caic-xyz/caic/backend/internal/server"
 )
 
 // expandTilde replaces a leading "~/" or bare "~" with the current user's home directory.

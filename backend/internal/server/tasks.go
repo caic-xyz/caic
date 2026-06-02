@@ -25,6 +25,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
@@ -536,7 +537,7 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := r.URL.Query().Get("path")
-	diff, err := runner.DiffContent(r.Context(), t.MDRepos(), path)
+	diff, err := runner.DiffContent(r.Context(), t.RuntimeRepos(), path)
 	if err != nil {
 		writeError(w, api.InternalError(err.Error()))
 		return
@@ -647,11 +648,11 @@ func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, api.Conflict("task has no container"))
 		return
 	}
-	var procs []task.ProcessInfo
+	var procs []runtime.ProcessInfo
 	if s.fakeProcesses != nil {
 		procs, err = s.fakeProcesses(r.Context(), containerName)
 	} else {
-		procs, err = s.backend.Processes(r.Context(), containerName)
+		procs, err = s.backend.Processes(r.Context(), runtime.InstanceID(containerName))
 	}
 	if err != nil {
 		writeError(w, api.InternalError(err.Error()))
@@ -676,7 +677,7 @@ func (s *Server) signalProcess(ctx context.Context, entry *tasks.Entry, req *v1.
 			return nil, api.InternalError(err.Error())
 		}
 	} else {
-		if err := s.backend.Signal(ctx, containerName, req.PID, req.Signal); err != nil {
+		if err := s.backend.Signal(ctx, runtime.InstanceID(containerName), req.PID, req.Signal); err != nil {
 			return nil, api.InternalError(err.Error())
 		}
 	}
@@ -762,7 +763,7 @@ func (s *Server) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
 
 // SetFakeProcesses injects fake process and signal hooks for e2e testing.
 func (s *Server) SetFakeProcesses(
-	processes func(ctx context.Context, containerName string) ([]task.ProcessInfo, error),
+	processes func(ctx context.Context, containerName string) ([]runtime.ProcessInfo, error),
 	signal func(ctx context.Context, containerName string, pid int, sig string) error,
 ) {
 	s.fakeProcesses = processes

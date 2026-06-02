@@ -20,6 +20,7 @@ import (
 	"github.com/maruel/genai"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
@@ -148,10 +149,10 @@ func NewBackend(client *md.Client) *Backend {
 }
 
 // Launch implements task.ContainerBackend.
-func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, opts *task.StartOptions) (string, error) {
+func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, labels []string, opts *task.StartOptions) (runtime.InstanceID, error) {
 	defer trace.StartRegion(ctx, "container.launch").End()
 	if len(repos) > 0 {
-		slog.Info("md", "phase", "launch", "dir", repos[0].GitRoot, "br", repos[0].Branch, "hns", opts.Harness)
+		slog.Info("md", "phase", "launch", "dir", repos[0].HostPath, "br", repos[0].Branch, "hns", opts.Harness)
 	} else {
 		slog.Info("md", "phase", "launch", "hns", opts.Harness)
 	}
@@ -167,7 +168,8 @@ func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, 
 	slog.DebugContext(ctx, "harness verified", "rt", rt, "harness", opts.Harness)
 	mdOpts := b.mdStartOpts(labels, opts)
 	slog.DebugContext(ctx, "creating container", "rt", rt, "repos_count", len(repos))
-	c, err := b.client.Container(repos...)
+	mdRepos := toMDRepos(repos)
+	c, err := b.client.Container(mdRepos...)
 	if err != nil {
 		return "", err
 	}
@@ -187,14 +189,15 @@ func (b *Backend) Launch(ctx context.Context, repos []md.Repo, labels []string, 
 	b.vncPorts[name] = c.VNCPort()
 	b.mu.Unlock()
 	slog.DebugContext(ctx, "launch returning", "rt", rt, "ctr", name)
-	return name, nil
+	return runtime.InstanceID(name), nil
 }
 
 // Connect implements task.ContainerBackend.
-func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opts *task.StartOptions) (tailscaleFQDN, tailscaleAuthURL string, err error) {
+func (b *Backend) Connect(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *task.StartOptions) (runtime.ConnectionInfo, error) {
 	defer trace.StartRegion(ctx, "container.connect").End()
+	name := string(id)
 	if len(repos) > 0 {
-		slog.Info("md", "phase", "connect", "dir", repos[0].GitRoot, "br", repos[0].Branch)
+		slog.Info("md", "phase", "connect", "dir", repos[0].HostPath, "br", repos[0].Branch)
 	}
 	rt := b.client.Runtime()
 	slog.DebugContext(ctx, "connect starting", "rt", rt, "ctr", name, "repos_count", len(repos))
@@ -206,7 +209,7 @@ func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opt
 	b.mu.Unlock()
 	if !ok {
 		slog.DebugContext(ctx, "no pending container", "rt", rt, "ctr", name)
-		return "", "", fmt.Errorf("no pending container %q", name)
+		return runtime.ConnectionInfo{}, fmt.Errorf("no pending container %q", name)
 	}
 	slog.DebugContext(ctx, "found pending container", "rt", rt, "ctr", name)
 	mdOpts := b.mdStartOpts(nil, opts)
@@ -215,22 +218,23 @@ func (b *Backend) Connect(ctx context.Context, name string, repos []md.Repo, opt
 	sr, err := c.Connect(ctx, stdout, stderr, mdOpts)
 	if err != nil {
 		slog.ErrorContext(ctx, "connect failed", "rt", rt, "ctr", name, "err", err)
-		return "", "", err
+		return runtime.ConnectionInfo{}, err
 	}
 	slog.DebugContext(ctx, "connect succeeded", "rt", rt, "ctr", name, "fqdn", sr.TailscaleFQDN, "authurl", sr.TailscaleAuthURL)
-	return sr.TailscaleFQDN, sr.TailscaleAuthURL, nil
+	return runtime.ConnectionInfo{TailscaleFQDN: sr.TailscaleFQDN, TailscaleAuthURL: sr.TailscaleAuthURL}, nil
 }
 
 // Diff implements task.ContainerBackend.
-func (b *Backend) Diff(ctx context.Context, repos []md.Repo, repoIdx int, args ...string) (string, error) {
+func (b *Backend) Diff(ctx context.Context, repos []runtime.Repo, repoIdx int, args ...string) (string, error) {
 	defer trace.StartRegion(ctx, "container.diff").End()
 	if repoIdx < 0 || repoIdx >= len(repos) {
 		return "", fmt.Errorf("repo index %d out of range for %d repos", repoIdx, len(repos))
 	}
 	repo := &repos[repoIdx]
-	slog.Info("md diff", "dir", repo.GitRoot, "br", repo.Branch, "args", args)
+	slog.Info("md diff", "dir", repo.HostPath, "br", repo.Branch, "args", args)
 	var stdout bytes.Buffer
-	ct, err := b.client.Container(repos...)
+	mdRepos := toMDRepos(repos)
+	ct, err := b.client.Container(mdRepos...)
 	if err != nil {
 		return "", err
 	}
@@ -241,12 +245,13 @@ func (b *Backend) Diff(ctx context.Context, repos []md.Repo, repoIdx int, args .
 }
 
 // Fetch implements task.ContainerBackend.
-func (b *Backend) Fetch(ctx context.Context, repos []md.Repo) error {
+func (b *Backend) Fetch(ctx context.Context, repos []runtime.Repo) error {
 	defer trace.StartRegion(ctx, "container.fetch").End()
 	if len(repos) > 0 {
-		slog.Info("md fetch", "dir", repos[0].GitRoot, "br", repos[0].Branch)
+		slog.Info("md fetch", "dir", repos[0].HostPath, "br", repos[0].Branch)
 	}
-	ct, err := b.client.Container(repos...)
+	mdRepos := toMDRepos(repos)
+	ct, err := b.client.Container(mdRepos...)
 	if err != nil {
 		return err
 	}
@@ -259,8 +264,9 @@ func (b *Backend) Fetch(ctx context.Context, repos []md.Repo) error {
 }
 
 // Stop implements task.ContainerBackend.
-func (b *Backend) Stop(ctx context.Context, name string) error {
+func (b *Backend) Stop(ctx context.Context, id runtime.InstanceID) error {
 	defer trace.StartRegion(ctx, "container.stop").End()
+	name := string(id)
 	slog.Info("md stop", "name", name)
 	ct, err := b.client.Container()
 	if err != nil {
@@ -271,14 +277,16 @@ func (b *Backend) Stop(ctx context.Context, name string) error {
 }
 
 // Purge implements task.ContainerBackend.
-func (b *Backend) Purge(ctx context.Context, name string, repos []md.Repo) error {
+func (b *Backend) Purge(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo) error {
 	defer trace.StartRegion(ctx, "container.purge").End()
+	name := string(id)
 	if len(repos) > 0 {
-		slog.Info("md purge", "dir", repos[0].GitRoot, "br", repos[0].Branch)
+		slog.Info("md purge", "dir", repos[0].HostPath, "br", repos[0].Branch)
 	} else {
 		slog.Info("md purge", "name", name)
 	}
-	ct, err := b.client.Container(repos...)
+	mdRepos := toMDRepos(repos)
+	ct, err := b.client.Container(mdRepos...)
 	if err != nil {
 		return err
 	}
@@ -289,16 +297,18 @@ func (b *Backend) Purge(ctx context.Context, name string, repos []md.Repo) error
 }
 
 // Revive implements task.ContainerBackend.
-func (b *Backend) Revive(ctx context.Context, name string, repos []md.Repo) error {
+func (b *Backend) Revive(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo) error {
 	defer trace.StartRegion(ctx, "container.revive").End()
+	name := string(id)
 	if len(repos) > 0 {
-		slog.Info("md revive", "dir", repos[0].GitRoot, "br", repos[0].Branch, "ctr", name)
+		slog.Info("md revive", "dir", repos[0].HostPath, "br", repos[0].Branch, "ctr", name)
 	} else {
 		slog.Info("md revive", "name", name)
 	}
 	rt := b.client.Runtime()
 	slog.DebugContext(ctx, "revive starting", "rt", rt, "ctr", name, "repos_count", len(repos))
-	ct, err := b.client.Container(repos...)
+	mdRepos := toMDRepos(repos)
+	ct, err := b.client.Container(mdRepos...)
 	if err != nil {
 		return err
 	}
@@ -319,10 +329,11 @@ func (b *Backend) Revive(ctx context.Context, name string, repos []md.Repo) erro
 }
 
 // Fork implements task.ContainerBackend.
-func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *task.ForkOptions) (string, []md.Repo, error) {
+func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *task.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
 	defer trace.StartRegion(ctx, "container.fork").End()
+	name := string(id)
 	if len(repos) > 0 {
-		slog.Info("md", "phase", "fork", "src", name, "dir", repos[0].GitRoot, "br", repos[0].Branch)
+		slog.Info("md", "phase", "fork", "src", name, "dir", repos[0].HostPath, "br", repos[0].Branch)
 	}
 	rt := b.client.Runtime()
 	// Rootless podman does not support sudo (user namespace stacking prevents nested containers).
@@ -344,7 +355,7 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 	}
 	slog.DebugContext(ctx, "building fork options", "rt", rt, "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo)
 	forkOpts := &md.ForkOpts{
-		ExtraRepos: opts.ExtraRepos,
+		ExtraRepos: toMDRepos(opts.ExtraRepos),
 		Display:    opts.Display,
 		Tailscale:  opts.Tailscale,
 		USB:        opts.USB,
@@ -366,11 +377,12 @@ func (b *Backend) Fork(ctx context.Context, name string, repos []md.Repo, opts *
 	b.mu.Lock()
 	b.vncPorts[forkName] = forked.VNCPort()
 	b.mu.Unlock()
-	return forkName, forked.Repos(), nil
+	return runtime.InstanceID(forkName), fromMDRepos(forked.Repos()), nil
 }
 
 // VNCPort implements task.ContainerBackend.
-func (b *Backend) VNCPort(ctx context.Context, containerName string) int {
+func (b *Backend) VNCPort(ctx context.Context, id runtime.InstanceID) int {
+	containerName := string(id)
 	b.mu.Lock()
 	port := int(b.vncPorts[containerName])
 	b.mu.Unlock()
@@ -418,7 +430,7 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) *md.Star
 	}
 	return &md.StartOpts{
 		BaseImage:  image,
-		Caches:     opts.Caches,
+		Caches:     toMDCacheMounts(opts.Caches),
 		Labels:     labels,
 		AgentPaths: []md.AgentPaths{harnessPaths},
 		USB:        opts.USB,
@@ -428,6 +440,58 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) *md.Star
 		ExtraEnv:   extraEnv,
 		MaxCPUs:    maxCPUsOrDefault(opts.MaxCPUs),
 	}
+}
+
+func toMDRepos(repos []runtime.Repo) []md.Repo {
+	if len(repos) == 0 {
+		return nil
+	}
+	out := make([]md.Repo, len(repos))
+	for i, r := range repos {
+		out[i] = md.Repo{
+			GitRoot:       r.HostPath,
+			Branch:        r.Branch,
+			MountedPath:   r.MountPath,
+			DefaultRemote: r.Remote,
+			DefaultBranch: r.BaseBranch,
+		}
+	}
+	return out
+}
+
+func fromMDRepos(repos []md.Repo) []runtime.Repo {
+	if len(repos) == 0 {
+		return nil
+	}
+	out := make([]runtime.Repo, len(repos))
+	for i, r := range repos {
+		out[i] = runtime.Repo{
+			HostPath:   r.GitRoot,
+			MountPath:  r.MountedPath,
+			Branch:     r.Branch,
+			BaseBranch: r.DefaultBranch,
+			Remote:     r.DefaultRemote,
+		}
+	}
+	return out
+}
+
+func toMDCacheMounts(caches []runtime.CacheMount) []md.CacheMount {
+	if len(caches) == 0 {
+		return nil
+	}
+	out := make([]md.CacheMount, len(caches))
+	for i, c := range caches {
+		out[i] = md.CacheMount{
+			Name:          c.Name,
+			Description:   c.Description,
+			HostPath:      c.HostPath,
+			ContainerPath: c.MountPath,
+			ReadOnly:      c.ReadOnly,
+			Shallow:       c.Shallow,
+		}
+	}
+	return out
 }
 
 // hostPort reads the container host port mapping for the given container port.

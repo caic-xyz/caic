@@ -48,14 +48,14 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 | POST | `/api/v1/tasks/{id}/clear-context` | Clears context and restarts the agent session without a prompt. |  | `StatusResp` |
 | POST | `/api/v1/tasks/{id}/compact` | Sends a compact command to reduce the agent's context window usage. | `CompactReq` | `StatusResp` |
 | POST | `/api/v1/tasks/{id}/stop` | Requests graceful stop of a running task. |  | `StatusResp` |
-| POST | `/api/v1/tasks/{id}/purge` | Permanently deletes a task and its container. |  | `StatusResp` |
-| POST | `/api/v1/tasks/{id}/revive` | Reconnects to an orphaned task container. |  | `StatusResp` |
+| POST | `/api/v1/tasks/{id}/purge` | Permanently deletes a task and its runtime instance. |  | `StatusResp` |
+| POST | `/api/v1/tasks/{id}/revive` | Reconnects to an orphaned task runtime instance. |  | `StatusResp` |
 | GET | `/api/v1/tasks/{id}/ci-log` | Returns the log tail of a failed CI check run. |  | `CILogResp` |
 | POST | `/api/v1/tasks/{id}/sync` | Pushes task changes to the remote repository. | `SyncReq` | `SyncResp` |
-| POST | `/api/v1/tasks/{id}/fork` | Forks a task by snapshotting its container and creating a new task on a derived branch. | `ForkTaskReq` | `CreateTaskResp` |
+| POST | `/api/v1/tasks/{id}/fork` | Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. | `ForkTaskReq` | `CreateTaskResp` |
 | GET | `/api/v1/tasks/{id}/diff` | Returns the unified diff for a task's branch. |  | `DiffResp` |
-| GET | `/api/v1/tasks/{id}/processes` | Returns the list of running processes inside the task's container. |  | `ProcessListResp` |
-| POST | `/api/v1/tasks/{id}/processes/{pid}/signal` | Sends SIGTERM or SIGKILL to a process inside the task's container. | `SignalProcessReq` | `StatusResp` |
+| GET | `/api/v1/tasks/{id}/processes` | Returns the list of running processes inside the task's runtime instance. |  | `ProcessListResp` |
+| POST | `/api/v1/tasks/{id}/processes/{pid}/signal` | Sends SIGTERM or SIGKILL to a process inside the task's runtime instance. | `SignalProcessReq` | `StatusResp` |
 | GET | `/api/v1/tasks/{id}/tool/{toolUseID}` | Returns the full (untruncated) input for a tool call. |  | `TaskToolInputResp` |
 
 ## Usage
@@ -185,15 +185,15 @@ task's PR CI fails and the original task can no longer receive input.
 Only effective when the GitHub App is configured. | yes |
 | `autoFixOnPROpen` | `boolean` | AutoFixOnPROpen automatically creates a task to review and fix a pull
 request when it is opened or reopened via a forge webhook. | yes |
-| `baseImage` | `string` | BaseImage overrides the default container base image. Empty means use
+| `baseImage` | `string` | BaseImage overrides the default runtime base image. Empty means use
 the default. |  |
-| `maxCPUs` | `int` | MaxCPUs limits the number of CPU cores the container may use.
+| `maxCPUs` | `int` | MaxCPUs limits the number of CPU cores the runtime instance may use.
 Zero means use the system default (max(2, NumCPU-2)). |  |
 | `useDefaultCaches` | `boolean` | UseDefaultCaches controls whether default harness caches are mounted.
 When false, only custom CacheMappings are used. | yes |
 | `wellKnownCaches` | `Record<string, unknown>` | WellKnownCaches maps cache name to enabled state. nil means use default
 (all true), true means explicitly enabled, false means explicitly disabled. |  |
-| `cacheMappings` | `CacheMappingResp[]` | CacheMappings are custom host-to-container directory mappings. |  |
+| `cacheMappings` | `CacheMappingResp[]` | CacheMappings are custom host-to-runtime directory mappings. |  |
 
 ### PreferencesResp
 
@@ -233,7 +233,7 @@ WellKnownCache describes a single well-known cache.
 |-------|------|-------------|----------|
 | `name` | `string` |  | yes |
 | `description` | `string` |  | yes |
-| `mounts` | `string[]` | List of container paths | yes |
+| `mounts` | `string[]` | List of runtime mount paths | yes |
 
 ### WellKnownCachesResp
 
@@ -353,13 +353,13 @@ DiffFileStat describes changes to a single file.
 | `deleted` | `int` |  | yes |
 | `binary` | `boolean` |  |  |
 
-### Container
+### RuntimeInstance
 
-Container holds per-task container metadata.
+RuntimeInstance holds per-task runtime metadata.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `name` | `string` | Container name/ID. | yes |
+| `name` | `string` | Runtime instance name/ID. | yes |
 | `tailscale` | `string` | Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. |  |
 | `usb` | `boolean` |  |  |
 | `display` | `boolean` |  |  |
@@ -411,7 +411,7 @@ Task is the JSON representation sent to the frontend.
 | `turnStartedAt` | `ISOTimestamp` | When the current turn started; zero when not running. |  |
 | `inPlanMode` | `boolean` |  |  |
 | `planContent` | `string` |  |  |
-| `container` | `Container` |  | yes |
+| `runtime` | `RuntimeInstance` |  | yes |
 | `gitHubToken` | `boolean` | Per-task feature flags. |  |
 
 ### ImageData
@@ -662,7 +662,7 @@ EventSubagentEnd is emitted when a subagent task completes, fails, or stops.
 
 ### EventLog
 
-EventLog is a provisioning/startup log line from the container backend.
+EventLog is a provisioning/startup log line from the runtime backend.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
@@ -715,7 +715,7 @@ EventRateLimit is emitted when the agent's rate limit status changes.
 
 ### EventStats
 
-EventStats is a container resource usage snapshot emitted periodically.
+EventStats is a runtime resource usage snapshot emitted periodically.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
@@ -855,7 +855,7 @@ DiffResp is the response for GET /api/v1/tasks/{id}/diff.
 
 ### ProcessInfo
 
-ProcessInfo describes a single process running inside a task container.
+ProcessInfo describes a single process running inside a task runtime instance.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|

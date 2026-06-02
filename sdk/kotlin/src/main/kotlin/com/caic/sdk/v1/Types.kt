@@ -732,9 +732,9 @@ data class DiffFileStat(
     val binary: Boolean? = null,
 )
 
-/** Container holds per-task container metadata. */
+/** RuntimeInstance holds per-task runtime metadata. */
 @Serializable
-data class Container(
+data class RuntimeInstance(
     val name: String,
     val tailscale: String? = null,
     val usb: Boolean? = null,
@@ -785,7 +785,7 @@ data class Task(
     val turnStartedAt: Instant? = null,
     val inPlanMode: Boolean? = null,
     val planContent: String? = null,
-    val container: Container,
+    val runtime: RuntimeInstance,
     val gitHubToken: Boolean? = null,
 )
 
@@ -960,7 +960,7 @@ data class EventSubagentEnd(
     val status: String,
 )
 
-/** EventLog is a provisioning/startup log line from the container backend. */
+/** EventLog is a provisioning/startup log line from the runtime backend. */
 @Serializable
 data class EventLog(val line: String)
 
@@ -1003,7 +1003,7 @@ data class EventRateLimit(
     val overageResetsAt: Instant? = null,
 )
 
-/** EventStats is a container resource usage snapshot emitted periodically. */
+/** EventStats is a runtime resource usage snapshot emitted periodically. */
 @Serializable
 data class EventStats(
     val ts: Long,
@@ -1113,7 +1113,7 @@ data class ForkTaskReq(
 @Serializable
 data class DiffResp(val diff: String)
 
-/** ProcessInfo describes a single process running inside a task container. */
+/** ProcessInfo describes a single process running inside a task runtime instance. */
 @Serializable
 data class ProcessInfo(
     val pid: Int,

@@ -1,7 +1,7 @@
 // Unit tests for the bidirectional task ID to number map.
 package com.fghbuild.caic.voice
 
-import com.caic.sdk.v1.Container
+import com.caic.sdk.v1.RuntimeInstance
 import com.caic.sdk.v1.Harness
 import com.caic.sdk.v1.Task
 import com.caic.sdk.v1.TaskState
@@ -29,7 +29,7 @@ class TaskNumberMapTest {
         activeCacheReadTokens = 0,
         contextWindowLimit = 0,
         harness = Harness.Claude,
-        container = Container(name = "test-ctr"),
+        runtime = RuntimeInstance(name = "test-ctr"),
     )
 
     @Test

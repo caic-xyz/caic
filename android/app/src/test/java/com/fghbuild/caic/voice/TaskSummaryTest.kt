@@ -2,7 +2,7 @@
 package com.fghbuild.caic.voice
 
 import com.caic.sdk.v1.CIStatus
-import com.caic.sdk.v1.Container
+import com.caic.sdk.v1.RuntimeInstance
 import com.caic.sdk.v1.DiffFileStat
 import com.caic.sdk.v1.ForgePRState
 import com.caic.sdk.v1.Harness
@@ -45,7 +45,7 @@ class TaskSummaryTest {
         activeCacheReadTokens = 0,
         contextWindowLimit = 200_000,
         harness = harness,
-        container = Container(name = "ctr"),
+        runtime = RuntimeInstance(name = "ctr"),
         diffStat = diffStat,
         result = result,
         error = error,

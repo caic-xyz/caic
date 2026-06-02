@@ -226,7 +226,7 @@ export interface EventSubagentEnd {
   status: string;
 }
 
-/** EventLog is a provisioning/startup log line from the container backend. */
+/** EventLog is a provisioning/startup log line from the runtime backend. */
 export interface EventLog {
   line: string;
 }
@@ -273,7 +273,7 @@ export interface EventRateLimit {
   overageResetsAt?: ISOTimestamp;
 }
 
-/** EventStats is a container resource usage snapshot emitted periodically. */
+/** EventStats is a runtime resource usage snapshot emitted periodically. */
 export interface EventStats {
   ts: number /* int64 */;
   cpuPerc: number /* float64 */;
@@ -525,12 +525,12 @@ export interface UserSettings {
    */
   autoFixOnPROpen: boolean;
   /**
-   * BaseImage overrides the default container base image. Empty means use
+   * BaseImage overrides the default runtime base image. Empty means use
    * the default.
    */
   baseImage?: string;
   /**
-   * MaxCPUs limits the number of CPU cores the container may use.
+   * MaxCPUs limits the number of CPU cores the runtime instance may use.
    * Zero means use the system default (max(2, NumCPU-2)).
    */
   maxCPUs?: number /* int */;
@@ -544,7 +544,7 @@ export interface UserSettings {
    * (all true), true means explicitly enabled, false means explicitly disabled.
    */
   wellKnownCaches?: { [key: string]: boolean};
-  /** CacheMappings are custom host-to-container directory mappings. */
+  /** CacheMappings are custom host-to-runtime directory mappings. */
   cacheMappings?: CacheMappingResp[];
 }
 
@@ -573,7 +573,7 @@ export interface HarnessInfo {
 export interface WellKnownCache {
   name: string;
   description: string;
-  /** List of container paths */
+  /** List of runtime mount paths */
   mounts: string[];
 }
 
@@ -678,9 +678,9 @@ export interface DiffFileStat {
   binary?: boolean;
 }
 
-/** Container holds per-task container metadata. */
-export interface Container {
-  /** Container name/ID. */
+/** RuntimeInstance holds per-task runtime metadata. */
+export interface RuntimeInstance {
+  /** Runtime instance name/ID. */
   name: string;
   /** Tailscale URL (https://fqdn) or "true" if enabled but FQDN unknown. */
   tailscale?: string;
@@ -744,7 +744,7 @@ export interface Task {
   turnStartedAt?: ISOTimestamp;
   inPlanMode?: boolean;
   planContent?: string;
-  container: Container;
+  runtime: RuntimeInstance;
   /** Per-task feature flags. */
   gitHubToken?: boolean;
 }
@@ -863,7 +863,7 @@ export interface DiffResp {
   diff: string;
 }
 
-/** ProcessInfo describes a single process running inside a task container. */
+/** ProcessInfo describes a single process running inside a task runtime instance. */
 export interface ProcessInfo {
   pid: number /* int */;
   ppid: number /* int */;

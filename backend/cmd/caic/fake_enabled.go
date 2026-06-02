@@ -18,9 +18,9 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/fake"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/md"
 )
 
 const isFakeMode = true
@@ -210,37 +210,41 @@ type fakeContainer struct {
 
 var _ task.ContainerBackend = (*fakeContainer)(nil)
 
-func (*fakeContainer) Launch(_ context.Context, repos []md.Repo, _ []string, _ *task.StartOptions) (string, error) {
+func (*fakeContainer) Launch(_ context.Context, repos []runtime.Repo, _ []string, _ *task.StartOptions) (runtime.InstanceID, error) {
 	if len(repos) == 0 {
 		return "md-test-no-repo", nil
 	}
-	return "md-test-" + strings.ReplaceAll(repos[0].Branch, "/", "-"), nil
+	return runtime.InstanceID("md-test-" + strings.ReplaceAll(repos[0].Branch, "/", "-")), nil
 }
 
-func (*fakeContainer) Connect(_ context.Context, _ string, _ []md.Repo, _ *task.StartOptions) (string, string, error) {
-	return "", "", nil
+func (*fakeContainer) Connect(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *task.StartOptions) (runtime.ConnectionInfo, error) {
+	return runtime.ConnectionInfo{}, nil
 }
 
-func (*fakeContainer) Diff(_ context.Context, _ []md.Repo, _ int, _ ...string) (string, error) {
+func (*fakeContainer) Diff(_ context.Context, _ []runtime.Repo, _ int, _ ...string) (string, error) {
 	return "", nil
 }
 
-func (*fakeContainer) Fetch(_ context.Context, _ []md.Repo) error            { return nil }
-func (*fakeContainer) Stop(_ context.Context, _ string) error                { return nil }
-func (*fakeContainer) Purge(_ context.Context, _ string, _ []md.Repo) error  { return nil }
-func (*fakeContainer) Revive(_ context.Context, _ string, _ []md.Repo) error { return nil }
+func (*fakeContainer) Fetch(_ context.Context, _ []runtime.Repo) error    { return nil }
+func (*fakeContainer) Stop(_ context.Context, _ runtime.InstanceID) error { return nil }
+func (*fakeContainer) Purge(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo) error {
+	return nil
+}
+func (*fakeContainer) Revive(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo) error {
+	return nil
+}
 
-func (*fakeContainer) Fork(_ context.Context, _ string, _ []md.Repo, _ *task.ForkOptions) (string, []md.Repo, error) {
+func (*fakeContainer) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *task.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
 	return "fake-fork", nil, fmt.Errorf("fork not supported in fake mode")
 }
 
-func (fc *fakeContainer) VNCPort(_ context.Context, _ string) int { return fc.vncPort }
+func (fc *fakeContainer) VNCPort(_ context.Context, _ runtime.InstanceID) int { return fc.vncPort }
 
-func (*fakeContainer) Processes(_ context.Context, _ string) ([]task.ProcessInfo, error) {
+func (*fakeContainer) Processes(_ context.Context, _ runtime.InstanceID) ([]runtime.ProcessInfo, error) {
 	return fakeProcesses(nil, "")
 }
 
-func (*fakeContainer) Signal(_ context.Context, _ string, _ int, _ string) error {
+func (*fakeContainer) Signal(_ context.Context, _ runtime.InstanceID, _ int, _ string) error {
 	return nil
 }
 
@@ -255,8 +259,8 @@ func (*fakeContainer) Signal(_ context.Context, _ string, _ int, _ string) error
 //	          gcc(300)
 //	          gcc(301)
 //	        ps(202)
-func fakeProcesses(_ context.Context, _ string) ([]task.ProcessInfo, error) {
-	return []task.ProcessInfo{
+func fakeProcesses(_ context.Context, _ string) ([]runtime.ProcessInfo, error) {
+	return []runtime.ProcessInfo{
 		{PID: 1, PPID: 0, User: "root", State: "S", CPU: 0.0, Mem: 0.1, Time: "0:00", Command: "/sbin/init"},
 		{PID: 42, PPID: 1, User: "root", State: "S", CPU: 0.0, Mem: 0.2, Time: "0:01", Command: "sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups"},
 		{PID: 99, PPID: 42, User: "root", State: "S", CPU: 0.0, Mem: 0.3, Time: "0:00", Command: "sshd: user [priv]"},

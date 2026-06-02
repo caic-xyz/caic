@@ -2,7 +2,7 @@
 package com.fghbuild.caic.voice
 
 import com.caic.sdk.v1.ApiClient
-import com.caic.sdk.v1.Container
+import com.caic.sdk.v1.RuntimeInstance
 import com.caic.sdk.v1.Harness
 import com.caic.sdk.v1.Task
 import com.caic.sdk.v1.TaskState
@@ -43,7 +43,7 @@ class FunctionHandlersTest {
                     cumulativeCacheCreationInputTokens = 0, cumulativeCacheReadInputTokens = 0,
                     activeInputTokens = 0, activeCacheReadTokens = 0, contextWindowLimit = 200_000,
                     harness = Harness.Claude,
-                    container = Container(name = "ctr"),
+                    runtime = RuntimeInstance(name = "ctr"),
                 )
             )
         )
@@ -104,7 +104,7 @@ class FunctionHandlersTest {
                     "cumulativeCacheCreationInputTokens":0,"cumulativeCacheReadInputTokens":0,
                     "activeInputTokens":0,"activeCacheReadTokens":0,
                     "contextWindowLimit":200000,"harness":"claude",
-                    "container":{"name":"ctr"}
+                    "runtime":{"name":"ctr"}
                 }]
                 """,
             ),
@@ -131,7 +131,7 @@ class FunctionHandlersTest {
                     "cumulativeCacheCreationInputTokens":0,"cumulativeCacheReadInputTokens":0,
                     "activeInputTokens":0,"activeCacheReadTokens":0,
                     "contextWindowLimit":200000,"harness":"claude",
-                    "container":{"name":"ctr"}
+                    "runtime":{"name":"ctr"}
                 }]
                 """,
             ),
@@ -211,7 +211,7 @@ class FunctionHandlersTest {
                     "cumulativeCacheCreationInputTokens":0,"cumulativeCacheReadInputTokens":0,
                     "activeInputTokens":0,"activeCacheReadTokens":0,
                     "contextWindowLimit":200000,"harness":"claude",
-                    "container":{"name":"ctr"}
+                    "runtime":{"name":"ctr"}
                 }]
             """.trimIndent()))
         val h = handlers()

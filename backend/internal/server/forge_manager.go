@@ -9,12 +9,13 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/maruel/roundtrippers"
+
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
-	"github.com/maruel/roundtrippers"
 )
 
 // forgeManager resolves forge clients for repos, manages per-user rate-limit

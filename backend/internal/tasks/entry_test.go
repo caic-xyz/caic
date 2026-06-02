@@ -5,9 +5,10 @@ package tasks
 import (
 	"testing"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/maruel/ksid"
 )
 
 func TestNewEntry(t *testing.T) {

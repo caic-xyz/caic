@@ -72,7 +72,7 @@ func Task(ctx context.Context, e *tasks.Entry, r TaskResolvers) v1.Task {
 		InitialPrompt: t.InitialPrompt.Text,
 		Title:         snap.Title,
 		Repos:         taskRepos,
-		Container: v1.Container{
+		Runtime: v1.RuntimeInstance{
 			Name:         snap.Container,
 			Tailscale:    tailscaleURLFromSnapshot(&snap),
 			USB:          snap.USB,

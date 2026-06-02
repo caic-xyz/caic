@@ -8,7 +8,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import com.caic.sdk.v1.Container
+import com.caic.sdk.v1.RuntimeInstance
 import com.caic.sdk.v1.Harness
 import com.caic.sdk.v1.TaskState
 import com.caic.sdk.v1.Task
@@ -28,7 +28,7 @@ class TaskDetailBodyTest {
         id = "t1",
         initialPrompt = prompt,
         title = "Test task",
-        container = Container(name = "c1"),
+        runtime = RuntimeInstance(name = "c1"),
         state = state,
         stateUpdatedAt = Instant.EPOCH,
         costUSD = 0.0,

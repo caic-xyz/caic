@@ -13,6 +13,7 @@ import (
 	"github.com/maruel/genai"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
@@ -193,9 +194,9 @@ func TestBackend(t *testing.T) {
 		ctr := &fakeMDContainer{}
 		fc := &fakeMDClient{container: ctr}
 		b := newTestBackend(fc)
-		repos := []md.Repo{
-			{GitRoot: "/home/user/src/caic", Branch: "caic-7", MountedPath: "/home/user/src/caic"},
-			{GitRoot: "/home/user/src/genai", Branch: "caic-0", MountedPath: "/home/user/src/genai"},
+		repos := []runtime.Repo{
+			{HostPath: "/home/user/src/caic", Branch: "caic-7", MountPath: "/home/user/src/caic"},
+			{HostPath: "/home/user/src/genai", Branch: "caic-0", MountPath: "/home/user/src/genai"},
 		}
 		if _, err := b.Diff(t.Context(), repos, 1, "--numstat"); err != nil {
 			t.Fatalf("Diff: %v", err)
@@ -219,22 +220,22 @@ func TestBackend(t *testing.T) {
 			if _, err := b.Launch(t.Context(), nil, nil, &task.StartOptions{Harness: agent.Claude}); err != nil {
 				t.Fatalf("Launch: %v", err)
 			}
-			fqdn, _, err := b.Connect(t.Context(), "ctr-x", nil, &task.StartOptions{Harness: agent.Claude})
+			conn, err := b.Connect(t.Context(), "ctr-x", nil, &task.StartOptions{Harness: agent.Claude})
 			if err != nil {
 				t.Fatalf("Connect: %v", err)
 			}
-			if fqdn != "host.ts.net" {
-				t.Errorf("fqdn = %q, want host.ts.net", fqdn)
+			if conn.TailscaleFQDN != "host.ts.net" {
+				t.Errorf("fqdn = %q, want host.ts.net", conn.TailscaleFQDN)
 			}
 			// Pending entry must be consumed: a second Connect fails.
-			if _, _, err := b.Connect(t.Context(), "ctr-x", nil, &task.StartOptions{Harness: agent.Claude}); err == nil {
+			if _, err := b.Connect(t.Context(), "ctr-x", nil, &task.StartOptions{Harness: agent.Claude}); err == nil {
 				t.Error("second Connect should fail; pending entry not consumed")
 			}
 		})
 		t.Run("error no pending", func(t *testing.T) {
 			t.Parallel()
 			b := newTestBackend(&fakeMDClient{})
-			if _, _, err := b.Connect(t.Context(), "missing", nil, &task.StartOptions{Harness: agent.Claude}); err == nil {
+			if _, err := b.Connect(t.Context(), "missing", nil, &task.StartOptions{Harness: agent.Claude}); err == nil {
 				t.Fatal("want error when no pending container")
 			}
 		})
@@ -293,7 +294,7 @@ func TestBackend(t *testing.T) {
 		opts := b.mdStartOpts([]string{"label-a"}, &task.StartOptions{
 			Harness:     agent.Claude,
 			GitHubToken: "tok",
-			Caches:      []md.CacheMount{{Name: "npm", HostPath: "~/.npm", ContainerPath: "/home/user/.npm"}},
+			Caches:      []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", MountPath: "/home/user/.npm"}},
 		})
 		if !slices.Contains(opts.ExtraEnv, "EDITOR=true") {
 			t.Errorf("ExtraEnv missing EDITOR=true: %v", opts.ExtraEnv)

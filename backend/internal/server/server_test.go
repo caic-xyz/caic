@@ -694,7 +694,7 @@ func TestHandleCreateTask(t *testing.T) {
 		for _, cm := range entry.Task().CacheMounts {
 			switch cm.Name {
 			case "custom:/home/user/.custom":
-				gotCustom = cm.HostPath == "/host/custom" && cm.ContainerPath == "/home/user/.custom"
+				gotCustom = cm.HostPath == "/host/custom" && cm.MountPath == "/home/user/.custom"
 			case "npm":
 				gotNPM = true
 			case "go-mod":

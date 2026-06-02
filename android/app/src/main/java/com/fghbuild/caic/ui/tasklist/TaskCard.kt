@@ -133,10 +133,10 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
                             )
                         }
                     }
-                    if (task.container.tailscale != null) TailscaleIconBadge(url = task.container.tailscale)
-                    if (task.container.usb == true) FeatureBadge("USB")
-                    if (task.container.display == true) FeatureIconBadge(com.fghbuild.caic.R.drawable.ic_display, "Display")
-                    if (task.container.sudo == true) FeatureBadge("sudo")
+                    if (task.runtime.tailscale != null) TailscaleIconBadge(url = task.runtime.tailscale)
+                    if (task.runtime.usb == true) FeatureBadge("USB")
+                    if (task.runtime.display == true) FeatureIconBadge(com.fghbuild.caic.R.drawable.ic_display, "Display")
+                    if (task.runtime.sudo == true) FeatureBadge("sudo")
                     if (task.gitHubToken == true) FeatureIconBadge(com.fghbuild.caic.R.drawable.ic_github, "GitHub token")
                 }
             }

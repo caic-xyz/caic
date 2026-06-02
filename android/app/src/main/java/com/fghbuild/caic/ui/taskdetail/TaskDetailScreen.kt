@@ -410,8 +410,8 @@ fun TaskDetailScreen(
                                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
                                     )
                                 }
-                                if (it.container.sudo == true) {
-                                    it.container.sudoPassword?.let { pw ->
+                                if (it.runtime.sudo == true) {
+                                    it.runtime.sudoPassword?.let { pw ->
                                         SudoPasswordBadge(pw)
                                     }
                                 }
@@ -612,10 +612,10 @@ fun TaskDetailScreen(
                         taskHarness = task?.harness?.value ?: "",
                         taskModel = task?.model ?: "",
                         taskEffort = task?.effort ?: "",
-                        taskTailscale = task?.container?.tailscale != null,
-                        taskUsb = task?.container?.usb == true,
-                        taskDisplay = task?.container?.display == true,
-                        taskSudo = task?.container?.sudo == true,
+                        taskTailscale = task?.runtime?.tailscale != null,
+                        taskUsb = task?.runtime?.usb == true,
+                        taskDisplay = task?.runtime?.display == true,
+                        taskSudo = task?.runtime?.sudo == true,
                         taskGitHubToken = task?.gitHubToken == true,
                         harnesses = state.harnesses,
                         allRepos = state.allRepos,

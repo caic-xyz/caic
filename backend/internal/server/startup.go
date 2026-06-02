@@ -272,14 +272,14 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	// single owner of the runner registry. New() registers a no-repo runner; we
 	// overwrite it below so server-owned runners all come from newRunner.
 	s.taskMgr = tasks.New(tasks.Config{
-		ServerCtx:  ctx,
-		LogDir:     logDir,
-		CacheDir:   cfg.CacheDir,
-		Backend:    backend,
-		MDClient:   tasks.NewMDBackend(mdClient),
-		HarnessEnv: cfg.HarnessEnv,
-		Prefs:      prefsStore,
-		Provider:   s.provider,
+		ServerCtx:   ctx,
+		LogDir:      logDir,
+		CacheDir:    cfg.CacheDir,
+		Backend:     backend,
+		RuntimeInfo: container.NewRuntimeInfoBackend(mdClient),
+		HarnessEnv:  cfg.HarnessEnv,
+		Prefs:       prefsStore,
+		Provider:    s.provider,
 	})
 
 	for i := range results {
@@ -347,7 +347,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 				ForgeRepo:  r.ForgeRepo,
 			}
 		}
-		adopted, err := s.taskMgr.AdoptContainers(ctx, adoptRepos, contRes.containers, logRes.logs)
+		adopted, err := s.taskMgr.AdoptContainers(ctx, adoptRepos, container.InstancesFromMD(ctx, contRes.containers), logRes.logs)
 		if err != nil {
 			phase4.End()
 			return nil, fmt.Errorf("adopt containers: %w", err)
