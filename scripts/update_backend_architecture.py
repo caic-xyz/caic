@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DOC_PATH = ROOT / "backend" / "docs" / "ARCHITECTURE.md"
 START_MARKER = "<!-- BEGIN GENERATED PACKAGE DEPENDENCIES -->"
 END_MARKER = "<!-- END GENERATED PACKAGE DEPENDENCIES -->"
+MIN_BACKEND_PACKAGE_COUNT = 30
+MIN_GENERATED_MERMAID_COUNT = 3
 
 
 @dataclass(frozen=True)
@@ -34,11 +36,15 @@ class GroupRule:
 
 
 GROUP_RULES = (
-    GroupRule("Commands", prefixes=("cmd/", "internal/cmd/")),
+    GroupRule("Commands", exact=("cmd/caic",), prefixes=("cmd/", "internal/cmd/")),
     GroupRule("Static Assets", exact=("frontend",)),
     GroupRule("Agent", exact=("internal/agent",), prefixes=("internal/agent/",)),
     GroupRule("Forge", exact=("internal/forge",), prefixes=("internal/forge/",)),
-    GroupRule("Server", exact=("internal/server",), prefixes=("internal/server/",)),
+    GroupRule(
+        "Server",
+        exact=("internal/api", "internal/server"),
+        prefixes=("internal/api/", "internal/server/"),
+    ),
     GroupRule(
         "Task Runtime",
         exact=("internal/container", "internal/task", "internal/tasks"),
@@ -46,6 +52,7 @@ GROUP_RULES = (
     ),
     GroupRule("Support", prefixes=("internal/",)),
 )
+REQUIRED_PACKAGE_PATHS = frozenset(path for rule in GROUP_RULES for path in rule.exact)
 AGENT_GROUP_RULE = next(rule for rule in GROUP_RULES if rule.name == "Agent")
 
 
@@ -71,25 +78,37 @@ def read_json_stream(raw: str) -> list[dict[str, object]]:
 
 
 def backend_packages() -> list[Package]:
-    module_path = run(["go", "list", "-m"]).strip()
-    backend_prefix = f"{module_path}/backend/"
     raw = run(["go", "list", "-json", "./backend/..."])
+    values = read_json_stream(raw)
+    backend_root = ROOT / "backend"
+    paths_by_import = {}
+    for value in values:
+        package_dir = Path(str(value["Dir"])).resolve()
+        try:
+            package_path = package_dir.relative_to(backend_root).as_posix()
+        except ValueError:
+            continue
+        paths_by_import[str(value["ImportPath"])] = package_path
+
     packages = []
-    for value in read_json_stream(raw):
+    for value in values:
         import_path = str(value["ImportPath"])
-        if not import_path.startswith(backend_prefix):
+        package_path = paths_by_import.get(import_path)
+        if package_path is None:
             continue
         imports = tuple(
             sorted(
-                dep.removeprefix(backend_prefix)
-                for dep in value.get("Imports", [])
-                if isinstance(dep, str) and dep.startswith(backend_prefix)
+                {
+                    paths_by_import[dep]
+                    for dep in value.get("Imports", [])
+                    if isinstance(dep, str) and dep in paths_by_import
+                }
             )
         )
         packages.append(
             Package(
                 import_path=import_path,
-                path=import_path.removeprefix(backend_prefix),
+                path=package_path,
                 imports=imports,
             )
         )
@@ -190,6 +209,7 @@ def render_table(packages: list[Package]) -> list[str]:
 
 
 def render_generated_section(packages: list[Package]) -> str:
+    validate_package_inventory(packages)
     packages_by_path = {package.path: package for package in packages}
     all_paths = {package.path for package in packages}
     runtime_spine_paths = dependency_closure(packages_by_path, {"cmd/caic"})
@@ -211,7 +231,24 @@ def render_generated_section(packages: list[Package]) -> str:
     lines.extend(render_graph("Agent Backends", packages, agent_paths))
     lines.extend(render_graph("Complete Package Import Graph", packages, all_paths, grouped=True))
     lines.extend(render_table(packages))
-    return "\n".join(lines).rstrip()
+    content = "\n".join(lines).rstrip()
+    validate_generated_content(content)
+    return content
+
+
+def validate_package_inventory(packages: list[Package]) -> None:
+    paths = {package.path for package in packages}
+    if len(paths) < MIN_BACKEND_PACKAGE_COUNT:
+        raise ValueError(f"go list returned only {len(paths)} backend packages")
+    missing = sorted(REQUIRED_PACKAGE_PATHS - paths)
+    if missing:
+        raise ValueError("go list output is missing required packages: " + ", ".join(missing))
+
+
+def validate_generated_content(content: str) -> None:
+    mermaid_count = content.count("```mermaid")
+    if mermaid_count < MIN_GENERATED_MERMAID_COUNT:
+        raise ValueError(f"generated architecture has only {mermaid_count} Mermaid graphs")
 
 
 def update_markdown(content: str, check: bool) -> int:

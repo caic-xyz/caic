@@ -19,11 +19,12 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	api "github.com/caic-xyz/caic/backend/internal/api"
+	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/api/v1conv"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/server/dto"
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
@@ -43,7 +44,7 @@ func (s *Server) repoList() *[]v1.Repo {
 			repo.CI = v1.CIStatus(cs.Status)
 			repo.CIChecks = make([]v1.ForgeCheck, len(cs.Checks))
 			for j := range cs.Checks {
-				repo.CIChecks[j] = checkToDTO(&cs.Checks[j])
+				repo.CIChecks[j] = v1conv.ForgeCheck(&cs.Checks[j])
 			}
 		}
 		out[i] = repo
@@ -51,7 +52,7 @@ func (s *Server) repoList() *[]v1.Repo {
 	return &out
 }
 
-func (s *Server) listTasks(ctx context.Context, _ *dto.EmptyReq) (*[]v1.Task, error) {
+func (s *Server) listTasks(ctx context.Context, _ *api.EmptyReq) (*[]v1.Task, error) {
 	var ownerID string
 	if s.authEnabled() {
 		if u, ok := auth.UserFromContext(ctx); ok {
@@ -63,7 +64,7 @@ func (s *Server) listTasks(ctx context.Context, _ *dto.EmptyReq) (*[]v1.Task, er
 		if ownerID != "" && e.Task().OwnerID != "" && e.Task().OwnerID != ownerID {
 			return true
 		}
-		out = append(out, s.toJSON(ctx, e))
+		out = append(out, v1conv.Task(ctx, e, s.taskResolvers()))
 		return true
 	})
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -87,9 +88,9 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 
 	id, err := s.taskMgr.Create(ctx, tasks.CreateParams{
 		OwnerID:             ownerID,
-		Prompt:              v1PromptToAgent(req.InitialPrompt),
+		Prompt:              v1conv.PromptToAgent(req.InitialPrompt),
 		Repos:               repos,
-		Harness:             toAgentHarness(req.Harness),
+		Harness:             v1conv.AgentHarness(req.Harness),
 		Model:               req.Model,
 		Effort:              req.Effort,
 		Tailscale:           req.Tailscale,
@@ -108,7 +109,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 
 	entry, ok := s.taskMgr.GetEntry(id)
 	if !ok {
-		return nil, dto.InternalError("created task not found")
+		return nil, api.InternalError("created task not found")
 	}
 
 	go s.maybeFakeCI(entry.Task())
@@ -129,7 +130,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 				delete(p.Models, string(req.Harness))
 			}
 		}); err != nil {
-			return nil, dto.InternalError("save preferences: " + err.Error())
+			return nil, api.InternalError("save preferences: " + err.Error())
 		}
 	}
 
@@ -153,7 +154,7 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, dto.InternalError("streaming not supported"))
+		writeError(w, api.InternalError("streaming not supported"))
 		return
 	}
 
@@ -179,12 +180,12 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	statsHistory, statsLive, statsUnsub := entry.Task().SubscribeStats(r.Context())
 	defer statsUnsub()
 
-	tracker := newToolTimingTracker(entry.Task().Harness)
+	tracker := v1conv.NewToolTimingTracker(entry.Task().Harness, FormatToolOutput)
 	idx := 0
 
 	writeEvents := func(events []v1.EventMessage) {
 		for i := range events {
-			data, err := marshalEvent(&events[i])
+			data, err := v1conv.MarshalEvent(&events[i])
 			if err != nil {
 				slog.Warn("marshal SSE event", "err", err)
 				continue
@@ -196,11 +197,11 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	for _, msg := range filterHistoryForReplay(history) {
-		writeEvents(tracker.convertMessage(msg, now))
+		writeEvents(tracker.ConvertMessage(msg, now))
 	}
 	for i := range statsHistory {
-		ev := statsToEvent(&statsHistory[i])
-		data, err := marshalEvent(&ev)
+		ev := v1conv.StatsEvent(&statsHistory[i])
+		data, err := v1conv.MarshalEvent(&ev)
 		if err == nil {
 			_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
 			idx++
@@ -222,15 +223,15 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 				liveCh = nil
 				continue
 			}
-			writeEvents(tracker.convertMessage(msg, time.Now()))
+			writeEvents(tracker.ConvertMessage(msg, time.Now()))
 			flusher.Flush()
 		case cs, ok := <-statsCh:
 			if !ok {
 				statsCh = nil
 				continue
 			}
-			ev := statsToEvent(&cs)
-			data, err := marshalEvent(&ev)
+			ev := v1conv.StatsEvent(&cs)
+			data, err := v1conv.MarshalEvent(&ev)
 			if err == nil {
 				_, _ = fmt.Fprintf(w, "event: message\ndata: %s\nid: %d\n\n", data, idx)
 				idx++
@@ -247,14 +248,14 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 // "ready" event. No subscriber is registered: terminal tasks produce no live
 // messages.
 func (s *Server) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flusher, entry *tasks.Entry) {
-	tracker := newToolTimingTracker(entry.Task().Harness)
+	tracker := v1conv.NewToolTimingTracker(entry.Task().Harness, FormatToolOutput)
 	now := time.Now()
 	idx := 0
 	bytesSinceFlush := 0
 	emit := func(msg agent.Message) {
-		evs := tracker.convertMessage(msg, now)
+		evs := tracker.ConvertMessage(msg, now)
 		for i := range evs {
-			data, err := marshalEvent(&evs[i])
+			data, err := v1conv.MarshalEvent(&evs[i])
 			if err != nil {
 				slog.Warn("marshal SSE event", "err", err)
 				continue
@@ -292,7 +293,7 @@ func (s *Server) handleTaskToolInput(w http.ResponseWriter, r *http.Request) {
 	}
 	toolUseID := r.PathValue("toolUseID")
 	if toolUseID == "" {
-		writeError(w, dto.BadRequest("toolUseID required"))
+		writeError(w, api.BadRequest("toolUseID required"))
 		return
 	}
 	s.taskMgr.LoadMessagesOnDemand(entry)
@@ -304,7 +305,7 @@ func (s *Server) handleTaskToolInput(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeError(w, dto.NotFound("tool use"))
+	writeError(w, api.NotFound("tool use"))
 }
 
 // sendInput forwards user input to the agent session. On failure, it probes
@@ -315,7 +316,7 @@ func (s *Server) handleTaskToolInput(w http.ResponseWriter, r *http.Request) {
 // SSH round-trip may outlive a cancelled HTTP request, and we want the log line
 // regardless.
 func (s *Server) sendInput(ctx context.Context, entry *tasks.Entry, req *v1.InputReq) (*v1.StatusResp, error) {
-	err := s.taskMgr.SendInput(ctx, entry, v1PromptToAgent(req.Prompt))
+	err := s.taskMgr.SendInput(ctx, entry, v1conv.PromptToAgent(req.Prompt))
 	if err == nil {
 		return &v1.StatusResp{Status: "sent"}, nil
 	}
@@ -353,19 +354,19 @@ func (s *Server) sendInput(ctx context.Context, entry *tasks.Entry, req *v1.Inpu
 		"state", taskState,
 		"relay", rs,
 	)
-	return nil, dto.Conflict(err.Error()).
+	return nil, api.Conflict(err.Error()).
 		WithDetail("state", taskState.String()).
 		WithDetail("relay", string(rs))
 }
 
 func (s *Server) restartTask(ctx context.Context, entry *tasks.Entry, req *v1.RestartReq) (*v1.StatusResp, error) {
-	if err := s.taskMgr.Restart(ctx, entry, v1PromptToAgent(req.Prompt)); err != nil {
+	if err := s.taskMgr.Restart(ctx, entry, v1conv.PromptToAgent(req.Prompt)); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "restarted"}, nil
 }
 
-func (s *Server) clearContext(ctx context.Context, entry *tasks.Entry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
+func (s *Server) clearContext(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.ClearContext(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
@@ -379,21 +380,21 @@ func (s *Server) compactContext(ctx context.Context, entry *tasks.Entry, req *v1
 	return &v1.StatusResp{Status: "compacting"}, nil
 }
 
-func (s *Server) stopTask(ctx context.Context, entry *tasks.Entry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
+func (s *Server) stopTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Stop(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "stopping"}, nil
 }
 
-func (s *Server) purgeTask(ctx context.Context, entry *tasks.Entry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
+func (s *Server) purgeTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Purge(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "purging"}, nil
 }
 
-func (s *Server) reviveTask(ctx context.Context, entry *tasks.Entry, _ *dto.EmptyReq) (*v1.StatusResp, error) {
+func (s *Server) reviveTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Revive(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
@@ -410,7 +411,7 @@ func (s *Server) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.ForkT
 
 	var harness agent.Harness
 	if req.Harness != "" {
-		harness = toAgentHarness(req.Harness)
+		harness = v1conv.AgentHarness(req.Harness)
 	}
 
 	extraRepos := make([]tasks.ForkRepo, len(req.ExtraRepos))
@@ -442,7 +443,7 @@ func (s *Server) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.ForkT
 
 	newID, err := s.taskMgr.Fork(ctx, entry, tasks.ForkParams{
 		OwnerID:             ownerID,
-		Prompt:              v1PromptToAgent(req.Prompt),
+		Prompt:              v1conv.PromptToAgent(req.Prompt),
 		Harness:             harness,
 		Model:               req.Model,
 		Effort:              req.Effort,
@@ -460,7 +461,7 @@ func (s *Server) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.ForkT
 
 	forkEntry, ok := s.taskMgr.GetEntry(newID)
 	if !ok {
-		return nil, dto.InternalError("forked task not found")
+		return nil, api.InternalError("forked task not found")
 	}
 	return &v1.CreateTaskResp{Status: "accepted", ID: forkEntry.Task().ID}, nil
 }
@@ -475,7 +476,12 @@ func (s *Server) syncTask(ctx context.Context, entry *tasks.Entry, req *v1.SyncR
 	if err != nil {
 		return nil, toDTO(err)
 	}
-	resp := &v1.SyncResp{Status: res.Status, Branch: res.Branch, DiffStat: toV1DiffStat(res.DiffStat), SafetyIssues: toV1SafetyIssues(res.SafetyIssues)}
+	resp := &v1.SyncResp{
+		Status:       res.Status,
+		Branch:       res.Branch,
+		DiffStat:     v1conv.DiffStat(res.DiffStat),
+		SafetyIssues: v1conv.SafetyIssues(res.SafetyIssues),
+	}
 
 	// Default-branch sync never starts a PR flow.
 	if req.Target == v1.SyncTargetDefault {
@@ -517,7 +523,7 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 	t := entry.Task()
 	containerName := t.ContainerName()
 	if containerName == "" {
-		writeError(w, dto.Conflict("task has no container"))
+		writeError(w, api.Conflict("task has no container"))
 		return
 	}
 	diffPrimaryName := ""
@@ -526,13 +532,13 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 	}
 	runner, ok := s.taskMgr.Runner(diffPrimaryName)
 	if !ok {
-		writeError(w, dto.InternalError("unknown repo"))
+		writeError(w, api.InternalError("unknown repo"))
 		return
 	}
 	path := r.URL.Query().Get("path")
 	diff, err := runner.DiffContent(r.Context(), t.MDRepos(), path)
 	if err != nil {
-		writeError(w, dto.InternalError(err.Error()))
+		writeError(w, api.InternalError(err.Error()))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -552,7 +558,7 @@ func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 	t := entry.Task()
 	snap := t.Snapshot()
 	if snap.Container == "" || snap.VNCPort == 0 {
-		writeError(w, dto.BadRequest("task has no VNC display"))
+		writeError(w, api.BadRequest("task has no VNC display"))
 		return
 	}
 	slog.Info("vnc proxy start", "task", t.ID, "ctr", snap.Container, "port", snap.VNCPort)
@@ -563,7 +569,7 @@ func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 	vncConn, err := d.DialContext(r.Context(), "tcp", vncAddr)
 	if err != nil {
 		slog.Error("vnc websocket: dial failed", "addr", vncAddr, "err", err)
-		writeError(w, dto.InternalError("cannot reach container VNC"))
+		writeError(w, api.InternalError("cannot reach container VNC"))
 		return
 	}
 	defer func() { _ = vncConn.Close() }()
@@ -638,7 +644,7 @@ func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
 	t := entry.Task()
 	containerName := t.ContainerName()
 	if containerName == "" {
-		writeError(w, dto.Conflict("task has no container"))
+		writeError(w, api.Conflict("task has no container"))
 		return
 	}
 	var procs []task.ProcessInfo
@@ -648,18 +654,11 @@ func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
 		procs, err = s.backend.Processes(r.Context(), containerName)
 	}
 	if err != nil {
-		writeError(w, dto.InternalError(err.Error()))
+		writeError(w, api.InternalError(err.Error()))
 		return
 	}
-	v1Procs := make([]v1.ProcessInfo, len(procs))
-	for i, p := range procs {
-		v1Procs[i] = v1.ProcessInfo{
-			PID: p.PID, PPID: p.PPID, User: p.User, State: p.State,
-			CPU: p.CPU, Mem: p.Mem, Time: p.Time, Command: p.Command,
-		}
-	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(v1.ProcessListResp{Processes: v1Procs}); err != nil {
+	if err := json.NewEncoder(w).Encode(v1.ProcessListResp{Processes: v1conv.ProcessInfos(procs)}); err != nil {
 		slog.WarnContext(r.Context(), "encode process list response", "err", err)
 	}
 }
@@ -670,15 +669,15 @@ func (s *Server) signalProcess(ctx context.Context, entry *tasks.Entry, req *v1.
 	t := entry.Task()
 	containerName := t.ContainerName()
 	if containerName == "" {
-		return nil, dto.Conflict("task has no container")
+		return nil, api.Conflict("task has no container")
 	}
 	if s.fakeSignal != nil {
 		if err := s.fakeSignal(ctx, containerName, req.PID, req.Signal); err != nil {
-			return nil, dto.InternalError(err.Error())
+			return nil, api.InternalError(err.Error())
 		}
 	} else {
 		if err := s.backend.Signal(ctx, containerName, req.PID, req.Signal); err != nil {
-			return nil, dto.InternalError(err.Error())
+			return nil, api.InternalError(err.Error())
 		}
 	}
 	slog.Info("signal sent", "task", t.ID, "container", containerName, "pid", req.PID, "signal", req.Signal)
@@ -708,134 +707,44 @@ func (s *Server) getTask(r *http.Request) (*tasks.Entry, error) {
 	id := r.PathValue("id")
 	entry, ok := s.taskMgr.GetEntry(id)
 	if !ok {
-		return nil, dto.NotFound("task")
+		return nil, api.NotFound("task")
 	}
 	if s.authEnabled() {
 		if u, ok := auth.UserFromContext(r.Context()); ok {
 			if owner := entry.Task().OwnerID; owner != "" && owner != u.ID {
-				return nil, dto.Forbidden("task")
+				return nil, api.Forbidden("task")
 			}
 		}
 	}
 	return entry, nil
 }
 
-func (s *Server) toJSON(ctx context.Context, e *tasks.Entry) v1.Task {
-	// Read all volatile fields in a single locked snapshot to avoid
-	// data races with addMessage/RestoreMessages.
-	snap := e.Task().Snapshot()
-
-	// Build Repos slice for API response.
-	taskRepos := make([]v1.TaskRepo, len(snap.Repos))
-	for i, r := range snap.Repos {
-		taskRepos[i] = v1.TaskRepo{Name: r.Name, BaseBranch: r.BaseBranch, Branch: r.Branch, RemoteURL: s.repoURL(r.Name), Forge: s.repoForge(r.Name)}
-	}
-	if len(taskRepos) == 0 {
-		taskRepos = nil
-	}
-
-	// Derive primary name for context window lookup.
-	var primaryName string
-	if p := e.Task().Primary(); p != nil {
-		primaryName = p.Name
-	}
-
-	// For purged tasks loaded from logs, snap stats may be zero because
-	// messages aren't restored. Fall back to the result trailer.
-	costUSD := snap.CostUSD
-	numTurns := snap.NumTurns
-	duration := snap.Duration
-	cumulativeUsage := snap.Usage
-	if e.Result() != nil {
-		if costUSD == 0 {
-			costUSD = e.Result().CostUSD
-		}
-		if numTurns == 0 {
-			numTurns = e.Result().NumTurns
-		}
-		if duration == 0 {
-			duration = e.Result().Duration
-		}
-		if cumulativeUsage == (agent.Usage{}) {
-			cumulativeUsage = e.Result().Usage
-		}
-	}
-
-	j := v1.Task{
-		ID:            e.Task().ID,
-		InitialPrompt: e.Task().InitialPrompt.Text,
-		Title:         snap.Title,
-		Repos:         taskRepos,
-		Container: v1.Container{
-			Name:         snap.Container,
-			Tailscale:    tailscaleURLFromSnapshot(&snap),
-			USB:          snap.USB,
-			Display:      snap.Display,
-			Sudo:         snap.Sudo,
-			SudoPassword: s.taskMgr.SudoPassword(ctx, e.Task()),
-			VNCPort:      snap.VNCPort,
-		},
-		State:          toV1TaskState(ctx, snap.State),
-		StateUpdatedAt: snap.StateUpdatedAt,
-		Harness:        toV1Harness(e.Task().Harness),
-		Model:          snap.Model,
-		Effort:         e.Task().Effort,
-		AgentVersion:   snap.AgentVersion,
-		SessionID:      snap.SessionID,
-		InPlanMode:     snap.InPlanMode,
-		PlanContent:    snap.PlanContent,
-		GitHubToken:    snap.GitHubToken,
-		CostUSD:        costUSD,
-		NumTurns:       numTurns,
-		Duration:       duration.Seconds(),
-	}
-	j.StartedAt = e.Task().StartedAt
-	j.TurnStartedAt = snap.TurnStartedAt
-	j.CumulativeInputTokens = cumulativeUsage.InputTokens
-	j.CumulativeOutputTokens = cumulativeUsage.OutputTokens
-	j.CumulativeCacheCreationInputTokens = cumulativeUsage.CacheCreationInputTokens
-	j.CumulativeCacheReadInputTokens = cumulativeUsage.CacheReadInputTokens
-	// Active tokens = last API call's context window fill (not the per-query sum).
-	j.ActiveInputTokens = snap.LastAPIUsage.InputTokens + snap.LastAPIUsage.CacheCreationInputTokens
-	j.ActiveCacheReadTokens = snap.LastAPIUsage.CacheReadInputTokens
-	j.CacheTTLSeconds = snap.LastAPIUsage.CacheTTLSeconds
-	j.CacheExpiresAt = snap.CacheExpiresAt
-	if snap.ContextWindowLimit > 0 {
-		j.ContextWindowLimit = snap.ContextWindowLimit
-	} else if primaryName != "" {
-		if r, ok := s.taskMgr.Runner(primaryName); ok {
-			if b := r.Backends[e.Task().Harness]; b != nil {
-				j.ContextWindowLimit = b.ContextWindowLimit(snap.Model)
+func (s *Server) taskResolvers() v1conv.TaskResolvers {
+	return v1conv.TaskResolvers{
+		RepoURL:      s.repoURL,
+		RepoForge:    s.repoForge,
+		SudoPassword: s.taskMgr.SudoPassword,
+		OwnerName: func(ownerID string) string {
+			if s.authStore == nil || ownerID == "" {
+				return ""
 			}
-		}
+			if u, ok := s.authStore.FindByID(ownerID); ok {
+				return u.Username
+			}
+			return ""
+		},
+		ContextWindowLimit: func(repo string, harness agent.Harness, model string) int {
+			r, ok := s.taskMgr.Runner(repo)
+			if !ok {
+				return 0
+			}
+			b := r.Backends[harness]
+			if b == nil {
+				return 0
+			}
+			return b.ContextWindowLimit(model)
+		},
 	}
-	if e.Result() != nil {
-		j.DiffStat = toV1DiffStat(e.Result().DiffStat)
-		j.Result = e.Result().AgentResult
-		if e.Result().Err != nil {
-			j.Error = e.Result().Err.Error()
-		}
-	} else {
-		j.DiffStat = toV1DiffStat(snap.DiffStat)
-	}
-	j.ForgeOwner = snap.ForgeOwner
-	j.ForgeRepo = snap.ForgeRepo
-	j.ForgePR = snap.ForgePR
-	j.ForgePRState = toV1ForgePRState(snap.ForgePRState)
-	j.ForgeIssue = snap.ForgeIssue
-	j.CIStatus = v1.CIStatus(snap.CIStatus)
-	if len(snap.CIChecks) > 0 {
-		j.CIChecks = make([]v1.ForgeCheck, len(snap.CIChecks))
-		for i := range snap.CIChecks {
-			j.CIChecks[i] = checkToDTO(&snap.CIChecks[i])
-		}
-	}
-	if s.authStore != nil && e.Task().OwnerID != "" {
-		if u, ok := s.authStore.FindByID(e.Task().OwnerID); ok {
-			j.Owner = u.Username
-		}
-	}
-	return j
 }
 
 // SetRunnerBackends updates the container backend and agent runner backends

@@ -11,8 +11,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/server/dto"
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
+	api "github.com/caic-xyz/caic/backend/internal/api"
+	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/api/v1conv"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
@@ -25,7 +26,7 @@ import (
 func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, dto.InternalError("streaming not supported"))
+		writeError(w, api.InternalError("streaming not supported"))
 		return
 	}
 
@@ -60,7 +61,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	for {
 		var out []v1.Task
 		s.taskMgr.Range(func(_ string, e *tasks.Entry) bool {
-			out = append(out, s.toJSON(ctx, e))
+			out = append(out, v1conv.Task(ctx, e, s.taskResolvers()))
 			return true
 		})
 		ch := s.taskMgr.Changed()
@@ -174,7 +175,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeError(w, dto.InternalError("streaming not supported"))
+		writeError(w, api.InternalError("streaming not supported"))
 		return
 	}
 
@@ -220,13 +221,13 @@ func (s *Server) handleGetUsage(w http.ResponseWriter, r *http.Request) {
 // buildUsageResp assembles the full usage response: local task cost
 // aggregation plus per-provider quota data from each registered fetcher.
 func (s *Server) buildUsageResp(ctx context.Context) v1.UsageResp {
-	local := computeLocalUsage(s.taskMgr, time.Now())
+	local := v1conv.LocalUsage(s.taskMgr, time.Now())
 
 	resp := v1.UsageResp{Local: local}
 	detached := context.WithoutCancel(ctx)
 	for _, f := range s.usageFetchers {
 		if q := f.Get(detached); q != nil {
-			out := providerQuotaToResp(q)
+			out := v1conv.ProviderQuota(q)
 			out.LogoURL = "/logos/" + out.Provider + ".svg"
 			out.UsageURL = f.UsageURL()
 			resp.Providers = append(resp.Providers, out)

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/server/dto"
+	api "github.com/caic-xyz/caic/backend/internal/api"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
@@ -27,20 +27,20 @@ func TestToDTO(t *testing.T) {
 			name       string
 			kind       tasks.ErrorKind
 			wantStatus int
-			wantCode   dto.ErrorCode
+			wantCode   api.ErrorCode
 		}{
-			{"not_found", tasks.KindNotFound, http.StatusNotFound, dto.CodeNotFound},
-			{"conflict", tasks.KindConflict, http.StatusConflict, dto.CodeConflict},
-			{"bad_request", tasks.KindBadRequest, http.StatusBadRequest, dto.CodeBadRequest},
-			{"internal", tasks.KindInternal, http.StatusInternalServerError, dto.CodeInternalError},
+			{"not_found", tasks.KindNotFound, http.StatusNotFound, api.CodeNotFound},
+			{"conflict", tasks.KindConflict, http.StatusConflict, api.CodeConflict},
+			{"bad_request", tasks.KindBadRequest, http.StatusBadRequest, api.CodeBadRequest},
+			{"internal", tasks.KindInternal, http.StatusInternalServerError, api.CodeInternalError},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				got := toDTO(&tasks.Error{Kind: tc.kind, Msg: "boom"})
-				var ews dto.ErrorWithStatus
+				var ews api.ErrorWithStatus
 				if !errors.As(got, &ews) {
-					t.Fatalf("toDTO returned %T, want dto.ErrorWithStatus", got)
+					t.Fatalf("toDTO returned %T, want api.ErrorWithStatus", got)
 				}
 				if ews.StatusCode() != tc.wantStatus {
 					t.Errorf("StatusCode() = %d, want %d", ews.StatusCode(), tc.wantStatus)
@@ -69,21 +69,21 @@ func TestToDTO(t *testing.T) {
 		}
 	})
 
-	t.Run("already_dto", func(t *testing.T) {
+	t.Run("already_api", func(t *testing.T) {
 		t.Parallel()
-		orig := dto.BadRequest("invalid input")
+		orig := api.BadRequest("invalid input")
 		got := toDTO(orig)
 		if !errors.Is(got, orig) {
-			t.Errorf("toDTO should return the dto error unchanged, got %v", got)
+			t.Errorf("toDTO should return the API error unchanged, got %v", got)
 		}
 	})
 
 	t.Run("fallback_plain_error", func(t *testing.T) {
 		t.Parallel()
 		got := toDTO(errors.New("random failure"))
-		var ews dto.ErrorWithStatus
+		var ews api.ErrorWithStatus
 		if !errors.As(got, &ews) {
-			t.Fatalf("toDTO returned %T, want dto.ErrorWithStatus", got)
+			t.Fatalf("toDTO returned %T, want api.ErrorWithStatus", got)
 		}
 		if ews.StatusCode() != http.StatusInternalServerError {
 			t.Errorf("StatusCode() = %d, want 500", ews.StatusCode())

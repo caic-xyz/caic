@@ -1,6 +1,6 @@
 // Structured API error types and constructors shared across all API versions.
 
-package dto
+package api
 
 import (
 	"fmt"
@@ -29,9 +29,9 @@ type ErrorWithStatus interface {
 	Details() map[string]any
 }
 
-// APIError is a concrete error type with status code, error code, optional
+// Error is a concrete error type with status code, error code, optional
 // details, and optional wrapped error.
-type APIError struct {
+type Error struct {
 	statusCode int
 	code       ErrorCode
 	message    string
@@ -39,7 +39,7 @@ type APIError struct {
 	wrappedErr error
 }
 
-func (e *APIError) Error() string {
+func (e *Error) Error() string {
 	if e.wrappedErr != nil {
 		return fmt.Sprintf("%s: %v", e.message, e.wrappedErr)
 	}
@@ -47,27 +47,27 @@ func (e *APIError) Error() string {
 }
 
 // StatusCode returns the HTTP status code.
-func (e *APIError) StatusCode() int {
+func (e *Error) StatusCode() int {
 	return e.statusCode
 }
 
 // Code returns the machine-readable error code.
-func (e *APIError) Code() ErrorCode {
+func (e *Error) Code() ErrorCode {
 	return e.code
 }
 
 // Details returns the optional details map.
-func (e *APIError) Details() map[string]any {
+func (e *Error) Details() map[string]any {
 	return e.details
 }
 
 // Unwrap returns the wrapped error.
-func (e *APIError) Unwrap() error {
+func (e *Error) Unwrap() error {
 	return e.wrappedErr
 }
 
 // WithDetail adds a single key/value to the error details.
-func (e *APIError) WithDetail(key string, value any) *APIError {
+func (e *Error) WithDetail(key string, value any) *Error {
 	if e.details == nil {
 		e.details = make(map[string]any)
 	}
@@ -76,7 +76,7 @@ func (e *APIError) WithDetail(key string, value any) *APIError {
 }
 
 // Wrap wraps an underlying error.
-func (e *APIError) Wrap(err error) *APIError {
+func (e *Error) Wrap(err error) *Error {
 	e.wrappedErr = err
 	return e
 }
@@ -84,28 +84,28 @@ func (e *APIError) Wrap(err error) *APIError {
 // Constructors.
 
 // BadRequest creates a 400 error.
-func BadRequest(msg string) *APIError {
-	return &APIError{statusCode: http.StatusBadRequest, code: CodeBadRequest, message: msg}
+func BadRequest(msg string) *Error {
+	return &Error{statusCode: http.StatusBadRequest, code: CodeBadRequest, message: msg}
 }
 
 // NotFound creates a 404 error.
-func NotFound(resource string) *APIError {
-	return &APIError{statusCode: http.StatusNotFound, code: CodeNotFound, message: resource + " not found"}
+func NotFound(resource string) *Error {
+	return &Error{statusCode: http.StatusNotFound, code: CodeNotFound, message: resource + " not found"}
 }
 
 // Forbidden creates a 403 error.
-func Forbidden(resource string) *APIError {
-	return &APIError{statusCode: http.StatusForbidden, code: CodeForbidden, message: resource + " access denied"}
+func Forbidden(resource string) *Error {
+	return &Error{statusCode: http.StatusForbidden, code: CodeForbidden, message: resource + " access denied"}
 }
 
 // Conflict creates a 409 error.
-func Conflict(msg string) *APIError {
-	return &APIError{statusCode: http.StatusConflict, code: CodeConflict, message: msg}
+func Conflict(msg string) *Error {
+	return &Error{statusCode: http.StatusConflict, code: CodeConflict, message: msg}
 }
 
 // InternalError creates a 500 error.
-func InternalError(msg string) *APIError {
-	return &APIError{statusCode: http.StatusInternalServerError, code: CodeInternalError, message: msg}
+func InternalError(msg string) *Error {
+	return &Error{statusCode: http.StatusInternalServerError, code: CodeInternalError, message: msg}
 }
 
 // ErrorResponse is the JSON envelope for error responses.

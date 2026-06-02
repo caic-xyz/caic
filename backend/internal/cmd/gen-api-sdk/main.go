@@ -18,8 +18,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/caic-xyz/caic/backend/internal/server/dto"
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
+	api "github.com/caic-xyz/caic/backend/internal/api"
+	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
 	"github.com/maruel/ksid"
 )
 
@@ -27,7 +27,7 @@ var pathParamRe = regexp.MustCompile(`\{(\w+)\}`)
 
 // errorCodeDef describes an API error code for docs and generated constants.
 type errorCodeDef struct {
-	code   dto.ErrorCode
+	code   api.ErrorCode
 	status int
 }
 
@@ -99,11 +99,11 @@ func snakeToCamel(s string) string {
 	return strings.ToLower(pascal[:1]) + pascal[1:]
 }
 
-// isSDKPkg reports whether pkgPath is dto or dto/v1 — the two packages
+// isSDKPkg reports whether pkgPath is api or api/v1 — the two packages
 // whose struct types are emitted into the generated SDK.
 func isSDKPkg(pkgPath string) bool {
 	return pkgPath == reflect.TypeFor[v1.StatusResp]().PkgPath() ||
-		pkgPath == reflect.TypeFor[dto.ErrorResponse]().PkgPath()
+		pkgPath == reflect.TypeFor[api.ErrorResponse]().PkgPath()
 }
 
 // loadDocs parses Go source files in the current directory and extracts
@@ -293,7 +293,7 @@ func formatBlockDoc(doc, indent string) string {
 }
 
 // walkSDKTypes traverses struct types reachable from seeds in post-order
-// (leaves first), returning only dto or dto/v1 struct types.
+// (leaves first), returning only api or api/v1 struct types.
 func walkSDKTypes(seeds []reflect.Type) []reflect.Type {
 	seen := map[reflect.Type]struct{}{}
 	var order []reflect.Type
@@ -505,10 +505,10 @@ func writeTSSSEMethod(b *strings.Builder, r *v1.Route, params []string) {
 	b.WriteString("    },\n")
 }
 
-// discoverKotlinStructs walks the dto struct types reachable from route
+// discoverKotlinStructs walks the API struct types reachable from route
 // types and returns them in dependency order (leaves first).
 func (d *docRegistry) discoverKotlinStructs() []sdkType {
-	seeds := append(routeSeedTypes(), reflect.TypeFor[dto.ErrorResponse]())
+	seeds := append(routeSeedTypes(), reflect.TypeFor[api.ErrorResponse]())
 	order := walkSDKTypes(seeds)
 	result := make([]sdkType, len(order))
 	for i, t := range order {
@@ -969,10 +969,10 @@ func buildSwiftPath(path string, queryParams []string) string {
 	return "\"" + b.String() + "\""
 }
 
-// discoverSwiftStructs walks the dto struct types reachable from route types
+// discoverSwiftStructs walks the API struct types reachable from route types
 // and returns them in dependency order, annotated with Swift section comments.
 func (d *docRegistry) discoverSwiftStructs() []sdkType {
-	seeds := append(routeSeedTypes(), reflect.TypeFor[dto.ErrorResponse]())
+	seeds := append(routeSeedTypes(), reflect.TypeFor[api.ErrorResponse]())
 	order := walkSDKTypes(seeds)
 	result := make([]sdkType, len(order))
 	for i, t := range order {
@@ -1198,7 +1198,7 @@ public final class ApiClient {
 // discoverTSStructs walks route types and ErrorResponse, and annotates
 // each struct with its source file for section grouping.
 func (d *docRegistry) discoverTSStructs() []sdkType {
-	seeds := append(routeSeedTypes(), reflect.TypeFor[dto.ErrorResponse]())
+	seeds := append(routeSeedTypes(), reflect.TypeFor[api.ErrorResponse]())
 	order := walkSDKTypes(seeds)
 	result := make([]sdkType, len(order))
 	for i, t := range order {
@@ -2094,7 +2094,7 @@ func (d *docRegistry) generateMarkdownDoc(outDir string) error {
 
 	// Types section.
 	b.WriteString("## Types\n\n")
-	// Discover all dto struct types reachable from Routes in
+	// Discover all API struct types reachable from Routes in
 	// dependency order (leaves first).
 	for _, t := range walkSDKTypes(routeSeedTypes()) {
 		if err := d.writeDocType(&b, t); err != nil {
@@ -2402,9 +2402,9 @@ func main() {
 }
 
 func mainImpl() error {
-	// Output directories relative to go:generate CWD (backend/internal/server/dto/v1/).
+	// Output directories relative to go:generate CWD (backend/internal/api/v1/).
 	const (
-		sdkDir    = "../../../../../sdk"
+		sdkDir    = "../../../../sdk"
 		tsDir     = sdkDir + "/ts/v1"
 		kotlinDir = sdkDir + "/kotlin/src/main/kotlin/com/caic/sdk/v1"
 		swiftDir  = sdkDir + "/swift/Sources/CaicSDK"
@@ -2458,10 +2458,10 @@ func mainImpl() error {
 		},
 		discriminated: []string{"EventMessage", "TaskListEvent"},
 		errorCodes: []errorCodeDef{
-			{dto.CodeBadRequest, 400},
-			{dto.CodeNotFound, 404},
-			{dto.CodeConflict, 409},
-			{dto.CodeInternalError, 500},
+			{api.CodeBadRequest, 400},
+			{api.CodeNotFound, 404},
+			{api.CodeConflict, 409},
+			{api.CodeInternalError, 500},
 		},
 	}
 

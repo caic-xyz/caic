@@ -1,21 +1,21 @@
-// Tests for usage quota conversions from domain types to API DTOs.
+// Tests for conversions between backend domain values and API v1 DTOs.
 
-package server
+package v1conv
 
 import (
 	"reflect"
 	"testing"
 	"time"
 
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
+	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
-func TestProviderQuotaToResp(t *testing.T) {
+func TestProviderQuota(t *testing.T) {
 	t.Parallel()
 
 	resetsAt := time.Date(2026, time.June, 1, 10, 30, 0, 0, time.UTC)
-	got := providerQuotaToResp(&usage.ProviderQuota{
+	got := ProviderQuota(&usage.ProviderQuota{
 		Provider: "anthropic",
 		Label:    "Anthropic",
 		AuthKind: "oauth",
@@ -59,6 +59,6 @@ func TestProviderQuotaToResp(t *testing.T) {
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("providerQuotaToResp() = %#v, want %#v", got, want)
+		t.Fatalf("ProviderQuota() = %#v, want %#v", got, want)
 	}
 }

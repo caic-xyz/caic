@@ -26,7 +26,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -385,23 +384,4 @@ func (s *Server) buildHandler() (http.Handler, error) {
 			"cc", cc,
 		)
 	}), nil
-}
-
-func statsToEvent(cs *task.ContainerStats) v1.EventMessage {
-	return v1.EventMessage{
-		Kind: v1.EventKindStats,
-		Ts:   cs.Ts.UnixMilli(),
-		Stats: &v1.EventStats{
-			Ts:         cs.Ts.UnixMilli(),
-			CPUPerc:    cs.CPUPerc,
-			MemUsed:    cs.MemUsed,
-			MemLimit:   cs.MemLimit,
-			MemPerc:    cs.MemPerc,
-			NetRx:      cs.NetRx,
-			NetTx:      cs.NetTx,
-			BlockRead:  cs.BlockRead,
-			BlockWrite: cs.BlockWrite,
-			DiskUsed:   cs.DiskUsed,
-		},
-	}
 }

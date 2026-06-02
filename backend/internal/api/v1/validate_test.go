@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/server/dto"
+	api "github.com/caic-xyz/caic/backend/internal/api"
 )
 
 func TestValidate(t *testing.T) {
@@ -257,20 +257,20 @@ func TestValidate(t *testing.T) {
 	})
 }
 
-// assertBadRequest checks that err is an *dto.APIError with 400 status and the expected message.
+// assertBadRequest checks that err is an *api.Error with 400 status and the expected message.
 func assertBadRequest(t *testing.T, err error, wantMsg string) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	var apiErr *dto.APIError
+	var apiErr *api.Error
 	if !errors.As(err, &apiErr) {
-		t.Fatalf("expected *dto.APIError, got %T", err)
+		t.Fatalf("expected *api.Error, got %T", err)
 	}
 	if apiErr.StatusCode() != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", apiErr.StatusCode(), http.StatusBadRequest)
 	}
-	if apiErr.Code() != dto.CodeBadRequest {
-		t.Errorf("code = %q, want %q", apiErr.Code(), dto.CodeBadRequest)
+	if apiErr.Code() != api.CodeBadRequest {
+		t.Errorf("code = %q, want %q", apiErr.Code(), api.CodeBadRequest)
 	}
 	if apiErr.Error() != wantMsg {
 		t.Errorf("message = %q, want %q", apiErr.Error(), wantMsg)

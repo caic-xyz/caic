@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/caic-xyz/caic/backend/internal/server/dto"
+	api "github.com/caic-xyz/caic/backend/internal/api"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
@@ -23,7 +23,7 @@ import (
 // tags, validates, calls fn, and writes the JSON response or structured error.
 func handle[In any, PtrIn interface {
 	*In
-	dto.Validatable
+	api.Validatable
 }, Out any](fn func(context.Context, PtrIn) (*Out, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		in := PtrIn(new(In))
@@ -44,7 +44,7 @@ func handle[In any, PtrIn interface {
 // It parses {id}, looks up the task via s.getTask, then proceeds like handle.
 func handleWithTask[In any, PtrIn interface {
 	*In
-	dto.Validatable
+	api.Validatable
 }, Out any](s *Server, fn func(context.Context, *tasks.Entry, PtrIn) (*Out, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		entry, err := s.getTask(r)
@@ -69,9 +69,9 @@ func handleWithTask[In any, PtrIn interface {
 	}
 }
 
-// toDTO maps a tasks.Error to the matching dto API error so the HTTP layer can
+// toDTO maps a tasks.Error to the matching API error so the HTTP layer can
 // emit the correct status code. A nil error returns nil. An error that is
-// already a dto error (ErrorWithStatus) is returned unchanged. Any other error
+// already an API error (ErrorWithStatus) is returned unchanged. Any other error
 // falls back to a 500.
 func toDTO(err error) error {
 	if err == nil {
@@ -84,31 +84,31 @@ func toDTO(err error) error {
 		// the message. Error() == Msg when there is no wrapped error.
 		switch te.Kind {
 		case tasks.KindNotFound:
-			// dto.NotFound appends " not found"; trim it from the manager's
+			// api.NotFound appends " not found"; trim it from the manager's
 			// message (e.g. "task X not found") to avoid a doubled suffix.
-			return dto.NotFound(strings.TrimSuffix(te.Error(), " not found"))
+			return api.NotFound(strings.TrimSuffix(te.Error(), " not found"))
 		case tasks.KindConflict:
-			return dto.Conflict(te.Error())
+			return api.Conflict(te.Error())
 		case tasks.KindBadRequest:
-			return dto.BadRequest(te.Error())
+			return api.BadRequest(te.Error())
 		case tasks.KindInternal:
-			return dto.InternalError(te.Error())
+			return api.InternalError(te.Error())
 		default:
-			return dto.InternalError(te.Error())
+			return api.InternalError(te.Error())
 		}
 	}
-	var ews dto.ErrorWithStatus
+	var ews api.ErrorWithStatus
 	if errors.As(err, &ews) {
 		return err
 	}
-	return dto.InternalError(err.Error())
+	return api.InternalError(err.Error())
 }
 
 // readAndDecodeBody reads the request body and decodes JSON into input. It
 // skips decoding for EmptyReq. Unknown JSON fields are rejected. Returns false
 // if an error was written to the response.
 func readAndDecodeBody[In any](w http.ResponseWriter, r *http.Request, input *In) bool {
-	if _, isEmpty := any(input).(*dto.EmptyReq); isEmpty {
+	if _, isEmpty := any(input).(*api.EmptyReq); isEmpty {
 		return true
 	}
 	body, err := io.ReadAll(r.Body)
@@ -116,7 +116,7 @@ func readAndDecodeBody[In any](w http.ResponseWriter, r *http.Request, input *In
 		err = err2
 	}
 	if err != nil {
-		writeError(w, dto.BadRequest("failed to read request body"))
+		writeError(w, api.BadRequest("failed to read request body"))
 		return false
 	}
 	if len(body) == 0 {
@@ -126,7 +126,7 @@ func readAndDecodeBody[In any](w http.ResponseWriter, r *http.Request, input *In
 	d.DisallowUnknownFields()
 	if err := d.Decode(input); err != nil {
 		slog.Error("failed to decode request body", "err", err)
-		writeError(w, dto.BadRequest("invalid request body"))
+		writeError(w, api.BadRequest("invalid request body"))
 		return false
 	}
 	return true

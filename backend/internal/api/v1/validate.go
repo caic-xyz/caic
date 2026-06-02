@@ -16,13 +16,13 @@ import (
 
 	"github.com/caic-xyz/md"
 
-	"github.com/caic-xyz/caic/backend/internal/server/dto"
+	api "github.com/caic-xyz/caic/backend/internal/api"
 )
 
 // Validate checks that prompt or images are provided.
 func (r *InputReq) Validate() error {
 	if r.Prompt.Text == "" && len(r.Prompt.Images) == 0 {
-		return dto.BadRequest("prompt or images required")
+		return api.BadRequest("prompt or images required")
 	}
 	return validateImages(r.Prompt.Images)
 }
@@ -39,7 +39,7 @@ func (r SyncReq) Validate() error {
 	case "", SyncTargetBranch, SyncTargetDefault:
 		return nil
 	default:
-		return dto.BadRequest("invalid sync target: " + string(r.Target))
+		return api.BadRequest("invalid sync target: " + string(r.Target))
 	}
 }
 
@@ -47,10 +47,10 @@ func (r SyncReq) Validate() error {
 // means no git repository is associated with the task).
 func (r *CreateTaskReq) Validate() error {
 	if r.InitialPrompt.Text == "" && len(r.InitialPrompt.Images) == 0 {
-		return dto.BadRequest("prompt or images required")
+		return api.BadRequest("prompt or images required")
 	}
 	if r.Harness == "" {
-		return dto.BadRequest("harness is required")
+		return api.BadRequest("harness is required")
 	}
 	if err := validateRepoSpecs(r.Repos, "repos"); err != nil {
 		return err
@@ -77,32 +77,32 @@ var pathSegmentRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 // Validate checks that the clone URL is provided and the optional path is safe.
 func (r *CloneRepoReq) Validate() error {
 	if r.URL == "" {
-		return dto.BadRequest("url is required")
+		return api.BadRequest("url is required")
 	}
 	if r.Depth < 0 {
-		return dto.BadRequest("depth must be non-negative")
+		return api.BadRequest("depth must be non-negative")
 	}
 	if r.Path != "" {
 		if filepath.IsAbs(r.Path) {
-			return dto.BadRequest("path must be relative")
+			return api.BadRequest("path must be relative")
 		}
 		cleaned := filepath.Clean(r.Path)
 		if cleaned != r.Path {
-			return dto.BadRequest("path must be clean (use filepath.Clean form)")
+			return api.BadRequest("path must be clean (use filepath.Clean form)")
 		}
 		if strings.Contains(cleaned, "..") {
-			return dto.BadRequest("path must not contain '..' segments")
+			return api.BadRequest("path must not contain '..' segments")
 		}
 		if len(r.Path) > 255 {
-			return dto.BadRequest("path too long (max 255 characters)")
+			return api.BadRequest("path too long (max 255 characters)")
 		}
 		segments := strings.Split(cleaned, string(filepath.Separator))
 		if len(segments) > 3 {
-			return dto.BadRequest("path too deep (max 3 segments)")
+			return api.BadRequest("path too deep (max 3 segments)")
 		}
 		for _, seg := range segments {
 			if !pathSegmentRe.MatchString(seg) {
-				return dto.BadRequest("path segment contains invalid characters: " + seg)
+				return api.BadRequest("path segment contains invalid characters: " + seg)
 			}
 		}
 	}
@@ -112,14 +112,14 @@ func (r *CloneRepoReq) Validate() error {
 // Validate checks that the URL is non-empty and has an http or https scheme.
 func (r *WebFetchReq) Validate() error {
 	if r.URL == "" {
-		return dto.BadRequest("url is required")
+		return api.BadRequest("url is required")
 	}
 	u, err := url.Parse(r.URL)
 	if err != nil {
-		return dto.BadRequest("invalid url")
+		return api.BadRequest("invalid url")
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return dto.BadRequest("url must have http or https scheme")
+		return api.BadRequest("url must have http or https scheme")
 	}
 	return nil
 }
@@ -127,7 +127,7 @@ func (r *WebFetchReq) Validate() error {
 // Validate checks that the repo field is provided.
 func (r *BotFixCIReq) Validate() error {
 	if r.Repo == "" {
-		return dto.BadRequest("repo is required")
+		return api.BadRequest("repo is required")
 	}
 	return nil
 }
@@ -135,7 +135,7 @@ func (r *BotFixCIReq) Validate() error {
 // Validate checks that the taskId field is provided.
 func (r *BotFixPRReq) Validate() error {
 	if r.TaskID == "" {
-		return dto.BadRequest("taskId is required")
+		return api.BadRequest("taskId is required")
 	}
 	return nil
 }
@@ -143,7 +143,7 @@ func (r *BotFixPRReq) Validate() error {
 // Validate checks that a prompt is provided, images are valid, and extra repos have no duplicates.
 func (r *ForkTaskReq) Validate() error {
 	if r.Prompt.Text == "" && len(r.Prompt.Images) == 0 {
-		return dto.BadRequest("prompt or images required")
+		return api.BadRequest("prompt or images required")
 	}
 	if err := validateRepoSpecs(r.ExtraRepos, "extraRepos"); err != nil {
 		return err
@@ -179,11 +179,11 @@ func (r *UpdatePreferencesReq) UnmarshalJSON(data []byte) error {
 // Validate checks that the complete settings object is present and references valid cache names.
 func (r *UpdatePreferencesReq) Validate() error {
 	if !r.settingsSet {
-		return dto.BadRequest("settings is required")
+		return api.BadRequest("settings is required")
 	}
 	for name := range r.Settings.WellKnownCaches {
 		if _, ok := md.WellKnownCaches[name]; !ok {
-			return dto.BadRequest("unknown cache: " + name)
+			return api.BadRequest("unknown cache: " + name)
 		}
 	}
 	return nil
@@ -192,20 +192,20 @@ func (r *UpdatePreferencesReq) Validate() error {
 // Validate checks that the signal is SIGTERM or SIGKILL.
 func (r *SignalProcessReq) Validate() error {
 	if r.PID < 1 {
-		return dto.BadRequest("invalid pid")
+		return api.BadRequest("invalid pid")
 	}
 	switch r.Signal {
 	case "SIGTERM", "SIGKILL":
 		return nil
 	default:
-		return dto.BadRequest("signal must be SIGTERM or SIGKILL")
+		return api.BadRequest("signal must be SIGTERM or SIGKILL")
 	}
 }
 
 // Validate checks that the SDP offer is provided.
 func (r *VoiceRTCOfferReq) Validate() error {
 	if r.SDP == "" {
-		return dto.BadRequest("sdp is required")
+		return api.BadRequest("sdp is required")
 	}
 	return nil
 }
@@ -215,10 +215,10 @@ func validateRepoSpecs(specs []RepoSpec, field string) error {
 	seen := make(map[string]struct{}, len(specs))
 	for _, rs := range specs {
 		if rs.Name == "" {
-			return dto.BadRequest(field + " contains entry with empty name")
+			return api.BadRequest(field + " contains entry with empty name")
 		}
 		if _, dup := seen[rs.Name]; dup {
-			return dto.BadRequest(field + " contains duplicate name: " + rs.Name)
+			return api.BadRequest(field + " contains duplicate name: " + rs.Name)
 		}
 		seen[rs.Name] = struct{}{}
 	}
@@ -231,20 +231,20 @@ func validateImages(images []ImageData) error {
 	var total int
 	for _, img := range images {
 		if img.MediaType == "" {
-			return dto.BadRequest("image mediaType is required")
+			return api.BadRequest("image mediaType is required")
 		}
 		if _, ok := allowedImageTypes[img.MediaType]; !ok {
-			return dto.BadRequest("unsupported image mediaType: " + img.MediaType)
+			return api.BadRequest("unsupported image mediaType: " + img.MediaType)
 		}
 		if img.Data == "" {
-			return dto.BadRequest("image data is required")
+			return api.BadRequest("image data is required")
 		}
 		if base64.StdEncoding.DecodedLen(len(img.Data)) > maxImageBytes {
-			return dto.BadRequest("image data too large")
+			return api.BadRequest("image data too large")
 		}
 		total += base64.StdEncoding.DecodedLen(len(img.Data))
 		if total > maxPromptImageBytes {
-			return dto.BadRequest("image data total too large")
+			return api.BadRequest("image data total too large")
 		}
 	}
 	return nil

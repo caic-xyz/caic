@@ -8,7 +8,7 @@ import (
 
 	"github.com/maruel/ksid"
 
-	"github.com/caic-xyz/caic/backend/internal/server/dto"
+	api "github.com/caic-xyz/caic/backend/internal/api"
 )
 
 //go:generate go run github.com/caic-xyz/caic/backend/internal/cmd/gen-api-sdk
@@ -597,7 +597,7 @@ type UpdateResp struct {
 }
 
 // EmptyReq is used for endpoints that take no request body.
-type EmptyReq = dto.EmptyReq
+type EmptyReq = api.EmptyReq
 
 // ErrorResponse is the JSON envelope for error responses.
-type ErrorResponse = dto.ErrorResponse
+type ErrorResponse = api.ErrorResponse

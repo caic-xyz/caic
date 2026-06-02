@@ -21,12 +21,13 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	api "github.com/caic-xyz/caic/backend/internal/api"
+	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/api/v1conv"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/server/dto"
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
@@ -62,8 +63,8 @@ func (stubBackend) SupportsCompact() bool { return false }
 
 func (stubBackend) ContextWindowLimit(string) int { return 180_000 }
 
-func decodeError(t *testing.T, w *httptest.ResponseRecorder) dto.ErrorDetails {
-	var resp dto.ErrorResponse
+func decodeError(t *testing.T, w *httptest.ResponseRecorder) api.ErrorDetails {
+	var resp api.ErrorResponse
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode error response: %v", err)
 	}
@@ -273,8 +274,8 @@ func TestHandleTaskEvents(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 		}
 		e := decodeError(t, w)
-		if e.Code != dto.CodeNotFound {
-			t.Errorf("code = %q, want %q", e.Code, dto.CodeNotFound)
+		if e.Code != api.CodeNotFound {
+			t.Errorf("code = %q, want %q", e.Code, api.CodeNotFound)
 		}
 	})
 
@@ -289,8 +290,8 @@ func TestHandleTaskEvents(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 		}
 		e := decodeError(t, w)
-		if e.Code != dto.CodeNotFound {
-			t.Errorf("code = %q, want %q", e.Code, dto.CodeNotFound)
+		if e.Code != api.CodeNotFound {
+			t.Errorf("code = %q, want %q", e.Code, api.CodeNotFound)
 		}
 	})
 }
@@ -302,19 +303,19 @@ func TestHandleTaskInput(t *testing.T) {
 		name       string
 		bodyJSON   string
 		wantStatus int
-		wantCode   dto.ErrorCode
+		wantCode   api.ErrorCode
 	}{
 		{
 			name:       "NotRunning",
 			bodyJSON:   `{"prompt":{"text":"hello"}}`,
 			wantStatus: http.StatusConflict,
-			wantCode:   dto.CodeConflict,
+			wantCode:   api.CodeConflict,
 		},
 		{
 			name:       "EmptyPrompt",
 			bodyJSON:   `{"prompt":{"text":""}}`,
 			wantStatus: http.StatusBadRequest,
-			wantCode:   dto.CodeBadRequest,
+			wantCode:   api.CodeBadRequest,
 		},
 	}
 	for _, tt := range tests {
@@ -340,7 +341,7 @@ func TestHandleTaskInput(t *testing.T) {
 }
 
 // testRestart is a helper for TestHandleRestart subtests.
-func testRestart(t *testing.T, state task.State, bodyJSON string, wantStatus int, wantCode dto.ErrorCode) {
+func testRestart(t *testing.T, state task.State, bodyJSON string, wantStatus int, wantCode api.ErrorCode) {
 	s := newTestServer(t)
 	tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
 	tk.SetState(state)
@@ -364,12 +365,12 @@ func TestHandleRestart(t *testing.T) {
 	t.Parallel()
 	t.Run("NotWaiting", func(t *testing.T) {
 		t.Parallel()
-		testRestart(t, task.StateRunning, `{"prompt":{"text":"new plan"}}`, http.StatusConflict, dto.CodeConflict)
+		testRestart(t, task.StateRunning, `{"prompt":{"text":"new plan"}}`, http.StatusConflict, api.CodeConflict)
 	})
 
 	t.Run("EmptyPrompt", func(t *testing.T) {
 		t.Parallel()
-		testRestart(t, task.StateWaiting, `{"prompt":{"text":""}}`, http.StatusBadRequest, dto.CodeBadRequest)
+		testRestart(t, task.StateWaiting, `{"prompt":{"text":""}}`, http.StatusBadRequest, api.CodeBadRequest)
 	})
 }
 
@@ -390,8 +391,8 @@ func TestHandlePurge(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
 		}
 		e := decodeError(t, w)
-		if e.Code != dto.CodeConflict {
-			t.Errorf("code = %q, want %q", e.Code, dto.CodeConflict)
+		if e.Code != api.CodeConflict {
+			t.Errorf("code = %q, want %q", e.Code, api.CodeConflict)
 		}
 	})
 
@@ -493,8 +494,8 @@ func TestHandleCreateTask(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
 		e := decodeError(t, w)
-		if e.Code != dto.CodeBadRequest {
-			t.Errorf("code = %q, want %q", e.Code, dto.CodeBadRequest)
+		if e.Code != api.CodeBadRequest {
+			t.Errorf("code = %q, want %q", e.Code, api.CodeBadRequest)
 		}
 	})
 
@@ -512,8 +513,8 @@ func TestHandleCreateTask(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
 		e := decodeError(t, w)
-		if e.Code != dto.CodeBadRequest {
-			t.Errorf("code = %q, want %q", e.Code, dto.CodeBadRequest)
+		if e.Code != api.CodeBadRequest {
+			t.Errorf("code = %q, want %q", e.Code, api.CodeBadRequest)
 		}
 	})
 
@@ -536,8 +537,8 @@ func TestHandleCreateTask(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
 		e := decodeError(t, w)
-		if e.Code != dto.CodeBadRequest {
-			t.Errorf("code = %q, want %q", e.Code, dto.CodeBadRequest)
+		if e.Code != api.CodeBadRequest {
+			t.Errorf("code = %q, want %q", e.Code, api.CodeBadRequest)
 		}
 		if !strings.Contains(e.Message, "nonexistent") {
 			t.Errorf("message = %q, want it to mention the unknown harness", e.Message)
@@ -567,8 +568,8 @@ func TestHandleCreateTask(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
 		e := decodeError(t, w)
-		if e.Code != dto.CodeBadRequest {
-			t.Errorf("code = %q, want %q", e.Code, dto.CodeBadRequest)
+		if e.Code != api.CodeBadRequest {
+			t.Errorf("code = %q, want %q", e.Code, api.CodeBadRequest)
 		}
 		if !strings.Contains(e.Message, "nonexistent") {
 			t.Errorf("message = %q, want it to mention the invalid model", e.Message)
@@ -774,8 +775,8 @@ func TestHandleCreateTask(t *testing.T) {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
 		e := decodeError(t, w)
-		if e.Code != dto.CodeBadRequest {
-			t.Errorf("code = %q, want %q", e.Code, dto.CodeBadRequest)
+		if e.Code != api.CodeBadRequest {
+			t.Errorf("code = %q, want %q", e.Code, api.CodeBadRequest)
 		}
 	})
 }
@@ -1083,7 +1084,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
 		for _, e := range entries {
-			j := s.toJSON(t.Context(), e)
+			j := v1conv.Task(t.Context(), e, s.taskResolvers())
 			if j.CostUSD != 1.23 {
 				t.Errorf("CostUSD = %f, want 1.23", j.CostUSD)
 			}
@@ -1140,7 +1141,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			t.Fatalf("len(entries) = %d, want 1", len(entries))
 		}
 		for _, e := range entries {
-			j := s.toJSON(t.Context(), e)
+			j := v1conv.Task(t.Context(), e, s.taskResolvers())
 			if j.CostUSD != 0.42 {
 				t.Errorf("CostUSD = %f, want 0.42 (should be backfilled from ResultMessage)", j.CostUSD)
 			}

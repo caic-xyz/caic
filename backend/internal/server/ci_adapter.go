@@ -11,7 +11,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
@@ -155,24 +154,6 @@ func (s *Server) SetRepoCIStatusIfChanged(relPath, sha string, result forgecache
 
 // Prefs returns the user preferences store.
 func (s *Server) Prefs() *preferences.Store { return s.prefs }
-
-// ---- helpers -----------------------------------------------------------------
-
-// checkToDTO converts a forge.Check to a v1.ForgeCheck for API responses.
-func checkToDTO(c *forge.Check) v1.ForgeCheck {
-	return v1.ForgeCheck{
-		Name:        c.Name,
-		Owner:       c.Owner,
-		Repo:        c.Repo,
-		RunID:       c.RunID,
-		JobID:       c.JobID,
-		Status:      v1.CheckStatus(c.Status),
-		Conclusion:  v1.CheckConclusion(c.Conclusion),
-		QueuedAt:    c.QueuedAt,
-		StartedAt:   c.StartedAt,
-		CompletedAt: c.CompletedAt,
-	}
-}
 
 // repoInfoFor returns a copy of the repoInfo for relPath. Callers needing a
 // *repoInfo (e.g. forgeForInfo) should take the address of the returned copy.

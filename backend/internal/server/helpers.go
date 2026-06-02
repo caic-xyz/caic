@@ -14,9 +14,8 @@ import (
 
 	"github.com/caic-xyz/md/gitutil"
 
+	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
-	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // relayStatus describes the state of the in-container relay daemon, probed
@@ -170,21 +169,6 @@ func emitTaskListEvent(w http.ResponseWriter, flusher http.Flusher, ev v1.TaskLi
 	_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", data)
 	flusher.Flush()
 	return nil
-}
-
-// tailscaleURLFromSnapshot returns the Tailscale URL for the task, or "true" if
-// enabled but neither FQDN nor auth URL known, or "" if disabled.
-func tailscaleURLFromSnapshot(s *task.Snapshot) string {
-	if s.TailscaleFQDN != "" {
-		return "https://" + s.TailscaleFQDN
-	}
-	if s.TailscaleAuthURL != "" {
-		return s.TailscaleAuthURL
-	}
-	if s.Tailscale {
-		return "true"
-	}
-	return ""
 }
 
 // roundDuration rounds d to 3 significant digits with minimum 1us precision.

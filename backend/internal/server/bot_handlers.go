@@ -8,14 +8,15 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/maruel/ksid"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	api "github.com/caic-xyz/caic/backend/internal/api"
+	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
-	"github.com/caic-xyz/caic/backend/internal/server/dto"
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
-	"github.com/maruel/ksid"
 )
 
 // handleGetCILog fetches the log for a specific CI job by jobID.
@@ -35,23 +36,23 @@ func (s *Server) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	}
 	info, ok := s.repoInfoFor(ciPrimaryName)
 	if !ok {
-		writeError(w, dto.BadRequest("no repo info found"))
+		writeError(w, api.BadRequest("no repo info found"))
 		return
 	}
 	f := s.forge.forgeForInfo(r.Context(), &info)
 	if f == nil {
-		writeError(w, dto.BadRequest("no forge token configured for this repo"))
+		writeError(w, api.BadRequest("no forge token configured for this repo"))
 		return
 	}
 
 	jobIDStr := r.URL.Query().Get("jobID")
 	if jobIDStr == "" {
-		writeError(w, dto.BadRequest("jobID query parameter is required"))
+		writeError(w, api.BadRequest("jobID query parameter is required"))
 		return
 	}
 	var jobID int64
 	if _, scanErr := fmt.Sscanf(jobIDStr, "%d", &jobID); scanErr != nil || jobID <= 0 {
-		writeError(w, dto.BadRequest("invalid jobID"))
+		writeError(w, api.BadRequest("invalid jobID"))
 		return
 	}
 
@@ -64,7 +65,7 @@ func (s *Server) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if check == nil {
-		writeError(w, dto.NotFound("no CI check with that jobID"))
+		writeError(w, api.NotFound("no CI check with that jobID"))
 		return
 	}
 
@@ -88,17 +89,17 @@ func (s *Server) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 func (s *Server) botFixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateTaskResp, error) {
 	info, ok := s.repoInfoFor(req.Repo)
 	if !ok {
-		return nil, dto.BadRequest("repo not found")
+		return nil, api.BadRequest("repo not found")
 	}
 	f := s.forge.forgeForInfo(ctx, &info)
 	if f == nil {
-		return nil, dto.BadRequest("no forge token configured for this repo")
+		return nil, api.BadRequest("no forge token configured for this repo")
 	}
 
 	state := s.repoReg.ciStatusFor(req.Repo)
 
 	if state.Status != forge.CIStatusFailure {
-		return nil, dto.BadRequest("no CI failure on default branch")
+		return nil, api.BadRequest("no CI failure on default branch")
 	}
 
 	// Convert stored DTO checks back to forge.Check for bot.FailureSummary.
@@ -142,24 +143,24 @@ func (s *Server) botFixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateT
 func (s *Server) botFixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.StatusResp, error) {
 	entry, ok := s.taskMgr.GetEntry(req.TaskID)
 	if !ok {
-		return nil, dto.NotFound("task")
+		return nil, api.NotFound("task")
 	}
 	t := entry.Task()
 	snap := t.Snapshot()
 	if snap.ForgePR == 0 {
-		return nil, dto.BadRequest("task has no associated PR")
+		return nil, api.BadRequest("task has no associated PR")
 	}
 	primary := t.Primary()
 	if primary == nil {
-		return nil, dto.BadRequest("task has no primary repo")
+		return nil, api.BadRequest("task has no primary repo")
 	}
 	info, ok := s.repoInfoFor(primary.Name)
 	if !ok {
-		return nil, dto.BadRequest("repo not found")
+		return nil, api.BadRequest("repo not found")
 	}
 	f := s.forge.forgeForInfo(ctx, &info)
 	if f == nil {
-		return nil, dto.BadRequest("no forge token configured for this repo")
+		return nil, api.BadRequest("no forge token configured for this repo")
 	}
 
 	checks := snap.CIChecks

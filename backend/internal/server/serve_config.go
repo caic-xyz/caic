@@ -24,15 +24,15 @@ import (
 	"github.com/caic-xyz/md/gitutil"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	api "github.com/caic-xyz/caic/backend/internal/api"
+	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/server/dto"
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
-func (s *Server) getConfig(_ context.Context, _ *dto.EmptyReq) (*v1.Config, error) {
+func (s *Server) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Config, error) {
 	displayName, err := os.Hostname()
 	if err != nil {
 		slog.Warn("failed to get hostname", "err", err)
@@ -55,7 +55,7 @@ func (s *Server) getConfig(_ context.Context, _ *dto.EmptyReq) (*v1.Config, erro
 }
 
 // getVersion returns the current server version and checks GitHub for the latest release.
-func (s *Server) getVersion(ctx context.Context, _ *dto.EmptyReq) (*v1.VersionResp, error) {
+func (s *Server) getVersion(ctx context.Context, _ *api.EmptyReq) (*v1.VersionResp, error) {
 	current := autoupdate.Version
 	gh := s.forge.githubClient()
 	resp := &v1.VersionResp{
@@ -75,15 +75,15 @@ func (s *Server) getVersion(ctx context.Context, _ *dto.EmptyReq) (*v1.VersionRe
 }
 
 // triggerUpdate starts a background update check-and-install. Returns immediately.
-func (s *Server) triggerUpdate(ctx context.Context, _ *dto.EmptyReq) (*v1.UpdateResp, error) {
+func (s *Server) triggerUpdate(ctx context.Context, _ *api.EmptyReq) (*v1.UpdateResp, error) {
 	gh := s.forge.githubClient()
 	if gh == nil {
-		return nil, dto.InternalError("GitHub token not configured; cannot check for updates")
+		return nil, api.InternalError("GitHub token not configured; cannot check for updates")
 	}
 	current := autoupdate.Version
 	latest, err := autoupdate.CheckLatest(ctx, gh)
 	if err != nil {
-		return nil, dto.InternalError("check latest version: " + err.Error())
+		return nil, api.InternalError("check latest version: " + err.Error())
 	}
 	if !autoupdate.IsNewer(latest, current) {
 		return &v1.UpdateResp{Status: "already_up_to_date"}, nil
@@ -97,7 +97,7 @@ func (s *Server) triggerUpdate(ctx context.Context, _ *dto.EmptyReq) (*v1.Update
 	return &v1.UpdateResp{Status: "started"}, nil
 }
 
-func (s *Server) getPreferences(ctx context.Context, _ *dto.EmptyReq) (*v1.PreferencesResp, error) {
+func (s *Server) getPreferences(ctx context.Context, _ *api.EmptyReq) (*v1.PreferencesResp, error) {
 	prefs := s.prefs.Get(userIDFromCtx(ctx))
 	recent := prefs.RecentRepos(time.Now())
 	repos := make([]v1.RepoPrefsResp, len(recent))
@@ -150,7 +150,7 @@ func (s *Server) updatePreferences(ctx context.Context, req *v1.UpdatePreference
 			}
 		}
 	}); err != nil {
-		return nil, dto.InternalError("save preferences: " + err.Error())
+		return nil, api.InternalError("save preferences: " + err.Error())
 	}
 	// Return the updated preferences.
 	return s.getPreferences(ctx, nil)
@@ -177,7 +177,7 @@ func cacheMountsFromSettings(settings preferences.Settings) []md.CacheMount {
 	return caches
 }
 
-func (s *Server) listHarnesses(_ context.Context, _ *dto.EmptyReq) (*[]v1.HarnessInfo, error) {
+func (s *Server) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v1.HarnessInfo, error) {
 	// Collect unique harness backends from all runners.
 	seen := make(map[agent.Harness]agent.Backend)
 	s.taskMgr.RangeRunners(func(_ string, r *task.Runner) bool {
@@ -194,7 +194,7 @@ func (s *Server) listHarnesses(_ context.Context, _ *dto.EmptyReq) (*[]v1.Harnes
 	return &out, nil
 }
 
-func (s *Server) listCaches(_ context.Context, _ *dto.EmptyReq) (*v1.WellKnownCachesResp, error) {
+func (s *Server) listCaches(_ context.Context, _ *api.EmptyReq) (*v1.WellKnownCachesResp, error) {
 	harnessMounts := make([]string, 0, len(md.HarnessMounts))
 	for _, hp := range md.HarnessMounts {
 		for _, p := range hp.HomePaths {
@@ -226,19 +226,19 @@ func (s *Server) listCaches(_ context.Context, _ *dto.EmptyReq) (*v1.WellKnownCa
 	}, nil
 }
 
-func (s *Server) listRepos(_ context.Context, _ *dto.EmptyReq) (*[]v1.Repo, error) {
+func (s *Server) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {
 	return s.repoList(), nil
 }
 
 func (s *Server) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
 	repo := r.URL.Query().Get("repo")
 	if repo == "" {
-		writeError(w, dto.BadRequest("repo is required"))
+		writeError(w, api.BadRequest("repo is required"))
 		return
 	}
 	absPath, ok := s.repoAbsPath(repo)
 	if !ok {
-		writeError(w, dto.NotFound("repo not found"))
+		writeError(w, api.NotFound("repo not found"))
 		return
 	}
 	ctx := r.Context()
@@ -285,7 +285,7 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 		base := filepath.Base(req.URL)
 		base = strings.TrimSuffix(base, ".git")
 		if base == "" || base == "." || base == "/" {
-			return nil, dto.BadRequest("cannot derive repo name from URL; specify path explicitly")
+			return nil, api.BadRequest("cannot derive repo name from URL; specify path explicitly")
 		}
 		targetPath = base
 	}
@@ -293,19 +293,19 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 	absTarget := filepath.Join(s.absRoot, targetPath)
 	// Defense-in-depth: ensure the resolved path is under absRoot.
 	if rel, err := filepath.Rel(s.absRoot, absTarget); err != nil || strings.HasPrefix(rel, "..") {
-		return nil, dto.BadRequest("path escapes root directory")
+		return nil, api.BadRequest("path escapes root directory")
 	} else {
 		targetPath = rel
 	}
 
 	// Check if directory already exists.
 	if _, err := os.Stat(absTarget); err == nil {
-		return nil, dto.Conflict("directory already exists: " + targetPath)
+		return nil, api.Conflict("directory already exists: " + targetPath)
 	}
 
 	// Check if path already registered.
 	if _, ok := s.taskMgr.Runner(targetPath); ok {
-		return nil, dto.Conflict("repo already registered: " + targetPath)
+		return nil, api.Conflict("repo already registered: " + targetPath)
 	}
 
 	// Reject when the basename collides with an existing repo from a
@@ -320,7 +320,7 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 		return true
 	})
 	if basenameConflict != "" {
-		return nil, dto.Conflict("repo basename conflicts with existing: " + basenameConflict)
+		return nil, api.Conflict("repo basename conflicts with existing: " + basenameConflict)
 	}
 
 	// Determine clone depth.
@@ -338,26 +338,26 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 		// Clean up partial clone.
 		_ = os.RemoveAll(absTarget)
 		slog.Warn("git clone failed", "url", req.URL, "err", err, "out", string(out))
-		return nil, dto.InternalError("git clone failed: " + err.Error())
+		return nil, api.InternalError("git clone failed: " + err.Error())
 	}
 
 	// Discover repo info.
 	remoteName, err := gitutil.DefaultRemote(ctx, absTarget)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
-		return nil, dto.InternalError("cannot determine default remote: " + err.Error())
+		return nil, api.InternalError("cannot determine default remote: " + err.Error())
 	}
 	branch, err := gitutil.DefaultBranch(ctx, absTarget, remoteName)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
-		return nil, dto.InternalError("cannot determine default branch: " + err.Error())
+		return nil, api.InternalError("cannot determine default branch: " + err.Error())
 	}
 	remote := gitutil.RemoteOriginURL(ctx, absTarget)
 	info := repoInfo{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
 	runner, err := s.newRunner(ctx, &info)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
-		return nil, dto.InternalError("failed to init runner: " + err.Error())
+		return nil, api.InternalError("failed to init runner: " + err.Error())
 	}
 	if rawURL, err := forge.RemoteURL(ctx, absTarget); err == nil {
 		info.ForgeKind, info.ForgeOwner, info.ForgeRepo, _ = forge.ParseRemoteURL(rawURL)
@@ -379,10 +379,10 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 //
 // TODO(security): Switch back to ephemeral tokens once v1beta supports
 // auth_tokens or v1alpha quality improves. See getVoiceTokenEphemeral.
-func (s *Server) getVoiceToken(_ context.Context, _ *dto.EmptyReq) (*v1.VoiceTokenResp, error) {
+func (s *Server) getVoiceToken(_ context.Context, _ *api.EmptyReq) (*v1.VoiceTokenResp, error) {
 	apiKey := s.geminiAPIKey
 	if apiKey == "" {
-		return nil, dto.InternalError("GEMINI_API_KEY not configured")
+		return nil, api.InternalError("GEMINI_API_KEY not configured")
 	}
 	slog.Info("voice token", "keylen", len(apiKey), "mode", "raw_key")
 	expireTime := time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339)
@@ -402,10 +402,10 @@ func (s *Server) getVoiceToken(_ context.Context, _ *dto.EmptyReq) (*v1.VoiceTok
 // stabilises v1beta ephemeral tokens.
 //
 // See https://ai.google.dev/gemini-api/docs/ephemeral-tokens
-func (s *Server) getVoiceTokenEphemeral(ctx context.Context, _ *dto.EmptyReq) (*v1.VoiceTokenResp, error) { //nolint:unused // kept for future use
+func (s *Server) getVoiceTokenEphemeral(ctx context.Context, _ *api.EmptyReq) (*v1.VoiceTokenResp, error) { //nolint:unused // kept for future use
 	apiKey := s.geminiAPIKey
 	if apiKey == "" {
-		return nil, dto.InternalError("GEMINI_API_KEY not configured")
+		return nil, api.InternalError("GEMINI_API_KEY not configured")
 	}
 	slog.Info("voice token", "keylen", len(apiKey), "mode", "ephemeral")
 	now := time.Now().UTC()
@@ -419,32 +419,32 @@ func (s *Server) getVoiceTokenEphemeral(ctx context.Context, _ *dto.EmptyReq) (*
 	}
 	bodyBytes, err := json.Marshal(&reqBody)
 	if err != nil {
-		return nil, dto.InternalError("failed to marshal token request").Wrap(err)
+		return nil, api.InternalError("failed to marshal token request").Wrap(err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		"https://generativelanguage.googleapis.com/v1alpha/auth_tokens",
 		bytes.NewReader(bodyBytes))
 	if err != nil {
-		return nil, dto.InternalError("failed to create token request").Wrap(err)
+		return nil, api.InternalError("failed to create token request").Wrap(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Goog-Api-Key", apiKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, dto.InternalError("failed to fetch ephemeral token").Wrap(err)
+		return nil, api.InternalError("failed to fetch ephemeral token").Wrap(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, dto.InternalError(fmt.Sprintf("Gemini auth_tokens returned %d: %s", resp.StatusCode, string(body)))
+		return nil, api.InternalError(fmt.Sprintf("Gemini auth_tokens returned %d: %s", resp.StatusCode, string(body)))
 	}
 
 	var tokenResp AuthToken
 	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return nil, dto.InternalError("failed to decode token response").Wrap(err)
+		return nil, api.InternalError("failed to decode token response").Wrap(err)
 	}
 
 	tokenPrefix := tokenResp.Name

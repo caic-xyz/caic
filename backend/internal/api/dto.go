@@ -1,7 +1,7 @@
-// Package dto provides shared API infrastructure (errors, validation interface)
+// Package api provides shared API infrastructure (errors, validation interface)
 // used across all API versions. Version-specific types live in sub-packages
-// (e.g. dto/v1).
-package dto
+// (e.g. api/v1).
+package api
 
 // Validatable is implemented by request types that can validate their fields.
 type Validatable interface {

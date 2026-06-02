@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
+	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 )

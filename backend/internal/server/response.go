@@ -8,18 +8,18 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/caic-xyz/caic/backend/internal/server/dto"
+	api "github.com/caic-xyz/caic/backend/internal/api"
 )
 
 // writeError writes a structured JSON error response. If err implements
-// dto.ErrorWithStatus, the HTTP status, error code and details are taken from
+// api.ErrorWithStatus, the HTTP status, error code and details are taken from
 // it; otherwise 500 is used.
 func writeError(w http.ResponseWriter, err error) {
 	statusCode := http.StatusInternalServerError
-	code := dto.CodeInternalError
+	code := api.CodeInternalError
 	var details map[string]any
 
-	var ews dto.ErrorWithStatus
+	var ews api.ErrorWithStatus
 	if errors.As(err, &ews) {
 		statusCode = ews.StatusCode()
 		code = ews.Code()
@@ -29,8 +29,8 @@ func writeError(w http.ResponseWriter, err error) {
 	slog.Error("handler error", "err", err, "statusCode", statusCode, "code", code)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	resp := dto.ErrorResponse{
-		Error:   dto.ErrorDetails{Code: code, Message: err.Error()},
+	resp := api.ErrorResponse{
+		Error:   api.ErrorDetails{Code: code, Message: err.Error()},
 		Details: details,
 	}
 	if encErr := json.NewEncoder(w).Encode(resp); encErr != nil {
