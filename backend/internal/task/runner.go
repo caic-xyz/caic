@@ -1460,11 +1460,11 @@ func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, instance s
 // startMessageDispatch starts a goroutine that reads from msgCh and dispatches
 // to t.addMessage. For ResultMessages, it fetches from the instance first and
 // attaches the diff stat. For tool results following a mutating tool (Edit,
-// Bash, Write, NotebookEdit), it also fetches and emits a DiffStatMessage.
-// When skipSideEffects is true, fetch+diff and title generation are suppressed
-// (used during adoption where these are handled once at the end).
-// Returns the message channel and a done channel that closes when the
-// goroutine exits (after msgCh is fully drained).
+// Bash, Write, NotebookEdit), it emits a DiffStatMessage without fetching from
+// the instance. When skipSideEffects is true, fetch+diff and title generation
+// are suppressed (used during adoption where these are handled once at the end).
+// Returns the message channel and a done channel that closes when the goroutine
+// exits (after msgCh is fully drained).
 func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffects bool) (msgCh chan agent.Message, dispatchDone <-chan struct{}) {
 	// Capture all repos outside the goroutine to avoid races.
 	allRepos := t.RuntimeRepos()
@@ -1477,17 +1477,16 @@ func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffe
 		// Track tool_use IDs from ToolUseMessage that may mutate files.
 		pendingMutating := make(map[string]struct{})
 		for m := range msgCh {
+			emitToolDiff := false
 			switch msg := m.(type) {
 			case *agent.ToolUseMessage:
 				if _, ok := mutatingTools[msg.Name]; ok {
 					pendingMutating[msg.ToolUseID] = struct{}{}
 				}
 			case *agent.ToolResultMessage:
-				if !skipSideEffects && r.Runtime != nil && r.Dir != "" {
-					if _, ok := pendingMutating[msg.ToolUseID]; ok {
-						delete(pendingMutating, msg.ToolUseID)
-						r.fetchDiffStatBranch(ctx, t, instanceID, allRepos)
-					}
+				if _, ok := pendingMutating[msg.ToolUseID]; ok {
+					delete(pendingMutating, msg.ToolUseID)
+					emitToolDiff = !skipSideEffects && r.Runtime != nil && r.Dir != ""
 				}
 			case *agent.ResultMessage:
 				if !skipSideEffects && r.Runtime != nil && r.Dir != "" {
@@ -1502,24 +1501,23 @@ func (r *Runner) startMessageDispatch(ctx context.Context, t *Task, skipSideEffe
 				}
 			}
 			t.addMessage(ctx, m, skipSideEffects)
+			if emitToolDiff {
+				r.emitDiffStatBranch(ctx, t, instanceID, allRepos)
+			}
 		}
 	}()
 	return msgCh, dispatchDone
 }
 
-// fetchDiffStatBranch fetches from the instance and emits a DiffStatMessage
-// into the task's message stream. Used after mutating tool results to keep the
-// live diff stat up to date across all repos.
-func (r *Runner) fetchDiffStatBranch(ctx context.Context, t *Task, id runtime.InstanceID, repos []runtime.Repo) {
-	fetchCtx, fetchCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
-	defer fetchCancel()
+// emitDiffStatBranch emits a DiffStatMessage from the current instance diff
+// without fetching from the instance. This keeps live UI diff stats fresh during
+// a running turn without triggering md fetch side effects.
+func (r *Runner) emitDiffStatBranch(ctx context.Context, t *Task, id runtime.InstanceID, repos []runtime.Repo) {
+	diffCtx, diffCancel := context.WithTimeout(context.WithoutCancel(ctx), r.GitTimeout)
+	defer diffCancel()
 	r.branchMu.Lock()
-	defer r.branchMu.Unlock()
-	if err := r.Runtime.Fetch(fetchCtx, id); err != nil {
-		r.log.Warn("fetch on tool result failed", "err", err)
-		return
-	}
-	ds := r.diffStat(fetchCtx, id, repos)
+	ds := r.diffStat(diffCtx, id, repos)
+	r.branchMu.Unlock()
 	if len(ds) == 0 {
 		return
 	}

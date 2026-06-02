@@ -1538,9 +1538,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 			}
 			tlog.Debug("auto-reconnect succeeded")
 			t.SetVNCPort(runner.Runtime.VNCPort(m.serverCtx, t.RuntimeInstanceID()))
-			if ds := runner.BranchDiffStat(m.serverCtx, t); len(ds) > 0 {
-				t.SetLiveDiffStat(ds)
-			}
+			refreshAdoptedDiffStat(m.serverCtx, runner, t)
 			m.NotifyTaskChange()
 			m.watchSession(entry, runner, h)
 		}()
@@ -1565,6 +1563,17 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		Branch:         branch,
 		FoundPRFromLog: foundPRFromLog,
 	}, nil
+}
+
+func refreshAdoptedDiffStat(ctx context.Context, runner *task.Runner, t *task.Task) {
+	switch t.GetState() {
+	case task.StateWaiting, task.StateAsking, task.StateHasPlan:
+	default:
+		return
+	}
+	if ds := runner.BranchDiffStat(ctx, t); len(ds) > 0 {
+		t.SetLiveDiffStat(ds)
+	}
 }
 
 // setParser sets the parse function on a LoadedTask from the first runner

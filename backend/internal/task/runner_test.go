@@ -746,7 +746,7 @@ func TestRunner(t *testing.T) {
 			}
 		})
 
-		t.Run("MutatingToolEmitsDiffStat", func(t *testing.T) {
+		t.Run("MutatingToolEmitsDiffStatWithoutFetch", func(t *testing.T) {
 			t.Parallel()
 			for _, tool := range []string{"Edit", "Bash", "Write", "NotebookEdit"} {
 				t.Run(tool, func(t *testing.T) {
@@ -777,22 +777,20 @@ func TestRunner(t *testing.T) {
 						ToolUseID: toolID,
 					}
 
-					// Expect two messages: the ToolResultMessage and a DiffStatMessage.
-					var gotDiffStat bool
-					for range 2 {
-						msg := recvMsg(t, ch)
-						if ds, ok := msg.(*agent.DiffStatMessage); ok {
-							gotDiffStat = true
-							if len(ds.DiffStat) != 1 || ds.DiffStat[0].Path != "main.go" {
-								t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", ds.DiffStat)
-							}
-						}
+					msg := recvMsg(t, ch)
+					if _, ok := msg.(*agent.ToolResultMessage); !ok {
+						t.Fatalf("expected *agent.ToolResultMessage, got %T", msg)
 					}
-					if !gotDiffStat {
-						t.Error("no DiffStatMessage emitted after mutating tool result")
+					msg = recvMsg(t, ch)
+					ds, ok := msg.(*agent.DiffStatMessage)
+					if !ok {
+						t.Fatalf("expected *agent.DiffStatMessage, got %T", msg)
 					}
-					if !stub.fetched {
-						t.Error("Fetch was not called on mutating tool result")
+					if len(ds.DiffStat) != 1 || ds.DiffStat[0].Path != "main.go" {
+						t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", ds.DiffStat)
+					}
+					if stub.fetched {
+						t.Error("Fetch was called for mutating tool result")
 					}
 					close(msgCh)
 				})

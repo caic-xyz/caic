@@ -2299,6 +2299,59 @@ func TestNeedsTitleRegen(t *testing.T) {
 	})
 }
 
+func TestRefreshAdoptedDiffStat(t *testing.T) {
+	t.Parallel()
+	t.Run("valid_waiting_fetches_branch_diff", func(t *testing.T) {
+		t.Parallel()
+		fake := &tasktest.FakeRuntimeBackend{
+			DiffFunc: func(context.Context, runtime.InstanceID, int, ...string) (string, error) {
+				return "5\t1\tmain.go\n", nil
+			},
+		}
+		runner := &task.Runner{Runtime: fake, Dir: "/repo"}
+		tk := &task.Task{Repos: []task.RepoMount{{GitRoot: "/repo", Branch: "caic-0"}}}
+		tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+		tk.SetState(task.StateWaiting)
+
+		refreshAdoptedDiffStat(t.Context(), runner, tk)
+
+		if got := fake.Count("Fetch"); got != 1 {
+			t.Errorf("Fetch count = %d, want 1", got)
+		}
+		if got := fake.Count("Diff"); got != 1 {
+			t.Errorf("Diff count = %d, want 1", got)
+		}
+		ds := tk.Snapshot().DiffStat
+		if len(ds) != 1 || ds[0].Path != "main.go" || ds[0].Added != 5 || ds[0].Deleted != 1 {
+			t.Errorf("DiffStat = %+v, want [{main.go 5 1}]", ds)
+		}
+	})
+	t.Run("valid_running_skips_branch_diff", func(t *testing.T) {
+		t.Parallel()
+		fake := &tasktest.FakeRuntimeBackend{
+			DiffFunc: func(context.Context, runtime.InstanceID, int, ...string) (string, error) {
+				return "5\t1\tmain.go\n", nil
+			},
+		}
+		runner := &task.Runner{Runtime: fake, Dir: "/repo"}
+		tk := &task.Task{Repos: []task.RepoMount{{GitRoot: "/repo", Branch: "caic-0"}}}
+		tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+		tk.SetState(task.StateRunning)
+
+		refreshAdoptedDiffStat(t.Context(), runner, tk)
+
+		if got := fake.Count("Fetch"); got != 0 {
+			t.Errorf("Fetch count = %d, want 0", got)
+		}
+		if got := fake.Count("Diff"); got != 0 {
+			t.Errorf("Diff count = %d, want 0", got)
+		}
+		if ds := tk.Snapshot().DiffStat; len(ds) != 0 {
+			t.Errorf("DiffStat = %+v, want empty", ds)
+		}
+	})
+}
+
 func TestErrTaskNotFound(t *testing.T) {
 	t.Parallel()
 	t.Run("valid", func(t *testing.T) {
