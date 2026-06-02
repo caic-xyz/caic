@@ -80,9 +80,12 @@ type DirsConfig struct {
 
 // RuntimeConfig selects and configures task runtime provisioning.
 type RuntimeConfig struct {
-	Name            string // container runtime: "docker" or "podman" (default: "docker")
-	TailscaleAPIKey string // required for Tailscale networking inside runtime instances
-
+	Name            string                // container runtime: "docker" or "podman" (default: "docker")
+	TailscaleAPIKey string                // required for Tailscale networking inside runtime instances
+	Backend         runtime.Backend       // optional runtime lifecycle override for smoke/e2e tests
+	Monitor         runtime.Monitor       // optional runtime stats/events override for smoke/e2e tests
+	Inventory       runtime.Inventory     // optional runtime inventory override for smoke/e2e tests
+	Privilege       runtime.PrivilegeInfo // optional privileged runtime info override for smoke/e2e tests
 	// SkipWarmup skips base-image warmup at startup. Used by e2e fake mode to
 	// avoid pulling Docker images that aren't needed for testing.
 	SkipWarmup bool

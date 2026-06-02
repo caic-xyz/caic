@@ -66,6 +66,24 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	}
 	mdClient.DigestCacheTTL = warmupInterval
 	runtimeInfo := mdruntime.NewRuntimeInfoBackend(mdClient)
+	backend := mdruntime.NewBackend(mdClient)
+	backend.HarnessEnv = cfg.Agent.HarnessEnv
+	runtimeBackend := runtime.Backend(backend)
+	if cfg.Runtime.Backend != nil {
+		runtimeBackend = cfg.Runtime.Backend
+	}
+	runtimeMonitor := runtime.Monitor(runtimeInfo)
+	if cfg.Runtime.Monitor != nil {
+		runtimeMonitor = cfg.Runtime.Monitor
+	}
+	runtimeInventory := runtime.Inventory(runtimeInfo)
+	if cfg.Runtime.Inventory != nil {
+		runtimeInventory = cfg.Runtime.Inventory
+	}
+	runtimePrivilege := runtime.PrivilegeInfo(runtimeInfo)
+	if cfg.Runtime.Privilege != nil {
+		runtimePrivilege = cfg.Runtime.Privilege
+	}
 
 	// Phase 1: Parallel I/O — repos discovery, logs loading, and runtime inventory.
 	type reposResult struct {
@@ -97,7 +115,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	}()
 	go func() {
 		defer trace.StartRegion(ctx, "list-runtime-instances").End()
-		instances, err := runtimeInfo.List(ctx)
+		instances, err := runtimeInventory.List(ctx)
 		instanceCh <- instancesResult{instances, err}
 	}()
 
@@ -163,10 +181,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("open preferences: %w", err)
 	}
 
-	backend := mdruntime.NewBackend(mdClient)
-	backend.HarnessEnv = cfg.Agent.HarnessEnv
 	agentBackends := registry.DefaultBackends(cfg.Dirs.CacheDir, cfg.Agent.HarnessEnv)
-
 	cachePath := filepath.Join(cfg.Dirs.CacheDir, "ci_results.json")
 	cache, err := forgecache.Open(cachePath)
 	if err != nil {
@@ -205,7 +220,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		forge:              newForgeManager(cfg.GitHub.Token, cfg.GitLab.Token, nil),
 		ciCache:            cache,
 		backend:            backend,
-		runtimeBackend:     backend,
+		runtimeBackend:     runtimeBackend,
 		agentBackends:      agentBackends,
 		repoReg:            newRepoRegistry(nil),
 	}
@@ -280,10 +295,10 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		ServerCtx:  ctx,
 		LogDir:     logDir,
 		CacheDir:   cfg.Dirs.CacheDir,
-		Backend:    backend,
-		Monitor:    runtimeInfo,
-		Inventory:  runtimeInfo,
-		Privilege:  runtimeInfo,
+		Backend:    runtimeBackend,
+		Monitor:    runtimeMonitor,
+		Inventory:  runtimeInventory,
+		Privilege:  runtimePrivilege,
 		Backends:   agentBackends,
 		HarnessEnv: cfg.Agent.HarnessEnv,
 		Prefs:      prefsStore,
@@ -458,11 +473,7 @@ func (s *Server) newRunner(ctx context.Context, info *repoInfo) (*task.Runner, e
 		CacheDir:   s.cacheDir,
 		Backends:   s.agentBackends,
 		HarnessEnv: s.backend.HarnessEnv,
-	}
-	if s.runtimeBackend != nil {
-		runner.Container = s.runtimeBackend
-	} else {
-		runner.Container = s.backend
+		Container:  s.runtimeBackend,
 	}
 	if info != nil {
 		runner.BaseBranch = info.BaseBranch

@@ -61,6 +61,18 @@ then start it with `make android-start-emulator`, then run `make android-e2e`.
 The test script dynamically allocates a port for the fake backend and verifies it
 before running instrumented tests.
 
+### Fake E2E vs Runtime Smoke
+
+The fake server is the e2e backend. It replaces containers, runtime inventory,
+runtime events, CI, usage providers, VNC, and agent processes with deterministic
+fakes. Use it for UI/API/task-lifecycle coverage that must not depend on Docker,
+Podman, md, SSH, external LLMs, or network credentials.
+
+A smoke test for the real runtime must not use the fake server or the
+`smoketest` runtime backend. It should intentionally exercise the md/container
+runtime path and be isolated behind its own target, build tag, or environment
+guard because it is host-dependent.
+
 ### Make Targets
 
 ```
@@ -69,6 +81,7 @@ make dev            # Build and run server on :2242
 make frontend-dev   # Run Vite frontend dev server on :5173
 make types          # Generate types (go generate → gen-api-sdk)
 make test           # Go unit tests with coverage
+make smoke          # Run real runtime smoke test
 make frontend-e2e   # Playwright end-to-end tests (also type-checks e2e/ TypeScript)
 make android-e2e    # Run Android instrumented tests and generate screenshots
 make lint           # Run linters (Go + frontend + Python + binaries + file index check)

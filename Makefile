@@ -14,7 +14,7 @@ help:
 	@echo "  make fake-dev               - Run the server with fake backend (no containers)"
 	@echo "  make frontend-build         - Build frontend assets (TypeScript → JavaScript)"
 	@echo "  make test                   - Run unit tests"
-	@echo "  make smoke                  - Run smoke test (end-to-end server lifecycle)"
+	@echo "  make smoke                  - Run real runtime smoke test"
 	@echo "  make lint                   - Run linters (Go + frontend + Python + binaries + file index check)"
 	@echo "  make lint-fix               - Fix linting issues automatically (includes updating file indexes)"
 	@echo "  make git-hooks              - Install git pre-commit hooks"
@@ -56,7 +56,7 @@ test: $(FRONTEND_STAMP)
 	@find . -name 'test_*.py' -exec python3 {} \;
 
 smoke:
-	@go test -tags="smoke e2e" -run TestSmoke -v -timeout 5m ./backend/cmd/caic/
+	@go test -tags="smoke" -run TestSmoke -v -timeout 15m ./backend/cmd/caic/
 
 coverage: $(FRONTEND_STAMP)
 	@go test -coverprofile=coverage.out ./...

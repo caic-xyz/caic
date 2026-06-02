@@ -1,4 +1,4 @@
-// End-to-end smoke test for the caic server with fake backends.
+// Runtime smoke test for the caic server with a real md container.
 
 // Copyright 2026 Marc-Antoine Ruel. All Rights Reserved. Use of this
 // source code is governed by the Apache v2 license that can be found in the
@@ -28,11 +28,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
 )
 
-// TestSmoke verifies end-to-end: start the server with fake backends, query
-// API endpoints, create a task, and exercise the full task lifecycle.
+// TestSmoke verifies the real runtime path: start the server, launch an md
+// container, run a deterministic agent through the relay over SSH, and
+// exercise the task lifecycle.
 func TestSmoke(t *testing.T) {
-	baseURL, cancel := startSmokeServer(t)
-	defer cancel()
+	baseURL := startSmokeServer(t)
 
 	// --- API endpoints ---
 
@@ -52,7 +52,7 @@ func TestSmoke(t *testing.T) {
 		if len(repos) == 0 {
 			t.Fatal("expected at least one repo")
 		}
-		// Fake mode creates two repos (clone and clone2).
+		// Smoke setup creates two repos (clone and clone2).
 		if len(repos) < 2 {
 			t.Errorf("expected at least 2 repos, got %d", len(repos))
 		}
@@ -72,15 +72,14 @@ func TestSmoke(t *testing.T) {
 		if len(harnesses) == 0 {
 			t.Fatal("expected at least one harness")
 		}
-		// Fake mode registers the "fake" harness.
 		found := false
 		for _, h := range harnesses {
-			if h.Name == "fake" {
+			if h.Name == string(agent.Codex) {
 				found = true
 			}
 		}
 		if !found {
-			t.Error("expected 'fake' harness in list")
+			t.Errorf("expected %q harness in list", agent.Codex)
 		}
 	})
 
@@ -92,6 +91,13 @@ func TestSmoke(t *testing.T) {
 		getJSON(t, baseURL, "/api/v1/server/repos", &repos)
 		var harnesses []v1.HarnessInfo
 		getJSON(t, baseURL, "/api/v1/server/harnesses", &harnesses)
+
+		var prefs v1.PreferencesResp
+		getJSON(t, baseURL, "/api/v1/server/preferences", &prefs)
+		prefs.Settings.UseDefaultCaches = false
+		prefs.Settings.WellKnownCaches = nil
+		prefs.Settings.CacheMappings = nil
+		postJSON(t, baseURL, "/api/v1/server/preferences", v1.UpdatePreferencesReq{Settings: prefs.Settings}, &prefs)
 
 		// Create a task.
 		createReq := v1.CreateTaskReq{
@@ -107,11 +113,11 @@ func TestSmoke(t *testing.T) {
 		}
 		t.Logf("created task %s", taskID)
 
-		// Poll until the task reaches "waiting" (fake agent exits after
-		// consuming stdin).
+		// Poll until the task reaches "waiting" after the in-container smoke
+		// agent responds through the relay.
 		var task v1.Task
 		waitForState := func(want string) {
-			deadline := time.After(30 * time.Second)
+			deadline := time.After(10 * time.Minute)
 			for {
 				var tasks []v1.Task
 				getJSON(t, baseURL, "/api/v1/tasks", &tasks)
@@ -132,8 +138,10 @@ func TestSmoke(t *testing.T) {
 			}
 		}
 
-		// The fake agent should transition to "waiting" once it finishes.
 		waitForState("waiting")
+		if task.NumTurns != 1 {
+			t.Fatalf("task %s: NumTurns = %d, want 1; error=%q", taskID, task.NumTurns, task.Error)
+		}
 		t.Logf("task %s reached 'waiting'", taskID)
 
 		// Stop the task.
@@ -142,8 +150,18 @@ func TestSmoke(t *testing.T) {
 		t.Logf("task %s reached 'stopped'", taskID)
 
 		// Purge the task.
+		containerName := task.Runtime.Name
+		if containerName == "" {
+			t.Fatalf("task %s has no runtime name before purge", taskID)
+		}
 		postJSON(t, baseURL, "/api/v1/tasks/"+taskID+"/purge", nil, nil)
 		waitForState("purged")
+		purgeCtx, purgeCancel := context.WithTimeout(t.Context(), 2*time.Minute)
+		if err := smoketest.WaitForRuntimeGone(purgeCtx, smoketest.SmokeRuntime(), containerName); err != nil {
+			purgeCancel()
+			t.Fatal(err)
+		}
+		purgeCancel()
 		t.Logf("task %s reached 'purged'", taskID)
 	})
 
@@ -158,21 +176,26 @@ func TestSmoke(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET /: %v", err)
 		}
-		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
 			t.Errorf("GET /: status %d, want %d", resp.StatusCode, http.StatusOK)
+			return
 		}
 		ct := resp.Header.Get("Content-Type")
+		if err := resp.Body.Close(); err != nil {
+			t.Fatalf("close / response: %v", err)
+		}
 		if !strings.Contains(ct, "text/html") {
 			t.Errorf("GET /: Content-Type %q, want text/html", ct)
 		}
 	})
 }
 
-// startSmokeServer starts the caic HTTP server with fake backends and returns
-// the base URL. The caller must defer cancel() to shut down the server.
-func startSmokeServer(t *testing.T) (string, context.CancelFunc) {
+// startSmokeServer starts the caic HTTP server with the real runtime backend
+// and returns the base URL.
+func startSmokeServer(t *testing.T) string {
 	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
 
 	// Create isolated temp dirs for config, cache, and md state.
 	tmpDir := t.TempDir()
@@ -192,16 +215,18 @@ func startSmokeServer(t *testing.T) (string, context.CancelFunc) {
 	}
 	t.Setenv("XDG_CONFIG_HOME", xdgDir)
 
-	// Initialize fake repos.
-	clone, err := smoketest.InitRepo(ctx, tmpDir)
+	// Initialize local repos used by the runtime smoke task.
+	clone, err := smoketest.InitSmokeRepos(ctx, tmpDir)
 	if err != nil {
-		t.Fatalf("InitRepo: %v", err)
+		t.Fatalf("init smoke repos: %v", err)
 	}
 	rootDir := filepath.Dir(clone)
 
-	// Pre-populate harness model cache.
-	if err := smoketest.InitHarnessCache(cacheDir); err != nil {
-		t.Fatalf("InitHarnessCache: %v", err)
+	// Pre-populate harness model cache so startup does not launch unrelated
+	// model-refresh containers. The task below still launches a real md
+	// container and agent relay.
+	if err := smoketest.InitSmokeHarnessCache(cacheDir); err != nil {
+		t.Fatalf("init harness cache: %v", err)
 	}
 
 	cfg := &server.Config{
@@ -210,7 +235,7 @@ func startSmokeServer(t *testing.T) (string, context.CancelFunc) {
 			CacheDir:  cacheDir,
 		},
 		Runtime: server.RuntimeConfig{
-			Name:       "docker",
+			Name:       smoketest.SmokeRuntime(),
 			SkipWarmup: true,
 		},
 		LLM: server.LLMConfig{
@@ -235,12 +260,10 @@ func startSmokeServer(t *testing.T) (string, context.CancelFunc) {
 		t.Fatalf("server.New: %v", err)
 	}
 
-	// Inject fake backends.
-	fc := smoketest.NewRuntimeBackend(0)
-	fb := smoketest.NewFakeBackend()
-	srv.SetRunnerBackends(fc, map[agent.Harness]agent.Backend{fb.Harness(): fb})
-	srv.SetUsageFetchers(smoketest.UsageFetchers())
-	srv.SetFakeCI(smoketest.SimulateCI)
+	// Use a deterministic no-LLM agent, but run it inside the real md
+	// container through the normal relay over SSH.
+	sb := smoketest.NewSmokeBackend()
+	srv.SetRunnerBackends(nil, map[agent.Harness]agent.Backend{sb.Harness(): sb})
 
 	// Start serving in background.
 	go func() {
@@ -255,7 +278,7 @@ func startSmokeServer(t *testing.T) (string, context.CancelFunc) {
 		cancel()
 		t.Fatalf("server not ready: %v", err)
 	}
-	return baseURL, cancel
+	return baseURL
 }
 
 // waitForReady polls GET /api/v1/server/config until it returns 200.
@@ -292,13 +315,17 @@ func getJSON(t *testing.T, baseURL, path string, dst any) {
 	if err != nil {
 		t.Fatalf("GET %s: %v", path, err)
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
 		t.Fatalf("GET %s: status %d: %s", path, resp.StatusCode, body)
 	}
 	if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
+		_ = resp.Body.Close()
 		t.Fatalf("decode %s: %v", path, err)
+	}
+	if err := resp.Body.Close(); err != nil {
+		t.Fatalf("close GET %s: %v", path, err)
 	}
 }
 
@@ -323,14 +350,18 @@ func postJSON(t *testing.T, baseURL, path string, reqBody, dst any) {
 	if err != nil {
 		t.Fatalf("POST %s: %v", path, err)
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
 		t.Fatalf("POST %s: status %d: %s", path, resp.StatusCode, respBody)
 	}
 	if dst != nil {
 		if err := json.NewDecoder(resp.Body).Decode(dst); err != nil {
+			_ = resp.Body.Close()
 			t.Fatalf("decode %s: %v", path, err)
 		}
+	}
+	if err := resp.Body.Close(); err != nil {
+		t.Fatalf("close POST %s: %v", path, err)
 	}
 }

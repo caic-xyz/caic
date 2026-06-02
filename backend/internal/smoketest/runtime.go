@@ -18,13 +18,13 @@ import (
 // add-repo button is visible after the first repo is auto-selected on load.
 // Returns the path to the primary clone.
 func InitRepo(ctx context.Context, tmpDir string) (string, error) {
-	if err := initOneRepo(ctx, tmpDir, "remote.git", "clone"); err != nil {
+	if err := initOneRepo(ctx, tmpDir, filepath.Join("remotes", "remote.git"), filepath.Join("repos", "clone")); err != nil {
 		return "", err
 	}
-	if err := initOneRepo(ctx, tmpDir, "remote2.git", "clone2"); err != nil {
+	if err := initOneRepo(ctx, tmpDir, filepath.Join("remotes", "remote2.git"), filepath.Join("repos", "clone2")); err != nil {
 		return "", err
 	}
-	return filepath.Join(tmpDir, "clone"), nil
+	return filepath.Join(tmpDir, "repos", "clone"), nil
 }
 
 // InitHarnessCache pre-populates the harness model cache with fresh dummy
@@ -45,6 +45,9 @@ type RuntimeBackend struct {
 }
 
 var _ runtime.Backend = (*RuntimeBackend)(nil)
+var _ runtime.Inventory = (*RuntimeBackend)(nil)
+var _ runtime.Monitor = (*RuntimeBackend)(nil)
+var _ runtime.PrivilegeInfo = (*RuntimeBackend)(nil)
 
 // NewRuntimeBackend creates a fake runtime backend for smoke and e2e tests.
 func NewRuntimeBackend(vncPort int) *RuntimeBackend {
@@ -99,10 +102,50 @@ func (*RuntimeBackend) Signal(_ context.Context, _ runtime.InstanceID, _ int, _ 
 	return nil
 }
 
+// List implements runtime.Inventory.
+func (*RuntimeBackend) List(context.Context) ([]runtime.Instance, error) {
+	return nil, nil
+}
+
+// Metadata implements runtime.Inventory.
+func (*RuntimeBackend) Metadata(context.Context, runtime.InstanceID, runtime.MetadataKey) (string, error) {
+	return "", nil
+}
+
+// StatsAll implements runtime.Monitor.
+func (*RuntimeBackend) StatsAll(_ context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]*runtime.Stats, error) {
+	stats := make(map[runtime.InstanceID]*runtime.Stats, len(ids))
+	for _, id := range ids {
+		stats[id] = &runtime.Stats{}
+	}
+	return stats, nil
+}
+
+// WatchEvents implements runtime.Monitor.
+func (*RuntimeBackend) WatchEvents(ctx context.Context, _ runtime.EventFilter) (<-chan runtime.Event, error) {
+	ch := make(chan runtime.Event)
+	go func() {
+		defer close(ch)
+		<-ctx.Done()
+	}()
+	return ch, nil
+}
+
+// SudoPassword implements runtime.PrivilegeInfo.
+func (*RuntimeBackend) SudoPassword(context.Context, runtime.InstanceID) (string, error) {
+	return "", nil
+}
+
 // initOneRepo initialises a bare remote and a clone under tmpDir.
 func initOneRepo(ctx context.Context, tmpDir, bareName, cloneName string) error {
 	bare := filepath.Join(tmpDir, bareName)
 	clone := filepath.Join(tmpDir, cloneName)
+	if err := os.MkdirAll(filepath.Dir(bare), 0o700); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(clone), 0o700); err != nil {
+		return err
+	}
 	for _, args := range [][]string{
 		{"init", "--bare", bare},
 		{"init", clone},

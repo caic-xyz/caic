@@ -63,6 +63,19 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 	cfg.Dirs.CacheDir = fakeLogsDir
 	cfg.LLM.Disable = true
 
+	// Start a fake VNC server serving a generated IDE screenshot.
+	fvnc, err := smoketest.StartVNC(ctx)
+	if err != nil {
+		return fmt.Errorf("start fake VNC: %w", err)
+	}
+	defer func() { retErr = errors.Join(retErr, fvnc.Close()) }()
+
+	fc := smoketest.NewRuntimeBackend(fvnc.Port())
+	cfg.Runtime.Backend = fc
+	cfg.Runtime.Monitor = fc
+	cfg.Runtime.Inventory = fc
+	cfg.Runtime.Privilege = fc
+
 	// If a trace file is specified, copy it to the tasks log directory so it
 	// gets loaded as a purged task on startup.
 	if traceFile != "" {
@@ -103,14 +116,6 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	// Start a fake VNC server serving a generated IDE screenshot.
-	fvnc, err := smoketest.StartVNC(ctx)
-	if err != nil {
-		return fmt.Errorf("start fake VNC: %w", err)
-	}
-	defer func() { retErr = errors.Join(retErr, fvnc.Close()) }()
-
-	fc := smoketest.NewRuntimeBackend(fvnc.Port())
 	fb := smoketest.NewFakeBackend()
 	srv.SetRunnerBackends(fc, map[agent.Harness]agent.Backend{fb.Harness(): fb})
 	srv.SetUsageFetchers(smoketest.UsageFetchers())
