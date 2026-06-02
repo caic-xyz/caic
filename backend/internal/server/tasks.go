@@ -750,7 +750,7 @@ func (s *Server) taskResolvers() v1conv.TaskResolvers {
 
 // SetRunnerBackends updates the container backend and agent runner backends
 // for all runners.
-func (s *Server) SetRunnerBackends(c task.ContainerBackend, backends map[agent.Harness]agent.Backend) {
+func (s *Server) SetRunnerBackends(c runtime.Backend, backends map[agent.Harness]agent.Backend) {
 	s.taskMgr.SetRunnerBackends(c, backends)
 }
 

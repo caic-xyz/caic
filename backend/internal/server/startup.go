@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/caic-xyz/md"
 	"github.com/caic-xyz/md/gitutil"
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
@@ -26,6 +25,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -33,16 +33,16 @@ import (
 )
 
 // New creates a new Server. It discovers repos under rootDir, creates a Runner
-// per repo, and adopts preexisting containers.
+// per repo, and adopts preexisting runtime instances.
 //
 // Startup sequence:
-//  1. Initialize container client (instant).
+//  1. Initialize the md runtime client (instant).
 //  2. Parallel I/O phase: discover repos, load purged task logs, and list
-//     containers concurrently.
-//  3. Runner init phase: create a Runner per repo with container and agent backends
-//     (runs parallel within after repos are discovered).
-//  4. Adopt containers using pre-fetched list and logs. If a container's relay
-//     is alive, auto-attach to resume streaming.
+//     runtime instances concurrently.
+//  3. Runner init phase: create a Runner per repo with runtime and agent
+//     backends (runs parallel within after repos are discovered).
+//  4. Adopt runtime instances using pre-fetched inventory and logs. If an
+//     instance's relay is alive, auto-attach to resume streaming.
 func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	if cfg.CacheDir == "" {
 		return nil, errors.New("CacheDir is required")
@@ -64,8 +64,9 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("init container library: %w", err)
 	}
 	mdClient.DigestCacheTTL = warmupInterval
+	runtimeInfo := container.NewRuntimeInfoBackend(mdClient)
 
-	// Phase 1: Parallel I/O — repos discovery, logs loading, and container listing.
+	// Phase 1: Parallel I/O — repos discovery, logs loading, and runtime inventory.
 	type reposResult struct {
 		paths []string
 		err   error
@@ -74,14 +75,14 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		logs []*task.LoadedTask
 		err  error
 	}
-	type containersResult struct {
-		containers []*md.Container
-		err        error
+	type instancesResult struct {
+		instances []runtime.Instance
+		err       error
 	}
 
 	repoCh := make(chan reposResult, 1)
 	logCh := make(chan logsResult, 1)
-	contCh := make(chan containersResult, 1)
+	instanceCh := make(chan instancesResult, 1)
 
 	go func() {
 		defer trace.StartRegion(ctx, "discover-repos").End()
@@ -94,14 +95,14 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		logCh <- logsResult{logs, err}
 	}()
 	go func() {
-		defer trace.StartRegion(ctx, "list-containers").End()
-		containers, err := mdClient.List(ctx)
-		contCh <- containersResult{containers, err}
+		defer trace.StartRegion(ctx, "list-runtime-instances").End()
+		instances, err := runtimeInfo.List(ctx)
+		instanceCh <- instancesResult{instances, err}
 	}()
 
 	repoRes := <-repoCh
 	logRes := <-logCh
-	contRes := <-contCh
+	instanceRes := <-instanceCh
 
 	// Check for errors.
 	if repoRes.err != nil {
@@ -272,14 +273,16 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	// single owner of the runner registry. New() registers a no-repo runner; we
 	// overwrite it below so server-owned runners all come from newRunner.
 	s.taskMgr = tasks.New(tasks.Config{
-		ServerCtx:   ctx,
-		LogDir:      logDir,
-		CacheDir:    cfg.CacheDir,
-		Backend:     backend,
-		RuntimeInfo: container.NewRuntimeInfoBackend(mdClient),
-		HarnessEnv:  cfg.HarnessEnv,
-		Prefs:       prefsStore,
-		Provider:    s.provider,
+		ServerCtx:  ctx,
+		LogDir:     logDir,
+		CacheDir:   cfg.CacheDir,
+		Backend:    backend,
+		Monitor:    runtimeInfo,
+		Inventory:  runtimeInfo,
+		Privilege:  runtimeInfo,
+		HarnessEnv: cfg.HarnessEnv,
+		Prefs:      prefsStore,
+		Provider:   s.provider,
 	})
 
 	for i := range results {
@@ -329,10 +332,10 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	}
 	phase3.End()
 
-	// Phase 4: Adopt containers (using pre-fetched list).
-	phase4 := trace.StartRegion(ctx, "adopt-containers")
-	if contRes.err != nil {
-		slog.Warn("list failed, skipping adoption", "rt", s.mdClient.Runtime, "err", contRes.err)
+	// Phase 4: Adopt runtime instances (using pre-fetched inventory).
+	phase4 := trace.StartRegion(ctx, "adopt-runtime-instances")
+	if instanceRes.err != nil {
+		slog.Warn("list failed, skipping adoption", "rt", s.mdClient.Runtime, "err", instanceRes.err)
 	} else {
 		// Convert repos for Manager adoption.
 		snap := s.repoReg.snapshot()
@@ -347,10 +350,10 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 				ForgeRepo:  r.ForgeRepo,
 			}
 		}
-		adopted, err := s.taskMgr.AdoptContainers(ctx, adoptRepos, container.InstancesFromMD(ctx, contRes.containers), logRes.logs)
+		adopted, err := s.taskMgr.AdoptInstances(ctx, adoptRepos, instanceRes.instances, logRes.logs)
 		if err != nil {
 			phase4.End()
-			return nil, fmt.Errorf("adopt containers: %w", err)
+			return nil, fmt.Errorf("adopt runtime instances: %w", err)
 		}
 		// Wire up forge/CI monitoring for adopted tasks with PRs.
 		for i := range adopted {

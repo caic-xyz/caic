@@ -1,4 +1,4 @@
-// Backend adapts *md.Client to task.ContainerBackend for launching and managing containers.
+// Backend adapts *md.Client to runtime.Backend for launching and managing runtime instances.
 
 package container
 
@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime/trace"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,7 +22,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // mdClient is the subset of *md.Client that Backend needs. Production wraps a
@@ -54,9 +54,9 @@ type mdContainer interface {
 }
 
 var (
-	_ mdClient              = mdClientAdapter{}
-	_ mdContainer           = mdContainerAdapter{}
-	_ task.ContainerBackend = (*Backend)(nil)
+	_ mdClient        = mdClientAdapter{}
+	_ mdContainer     = mdContainerAdapter{}
+	_ runtime.Backend = (*Backend)(nil)
 )
 
 // mdClientAdapter adapts *md.Client to mdClient.
@@ -129,7 +129,7 @@ func (a mdContainerAdapter) Fork(ctx context.Context, stdout, stderr io.Writer, 
 	return mdContainerAdapter{f}, nil
 }
 
-// Backend adapts *md.Client to task.ContainerBackend.
+// Backend adapts *md.Client to runtime.Backend.
 type Backend struct {
 	client     mdClient
 	Provider   genai.Provider      // nil if LLM not configured
@@ -148,8 +148,8 @@ func NewBackend(client *md.Client) *Backend {
 	}
 }
 
-// Launch implements task.ContainerBackend.
-func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, labels []string, opts *task.StartOptions) (runtime.InstanceID, error) {
+// Launch implements runtime.Backend.
+func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.InstanceID, error) {
 	defer trace.StartRegion(ctx, "container.launch").End()
 	if len(repos) > 0 {
 		slog.Info("md", "phase", "launch", "dir", repos[0].HostPath, "br", repos[0].Branch, "hns", opts.Harness)
@@ -166,7 +166,7 @@ func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, labels []str
 		return "", errors.New("sudo is not supported with rootless podman; use docker instead")
 	}
 	slog.DebugContext(ctx, "harness verified", "rt", rt, "harness", opts.Harness)
-	mdOpts := b.mdStartOpts(labels, opts)
+	mdOpts := b.mdStartOpts(opts)
 	slog.DebugContext(ctx, "creating container", "rt", rt, "repos_count", len(repos))
 	mdRepos := toMDRepos(repos)
 	c, err := b.client.Container(mdRepos...)
@@ -192,15 +192,12 @@ func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, labels []str
 	return runtime.InstanceID(name), nil
 }
 
-// Connect implements task.ContainerBackend.
-func (b *Backend) Connect(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *task.StartOptions) (runtime.ConnectionInfo, error) {
+// Connect implements runtime.Backend.
+func (b *Backend) Connect(ctx context.Context, id runtime.InstanceID, opts *runtime.StartOptions) (runtime.ConnectionInfo, error) {
 	defer trace.StartRegion(ctx, "container.connect").End()
 	name := string(id)
-	if len(repos) > 0 {
-		slog.Info("md", "phase", "connect", "dir", repos[0].HostPath, "br", repos[0].Branch)
-	}
 	rt := b.client.Runtime()
-	slog.DebugContext(ctx, "connect starting", "rt", rt, "ctr", name, "repos_count", len(repos))
+	slog.DebugContext(ctx, "connect starting", "rt", rt, "ctr", name)
 	b.mu.Lock()
 	c, ok := b.pendingContainers[name]
 	if ok {
@@ -212,7 +209,7 @@ func (b *Backend) Connect(ctx context.Context, id runtime.InstanceID, repos []ru
 		return runtime.ConnectionInfo{}, fmt.Errorf("no pending container %q", name)
 	}
 	slog.DebugContext(ctx, "found pending container", "rt", rt, "ctr", name)
-	mdOpts := b.mdStartOpts(nil, opts)
+	mdOpts := b.mdStartOpts(opts)
 	stdout, stderr := logWriters(opts.LogWriter, "connect")
 	slog.DebugContext(ctx, "calling connect", "rt", rt, "ctr", name)
 	sr, err := c.Connect(ctx, stdout, stderr, mdOpts)
@@ -224,7 +221,7 @@ func (b *Backend) Connect(ctx context.Context, id runtime.InstanceID, repos []ru
 	return runtime.ConnectionInfo{TailscaleFQDN: sr.TailscaleFQDN, TailscaleAuthURL: sr.TailscaleAuthURL}, nil
 }
 
-// Diff implements task.ContainerBackend.
+// Diff implements runtime.Backend.
 func (b *Backend) Diff(ctx context.Context, id runtime.InstanceID, repoIdx int, args ...string) (string, error) {
 	defer trace.StartRegion(ctx, "container.diff").End()
 	name := string(id)
@@ -245,7 +242,7 @@ func (b *Backend) Diff(ctx context.Context, id runtime.InstanceID, repoIdx int, 
 	return stdout.String(), nil
 }
 
-// Fetch implements task.ContainerBackend.
+// Fetch implements runtime.Backend.
 func (b *Backend) Fetch(ctx context.Context, id runtime.InstanceID) error {
 	defer trace.StartRegion(ctx, "container.fetch").End()
 	name := string(id)
@@ -265,7 +262,7 @@ func (b *Backend) Fetch(ctx context.Context, id runtime.InstanceID) error {
 	return nil
 }
 
-// Stop implements task.ContainerBackend.
+// Stop implements runtime.Backend.
 func (b *Backend) Stop(ctx context.Context, id runtime.InstanceID) error {
 	defer trace.StartRegion(ctx, "container.stop").End()
 	name := string(id)
@@ -277,7 +274,7 @@ func (b *Backend) Stop(ctx context.Context, id runtime.InstanceID) error {
 	return ct.Stop(ctx)
 }
 
-// Purge implements task.ContainerBackend.
+// Purge implements runtime.Backend.
 func (b *Backend) Purge(ctx context.Context, id runtime.InstanceID) error {
 	defer trace.StartRegion(ctx, "container.purge").End()
 	name := string(id)
@@ -294,7 +291,7 @@ func (b *Backend) Purge(ctx context.Context, id runtime.InstanceID) error {
 	return ct.Purge(ctx, &SlogWriter{Phase: "purge"}, &SlogWriter{Phase: "purge"})
 }
 
-// Revive implements task.ContainerBackend.
+// Revive implements runtime.Backend.
 func (b *Backend) Revive(ctx context.Context, id runtime.InstanceID) error {
 	defer trace.StartRegion(ctx, "container.revive").End()
 	name := string(id)
@@ -323,8 +320,8 @@ func (b *Backend) Revive(ctx context.Context, id runtime.InstanceID) error {
 	return nil
 }
 
-// Fork implements task.ContainerBackend.
-func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *task.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
+// Fork implements runtime.Backend.
+func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
 	defer trace.StartRegion(ctx, "container.fork").End()
 	name := string(id)
 	if len(repos) > 0 {
@@ -355,7 +352,7 @@ func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runti
 		Tailscale:  opts.Tailscale,
 		USB:        opts.USB,
 		Sudo:       opts.Sudo,
-		Labels:     opts.Labels,
+		Labels:     metadataLabels(opts.Metadata),
 		AgentPaths: agentPaths,
 		ExtraEnv:   opts.ExtraEnv,
 		MaxCPUs:    maxCPUsOrDefault(opts.MaxCPUs),
@@ -375,7 +372,7 @@ func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runti
 	return runtime.InstanceID(forkName), fromMDRepos(forked.Repos()), nil
 }
 
-// VNCPort implements task.ContainerBackend.
+// VNCPort implements runtime.Backend.
 func (b *Backend) VNCPort(ctx context.Context, id runtime.InstanceID) int {
 	containerName := string(id)
 	b.mu.Lock()
@@ -387,7 +384,7 @@ func (b *Backend) VNCPort(ctx context.Context, id runtime.InstanceID) int {
 	// Fallback: query container label. Handles server
 	// restarts where the in-memory map is empty but the container
 	// is still running with a display.
-	if v, err := LabelValue(ctx, b.client.Runtime(), containerName, "md.display"); err == nil && v == "1" {
+	if v, err := labelValue(ctx, b.client.Runtime(), containerName, string(runtime.MetadataDisplayCapability)); err == nil && v == "1" {
 		if hp, err := b.hostPort(ctx, containerName, "5901/tcp"); err == nil {
 			b.mu.Lock()
 			b.vncPorts[containerName] = int32(hp) //nolint:gosec // port numbers are 1-65535, safe for int32
@@ -409,7 +406,7 @@ var harnessMap = map[agent.Harness]md.Harness{
 }
 
 // mdStartOpts builds the md.StartOpts for a given harness and task options.
-func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) *md.StartOpts {
+func (b *Backend) mdStartOpts(opts *runtime.StartOptions) *md.StartOpts {
 	harnessPaths := md.HarnessMounts[harnessMap[opts.Harness]]
 	image := opts.DockerImage
 	if image == "" {
@@ -426,7 +423,7 @@ func (b *Backend) mdStartOpts(labels []string, opts *task.StartOptions) *md.Star
 	return &md.StartOpts{
 		BaseImage:  image,
 		Caches:     toMDCacheMounts(opts.Caches),
-		Labels:     labels,
+		Labels:     metadataLabels(opts.Metadata),
 		AgentPaths: []md.AgentPaths{harnessPaths},
 		USB:        opts.USB,
 		Tailscale:  opts.Tailscale,
@@ -487,6 +484,18 @@ func toMDCacheMounts(caches []runtime.CacheMount) []md.CacheMount {
 		}
 	}
 	return out
+}
+
+func metadataLabels(metadata runtime.Metadata) []string {
+	if len(metadata) == 0 {
+		return nil
+	}
+	labels := make([]string, 0, len(metadata))
+	for key, value := range metadata {
+		labels = append(labels, string(key)+"="+value)
+	}
+	slices.Sort(labels)
+	return labels
 }
 
 // hostPort reads the container host port mapping for the given container port.

@@ -103,7 +103,7 @@ func (w *testWire) ParseMessage(line []byte) ([]agent.Message, error) {
 
 func TestRunner(t *testing.T) {
 	t.Parallel()
-	t.Run("MakeLabels", func(t *testing.T) {
+	t.Run("MakeMetadata", func(t *testing.T) {
 		t.Parallel()
 		t.Run("Basic", func(t *testing.T) {
 			t.Parallel()
@@ -111,18 +111,18 @@ func TestRunner(t *testing.T) {
 				ID:      ksid.NewID(),
 				Harness: agent.Claude,
 			}
-			labels := MakeLabels(tk)
-			if len(labels) != 3 {
-				t.Fatalf("len = %d, want 3", len(labels))
+			metadata := MakeMetadata(tk)
+			if len(metadata) != 3 {
+				t.Fatalf("len = %d, want 3", len(metadata))
 			}
-			if labels[0] != "caic.id="+tk.ID.String() {
-				t.Errorf("labels[0] = %q", labels[0])
+			if metadata[runtime.MetadataTaskID] != tk.ID.String() {
+				t.Errorf("metadata[%s] = %q", runtime.MetadataTaskID, metadata[runtime.MetadataTaskID])
 			}
-			if labels[1] != "caic="+tk.ID.String() {
-				t.Errorf("labels[1] = %q", labels[1])
+			if metadata[runtime.MetadataLegacyTaskID] != tk.ID.String() {
+				t.Errorf("metadata[%s] = %q", runtime.MetadataLegacyTaskID, metadata[runtime.MetadataLegacyTaskID])
 			}
-			if labels[2] != "caic.harness="+string(tk.Harness) {
-				t.Errorf("labels[2] = %q", labels[2])
+			if metadata[runtime.MetadataHarness] != string(tk.Harness) {
+				t.Errorf("metadata[%s] = %q", runtime.MetadataHarness, metadata[runtime.MetadataHarness])
 			}
 		})
 		t.Run("WithGitHubToken", func(t *testing.T) {
@@ -132,12 +132,12 @@ func TestRunner(t *testing.T) {
 				Harness:     agent.Claude,
 				GitHubToken: true,
 			}
-			labels := MakeLabels(tk)
-			if len(labels) != 4 {
-				t.Fatalf("len = %d, want 4", len(labels))
+			metadata := MakeMetadata(tk)
+			if len(metadata) != 4 {
+				t.Fatalf("len = %d, want 4", len(metadata))
 			}
-			if labels[3] != "caic.githubToken=true" {
-				t.Errorf("labels[3] = %q, want %q", labels[3], "caic.githubToken=true")
+			if metadata[runtime.MetadataGitHubToken] != "true" {
+				t.Errorf("metadata[%s] = %q, want true", runtime.MetadataGitHubToken, metadata[runtime.MetadataGitHubToken])
 			}
 		})
 	})
@@ -1221,7 +1221,7 @@ func TestPrependRepoToDiffDevNull(t *testing.T) {
 	}
 }
 
-// stubContainer implements ContainerBackend for testing. Diff returns a fixed
+// stubContainer implements runtime.Backend for testing. Diff returns a fixed
 // numstat line; Fetch records that it was called.
 type stubContainer struct {
 	fetched  bool
@@ -1232,11 +1232,11 @@ type stubContainer struct {
 	diffIdxs []int
 }
 
-func (s *stubContainer) Launch(_ context.Context, _ []runtime.Repo, _ []string, _ *StartOptions) (runtime.InstanceID, error) {
+func (s *stubContainer) Launch(_ context.Context, _ []runtime.Repo, _ *runtime.StartOptions) (runtime.InstanceID, error) {
 	return "stub", nil
 }
 
-func (s *stubContainer) Connect(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *StartOptions) (runtime.ConnectionInfo, error) {
+func (s *stubContainer) Connect(_ context.Context, _ runtime.InstanceID, _ *runtime.StartOptions) (runtime.ConnectionInfo, error) {
 	return runtime.ConnectionInfo{}, nil
 }
 
@@ -1266,7 +1266,7 @@ func (s *stubContainer) Revive(_ context.Context, _ runtime.InstanceID) error {
 	return nil
 }
 
-func (s *stubContainer) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
+func (s *stubContainer) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *runtime.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
 	return "stub-fork", nil, nil
 }
 func (s *stubContainer) VNCPort(_ context.Context, _ runtime.InstanceID) int { return 0 }

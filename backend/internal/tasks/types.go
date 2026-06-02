@@ -22,7 +22,7 @@ type CreateParams struct {
 	USB         bool
 	Display     bool
 	Sudo        bool
-	GitHubToken bool                 // inject GitHub token into container
+	GitHubToken bool                 // inject GitHub token into the runtime environment
 	DockerImage string               // resolved base image
 	MaxCPUs     int                  // max CPU cores; 0 means use the default
 	CacheMounts []runtime.CacheMount // resolved build cache mounts
@@ -78,7 +78,7 @@ type ForkRepo struct {
 	BaseBranch string
 }
 
-// AdoptRepo describes a repo known to the manager for container adoption.
+// AdoptRepo describes a repo known to the manager for runtime instance adoption.
 type AdoptRepo struct {
 	RelPath    string
 	AbsPath    string
@@ -87,7 +87,7 @@ type AdoptRepo struct {
 	ForgeRepo  string
 }
 
-// AdoptedTask holds the result of adopting a single container.
+// AdoptedTask holds the result of adopting a single runtime instance.
 type AdoptedTask struct {
 	Entry          *Entry
 	Task           *task.Task

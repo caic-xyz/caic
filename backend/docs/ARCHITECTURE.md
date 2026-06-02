@@ -78,10 +78,10 @@ graph TD
   pkg_internal_ci --> pkg_internal_task
   pkg_internal_container --> pkg_internal_agent
   pkg_internal_container --> pkg_internal_runtime
-  pkg_internal_container --> pkg_internal_task
   pkg_internal_forge_forgecache --> pkg_internal_forge
   pkg_internal_forge_github --> pkg_internal_forge
   pkg_internal_forge_gitlab --> pkg_internal_forge
+  pkg_internal_runtime --> pkg_internal_agent
   pkg_internal_server --> pkg_frontend
   pkg_internal_server --> pkg_internal_agent
   pkg_internal_server --> pkg_internal_agent_codex
@@ -263,10 +263,10 @@ graph TD
   pkg_internal_cmd_record_trace --> pkg_internal_agent_relay
   pkg_internal_container --> pkg_internal_agent
   pkg_internal_container --> pkg_internal_runtime
-  pkg_internal_container --> pkg_internal_task
   pkg_internal_forge_forgecache --> pkg_internal_forge
   pkg_internal_forge_github --> pkg_internal_forge
   pkg_internal_forge_gitlab --> pkg_internal_forge
+  pkg_internal_runtime --> pkg_internal_agent
   pkg_internal_server --> pkg_frontend
   pkg_internal_server --> pkg_internal_agent
   pkg_internal_server --> pkg_internal_agent_codex
@@ -301,7 +301,6 @@ graph TD
   pkg_internal_task --> pkg_internal_jsonutil
   pkg_internal_task --> pkg_internal_runtime
   pkg_internal_task_tasktest --> pkg_internal_runtime
-  pkg_internal_task_tasktest --> pkg_internal_task
   pkg_internal_tasks --> pkg_internal_agent
   pkg_internal_tasks --> pkg_internal_preferences
   pkg_internal_tasks --> pkg_internal_runtime
@@ -333,19 +332,19 @@ graph TD
 | `internal/ci` | `internal/agent`, `internal/bot`, `internal/forge`, `internal/forge/forgecache`, `internal/preferences`, `internal/task` |
 | `internal/cmd/gen-api-sdk` | `internal/api`, `internal/api/v1` |
 | `internal/cmd/record-trace` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/gemini`, `internal/agent/kilo`, `internal/agent/opencode`, `internal/agent/pi`, `internal/agent/relay` |
-| `internal/container` | `internal/agent`, `internal/runtime`, `internal/task` |
+| `internal/container` | `internal/agent`, `internal/runtime` |
 | `internal/forge` | None |
 | `internal/forge/forgecache` | `internal/forge` |
 | `internal/forge/github` | `internal/forge` |
 | `internal/forge/gitlab` | `internal/forge` |
 | `internal/jsonutil` | None |
 | `internal/preferences` | None |
-| `internal/runtime` | None |
+| `internal/runtime` | `internal/agent` |
 | `internal/server` | `frontend`, `internal/agent`, `internal/agent/codex`, `internal/agent/opencode`, `internal/agent/pi`, `internal/api`, `internal/api/v1`, `internal/api/v1conv`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/container`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/github`, `internal/forge/gitlab`, `internal/preferences`, `internal/runtime`, `internal/server/ipgeo`, `internal/server/voicertc`, `internal/task`, `internal/tasks`, `internal/usage` |
 | `internal/server/ipgeo` | None |
 | `internal/server/voicertc` | `internal/jsonutil` |
 | `internal/task` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/opencode`, `internal/agent/pi`, `internal/forge`, `internal/jsonutil`, `internal/runtime` |
-| `internal/task/tasktest` | `internal/runtime`, `internal/task` |
+| `internal/task/tasktest` | `internal/runtime` |
 | `internal/tasks` | `internal/agent`, `internal/preferences`, `internal/runtime`, `internal/task` |
 | `internal/usage` | None |
 <!-- END GENERATED PACKAGE DEPENDENCIES -->

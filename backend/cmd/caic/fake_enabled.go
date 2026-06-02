@@ -20,7 +20,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/fake"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server"
-	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 const isFakeMode = true
@@ -203,21 +202,21 @@ func runGit(ctx context.Context, args ...string) error {
 	return nil
 }
 
-// fakeContainer implements task.ContainerBackend with no-op operations.
+// fakeContainer implements runtime.Backend with no-op operations.
 type fakeContainer struct {
 	vncPort int // non-zero when a fake VNC server is running.
 }
 
-var _ task.ContainerBackend = (*fakeContainer)(nil)
+var _ runtime.Backend = (*fakeContainer)(nil)
 
-func (*fakeContainer) Launch(_ context.Context, repos []runtime.Repo, _ []string, _ *task.StartOptions) (runtime.InstanceID, error) {
+func (*fakeContainer) Launch(_ context.Context, repos []runtime.Repo, _ *runtime.StartOptions) (runtime.InstanceID, error) {
 	if len(repos) == 0 {
 		return "md-test-no-repo", nil
 	}
 	return runtime.InstanceID("md-test-" + strings.ReplaceAll(repos[0].Branch, "/", "-")), nil
 }
 
-func (*fakeContainer) Connect(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *task.StartOptions) (runtime.ConnectionInfo, error) {
+func (*fakeContainer) Connect(_ context.Context, _ runtime.InstanceID, _ *runtime.StartOptions) (runtime.ConnectionInfo, error) {
 	return runtime.ConnectionInfo{}, nil
 }
 
@@ -234,7 +233,7 @@ func (*fakeContainer) Revive(_ context.Context, _ runtime.InstanceID) error {
 	return nil
 }
 
-func (*fakeContainer) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *task.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
+func (*fakeContainer) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *runtime.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
 	return "fake-fork", nil, fmt.Errorf("fork not supported in fake mode")
 }
 

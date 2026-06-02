@@ -37,14 +37,6 @@ import (
 // errTaskNotFound is returned when a task ID doesn't exist.
 var errTaskNotFound = &Error{Kind: KindNotFound, Msg: "task not found"}
 
-// RuntimeInfoBackend is the runtime metadata and monitoring seam Manager depends on.
-type RuntimeInfoBackend interface {
-	StatsAll(ctx context.Context, ids []runtime.InstanceID) (map[runtime.InstanceID]*runtime.Stats, error)
-	SudoPassword(ctx context.Context, id runtime.InstanceID) (string, error)
-	LabelValue(ctx context.Context, id runtime.InstanceID, label string) (string, error)
-	WatchEvents(ctx context.Context, labelFilter string) (<-chan runtime.Event, error)
-}
-
 // Config holds the dependencies Manager needs at construction.
 type Config struct {
 	// ServerCtx tracks the Manager's own lifetime. Used as the parent for
@@ -55,25 +47,29 @@ type Config struct {
 	// Backend is the per-task container lifecycle seam (launch/stop/purge/fork).
 	// Production passes *container.Backend (Docker); a future VM backend or a
 	// test fake can be substituted via this interface.
-	Backend     task.ContainerBackend
-	RuntimeInfo RuntimeInfoBackend
-	HarnessEnv  map[string][]string
-	Prefs       *preferences.Store
-	Provider    genai.Provider // nil-safe
+	Backend    runtime.Backend
+	Monitor    runtime.Monitor
+	Inventory  runtime.Inventory
+	Privilege  runtime.PrivilegeInfo
+	HarnessEnv map[string][]string
+	Prefs      *preferences.Store
+	Provider   genai.Provider // nil-safe
 }
 
 // Manager owns the task and runner registries, container adoption, session
 // watching, and stats polling.
 type Manager struct {
 	// Immutable after construction.
-	serverCtx   context.Context // lifetime of the Manager; for goroutines that outlive requests
-	logDir      string
-	cacheDir    string
-	backend     task.ContainerBackend
-	runtimeInfo RuntimeInfoBackend
-	harnessEnv  map[string][]string
-	prefs       *preferences.Store
-	provider    genai.Provider
+	serverCtx  context.Context // lifetime of the Manager; for goroutines that outlive requests
+	logDir     string
+	cacheDir   string
+	backend    runtime.Backend
+	monitor    runtime.Monitor
+	inventory  runtime.Inventory
+	privilege  runtime.PrivilegeInfo
+	harnessEnv map[string][]string
+	prefs      *preferences.Store
+	provider   genai.Provider
 
 	// Guarded by mu.
 	mu      sync.Mutex
@@ -86,17 +82,19 @@ type Manager struct {
 // Call RegisterRunner for each repo, then Start.
 func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passed once at construction
 	m := &Manager{
-		serverCtx:   cfg.ServerCtx,
-		logDir:      cfg.LogDir,
-		cacheDir:    cfg.CacheDir,
-		backend:     cfg.Backend,
-		runtimeInfo: cfg.RuntimeInfo,
-		harnessEnv:  cfg.HarnessEnv,
-		prefs:       cfg.Prefs,
-		provider:    cfg.Provider,
-		tasks:       make(map[string]*Entry),
-		runners:     make(map[string]*task.Runner),
-		changed:     make(chan struct{}),
+		serverCtx:  cfg.ServerCtx,
+		logDir:     cfg.LogDir,
+		cacheDir:   cfg.CacheDir,
+		backend:    cfg.Backend,
+		monitor:    cfg.Monitor,
+		inventory:  cfg.Inventory,
+		privilege:  cfg.Privilege,
+		harnessEnv: cfg.HarnessEnv,
+		prefs:      cfg.Prefs,
+		provider:   cfg.Provider,
+		tasks:      make(map[string]*Entry),
+		runners:    make(map[string]*task.Runner),
+		changed:    make(chan struct{}),
 	}
 	noRepoRunner := &task.Runner{
 		LogDir:     cfg.LogDir,
@@ -112,7 +110,7 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 // Start launches background goroutines: container event watching and stats polling.
 // Must be called once after New, after runners have been registered.
 func (m *Manager) Start() {
-	go m.watchContainerEvents(m.serverCtx)
+	go m.watchRuntimeEvents(m.serverCtx)
 	go m.pollStats(m.serverCtx)
 }
 
@@ -563,13 +561,13 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 			extraEnv = append(extraEnv, "GITHUB_TOKEN="+ghToken)
 		}
 
-		forkOpts := &task.ForkOptions{
+		forkOpts := &runtime.ForkOptions{
 			ExtraRepos: extraRepos,
 			Display:    p.Display,
 			Tailscale:  p.Tailscale,
 			USB:        p.USB,
 			Sudo:       p.Sudo,
-			Labels:     task.MakeLabels(t),
+			Metadata:   task.MakeMetadata(t),
 			Harness:    forkHarness,
 			ExtraEnv:   extraEnv,
 			MaxCPUs:    source.MaxCPUs,
@@ -626,7 +624,7 @@ func (m *Manager) SudoPassword(ctx context.Context, t *task.Task) string {
 	if cached != "" {
 		return cached
 	}
-	pw, err := m.runtimeInfo.SudoPassword(ctx, runtime.InstanceID(containerName))
+	pw, err := m.privilege.SudoPassword(ctx, runtime.InstanceID(containerName))
 	if err != nil {
 		slog.WarnContext(ctx, "sudo password lookup failed", "ctr", containerName, "err", err)
 		return ""
@@ -635,8 +633,8 @@ func (m *Manager) SudoPassword(ctx context.Context, t *task.Task) string {
 	return pw
 }
 
-// SetRunnerBackends updates the container backend and agent runner backends for all runners.
-func (m *Manager) SetRunnerBackends(c task.ContainerBackend, backends map[agent.Harness]agent.Backend) {
+// SetRunnerBackends updates the runtime backend and agent runner backends for all runners.
+func (m *Manager) SetRunnerBackends(c runtime.Backend, backends map[agent.Harness]agent.Backend) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, r := range m.runners {
@@ -655,10 +653,10 @@ func (m *Manager) SetTaskMonitorBranch(entry *Entry, branch string) {
 	entry.SetMonitorBranch(branch)
 }
 
-// AdoptContainers discovers preexisting runtime instances and creates task entries
+// AdoptInstances discovers preexisting runtime instances and creates task entries
 // for them. Returns the list of adopted tasks so the caller (Server) can wire
 // up forge/CI post-adoption.
-func (m *Manager) AdoptContainers(ctx context.Context, repos []AdoptRepo, instances []runtime.Instance, allLogs []*task.LoadedTask) ([]AdoptedTask, error) {
+func (m *Manager) AdoptInstances(ctx context.Context, repos []AdoptRepo, instances []runtime.Instance, allLogs []*task.LoadedTask) ([]AdoptedTask, error) {
 	if instances == nil {
 		return nil, nil
 	}
@@ -712,7 +710,7 @@ func (m *Manager) AdoptContainers(ctx context.Context, repos []AdoptRepo, instan
 	}
 	wg.Wait()
 
-	// Adopt no-repo containers.
+	// Adopt no-repo runtime instances.
 	if noRepoRunner, ok := m.Runner(""); ok {
 		for i := range instances {
 			c := &instances[i]
@@ -1069,7 +1067,7 @@ func (m *Manager) repoBasenameCollides(relPath string) bool {
 	return collides
 }
 
-// pollStats polls container resource stats every 5 seconds for all active tasks.
+// pollStats polls runtime resource stats every 5 seconds for all active tasks.
 func (m *Manager) pollStats(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -1111,7 +1109,7 @@ func (m *Manager) pushStats(ctx context.Context) {
 	for i, e := range active {
 		ids[i] = runtime.InstanceID(e.name)
 	}
-	statsMap, err := m.runtimeInfo.StatsAll(ctx, ids)
+	statsMap, err := m.monitor.StatsAll(ctx, ids)
 	if err != nil {
 		slog.Debug("stats poll failed", "err", err)
 		return
@@ -1137,17 +1135,17 @@ func (m *Manager) pushStats(ctx context.Context) {
 	}
 }
 
-// watchContainerEvents listens for Docker container die events and triggers
+// watchRuntimeEvents listens for runtime instance exit events and triggers
 // cleanup for the corresponding task.
-func (m *Manager) watchContainerEvents(ctx context.Context) {
+func (m *Manager) watchRuntimeEvents(ctx context.Context) {
 	go func() {
 		for {
-			ch, err := m.runtimeInfo.WatchEvents(ctx, "caic")
+			ch, err := m.monitor.WatchEvents(ctx, runtime.EventFilter{MetadataKey: runtime.MetadataLegacyTaskID})
 			if err != nil {
 				if ctx.Err() != nil {
 					return
 				}
-				slog.Warn("docker events failed, retrying in 5s", "err", err)
+				slog.Warn("runtime events failed, retrying in 5s", "err", err)
 				select {
 				case <-time.After(5 * time.Second):
 					continue
@@ -1161,7 +1159,7 @@ func (m *Manager) watchContainerEvents(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			slog.Warn("docker events stream ended, reconnecting in 5s")
+			slog.Warn("runtime events stream ended, reconnecting in 5s")
 			select {
 			case <-time.After(5 * time.Second):
 			case <-ctx.Done():
@@ -1171,7 +1169,7 @@ func (m *Manager) watchContainerEvents(ctx context.Context) {
 	}()
 }
 
-// handleContainerDeath looks up a task by container name and archives it.
+// handleContainerDeath looks up a task by runtime instance name and archives it.
 func (m *Manager) handleContainerDeath(containerName string) {
 	m.mu.Lock()
 	var found *Entry
@@ -1189,7 +1187,7 @@ func (m *Manager) handleContainerDeath(containerName string) {
 	t := found.task
 	// Atomically archive as stopped unless the task is already terminal or in
 	// cleanup. StateStopping and StatePurging are both self-inflicted: Stop and
-	// Purge stop/remove the container, which itself emits the "die" event we are
+	// Purge stop/remove the runtime instance, which emits the "die" event we are
 	// handling here. Acting on them would flap the task to StateStopped
 	// mid-cleanup and race the cleanup goroutine. Guarding and transitioning in
 	// one lock also prevents clobbering a state a concurrent Stop/Purge sets
@@ -1243,28 +1241,28 @@ func applyLoadedSessionMetadata(t *task.Task, lt *task.LoadedTask) {
 	t.SetSessionMetadata(lt.SessionID, lt.Model, lt.AgentVersion)
 }
 
-// adoptOne investigates a single container and registers it as a task.
+// adoptOne investigates a single runtime instance and registers it as a task.
 func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runner, c *runtime.Instance, branch string, branchIDs map[string][]string, allLogs []*task.LoadedTask) (*AdoptedTask, error) { //nolint:gocritic // massive function from existing code; refactor deferred
 	ctx, adoptTask := trace.NewTask(ctx, "adopt-container")
 	defer adoptTask.End()
 	trace.Logf(ctx, "container", "%s repo=%s branch=%s", c.ID, ri.RelPath, branch)
 
-	// Only adopt containers that caic started. The caic.id label is set at
-	// container creation and is the authoritative proof of ownership.
-	labelVal, err := m.runtimeInfo.LabelValue(ctx, c.ID, "caic.id")
-	if labelVal == "" && err == nil {
-		labelVal, err = m.runtimeInfo.LabelValue(ctx, c.ID, "caic")
+	// Only adopt runtime instances that caic started. MetadataTaskID is set at
+	// creation and is the authoritative proof of ownership.
+	taskIDVal, err := m.inventory.Metadata(ctx, c.ID, runtime.MetadataTaskID)
+	if taskIDVal == "" && err == nil {
+		taskIDVal, err = m.inventory.Metadata(ctx, c.ID, runtime.MetadataLegacyTaskID)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("label check for %s: %w", c.ID, err)
+		return nil, fmt.Errorf("metadata check for %s: %w", c.ID, err)
 	}
-	if labelVal == "" {
+	if taskIDVal == "" {
 		slog.Info("container", "msg", "skipping non-caic", "repo", ri.RelPath, "ctr", c.ID, "br", branch)
-		return nil, nil //nolint:nilnil // non-caic containers are intentionally skipped
+		return nil, nil //nolint:nilnil // non-caic runtime instances are intentionally skipped
 	}
-	taskID, err := ksid.Parse(labelVal)
+	taskID, err := ksid.Parse(taskIDVal)
 	if err != nil {
-		return nil, fmt.Errorf("parse caic label %q on %s: %w", labelVal, c.ID, err)
+		return nil, fmt.Errorf("parse caic metadata %q on %s: %w", taskIDVal, c.ID, err)
 	}
 
 	isExited := c.State == "exited"
@@ -1293,10 +1291,10 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	var startedAt time.Time
 	var stateUpdatedAt time.Time
 
-	// Read harness from container label (authoritative), fall back to log.
-	harnessLabel, _ := m.runtimeInfo.LabelValue(ctx, c.ID, "caic.harness")
+	// Read harness from runtime metadata (authoritative), fall back to log.
+	harnessLabel, _ := m.inventory.Metadata(ctx, c.ID, runtime.MetadataHarness)
 	if harnessLabel == "" {
-		harnessLabel, _ = m.runtimeInfo.LabelValue(ctx, c.ID, "harness")
+		harnessLabel, _ = m.inventory.Metadata(ctx, c.ID, runtime.MetadataLegacyHarness)
 	}
 	harnessName := agent.Harness(harnessLabel)
 	if harnessName == "" && lt != nil {
@@ -1364,7 +1362,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		if lt != nil && lt.Primary() != nil {
 			primaryBaseBranch = lt.Primary().BaseBranch
 		}
-		// Derive MountedPath from container's Docker label.
+		// Derive MountedPath from the runtime instance repo metadata.
 		var mountedPath string
 		if len(c.Repos) > 0 && c.Repos[0].Branch == branch {
 			mountedPath = c.Repos[0].MountPath
@@ -1416,14 +1414,14 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		Provider:      m.provider,
 		ForgeIssue:    forgeIssue,
 	}
-	// Restore GitHub token flag from log trailer (primary) or container label (fallback).
-	gtLabel, _ := m.runtimeInfo.LabelValue(ctx, c.ID, "caic.githubToken")
+	// Restore GitHub token flag from log trailer (primary) or runtime metadata (fallback).
+	gtLabel, _ := m.inventory.Metadata(ctx, c.ID, runtime.MetadataGitHubToken)
 	if (lt != nil && lt.GitHubToken) || gtLabel == "true" {
 		t.SetGitHubTokenEnabled(true)
 	}
 	t.SetStateAt(task.StateRunning, stateUpdatedAt)
 	if c.Sudo {
-		if pw, err := m.runtimeInfo.SudoPassword(ctx, c.ID); err == nil {
+		if pw, err := m.privilege.SudoPassword(ctx, c.ID); err == nil {
 			t.SetSudoPassword(pw)
 		}
 	}

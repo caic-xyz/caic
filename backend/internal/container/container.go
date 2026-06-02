@@ -77,10 +77,10 @@ func (w *SlogWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// LabelValue returns the value of a container label on a running container.
+// labelValue returns the value of a container label on a running container.
 //
 // Returns empty string if the label is not set.
-func LabelValue(ctx context.Context, runtimeName, containerName, label string) (string, error) {
+func labelValue(ctx context.Context, runtimeName, containerName, label string) (string, error) {
 	format := fmt.Sprintf("{{index .Config.Labels %q}}", label)
 	cmd := exec.CommandContext(ctx, runtimeName, "inspect", containerName, "--format", format) //nolint:gosec // containerName and format are not user-controlled.
 	out, err := cmd.Output()
@@ -101,15 +101,15 @@ type containerEvent struct {
 	} `json:"Actor"`
 }
 
-// WatchEvents monitors container die events filtered by a label.
-// It runs `<runtime> events --filter event=die --filter label=<labelFilter>`
+// WatchEvents monitors container die events filtered by runtime metadata.
+// It runs `<runtime> events --filter event=die --filter label=<metadata key>`
 // and sends an Event for each death. The caller handles reconnection
 // on stream errors. The channel is closed when the context is cancelled or
 // the events process exits.
-func WatchEvents(ctx context.Context, containerRuntime, labelFilter string) (<-chan runtime.Event, error) {
-	cmd := exec.CommandContext(ctx, containerRuntime, "events", //nolint:gosec // labelFilter is a trusted constant
+func WatchEvents(ctx context.Context, containerRuntime string, filter runtime.EventFilter) (<-chan runtime.Event, error) {
+	cmd := exec.CommandContext(ctx, containerRuntime, "events", //nolint:gosec // filter is built from caic-owned constants
 		"--filter", "event=die",
-		"--filter", "label="+labelFilter,
+		"--filter", "label="+string(filter.MetadataKey),
 		"--format", "{{json .}}",
 	)
 	stdout, err := cmd.StdoutPipe()

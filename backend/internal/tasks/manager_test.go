@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -876,7 +875,7 @@ func TestManager(t *testing.T) {
 				t.Errorf("MaxCPUs = %d, want 5 (from source)", tk.MaxCPUs)
 			}
 		})
-		t.Run("valid_labels_match_make_labels", func(t *testing.T) {
+		t.Run("valid_metadata_matches_task", func(t *testing.T) {
 			t.Parallel()
 			m, src := newForkManager(t)
 			id, err := m.Fork(t.Context(), src, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
@@ -884,10 +883,9 @@ func TestManager(t *testing.T) {
 				t.Fatalf("Fork: %v", err)
 			}
 			e, _ := m.GetEntry(id)
-			labels := task.MakeLabels(e.Task())
-			// Sanity: MakeLabels includes the canonical caic.id label.
-			if !slices.Contains(labels, "caic.id="+e.Task().ID.String()) {
-				t.Errorf("labels %v missing caic.id", labels)
+			metadata := task.MakeMetadata(e.Task())
+			if metadata[runtime.MetadataTaskID] != e.Task().ID.String() {
+				t.Errorf("metadata[%s] = %q, want %q", runtime.MetadataTaskID, metadata[runtime.MetadataTaskID], e.Task().ID.String())
 			}
 		})
 		t.Run("error_extra_repo_overlap", func(t *testing.T) {
@@ -1169,7 +1167,7 @@ func TestManager(t *testing.T) {
 					return "fetched-pw", nil
 				},
 			}
-			m := New(Config{ServerCtx: t.Context(), RuntimeInfo: fake})
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
@@ -1197,7 +1195,7 @@ func TestManager(t *testing.T) {
 					return "", errors.New("ssh boom")
 				},
 			}
-			m := New(Config{ServerCtx: t.Context(), RuntimeInfo: fake})
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
@@ -1593,7 +1591,7 @@ func TestManager(t *testing.T) {
 			stopStarted := make(chan struct{})
 			stopReturned := make(chan struct{})
 			releaseStop := make(chan struct{})
-			fake := &tasktest.FakeContainerBackend{
+			fake := &tasktest.FakeRuntimeBackend{
 				StopFunc: func(ctx context.Context, _ runtime.InstanceID) error {
 					close(stopStarted)
 					defer close(stopReturned)
@@ -1682,7 +1680,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_stops_container_backend", func(t *testing.T) {
 			t.Parallel()
 			// Backend is the interface seam, so a fake stands in for Docker.
-			fake := &tasktest.FakeContainerBackend{}
+			fake := &tasktest.FakeRuntimeBackend{}
 			m := New(Config{ServerCtx: t.Context(), Backend: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
@@ -1730,7 +1728,7 @@ func TestManager(t *testing.T) {
 		t.Run("error_failure_closes_done_and_publishes_result", func(t *testing.T) {
 			t.Parallel()
 			releaseRevive := make(chan struct{})
-			fake := &tasktest.FakeContainerBackend{
+			fake := &tasktest.FakeRuntimeBackend{
 				ReviveFunc: func(ctx context.Context, _ runtime.InstanceID) error {
 					select {
 					case <-releaseRevive:
@@ -1994,16 +1992,16 @@ func TestManager(t *testing.T) {
 		})
 	})
 
-	t.Run("AdoptContainers", func(t *testing.T) {
+	t.Run("AdoptInstances", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_matches_only_primary_repo", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
-			fake := &fakeMD{labels: map[string]string{
+			fake := &fakeMD{metadata: map[string]string{
 				"md-caic-caic-5\x00caic.id":      taskID.String(),
 				"md-caic-caic-5\x00caic.harness": string(agent.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), RuntimeInfo: fake})
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			m.RegisterRunner("caic-xyz/caic", &task.Runner{
 				Dir:      "/home/user/src/caic-xyz/caic",
 				Backends: map[agent.Harness]agent.Backend{agent.Claude: &fakeBackend{models: []string{"m1"}}},
@@ -2013,7 +2011,7 @@ func TestManager(t *testing.T) {
 				Backends: map[agent.Harness]agent.Backend{agent.Claude: &fakeBackend{models: []string{"m1"}}},
 			})
 
-			adopted, err := m.AdoptContainers(t.Context(), []AdoptRepo{
+			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{
 				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
 				{RelPath: "caic-xyz/md", AbsPath: "/home/user/src/caic-xyz/md"},
 			}, []runtime.Instance{
@@ -2027,7 +2025,7 @@ func TestManager(t *testing.T) {
 				},
 			}, nil)
 			if err != nil {
-				t.Fatalf("AdoptContainers: %v", err)
+				t.Fatalf("AdoptInstances: %v", err)
 			}
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
@@ -2045,11 +2043,11 @@ func TestManager(t *testing.T) {
 		t.Run("valid_loads_legacy_codex_session_metadata", func(t *testing.T) {
 			t.Parallel()
 			taskID := ksid.NewID()
-			fake := &fakeMD{labels: map[string]string{
+			fake := &fakeMD{metadata: map[string]string{
 				"md-caic-caic-6\x00caic.id":      taskID.String(),
 				"md-caic-caic-6\x00caic.harness": string(agent.Codex),
 			}}
-			m := New(Config{ServerCtx: t.Context(), RuntimeInfo: fake})
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			m.RegisterRunner("caic-xyz/caic", &task.Runner{
 				Dir:      "/home/user/src/caic-xyz/caic",
 				Backends: map[agent.Harness]agent.Backend{agent.Codex: codex.New("", nil)},
@@ -2075,7 +2073,7 @@ func TestManager(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			adopted, err := m.AdoptContainers(t.Context(), []AdoptRepo{
+			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{
 				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
 			}, []runtime.Instance{
 				{
@@ -2087,7 +2085,7 @@ func TestManager(t *testing.T) {
 				},
 			}, logs)
 			if err != nil {
-				t.Fatalf("AdoptContainers: %v", err)
+				t.Fatalf("AdoptInstances: %v", err)
 			}
 			if len(adopted) != 1 {
 				t.Fatalf("adopted len = %d, want 1", len(adopted))
@@ -2111,7 +2109,7 @@ func TestManager(t *testing.T) {
 					return out, nil
 				},
 			}
-			m := New(Config{ServerCtx: t.Context(), RuntimeInfo: fake})
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
@@ -2138,7 +2136,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_skips_inactive_states", func(t *testing.T) {
 			t.Parallel()
 			fake := &fakeMD{}
-			m := New(Config{ServerCtx: t.Context(), RuntimeInfo: fake})
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
@@ -2155,13 +2153,13 @@ func TestManager(t *testing.T) {
 		})
 	})
 
-	t.Run("watchContainerEvents", func(t *testing.T) {
+	t.Run("watchRuntimeEvents", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_dispatches_death", func(t *testing.T) {
 			t.Parallel()
 			events := make(chan runtime.Event, 1)
 			fake := &fakeMD{events: events}
-			m := New(Config{ServerCtx: t.Context(), RuntimeInfo: fake})
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
@@ -2173,7 +2171,7 @@ func TestManager(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			m.watchContainerEvents(ctx)
+			m.watchRuntimeEvents(ctx)
 
 			events <- runtime.Event{InstanceID: "ctr-dead"}
 

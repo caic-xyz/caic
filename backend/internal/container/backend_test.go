@@ -1,4 +1,4 @@
-// Tests for Backend's task.ContainerBackend logic using fake md seams.
+// Tests for Backend's runtime.Backend logic using fake md seams.
 
 package container
 
@@ -14,7 +14,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
 // fakeMDContainer is a fake mdContainer that records driven operations and
@@ -154,7 +153,10 @@ func TestBackend(t *testing.T) {
 			t.Parallel()
 			ctr := &fakeMDContainer{name: "ctr-x", vncPort: 5901}
 			b := newTestBackend(&fakeMDClient{container: ctr})
-			name, err := b.Launch(t.Context(), nil, []string{"l"}, &task.StartOptions{Harness: agent.Claude})
+			name, err := b.Launch(t.Context(), nil, &runtime.StartOptions{
+				Metadata: runtime.Metadata{runtime.MetadataTaskID: "task-1"},
+				Harness:  agent.Claude,
+			})
 			if err != nil {
 				t.Fatalf("Launch: %v", err)
 			}
@@ -175,7 +177,7 @@ func TestBackend(t *testing.T) {
 			t.Parallel()
 			fc := &fakeMDClient{}
 			b := newTestBackend(fc)
-			_, err := b.Launch(t.Context(), nil, nil, &task.StartOptions{Harness: "bogus"})
+			_, err := b.Launch(t.Context(), nil, &runtime.StartOptions{Harness: "bogus"})
 			if err == nil {
 				t.Fatal("want error for unknown harness")
 			}
@@ -187,7 +189,7 @@ func TestBackend(t *testing.T) {
 			t.Parallel()
 			ctr := &fakeMDContainer{name: "ctr-y", launchErr: errors.New("boom")}
 			b := newTestBackend(&fakeMDClient{container: ctr})
-			if _, err := b.Launch(t.Context(), nil, nil, &task.StartOptions{Harness: agent.Claude}); err == nil {
+			if _, err := b.Launch(t.Context(), nil, &runtime.StartOptions{Harness: agent.Claude}); err == nil {
 				t.Fatal("want error from container.Launch")
 			}
 			if _, ok := b.pendingContainers["ctr-y"]; ok {
@@ -251,10 +253,10 @@ func TestBackend(t *testing.T) {
 			t.Parallel()
 			ctr := &fakeMDContainer{name: "ctr-x", connectRes: &md.StartResult{TailscaleFQDN: "host.ts.net"}}
 			b := newTestBackend(&fakeMDClient{container: ctr})
-			if _, err := b.Launch(t.Context(), nil, nil, &task.StartOptions{Harness: agent.Claude}); err != nil {
+			if _, err := b.Launch(t.Context(), nil, &runtime.StartOptions{Harness: agent.Claude}); err != nil {
 				t.Fatalf("Launch: %v", err)
 			}
-			conn, err := b.Connect(t.Context(), "ctr-x", nil, &task.StartOptions{Harness: agent.Claude})
+			conn, err := b.Connect(t.Context(), "ctr-x", &runtime.StartOptions{Harness: agent.Claude})
 			if err != nil {
 				t.Fatalf("Connect: %v", err)
 			}
@@ -262,14 +264,14 @@ func TestBackend(t *testing.T) {
 				t.Errorf("fqdn = %q, want host.ts.net", conn.TailscaleFQDN)
 			}
 			// Pending entry must be consumed: a second Connect fails.
-			if _, err := b.Connect(t.Context(), "ctr-x", nil, &task.StartOptions{Harness: agent.Claude}); err == nil {
+			if _, err := b.Connect(t.Context(), "ctr-x", &runtime.StartOptions{Harness: agent.Claude}); err == nil {
 				t.Error("second Connect should fail; pending entry not consumed")
 			}
 		})
 		t.Run("error no pending", func(t *testing.T) {
 			t.Parallel()
 			b := newTestBackend(&fakeMDClient{})
-			if _, err := b.Connect(t.Context(), "missing", nil, &task.StartOptions{Harness: agent.Claude}); err == nil {
+			if _, err := b.Connect(t.Context(), "missing", &runtime.StartOptions{Harness: agent.Claude}); err == nil {
 				t.Fatal("want error when no pending container")
 			}
 		})
@@ -339,7 +341,7 @@ func TestBackend(t *testing.T) {
 		t.Parallel()
 		src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1", vncPort: 5902, repos: []md.Repo{{Branch: "caic-2"}}}}
 		b := newTestBackend(&fakeMDClient{getResult: src})
-		name, repos, err := b.Fork(t.Context(), "src", nil, &task.ForkOptions{Harness: agent.Claude})
+		name, repos, err := b.Fork(t.Context(), "src", nil, &runtime.ForkOptions{Harness: agent.Claude})
 		if err != nil {
 			t.Fatalf("Fork: %v", err)
 		}
@@ -370,7 +372,8 @@ func TestBackend(t *testing.T) {
 		t.Parallel()
 		b := newTestBackend(&fakeMDClient{})
 		b.HarnessEnv = map[string][]string{string(agent.Claude): {"FOO=bar"}}
-		opts := b.mdStartOpts([]string{"label-a"}, &task.StartOptions{
+		opts := b.mdStartOpts(&runtime.StartOptions{
+			Metadata:    runtime.Metadata{runtime.MetadataTaskID: "task-1"},
 			Harness:     agent.Claude,
 			GitHubToken: "tok",
 			Caches:      []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", MountPath: "/home/user/.npm"}},
@@ -384,7 +387,7 @@ func TestBackend(t *testing.T) {
 		if !slices.Contains(opts.ExtraEnv, "GITHUB_TOKEN=tok") {
 			t.Errorf("ExtraEnv missing GITHUB_TOKEN=tok: %v", opts.ExtraEnv)
 		}
-		if !slices.Contains(opts.Labels, "label-a") {
+		if !slices.Contains(opts.Labels, string(runtime.MetadataTaskID)+"=task-1") {
 			t.Errorf("Labels missing passthrough: %v", opts.Labels)
 		}
 		if opts.BaseImage == "" {

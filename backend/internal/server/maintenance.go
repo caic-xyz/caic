@@ -16,6 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/container"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
@@ -88,7 +89,10 @@ func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, f
 	defer cancel()
 
 	w := &container.SlogWriter{Phase: "model-refresh"}
-	name, err := s.backend.Launch(ctx, nil, []string{"model-refresh"}, &task.StartOptions{
+	name, err := s.backend.Launch(ctx, nil, &runtime.StartOptions{
+		Metadata: runtime.Metadata{
+			runtime.MetadataModelRefresh: "true",
+		},
 		Harness:   h,
 		LogWriter: w,
 	})
@@ -99,7 +103,7 @@ func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, f
 	defer func() {
 		_ = s.backend.Purge(context.WithoutCancel(ctx), name)
 	}()
-	if _, err := s.backend.Connect(ctx, name, nil, &task.StartOptions{Harness: h, LogWriter: w}); err != nil {
+	if _, err := s.backend.Connect(ctx, name, &runtime.StartOptions{Harness: h, LogWriter: w}); err != nil {
 		slog.Warn("model refresh: connect failed", "harness", h, "err", err)
 		return
 	}
