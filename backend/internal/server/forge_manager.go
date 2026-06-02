@@ -18,12 +18,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
 )
 
-// forgeManager resolves forge clients for repos, manages per-user rate-limit
+// ForgeManager resolves forge clients for repos, manages per-user rate-limit
 // throttles, and caches GitHub App installation IDs.
-type forgeManager struct {
+type ForgeManager struct {
 	githubToken string
 	gitlabToken string
-	githubApp   githubAppClient // nil when GitHub App not configured
+	githubApp   GitHubAppClient // nil when GitHub App not configured
 
 	mu                   sync.Mutex
 	githubOAuthThrottles map[string]http.RoundTripper // keyed by user ID
@@ -34,8 +34,13 @@ type forgeManager struct {
 	githubInstallations  map[string]int64 // owner (lowercase) → installation ID; -1 = not installed
 }
 
-func newForgeManager(githubToken, gitlabToken string, githubApp githubAppClient) *forgeManager {
-	return &forgeManager{
+// NewForgeManager creates a forge manager for configured forge tokens.
+func NewForgeManager(githubToken, gitlabToken string) *ForgeManager {
+	return newForgeManager(githubToken, gitlabToken, nil)
+}
+
+func newForgeManager(githubToken, gitlabToken string, githubApp GitHubAppClient) *ForgeManager {
+	return &ForgeManager{
 		githubToken:          githubToken,
 		gitlabToken:          gitlabToken,
 		githubApp:            githubApp,
@@ -48,10 +53,20 @@ func newForgeManager(githubToken, gitlabToken string, githubApp githubAppClient)
 	}
 }
 
+// SetGitHubApp sets the GitHub App client used for installation-scoped access.
+func (m *ForgeManager) SetGitHubApp(c GitHubAppClient) {
+	m.githubApp = c
+}
+
+// GitHubAppThrottle returns the shared throttle for GitHub App API requests.
+func (m *ForgeManager) GitHubAppThrottle() http.RoundTripper {
+	return m.githubAppThrottle
+}
+
 // forgeForInfo returns the appropriate forge.Forge for the repo's remote, using
 // the configured tokens. Falls back to a GitHub App installation token when no
 // user OAuth token or PAT is available. Returns nil if no token is available.
-func (m *forgeManager) forgeForInfo(ctx context.Context, info *repoInfo) forge.Forge {
+func (m *ForgeManager) forgeForInfo(ctx context.Context, info *RepoInfo) forge.Forge {
 	if f := m.forgeFor(ctx, info.ForgeKind); f != nil {
 		return f
 	}
@@ -85,7 +100,7 @@ func (m *forgeManager) forgeForInfo(ctx context.Context, info *repoInfo) forge.F
 // In PAT mode (no OAuth) the global token is used.
 // Config.Validate ensures these two modes are never mixed.
 // Returns nil if no token is available.
-func (m *forgeManager) forgeFor(ctx context.Context, kind forge.Kind) forge.Forge {
+func (m *ForgeManager) forgeFor(ctx context.Context, kind forge.Kind) forge.Forge {
 	if u, ok := auth.UserFromContext(ctx); ok && u.Provider == kind && u.AccessToken != "" {
 		switch kind {
 		case forge.KindGitHub:
@@ -109,7 +124,7 @@ func (m *forgeManager) forgeFor(ctx context.Context, kind forge.Kind) forge.Forg
 
 // storeInstallationID caches the GitHub App installation ID for the given owner.
 // id == -1 means the app is not installed for that owner.
-func (m *forgeManager) storeInstallationID(owner string, id int64) {
+func (m *ForgeManager) storeInstallationID(owner string, id int64) {
 	if id == 0 {
 		return
 	}
@@ -120,7 +135,7 @@ func (m *forgeManager) storeInstallationID(owner string, id int64) {
 
 // installationID returns the cached installation ID for the given owner, or 0 if unknown.
 // Returns -1 if the app is known to not be installed for that owner.
-func (m *forgeManager) installationID(owner string) int64 {
+func (m *ForgeManager) installationID(owner string) int64 {
 	m.mu.Lock()
 	id := m.githubInstallations[strings.ToLower(owner)]
 	m.mu.Unlock()
@@ -129,7 +144,7 @@ func (m *forgeManager) installationID(owner string) int64 {
 
 // githubOAuthThrottle returns the per-user throttle for GitHub OAuth.
 // Each OAuth user has a separate GitHub rate-limit bucket; throttles must not be shared.
-func (m *forgeManager) githubOAuthThrottle(userID string) http.RoundTripper {
+func (m *ForgeManager) githubOAuthThrottle(userID string) http.RoundTripper {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if t, ok := m.githubOAuthThrottles[userID]; ok {
@@ -141,7 +156,7 @@ func (m *forgeManager) githubOAuthThrottle(userID string) http.RoundTripper {
 }
 
 // gitlabOAuthThrottle returns the per-user throttle for GitLab OAuth.
-func (m *forgeManager) gitlabOAuthThrottle(userID string) http.RoundTripper {
+func (m *ForgeManager) gitlabOAuthThrottle(userID string) http.RoundTripper {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if t, ok := m.gitlabOAuthThrottles[userID]; ok {
@@ -155,7 +170,7 @@ func (m *forgeManager) gitlabOAuthThrottle(userID string) http.RoundTripper {
 // commenterFor returns a bot.Commenter for posting comments via the GitHub App
 // (when installationID is non-zero) or the configured PAT, or nil if neither
 // is available.
-func (m *forgeManager) commenterFor(installationID int64) bot.Commenter {
+func (m *ForgeManager) commenterFor(installationID int64) bot.Commenter {
 	if m.githubApp != nil && installationID != 0 {
 		return &appInstallCommenter{app: m.githubApp, installationID: installationID}
 	}
@@ -172,7 +187,7 @@ func newThrottle() http.RoundTripper {
 
 // githubClient returns a GitHub API client authenticated with the configured PAT.
 // Returns nil when no GitHub token is configured.
-func (m *forgeManager) githubClient() *github.Client {
+func (m *ForgeManager) githubClient() *github.Client {
 	if m.githubToken == "" {
 		return nil
 	}

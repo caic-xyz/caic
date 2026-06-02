@@ -71,7 +71,7 @@ func (s *Server) GitHubApp() ci.GitHubAppClient { return s.forge.githubApp }
 
 // ForgeForInfo returns a forge client for the given RepoInfo.
 func (s *Server) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) forge.Forge {
-	r := &repoInfo{
+	r := &RepoInfo{
 		ForgeKind:  info.ForgeKind,
 		ForgeOwner: info.ForgeOwner,
 		ForgeRepo:  info.ForgeRepo,
@@ -155,8 +155,8 @@ func (s *Server) SetRepoCIStatusIfChanged(relPath, sha string, result forgecache
 // Prefs returns the user preferences store.
 func (s *Server) Prefs() *preferences.Store { return s.prefs }
 
-// repoInfoFor returns a copy of the repoInfo for relPath. Callers needing a
-// *repoInfo (e.g. forgeForInfo) should take the address of the returned copy.
-func (s *Server) repoInfoFor(relPath string) (repoInfo, bool) {
+// repoInfoFor returns a copy of the RepoInfo for relPath. Callers needing a
+// *RepoInfo (e.g. forgeForInfo) should take the address of the returned copy.
+func (s *Server) repoInfoFor(relPath string) (RepoInfo, bool) {
 	return s.repoReg.infoFor(relPath)
 }

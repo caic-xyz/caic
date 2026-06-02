@@ -1,6 +1,6 @@
-// Loads and persists server configuration from settings.json.
+// Persistent app startup settings.
 
-package server
+package app
 
 import (
 	"crypto/rand"
@@ -11,16 +11,12 @@ import (
 	"path/filepath"
 )
 
-// serverSettings holds persistent server configuration stored in settings.json.
-type serverSettings struct {
+type settings struct {
 	SessionSecret string `json:"sessionSecret,omitempty"`
 }
 
-// loadSettings reads settings from path, generating any missing values and
-// writing them back atomically. New fields added to serverSettings are
-// automatically populated on first use and persisted.
-func loadSettings(path string) (*serverSettings, error) {
-	var s serverSettings
+func loadSettings(path string) (*settings, error) {
+	var s settings
 	if data, err := os.ReadFile(path); err == nil { //nolint:gosec // G304: internal config path
 		if err := json.Unmarshal(data, &s); err != nil {
 			return nil, err
@@ -45,8 +41,7 @@ func loadSettings(path string) (*serverSettings, error) {
 	return &s, nil
 }
 
-// writeSettingsAtomic writes settings to path via a temp file + rename.
-func writeSettingsAtomic(path string, s *serverSettings) error {
+func writeSettingsAtomic(path string, s *settings) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}

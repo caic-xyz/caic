@@ -488,19 +488,19 @@ func (s *Server) storeInstallationIDFromFullName(fullName string, id int64) {
 	}
 }
 
-// repoByForge returns a copy of the repoInfo whose forge matches "owner/repo".
-func (s *Server) repoByForge(fullName string) (repoInfo, bool) {
+// repoByForge returns a copy of the RepoInfo whose forge matches "owner/repo".
+func (s *Server) repoByForge(fullName string) (RepoInfo, bool) {
 	owner, repo, ok := strings.Cut(fullName, "/")
 	if !ok {
-		return repoInfo{}, false
+		return RepoInfo{}, false
 	}
 	return s.repoReg.byForge(owner, repo)
 }
 
-// appInstallCommenter adapts githubAppClient.PostComment to bot.Commenter by
+// appInstallCommenter adapts GitHubAppClient.PostComment to bot.Commenter by
 // binding a fixed installation ID.
 type appInstallCommenter struct {
-	app            githubAppClient
+	app            GitHubAppClient
 	installationID int64
 }
 

@@ -1,6 +1,6 @@
 // Tests for provider detection and title-generation LLM provider setup.
 
-package server
+package app
 
 import (
 	"slices"

@@ -41,7 +41,7 @@ func (s *Server) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Config, erro
 	cfg := &v1.Config{
 		Version:              autoupdate.Version,
 		DisplayName:          displayName,
-		TailscaleAvailable:   s.mdClient.TailscaleAPIKey != "",
+		TailscaleAvailable:   s.tailscaleAvailable,
 		USBAvailable:         runtime.GOOS == "linux",
 		DisplayAvailable:     true,
 		SudoAvailable:        true,
@@ -363,7 +363,7 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 		return nil, api.InternalError("cannot determine default branch: " + err.Error())
 	}
 	remote := gitutil.RemoteOriginURL(ctx, absTarget)
-	info := repoInfo{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
+	info := RepoInfo{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
 	runner, err := s.newRunner(ctx, &info)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)

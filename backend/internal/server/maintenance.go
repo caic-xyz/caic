@@ -10,52 +10,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/caic-xyz/md"
-
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
-
-// warmupInterval controls how often warmupImages re-checks for new base image
-// versions. It also sets DigestCacheTTL so that runtime instance starts between
-// warmup cycles reuse the cached digest instead of hitting the registry.
-const warmupInterval = 6 * time.Hour
-
-// warmupImages periodically calls md.Client.Warmup for the default base image
-// and any custom images configured in user preferences. This ensures the image
-// is pulled and the md-user layer is built before a task needs it.
-func (s *Server) warmupImages() {
-	// Run immediately on startup, then every warmupInterval.
-	ticker := time.NewTicker(warmupInterval)
-	defer ticker.Stop()
-	for {
-		images := []string{md.DefaultBaseImage + ":latest"}
-		for _, img := range s.prefs.BaseImages() {
-			if !slices.Contains(images, img) {
-				images = append(images, img)
-			}
-		}
-		for _, img := range images {
-			w := &mdruntime.SlogWriter{Phase: "warmup"}
-			built, err := s.mdClient.Warmup(s.ctx, w, w, &md.WarmupOpts{
-				BaseImage: img,
-				Quiet:     true,
-			})
-			if err != nil {
-				slog.Warn("warmup", "image", img, "err", err)
-			} else if built {
-				slog.Info("warmup", "image", img, "built", true)
-			}
-		}
-		select {
-		case <-ticker.C:
-		case <-s.ctx.Done():
-			return
-		}
-	}
-}
 
 // refreshHarnessModels checks if any harness caches are stale and refreshes
 // them by launching a temporary runtime instance. Runs once at startup.
@@ -72,7 +30,7 @@ func (s *Server) refreshHarnessModels() {
 		return true
 	})
 	for _, h := range slices.Sorted(maps.Keys(fetchers)) {
-		if _, fresh := cache.Models(h, agent.APIKeyHash(s.harnessEnv(h))); fresh {
+		if _, fresh := cache.Models(h, agent.APIKeyHash(s.harnessEnvFor(h))); fresh {
 			continue
 		}
 		s.refreshOneHarness(cache, h, fetchers[h])
@@ -84,13 +42,13 @@ func (s *Server) refreshHarnessModels() {
 func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, fetcher agent.ModelFetcher) {
 	backend := s.runtimeBackend
 	if backend == nil {
-		backend = s.backend
+		return
 	}
 	slog.Info("model cache stale, fetching", "harness", h)
 	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
 	defer cancel()
 
-	w := &mdruntime.SlogWriter{Phase: "model-refresh"}
+	w := phaseLogWriter{phase: "model-refresh"}
 	name, err := backend.Launch(ctx, nil, &runtime.StartOptions{
 		Metadata: runtime.Metadata{
 			runtime.MetadataModelRefresh: "true",
@@ -109,7 +67,7 @@ func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, f
 		slog.Warn("model refresh: connect failed", "harness", h, "err", err)
 		return
 	}
-	env := s.harnessEnv(h)
+	env := s.harnessEnvFor(h)
 	models, err := fetcher.FetchModels(ctx, string(name), env)
 	if err != nil {
 		slog.Warn("model refresh: fetch failed", "harness", h, "err", err)
@@ -126,6 +84,20 @@ func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, f
 	})
 }
 
-func (s *Server) harnessEnv(h agent.Harness) []string {
-	return s.backend.HarnessEnv[string(h)]
+func (s *Server) harnessEnvFor(h agent.Harness) []string {
+	return s.harnessEnv[string(h)]
+}
+
+// RefreshHarnessModels refreshes stale harness model caches.
+func (s *Server) RefreshHarnessModels() {
+	s.refreshHarnessModels()
+}
+
+type phaseLogWriter struct {
+	phase string
+}
+
+func (w phaseLogWriter) Write(p []byte) (int, error) {
+	slog.Info(w.phase, "out", string(p))
+	return len(p), nil
 }

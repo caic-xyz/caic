@@ -33,99 +33,7 @@ containers as one runtime adapter, not as the backend domain model.
   comments when a source file's purpose changes.
 - Run the validation commands listed for the phase that changed.
 
-## 1. Split `server.Config` Validation By Concern
-
-Goal: keep the nested `server.Config` structure, but move validation logic to
-the same concern boundaries as the data.
-
-Current state: `server.Config` is split into `DirsConfig`, `RuntimeConfig`,
-`AgentConfig`, `LLMConfig`, `GitHubConfig`, `GitLabConfig`, `AuthConfig`,
-`VoiceConfig`, `DebugConfig`, and `IPGeoConfig`. Validation is still centralized
-in one large `Config.Validate()` method.
-
-Implementation order:
-
-1. Add focused tests around the current validation matrix before moving code:
-   OAuth pairs, OAuth allowed users, GitLab token-vs-OAuth exclusivity,
-   `external_url`, `gitlab.url`, and runtime name.
-2. Add `Validate()` methods on nested structs for local rules:
-   `RuntimeConfig`, `GitHubConfig`, `GitLabConfig`, `AuthConfig`, and
-   `IPGeoConfig` if needed.
-3. Keep cross-concern rules in `Config.Validate()` only when they require
-   multiple sections, such as OAuth requiring `Auth.ExternalURL` and HTTPS.
-4. Make normalization explicit. `Config.Validate()` currently strips trailing
-   slashes from `Auth.ExternalURL`; keep that behavior, but isolate it so tests
-   make the mutation intentional.
-5. Keep the external TOML format unchanged only where it still matches the best
-   config structure. Rename or reshape config keys when the existing format
-   leaks old implementation details.
-6. Do not mix this with startup extraction.
-
-Acceptance criteria:
-
-- Local validation rules live beside their config structs.
-- `Config.Validate()` reads as orchestration over nested validators plus a short
-  set of cross-concern checks.
-- Config keys and validation errors describe the new domain model directly.
-
-Validation:
-
-```bash
-make lint-go
-go test ./backend/cmd/caic ./backend/internal/server
-```
-
-## 2. Extract Startup Assembly From `internal/server`
-
-Goal: keep `internal/server` focused on HTTP behavior and move composition and
-startup wiring elsewhere.
-
-Current state: `backend/internal/app` exists but only wraps `server.New`.
-`server.New` still performs startup assembly, including runtime adapter
-construction, repo discovery, settings/auth setup, forge manager creation, task
-manager construction, adoption, and maintenance startup.
-
-Implementation order:
-
-1. Introduce a narrower `server.New` that accepts constructed dependencies,
-   for example a `server.Dependencies` or `server.Options` value. Keep route
-   registration and HTTP middleware construction in `internal/server`.
-2. Keep `app.New(ctx, rootDir, cfg)` as the high-level constructor used by
-   `cmd/caic`, fake mode, and smoke setup.
-3. Move runtime adapter selection, runtime override wiring, agent backend
-   registry construction, repo discovery, task-log loading, settings load,
-   auth store setup, forge manager creation, task manager construction,
-   adoption, and maintenance goroutine startup into `internal/app`.
-4. Move helper code only when the helper belongs to assembly. Leave handler
-   helpers and API conversion helpers in `internal/server`.
-5. Keep repo discovery parallelism, task-log migration, adoption behavior, and
-   startup trace regions equivalent unless deliberately changing them in a
-   follow-up.
-6. Run the architecture generator and check that `internal/server` imports fewer
-   backend concerns. `internal/app` should become the package with composition
-   imports.
-
-Acceptance criteria:
-
-- `server.New` can be tested with small HTTP dependencies without constructing
-  md clients, runtime inventory, auth stores, forge clients, or task managers
-  internally.
-- `internal/server` no longer imports `internal/runtime/mdruntime` or
-  `internal/agent/registry`.
-- `internal/app` is the only package responsible for backend assembly.
-- Existing startup behavior remains covered by app-level tests and smoke/fake
-  setup.
-
-Validation:
-
-```bash
-make lint-go
-go test ./backend/cmd/caic ./backend/internal/app ./backend/internal/server ./backend/internal/tasks
-./scripts/update_backend_architecture.py
-make lint-docs
-```
-
-## 3. Split `server.Server` By Concern
+## 1. Split `server.Server` By Concern
 
 Goal: keep `Server` as the HTTP router and lifecycle owner, not the concrete
 implementation of every backend-facing role.
@@ -133,9 +41,7 @@ implementation of every backend-facing role.
 Current state: `Server` still owns auth, repo registry access, task HTTP
 handlers, webhook handlers, bot client methods, CI service adapter methods,
 usage streaming, voice handlers, maintenance helpers, forge management, and
-runtime operation helpers. Extracting startup assembly will reduce construction
-coupling, but it will not by itself reduce the number of responsibilities on
-`Server`.
+runtime operation helpers.
 
 Implementation order:
 
@@ -211,6 +117,4 @@ earlier.
 
 ## Suggested Order
 
-1. Split `server.Config` validation by concern.
-2. Extract startup assembly from `internal/server`.
-3. Split `server.Server` by concern.
+1. Split `server.Server` by concern.

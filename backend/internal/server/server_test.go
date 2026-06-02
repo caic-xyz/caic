@@ -89,11 +89,11 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
 	s := &Server{
-		ctx:          t.Context(),
-		backend:      &mdruntime.Backend{},
-		prefs:        newTestPrefs(t),
-		ipgeoChecker: checker,
-		forge:        newForgeManager("", "", nil),
+		ctx:            t.Context(),
+		runtimeBackend: &mdruntime.Backend{},
+		prefs:          newTestPrefs(t),
+		ipgeoChecker:   checker,
+		forge:          newForgeManager("", "", nil),
 	}
 	s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 	return s
@@ -149,9 +149,9 @@ func newRunnerConstructionTestServer(t *testing.T, root string) *Server {
 		absRoot:        root,
 		logDir:         logDir,
 		cacheDir:       cacheDir,
-		backend:        backend,
 		runtimeBackend: backend,
 		agentBackends:  map[agent.Harness]agent.Backend{agent.Codex: stubBackend{}},
+		harnessEnv:     harnessEnv,
 		repoReg:        newRepoRegistry(nil),
 	}
 	s.taskMgr = tasks.New(tasks.Config{
@@ -217,7 +217,7 @@ func TestCloneRepo(t *testing.T) {
 		if runner.LogDir != s.logDir || runner.CacheDir != s.cacheDir {
 			t.Fatalf("runner dirs = log %q cache %q, want log %q cache %q", runner.LogDir, runner.CacheDir, s.logDir, s.cacheDir)
 		}
-		if runner.Runtime != s.backend {
+		if runner.Runtime != s.runtimeBackend {
 			t.Fatal("runner instance backend was not wired")
 		}
 		if len(runner.HarnessEnv[string(agent.Codex)]) != 1 || runner.HarnessEnv[string(agent.Codex)][0] != "CODEX_HOME=/tmp/codex" {
@@ -856,7 +856,7 @@ func TestSignalProcess(t *testing.T) {
 func TestHandleListRepos(t *testing.T) {
 	t.Parallel()
 	s := &Server{
-		repoReg: newRepoRegistry([]repoInfo{
+		repoReg: newRepoRegistry([]RepoInfo{
 			{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"},
 			{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"},
 		}),

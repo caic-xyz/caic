@@ -11,8 +11,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
-// wireAdoptedCIMonitoring sets up CI monitoring for an adopted task that has a PR.
-func (s *Server) wireAdoptedCIMonitoring(ctx context.Context, at *tasks.AdoptedTask) {
+// WireAdoptedCIMonitoring sets up CI monitoring for an adopted task that has a PR.
+func (s *Server) WireAdoptedCIMonitoring(ctx context.Context, at *tasks.AdoptedTask) {
 	ri, ok := s.repoInfoFor(at.RelPath)
 	if !ok {
 		return
@@ -39,8 +39,8 @@ func (s *Server) wireAdoptedCIMonitoring(ctx context.Context, at *tasks.AdoptedT
 	}
 }
 
-// lookupExternalPRForTask queries the forge for a PR matching the task's branch.
-func (s *Server) lookupExternalPRForTask(at *tasks.AdoptedTask) {
+// LookupExternalPRForTask queries the forge for a PR matching the task's branch.
+func (s *Server) LookupExternalPRForTask(at *tasks.AdoptedTask) {
 	ri, ok := s.repoInfoFor(at.RelPath)
 	if !ok {
 		return

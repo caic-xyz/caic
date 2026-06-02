@@ -21,18 +21,18 @@ import (
 // background polling.
 const repoDiscoveryDepth = 3
 
-// repoInitResult holds the outcome of initialising a single newly-discovered
+// RepoInitResult holds the outcome of initialising a single newly-discovered
 // repository.
-type repoInitResult struct {
-	info    repoInfo
-	runner  *task.Runner
-	initErr error
+type RepoInitResult struct {
+	Info    RepoInfo
+	Runner  *task.Runner
+	InitErr error
 }
 
-// watchNewRepos polls absRoot and its subdirectories every 30 seconds for
+// WatchNewRepos polls absRoot and its subdirectories every 30 seconds for
 // new or removed git repositories, registering and deregistering them without
 // requiring a server restart.
-func (s *Server) watchNewRepos() {
+func (s *Server) WatchNewRepos() {
 	mtimes := make(map[string]time.Time)
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -93,7 +93,7 @@ func (s *Server) syncReposInDir(ctx context.Context, dir string) {
 	}
 
 	// Deregister repos directly under dir that are no longer present.
-	removed := s.repoReg.removeMatching(func(r repoInfo) bool {
+	removed := s.repoReg.removeMatching(func(r RepoInfo) bool {
 		if filepath.Dir(r.AbsPath) != dir {
 			return false
 		}
@@ -116,7 +116,7 @@ func (s *Server) syncReposInDir(ctx context.Context, dir string) {
 	if len(newPaths) == 0 {
 		return
 	}
-	results := make([]repoInitResult, len(newPaths))
+	results := make([]RepoInitResult, len(newPaths))
 	var wg sync.WaitGroup
 	for i, abs := range newPaths {
 		wg.Go(func() {
@@ -125,32 +125,29 @@ func (s *Server) syncReposInDir(ctx context.Context, dir string) {
 			if _, exists := s.taskMgr.Runner(rel); exists {
 				return
 			}
-			result, err := s.discoverRepoRunner(ctx, abs)
+			result, err := s.DiscoverRepoRunner(ctx, abs)
 			if err != nil {
 				slog.WarnContext(ctx, "new repo: discovery failed", "path", abs, "err", err)
 				return
 			}
-			if result.initErr != nil {
-				slog.WarnContext(ctx, "new repo: runner init failed", "path", abs, "err", result.initErr)
+			if result.InitErr != nil {
+				slog.WarnContext(ctx, "new repo: runner init failed", "path", abs, "err", result.InitErr)
 			}
 			results[i] = result
-			slog.InfoContext(ctx, "discovered new repo", "path", rel, "br", result.info.BaseBranch)
+			slog.InfoContext(ctx, "discovered new repo", "path", rel, "br", result.Info.BaseBranch)
 		})
 	}
 	wg.Wait()
 
 	for i := range results {
-		if results[i].runner == nil {
+		if results[i].Runner == nil {
 			continue
 		}
-		rel := results[i].info.RelPath
+		rel := results[i].Info.RelPath
 		if _, exists := s.taskMgr.Runner(rel); exists {
 			continue
 		}
-		// Add to the registry first, then register the runner (see
-		// repoRegistry's ordering invariant).
-		s.repoReg.add(&results[i].info)
-		s.taskMgr.RegisterRunner(rel, results[i].runner)
+		s.RegisterRepoRunner(&results[i])
 	}
 }
 
@@ -158,7 +155,7 @@ func (s *Server) syncReposInDir(ctx context.Context, dir string) {
 // path is within dir (used when dir itself has been deleted).
 func (s *Server) deregisterReposUnder(ctx context.Context, dir string) {
 	prefix := dir + string(filepath.Separator)
-	removed := s.repoReg.removeMatching(func(r repoInfo) bool {
+	removed := s.repoReg.removeMatching(func(r RepoInfo) bool {
 		return strings.HasPrefix(r.AbsPath, prefix)
 	})
 	for _, rel := range removed {

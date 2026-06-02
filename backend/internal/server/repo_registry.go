@@ -26,19 +26,19 @@ import (
 // enclosing operation returns.
 type repoRegistry struct {
 	mu       sync.Mutex
-	repos    []repoInfo
-	ciStatus map[string]ci.RepoCIState // keyed by repoInfo.RelPath
+	repos    []RepoInfo
+	ciStatus map[string]ci.RepoCIState // keyed by RepoInfo.RelPath
 }
 
 // newRepoRegistry creates a registry seeded with initial (taken over verbatim).
-func newRepoRegistry(initial []repoInfo) *repoRegistry {
+func newRepoRegistry(initial []RepoInfo) *repoRegistry {
 	return &repoRegistry{repos: initial, ciStatus: make(map[string]ci.RepoCIState)}
 }
 
-// infoFor returns a copy of the repoInfo for rel.
-func (r *repoRegistry) infoFor(rel string) (repoInfo, bool) {
+// infoFor returns a copy of the RepoInfo for rel.
+func (r *repoRegistry) infoFor(rel string) (RepoInfo, bool) {
 	if r == nil {
-		return repoInfo{}, false
+		return RepoInfo{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -47,14 +47,14 @@ func (r *repoRegistry) infoFor(rel string) (repoInfo, bool) {
 			return r.repos[i], true
 		}
 	}
-	return repoInfo{}, false
+	return RepoInfo{}, false
 }
 
-// byForge returns a copy of the repoInfo whose forge matches owner/repo
+// byForge returns a copy of the RepoInfo whose forge matches owner/repo
 // (case-insensitive).
-func (r *repoRegistry) byForge(owner, repo string) (repoInfo, bool) {
+func (r *repoRegistry) byForge(owner, repo string) (RepoInfo, bool) {
 	if r == nil {
-		return repoInfo{}, false
+		return RepoInfo{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -63,11 +63,11 @@ func (r *repoRegistry) byForge(owner, repo string) (repoInfo, bool) {
 			return r.repos[i], true
 		}
 	}
-	return repoInfo{}, false
+	return RepoInfo{}, false
 }
 
 // snapshot returns a copy of all registered repos.
-func (r *repoRegistry) snapshot() []repoInfo {
+func (r *repoRegistry) snapshot() []RepoInfo {
 	if r == nil {
 		return nil
 	}
@@ -78,7 +78,7 @@ func (r *repoRegistry) snapshot() []repoInfo {
 
 // repoWithCI pairs a repo with its cached CI status snapshot.
 type repoWithCI struct {
-	info  repoInfo
+	info  RepoInfo
 	ci    ci.RepoCIState
 	hasCI bool
 }
@@ -121,7 +121,7 @@ func (r *repoRegistry) forgePathsAtSHA(owner, repo, sha string) []string {
 // identities for a repo, so adding either identity twice is idempotent. The
 // caller registers the task.Runner afterwards (see the ordering invariant on
 // repoRegistry).
-func (r *repoRegistry) add(info *repoInfo) {
+func (r *repoRegistry) add(info *RepoInfo) {
 	r.mu.Lock()
 	for i := range r.repos {
 		if r.repos[i].RelPath != info.RelPath && r.repos[i].AbsPath != info.AbsPath {
@@ -144,11 +144,11 @@ func (r *repoRegistry) add(info *repoInfo) {
 
 // removeMatching removes every repo for which pred reports true and returns
 // their RelPaths. The caller unregisters the corresponding runners afterwards.
-func (r *repoRegistry) removeMatching(pred func(repoInfo) bool) []string {
+func (r *repoRegistry) removeMatching(pred func(RepoInfo) bool) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var removed []string
-	r.repos = slices.DeleteFunc(r.repos, func(ri repoInfo) bool {
+	r.repos = slices.DeleteFunc(r.repos, func(ri RepoInfo) bool {
 		if pred(ri) {
 			removed = append(removed, ri.RelPath)
 			return true

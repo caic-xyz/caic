@@ -10,7 +10,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
-	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
@@ -76,12 +75,11 @@ func TestRefreshHarnessModels(t *testing.T) {
 }
 
 func newModelRefreshTestServer(ctx context.Context, cacheDir string, env map[string][]string, runtimeBackend runtime.Backend, backends map[agent.Harness]agent.Backend) *Server {
-	backend := &mdruntime.Backend{HarnessEnv: env}
 	s := &Server{
 		ctx:            ctx,
 		cacheDir:       cacheDir,
-		backend:        backend,
 		runtimeBackend: runtimeBackend,
+		harnessEnv:     env,
 	}
 	s.taskMgr = tasks.New(tasks.Config{
 		ServerCtx: ctx,

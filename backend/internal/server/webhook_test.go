@@ -19,7 +19,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
-	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
@@ -109,7 +108,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("updates CI status when SHA matches HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalServer(t)
-		s.repoReg = newRepoRegistry([]repoInfo{{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}})
+		s.repoReg = newRepoRegistry([]RepoInfo{{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}})
 		s.forge.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}}
 
 		s.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
@@ -132,7 +131,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("ignores out-of-order delivery when SHA is not HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalServer(t)
-		s.repoReg = newRepoRegistry([]repoInfo{{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}})
+		s.repoReg = newRepoRegistry([]RepoInfo{{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"}})
 		// HEAD is now "newsha"; the webhook carries "oldsha".
 		s.forge.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}}
 
@@ -389,7 +388,6 @@ func minimalServer(t *testing.T) *Server {
 	ctx := t.Context()
 	s := &Server{
 		ctx:     ctx,
-		backend: &mdruntime.Backend{},
 		ciCache: cache,
 		repoReg: newRepoRegistry(nil),
 		forge:   newForgeManager("", "", nil),

@@ -16,7 +16,7 @@ func TestRepoRegistry(t *testing.T) {
 
 	t.Run("infoFor returns an independent copy", func(t *testing.T) {
 		t.Parallel()
-		r := newRepoRegistry([]repoInfo{{RelPath: "a", ForgeOwner: "org"}})
+		r := newRepoRegistry([]RepoInfo{{RelPath: "a", ForgeOwner: "org"}})
 		got, ok := r.infoFor("a")
 		if !ok {
 			t.Fatal("infoFor(a) not found")
@@ -60,8 +60,8 @@ func TestRepoRegistry(t *testing.T) {
 	t.Run("add is idempotent by rel path and abs path", func(t *testing.T) {
 		t.Parallel()
 		r := newRepoRegistry(nil)
-		r.add(&repoInfo{RelPath: "a", AbsPath: "/repo/a", BaseBranch: "main"})
-		r.add(&repoInfo{RelPath: "a", AbsPath: "/repo/a", BaseBranch: "trunk"})
+		r.add(&RepoInfo{RelPath: "a", AbsPath: "/repo/a", BaseBranch: "main"})
+		r.add(&RepoInfo{RelPath: "a", AbsPath: "/repo/a", BaseBranch: "trunk"})
 		if got := r.snapshot(); len(got) != 1 || got[0].BaseBranch != "trunk" {
 			t.Fatalf("same rel+abs add = %+v, want one updated repo", got)
 		}
@@ -69,7 +69,7 @@ func TestRepoRegistry(t *testing.T) {
 		if !r.setCIStatusIfChanged("a", ci.RepoCIState{Status: forge.CIStatusSuccess}) {
 			t.Fatal("initial CI status should report changed")
 		}
-		r.add(&repoInfo{RelPath: "nested/a", AbsPath: "/repo/a", BaseBranch: "main"})
+		r.add(&RepoInfo{RelPath: "nested/a", AbsPath: "/repo/a", BaseBranch: "main"})
 		got := r.snapshot()
 		if len(got) != 1 || got[0].RelPath != "nested/a" {
 			t.Fatalf("same abs add = %+v, want one repo with updated rel path", got)
@@ -81,7 +81,7 @@ func TestRepoRegistry(t *testing.T) {
 			t.Fatalf("old CI status = %q, want empty", st.Status)
 		}
 
-		r.add(&repoInfo{RelPath: "nested/a", AbsPath: "/repo/other", BaseBranch: "develop"})
+		r.add(&RepoInfo{RelPath: "nested/a", AbsPath: "/repo/other", BaseBranch: "develop"})
 		got = r.snapshot()
 		if len(got) != 1 || got[0].AbsPath != "/repo/other" {
 			t.Fatalf("same rel add = %+v, want one repo with updated abs path", got)
@@ -96,7 +96,7 @@ func TestRepoRegistry(t *testing.T) {
 			wg.Add(2)
 			go func() {
 				defer wg.Done()
-				info := repoInfo{RelPath: fmt.Sprintf("r-%d", i), AbsPath: fmt.Sprintf("/repo/%d", i), ForgeOwner: "o", ForgeRepo: "p"}
+				info := RepoInfo{RelPath: fmt.Sprintf("r-%d", i), AbsPath: fmt.Sprintf("/repo/%d", i), ForgeOwner: "o", ForgeRepo: "p"}
 				r.add(&info)
 			}()
 			go func() {
