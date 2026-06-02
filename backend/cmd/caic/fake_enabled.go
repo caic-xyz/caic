@@ -1,6 +1,6 @@
-//go:build e2e
-
 // Implements fake container and agent backends for e2e testing without real SSH or containers.
+
+//go:build e2e
 
 package main
 
@@ -8,18 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/fake"
-	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server"
+	"github.com/caic-xyz/caic/backend/internal/smoketest"
 )
 
 const isFakeMode = true
@@ -29,13 +25,13 @@ const isFakeMode = true
 func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile string) (retErr error) {
 	addr = localizeAddr(addr)
 
-	// Always create a temp git repo — fake mode doesn't use real repos.
+	// Always create a temp git repo; fake mode doesn't use real repos.
 	tmpDir, err := os.MkdirTemp("", "caic-e2e-*")
 	if err != nil {
 		return err
 	}
 	defer func() { retErr = errors.Join(retErr, os.RemoveAll(tmpDir)) }()
-	clone, err := initFakeRepo(ctx, tmpDir)
+	clone, err := smoketest.InitRepo(ctx, tmpDir)
 	if err != nil {
 		return fmt.Errorf("init fake repo: %w", err)
 	}
@@ -88,7 +84,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 
 	// Pre-populate the harness model cache so refreshHarnessModels skips
 	// launching temporary containers for Pi and OpenCode model discovery.
-	if err := initFakeHarnessCache(fakeLogsDir); err != nil {
+	if err := smoketest.InitHarnessCache(fakeLogsDir); err != nil {
 		return fmt.Errorf("init fake harness cache: %w", err)
 	}
 	cfg.SkipWarmup = true
@@ -106,172 +102,17 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 	}
 
 	// Start a fake VNC server serving a generated IDE screenshot.
-	fvnc, err := startFakeVNC(ctx)
+	fvnc, err := smoketest.StartVNC(ctx)
 	if err != nil {
 		return fmt.Errorf("start fake VNC: %w", err)
 	}
 	defer func() { retErr = errors.Join(retErr, fvnc.Close()) }()
 
-	fc := &fakeContainer{vncPort: fvnc.Port()}
-	fb := fake.New()
+	fc := smoketest.NewRuntimeBackend(fvnc.Port())
+	fb := smoketest.NewFakeBackend()
 	srv.SetRunnerBackends(fc, map[agent.Harness]agent.Backend{fb.Harness(): fb})
-	srv.SetFakeProcesses(fakeProcesses, fakeSignal)
-	srv.SetUsageFetchers(fakeUsageFetchers())
+	srv.SetUsageFetchers(smoketest.UsageFetchers())
+	srv.SetFakeCI(smoketest.SimulateCI)
 
 	return srv.Serve(ctx, ln)
-}
-
-// initFakeRepo creates two fake repos (clone and clone2) in tmpDir so that the
-// add-repo button is visible after the first repo is auto-selected on load.
-// Returns the path to the primary clone.
-func initFakeRepo(ctx context.Context, tmpDir string) (string, error) {
-	if err := initOneRepo(ctx, tmpDir, "remote.git", "clone"); err != nil {
-		return "", err
-	}
-	if err := initOneRepo(ctx, tmpDir, "remote2.git", "clone2"); err != nil {
-		return "", err
-	}
-	return filepath.Join(tmpDir, "clone"), nil
-}
-
-// initOneRepo initialises a bare remote and a clone under tmpDir.
-func initOneRepo(ctx context.Context, tmpDir, bareName, cloneName string) error {
-	bare := filepath.Join(tmpDir, bareName)
-	clone := filepath.Join(tmpDir, cloneName)
-	for _, args := range [][]string{
-		{"init", "--bare", bare},
-		{"init", clone},
-		{"-C", clone, "config", "user.name", "Test"},
-		{"-C", clone, "config", "user.email", "test@test.com"},
-		{"-C", clone, "checkout", "-b", "main"},
-	} {
-		if err := runGit(ctx, args...); err != nil {
-			return err
-		}
-	}
-	if err := os.WriteFile(filepath.Join(clone, "README.md"), []byte("hello\n"), 0o600); err != nil {
-		return err
-	}
-	for _, args := range [][]string{
-		{"-C", clone, "add", "."},
-		{"-C", clone, "commit", "-m", "init"},
-		{"-C", clone, "remote", "add", "origin", bare},
-		{"-C", clone, "push", "-u", "origin", "main"},
-	} {
-		if err := runGit(ctx, args...); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// initFakeHarnessCache pre-populates the harness model cache with fresh
-// dummy entries so refreshHarnessModels skips launching temp containers
-// for Pi and OpenCode model discovery during e2e tests.
-func initFakeHarnessCache(cacheDir string) error {
-	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-	for _, h := range []agent.Harness{agent.Pi, agent.OpenCode} {
-		cache.SetModels(h, []string{"fake-model"}, "")
-	}
-	return nil
-}
-
-// copyFile copies a file from src to dst.
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Close()
-}
-
-func runGit(ctx context.Context, args ...string) error {
-	out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput() //nolint:gosec // args are hardcoded git subcommands
-	if err != nil {
-		return fmt.Errorf("git %v: %w\n%s", args, err, out)
-	}
-	return nil
-}
-
-// fakeContainer implements runtime.Backend with no-op operations.
-type fakeContainer struct {
-	vncPort int // non-zero when a fake VNC server is running.
-}
-
-var _ runtime.Backend = (*fakeContainer)(nil)
-
-func (*fakeContainer) Launch(_ context.Context, repos []runtime.Repo, _ *runtime.StartOptions) (runtime.InstanceID, error) {
-	if len(repos) == 0 {
-		return "md-test-no-repo", nil
-	}
-	return runtime.InstanceID("md-test-" + strings.ReplaceAll(repos[0].Branch, "/", "-")), nil
-}
-
-func (*fakeContainer) Connect(_ context.Context, _ runtime.InstanceID, _ *runtime.StartOptions) (runtime.ConnectionInfo, error) {
-	return runtime.ConnectionInfo{}, nil
-}
-
-func (*fakeContainer) Diff(_ context.Context, _ runtime.InstanceID, _ int, _ ...string) (string, error) {
-	return "", nil
-}
-
-func (*fakeContainer) Fetch(_ context.Context, _ runtime.InstanceID) error { return nil }
-func (*fakeContainer) Stop(_ context.Context, _ runtime.InstanceID) error  { return nil }
-func (*fakeContainer) Purge(_ context.Context, _ runtime.InstanceID) error {
-	return nil
-}
-func (*fakeContainer) Revive(_ context.Context, _ runtime.InstanceID) error {
-	return nil
-}
-
-func (*fakeContainer) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *runtime.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
-	return "fake-fork", nil, fmt.Errorf("fork not supported in fake mode")
-}
-
-func (fc *fakeContainer) VNCPort(_ context.Context, _ runtime.InstanceID) int { return fc.vncPort }
-
-func (*fakeContainer) Processes(_ context.Context, _ runtime.InstanceID) ([]runtime.ProcessInfo, error) {
-	return fakeProcesses(nil, "")
-}
-
-func (*fakeContainer) Signal(_ context.Context, _ runtime.InstanceID, _ int, _ string) error {
-	return nil
-}
-
-// fakeProcesses returns a canned process tree for e2e screenshots:
-//
-//	init(1)
-//	  sshd(42)
-//	    sshd-session(99)
-//	      bash(100)
-//	        node(200) — agent harness
-//	        make(201)
-//	          gcc(300)
-//	          gcc(301)
-//	        ps(202)
-func fakeProcesses(_ context.Context, _ string) ([]runtime.ProcessInfo, error) {
-	return []runtime.ProcessInfo{
-		{PID: 1, PPID: 0, User: "root", State: "S", CPU: 0.0, Mem: 0.1, Time: "0:00", Command: "/sbin/init"},
-		{PID: 42, PPID: 1, User: "root", State: "S", CPU: 0.0, Mem: 0.2, Time: "0:01", Command: "sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups"},
-		{PID: 99, PPID: 42, User: "root", State: "S", CPU: 0.0, Mem: 0.3, Time: "0:00", Command: "sshd: user [priv]"},
-		{PID: 100, PPID: 99, User: "user", State: "S", CPU: 0.1, Mem: 0.5, Time: "0:02", Command: "-bash"},
-		{PID: 200, PPID: 100, User: "user", State: "R", CPU: 45.2, Mem: 12.3, Time: "1:23", Command: "node /home/user/.npm/_npx/abc123/node_modules/.bin/claude --dangerously-skip-permissions"},
-		{PID: 201, PPID: 100, User: "user", State: "S", CPU: 0.0, Mem: 0.1, Time: "0:00", Command: "make -j$(nproc)"},
-		{PID: 300, PPID: 201, User: "user", State: "R", CPU: 98.7, Mem: 5.6, Time: "0:45", Command: "/usr/lib/gcc/x86_64-linux-gnu/14/cc1 -quiet -Iinclude -D_FORTIFY_SOURCE=2 src/main.c -o /tmp/ccXyz.s"},
-		{PID: 301, PPID: 201, User: "user", State: "R", CPU: 97.1, Mem: 4.8, Time: "0:42", Command: "/usr/lib/gcc/x86_64-linux-gnu/14/cc1 -quiet -Iinclude -D_FORTIFY_SOURCE=2 src/parser.c -o /tmp/ccAbc.s"},
-		{PID: 202, PPID: 100, User: "user", State: "R", CPU: 0.3, Mem: 0.1, Time: "0:00", Command: "ps -eo pid,ppid,user,stat,%cpu,%mem,time,args"},
-	}, nil
-}
-
-func fakeSignal(_ context.Context, _ string, _ int, _ string) error {
-	return nil
 }

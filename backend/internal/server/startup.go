@@ -203,6 +203,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		forge:              newForgeManager(cfg.GitHubToken, cfg.GitLabToken, nil),
 		ciCache:            cache,
 		backend:            backend,
+		runtimeBackend:     backend,
 		repoReg:            newRepoRegistry(nil),
 	}
 	s.githubWebhookSecret = cfg.GitHubWebhookSecret

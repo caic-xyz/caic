@@ -1,13 +1,12 @@
-//go:build e2e
-
 // Minimal VNC (RFB) server that serves a fake IDE screenshot for e2e
-// documentation. Generates the image in-memory — no external dependencies.
+// documentation. Generates the image in-memory - no external dependencies.
 
-package main
+package smoketest
 
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -15,47 +14,55 @@ import (
 	"net"
 )
 
-// fakeVNCServer listens on a random localhost port and serves a single
+const (
+	framebufferW  uint16 = 960
+	framebufferH  uint16 = 600
+	serverName           = "caic-e2e"
+	serverNameLen uint32 = 8
+)
+
+// VNCServer listens on a random localhost port and serves a single
 // generated screenshot to every connecting VNC client.
-type fakeVNCServer struct {
+type VNCServer struct {
 	ln   net.Listener
 	port int
 	img  []byte // raw RGBA pixel data
-	w, h int
-	done chan struct{}
+	w, h uint16
 }
 
-// startFakeVNC creates the fake VNC server and starts accepting connections.
-func startFakeVNC(ctx context.Context) (*fakeVNCServer, error) {
+// StartVNC creates the fake VNC server and starts accepting connections.
+func StartVNC(ctx context.Context) (*VNCServer, error) {
 	img := generateFakeScreenshot()
-	w, h := img.Rect.Dx(), img.Rect.Dy()
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
-	fv := &fakeVNCServer{
+	addr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = ln.Close()
+		return nil, fmt.Errorf("listen address has type %T, want *net.TCPAddr", ln.Addr())
+	}
+	fv := &VNCServer{
 		ln:   ln,
-		port: ln.Addr().(*net.TCPAddr).Port,
+		port: addr.Port,
 		img:  img.Pix,
-		w:    w,
-		h:    h,
-		done: make(chan struct{}),
+		w:    framebufferW,
+		h:    framebufferH,
 	}
 	go fv.serve()
 	return fv, nil
 }
 
 // Port returns the TCP port the server is listening on.
-func (fv *fakeVNCServer) Port() int { return fv.port }
+func (fv *VNCServer) Port() int { return fv.port }
 
 // Close stops the VNC listener.
-func (fv *fakeVNCServer) Close() error {
-	close(fv.done)
+func (fv *VNCServer) Close() error {
 	return fv.ln.Close()
 }
 
-func (fv *fakeVNCServer) serve() {
+func (fv *VNCServer) serve() {
 	for {
 		conn, err := fv.ln.Accept()
 		if err != nil {
@@ -67,24 +74,30 @@ func (fv *fakeVNCServer) serve() {
 
 // handle runs the RFB protocol handshake and serves the screenshot.
 // Implements RFB 3.8 with no authentication and raw encoding.
-func (fv *fakeVNCServer) handle(conn net.Conn) {
-	defer conn.Close()
+func (fv *VNCServer) handle(conn net.Conn) {
+	defer func() { _ = conn.Close() }()
 
 	buf := make([]byte, 256)
 
-	// ProtocolVersion: server → client.
-	conn.Write([]byte("RFB 003.008\n"))
+	// ProtocolVersion: server -> client.
+	if err := writeFull(conn, []byte("RFB 003.008\n")); err != nil {
+		return
+	}
 	if _, err := io.ReadFull(conn, buf[:12]); err != nil {
 		return
 	}
 
 	// Security: offer "None" (type 1).
-	conn.Write([]byte{1, 1}) // number-of-types=1, type=1 (None)
+	if err := writeFull(conn, []byte{1, 1}); err != nil {
+		return
+	}
 	if _, err := io.ReadFull(conn, buf[:1]); err != nil {
 		return
 	}
 	// SecurityResult: OK.
-	conn.Write([]byte{0, 0, 0, 0})
+	if err := writeFull(conn, []byte{0, 0, 0, 0}); err != nil {
+		return
+	}
 
 	// ClientInit: shared-flag (ignored).
 	if _, err := io.ReadFull(conn, buf[:1]); err != nil {
@@ -93,8 +106,8 @@ func (fv *fakeVNCServer) handle(conn net.Conn) {
 
 	// ServerInit: framebuffer dimensions + pixel format + name.
 	var si []byte
-	si = binary.BigEndian.AppendUint16(si, uint16(fv.w))
-	si = binary.BigEndian.AppendUint16(si, uint16(fv.h))
+	si = binary.BigEndian.AppendUint16(si, fv.w)
+	si = binary.BigEndian.AppendUint16(si, fv.h)
 	// Pixel format (16 bytes): 32-bit RGB, little-endian, red/green/blue at shifts 0/8/16.
 	// This matches Go's image.RGBA.Pix layout: [R, G, B, A, ...].
 	pf := []byte{
@@ -111,10 +124,11 @@ func (fv *fakeVNCServer) handle(conn net.Conn) {
 		0, 0, 0, // padding
 	}
 	si = append(si, pf...)
-	name := "caic-e2e"
-	si = binary.BigEndian.AppendUint32(si, uint32(len(name)))
-	si = append(si, []byte(name)...)
-	conn.Write(si)
+	si = binary.BigEndian.AppendUint32(si, serverNameLen)
+	si = append(si, []byte(serverName)...)
+	if err := writeFull(conn, si); err != nil {
+		return
+	}
 
 	// Message loop: handle client requests.
 	for {
@@ -123,7 +137,7 @@ func (fv *fakeVNCServer) handle(conn net.Conn) {
 			return
 		}
 		switch msgType[0] {
-		case 0: // SetPixelFormat (19 bytes after type) — ignore.
+		case 0: // SetPixelFormat (19 bytes after type) - ignore.
 			_, _ = io.ReadFull(conn, buf[:19])
 		case 2: // SetEncodings: 1 padding + 2 count + n*4 encodings.
 			if _, err := io.ReadFull(conn, buf[:3]); err != nil {
@@ -139,14 +153,15 @@ func (fv *fakeVNCServer) handle(conn net.Conn) {
 			}
 			incremental := buf[0]
 			if incremental == 0 {
-				fv.sendUpdate(conn)
-			} else {
-				// No changes — send zero-rectangle update.
-				conn.Write([]byte{0, 0, 0, 0})
+				if err := fv.sendUpdate(conn); err != nil {
+					return
+				}
+			} else if err := writeFull(conn, []byte{0, 0, 0, 0}); err != nil {
+				return
 			}
-		case 4: // KeyEvent (7 bytes after type) — ignore.
+		case 4: // KeyEvent (7 bytes after type) - ignore.
 			_, _ = io.ReadFull(conn, buf[:7])
-		case 5: // PointerEvent (5 bytes after type) — ignore.
+		case 5: // PointerEvent (5 bytes after type) - ignore.
 			_, _ = io.ReadFull(conn, buf[:5])
 		case 6: // ClientCutText: 3 padding + 4 length + text.
 			if _, err := io.ReadFull(conn, buf[:7]); err != nil {
@@ -157,28 +172,42 @@ func (fv *fakeVNCServer) handle(conn net.Conn) {
 				return
 			}
 		default:
-			return // unknown message type — close connection.
+			return // unknown message type - close connection.
 		}
 	}
 }
 
 // sendUpdate writes a FramebufferUpdate with one full-screen raw rectangle.
-func (fv *fakeVNCServer) sendUpdate(conn net.Conn) {
-	var hdr []byte
-	hdr = append(hdr, 0)                        // message-type = 0 (FramebufferUpdate)
-	hdr = append(hdr, 0)                        // padding
+func (fv *VNCServer) sendUpdate(conn net.Conn) error {
+	hdr := []byte{0, 0}                         // message-type = 0 (FramebufferUpdate), then padding.
 	hdr = binary.BigEndian.AppendUint16(hdr, 1) // number of rectangles
 	// Rectangle: x, y, w, h, encoding-type (0 = raw).
 	hdr = binary.BigEndian.AppendUint16(hdr, 0)
 	hdr = binary.BigEndian.AppendUint16(hdr, 0)
-	hdr = binary.BigEndian.AppendUint16(hdr, uint16(fv.w))
-	hdr = binary.BigEndian.AppendUint16(hdr, uint16(fv.h))
+	hdr = binary.BigEndian.AppendUint16(hdr, fv.w)
+	hdr = binary.BigEndian.AppendUint16(hdr, fv.h)
 	hdr = append(hdr, 0, 0, 0, 0) // raw encoding
-	conn.Write(hdr)
-	conn.Write(fv.img)
+	if err := writeFull(conn, hdr); err != nil {
+		return err
+	}
+	return writeFull(conn, fv.img)
 }
 
-// ── Screenshot generation ──────────────────────────────────────────────
+func writeFull(w io.Writer, b []byte) error {
+	for len(b) > 0 {
+		n, err := w.Write(b)
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrNoProgress
+		}
+		b = b[n:]
+	}
+	return nil
+}
+
+// -- Screenshot generation ----------------------------------------------
 
 // Colours used in the fake IDE screenshot.
 var (
@@ -199,13 +228,13 @@ var (
 )
 
 func generateFakeScreenshot() *image.RGBA {
-	const w, h = 960, 600
+	const w, h = int(framebufferW), int(framebufferH)
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 
 	// Background.
 	draw.Draw(img, img.Bounds(), image.NewUniform(cBG), image.Point{}, draw.Src)
 
-	// ── Title bar ──
+	// -- Title bar --
 	fillRect(img, 0, 0, w, 36, cTitleBG)
 	// Window title text (colored bars)
 	drawTextBar(img, 12, 10, 200, 18, cWhite)
@@ -218,7 +247,7 @@ func generateFakeScreenshot() *image.RGBA {
 	// Tab labels
 	drawTextBar(img, 12, 44, 140, 16, cWhite)
 
-	// ── Sidebar ──
+	// -- Sidebar --
 	sbW := 200
 	fillRect(img, 0, 68, sbW, h-68-24, cSidebarBG)
 	fillRect(img, sbW, 68, 1, h-68-24, cBorder) // separator
@@ -241,7 +270,7 @@ func generateFakeScreenshot() *image.RGBA {
 		sidebarY += 22
 	}
 
-	// ── Editor area ──
+	// -- Editor area --
 	editorX := sbW + 1 // 201
 	editorY := 68
 
@@ -256,7 +285,7 @@ func generateFakeScreenshot() *image.RGBA {
 		drawTextBar(img, editorX+8, yy, 30, 14, color.RGBA{100, 100, 105, 255})
 	}
 
-	// Code lines — each is a row of colored bars simulating syntax-highlighted text.
+	// Code lines - each is a row of colored bars simulating syntax-highlighted text.
 	type token struct {
 		w int
 		c color.RGBA
@@ -311,12 +340,10 @@ func generateFakeScreenshot() *image.RGBA {
 	// Cursor on line 11
 	cursorLine := 10 // 0-indexed
 	cursorY := editorY + 12 + cursorLine*20
-	cursorX := codeX + 8 + 40 + 6 + 20 + 6 + 10 + 6 // after "task := &Task{Name: name"
-	// approximate
-	cursorX = codeX + 8 + 40 + 6 + 20 + 6 + 10 + 6 + 30 + 6 + 20 + 3
+	cursorX := codeX + 8 + 40 + 6 + 20 + 6 + 10 + 6 + 30 + 6 + 20 + 3
 	fillRect(img, cursorX, cursorY-1, 2, 17, cCursor)
 
-	// ── Status bar ──
+	// -- Status bar --
 	sbY := h - 24
 	fillRect(img, 0, sbY, w, 24, cStatusBG)
 	drawTextBar(img, 10, sbY+5, 180, 14, color.RGBA{255, 255, 255, 255})

@@ -1,23 +1,22 @@
-//go:build e2e
+// Fake CI simulation for smoke and e2e tests.
 
-// Fake CI simulation for e2e tests: sets a PR and cycles checks to success.
-
-package server
+package smoketest
 
 import (
+	"context"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
-// maybeFakeCI polls until the task reaches a non-running state, then sets a
+// SimulateCI polls until the task reaches a reviewable state, then sets a
 // fake PR and transitions CI from pending to success with progressive check
 // completion.
-func (s *Server) maybeFakeCI(t *task.Task) {
+func SimulateCI(ctx context.Context, t *task.Task) {
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-time.After(100 * time.Millisecond):
 		}
@@ -41,7 +40,7 @@ ready:
 	for i := range checks {
 		select {
 		case <-time.After(time.Second):
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			return
 		}
 		checks[i].Status = forge.CheckRunStatusCompleted

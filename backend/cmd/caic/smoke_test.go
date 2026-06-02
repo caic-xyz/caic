@@ -22,10 +22,9 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/fake"
 	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server"
-	"github.com/caic-xyz/caic/backend/internal/usage"
+	"github.com/caic-xyz/caic/backend/internal/smoketest"
 )
 
 // TestSmoke verifies end-to-end: start the server with fake backends, query
@@ -193,15 +192,15 @@ func startSmokeServer(t *testing.T) (string, context.CancelFunc) {
 	t.Setenv("XDG_CONFIG_HOME", xdgDir)
 
 	// Initialize fake repos.
-	clone, err := initFakeRepo(ctx, tmpDir)
+	clone, err := smoketest.InitRepo(ctx, tmpDir)
 	if err != nil {
-		t.Fatalf("initFakeRepo: %v", err)
+		t.Fatalf("InitRepo: %v", err)
 	}
 	rootDir := filepath.Dir(clone)
 
 	// Pre-populate harness model cache.
-	if err := initFakeHarnessCache(cacheDir); err != nil {
-		t.Fatalf("initFakeHarnessCache: %v", err)
+	if err := smoketest.InitHarnessCache(cacheDir); err != nil {
+		t.Fatalf("InitHarnessCache: %v", err)
 	}
 
 	cfg := &server.Config{
@@ -227,11 +226,11 @@ func startSmokeServer(t *testing.T) (string, context.CancelFunc) {
 	}
 
 	// Inject fake backends.
-	fc := &fakeContainer{vncPort: 0}
-	fb := fake.New()
+	fc := smoketest.NewRuntimeBackend(0)
+	fb := smoketest.NewFakeBackend()
 	srv.SetRunnerBackends(fc, map[agent.Harness]agent.Backend{fb.Harness(): fb})
-	srv.SetFakeProcesses(fakeProcesses, fakeSignal)
-	srv.SetUsageFetchers([]usage.ProviderFetcher{})
+	srv.SetUsageFetchers(smoketest.UsageFetchers())
+	srv.SetFakeCI(smoketest.SimulateCI)
 
 	// Start serving in background.
 	go func() {

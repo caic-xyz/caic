@@ -29,9 +29,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
+
+type fakeCIHook func(ctx context.Context, t *task.Task)
 
 type repoInfo struct {
 	RelPath          string // e.g. "github/caic" — used as API ID.
@@ -171,18 +174,19 @@ type Server struct {
 	// Immutable after construction.
 
 	// Core infrastructure.
-	ctx       context.Context // server-lifetime context; outlives individual HTTP requests
-	absRoot   string          // absolute path to the root repos directory
-	repoReg   *repoRegistry   // owns the managed-repo set and per-repo CI status (self-locking)
-	taskMgr   *tasks.Manager  // task orchestration layer
-	mdClient  *md.Client
-	backend   *container.Backend // container backend for runner creation
-	logDir    string
-	cacheDir  string
-	ciCache   *forgecache.Cache
-	provider  genai.Provider // nil if LLM not configured
-	Bot       *bot.Bot
-	ciService *ci.Service // handles forge event-driven task automation
+	ctx            context.Context // server-lifetime context; outlives individual HTTP requests
+	absRoot        string          // absolute path to the root repos directory
+	repoReg        *repoRegistry   // owns the managed-repo set and per-repo CI status (self-locking)
+	taskMgr        *tasks.Manager  // task orchestration layer
+	mdClient       *md.Client
+	backend        *container.Backend // container backend for runner creation and maintenance
+	runtimeBackend runtime.Backend    // runtime backend used by route-level container operations
+	logDir         string
+	cacheDir       string
+	ciCache        *forgecache.Cache
+	provider       genai.Provider // nil if LLM not configured
+	Bot            *bot.Bot
+	ciService      *ci.Service // handles forge event-driven task automation
 
 	// Profiling.
 	pprof bool
@@ -210,6 +214,7 @@ type Server struct {
 	sessionSecret []byte          // nil when auth disabled
 	hostState     *auth.HostState // non-nil when ExternalURL is set (static or auto)
 	usageFetchers []usage.ProviderFetcher
+	fakeCI        fakeCIHook // nil outside smoke/e2e tests.
 
 	// IP geolocation.
 	ipgeoChecker *ipgeo.Checker
@@ -219,10 +224,11 @@ type Server struct {
 
 	mu       sync.Mutex
 	warnings []serverWarning // ring buffer of recent CI warnings for SSE clients; guarded by mu
+}
 
-	// Fake hooks injected during e2e testing.
-	fakeProcesses func(ctx context.Context, containerName string) ([]runtime.ProcessInfo, error)
-	fakeSignal    func(ctx context.Context, containerName string, pid int, sig string) error
+// SetFakeCI injects a fake CI simulation hook for smoke and e2e tests.
+func (s *Server) SetFakeCI(f func(context.Context, *task.Task)) {
+	s.fakeCI = f
 }
 
 // Serve starts the HTTP server on an already-open listener and blocks until
@@ -261,6 +267,13 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		return nil
 	}
 	return err
+}
+
+func (s *Server) maybeFakeCI(t *task.Task) {
+	if s.fakeCI == nil {
+		return
+	}
+	s.fakeCI(s.ctx, t)
 }
 
 // buildHandler assembles the full HTTP handler. Extracted from Serve so that

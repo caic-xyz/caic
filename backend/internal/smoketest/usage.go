@@ -1,9 +1,6 @@
-//go:build e2e
+// Fake usage providers that return canned quota data for smoke and e2e tests.
 
-// Fake usage providers that return canned quota data for e2e testing,
-// simulating Anthropic and Codex OAuth usage responses.
-
-package main
+package smoketest
 
 import (
 	"context"
@@ -20,14 +17,23 @@ type fakeFetcher struct {
 	resp     usage.ProviderQuota
 }
 
-func (f *fakeFetcher) Provider() string                           { return f.provider }
-func (f *fakeFetcher) Label() string                              { return f.label }
-func (f *fakeFetcher) AuthKind() string                           { return f.authKind }
-func (f *fakeFetcher) UsageURL() string                           { return "https://example.com" }
+// Provider implements usage.ProviderFetcher.
+func (f *fakeFetcher) Provider() string { return f.provider }
+
+// Label implements usage.ProviderFetcher.
+func (f *fakeFetcher) Label() string { return f.label }
+
+// AuthKind implements usage.ProviderFetcher.
+func (f *fakeFetcher) AuthKind() string { return f.authKind }
+
+// UsageURL implements usage.ProviderFetcher.
+func (f *fakeFetcher) UsageURL() string { return "https://example.com" }
+
+// Get implements usage.ProviderFetcher.
 func (f *fakeFetcher) Get(_ context.Context) *usage.ProviderQuota { return &f.resp }
 
-// fakeUsageFetchers returns canned Anthropic and Codex usage for e2e tests.
-func fakeUsageFetchers() []usage.ProviderFetcher {
+// UsageFetchers returns canned Anthropic and Codex usage for smoke and e2e tests.
+func UsageFetchers() []usage.ProviderFetcher {
 	now := time.Now().UTC()
 	fiveHourReset := now.Add(2 * time.Hour)
 	sevenDayReset := now.Add(3 * 24 * time.Hour)

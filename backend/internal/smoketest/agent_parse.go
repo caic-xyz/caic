@@ -1,9 +1,7 @@
-//go:build e2e
-
 // Flat NDJSON parser for the fake agent. Each line is a JSON object whose
 // "type" field maps directly to an agent.Message type.
 
-package fake
+package smoketest
 
 import (
 	"encoding/json"
@@ -107,7 +105,7 @@ func parseMessage(line []byte) ([]agent.Message, error) {
 	}
 }
 
-// Wire types — thin wrappers matching the flat NDJSON the Python script emits.
+// Wire types: thin wrappers matching the flat NDJSON the Python script emits.
 
 type textDelta struct {
 	Text string `json:"text"`

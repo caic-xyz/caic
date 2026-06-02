@@ -1,11 +1,10 @@
-//go:build e2e
+// Fake agent backend for smoke and e2e tests.
 
-// Package fake implements agent.Backend for e2e testing with a Python script
-// that emits flat NDJSON messages.
-package fake
+package smoketest
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"io"
@@ -14,17 +13,22 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
-// Backend implements agent.Backend using a Python subprocess that cycles
+// fakeScript is the fake agent that cycles through jokes in Claude Code streaming JSON format.
+//
+//go:embed fake_agent.py
+var fakeScript []byte
+
+// FakeBackend implements agent.Backend using a Python subprocess that cycles
 // through canned responses in a flat NDJSON wire format.
-type Backend struct {
+type FakeBackend struct {
 	agent.Base
 }
 
-var _ agent.Backend = (*Backend)(nil)
+var _ agent.Backend = (*FakeBackend)(nil)
 
-// New creates a fake backend for e2e testing.
-func New() *Backend {
-	return &Backend{Base: agent.Base{
+// NewFakeBackend creates a fake backend for smoke and e2e testing.
+func NewFakeBackend() *FakeBackend {
+	return &FakeBackend{Base: agent.Base{
 		HarnessID:     "fake",
 		ModelList:     []string{"fake-model"},
 		Images:        true,
@@ -33,20 +37,22 @@ func New() *Backend {
 	}}
 }
 
-// WritePrompt writes the prompt as plain text. The fake Python agent reads
-// lines from stdin and matches keywords — it does not parse JSON input.
-func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
+// WritePrompt writes the prompt as plain text.
+//
+// The fake Python agent reads lines from stdin and matches keywords; it does
+// not parse JSON input.
+func (*FakeBackend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
 	return agent.PlainTextWritePrompt(w, p, logW)
 }
 
 // ParseMessage decodes a single flat NDJSON line from the fake agent.
-func (*Backend) ParseMessage(line []byte) ([]agent.Message, error) {
+func (*FakeBackend) ParseMessage(line []byte) ([]agent.Message, error) {
 	return parseMessage(line)
 }
 
 // Start launches the embedded fake Python agent as a subprocess.
-func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	cmd := exec.CommandContext(ctx, "python3", "-u", "-c", string(Script)) //nolint:gosec // Script is an embedded constant
+func (b *FakeBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
+	cmd := exec.CommandContext(ctx, "python3", "-u", "-c", string(fakeScript)) //nolint:gosec // fakeScript is an embedded constant
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -71,16 +77,16 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 
 // AgentArgs implements agent.Backend. Returns nil because the fake agent is
 // embedded and not launched via record-trace.
-func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
+func (*FakeBackend) AgentArgs(_ agent.HarnessArgs) []string {
 	return nil
 }
 
 // AttachRelay implements agent.Backend.
-func (*Backend) AttachRelay(context.Context, *agent.Options) (*agent.Session, error) {
+func (*FakeBackend) AttachRelay(context.Context, *agent.Options) (*agent.Session, error) {
 	return nil, errors.New("fake backend does not support relay")
 }
 
 // NewWire implements agent.Backend.
-func (b *Backend) NewWire() agent.WireFormat {
+func (b *FakeBackend) NewWire() agent.WireFormat {
 	return b
 }

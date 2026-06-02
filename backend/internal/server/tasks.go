@@ -648,12 +648,11 @@ func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
 		writeError(w, api.Conflict("task has no container"))
 		return
 	}
-	var procs []runtime.ProcessInfo
-	if s.fakeProcesses != nil {
-		procs, err = s.fakeProcesses(r.Context(), containerName)
-	} else {
-		procs, err = s.backend.Processes(r.Context(), runtime.InstanceID(containerName))
+	if s.runtimeBackend == nil {
+		writeError(w, api.InternalError("runtime backend not configured"))
+		return
 	}
+	procs, err := s.runtimeBackend.Processes(r.Context(), runtime.InstanceID(containerName))
 	if err != nil {
 		writeError(w, api.InternalError(err.Error()))
 		return
@@ -672,14 +671,11 @@ func (s *Server) signalProcess(ctx context.Context, entry *tasks.Entry, req *v1.
 	if containerName == "" {
 		return nil, api.Conflict("task has no container")
 	}
-	if s.fakeSignal != nil {
-		if err := s.fakeSignal(ctx, containerName, req.PID, req.Signal); err != nil {
-			return nil, api.InternalError(err.Error())
-		}
-	} else {
-		if err := s.backend.Signal(ctx, runtime.InstanceID(containerName), req.PID, req.Signal); err != nil {
-			return nil, api.InternalError(err.Error())
-		}
+	if s.runtimeBackend == nil {
+		return nil, api.InternalError("runtime backend not configured")
+	}
+	if err := s.runtimeBackend.Signal(ctx, runtime.InstanceID(containerName), req.PID, req.Signal); err != nil {
+		return nil, api.InternalError(err.Error())
 	}
 	slog.Info("signal sent", "task", t.ID, "container", containerName, "pid", req.PID, "signal", req.Signal)
 	return &v1.StatusResp{Status: "signalled"}, nil
@@ -752,6 +748,7 @@ func (s *Server) taskResolvers() v1conv.TaskResolvers {
 // for all runners.
 func (s *Server) SetRunnerBackends(c runtime.Backend, backends map[agent.Harness]agent.Backend) {
 	s.taskMgr.SetRunnerBackends(c, backends)
+	s.runtimeBackend = c
 }
 
 // SetUsageFetchers replaces the provider usage fetchers used by the usage
@@ -759,13 +756,4 @@ func (s *Server) SetRunnerBackends(c runtime.Backend, backends map[agent.Harness
 // canned data without real API credentials.
 func (s *Server) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
 	s.usageFetchers = fetchers
-}
-
-// SetFakeProcesses injects fake process and signal hooks for e2e testing.
-func (s *Server) SetFakeProcesses(
-	processes func(ctx context.Context, containerName string) ([]runtime.ProcessInfo, error),
-	signal func(ctx context.Context, containerName string, pid int, sig string) error,
-) {
-	s.fakeProcesses = processes
-	s.fakeSignal = signal
 }

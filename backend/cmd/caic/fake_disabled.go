@@ -1,6 +1,6 @@
-//go:build !e2e
-
 // Stub that disables fake/e2e mode in standard builds.
+
+//go:build !e2e
 
 package main
 

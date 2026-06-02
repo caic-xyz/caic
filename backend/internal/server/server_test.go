@@ -28,8 +28,10 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
@@ -790,9 +792,11 @@ func TestSignalProcess(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetContainerInfo("ctr", "", "", 0)
 		insertTestTask(t, s, "t1", tk)
-		s.fakeSignal = func(context.Context, string, int, string) error {
-			t.Fatal("fakeSignal should not be called")
-			return nil
+		s.runtimeBackend = &tasktest.FakeRuntimeBackend{
+			SignalFunc: func(context.Context, runtime.InstanceID, int, string) error {
+				t.Fatal("Signal should not be called")
+				return nil
+			},
 		}
 
 		body := strings.NewReader(`{"signal":"SIGTERM","extra":true}`)
@@ -815,13 +819,15 @@ func TestSignalProcess(t *testing.T) {
 		insertTestTask(t, s, "t1", tk)
 		var gotPID int
 		var gotSignal string
-		s.fakeSignal = func(_ context.Context, containerName string, pid int, sig string) error {
-			if containerName != "ctr" {
-				t.Errorf("container = %q, want ctr", containerName)
-			}
-			gotPID = pid
-			gotSignal = sig
-			return nil
+		s.runtimeBackend = &tasktest.FakeRuntimeBackend{
+			SignalFunc: func(_ context.Context, id runtime.InstanceID, pid int, sig string) error {
+				if id != "ctr" {
+					t.Errorf("container = %q, want ctr", id)
+				}
+				gotPID = pid
+				gotSignal = sig
+				return nil
+			},
 		}
 
 		body := strings.NewReader(`{"signal":"SIGKILL"}`)

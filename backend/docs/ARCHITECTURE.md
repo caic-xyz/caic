@@ -210,6 +210,7 @@ graph TD
     pkg_internal_jsonutil["internal/jsonutil"]
     pkg_internal_preferences["internal/preferences"]
     pkg_internal_runtime["internal/runtime"]
+    pkg_internal_smoketest["internal/smoketest"]
     pkg_internal_usage["internal/usage"]
   end
 
@@ -292,6 +293,11 @@ graph TD
   pkg_internal_server --> pkg_internal_tasks
   pkg_internal_server --> pkg_internal_usage
   pkg_internal_server_voicertc --> pkg_internal_jsonutil
+  pkg_internal_smoketest --> pkg_internal_agent
+  pkg_internal_smoketest --> pkg_internal_forge
+  pkg_internal_smoketest --> pkg_internal_runtime
+  pkg_internal_smoketest --> pkg_internal_task
+  pkg_internal_smoketest --> pkg_internal_usage
   pkg_internal_task --> pkg_internal_agent
   pkg_internal_task --> pkg_internal_agent_claudecode
   pkg_internal_task --> pkg_internal_agent_codex
@@ -343,6 +349,7 @@ graph TD
 | `internal/server` | `frontend`, `internal/agent`, `internal/agent/codex`, `internal/agent/opencode`, `internal/agent/pi`, `internal/api`, `internal/api/v1`, `internal/api/v1conv`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/container`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/github`, `internal/forge/gitlab`, `internal/preferences`, `internal/runtime`, `internal/server/ipgeo`, `internal/server/voicertc`, `internal/task`, `internal/tasks`, `internal/usage` |
 | `internal/server/ipgeo` | None |
 | `internal/server/voicertc` | `internal/jsonutil` |
+| `internal/smoketest` | `internal/agent`, `internal/forge`, `internal/runtime`, `internal/task`, `internal/usage` |
 | `internal/task` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/opencode`, `internal/agent/pi`, `internal/forge`, `internal/jsonutil`, `internal/runtime` |
 | `internal/task/tasktest` | `internal/runtime` |
 | `internal/tasks` | `internal/agent`, `internal/preferences`, `internal/runtime`, `internal/task` |
