@@ -4,7 +4,7 @@ import { useParams } from "@solidjs/router";
 import TaskDetail from "../components/TaskDetail";
 import { useAppState } from "../AppState";
 import { taskIdFromParam } from "../taskPath";
-import styles from "../layout.module.css";
+import { DetailPane } from "../components/Layout";
 
 export default function TaskDetailPage() {
   const s = useAppState();
@@ -16,7 +16,7 @@ export default function TaskDetailPage() {
       {(taskId) => {
         const t = () => s.taskById(taskId);
         return (
-          <div class={styles.detailPane}>
+          <DetailPane>
             <TaskDetail
               taskId={taskId}
               taskState={t()?.state ?? "pending"}
@@ -52,7 +52,7 @@ export default function TaskDetailPage() {
               onInputImages={(imgs) => s.setInputImages(taskId, imgs)}
               onError={s.showWarning}
             />
-          </div>
+          </DetailPane>
         );
       }}
     </Show>

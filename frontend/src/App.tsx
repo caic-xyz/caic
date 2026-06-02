@@ -9,6 +9,7 @@ import RepoChipStrip from "./components/RepoChipStrip";
 import LoginPage from "./pages/LoginPage";
 import AutoResizeTextarea from "./components/AutoResizeTextarea";
 import Button from "./components/Button";
+import { ControlSelect, ToggleChip } from "./components/FormControls";
 import UsageBadges from "./components/UsageBadges";
 import VoiceOverlay from "./components/VoiceOverlay";
 import CloneRepoDialog from "./components/CloneRepoDialog";
@@ -20,7 +21,6 @@ import PersonIcon from "@material-symbols/svg-400/outlined/person.svg?solid";
 import SettingsIcon from "@material-symbols/svg-400/outlined/settings.svg?solid";
 import TailscaleIcon from "./components/tailscale.svg?solid";
 import styles from "./App.module.css";
-import controls from "./controls.module.css";
 
 function ConnectionDot(props: { connected: boolean }) {
   return (
@@ -140,7 +140,7 @@ function Shell(props: { children?: JSX.Element }) {
           </Show>
           <div class={styles.forkRow}>
             <Show when={s.harnesses().length > 1}>
-              <select
+              <ControlSelect
                 value={s.forkHarness()}
                 onChange={(e) => {
                   const h = e.currentTarget.value;
@@ -149,68 +149,60 @@ function Shell(props: { children?: JSX.Element }) {
                   s.setForkModel(models.includes(s.forkModel()) ? s.forkModel() : "");
                   s.setForkEffort("");
                 }}
-                class={controls.modelSelect}
               >
                 <For each={s.harnesses()}>
                   {(h) => <option value={h.name}>{h.name}</option>}
                 </For>
-              </select>
+              </ControlSelect>
             </Show>
             <Show when={(s.harnesses().find((h) => h.name === s.forkHarness())?.models ?? []).length > 0}>
-              <select
+              <ControlSelect
                 value={s.forkModel()}
                 onChange={(e) => s.setForkModel(e.currentTarget.value)}
-                class={controls.modelSelect}
               >
                 <option value="">Default model</option>
                 <For each={s.harnesses().find((h) => h.name === s.forkHarness())?.models ?? []}>
                   {(m) => <option value={m}>{m}</option>}
                 </For>
-              </select>
+              </ControlSelect>
             </Show>
             <Show when={effortOptions(s.forkHarness() as Harness).length > 0}>
-              <select
+              <ControlSelect
                 value={s.forkEffort()}
                 onChange={(e) => s.setForkEffort(e.currentTarget.value)}
-                class={controls.modelSelect}
               >
                 <option value="">Default effort</option>
                 <For each={effortOptions(s.forkHarness() as Harness)}>
                   {(e) => <option value={e}>{e}</option>}
                 </For>
-              </select>
+              </ControlSelect>
             </Show>
           </div>
           <div class={styles.forkRow}>
             <Show when={s.tailscaleAvailable()}>
-              <label class={controls.toggleChip} title="Enable Tailscale networking">
-                <input type="checkbox" checked={s.forkTailscale()} onChange={(e) => s.setForkTailscale(e.currentTarget.checked)} />
+              <ToggleChip checked={s.forkTailscale()} title="Enable Tailscale networking" onChange={s.setForkTailscale}>
                 <TailscaleIcon width="1.2em" height="1.2em" />
-              </label>
+              </ToggleChip>
             </Show>
             <Show when={s.usbAvailable()}>
-              <label class={controls.toggleChip} title="Enable USB passthrough">
-                <input type="checkbox" checked={s.forkUSB()} onChange={(e) => s.setForkUSB(e.currentTarget.checked)} />
+              <ToggleChip checked={s.forkUSB()} title="Enable USB passthrough" onChange={s.setForkUSB}>
                 <USBIcon width="1.2em" height="1.2em" />
-              </label>
+              </ToggleChip>
             </Show>
             <Show when={s.displayAvailable()}>
-              <label class={controls.toggleChip} title="Enable virtual display">
-                <input type="checkbox" checked={s.forkDisplay()} onChange={(e) => s.setForkDisplay(e.currentTarget.checked)} />
+              <ToggleChip checked={s.forkDisplay()} title="Enable virtual display" onChange={s.setForkDisplay}>
                 <DisplayIcon width="1.2em" height="1.2em" />
-              </label>
+              </ToggleChip>
             </Show>
             <Show when={s.sudoAvailable()}>
-              <label class={controls.toggleChip} title="Enable root access">
-                <input type="checkbox" checked={s.forkSudo()} onChange={(e) => s.setForkSudo(e.currentTarget.checked)} />
+              <ToggleChip checked={s.forkSudo()} title="Enable root access" onChange={s.setForkSudo}>
                 <SudoIcon width="1.2em" height="1.2em" />
-              </label>
+              </ToggleChip>
             </Show>
             <Show when={s.gitHubTokenAvailable()}>
-              <label class={controls.toggleChip} title="Enable GitHub token">
-                <input type="checkbox" checked={s.forkGitHubToken()} onChange={(e) => s.setForkGitHubToken(e.currentTarget.checked)} />
+              <ToggleChip checked={s.forkGitHubToken()} title="Enable GitHub token" onChange={s.setForkGitHubToken}>
                 <TokenIcon width="1.2em" height="1.2em" />
-              </label>
+              </ToggleChip>
             </Show>
           </div>
           <div class={styles.forkActions}>

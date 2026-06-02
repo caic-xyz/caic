@@ -4,7 +4,7 @@ import { useParams } from "@solidjs/router";
 import DiffDetail from "../components/DiffDetail";
 import { useAppState } from "../AppState";
 import { taskIdFromParam, taskPath } from "../taskPath";
-import styles from "../layout.module.css";
+import { DetailPane } from "../components/Layout";
 
 export default function DiffPage() {
   const s = useAppState();
@@ -20,14 +20,14 @@ export default function DiffPage() {
           return task ? taskPath(task.id, task.repos?.[0]?.name ?? "", task.repos?.[0]?.branch ?? "", task.title) : `/task/@${taskId}`;
         };
         return (
-          <div class={styles.detailPane}>
+          <DetailPane>
             <DiffDetail
               taskId={taskId}
               diffStat={t()?.diffStat ?? []}
               repos={(t()?.repos ?? []).map((r) => ({ name: r.name, branch: r.branch }))}
               taskPath={tp()}
             />
-          </div>
+          </DetailPane>
         );
       }}
     </Show>

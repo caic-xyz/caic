@@ -1,5 +1,4 @@
-/* Shared two-column layout: the sidebar + detail-pane split and the detail pane
-   slot, used by MainLayout, SettingsPane, and the routed detail panes. */
+/* Shared layout component styles for route panes and detail-pane slots. */
 
 .layout {
   display: flex;

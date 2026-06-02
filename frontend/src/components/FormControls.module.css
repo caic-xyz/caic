@@ -1,7 +1,6 @@
-/* Shared form controls: model/effort selects and capability toggle chips,
-   used by the new-task form (MainLayout) and the fork dialog (App shell). */
+/* Shared form control component styles for selects and capability toggle chips. */
 
-.modelSelect {
+.select {
   padding: 0.35rem 0.5rem;
   font: inherit;
   font-size: 0.9rem;
@@ -14,16 +13,16 @@
   min-width: 0;
 }
 
-.modelSelect:hover:not(:disabled) {
+.select:hover:not(:disabled) {
   background: var(--color-bg-input-hover);
 }
 
-.modelSelect:focus {
+.select:focus {
   outline: none;
   box-shadow: 0 0 0 2px var(--color-primary-ring);
 }
 
-.modelSelect:disabled {
+.select:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -59,7 +58,7 @@
 
 /* Mobile: <=768px */
 @media (max-width: 768px) {
-  .modelSelect {
+  .select {
     box-sizing: border-box;
     flex: 1 1 auto;
     min-width: 0;

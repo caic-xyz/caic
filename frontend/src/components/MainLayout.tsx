@@ -8,6 +8,8 @@ import TaskList from "./TaskList";
 import { useAppState } from "../AppState";
 import { effortOptions } from "../effortOptions";
 import { voiceConnected, getVoiceTaskNumber } from "../VoiceState";
+import { ControlSelect, ToggleChip } from "./FormControls";
+import { Layout } from "./Layout";
 import SendIcon from "@material-symbols/svg-400/outlined/send.svg?solid";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
@@ -15,8 +17,6 @@ import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid
 import TokenIcon from "./github.svg?solid";
 import TailscaleIcon from "./tailscale.svg?solid";
 import styles from "./MainLayout.module.css";
-import controls from "../controls.module.css";
-import layout from "../layout.module.css";
 
 export default function MainLayout(props: { children?: JSX.Element }) {
   const s = useAppState();
@@ -36,7 +36,7 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           data-testid="repo-chips"
         />
         <Show when={s.harnesses().length > 1}>
-          <select
+          <ControlSelect
             value={s.selectedHarness()}
             onChange={(e) => {
               const h = e.currentTarget.value;
@@ -46,86 +46,78 @@ export default function MainLayout(props: { children?: JSX.Element }) {
               s.setSelectedModel(lastModel && models.includes(lastModel) ? lastModel : "");
               s.setSelectedEffort("");
             }}
-            class={controls.modelSelect}
           >
             <For each={s.harnesses()}>
               {(h) => <option value={h.name}>{h.name}</option>}
             </For>
-          </select>
+          </ControlSelect>
         </Show>
         <Show when={(s.harnesses().find((h) => h.name === s.selectedHarness())?.models ?? []).length > 0}>
-          <select
+          <ControlSelect
             value={s.selectedModel()}
             onChange={(e) => {
               const m = e.currentTarget.value;
               s.setSelectedModel(m);
               s.setPrefModel(s.selectedHarness(), m);
             }}
-            class={controls.modelSelect}
           >
             <option value="">Default model</option>
             <For each={s.harnesses().find((h) => h.name === s.selectedHarness())?.models ?? []}>
               {(m) => <option value={m}>{m}</option>}
             </For>
-          </select>
+          </ControlSelect>
         </Show>
         <Show when={effortOptions(s.selectedHarness() as Harness).length > 0}>
-          <select
+          <ControlSelect
             value={s.selectedEffort()}
             onChange={(e) => s.setSelectedEffort(e.currentTarget.value)}
-            class={controls.modelSelect}
           >
             <option value="">Default effort</option>
             <For each={effortOptions(s.selectedHarness() as Harness)}>
               {(e) => <option value={e}>{e}</option>}
             </For>
-          </select>
+          </ControlSelect>
         </Show>
-        <label class={controls.toggleChip} title={s.tailscaleAvailable() ? "Enable Tailscale networking" : "Tailscale is not available on this server"}>
-          <input
-            type="checkbox"
-            checked={s.tailscaleEnabled()}
-            disabled={!s.tailscaleAvailable()}
-            onChange={(e) => s.setTailscaleEnabled(e.currentTarget.checked)}
-          />
+        <ToggleChip
+          checked={s.tailscaleEnabled()}
+          disabled={!s.tailscaleAvailable()}
+          title={s.tailscaleAvailable() ? "Enable Tailscale networking" : "Tailscale is not available on this server"}
+          onChange={s.setTailscaleEnabled}
+        >
           <TailscaleIcon width="1.2em" height="1.2em" />
-        </label>
-        <label class={controls.toggleChip} title={s.usbAvailable() ? "Enable USB passthrough" : "USB passthrough is not available on this server"}>
-          <input
-            type="checkbox"
-            checked={s.usbEnabled()}
-            disabled={!s.usbAvailable()}
-            onChange={(e) => s.setUSBEnabled(e.currentTarget.checked)}
-          />
+        </ToggleChip>
+        <ToggleChip
+          checked={s.usbEnabled()}
+          disabled={!s.usbAvailable()}
+          title={s.usbAvailable() ? "Enable USB passthrough" : "USB passthrough is not available on this server"}
+          onChange={s.setUSBEnabled}
+        >
           <USBIcon width="1.2em" height="1.2em" />
-        </label>
-        <label class={controls.toggleChip} title={s.displayAvailable() ? "Enable virtual display" : "Virtual display is not available on this server"}>
-          <input
-            type="checkbox"
-            checked={s.displayEnabled()}
-            disabled={!s.displayAvailable()}
-            onChange={(e) => s.setDisplayEnabled(e.currentTarget.checked)}
-          />
+        </ToggleChip>
+        <ToggleChip
+          checked={s.displayEnabled()}
+          disabled={!s.displayAvailable()}
+          title={s.displayAvailable() ? "Enable virtual display" : "Virtual display is not available on this server"}
+          onChange={s.setDisplayEnabled}
+        >
           <DisplayIcon width="1.2em" height="1.2em" />
-        </label>
-        <label class={controls.toggleChip} title={s.sudoAvailable() ? "Enable root access" : "Root access (sudo) is not available on this server"}>
-          <input
-            type="checkbox"
-            checked={s.sudoEnabled()}
-            disabled={!s.sudoAvailable()}
-            onChange={(e) => s.setSudoEnabled(e.currentTarget.checked)}
-          />
+        </ToggleChip>
+        <ToggleChip
+          checked={s.sudoEnabled()}
+          disabled={!s.sudoAvailable()}
+          title={s.sudoAvailable() ? "Enable root access" : "Root access (sudo) is not available on this server"}
+          onChange={s.setSudoEnabled}
+        >
           <SudoIcon width="1.2em" height="1.2em" />
-        </label>
-        <label class={controls.toggleChip} title={s.gitHubTokenAvailable() ? "Enable GitHub token" : "GitHub token is not available on this server"}>
-          <input
-            type="checkbox"
-            checked={s.gitHubTokenEnabled()}
-            disabled={!s.gitHubTokenAvailable()}
-            onChange={(e) => s.setGitHubTokenEnabled(e.currentTarget.checked)}
-          />
+        </ToggleChip>
+        <ToggleChip
+          checked={s.gitHubTokenEnabled()}
+          disabled={!s.gitHubTokenAvailable()}
+          title={s.gitHubTokenAvailable() ? "Enable GitHub token" : "GitHub token is not available on this server"}
+          onChange={s.setGitHubTokenEnabled}
+        >
           <TokenIcon width="1.2em" height="1.2em" />
-        </label>
+        </ToggleChip>
         <PromptInput
           value={s.prompt()}
           onInput={s.setPrompt}
@@ -144,7 +136,7 @@ export default function MainLayout(props: { children?: JSX.Element }) {
         />
       </form>
 
-      <div class={layout.layout}>
+      <Layout>
         <TaskList
           tasks={s.tasks}
           repos={s.repos}
@@ -165,7 +157,7 @@ export default function MainLayout(props: { children?: JSX.Element }) {
           getTaskNumber={getVoiceTaskNumber}
         />
         {props.children}
-      </div>
+      </Layout>
     </>
   );
 }

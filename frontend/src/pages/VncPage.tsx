@@ -3,7 +3,7 @@ import { Show, Suspense, lazy } from "solid-js";
 import { useParams } from "@solidjs/router";
 import { useAppState } from "../AppState";
 import { taskIdFromParam, taskPath } from "../taskPath";
-import styles from "../layout.module.css";
+import { DetailPane } from "../components/Layout";
 
 const VncViewer = lazy(() => import("../components/VncViewer"));
 
@@ -21,7 +21,7 @@ export default function VncPage() {
           return task ? taskPath(task.id, task.repos?.[0]?.name ?? "", task.repos?.[0]?.branch ?? "", task.title) : `/task/@${taskId}`;
         };
         return (
-          <div class={styles.detailPane}>
+          <DetailPane>
             <Suspense fallback={<div style={{ padding: "1rem", color: "var(--color-text-muted)" }}>Loading VNC viewer…</div>}>
               <VncViewer
                 taskId={taskId}
@@ -30,7 +30,7 @@ export default function VncPage() {
                 taskPath={tp()}
               />
             </Suspense>
-          </div>
+          </DetailPane>
         );
       }}
     </Show>

@@ -4,7 +4,7 @@ import { useParams } from "@solidjs/router";
 import ProcessDetail from "../components/ProcessDetail";
 import { useAppState } from "../AppState";
 import { taskIdFromParam, taskPath } from "../taskPath";
-import styles from "../layout.module.css";
+import { DetailPane } from "../components/Layout";
 
 export default function ProcessesPage() {
   const s = useAppState();
@@ -20,14 +20,14 @@ export default function ProcessesPage() {
           return task ? taskPath(task.id, task.repos?.[0]?.name ?? "", task.repos?.[0]?.branch ?? "", task.title) : `/task/@${taskId}`;
         };
         return (
-          <div class={styles.detailPane}>
+          <DetailPane>
             <ProcessDetail
               taskId={taskId}
               repo={t()?.repos?.[0]?.name ?? ""}
               branch={t()?.repos?.[0]?.branch ?? ""}
               taskPath={tp()}
             />
-          </div>
+          </DetailPane>
         );
       }}
     </Show>

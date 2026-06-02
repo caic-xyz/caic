@@ -1,12 +1,12 @@
 // SettingsPage is the /settings route, wiring application state into the settings form.
 import SettingsForm from "../components/SettingsForm";
 import { useAppState } from "../AppState";
-import styles from "../layout.module.css";
+import { Layout } from "../components/Layout";
 
 export default function SettingsPage() {
   const s = useAppState();
   return (
-    <div class={styles.layout}>
+    <Layout>
       <SettingsForm
         selectedImage={s.selectedImage}
         setSelectedImage={s.setSelectedImage}
@@ -29,6 +29,6 @@ export default function SettingsPage() {
         saveSettings={s.saveSettings}
         triggerServerUpdate={s.triggerServerUpdate}
       />
-    </div>
+    </Layout>
   );
 }
