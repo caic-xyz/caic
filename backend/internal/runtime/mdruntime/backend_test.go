@@ -1,6 +1,6 @@
 // Tests for Backend's runtime.Backend logic using fake md seams.
 
-package container
+package mdruntime
 
 import (
 	"context"

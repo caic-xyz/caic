@@ -25,10 +25,10 @@ import (
 	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/api/v1conv"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
@@ -90,6 +90,7 @@ func newTestServer(t *testing.T) *Server {
 	}
 	s := &Server{
 		ctx:          t.Context(),
+		backend:      &mdruntime.Backend{},
 		prefs:        newTestPrefs(t),
 		ipgeoChecker: checker,
 		forge:        newForgeManager("", "", nil),
@@ -140,22 +141,25 @@ func loadPurgedTasksForTest(s *Server) error {
 
 func newRunnerConstructionTestServer(t *testing.T, root string) *Server {
 	harnessEnv := map[string][]string{string(agent.Codex): {"CODEX_HOME=/tmp/codex"}}
-	backend := &container.Backend{HarnessEnv: harnessEnv}
+	backend := &mdruntime.Backend{HarnessEnv: harnessEnv}
 	logDir := filepath.Join(t.TempDir(), "logs")
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	s := &Server{
-		ctx:      t.Context(),
-		absRoot:  root,
-		logDir:   logDir,
-		cacheDir: cacheDir,
-		backend:  backend,
-		repoReg:  newRepoRegistry(nil),
+		ctx:            t.Context(),
+		absRoot:        root,
+		logDir:         logDir,
+		cacheDir:       cacheDir,
+		backend:        backend,
+		runtimeBackend: backend,
+		agentBackends:  map[agent.Harness]agent.Backend{agent.Codex: stubBackend{}},
+		repoReg:        newRepoRegistry(nil),
 	}
 	s.taskMgr = tasks.New(tasks.Config{
 		ServerCtx:  t.Context(),
 		LogDir:     logDir,
 		CacheDir:   cacheDir,
 		Backend:    backend,
+		Backends:   s.agentBackends,
 		HarnessEnv: harnessEnv,
 	})
 	return s
@@ -1708,136 +1712,157 @@ func TestConfigValidate(t *testing.T) {
 	})
 	t.Run("PAT only is valid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitHubToken: "ghp_abc", GitLabToken: "glpat-abc"}
+		c := &Config{GitHub: GitHubConfig{Token: "ghp_abc"}, GitLab: GitLabConfig{Token: "glpat-abc"}}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
 	t.Run("OAuth with ExternalURL and allowlist is valid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com", GitHubOAuthAllowedUsers: "alice,bob"}
+		c := &Config{
+			GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: "alice,bob"},
+			Auth:   AuthConfig{ExternalURL: "https://caic.example.com"},
+		}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
 	t.Run("ExternalURL auto is valid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{ExternalURL: "auto"}
+		c := &Config{Auth: AuthConfig{ExternalURL: "auto"}}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
 	t.Run("OAuth with ExternalURL auto is valid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", GitHubOAuthAllowedUsers: "alice", ExternalURL: "auto"}
+		c := &Config{
+			GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: "alice"},
+			Auth:   AuthConfig{ExternalURL: "auto"},
+		}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
 	t.Run("OAuth without ExternalURL is invalid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", GitHubOAuthAllowedUsers: "alice"}
+		c := &Config{GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: "alice"}}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitHub OAuth without allowlist is invalid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com"}
+		c := &Config{
+			GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec"},
+			Auth:   AuthConfig{ExternalURL: "https://caic.example.com"},
+		}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitLab OAuth without allowlist is invalid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitLabOAuthClientID: "id", GitLabOAuthClientSecret: "sec", ExternalURL: "https://caic.example.com"}
+		c := &Config{
+			GitLab: GitLabConfig{OAuthClientID: "id", OAuthClientSecret: "sec"},
+			Auth:   AuthConfig{ExternalURL: "https://caic.example.com"},
+		}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("OAuth with http ExternalURL is invalid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", GitHubOAuthAllowedUsers: "alice", ExternalURL: "http://caic.example.com"}
+		c := &Config{
+			GitHub: GitHubConfig{OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: "alice"},
+			Auth:   AuthConfig{ExternalURL: "http://caic.example.com"},
+		}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("invalid ExternalURL is invalid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{ExternalURL: "not a url"}
+		c := &Config{Auth: AuthConfig{ExternalURL: "not a url"}}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("ExternalURL with subpath is invalid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{ExternalURL: "https://caic.example.com/sub"}
+		c := &Config{Auth: AuthConfig{ExternalURL: "https://caic.example.com/sub"}}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("ExternalURL with trailing slash is valid and stripped", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{ExternalURL: "https://caic.example.com/"}
+		c := &Config{Auth: AuthConfig{ExternalURL: "https://caic.example.com/"}}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
-		if c.ExternalURL != "https://caic.example.com" {
-			t.Fatalf("ExternalURL trailing slash not stripped: %q", c.ExternalURL)
+		if c.Auth.ExternalURL != "https://caic.example.com" {
+			t.Fatalf("ExternalURL trailing slash not stripped: %q", c.Auth.ExternalURL)
 		}
 	})
 	t.Run("invalid GitLabURL is invalid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitLabURL: "not a url"}
+		c := &Config{GitLab: GitLabConfig{URL: "not a url"}}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitLabURL with subpath is invalid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitLabURL: "https://gitlab.example.com/sub"}
+		c := &Config{GitLab: GitLabConfig{URL: "https://gitlab.example.com/sub"}}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitHub OAuth ID without secret is invalid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitHubOAuthClientID: "id"}
+		c := &Config{GitHub: GitHubConfig{OAuthClientID: "id"}}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitHub OAuth secret without ID is invalid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitHubOAuthClientSecret: "sec"}
+		c := &Config{GitHub: GitHubConfig{OAuthClientSecret: "sec"}}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitLab OAuth ID without secret is invalid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitLabOAuthClientID: "id"}
+		c := &Config{GitLab: GitLabConfig{OAuthClientID: "id"}}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitLab OAuth secret without ID is invalid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitLabOAuthClientSecret: "sec"}
+		c := &Config{GitLab: GitLabConfig{OAuthClientSecret: "sec"}}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}
 	})
 	t.Run("GitHub PAT and OAuth together is valid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitHubToken: "ghp_abc", GitHubOAuthClientID: "id", GitHubOAuthClientSecret: "sec", GitHubOAuthAllowedUsers: "alice", ExternalURL: "https://caic.example.com"}
+		c := &Config{
+			GitHub: GitHubConfig{Token: "ghp_abc", OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: "alice"},
+			Auth:   AuthConfig{ExternalURL: "https://caic.example.com"},
+		}
 		if err := c.Validate(); err != nil {
 			t.Fatalf("Validate() unexpected error: %v", err)
 		}
 	})
 	t.Run("GitLab PAT and OAuth together is invalid", func(t *testing.T) {
 		t.Parallel()
-		c := &Config{GitLabToken: "glpat-abc", GitLabOAuthClientID: "id", GitLabOAuthClientSecret: "sec", GitLabOAuthAllowedUsers: "alice", ExternalURL: "https://caic.example.com"}
+		c := &Config{
+			GitLab: GitLabConfig{Token: "glpat-abc", OAuthClientID: "id", OAuthClientSecret: "sec", OAuthAllowedUsers: "alice"},
+			Auth:   AuthConfig{ExternalURL: "https://caic.example.com"},
+		}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
 		}

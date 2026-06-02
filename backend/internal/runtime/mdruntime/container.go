@@ -1,5 +1,5 @@
-// Package container wraps md container lifecycle operations.
-package container
+// Package mdruntime adapts md containers to caic runtime interfaces.
+package mdruntime
 
 import (
 	"bufio"
@@ -16,7 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
-// New creates an md.Client for container operations.
+// New creates an md.Client for the md runtime adapter.
 // runtimeName selects the container runtime ("docker" or "podman"); empty means auto-detect.
 func New(tailscaleAPIKey, githubToken, runtimeName string) (*md.Client, error) {
 	c, err := md.New(&SlogWriter{Phase: "init"})

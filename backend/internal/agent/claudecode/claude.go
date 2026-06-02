@@ -11,9 +11,10 @@ import (
 	"os"
 	"path/filepath"
 
+	cc "github.com/maruel/genai/providers/claudecode"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
-	cc "github.com/maruel/genai/providers/claudecode"
 )
 
 // Backend implements agent.Backend for Claude Code.

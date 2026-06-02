@@ -23,6 +23,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/app"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
 )
@@ -204,12 +205,20 @@ func startSmokeServer(t *testing.T) (string, context.CancelFunc) {
 	}
 
 	cfg := &server.Config{
-		ConfigDir:      configDir,
-		CacheDir:       cacheDir,
-		SkipWarmup:     true,
-		DisableLLM:     true,
-		Runtime:        "docker",
-		IPGeoAllowlist: "0.0.0.0/0,::/0",
+		Dirs: server.DirsConfig{
+			ConfigDir: configDir,
+			CacheDir:  cacheDir,
+		},
+		Runtime: server.RuntimeConfig{
+			Name:       "docker",
+			SkipWarmup: true,
+		},
+		LLM: server.LLMConfig{
+			Disable: true,
+		},
+		IPGeo: server.IPGeoConfig{
+			Allowlist: "0.0.0.0/0,::/0",
+		},
 	}
 
 	// Listen on a random port.
@@ -220,7 +229,7 @@ func startSmokeServer(t *testing.T) (string, context.CancelFunc) {
 	}
 	addr := ln.Addr().String()
 
-	srv, err := server.New(ctx, rootDir, cfg)
+	srv, err := app.New(ctx, rootDir, cfg)
 	if err != nil {
 		ln.Close()
 		t.Fatalf("server.New: %v", err)

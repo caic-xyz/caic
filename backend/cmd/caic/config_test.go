@@ -144,7 +144,7 @@ OPENROUTER_API_KEY = "sk-or-test"
 		if err != nil {
 			t.Fatal(err)
 		}
-		piEnv := cfg.HarnessEnv["pi"]
+		piEnv := cfg.Agent.HarnessEnv["pi"]
 		if len(piEnv) != 2 {
 			t.Fatalf("HarnessEnv[pi] = %v, want 2 entries", piEnv)
 		}
@@ -273,35 +273,35 @@ func TestTomlToServerConfig(t *testing.T) {
 		if logLevel != "warn" {
 			t.Errorf("logLevel = %q", logLevel)
 		}
-		if cfg.GitHubToken != "ghp_abc" {
-			t.Errorf("GitHubToken = %q", cfg.GitHubToken)
+		if cfg.GitHub.Token != "ghp_abc" {
+			t.Errorf("GitHubToken = %q", cfg.GitHub.Token)
 		}
-		if cfg.GitHubOAuthAllowedUsers != "alice,bob" {
-			t.Errorf("GitHubOAuthAllowedUsers = %q", cfg.GitHubOAuthAllowedUsers)
+		if cfg.GitHub.OAuthAllowedUsers != "alice,bob" {
+			t.Errorf("GitHubOAuthAllowedUsers = %q", cfg.GitHub.OAuthAllowedUsers)
 		}
-		if cfg.GitHubAppAllowedOwners != "org1,org2" {
-			t.Errorf("GitHubAppAllowedOwners = %q", cfg.GitHubAppAllowedOwners)
+		if cfg.GitHub.AppAllowedOwners != "org1,org2" {
+			t.Errorf("GitHubAppAllowedOwners = %q", cfg.GitHub.AppAllowedOwners)
 		}
-		if string(cfg.GitHubAppPrivateKeyPEM) != "PEM-DATA" {
-			t.Errorf("GitHubAppPrivateKeyPEM = %q", cfg.GitHubAppPrivateKeyPEM)
+		if string(cfg.GitHub.AppPrivateKeyPEM) != "PEM-DATA" {
+			t.Errorf("GitHubAppPrivateKeyPEM = %q", cfg.GitHub.AppPrivateKeyPEM)
 		}
-		if string(cfg.GitHubWebhookSecret) != "hmac" {
-			t.Errorf("GitHubWebhookSecret = %q", cfg.GitHubWebhookSecret)
+		if string(cfg.GitHub.WebhookSecret) != "hmac" {
+			t.Errorf("GitHubWebhookSecret = %q", cfg.GitHub.WebhookSecret)
 		}
-		if cfg.IPGeoDB != filepath.Join(dir, "geo.mmdb") {
-			t.Errorf("IPGeoDB = %q", cfg.IPGeoDB)
+		if cfg.IPGeo.DB != filepath.Join(dir, "geo.mmdb") {
+			t.Errorf("IPGeoDB = %q", cfg.IPGeo.DB)
 		}
-		if cfg.IPGeoAllowlist != "local,tailscale" {
-			t.Errorf("IPGeoAllowlist = %q", cfg.IPGeoAllowlist)
+		if cfg.IPGeo.Allowlist != "local,tailscale" {
+			t.Errorf("IPGeoAllowlist = %q", cfg.IPGeo.Allowlist)
 		}
-		if cfg.GeminiAPIKey != "AIza_from_core_env" {
-			t.Errorf("GeminiAPIKey = %q, want AIza_from_core_env", cfg.GeminiAPIKey)
+		if cfg.Agent.GeminiAPIKey != "AIza_from_core_env" {
+			t.Errorf("GeminiAPIKey = %q, want AIza_from_core_env", cfg.Agent.GeminiAPIKey)
 		}
-		if cfg.CoreEnv["DEEPSEEK_API_KEY"] != "sk_deepseek_from_core_env" {
-			t.Errorf("CoreEnv[DEEPSEEK_API_KEY] = %q, want sk_deepseek_from_core_env", cfg.CoreEnv["DEEPSEEK_API_KEY"])
+		if cfg.Agent.CoreEnv["DEEPSEEK_API_KEY"] != "sk_deepseek_from_core_env" {
+			t.Errorf("CoreEnv[DEEPSEEK_API_KEY] = %q, want sk_deepseek_from_core_env", cfg.Agent.CoreEnv["DEEPSEEK_API_KEY"])
 		}
-		if cfg.TailscaleAPIKey != "tskey_from_core_env" {
-			t.Errorf("TailscaleAPIKey = %q, want tskey_from_core_env", cfg.TailscaleAPIKey)
+		if cfg.Runtime.TailscaleAPIKey != "tskey_from_core_env" {
+			t.Errorf("TailscaleAPIKey = %q, want tskey_from_core_env", cfg.Runtime.TailscaleAPIKey)
 		}
 	})
 
@@ -322,8 +322,8 @@ func TestTomlToServerConfig(t *testing.T) {
 			t.Fatal(err)
 		}
 		wantPath := filepath.Join(dir, "GeoLite2-Country.mmdb")
-		if cfg.IPGeoDB != wantPath {
-			t.Errorf("IPGeoDB = %q, want %q", cfg.IPGeoDB, wantPath)
+		if cfg.IPGeo.DB != wantPath {
+			t.Errorf("IPGeoDB = %q, want %q", cfg.IPGeo.DB, wantPath)
 		}
 	})
 
@@ -339,8 +339,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.IPGeoDB != "" {
-			t.Errorf("IPGeoDB = %q, want empty string", cfg.IPGeoDB)
+		if cfg.IPGeo.DB != "" {
+			t.Errorf("IPGeoDB = %q, want empty string", cfg.IPGeo.DB)
 		}
 	})
 
@@ -359,8 +359,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.GeminiAPIKey != wantKey {
-			t.Errorf("GeminiAPIKey = %q, want %q", cfg.GeminiAPIKey, wantKey)
+		if cfg.Agent.GeminiAPIKey != wantKey {
+			t.Errorf("GeminiAPIKey = %q, want %q", cfg.Agent.GeminiAPIKey, wantKey)
 		}
 	})
 
@@ -379,8 +379,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.TailscaleAPIKey != wantKey {
-			t.Errorf("TailscaleAPIKey = %q, want %q", cfg.TailscaleAPIKey, wantKey)
+		if cfg.Runtime.TailscaleAPIKey != wantKey {
+			t.Errorf("TailscaleAPIKey = %q, want %q", cfg.Runtime.TailscaleAPIKey, wantKey)
 		}
 	})
 }
@@ -397,8 +397,8 @@ func TestTomlToServerConfigEnvFallback(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.GeminiAPIKey != envKey {
-			t.Errorf("GeminiAPIKey = %q, want %q", cfg.GeminiAPIKey, envKey)
+		if cfg.Agent.GeminiAPIKey != envKey {
+			t.Errorf("GeminiAPIKey = %q, want %q", cfg.Agent.GeminiAPIKey, envKey)
 		}
 	})
 
@@ -418,8 +418,8 @@ func TestTomlToServerConfigEnvFallback(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.GeminiAPIKey != configKey {
-			t.Errorf("GeminiAPIKey = %q, want %q", cfg.GeminiAPIKey, configKey)
+		if cfg.Agent.GeminiAPIKey != configKey {
+			t.Errorf("GeminiAPIKey = %q, want %q", cfg.Agent.GeminiAPIKey, configKey)
 		}
 	})
 
@@ -432,8 +432,8 @@ func TestTomlToServerConfigEnvFallback(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.TailscaleAPIKey != envKey {
-			t.Errorf("TailscaleAPIKey = %q, want %q", cfg.TailscaleAPIKey, envKey)
+		if cfg.Runtime.TailscaleAPIKey != envKey {
+			t.Errorf("TailscaleAPIKey = %q, want %q", cfg.Runtime.TailscaleAPIKey, envKey)
 		}
 	})
 }

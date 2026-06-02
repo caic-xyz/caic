@@ -1,6 +1,6 @@
-// RuntimeInfoBackend adapts md.Client inventory, monitoring, and metadata operations.
+// RuntimeInfoBackend adapts md inventory, monitoring, and metadata operations.
 
-package container
+package mdruntime
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
-// RuntimeInfoBackend wraps an md client for runtime-neutral monitoring and metadata.
+// RuntimeInfoBackend wraps an md client for runtime-neutral inventory, monitoring, and metadata.
 type RuntimeInfoBackend struct {
 	c *md.Client
 }

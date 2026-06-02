@@ -39,6 +39,7 @@ type Backend struct {
 
 var (
 	_ agent.Backend          = (*Backend)(nil)
+	_ agent.ModelFetcher     = (*Backend)(nil)
 	_ agent.RecordHandshaker = (*Backend)(nil)
 )
 
@@ -170,6 +171,11 @@ func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
 	// 	"-c", `mcp_servers.widget.args=["` + widgetMCPServerPath + `"]`,
 	// }
 	return codexAppServerArgs()
+}
+
+// FetchModels implements agent.ModelFetcher.
+func (*Backend) FetchModels(ctx context.Context, instance string, extraEnv []string) ([]string, error) {
+	return FetchModels(ctx, instance, extraEnv)
 }
 
 // FetchModels SSHes into the given container, runs codex app-server, fetches

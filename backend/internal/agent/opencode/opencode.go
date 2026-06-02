@@ -34,6 +34,7 @@ type Backend struct {
 }
 
 var _ agent.Backend = (*Backend)(nil)
+var _ agent.ModelFetcher = (*Backend)(nil)
 var _ agent.RecordHandshaker = (*Backend)(nil)
 
 // New creates an OpenCode backend with parser configured. If cacheDir is
@@ -560,6 +561,11 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*oc.JSONRPCMessa
 	case <-ctx.Done():
 		return nil, fmt.Errorf("handshake: %w", ctx.Err())
 	}
+}
+
+// FetchModels implements agent.ModelFetcher.
+func (*Backend) FetchModels(ctx context.Context, instance string, extraEnv []string) ([]string, error) {
+	return FetchModels(ctx, instance, extraEnv)
 }
 
 // FetchModels SSHes into the given container, runs "opencode models", and

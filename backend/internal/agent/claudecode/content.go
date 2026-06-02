@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 	cc "github.com/maruel/genai/providers/claudecode"
+
+	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
 // ContentBlock is a single block within a message's content array.

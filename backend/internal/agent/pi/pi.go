@@ -44,6 +44,7 @@ type Backend struct {
 }
 
 var _ agent.Backend = (*Backend)(nil)
+var _ agent.ModelFetcher = (*Backend)(nil)
 
 // New creates a Pi backend. If cacheDir is non-empty, the model list is loaded
 // from the on-disk harness cache; otherwise a hardcoded default is used.
@@ -704,6 +705,11 @@ func writeSetThinking(w io.Writer, level string, logW io.Writer) error {
 		Level: pi.ThinkingLevel(level),
 	}
 	return writeJSONLine(w, cmd, logW)
+}
+
+// FetchModels implements agent.ModelFetcher.
+func (*Backend) FetchModels(ctx context.Context, instance string, extraEnv []string) ([]string, error) {
+	return FetchModels(ctx, instance, extraEnv)
 }
 
 // FetchModels SSHes into the given container, runs pi --mode rpc --no-session,

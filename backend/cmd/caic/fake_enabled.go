@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/app"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
 )
@@ -53,14 +54,14 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 		return err
 	}
 	defer func() { retErr = errors.Join(retErr, os.RemoveAll(fakeConfigDir)) }()
-	cfg.ConfigDir = fakeConfigDir
+	cfg.Dirs.ConfigDir = fakeConfigDir
 	fakeLogsDir, err := os.MkdirTemp("", "caic-e2e-logs-*")
 	if err != nil {
 		return err
 	}
 	defer func() { retErr = errors.Join(retErr, os.RemoveAll(fakeLogsDir)) }()
-	cfg.CacheDir = fakeLogsDir
-	cfg.DisableLLM = true
+	cfg.Dirs.CacheDir = fakeLogsDir
+	cfg.LLM.Disable = true
 
 	// If a trace file is specified, copy it to the tasks log directory so it
 	// gets loaded as a purged task on startup.
@@ -88,7 +89,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 	if err := smoketest.InitHarnessCache(fakeLogsDir); err != nil {
 		return fmt.Errorf("init fake harness cache: %w", err)
 	}
-	cfg.SkipWarmup = true
+	cfg.Runtime.SkipWarmup = true
 
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", addr)
@@ -97,7 +98,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 	}
 	defer ln.Close()
 
-	srv, err := server.New(ctx, rootDir, cfg)
+	srv, err := app.New(ctx, rootDir, cfg)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}

@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"strings"
 
+	pi "github.com/maruel/genai/providers/pi"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
-	pi "github.com/maruel/genai/providers/pi"
 )
 
 // typeProbe is a minimal routing probe; pi.LineProbe's other fields are unused.

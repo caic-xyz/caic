@@ -1,4 +1,4 @@
-// Registers net/http/pprof handlers when profiling is enabled via Config.Pprof.
+// Registers net/http/pprof handlers when profiling is enabled via Config.Debug.Pprof.
 
 package server
 

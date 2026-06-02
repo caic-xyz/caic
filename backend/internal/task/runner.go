@@ -23,10 +23,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
-	"github.com/caic-xyz/caic/backend/internal/agent/codex"
-	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
-	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -1234,17 +1230,12 @@ func (r *Runner) taskRuntime(t *Task) (runtime.InstanceID, []runtime.Repo, error
 	return id, repos, nil
 }
 
-// initDefaults populates default Backends, timeout values, and the logger.
+// initDefaults populates timeout values and the logger.
 // Safe to call multiple times (sync.Once).
 func (r *Runner) initDefaults() {
 	r.initOnce.Do(func() {
 		if r.Backends == nil {
-			r.Backends = map[agent.Harness]agent.Backend{
-				agent.Claude:   claudecode.New(),
-				agent.Codex:    codex.New(r.CacheDir, r.HarnessEnv[string(agent.Codex)]),
-				agent.OpenCode: opencode.New(r.CacheDir, r.HarnessEnv[string(agent.OpenCode)]),
-				agent.Pi:       pi.New(r.CacheDir, r.HarnessEnv[string(agent.Pi)]),
-			}
+			r.Backends = map[agent.Harness]agent.Backend{}
 		}
 		if r.GitTimeout == 0 {
 			r.GitTimeout = time.Minute

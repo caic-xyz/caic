@@ -748,7 +748,12 @@ func (s *Server) taskResolvers() v1conv.TaskResolvers {
 // for all runners.
 func (s *Server) SetRunnerBackends(c runtime.Backend, backends map[agent.Harness]agent.Backend) {
 	s.taskMgr.SetRunnerBackends(c, backends)
-	s.runtimeBackend = c
+	if c != nil {
+		s.runtimeBackend = c
+	}
+	if backends != nil {
+		s.agentBackends = backends
+	}
 }
 
 // SetUsageFetchers replaces the provider usage fetchers used by the usage

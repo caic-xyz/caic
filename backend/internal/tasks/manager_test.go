@@ -19,8 +19,8 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
-	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 )
@@ -56,7 +56,8 @@ func TestNew(t *testing.T) {
 			ServerCtx:  t.Context(),
 			LogDir:     "/tmp/logs",
 			CacheDir:   "/tmp/cache",
-			Backend:    &container.Backend{},
+			Backend:    &mdruntime.Backend{},
+			Backends:   map[agent.Harness]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
 			HarnessEnv: map[string][]string{string(agent.Codex): {"CODEX_HOME=/tmp/codex"}},
 		}
 		m := New(cfg)

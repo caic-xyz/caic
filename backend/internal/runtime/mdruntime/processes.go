@@ -1,6 +1,6 @@
-// Runs ps inside a container via SSH and returns the process list.
+// Runs ps inside an md runtime instance via SSH and returns the process list.
 
-package container
+package mdruntime
 
 import (
 	"context"

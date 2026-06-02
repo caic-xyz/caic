@@ -9,8 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
 	cc "github.com/maruel/genai/providers/claudecode"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
 )
 
 func TestWritePrompt(t *testing.T) {

@@ -53,6 +53,11 @@ type Backend interface {
 	ContextWindowLimit(model string) int
 }
 
+// ModelFetcher is an optional backend capability for discovering available models.
+type ModelFetcher interface {
+	FetchModels(ctx context.Context, instance string, env []string) ([]string, error)
+}
+
 // HarnessArgs holds the session-specific parameters that influence the CLI
 // arguments passed to an agent subprocess.
 type HarnessArgs struct {

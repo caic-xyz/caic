@@ -47,8 +47,8 @@ GROUP_RULES = (
     ),
     GroupRule(
         "Task Runtime",
-        exact=("internal/container", "internal/task", "internal/tasks"),
-        prefixes=("internal/container/", "internal/task/", "internal/tasks/"),
+        exact=("internal/runtime", "internal/runtime/mdruntime", "internal/task", "internal/tasks"),
+        prefixes=("internal/runtime/", "internal/task/", "internal/tasks/"),
     ),
     GroupRule("Support", prefixes=("internal/",)),
 )

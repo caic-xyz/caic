@@ -19,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
+	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
@@ -388,6 +389,7 @@ func minimalServer(t *testing.T) *Server {
 	ctx := t.Context()
 	s := &Server{
 		ctx:     ctx,
+		backend: &mdruntime.Backend{},
 		ciCache: cache,
 		repoReg: newRepoRegistry(nil),
 		forge:   newForgeManager("", "", nil),

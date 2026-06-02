@@ -17,15 +17,16 @@ import (
 	"github.com/maruel/genai"
 	"github.com/maruel/genai/providers"
 
+	"github.com/caic-xyz/caic/backend/internal/agent/registry"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
-	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -44,11 +45,11 @@ import (
 //  4. Adopt runtime instances using pre-fetched inventory and logs. If an
 //     instance's relay is alive, auto-attach to resume streaming.
 func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
-	if cfg.CacheDir == "" {
+	if cfg.Dirs.CacheDir == "" {
 		return nil, errors.New("CacheDir is required")
 	}
-	logDir := filepath.Join(cfg.CacheDir, "tasks")
-	migrateTaskLogs(cfg.CacheDir, logDir)
+	logDir := filepath.Join(cfg.Dirs.CacheDir, "tasks")
+	migrateTaskLogs(cfg.Dirs.CacheDir, logDir)
 
 	absRoot, err := filepath.Abs(rootDir)
 	if err != nil {
@@ -58,13 +59,13 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	ctx, startTask := trace.NewTask(ctx, "server.startup")
 	defer startTask.End()
 
-	// container.New is instant; run it serially to simplify.
-	mdClient, err := container.New(cfg.TailscaleAPIKey, cfg.GitHubToken, cfg.Runtime)
+	// mdruntime.New is instant; run it serially to simplify.
+	mdClient, err := mdruntime.New(cfg.Runtime.TailscaleAPIKey, cfg.GitHub.Token, cfg.Runtime.Name)
 	if err != nil {
-		return nil, fmt.Errorf("init container library: %w", err)
+		return nil, fmt.Errorf("init md runtime adapter: %w", err)
 	}
 	mdClient.DigestCacheTTL = warmupInterval
-	runtimeInfo := container.NewRuntimeInfoBackend(mdClient)
+	runtimeInfo := mdruntime.NewRuntimeInfoBackend(mdClient)
 
 	// Phase 1: Parallel I/O — repos discovery, logs loading, and runtime inventory.
 	type reposResult struct {
@@ -109,63 +110,64 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("discover repos: %w", repoRes.err)
 	}
 	// Load persistent settings (generates sessionSecret on first run).
-	settings, err := loadSettings(filepath.Join(cfg.ConfigDir, "settings.json"))
+	settings, err := loadSettings(filepath.Join(cfg.Dirs.ConfigDir, "settings.json"))
 	if err != nil {
 		return nil, fmt.Errorf("load settings: %w", err)
 	}
 
 	// Initialize host checking and external URL state.
 	var hostState *auth.HostState
-	isAuto := strings.EqualFold(cfg.ExternalURL, "auto")
+	isAuto := strings.EqualFold(cfg.Auth.ExternalURL, "auto")
 	if isAuto {
 		hostState = &auth.HostState{}
-	} else if cfg.ExternalURL != "" {
-		hostState = auth.NewHostState(cfg.ExternalURL)
+	} else if cfg.Auth.ExternalURL != "" {
+		hostState = auth.NewHostState(cfg.Auth.ExternalURL)
 	}
 
-	slog.Info("github", "pat", auth.MaskedToken(cfg.GitHubToken), "oauth", auth.MaskedToken(cfg.GitHubOAuthClientID))
-	slog.Info("gitlab", "pat", auth.MaskedToken(cfg.GitLabToken), "oauth", auth.MaskedToken(cfg.GitLabOAuthClientID))
+	slog.Info("github", "pat", auth.MaskedToken(cfg.GitHub.Token), "oauth", auth.MaskedToken(cfg.GitHub.OAuthClientID))
+	slog.Info("gitlab", "pat", auth.MaskedToken(cfg.GitLab.Token), "oauth", auth.MaskedToken(cfg.GitLab.OAuthClientID))
 
 	// Initialize auth store and OAuth providers when auth is configured.
 	var authStore *auth.Store
 	var sessionSecret []byte
 	var githubOAuth *auth.ProviderConfig
 	var gitlabOAuth *auth.ProviderConfig
-	oauthConfigured := cfg.GitHubOAuthClientID != "" || cfg.GitLabOAuthClientID != ""
-	if cfg.ExternalURL != "" && (oauthConfigured || !isAuto) {
+	oauthConfigured := cfg.GitHub.OAuthClientID != "" || cfg.GitLab.OAuthClientID != ""
+	if cfg.Auth.ExternalURL != "" && (oauthConfigured || !isAuto) {
 		secret, err := hexDecode(settings.SessionSecret)
 		if err != nil {
 			return nil, fmt.Errorf("decode session secret: %w", err)
 		}
 		sessionSecret = secret
-		store, err := auth.Open(filepath.Join(cfg.ConfigDir, "users.json"))
+		store, err := auth.Open(filepath.Join(cfg.Dirs.ConfigDir, "users.json"))
 		if err != nil {
 			return nil, fmt.Errorf("open users store: %w", err)
 		}
 		authStore = store
-		if cfg.GitHubOAuthClientID != "" && cfg.GitHubOAuthClientSecret != "" {
-			c := auth.GitHubConfig(cfg.GitHubOAuthClientID, cfg.GitHubOAuthClientSecret, hostState)
+		if cfg.GitHub.OAuthClientID != "" && cfg.GitHub.OAuthClientSecret != "" {
+			c := auth.GitHubConfig(cfg.GitHub.OAuthClientID, cfg.GitHub.OAuthClientSecret, hostState)
 			githubOAuth = &c
 		}
-		if cfg.GitLabOAuthClientID != "" && cfg.GitLabOAuthClientSecret != "" {
-			c := auth.GitLabConfig(cfg.GitLabOAuthClientID, cfg.GitLabOAuthClientSecret, cfg.GitLabURL, hostState)
+		if cfg.GitLab.OAuthClientID != "" && cfg.GitLab.OAuthClientSecret != "" {
+			c := auth.GitLabConfig(cfg.GitLab.OAuthClientID, cfg.GitLab.OAuthClientSecret, cfg.GitLab.URL, hostState)
 			gitlabOAuth = &c
 		}
 	}
 
-	githubAllowedUsers := parseAllowedUsers(cfg.GitHubOAuthAllowedUsers)
-	gitlabAllowedUsers := parseAllowedUsers(cfg.GitLabOAuthAllowedUsers)
+	githubAllowedUsers := parseAllowedUsers(cfg.GitHub.OAuthAllowedUsers)
+	gitlabAllowedUsers := parseAllowedUsers(cfg.GitLab.OAuthAllowedUsers)
 
-	prefsPath := filepath.Join(cfg.ConfigDir, "preferences.json")
+	prefsPath := filepath.Join(cfg.Dirs.ConfigDir, "preferences.json")
 	prefsStore, err := preferences.Open(prefsPath)
 	if err != nil {
 		return nil, fmt.Errorf("open preferences: %w", err)
 	}
 
-	backend := container.NewBackend(mdClient)
-	backend.HarnessEnv = cfg.HarnessEnv
+	backend := mdruntime.NewBackend(mdClient)
+	backend.HarnessEnv = cfg.Agent.HarnessEnv
+	agentBackends := registry.DefaultBackends(cfg.Dirs.CacheDir, cfg.Agent.HarnessEnv)
 
-	cachePath := filepath.Join(cfg.CacheDir, "ci_results.json")
+	cachePath := filepath.Join(cfg.Dirs.CacheDir, "ci_results.json")
 	cache, err := forgecache.Open(cachePath)
 	if err != nil {
 		slog.Warn("cannot open CI cache; falling back to in-memory", "path", cachePath, "err", err)
@@ -173,12 +175,12 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	}
 
 	var voiceBridge *voicertc.Bridge
-	if cfg.WebRTCPort >= 0 && cfg.GeminiAPIKey != "" {
-		voiceBridge, err = voicertc.NewBridge(ctx, cfg.GeminiAPIKey, cfg.WebRTCPort)
+	if cfg.Voice.WebRTCPort >= 0 && cfg.Agent.GeminiAPIKey != "" {
+		voiceBridge, err = voicertc.NewBridge(ctx, cfg.Agent.GeminiAPIKey, cfg.Voice.WebRTCPort)
 		if err != nil {
 			return nil, fmt.Errorf("voice bridge: %w", err)
 		}
-	} else if cfg.WebRTCPort >= 0 {
+	} else if cfg.Voice.WebRTCPort >= 0 {
 		slog.Info("voice bridge disabled: GEMINI_API_KEY not set")
 	}
 
@@ -187,7 +189,7 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		absRoot:            absRoot,
 		mdClient:           mdClient,
 		logDir:             logDir,
-		cacheDir:           cfg.CacheDir,
+		cacheDir:           cfg.Dirs.CacheDir,
 		prefs:              prefsStore,
 		authStore:          authStore,
 		sessionSecret:      sessionSecret,
@@ -196,50 +198,51 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		githubAllowedUsers: githubAllowedUsers,
 		gitlabAllowedUsers: gitlabAllowedUsers,
 		hostState:          hostState,
-		usageFetchers:      detectProviders(ctx, cfg.CoreEnv, cfg.HarnessEnv),
-		pprof:              cfg.Pprof,
-		geminiAPIKey:       cfg.GeminiAPIKey,
+		usageFetchers:      detectProviders(ctx, cfg.Agent.CoreEnv, cfg.Agent.HarnessEnv),
+		pprof:              cfg.Debug.Pprof,
+		geminiAPIKey:       cfg.Agent.GeminiAPIKey,
 		voiceBridge:        voiceBridge,
-		forge:              newForgeManager(cfg.GitHubToken, cfg.GitLabToken, nil),
+		forge:              newForgeManager(cfg.GitHub.Token, cfg.GitLab.Token, nil),
 		ciCache:            cache,
 		backend:            backend,
 		runtimeBackend:     backend,
+		agentBackends:      agentBackends,
 		repoReg:            newRepoRegistry(nil),
 	}
-	s.githubWebhookSecret = cfg.GitHubWebhookSecret
-	s.gitlabWebhookSecret = cfg.GitLabWebhookSecret
+	s.githubWebhookSecret = cfg.GitHub.WebhookSecret
+	s.gitlabWebhookSecret = cfg.GitLab.WebhookSecret
 
-	if cfg.GitHubAppID != 0 && len(cfg.GitHubAppPrivateKeyPEM) > 0 {
-		app, err := github.NewAppClient(cfg.GitHubAppID, cfg.GitHubAppPrivateKeyPEM, s.forge.githubAppThrottle)
+	if cfg.GitHub.AppID != 0 && len(cfg.GitHub.AppPrivateKeyPEM) > 0 {
+		app, err := github.NewAppClient(cfg.GitHub.AppID, cfg.GitHub.AppPrivateKeyPEM, s.forge.githubAppThrottle)
 		if err != nil {
 			return nil, fmt.Errorf("github app: %w", err)
 		}
 		s.forge.githubApp = app
-		if cfg.GitHubAppAllowedOwners != "" {
-			s.githubAppAllowedOwners = parseAllowedUsers(cfg.GitHubAppAllowedOwners)
+		if cfg.GitHub.AppAllowedOwners != "" {
+			s.githubAppAllowedOwners = parseAllowedUsers(cfg.GitHub.AppAllowedOwners)
 		}
 	}
 
 	// Determine LLM provider: use configured value or auto-detect.
-	llmProvider := cfg.LLMProvider
-	if !cfg.DisableLLM && llmProvider == "" {
-		llmProvider = autoDetectLLMProvider(ctx, cfg.CoreEnv, cfg.GeminiAPIKey)
+	llmProvider := cfg.LLM.Provider
+	if !cfg.LLM.Disable && llmProvider == "" {
+		llmProvider = autoDetectLLMProvider(ctx, cfg.Agent.CoreEnv, cfg.Agent.GeminiAPIKey)
 		if llmProvider != "" {
 			slog.Info("auto-detected LLM provider", "prov", llmProvider)
 		}
 	}
 
-	if !cfg.DisableLLM && llmProvider != "" {
+	if !cfg.LLM.Disable && llmProvider != "" {
 		if c, ok := providers.All[llmProvider]; !ok || c.Factory == nil {
 			slog.Warn("unknown LLM provider for title generation", "prov", llmProvider)
 		} else {
 			var opts []genai.ProviderOption
-			if cfg.LLMModel != "" {
-				opts = append(opts, genai.ProviderOptionModel(cfg.LLMModel))
+			if cfg.LLM.Model != "" {
+				opts = append(opts, genai.ProviderOptionModel(cfg.LLM.Model))
 			} else {
 				opts = append(opts, genai.ModelCheap)
 			}
-			opts = appendProviderAPIKey(opts, llmProvider, cfg.CoreEnv, cfg.GeminiAPIKey)
+			opts = appendProviderAPIKey(opts, llmProvider, cfg.Agent.CoreEnv, cfg.Agent.GeminiAPIKey)
 			if p, err := c.Factory(ctx, opts...); err != nil {
 				slog.Warn("LLM provider init failed", "prov", llmProvider, "err", err)
 			} else {
@@ -276,12 +279,13 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 	s.taskMgr = tasks.New(tasks.Config{
 		ServerCtx:  ctx,
 		LogDir:     logDir,
-		CacheDir:   cfg.CacheDir,
+		CacheDir:   cfg.Dirs.CacheDir,
 		Backend:    backend,
 		Monitor:    runtimeInfo,
 		Inventory:  runtimeInfo,
 		Privilege:  runtimeInfo,
-		HarnessEnv: cfg.HarnessEnv,
+		Backends:   agentBackends,
+		HarnessEnv: cfg.Agent.HarnessEnv,
 		Prefs:      prefsStore,
 		Provider:   s.provider,
 	})
@@ -376,15 +380,15 @@ func New(ctx context.Context, rootDir string, cfg *Config) (*Server, error) {
 		region.End()
 	}
 
-	s.ipgeoChecker, err = ipgeo.NewChecker(ctx, cfg.IPGeoAllowlist, cfg.IPGeoDB, "")
+	s.ipgeoChecker, err = ipgeo.NewChecker(ctx, cfg.IPGeo.Allowlist, cfg.IPGeo.DB, "")
 	if err != nil {
 		return nil, fmt.Errorf("ipgeo: %w", err)
 	}
-	if cfg.IPGeoDB != "" {
-		slog.Info("ipgeo", "path", cfg.IPGeoDB, "list", cfg.IPGeoAllowlist)
+	if cfg.IPGeo.DB != "" {
+		slog.Info("ipgeo", "path", cfg.IPGeo.DB, "list", cfg.IPGeo.Allowlist)
 	}
 
-	if !cfg.SkipWarmup {
+	if !cfg.Runtime.SkipWarmup {
 		go func() {
 			_, tk := trace.NewTask(ctx, "warmup-images")
 			defer tk.End()
@@ -450,17 +454,20 @@ func (s *Server) repoRelPath(abs string) string {
 
 func (s *Server) newRunner(ctx context.Context, info *repoInfo) (*task.Runner, error) {
 	runner := &task.Runner{
-		LogDir:    s.logDir,
-		CacheDir:  s.cacheDir,
-		Container: s.backend,
+		LogDir:     s.logDir,
+		CacheDir:   s.cacheDir,
+		Backends:   s.agentBackends,
+		HarnessEnv: s.backend.HarnessEnv,
+	}
+	if s.runtimeBackend != nil {
+		runner.Container = s.runtimeBackend
+	} else {
+		runner.Container = s.backend
 	}
 	if info != nil {
 		runner.BaseBranch = info.BaseBranch
 		runner.Dir = info.AbsPath
 		runner.RepoName = info.RelPath
-	}
-	if s.backend != nil {
-		runner.HarnessEnv = s.backend.HarnessEnv
 	}
 	err := runner.Init(ctx)
 	return runner, err

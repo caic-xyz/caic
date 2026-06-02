@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"path/filepath"
 	"slices"
 	"time"
@@ -12,11 +13,8 @@ import (
 	"github.com/caic-xyz/md"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	"github.com/caic-xyz/caic/backend/internal/agent/codex"
-	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
-	"github.com/caic-xyz/caic/backend/internal/agent/pi"
-	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
@@ -40,7 +38,7 @@ func (s *Server) warmupImages() {
 			}
 		}
 		for _, img := range images {
-			w := &container.SlogWriter{Phase: "warmup"}
+			w := &mdruntime.SlogWriter{Phase: "warmup"}
 			built, err := s.mdClient.Warmup(s.ctx, w, w, &md.WarmupOpts{
 				BaseImage: img,
 				Quiet:     true,
@@ -64,32 +62,36 @@ func (s *Server) warmupImages() {
 func (s *Server) refreshHarnessModels() {
 	cache := agent.OpenHarnessCache(filepath.Join(s.cacheDir, "harnesses.json"))
 
-	type fetchFunc func(ctx context.Context, container string, env []string) ([]string, error)
-	harnesses := []struct {
-		h     agent.Harness
-		fetch fetchFunc
-	}{
-		{agent.Codex, codex.FetchModels},
-		{agent.Pi, pi.FetchModels},
-		{agent.OpenCode, opencode.FetchModels},
-	}
-	for _, entry := range harnesses {
-		if _, fresh := cache.Models(entry.h, agent.APIKeyHash(s.backend.HarnessEnv[string(entry.h)])); fresh {
+	fetchers := map[agent.Harness]agent.ModelFetcher{}
+	s.taskMgr.RangeRunners(func(_ string, r *task.Runner) bool {
+		for h, b := range r.Backends {
+			if f, ok := b.(agent.ModelFetcher); ok {
+				fetchers[h] = f
+			}
+		}
+		return true
+	})
+	for _, h := range slices.Sorted(maps.Keys(fetchers)) {
+		if _, fresh := cache.Models(h, agent.APIKeyHash(s.harnessEnv(h))); fresh {
 			continue
 		}
-		s.refreshOneHarness(cache, entry.h, entry.fetch)
+		s.refreshOneHarness(cache, h, fetchers[h])
 	}
 }
 
 // refreshOneHarness launches a temporary container, fetches models, and
 // updates the cache and all runner backends.
-func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, fetch func(ctx context.Context, container string, env []string) ([]string, error)) {
-	slog.Info("model cache stale, fetching", "rt", s.mdClient.Runtime, "harness", h)
+func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, fetcher agent.ModelFetcher) {
+	backend := s.runtimeBackend
+	if backend == nil {
+		backend = s.backend
+	}
+	slog.Info("model cache stale, fetching", "harness", h)
 	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute)
 	defer cancel()
 
-	w := &container.SlogWriter{Phase: "model-refresh"}
-	name, err := s.backend.Launch(ctx, nil, &runtime.StartOptions{
+	w := &mdruntime.SlogWriter{Phase: "model-refresh"}
+	name, err := backend.Launch(ctx, nil, &runtime.StartOptions{
 		Metadata: runtime.Metadata{
 			runtime.MetadataModelRefresh: "true",
 		},
@@ -101,18 +103,19 @@ func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, f
 		return
 	}
 	defer func() {
-		_ = s.backend.Purge(context.WithoutCancel(ctx), name)
+		_ = backend.Purge(context.WithoutCancel(ctx), name)
 	}()
-	if _, err := s.backend.Connect(ctx, name, &runtime.StartOptions{Harness: h, LogWriter: w}); err != nil {
+	if _, err := backend.Connect(ctx, name, &runtime.StartOptions{Harness: h, LogWriter: w}); err != nil {
 		slog.Warn("model refresh: connect failed", "harness", h, "err", err)
 		return
 	}
-	models, err := fetch(ctx, string(name), s.backend.HarnessEnv[string(h)])
+	env := s.harnessEnv(h)
+	models, err := fetcher.FetchModels(ctx, string(name), env)
 	if err != nil {
 		slog.Warn("model refresh: fetch failed", "harness", h, "err", err)
 		return
 	}
-	cache.SetModels(h, models, agent.APIKeyHash(s.backend.HarnessEnv[string(h)]))
+	cache.SetModels(h, models, agent.APIKeyHash(env))
 	slog.Info("model cache refreshed", "harness", h, "count", len(models))
 
 	s.taskMgr.RangeRunners(func(_ string, r *task.Runner) bool {
@@ -121,4 +124,8 @@ func (s *Server) refreshOneHarness(cache *agent.HarnessCache, h agent.Harness, f
 		}
 		return true
 	})
+}
+
+func (s *Server) harnessEnv(h agent.Harness) []string {
+	return s.backend.HarnessEnv[string(h)]
 }

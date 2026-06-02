@@ -9,9 +9,10 @@ import (
 	"strings"
 	"sync"
 
+	cc "github.com/maruel/genai/providers/claudecode"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
-	cc "github.com/maruel/genai/providers/claudecode"
 )
 
 // toAgentUsage converts the wire MsgUsage to the backend-neutral agent.Usage.

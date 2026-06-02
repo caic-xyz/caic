@@ -45,12 +45,13 @@ type Config struct {
 	LogDir    string
 	CacheDir  string
 	// Backend is the per-task container lifecycle seam (launch/stop/purge/fork).
-	// Production passes *container.Backend (Docker); a future VM backend or a
+	// Production passes *mdruntime.Backend (md over Docker/Podman); a future VM backend or a
 	// test fake can be substituted via this interface.
 	Backend    runtime.Backend
 	Monitor    runtime.Monitor
 	Inventory  runtime.Inventory
 	Privilege  runtime.PrivilegeInfo
+	Backends   map[agent.Harness]agent.Backend
 	HarnessEnv map[string][]string
 	Prefs      *preferences.Store
 	Provider   genai.Provider // nil-safe
@@ -101,6 +102,7 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 		CacheDir:   cfg.CacheDir,
 		HarnessEnv: cfg.HarnessEnv,
 		Container:  cfg.Backend,
+		Backends:   cfg.Backends,
 	}
 	_ = noRepoRunner.Init(cfg.ServerCtx)
 	m.runners[""] = noRepoRunner

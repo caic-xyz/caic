@@ -19,14 +19,15 @@ import (
 	"github.com/maruel/genai"
 
 	"github.com/caic-xyz/caic/backend/frontend"
+	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
-	"github.com/caic-xyz/caic/backend/internal/container"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -59,113 +60,145 @@ type githubAppClient interface {
 // Config bundles values read once at startup from config.toml, environment
 // variables, and CLI flags, then threaded into the server.
 type Config struct {
-	// Directories.
+	Dirs    DirsConfig
+	Runtime RuntimeConfig
+	Agent   AgentConfig
+	LLM     LLMConfig
+	GitHub  GitHubConfig
+	GitLab  GitLabConfig
+	Auth    AuthConfig
+	Voice   VoiceConfig
+	Debug   DebugConfig
+	IPGeo   IPGeoConfig
+}
+
+// DirsConfig contains filesystem paths for persistent server state.
+type DirsConfig struct {
 	ConfigDir string // persistent server state, e.g. ~/.config/caic
 	CacheDir  string // logs and cache files, e.g. ~/.cache/caic
+}
 
-	// Agent backends.
-	HarnessEnv      map[string][]string // per-harness KEY=VALUE env vars for containers
-	CoreEnv         map[string]string   // server-level KEY=VALUE env vars from [core.env]
-	GeminiAPIKey    string              // required for Gemini Live audio
-	TailscaleAPIKey string              // required for Tailscale networking inside containers
-	Runtime         string              // container runtime: "docker" or "podman" (default: "docker")
+// RuntimeConfig selects and configures task runtime provisioning.
+type RuntimeConfig struct {
+	Name            string // container runtime: "docker" or "podman" (default: "docker")
+	TailscaleAPIKey string // required for Tailscale networking inside runtime instances
 
-	// LLM features (title generation, commit descriptions).
-	LLMProvider string
-	LLMModel    string
-	DisableLLM  bool
-
-	// GitHub — PAT for server-level API access (forges, autoupdate); OAuth for user login.
-	GitHubToken             string // PAT for GitHub API access
-	GitHubOAuthClientID     string // OAuth app client ID
-	GitHubOAuthClientSecret string
-	GitHubOAuthAllowedUsers string // comma-separated; required with OAuth
-	GitHubWebhookSecret     []byte // HMAC secret; enables POST /webhooks/github
-	GitHubAppID             int64  // GitHub App ID; used with GitHubAppPrivateKeyPEM
-	GitHubAppPrivateKeyPEM  []byte // RSA private key PEM (path or content)
-	GitHubAppAllowedOwners  string // comma-separated; if set, reject installs from other owners
-
-	// GitLab — PAT and OAuth are mutually exclusive.
-	GitLabToken             string // PAT; mutually exclusive with GitLabOAuthClientID
-	GitLabOAuthClientID     string // OAuth app client ID; mutually exclusive with GitLabToken
-	GitLabOAuthClientSecret string
-	GitLabOAuthAllowedUsers string // comma-separated; required with OAuth
-	GitLabURL               string // default "https://gitlab.com"
-	GitLabWebhookSecret     []byte // X-Gitlab-Token secret; enables POST /webhooks/gitlab
-
-	// ExternalURL is the public base URL (e.g. https://caic.example.com).
-	// "auto" (the default) locks the hostname from the first FQDN request.
-	// Required for OAuth login and webhook delivery.
-	ExternalURL string
-
-	// WebRTC voice bridge.
-	WebRTCPort int // UDP port for ICE; 0 = ephemeral; -1 = disabled
-
-	// Profiling.
-	Pprof bool // expose /debug/pprof/* endpoints
-
-	// IP geolocation (optional).
-	// IPGeoDB is the path to a MaxMind MMDB file (e.g. GeoLite2-Country.mmdb).
-	// When set, country codes are resolved and logged for every request.
-	IPGeoDB string
-	// IPGeoAllowlist is a comma-separated list of permitted country codes and
-	// special values "local" and "tailscale". When set, requests from IPs that
-	// do not resolve to an allowed value are rejected with 403. Requires
-	// IPGeoDB when any token is not "local" or "tailscale".
-	IPGeoAllowlist string
-
-	// Skip warmup of base images at startup. Used by e2e fake mode to avoid
-	// pulling Docker images that aren't needed for testing.
+	// SkipWarmup skips base-image warmup at startup. Used by e2e fake mode to
+	// avoid pulling Docker images that aren't needed for testing.
 	SkipWarmup bool
+}
+
+// AgentConfig configures coding-agent process environments.
+type AgentConfig struct {
+	HarnessEnv   map[string][]string // per-harness KEY=VALUE env vars for runtime instances
+	CoreEnv      map[string]string   // server-level KEY=VALUE env vars from [core.env]
+	GeminiAPIKey string              // required for Gemini Live audio and Gemini LLM access
+}
+
+// LLMConfig configures title generation and commit-description LLM calls.
+type LLMConfig struct {
+	Provider string
+	Model    string
+	Disable  bool
+}
+
+// GitHubConfig configures GitHub API, OAuth, webhooks, and App integration.
+type GitHubConfig struct {
+	Token             string // PAT for GitHub API access
+	OAuthClientID     string // OAuth app client ID
+	OAuthClientSecret string
+	OAuthAllowedUsers string // comma-separated; required with OAuth
+	WebhookSecret     []byte // HMAC secret; enables POST /webhooks/github
+	AppID             int64  // GitHub App ID; used with AppPrivateKeyPEM
+	AppPrivateKeyPEM  []byte // RSA private key PEM
+	AppAllowedOwners  string // comma-separated; if set, reject installs from other owners
+}
+
+// GitLabConfig configures GitLab API, OAuth, and webhooks.
+type GitLabConfig struct {
+	Token             string // PAT; mutually exclusive with OAuthClientID
+	OAuthClientID     string // OAuth app client ID; mutually exclusive with Token
+	OAuthClientSecret string
+	OAuthAllowedUsers string // comma-separated; required with OAuth
+	URL               string // default "https://gitlab.com"
+	WebhookSecret     []byte // X-Gitlab-Token secret; enables POST /webhooks/gitlab
+}
+
+// AuthConfig configures public URL state used by OAuth and webhook flows.
+type AuthConfig struct {
+	// ExternalURL is the public base URL (e.g. https://caic.example.com).
+	// "auto" locks the hostname from the first FQDN request.
+	ExternalURL string
+}
+
+// VoiceConfig configures the WebRTC voice bridge.
+type VoiceConfig struct {
+	WebRTCPort int // UDP port for ICE; 0 = ephemeral; -1 = disabled
+}
+
+// DebugConfig configures optional server diagnostics.
+type DebugConfig struct {
+	Pprof bool // expose /debug/pprof/* endpoints
+}
+
+// IPGeoConfig configures optional request geolocation allowlisting.
+type IPGeoConfig struct {
+	// DB is the path to a MaxMind MMDB file (e.g. GeoLite2-Country.mmdb).
+	DB string
+	// Allowlist is a comma-separated list of permitted country codes and
+	// special values "local" and "tailscale". When set, requests from IPs that
+	// do not resolve to an allowed value are rejected with 403. Requires DB when
+	// any token is not "local" or "tailscale".
+	Allowlist string
 }
 
 // Validate returns an error if the configuration is invalid.
 func (c *Config) Validate() error {
-	if (c.GitHubOAuthClientID == "") != (c.GitHubOAuthClientSecret == "") {
+	if (c.GitHub.OAuthClientID == "") != (c.GitHub.OAuthClientSecret == "") {
 		return errors.New("github.oauth_client_id and github.oauth_client_secret must both be set or both be unset")
 	}
-	if (c.GitLabOAuthClientID == "") != (c.GitLabOAuthClientSecret == "") {
+	if (c.GitLab.OAuthClientID == "") != (c.GitLab.OAuthClientSecret == "") {
 		return errors.New("gitlab.oauth_client_id and gitlab.oauth_client_secret must both be set or both be unset")
 	}
-	oauthConfigured := c.GitHubOAuthClientID != "" || c.GitLabOAuthClientID != ""
-	if oauthConfigured && c.ExternalURL == "" {
+	oauthConfigured := c.GitHub.OAuthClientID != "" || c.GitLab.OAuthClientID != ""
+	if oauthConfigured && c.Auth.ExternalURL == "" {
 		return errors.New("external_url is required when OAuth login is configured")
 	}
-	if c.ExternalURL != "" && !strings.EqualFold(c.ExternalURL, "auto") {
-		u, err := url.Parse(c.ExternalURL)
+	if c.Auth.ExternalURL != "" && !strings.EqualFold(c.Auth.ExternalURL, "auto") {
+		u, err := url.Parse(c.Auth.ExternalURL)
 		if err != nil || u.Host == "" {
-			return fmt.Errorf("external_url is not a valid URL: %q", c.ExternalURL)
+			return fmt.Errorf("external_url is not a valid URL: %q", c.Auth.ExternalURL)
 		}
 		if u.Path != "" && u.Path != "/" {
-			return fmt.Errorf("external_url must not contain a path: %q", c.ExternalURL)
+			return fmt.Errorf("external_url must not contain a path: %q", c.Auth.ExternalURL)
 		}
 		// Normalize: strip trailing slash to avoid double-slash in redirect URIs.
-		c.ExternalURL = strings.TrimRight(c.ExternalURL, "/")
+		c.Auth.ExternalURL = strings.TrimRight(c.Auth.ExternalURL, "/")
 		if oauthConfigured && u.Scheme != "https" {
 			return errors.New("external_url must use https:// when OAuth login is configured")
 		}
 	}
-	if c.GitLabURL != "" {
-		u, err := url.Parse(c.GitLabURL)
+	if c.GitLab.URL != "" {
+		u, err := url.Parse(c.GitLab.URL)
 		if err != nil || u.Host == "" {
-			return fmt.Errorf("gitlab.url is not a valid URL: %q", c.GitLabURL)
+			return fmt.Errorf("gitlab.url is not a valid URL: %q", c.GitLab.URL)
 		}
 		if u.Path != "" && u.Path != "/" {
-			return fmt.Errorf("gitlab.url must not contain a path: %q", c.GitLabURL)
+			return fmt.Errorf("gitlab.url must not contain a path: %q", c.GitLab.URL)
 		}
 	}
-	if c.GitLabToken != "" && c.GitLabOAuthClientID != "" {
+	if c.GitLab.Token != "" && c.GitLab.OAuthClientID != "" {
 		return errors.New("gitlab.token and gitlab.oauth_client_id are mutually exclusive: " +
 			"remove gitlab.token when using GitLab OAuth login")
 	}
-	if c.GitHubOAuthClientID != "" && c.GitHubOAuthAllowedUsers == "" {
+	if c.GitHub.OAuthClientID != "" && c.GitHub.OAuthAllowedUsers == "" {
 		return errors.New("github.oauth_allowed_users is required when GitHub OAuth login is configured")
 	}
-	if c.GitLabOAuthClientID != "" && c.GitLabOAuthAllowedUsers == "" {
+	if c.GitLab.OAuthClientID != "" && c.GitLab.OAuthAllowedUsers == "" {
 		return errors.New("gitlab.oauth_allowed_users is required when GitLab OAuth login is configured")
 	}
-	if c.Runtime != "" && c.Runtime != "docker" && c.Runtime != "podman" {
-		return fmt.Errorf("core.runtime must be \"docker\" or \"podman\", got %q", c.Runtime)
+	if c.Runtime.Name != "" && c.Runtime.Name != "docker" && c.Runtime.Name != "podman" {
+		return fmt.Errorf("core.runtime must be \"docker\" or \"podman\", got %q", c.Runtime.Name)
 	}
 	return nil
 }
@@ -180,8 +213,9 @@ type Server struct {
 	repoReg        *repoRegistry   // owns the managed-repo set and per-repo CI status (self-locking)
 	taskMgr        *tasks.Manager  // task orchestration layer
 	mdClient       *md.Client
-	backend        *container.Backend // container backend for runner creation and maintenance
+	backend        *mdruntime.Backend // required md runtime backend for runner creation and maintenance
 	runtimeBackend runtime.Backend    // runtime backend used by route-level container operations
+	agentBackends  map[agent.Harness]agent.Backend
 	logDir         string
 	cacheDir       string
 	ciCache        *forgecache.Cache

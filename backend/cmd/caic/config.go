@@ -167,34 +167,54 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 	}
 
 	cfg = &server.Config{
-		ConfigDir:               cfgDir,
-		CacheDir:                cacheDir(),
-		HarnessEnv:              harnessEnv,
-		CoreEnv:                 tc.Core.Env,
-		GeminiAPIKey:            geminiAPIKey,
-		TailscaleAPIKey:         tailscaleAPIKey,
-		Runtime:                 tc.Core.Runtime,
-		LLMProvider:             tc.AI.Provider,
-		LLMModel:                tc.AI.Model,
-		GitHubToken:             ghToken,
-		GitHubOAuthClientID:     tc.GitHub.OAuthClientID,
-		GitHubOAuthClientSecret: tc.GitHub.OAuthClientSecret,
-		GitHubOAuthAllowedUsers: strings.Join(tc.GitHub.OAuthAllowedUsers, ","),
-		GitHubWebhookSecret:     []byte(tc.GitHub.WebhookSecret),
-		GitHubAppID:             tc.GitHub.AppID,
-		GitHubAppPrivateKeyPEM:  pem,
-		GitHubAppAllowedOwners:  strings.Join(tc.GitHub.AppAllowedOwners, ","),
-		GitLabToken:             tc.GitLab.Token,
-		GitLabOAuthClientID:     tc.GitLab.OAuthClientID,
-		GitLabOAuthClientSecret: tc.GitLab.OAuthClientSecret,
-		GitLabOAuthAllowedUsers: strings.Join(tc.GitLab.OAuthAllowedUsers, ","),
-		GitLabURL:               tc.GitLab.URL,
-		GitLabWebhookSecret:     []byte(tc.GitLab.WebhookSecret),
-		ExternalURL:             tc.Server.ExternalURL,
-		WebRTCPort:              tc.Server.WebRTCPort,
-		IPGeoDB:                 geoDBOrDefault(tc.Server.GeoDB, cfgDir),
-		IPGeoAllowlist:          strings.Join(allowOriginsOrDefault(tc.Server.AllowOrigins), ","),
-		Pprof:                   tc.Debug.Pprof,
+		Dirs: server.DirsConfig{
+			ConfigDir: cfgDir,
+			CacheDir:  cacheDir(),
+		},
+		Runtime: server.RuntimeConfig{
+			Name:            tc.Core.Runtime,
+			TailscaleAPIKey: tailscaleAPIKey,
+		},
+		Agent: server.AgentConfig{
+			HarnessEnv:   harnessEnv,
+			CoreEnv:      tc.Core.Env,
+			GeminiAPIKey: geminiAPIKey,
+		},
+		LLM: server.LLMConfig{
+			Provider: tc.AI.Provider,
+			Model:    tc.AI.Model,
+		},
+		GitHub: server.GitHubConfig{
+			Token:             ghToken,
+			OAuthClientID:     tc.GitHub.OAuthClientID,
+			OAuthClientSecret: tc.GitHub.OAuthClientSecret,
+			OAuthAllowedUsers: strings.Join(tc.GitHub.OAuthAllowedUsers, ","),
+			WebhookSecret:     []byte(tc.GitHub.WebhookSecret),
+			AppID:             tc.GitHub.AppID,
+			AppPrivateKeyPEM:  pem,
+			AppAllowedOwners:  strings.Join(tc.GitHub.AppAllowedOwners, ","),
+		},
+		GitLab: server.GitLabConfig{
+			Token:             tc.GitLab.Token,
+			OAuthClientID:     tc.GitLab.OAuthClientID,
+			OAuthClientSecret: tc.GitLab.OAuthClientSecret,
+			OAuthAllowedUsers: strings.Join(tc.GitLab.OAuthAllowedUsers, ","),
+			URL:               tc.GitLab.URL,
+			WebhookSecret:     []byte(tc.GitLab.WebhookSecret),
+		},
+		Auth: server.AuthConfig{
+			ExternalURL: tc.Server.ExternalURL,
+		},
+		Voice: server.VoiceConfig{
+			WebRTCPort: tc.Server.WebRTCPort,
+		},
+		Debug: server.DebugConfig{
+			Pprof: tc.Debug.Pprof,
+		},
+		IPGeo: server.IPGeoConfig{
+			DB:        geoDBOrDefault(tc.Server.GeoDB, cfgDir),
+			Allowlist: strings.Join(allowOriginsOrDefault(tc.Server.AllowOrigins), ","),
+		},
 	}
 	return cfg, tc.Server.HTTP, tc.Core.Root, tc.Debug.LogLevel, nil
 }

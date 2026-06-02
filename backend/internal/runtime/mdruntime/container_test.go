@@ -1,6 +1,6 @@
-// Tests for container configuration initialization and defaults.
+// Tests for md runtime adapter configuration initialization and defaults.
 
-package container
+package mdruntime
 
 import (
 	"path/filepath"

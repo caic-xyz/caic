@@ -98,7 +98,7 @@ format (Go 1.26 limitation). Only `trace.Log` / `trace.Logf` calls appear as
 | `SyncToOrigin` — fetch | `trace.StartRegion` | `sync-fetch` |
 | `SyncToDefault` — fetch | `trace.StartRegion` | `sync-default-fetch` |
 
-### Container operations (`backend/internal/container/backend.go`)
+### Container operations (`backend/internal/runtime/mdruntime/backend.go`)
 
 | Method | Type | Name |
 |---|---|---|

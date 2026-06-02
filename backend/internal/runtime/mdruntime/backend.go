@@ -1,6 +1,6 @@
-// Backend adapts *md.Client to runtime.Backend for launching and managing runtime instances.
+// Backend adapts md containers to runtime.Backend for launching and managing runtime instances.
 
-package container
+package mdruntime
 
 import (
 	"bytes"
@@ -62,7 +62,7 @@ var (
 // mdClientAdapter adapts *md.Client to mdClient.
 type mdClientAdapter struct{ c *md.Client }
 
-// Runtime returns the container runtime name ("docker" or "podman").
+// Runtime returns the underlying container runtime name ("docker" or "podman").
 func (a mdClientAdapter) Runtime() string { return a.c.Runtime }
 
 // Container constructs a container handle for the given repos.
@@ -136,8 +136,8 @@ type Backend struct {
 	HarnessEnv map[string][]string // per-harness KEY=VALUE env vars from config
 
 	mu                sync.Mutex
-	pendingContainers map[string]mdContainer // keyed by container name
-	vncPorts          map[string]int32       // container name → host VNC port
+	pendingContainers map[string]mdContainer // keyed by runtime instance name
+	vncPorts          map[string]int32       // runtime instance name to host VNC port
 }
 
 // NewBackend creates a Backend wrapping the given md client.

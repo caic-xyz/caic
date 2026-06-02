@@ -25,6 +25,7 @@ import (
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
 
+	"github.com/caic-xyz/caic/backend/internal/app"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
@@ -139,8 +140,8 @@ Flags:
 
 	// Validate geo_db file exists if explicitly set in config.
 	if tc.Server.GeoDB != nil {
-		if _, err := os.Stat(cfg.IPGeoDB); err != nil {
-			return fmt.Errorf("geo_db file not found at %q: %w", cfg.IPGeoDB, err)
+		if _, err := os.Stat(cfg.IPGeo.DB); err != nil {
+			return fmt.Errorf("geo_db file not found at %q: %w", cfg.IPGeo.DB, err)
 		}
 	}
 
@@ -201,9 +202,9 @@ Flags:
 		}()
 	}
 
-	slog.Info("gemini", "apikey", auth.MaskedToken(cfg.GeminiAPIKey))
-	slog.Info("tailscale", "apikey", auth.MaskedToken(cfg.TailscaleAPIKey))
-	slog.Info("LLM", "provider", cfg.LLMProvider, "model", cfg.LLMModel)
+	slog.Info("gemini", "apikey", auth.MaskedToken(cfg.Agent.GeminiAPIKey))
+	slog.Info("tailscale", "apikey", auth.MaskedToken(cfg.Runtime.TailscaleAPIKey))
+	slog.Info("LLM", "provider", cfg.LLM.Provider, "model", cfg.LLM.Model)
 
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -234,7 +235,7 @@ Flags:
 			return err
 		}
 		if sched != nil {
-			go autoupdate.Run(ctx, github.NewClient(cfg.GitHubToken, http.DefaultTransport), sched)
+			go autoupdate.Run(ctx, github.NewClient(cfg.GitHub.Token, http.DefaultTransport), sched)
 		}
 	}
 	return serveHTTP(ctx, ln, root, cfg)
@@ -312,7 +313,7 @@ func initLogging(level string, noLogTime bool) {
 }
 
 func serveHTTP(ctx context.Context, ln net.Listener, rootDir string, cfg *server.Config) error {
-	srv, err := server.New(ctx, rootDir, cfg)
+	srv, err := app.New(ctx, rootDir, cfg)
 	if err != nil {
 		return err
 	}
