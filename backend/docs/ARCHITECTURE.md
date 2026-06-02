@@ -106,7 +106,6 @@ graph TD
   pkg_internal_tasks --> pkg_internal_container
   pkg_internal_tasks --> pkg_internal_preferences
   pkg_internal_tasks --> pkg_internal_task
-  pkg_internal_usage --> pkg_internal_server_dto_v1
 ```
 
 ## Agent Backends
@@ -280,7 +279,6 @@ graph TD
   pkg_internal_tasks --> pkg_internal_container
   pkg_internal_tasks --> pkg_internal_preferences
   pkg_internal_tasks --> pkg_internal_task
-  pkg_internal_usage --> pkg_internal_server_dto_v1
 ```
 
 ## Package Dependencies
@@ -320,7 +318,7 @@ graph TD
 | `internal/task` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/opencode`, `internal/agent/pi`, `internal/forge`, `internal/jsonutil` |
 | `internal/task/tasktest` | `internal/task` |
 | `internal/tasks` | `internal/agent`, `internal/container`, `internal/preferences`, `internal/task` |
-| `internal/usage` | `internal/server/dto/v1` |
+| `internal/usage` | None |
 <!-- END GENERATED PACKAGE DEPENDENCIES -->
 
 ## Layering Notes

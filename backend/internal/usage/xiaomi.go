@@ -4,11 +4,7 @@
 
 package usage
 
-import (
-	"context"
-
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
-)
+import "context"
 
 // XiaomiFetcher registers the Xiaomi MiMo provider without balance data.
 // The platform (platform.xiaomimimo.com) requires Xiaomi account OAuth for
@@ -36,8 +32,8 @@ func (f *XiaomiFetcher) AuthKind() string { return "apikey" }
 func (f *XiaomiFetcher) UsageURL() string { return "https://platform.xiaomimimo.com/console/balance" }
 
 // Get returns provider metadata with no balance data.
-func (f *XiaomiFetcher) Get(ctx context.Context) *v1.ProviderQuota {
-	return &v1.ProviderQuota{
+func (f *XiaomiFetcher) Get(ctx context.Context) *ProviderQuota {
+	return &ProviderQuota{
 		Provider: f.Provider(),
 		Label:    f.Label(),
 		AuthKind: f.AuthKind(),

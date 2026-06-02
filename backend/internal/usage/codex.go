@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"time"
 
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -103,7 +102,7 @@ func (f *CodexFetcher) AuthKind() string { return "oauth" }
 func (f *CodexFetcher) UsageURL() string { return "https://chatgpt.com/codex/cloud/settings/analytics" }
 
 // Get returns the cached quota data, refreshing if stale.
-func (f *CodexFetcher) Get(ctx context.Context) *v1.ProviderQuota {
+func (f *CodexFetcher) Get(ctx context.Context) *ProviderQuota {
 	f.mu.Lock()
 	if f.token == "" {
 		f.mu.Unlock()
@@ -113,7 +112,7 @@ func (f *CodexFetcher) Get(ctx context.Context) *v1.ProviderQuota {
 	return f.get(ctx, f.fetch, "Codex")
 }
 
-func (f *CodexFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) {
+func (f *CodexFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, codexUsageAPIURL, http.NoBody)
 	if err != nil {
 		return nil, err
@@ -140,21 +139,21 @@ func (f *CodexFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) {
 		return nil, fmt.Errorf("decode Codex usage: %w", err)
 	}
 
-	out := &v1.ProviderQuota{
+	out := &ProviderQuota{
 		Provider: f.Provider(),
 		Label:    f.Label(),
 		AuthKind: f.AuthKind(),
 	}
 	if raw.RateLimit != nil {
 		if w := raw.RateLimit.PrimaryWindow; w != nil {
-			out.RateLimits = append(out.RateLimits, v1.QuotaRateLimit{
+			out.RateLimits = append(out.RateLimits, QuotaRateLimit{
 				Window:   "5h",
 				UsedPct:  float64(w.UsedPercent),
 				ResetsAt: time.Unix(int64(w.ResetAt), 0).UTC(),
 			})
 		}
 		if w := raw.RateLimit.SecondaryWindow; w != nil {
-			out.RateLimits = append(out.RateLimits, v1.QuotaRateLimit{
+			out.RateLimits = append(out.RateLimits, QuotaRateLimit{
 				Window:   "7d",
 				UsedPct:  float64(w.UsedPercent),
 				ResetsAt: time.Unix(int64(w.ResetAt), 0).UTC(),
@@ -163,7 +162,7 @@ func (f *CodexFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) {
 	}
 	if raw.Credits != nil && raw.Credits.Balance != "" {
 		bal, _ := strconv.ParseFloat(raw.Credits.Balance, 64)
-		out.Balance = v1.QuotaBalance{
+		out.Balance = QuotaBalance{
 			Currency: "USD",
 			Total:    bal,
 		}

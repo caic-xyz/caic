@@ -10,8 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
-
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 )
 
 const openRouterCreditsURL = "https://openrouter.ai/api/v1/credits" //nolint:gosec // URL, not a credential
@@ -58,11 +56,11 @@ func (f *OpenRouterFetcher) AuthKind() string { return "apikey" }
 func (f *OpenRouterFetcher) UsageURL() string { return "https://openrouter.ai/settings/credits" }
 
 // Get returns the cached credit balance.
-func (f *OpenRouterFetcher) Get(ctx context.Context) *v1.ProviderQuota {
+func (f *OpenRouterFetcher) Get(ctx context.Context) *ProviderQuota {
 	return f.get(ctx, f.fetch, "OpenRouter")
 }
 
-func (f *OpenRouterFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) {
+func (f *OpenRouterFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, openRouterCreditsURL, http.NoBody)
 	if err != nil {
 		return nil, err
@@ -91,11 +89,11 @@ func (f *OpenRouterFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error
 	// Balance = total_credits - total_usage.
 	var payload openRouterCreditsPayload
 	if err := json.Unmarshal(raw, &payload); err == nil && payload.Data.TotalCredits != 0 {
-		return &v1.ProviderQuota{
+		return &ProviderQuota{
 			Provider: f.Provider(),
 			Label:    f.Label(),
 			AuthKind: f.AuthKind(),
-			Balance: v1.QuotaBalance{
+			Balance: QuotaBalance{
 				Currency: "USD",
 				Total:    payload.Data.TotalCredits - payload.Data.TotalUsage,
 			},

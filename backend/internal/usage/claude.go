@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"time"
 
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/fsnotify/fsnotify"
 )
 
@@ -92,7 +91,7 @@ func (f *AnthropicFetcher) UsageURL() string { return "https://claude.ai/setting
 
 // Get returns the cached quota data, refreshing if stale. Returns nil when
 // no token is available.
-func (f *AnthropicFetcher) Get(ctx context.Context) *v1.ProviderQuota {
+func (f *AnthropicFetcher) Get(ctx context.Context) *ProviderQuota {
 	f.mu.Lock()
 	if f.token == "" {
 		f.mu.Unlock()
@@ -102,7 +101,7 @@ func (f *AnthropicFetcher) Get(ctx context.Context) *v1.ProviderQuota {
 	return f.get(ctx, f.fetch, "Anthropic")
 }
 
-func (f *AnthropicFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) {
+func (f *AnthropicFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, anthropicUsageAPIURL, http.NoBody)
 	if err != nil {
 		return nil, err
@@ -128,14 +127,14 @@ func (f *AnthropicFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error)
 		return nil, fmt.Errorf("decode usage: %w", err)
 	}
 
-	out := &v1.ProviderQuota{
+	out := &ProviderQuota{
 		Provider: f.Provider(),
 		Label:    f.Label(),
 		AuthKind: f.AuthKind(),
 	}
 	if raw.FiveHour != nil {
 		t, _ := time.Parse(time.RFC3339, raw.FiveHour.ResetsAt)
-		out.RateLimits = append(out.RateLimits, v1.QuotaRateLimit{
+		out.RateLimits = append(out.RateLimits, QuotaRateLimit{
 			Window:   "5h",
 			UsedPct:  raw.FiveHour.Utilization,
 			ResetsAt: t,
@@ -143,14 +142,14 @@ func (f *AnthropicFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error)
 	}
 	if raw.SevenDay != nil {
 		t, _ := time.Parse(time.RFC3339, raw.SevenDay.ResetsAt)
-		out.RateLimits = append(out.RateLimits, v1.QuotaRateLimit{
+		out.RateLimits = append(out.RateLimits, QuotaRateLimit{
 			Window:   "7d",
 			UsedPct:  raw.SevenDay.Utilization,
 			ResetsAt: t,
 		})
 	}
 	if raw.ExtraUsage != nil {
-		out.ExtraUsage = v1.QuotaExtraUsage{
+		out.ExtraUsage = QuotaExtraUsage{
 			Currency:     "USD",
 			IsEnabled:    raw.ExtraUsage.IsEnabled,
 			MonthlyLimit: raw.ExtraUsage.MonthlyLimit / 100,

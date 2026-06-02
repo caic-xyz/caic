@@ -9,7 +9,6 @@ import (
 	"context"
 	"time"
 
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
@@ -18,14 +17,14 @@ type fakeFetcher struct {
 	provider string
 	label    string
 	authKind string
-	resp     v1.ProviderQuota
+	resp     usage.ProviderQuota
 }
 
-func (f *fakeFetcher) Provider() string                        { return f.provider }
-func (f *fakeFetcher) Label() string                           { return f.label }
-func (f *fakeFetcher) AuthKind() string                        { return f.authKind }
-func (f *fakeFetcher) UsageURL() string                        { return "https://example.com" }
-func (f *fakeFetcher) Get(_ context.Context) *v1.ProviderQuota { return &f.resp }
+func (f *fakeFetcher) Provider() string                           { return f.provider }
+func (f *fakeFetcher) Label() string                              { return f.label }
+func (f *fakeFetcher) AuthKind() string                           { return f.authKind }
+func (f *fakeFetcher) UsageURL() string                           { return "https://example.com" }
+func (f *fakeFetcher) Get(_ context.Context) *usage.ProviderQuota { return &f.resp }
 
 // fakeUsageFetchers returns canned Anthropic and Codex usage for e2e tests.
 func fakeUsageFetchers() []usage.ProviderFetcher {
@@ -40,15 +39,15 @@ func fakeUsageFetchers() []usage.ProviderFetcher {
 			provider: "anthropic",
 			label:    "Anthropic",
 			authKind: "oauth",
-			resp: v1.ProviderQuota{
+			resp: usage.ProviderQuota{
 				Provider: "anthropic",
 				Label:    "Anthropic",
 				AuthKind: "oauth",
-				RateLimits: []v1.QuotaRateLimit{
+				RateLimits: []usage.QuotaRateLimit{
 					{Window: "5h", UsedPct: 42, ResetsAt: fiveHourReset},
 					{Window: "7d", UsedPct: 15, ResetsAt: sevenDayReset},
 				},
-				ExtraUsage: v1.QuotaExtraUsage{
+				ExtraUsage: usage.QuotaExtraUsage{
 					Currency:     "USD",
 					IsEnabled:    true,
 					UsedCredits:  3.50,
@@ -61,15 +60,15 @@ func fakeUsageFetchers() []usage.ProviderFetcher {
 			provider: "codex",
 			label:    "Codex",
 			authKind: "oauth",
-			resp: v1.ProviderQuota{
+			resp: usage.ProviderQuota{
 				Provider: "codex",
 				Label:    "Codex",
 				AuthKind: "oauth",
-				RateLimits: []v1.QuotaRateLimit{
+				RateLimits: []usage.QuotaRateLimit{
 					{Window: "primary", UsedPct: 68, ResetsAt: primaryReset},
 					{Window: "secondary", UsedPct: 23, ResetsAt: secondaryReset},
 				},
-				Balance: v1.QuotaBalance{
+				Balance: usage.QuotaBalance{
 					Currency: "USD",
 					Total:    5.00,
 				},

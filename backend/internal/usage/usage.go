@@ -1,7 +1,5 @@
-// Package usage provides cached fetchers for LLM provider usage quotas.
-// Each provider (Anthropic, DeepSeek, Gemini, Codex, …) has its own
-// fetcher implementing the ProviderFetcher interface. The server
-// auto-detects available providers from configuration and environment.
+// Package usage provides cached fetchers and domain types for LLM provider
+// usage quotas.
 package usage
 
 import (
@@ -9,8 +7,6 @@ import (
 	"log/slog"
 	"sync"
 	"time"
-
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 )
 
 const (
@@ -34,7 +30,42 @@ type ProviderFetcher interface {
 	// UsageURL returns the link to the provider's usage/billing page.
 	UsageURL() string
 	// Get returns the latest quota data, using cached values when fresh.
-	Get(ctx context.Context) *v1.ProviderQuota
+	Get(ctx context.Context) *ProviderQuota
+}
+
+// QuotaRateLimit is a rate-limit window reported by a provider.
+type QuotaRateLimit struct {
+	Window   string
+	UsedPct  float64
+	ResetsAt time.Time
+}
+
+// QuotaBalance is a balance or credit snapshot reported by a provider.
+type QuotaBalance struct {
+	Currency string
+	Total    float64
+	Granted  float64
+	ToppedUp float64
+}
+
+// QuotaExtraUsage is pay-as-you-go usage information reported by a provider.
+type QuotaExtraUsage struct {
+	Currency     string
+	IsEnabled    bool
+	UsedCredits  float64
+	MonthlyLimit float64
+	UsedPct      float64
+}
+
+// ProviderQuota is quota data for one provider.
+type ProviderQuota struct {
+	Provider string
+	Label    string
+	AuthKind string
+
+	RateLimits []QuotaRateLimit
+	Balance    QuotaBalance
+	ExtraUsage QuotaExtraUsage
 }
 
 // baseFetcher holds the shared caching, backoff, and locking logic used by
@@ -42,7 +73,7 @@ type ProviderFetcher interface {
 // and calls get with its own fetch function and a provider name for logging.
 type baseFetcher struct {
 	mu      sync.Mutex
-	cached  *v1.ProviderQuota
+	cached  *ProviderQuota
 	fetchAt time.Time
 	backoff time.Duration
 	errorAt time.Time
@@ -50,7 +81,7 @@ type baseFetcher struct {
 
 // get runs the common fetch-with-cache-and-backoff logic. providerName is
 // used only in the warning log message on fetch failure.
-func (b *baseFetcher) get(ctx context.Context, fetch func(context.Context) (*v1.ProviderQuota, error), providerName string) *v1.ProviderQuota {
+func (b *baseFetcher) get(ctx context.Context, fetch func(context.Context) (*ProviderQuota, error), providerName string) *ProviderQuota {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.cached != nil && time.Since(b.fetchAt) < CacheTTL {

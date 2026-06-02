@@ -9,8 +9,6 @@ import (
 	"io"
 	"net/http"
 	"time"
-
-	v1 "github.com/caic-xyz/caic/backend/internal/server/dto/v1"
 )
 
 const deepseekBalanceURL = "https://api.deepseek.com/user/balance"
@@ -60,11 +58,11 @@ func (f *DeepSeekFetcher) AuthKind() string { return "apikey" }
 func (f *DeepSeekFetcher) UsageURL() string { return "https://platform.deepseek.com/usage" }
 
 // Get returns the cached balance, refreshing if stale.
-func (f *DeepSeekFetcher) Get(ctx context.Context) *v1.ProviderQuota {
+func (f *DeepSeekFetcher) Get(ctx context.Context) *ProviderQuota {
 	return f.get(ctx, f.fetch, "DeepSeek")
 }
 
-func (f *DeepSeekFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) {
+func (f *DeepSeekFetcher) fetch(ctx context.Context) (*ProviderQuota, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, deepseekBalanceURL, http.NoBody)
 	if err != nil {
 		return nil, err
@@ -88,7 +86,7 @@ func (f *DeepSeekFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) 
 		return nil, fmt.Errorf("decode DeepSeek balance: %w", err)
 	}
 
-	out := &v1.ProviderQuota{
+	out := &ProviderQuota{
 		Provider: f.Provider(),
 		Label:    f.Label(),
 		AuthKind: f.AuthKind(),
@@ -98,7 +96,7 @@ func (f *DeepSeekFetcher) fetch(ctx context.Context) (*v1.ProviderQuota, error) 
 		total, _ := parseFloat(bi.TotalBalance)
 		granted, _ := parseFloat(bi.GrantedBalance)
 		toppedUp, _ := parseFloat(bi.ToppedUpBalance)
-		out.Balance = v1.QuotaBalance{
+		out.Balance = QuotaBalance{
 			Currency: bi.Currency,
 			Total:    total,
 			Granted:  granted,

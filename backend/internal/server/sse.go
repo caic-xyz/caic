@@ -226,9 +226,10 @@ func (s *Server) buildUsageResp(ctx context.Context) v1.UsageResp {
 	detached := context.WithoutCancel(ctx)
 	for _, f := range s.usageFetchers {
 		if q := f.Get(detached); q != nil {
-			q.LogoURL = "/logos/" + q.Provider + ".svg"
-			q.UsageURL = f.UsageURL()
-			resp.Providers = append(resp.Providers, *q)
+			out := providerQuotaToResp(q)
+			out.LogoURL = "/logos/" + out.Provider + ".svg"
+			out.UsageURL = f.UsageURL()
+			resp.Providers = append(resp.Providers, out)
 		}
 	}
 	return resp
