@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+
+	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/forge"
 )
 
 func TestTaskListEvent(t *testing.T) {
@@ -111,6 +114,80 @@ func TestUserSettings(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestHarness(t *testing.T) {
+	t.Parallel()
+
+	want := map[Harness]agent.Harness{
+		HarnessClaude:   agent.Claude,
+		HarnessCodex:    agent.Codex,
+		HarnessGemini:   agent.Gemini,
+		HarnessKilo:     agent.Kilo,
+		HarnessOpenCode: agent.OpenCode,
+		HarnessPi:       agent.Pi,
+	}
+	for dtoHarness, agentHarness := range want {
+		if string(dtoHarness) != string(agentHarness) {
+			t.Errorf("%s = %q, want agent harness %q", dtoHarness, dtoHarness, agentHarness)
+		}
+	}
+
+	got := map[agent.Harness]struct{}{}
+	for dtoHarness, agentHarness := range want {
+		if _, ok := got[agentHarness]; ok {
+			t.Fatalf("duplicate agent harness mapping for DTO harness %q", dtoHarness)
+		}
+		got[agentHarness] = struct{}{}
+	}
+	for _, agentHarness := range []agent.Harness{
+		agent.Claude,
+		agent.Codex,
+		agent.Gemini,
+		agent.Kilo,
+		agent.OpenCode,
+		agent.Pi,
+	} {
+		if _, ok := got[agentHarness]; !ok {
+			t.Errorf("agent harness %q is missing from DTO harness constants", agentHarness)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("agent harness mapping count = %d, want %d", len(got), len(want))
+	}
+}
+
+func TestForge(t *testing.T) {
+	t.Parallel()
+
+	want := map[Forge]forge.Kind{
+		ForgeGitHub: forge.KindGitHub,
+		ForgeGitLab: forge.KindGitLab,
+	}
+	for dtoForge, forgeKind := range want {
+		if string(dtoForge) != string(forgeKind) {
+			t.Errorf("%s = %q, want forge kind %q", dtoForge, dtoForge, forgeKind)
+		}
+	}
+
+	got := map[forge.Kind]struct{}{}
+	for dtoForge, forgeKind := range want {
+		if _, ok := got[forgeKind]; ok {
+			t.Fatalf("duplicate forge kind mapping for DTO forge %q", dtoForge)
+		}
+		got[forgeKind] = struct{}{}
+	}
+	for _, forgeKind := range []forge.Kind{
+		forge.KindGitHub,
+		forge.KindGitLab,
+	} {
+		if _, ok := got[forgeKind]; !ok {
+			t.Errorf("forge kind %q is missing from DTO forge constants", forgeKind)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("forge kind mapping count = %d, want %d", len(got), len(want))
+	}
 }
 
 func TestRoutes(t *testing.T) {
