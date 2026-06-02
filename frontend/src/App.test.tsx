@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import type { Repo, PreferencesResp, HarnessInfo } from "@sdk/types.gen";
 
 const navigateMock = vi.fn();
+let pathname = "/";
 
 // Stub EventSource to prevent real SSE connections.
 // FakeEventSource captures message listeners so tests can push SSE events.
@@ -21,7 +22,11 @@ class FakeEventSource {
 
 vi.mock("@solidjs/router", () => ({
   useNavigate: () => navigateMock,
-  useLocation: () => ({ pathname: "/" }),
+  useLocation: () => ({
+    get pathname() {
+      return pathname;
+    },
+  }),
 }));
 
 vi.mock("./api", () => ({
@@ -30,10 +35,13 @@ vi.mock("./api", () => ({
   listHarnesses: vi.fn(),
   listCaches: vi.fn(() => Promise.resolve(null)),
   getConfig: vi.fn(),
+  getVersion: vi.fn(),
+  triggerUpdate: vi.fn(),
   getUsage: vi.fn(),
   listRepoBranches: vi.fn(),
   cloneRepo: vi.fn(),
   createTask: vi.fn(),
+  botFixCI: vi.fn(),
   stopTask: vi.fn(),
   purgeTask: vi.fn(),
   reviveTask: vi.fn(),
@@ -78,6 +86,7 @@ function chipPathValues(): string[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  pathname = "/";
   navigateMock.mockClear();
   fakeESListeners.length = 0;
   vi.mocked(api.listRepos).mockResolvedValue([repoA, repoB]);
@@ -91,6 +100,12 @@ beforeEach(() => {
     { name: "claude", models: [], supportsImages: false, supportsCompact: false },
   ] as unknown as HarnessInfo[]);
   vi.mocked(api.getConfig).mockRejectedValue(new Error("no config"));
+  vi.mocked(api.getVersion).mockResolvedValue({
+    current: "0.0.1",
+    latest: "0.0.1",
+    updateAvailable: false,
+    autoUpdateEnabled: false,
+  });
   vi.mocked(api.getUsage).mockRejectedValue(new Error("no usage"));
   vi.mocked(api.listRepoBranches).mockResolvedValue({ branches: [{ name: "main" }, { name: "dev", remote: "origin" }] });
   vi.mocked(api.cloneRepo).mockResolvedValue(newRepo);
@@ -105,6 +120,25 @@ describe("App repo chips: No repository", () => {
     await user.click(screen.getByRole("button", { name: "caic" }));
 
     expect(navigateMock).toHaveBeenCalledWith("/");
+  });
+
+  it("navigates to the settings page from the user menu", async () => {
+    const user = userEvent.setup();
+    render(() => <App />);
+
+    await user.click(screen.getByRole("button", { name: "Menu" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(navigateMock).toHaveBeenCalledWith("/settings");
+  });
+
+  it("renders settings as a routed page instead of a dialog", async () => {
+    pathname = "/settings";
+    render(() => <App />);
+
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await waitFor(() => expect(api.getVersion).toHaveBeenCalledOnce());
   });
 
   it("has no chips after removing the last one", async () => {

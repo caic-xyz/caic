@@ -29,6 +29,7 @@ import PersonIcon from "@material-symbols/svg-400/outlined/person.svg?solid";
 import SettingsIcon from "@material-symbols/svg-400/outlined/settings.svg?solid";
 import TailscaleIcon from "./tailscale.svg?solid";
 import CloneRepoDialog from "./CloneRepoDialog";
+import SettingsPage from "./SettingsPage";
 import { voiceConnected, getVoiceTaskNumber } from "./VoiceState";
 import VoiceOverlay from "./VoiceOverlay";
 import styles from "./App.module.css";
@@ -79,6 +80,11 @@ function isProcessesPath(pathname: string): boolean {
 /** True when the pathname ends with /vnc (VNC viewer route). */
 function isVncPath(pathname: string): boolean {
   return pathname.startsWith("/task/@") && pathname.endsWith("/vnc");
+}
+
+/** True when the pathname is the settings page route. */
+function isSettingsPath(pathname: string): boolean {
+  return pathname === "/settings";
 }
 
 function ConnectionDot(props: { connected: boolean }) {
@@ -150,8 +156,8 @@ export default function App() {
   const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
   const [wellKnownCachesList, setWellKnownCachesList] = createSignal<WellKnownCachesResp["wellKnown"]>([]);
   const [cacheMappings, setCacheMappings] = createSignal<CacheMappingResp[]>([]);
-  const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [versionInfo, setVersionInfo] = createSignal<VersionResp | null>(null);
+  const [versionCheckError, setVersionCheckError] = createSignal("");
   const [updateStatus, setUpdateStatus] = createSignal<string>("");
   const [checkingUpdate, setCheckingUpdate] = createSignal(false);
   const [updating, setUpdating] = createSignal(false);
@@ -241,16 +247,17 @@ export default function App() {
   // Track previous task states to detect transitions to "waiting".
   let prevStates = new Map<string, string>();
 
-  // Fetch version info when settings dialog opens.
+  // Fetch version info when the settings page opens.
   createEffect(() => {
-    if (!settingsOpen()) return;
+    if (!isSettingsPath(location.pathname)) return;
     void (async () => {
       setCheckingUpdate(true);
+      setVersionCheckError("");
       try {
         const v = await getVersion();
         setVersionInfo(v);
-      } catch {
-        // Version check failed — non-critical.
+      } catch (e: unknown) {
+        setVersionCheckError(e instanceof Error ? e.message : "Version check failed");
       } finally {
         setCheckingUpdate(false);
       }
@@ -727,6 +734,23 @@ export default function App() {
     }
   }
 
+  async function saveSettings(overrides: Partial<Parameters<typeof updatePreferences>[0]["settings"]> = {}) {
+    await updatePreferences(currentSettings(overrides));
+  }
+
+  async function triggerServerUpdate() {
+    setUpdating(true);
+    setUpdateStatus("");
+    try {
+      const resp = await triggerUpdate();
+      setUpdateStatus(resp.status === "started" ? "Update started in background. The server will restart shortly." : "Already up to date.");
+    } catch (e: unknown) {
+      setUpdateStatus(e instanceof Error ? e.message : "Update failed");
+    } finally {
+      setUpdating(false);
+    }
+  }
+
   return (
     <Show when={auth.providers().length === 0 || auth.user()} fallback={<Login />}>
     <div class={styles.app}>
@@ -752,7 +776,7 @@ export default function App() {
                   <Show when={hasAuth() && auth.user()}>
                     <span class={styles.dropdownUser}>{user().username}</span>
                   </Show>
-                  <button class={styles.dropdownItem} onClick={() => { setMenuOpen(false); setSettingsOpen(true); }}>
+                  <button type="button" class={styles.dropdownItem} onClick={() => { setMenuOpen(false); navigate("/settings"); }}>
                     <SettingsIcon width="1em" height="1em" style={{ "vertical-align": "middle", "margin-right": "0.4em" }} />
                     Settings
                   </button>
@@ -782,7 +806,7 @@ export default function App() {
         })()}
       </div>
 
-      <form onSubmit={(e) => { e.preventDefault(); submitTask(); }} class={`${styles.submitForm} ${selectedId() ? styles.hidden : ""}`}>
+      <form onSubmit={(e) => { e.preventDefault(); submitTask(); }} class={`${styles.submitForm} ${selectedId() || isSettingsPath(location.pathname) ? styles.hidden : ""}`}>
         <RepoChipStrip
           repos={repos}
           selectedRepos={selectedRepos}
@@ -914,39 +938,65 @@ export default function App() {
       </Show>
 
       <div class={styles.layout}>
-        <TaskList
-          tasks={tasks}
-          repos={repos}
-          selectedId={selectedId()}
-          sidebarOpen={sidebarOpen}
-          setSidebarOpen={setSidebarOpen}
-          now={now}
-          onSelect={(id) => {
-            const found = tasks().find((t) => t.id === id);
-            navigate(found ? taskPath(found.id, found.repos?.[0]?.name ?? "", found.repos?.[0]?.branch ?? "", found.title) : `/task/@${id}`);
-          }}
-          onStop={handleStop}
-          onPurge={handlePurge}
-          onRevive={handleRevive}
-          actionId={actionId}
-          onDiffClick={(id) => {
-            const found = tasks().find((t) => t.id === id);
-            if (found?.diffStat?.length) {
-              navigate(taskPath(found.id, found.repos?.[0]?.name ?? "", found.repos?.[0]?.branch ?? "", found.title) + "/diff");
-            }
-          }}
-          autoFixCI={autoFixCI}
-          autoFixPR={autoFixPR}
-          onFixCI={(repoPath) => {
-            botFixCI({ repo: repoPath }).then((data) => {
-              navigate(taskPath(data.id, repoPath, "", `Fix CI: ${repoPath}`));
-            });
-          }}
-          voiceConnected={voiceConnected}
-          getTaskNumber={getVoiceTaskNumber}
-        />
+        <Show when={!isSettingsPath(location.pathname)}>
+          <TaskList
+            tasks={tasks}
+            repos={repos}
+            selectedId={selectedId()}
+            sidebarOpen={sidebarOpen}
+            setSidebarOpen={setSidebarOpen}
+            now={now}
+            onSelect={(id) => {
+              const found = tasks().find((t) => t.id === id);
+              navigate(found ? taskPath(found.id, found.repos?.[0]?.name ?? "", found.repos?.[0]?.branch ?? "", found.title) : `/task/@${id}`);
+            }}
+            onStop={handleStop}
+            onPurge={handlePurge}
+            onRevive={handleRevive}
+            actionId={actionId}
+            onDiffClick={(id) => {
+              const found = tasks().find((t) => t.id === id);
+              if (found?.diffStat?.length) {
+                navigate(taskPath(found.id, found.repos?.[0]?.name ?? "", found.repos?.[0]?.branch ?? "", found.title) + "/diff");
+              }
+            }}
+            autoFixCI={autoFixCI}
+            autoFixPR={autoFixPR}
+            onFixCI={(repoPath) => {
+              botFixCI({ repo: repoPath }).then((data) => {
+                navigate(taskPath(data.id, repoPath, "", `Fix CI: ${repoPath}`));
+              });
+            }}
+            voiceConnected={voiceConnected}
+            getTaskNumber={getVoiceTaskNumber}
+          />
+        </Show>
 
         <Switch>
+          <Match when={isSettingsPath(location.pathname)}>
+            <SettingsPage
+              selectedImage={selectedImage}
+              setSelectedImage={setSelectedImage}
+              maxCPUs={maxCPUs}
+              setMaxCPUs={setMaxCPUs}
+              wellKnownCaches={wellKnownCaches}
+              setWellKnownCaches={setWellKnownCaches}
+              wellKnownCachesList={wellKnownCachesList}
+              cacheMappings={cacheMappings}
+              setCacheMappings={setCacheMappings}
+              autoFixCI={autoFixCI}
+              setAutoFixCI={setAutoFixCI}
+              autoFixPR={autoFixPR}
+              setAutoFixPR={setAutoFixPR}
+              versionInfo={versionInfo}
+              versionCheckError={versionCheckError}
+              checkingUpdate={checkingUpdate}
+              updating={updating}
+              updateStatus={updateStatus}
+              saveSettings={saveSettings}
+              triggerServerUpdate={triggerServerUpdate}
+            />
+          </Match>
           <Match when={isDiffPath(location.pathname) && selectedId()} keyed>
             {(id) => {
               const t = selectedTask();
@@ -1153,229 +1203,6 @@ export default function App() {
           <div class={styles.forkActions}>
             <button type="button" class={styles.forkCancel} onClick={() => setForkTaskId(null)}>Cancel</button>
             <Button type="button" onClick={submitFork} disabled={!forkPrompt().trim()}>Fork</Button>
-          </div>
-        </dialog>
-      </Show>
-      <Show when={settingsOpen()}>
-        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events -- native <dialog> handles Escape; click-to-dismiss on padding is supplementary */}
-        <dialog
-          ref={(el) => {
-            el.addEventListener("close", () => { setSettingsOpen(false); });
-            const stopEscape = (e: KeyboardEvent) => {
-              if (e.key === "Escape") { e.stopPropagation(); e.stopImmediatePropagation(); }
-            };
-            el.addEventListener("keydown", stopEscape, true);
-            // showModal requires the element to be in the document; defer to next microtask.
-            queueMicrotask(() => el.showModal());
-          }}
-          class={styles.settingsPanel}
-          onClick={() => setSettingsOpen(false)}
-        >
-          {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events -- stop click propagation to dialog backdrop; native <dialog> handles Escape */}
-          <div
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2 class={styles.settingsPanelTitle}>Settings</h2>
-            <div class={styles.settingsSection}>
-              <h3 class={styles.settingsSectionTitle}>Container</h3>
-              <label class={styles.settingsLabel}>
-                Docker image
-                <input
-                  type="text"
-                  class={styles.settingsInput}
-                  placeholder="ghcr.io/caic-xyz/md-user:latest"
-                  value={selectedImage() || ""}
-                  onChange={(e) => setSelectedImage(e.currentTarget.value)}
-                  onBlur={async () => {
-                    await updatePreferences(currentSettings());
-                  }}
-                />
-              </label>
-              <label class={styles.settingsLabel}>
-                CPU cores
-                <input
-                  type="number"
-                  class={styles.settingsInput}
-                  placeholder="Default"
-                  min="0"
-                  value={maxCPUs() || ""}
-                  onChange={(e) => setMaxCPUs(parseInt(e.currentTarget.value, 10) || 0)}
-                  onBlur={async () => {
-                    await updatePreferences(currentSettings());
-                  }}
-                />
-              </label>
-              <p class={styles.settingsDescription}>Maximum CPU cores for each container (0 = use default).</p>
-            </div>
-            <div class={styles.settingsSection}>
-              <h3 class={styles.settingsSectionTitle}>Well-known caches</h3>
-              <div class={styles.cacheGrid}>
-                <For each={wellKnownCachesList()}>
-                  {(cache) => {
-                    const state = () => wellKnownCaches()[cache.name];
-                    const isEnabled = () => state() !== false;
-                    return (
-                      <label
-                        class={styles.cacheCheckbox}
-                        data-state={state() === undefined ? "default" : isEnabled() ? "enabled" : "disabled"}
-                        title={cache.description}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isEnabled()}
-                          onChange={async (e) => {
-                            const newCaches = { ...wellKnownCaches() };
-                            if (e.currentTarget.checked) {
-                              newCaches[cache.name] = true;
-                            } else {
-                              newCaches[cache.name] = false;
-                            }
-                            setWellKnownCaches(newCaches);
-                            await updatePreferences(currentSettings({ wellKnownCaches: newCaches as Record<string, boolean> }));
-                          }}
-                        />
-                        {cache.name}
-                      </label>
-                    );
-                  }}
-                </For>
-              </div>
-            </div>
-            <div class={styles.settingsSection}>
-              <h3 class={styles.settingsSectionTitle}>Custom cache mappings</h3>
-              <For each={cacheMappings()}>
-                {(mapping, index) => (
-                  <div class={styles.cacheMappingRow}>
-                    <input
-                      type="text"
-                      class={styles.settingsInput}
-                      placeholder="Host path"
-                      value={mapping.hostPath}
-                      onChange={(e) => {
-                        const newMappings = [...cacheMappings()];
-                        newMappings[index()].hostPath = e.currentTarget.value;
-                        setCacheMappings(newMappings);
-                      }}
-                      onBlur={async () => {
-                        await updatePreferences(currentSettings());
-                      }}
-                    />
-                    <span class={styles.cacheMappingArrow}>→</span>
-                    <input
-                      type="text"
-                      class={styles.settingsInput}
-                      placeholder="Container path"
-                      value={mapping.containerPath}
-                      onChange={(e) => {
-                        const newMappings = [...cacheMappings()];
-                        newMappings[index()].containerPath = e.currentTarget.value;
-                        setCacheMappings(newMappings);
-                      }}
-                      onBlur={async () => {
-                        await updatePreferences(currentSettings());
-                      }}
-                    />
-                    <button
-                      class={styles.cacheMappingRemove}
-                      onClick={async () => {
-                        const newMappings = cacheMappings().filter((_, i) => i !== index());
-                        setCacheMappings(newMappings);
-                        await updatePreferences(currentSettings({ cacheMappings: newMappings }));
-                      }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                )}
-              </For>
-              <button
-                class={styles.settingsButton}
-                onClick={() => {
-                  setCacheMappings([...cacheMappings(), { hostPath: "", containerPath: "" }]);
-                }}
-              >
-                + Add mapping
-              </button>
-            </div>
-            <div class={styles.settingsSection}>
-              <h3 class={styles.settingsSectionTitle}>Automation</h3>
-              <label class={styles.settingsLabel}>
-                <input
-                  type="checkbox"
-                  checked={autoFixCI()}
-                  onChange={async (e) => {
-                    const val = e.currentTarget.checked;
-                    setAutoFixCI(val);
-                    await updatePreferences(currentSettings({ autoFixOnCIFailure: val }));
-                  }}
-                />
-                Auto-fix CI failures
-              </label>
-              <p class={styles.settingsDescription}>When CI fails on a PR and the agent has finished, automatically start a new task to fix it.</p>
-              <label class={styles.settingsLabel}>
-                <input
-                  type="checkbox"
-                  checked={autoFixPR()}
-                  onChange={async (e) => {
-                    const val = e.currentTarget.checked;
-                    setAutoFixPR(val);
-                    await updatePreferences(currentSettings({ autoFixOnPROpen: val }));
-                  }}
-                />
-                Auto-fix PRs
-              </label>
-              <p class={styles.settingsDescription}>When a pull request is opened or reopened, automatically start a task to review and fix it.</p>
-            </div>
-            <div class={styles.settingsSection}>
-              <h3 class={styles.settingsSectionTitle}>Version</h3>
-              <Show when={versionInfo()} fallback={
-                <Show when={checkingUpdate()}>
-                  <p class={styles.settingsDescription}>Checking for updates…</p>
-                </Show>
-              }>
-                {(v) => (
-                  <>
-                    <p class={styles.settingsDescription}>
-                      Current: <strong>caic v{v().current}</strong>
-                      <Show when={v().latest}>
-                        {" — "}
-                        <Show when={v().updateAvailable} fallback={
-                          <>latest: v{v().latest} (up to date)</>
-                        }>
-                          latest: <strong>v{v().latest}</strong> (update available)
-                        </Show>
-                      </Show>
-                    </p>
-                    <Show when={v().checkError}>
-                      <p class={styles.settingsDescription} style={{ color: "var(--color-error)" }}>Check failed: {v().checkError}</p>
-                    </Show>
-                    <Show when={v().autoUpdateEnabled && v().updateAvailable}>
-                      <button
-                        class={styles.settingsButton}
-                        disabled={updating()}
-                        onClick={async () => {
-                          setUpdating(true);
-                          setUpdateStatus("");
-                          try {
-                            const resp = await triggerUpdate();
-                            setUpdateStatus(resp.status === "started" ? "Update started in background. The server will restart shortly." : "Already up to date.");
-                          } catch (e: unknown) {
-                            setUpdateStatus(e instanceof Error ? e.message : "Update failed");
-                          } finally {
-                            setUpdating(false);
-                          }
-                        }}
-                      >
-                        {updating() ? "Updating…" : "Update now"}
-                      </button>
-                    </Show>
-                    <Show when={updateStatus()}>
-                      <p class={styles.settingsDescription}>{updateStatus()}</p>
-                    </Show>
-                  </>
-                )}
-              </Show>
-            </div>
           </div>
         </dialog>
       </Show>

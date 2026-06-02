@@ -1,0 +1,231 @@
+// SettingsPage renders the full-page application settings view.
+import { For, Show, type Accessor, type Setter } from "solid-js";
+import type { CacheMappingResp, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
+import styles from "./SettingsPage.module.css";
+
+type SettingsOverrides = Partial<UpdatePreferencesReq["settings"]>;
+
+interface SettingsPageProps {
+  selectedImage: Accessor<string>;
+  setSelectedImage: Setter<string>;
+  maxCPUs: Accessor<number>;
+  setMaxCPUs: Setter<number>;
+  wellKnownCaches: Accessor<Record<string, boolean | undefined>>;
+  setWellKnownCaches: Setter<Record<string, boolean | undefined>>;
+  wellKnownCachesList: Accessor<WellKnownCachesResp["wellKnown"]>;
+  cacheMappings: Accessor<CacheMappingResp[]>;
+  setCacheMappings: Setter<CacheMappingResp[]>;
+  autoFixCI: Accessor<boolean>;
+  setAutoFixCI: Setter<boolean>;
+  autoFixPR: Accessor<boolean>;
+  setAutoFixPR: Setter<boolean>;
+  versionInfo: Accessor<VersionResp | null>;
+  versionCheckError: Accessor<string>;
+  checkingUpdate: Accessor<boolean>;
+  updating: Accessor<boolean>;
+  updateStatus: Accessor<string>;
+  saveSettings: (overrides?: SettingsOverrides) => Promise<void>;
+  triggerServerUpdate: () => Promise<void>;
+}
+
+export default function SettingsPage(props: SettingsPageProps) {
+  const updateCacheMapping = (index: number, update: Partial<CacheMappingResp>) => {
+    props.setCacheMappings((prev) => prev.map((mapping, i) => (
+      i === index ? { ...mapping, ...update } : mapping
+    )));
+  };
+
+  return (
+    <div class={styles.settingsPage}>
+      <div class={styles.settingsPanel}>
+        <h2 class={styles.settingsPanelTitle}>Settings</h2>
+        <div class={styles.settingsSection}>
+          <h3 class={styles.settingsSectionTitle}>Container</h3>
+          <label class={styles.settingsLabel}>
+            Docker image
+            <input
+              type="text"
+              class={styles.settingsInput}
+              placeholder="ghcr.io/caic-xyz/md-user:latest"
+              value={props.selectedImage() || ""}
+              onChange={(e) => props.setSelectedImage(e.currentTarget.value)}
+              onBlur={() => {
+                void props.saveSettings();
+              }}
+            />
+          </label>
+          <label class={styles.settingsLabel}>
+            CPU cores
+            <input
+              type="number"
+              class={styles.settingsInput}
+              placeholder="Default"
+              min="0"
+              value={props.maxCPUs() || ""}
+              onChange={(e) => props.setMaxCPUs(parseInt(e.currentTarget.value, 10) || 0)}
+              onBlur={() => {
+                void props.saveSettings();
+              }}
+            />
+          </label>
+          <p class={styles.settingsDescription}>Maximum CPU cores for each container (0 = use default).</p>
+        </div>
+        <div class={styles.settingsSection}>
+          <h3 class={styles.settingsSectionTitle}>Well-known caches</h3>
+          <div class={styles.cacheGrid}>
+            <For each={props.wellKnownCachesList()}>
+              {(cache) => {
+                const state = () => props.wellKnownCaches()[cache.name];
+                const isEnabled = () => state() !== false;
+                return (
+                  <label
+                    class={styles.cacheCheckbox}
+                    data-state={state() === undefined ? "default" : isEnabled() ? "enabled" : "disabled"}
+                    title={cache.description}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isEnabled()}
+                      onChange={(e) => {
+                        const newCaches = { ...props.wellKnownCaches() };
+                        newCaches[cache.name] = e.currentTarget.checked;
+                        props.setWellKnownCaches(newCaches);
+                        void props.saveSettings({ wellKnownCaches: newCaches as Record<string, boolean> });
+                      }}
+                    />
+                    {cache.name}
+                  </label>
+                );
+              }}
+            </For>
+          </div>
+        </div>
+        <div class={styles.settingsSection}>
+          <h3 class={styles.settingsSectionTitle}>Custom cache mappings</h3>
+          <For each={props.cacheMappings()}>
+            {(mapping, index) => (
+              <div class={styles.cacheMappingRow}>
+                <input
+                  type="text"
+                  class={styles.settingsInput}
+                  placeholder="Host path"
+                  value={mapping.hostPath}
+                  onChange={(e) => updateCacheMapping(index(), { hostPath: e.currentTarget.value })}
+                  onBlur={() => {
+                    void props.saveSettings();
+                  }}
+                />
+                <span class={styles.cacheMappingArrow}>→</span>
+                <input
+                  type="text"
+                  class={styles.settingsInput}
+                  placeholder="Container path"
+                  value={mapping.containerPath}
+                  onChange={(e) => updateCacheMapping(index(), { containerPath: e.currentTarget.value })}
+                  onBlur={() => {
+                    void props.saveSettings();
+                  }}
+                />
+                <button
+                  type="button"
+                  class={styles.cacheMappingRemove}
+                  onClick={() => {
+                    const newMappings = props.cacheMappings().filter((_, i) => i !== index());
+                    props.setCacheMappings(newMappings);
+                    void props.saveSettings({ cacheMappings: newMappings });
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+          </For>
+          <button
+            type="button"
+            class={styles.settingsButton}
+            onClick={() => {
+              props.setCacheMappings([...props.cacheMappings(), { hostPath: "", containerPath: "" }]);
+            }}
+          >
+            + Add mapping
+          </button>
+        </div>
+        <div class={styles.settingsSection}>
+          <h3 class={styles.settingsSectionTitle}>Automation</h3>
+          <label class={styles.settingsLabel}>
+            <input
+              type="checkbox"
+              checked={props.autoFixCI()}
+              onChange={(e) => {
+                const val = e.currentTarget.checked;
+                props.setAutoFixCI(val);
+                void props.saveSettings({ autoFixOnCIFailure: val });
+              }}
+            />
+            Auto-fix CI failures
+          </label>
+          <p class={styles.settingsDescription}>When CI fails on a PR and the agent has finished, automatically start a new task to fix it.</p>
+          <label class={styles.settingsLabel}>
+            <input
+              type="checkbox"
+              checked={props.autoFixPR()}
+              onChange={(e) => {
+                const val = e.currentTarget.checked;
+                props.setAutoFixPR(val);
+                void props.saveSettings({ autoFixOnPROpen: val });
+              }}
+            />
+            Auto-fix PRs
+          </label>
+          <p class={styles.settingsDescription}>When a pull request is opened or reopened, automatically start a task to review and fix it.</p>
+        </div>
+        <div class={styles.settingsSection}>
+          <h3 class={styles.settingsSectionTitle}>Version</h3>
+          <Show when={props.versionInfo()} fallback={
+            <Show when={props.checkingUpdate()} fallback={
+              <Show when={props.versionCheckError()}>
+                <p class={styles.settingsDescription} style={{ color: "var(--color-error)" }}>Check failed: {props.versionCheckError()}</p>
+              </Show>
+            }>
+              <p class={styles.settingsDescription}>Checking for updates…</p>
+            </Show>
+          }>
+            {(v) => (
+              <>
+                <p class={styles.settingsDescription}>
+                  Current: <strong>caic v{v().current}</strong>
+                  <Show when={v().latest}>
+                    {" — "}
+                    <Show when={v().updateAvailable} fallback={
+                      <>latest: v{v().latest} (up to date)</>
+                    }>
+                      latest: <strong>v{v().latest}</strong> (update available)
+                    </Show>
+                  </Show>
+                </p>
+                <Show when={v().checkError}>
+                  <p class={styles.settingsDescription} style={{ color: "var(--color-error)" }}>Check failed: {v().checkError}</p>
+                </Show>
+                <Show when={v().autoUpdateEnabled && v().updateAvailable}>
+                  <button
+                    type="button"
+                    class={styles.settingsButton}
+                    disabled={props.updating()}
+                    onClick={() => {
+                      void props.triggerServerUpdate();
+                    }}
+                  >
+                    {props.updating() ? "Updating…" : "Update now"}
+                  </button>
+                </Show>
+                <Show when={props.updateStatus()}>
+                  <p class={styles.settingsDescription}>{props.updateStatus()}</p>
+                </Show>
+              </>
+            )}
+          </Show>
+        </div>
+      </div>
+    </div>
+  );
+}
