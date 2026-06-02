@@ -1,11 +1,12 @@
 # Android Web Shell Plan
 
-This is the canonical plan for replacing duplicated Android screen-mode UI with
-a thin Android shell around the existing SolidJS mobile web frontend.
+This is the canonical plan for creating **Go Mode**, a new Android app with
+application ID `com.fghbuild.gomode`. Go Mode is a thin native shell around
+backend-hosted mobile web frontends such as caic and mddb.
 
-It also records one architectural fork: whether this work should remain inside
-the caic Android app or become a second Android app that can host caic, mddb,
-and future server-backed tools behind a shared native voice endpoint layer.
+The current caic Android app, `com.fghbuild.caic`, remains source material. Do
+not edit it as the shell migration path. Copy the relevant native code into Go
+Mode and leave caic-specific screen-mode UI behind.
 
 The target is not a pure web app. Android stays authoritative for platform
 capabilities that require native APIs:
@@ -21,17 +22,39 @@ capabilities that require native APIs:
 - Halo/BLE integration. Halo is in scope even if the first implementation is
   still incomplete.
 
-The migration should proceed only if the first implementation proves that
-WebView loading, auth, native notifications, and voice-gateway-mediated voice
-can work without a broad bridge or fragile request interception.
+The migration has two gates. First, prove a new app can load backend-hosted web
+frontends with auth, native notifications, and Go Mode host mode. Then prove
+voice-gateway-mediated voice without a broad bridge or fragile request
+interception.
+
+## Immediate Direction
+
+Create a new Android app named Go Mode with package/application ID
+`com.fghbuild.gomode`.
+
+The first useful iteration is a backend-hosted WebView shell with native
+settings fallback, Go Mode host-mode detection in the frontend, and copied
+native monitoring/notification code that does not depend on caic Compose screen
+ViewModels. Keep the copied native voice path available during the first spike
+only if it is cheaper than stubbing voice until the gateway exists.
+
+Treat the voice gateway as the target architecture, not as a prerequisite for
+loading the web shell. Before moving Android voice to the gateway, define the
+minimum service compatibility metadata, gateway compatibility metadata, and
+service-issued token contract needed by Android.
+
+Do not bring over caic task list/detail/diff/process/widget Compose screens.
+Go Mode starts as a WebView host plus native bootstrap, notification, voice,
+screenshot, and Halo integrations.
 
 ## Current Facts
 
 - `frontend/` is already the richer screen-mode implementation for task list,
   task detail, grouping, widgets, VNC, diff, process views, formatting, and
   mobile behavior.
-- Android duplicates much of that screen UI in Compose and currently relies on
-  convention for parity with the frontend.
+- The current caic Android app duplicates much of that screen UI in Compose and
+  relies on convention for parity with the frontend. Go Mode should not inherit
+  that duplicated screen UI.
 - `TaskListViewModel` starts `TaskRepository.start(viewModelScope)` and
   `TaskNotifier.start(viewModelScope)`. Shell mode must not depend on that
   ViewModel being created.
@@ -48,15 +71,14 @@ can work without a broad bridge or fragile request interception.
   Bundled APK assets would force API-origin, EventSource, service-worker, and
   auth work too early.
 - The frontend currently renders `VoiceOverlay` and requests browser
-  notifications. Android host mode must suppress both unless they are explicitly
+  notifications. Go Mode host mode must suppress both unless they are explicitly
   backed by native Android behavior.
-- The Android app must keep multiplexing multiple caic backend servers. Native
-  Android settings and server-specific web settings are separate ownership
-  domains.
+- Go Mode must multiplex multiple service instances, initially caic backend
+  servers. Native Android settings and server-specific web settings are
+  separate ownership domains.
 - mddb is another backend-hosted frontend service with OAuth, generated SDK/API
-  docs, e2e coverage, and mobile UI tests. This makes a multi-service Android
-  host plausible, but it should be decided explicitly before the caic shell work
-  hardens caic-specific abstractions.
+  docs, e2e coverage, and mobile UI tests. Go Mode should keep the service host
+  boundary generic enough for mddb even if caic is implemented first.
 - The caic backend currently exposes `/api/v1/voice/rtc/offer` and terminates
   the WebRTC side of a voice session through `internal/server/voicertc`.
 - The current caic API reports voice availability as `Config.webrtcAvailable`.
@@ -80,8 +102,11 @@ can work without a broad bridge or fragile request interception.
 
 - Do not start with a Trusted Web Activity. The shell needs direct native state,
   foreground service, notification, permission, and voice integration.
-- Do not delete Compose screen mode until the WebView shell passes the
-  acceptance checks below.
+- Do not edit `com.fghbuild.caic` as the shell migration target. It is source
+  material for copying.
+- Do not copy caic task list/detail/diff/process/widget Compose UI into Go
+  Mode.
+- Do not build a caic Compose/WebView mode switch.
 - Do not proxy normal caic API calls through JavaScript bridge methods.
 - Do not bundle frontend assets into the APK. There is no offline use case; the
   app cannot do useful work without network access to a backend service.
@@ -90,7 +115,7 @@ can work without a broad bridge or fragile request interception.
   voice gateway side of the Gemini Live bridge, using service-owned tool binding
   APIs.
 - Do not keep `webrtc-relay` as a caic-auth-coupled sidecar if it becomes part
-  of the Android shell architecture.
+  of the Go Mode shell architecture.
 - Do not weaken notification, microphone, audio routing, foreground service, or
   MediaProjection behavior to fit a pure web model.
 - Do not add broad refactors before the WebView, auth, notification, and voice
@@ -99,10 +124,10 @@ can work without a broad bridge or fragile request interception.
 ## Target Architecture
 
 ```text
-MainActivity
+com.fghbuild.gomode.MainActivity
   -> native bootstrap shell
-      -> Android app settings
-          -> configured caic backend servers
+      -> Go Mode app settings
+          -> configured service instances
           -> configured voice gateway
           -> notification policy
           -> voice endpoint settings
@@ -137,74 +162,65 @@ Active service backend
 
 Ownership rules:
 
-- Web owns screen-mode task UI once the shell is accepted.
-- Android owns native settings needed to configure the first server or recover
+- Web owns screen-mode task UI from the first Go Mode implementation.
+- Go Mode owns native settings needed to configure the first server or recover
   from a broken WebView.
-- Android owns multiplexing between configured backend servers.
+- Go Mode owns multiplexing between configured service instances.
 - Each backend frontend owns instance-specific server settings such as cache,
   server preferences, workspace settings, and product-specific configuration.
 - The backend web UI should remain the primary owner of authentication unless a
   native capability has a proven need for bearer-token access.
-- Android owns local voice endpoint lifecycle and platform permissions.
+- Go Mode owns local voice endpoint lifecycle and platform permissions.
 - The voice gateway owns Gemini Live session orchestration, Gemini setup,
   function declarations, tool-call dispatch, and tool responses.
 - Each service backend owns its web UI, auth, product API, and service-specific
   tool binding implementation. The gateway calls these bindings through scoped
   credentials issued by the service backend.
 - A service backend may either host the voice-gateway protocol itself or
-  advertise a preferred external gateway. Android always talks to a
+  advertise a preferred external gateway. Go Mode always talks to a
   voice-gateway protocol endpoint, not to caic-specific voice routes.
-- Android owns task notifications.
-- Android owns MediaProjection screenshot capture until an equivalent web path
+- Go Mode owns task notifications.
+- Go Mode owns MediaProjection screenshot capture until an equivalent web path
   is proven.
-- Android owns Halo/BLE integration.
+- Go Mode owns Halo/BLE integration.
 - The JavaScript bridge is capability-oriented, not a second API client.
 - The native shell must negotiate protocol compatibility with the loaded server
   before enabling native bindings.
 
 ## App Boundary Decision
 
-There are two viable product boundaries.
+The product boundary is decided: build a second Android app named Go Mode.
 
-Option A: evolve the existing caic Android app.
+Go Mode provides microphone/audio routing, foreground services, notifications,
+WebView hosting, protocol negotiation, and native bindings as shared
+infrastructure. The voice gateway provides the shared Gemini Live bridge and
+dispatches to service-specific tool binding APIs.
 
-- Best when caic is the only near-term target.
-- Lowest migration cost because existing Android voice endpoint code,
-  notifications, Halo, screenshot capture, settings, and e2e infrastructure
-  already live here.
-- Risk: caic-specific naming, repositories, and bridge contracts can become hard
-  to generalize later.
+caic, mddb, and future services are configured as service instances with their
+own backend URL, hosted web frontend, capabilities, and bridge schema.
 
-Option B: create a second Android app as a generic native service host.
+Code-copy policy:
 
-- The app would provide microphone/audio routing, foreground services,
-  notifications, WebView hosting, protocol negotiation, and native bindings as
-  shared infrastructure. The voice gateway would provide the shared Gemini Live
-  bridge and dispatch to service-specific tool binding APIs.
-- caic, mddb, and future services would be configured as service instances with
-  their own backend URL, web frontend, capabilities, and bridge schema.
-- This aligns with a future where servers expose agent skills through
-  https://agentskills.io/ style capability metadata.
-- Risk: it creates a product and packaging split before the caic WebView shell
-  has proven its basic lifecycle, auth, and voice assumptions.
-
-Decision rule:
-
-- Keep the first spike in the existing caic Android app unless the generic host
-  boundary can be defined without delaying the caic migration.
-- Before implementing the full bridge, decide whether bridge package names,
-  settings models, and protocol names should be caic-specific or generic.
-- If the generic host is chosen, extract only after the caic spike proves
-  WebView loading, auth, notifications, and voice-gateway-mediated voice. Do not start
-  by moving incomplete behavior into a new app.
+- Copy relevant code from `com.fghbuild.caic` into `com.fghbuild.gomode`.
+- Rename packages, DI modules, app labels, notification channels, DataStore
+  names, deep-link schemes, test packages, and generated screenshots so the two
+  apps can coexist on one device.
+- Keep copied code only when Go Mode needs the native capability: settings,
+  service instance storage, WebView shell, task monitoring, notifications,
+  voice endpoint, screenshot capture, and Halo/BLE.
+- Do not copy caic screen-mode Compose task UI.
+- Do not share mutable preferences or notification IDs between the two apps.
+- Prefer later extraction into shared modules only after duplicated copied code
+  has stabilized in Go Mode.
 
 ## Settings Model
 
 Native Android settings and backend settings must stay separate.
 
-Android app settings:
+Go Mode app settings:
 
-- Configured service instances, initially multiple caic backend servers.
+- Configured service instances, initially multiple caic backend servers and
+  later mddb.
 - Configured voice gateway URL and last-known compatibility state.
 - Active service instance.
 - Notification policy and Android notification permission state.
@@ -243,8 +259,8 @@ Rules:
   that can be refreshed or invalidated.
 - Server switching must switch WebView origin, native monitoring, notification
   routing, and native capability state as one coherent operation.
-- In a future generic host, settings should be keyed by service type and service
-  instance ID, not only by URL.
+- Settings should be keyed by service type and service instance ID, not only by
+  URL.
 
 Voice gateway config ownership:
 
@@ -431,7 +447,7 @@ Auth implementation notes:
 
 ## Protocol And Versioning
 
-The Android shell must not assume that every configured server supports the same
+The Go Mode shell must not assume that every configured server supports the same
 frontend, API, or native binding version.
 
 Add a small shell compatibility endpoint to caic before relying on native
@@ -445,8 +461,8 @@ the shape should be stable:
   "serviceVersion": "0.0.0",
   "apiVersion": 1,
   "webShell": {
-    "minAndroidShell": 1,
-    "maxAndroidShell": 1,
+    "minGoModeShell": 1,
+    "maxGoModeShell": 1,
     "bridgeVersion": 1,
     "voiceGateway": {
       "required": true,
@@ -482,9 +498,9 @@ Versioning rules:
   connects to that gateway directly. caic does not depend on HTTP redirects for
   signaling.
 - For `disabled`, Android disables voice without probing legacy WebRTC routes.
-- Android reads compatibility metadata before enabling bridge commands.
+- Go Mode reads compatibility metadata before enabling bridge commands.
 - The web frontend also receives shell version and capabilities through
-  `window.caicAndroid`.
+  `window.goMode`.
 - Unsupported versions must fail visibly with an upgrade message instead of
   partial behavior.
 - Server upgrade prompts should be driven by server metadata, not hardcoded app
@@ -531,7 +547,7 @@ current code and report any mismatch.
 - Hypothesis: frontend API and EventSource calls still use relative `/api/...`
   paths.
 - Hypothesis: browser voice and browser notifications are still active in normal
-  frontend mode and need Android host-mode suppression.
+  frontend mode and need Go Mode host-mode suppression.
 - Hypothesis: authentication is primarily backend-owned through the web UI, and
   Android only needs native auth state for capabilities that cannot use the
   WebView session.
@@ -583,8 +599,11 @@ current code and report any mismatch.
 - Hypothesis: caic only needs gateway connection and service-token policy for
   external gateway deployments; full gateway config is needed only when caic
   explicitly hosts the gateway protocol in-process.
-- Hypothesis: the first caic spike can be implemented without preventing a
-  future generic service host.
+- Hypothesis: the first Go Mode spike can copy the relevant caic native code
+  without pulling in caic task list/detail/diff/process/widget Compose UI.
+- Hypothesis: Go Mode can coexist with `com.fghbuild.caic` on the same device
+  after package names, DataStore names, notification channels, deep links, and
+  screenshot paths are renamed.
 
 If any hypothesis is false, update this plan before coding.
 
@@ -594,7 +613,7 @@ Read before editing:
 
 - `/home/user/src/AGENTS.md`
 - `AGENTS.md`
-- `android/AGENTS.md`
+- `android/AGENTS.md` before copying Android code from the caic app
 - `frontend/AGENTS.md`
 - `sdk/halo/AGENTS.md` if Halo code is touched
 
@@ -615,27 +634,37 @@ make android-build
 ```
 
 If a baseline check already fails, report it before changing behavior. Do not
-hide pre-existing failures behind Web shell work.
+hide pre-existing failures behind Go Mode work.
 
 ## Execution Order
 
 Execute in this order unless a phase explicitly proves the direction is wrong:
 
-1. Establish the voice gateway boundary.
-2. Prove backend-hosted WebView shell loading.
-3. Prove auth, scoped voice-gateway token exchange, and version negotiation.
-4. Move task monitoring and notifications out of screen ViewModels.
-5. Add Android host mode to the frontend.
-6. Add the narrow native-web bridge.
-7. Move voice tool execution into the voice gateway and service bindings.
-8. Wire Android voice endpoint to the voice gateway.
-9. Add notification deep links, screenshot bridge, and Halo context.
-10. Retire duplicated Compose screen-mode UI only after all gates pass.
+1. Confirm the hypotheses against current code and record mismatches in this
+   plan.
+2. Scaffold Go Mode as a new Android app with package/application ID
+   `com.fghbuild.gomode`.
+3. Copy only native bootstrap/settings code needed to configure service
+   instances.
+4. Prove backend-hosted WebView shell loading in Go Mode.
+5. Add Go Mode host mode to the frontend.
+6. Copy and adapt task monitoring and notifications without screen ViewModel
+   dependencies.
+7. Prove auth and service compatibility negotiation.
+8. Add the narrow native-web bridge.
+9. Establish the voice gateway boundary and compatibility endpoint.
+10. Prove scoped voice-gateway token exchange.
+11. Move voice tool execution into the voice gateway and service bindings.
+12. Wire Go Mode voice endpoint to the voice gateway.
+13. Add notification deep links, screenshot bridge, and Halo context.
 
 ## Phase 1: Voice Gateway Foundation
 
-Rename and reshape the partial relay before building more Android voice
-behavior around it.
+This is required before Go Mode voice moves to a gateway. It is not required
+before the first WebView shell spike.
+
+Rename and reshape the partial relay before building more gateway-dependent
+Android voice behavior around it.
 
 Requirements:
 
@@ -707,23 +736,25 @@ Acceptance checks:
 - Tests cover config loading, compatibility response, token validation, and
   service selection.
 
-## Phase 2: Reversible Remote WebView Spike
+## Phase 2: Go Mode WebView Spike
 
-Goal: prove that Android can host the existing backend-served mobile frontend
-without deleting Compose screen mode.
+Goal: prove that Go Mode can host the existing backend-served mobile frontend
+without editing the current caic Android app.
 
-Add a reversible shell mode:
+Create a new Android app:
 
-- Prefer a local developer setting or build flag that defaults to existing
-  Compose screen mode.
-- Route shell mode through `CaicNavGraph` or a new top-level host.
-- Keep existing Compose screens, ViewModels, and tests compiling.
-- Keep the native voice panel available as a Compose overlay in the first spike.
+- Package/application ID: `com.fghbuild.gomode`.
+- App label: `Go Mode`.
+- Keep caic's `com.fghbuild.caic` app installable in parallel.
+- Copy only native bootstrap/settings code needed for service instance
+  configuration.
+- Do not copy caic screen-mode Compose task UI.
+- Keep the copied native voice panel only if it is needed for the first spike.
 
 Create:
 
 ```text
-android/app/src/main/java/com/fghbuild/caic/ui/web/WebShellScreen.kt
+<gomode-app>/src/main/java/com/fghbuild/gomode/ui/web/WebShellScreen.kt
 ```
 
 Initial WebView behavior:
@@ -750,7 +781,8 @@ Acceptance checks:
 - Sending task input works.
 - Android back navigates predictably.
 - The user can still reach native settings if WebView cannot load.
-- Default production behavior remains the existing Compose path.
+- Go Mode and the current caic Android app can both be installed on the same
+  device.
 
 ## Phase 3: Auth Spike and Decision
 
@@ -844,7 +876,7 @@ Requirements:
   voice.
 - Android stores the last-known compatibility result per configured server.
 - Android stores the last-known compatibility result for the configured gateway.
-- WebView host mode exposes Android shell version and native capabilities to the
+- WebView host mode exposes Go Mode shell version and native capabilities to the
   frontend.
 - Incompatible servers show a clear native recovery screen with upgrade guidance.
 - Incompatible voice gateways show a clear native recovery screen with gateway
@@ -868,7 +900,7 @@ Move task monitoring out of screen-mode ViewModels.
 Implement a dedicated app-scoped starter, for example:
 
 ```text
-android/app/src/main/java/com/fghbuild/caic/data/TaskMonitor.kt
+<gomode-app>/src/main/java/com/fghbuild/gomode/data/TaskMonitor.kt
 ```
 
 Requirements:
@@ -894,50 +926,51 @@ Acceptance checks:
 - Notifications auto-dismiss when a task leaves an attention state.
 - Server switch and re-auth restart monitoring.
 - Closing and reopening shell mode does not create duplicate SSE collectors.
-- Existing Compose task list still works while the migration is reversible.
+- Go Mode task monitoring does not instantiate copied caic screen ViewModels.
 
-## Phase 5: Android Host Mode in the Frontend
+## Phase 5: Go Mode Host Mode in the Frontend
 
 Add a narrow frontend host-mode abstraction.
 
 Recommended files:
 
 ```text
-frontend/src/androidHost.ts
-frontend/src/androidHost.test.ts
+frontend/src/goModeHost.ts
+frontend/src/goModeHost.test.ts
 frontend/src/global.d.ts
 ```
 
 Native should expose one marker before the app code runs:
 
 ```ts
-window.caicAndroid = {
+window.goMode = {
   version: 1,
   hostMode: true,
+  activeService: "caic",
 };
 ```
 
-In Android host mode:
+In Go Mode host mode:
 
 - Do not render or auto-start browser `VoiceOverlay`.
 - Do not instantiate browser `VoiceSession`.
 - Do not request browser notification permission.
 - Do not show browser notifications.
 - Prefer native screenshot integration when it is available.
-- Keep normal browser and PWA behavior unchanged outside Android host mode.
+- Keep normal browser and PWA behavior unchanged outside Go Mode host mode.
 
 Frontend contract rules:
 
 - Add typed global declarations. Avoid `any`.
-- Keep Android host behavior behind a small module.
-- Do not scatter `window.caicAndroid` checks throughout feature code.
-- Unit-test browser behavior and Android host behavior separately.
+- Keep Go Mode host behavior behind a small module.
+- Do not scatter `window.goMode` checks throughout feature code.
+- Unit-test browser behavior and Go Mode host behavior separately.
 
 Acceptance checks:
 
 - Browser/PWA voice behavior is unchanged.
-- Android WebView does not start duplicate browser voice.
-- Android WebView does not emit browser notifications in addition to Android
+- Go Mode WebView does not start duplicate browser voice.
+- Go Mode WebView does not emit browser notifications in addition to Android
   notifications.
 - Frontend tests cover host-mode detection and suppression.
 
@@ -949,10 +982,10 @@ continue through the generated TypeScript SDK.
 Use one JavaScript object:
 
 ```ts
-interface CaicAndroidBridge {
+interface GoModeBridge {
   version: 1;
   hostMode: true;
-  service: "caic";
+  activeService: string;
   capabilities: string[];
   postMessage(messageJson: string): void;
 }
@@ -1001,8 +1034,8 @@ Bridge rules:
 - Do not use the bridge as a broad state synchronization layer.
 - Emit current native state after WebView page load so reloads reconstruct UI
   state without reconnecting voice.
-- Keep compatibility versioned so future web builds can detect unsupported
-  Android shells.
+- Keep compatibility versioned so future web builds can detect unsupported Go
+  Mode shells.
 - Keep service identity explicit. A future generic host must not let a caic
   frontend call bindings intended for another service.
 
@@ -1105,7 +1138,7 @@ Acceptance checks:
   work through gateway-dispatched service bindings.
 - Android does not execute Gemini function calls locally.
 - Android task notifications remain suppressed while voice is connected.
-- Browser voice code is inactive in Android host mode.
+- Browser voice code is inactive in Go Mode host mode.
 
 ## Phase 8: Notification Deep Links
 
@@ -1152,10 +1185,10 @@ Acceptance checks:
 - Captured image attaches to a task prompt or input.
 - Cancellation and failure do not silently disappear.
 
-## Phase 10: Decide Remaining Native Features
+## Phase 10: Decide Remaining Native Integrations
 
-Before deleting duplicated Compose screens, explicitly decide what happens to
-Android-only features:
+Before broadening Go Mode, explicitly decide which Android-only features are
+copied from caic and which stay out:
 
 - Native server settings
 - Native login screen
@@ -1163,33 +1196,31 @@ Android-only features:
 - Native screenshot capture
 - Halo BLE support
 - Multi-server switcher and per-server diagnostics
-- Generic service host extraction
+- Service host diagnostics for caic and mddb
 
 Recommended defaults:
 
 - Keep native server settings permanently as bootstrap and recovery UI.
 - Keep multi-server configuration native.
-- Keep native voice endpoint panel through the first accepted shell release.
+- Keep or copy the native voice endpoint panel only until gateway-backed voice
+  owns Gemini setup and tool dispatch.
 - Keep screenshot capture if web image attach is worse on Android.
 - Keep Halo native.
 - Keep backend-owned settings in the backend web UI.
-- Remove native task list/detail/diff/process/widget UI only after shell
-  acceptance.
-- Defer a second app until the caic shell proves the shared host boundaries.
+- Do not copy native task list/detail/diff/process/widget UI.
+- Keep shared-host assumptions in Go Mode names and schemas from the start.
 
-## Phase 11: Retire Duplicated Compose Screen Mode
+## Phase 11: Remove Copied Transitional Code
 
 Only start after all earlier acceptance checks pass.
 
-Remove or quarantine native implementations replaced by the web frontend:
+Remove copied caic code that was useful for bootstrapping but is no longer part
+of the Go Mode product boundary:
 
-- task list
-- task detail
-- diff view
-- process view
-- widget rendering
-- task input UI
-- duplicated grouping and formatting code, if Android voice endpoint code no
+- caic-specific task list/detail formatting helpers
+- local voice function declarations and handlers
+- caic-specific navigation constants that should be service metadata
+- duplicated grouping and formatting code, if Go Mode voice endpoint code no
   longer needs it
 
 Keep:
@@ -1206,18 +1237,17 @@ Keep:
 Requirements:
 
 - Convert coverage instead of deleting it blindly.
-- Android e2e should exercise WebView-hosted task creation, task detail,
+- Go Mode e2e should exercise WebView-hosted task creation, task detail,
   notifications, voice startup, and screenshot capture where practical.
-- Update `android/AGENTS.md` and generated file indexes if the architecture
-  description changes.
-- Do not remove Compose entirely if native settings or native voice endpoint
-  overlay still use it.
+- Update `AGENTS.md` file indexes if new app files are added.
+- Keep Compose only for native Go Mode surfaces such as settings, recovery UI,
+  and optional voice controls.
 
 Acceptance checks:
 
-- Removed Compose screens are no longer reachable.
+- No copied caic screen-mode task UI is reachable in Go Mode.
 - Native services still start and stop correctly.
-- Android e2e covers the accepted shell workflows.
+- Go Mode e2e covers the accepted shell workflows.
 - Lint, unit tests, build, and e2e pass.
 
 ## No Bundled Frontend
@@ -1296,16 +1326,16 @@ Android instrumented tests:
 
 Frontend tests:
 
-- Android host detection.
+- Go Mode host detection.
 - Browser voice path remains unchanged without Android bridge.
-- Android host mode does not instantiate browser `VoiceSession`.
-- Browser notifications are suppressed in Android host mode.
+- Go Mode host mode does not instantiate browser `VoiceSession`.
+- Browser notifications are suppressed in Go Mode host mode.
 - Android voice endpoint state updates task number badges if web badges are
   implemented.
 - Browser/web voice clients stop executing caic voice tools locally once gateway
   voice tools and service bindings are available.
 
-Manual matrix before Compose retirement:
+Manual matrix before first Go Mode release:
 
 - Fresh install, no server configured.
 - Server configured, no auth.
@@ -1374,30 +1404,39 @@ python3 scripts/update_agents_file_index.py
 make lint-docs
 ```
 
-## Go/No-Go Criteria
+## Design Goals
 
-Proceed with the migration only if all are true:
-
-- WebView loads the mobile web UI reliably from the configured server.
-- Auth works without broad request interception or a custom API proxy.
-- Compatibility negotiation prevents unsupported bridge/API combinations.
+- Go Mode builds as `com.fghbuild.gomode` and can coexist with
+  `com.fghbuild.caic` on one device.
 - caic config metadata replaces the `webrtcAvailable` boolean decision with
   structured embedded, external, and disabled gateway modes.
-- Android can multiplex multiple configured caic backend servers.
+- Go Mode can multiplex multiple configured service instances, initially caic
+  backend servers.
 - Native task notifications work independently of WebView lifecycle.
-- Android voice endpoint works and can expose enough state for the shell.
-- Voice gateway auth works with configured Google, GitHub, and GitLab providers.
-- Voice gateway auth works for Tailscale-only deployments without requiring
-  public inbound access.
+- Go Mode voice endpoint works and can expose enough state for the shell.
 - Voice gateway owns Gemini setup and tool dispatch.
 - Service backends own scoped token issuance and tool binding implementation.
 - Halo remains compatible with the shell architecture.
 - Browser and Android voice endpoints do not duplicate each other.
 - Browser and Android notifications do not duplicate each other.
-- The shell removes more duplicated screen code than it adds in bridge and
-  lifecycle complexity.
+- Go Mode avoids importing caic duplicated screen-mode UI.
 
-Stop and keep native Android screen mode if any are true:
+## Acceptance Criteria
+
+- WebView loads the mobile web UI reliably from the configured server.
+- Auth works without broad request interception or a custom API proxy.
+- Compatibility negotiation prevents unsupported bridge/API combinations.
+- Voice gateway auth works with configured Google, GitHub, and GitLab providers.
+- Voice gateway auth works for Tailscale-only deployments without requiring
+  public inbound access.
+- Go Mode host mode suppresses browser voice and browser notifications.
+- Native task notifications route to the correct web task route.
+- Go Mode and `com.fghbuild.caic` can be installed and used on one device
+  without shared storage, notification, or deep-link collisions.
+
+## Go/No-Go Criteria
+
+Stop and reassess Go Mode if any are true:
 
 - Auth requires fragile WebView request interception.
 - EventSource cannot authenticate cleanly.
@@ -1414,16 +1453,75 @@ Stop and keep native Android screen mode if any are true:
 - Android must keep executing caic voice tools locally after gateway tools and
   service bindings are available.
 - WebView routing or reload behavior is unreliable.
-- Android-only features become worse than the current Compose implementation.
+- Go Mode cannot coexist with `com.fghbuild.caic` because package names,
+  storage, notification channels, or deep links are not isolated.
+- Go Mode starts accumulating copied caic screen-mode task UI.
 
-If the migration stops, narrow native Android to voice-endpoint workflows and
-stop chasing full web parity for secondary screen-mode features.
+If the migration stops, keep `com.fghbuild.caic` unchanged and narrow Go Mode
+to the native host capabilities that remain independently useful.
 
 ## Recommended PR Sequence
 
 Keep each PR small enough to revert.
 
-PR 1: voice gateway identity and configuration.
+PR 1: Go Mode app scaffold and WebView shell.
+
+- Confirm the hypotheses in this document against current code and update the
+  plan for any mismatch.
+- Add a new Android app with package/application ID `com.fghbuild.gomode`.
+- Copy only the minimal native bootstrap/settings code needed to configure a
+  caic service instance.
+- Add remote WebView shell mode as Go Mode's primary screen.
+- Load the backend-hosted frontend from the active server URL.
+- Keep native settings fallback and native service-instance configuration.
+- Ensure Go Mode and `com.fghbuild.caic` install side by side.
+- Do not implement bundled frontend assets.
+- Do not copy caic task list/detail/diff/process/widget Compose UI.
+- Add smoke coverage for fake-backend shell loading, task list display, task
+  detail navigation, task creation, task input, and Android back behavior.
+
+PR 2: Go Mode host mode and app-scoped monitoring.
+
+- Add Go Mode host-mode marker in the frontend.
+- Suppress browser voice and browser notifications in Go Mode host mode.
+- Copy and adapt task monitoring startup to an idempotent app-scoped path in Go
+  Mode.
+- Keep notification suppression tied to Android voice endpoint state.
+- Ensure Android task notifications work when only WebView screen mode is
+  mounted.
+- Keep existing browser/PWA behavior unchanged outside Go Mode host mode.
+
+PR 3: service auth and shell compatibility.
+
+- Prove OAuth login, logout, fetch, and EventSource behavior inside WebView.
+- Add service compatibility metadata for shell version, bridge version range,
+  capabilities, and upgrade guidance.
+- Add Android compatibility checks for the active service backend.
+- Keep normal caic API calls in the web frontend; do not proxy them through the
+  native bridge.
+- Stop the shell migration if auth requires broad request interception or a
+  custom API proxy layer.
+
+PR 4: narrow native-web bridge and routing.
+
+- Add the versioned capability bridge.
+- Support native settings, notification permission, current task context, and
+  visible native errors.
+- Add task ID or route extras to Android notification intents.
+- Ensure notification routing works for multiple configured caic backends.
+- Replay pending navigation after WebView load.
+- Reject invalid bridge calls visibly.
+
+PR 5: screenshot and retained native integrations.
+
+- Add native screenshot request/result bridge if the web attach path is worse on
+  Android.
+- Keep MediaProjection countdown, foreground service behavior, cancellation, and
+  error handling intact.
+- Define the Halo context shape sent from Android to the future gateway.
+- Keep Halo native.
+
+PR 6: voice gateway identity and configuration.
 
 - Rename `backend/cmd/webrtc-relay` to `backend/cmd/voice-gateway`.
 - Rename logs, help text, environment variable names, docs, and build targets
@@ -1445,7 +1543,7 @@ PR 1: voice gateway identity and configuration.
   external gateway config, config API metadata, config validation, and
   compatibility response.
 
-PR 2: gateway user auth.
+PR 7: gateway user auth.
 
 - Add gateway-owned session storage, cookies, middleware, logout, and active
   voice-session invalidation.
@@ -1458,7 +1556,7 @@ PR 2: gateway user auth.
 - Add tests for OAuth state validation, provider config validation, allowed-user
   enforcement, session invalidation, and pairing code expiry/one-time use.
 
-PR 3: scoped service auth and caic binding skeleton.
+PR 8: scoped service auth and caic binding skeleton.
 
 - Add trusted issuer configuration to the gateway.
 - Add scoped-token validation skeleton with audience, expiry, issuer, service
@@ -1470,7 +1568,7 @@ PR 3: scoped service auth and caic binding skeleton.
 - Add tests for token issuance, token rejection, logout/revocation behavior, and
   binding authorization.
 
-PR 4: gateway-owned Gemini setup and caic voice tools.
+PR 9: gateway-owned Gemini setup and caic voice tools.
 
 - Move Gemini setup construction and function declarations out of Android/web
   clients into the gateway.
@@ -1482,29 +1580,9 @@ PR 4: gateway-owned Gemini setup and caic voice tools.
 - Keep Android/web local `FunctionHandlers` behind a temporary fallback only if
   needed for transition, and mark the fallback for removal.
 
-PR 5: reversible Android WebView shell.
+PR 10: Android voice endpoint to voice gateway.
 
-- Add feature-flagged remote WebView shell mode.
-- Keep native settings fallback.
-- Preserve native multi-server configuration.
-- Add Android compatibility checks for both active service backend and voice
-  gateway.
-- Add Android host-mode marker in the frontend.
-- Suppress browser voice and browser notifications in Android host mode.
-- Do not delete Compose screen mode.
-- Do not implement bundled frontend assets.
-- Do not extract a second app yet.
-
-PR 6: app-scoped monitoring and notification routing.
-
-- Move task monitoring startup to an idempotent app-scoped path.
-- Add task ID or route extras to Android notification intents.
-- Ensure notification routing works for multiple configured caic backends.
-- Keep notification suppression tied to Android voice endpoint state.
-
-PR 7: Android voice endpoint to voice gateway.
-
-- Point Android WebRTC signaling at the configured voice gateway.
+- Point Go Mode WebRTC signaling at the configured voice gateway.
 - Require a valid gateway session before creating voice sessions.
 - Send selected service instance, route/task context, selected voice settings,
   and Halo context to the gateway.
@@ -1512,4 +1590,4 @@ PR 7: Android voice endpoint to voice gateway.
 - Remove Android Gemini setup and local caic voice tool execution once gateway
   tools pass acceptance checks.
 
-Only after these PRs pass should Compose screen-mode retirement start.
+Only after these PRs pass should copied transitional code be removed.
