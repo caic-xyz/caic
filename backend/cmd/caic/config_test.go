@@ -41,7 +41,6 @@ GEMINI_API_KEY = "AIza_test"
 [server]
 http = ":9090"
 external_url = "https://example.com"
-webrtc_port = 3478
 geo_db = "GeoLite2-Country.mmdb"
 allow_origins = ["local", "CA", "US"]
 
@@ -60,6 +59,9 @@ webhook_secret = "secret123"
 token = "glpat_test"
 url = "https://gitlab.example.com"
 webhook_secret = "glsecret"
+
+[voice-gateway]
+url = "https://voice.example.com"
 
 [debug]
 log_level = "debug"
@@ -93,8 +95,8 @@ pprof = true
 		if tc.GitHub.AppID != 42 {
 			t.Errorf("GitHub.AppID = %d", tc.GitHub.AppID)
 		}
-		if tc.Server.WebRTCPort != 3478 {
-			t.Errorf("Server.WebRTCPort = %d", tc.Server.WebRTCPort)
+		if tc.VoiceGateway.URL != "https://voice.example.com" {
+			t.Errorf("VoiceGateway.URL = %q", tc.VoiceGateway.URL)
 		}
 		if tc.Core.Env["TAILSCALE_API_KEY"] != "tskey_test" {
 			t.Errorf("Core.Env[TAILSCALE_API_KEY] = %q", tc.Core.Env["TAILSCALE_API_KEY"])
@@ -157,6 +159,79 @@ OPENROUTER_API_KEY = "sk-or-test"
 		}
 		if _, ok := got["OPENROUTER_API_KEY=sk-or-test"]; !ok {
 			t.Errorf("missing OPENROUTER_API_KEY=sk-or-test in %v", piEnv)
+		}
+	})
+
+	t.Run("parses embedded voice gateway config", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		content := `
+[core.env]
+GEMINI_API_KEY = "AIza_test"
+
+[voice-gateway.config]
+model = "gemini-live-test"
+
+[voice-gateway.config.server]
+webrtc_udp_port = -1
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		tc, err := loadTOMLConfig(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tc.VoiceGateway.Config.Model != "gemini-live-test" {
+			t.Errorf("VoiceGateway.Config.Model = %q, want gemini-live-test", tc.VoiceGateway.Config.Model)
+		}
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Voice.Gateway.Config.Model != "gemini-live-test" {
+			t.Errorf("Voice.Gateway.Config.Model = %q, want gemini-live-test", cfg.Voice.Gateway.Config.Model)
+		}
+		if cfg.Voice.Gateway.Config.Server.WebRTCUDPPort != -1 {
+			t.Errorf("Voice.Gateway.Config.Server.WebRTCUDPPort = %d, want -1", cfg.Voice.Gateway.Config.Server.WebRTCUDPPort)
+		}
+	})
+
+	t.Run("rejects embedded voice gateway http", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		content := `
+[voice-gateway.config.server]
+http = ":3479"
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := loadTOMLConfig(dir)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "voice-gateway.config.server.http") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("rejects voice gateway mode", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		content := `
+[voice-gateway]
+mode = "embedded"
+`
+		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := loadTOMLConfig(dir)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "missing in the target struct") {
+			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 
@@ -381,6 +456,88 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 		if cfg.Runtime.TailscaleAPIKey != wantKey {
 			t.Errorf("TailscaleAPIKey = %q, want %q", cfg.Runtime.TailscaleAPIKey, wantKey)
+		}
+	})
+
+	t.Run("external voice gateway", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		tc := &tomlConfig{
+			VoiceGateway: tomlVoiceGateway{
+				URL: "https://voice.example.com",
+			},
+		}
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Voice.Gateway.Mode != "external" {
+			t.Errorf("Voice.Gateway.Mode = %q, want external", cfg.Voice.Gateway.Mode)
+		}
+		if cfg.Voice.Gateway.URL != "https://voice.example.com" {
+			t.Errorf("Voice.Gateway.URL = %q, want https://voice.example.com", cfg.Voice.Gateway.URL)
+		}
+	})
+
+	t.Run("default voice gateway disabled without gemini key", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		tc := defaultConfig()
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Voice.Gateway.Mode != "disabled" {
+			t.Errorf("Voice.Gateway.Mode = %q, want disabled", cfg.Voice.Gateway.Mode)
+		}
+	})
+
+	t.Run("default voice gateway embedded with gemini key", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		tc := defaultConfig()
+		tc.Core.Env = map[string]string{"GEMINI_API_KEY": "AIza_test"}
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Voice.Gateway.Mode != "embedded" {
+			t.Errorf("Voice.Gateway.Mode = %q, want embedded", cfg.Voice.Gateway.Mode)
+		}
+	})
+
+	t.Run("external voice gateway wins over gemini key", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		tc := defaultConfig()
+		tc.Core.Env = map[string]string{"GEMINI_API_KEY": "AIza_test"}
+		tc.VoiceGateway.URL = "https://voice.example.com"
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Voice.Gateway.Mode != "external" {
+			t.Errorf("Voice.Gateway.Mode = %q, want external", cfg.Voice.Gateway.Mode)
+		}
+		if cfg.Voice.Gateway.URL != "https://voice.example.com" {
+			t.Errorf("Voice.Gateway.URL = %q, want https://voice.example.com", cfg.Voice.Gateway.URL)
+		}
+	})
+
+	t.Run("embedded voice gateway default config", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		tc := defaultConfig()
+		tc.Core.Env = map[string]string{"GEMINI_API_KEY": "AIza_test"}
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Voice.Gateway.Mode != "embedded" {
+			t.Errorf("Voice.Gateway.Mode = %q, want embedded", cfg.Voice.Gateway.Mode)
+		}
+		if cfg.Voice.Gateway.Config.Server.HTTP != "" {
+			t.Errorf("Voice.Gateway.Config.Server.HTTP = %q, want empty", cfg.Voice.Gateway.Config.Server.HTTP)
 		}
 	})
 }

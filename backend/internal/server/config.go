@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 )
 
 // Config bundles values read once at startup from config.toml, environment
@@ -38,6 +39,9 @@ func (c *Config) Validate() error {
 		return err
 	}
 	if err := c.Auth.Validate(); err != nil {
+		return err
+	}
+	if err := c.Voice.Validate(); err != nil {
 		return err
 	}
 
@@ -181,7 +185,46 @@ func (c *AuthConfig) externalURLUsesHTTPS() bool {
 
 // VoiceConfig configures the WebRTC voice bridge.
 type VoiceConfig struct {
-	WebRTCPort int // UDP port for ICE; 0 = ephemeral; -1 = disabled
+	Gateway VoiceGatewayConfig
+}
+
+// Validate returns an error if the voice configuration is invalid.
+func (c *VoiceConfig) Validate() error {
+	return c.Gateway.Validate()
+}
+
+// VoiceGatewayMode describes how caic exposes voice gateway support.
+type VoiceGatewayMode string
+
+// Voice gateway support modes.
+const (
+	VoiceGatewayModeDisabled VoiceGatewayMode = "disabled"
+	VoiceGatewayModeEmbedded VoiceGatewayMode = "embedded"
+	VoiceGatewayModeExternal VoiceGatewayMode = "external"
+)
+
+// VoiceGatewayConfig is caic's effective reference to a voice gateway.
+type VoiceGatewayConfig struct {
+	Mode   VoiceGatewayMode
+	URL    string
+	Config voicegateway.Config
+}
+
+// Validate returns an error if the voice gateway configuration is invalid.
+func (c *VoiceGatewayConfig) Validate() error {
+	switch c.Mode {
+	case "", VoiceGatewayModeDisabled:
+		return nil
+	case VoiceGatewayModeExternal:
+		if c.URL == "" {
+			return errors.New("voice gateway URL is required for external mode")
+		}
+		return validateBaseURL("voice gateway URL", c.URL)
+	case VoiceGatewayModeEmbedded:
+		return c.Config.ValidateEmbedded()
+	default:
+		return fmt.Errorf("voice gateway mode must be %q, %q, or %q, got %q", VoiceGatewayModeDisabled, VoiceGatewayModeEmbedded, VoiceGatewayModeExternal, c.Mode)
+	}
 }
 
 // DebugConfig configures optional server diagnostics.

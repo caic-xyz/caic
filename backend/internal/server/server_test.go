@@ -30,9 +30,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
+	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 )
 
 // stubBackend implements agent.Backend for test map-membership checks.
@@ -1885,6 +1887,62 @@ func TestConfigValidate(t *testing.T) {
 		}
 		if err := c.Validate(); err == nil {
 			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+	t.Run("invalid voice gateway is invalid", func(t *testing.T) {
+		t.Parallel()
+		c := &Config{
+			Voice: VoiceConfig{
+				Gateway: VoiceGatewayConfig{Mode: VoiceGatewayModeExternal},
+			},
+		}
+		if err := c.Validate(); err == nil {
+			t.Fatal("Validate() expected error, got nil")
+		}
+	})
+}
+
+func TestVoiceGatewayMetadata(t *testing.T) {
+	t.Parallel()
+	t.Run("default disabled", func(t *testing.T) {
+		t.Parallel()
+		s := newTestServer(t)
+		got := s.voiceGatewayMetadata()
+		if got.Mode != v1.VoiceGatewayModeDisabled {
+			t.Fatalf("Mode = %q, want disabled", got.Mode)
+		}
+	})
+
+	t.Run("external", func(t *testing.T) {
+		t.Parallel()
+		s := newTestServer(t)
+		s.voiceGateway = VoiceGatewayConfig{
+			Mode: VoiceGatewayModeExternal,
+			URL:  "https://voice.example.com",
+		}
+		got := s.voiceGatewayMetadata()
+		if got.Mode != v1.VoiceGatewayModeExternal {
+			t.Fatalf("Mode = %q, want external", got.Mode)
+		}
+		if got.URL != "https://voice.example.com" {
+			t.Fatalf("URL = %q, want https://voice.example.com", got.URL)
+		}
+		if got.TokenEndpoint != "/api/v1/voice/token" {
+			t.Fatalf("TokenEndpoint = %q, want /api/v1/voice/token", got.TokenEndpoint)
+		}
+	})
+
+	t.Run("embedded", func(t *testing.T) {
+		t.Parallel()
+		s := newTestServer(t)
+		s.voiceGateway = VoiceGatewayConfig{Mode: VoiceGatewayModeEmbedded}
+		s.voiceBridge = &voicertc.Bridge{}
+		got := s.voiceGatewayMetadata()
+		if got.Mode != v1.VoiceGatewayModeEmbedded {
+			t.Fatalf("Mode = %q, want embedded", got.Mode)
+		}
+		if got.MinGatewayProtocol != voicegateway.ProtocolVersion {
+			t.Fatalf("MinGatewayProtocol = %d, want %d", got.MinGatewayProtocol, voicegateway.ProtocolVersion)
 		}
 	})
 }

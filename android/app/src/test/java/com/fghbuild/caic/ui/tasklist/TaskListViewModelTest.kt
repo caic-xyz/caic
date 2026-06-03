@@ -80,7 +80,8 @@ class TaskListViewModelTest {
                     "/api/v1/server/config" -> jsonResponse(
                         """{"displayName":"test-host","tailscaleAvailable":false,""" +
                             """"usbAvailable":false,"displayAvailable":false,""" +
-                            """"sudoAvailable":true,"gitHubTokenAvailable":false,"webrtcAvailable":false}"""
+                            """"sudoAvailable":true,"gitHubTokenAvailable":false,""" +
+                            """"voiceGateway":{"mode":"disabled"}}"""
                     )
                     "/api/v1/server/repos" -> jsonResponse(
                         """[
@@ -172,7 +173,8 @@ class TaskListViewModelTest {
                     "/api/v1/server/config" -> jsonResponse(
                         """{"displayName":"test-host","tailscaleAvailable":false,""" +
                             """"usbAvailable":false,"displayAvailable":false,""" +
-                            """"sudoAvailable":true,"gitHubTokenAvailable":false,"webrtcAvailable":false}"""
+                            """"sudoAvailable":true,"gitHubTokenAvailable":false,""" +
+                            """"voiceGateway":{"mode":"disabled"}}"""
                     )
                     "/api/v1/server/repos" -> jsonResponse(
                         """[{"path":"my-org/repo","branch":"main","baseBranch":{"name":"main"}}]"""

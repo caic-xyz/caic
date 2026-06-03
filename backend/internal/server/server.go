@@ -80,6 +80,7 @@ type Server struct {
 	// Agent backends.
 	geminiAPIKey string
 	voiceBridge  *voicertc.Bridge
+	voiceGateway VoiceGatewayConfig
 
 	// Forge client management (throttles, App client, installation cache).
 	forge *ForgeManager

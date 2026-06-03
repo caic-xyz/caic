@@ -447,8 +447,30 @@ export const TaskStatePurging: TaskState = "purging";
 export const TaskStateFailed: TaskState = "failed";
 export const TaskStatePurged: TaskState = "purged";
 
+export type VoiceGatewayMode =
+  | "disabled"
+  | "embedded"
+  | "external";
+/**
+ * Supported values.
+ */
+export const VoiceGatewayModeDisabled: VoiceGatewayMode = "disabled";
+export const VoiceGatewayModeEmbedded: VoiceGatewayMode = "embedded";
+export const VoiceGatewayModeExternal: VoiceGatewayMode = "external";
+
 /** DiffStat summarises the changes in a branch relative to its base. */
 export type DiffStat = DiffFileStat[];
+
+/** VoiceGatewayMetadata reports structured voice gateway support. */
+export interface VoiceGatewayMetadata {
+  mode: VoiceGatewayMode;
+  url?: string;
+  minGatewayProtocol?: number /* int */;
+  authRequired?: boolean;
+  tokenEndpoint?: string;
+  tokenAudience?: string;
+  capabilities?: string[];
+}
 
 /** Config reports server capabilities to the frontend. */
 export interface Config {
@@ -459,7 +481,7 @@ export interface Config {
   displayAvailable: boolean;
   sudoAvailable: boolean;
   gitHubTokenAvailable: boolean;
-  webrtcAvailable: boolean;
+  voiceGateway: VoiceGatewayMetadata;
   gitHubAppEnabled?: boolean;
   /** e.g. ["github","gitlab"] */
   authProviders?: string[];

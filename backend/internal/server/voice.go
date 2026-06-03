@@ -12,7 +12,7 @@ import (
 
 func (s *Server) voiceRTCOffer(ctx context.Context, req *v1.VoiceRTCOfferReq) (*v1.VoiceRTCAnswerResp, error) {
 	if s.voiceBridge == nil {
-		return nil, api.BadRequest("WebRTC is not enabled (set CAIC_WEBRTC_PORT)")
+		return nil, api.BadRequest("WebRTC is not enabled (set voice-gateway.config.server.webrtc_udp_port and GEMINI_API_KEY)")
 	}
 	sdpAnswer, sessionID, err := s.voiceBridge.HandleOffer(ctx, req.SDP)
 	if err != nil {

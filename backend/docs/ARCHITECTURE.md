@@ -46,12 +46,14 @@ graph TD
   pkg_internal_task["internal/task"]
   pkg_internal_tasks["internal/tasks"]
   pkg_internal_usage["internal/usage"]
+  pkg_internal_voicegateway["internal/voicegateway"]
 
   pkg_cmd_caic --> pkg_internal_app
   pkg_cmd_caic --> pkg_internal_auth
   pkg_cmd_caic --> pkg_internal_autoupdate
   pkg_cmd_caic --> pkg_internal_forge_github
   pkg_cmd_caic --> pkg_internal_server
+  pkg_cmd_caic --> pkg_internal_voicegateway
   pkg_internal_agent --> pkg_internal_agent_relay
   pkg_internal_agent_claudecode --> pkg_internal_agent
   pkg_internal_agent_claudecode --> pkg_internal_jsonutil
@@ -125,6 +127,7 @@ graph TD
   pkg_internal_server --> pkg_internal_task
   pkg_internal_server --> pkg_internal_tasks
   pkg_internal_server --> pkg_internal_usage
+  pkg_internal_server --> pkg_internal_voicegateway
   pkg_internal_server_voicertc --> pkg_internal_jsonutil
   pkg_internal_task --> pkg_internal_agent
   pkg_internal_task --> pkg_internal_forge
@@ -179,7 +182,7 @@ graph TD
 graph TD
   subgraph Commands["Commands"]
     pkg_cmd_caic["cmd/caic"]
-    pkg_cmd_webrtc_relay["cmd/webrtc-relay"]
+    pkg_cmd_voice_gateway["cmd/voice-gateway"]
     pkg_internal_cmd_gen_api_sdk["internal/cmd/gen-api-sdk"]
     pkg_internal_cmd_record_trace["internal/cmd/record-trace"]
   end
@@ -235,6 +238,7 @@ graph TD
     pkg_internal_preferences["internal/preferences"]
     pkg_internal_smoketest["internal/smoketest"]
     pkg_internal_usage["internal/usage"]
+    pkg_internal_voicegateway["internal/voicegateway"]
   end
 
   pkg_cmd_caic --> pkg_internal_app
@@ -242,8 +246,9 @@ graph TD
   pkg_cmd_caic --> pkg_internal_autoupdate
   pkg_cmd_caic --> pkg_internal_forge_github
   pkg_cmd_caic --> pkg_internal_server
-  pkg_cmd_webrtc_relay --> pkg_internal_auth
-  pkg_cmd_webrtc_relay --> pkg_internal_server_voicertc
+  pkg_cmd_caic --> pkg_internal_voicegateway
+  pkg_cmd_voice_gateway --> pkg_internal_server_voicertc
+  pkg_cmd_voice_gateway --> pkg_internal_voicegateway
   pkg_internal_agent --> pkg_internal_agent_relay
   pkg_internal_agent_agenttest --> pkg_internal_agent
   pkg_internal_agent_claudecode --> pkg_internal_agent
@@ -332,6 +337,7 @@ graph TD
   pkg_internal_server --> pkg_internal_task
   pkg_internal_server --> pkg_internal_tasks
   pkg_internal_server --> pkg_internal_usage
+  pkg_internal_server --> pkg_internal_voicegateway
   pkg_internal_server_voicertc --> pkg_internal_jsonutil
   pkg_internal_smoketest --> pkg_internal_agent
   pkg_internal_smoketest --> pkg_internal_forge
@@ -353,8 +359,8 @@ graph TD
 
 | Package | Direct backend dependencies |
 |---|---|
-| `cmd/caic` | `internal/app`, `internal/auth`, `internal/autoupdate`, `internal/forge/github`, `internal/server` |
-| `cmd/webrtc-relay` | `internal/auth`, `internal/server/voicertc` |
+| `cmd/caic` | `internal/app`, `internal/auth`, `internal/autoupdate`, `internal/forge/github`, `internal/server`, `internal/voicegateway` |
+| `cmd/voice-gateway` | `internal/server/voicertc`, `internal/voicegateway` |
 | `frontend` | None |
 | `internal/agent` | `internal/agent/relay` |
 | `internal/agent/agenttest` | `internal/agent` |
@@ -384,7 +390,7 @@ graph TD
 | `internal/preferences` | None |
 | `internal/runtime` | `internal/agent` |
 | `internal/runtime/mdruntime` | `internal/agent`, `internal/runtime` |
-| `internal/server` | `frontend`, `internal/agent`, `internal/api`, `internal/api/v1`, `internal/api/v1conv`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/github`, `internal/forge/gitlab`, `internal/preferences`, `internal/runtime`, `internal/server/ipgeo`, `internal/server/voicertc`, `internal/task`, `internal/tasks`, `internal/usage` |
+| `internal/server` | `frontend`, `internal/agent`, `internal/api`, `internal/api/v1`, `internal/api/v1conv`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/github`, `internal/forge/gitlab`, `internal/preferences`, `internal/runtime`, `internal/server/ipgeo`, `internal/server/voicertc`, `internal/task`, `internal/tasks`, `internal/usage`, `internal/voicegateway` |
 | `internal/server/ipgeo` | None |
 | `internal/server/voicertc` | `internal/jsonutil` |
 | `internal/smoketest` | `internal/agent`, `internal/forge`, `internal/runtime`, `internal/task`, `internal/usage` |
@@ -392,6 +398,7 @@ graph TD
 | `internal/task/tasktest` | `internal/runtime` |
 | `internal/tasks` | `internal/agent`, `internal/preferences`, `internal/runtime`, `internal/task` |
 | `internal/usage` | None |
+| `internal/voicegateway` | None |
 <!-- END GENERATED PACKAGE DEPENDENCIES -->
 
 ## Layering Notes

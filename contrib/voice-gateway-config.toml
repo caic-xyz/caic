@@ -1,0 +1,20 @@
+# voice-gateway configuration
+# Copy to ~/.config/voice-gateway/config.toml and edit as needed.
+
+# ── Gemini ───────────────────────────────────────────────────────────────────
+
+# Gemini Live model used by the gateway. The API key is always read from
+# GEMINI_API_KEY.
+#model = "gemini-3.1-flash-live-preview"
+
+# ── Server ───────────────────────────────────────────────────────────────────
+
+[server]
+# HTTP listen address for voice gateway signaling.
+#http = ":3479"
+
+# UDP port for WebRTC ICE (single-port mux).
+# 0 (default) = enabled with OS-assigned ephemeral port.
+# >0 = enabled on that static port (open it in your firewall for UDP traffic).
+# GEMINI_API_KEY is required.
+#webrtc_udp_port = 0

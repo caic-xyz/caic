@@ -541,6 +541,39 @@ object ToolOutputContentTypeSerializer : KSerializer<ToolOutputContentType> {
     }
 }
 
+@Serializable(with = VoiceGatewayModeSerializer::class)
+sealed interface VoiceGatewayMode {
+    val value: String
+    @Serializable
+    data object Disabled : VoiceGatewayMode {
+        override val value = "disabled"
+    }
+    @Serializable
+    data object Embedded : VoiceGatewayMode {
+        override val value = "embedded"
+    }
+    @Serializable
+    data object External : VoiceGatewayMode {
+        override val value = "external"
+    }
+    @Serializable
+    data class Other(override val value: String) : VoiceGatewayMode
+}
+
+object VoiceGatewayModeSerializer : KSerializer<VoiceGatewayMode> {
+    override val descriptor = PrimitiveSerialDescriptor("VoiceGatewayMode", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: VoiceGatewayMode) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): VoiceGatewayMode {
+        val v = decoder.decodeString()
+        return when (v) {
+            "disabled" -> VoiceGatewayMode.Disabled
+            "embedded" -> VoiceGatewayMode.Embedded
+            "external" -> VoiceGatewayMode.External
+            else -> VoiceGatewayMode.Other(v)
+        }
+    }
+}
+
 object ErrorCodes {
     const val BadRequest = "BAD_REQUEST"
     const val NotFound = "NOT_FOUND"
@@ -549,6 +582,18 @@ object ErrorCodes {
 }
 
 typealias DiffStat = List<DiffFileStat>
+
+/** VoiceGatewayMetadata reports structured voice gateway support. */
+@Serializable
+data class VoiceGatewayMetadata(
+    val mode: VoiceGatewayMode,
+    val url: String? = null,
+    val minGatewayProtocol: Int? = null,
+    val authRequired: Boolean? = null,
+    val tokenEndpoint: String? = null,
+    val tokenAudience: String? = null,
+    val capabilities: List<String>? = null,
+)
 
 /** Config reports server capabilities to the frontend. */
 @Serializable
@@ -560,7 +605,7 @@ data class Config(
     val displayAvailable: Boolean,
     val sudoAvailable: Boolean,
     val gitHubTokenAvailable: Boolean,
-    val webrtcAvailable: Boolean,
+    val voiceGateway: VoiceGatewayMetadata,
     val gitHubAppEnabled: Boolean? = null,
     val authProviders: List<String>? = null,
 )

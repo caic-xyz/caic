@@ -59,16 +59,37 @@ type Prompt struct {
 
 // Config reports server capabilities to the frontend.
 type Config struct {
-	Version              string   `json:"version,omitempty"`
-	DisplayName          string   `json:"displayName"`
-	TailscaleAvailable   bool     `json:"tailscaleAvailable"`
-	USBAvailable         bool     `json:"usbAvailable"`
-	DisplayAvailable     bool     `json:"displayAvailable"`
-	SudoAvailable        bool     `json:"sudoAvailable"`
-	GitHubTokenAvailable bool     `json:"gitHubTokenAvailable"`
-	WebRTCAvailable      bool     `json:"webrtcAvailable"`
-	GitHubAppEnabled     bool     `json:"gitHubAppEnabled,omitempty"`
-	AuthProviders        []string `json:"authProviders,omitempty"` // e.g. ["github","gitlab"]
+	Version              string               `json:"version,omitempty"`
+	DisplayName          string               `json:"displayName"`
+	TailscaleAvailable   bool                 `json:"tailscaleAvailable"`
+	USBAvailable         bool                 `json:"usbAvailable"`
+	DisplayAvailable     bool                 `json:"displayAvailable"`
+	SudoAvailable        bool                 `json:"sudoAvailable"`
+	GitHubTokenAvailable bool                 `json:"gitHubTokenAvailable"`
+	VoiceGateway         VoiceGatewayMetadata `json:"voiceGateway"`
+	GitHubAppEnabled     bool                 `json:"gitHubAppEnabled,omitempty"`
+	AuthProviders        []string             `json:"authProviders,omitempty"` // e.g. ["github","gitlab"]
+}
+
+// VoiceGatewayMode is the advertised service-side voice gateway mode.
+type VoiceGatewayMode string
+
+// Voice gateway modes.
+const (
+	VoiceGatewayModeDisabled VoiceGatewayMode = "disabled"
+	VoiceGatewayModeEmbedded VoiceGatewayMode = "embedded"
+	VoiceGatewayModeExternal VoiceGatewayMode = "external"
+)
+
+// VoiceGatewayMetadata reports structured voice gateway support.
+type VoiceGatewayMetadata struct {
+	Mode               VoiceGatewayMode `json:"mode"`
+	URL                string           `json:"url,omitempty"`
+	MinGatewayProtocol int              `json:"minGatewayProtocol,omitempty"`
+	AuthRequired       bool             `json:"authRequired,omitempty"`
+	TokenEndpoint      string           `json:"tokenEndpoint,omitempty"`
+	TokenAudience      string           `json:"tokenAudience,omitempty"`
+	Capabilities       []string         `json:"capabilities,omitempty"`
 }
 
 // UserResp is returned by GET /api/v1/auth/me.

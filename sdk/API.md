@@ -98,6 +98,20 @@ All errors return:
 
 ## Types
 
+### VoiceGatewayMetadata
+
+VoiceGatewayMetadata reports structured voice gateway support.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `mode` | `string` |  | yes |
+| `url` | `string` |  |  |
+| `minGatewayProtocol` | `int` |  |  |
+| `authRequired` | `boolean` |  |  |
+| `tokenEndpoint` | `string` |  |  |
+| `tokenAudience` | `string` |  |  |
+| `capabilities` | `string[]` |  |  |
+
 ### Config
 
 Config reports server capabilities to the frontend.
@@ -111,7 +125,7 @@ Config reports server capabilities to the frontend.
 | `displayAvailable` | `boolean` |  | yes |
 | `sudoAvailable` | `boolean` |  | yes |
 | `gitHubTokenAvailable` | `boolean` |  | yes |
-| `webrtcAvailable` | `boolean` |  | yes |
+| `voiceGateway` | `VoiceGatewayMetadata` |  | yes |
 | `gitHubAppEnabled` | `boolean` |  |  |
 | `authProviders` | `string[]` | e.g. ["github","gitlab"] |  |
 

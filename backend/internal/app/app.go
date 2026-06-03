@@ -170,13 +170,16 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 	}
 
 	var voiceBridge *voicertc.Bridge
-	if cfg.Voice.WebRTCPort >= 0 && cfg.Agent.GeminiAPIKey != "" {
-		voiceBridge, err = voicertc.NewBridge(ctx, cfg.Agent.GeminiAPIKey, cfg.Voice.WebRTCPort)
-		if err != nil {
-			return nil, fmt.Errorf("voice bridge: %w", err)
+	if cfg.Voice.Gateway.Mode == server.VoiceGatewayModeEmbedded {
+		port := cfg.Voice.Gateway.Config.Server.WebRTCUDPPort
+		if port >= 0 && cfg.Agent.GeminiAPIKey != "" {
+			voiceBridge, err = voicertc.NewBridge(ctx, cfg.Agent.GeminiAPIKey, port)
+			if err != nil {
+				return nil, fmt.Errorf("voice bridge: %w", err)
+			}
+		} else if port >= 0 {
+			slog.Info("voice bridge disabled: GEMINI_API_KEY not set")
 		}
-	} else if cfg.Voice.WebRTCPort >= 0 {
-		slog.Info("voice bridge disabled: GEMINI_API_KEY not set")
 	}
 
 	forgeManager := server.NewForgeManager(cfg.GitHub.Token, cfg.GitLab.Token)
@@ -230,6 +233,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 		HostState:              hostState,
 		UsageFetchers:          detectProviders(ctx, cfg.Agent.CoreEnv, cfg.Agent.HarnessEnv),
 		VoiceBridge:            voiceBridge,
+		VoiceGateway:           cfg.Voice.Gateway,
 		Forge:                  forgeManager,
 		CICache:                cache,
 		Runtime:                runtimeBackend,

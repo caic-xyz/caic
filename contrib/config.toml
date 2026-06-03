@@ -41,14 +41,6 @@
 # Example: "https://caic.example.com" or "https://caic.my-tailnet.ts.net"
 #external_url = "auto"
 
-# UDP port for WebRTC ICE (single-port mux).
-# 0 (default) = enabled with OS-assigned ephemeral port.
-# >0 = enabled on that static port (open it in your firewall for UDP traffic).
-# -1 = disabled.
-# When GEMINI_API_KEY is not set in core.env, the voice bridge is disabled
-# regardless of this setting (effective default: -1).
-#webrtc_port = 0
-
 # Path to a MaxMind MMDB file for country-code resolution and logging.
 # Download GeoLite2-Country.mmdb from https://dev.maxmind.com/geoip/geolite2-free-geolocation-data
 # Relative paths are resolved against the config directory.
@@ -61,6 +53,32 @@
 # CIDR ranges: e.g. "203.0.113.0/24".
 # Country codes: ISO 3166-1 alpha-2 (e.g. "CA", "US", "DE"); requires geo_db.
 #allow_origins = ["local", "tailscale", "github"]
+
+# ── Voice Gateway ────────────────────────────────────────────────────────────
+
+[voice-gateway]
+# Voice gateway support is derived automatically:
+#   url set = advertise that standalone voice gateway URL.
+#   no url and GEMINI_API_KEY available = host the embedded voice gateway.
+#   no url and no GEMINI_API_KEY = disabled.
+
+# Standalone voice gateway URL.
+#url = "https://voice.example.com"
+
+# Optional embedded gateway runtime config. This uses the same shape as the
+# standalone ~/.config/voice-gateway/config.toml template in
+# contrib/voice-gateway-config.toml. Only set this when caic is hosting the
+# gateway protocol in-process.
+#[voice-gateway.config]
+# The API key is always read from GEMINI_API_KEY.
+#model = "gemini-3.1-flash-live-preview"
+
+#[voice-gateway.config.server]
+# UDP port for WebRTC ICE (single-port mux).
+# 0 (default) = enabled with OS-assigned ephemeral port.
+# >0 = enabled on that static port (open it in your firewall for UDP traffic).
+# GEMINI_API_KEY is required.
+#webrtc_udp_port = 0
 
 # ── AI ───────────────────────────────────────────────────────────────────────
 

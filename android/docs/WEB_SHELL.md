@@ -81,14 +81,12 @@ screenshot, and Halo integrations.
   boundary generic enough for mddb even if caic is implemented first.
 - The caic backend currently exposes `/api/v1/voice/rtc/offer` and terminates
   the WebRTC side of a voice session through `internal/server/voicertc`.
-- The current caic API reports voice availability as `Config.webrtcAvailable`.
-  That boolean is too coarse for the shell architecture because Android must
-  distinguish disabled voice, caic-embedded gateway, and external preferred
-  gateway modes.
-- `backend/cmd/webrtc-relay` is partially implemented, but is currently a caic
-  sidecar: it reads caic `settings.json`, caic `users.json`, and validates caic
-  JWTs. That coupling must be removed before it can bridge caic, mddb, and future
-  services.
+- The current caic API reports structured `Config.voiceGateway` metadata so
+  Android can distinguish disabled voice, caic-embedded gateway, and external
+  preferred gateway modes.
+- `backend/cmd/voice-gateway` exists as the standalone voice gateway binary. Its
+  static config and compatibility metadata live in `backend/internal/voicegateway`,
+  and it no longer reads caic `settings.json` or `users.json`.
 - The checked-in `voicertc` bridge dials Gemini Live WebSocket and forwards
   Gemini protocol messages over the WebRTC data channel while converting audio
   between RTP and Gemini PCM messages.
@@ -114,8 +112,8 @@ screenshot, and Halo integrations.
 - Do not make Android execute caic voice tools. Tool execution belongs on the
   voice gateway side of the Gemini Live bridge, using service-owned tool binding
   APIs.
-- Do not keep `webrtc-relay` as a caic-auth-coupled sidecar if it becomes part
-  of the Go Mode shell architecture.
+- Do not reintroduce caic-auth-coupled sidecar behavior into the standalone
+  voice gateway.
 - Do not weaken notification, microphone, audio routing, foreground service, or
   MediaProjection behavior to fit a pure web model.
 - Do not add broad refactors before the WebView, auth, notification, and voice
@@ -269,8 +267,9 @@ Voice gateway config ownership:
   validation function.
 - caic may embed the same static gateway config under `[voice-gateway.config]`
   when caic hosts the gateway protocol in-process.
-- caic should normally store only gateway connection settings: mode, URL,
-  compatibility state, and service-side token issuance policy.
+- caic should normally store only gateway connection settings: standalone URL,
+  compatibility state, and service-side token issuance policy. The effective
+  gateway state is derived from the URL and `GEMINI_API_KEY`.
 - mddb and future services must be able to use the same standalone gateway
   without depending on caic config.
 - Embedding gateway config in caic must not make the gateway read caic
@@ -283,100 +282,13 @@ Voice gateway config ownership:
 - caic should advertise its preferred gateway through API metadata instead of
   relying on HTTP redirects for WebRTC signaling.
 
-Recommended standalone voice gateway config:
-
-```toml
-[server]
-http = ":3479"
-webrtc_udp_port = 3478
-external_url = "https://voice.example.com"
-
-[gemini]
-api_key_env = "GEMINI_API_KEY"
-model = "gemini-live-2.5-flash-preview"
-
-[auth]
-session_secret_file = "session_secret"
-allowed_users = ["marc@example.com"]
-allow_tailscale = true
-allow_localhost = true
-
-[auth.google]
-client_id = "..."
-client_secret_env = "GOOGLE_OAUTH_CLIENT_SECRET"
-allowed_domains = []
-
-[auth.github]
-client_id = "..."
-client_secret_env = "GITHUB_OAUTH_CLIENT_SECRET"
-allowed_users = ["maruel"]
-
-[auth.gitlab]
-client_id = "..."
-client_secret_env = "GITLAB_OAUTH_CLIENT_SECRET"
-base_url = "https://gitlab.com"
-allowed_users = ["maruel"]
-
-[[trusted_issuers]]
-service = "caic"
-issuer = "https://caic.example.com"
-jwks_url = "https://caic.example.com/api/v1/voice/jwks"
-
-[[services]]
-id = "home-caic"
-kind = "caic"
-base_url = "https://caic.example.com"
-capabilities = ["tasks", "notifications", "halo"]
-
-[[services]]
-id = "home-mddb"
-kind = "mddb"
-base_url = "https://mddb.example.com"
-capabilities = ["documents", "tables"]
-```
-
 Use a dedicated XDG config directory such as
 `~/.config/voice-gateway/config.toml`. Do not reuse `~/.config/caic`.
-
-Recommended caic reference to an external gateway:
-
-```toml
-[voice-gateway]
-mode = "external"
-url = "https://voice.example.com"
-```
-
-Optional caic-embedded gateway config:
-
-```toml
-[voice-gateway]
-mode = "embedded"
-
-[voice-gateway.config.server]
-http = ":3479"
-webrtc_udp_port = 3478
-external_url = "https://voice.example.com"
-
-[voice-gateway.config.gemini]
-api_key_env = "GEMINI_API_KEY"
-model = "gemini-live-2.5-flash-preview"
-
-[voice-gateway.config.auth]
-session_secret_file = "voice-gateway-session-secret"
-allowed_users = ["marc@example.com"]
-allow_tailscale = true
-
-[[voice-gateway.config.services]]
-id = "home-caic"
-kind = "caic"
-base_url = "https://caic.example.com"
-capabilities = ["tasks", "notifications", "halo"]
-```
 
 The embedded shape should stay isomorphic to the standalone gateway config, but
 standalone remains the source of truth for the gateway product boundary.
 
-Mode meanings:
+Effective API mode meanings:
 
 - `external`: caic advertises a preferred gateway URL. Android connects to that
   gateway directly and uses caic only for service metadata, web UI, scoped token
@@ -451,9 +363,7 @@ The Go Mode shell must not assume that every configured server supports the same
 frontend, API, or native binding version.
 
 Add a small shell compatibility endpoint to caic before relying on native
-bindings. The existing `Config.webrtcAvailable` boolean should be replaced or
-augmented with structured voice gateway metadata. The exact path can change, but
-the shape should be stable:
+bindings. The exact path can change, but the shape should be stable:
 
 ```json
 {
@@ -487,17 +397,15 @@ the shape should be stable:
 
 Versioning rules:
 
-- `Config.webrtcAvailable` must not remain the only voice signal exposed to
-  Android or the web frontend. At minimum, the API must expose gateway mode,
-  gateway URL, minimum gateway protocol, auth requirements, token exchange
-  endpoint, and capabilities.
+- The API must expose gateway mode, gateway URL, minimum gateway protocol, auth
+  requirements, token exchange endpoint, and capabilities.
 - Gateway mode is one of `embedded`, `external`, or `disabled`.
 - For `embedded`, `url` points at the caic server origin and caic serves the
   voice-gateway protocol handlers in-process.
 - For `external`, `url` points at the preferred standalone gateway. Android
   connects to that gateway directly. caic does not depend on HTTP redirects for
   signaling.
-- For `disabled`, Android disables voice without probing legacy WebRTC routes.
+- For `disabled`, Android disables voice without probing WebRTC routes.
 - Go Mode reads compatibility metadata before enabling bridge commands.
 - The web frontend also receives shell version and capabilities through
   `window.goMode`.
@@ -510,8 +418,7 @@ Versioning rules:
 - Feature checks use capabilities, not only version numbers.
 - Voice capabilities distinguish local Android audio endpoint support, service
   backend binding support, and voice gateway Gemini/tool support.
-- Legacy clients may continue to read `webrtcAvailable` during migration, but
-  new clients must use structured gateway metadata.
+- Clients must use structured gateway metadata.
 - For a generic host, the same mechanism should support `service: "mddb"` or
   other service identifiers.
 
@@ -554,24 +461,8 @@ current code and report any mismatch.
 - Hypothesis: voice gateway can own Gemini setup, function declarations,
   tool-call dispatch, and tool responses, leaving Android as a local voice
   endpoint and service backends as binding owners.
-- Hypothesis: `backend/cmd/webrtc-relay` can be renamed to
-  `backend/cmd/voice-gateway` before it grows, and `internal/server/voicertc`
-  can remain the lower-level transport package until it needs a broader name.
-- Hypothesis: the voice gateway can use its own config directory and config
-  format without reading caic private config files.
-- Hypothesis: the voice gateway static config can live in a shared Go package
-  without importing caic server packages.
-- Hypothesis: caic can embed the same static gateway config under
-  `[voice-gateway.config]` for embedded colocated deployments while keeping
-  `~/.config/voice-gateway/config.toml` canonical for standalone deployments.
 - Hypothesis: caic can tolerate gateway config version skew, unknown fields, or
   unsupported gateway features without making unrelated caic startup fail.
-- Hypothesis: `Config.webrtcAvailable` is still a boolean in the generated API
-  and can be migrated to structured gateway metadata without breaking existing
-  web and Android clients during a compatibility window.
-- Hypothesis: caic can advertise `embedded`, `external`, and `disabled` gateway
-  modes through `GET /api/v1/server/config` or a new compatibility endpoint
-  before Android depends on voice-gateway routing.
 - Hypothesis: gateway-owned OAuth can support Google, GitHub, and GitLab without
   coupling to caic's existing user store.
 - Hypothesis: Tailscale-only gateway deployments can support OAuth when the
@@ -663,25 +554,19 @@ Execute in this order unless a phase explicitly proves the direction is wrong:
 This is required before Go Mode voice moves to a gateway. It is not required
 before the first WebView shell spike.
 
-Rename and reshape the partial relay before building more gateway-dependent
-Android voice behavior around it.
+The standalone voice gateway baseline is already in place:
+`backend/cmd/voice-gateway` owns the binary, `backend/internal/voicegateway`
+owns static config and compatibility metadata, and `internal/server/voicertc`
+remains the lower-level WebRTC transport package.
 
 Requirements:
 
-- Rename `backend/cmd/webrtc-relay` to `backend/cmd/voice-gateway`.
-- Keep `internal/server/voicertc` as the lower-level WebRTC transport package
-  until it grows beyond transport concerns.
-- Change default config from `~/.config/caic` to
-  `~/.config/voice-gateway/config.toml`.
-- Remove caic `settings.json` and `users.json` reads from the gateway.
-- Add gateway config parsing and validation in a package that can be reused by
-  both the standalone gateway binary and caic's optional embedded gateway mode.
-- Add caic `[voice-gateway]` config with `external`, `embedded`, and `disabled`
-  modes. `external` stores only the gateway URL and service-side policy;
-  `embedded` embeds the same static gateway config shape as standalone.
-- Replace or augment `Config.webrtcAvailable` with structured gateway metadata
-  that reports mode, gateway URL, minimum gateway protocol, auth requirements,
-  token endpoint, and capabilities.
+- Add caic `[voice-gateway]` config that derives `external`, `embedded`, and
+  `disabled` from the standalone gateway URL and `GEMINI_API_KEY`. External
+  config stores only the gateway URL and service-side policy; embedded config
+  embeds the same static gateway config shape as standalone.
+- Keep `Config.voiceGateway` metadata reporting mode, gateway URL, minimum
+  gateway protocol, auth requirements, token endpoint, and capabilities.
 - Add gateway-owned session storage and session middleware.
 - Add OAuth provider configuration for Google, GitHub, and GitLab.
 - Add Tailscale/private-network mode settings.
@@ -725,7 +610,7 @@ Acceptance checks:
 - caic can reference an external gateway without embedding gateway runtime
   settings.
 - caic API clients can distinguish `embedded`, `external`, and `disabled` voice
-  gateway modes without relying only on `webrtcAvailable`.
+  gateway modes through structured metadata.
 - Gateway login works with configured Google, GitHub, and GitLab providers.
 - Gateway login works over a Tailscale-only URL when the client can reach that
   URL.
@@ -1290,10 +1175,8 @@ Voice gateway unit tests:
 
 Service backend unit tests:
 
-- caic config API exposes structured gateway metadata for `embedded`,
-  `external`, and `disabled` modes.
-- caic keeps `Config.webrtcAvailable` only as a legacy compatibility field if it
-  remains during migration.
+- caic config API exposes structured gateway metadata for URL-derived external,
+  key-derived embedded, and disabled states.
 - caic compatibility endpoint reports voice gateway requirements and binding
   capabilities.
 - caic scoped voice-gateway token issuance is tied to the current authenticated
@@ -1345,9 +1228,9 @@ Manual matrix before first Go Mode release:
 - Voice gateway configured with GitLab OAuth.
 - Voice gateway reachable only over Tailscale with OAuth callback URL.
 - Voice gateway reachable only over Tailscale with pairing mode.
-- caic configured with embedded voice gateway mode.
-- caic configured with external preferred voice gateway mode.
-- caic configured with disabled voice gateway mode.
+- caic with no gateway URL and `GEMINI_API_KEY` available.
+- caic with standalone gateway URL configured.
+- caic with no gateway URL and no `GEMINI_API_KEY`.
 - Server switch.
 - Logout.
 - Server upgrade with older Android app.
@@ -1408,8 +1291,8 @@ make lint-docs
 
 - Go Mode builds as `com.fghbuild.gomode` and can coexist with
   `com.fghbuild.caic` on one device.
-- caic config metadata replaces the `webrtcAvailable` boolean decision with
-  structured embedded, external, and disabled gateway modes.
+- caic config metadata uses structured embedded, external, and disabled gateway
+  modes.
 - Go Mode can multiplex multiple configured service instances, initially caic
   backend servers.
 - Native task notifications work independently of WebView lifecycle.
@@ -1441,8 +1324,6 @@ Stop and reassess Go Mode if any are true:
 - Auth requires fragile WebView request interception.
 - EventSource cannot authenticate cleanly.
 - Version compatibility cannot be represented cleanly between app and server.
-- `webrtcAvailable` remains the only voice capability signal available to
-  Android.
 - Voice gateway compatibility cannot be represented cleanly between Android,
   gateway, and service backends.
 - Voice gateway auth requires public inbound internet access for Tailscale-only
@@ -1521,27 +1402,17 @@ PR 5: screenshot and retained native integrations.
 - Define the Halo context shape sent from Android to the future gateway.
 - Keep Halo native.
 
-PR 6: voice gateway identity and configuration.
+PR 6: voice gateway identity and configuration. Done.
 
-- Rename `backend/cmd/webrtc-relay` to `backend/cmd/voice-gateway`.
-- Rename logs, help text, environment variable names, docs, and build targets
-  that refer to the standalone voice binary.
-- Keep `internal/server/voicertc` as the lower-level transport package.
-- Add `~/.config/voice-gateway/config.toml` loading and validation.
-- Add reusable gateway static config types and validation that do not import
-  caic server packages.
-- Add caic `[voice-gateway]` parsing for `external`, `embedded`, and `disabled`
-  modes.
-- Keep standalone config canonical; embedded caic config embeds the same static
-  config only for colocated deployments.
-- Update caic config API metadata so clients can distinguish embedded gateway,
-  external preferred gateway, and disabled voice. Keep `webrtcAvailable` only as
-  a temporary legacy compatibility field if needed.
-- Remove caic `settings.json` and `users.json` reads from the gateway.
-- Add gateway `GET /health` and `GET /compat`.
-- Add tests for standalone config defaults, embedded caic gateway config,
-  external gateway config, config API metadata, config validation, and
-  compatibility response.
+Implemented the standalone `backend/cmd/voice-gateway` binary, reusable
+`backend/internal/voicegateway` static config, canonical
+`~/.config/voice-gateway/config.toml` loading, caic `[voice-gateway]` parsing,
+structured `Config.voiceGateway` API metadata, and gateway `GET /health` plus
+`GET /compat`. The gateway no longer reads caic `settings.json` or `users.json`.
+
+Remaining follow-up: caic currently rejects unknown gateway config fields with
+the rest of `config.toml`; deliberate gateway config version-skew handling is
+still unresolved.
 
 PR 7: gateway user auth.
 

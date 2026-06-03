@@ -31,7 +31,10 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	caicruntime "github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
+	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 )
+
+const voiceGatewayTokenAudience = "voice-gateway"
 
 func (s *Server) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Config, error) {
 	displayName, err := os.Hostname()
@@ -47,13 +50,50 @@ func (s *Server) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Config, erro
 		DisplayAvailable:     true,
 		SudoAvailable:        true,
 		GitHubTokenAvailable: s.forge.githubToken != "" || s.githubOAuth != nil,
-		WebRTCAvailable:      s.voiceBridge != nil,
+		VoiceGateway:         s.voiceGatewayMetadata(),
 		GitHubAppEnabled:     s.forge.githubApp != nil,
 	}
 	if s.authEnabled() {
 		cfg.AuthProviders = s.authProviders()
 	}
 	return cfg, nil
+}
+
+func (s *Server) voiceGatewayMetadata() v1.VoiceGatewayMetadata {
+	cfg := s.voiceGateway
+	if cfg.Mode == "" {
+		if s.voiceBridge != nil {
+			cfg.Mode = VoiceGatewayModeEmbedded
+		} else {
+			cfg.Mode = VoiceGatewayModeDisabled
+		}
+	}
+	switch cfg.Mode {
+	case VoiceGatewayModeEmbedded:
+		if s.voiceBridge == nil {
+			return v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeDisabled}
+		}
+		return v1.VoiceGatewayMetadata{ //nolint:gosec // G101: token metadata field names, not credentials.
+			Mode:               v1.VoiceGatewayModeEmbedded,
+			MinGatewayProtocol: voicegateway.ProtocolVersion,
+			AuthRequired:       false,
+			TokenEndpoint:      "/api/v1/voice/token",
+			TokenAudience:      voiceGatewayTokenAudience,
+			Capabilities:       []string{"voice.gatewayGeminiLive"},
+		}
+	case VoiceGatewayModeExternal:
+		return v1.VoiceGatewayMetadata{ //nolint:gosec // G101: token metadata field names, not credentials.
+			Mode:               v1.VoiceGatewayModeExternal,
+			URL:                cfg.URL,
+			MinGatewayProtocol: voicegateway.ProtocolVersion,
+			AuthRequired:       true,
+			TokenEndpoint:      "/api/v1/voice/token",
+			TokenAudience:      voiceGatewayTokenAudience,
+			Capabilities:       []string{"voice.gatewayGeminiLive"},
+		}
+	default:
+		return v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeDisabled}
+	}
 }
 
 // getVersion returns the current server version and checks GitHub for the latest release.

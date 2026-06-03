@@ -295,6 +295,28 @@ public struct ToolOutputContentType: Codable, Equatable, Hashable {
     }
 }
 
+public struct VoiceGatewayMode: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Disabled = VoiceGatewayMode("disabled")
+    public static let Embedded = VoiceGatewayMode("embedded")
+    public static let External = VoiceGatewayMode("external")
+
+    public static func other(_ value: String) -> VoiceGatewayMode { VoiceGatewayMode(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public enum ErrorCodes {
     public static let badRequest = "BAD_REQUEST"
     public static let notFound = "NOT_FOUND"
@@ -305,6 +327,17 @@ public enum ErrorCodes {
 /// DiffStat summarises the changes in a branch relative to its base.
 public typealias DiffStat = [DiffFileStat]
 
+/// VoiceGatewayMetadata reports structured voice gateway support.
+public struct VoiceGatewayMetadata: Codable {
+    public let mode: VoiceGatewayMode
+    public let url: String?
+    public let minGatewayProtocol: Int?
+    public let authRequired: Bool?
+    public let tokenEndpoint: String?
+    public let tokenAudience: String?
+    public let capabilities: [String]?
+}
+
 /// Config reports server capabilities to the frontend.
 public struct Config: Codable {
     public let version: String?
@@ -314,7 +347,7 @@ public struct Config: Codable {
     public let displayAvailable: Bool
     public let sudoAvailable: Bool
     public let gitHubTokenAvailable: Bool
-    public let webrtcAvailable: Bool
+    public let voiceGateway: VoiceGatewayMetadata
     public let gitHubAppEnabled: Bool?
     /// e.g. ["github","gitlab"]
     public let authProviders: [String]?

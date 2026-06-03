@@ -35,6 +35,7 @@ type Dependencies struct {
 	HostState     *auth.HostState
 	UsageFetchers []usage.ProviderFetcher
 	VoiceBridge   *voicertc.Bridge
+	VoiceGateway  VoiceGatewayConfig
 	Forge         *ForgeManager
 	CICache       *forgecache.Cache
 	Runtime       runtime.Backend
@@ -76,6 +77,7 @@ func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocrit
 		pprof:                  d.Pprof,
 		geminiAPIKey:           d.GeminiAPIKey,
 		voiceBridge:            d.VoiceBridge,
+		voiceGateway:           d.VoiceGateway,
 		forge:                  d.Forge,
 		ciCache:                d.CICache,
 		runtimeBackend:         d.Runtime,

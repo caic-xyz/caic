@@ -13,6 +13,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/server"
+	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 )
 
 // tomlConfig mirrors the TOML file layout at ~/.config/caic/config.toml.
@@ -20,13 +21,14 @@ import (
 // IMPORTANT: When adding or modifying configuration fields, update contrib/config.toml
 // accordingly. Document all default values in the example config file.
 type tomlConfig struct {
-	Core    tomlCore               `toml:"core"`
-	Server  tomlServer             `toml:"server"`
-	AI      tomlAI                 `toml:"ai"`
-	Harness map[string]tomlHarness `toml:"harness"`
-	GitHub  tomlGitHub             `toml:"github"`
-	GitLab  tomlGitLab             `toml:"gitlab"`
-	Debug   tomlDebug              `toml:"debug"`
+	Core         tomlCore               `toml:"core"`
+	Server       tomlServer             `toml:"server"`
+	AI           tomlAI                 `toml:"ai"`
+	Harness      map[string]tomlHarness `toml:"harness"`
+	GitHub       tomlGitHub             `toml:"github"`
+	GitLab       tomlGitLab             `toml:"gitlab"`
+	VoiceGateway tomlVoiceGateway       `toml:"voice-gateway"`
+	Debug        tomlDebug              `toml:"debug"`
 }
 
 type tomlHarness struct {
@@ -43,7 +45,6 @@ type tomlCore struct {
 type tomlServer struct {
 	HTTP         string   `toml:"http"`
 	ExternalURL  string   `toml:"external_url"`
-	WebRTCPort   int      `toml:"webrtc_port"`
 	GeoDB        *string  `toml:"geo_db"`
 	AllowOrigins []string `toml:"allow_origins"`
 }
@@ -82,14 +83,31 @@ type tomlGitLab struct {
 	WebhookSecret     string   `toml:"webhook_secret"`
 }
 
+type tomlVoiceGateway struct {
+	URL    string              `toml:"url"`
+	Config voicegateway.Config `toml:"config"`
+}
+
 // defaultConfig returns a tomlConfig with sensible defaults pre-populated.
 // TOML decoding overwrites only fields present in the file.
 func defaultConfig() tomlConfig {
 	return tomlConfig{
-		Core:   tomlCore{Root: "."},
-		Server: tomlServer{HTTP: ":2242", ExternalURL: "auto"},
-		Debug:  tomlDebug{LogLevel: "info"},
+		Core: tomlCore{Root: "."},
+		Server: tomlServer{
+			HTTP:        ":2242",
+			ExternalURL: "auto",
+		},
+		VoiceGateway: tomlVoiceGateway{
+			Config: embeddedVoiceGatewayConfigDefaults(),
+		},
+		Debug: tomlDebug{LogLevel: "info"},
 	}
+}
+
+func embeddedVoiceGatewayConfigDefaults() voicegateway.Config {
+	cfg := voicegateway.DefaultConfig()
+	cfg.Server.HTTP = ""
+	return cfg
 }
 
 // loadTOMLConfig reads and parses config.toml from cfgDir.
@@ -109,6 +127,9 @@ func loadTOMLConfig(cfgDir string) (tomlConfig, error) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&tc); err != nil {
 		return tomlConfig{}, fmt.Errorf("parse %s: %w", path, err)
+	}
+	if tc.VoiceGateway.Config.Server.HTTP != "" {
+		return tomlConfig{}, fmt.Errorf("parse %s: voice-gateway.config.server.http is not supported; use server.http", path)
 	}
 	slog.Info("loaded config", "path", path)
 	return tc, nil
@@ -157,6 +178,12 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 	// Resolve core env vars: explicit config values take precedence over the host environment.
 	tailscaleAPIKey := coreEnvOrDefault(tc.Core.Env, "TAILSCALE_API_KEY")
 	geminiAPIKey := coreEnvOrDefault(tc.Core.Env, "GEMINI_API_KEY")
+	voiceGatewayMode := server.VoiceGatewayModeDisabled
+	if tc.VoiceGateway.URL != "" {
+		voiceGatewayMode = server.VoiceGatewayModeExternal
+	} else if geminiAPIKey != "" {
+		voiceGatewayMode = server.VoiceGatewayModeEmbedded
+	}
 
 	// Convert per-harness env maps to KEY=VALUE slices.
 	harnessEnv := make(map[string][]string, len(tc.Harness))
@@ -206,7 +233,11 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 			ExternalURL: tc.Server.ExternalURL,
 		},
 		Voice: server.VoiceConfig{
-			WebRTCPort: tc.Server.WebRTCPort,
+			Gateway: server.VoiceGatewayConfig{
+				Mode:   voiceGatewayMode,
+				URL:    tc.VoiceGateway.URL,
+				Config: tc.VoiceGateway.Config,
+			},
 		},
 		Debug: server.DebugConfig{
 			Pprof: tc.Debug.Pprof,
