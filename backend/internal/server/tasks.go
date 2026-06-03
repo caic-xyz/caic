@@ -636,53 +636,6 @@ func (w wsNetConn) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// handleGetProcesses returns the list of running processes inside the task's
-// instance by running ps via SSH.
-func (s *Server) handleGetProcesses(w http.ResponseWriter, r *http.Request) {
-	entry, err := s.getTask(r)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	t := entry.Task()
-	instanceID := t.RuntimeInstanceID()
-	if instanceID == "" {
-		writeError(w, api.Conflict("task has no instance"))
-		return
-	}
-	if s.runtimeBackend == nil {
-		writeError(w, api.InternalError("runtime backend not configured"))
-		return
-	}
-	procs, err := s.runtimeBackend.Processes(r.Context(), instanceID)
-	if err != nil {
-		writeError(w, api.InternalError(err.Error()))
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(v1.ProcessListResp{Processes: v1conv.ProcessInfos(procs)}); err != nil {
-		slog.WarnContext(r.Context(), "encode process list response", "err", err)
-	}
-}
-
-// handleSignalProcess sends a signal to a process inside the task's instance.
-// Reads the pid from the URL path and the signal name from the request body.
-func (s *Server) signalProcess(ctx context.Context, entry *tasks.Entry, req *v1.SignalProcessReq) (*v1.StatusResp, error) {
-	t := entry.Task()
-	instanceID := t.RuntimeInstanceID()
-	if instanceID == "" {
-		return nil, api.Conflict("task has no instance")
-	}
-	if s.runtimeBackend == nil {
-		return nil, api.InternalError("runtime backend not configured")
-	}
-	if err := s.runtimeBackend.Signal(ctx, instanceID, req.PID, req.Signal); err != nil {
-		return nil, api.InternalError(err.Error())
-	}
-	slog.Info("signal sent", "task", t.ID, "instance", instanceID, "pid", req.PID, "signal", req.Signal)
-	return &v1.StatusResp{Status: "signalled"}, nil
-}
-
 // resolveGitHubContainerToken returns the GitHub token to inject into a
 // instance when enabled is true, otherwise returns empty.
 func (s *Server) resolveGitHubContainerToken(ctx context.Context, enabled bool) string {

@@ -810,13 +810,19 @@ func TestSignalProcess(t *testing.T) {
 				return nil
 			},
 		}
+		processes := &RuntimeProcesses{
+			taskMgr:      s.taskMgr,
+			backend:      s.runtimeBackend,
+			authEnabled:  s.authEnabled,
+			notifyChange: s.taskMgr.NotifyTaskChange,
+		}
 
 		body := strings.NewReader(`{"signal":"SIGTERM","extra":true}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/processes/123/signal", body)
 		req.SetPathValue("id", "t1")
 		req.SetPathValue("pid", "123")
 		w := httptest.NewRecorder()
-		handleWithTask(s, s.signalProcess)(w, req)
+		processes.HandleSignalProcess(w, req)
 
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
@@ -841,13 +847,19 @@ func TestSignalProcess(t *testing.T) {
 				return nil
 			},
 		}
+		processes := &RuntimeProcesses{
+			taskMgr:      s.taskMgr,
+			backend:      s.runtimeBackend,
+			authEnabled:  s.authEnabled,
+			notifyChange: s.taskMgr.NotifyTaskChange,
+		}
 
 		body := strings.NewReader(`{"signal":"SIGKILL"}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/processes/123/signal", body)
 		req.SetPathValue("id", "t1")
 		req.SetPathValue("pid", "123")
 		w := httptest.NewRecorder()
-		handleWithTask(s, s.signalProcess)(w, req)
+		processes.HandleSignalProcess(w, req)
 
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)

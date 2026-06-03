@@ -179,6 +179,12 @@ func (s *Server) buildHandler() (http.Handler, error) {
 
 	// Protected routes.
 	apiMux := http.NewServeMux()
+	runtimeProcesses := &RuntimeProcesses{
+		taskMgr:      s.taskMgr,
+		backend:      s.runtimeBackend,
+		authEnabled:  s.authEnabled,
+		notifyChange: s.taskMgr.NotifyTaskChange,
+	}
 	apiMux.HandleFunc("GET /api/v1/server/preferences", handle(s.getPreferences))
 	apiMux.HandleFunc("POST /api/v1/server/preferences", handle(s.updatePreferences))
 	apiMux.HandleFunc("GET /api/v1/server/harnesses", handle(s.listHarnesses))
@@ -205,8 +211,8 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("POST /api/v1/tasks/{id}/sync", handleWithTask(s, s.syncTask))
 	apiMux.HandleFunc("GET /api/v1/tasks/{id}/diff", s.handleGetDiff)
 	apiMux.HandleFunc("GET /api/v1/tasks/{id}/vnc/ws", s.handleVNCWebSocket)
-	apiMux.HandleFunc("GET /api/v1/tasks/{id}/processes", s.handleGetProcesses)
-	apiMux.HandleFunc("POST /api/v1/tasks/{id}/processes/{pid}/signal", handleWithTask(s, s.signalProcess))
+	apiMux.HandleFunc("GET /api/v1/tasks/{id}/processes", runtimeProcesses.HandleGetProcesses)
+	apiMux.HandleFunc("POST /api/v1/tasks/{id}/processes/{pid}/signal", runtimeProcesses.HandleSignalProcess)
 	apiMux.HandleFunc("GET /api/v1/tasks/{id}/tool/{toolUseID}", s.handleTaskToolInput)
 	apiMux.HandleFunc("GET /api/v1/usage", s.handleGetUsage)
 	apiMux.HandleFunc("GET /api/v1/voice/token", handle(s.getVoiceToken))

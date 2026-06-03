@@ -40,9 +40,9 @@ implementation of every backend-facing role.
 
 Current state: `Server` still owns auth, repo registry access, task HTTP
 handlers, webhook handlers, usage streaming, voice handlers, maintenance
-helpers, forge management, and runtime operation helpers. CI and bot now use
-dedicated adapters with explicit dependencies instead of using `Server` as the
-adapter/client type.
+helpers, and forge management. CI, bot, and runtime process routes now use
+dedicated adapters/handlers with explicit dependencies instead of using
+`Server` as the adapter/client/handler type.
 
 Implementation order:
 
@@ -116,5 +116,3 @@ earlier.
    repos/config/preferences.
 2. Move webhook handlers behind a concern struct that depends on bot, CI, repo,
    forge, and task managers explicitly.
-3. Move runtime process operations out of the task handler concern once task
-   lifecycle routes are isolated.
