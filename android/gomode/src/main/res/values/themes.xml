@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.GoMode" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#FFFDF7</item>
+        <item name="android:colorAccent">@color/gomode_seed</item>
+    </style>
+</resources>

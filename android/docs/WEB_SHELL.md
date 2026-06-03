@@ -626,6 +626,15 @@ Acceptance checks:
 Goal: prove that Go Mode can host the existing backend-served mobile frontend
 without editing the current caic Android app.
 
+Remaining PR 1 work:
+
+- Add Android instrumented smoke coverage against the fake backend for shell
+  loading, task list display, task detail navigation, task creation, task input,
+  and Android back behavior.
+- Manually verify side-by-side installation of `com.fghbuild.gomode` and
+  `com.fghbuild.caic` on a device or emulator.
+- Prove the no-auth fake backend flow in WebView with `adb reverse`.
+
 Create a new Android app:
 
 - Package/application ID: `com.fghbuild.gomode`.
@@ -1347,19 +1356,10 @@ Keep each PR small enough to revert.
 
 PR 1: Go Mode app scaffold and WebView shell.
 
-- Confirm the hypotheses in this document against current code and update the
-  plan for any mismatch.
-- Add a new Android app with package/application ID `com.fghbuild.gomode`.
-- Copy only the minimal native bootstrap/settings code needed to configure a
-  caic service instance.
-- Add remote WebView shell mode as Go Mode's primary screen.
-- Load the backend-hosted frontend from the active server URL.
-- Keep native settings fallback and native service-instance configuration.
-- Ensure Go Mode and `com.fghbuild.caic` install side by side.
-- Do not implement bundled frontend assets.
-- Do not copy caic task list/detail/diff/process/widget Compose UI.
 - Add smoke coverage for fake-backend shell loading, task list display, task
   detail navigation, task creation, task input, and Android back behavior.
+- Verify side-by-side installation of `com.fghbuild.gomode` and
+  `com.fghbuild.caic`.
 
 PR 2: Go Mode host mode and app-scoped monitoring.
 

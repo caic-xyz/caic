@@ -24,6 +24,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "caic"
 include(":app")
+include(":gomode")
 include(":sdk")
 project(":sdk").projectDir = file("../sdk/kotlin")
 include(":halo")
