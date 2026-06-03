@@ -38,6 +38,7 @@ func (s *Server) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Config, erro
 	if err != nil {
 		slog.Warn("failed to get hostname", "err", err)
 	}
+	displayName, _, _ = strings.Cut(displayName, ".")
 	cfg := &v1.Config{
 		Version:              autoupdate.Version,
 		DisplayName:          displayName,
