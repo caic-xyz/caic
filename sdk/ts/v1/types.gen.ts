@@ -511,6 +511,12 @@ export interface CacheMappingResp {
   containerPath: string;
 }
 
+/** MountMappingResp represents a general host-to-runtime directory mount. */
+export interface MountMappingResp {
+  hostPath: string;
+  containerPath: string;
+}
+
 /** UserSettings holds user-configurable behavioral settings. */
 export interface UserSettings {
   /**
@@ -536,7 +542,7 @@ export interface UserSettings {
   maxCPUs?: number /* int */;
   /**
    * UseDefaultCaches controls whether default harness caches are mounted.
-   * When false, only custom CacheMappings are used.
+   * When false, only custom cache mappings and custom mounts are used.
    */
   useDefaultCaches: boolean;
   /**
@@ -546,6 +552,8 @@ export interface UserSettings {
   wellKnownCaches?: { [key: string]: boolean};
   /** CacheMappings are custom host-to-runtime directory mappings. */
   cacheMappings?: CacheMappingResp[];
+  /** CustomMounts are custom non-cache host-to-runtime directory mappings. */
+  customMounts?: MountMappingResp[];
 }
 
 /** PreferencesResp is the response for GET /api/v1/server/preferences. */

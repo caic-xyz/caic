@@ -1,6 +1,6 @@
 // SettingsForm renders the application settings controls.
 import { For, Show, type Accessor, type Setter } from "solid-js";
-import type { CacheMappingResp, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
+import type { CacheMappingResp, MountMappingResp, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
 import styles from "./SettingsForm.module.css";
 
 type SettingsOverrides = Partial<UpdatePreferencesReq["settings"]>;
@@ -15,6 +15,8 @@ interface SettingsFormProps {
   wellKnownCachesList: Accessor<WellKnownCachesResp["wellKnown"]>;
   cacheMappings: Accessor<CacheMappingResp[]>;
   setCacheMappings: Setter<CacheMappingResp[]>;
+  customMounts: Accessor<MountMappingResp[]>;
+  setCustomMounts: Setter<MountMappingResp[]>;
   autoFixCI: Accessor<boolean>;
   setAutoFixCI: Setter<boolean>;
   autoFixPR: Accessor<boolean>;
@@ -32,6 +34,11 @@ export default function SettingsForm(props: SettingsFormProps) {
   const updateCacheMapping = (index: number, update: Partial<CacheMappingResp>) => {
     props.setCacheMappings((prev) => prev.map((mapping, i) => (
       i === index ? { ...mapping, ...update } : mapping
+    )));
+  };
+  const updateCustomMount = (index: number, update: Partial<MountMappingResp>) => {
+    props.setCustomMounts((prev) => prev.map((mount, i) => (
+      i === index ? { ...mount, ...update } : mount
     )));
   };
 
@@ -101,7 +108,8 @@ export default function SettingsForm(props: SettingsFormProps) {
           </div>
         </div>
         <div class={styles.settingsSection}>
-          <h3 class={styles.settingsSectionTitle}>Custom cache mappings</h3>
+          <h3 class={styles.settingsSectionTitle}>Custom caches</h3>
+          <p class={styles.settingsDescription}>Persistent host directories mounted into each container for tool caches.</p>
           <For each={props.cacheMappings()}>
             {(mapping, index) => (
               <div class={styles.cacheMappingRow}>
@@ -148,6 +156,57 @@ export default function SettingsForm(props: SettingsFormProps) {
             }}
           >
             + Add mapping
+          </button>
+        </div>
+        <div class={styles.settingsSection}>
+          <h3 class={styles.settingsSectionTitle}>Custom mounts</h3>
+          <p class={styles.settingsDescription}>Additional host directories mounted into each container.</p>
+          <For each={props.customMounts()}>
+            {(mount, index) => (
+              <div class={styles.cacheMappingRow}>
+                <input
+                  type="text"
+                  class={styles.settingsInput}
+                  placeholder="Host path"
+                  value={mount.hostPath}
+                  onChange={(e) => updateCustomMount(index(), { hostPath: e.currentTarget.value })}
+                  onBlur={() => {
+                    void props.saveSettings();
+                  }}
+                />
+                <span class={styles.cacheMappingArrow}>→</span>
+                <input
+                  type="text"
+                  class={styles.settingsInput}
+                  placeholder="Container path"
+                  value={mount.containerPath}
+                  onChange={(e) => updateCustomMount(index(), { containerPath: e.currentTarget.value })}
+                  onBlur={() => {
+                    void props.saveSettings();
+                  }}
+                />
+                <button
+                  type="button"
+                  class={styles.cacheMappingRemove}
+                  onClick={() => {
+                    const newMounts = props.customMounts().filter((_, i) => i !== index());
+                    props.setCustomMounts(newMounts);
+                    void props.saveSettings({ customMounts: newMounts });
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+          </For>
+          <button
+            type="button"
+            class={styles.settingsButton}
+            onClick={() => {
+              props.setCustomMounts([...props.customMounts(), { hostPath: "", containerPath: "" }]);
+            }}
+          >
+            + Add mount
           </button>
         </div>
         <div class={styles.settingsSection}>

@@ -219,7 +219,12 @@ fun SettingsScreen(
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-            Text("Custom cache mappings", style = MaterialTheme.typography.titleMedium)
+            Text("Custom caches", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Persistent host directories mounted into each container for tool caches.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             screenState.cacheMappings.forEachIndexed { index, mapping ->
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -245,10 +250,62 @@ fun SettingsScreen(
                     }
                 }
             }
-            TextButton(onClick = { viewModel.addCacheMapping() }) {
-                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Add mapping")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { viewModel.addCacheMapping() }) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Add mapping")
+                }
+                TextButton(onClick = { viewModel.saveCacheMappings() }) {
+                    Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Save mappings")
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Text("Custom mounts", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Additional host directories mounted into each container.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            screenState.customMounts.forEachIndexed { index, mount ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    OutlinedTextField(
+                        value = mount.hostPath,
+                        onValueChange = { viewModel.updateCustomMount(index, it, mount.containerPath) },
+                        placeholder = { Text("Host path") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(" → ", style = MaterialTheme.typography.bodyMedium)
+                    OutlinedTextField(
+                        value = mount.containerPath,
+                        onValueChange = { viewModel.updateCustomMount(index, mount.hostPath, it) },
+                        placeholder = { Text("Container path") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { viewModel.removeCustomMount(index) }) {
+                        Icon(Icons.Filled.Delete, contentDescription = "Remove")
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { viewModel.addCustomMount() }) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Add mount")
+                }
+                TextButton(onClick = { viewModel.saveCustomMounts() }) {
+                    Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Save mounts")
+                }
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))

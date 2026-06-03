@@ -186,6 +186,12 @@ func (r *UpdatePreferencesReq) Validate() error {
 			return api.BadRequest("unknown cache: " + name)
 		}
 	}
+	if err := validateCacheMappings(r.Settings.CacheMappings); err != nil {
+		return err
+	}
+	if err := validateMountMappings(r.Settings.CustomMounts); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -221,6 +227,30 @@ func validateRepoSpecs(specs []RepoSpec, field string) error {
 			return api.BadRequest(field + " contains duplicate name: " + rs.Name)
 		}
 		seen[rs.Name] = struct{}{}
+	}
+	return nil
+}
+
+func validateCacheMappings(mappings []CacheMappingResp) error {
+	for i, m := range mappings {
+		if m.HostPath == "" {
+			return api.BadRequest(fmt.Sprintf("cacheMappings[%d]: hostPath is required", i))
+		}
+		if m.ContainerPath == "" {
+			return api.BadRequest(fmt.Sprintf("cacheMappings[%d]: containerPath is required", i))
+		}
+	}
+	return nil
+}
+
+func validateMountMappings(mappings []MountMappingResp) error {
+	for i, m := range mappings {
+		if m.HostPath == "" {
+			return api.BadRequest(fmt.Sprintf("customMounts[%d]: hostPath is required", i))
+		}
+		if m.ContainerPath == "" {
+			return api.BadRequest(fmt.Sprintf("customMounts[%d]: containerPath is required", i))
+		}
 	}
 	return nil
 }

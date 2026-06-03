@@ -17,6 +17,8 @@ export default function SettingsPage() {
         wellKnownCachesList={s.wellKnownCachesList}
         cacheMappings={s.cacheMappings}
         setCacheMappings={s.setCacheMappings}
+        customMounts={s.customMounts}
+        setCustomMounts={s.setCustomMounts}
         autoFixCI={s.autoFixCI}
         setAutoFixCI={s.setAutoFixCI}
         autoFixPR={s.autoFixPR}

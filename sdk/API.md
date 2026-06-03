@@ -174,6 +174,15 @@ CacheMappingResp represents a directory mapping for cache/state sharing.
 | `hostPath` | `string` |  | yes |
 | `containerPath` | `string` |  | yes |
 
+### MountMappingResp
+
+MountMappingResp represents a general host-to-runtime directory mount.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `hostPath` | `string` |  | yes |
+| `containerPath` | `string` |  | yes |
+
 ### UserSettings
 
 UserSettings holds user-configurable behavioral settings.
@@ -190,10 +199,11 @@ the default. |  |
 | `maxCPUs` | `int` | MaxCPUs limits the number of CPU cores the runtime instance may use.
 Zero means use the system default (max(2, NumCPU-2)). |  |
 | `useDefaultCaches` | `boolean` | UseDefaultCaches controls whether default harness caches are mounted.
-When false, only custom CacheMappings are used. | yes |
+When false, only custom cache mappings and custom mounts are used. | yes |
 | `wellKnownCaches` | `Record<string, unknown>` | WellKnownCaches maps cache name to enabled state. nil means use default
 (all true), true means explicitly enabled, false means explicitly disabled. |  |
 | `cacheMappings` | `CacheMappingResp[]` | CacheMappings are custom host-to-runtime directory mappings. |  |
+| `customMounts` | `MountMappingResp[]` | CustomMounts are custom non-cache host-to-runtime directory mappings. |  |
 
 ### PreferencesResp
 

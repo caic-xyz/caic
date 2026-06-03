@@ -605,6 +605,10 @@ data class RepoPrefsResp(
 @Serializable
 data class CacheMappingResp(val hostPath: String, val containerPath: String)
 
+/** MountMappingResp represents a general host-to-runtime directory mount. */
+@Serializable
+data class MountMappingResp(val hostPath: String, val containerPath: String)
+
 /** UserSettings holds user-configurable behavioral settings. */
 @Serializable
 data class UserSettings(
@@ -615,6 +619,7 @@ data class UserSettings(
     val useDefaultCaches: Boolean,
     val wellKnownCaches: Map<String, Boolean>? = null,
     val cacheMappings: List<CacheMappingResp>? = null,
+    val customMounts: List<MountMappingResp>? = null,
 )
 
 /** PreferencesResp is the response for GET /api/v1/server/preferences. */

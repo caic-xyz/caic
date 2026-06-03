@@ -102,7 +102,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		ResolvedGitHubToken: s.resolveGitHubContainerToken(ctx, req.GitHubToken),
 		BaseImage:           prefs.Settings.BaseImage,
 		MaxCPUs:             prefs.Settings.MaxCPUs,
-		CacheMounts:         cacheMountsFromSettings(prefs.Settings),
+		CacheMounts:         cacheMountsFromSettings(&prefs.Settings),
 	})
 	if err != nil {
 		return nil, toDTO(err)

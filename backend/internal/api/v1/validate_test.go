@@ -247,6 +247,22 @@ func TestValidate(t *testing.T) {
 			}
 			assertBadRequest(t, r.Validate(), "unknown cache: bogus")
 		})
+		t.Run("InvalidCacheMapping", func(t *testing.T) {
+			t.Parallel()
+			var r UpdatePreferencesReq
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"useDefaultCaches":true,"cacheMappings":[{"hostPath":"","containerPath":"/cache"}]}}`), &r); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			assertBadRequest(t, r.Validate(), "cacheMappings[0]: hostPath is required")
+		})
+		t.Run("InvalidCustomMount", func(t *testing.T) {
+			t.Parallel()
+			var r UpdatePreferencesReq
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"useDefaultCaches":true,"customMounts":[{"hostPath":"/host","containerPath":""}]}}`), &r); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			assertBadRequest(t, r.Validate(), "customMounts[0]: containerPath is required")
+		})
 		t.Run("UnknownTopLevelField", func(t *testing.T) {
 			t.Parallel()
 			var r UpdatePreferencesReq

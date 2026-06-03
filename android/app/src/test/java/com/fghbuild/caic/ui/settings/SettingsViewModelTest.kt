@@ -188,6 +188,51 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `addCustomMount appends and modifies entries`() = runBlocking {
+        val vm = createViewModel()
+        assertTrue(vm.state.value.customMounts.isEmpty())
+
+        vm.addCustomMount()
+        assertEquals(1, vm.state.value.customMounts.size)
+
+        vm.addCustomMount()
+        vm.updateCustomMount(0, "/host/a", "/container/a")
+        vm.updateCustomMount(1, "/host/b", "/container/b")
+        assertEquals("/host/a", vm.state.value.customMounts[0].hostPath)
+        assertEquals("/container/b", vm.state.value.customMounts[1].containerPath)
+    }
+
+    @Test
+    fun `updateCustomMount ignores out-of-bounds index`() = runBlocking {
+        val vm = createViewModel()
+        vm.addCustomMount()
+        val before = vm.state.value.customMounts.toList()
+        vm.updateCustomMount(5, "/x", "/y")
+        assertEquals(before, vm.state.value.customMounts)
+    }
+
+    @Test
+    fun `removeCustomMount deletes entry at index`() = runBlocking {
+        val vm = createViewModel()
+        vm.addCustomMount()
+        vm.addCustomMount()
+        vm.addCustomMount()
+        vm.addCustomMount()
+
+        vm.removeCustomMount(1)
+        assertEquals(3, vm.state.value.customMounts.size)
+    }
+
+    @Test
+    fun `removeCustomMount ignores out-of-bounds index`() = runBlocking {
+        val vm = createViewModel()
+        vm.addCustomMount()
+        val before = vm.state.value.customMounts.toList()
+        vm.removeCustomMount(5)
+        assertEquals(before, vm.state.value.customMounts)
+    }
+
+    @Test
     fun `updateServerURL updates state immediately`() = runBlocking {
         val vm = createViewModel()
         vm.updateServerURL("http://example.com")

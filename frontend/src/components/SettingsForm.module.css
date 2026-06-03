@@ -49,6 +49,10 @@
   letter-spacing: 0.03em;
 }
 
+.settingsSectionTitle + .settingsDescription {
+  margin-bottom: 0.75rem;
+}
+
 .settingsInput {
   width: 100%;
   padding: 0.5rem;

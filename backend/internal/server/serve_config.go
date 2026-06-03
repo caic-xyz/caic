@@ -117,6 +117,13 @@ func (s *Server) getPreferences(ctx context.Context, _ *api.EmptyReq) (*v1.Prefe
 			ContainerPath: m.ContainerPath,
 		}
 	}
+	customMounts := make([]v1.MountMappingResp, len(prefs.Settings.CustomMounts))
+	for i, m := range prefs.Settings.CustomMounts {
+		customMounts[i] = v1.MountMappingResp{
+			HostPath:      m.HostPath,
+			ContainerPath: m.ContainerPath,
+		}
+	}
 	return &v1.PreferencesResp{
 		Repositories: repos,
 		Harness:      prefs.Harness,
@@ -129,6 +136,7 @@ func (s *Server) getPreferences(ctx context.Context, _ *api.EmptyReq) (*v1.Prefe
 			UseDefaultCaches:   prefs.Settings.UseDefaultCaches,
 			WellKnownCaches:    prefs.Settings.WellKnownCaches,
 			CacheMappings:      cacheMappings,
+			CustomMounts:       customMounts,
 		},
 	}, nil
 }
@@ -150,6 +158,15 @@ func (s *Server) updatePreferences(ctx context.Context, req *v1.UpdatePreference
 				}
 			}
 		}
+		if req.Settings.CustomMounts != nil {
+			p.Settings.CustomMounts = make([]preferences.MountMapping, len(req.Settings.CustomMounts))
+			for i, m := range req.Settings.CustomMounts {
+				p.Settings.CustomMounts[i] = preferences.MountMapping{
+					HostPath:      m.HostPath,
+					ContainerPath: m.ContainerPath,
+				}
+			}
+		}
 	}); err != nil {
 		return nil, api.InternalError("save preferences: " + err.Error())
 	}
@@ -157,7 +174,7 @@ func (s *Server) updatePreferences(ctx context.Context, req *v1.UpdatePreference
 	return s.getPreferences(ctx, nil)
 }
 
-func cacheMountsFromSettings(settings preferences.Settings) []caicruntime.CacheMount {
+func cacheMountsFromSettings(settings *preferences.Settings) []caicruntime.CacheMount {
 	var caches []caicruntime.CacheMount
 	if settings.UseDefaultCaches {
 		names := slices.Sorted(maps.Keys(md.WellKnownCaches))
@@ -180,6 +197,13 @@ func cacheMountsFromSettings(settings preferences.Settings) []caicruntime.CacheM
 	for _, m := range settings.CacheMappings {
 		caches = append(caches, caicruntime.CacheMount{
 			Name:      "custom:" + m.ContainerPath,
+			HostPath:  m.HostPath,
+			MountPath: m.ContainerPath,
+		})
+	}
+	for _, m := range settings.CustomMounts {
+		caches = append(caches, caicruntime.CacheMount{
+			Name:      "custom-mount:" + m.ContainerPath,
 			HostPath:  m.HostPath,
 			MountPath: m.ContainerPath,
 		})

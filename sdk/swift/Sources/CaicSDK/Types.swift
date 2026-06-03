@@ -366,6 +366,12 @@ public struct CacheMappingResp: Codable {
     public let containerPath: String
 }
 
+/// MountMappingResp represents a general host-to-runtime directory mount.
+public struct MountMappingResp: Codable {
+    public let hostPath: String
+    public let containerPath: String
+}
+
 /// UserSettings holds user-configurable behavioral settings.
 public struct UserSettings: Codable {
     /// AutoFixOnCIFailure automatically starts a new task to fix CI when a
@@ -382,13 +388,15 @@ public struct UserSettings: Codable {
     /// Zero means use the system default (max(2, NumCPU-2)).
     public let maxCPUs: Int?
     /// UseDefaultCaches controls whether default harness caches are mounted.
-    /// When false, only custom CacheMappings are used.
+    /// When false, only custom cache mappings and custom mounts are used.
     public let useDefaultCaches: Bool
     /// WellKnownCaches maps cache name to enabled state. nil means use default
     /// (all true), true means explicitly enabled, false means explicitly disabled.
     public let wellKnownCaches: [String: Bool]?
     /// CacheMappings are custom host-to-runtime directory mappings.
     public let cacheMappings: [CacheMappingResp]?
+    /// CustomMounts are custom non-cache host-to-runtime directory mappings.
+    public let customMounts: [MountMappingResp]?
 }
 
 /// PreferencesResp is the response for GET /api/v1/server/preferences.

@@ -678,6 +678,7 @@ func TestHandleCreateTask(t *testing.T) {
 			p.Settings.UseDefaultCaches = true
 			p.Settings.WellKnownCaches = map[string]bool{"go-mod": false, "npm": true}
 			p.Settings.CacheMappings = []preferences.CacheMapping{{HostPath: "/host/custom", ContainerPath: "/home/user/.custom"}}
+			p.Settings.CustomMounts = []preferences.MountMapping{{HostPath: "/host/work", ContainerPath: "/workspace/external"}}
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -698,11 +699,13 @@ func TestHandleCreateTask(t *testing.T) {
 		if entry == nil {
 			t.Fatal("task not found")
 		}
-		var gotCustom, gotNPM, gotGoMod bool
+		var gotCustom, gotCustomMount, gotNPM, gotGoMod bool
 		for _, cm := range entry.Task().CacheMounts {
 			switch cm.Name {
 			case "custom:/home/user/.custom":
 				gotCustom = cm.HostPath == "/host/custom" && cm.MountPath == "/home/user/.custom"
+			case "custom-mount:/workspace/external":
+				gotCustomMount = cm.HostPath == "/host/work" && cm.MountPath == "/workspace/external"
 			case "npm":
 				gotNPM = true
 			case "go-mod":
@@ -711,6 +714,9 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 		if !gotCustom {
 			t.Errorf("custom cache mapping missing from %+v", entry.Task().CacheMounts)
+		}
+		if !gotCustomMount {
+			t.Errorf("custom mount missing from %+v", entry.Task().CacheMounts)
 		}
 		if !gotNPM {
 			t.Errorf("enabled npm cache missing from %+v", entry.Task().CacheMounts)

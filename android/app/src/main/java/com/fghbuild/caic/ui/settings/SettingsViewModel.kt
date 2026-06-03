@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import android.util.Log
 import com.caic.sdk.v1.ApiClient
 import com.caic.sdk.v1.CacheMappingResp
+import com.caic.sdk.v1.MountMappingResp
 import com.caic.sdk.v1.UpdatePreferencesReq
 import com.caic.sdk.v1.UserSettings
 import com.caic.sdk.v1.VersionResp
@@ -37,6 +38,7 @@ data class SettingsScreenState(
     val wellKnownCaches: Map<String, Boolean> = emptyMap(),
     val wellKnownCachesList: List<WellKnownCache> = emptyList(),
     val cacheMappings: List<CacheMappingResp> = emptyList(),
+    val customMounts: List<MountMappingResp> = emptyList(),
     val serverVersion: String = "",
     val versionInfo: VersionResp? = null,
     val checkingUpdate: Boolean = false,
@@ -175,6 +177,7 @@ class SettingsViewModel @Inject constructor(
                         wellKnownCaches = prefs.settings.wellKnownCaches ?: emptyMap(),
                         wellKnownCachesList = caches?.wellKnown ?: emptyList(),
                         cacheMappings = prefs.settings.cacheMappings ?: emptyList(),
+                        customMounts = prefs.settings.customMounts ?: emptyList(),
                         serverVersion = config?.version ?: "",
                     )
                 }
@@ -253,7 +256,38 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun saveCacheMappings() {
-        saveSettings { it.copy(cacheMappings = _state.value.cacheMappings.ifEmpty { null }) }
+        val mappings = _state.value.cacheMappings
+        if (mappings.any { it.hostPath.isBlank() || it.containerPath.isBlank() }) return
+        saveSettings { it.copy(cacheMappings = mappings.ifEmpty { null }) }
+    }
+
+    fun addCustomMount() {
+        val current = _state.value.customMounts.toMutableList()
+        current.add(MountMappingResp("", ""))
+        _state.update { it.copy(customMounts = current) }
+    }
+
+    fun updateCustomMount(index: Int, hostPath: String, containerPath: String) {
+        val current = _state.value.customMounts.toMutableList()
+        if (index in current.indices) {
+            current[index] = MountMappingResp(hostPath, containerPath)
+            _state.update { it.copy(customMounts = current) }
+        }
+    }
+
+    fun removeCustomMount(index: Int) {
+        val current = _state.value.customMounts.toMutableList()
+        if (index in current.indices) {
+            current.removeAt(index)
+            _state.update { it.copy(customMounts = current) }
+            saveSettings { it.copy(customMounts = current.ifEmpty { null }) }
+        }
+    }
+
+    fun saveCustomMounts() {
+        val mounts = _state.value.customMounts
+        if (mounts.any { it.hostPath.isBlank() || it.containerPath.isBlank() }) return
+        saveSettings { it.copy(customMounts = mounts.ifEmpty { null }) }
     }
 
     fun checkForUpdates() {
@@ -311,6 +345,7 @@ class SettingsViewModel @Inject constructor(
                     useDefaultCaches = snapshot.useDefaultCaches,
                     wellKnownCaches = snapshot.wellKnownCaches.ifEmpty { null },
                     cacheMappings = snapshot.cacheMappings.ifEmpty { null },
+                    customMounts = snapshot.customMounts.ifEmpty { null },
                 )
                 client.updatePreferences(UpdatePreferencesReq(settings = update(current)))
             } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
@@ -324,6 +359,7 @@ class SettingsViewModel @Inject constructor(
                         useDefaultCaches = snapshot.useDefaultCaches,
                         wellKnownCaches = snapshot.wellKnownCaches,
                         cacheMappings = snapshot.cacheMappings,
+                        customMounts = snapshot.customMounts,
                     )
                 }
             }

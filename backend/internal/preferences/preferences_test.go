@@ -103,6 +103,48 @@ func TestValidate(t *testing.T) {
 			t.Fatal("expected error for empty containerPath")
 		}
 	})
+	t.Run("valid_custom_mounts", func(t *testing.T) {
+		t.Parallel()
+		p := &Preferences{
+			Version: 1,
+			Settings: Settings{
+				CustomMounts: []MountMapping{
+					{HostPath: "/host/a", ContainerPath: "/container/a"},
+				},
+			},
+		}
+		if err := p.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("custom_mount_empty_host", func(t *testing.T) {
+		t.Parallel()
+		p := &Preferences{
+			Version: 1,
+			Settings: Settings{
+				CustomMounts: []MountMapping{
+					{HostPath: "", ContainerPath: "/container/a"},
+				},
+			},
+		}
+		if err := p.Validate(); err == nil {
+			t.Fatal("expected error for empty hostPath")
+		}
+	})
+	t.Run("custom_mount_empty_container", func(t *testing.T) {
+		t.Parallel()
+		p := &Preferences{
+			Version: 1,
+			Settings: Settings{
+				CustomMounts: []MountMapping{
+					{HostPath: "/host/a", ContainerPath: ""},
+				},
+			},
+		}
+		if err := p.Validate(); err == nil {
+			t.Fatal("expected error for empty containerPath")
+		}
+	})
 }
 
 func TestUsersFileValidate(t *testing.T) {
@@ -175,6 +217,9 @@ func TestUsers(t *testing.T) {
 				CacheMappings: []CacheMapping{
 					{HostPath: "/host/cache", ContainerPath: "/container/cache"},
 				},
+				CustomMounts: []MountMapping{
+					{HostPath: "/host/data", ContainerPath: "/container/data"},
+				},
 			},
 		}
 		if err := s.Update("alice", func(p *Preferences) { *p = want }); err != nil {
@@ -220,6 +265,12 @@ func TestUsers(t *testing.T) {
 		}
 		if got.Settings.CacheMappings[0].HostPath != "/host/cache" {
 			t.Errorf("cacheMappings[0].hostPath = %q, want %q", got.Settings.CacheMappings[0].HostPath, "/host/cache")
+		}
+		if len(got.Settings.CustomMounts) != 1 {
+			t.Fatalf("customMounts len = %d, want 1", len(got.Settings.CustomMounts))
+		}
+		if got.Settings.CustomMounts[0].HostPath != "/host/data" {
+			t.Errorf("customMounts[0].hostPath = %q, want %q", got.Settings.CustomMounts[0].HostPath, "/host/data")
 		}
 	})
 
@@ -303,6 +354,7 @@ func TestUsers(t *testing.T) {
 			p.TouchRepo("github/foo", &RepoPrefs{Harness: "claude", Model: "opus"})
 			p.Settings.WellKnownCaches = map[string]bool{"go-mod": true}
 			p.Settings.CacheMappings = []CacheMapping{{HostPath: "/a", ContainerPath: "/b"}}
+			p.Settings.CustomMounts = []MountMapping{{HostPath: "/c", ContainerPath: "/d"}}
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -332,6 +384,11 @@ func TestUsers(t *testing.T) {
 		snapshot.Settings.CacheMappings[0].HostPath = "mutated"
 		if got := s.Get("u"); got.Settings.CacheMappings[0].HostPath == "mutated" {
 			t.Error("cacheMappings slice aliased")
+		}
+
+		snapshot.Settings.CustomMounts[0].HostPath = "mutated"
+		if got := s.Get("u"); got.Settings.CustomMounts[0].HostPath == "mutated" {
+			t.Error("customMounts slice aliased")
 		}
 	})
 }

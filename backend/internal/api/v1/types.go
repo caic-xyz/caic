@@ -489,6 +489,12 @@ type CacheMappingResp struct {
 	ContainerPath string `json:"containerPath"`
 }
 
+// MountMappingResp represents a general host-to-runtime directory mount.
+type MountMappingResp struct {
+	HostPath      string `json:"hostPath"`
+	ContainerPath string `json:"containerPath"`
+}
+
 // UserSettings holds user-configurable behavioral settings.
 type UserSettings struct {
 	// AutoFixOnCIFailure automatically starts a new task to fix CI when a
@@ -505,13 +511,15 @@ type UserSettings struct {
 	// Zero means use the system default (max(2, NumCPU-2)).
 	MaxCPUs int `json:"maxCPUs,omitempty"`
 	// UseDefaultCaches controls whether default harness caches are mounted.
-	// When false, only custom CacheMappings are used.
+	// When false, only custom cache mappings and custom mounts are used.
 	UseDefaultCaches bool `json:"useDefaultCaches"`
 	// WellKnownCaches maps cache name to enabled state. nil means use default
 	// (all true), true means explicitly enabled, false means explicitly disabled.
 	WellKnownCaches map[string]bool `json:"wellKnownCaches,omitempty"`
 	// CacheMappings are custom host-to-runtime directory mappings.
 	CacheMappings []CacheMappingResp `json:"cacheMappings,omitempty"`
+	// CustomMounts are custom non-cache host-to-runtime directory mappings.
+	CustomMounts []MountMappingResp `json:"customMounts,omitempty"`
 }
 
 // PreferencesResp is the response for GET /api/v1/server/preferences.

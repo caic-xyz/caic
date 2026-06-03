@@ -2,7 +2,7 @@
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 import { createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
-import type { Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
+import type { Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, MountMappingResp, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
 import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
@@ -53,6 +53,7 @@ function createAppStore() {
   const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
   const [wellKnownCachesList, setWellKnownCachesList] = createSignal<WellKnownCachesResp["wellKnown"]>([]);
   const [cacheMappings, setCacheMappings] = createSignal<CacheMappingResp[]>([]);
+  const [customMounts, setCustomMounts] = createSignal<MountMappingResp[]>([]);
   const [versionInfo, setVersionInfo] = createSignal<VersionResp | null>(null);
   const [versionCheckError, setVersionCheckError] = createSignal("");
   const [updateStatus, setUpdateStatus] = createSignal<string>("");
@@ -69,6 +70,7 @@ function createAppStore() {
       useDefaultCaches: useDefaultCaches(),
       wellKnownCaches: wellKnownCaches() as Record<string, boolean>,
       cacheMappings: cacheMappings(),
+      customMounts: customMounts(),
       ...overrides,
     },
   });
@@ -263,6 +265,7 @@ function createAppStore() {
           setUseDefaultCaches(prefs.settings.useDefaultCaches ?? true);
           setWellKnownCaches(prefs.settings.wellKnownCaches ?? {});
           setCacheMappings(prefs.settings.cacheMappings ?? []);
+          setCustomMounts(prefs.settings.customMounts ?? []);
         }
         if (usageData) setUsage(usageData);
       } finally {
@@ -719,7 +722,8 @@ function createAppStore() {
     forkAvailableRecent, forkAvailableRest, submitFork,
     // settings
     selectedImage, setSelectedImage, maxCPUs, setMaxCPUs, wellKnownCaches, setWellKnownCaches,
-    wellKnownCachesList, cacheMappings, setCacheMappings, autoFixCI, setAutoFixCI, autoFixPR, setAutoFixPR,
+    wellKnownCachesList, cacheMappings, setCacheMappings, customMounts, setCustomMounts,
+    autoFixCI, setAutoFixCI, autoFixPR, setAutoFixPR,
     versionInfo, versionCheckError, checkingUpdate, updating, updateStatus, saveSettings, triggerServerUpdate,
     // usage + connection
     usage, connected,

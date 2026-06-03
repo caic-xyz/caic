@@ -23,6 +23,14 @@ type CacheMapping struct {
 	ContainerPath string `json:"containerPath"`
 }
 
+// MountMapping maps a host directory to a container path as a general mount.
+type MountMapping struct {
+	// HostPath is the path on the host filesystem to mount.
+	HostPath string `json:"hostPath"`
+	// ContainerPath is the path inside the container where hostPath will be mounted.
+	ContainerPath string `json:"containerPath"`
+}
+
 // Preferences holds persistent user preferences.
 type Preferences struct {
 	// Version is the preferences file format version.
@@ -59,6 +67,14 @@ func (p *Preferences) Validate() error {
 		}
 		if m.ContainerPath == "" {
 			return fmt.Errorf("cacheMappings[%d]: empty containerPath", i)
+		}
+	}
+	for i, m := range p.Settings.CustomMounts {
+		if m.HostPath == "" {
+			return fmt.Errorf("customMounts[%d]: empty hostPath", i)
+		}
+		if m.ContainerPath == "" {
+			return fmt.Errorf("customMounts[%d]: empty containerPath", i)
 		}
 	}
 	return nil
@@ -127,6 +143,7 @@ func (p *Preferences) clone() Preferences {
 	c.Repositories = slices.Clone(p.Repositories)
 	c.Models = maps.Clone(p.Models)
 	c.Settings.CacheMappings = slices.Clone(p.Settings.CacheMappings)
+	c.Settings.CustomMounts = slices.Clone(p.Settings.CustomMounts)
 	c.Settings.WellKnownCaches = maps.Clone(p.Settings.WellKnownCaches)
 	return c
 }
@@ -146,13 +163,15 @@ type Settings struct {
 	// Passed as --cpus to docker/podman. Zero means use [md.DefaultMaxCPUs].
 	MaxCPUs int `json:"maxCPUs,omitempty"`
 	// UseDefaultCaches controls whether default harness caches are mounted.
-	// When false, only custom CacheMappings are used.
+	// When false, only custom cache mappings and custom mounts are used.
 	UseDefaultCaches bool `json:"useDefaultCaches"`
 	// WellKnownCaches maps cache name to enabled state. nil means use default
 	// (all true), true means explicitly enabled, false means explicitly disabled.
 	WellKnownCaches map[string]bool `json:"wellKnownCaches,omitempty"`
 	// CacheMappings are custom directory mappings to mount into the container.
 	CacheMappings []CacheMapping `json:"cacheMappings,omitempty"`
+	// CustomMounts are custom non-cache directory mappings to mount into the container.
+	CustomMounts []MountMapping `json:"customMounts,omitempty"`
 }
 
 // RepoPrefs stores per-repository user preferences. Fields override the
