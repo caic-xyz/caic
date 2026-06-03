@@ -1,4 +1,4 @@
-// Implements bot.Client for the Server, providing task creation and status tracking for the bot.
+// Bot client adapter for task creation and forge comment resolution.
 
 package server
 
@@ -15,14 +15,40 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
+type tokenResolver func(ctx context.Context, enabled bool) string
+
+type botClientDeps struct {
+	repoReg   *repoRegistry
+	taskMgr   *tasks.Manager
+	forge     *ForgeManager
+	tokenFunc tokenResolver
+}
+
+// BotClient adapts task and forge stores to bot.Client.
+type BotClient struct {
+	repoReg   *repoRegistry
+	taskMgr   *tasks.Manager
+	forge     *ForgeManager
+	tokenFunc tokenResolver
+}
+
+func newBotClient(d botClientDeps) *BotClient {
+	return &BotClient{
+		repoReg:   d.repoReg,
+		taskMgr:   d.taskMgr,
+		forge:     d.forge,
+		tokenFunc: d.tokenFunc,
+	}
+}
+
 // ResolveRepo maps a forge full name ("owner/repo") to repo info.
 // Returns nil if the forge name does not match any managed repo.
-func (s *Server) ResolveRepo(forgeFullName string) *bot.RepoInfo {
+func (c *BotClient) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 	owner, repo, ok := strings.Cut(forgeFullName, "/")
 	if !ok {
 		return nil
 	}
-	info, found := s.repoReg.byForge(owner, repo)
+	info, found := c.repoReg.byForge(owner, repo)
 	if !found {
 		return nil
 	}
@@ -34,10 +60,9 @@ func (s *Server) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 	}
 }
 
-// CreateTask implements bot.Client. It creates and starts a task using the
-// same code path as the HTTP API handler, returning the new task ID.
-func (s *Server) CreateTask(ctx context.Context, req bot.TaskRequest) (string, error) {
-	runner, ok := s.GetRunner(req.Repo)
+// CreateTask creates and starts a task for bot-driven automation.
+func (c *BotClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string, error) {
+	runner, ok := c.taskMgr.Runner(req.Repo)
 	if !ok {
 		return "", fmt.Errorf("runner not found for repo %s", req.Repo)
 	}
@@ -58,7 +83,7 @@ func (s *Server) CreateTask(ctx context.Context, req bot.TaskRequest) (string, e
 	// commenter. Only relevant for issue-triggered tasks.
 	var ownerResolved, repoResolved string
 	if req.IssueNumber > 0 {
-		if info, ok := s.repoReg.infoFor(req.Repo); ok && info.ForgeOwner != "" {
+		if info, ok := c.repoReg.infoFor(req.Repo); ok && info.ForgeOwner != "" {
 			ownerResolved = info.ForgeOwner
 			repoResolved = info.ForgeRepo
 		}
@@ -67,9 +92,12 @@ func (s *Server) CreateTask(ctx context.Context, req bot.TaskRequest) (string, e
 	// Bot tasks always get the GitHub token if available (needed for pushing CI
 	// fixes). Resolve it in the request ctx so multi-user deployments use the
 	// caller's OAuth token rather than the server PAT.
-	ghToken := s.resolveGitHubContainerToken(ctx, true)
+	ghToken := ""
+	if c.tokenFunc != nil {
+		ghToken = c.tokenFunc(ctx, true)
+	}
 
-	id, err := s.taskMgr.Create(ctx, tasks.CreateParams{
+	id, err := c.taskMgr.Create(ctx, tasks.CreateParams{
 		OwnerID:             req.OwnerID,
 		Prompt:              agent.Prompt{Text: req.Prompt},
 		Repos:               []tasks.CreateRepo{{Name: req.Repo}},
@@ -87,14 +115,14 @@ func (s *Server) CreateTask(ctx context.Context, req bot.TaskRequest) (string, e
 	return id, nil
 }
 
-// WatchTaskCompletion implements bot.Client.
-func (s *Server) WatchTaskCompletion(ctx context.Context, taskID string) (state, result string, err error) {
-	return s.taskMgr.WatchTaskCompletion(ctx, taskID)
+// WatchTaskCompletion blocks until a task reaches a terminal state.
+func (c *BotClient) WatchTaskCompletion(ctx context.Context, taskID string) (state, result string, err error) {
+	return c.taskMgr.WatchTaskCompletion(ctx, taskID)
 }
 
-// ListPendingBotTasks implements bot.Client.
-func (s *Server) ListPendingBotTasks() []bot.PendingBotTask {
-	pending := s.taskMgr.ListPendingBotTasks()
+// ListPendingBotTasks returns non-terminal bot-created tasks.
+func (c *BotClient) ListPendingBotTasks() []bot.PendingBotTask {
+	pending := c.taskMgr.ListPendingBotTasks()
 	out := make([]bot.PendingBotTask, len(pending))
 	for i, p := range pending {
 		out[i] = bot.PendingBotTask{
@@ -107,16 +135,16 @@ func (s *Server) ListPendingBotTasks() []bot.PendingBotTask {
 	return out
 }
 
-// ResolveCommenter implements bot.Client.
-func (s *Server) ResolveCommenter(ctx context.Context, owner string) bot.Commenter {
-	installID := s.forge.installationID(owner)
-	if installID == 0 && s.forge.githubApp != nil {
+// ResolveCommenter returns a forge commenter for an owner.
+func (c *BotClient) ResolveCommenter(ctx context.Context, owner string) bot.Commenter {
+	installID := c.forge.installationID(owner)
+	if installID == 0 && c.forge.githubApp != nil {
 		// Try to discover the installation ID via the API.
-		id, err := s.forge.githubApp.RepoInstallation(ctx, owner, "")
+		id, err := c.forge.githubApp.RepoInstallation(ctx, owner, "")
 		if err == nil && id > 0 {
-			s.forge.storeInstallationID(owner, id)
+			c.forge.storeInstallationID(owner, id)
 			installID = id
 		}
 	}
-	return s.forge.commenterFor(installID)
+	return c.forge.commenterFor(installID)
 }

@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/maruel/genai"
@@ -71,6 +70,8 @@ type Server struct {
 	provider       genai.Provider // nil if LLM not configured
 	Bot            *bot.Bot
 	ciService      *ci.Service // handles forge event-driven task automation
+	botClient      *BotClient
+	ciAdapter      *CIAdapter
 
 	// Profiling.
 	pprof              bool
@@ -107,8 +108,7 @@ type Server struct {
 	// User preferences — all users in a single file.
 	prefs *preferences.Store
 
-	mu       sync.Mutex
-	warnings []serverWarning // ring buffer of recent CI warnings for SSE clients; guarded by mu
+	warnings *warningStore
 }
 
 // SetFakeCI injects a fake CI simulation hook for smoke and e2e tests.
@@ -164,6 +164,8 @@ func (s *Server) maybeFakeCI(t *task.Task) {
 // buildHandler assembles the full HTTP handler. Extracted from Serve so that
 // route registration can be tested without a listener.
 func (s *Server) buildHandler() (http.Handler, error) {
+	s.initConcernAdapters()
+
 	// Auth routes (exempt from RequireUser).
 	authMux := http.NewServeMux()
 	authMux.HandleFunc("GET /api/v1/server/config", handle(s.getConfig))

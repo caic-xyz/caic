@@ -96,6 +96,7 @@ func newTestServer(t *testing.T) *Server {
 		forge:          newForgeManager("", "", nil),
 	}
 	s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+	s.initConcernAdapters()
 	return s
 }
 
@@ -162,6 +163,7 @@ func newRunnerConstructionTestServer(t *testing.T, root string) *Server {
 		Backends:   s.agentBackends,
 		HarnessEnv: harnessEnv,
 	})
+	s.initConcernAdapters()
 	return s
 }
 

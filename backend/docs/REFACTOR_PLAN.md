@@ -39,9 +39,10 @@ Goal: keep `Server` as the HTTP router and lifecycle owner, not the concrete
 implementation of every backend-facing role.
 
 Current state: `Server` still owns auth, repo registry access, task HTTP
-handlers, webhook handlers, bot client methods, CI service adapter methods,
-usage streaming, voice handlers, maintenance helpers, forge management, and
-runtime operation helpers.
+handlers, webhook handlers, usage streaming, voice handlers, maintenance
+helpers, forge management, and runtime operation helpers. CI and bot now use
+dedicated adapters with explicit dependencies instead of using `Server` as the
+adapter/client type.
 
 Implementation order:
 
@@ -49,23 +50,17 @@ Implementation order:
    webhooks, bot actions, usage streams, voice, and runtime process operations.
 2. Introduce small concern structs with explicit dependencies. The first pass
    can keep them in `internal/server` to avoid premature package splits.
-3. Move CI service adapter methods out of `Server` into a dedicated adapter that
-   takes only the repo registry, task manager, forge manager, preferences, and
-   warning sink it needs.
-4. Move bot client methods out of `Server` into a dedicated `bot.Client`
-   implementation with explicit task, repo, forge, and warning dependencies.
-5. Keep shared stores and managers as shared objects, but pass them directly to
+3. Keep shared stores and managers as shared objects, but pass them directly to
    each concern instead of reaching through the whole `Server`.
-6. Keep route registration centralized until split registration reduces
+4. Keep route registration centralized until split registration reduces
    concrete complexity. Do not hide route definitions behind package-level side
    effects.
-7. Update tests to target extracted concern structs where that gives smaller
+5. Update tests to target extracted concern structs where that gives smaller
    fixtures, while keeping route-level tests for public HTTP behavior.
 
 Acceptance criteria:
 
 - `Server` owns the HTTP server, middleware, router setup, and lifecycle state.
-- CI and bot packages no longer need `Server` as their adapter/client type.
 - Handler tests can construct the concern under test without unrelated auth,
   voice, runtime, and forge fixtures.
 
@@ -117,4 +112,9 @@ earlier.
 
 ## Suggested Order
 
-1. Split `server.Server` by concern.
+1. Split route handlers into concern structs, starting with tasks and
+   repos/config/preferences.
+2. Move webhook handlers behind a concern struct that depends on bot, CI, repo,
+   forge, and task managers explicitly.
+3. Move runtime process operations out of the task handler concern once task
+   lifecycle routes are isolated.

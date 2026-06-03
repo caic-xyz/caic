@@ -272,8 +272,8 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 	}
 	s.WarnRepoBasenameCollisions()
 
-	s.SetBot(bot.New(ctx, s))
-	s.SetCIService(ci.NewService(cache, provider, s))
+	s.SetBot(bot.New(ctx, s.BotClient()))
+	s.SetCIService(ci.NewService(cache, provider, s.CIAdapter()))
 	s.RegisterNoRepoRunner(ctx)
 	taskMgr.Start()
 

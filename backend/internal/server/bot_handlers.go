@@ -126,7 +126,7 @@ func (s *Server) botFixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateT
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
 	}
-	taskIDStr, err := s.CreateTask(ctx, bot.TaskRequest{Repo: info.RelPath, Prompt: summary, OwnerID: ownerID})
+	taskIDStr, err := s.BotClient().CreateTask(ctx, bot.TaskRequest{Repo: info.RelPath, Prompt: summary, OwnerID: ownerID})
 	if err != nil {
 		return nil, fmt.Errorf("create task: %w", err)
 	}

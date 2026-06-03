@@ -66,9 +66,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 		})
 		ch := s.taskMgr.Changed()
 		repos := s.repoList()
-		s.mu.Lock()
-		newWarnings := s.warningsSince(lastWarnTime)
-		s.mu.Unlock()
+		newWarnings := s.warnings.Since(lastWarnTime)
 
 		reposJSON, err := json.Marshal(repos)
 		if err != nil {

@@ -468,6 +468,8 @@ func (s *Server) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.ForkT
 }
 
 func (s *Server) syncTask(ctx context.Context, entry *tasks.Entry, req *v1.SyncReq) (*v1.SyncResp, error) {
+	s.initConcernAdapters()
+
 	t := entry.Task()
 	target := tasks.SyncTargetOrigin
 	if req.Target == v1.SyncTargetDefault {
@@ -498,7 +500,7 @@ func (s *Server) syncTask(ctx context.Context, entry *tasks.Entry, req *v1.SyncR
 	if resp.Status != "blocked" {
 		if info, ok := s.repoInfoFor(syncPrimaryName); ok {
 			if f := s.forge.forgeForInfo(ctx, &info); f != nil {
-				ciInfo := s.RepoInfoFor(info.RelPath)
+				ciInfo := s.ciAdapter.RepoInfoFor(info.RelPath)
 				prNumber, err := s.ciService.StartPRFlow(ctx, entry, f, &ciInfo, syncPrimaryBranch, s.taskMgr.EffectiveBaseBranch(t))
 				if err != nil {
 					slog.Warn("sync: create PR", "repo", info.ForgeRepo, "branch", syncPrimaryBranch, "err", err)

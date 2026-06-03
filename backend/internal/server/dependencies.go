@@ -85,6 +85,7 @@ func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocrit
 		repoReg:                newRepoRegistry(nil),
 		ipgeoChecker:           d.IPGeoChecker,
 	}
+	s.initConcernAdapters()
 	return s, nil
 }
 
@@ -96,4 +97,49 @@ func (s *Server) SetBot(b *bot.Bot) {
 // SetCIService sets the CI service used by server handlers and adoption hooks.
 func (s *Server) SetCIService(c *ci.Service) {
 	s.ciService = c
+}
+
+// BotClient returns the bot-facing task client.
+func (s *Server) BotClient() bot.Client {
+	s.initConcernAdapters()
+	return s.botClient
+}
+
+// CIAdapter returns the CI service backend adapter.
+func (s *Server) CIAdapter() ci.Backend {
+	s.initConcernAdapters()
+	return s.ciAdapter
+}
+
+func (s *Server) initConcernAdapters() {
+	if s.repoReg == nil {
+		s.repoReg = newRepoRegistry(nil)
+	}
+	if s.botClient == nil {
+		s.botClient = newBotClient(botClientDeps{
+			repoReg:   s.repoReg,
+			taskMgr:   s.taskMgr,
+			forge:     s.forge,
+			tokenFunc: s.resolveGitHubContainerToken,
+		})
+	}
+	if s.warnings == nil {
+		s.warnings = newWarningStore(s.taskMgr)
+	}
+	if s.ciAdapter == nil {
+		var notifyChange func()
+		if s.taskMgr != nil {
+			notifyChange = s.taskMgr.NotifyTaskChange
+		}
+		s.ciAdapter = newCIAdapter(ciAdapterDeps{
+			repoReg:      s.repoReg,
+			taskMgr:      s.taskMgr,
+			forge:        s.forge,
+			prefs:        s.prefs,
+			warnings:     s.warnings,
+			taskCreator:  s.botClient,
+			infoForRepo:  s.repoInfoFor,
+			notifyChange: notifyChange,
+		})
+	}
 }
