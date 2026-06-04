@@ -8,6 +8,8 @@ type SettingsOverrides = Partial<UpdatePreferencesReq["settings"]>;
 interface SettingsFormProps {
   selectedImage: Accessor<string>;
   setSelectedImage: Setter<string>;
+  containerPlatform: Accessor<string>;
+  setContainerPlatform: Setter<string>;
   maxCPUs: Accessor<number>;
   setMaxCPUs: Setter<number>;
   wellKnownCaches: Accessor<Record<string, boolean | undefined>>;
@@ -60,6 +62,22 @@ export default function SettingsForm(props: SettingsFormProps) {
                 void props.saveSettings();
               }}
             />
+          </label>
+          <label class={styles.settingsLabel}>
+            CPU architecture
+            <select
+              class={styles.settingsInput}
+              value={props.containerPlatform()}
+              onChange={(e) => {
+                const val = e.currentTarget.value;
+                props.setContainerPlatform(val);
+                void props.saveSettings({ containerPlatform: val });
+              }}
+            >
+              <option value="">Native</option>
+              <option value="linux/amd64">linux/amd64</option>
+              <option value="linux/arm64">linux/arm64</option>
+            </select>
           </label>
           <label class={styles.settingsLabel}>
             CPU cores

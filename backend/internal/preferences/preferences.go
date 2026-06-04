@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -29,6 +30,12 @@ type MountMapping struct {
 	HostPath string `json:"hostPath"`
 	// ContainerPath is the path inside the container where hostPath will be mounted.
 	ContainerPath string `json:"containerPath"`
+}
+
+// ContainerImage identifies a base image and optional platform pair.
+type ContainerImage struct {
+	BaseImage string
+	Platform  string
 }
 
 // Preferences holds persistent user preferences.
@@ -76,6 +83,9 @@ func (p *Preferences) Validate() error {
 		if m.ContainerPath == "" {
 			return fmt.Errorf("customMounts[%d]: empty containerPath", i)
 		}
+	}
+	if p.Settings.ContainerPlatform != "" && !validContainerPlatform(p.Settings.ContainerPlatform) {
+		return fmt.Errorf("unsupported containerPlatform %q", p.Settings.ContainerPlatform)
 	}
 	return nil
 }
@@ -159,6 +169,9 @@ type Settings struct {
 	// BaseImage overrides the default container base image. Empty means use
 	// the default.
 	BaseImage string `json:"baseImage,omitempty"`
+	// ContainerPlatform selects the container CPU architecture. Empty means use
+	// the host's native platform.
+	ContainerPlatform string `json:"containerPlatform,omitempty"`
 	// MaxCPUs limits the number of CPU cores the container may use.
 	// Passed as --cpus to docker/podman. Zero means use [md.DefaultMaxCPUs].
 	MaxCPUs int `json:"maxCPUs,omitempty"`
@@ -172,6 +185,15 @@ type Settings struct {
 	CacheMappings []CacheMapping `json:"cacheMappings,omitempty"`
 	// CustomMounts are custom non-cache directory mappings to mount into the container.
 	CustomMounts []MountMapping `json:"customMounts,omitempty"`
+}
+
+func validContainerPlatform(platform string) bool {
+	switch platform {
+	case "linux/amd64", "linux/arm64":
+		return true
+	default:
+		return false
+	}
 }
 
 // RepoPrefs stores per-repository user preferences. Fields override the
@@ -285,16 +307,23 @@ type usersFile struct {
 
 // BaseImages returns all distinct non-empty base images configured across all
 // users' global preferences.
-func (s *Store) BaseImages() []string {
+func (s *Store) BaseImages() []ContainerImage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	seen := make(map[string]struct{})
 	for k := range s.cached {
-		if s.cached[k].Settings.BaseImage != "" {
-			seen[s.cached[k].Settings.BaseImage] = struct{}{}
+		settings := s.cached[k].Settings
+		if settings.BaseImage != "" {
+			seen[settings.BaseImage+"\x00"+settings.ContainerPlatform] = struct{}{}
 		}
 	}
-	return slices.Sorted(maps.Keys(seen))
+	keys := slices.Sorted(maps.Keys(seen))
+	images := make([]ContainerImage, len(keys))
+	for i, key := range keys {
+		baseImage, platform, _ := strings.Cut(key, "\x00")
+		images[i] = ContainerImage{BaseImage: baseImage, Platform: platform}
+	}
+	return images
 }
 
 // Validate checks that the on-disk format is well-formed.

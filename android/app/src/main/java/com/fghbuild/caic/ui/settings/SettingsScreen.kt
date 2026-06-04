@@ -184,6 +184,22 @@ fun SettingsScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            Text("CPU architecture", style = MaterialTheme.typography.titleSmall)
+            PlatformOption(
+                label = "Native",
+                selected = screenState.containerPlatform.isBlank(),
+                onClick = { viewModel.updateContainerPlatform("") },
+            )
+            PlatformOption(
+                label = "linux/amd64",
+                selected = screenState.containerPlatform == "linux/amd64",
+                onClick = { viewModel.updateContainerPlatform("linux/amd64") },
+            )
+            PlatformOption(
+                label = "linux/arm64",
+                selected = screenState.containerPlatform == "linux/arm64",
+                onClick = { viewModel.updateContainerPlatform("linux/arm64") },
+            )
             OutlinedTextField(
                 value = screenState.maxCPUs,
                 onValueChange = { viewModel.updateMaxCPUs(it) },
@@ -364,6 +380,21 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.padding(bottom = 16.dp))
         }
     }
+}
+
+@Composable
+private fun PlatformOption(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    ListItem(
+        headlineContent = { Text(label) },
+        leadingContent = {
+            RadioButton(selected = selected, onClick = onClick)
+        },
+        modifier = Modifier.clickable(onClick = onClick),
+    )
 }
 
 @Composable

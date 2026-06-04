@@ -25,7 +25,7 @@ func warmupImages(ctx context.Context, client *md.Client, prefs *preferences.Sto
 	ticker := time.NewTicker(warmupInterval)
 	defer ticker.Stop()
 	for {
-		images := []string{md.DefaultBaseImage + ":latest"}
+		images := []preferences.ContainerImage{{BaseImage: md.DefaultBaseImage + ":latest"}}
 		for _, img := range prefs.BaseImages() {
 			if !slices.Contains(images, img) {
 				images = append(images, img)
@@ -34,13 +34,14 @@ func warmupImages(ctx context.Context, client *md.Client, prefs *preferences.Sto
 		for _, img := range images {
 			w := &mdruntime.SlogWriter{Phase: "warmup"}
 			built, err := client.Warmup(ctx, w, w, &md.WarmupOpts{
-				BaseImage: img,
+				BaseImage: img.BaseImage,
+				Platform:  img.Platform,
 				Quiet:     true,
 			})
 			if err != nil {
-				slog.Warn("warmup", "image", img, "err", err)
+				slog.Warn("warmup", "image", img.BaseImage, "platform", img.Platform, "err", err)
 			} else if built {
-				slog.Info("warmup", "image", img, "built", true)
+				slog.Info("warmup", "image", img.BaseImage, "platform", img.Platform, "built", true)
 			}
 		}
 		select {

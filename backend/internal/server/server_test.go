@@ -634,6 +634,7 @@ func TestHandleCreateTask(t *testing.T) {
 		// Set docker image in user preferences.
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.BaseImage = "ghcr.io/my/image:v1"
+			p.Settings.ContainerPlatform = "linux/amd64"
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -661,6 +662,9 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 		if entry.Task().BaseImage != "ghcr.io/my/image:v1" {
 			t.Errorf("Image = %q, want %q", entry.Task().BaseImage, "ghcr.io/my/image:v1")
+		}
+		if entry.Task().ContainerPlatform != "linux/amd64" {
+			t.Errorf("ContainerPlatform = %q, want linux/amd64", entry.Task().ContainerPlatform)
 		}
 	})
 

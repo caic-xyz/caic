@@ -186,6 +186,9 @@ func (r *UpdatePreferencesReq) Validate() error {
 			return api.BadRequest("unknown cache: " + name)
 		}
 	}
+	if err := validateContainerPlatform(r.Settings.ContainerPlatform); err != nil {
+		return err
+	}
 	if err := validateCacheMappings(r.Settings.CacheMappings); err != nil {
 		return err
 	}
@@ -193,6 +196,15 @@ func (r *UpdatePreferencesReq) Validate() error {
 		return err
 	}
 	return nil
+}
+
+func validateContainerPlatform(platform string) error {
+	switch platform {
+	case "", "linux/amd64", "linux/arm64":
+		return nil
+	default:
+		return api.BadRequest(fmt.Sprintf("unsupported platform %q; use linux/amd64 or linux/arm64", platform))
+	}
 }
 
 // Validate checks that the signal is SIGTERM or SIGKILL.

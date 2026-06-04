@@ -422,6 +422,7 @@ func (b *Backend) mdStartOpts(opts *runtime.StartOptions) *md.StartOpts {
 	}
 	return &md.StartOpts{
 		BaseImage:  image,
+		Platform:   opts.ContainerPlatform,
 		Caches:     toMDCacheMounts(opts.Caches),
 		Labels:     metadataLabels(opts.Metadata),
 		AgentPaths: []md.AgentPaths{harnessPaths},

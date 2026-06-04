@@ -247,6 +247,14 @@ func TestValidate(t *testing.T) {
 			}
 			assertBadRequest(t, r.Validate(), "unknown cache: bogus")
 		})
+		t.Run("InvalidPlatform", func(t *testing.T) {
+			t.Parallel()
+			var r UpdatePreferencesReq
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"useDefaultCaches":true,"containerPlatform":"linux/386"}}`), &r); err != nil {
+				t.Fatalf("Unmarshal: %v", err)
+			}
+			assertBadRequest(t, r.Validate(), `unsupported platform "linux/386"; use linux/amd64 or linux/arm64`)
+		})
 		t.Run("InvalidCacheMapping", func(t *testing.T) {
 			t.Parallel()
 			var r UpdatePreferencesReq

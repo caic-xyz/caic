@@ -210,6 +210,8 @@ Only effective when the GitHub App is configured. | yes |
 request when it is opened or reopened via a forge webhook. | yes |
 | `baseImage` | `string` | BaseImage overrides the default runtime base image. Empty means use
 the default. |  |
+| `containerPlatform` | `string` | ContainerPlatform selects the runtime CPU architecture. Empty means use
+the host's native platform. Valid values are linux/amd64 and linux/arm64. |  |
 | `maxCPUs` | `int` | MaxCPUs limits the number of CPU cores the runtime instance may use.
 Zero means use the system default (max(2, NumCPU-2)). |  |
 | `useDefaultCaches` | `boolean` | UseDefaultCaches controls whether default harness caches are mounted.

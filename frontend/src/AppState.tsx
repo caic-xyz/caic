@@ -49,6 +49,7 @@ function createAppStore() {
   const [autoFixCI, setAutoFixCI] = createSignal(false);
   const [autoFixPR, setAutoFixPR] = createSignal(false);
   const [maxCPUs, setMaxCPUs] = createSignal(0);
+  const [containerPlatform, setContainerPlatform] = createSignal("");
   const [useDefaultCaches, setUseDefaultCaches] = createSignal(true);
   const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
   const [wellKnownCachesList, setWellKnownCachesList] = createSignal<WellKnownCachesResp["wellKnown"]>([]);
@@ -66,6 +67,7 @@ function createAppStore() {
       autoFixOnCIFailure: autoFixCI(),
       autoFixOnPROpen: autoFixPR(),
       baseImage: selectedImage() || "",
+      containerPlatform: containerPlatform() || "",
       maxCPUs: maxCPUs(),
       useDefaultCaches: useDefaultCaches(),
       wellKnownCaches: wellKnownCaches() as Record<string, boolean>,
@@ -262,6 +264,7 @@ function createAppStore() {
           setAutoFixCI(prefs.settings.autoFixOnCIFailure);
           setAutoFixPR(prefs.settings.autoFixOnPROpen);
           setMaxCPUs(prefs.settings.maxCPUs ?? 0);
+          setContainerPlatform(prefs.settings.containerPlatform ?? "");
           setUseDefaultCaches(prefs.settings.useDefaultCaches ?? true);
           setWellKnownCaches(prefs.settings.wellKnownCaches ?? {});
           setCacheMappings(prefs.settings.cacheMappings ?? []);
@@ -721,7 +724,8 @@ function createAppStore() {
     forkSudo, setForkSudo, forkGitHubToken, setForkGitHubToken,
     forkAvailableRecent, forkAvailableRest, submitFork,
     // settings
-    selectedImage, setSelectedImage, maxCPUs, setMaxCPUs, wellKnownCaches, setWellKnownCaches,
+    selectedImage, setSelectedImage, containerPlatform, setContainerPlatform,
+    maxCPUs, setMaxCPUs, wellKnownCaches, setWellKnownCaches,
     wellKnownCachesList, cacheMappings, setCacheMappings, customMounts, setCustomMounts,
     autoFixCI, setAutoFixCI, autoFixPR, setAutoFixPR,
     versionInfo, versionCheckError, checkingUpdate, updating, updateStatus, saveSettings, triggerServerUpdate,

@@ -170,22 +170,23 @@ func RepoMountFromMeta(m agent.MetaRepo, gitRoot string) RepoMount {
 // Task represents a single unit of work.
 type Task struct {
 	// Immutable fields — set at creation, never modified.
-	ID            ksid.ID
-	InitialPrompt agent.Prompt         // Initial prompt text and optional images.
-	Harness       agent.Harness        // Agent harness ("claude", "gemini", etc.).
-	Model         string               // User-requested model; passed to agent CLI.
-	Effort        string               // Thinking effort; passed to agent CLI. Empty = default.
-	BaseImage     string               // Custom runtime base image; empty means use the default.
-	MaxCPUs       int                  // Max CPU cores for the instance; 0 means use the default.
-	CacheMounts   []runtime.CacheMount // Build cache mounts baked into the runtime image.
-	Tailscale     bool                 // Enable Tailscale networking in the instance.
-	USB           bool                 // Enable USB passthrough in the instance.
-	Display       bool                 // Enable Xvfb display in the instance.
-	Sudo          bool                 // Enable root access (password-based sudo) in the instance.
-	StartedAt     time.Time            // When the task was created.
-	OwnerID       string               // Internal user ID of the creator; empty in no-auth mode.
-	ForgeIssue    int                  // Originating issue number for bot comment callbacks; 0 = none.
-	Provider      genai.Provider
+	ID                ksid.ID
+	InitialPrompt     agent.Prompt         // Initial prompt text and optional images.
+	Harness           agent.Harness        // Agent harness ("claude", "gemini", etc.).
+	Model             string               // User-requested model; passed to agent CLI.
+	Effort            string               // Thinking effort; passed to agent CLI. Empty = default.
+	BaseImage         string               // Custom runtime base image; empty means use the default.
+	ContainerPlatform string               // Container CPU architecture; empty means use the host default.
+	MaxCPUs           int                  // Max CPU cores for the instance; 0 means use the default.
+	CacheMounts       []runtime.CacheMount // Build cache mounts baked into the runtime image.
+	Tailscale         bool                 // Enable Tailscale networking in the instance.
+	USB               bool                 // Enable USB passthrough in the instance.
+	Display           bool                 // Enable Xvfb display in the instance.
+	Sudo              bool                 // Enable root access (password-based sudo) in the instance.
+	StartedAt         time.Time            // When the task was created.
+	OwnerID           string               // Internal user ID of the creator; empty in no-auth mode.
+	ForgeIssue        int                  // Originating issue number for bot comment callbacks; 0 = none.
+	Provider          genai.Provider
 
 	// Mutable task metadata. These fields are populated at construction, setup, or
 	// adoption. After a task is published in the Manager registry, access them

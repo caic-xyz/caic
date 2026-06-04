@@ -12,20 +12,21 @@ import (
 // The caller (Server) reads docker image, GitHub token access, and per-repo
 // prefs from the user's preferences store before calling Create.
 type CreateParams struct {
-	OwnerID     string // empty in no-auth mode
-	Prompt      agent.Prompt
-	Repos       []CreateRepo // first entry is primary; empty = no-repo
-	Harness     agent.Harness
-	Model       string // "" = harness default
-	Effort      string // thinking effort; empty = default
-	Tailscale   bool
-	USB         bool
-	Display     bool
-	Sudo        bool
-	GitHubToken bool                 // inject GitHub token into the runtime environment
-	BaseImage   string               // resolved base image
-	MaxCPUs     int                  // max CPU cores; 0 means use the default
-	CacheMounts []runtime.CacheMount // resolved build cache mounts
+	OwnerID           string // empty in no-auth mode
+	Prompt            agent.Prompt
+	Repos             []CreateRepo // first entry is primary; empty = no-repo
+	Harness           agent.Harness
+	Model             string // "" = harness default
+	Effort            string // thinking effort; empty = default
+	Tailscale         bool
+	USB               bool
+	Display           bool
+	Sudo              bool
+	GitHubToken       bool                 // inject GitHub token into the runtime environment
+	BaseImage         string               // resolved base image
+	ContainerPlatform string               // resolved container platform; empty means use host default
+	MaxCPUs           int                  // max CPU cores; 0 means use the default
+	CacheMounts       []runtime.CacheMount // resolved build cache mounts
 
 	// ResolvedGitHubToken is the actual token string, resolved by the caller in
 	// the request ctx; passed to runner.Start. The caller resolves it (preferring

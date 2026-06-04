@@ -528,6 +528,9 @@ type UserSettings struct {
 	// BaseImage overrides the default runtime base image. Empty means use
 	// the default.
 	BaseImage string `json:"baseImage,omitempty"`
+	// ContainerPlatform selects the runtime CPU architecture. Empty means use
+	// the host's native platform. Valid values are linux/amd64 and linux/arm64.
+	ContainerPlatform string `json:"containerPlatform,omitempty"`
 	// MaxCPUs limits the number of CPU cores the runtime instance may use.
 	// Zero means use the system default (max(2, NumCPU-2)).
 	MaxCPUs int `json:"maxCPUs,omitempty"`

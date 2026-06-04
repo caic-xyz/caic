@@ -28,10 +28,17 @@ func TestValidate(t *testing.T) {
 			},
 			Harness:  "claude",
 			Models:   map[string]string{"claude": "opus", "codex": "o3"},
-			Settings: Settings{BaseImage: "custom:latest"},
+			Settings: Settings{BaseImage: "custom:latest", ContainerPlatform: "linux/amd64"},
 		}
 		if err := p.Validate(); err != nil {
 			t.Fatal(err)
+		}
+	})
+	t.Run("invalid_container_platform", func(t *testing.T) {
+		t.Parallel()
+		p := &Preferences{Version: currentVersion, Settings: Settings{ContainerPlatform: "linux/386"}}
+		if err := p.Validate(); err == nil {
+			t.Fatal("expected error for invalid container platform")
 		}
 	})
 	t.Run("wrong_version", func(t *testing.T) {
@@ -211,9 +218,10 @@ func TestUsers(t *testing.T) {
 			Harness: "claude",
 			Models:  map[string]string{"claude": "opus"},
 			Settings: Settings{
-				BaseImage:        "custom:latest",
-				UseDefaultCaches: true,
-				WellKnownCaches:  map[string]bool{"go-mod": true, "npm": false},
+				BaseImage:         "custom:latest",
+				ContainerPlatform: "linux/amd64",
+				UseDefaultCaches:  true,
+				WellKnownCaches:   map[string]bool{"go-mod": true, "npm": false},
 				CacheMappings: []CacheMapping{
 					{HostPath: "/host/cache", ContainerPath: "/container/cache"},
 				},
@@ -236,6 +244,9 @@ func TestUsers(t *testing.T) {
 		}
 		if got.Settings.BaseImage != want.Settings.BaseImage {
 			t.Errorf("baseImage = %q, want %q", got.Settings.BaseImage, want.Settings.BaseImage)
+		}
+		if got.Settings.ContainerPlatform != want.Settings.ContainerPlatform {
+			t.Errorf("containerPlatform = %q, want %q", got.Settings.ContainerPlatform, want.Settings.ContainerPlatform)
 		}
 		if len(got.Repositories) != len(want.Repositories) {
 			t.Fatalf("repos len = %d, want %d", len(got.Repositories), len(want.Repositories))

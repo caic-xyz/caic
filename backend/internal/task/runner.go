@@ -1378,18 +1378,24 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
 	}
-	r.log.Info("starting instance", "br", primaryBranch, "img", t.BaseImage, "hns", t.Harness, "ts", t.Tailscale, "usb", t.USB, "dpy", t.Display, "sudo", t.Sudo, "gitHubToken", t.GitHubTokenEnabled())
+	r.log.Info("starting instance", "br", primaryBranch, "img", t.BaseImage, "platform", t.ContainerPlatform, "hns", t.Harness, "ts", t.Tailscale, "usb", t.USB, "dpy", t.Display, "sudo", t.Sudo, "gitHubToken", t.GitHubTokenEnabled())
 	tContainer := time.Now()
 	startCtx, startCancel := context.WithTimeout(detached, r.RuntimeStartTimeout)
 	defer startCancel()
 
 	opts := &runtime.StartOptions{
-		Metadata:  metadata,
-		BaseImage: t.BaseImage, Harness: t.Harness, Tailscale: t.Tailscale, USB: t.USB, Display: t.Display, Sudo: t.Sudo,
-		Caches:      t.CacheMounts,
-		MaxCPUs:     t.MaxCPUs,
-		GitHubToken: resolvedGitHubToken,
-		LogWriter:   &provisioningWriter{ctx: ctx, t: t},
+		Metadata:          metadata,
+		BaseImage:         t.BaseImage,
+		ContainerPlatform: t.ContainerPlatform,
+		Harness:           t.Harness,
+		Tailscale:         t.Tailscale,
+		USB:               t.USB,
+		Display:           t.Display,
+		Sudo:              t.Sudo,
+		Caches:            t.CacheMounts,
+		MaxCPUs:           t.MaxCPUs,
+		GitHubToken:       resolvedGitHubToken,
+		LogWriter:         &provisioningWriter{ctx: ctx, t: t},
 	}
 
 	// Phase A: docker run + SSH config. Branch creation runs concurrently so

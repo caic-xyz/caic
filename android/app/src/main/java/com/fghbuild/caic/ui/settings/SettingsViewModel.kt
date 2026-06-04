@@ -33,6 +33,7 @@ data class SettingsScreenState(
     val autoFixCI: Boolean = false,
     val autoFixPR: Boolean = false,
     val baseImage: String = "",
+    val containerPlatform: String = "",
     val maxCPUs: String = "",
     val useDefaultCaches: Boolean = true,
     val wellKnownCaches: Map<String, Boolean> = emptyMap(),
@@ -172,6 +173,7 @@ class SettingsViewModel @Inject constructor(
                         autoFixCI = prefs.settings.autoFixOnCIFailure,
                         autoFixPR = prefs.settings.autoFixOnPROpen ?: false,
                         baseImage = prefs.settings.baseImage ?: "",
+                        containerPlatform = prefs.settings.containerPlatform ?: "",
                         maxCPUs = prefs.settings.maxCPUs?.toString() ?: "",
                         useDefaultCaches = prefs.settings.useDefaultCaches,
                         wellKnownCaches = prefs.settings.wellKnownCaches ?: emptyMap(),
@@ -205,6 +207,11 @@ class SettingsViewModel @Inject constructor(
 
     fun saveBaseImage() {
         saveSettings { it.copy(baseImage = _state.value.baseImage.ifBlank { null }) }
+    }
+
+    fun updateContainerPlatform(platform: String) {
+        _state.update { it.copy(containerPlatform = platform) }
+        saveSettings { it.copy(containerPlatform = platform.ifBlank { null }) }
     }
 
     fun updateMaxCPUs(cpus: String) {
@@ -341,6 +348,7 @@ class SettingsViewModel @Inject constructor(
                     autoFixOnCIFailure = snapshot.autoFixCI,
                     autoFixOnPROpen = snapshot.autoFixPR,
                     baseImage = snapshot.baseImage.ifBlank { null },
+                    containerPlatform = snapshot.containerPlatform.ifBlank { null },
                     maxCPUs = snapshot.maxCPUs.toIntOrNull(),
                     useDefaultCaches = snapshot.useDefaultCaches,
                     wellKnownCaches = snapshot.wellKnownCaches.ifEmpty { null },
@@ -356,6 +364,7 @@ class SettingsViewModel @Inject constructor(
                         autoFixCI = snapshot.autoFixCI,
                         autoFixPR = snapshot.autoFixPR,
                         baseImage = snapshot.baseImage,
+                        containerPlatform = snapshot.containerPlatform,
                         useDefaultCaches = snapshot.useDefaultCaches,
                         wellKnownCaches = snapshot.wellKnownCaches,
                         cacheMappings = snapshot.cacheMappings,

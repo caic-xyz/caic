@@ -373,10 +373,11 @@ func TestBackend(t *testing.T) {
 		b := newTestBackend(&fakeMDClient{})
 		b.HarnessEnv = map[string][]string{string(agent.Claude): {"FOO=bar"}}
 		opts := b.mdStartOpts(&runtime.StartOptions{
-			Metadata:    runtime.Metadata{runtime.MetadataTaskID: "task-1"},
-			Harness:     agent.Claude,
-			GitHubToken: "tok",
-			Caches:      []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", MountPath: "/home/user/.npm"}},
+			Metadata:          runtime.Metadata{runtime.MetadataTaskID: "task-1"},
+			ContainerPlatform: "linux/amd64",
+			Harness:           agent.Claude,
+			GitHubToken:       "tok",
+			Caches:            []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", MountPath: "/home/user/.npm"}},
 		})
 		if !slices.Contains(opts.ExtraEnv, "EDITOR=true") {
 			t.Errorf("ExtraEnv missing EDITOR=true: %v", opts.ExtraEnv)
@@ -392,6 +393,9 @@ func TestBackend(t *testing.T) {
 		}
 		if opts.BaseImage == "" {
 			t.Error("BaseImage should default when BaseImage empty")
+		}
+		if opts.Platform != "linux/amd64" {
+			t.Errorf("Platform = %q, want linux/amd64", opts.Platform)
 		}
 		if opts.MaxCPUs <= 0 {
 			t.Errorf("MaxCPUs = %d, want positive default", opts.MaxCPUs)

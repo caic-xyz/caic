@@ -660,6 +660,7 @@ data class UserSettings(
     @SerialName("autoFixOnCIFailure") val autoFixOnCIFailure: Boolean,
     @SerialName("autoFixOnPROpen") val autoFixOnPROpen: Boolean,
     val baseImage: String? = null,
+    val containerPlatform: String? = null,
     @SerialName("maxCPUs") val maxCPUs: Int? = null,
     val useDefaultCaches: Boolean,
     val wellKnownCaches: Map<String, Boolean>? = null,

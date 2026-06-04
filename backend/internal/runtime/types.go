@@ -105,14 +105,15 @@ type Event struct {
 
 // StartOptions holds optional flags for runtime instance startup.
 type StartOptions struct {
-	Metadata  Metadata
-	BaseImage string
-	Harness   agent.Harness
-	Caches    []CacheMount
-	Tailscale bool
-	USB       bool
-	Display   bool
-	Sudo      bool
+	Metadata          Metadata
+	BaseImage         string
+	ContainerPlatform string
+	Harness           agent.Harness
+	Caches            []CacheMount
+	Tailscale         bool
+	USB               bool
+	Display           bool
+	Sudo              bool
 	// MaxCPUs limits the number of CPU cores the runtime instance may use.
 	// Zero means use the runtime adapter default.
 	MaxCPUs int
