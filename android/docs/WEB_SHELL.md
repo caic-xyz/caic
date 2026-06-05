@@ -506,26 +506,6 @@ Execute in this order unless a phase explicitly proves the direction is wrong:
 Goal: prove that Go Mode can host the existing backend-served mobile frontend
 without editing the current caic Android app.
 
-Remaining PR 1 work:
-
-- Verify the existing `android/gomode` WebView shell against a real or fake
-  backend.
-- Add Android instrumented smoke coverage against the fake backend for shell
-  loading, task list display, task detail navigation, task creation, task input,
-  and Android back behavior.
-- Manually verify side-by-side installation of `com.fghbuild.gomode` and
-  `com.fghbuild.caic` on a device or emulator.
-- Prove the no-auth fake backend flow in WebView with `adb reverse`.
-
-Acceptance checks:
-
-- A configured no-auth fake backend loads the web UI inside Android under test.
-- Task list SSE updates, task detail navigation, task creation, and task input
-  work in the WebView under test.
-- Android back behavior is covered by an instrumented test.
-- Go Mode and the current caic Android app are manually verified installable on
-  the same device.
-
 ## Phase 3: Auth Spike and Decision
 
 Auth is the highest-risk migration point. Test it before building a broad bridge.
@@ -1174,14 +1154,7 @@ to the native host capabilities that remain independently useful.
 
 Keep each PR small enough to revert.
 
-PR 1: Go Mode app scaffold and WebView shell.
-
-- Add smoke coverage for fake-backend shell loading, task list display, task
-  detail navigation, task creation, task input, and Android back behavior.
-- Verify side-by-side installation of `com.fghbuild.gomode` and
-  `com.fghbuild.caic`.
-
-PR 2: Go Mode host mode and app-scoped monitoring.
+PR 1: Go Mode host mode and app-scoped monitoring.
 
 - Add Go Mode host-mode marker in the frontend.
 - Suppress browser voice and browser notifications in Go Mode host mode.
@@ -1192,7 +1165,7 @@ PR 2: Go Mode host mode and app-scoped monitoring.
   mounted.
 - Keep existing browser/PWA behavior unchanged outside Go Mode host mode.
 
-PR 3: service auth and shell compatibility.
+PR 2: service auth and shell compatibility.
 
 - Prove OAuth login, logout, fetch, and EventSource behavior inside WebView.
 - Add service compatibility metadata for shell version, bridge version range,
@@ -1203,7 +1176,7 @@ PR 3: service auth and shell compatibility.
 - Stop the shell migration if auth requires broad request interception or a
   custom API proxy layer.
 
-PR 4: narrow native-web bridge and routing.
+PR 3: narrow native-web bridge and routing.
 
 - Add the versioned capability bridge.
 - Support native settings, notification permission, current task context, and
@@ -1213,7 +1186,7 @@ PR 4: narrow native-web bridge and routing.
 - Replay pending navigation after WebView load.
 - Reject invalid bridge calls visibly.
 
-PR 5: screenshot and retained native integrations.
+PR 4: screenshot and retained native integrations.
 
 - Add native screenshot request/result bridge if the web attach path is worse on
   Android.
@@ -1222,7 +1195,7 @@ PR 5: screenshot and retained native integrations.
 - Define the Halo context shape sent from Android to the future gateway.
 - Keep Halo native.
 
-PR 6: voice gateway identity and configuration. Done.
+PR 5: voice gateway identity and configuration. Done.
 
 Implemented the standalone `backend/cmd/voice-gateway` binary, reusable
 `backend/internal/voicegateway` static config, canonical
@@ -1234,7 +1207,7 @@ Remaining follow-up: caic currently rejects unknown gateway config fields with
 the rest of `config.toml`; deliberate gateway config version-skew handling is
 still unresolved.
 
-PR 7: service signing keys.
+PR 6: service signing keys.
 
 - Add caic Ed25519 signing key generation and persistence in private runtime
   settings.
@@ -1243,7 +1216,7 @@ PR 7: service signing keys.
 - Add tests for key generation, public-key encoding, trusted-issuer validation,
   and token signature rejection.
 
-PR 8: scoped service auth and caic voice metadata.
+PR 7: scoped service auth and caic voice metadata.
 
 - Add service-signed token validation with audience, expiry, issuer, service
   kind, service instance ID, backend origin, subject, and capability checks.
@@ -1253,7 +1226,7 @@ PR 8: scoped service auth and caic voice metadata.
 - Add tests for token issuance, token rejection, logout/revocation behavior, and
   service API authorization.
 
-PR 9: Go Mode Android-local caic voice tools.
+PR 8: Go Mode Android-local caic voice tools.
 
 - Copy/adapt Gemini setup construction and function declarations into Go Mode.
 - Implement Android-local caic tool handlers for task create, answer, send message,
@@ -1263,7 +1236,7 @@ PR 9: Go Mode Android-local caic voice tools.
   client status/transcript channel.
 - Defer caic/mddb service tool manifests until the generic multi-service phase.
 
-PR 10: Android voice endpoint to voice gateway.
+PR 9: Android voice endpoint to voice gateway.
 
 - Point Go Mode WebRTC signaling at the configured voice gateway.
 - Require a valid service-signed gateway token before creating voice sessions.

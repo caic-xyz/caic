@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
+import com.fghbuild.gomode.R
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -46,92 +47,99 @@ fun WebShellScreen(
     onOpenSettings: () -> Unit,
 ) {
     val context = LocalContext.current
-    var webView by remember { mutableStateOf<WebView?>(null) }
     var pageFailed by remember(initialURL) { mutableStateOf<String?>(null) }
     var loading by remember(initialURL) { mutableStateOf(true) }
-    var canGoBack by remember { mutableStateOf(false) }
     var fileChooserCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     val fileChooserLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         fileChooserCallback?.onReceiveValue(uris.toTypedArray())
         fileChooserCallback = null
     }
+    val webView = remember(context) {
+        WebView(context).apply {
+            id = R.id.web_shell
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                    view.loadUrl(request.url.toString())
+                    return true
+                }
 
-    BackHandler(enabled = canGoBack) {
-        webView?.goBack()
-        canGoBack = webView?.canGoBack() == true
+                override fun onPageFinished(view: WebView, url: String?) {
+                    loading = false
+                }
+
+                override fun onReceivedError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    error: WebResourceError,
+                ) {
+                    if (request.isForMainFrame) {
+                        loading = false
+                        pageFailed = error.description?.toString() ?: "Page load failed."
+                    }
+                }
+            }
+            webChromeClient = object : WebChromeClient() {
+                override fun onPermissionRequest(request: PermissionRequest) {
+                    val grantedResources = request.resources.filter { resource ->
+                        when (resource) {
+                            PermissionRequest.RESOURCE_AUDIO_CAPTURE ->
+                                hasPermission(context, Manifest.permission.RECORD_AUDIO)
+                            PermissionRequest.RESOURCE_VIDEO_CAPTURE ->
+                                hasPermission(context, Manifest.permission.CAMERA)
+                            else -> true
+                        }
+                    }.toTypedArray()
+                    if (grantedResources.size != request.resources.size) {
+                        request.deny()
+                        return
+                    }
+                    request.grant(grantedResources)
+                }
+
+                override fun onShowFileChooser(
+                    webView: WebView,
+                    filePathCallback: ValueCallback<Array<Uri>>,
+                    fileChooserParams: FileChooserParams,
+                ): Boolean {
+                    fileChooserCallback?.onReceiveValue(emptyArray())
+                    fileChooserCallback = filePathCallback
+                    val mimeTypes = fileChooserParams.acceptTypes.filter { it.isNotBlank() }
+                    fileChooserLauncher.launch(mimeTypes.firstOrNull() ?: "*/*")
+                    return true
+                }
+            }
+        }
     }
 
-    DisposableEffect(Unit) {
+    BackHandler {
+        webView.evaluateJavascript(
+            """
+            if (window.location.pathname !== "/") {
+              window.history.back();
+              true;
+            } else {
+              false;
+            }
+            """.trimIndent(),
+        ) { handled ->
+            if (handled != "true" && webView.canGoBack()) {
+                webView.goBack()
+            }
+        }
+    }
+
+    DisposableEffect(webView) {
         onDispose {
-            webView?.destroy()
-            webView = null
+            webView.destroy()
         }
     }
 
     Box(Modifier.fillMaxSize().testTag("gomode-web-shell")) {
         AndroidView(
-            factory = { factoryContext ->
-                WebView(factoryContext).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.mediaPlaybackRequiresUserGesture = false
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                            view.loadUrl(request.url.toString())
-                            return true
-                        }
-
-                        override fun onPageFinished(view: WebView, url: String?) {
-                            loading = false
-                            canGoBack = view.canGoBack()
-                        }
-
-                        override fun onReceivedError(
-                            view: WebView,
-                            request: WebResourceRequest,
-                            error: WebResourceError,
-                        ) {
-                            if (request.isForMainFrame) {
-                                loading = false
-                                canGoBack = view.canGoBack()
-                                pageFailed = error.description?.toString() ?: "Page load failed."
-                            }
-                        }
-                    }
-                    webChromeClient = object : WebChromeClient() {
-                        override fun onPermissionRequest(request: PermissionRequest) {
-                            val grantedResources = request.resources.filter { resource ->
-                                when (resource) {
-                                    PermissionRequest.RESOURCE_AUDIO_CAPTURE ->
-                                        hasPermission(context, Manifest.permission.RECORD_AUDIO)
-                                    PermissionRequest.RESOURCE_VIDEO_CAPTURE ->
-                                        hasPermission(context, Manifest.permission.CAMERA)
-                                    else -> true
-                                }
-                            }.toTypedArray()
-                            if (grantedResources.size != request.resources.size) {
-                                request.deny()
-                                return
-                            }
-                            request.grant(grantedResources)
-                        }
-
-                        override fun onShowFileChooser(
-                            webView: WebView,
-                            filePathCallback: ValueCallback<Array<Uri>>,
-                            fileChooserParams: FileChooserParams,
-                        ): Boolean {
-                            fileChooserCallback?.onReceiveValue(emptyArray())
-                            fileChooserCallback = filePathCallback
-                            val mimeTypes = fileChooserParams.acceptTypes.filter { it.isNotBlank() }
-                            fileChooserLauncher.launch(mimeTypes.firstOrNull() ?: "*/*")
-                            return true
-                        }
-                    }
-                    webView = this
-                    loadUrl(initialURL)
-                }
-            },
+            factory = { webView },
             update = { view ->
                 if (view.url != initialURL && view.originalUrl != initialURL) {
                     loading = true
@@ -152,7 +160,7 @@ fun WebShellScreen(
                 onRetry = {
                     pageFailed = null
                     loading = true
-                    webView?.reload()
+                    webView.reload()
                 },
                 onOpenSettings = onOpenSettings,
                 modifier = Modifier.align(Alignment.Center),
