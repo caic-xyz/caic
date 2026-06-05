@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -57,18 +56,24 @@ func mainImpl(args []string) error {
 	}
 
 	geminiAPIKey := cfg.GeminiAPIKey()
+	var bridge *voicertc.Bridge
 	if geminiAPIKey == "" {
-		return fmt.Errorf("%s is required", voicegateway.GeminiAPIKeyEnv)
+		slog.Warn("voice media disabled", "reason", voicegateway.GeminiAPIKeyEnv+" is not configured")
+	} else {
+		bridge, err = voicertc.NewBridge(ctx, geminiAPIKey, cfg.Server.WebRTCUDPPort)
+		if err != nil {
+			return err
+		}
+		defer bridge.CloseAll()
 	}
-	bridge, err := voicertc.NewBridge(ctx, geminiAPIKey, cfg.Server.WebRTCUDPPort)
+
+	handler, err := voicegateway.NewHandler(&cfg, bridge)
 	if err != nil {
 		return err
 	}
-	defer bridge.CloseAll()
-
 	srv := &http.Server{
 		Addr:              cfg.Server.HTTP,
-		Handler:           gatewayHandler(&cfg, bridge),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -87,19 +92,6 @@ func mainImpl(args []string) error {
 	return nil
 }
 
-func gatewayHandler(cfg *voicegateway.Config, bridge *voicertc.Bridge) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
-	mux.HandleFunc("GET /compat", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, cfg.Compatibility())
-	})
-	mux.HandleFunc("POST /offer", handleOffer(bridge))
-	mux.HandleFunc("POST /sessions/{sessionID}", handleClose(bridge))
-	return mux
-}
-
 func validateStandaloneConfig(cfg *voicegateway.Config) error {
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -108,62 +100,6 @@ func validateStandaloneConfig(cfg *voicegateway.Config) error {
 		return errors.New("server.webrtc_udp_port cannot be -1 for standalone voice-gateway")
 	}
 	return nil
-}
-
-type offerReq struct {
-	SDP string `json:"sdp"`
-}
-
-func handleOffer(bridge *voicertc.Bridge) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if bridge == nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice bridge unavailable"})
-			return
-		}
-		var req offerReq
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
-			return
-		}
-		if req.SDP == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "sdp is required"})
-			return
-		}
-		sdpAnswer, sessionID, err := bridge.HandleOffer(r.Context(), req.SDP)
-		if err != nil {
-			slog.Error("offer failed", "err", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "offer failed"})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{
-			"sdp":       sdpAnswer,
-			"sessionID": sessionID,
-		})
-	}
-}
-
-func handleClose(bridge *voicertc.Bridge) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if bridge == nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice bridge unavailable"})
-			return
-		}
-		sessionID := r.PathValue("sessionID")
-		if sessionID == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "sessionID is required"})
-			return
-		}
-		bridge.Close(sessionID)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "closed"})
-	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.Error("json encode", "err", err)
-	}
 }
 
 func initLogging(level string) {

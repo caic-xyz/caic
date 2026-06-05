@@ -3,6 +3,7 @@
 package voicegateway
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,44 +31,21 @@ func TestLoadConfig(t *testing.T) {
 
 	t.Run("parses static config", func(t *testing.T) {
 		t.Parallel()
+		publicKey := newTestPublicKey(t)
 		dir := t.TempDir()
 		path := filepath.Join(dir, "config.toml")
-		content := `
+		content := fmt.Sprintf(`
 model = "gemini-live-test"
 
 [server]
 http = ":4444"
 webrtc_udp_port = 4445
-external_url = "https://voice.example.com"
-
-[auth]
-session_secret_file = "session_secret"
-allowed_users = ["marc@example.com"]
-allow_tailscale = true
-allow_localhost = true
-
-[auth.google]
-client_id = "google-client"
-client_secret_env = "GOOGLE_SECRET"
-allowed_domains = ["example.com"]
-
-[auth.gitlab]
-client_id = "gitlab-client"
-client_secret_env = "GITLAB_SECRET"
-base_url = "https://gitlab.example.com"
-allowed_users = ["marc"]
 
 [[trusted_issuers]]
 service = "caic"
 issuer = "https://caic.example.com"
-jwks_url = "https://caic.example.com/api/v1/voice/jwks"
-
-[[services]]
-id = "home-caic"
-kind = "caic"
-base_url = "https://caic.example.com"
-capabilities = ["tasks"]
-`
+public_key = %q
+`, publicKey)
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -84,11 +62,8 @@ capabilities = ["tasks"]
 		if cfg.Model != "gemini-live-test" {
 			t.Errorf("Model = %q, want gemini-live-test", cfg.Model)
 		}
-		if cfg.Auth.GitLab.BaseURL != "https://gitlab.example.com" {
-			t.Errorf("Auth.GitLab.BaseURL = %q, want https://gitlab.example.com", cfg.Auth.GitLab.BaseURL)
-		}
-		if len(cfg.Services) != 1 || cfg.Services[0].Kind != "caic" {
-			t.Errorf("Services = %+v, want one caic service", cfg.Services)
+		if len(cfg.TrustedIssuers) != 1 || cfg.TrustedIssuers[0].Service != "caic" {
+			t.Errorf("TrustedIssuers = %+v, want one caic issuer", cfg.TrustedIssuers)
 		}
 	})
 
@@ -118,19 +93,19 @@ func TestConfigValidate(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects invalid service URL", func(t *testing.T) {
+	t.Run("rejects invalid issuer URL", func(t *testing.T) {
 		t.Parallel()
 		cfg := DefaultConfig()
-		cfg.Services = []ServiceConfig{{
-			ID:      "bad",
-			Kind:    "caic",
-			BaseURL: "not a url",
+		cfg.TrustedIssuers = []TrustedIssuerConfig{{
+			Service:   "caic",
+			Issuer:    "not a url",
+			PublicKey: newTestPublicKey(t),
 		}}
 		err := cfg.Validate()
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		if !strings.Contains(err.Error(), "services[0].base_url") {
+		if !strings.Contains(err.Error(), "trusted_issuers[0].issuer") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -165,16 +140,54 @@ func TestConfigValidate(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
+
+	t.Run("rejects invalid issuer public key", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		cfg.TrustedIssuers = []TrustedIssuerConfig{{
+			Service:   "caic",
+			Issuer:    "https://caic.example.com",
+			PublicKey: "bogus",
+		}}
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "trusted_issuers[0].public_key") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("allows trusted public key issuer", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		cfg.TrustedIssuers = []TrustedIssuerConfig{{
+			Service:   "caic",
+			Issuer:    "https://caic.example.com",
+			PublicKey: newTestPublicKey(t),
+		}}
+		if err := cfg.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func TestConfigCompatibility(t *testing.T) {
 	t.Parallel()
 	cfg := DefaultConfig()
-	cfg.Services = []ServiceConfig{
-		{ID: "home-caic", Kind: "caic", BaseURL: "https://caic.example.com"},
-		{ID: "work-caic", Kind: "caic", BaseURL: "https://work.example.com"},
-		{ID: "docs", Kind: "mddb", BaseURL: "https://mddb.example.com"},
-	}
+	cfg.TrustedIssuers = []TrustedIssuerConfig{{
+		Service:   "caic",
+		Issuer:    "https://caic.example.com",
+		PublicKey: newTestPublicKey(t),
+	}, {
+		Service:   "caic",
+		Issuer:    "https://work.example.com",
+		PublicKey: newTestPublicKey(t),
+	}, {
+		Service:   "mddb",
+		Issuer:    "https://mddb.example.com",
+		PublicKey: newTestPublicKey(t),
+	}}
 	got := cfg.Compatibility()
 	if got.Service != "voice-gateway" {
 		t.Errorf("Service = %q, want voice-gateway", got.Service)
@@ -184,5 +197,15 @@ func TestConfigCompatibility(t *testing.T) {
 	}
 	if len(got.ServiceKinds) != 2 || got.ServiceKinds[0] != "caic" || got.ServiceKinds[1] != "mddb" {
 		t.Errorf("ServiceKinds = %v, want [caic mddb]", got.ServiceKinds)
+	}
+	wantCaps := map[string]struct{}{
+		"voice.gatewayGeminiLive":   {},
+		"voice.serviceSignedTokens": {},
+	}
+	for _, cap := range got.Capabilities {
+		delete(wantCaps, cap)
+	}
+	if len(wantCaps) != 0 {
+		t.Errorf("missing capabilities: %v", wantCaps)
 	}
 }

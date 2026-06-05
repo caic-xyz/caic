@@ -18,3 +18,12 @@
 # >0 = enabled on that static port (open it in your firewall for UDP traffic).
 # GEMINI_API_KEY is required.
 #webrtc_udp_port = 0
+
+# ── Trusted Service Token Issuers ────────────────────────────────────────────
+
+# Import the public key exposed by a service backend. The service keeps the
+# private key and signs short-lived voice-gateway tokens for authenticated users.
+#[[trusted_issuers]]
+#service = "caic"
+#issuer = "https://caic.example.com"
+#public_key = "ed25519:..."

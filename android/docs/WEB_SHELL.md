@@ -91,10 +91,9 @@ screenshot, and Halo integrations.
   Gemini protocol messages over the WebRTC data channel while converting audio
   between RTP and Gemini PCM messages.
 - The checked-in Android and web voice clients still contain local function
-  declaration and tool-call dispatch code. That is a transitional split. The
-  target shell architecture should move Gemini setup, function declarations,
-  tool calls, and tool responses into a standalone voice gateway so Android is
-  not the tool executor and the caic backend is not the only possible service.
+  declaration and tool-call dispatch code. Go Mode keeps Gemini tool-call
+  handling local to Android: Android receives the model's tool calls and calls
+  the active service backend, such as caic, through HTTP APIs.
 
 ## Non-Goals
 
@@ -109,9 +108,9 @@ screenshot, and Halo integrations.
 - Do not bundle frontend assets into the APK. There is no offline use case; the
   app cannot do useful work without network access to a backend service.
 - Do not move Android voice endpoint behavior into browser JavaScript.
-- Do not make Android execute caic voice tools. Tool execution belongs on the
-  voice gateway side of the Gemini Live bridge, using service-owned tool binding
-  APIs.
+- Do not put service-specific tool execution in the voice gateway. Go Mode
+  Android owns local Gemini tool-call handling and calls the active service
+  backend over HTTP.
 - Do not reintroduce caic-auth-coupled sidecar behavior into the standalone
   voice gateway.
 - Do not weaken notification, microphone, audio routing, foreground service, or
@@ -143,19 +142,20 @@ com.fghbuild.gomode.MainActivity
 Voice gateway
   -> WebRTC signaling and media endpoint
       -> Gemini Live WebSocket
-      -> voice system instruction and service-specific tool declarations
-      -> service adapter dispatch
-          -> caic tool binding API
-          -> mddb tool binding API
-          -> future service binding APIs
+      -> Gemini Live transport messages
 
 Active service backend
   -> hosted web frontend
   -> normal product API
   -> auth/session owner
   -> preferred voice gateway metadata
-  -> scoped voice-gateway token issuer
-  -> service-specific tool binding API
+  -> service-signed voice-gateway token issuer
+  -> service-specific tool manifest, when that phase exists
+
+Go Mode Android
+  -> Gemini setup and tool declarations for the active service
+  -> local Gemini tool-call handling
+  -> HTTP calls to the active service backend
 ```
 
 Ownership rules:
@@ -169,11 +169,11 @@ Ownership rules:
 - The backend web UI should remain the primary owner of authentication unless a
   native capability has a proven need for bearer-token access.
 - Go Mode owns local voice endpoint lifecycle and platform permissions.
-- The voice gateway owns Gemini Live session orchestration, Gemini setup,
-  function declarations, tool-call dispatch, and tool responses.
-- Each service backend owns its web UI, auth, product API, and service-specific
-  tool binding implementation. The gateway calls these bindings through scoped
-  credentials issued by the service backend.
+- The voice gateway owns Gemini Live transport and gateway authentication.
+- Go Mode Android owns Gemini setup, tool declarations, tool-call dispatch, and
+  tool responses for the local voice endpoint.
+- Each service backend owns its web UI, auth, product API, and future
+  service-specific tool manifest.
 - A service backend may either host the voice-gateway protocol itself or
   advertise a preferred external gateway. Go Mode always talks to a
   voice-gateway protocol endpoint, not to caic-specific voice routes.
@@ -190,9 +190,9 @@ Ownership rules:
 The product boundary is decided: build a second Android app named Go Mode.
 
 Go Mode provides microphone/audio routing, foreground services, notifications,
-WebView hosting, protocol negotiation, and native bindings as shared
-infrastructure. The voice gateway provides the shared Gemini Live bridge and
-dispatches to service-specific tool binding APIs.
+WebView hosting, protocol negotiation, native bindings, and local Gemini
+tool-call execution as shared infrastructure. The voice gateway provides the
+shared Gemini Live transport bridge.
 
 caic, mddb, and future services are configured as service instances with their
 own backend URL, hosted web frontend, capabilities, and bridge schema.
@@ -241,11 +241,7 @@ Voice gateway settings:
 - HTTP signaling listen address.
 - UDP WebRTC port.
 - Gemini API key source and model defaults.
-- Gateway-owned authentication settings.
-- OAuth provider settings for Google, GitHub, and GitLab.
-- Tailscale/private-network access policy.
-- Trusted service issuers and token verification material.
-- Service adapter registry for caic, mddb, and future services.
+- Imported service public keys for trusted token issuers.
 - Gateway logging, diagnostics, and compatibility metadata.
 
 Rules:
@@ -291,71 +287,36 @@ standalone remains the source of truth for the gateway product boundary.
 Effective API mode meanings:
 
 - `external`: caic advertises a preferred gateway URL. Android connects to that
-  gateway directly and uses caic only for service metadata, web UI, scoped token
-  issuance, and caic tool bindings.
+  gateway directly and uses caic only for service metadata, web UI,
+  service-signed token issuance, and caic API calls.
 - `embedded`: caic registers the reusable voice-gateway protocol handlers
   in-process and advertises itself as the gateway URL. The implementation must
-  still use the same gateway config, auth, compatibility, and signaling protocol
-  as the standalone binary.
+  still use the same gateway config, compatibility, trusted-issuer, and
+  signaling protocol as the standalone binary.
 - `disabled`: caic advertises no voice gateway support.
 
 ## Voice Gateway Authentication
 
-The voice gateway has its own user authentication. It must not rely on caic,
-mddb, or any other service backend user store.
+The voice gateway has no user login, OAuth flow, local pairing mode, shared
+secret, or service-private config access. It accepts voice sessions only when an
+active service backend signs a short-lived gateway token.
 
-Gateway auth owns:
+Service-signed token rules:
 
-- user login session
-- gateway session secret
-- OAuth provider configuration
-- allowed-user policy
-- Tailscale/private-network access policy
-- scoped service-token exchange with selected service backends
-
-OAuth providers:
-
-- Google
-- GitHub
-- GitLab, including self-hosted GitLab through configurable `base_url`
-
-OAuth rules:
-
-- OAuth redirects terminate at the voice gateway, not at caic or mddb.
-- Provider identity is normalized into a gateway user identity.
-- Allowed-user checks happen in the gateway before issuing a gateway session.
-- A gateway session is not a caic or mddb session.
-- Gateway OAuth tokens are not forwarded to service backends.
-- Service access still uses backend-issued scoped service tokens.
-
-Tailscale/private-network mode:
-
-- The gateway must be usable when it is reachable only from a tailnet and is not
-  internet accessible.
-- OAuth can still work if the user's browser and Android device can reach the
-  gateway's callback URL over Tailscale, because OAuth redirects are browser
-  navigations. The provider does not need inbound network access to the gateway.
-- For this mode, configure `external_url` to a stable HTTPS tailnet URL when
-  possible.
-- If a stable HTTPS callback URL is unavailable, support a local pairing mode:
-  the gateway displays a short-lived one-time code or local approval URL, and
-  Android exchanges it for a gateway session over the tailnet.
-- Pairing mode is only for private-network deployments and must be explicitly
-  enabled.
-- Do not require Tailscale Funnel or public internet exposure for normal private
-  tailnet usage.
-
-Auth implementation notes:
-
-- Reuse generic OAuth/session helpers where practical, but do not reuse caic's
-  config directory, `users.json`, or `settings.json`.
-- Add Google OAuth support to the shared auth package or gateway auth package.
-- Keep GitHub and GitLab provider behavior compatible with caic where possible.
-- Treat provider device-code flows as optional future work; verify provider
-  support before depending on them.
-- Store only the minimum needed gateway identity/session data.
-- Gateway logout revokes the gateway session and invalidates active voice
-  sessions owned by that user.
+- Each service backend, such as caic or mddb, owns its user auth and session.
+- Each service backend generates an Ed25519 signing key pair in its private
+  runtime settings and exposes only the public key.
+- The user imports the service public key into
+  `~/.config/voice-gateway/config.toml`.
+- Android requests a short-lived gateway token from the active service backend
+  through the normal authenticated service session.
+- Android sends the token to the voice gateway when creating the WebRTC voice
+  session.
+- The gateway verifies the signature with the imported public key and checks
+  audience, expiry, service kind, service instance ID, backend origin, and
+  subject claims.
+- The gateway never receives service user credentials and never reads caic,
+  mddb, or other service-private files.
 
 ## Protocol And Versioning
 
@@ -386,8 +347,7 @@ bindings. The exact path can change, but the shape should be stable:
       },
       "capabilities": [
         "voice.gatewayGeminiLive",
-        "voice.gatewayTools",
-        "voice.scopedTokens"
+        "voice.serviceSignedTokens"
       ]
     },
     "capabilities": ["notifications.native", "screenshot.native", "halo.native"]
@@ -417,7 +377,8 @@ Versioning rules:
   declared range.
 - Feature checks use capabilities, not only version numbers.
 - Voice capabilities distinguish local Android audio endpoint support, service
-  backend binding support, and voice gateway Gemini/tool support.
+  backend signed-token/API support, voice gateway transport/token verification
+  support, and Android-local tool execution support.
 - Clients must use structured gateway metadata.
 - For a generic host, the same mechanism should support `service: "mddb"` or
   other service identifiers.
@@ -430,13 +391,8 @@ The voice gateway also needs its own compatibility endpoint:
   "gatewayProtocol": 1,
   "serviceKinds": ["caic", "mddb"],
   "capabilities": [
-    "auth.oauth.google",
-    "auth.oauth.github",
-    "auth.oauth.gitlab",
-    "auth.pairing.privateNetwork",
     "voice.gatewayGeminiLive",
-    "voice.gatewayTools",
-    "voice.scopedTokens"
+    "voice.serviceSignedTokens"
   ]
 }
 ```
@@ -458,26 +414,20 @@ current code and report any mismatch.
 - Hypothesis: authentication is primarily backend-owned through the web UI, and
   Android only needs native auth state for capabilities that cannot use the
   WebView session.
-- Hypothesis: voice gateway can own Gemini setup, function declarations,
-  tool-call dispatch, and tool responses, leaving Android as a local voice
-  endpoint and service backends as binding owners.
+- Hypothesis: Go Mode Android can own Gemini setup, function declarations,
+  tool-call dispatch, and tool responses while using the voice gateway only for
+  Gemini Live transport and service-signed token verification.
 - Hypothesis: caic can tolerate gateway config version skew, unknown fields, or
   unsupported gateway features without making unrelated caic startup fail.
-- Hypothesis: gateway-owned OAuth can support Google, GitHub, and GitLab without
-  coupling to caic's existing user store.
-- Hypothesis: Tailscale-only gateway deployments can support OAuth when the
-  callback URL is reachable by the user's browser and Android device over the
-  tailnet.
-- Hypothesis: local pairing mode is sufficient for private-network deployments
-  that do not have a stable HTTPS callback URL.
-- Hypothesis: caic and mddb can issue scoped voice-gateway tokens or expose a
-  token exchange so the gateway does not need direct access to service session
-  stores.
-- Hypothesis: service-specific voice tools can be represented as backend-owned
-  binding APIs that the gateway can call with scoped credentials.
+- Hypothesis: caic and mddb can generate service signing key pairs, expose their
+  public keys, and issue short-lived voice-gateway tokens from normal
+  authenticated service sessions.
+- Hypothesis: service-specific voice tools can initially be represented by
+  Android-local handlers calling service HTTP APIs, and later by service tool
+  manifests when caic and mddb expose them.
 - Hypothesis: Android voice `FunctionHandlers`, local voice function
-  declarations, and local Gemini setup can be removed or bypassed after backend
-  voice tools are available.
+  declarations, and local Gemini setup can be copied into Go Mode as the first
+  implementation, then generalized when service tool manifests exist.
 - Hypothesis: Android can still expose enough state to the gateway for voice
   context: active service instance, current task route, selected voice name,
   audio state, and Halo context.
@@ -531,95 +481,25 @@ hide pre-existing failures behind Go Mode work.
 
 Execute in this order unless a phase explicitly proves the direction is wrong:
 
-1. Confirm the hypotheses against current code and record mismatches in this
-   plan.
-2. Scaffold Go Mode as a new Android app with package/application ID
-   `com.fghbuild.gomode`.
-3. Copy only native bootstrap/settings code needed to configure service
-   instances.
-4. Prove backend-hosted WebView shell loading in Go Mode.
-5. Add Go Mode host mode to the frontend.
-6. Copy and adapt task monitoring and notifications without screen ViewModel
+1. Prove backend-hosted WebView shell loading in Go Mode.
+2. Add Go Mode host mode to the frontend.
+3. Copy and adapt task monitoring and notifications without screen ViewModel
    dependencies.
-7. Prove auth and service compatibility negotiation.
-8. Add the narrow native-web bridge.
-9. Establish the voice gateway boundary and compatibility endpoint.
-10. Prove scoped voice-gateway token exchange.
-11. Move voice tool execution into the voice gateway and service bindings.
-12. Wire Go Mode voice endpoint to the voice gateway.
-13. Add notification deep links, screenshot bridge, and Halo context.
+4. Prove auth and service compatibility negotiation.
+5. Add the narrow native-web bridge.
+6. Prove service-signed voice-gateway token exchange.
+7. Copy and adapt Android-local voice tool execution for Go Mode service APIs.
+8. Wire Go Mode voice endpoint to the voice gateway.
+9. Add notification deep links, screenshot bridge, and Halo context.
 
-## Phase 1: Voice Gateway Foundation
+## Remaining Voice Gateway Work
 
-This is required before Go Mode voice moves to a gateway. It is not required
-before the first WebView shell spike.
-
-The standalone voice gateway baseline is already in place:
-`backend/cmd/voice-gateway` owns the binary, `backend/internal/voicegateway`
-owns static config and compatibility metadata, and `internal/server/voicertc`
-remains the lower-level WebRTC transport package.
-
-Requirements:
-
-- Add caic `[voice-gateway]` config that derives `external`, `embedded`, and
-  `disabled` from the standalone gateway URL and `GEMINI_API_KEY`. External
-  config stores only the gateway URL and service-side policy; embedded config
-  embeds the same static gateway config shape as standalone.
-- Keep `Config.voiceGateway` metadata reporting mode, gateway URL, minimum
-  gateway protocol, auth requirements, token endpoint, and capabilities.
-- Add gateway-owned session storage and session middleware.
-- Add OAuth provider configuration for Google, GitHub, and GitLab.
-- Add Tailscale/private-network mode settings.
-- Add `GET /health` and `GET /compat` endpoints.
-- Keep `POST /offer` and `POST /sessions/{sessionID}` as transport endpoints,
-  but version their request and response payloads before Android depends on
-  them.
-- Add service identity to session creation: service kind, service instance ID,
-  service base URL, and scoped service token.
-- Add a caic service adapter interface, even if its first implementation only
-  calls existing caic APIs.
-- Design the mddb adapter interface but do not implement product behavior until
-  mddb exposes the required voice binding surface.
-
-Auth requirements:
-
-- Gateway has its own user auth and session cookies.
-- Gateway supports Google, GitHub, and GitLab OAuth.
-- Gateway supports self-hosted GitLab through configurable base URL.
-- Gateway supports Tailscale/private-network deployments where the gateway is
-  not internet accessible.
-- Gateway supports explicit local pairing mode for private-network deployments
-  without a stable OAuth callback URL.
-- Gateway accepts only scoped tokens issued by trusted service backends or a
-  configured development token.
-- Gateway does not validate service UI cookies directly.
-- Gateway does not open service private files.
-- Tokens include service kind, service instance ID, backend origin, user
-  identity or subject, allowed capabilities, expiry, and audience.
-- Token verification supports key rotation through JWKS or equivalent
-  issuer-published metadata.
-
-Acceptance checks:
-
-- The binary name and logs say `voice-gateway`.
-- Running the gateway does not require a caic config directory.
-- The gateway can start with no configured caic server and still report health
-  and compatibility.
-- Standalone gateway config and embedded caic gateway config validate
-  through the same rules.
-- caic can reference an external gateway without embedding gateway runtime
-  settings.
-- caic API clients can distinguish `embedded`, `external`, and `disabled` voice
-  gateway modes through structured metadata.
-- Gateway login works with configured Google, GitHub, and GitLab providers.
-- Gateway login works over a Tailscale-only URL when the client can reach that
-  URL.
-- Pairing mode can create a gateway session without public inbound access.
-- Invalid or expired scoped tokens are rejected.
-- A configured caic service can create a voice session without Android executing
-  tool calls locally.
-- Tests cover config loading, compatibility response, token validation, and
-  service selection.
+- Add caic service signing key generation, persistence in caic private runtime
+  settings, and public-key exposure.
+- Add caic service-signed voice-gateway token issuance tied to the authenticated
+  web session.
+- Keep Go Mode Android as the tool-call executor. Later, define service tool
+  manifests for caic and mddb before generalizing beyond copied caic handlers.
 
 ## Phase 2: Go Mode WebView Spike
 
@@ -628,6 +508,8 @@ without editing the current caic Android app.
 
 Remaining PR 1 work:
 
+- Verify the existing `android/gomode` WebView shell against a real or fake
+  backend.
 - Add Android instrumented smoke coverage against the fake backend for shell
   loading, task list display, task detail navigation, task creation, task input,
   and Android back behavior.
@@ -635,54 +517,21 @@ Remaining PR 1 work:
   `com.fghbuild.caic` on a device or emulator.
 - Prove the no-auth fake backend flow in WebView with `adb reverse`.
 
-Create a new Android app:
-
-- Package/application ID: `com.fghbuild.gomode`.
-- App label: `Go Mode`.
-- Keep caic's `com.fghbuild.caic` app installable in parallel.
-- Copy only native bootstrap/settings code needed for service instance
-  configuration.
-- Do not copy caic screen-mode Compose task UI.
-- Keep the copied native voice panel only if it is needed for the first spike.
-
-Create:
-
-```text
-<gomode-app>/src/main/java/com/fghbuild/gomode/ui/web/WebShellScreen.kt
-```
-
-Initial WebView behavior:
-
-- Read the active server URL from `SettingsRepository`.
-- If no server is configured, show native settings.
-- Load the configured backend URL, not bundled APK assets.
-- Enable JavaScript and DOM storage.
-- Use a `WebViewClient` that keeps app navigation inside the WebView.
-- Use a `WebChromeClient` for permission prompts and file chooser support where
-  needed by microphone, camera, or image attachment workflows.
-- Handle Android back by navigating WebView history first, then falling back to
-  normal activity back handling.
-- Show native recovery UI for unconfigured server, page load failure, and auth
-  redirect failure.
-- Provide a route for opening native settings even when the web page is broken.
-
 Acceptance checks:
 
-- A configured no-auth fake backend loads the web UI inside Android.
-- Task list SSE updates appear.
-- Task detail pages load.
-- Creating a task works.
-- Sending task input works.
-- Android back navigates predictably.
-- The user can still reach native settings if WebView cannot load.
-- Go Mode and the current caic Android app can both be installed on the same
-  device.
+- A configured no-auth fake backend loads the web UI inside Android under test.
+- Task list SSE updates, task detail navigation, task creation, and task input
+  work in the WebView under test.
+- Android back behavior is covered by an instrumented test.
+- Go Mode and the current caic Android app are manually verified installable on
+  the same device.
 
 ## Phase 3: Auth Spike and Decision
 
 Auth is the highest-risk migration point. Test it before building a broad bridge.
-There are two independent auth domains: the active service backend web session
-and the voice gateway user session.
+There is one user auth domain for Go Mode voice: the active service backend web
+session. The voice gateway verifies service-signed tokens and has no separate
+user session.
 
 Strategy A: backend-owned WebView session
 
@@ -702,28 +551,15 @@ Strategy B: native token handoff for specific capabilities
 - This is higher risk because browser `EventSource` does not support custom
   headers and broad request interception can become fragile.
 
-Strategy C: gateway-owned user session
-
-- The voice gateway owns its own user login and session cookie.
-- Supported providers are Google, GitHub, and GitLab.
-- Self-hosted GitLab is supported through configurable provider base URL.
-- Android authenticates to the gateway before creating or resuming a voice
-  session.
-- The gateway session authorizes access to gateway resources only. It does not
-  grant caic or mddb product access.
-- Tailscale-only deployments can use normal OAuth when the browser and Android
-  can reach the gateway callback URL over the tailnet.
-- Tailscale-only deployments without a stable HTTPS callback URL use explicit
-  local pairing mode to create the gateway session.
-
-Strategy D: service-issued voice gateway token
+Strategy C: service-issued voice gateway token
 
 - The backend web session grants Android a short-lived token for the configured
   voice gateway.
 - Android sends that token only to the voice gateway when starting or updating a
   voice session.
-- The token lets the gateway call the selected service backend's voice binding
-  API for the authenticated user.
+- The token authorizes the gateway to create transport for the selected service
+  instance. Go Mode Android still executes service tools locally through service
+  HTTP APIs.
 - Prefer this strategy for voice. It keeps web login backend-owned while avoiding
   Android-owned service credentials and avoiding gateway access to service
   private files.
@@ -734,8 +570,7 @@ Decision rule:
   coherent enough.
 - Add Strategy B only for narrow native capabilities that cannot use the web
   session.
-- Use Strategy C for gateway login and gateway session state.
-- Use Strategy D for service access inside gateway-dispatched voice tools.
+- Use Strategy C for voice session authorization.
 - Stop the shell migration if normal web API calls require broad WebView request
   interception, a custom API proxy layer, or Android-specific forks.
 
@@ -745,14 +580,8 @@ Acceptance checks:
 - Auth-enabled server works.
 - OAuth login works in WebView.
 - Native capabilities either work through backend-owned session state or receive
-  scoped token handoff through an explicit backend flow.
-- Gateway login works with Google, GitHub, and GitLab.
-- Gateway login works in Tailscale-only mode through either OAuth callback or
-  explicit pairing.
-- Gateway logout invalidates active voice sessions for that gateway user.
-- Voice sessions use a service-issued scoped token accepted by the voice gateway.
-- A valid gateway session without a valid service token cannot execute service
-  tool calls.
+  signed-token handoff through an explicit backend flow.
+- Voice sessions use a service-signed token accepted by the voice gateway.
 - Logout revokes or invalidates native capability tokens.
 - Server switch changes WebView origin, native monitoring credentials, and
   native capability state coherently.
@@ -944,8 +773,9 @@ Acceptance checks:
 
 ## Phase 7: Voice Gateway Integration
 
-Android voice remains native at the platform boundary, but Gemini Live
-orchestration is owned by the voice gateway.
+Android voice remains native at the platform boundary. The voice gateway carries
+Gemini Live media and data-channel traffic, while Go Mode Android owns Gemini
+setup, tool declarations, local tool-call dispatch, and tool responses.
 
 Android continues to own:
 
@@ -959,23 +789,24 @@ Android continues to own:
 - mute and disconnect controls
 - transcript and status presentation
 - Halo/BLE context capture when Halo-backed awareness is enabled
+- Gemini setup message
+- function declarations for the active service
+- tool-call dispatch and tool responses
+- service HTTP API calls for tool execution
 
 The voice gateway owns:
 
 - Gemini Live WebSocket connection
-- Gemini setup message
-- system instruction
-- voice function declarations
-- tool-call dispatch
-- tool responses
-- service adapter dispatch
-- task or workspace state notifications injected into Gemini
+- WebRTC signaling and media/data transport
+- service-signed token verification
 
 The active service backend owns:
 
 - user auth and session state
-- scoped voice-gateway token issuance
-- service-specific tool binding API
+- service signing key generation and public-key exposure
+- service-signed voice-gateway token issuance
+- product HTTP APIs used by Go Mode tool handlers
+- service-specific tool manifest, when that phase exists
 - product-side authorization for every voice action
 
 Use Option A first: keep the native Compose voice panel above or below the
@@ -992,34 +823,33 @@ Move to Option B later only if the shell is accepted:
 
 - Web renders voice controls.
 - Commands and state flow through the bridge.
-- Android still owns local audio endpoint controls.
-- Voice gateway still owns Gemini Live orchestration.
-- Service backends still own binding authorization and product-side effects.
+- Android still owns local audio endpoint controls and local tool execution.
+- Voice gateway still owns Gemini Live transport.
+- Service backends still authorize product-side HTTP actions.
 
 Migration requirements:
 
 - Extend the voice RTC offer/session protocol so Android sends local session
   configuration to the gateway, such as selected voice name, active service
   instance, current task route, and supported native context sources.
-- Move or duplicate Android `FunctionHandlers` behavior into caic voice binding
-  handlers callable by the gateway, then remove local Android voice tool
-  execution.
-- Move Gemini setup construction and function declarations from Android/web
-  clients to the gateway.
-- Keep task number mapping either backend-owned or explicitly synchronized to
-  Android/web as presentation state. Do not let Android-only numbering become
-  required for service binding correctness.
-- Treat Halo/BLE observations as native context sent to the gateway, not as
-  Android-executed Gemini tools.
+- Copy and adapt Android `FunctionHandlers` behavior into Go Mode so local tool
+  calls use the active service's HTTP API.
+- Keep Gemini setup construction and function declarations in Go Mode for the
+  first caic implementation.
+- Define a service tool manifest later for caic and mddb before generalizing
+  service-specific tools.
+- Keep task number mapping Android-owned presentation state unless a later
+  service manifest requires a different stable reference.
+- Treat Halo/BLE observations as native context available to Android-local tool
+  handling, not as gateway-executed tools.
 
 Navigation behavior:
 
 - When WebView route changes, call `native.setCurrentTask` or
   `native.setVoiceContext` so Android can send context to the gateway voice
   session.
-- When gateway voice chooses a task, the gateway sends a navigation event through
-  the Android voice/session channel or an app bridge event, then Android
-  dispatches `native.navigate` to the WebView.
+- When Android-local voice handling chooses a task, Android dispatches
+  `native.navigate` to the WebView.
 
 Acceptance checks:
 
@@ -1029,8 +859,8 @@ Acceptance checks:
   cards.
 - Voice-created tasks appear in the WebView task list.
 - Voice answer, purge, status lookup, CI notification, and task creation flows
-  work through gateway-dispatched service bindings.
-- Android does not execute Gemini function calls locally.
+  work through Android-local handlers calling the service HTTP API.
+- Android executes Gemini function calls locally for the active service.
 - Android task notifications remain suppressed while voice is connected.
 - Browser voice code is inactive in Go Mode host mode.
 
@@ -1164,36 +994,24 @@ policy, and network diagnostics rather than packaging stale frontend assets.
 Voice gateway unit tests:
 
 - Config loading and validation for `~/.config/voice-gateway/config.toml`.
-- Gateway session creation, validation, logout, and active-session invalidation.
-- OAuth provider config validation for Google, GitHub, GitLab, and self-hosted
-  GitLab.
-- OAuth callback state validation and allowed-user enforcement.
-- Tailscale/private-network mode does not require a public `external_url` when
-  pairing mode is enabled.
-- Pairing code creation, expiry, one-time use, and exchange.
+- Service public-key parsing and trusted-issuer validation.
 - Compatibility endpoint reports gateway protocol, supported service kinds, and
   gateway capabilities.
-- Scoped token validation rejects wrong issuer, wrong audience, expired tokens,
-  unsupported service kind, and unsupported service instance.
-- Voice RTC session setup builds the Gemini setup message in the gateway.
-- Service adapter selection uses explicit service kind and service instance ID.
-- Tool errors are returned to Gemini as tool responses and surfaced to the
-  client transcript/status channel.
-- Voice session context updates from Android are applied without trusting
-  arbitrary client-supplied task IDs or URLs.
+- Service-signed token validation rejects wrong signature, wrong issuer, wrong
+  audience, expired tokens, unsupported service kind, and unsupported service
+  instance.
+- Voice RTC session setup accepts explicit service kind and service instance ID
+  metadata without executing service tools in the gateway.
 
 Service backend unit tests:
 
 - caic config API exposes structured gateway metadata for URL-derived external,
   key-derived embedded, and disabled states.
-- caic compatibility endpoint reports voice gateway requirements and binding
-  capabilities.
-- caic scoped voice-gateway token issuance is tied to the current authenticated
-  web session and can be revoked by logout.
-- caic voice binding handlers cover task create, answer, send message, stop,
-  purge, revive, fork, status/detail, usage, web fetch/search, and CI helpers.
-- Binding handlers authorize each action server-side and do not trust gateway
-  claims beyond the scoped token.
+- caic compatibility endpoint reports voice gateway requirements.
+- caic service-signed voice-gateway token issuance is tied to the current
+  authenticated web session and can be revoked by logout.
+- caic HTTP APIs used by Android-local voice tools authorize each action
+  server-side.
 
 Android unit tests:
 
@@ -1204,6 +1022,11 @@ Android unit tests:
 - Server switch and auth-token change restart behavior.
 - Voice endpoint state machine for connect, mute, disconnect, route context
   updates, and backend session failure.
+- Android-local voice tool handlers cover task create, answer, send message,
+  stop, purge, revive, fork, status/detail, usage, web fetch/search, and CI
+  helpers for the caic service.
+- Tool errors are returned to Gemini as tool responses and surfaced to the
+  client transcript/status channel.
 
 Android instrumented tests:
 
@@ -1213,8 +1036,8 @@ Android instrumented tests:
 - Back button navigates WebView history.
 - Android voice endpoint can connect or bridge commands can be invoked without
   crashing, depending on the implemented phase.
-- Gateway-dispatched service bindings execute voice commands without Android
-  `FunctionHandlers`.
+- Android-local voice tool handlers execute voice commands through service HTTP
+  APIs.
 
 Frontend tests:
 
@@ -1224,19 +1047,16 @@ Frontend tests:
 - Browser notifications are suppressed in Go Mode host mode.
 - Android voice endpoint state updates task number badges if web badges are
   implemented.
-- Browser/web voice clients stop executing caic voice tools locally once gateway
-  voice tools and service bindings are available.
+- Browser voice remains inactive in Go Mode host mode so Android is the only
+  voice tool executor.
 
 Manual matrix before first Go Mode release:
 
 - Fresh install, no server configured.
 - Server configured, no auth.
 - Server configured, OAuth enabled.
-- Voice gateway configured with Google OAuth.
-- Voice gateway configured with GitHub OAuth.
-- Voice gateway configured with GitLab OAuth.
-- Voice gateway reachable only over Tailscale with OAuth callback URL.
-- Voice gateway reachable only over Tailscale with pairing mode.
+- Voice gateway configured with an imported caic public key.
+- Voice gateway rejects tokens from an untrusted caic public key.
 - caic with no gateway URL and `GEMINI_API_KEY` available.
 - caic with standalone gateway URL configured.
 - caic with no gateway URL and no `GEMINI_API_KEY`.
@@ -1306,8 +1126,8 @@ make lint-docs
   backend servers.
 - Native task notifications work independently of WebView lifecycle.
 - Go Mode voice endpoint works and can expose enough state for the shell.
-- Voice gateway owns Gemini setup and tool dispatch.
-- Service backends own scoped token issuance and tool binding implementation.
+- Go Mode Android owns Gemini setup and tool dispatch.
+- Service backends own signed-token issuance and product API authorization.
 - Halo remains compatible with the shell architecture.
 - Browser and Android voice endpoints do not duplicate each other.
 - Browser and Android notifications do not duplicate each other.
@@ -1340,8 +1160,8 @@ Stop and reassess Go Mode if any are true:
 - Gateway user auth and service backend auth cannot be separated cleanly.
 - Multi-server state makes native monitoring or notifications ambiguous.
 - Voice state synchronization requires a broad, hard-to-test bridge.
-- Android must keep executing caic voice tools locally after gateway tools and
-  service bindings are available.
+- Android-local voice tool execution cannot be represented cleanly for multiple
+  service instances.
 - WebView routing or reload behavior is unreliable.
 - Go Mode cannot coexist with `com.fghbuild.caic` because package names,
   storage, notification channels, or deep links are not isolated.
@@ -1414,51 +1234,44 @@ Remaining follow-up: caic currently rejects unknown gateway config fields with
 the rest of `config.toml`; deliberate gateway config version-skew handling is
 still unresolved.
 
-PR 7: gateway user auth.
+PR 7: service signing keys.
 
-- Add gateway-owned session storage, cookies, middleware, logout, and active
-  voice-session invalidation.
-- Add OAuth routes for Google, GitHub, and GitLab.
-- Add self-hosted GitLab support through configurable provider base URL.
-- Add allowed-user and allowed-domain enforcement.
-- Add Tailscale/private-network mode checks.
-- Add explicit local pairing mode for private tailnet deployments without a
-  stable OAuth callback URL.
-- Add tests for OAuth state validation, provider config validation, allowed-user
-  enforcement, session invalidation, and pairing code expiry/one-time use.
+- Add caic Ed25519 signing key generation and persistence in private runtime
+  settings.
+- Add a caic public-key endpoint for importing into the voice gateway.
+- Add voice gateway trusted-issuer config using imported service public keys.
+- Add tests for key generation, public-key encoding, trusted-issuer validation,
+  and token signature rejection.
 
-PR 8: scoped service auth and caic binding skeleton.
+PR 8: scoped service auth and caic voice metadata.
 
-- Add trusted issuer configuration to the gateway.
-- Add scoped-token validation skeleton with audience, expiry, issuer, service
-  kind, service instance ID, and capability checks.
+- Add service-signed token validation with audience, expiry, issuer, service
+  kind, service instance ID, backend origin, subject, and capability checks.
 - Add caic compatibility metadata describing voice gateway requirements.
 - Add a caic endpoint that can issue a short-lived voice-gateway token from the
   authenticated web session.
-- Add a caic voice binding API skeleton for service tool calls.
 - Add tests for token issuance, token rejection, logout/revocation behavior, and
-  binding authorization.
+  service API authorization.
 
-PR 9: gateway-owned Gemini setup and caic voice tools.
+PR 9: Go Mode Android-local caic voice tools.
 
-- Move Gemini setup construction and function declarations out of Android/web
-  clients into the gateway.
-- Implement caic service adapter calls for task create, answer, send message,
+- Copy/adapt Gemini setup construction and function declarations into Go Mode.
+- Implement Android-local caic tool handlers for task create, answer, send message,
   stop, purge, revive, fork, status/detail, usage, web fetch/search, and CI
   helpers.
 - Return tool errors to Gemini as tool responses and surface them through the
   client status/transcript channel.
-- Keep Android/web local `FunctionHandlers` behind a temporary fallback only if
-  needed for transition, and mark the fallback for removal.
+- Defer caic/mddb service tool manifests until the generic multi-service phase.
 
 PR 10: Android voice endpoint to voice gateway.
 
 - Point Go Mode WebRTC signaling at the configured voice gateway.
-- Require a valid gateway session before creating voice sessions.
+- Require a valid service-signed gateway token before creating voice sessions.
 - Send selected service instance, route/task context, selected voice settings,
   and Halo context to the gateway.
 - Use service-issued voice-gateway tokens, not caic private config files.
-- Remove Android Gemini setup and local caic voice tool execution once gateway
-  tools pass acceptance checks.
+- Keep Android Gemini setup and local caic voice tool execution out of the
+  gateway; replace copied handlers only after the later service manifest design
+  is accepted.
 
 Only after these PRs pass should copied transitional code be removed.
