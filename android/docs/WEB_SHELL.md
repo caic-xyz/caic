@@ -80,7 +80,7 @@ screenshot, and Halo integrations.
   docs, e2e coverage, and mobile UI tests. Go Mode should keep the service host
   boundary generic enough for mddb even if caic is implemented first.
 - The caic backend currently exposes `/api/v1/voice/rtc/offer` and terminates
-  the WebRTC side of a voice session through `internal/server/voicertc`.
+  the WebRTC side of a voice session through `internal/voicegateway/voicertc`.
 - The current caic API reports structured `Config.voiceGateway` metadata so
   Android can distinguish disabled voice, caic-embedded gateway, and external
   preferred gateway modes.

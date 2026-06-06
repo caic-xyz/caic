@@ -18,8 +18,8 @@ import (
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
 
-	"github.com/caic-xyz/caic/backend/internal/server/voicertc"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway"
+	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
 )
 
 func mainImpl(args []string) error {
