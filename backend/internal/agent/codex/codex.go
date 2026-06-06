@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	cx "github.com/maruel/genai/providers/codex"
+	"github.com/maruel/genai/providers/codex"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
@@ -283,23 +283,23 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 		return errors.New("codex: no thread ID (handshake not completed)")
 	}
 	id := w.nextID.Add(1)
-	input := make([]cx.TurnInput, 0, 1+len(p.Images))
-	input = append(input, cx.TurnInput{Type: cx.TurnInputTypeText, Text: p.Text})
+	input := make([]codex.TurnInput, 0, 1+len(p.Images))
+	input = append(input, codex.TurnInput{Type: codex.TurnInputTypeText, Text: p.Text})
 	for _, img := range p.Images {
-		input = append(input, cx.TurnInput{
-			Type: cx.TurnInputTypeImage,
+		input = append(input, codex.TurnInput{
+			Type: codex.TurnInputTypeImage,
 			URL:  "data:" + img.MediaType + ";base64," + img.Data,
 		})
 	}
-	req := cx.JSONRPCRequest{
+	req := codex.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  "turn/start",
-		Params: cx.TurnStartParams{
+		Params: codex.TurnStartParams{
 			ThreadID: w.threadID,
 			Input:    input,
-			Summary:  cx.ReasoningSummaryAuto,
-			Effort:   cx.ReasoningEffort(w.effort),
+			Summary:  codex.ReasoningSummaryAuto,
+			Effort:   codex.ReasoningEffort(w.effort),
 		},
 	}
 	// Don't log to logW — stdin is not logged with --no-log-stdin.
@@ -314,11 +314,11 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, _ io.Writer) error {
 	if w.threadID == "" {
 		return errors.New("codex: no thread ID (handshake not completed)")
 	}
-	req := cx.JSONRPCRequest{
+	req := codex.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      w.nextID.Add(1),
 		Method:  "thread/compact/start",
-		Params:  cx.ThreadCompactStartParams{ThreadID: w.threadID},
+		Params:  codex.ThreadCompactStartParams{ThreadID: w.threadID},
 	}
 	return writeJSON(wr, req)
 }
@@ -335,14 +335,14 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, _ io.Writer) error {
 func (w *wireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	// Intercept thread/tokenUsage/updated: emit a UsageMessage with the
 	// incremental (Last) usage and accumulate into totalUsage.
-	var probe cx.MethodProbe
+	var probe codex.MethodProbe
 	_ = json.Unmarshal(line, &probe)
-	if probe.Method == cx.MethodTokenUsageUpdated {
-		var msg cx.JSONRPCMessage
+	if probe.Method == codex.MethodTokenUsageUpdated {
+		var msg codex.JSONRPCMessage
 		if err := json.Unmarshal(line, &msg); err != nil {
 			return nil, fmt.Errorf("tokenUsage/updated: %w", err)
 		}
-		var p cx.ThreadTokenUsageUpdatedNotification
+		var p codex.ThreadTokenUsageUpdatedNotification
 		if err := unmarshalNotification(msg.Params, &p, "ThreadTokenUsageUpdatedNotification", w.fw); err != nil {
 			return nil, fmt.Errorf("tokenUsage/updated params: %w", err)
 		}
@@ -413,20 +413,20 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 
 	// 4. Send thread/start or thread/resume.
-	var threadReq cx.JSONRPCRequest
+	var threadReq codex.JSONRPCRequest
 	if opts.ResumeSessionID != "" {
-		threadReq = cx.JSONRPCRequest{
+		threadReq = codex.JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.nextID.Add(1),
 			Method:  "thread/resume",
-			Params:  cx.ThreadResumeParams{ThreadID: opts.ResumeSessionID},
+			Params:  codex.ThreadResumeParams{ThreadID: opts.ResumeSessionID},
 		}
 	} else {
-		threadReq = cx.JSONRPCRequest{
+		threadReq = codex.JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.nextID.Add(1),
 			Method:  "thread/start",
-			Params:  cx.ThreadStartParams{Model: opts.Model},
+			Params:  codex.ThreadStartParams{Model: opts.Model},
 		}
 	}
 	if err := writeJSON(stdin, threadReq); err != nil {
@@ -440,7 +440,7 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 
 	// Extract thread ID from the response result.
-	var result cx.ThreadStartResult
+	var result codex.ThreadStartResult
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
 		return nil, nil, fmt.Errorf("parse thread/start result: %w", err)
 	}
@@ -455,38 +455,38 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, stdout *bufi
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	initReq := cx.JSONRPCRequest{
+	initReq := codex.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      nextID.Add(1),
 		Method:  "initialize",
-		Params: cx.InitializeParams{
-			ClientInfo: cx.ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
-			Capabilities: cx.Capabilities{
-				OptOutNotificationMethods: []cx.Method{
+		Params: codex.InitializeParams{
+			ClientInfo: codex.ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
+			Capabilities: codex.Capabilities{
+				OptOutNotificationMethods: []codex.Method{
 					// Interactive terminal prompts (e.g. sudo password, interactive stdin);
 					// caic does not forward interactive terminal I/O to the agent.
-					cx.MethodCommandTerminalInteract,
+					codex.MethodCommandTerminalInteract,
 					// Incremental diff of a file being written; we surface the completed
 					// diff via item/completed fileChange instead.
-					cx.MethodFileChangeOutputDelta,
+					codex.MethodFileChangeOutputDelta,
 					// Streaming pre-summary reasoning part markers; we prefer the
 					// incremental text via item/reasoning/summaryTextDelta.
-					cx.MethodReasoningSummaryPartAdded,
+					codex.MethodReasoningSummaryPartAdded,
 					// Raw token-by-token reasoning text; we prefer the summarised form via
 					// item/reasoning/summaryTextDelta which is more readable.
-					cx.MethodReasoningTextDelta,
+					codex.MethodReasoningTextDelta,
 					// Incremental plan text delta; we surface the final plan text via
 					// item/completed plan instead.
-					cx.MethodPlanDelta,
+					codex.MethodPlanDelta,
 					// Coarse git diff snapshot repeated on every file change; we use the
 					// caic-injected caic_diff_stat from the relay watcher instead.
-					cx.MethodTurnDiffUpdated,
+					codex.MethodTurnDiffUpdated,
 					// High-level plan snapshot updated on each tool call; redundant with
 					// item/plan which gives us the final plan text.
-					cx.MethodTurnPlanUpdated,
+					codex.MethodTurnPlanUpdated,
 					// Thread name set by the agent (cosmetic label); caic uses the user's
 					// initial prompt as the task title instead.
-					cx.MethodThreadNameUpdated,
+					codex.MethodThreadNameUpdated,
 				},
 			},
 		},
@@ -501,13 +501,13 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, stdout *bufi
 	}
 
 	// 2. Send initialized notification.
-	if err := writeJSON(stdin, cx.JSONRPCNotification{JSONRPC: "2.0", Method: "initialized"}); err != nil {
+	if err := writeJSON(stdin, codex.JSONRPCNotification{JSONRPC: "2.0", Method: "initialized"}); err != nil {
 		return nil, fmt.Errorf("write initialized: %w", err)
 	}
 
 	// 3. Fetch model list so the UI offers only valid model IDs.
 	var models []string
-	if err := writeJSON(stdin, cx.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: "model/list", Params: struct{}{}}); err != nil {
+	if err := writeJSON(stdin, codex.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: "model/list", Params: struct{}{}}); err != nil {
 		return nil, fmt.Errorf("write model/list: %w", err)
 	}
 	mlResp, err := readJSONRPCResponse(ctx, stdout)
@@ -517,7 +517,7 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, stdout *bufi
 	if mlResp.Result == nil {
 		return nil, errors.New("model/list response missing result")
 	}
-	var mlResult cx.ModelListResult
+	var mlResult codex.ModelListResult
 	if err := json.Unmarshal(mlResp.Result, &mlResult); err != nil {
 		return nil, fmt.Errorf("parse model/list result: %w", err)
 	}
@@ -543,9 +543,9 @@ func writeJSON(w io.Writer, v any) error {
 // readJSONRPCResponse reads lines from r until it finds a JSON-RPC response
 // (has "id" field). Notifications encountered during the handshake are logged
 // and skipped. It returns an error if ctx is cancelled before a response arrives.
-func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*cx.JSONRPCMessage, error) {
+func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*codex.JSONRPCMessage, error) {
 	type result struct {
-		msg *cx.JSONRPCMessage
+		msg *codex.JSONRPCMessage
 		err error
 	}
 	ch := make(chan result, 1)
@@ -560,7 +560,7 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*cx.JSONRPCMessa
 			if len(line) == 0 {
 				continue
 			}
-			var msg cx.JSONRPCMessage
+			var msg codex.JSONRPCMessage
 			if err := json.Unmarshal(line, &msg); err != nil {
 				ch <- result{nil, fmt.Errorf("unmarshal response: %w", err)}
 				return

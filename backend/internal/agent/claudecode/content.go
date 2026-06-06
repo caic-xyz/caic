@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	cc "github.com/maruel/genai/providers/claudecode"
+	"github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
@@ -57,16 +57,16 @@ func (c *ContentBlock) UnmarshalJSON(data []byte) error {
 type APIMessage struct {
 	jsonutil.Overflow
 
-	ID                string          `json:"id"`
-	Type              string          `json:"type"`
-	Model             string          `json:"model"`
-	Role              string          `json:"role"`
-	Content           []ContentBlock  `json:"content"`
-	StopReason        *string         `json:"stop_reason"`
-	StopSequence      *string         `json:"stop_sequence"`
-	Usage             *cc.MsgUsage    `json:"usage,omitempty"`
-	Container         json.RawMessage `json:"container,omitempty"`
-	ContextManagement json.RawMessage `json:"context_management,omitempty"`
+	ID                string               `json:"id"`
+	Type              string               `json:"type"`
+	Model             string               `json:"model"`
+	Role              string               `json:"role"`
+	Content           []ContentBlock       `json:"content"`
+	StopReason        *string              `json:"stop_reason"`
+	StopSequence      *string              `json:"stop_sequence"`
+	Usage             *claudecode.MsgUsage `json:"usage,omitempty"`
+	Container         json.RawMessage      `json:"container,omitempty"`
+	ContextManagement json.RawMessage      `json:"context_management,omitempty"`
 }
 
 var apiMessageKnown = jsonutil.KnownFields(APIMessage{})
@@ -189,14 +189,14 @@ func (t *ThinkingMetadata) UnmarshalJSON(data []byte) error {
 type ToolUseResult struct {
 	jsonutil.Overflow
 
-	Status            string          `json:"status"`
-	Prompt            string          `json:"prompt"`
-	AgentID           string          `json:"agentId"`
-	Content           json.RawMessage `json:"content,omitempty"`
-	TotalDurationMs   int64           `json:"totalDurationMs"`
-	TotalTokens       int             `json:"totalTokens"`
-	TotalToolUseCount int             `json:"totalToolUseCount"`
-	Usage             *cc.MsgUsage    `json:"usage,omitempty"`
+	Status            string               `json:"status"`
+	Prompt            string               `json:"prompt"`
+	AgentID           string               `json:"agentId"`
+	Content           json.RawMessage      `json:"content,omitempty"`
+	TotalDurationMs   int64                `json:"totalDurationMs"`
+	TotalTokens       int                  `json:"totalTokens"`
+	TotalToolUseCount int                  `json:"totalToolUseCount"`
+	Usage             *claudecode.MsgUsage `json:"usage,omitempty"`
 }
 
 var toolUseResultKnown = jsonutil.KnownFields(ToolUseResult{})

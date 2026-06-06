@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	cx "github.com/maruel/genai/providers/codex"
+	"github.com/maruel/genai/providers/codex"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
@@ -63,7 +63,7 @@ func unmarshalNotification(data []byte, v any, name string, fw *jsonutil.FieldWa
 //   - RawMessage           — unrecognised wire types (preserved verbatim)
 func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
 	// Fast probe: check for "type" (caic-injected) vs "method"/"id" (JSON-RPC).
-	var probe cx.MessageProbe
+	var probe codex.MessageProbe
 	if err := json.Unmarshal(line, &probe); err != nil {
 		return nil, fmt.Errorf("unmarshal probe: %w", err)
 	}
@@ -104,14 +104,14 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 	}
 
 	// JSON-RPC notification — dispatch on method.
-	var msg cx.JSONRPCMessage
+	var msg codex.JSONRPCMessage
 	if err := json.Unmarshal(line, &msg); err != nil {
 		return nil, fmt.Errorf("unmarshal jsonrpc: %w", err)
 	}
 
 	switch msg.Method {
-	case cx.MethodThreadStarted:
-		var p cx.ThreadStartedNotification
+	case codex.MethodThreadStarted:
+		var p codex.ThreadStartedNotification
 		if err := unmarshalNotification(msg.Params, &p, "ThreadStartedNotification", fw); err != nil {
 			return nil, fmt.Errorf("thread/started params: %w", err)
 		}
@@ -121,16 +121,16 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 			Version:   p.Thread.CLIVersion,
 		}}, nil
 
-	case cx.MethodTurnStarted:
+	case codex.MethodTurnStarted:
 		return nil, nil
 
-	case cx.MethodTurnCompleted:
-		var p cx.TurnCompletedNotification
+	case codex.MethodTurnCompleted:
+		var p codex.TurnCompletedNotification
 		if err := unmarshalNotification(msg.Params, &p, "TurnCompletedNotification", fw); err != nil {
 			return nil, fmt.Errorf("turn/completed params: %w", err)
 		}
 		switch p.Turn.Status {
-		case cx.TurnStatusFailed, cx.TurnStatusInterrupted:
+		case codex.TurnStatusFailed, codex.TurnStatusInterrupted:
 			errMsg := ""
 			if p.Turn.Error != nil {
 				errMsg = p.Turn.Error.Message
@@ -148,21 +148,21 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 			}}, nil
 		}
 
-	case cx.MethodItemStarted:
+	case codex.MethodItemStarted:
 		return parseItemStarted(&msg, fw)
 
-	case cx.MethodItemCompleted:
+	case codex.MethodItemCompleted:
 		return parseItemCompleted(&msg, fw)
 
-	case cx.MethodItemDelta:
-		var p cx.AgentMessageDeltaNotification
+	case codex.MethodItemDelta:
+		var p codex.AgentMessageDeltaNotification
 		if err := unmarshalNotification(msg.Params, &p, "AgentMessageDeltaNotification", fw); err != nil {
 			return nil, fmt.Errorf("item/agentMessage/delta params: %w", err)
 		}
 		return []agent.Message{&agent.TextDeltaMessage{Text: p.Delta}}, nil
 
-	case cx.MethodErrorNotification:
-		var p cx.ErrorNotification
+	case codex.MethodErrorNotification:
+		var p codex.ErrorNotification
 		if err := unmarshalNotification(msg.Params, &p, "ErrorNotification", fw); err != nil {
 			return nil, fmt.Errorf("error notification params: %w", err)
 		}
@@ -176,29 +176,29 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 			Result:      p.Error.Message,
 		}}, nil
 
-	case cx.MethodReasoningSummaryTextDelta:
-		var p cx.ReasoningSummaryTextDeltaNotification
+	case codex.MethodReasoningSummaryTextDelta:
+		var p codex.ReasoningSummaryTextDeltaNotification
 		if err := unmarshalNotification(msg.Params, &p, "ReasoningSummaryTextDeltaNotification", fw); err != nil {
 			return nil, fmt.Errorf("item/reasoning/summaryTextDelta params: %w", err)
 		}
 		return []agent.Message{&agent.ThinkingDeltaMessage{Text: p.Delta}}, nil
 
-	case cx.MethodCommandOutputDelta:
-		var p cx.CommandExecutionOutputDeltaNotification
+	case codex.MethodCommandOutputDelta:
+		var p codex.CommandExecutionOutputDeltaNotification
 		if err := unmarshalNotification(msg.Params, &p, "CommandExecutionOutputDeltaNotification", fw); err != nil {
 			return nil, fmt.Errorf("commandExecution/outputDelta params: %w", err)
 		}
 		return []agent.Message{&agent.ToolOutputDeltaMessage{ToolUseID: p.ItemID, Delta: p.Delta}}, nil
 
-	case cx.MethodMcpToolCallProgress:
-		var p cx.McpToolCallProgressNotification
+	case codex.MethodMcpToolCallProgress:
+		var p codex.McpToolCallProgressNotification
 		if err := unmarshalNotification(msg.Params, &p, "McpToolCallProgressNotification", fw); err != nil {
 			return nil, fmt.Errorf("mcpToolCall/progress params: %w", err)
 		}
 		return []agent.Message{&agent.ToolOutputDeltaMessage{ToolUseID: p.ItemID, Delta: p.Message}}, nil
 
-	case cx.MethodThreadStatusChanged:
-		var p cx.ThreadStatusChangedNotification
+	case codex.MethodThreadStatusChanged:
+		var p codex.ThreadStatusChangedNotification
 		if err := unmarshalNotification(msg.Params, &p, "ThreadStatusChangedNotification", fw); err != nil {
 			return nil, fmt.Errorf("thread/status/changed params: %w", err)
 		}
@@ -207,8 +207,8 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 			Subtype:     string(p.Status.Type),
 		}}, nil
 
-	case cx.MethodModelRerouted:
-		var p cx.ModelReroutedNotification
+	case codex.MethodModelRerouted:
+		var p codex.ModelReroutedNotification
 		if err := unmarshalNotification(msg.Params, &p, "ModelReroutedNotification", fw); err != nil {
 			return nil, fmt.Errorf("model/rerouted params: %w", err)
 		}
@@ -229,25 +229,25 @@ func parseMessage(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error
 }
 
 // parseItemStarted handles item/started notifications.
-func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
-	var p cx.ItemStartedNotification
+func parseItemStarted(msg *codex.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
+	var p codex.ItemStartedNotification
 	if err := unmarshalNotification(msg.Params, &p, "ItemStartedNotification", fw); err != nil {
 		return nil, fmt.Errorf("item/started params: %w", err)
 	}
-	var h cx.ItemHeader
+	var h codex.ItemHeader
 	if err := json.Unmarshal(p.Item, &h); err != nil {
 		return nil, fmt.Errorf("item/started header: %w", err)
 	}
 	switch h.Type {
-	case cx.ItemTypeUserMessage:
-		var item cx.UserMessageItem
+	case codex.ItemTypeUserMessage:
+		var item codex.UserMessageItem
 		if err := unmarshalNotification(p.Item, &item, "UserMessageItem", fw); err != nil {
 			return nil, fmt.Errorf("item/started userMessage: %w", err)
 		}
 		return []agent.Message{userInputFromContent(item.Content)}, nil
 
-	case cx.ItemTypeCommandExecution:
-		var item cx.CommandExecutionItem
+	case codex.ItemTypeCommandExecution:
+		var item codex.CommandExecutionItem
 		if err := unmarshalNotification(p.Item, &item, "CommandExecutionItem", fw); err != nil {
 			return nil, fmt.Errorf("item/started commandExecution: %w", err)
 		}
@@ -261,8 +261,8 @@ func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent
 			Input:     input,
 		}}, nil
 
-	case cx.ItemTypeFileChange:
-		var item cx.FileChangeItem
+	case codex.ItemTypeFileChange:
+		var item codex.FileChangeItem
 		if err := unmarshalNotification(p.Item, &item, "FileChangeItem", fw); err != nil {
 			return nil, fmt.Errorf("item/started fileChange: %w", err)
 		}
@@ -276,8 +276,8 @@ func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent
 			Input:     input,
 		}}, nil
 
-	case cx.ItemTypeMCPToolCall:
-		var item cx.McpToolCallItem
+	case codex.ItemTypeMCPToolCall:
+		var item codex.McpToolCallItem
 		if err := unmarshalNotification(p.Item, &item, "McpToolCallItem", fw); err != nil {
 			return nil, fmt.Errorf("item/started mcpToolCall: %w", err)
 		}
@@ -290,8 +290,8 @@ func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent
 			Input:     item.Arguments,
 		}}, nil
 
-	case cx.ItemTypeDynamicToolCall:
-		var item cx.DynamicToolCallItem
+	case codex.ItemTypeDynamicToolCall:
+		var item codex.DynamicToolCallItem
 		if err := unmarshalNotification(p.Item, &item, "DynamicToolCallItem", fw); err != nil {
 			return nil, fmt.Errorf("item/started dynamicToolCall: %w", err)
 		}
@@ -301,8 +301,8 @@ func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent
 			Input:     item.Arguments,
 		}}, nil
 
-	case cx.ItemTypeCollabAgentToolCall:
-		var item cx.CollabAgentToolCallItem
+	case codex.ItemTypeCollabAgentToolCall:
+		var item codex.CollabAgentToolCallItem
 		if err := unmarshalNotification(p.Item, &item, "CollabAgentToolCallItem", fw); err != nil {
 			return nil, fmt.Errorf("item/started collabAgentToolCall: %w", err)
 		}
@@ -320,8 +320,8 @@ func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent
 			Input:     input,
 		}}, nil
 
-	case cx.ItemTypeImageGeneration:
-		var item cx.ImageGenerationItem
+	case codex.ItemTypeImageGeneration:
+		var item codex.ImageGenerationItem
 		if err := unmarshalNotification(p.Item, &item, "ImageGenerationItem", fw); err != nil {
 			return nil, fmt.Errorf("item/started imageGeneration: %w", err)
 		}
@@ -341,55 +341,55 @@ func parseItemStarted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent
 }
 
 // parseItemCompleted handles item/completed notifications.
-func parseItemCompleted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
-	var p cx.ItemCompletedNotification
+func parseItemCompleted(msg *codex.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
+	var p codex.ItemCompletedNotification
 	if err := unmarshalNotification(msg.Params, &p, "ItemCompletedNotification", fw); err != nil {
 		return nil, fmt.Errorf("item/completed params: %w", err)
 	}
-	var h cx.ItemHeader
+	var h codex.ItemHeader
 	if err := json.Unmarshal(p.Item, &h); err != nil {
 		return nil, fmt.Errorf("item/completed header: %w", err)
 	}
 	switch h.Type {
-	case cx.ItemTypeUserMessage:
+	case codex.ItemTypeUserMessage:
 		// Codex emits userMessage for both item/started and item/completed.
 		// The started item is enough to show the prompt and avoids duplicates.
 		return nil, nil
 
-	case cx.ItemTypeAgentMessage:
-		var item cx.AgentMessageItem
+	case codex.ItemTypeAgentMessage:
+		var item codex.AgentMessageItem
 		if err := unmarshalNotification(p.Item, &item, "AgentMessageItem", fw); err != nil {
 			return nil, fmt.Errorf("item/completed agentMessage: %w", err)
 		}
 		return []agent.Message{&agent.TextMessage{Text: item.Text, Phase: string(item.Phase)}}, nil
 
-	case cx.ItemTypeReasoning:
-		var item cx.ReasoningItem
+	case codex.ItemTypeReasoning:
+		var item codex.ReasoningItem
 		if err := unmarshalNotification(p.Item, &item, "ReasoningItem", fw); err != nil {
 			return nil, fmt.Errorf("item/completed reasoning: %w", err)
 		}
 		text := strings.Join(item.Summary, "\n")
 		return []agent.Message{&agent.ThinkingMessage{Text: text}}, nil
 
-	case cx.ItemTypePlan:
-		var item cx.PlanItem
+	case codex.ItemTypePlan:
+		var item codex.PlanItem
 		if err := unmarshalNotification(p.Item, &item, "PlanItem", fw); err != nil {
 			return nil, fmt.Errorf("item/completed plan: %w", err)
 		}
 		return []agent.Message{&agent.TextMessage{Text: item.Text}}, nil
 
-	case cx.ItemTypeCommandExecution:
+	case codex.ItemTypeCommandExecution:
 		return []agent.Message{&agent.ToolResultMessage{ToolUseID: h.ID}}, nil
 
-	case cx.ItemTypeFileChange:
-		var item cx.FileChangeItem
+	case codex.ItemTypeFileChange:
+		var item codex.FileChangeItem
 		if err := unmarshalNotification(p.Item, &item, "FileChangeItem", fw); err != nil {
 			return nil, fmt.Errorf("item/completed fileChange: %w", err)
 		}
 		return []agent.Message{&agent.ToolResultMessage{ToolUseID: item.ID}}, nil
 
-	case cx.ItemTypeMCPToolCall:
-		var item cx.McpToolCallItem
+	case codex.ItemTypeMCPToolCall:
+		var item codex.McpToolCallItem
 		if err := unmarshalNotification(p.Item, &item, "McpToolCallItem", fw); err != nil {
 			return nil, fmt.Errorf("item/completed mcpToolCall: %w", err)
 		}
@@ -399,8 +399,8 @@ func parseItemCompleted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]age
 		}
 		return []agent.Message{m}, nil
 
-	case cx.ItemTypeDynamicToolCall:
-		var item cx.DynamicToolCallItem
+	case codex.ItemTypeDynamicToolCall:
+		var item codex.DynamicToolCallItem
 		if err := unmarshalNotification(p.Item, &item, "DynamicToolCallItem", fw); err != nil {
 			return nil, fmt.Errorf("item/completed dynamicToolCall: %w", err)
 		}
@@ -410,25 +410,25 @@ func parseItemCompleted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]age
 		}
 		return []agent.Message{m}, nil
 
-	case cx.ItemTypeCollabAgentToolCall:
-		var item cx.CollabAgentToolCallItem
+	case codex.ItemTypeCollabAgentToolCall:
+		var item codex.CollabAgentToolCallItem
 		if err := unmarshalNotification(p.Item, &item, "CollabAgentToolCallItem", fw); err != nil {
 			return nil, fmt.Errorf("item/completed collabAgentToolCall: %w", err)
 		}
 		m := &agent.ToolResultMessage{ToolUseID: item.ID}
-		if item.Status == cx.CollabAgentToolCallStatusFailed {
+		if item.Status == codex.CollabAgentToolCallStatusFailed {
 			m.Error = "collab agent tool call failed"
 		}
 		return []agent.Message{m}, nil
 
-	case cx.ItemTypeContextCompaction:
+	case codex.ItemTypeContextCompaction:
 		return []agent.Message{&agent.SystemMessage{
 			MessageType: "system",
 			Subtype:     "context_compaction",
 		}}, nil
 
-	case cx.ItemTypeWebSearch:
-		var item cx.WebSearchItem
+	case codex.ItemTypeWebSearch:
+		var item codex.WebSearchItem
 		if err := unmarshalNotification(p.Item, &item, "WebSearchItem", fw); err != nil {
 			return nil, fmt.Errorf("item/completed webSearch: %w", err)
 		}
@@ -441,8 +441,8 @@ func parseItemCompleted(msg *cx.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]age
 			&agent.ToolResultMessage{ToolUseID: item.ID},
 		}, nil
 
-	case cx.ItemTypeImageGeneration:
-		var item cx.ImageGenerationItem
+	case codex.ItemTypeImageGeneration:
+		var item codex.ImageGenerationItem
 		if err := unmarshalNotification(p.Item, &item, "ImageGenerationItem", fw); err != nil {
 			return nil, fmt.Errorf("item/completed imageGeneration: %w", err)
 		}
@@ -481,9 +481,9 @@ func userInputFromContent(content json.RawMessage) *agent.UserInputMessage {
 }
 
 // toolNameForChanges returns "Write" if any change has Kind.Type == "add", else "Edit".
-func toolNameForChanges(changes []cx.FileUpdateChange) string {
+func toolNameForChanges(changes []codex.FileUpdateChange) string {
 	for _, c := range changes {
-		if c.Kind.Type == cx.PatchChangeKindTypeAdd {
+		if c.Kind.Type == codex.PatchChangeKindTypeAdd {
 			return "Write"
 		}
 	}

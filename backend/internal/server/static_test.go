@@ -11,7 +11,7 @@ import (
 	"testing/fstest"
 
 	"github.com/andybalholm/brotli"
-	kgzip "github.com/klauspost/compress/gzip"
+	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -258,7 +258,7 @@ func decompressZstd(t *testing.T, data []byte) []byte {
 }
 
 func decompressGzip(t *testing.T, data []byte) []byte {
-	r, err := kgzip.NewReader(bytes.NewReader(data))
+	r, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("gzip reader: %v", err)
 	}

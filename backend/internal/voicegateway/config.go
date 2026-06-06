@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	toml "github.com/pelletier/go-toml/v2"
+	"github.com/pelletier/go-toml/v2"
 )
 
 const (

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	cc "github.com/maruel/genai/providers/claudecode"
+	"github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 )
@@ -170,7 +170,7 @@ func TestEnvInjectorConn(t *testing.T) {
 		if len(inner.sent) != 1 {
 			t.Fatalf("SendRaw called %d times, want 1", len(inner.sent))
 		}
-		var got cc.InputUpdateEnvVarsMsg
+		var got claudecode.InputUpdateEnvVarsMsg
 		if err := json.Unmarshal(bytes.TrimSpace(inner.sent[0]), &got); err != nil {
 			t.Fatal(err)
 		}

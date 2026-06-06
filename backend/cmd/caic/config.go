@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	toml "github.com/pelletier/go-toml/v2"
+	"github.com/pelletier/go-toml/v2"
 
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/server"

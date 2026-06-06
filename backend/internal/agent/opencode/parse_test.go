@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	oc "github.com/maruel/genai/providers/opencode"
+	"github.com/maruel/genai/providers/opencode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
@@ -615,30 +615,30 @@ func TestNormalizeToolName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		title string
-		kind  oc.ToolKind
+		kind  opencode.ToolKind
 		want  string
 	}{
-		{"bash", oc.KindExecute, "Bash"},
-		{"edit", oc.KindEdit, "Edit"},
-		{"write", oc.KindEdit, "Write"},
-		{"read", oc.KindRead, "Read"},
-		{"glob", oc.KindSearch, "Glob"},
-		{"grep", oc.KindSearch, "Grep"},
-		{"list", oc.KindRead, "ListDirectory"},
-		{"webfetch", oc.KindFetch, "WebFetch"},
-		{"websearch", oc.KindSearch, "WebSearch"},
-		{"todowrite", oc.KindOther, "TodoWrite"},
-		{"task", oc.KindOther, "Agent"},
+		{"bash", opencode.KindExecute, "Bash"},
+		{"edit", opencode.KindEdit, "Edit"},
+		{"write", opencode.KindEdit, "Write"},
+		{"read", opencode.KindRead, "Read"},
+		{"glob", opencode.KindSearch, "Glob"},
+		{"grep", opencode.KindSearch, "Grep"},
+		{"list", opencode.KindRead, "ListDirectory"},
+		{"webfetch", opencode.KindFetch, "WebFetch"},
+		{"websearch", opencode.KindSearch, "WebSearch"},
+		{"todowrite", opencode.KindOther, "TodoWrite"},
+		{"task", opencode.KindOther, "Agent"},
 		// Additional name mappings.
-		{"patch", oc.KindEdit, "Edit"},
+		{"patch", opencode.KindEdit, "Edit"},
 		// Kind-based fallback.
-		{"unknown_tool", oc.KindExecute, "Bash"},
-		{"unknown_tool", oc.KindEdit, "Edit"},
-		{"unknown_tool", oc.KindRead, "Read"},
-		{"unknown_tool", oc.KindSearch, "Grep"},
-		{"unknown_tool", oc.KindFetch, "WebFetch"},
+		{"unknown_tool", opencode.KindExecute, "Bash"},
+		{"unknown_tool", opencode.KindEdit, "Edit"},
+		{"unknown_tool", opencode.KindRead, "Read"},
+		{"unknown_tool", opencode.KindSearch, "Grep"},
+		{"unknown_tool", opencode.KindFetch, "WebFetch"},
 		// Passthrough.
-		{"custom_mcp_tool", oc.KindOther, "custom_mcp_tool"},
+		{"custom_mcp_tool", opencode.KindOther, "custom_mcp_tool"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.title+"_"+string(tt.kind), func(t *testing.T) {

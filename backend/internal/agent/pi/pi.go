@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	pi "github.com/maruel/genai/providers/pi"
+	"github.com/maruel/genai/providers/pi"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"

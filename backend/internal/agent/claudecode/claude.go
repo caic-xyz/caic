@@ -11,7 +11,7 @@ import (
 	"os"
 	"path/filepath"
 
-	cc "github.com/maruel/genai/providers/claudecode"
+	"github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
@@ -90,11 +90,11 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 // WritePrompt writes a single user message in Claude Code's stdin format.
 // When images are provided, content is emitted as an array of content blocks.
 func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
-	var blocks []cc.InputContentBlock
+	var blocks []claudecode.InputContentBlock
 	for _, img := range p.Images {
-		blocks = append(blocks, cc.InputContentBlock{
+		blocks = append(blocks, claudecode.InputContentBlock{
 			Type: "image",
-			Source: cc.InputImageSource{
+			Source: claudecode.InputImageSource{
 				Type:      "base64",
 				MediaType: img.MediaType,
 				Data:      img.Data,
@@ -102,11 +102,11 @@ func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
 		})
 	}
 	if p.Text != "" {
-		blocks = append(blocks, cc.InputContentBlock{Type: "text", Text: p.Text})
+		blocks = append(blocks, claudecode.InputContentBlock{Type: "text", Text: p.Text})
 	}
-	msg := cc.InputUserMsg{
-		Type:    cc.InputUser,
-		Message: cc.InputUserContent{Role: "user", Content: blocks},
+	msg := claudecode.InputUserMsg{
+		Type:    claudecode.InputUser,
+		Message: claudecode.InputUserContent{Role: "user", Content: blocks},
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -180,8 +180,8 @@ func (c *envInjectorConn) ReadMessages(r io.Reader, msgCh chan<- agent.Message) 
 		defer close(errc)
 		for m := range proxy {
 			if v, ok := m.(*agent.StrippedEnvMessage); ok {
-				payload, err := json.Marshal(cc.InputUpdateEnvVarsMsg{
-					Type:      cc.InputUpdateEnvVars,
+				payload, err := json.Marshal(claudecode.InputUpdateEnvVarsMsg{
+					Type:      claudecode.InputUpdateEnvVars,
 					Variables: v.Variables,
 				})
 				if err != nil {
