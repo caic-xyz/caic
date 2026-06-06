@@ -588,7 +588,6 @@ typealias DiffStat = List<DiffFileStat>
 data class VoiceGatewayMetadata(
     val mode: VoiceGatewayMode,
     val url: String? = null,
-    val minGatewayProtocol: Int? = null,
     val authRequired: Boolean? = null,
     val tokenEndpoint: String? = null,
     val tokenAudience: String? = null,
@@ -1272,14 +1271,6 @@ data class LocalUsage(val windows: List<LocalWindow>)
 @Serializable
 data class UsageResp(val providers: List<ProviderQuota>? = null, val local: LocalUsage)
 
-/** VoiceTokenResp is the response for GET /api/v1/voice/token. */
-@Serializable
-data class VoiceTokenResp(
-    val token: String,
-    val expiresAt: String,
-    val ephemeral: Boolean,
-)
-
 /** WebFetchReq is the request body for POST /api/v1/web/fetch. */
 @Serializable
 data class WebFetchReq(val url: String)
@@ -1287,17 +1278,6 @@ data class WebFetchReq(val url: String)
 /** WebFetchResp is the response for POST /api/v1/web/fetch. */
 @Serializable
 data class WebFetchResp(val title: String, val content: String)
-
-/** VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer. */
-@Serializable
-data class VoiceRTCOfferReq(val sdp: String)
-
-/** VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer. */
-@Serializable
-data class VoiceRTCAnswerResp(
-    val sdp: String,
-    @SerialName("sessionID") val sessionID: String,
-)
 
 @Serializable
 data class ErrorDetails(val code: String, val message: String)

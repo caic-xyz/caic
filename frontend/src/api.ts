@@ -1,7 +1,9 @@
 // Singleton API client for the caic web UI.
 import { createApiClient } from "@sdk/api.gen";
+import { createApiClient as createVoiceGatewayClient } from "@voicegateway-sdk/api.gen";
 
 export const api = createApiClient();
+export const voiceGatewayApi = createVoiceGatewayClient();
 
 export const {
   getConfig,
@@ -39,7 +41,11 @@ export const {
   globalTaskEvents,
   globalUsageEvents,
   getUsage,
-  voiceRTCOffer,
-  closeVoiceRTC,
   webFetch,
 } = api;
+
+export const {
+  getVoiceToken,
+  voiceRTCOffer,
+  closeVoiceRTC,
+} = voiceGatewayApi;

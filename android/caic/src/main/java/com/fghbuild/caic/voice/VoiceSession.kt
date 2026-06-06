@@ -14,7 +14,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.caic.sdk.v1.ApiClient
-import com.caic.sdk.v1.VoiceRTCOfferReq
+import com.caic.voicegateway.sdk.v1.ApiClient as VoiceGatewayApiClient
+import com.caic.voicegateway.sdk.v1.VoiceRTCOfferReq
 import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.data.TaskRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -147,6 +148,8 @@ class VoiceSession @Inject constructor(
                 }
 
                 val apiClient = ApiClient(settings.serverURL, tokenProvider = { settingsRepository.settings.value.authToken })
+                val voiceGatewayClient =
+                    VoiceGatewayApiClient(settings.serverURL, tokenProvider = { settingsRepository.settings.value.authToken })
                 availableHarnesses = apiClient.listHarnesses().map { it.name }
                 availableRepos = apiClient.listRepos().map { it.path }
                 val config = apiClient.getConfig()
@@ -243,7 +246,7 @@ class VoiceSession @Inject constructor(
                         pc.setLocalDescription(noOpSdpObserver(), desc)
                         scope.launch {
                             try {
-                                val resp = apiClient.voiceRTCOffer(VoiceRTCOfferReq(sdp = desc.description))
+                                val resp = voiceGatewayClient.voiceRTCOffer(VoiceRTCOfferReq(sdp = desc.description))
                                 rtcSessionID = resp.sessionID
                                 val answer = SessionDescription(SessionDescription.Type.ANSWER, resp.sdp)
                                 pc.setRemoteDescription(noOpSdpObserver(), answer)
@@ -788,4 +791,3 @@ private fun audioDeviceTypeName(type: Int): String = when (type) {
     AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "Wired Headphones"
     else -> "Device $type"
 }
-

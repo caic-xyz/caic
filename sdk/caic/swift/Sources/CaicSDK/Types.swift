@@ -331,7 +331,6 @@ public typealias DiffStat = [DiffFileStat]
 public struct VoiceGatewayMetadata: Codable {
     public let mode: VoiceGatewayMode
     public let url: String?
-    public let minGatewayProtocol: Int?
     public let authRequired: Bool?
     public let tokenEndpoint: String?
     public let tokenAudience: String?
@@ -1106,13 +1105,6 @@ public struct UsageResp: Codable {
     public let local: LocalUsage
 }
 
-/// VoiceTokenResp is the response for GET /api/v1/voice/token.
-public struct VoiceTokenResp: Codable {
-    public let token: String
-    public let expiresAt: String
-    public let ephemeral: Bool
-}
-
 /// WebFetchReq is the request body for POST /api/v1/web/fetch.
 public struct WebFetchReq: Codable {
     public let url: String
@@ -1122,17 +1114,6 @@ public struct WebFetchReq: Codable {
 public struct WebFetchResp: Codable {
     public let title: String
     public let content: String
-}
-
-/// VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer.
-public struct VoiceRTCOfferReq: Codable {
-    public let sdp: String
-}
-
-/// VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer.
-public struct VoiceRTCAnswerResp: Codable {
-    public let sdp: String
-    public let sessionID: String
 }
 
 public struct ErrorDetails: Codable {

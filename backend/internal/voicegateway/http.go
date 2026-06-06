@@ -1,4 +1,4 @@
-// HTTP handlers for the voice gateway protocol.
+// HTTP handlers for the voice gateway API.
 
 package voicegateway
 
@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// MediaBridge is the WebRTC media transport used by the gateway protocol.
+// MediaBridge is the WebRTC media transport used by the voice gateway API.
 type MediaBridge interface {
 	HandleOffer(ctx context.Context, sdp string) (sdpAnswer, sessionID string, err error)
 	Close(sessionID string)
@@ -31,10 +31,10 @@ func NewHandler(
 		bridge: bridge,
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", h.handleHealth)
-	mux.HandleFunc("GET /compat", h.handleCompat)
-	mux.HandleFunc("POST /offer", h.handleOffer)
-	mux.HandleFunc("POST /sessions/{sessionID}", h.handleClose)
+	mux.HandleFunc("GET /api/v1/voice/health", h.handleHealth)
+	mux.HandleFunc("GET /api/v1/voice/compat", h.handleCompat)
+	mux.HandleFunc("POST /api/v1/voice/rtc/offer", h.handleOffer)
+	mux.HandleFunc("POST /api/v1/voice/rtc/{sessionID}", h.handleClose)
 	return mux, nil
 }
 
@@ -43,16 +43,15 @@ type handler struct {
 	bridge MediaBridge
 }
 
-// HealthResp is returned by GET /health.
+// HealthResp is returned by GET /api/v1/voice/health.
 type HealthResp struct {
 	Status string `json:"status"`
 }
 
 // OfferReq starts a voice gateway WebRTC signaling session.
 type OfferReq struct {
-	ProtocolVersion int                  `json:"protocolVersion"`
-	SDP             string               `json:"sdp"`
-	Service         ServiceAuthorization `json:"service"`
+	SDP     string               `json:"sdp"`
+	Service ServiceAuthorization `json:"service"`
 }
 
 // OfferResp returns the WebRTC SDP answer and gateway session ID.
@@ -63,8 +62,7 @@ type OfferResp struct {
 
 // CloseSessionResp is returned after closing a voice gateway session.
 type CloseSessionResp struct {
-	ProtocolVersion int    `json:"protocolVersion"`
-	Status          string `json:"status"`
+	Status string `json:"status"`
 }
 
 // ErrorResponse is the JSON envelope for voice gateway error responses.
@@ -99,10 +97,6 @@ func (h *handler) handleOffer(w http.ResponseWriter, r *http.Request) {
 	var req OfferReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
-		return
-	}
-	if req.ProtocolVersion != ProtocolVersion {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "unsupported protocolVersion")
 		return
 	}
 	if req.SDP == "" {
@@ -141,7 +135,7 @@ func (h *handler) handleClose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.bridge.Close(sessionID)
-	writeJSON(w, http.StatusOK, CloseSessionResp{ProtocolVersion: ProtocolVersion, Status: "closed"})
+	writeJSON(w, http.StatusOK, CloseSessionResp{Status: "closed"})
 }
 
 func verifyServiceToken(cfg *Config, s ServiceAuthorization) error {

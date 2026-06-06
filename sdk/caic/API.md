@@ -64,14 +64,6 @@ RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JS
 |--------|------|-------------|---------|----------|
 | GET | `/api/v1/usage` | Returns current usage quota statistics. |  | `UsageResp` |
 
-## Voice
-
-| Method | Path | Description | Request | Response |
-|--------|------|-------------|---------|----------|
-| GET | `/api/v1/voice/token` | Returns a short-lived voice API token. |  | `VoiceTokenResp` |
-| POST | `/api/v1/voice/rtc/offer` | Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session. | `VoiceRTCOfferReq` | `VoiceRTCAnswerResp` |
-| POST | `/api/v1/voice/rtc/{sessionID}` | Closes a WebRTC voice bridge session. |  | `StatusResp` |
-
 ## Web
 
 | Method | Path | Description | Request | Response |
@@ -106,7 +98,6 @@ VoiceGatewayMetadata reports structured voice gateway support.
 |-------|------|-------------|----------|
 | `mode` | `string` |  | yes |
 | `url` | `string` |  |  |
-| `minGatewayProtocol` | `int` |  |  |
 | `authRequired` | `boolean` |  |  |
 | `tokenEndpoint` | `string` |  |  |
 | `tokenAudience` | `string` |  |  |
@@ -1016,16 +1007,6 @@ UsageResp is the response for GET /api/v1/usage.
 | `providers` | `ProviderQuota[]` |  |  |
 | `local` | `LocalUsage` |  | yes |
 
-### VoiceTokenResp
-
-VoiceTokenResp is the response for GET /api/v1/voice/token.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `token` | `string` |  | yes |
-| `expiresAt` | `string` |  | yes |
-| `ephemeral` | `boolean` |  | yes |
-
 ### WebFetchReq
 
 WebFetchReq is the request body for POST /api/v1/web/fetch.
@@ -1042,21 +1023,4 @@ WebFetchResp is the response for POST /api/v1/web/fetch.
 |-------|------|-------------|----------|
 | `title` | `string` |  | yes |
 | `content` | `string` |  | yes |
-
-### VoiceRTCOfferReq
-
-VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `sdp` | `string` |  | yes |
-
-### VoiceRTCAnswerResp
-
-VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `sdp` | `string` |  | yes |
-| `sessionID` | `string` |  | yes |
 

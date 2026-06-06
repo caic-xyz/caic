@@ -192,9 +192,6 @@ func TestConfigCompatibility(t *testing.T) {
 	if got.Service != "voice-gateway" {
 		t.Errorf("Service = %q, want voice-gateway", got.Service)
 	}
-	if got.GatewayProtocol != ProtocolVersion {
-		t.Errorf("GatewayProtocol = %d, want %d", got.GatewayProtocol, ProtocolVersion)
-	}
 	if len(got.ServiceKinds) != 2 || got.ServiceKinds[0] != "caic" || got.ServiceKinds[1] != "mddb" {
 		t.Errorf("ServiceKinds = %v, want [caic mddb]", got.ServiceKinds)
 	}

@@ -82,8 +82,8 @@ Go Mode Android
           -> normalized tool results
 
 voice-gateway
-  -> /compat
-  -> /offer
+  -> /api/v1/voice/compat
+  -> /api/v1/voice/rtc/offer
   -> WebRTC session manager
   -> voice protocol normalizer
   -> backend selector
@@ -178,26 +178,25 @@ Rules:
 - Audio never goes through the data channel except optional diagnostics.
 - Message `version` is mandatory.
 - Unknown `kind` values are ignored only when explicitly marked optional by the
-  negotiated protocol range.
+  API version used for the session.
 - Tool call IDs are gateway-generated and unique within a session.
 - Android may keep using existing local function declaration builders at first,
   but the wire schema must not be Gemini-specific.
 
 ## Compatibility Metadata
 
-Extend gateway compatibility with backend and protocol capabilities:
+Extend gateway compatibility with backend capabilities:
 
 ```json
 {
   "service": "voice-gateway",
-  "gatewayProtocol": 2,
   "serviceKinds": ["caic", "mddb"],
   "backends": [
     {
       "id": "gemini-live",
       "capabilities": [
         "voice.backend.geminiLive",
-        "voice.protocol.normalized.v2",
+        "voice.protocol.normalized",
         "voice.realtime.fullDuplex",
         "voice.toolCalls.normalized"
       ]
@@ -206,7 +205,7 @@ Extend gateway compatibility with backend and protocol capabilities:
       "id": "local-cascade",
       "capabilities": [
         "voice.backend.localCascade",
-        "voice.protocol.normalized.v2",
+        "voice.protocol.normalized",
         "voice.asr.parakeet",
         "voice.llm.gemma4",
         "voice.tts.qwen3",
@@ -222,7 +221,6 @@ Service metadata should advertise a preferred backend policy, not a provider
 implementation detail:
 
 - `voiceGateway.backendsPreferred`: ordered backend IDs.
-- `voiceGateway.minGatewayProtocol`: minimum gateway protocol.
 - `voiceGateway.capabilities`: service-required capabilities.
 - `voiceGateway.tokenEndpoint`: service-issued token endpoint.
 
@@ -256,7 +254,7 @@ TTS backend candidates:
 
 - `qwen-tts-python`: target path, smoke tested on macOS CPU/MPS if available.
 - `qwen-tts-onnx`: investigate for lower-dependency local serving.
-- `dashscope-qwen-tts`: optional hosted fallback for validating gateway protocol,
+- `dashscope-qwen-tts`: optional hosted fallback for validating the gateway API,
   not the local target.
 - Linux CUDA deployments may use the same TTS adapter contract with the
   official CUDA/PyTorch-oriented Qwen3-TTS path.
@@ -265,10 +263,10 @@ TTS backend candidates:
 
 ### Phase 1: Normalize The Android-Gateway Protocol
 
-- Add gateway protocol v2 message types and tests.
+- Add normalized gateway message types and tests.
 - Keep Android WebRTC audio setup unchanged.
 - Rename Android data-channel ownership conceptually from Gemini to gateway.
-- Add a Gemini backend adapter that maps protocol v2 to current Gemini Live
+- Add a Gemini backend adapter that maps normalized gateway messages to Gemini Live
   messages.
 - Keep existing voice behavior passing through the Gemini backend.
 
@@ -277,7 +275,7 @@ Acceptance:
 - Gemini Live voice still works.
 - Android no longer constructs Gemini setup directly for gateway sessions.
 - Tool calls still execute in Android and call the active service backend.
-- Gateway `/compat` reports protocol v2 and Gemini backend support.
+- Gateway `/api/v1/voice/compat` reports Gemini backend support.
 
 ### Phase 2: Add Backend Selection
 
@@ -377,12 +375,12 @@ Acceptance:
   available in the selected runtime.
 - Whether Android sends tool schemas from copied local declarations only, or
   merges them with future service-provided tool manifests.
-- Whether protocol v2 replaces the current Gemini data-channel path in-place or
-  runs temporarily beside it for migration.
+- Whether normalized gateway messages replace the current Gemini data-channel
+  path in-place or run temporarily beside it for migration.
 
 ## Next Step
 
-Implement protocol v2 with Gemini Live as the only concrete backend first. That
-isolates Android from Gemini protocol details before adding the local cascade
-and keeps the behavior reversible while the macOS model runtime risks are
-measured.
+Implement normalized gateway messages with Gemini Live as the only concrete
+backend first. That isolates Android from Gemini protocol details before adding
+the local cascade and keeps the behavior reversible while the macOS model
+runtime risks are measured.

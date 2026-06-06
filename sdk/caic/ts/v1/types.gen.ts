@@ -465,7 +465,6 @@ export type DiffStat = DiffFileStat[];
 export interface VoiceGatewayMetadata {
   mode: VoiceGatewayMode;
   url?: string;
-  minGatewayProtocol?: number /* int */;
   authRequired?: boolean;
   tokenEndpoint?: string;
   tokenAudience?: string;
@@ -1021,13 +1020,6 @@ export interface UsageResp {
   local: LocalUsage;
 }
 
-/** VoiceTokenResp is the response for GET /api/v1/voice/token. */
-export interface VoiceTokenResp {
-  token: string;
-  expiresAt: string;
-  ephemeral: boolean;
-}
-
 /** WebFetchReq is the request body for POST /api/v1/web/fetch. */
 export interface WebFetchReq {
   url: string;
@@ -1037,17 +1029,6 @@ export interface WebFetchReq {
 export interface WebFetchResp {
   title: string;
   content: string;
-}
-
-/** VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer. */
-export interface VoiceRTCOfferReq {
-  sdp: string;
-}
-
-/** VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer. */
-export interface VoiceRTCAnswerResp {
-  sdp: string;
-  sessionID: string;
 }
 
 export interface ErrorDetails {

@@ -18,12 +18,16 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
+type validatable interface {
+	Validate() error
+}
+
 // handle wraps a typed handler function into an http.HandlerFunc. It reads the
 // JSON body (with DisallowUnknownFields), populates path parameters via struct
 // tags, validates, calls fn, and writes the JSON response or structured error.
 func handle[In any, PtrIn interface {
 	*In
-	api.Validatable
+	validatable
 }, Out any](fn func(context.Context, PtrIn) (*Out, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		in := PtrIn(new(In))
@@ -44,7 +48,7 @@ func handle[In any, PtrIn interface {
 // It parses {id}, looks up the task via s.getTask, then proceeds like handle.
 func handleWithTask[In any, PtrIn interface {
 	*In
-	api.Validatable
+	validatable
 }, Out any](s *Server, fn func(context.Context, *tasks.Entry, PtrIn) (*Out, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		entry, err := s.getTask(r)

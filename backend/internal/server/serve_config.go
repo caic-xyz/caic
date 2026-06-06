@@ -31,7 +31,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/voicegateway"
+	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
 )
 
 const voiceGatewayTokenAudience = "voice-gateway"
@@ -74,22 +74,20 @@ func (s *Server) voiceGatewayMetadata() v1.VoiceGatewayMetadata {
 			return v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeDisabled}
 		}
 		return v1.VoiceGatewayMetadata{ //nolint:gosec // G101: token metadata field names, not credentials.
-			Mode:               v1.VoiceGatewayModeEmbedded,
-			MinGatewayProtocol: voicegateway.ProtocolVersion,
-			AuthRequired:       false,
-			TokenEndpoint:      "/api/v1/voice/token",
-			TokenAudience:      voiceGatewayTokenAudience,
-			Capabilities:       []string{"voice.gatewayGeminiLive"},
+			Mode:          v1.VoiceGatewayModeEmbedded,
+			AuthRequired:  false,
+			TokenEndpoint: "/api/v1/voice/token",
+			TokenAudience: voiceGatewayTokenAudience,
+			Capabilities:  []string{"voice.gatewayGeminiLive"},
 		}
 	case VoiceGatewayModeExternal:
 		return v1.VoiceGatewayMetadata{ //nolint:gosec // G101: token metadata field names, not credentials.
-			Mode:               v1.VoiceGatewayModeExternal,
-			URL:                cfg.URL,
-			MinGatewayProtocol: voicegateway.ProtocolVersion,
-			AuthRequired:       true,
-			TokenEndpoint:      "/api/v1/voice/token",
-			TokenAudience:      voiceGatewayTokenAudience,
-			Capabilities:       []string{"voice.gatewayGeminiLive"},
+			Mode:          v1.VoiceGatewayModeExternal,
+			URL:           cfg.URL,
+			AuthRequired:  true,
+			TokenEndpoint: "/api/v1/voice/token",
+			TokenAudience: voiceGatewayTokenAudience,
+			Capabilities:  []string{"voice.gatewayGeminiLive"},
 		}
 	default:
 		return v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeDisabled}
@@ -456,14 +454,14 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 //
 // TODO(security): Switch back to ephemeral tokens once v1beta supports
 // auth_tokens or v1alpha quality improves. See getVoiceTokenEphemeral.
-func (s *Server) getVoiceToken(_ context.Context, _ *api.EmptyReq) (*v1.VoiceTokenResp, error) {
+func (s *Server) getVoiceToken(_ context.Context, _ *api.EmptyReq) (*voicev1.VoiceTokenResp, error) {
 	apiKey := s.geminiAPIKey
 	if apiKey == "" {
 		return nil, api.InternalError("GEMINI_API_KEY not configured")
 	}
 	slog.Info("voice token", "keylen", len(apiKey), "mode", "raw_key")
 	expireTime := time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339)
-	return &v1.VoiceTokenResp{
+	return &voicev1.VoiceTokenResp{
 		Token:     apiKey,
 		ExpiresAt: expireTime,
 	}, nil
@@ -479,7 +477,7 @@ func (s *Server) getVoiceToken(_ context.Context, _ *api.EmptyReq) (*v1.VoiceTok
 // stabilises v1beta ephemeral tokens.
 //
 // See https://ai.google.dev/gemini-api/docs/ephemeral-tokens
-func (s *Server) getVoiceTokenEphemeral(ctx context.Context, _ *api.EmptyReq) (*v1.VoiceTokenResp, error) { //nolint:unused // kept for future use
+func (s *Server) getVoiceTokenEphemeral(ctx context.Context, _ *api.EmptyReq) (*voicev1.VoiceTokenResp, error) { //nolint:unused // kept for future use
 	apiKey := s.geminiAPIKey
 	if apiKey == "" {
 		return nil, api.InternalError("GEMINI_API_KEY not configured")
@@ -530,7 +528,7 @@ func (s *Server) getVoiceTokenEphemeral(ctx context.Context, _ *api.EmptyReq) (*
 	}
 	slog.Info("voice token", "prefix", tokenPrefix, "len", len(tokenResp.Name))
 
-	return &v1.VoiceTokenResp{
+	return &voicev1.VoiceTokenResp{
 		Token:     tokenResp.Name,
 		ExpiresAt: expireTime,
 		Ephemeral: true,

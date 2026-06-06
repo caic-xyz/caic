@@ -107,21 +107,17 @@ public final class ApiClient {
     }
 
     // JSON endpoints
-    /// Returns gateway health status.
-    public func health() async throws -> HealthResp {
-        try await request("GET", path: "/health")
+    /// Returns a short-lived voice API token.
+    public func getVoiceToken() async throws -> VoiceTokenResp {
+        try await request("GET", path: "/api/v1/voice/token")
     }
-    /// Returns gateway compatibility metadata.
-    public func compat() async throws -> Compatibility {
-        try await request("GET", path: "/compat")
+    /// Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session.
+    public func voiceRTCOffer(req: VoiceRTCOfferReq) async throws -> VoiceRTCAnswerResp {
+        try await request("POST", path: "/api/v1/voice/rtc/offer", body: try encoder.encode(req))
     }
-    /// Creates a WebRTC voice session from an SDP offer.
-    public func offer(req: OfferReq) async throws -> OfferResp {
-        try await request("POST", path: "/offer", body: try encoder.encode(req))
-    }
-    /// Closes an active voice gateway session.
-    public func closeSession(sessionID: String) async throws -> CloseSessionResp {
-        try await request("POST", path: "/sessions/\(sessionID)")
+    /// Closes a WebRTC voice bridge session.
+    public func closeVoiceRTC(sessionID: String) async throws -> StatusResp {
+        try await request("POST", path: "/api/v1/voice/rtc/\(sessionID)")
     }
 
     // SSE endpoints

@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	"github.com/caic-xyz/caic/backend/internal/server/api"
+	voiceapi "github.com/caic-xyz/caic/backend/internal/voicegateway/api"
 )
 
 // writeError writes a structured JSON error response. If err implements
@@ -24,6 +25,12 @@ func writeError(w http.ResponseWriter, err error) {
 		statusCode = ews.StatusCode()
 		code = ews.Code()
 		details = ews.Details()
+	}
+	var voiceEWS voiceapi.ErrorWithStatus
+	if errors.As(err, &voiceEWS) {
+		statusCode = voiceEWS.StatusCode()
+		code = api.ErrorCode(voiceEWS.Code())
+		details = voiceEWS.Details()
 	}
 
 	slog.Error("handler error", "err", err, "statusCode", statusCode, "code", code)

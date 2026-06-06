@@ -6,53 +6,34 @@ export type ISOTimestamp = string & { readonly __brand: "ISOTimestamp" };
 //////////
 // source: types.go
 
-/** HealthResp is returned by GET /health. */
-export interface HealthResp {
-  status: string;
-}
-
-/** Compatibility is returned by GET /compat on the standalone voice gateway. */
-export interface Compatibility {
-  service: string;
-  gatewayProtocol: number /* int */;
-  serviceKinds: string[];
-  capabilities: string[];
-}
-
-/** ServiceAuthorization authorizes one service-bound voice session. */
-export interface ServiceAuthorization {
-  kind: string;
-  instanceID: string;
-  baseURL: string;
+/** VoiceTokenResp is the response for GET /api/v1/voice/token. */
+export interface VoiceTokenResp {
   token: string;
+  expiresAt: string;
+  ephemeral: boolean;
 }
 
-/** OfferReq starts a voice gateway WebRTC signaling session. */
-export interface OfferReq {
-  protocolVersion: number /* int */;
+/** VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer. */
+export interface VoiceRTCOfferReq {
   sdp: string;
-  service: ServiceAuthorization;
 }
 
-/** OfferResp returns the WebRTC SDP answer and gateway session ID. */
-export interface OfferResp {
+/** VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer. */
+export interface VoiceRTCAnswerResp {
   sdp: string;
   sessionID: string;
 }
 
-/** CloseSessionResp is returned after closing a voice gateway session. */
-export interface CloseSessionResp {
-  protocolVersion: number /* int */;
+/** StatusResp is a common response for mutation endpoints. */
+export interface StatusResp {
   status: string;
 }
 
-/** ErrorDetails holds the code and message within an error response. */
 export interface ErrorDetails {
   code: string;
   message: string;
 }
 
-/** ErrorResponse is the JSON envelope for voice gateway error responses. */
 export interface ErrorResponse {
   error: ErrorDetails;
   details?: { [key: string]: any /* json.RawMessage */};

@@ -174,9 +174,9 @@ Ownership rules:
   tool responses for the local voice endpoint.
 - Each service backend owns its web UI, auth, product API, and future
   service-specific tool manifest.
-- A service backend may either host the voice-gateway protocol itself or
+- A service backend may either host the voice-gateway API itself or
   advertise a preferred external gateway. Go Mode always talks to a
-  voice-gateway protocol endpoint, not to caic-specific voice routes.
+  voice-gateway API endpoint, not to caic-specific voice routes.
 - Go Mode owns task notifications.
 - Go Mode owns MediaProjection screenshot capture until an equivalent web path
   is proven.
@@ -262,7 +262,7 @@ Voice gateway config ownership:
 - The gateway implementation should expose a reusable static config type and
   validation function.
 - caic may embed the same static gateway config under `[voice-gateway.config]`
-  when caic hosts the gateway protocol in-process.
+  when caic hosts the gateway API in-process.
 - caic should normally store only gateway connection settings: standalone URL,
   compatibility state, and service-side token issuance policy. The effective
   gateway state is derived from the URL and `GEMINI_API_KEY`.
@@ -289,10 +289,10 @@ Effective API mode meanings:
 - `external`: caic advertises a preferred gateway URL. Android connects to that
   gateway directly and uses caic only for service metadata, web UI,
   service-signed token issuance, and caic API calls.
-- `embedded`: caic registers the reusable voice-gateway protocol handlers
+- `embedded`: caic registers the reusable voice-gateway API handlers
   in-process and advertises itself as the gateway URL. The implementation must
   still use the same gateway config, compatibility, trusted-issuer, and
-  signaling protocol as the standalone binary.
+  signaling API as the standalone binary.
 - `disabled`: caic advertises no voice gateway support.
 
 ## Voice Gateway Authentication
@@ -337,7 +337,6 @@ bindings. The exact path can change, but the shape should be stable:
     "bridgeVersion": 1,
     "voiceGateway": {
       "required": true,
-      "minGatewayProtocol": 1,
       "mode": "external",
       "url": "https://voice.example.com",
       "serviceToken": {
@@ -357,11 +356,11 @@ bindings. The exact path can change, but the shape should be stable:
 
 Versioning rules:
 
-- The API must expose gateway mode, gateway URL, minimum gateway protocol, auth
-  requirements, token exchange endpoint, and capabilities.
+- The API must expose gateway mode, gateway URL, auth requirements, token
+  exchange endpoint, and capabilities.
 - Gateway mode is one of `embedded`, `external`, or `disabled`.
 - For `embedded`, `url` points at the caic server origin and caic serves the
-  voice-gateway protocol handlers in-process.
+  voice-gateway API handlers in-process.
 - For `external`, `url` points at the preferred standalone gateway. Android
   connects to that gateway directly. caic does not depend on HTTP redirects for
   signaling.
@@ -388,7 +387,6 @@ The voice gateway also needs its own compatibility endpoint:
 ```json
 {
   "service": "voice-gateway",
-  "gatewayProtocol": 1,
   "serviceKinds": ["caic", "mddb"],
   "capabilities": [
     "voice.gatewayGeminiLive",
@@ -439,7 +437,7 @@ current code and report any mismatch.
   backend-owned server settings without duplicating configuration.
 - Hypothesis: caic only needs gateway connection and service-token policy for
   external gateway deployments; full gateway config is needed only when caic
-  explicitly hosts the gateway protocol in-process.
+  explicitly hosts the gateway API in-process.
 - Hypothesis: the first Go Mode spike can copy the relevant caic native code
   without pulling in caic task list/detail/diff/process/widget Compose UI.
 - Hypothesis: Go Mode can coexist with `com.fghbuild.caic` on the same device
@@ -575,8 +573,7 @@ Requirements:
 - caic exposes a public or minimally-authenticated compatibility endpoint.
 - voice-gateway exposes a public compatibility endpoint.
 - Android checks service ID, API version, bridge version range, and capabilities.
-- Android checks voice-gateway protocol version and capabilities before enabling
-  voice.
+- Android checks voice-gateway capabilities before enabling voice.
 - Android stores the last-known compatibility result per configured server.
 - Android stores the last-known compatibility result for the configured gateway.
 - WebView host mode exposes Go Mode shell version and native capabilities to the
@@ -975,8 +972,8 @@ Voice gateway unit tests:
 
 - Config loading and validation for `~/.config/voice-gateway/config.toml`.
 - Service public-key parsing and trusted-issuer validation.
-- Compatibility endpoint reports gateway protocol, supported service kinds, and
-  gateway capabilities.
+- Compatibility endpoint reports supported service kinds and gateway
+  capabilities.
 - Service-signed token validation rejects wrong signature, wrong issuer, wrong
   audience, expired tokens, unsupported service kind, and unsupported service
   instance.
@@ -1200,8 +1197,9 @@ PR 5: voice gateway identity and configuration. Done.
 Implemented the standalone `backend/cmd/voice-gateway` binary, reusable
 `backend/internal/voicegateway` static config, canonical
 `~/.config/voice-gateway/config.toml` loading, caic `[voice-gateway]` parsing,
-structured `Config.voiceGateway` API metadata, and gateway `GET /health` plus
-`GET /compat`. The gateway no longer reads caic `settings.json` or `users.json`.
+structured `Config.voiceGateway` API metadata, and gateway
+`GET /api/v1/voice/health` plus `GET /api/v1/voice/compat`. The gateway no
+longer reads caic `settings.json` or `users.json`.
 
 Remaining follow-up: caic currently rejects unknown gateway config fields with
 the rest of `config.toml`; deliberate gateway config version-skew handling is

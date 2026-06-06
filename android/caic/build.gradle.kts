@@ -68,6 +68,7 @@ detekt {
 
 dependencies {
     implementation(project(":caic-sdk"))
+    implementation(project(":voicegateway-sdk"))
     implementation(project(":halo"))
 
     // Compose

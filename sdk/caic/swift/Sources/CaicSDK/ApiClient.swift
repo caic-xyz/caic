@@ -231,21 +231,9 @@ public final class ApiClient {
     public func getUsage() async throws -> UsageResp {
         try await request("GET", path: "/api/v1/usage")
     }
-    /// Returns a short-lived voice API token.
-    public func getVoiceToken() async throws -> VoiceTokenResp {
-        try await request("GET", path: "/api/v1/voice/token")
-    }
     /// Fetches a URL and returns its text content.
     public func webFetch(req: WebFetchReq) async throws -> WebFetchResp {
         try await request("POST", path: "/api/v1/web/fetch", body: try encoder.encode(req))
-    }
-    /// Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session.
-    public func voiceRTCOffer(req: VoiceRTCOfferReq) async throws -> VoiceRTCAnswerResp {
-        try await request("POST", path: "/api/v1/voice/rtc/offer", body: try encoder.encode(req))
-    }
-    /// Closes a WebRTC voice bridge session.
-    public func closeVoiceRTC(sessionID: String) async throws -> StatusResp {
-        try await request("POST", path: "/api/v1/voice/rtc/\(sessionID)")
     }
 
     // SSE endpoints

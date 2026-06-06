@@ -12,6 +12,7 @@ Read the narrower guide before editing a module:
 - `:caic`: native caic companion app, package `com.fghbuild.caic`.
 - `:gomode`: Go Mode Android shell, package `com.fghbuild.gomode`.
 - `:caic-sdk`: generated Kotlin caic API SDK from `sdk/caic/kotlin`.
+- `:voicegateway-sdk`: generated Kotlin voice gateway API SDK from `sdk/voicegateway/kotlin`.
 - `:halo`: Halo BLE/message SDK from `sdk/halo`.
 
 ## Shared Conventions

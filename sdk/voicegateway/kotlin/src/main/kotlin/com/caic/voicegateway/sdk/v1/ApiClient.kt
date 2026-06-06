@@ -84,14 +84,12 @@ class ApiClient(
     }
 
     // JSON endpoints
-    /** Returns gateway health status. */
-    suspend fun health(): HealthResp = request("GET", "/health")
-    /** Returns gateway compatibility metadata. */
-    suspend fun compat(): Compatibility = request("GET", "/compat")
-    /** Creates a WebRTC voice session from an SDP offer. */
-    suspend fun offer(req: OfferReq): OfferResp = request("POST", "/offer", json.encodeToString(req))
-    /** Closes an active voice gateway session. */
-    suspend fun closeSession(sessionID: String): CloseSessionResp = request("POST", "/sessions/$sessionID")
+    /** Returns a short-lived voice API token. */
+    suspend fun getVoiceToken(): VoiceTokenResp = request("GET", "/api/v1/voice/token")
+    /** Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session. */
+    suspend fun voiceRTCOffer(req: VoiceRTCOfferReq): VoiceRTCAnswerResp = request("POST", "/api/v1/voice/rtc/offer", json.encodeToString(req))
+    /** Closes a WebRTC voice bridge session. */
+    suspend fun closeVoiceRTC(sessionID: String): StatusResp = request("POST", "/api/v1/voice/rtc/$sessionID")
 
     // SSE endpoints
 

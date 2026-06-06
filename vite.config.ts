@@ -12,6 +12,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@sdk": resolve(__dirname, "sdk/caic/ts/v1"),
+      "@voicegateway-sdk": resolve(__dirname, "sdk/voicegateway/ts/v1"),
     },
   },
   build: {

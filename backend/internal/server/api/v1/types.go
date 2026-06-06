@@ -83,13 +83,12 @@ const (
 
 // VoiceGatewayMetadata reports structured voice gateway support.
 type VoiceGatewayMetadata struct {
-	Mode               VoiceGatewayMode `json:"mode"`
-	URL                string           `json:"url,omitempty"`
-	MinGatewayProtocol int              `json:"minGatewayProtocol,omitempty"`
-	AuthRequired       bool             `json:"authRequired,omitempty"`
-	TokenEndpoint      string           `json:"tokenEndpoint,omitempty"`
-	TokenAudience      string           `json:"tokenAudience,omitempty"`
-	Capabilities       []string         `json:"capabilities,omitempty"`
+	Mode          VoiceGatewayMode `json:"mode"`
+	URL           string           `json:"url,omitempty"`
+	AuthRequired  bool             `json:"authRequired,omitempty"`
+	TokenEndpoint string           `json:"tokenEndpoint,omitempty"`
+	TokenAudience string           `json:"tokenAudience,omitempty"`
+	Capabilities  []string         `json:"capabilities,omitempty"`
 }
 
 // UserResp is returned by GET /api/v1/auth/me.
@@ -461,13 +460,6 @@ type UsageResp struct {
 	Local     LocalUsage      `json:"local"`
 }
 
-// VoiceTokenResp is the response for GET /api/v1/voice/token.
-type VoiceTokenResp struct {
-	Token     string `json:"token"`
-	ExpiresAt string `json:"expiresAt"`
-	Ephemeral bool   `json:"ephemeral"`
-}
-
 // DiffResp is the response for GET /api/v1/tasks/{id}/diff.
 type DiffResp struct {
 	Diff string `json:"diff"`
@@ -601,17 +593,6 @@ type WellKnownCache struct {
 type WellKnownCachesResp struct {
 	HarnessMounts []string         `json:"harnessMounts"` // e.g. "~/.claude", "~/.codex"
 	WellKnown     []WellKnownCache `json:"wellKnown"`
-}
-
-// VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer.
-type VoiceRTCOfferReq struct {
-	SDP string `json:"sdp"`
-}
-
-// VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer.
-type VoiceRTCAnswerResp struct {
-	SDP       string `json:"sdp"`
-	SessionID string `json:"sessionID"`
 }
 
 // VersionResp is the response for GET /api/v1/server/version.

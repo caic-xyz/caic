@@ -27,52 +27,32 @@ object ErrorCodes {
     const val InternalError = "INTERNAL_ERROR"
 }
 
-/** HealthResp is returned by GET /health. */
+/** VoiceTokenResp is the response for GET /api/v1/voice/token. */
 @Serializable
-data class HealthResp(val status: String)
-
-/** Compatibility is returned by GET /compat on the standalone voice gateway. */
-@Serializable
-data class Compatibility(
-    val service: String,
-    val gatewayProtocol: Int,
-    val serviceKinds: List<String>,
-    val capabilities: List<String>,
-)
-
-/** ServiceAuthorization authorizes one service-bound voice session. */
-@Serializable
-data class ServiceAuthorization(
-    val kind: String,
-    @SerialName("instanceID") val instanceID: String,
-    @SerialName("baseURL") val baseURL: String,
+data class VoiceTokenResp(
     val token: String,
+    val expiresAt: String,
+    val ephemeral: Boolean,
 )
 
-/** OfferReq starts a voice gateway WebRTC signaling session. */
+/** VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer. */
 @Serializable
-data class OfferReq(
-    val protocolVersion: Int,
-    val sdp: String,
-    val service: ServiceAuthorization,
-)
+data class VoiceRTCOfferReq(val sdp: String)
 
-/** OfferResp returns the WebRTC SDP answer and gateway session ID. */
+/** VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer. */
 @Serializable
-data class OfferResp(
+data class VoiceRTCAnswerResp(
     val sdp: String,
     @SerialName("sessionID") val sessionID: String,
 )
 
-/** CloseSessionResp is returned after closing a voice gateway session. */
+/** StatusResp is a common response for mutation endpoints. */
 @Serializable
-data class CloseSessionResp(val protocolVersion: Int, val status: String)
+data class StatusResp(val status: String)
 
-/** ErrorDetails holds the code and message within an error response. */
 @Serializable
 data class ErrorDetails(val code: String, val message: String)
 
-/** ErrorResponse is the JSON envelope for voice gateway error responses. */
 @Serializable
 data class ErrorResponse(val error: ErrorDetails, val details: Map<String, JsonElement>? = null)
 

@@ -1,4 +1,4 @@
-// Tests for the voice gateway protocol HTTP handlers.
+// Tests for the voice gateway API HTTP handlers.
 
 package voicegateway
 
@@ -18,7 +18,7 @@ func TestNewHandler(t *testing.T) {
 	t.Run("health", func(t *testing.T) {
 		t.Parallel()
 		w := httptest.NewRecorder()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/health", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/voice/health", http.NoBody)
 		cfg := DefaultConfig()
 		handler, err := NewHandler(&cfg, nil)
 		if err != nil {
@@ -45,7 +45,7 @@ func TestNewHandler(t *testing.T) {
 			{Service: "caic", Issuer: "https://caic.example.com", PublicKey: publicKey},
 		}
 		w := httptest.NewRecorder()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/compat", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/voice/compat", http.NoBody)
 		handler, err := NewHandler(&cfg, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -66,23 +66,10 @@ func TestNewHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("offer requires protocol version", func(t *testing.T) {
-		t.Parallel()
-		w := httptest.NewRecorder()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/offer", strings.NewReader(`{"sdp":"offer"}`))
-		cfg := DefaultConfig()
-		handler, err := NewHandler(&cfg, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		handler.ServeHTTP(w, req)
-		assertErrorResponse(t, w, http.StatusBadRequest, "BAD_REQUEST", "unsupported protocolVersion")
-	})
-
 	t.Run("offer requires service identity", func(t *testing.T) {
 		t.Parallel()
 		w := httptest.NewRecorder()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/offer", strings.NewReader(`{"protocolVersion":1,"sdp":"offer"}`))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/voice/rtc/offer", strings.NewReader(`{"sdp":"offer"}`))
 		cfg := DefaultConfig()
 		handler, err := NewHandler(&cfg, nil)
 		if err != nil {
@@ -115,8 +102,8 @@ func TestNewHandler(t *testing.T) {
 			t.Fatal(err)
 		}
 		w := httptest.NewRecorder()
-		body := `{"protocolVersion":1,"sdp":"offer","service":{"kind":"caic","instanceID":"home","baseURL":"https://caic.example.com","token":"` + token + `"}}`
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/offer", strings.NewReader(body))
+		body := `{"sdp":"offer","service":{"kind":"caic","instanceID":"home","baseURL":"https://caic.example.com","token":"` + token + `"}}`
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/voice/rtc/offer", strings.NewReader(body))
 		cfg := DefaultConfig()
 		cfg.TrustedIssuers = []TrustedIssuerConfig{{
 			Service:   "caic",

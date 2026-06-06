@@ -33,7 +33,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
-	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
 )
 
@@ -1945,9 +1944,6 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 		got := s.voiceGatewayMetadata()
 		if got.Mode != v1.VoiceGatewayModeEmbedded {
 			t.Fatalf("Mode = %q, want embedded", got.Mode)
-		}
-		if got.MinGatewayProtocol != voicegateway.ProtocolVersion {
-			t.Fatalf("MinGatewayProtocol = %d, want %d", got.MinGatewayProtocol, voicegateway.ProtocolVersion)
 		}
 	})
 }

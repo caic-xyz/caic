@@ -22,8 +22,6 @@ const (
 	DefaultGeminiModel = "gemini-3.1-flash-live-preview"
 	// GeminiAPIKeyEnv is the environment variable read for Gemini access.
 	GeminiAPIKeyEnv = "GEMINI_API_KEY" //nolint:gosec // G101: environment variable name, not a credential.
-	// ProtocolVersion is the current voice gateway compatibility protocol.
-	ProtocolVersion = 1
 )
 
 // Config is the static voice gateway configuration.
@@ -53,12 +51,11 @@ type TrustedIssuerConfig struct {
 	PublicKey string `toml:"public_key"`
 }
 
-// Compatibility is returned by GET /compat on the standalone voice gateway.
+// Compatibility is returned by GET /api/v1/voice/compat on the standalone voice gateway.
 type Compatibility struct {
-	Service         string   `json:"service"`
-	GatewayProtocol int      `json:"gatewayProtocol"`
-	ServiceKinds    []string `json:"serviceKinds"`
-	Capabilities    []string `json:"capabilities"`
+	Service      string   `json:"service"`
+	ServiceKinds []string `json:"serviceKinds"`
+	Capabilities []string `json:"capabilities"`
 }
 
 // DefaultConfig returns the standalone voice gateway defaults.
@@ -133,10 +130,9 @@ func (c *Config) Compatibility() Compatibility {
 		kinds = append(kinds, issuer.Service)
 	}
 	return Compatibility{
-		Service:         "voice-gateway",
-		GatewayProtocol: ProtocolVersion,
-		ServiceKinds:    kinds,
-		Capabilities:    c.capabilities(),
+		Service:      "voice-gateway",
+		ServiceKinds: kinds,
+		Capabilities: c.capabilities(),
 	}
 }
 

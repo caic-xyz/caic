@@ -13,7 +13,8 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/voicegateway"
+	voiceapi "github.com/caic-xyz/caic/backend/internal/voicegateway/api"
+	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
 )
 
 func main() {
@@ -126,7 +127,7 @@ func generateCaicSDK() error {
 func generateVoiceGatewaySDK() error {
 	// Directories are relative to go:generate CWD (backend/internal/server/api/v1/).
 	const (
-		sourceDir = "../../../voicegateway"
+		sourceDir = "../../../voicegateway/api/v1"
 		sdkDir    = "../../../../../sdk/voicegateway"
 		tsDir     = sdkDir + "/ts/v1"
 		kotlinDir = sdkDir + "/kotlin/src/main/kotlin/com/caic/voicegateway/sdk/v1"
@@ -139,14 +140,15 @@ func generateVoiceGatewaySDK() error {
 	docs.cfg = &genConfig{
 		routes: voiceGatewayRoutes(),
 		sdkPackagePaths: map[string]struct{}{
-			reflect.TypeFor[voicegateway.Compatibility]().PkgPath(): {},
+			reflect.TypeFor[voicev1.StatusResp]().PkgPath():     {},
+			reflect.TypeFor[voiceapi.ErrorResponse]().PkgPath(): {},
 		},
 		extraSeeds: []reflect.Type{
-			reflect.TypeFor[voicegateway.ErrorResponse](),
+			reflect.TypeFor[voiceapi.ErrorResponse](),
 		},
 		kotlinPackage: "com.caic.voicegateway.sdk.v1",
 		apiDocTitle:   "Voice Gateway API Reference",
-		apiDocIntro:   "RESTful JSON signaling API served by the standalone voice gateway.",
+		apiDocIntro:   "RESTful JSON signaling API served at `/api/v1/voice/`.",
 		specialTypes: []specialType{
 			{
 				t:          reflect.TypeFor[json.RawMessage](),
@@ -209,39 +211,21 @@ func caicRoutes() []routeDef {
 }
 
 func voiceGatewayRoutes() []routeDef {
-	return []routeDef{
-		{
-			Name:     "health",
-			Doc:      "Returns gateway health status.",
-			Method:   "GET",
-			Path:     "/health",
-			Category: "Health",
-			Resp:     reflect.TypeFor[voicegateway.HealthResp](),
-		},
-		{
-			Name:     "compat",
-			Doc:      "Returns gateway compatibility metadata.",
-			Method:   "GET",
-			Path:     "/compat",
-			Category: "Compatibility",
-			Resp:     reflect.TypeFor[voicegateway.Compatibility](),
-		},
-		{
-			Name:     "offer",
-			Doc:      "Creates a WebRTC voice session from an SDP offer.",
-			Method:   "POST",
-			Path:     "/offer",
-			Category: "Sessions",
-			Req:      reflect.TypeFor[voicegateway.OfferReq](),
-			Resp:     reflect.TypeFor[voicegateway.OfferResp](),
-		},
-		{
-			Name:     "closeSession",
-			Doc:      "Closes an active voice gateway session.",
-			Method:   "POST",
-			Path:     "/sessions/{sessionID}",
-			Category: "Sessions",
-			Resp:     reflect.TypeFor[voicegateway.CloseSessionResp](),
-		},
+	routes := make([]routeDef, len(voicev1.Routes))
+	for i := range voicev1.Routes {
+		r := &voicev1.Routes[i]
+		routes[i] = routeDef{
+			Name:        r.Name,
+			Doc:         r.Doc,
+			Method:      r.Method,
+			Path:        r.Path,
+			Category:    r.CategoryName(),
+			Req:         r.Req,
+			Resp:        r.Resp,
+			IsArray:     r.IsArray,
+			IsSSE:       r.IsSSE,
+			QueryParams: slices.Clone(r.QueryParams),
+		}
 	}
+	return routes
 }

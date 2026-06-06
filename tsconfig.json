@@ -17,11 +17,15 @@
     "paths": {
       "@sdk/*": [
         "./sdk/caic/ts/v1/*"
+      ],
+      "@voicegateway-sdk/*": [
+        "./sdk/voicegateway/ts/v1/*"
       ]
     }
   },
   "include": [
     "frontend/src",
-    "sdk/caic"
+    "sdk/caic",
+    "sdk/voicegateway"
   ]
 }

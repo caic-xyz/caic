@@ -7,10 +7,10 @@ import (
 	"net/http"
 
 	"github.com/caic-xyz/caic/backend/internal/server/api"
-	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
 )
 
-func (s *Server) voiceRTCOffer(ctx context.Context, req *v1.VoiceRTCOfferReq) (*v1.VoiceRTCAnswerResp, error) {
+func (s *Server) voiceRTCOffer(ctx context.Context, req *voicev1.VoiceRTCOfferReq) (*voicev1.VoiceRTCAnswerResp, error) {
 	if s.voiceBridge == nil {
 		return nil, api.BadRequest("WebRTC is not enabled (set voice-gateway.config.server.webrtc_udp_port and GEMINI_API_KEY)")
 	}
@@ -18,7 +18,7 @@ func (s *Server) voiceRTCOffer(ctx context.Context, req *v1.VoiceRTCOfferReq) (*
 	if err != nil {
 		return nil, api.InternalError("WebRTC offer failed: " + err.Error()).Wrap(err)
 	}
-	return &v1.VoiceRTCAnswerResp{
+	return &voicev1.VoiceRTCAnswerResp{
 		SDP:       sdpAnswer,
 		SessionID: sessionID,
 	}, nil
@@ -35,5 +35,5 @@ func (s *Server) handleVoiceRTCClose(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.voiceBridge.Close(sessionID)
-	writeJSONResponse[v1.StatusResp](w, &v1.StatusResp{Status: "closed"}, nil)
+	writeJSONResponse[voicev1.StatusResp](w, &voicev1.StatusResp{Status: "closed"}, nil)
 }

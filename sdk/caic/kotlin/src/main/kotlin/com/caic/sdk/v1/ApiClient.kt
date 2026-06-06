@@ -146,14 +146,8 @@ class ApiClient(
     suspend fun getTaskToolInput(id: String, toolUseID: String): TaskToolInputResp = request("GET", "/api/v1/tasks/$id/tool/$toolUseID")
     /** Returns current usage quota statistics. */
     suspend fun getUsage(): UsageResp = request("GET", "/api/v1/usage")
-    /** Returns a short-lived voice API token. */
-    suspend fun getVoiceToken(): VoiceTokenResp = request("GET", "/api/v1/voice/token")
     /** Fetches a URL and returns its text content. */
     suspend fun webFetch(req: WebFetchReq): WebFetchResp = request("POST", "/api/v1/web/fetch", json.encodeToString(req))
-    /** Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session. */
-    suspend fun voiceRTCOffer(req: VoiceRTCOfferReq): VoiceRTCAnswerResp = request("POST", "/api/v1/voice/rtc/offer", json.encodeToString(req))
-    /** Closes a WebRTC voice bridge session. */
-    suspend fun closeVoiceRTC(sessionID: String): StatusResp = request("POST", "/api/v1/voice/rtc/$sessionID")
 
     // SSE endpoints
     /** Streams raw backend-specific task events via SSE. */

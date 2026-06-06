@@ -220,14 +220,6 @@ func (r *SignalProcessReq) Validate() error {
 	}
 }
 
-// Validate checks that the SDP offer is provided.
-func (r *VoiceRTCOfferReq) Validate() error {
-	if r.SDP == "" {
-		return api.BadRequest("sdp is required")
-	}
-	return nil
-}
-
 // validateRepoSpecs checks that each RepoSpec has a non-empty name and no duplicates.
 func validateRepoSpecs(specs []RepoSpec, field string) error {
 	seen := make(map[string]struct{}, len(specs))

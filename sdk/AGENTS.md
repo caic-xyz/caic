@@ -11,14 +11,21 @@ Shared client SDKs live here.
 - Keep TypeScript, Kotlin, Swift, and `API.md` outputs together when moving or
   regenerating the caic SDK.
 
+## Voice Gateway API SDK
+
+- Generated voice gateway API SDK outputs live under `voicegateway/`.
+- Do not edit generated voice gateway SDK files directly. Update
+  `backend/internal/voicegateway/api/v1` declarations and run `make types`.
+- Android consumes the Kotlin SDK through Gradle target `:voicegateway-sdk`.
+
 ## Halo SDK
 
 Read `halo/AGENTS.md` before touching Halo BLE or message SDK code.
 
 ## Checks
 
-- Generated caic SDK or path changes: run `make types`, `make lint`, and the
-  Android checks if Kotlin/Gradle wiring changed.
+- Generated caic or voice gateway SDK/path changes: run `make types`,
+  `make lint`, and the Android checks if Kotlin/Gradle wiring changed.
 - Halo SDK changes: follow `halo/AGENTS.md`.
 
 <!-- BEGIN FILE INDEX -->

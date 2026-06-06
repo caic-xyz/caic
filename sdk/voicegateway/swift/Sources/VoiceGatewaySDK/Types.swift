@@ -43,53 +43,34 @@ public enum ErrorCodes {
     public static let internalError = "INTERNAL_ERROR"
 }
 
-/// HealthResp is returned by GET /health.
-public struct HealthResp: Codable {
-    public let status: String
-}
-
-/// Compatibility is returned by GET /compat on the standalone voice gateway.
-public struct Compatibility: Codable {
-    public let service: String
-    public let gatewayProtocol: Int
-    public let serviceKinds: [String]
-    public let capabilities: [String]
-}
-
-/// ServiceAuthorization authorizes one service-bound voice session.
-public struct ServiceAuthorization: Codable {
-    public let kind: String
-    public let instanceID: String
-    public let baseURL: String
+/// VoiceTokenResp is the response for GET /api/v1/voice/token.
+public struct VoiceTokenResp: Codable {
     public let token: String
+    public let expiresAt: String
+    public let ephemeral: Bool
 }
 
-/// OfferReq starts a voice gateway WebRTC signaling session.
-public struct OfferReq: Codable {
-    public let protocolVersion: Int
+/// VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer.
+public struct VoiceRTCOfferReq: Codable {
     public let sdp: String
-    public let service: ServiceAuthorization
 }
 
-/// OfferResp returns the WebRTC SDP answer and gateway session ID.
-public struct OfferResp: Codable {
+/// VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer.
+public struct VoiceRTCAnswerResp: Codable {
     public let sdp: String
     public let sessionID: String
 }
 
-/// CloseSessionResp is returned after closing a voice gateway session.
-public struct CloseSessionResp: Codable {
-    public let protocolVersion: Int
+/// StatusResp is a common response for mutation endpoints.
+public struct StatusResp: Codable {
     public let status: String
 }
 
-/// ErrorDetails holds the code and message within an error response.
 public struct ErrorDetails: Codable {
     public let code: String
     public let message: String
 }
 
-/// ErrorResponse is the JSON envelope for voice gateway error responses.
 public struct ErrorResponse: Codable {
     public let error: ErrorDetails
     public let details: [String: JSONValue]?

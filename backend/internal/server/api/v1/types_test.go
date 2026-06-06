@@ -206,20 +206,6 @@ func TestRoutes(t *testing.T) {
 			t.Fatalf("QueryParams = %v, want [path]", r.QueryParams)
 		}
 	})
-
-	t.Run("closeVoiceRTCDeclared", func(t *testing.T) {
-		t.Parallel()
-		r := routeByName(t, "closeVoiceRTC")
-		if r.Method != http.MethodPost {
-			t.Fatalf("method = %q, want POST", r.Method)
-		}
-		if r.Path != "/api/v1/voice/rtc/{sessionID}" {
-			t.Fatalf("path = %q, want voice RTC close path", r.Path)
-		}
-		if r.RespName() != "StatusResp" {
-			t.Fatalf("response = %q, want StatusResp", r.RespName())
-		}
-	})
 }
 
 func routeByName(t *testing.T, name string) Route {

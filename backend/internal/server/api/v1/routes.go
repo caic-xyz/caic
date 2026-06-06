@@ -318,33 +318,11 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[UsageResp](),
 	},
 	{
-		Name:   "getVoiceToken",
-		Doc:    "Returns a short-lived voice API token.",
-		Method: "GET",
-		Path:   "/api/v1/voice/token",
-		Resp:   reflect.TypeFor[VoiceTokenResp](),
-	},
-	{
 		Name:   "webFetch",
 		Doc:    "Fetches a URL and returns its text content.",
 		Method: "POST",
 		Path:   "/api/v1/web/fetch",
 		Req:    reflect.TypeFor[WebFetchReq](),
 		Resp:   reflect.TypeFor[WebFetchResp](),
-	},
-	{
-		Name:   "voiceRTCOffer",
-		Doc:    "Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session.",
-		Method: "POST",
-		Path:   "/api/v1/voice/rtc/offer",
-		Req:    reflect.TypeFor[VoiceRTCOfferReq](),
-		Resp:   reflect.TypeFor[VoiceRTCAnswerResp](),
-	},
-	{
-		Name:   "closeVoiceRTC",
-		Doc:    "Closes a WebRTC voice bridge session.",
-		Method: "POST",
-		Path:   "/api/v1/voice/rtc/{sessionID}",
-		Resp:   reflect.TypeFor[StatusResp](),
 	},
 }
