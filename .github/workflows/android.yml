@@ -110,6 +110,6 @@ jobs:
         with:
           name: e2e-failure-logs
           path: |
-            android/app/build/reports/androidTests/connected/**
-            android/app/build/outputs/androidTest-results/connected/**
+            android/*/build/reports/androidTests/connected/**
+            android/*/build/outputs/androidTest-results/connected/**
           retention-days: 7

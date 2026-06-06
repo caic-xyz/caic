@@ -56,16 +56,9 @@ class WebShellSmokeTest {
         waitForDom("Boolean(document.querySelector('[data-testid=\"repo-chips\"] [data-testid^=\"chip-label-\"]'))")
 
         val prompt = "gomode web shell ${System.currentTimeMillis()}"
-        assertJsTrue(
-            """
-            const input = document.querySelector('[data-testid="prompt-input"]');
-            const submit = document.querySelector('[data-testid="submit-task"]');
-            input.textContent = ${prompt.jsString()};
-            input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${prompt.jsString()} }));
-            submit.click();
-            true;
-            """.trimIndent(),
-        )
+        enterPrompt(prompt)
+        waitForDom("document.querySelector('[data-testid=\"submit-task\"]')?.disabled === false")
+        clickSubmit()
 
         waitForDom("location.pathname.startsWith('/task/')")
         waitForDom("document.body.textContent.includes('Why do programmers prefer dark mode?')")
@@ -103,6 +96,30 @@ class WebShellSmokeTest {
 
     private fun assertJsTrue(script: String) {
         assertEquals("true", js(script))
+    }
+
+    private fun enterPrompt(prompt: String) {
+        assertJsTrue(
+            """
+            const input = document.querySelector('[data-testid="prompt-input"]');
+            input.focus();
+            input.textContent = ${prompt.jsString()};
+            input.dispatchEvent(
+              new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${prompt.jsString()} })
+            );
+            true;
+            """.trimIndent(),
+        )
+        waitForDom("document.querySelector('[data-testid=\"prompt-input\"]')?.textContent === ${prompt.jsString()}")
+    }
+
+    private fun clickSubmit() {
+        assertJsTrue(
+            """
+            document.querySelector('[data-testid="submit-task"]').click();
+            true;
+            """.trimIndent(),
+        )
     }
 
     private fun js(script: String): String {

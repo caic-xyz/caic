@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
 """Run Android E2E tests against the fake backend.
 
+By default this runs all Android E2E modules. Use --module to run one module:
+  python3 scripts/android_e2e.py --module app
+  python3 scripts/android_e2e.py --module gomode
+  python3 scripts/android_e2e.py --module halo
+  python3 scripts/android_e2e.py --module all
+
 Steps:
   1. Build the fake backend (go build -tags e2e).
   2. Find a free port and start the backend on it.
   3. Wait until the backend responds.
-  4. Run connectedAndroidTest via Gradle, passing 10.0.2.2:PORT
-     (emulator's host alias — no adb reverse needed).
-  5. Pull and convert screenshots.
+  4. Run the selected connectedAndroidTest module(s) via Gradle, passing
+     10.0.2.2:PORT (emulator's host alias — no adb reverse needed).
+  5. Pull and convert screenshots when the app module ran; focused gomode and
+     halo runs skip screenshot collection.
   6. Dump logcat on failure for CI diagnostics.
   7. Kill the backend on exit.
 """
@@ -27,6 +34,16 @@ import urllib.request
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCREENSHOT_DIR = os.path.join(ROOT_DIR, "e2e", "screenshots", "android")
+TEST_TASKS_BY_MODULE: dict[str, tuple[str, ...]] = {
+    "app": (":app:connectedAndroidTest",),
+    "gomode": (":gomode:connectedAndroidTest",),
+    "halo": (":halo:connectedAndroidTest",),
+}
+TEST_TASKS_BY_MODULE["all"] = (
+    *TEST_TASKS_BY_MODULE["app"],
+    *TEST_TASKS_BY_MODULE["gomode"],
+    *TEST_TASKS_BY_MODULE["halo"],
+)
 
 
 def find_free_port():
@@ -168,7 +185,7 @@ def is_emulator():
     return "emulator" in result.stdout
 
 
-def run_tests(port):
+def run_tests(port, module):
     # 10.0.2.2 is the emulator's host loopback alias — no adb reverse needed.
     # Real devices need localhost + adb reverse.
     if is_emulator():
@@ -176,11 +193,8 @@ def run_tests(port):
     else:
         host = "localhost"
         subprocess.check_call(["adb", "reverse", f"tcp:{port}", f"tcp:{port}"])
-    for task in (
-        ":app:connectedAndroidTest",
-        ":gomode:connectedAndroidTest",
-        ":halo:connectedAndroidTest",
-    ):
+    for task in TEST_TASKS_BY_MODULE[module]:
+        print(f"Running {task}...")
         result = subprocess.run(
             [
                 "./gradlew",
@@ -193,6 +207,10 @@ def run_tests(port):
         if result.returncode != 0:
             return result.returncode
     return 0
+
+
+def module_generates_screenshots(module):
+    return module in ("all", "app")
 
 
 def pull_screenshots():
@@ -264,8 +282,22 @@ def pull_screenshots():
     return 0
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--module",
+        choices=tuple(TEST_TASKS_BY_MODULE.keys()),
+        default="all",
+        help="Android module to test. Defaults to all.",
+    )
+    return parser.parse_args()
+
+
 def main():
-    argparse.ArgumentParser(description=__doc__).parse_args()
+    args = parse_args()
 
     try:
         subprocess.run(["java", "-version"], capture_output=True, check=True)
@@ -314,10 +346,10 @@ def main():
                     file=sys.stderr,
                 )
                 return 1
-            print("Running Android E2E tests...")
+            print(f"Running Android E2E tests for {args.module}...")
             logcat_proc, logcat_path, logcat_file = start_logcat(tmp_dir)
             try:
-                rc = run_tests(port)
+                rc = run_tests(port, args.module)
             finally:
                 stop_logcat(logcat_proc, logcat_file)
 
@@ -325,9 +357,11 @@ def main():
                 print(f"Tests failed (exit {rc}). Dumping logcat:", file=sys.stderr)
                 dump_logcat_on_failure(logcat_path)
                 persist_logcat_for_artifact(logcat_path)
-            else:
+            elif module_generates_screenshots(args.module):
                 print("Pulling screenshots...")
                 rc = pull_screenshots()
+            else:
+                print(f"Skipping screenshots for {args.module}.")
 
             return rc
         finally:
