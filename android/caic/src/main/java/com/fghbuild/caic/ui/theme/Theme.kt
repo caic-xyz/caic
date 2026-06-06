@@ -1,4 +1,4 @@
-// Material 3 theme with state-based task colors and centralized app color system. Keep color values in sync with frontend/src/global.css.
+// Material 3 theme with state-based task colors and shared app color system.
 package com.fghbuild.caic.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -96,15 +96,6 @@ data class AppColors(
     val thinkingBorder: Color,  // #9B8FD4  --color-thinking-border
     val elidedBg: Color,        // #E4EAF1  --color-elided-bg
     val elidedText: Color,      // #4A6785  --color-elided-text
-    val diffAddedStat: Color,   // #22863A  --color-diff-added-stat
-    val diffDeletedStat: Color, // #CB2431  --color-diff-deleted-stat
-    val diffBinary: Color,      // #6A737D  --color-diff-binary
-    val diffAddedLine: Color,   // #4EC94E  --color-diff-added-line
-    val diffDeletedLine: Color, // #FF4444  --color-diff-deleted-line
-    val diffHunk: Color,        // #B48EAD  --color-diff-hunk
-    val diffHeader: Color,      // #888888  --color-text-muted
-    val diffCodeBg: Color,      // #1E1E1E  --color-diff-code-bg
-    val diffCodeFg: Color,      // #D4D4D4  --color-diff-code-fg
     val widgetBorder: Color,    // #CCCCCC  --color-widget-border (= --color-border-medium)
     val widgetBg: Color,        // #FAFAFA  --color-widget-bg (= --color-bg-surface)
 )
@@ -131,15 +122,6 @@ private val LightAppColors = AppColors(
     thinkingBorder = Color(0xFF9B8FD4),
     elidedBg = Color(0xFFE4EAF1),
     elidedText = Color(0xFF4A6785),
-    diffAddedStat = Color(0xFF22863A),
-    diffDeletedStat = Color(0xFFCB2431),
-    diffBinary = Color(0xFF6A737D),
-    diffAddedLine = Color(0xFF4EC94E),
-    diffDeletedLine = Color(0xFFFF4444),
-    diffHunk = Color(0xFFB48EAD),
-    diffHeader = Color(0xFF888888),
-    diffCodeBg = Color(0xFF1E1E1E),
-    diffCodeFg = Color(0xFFD4D4D4),
     widgetBorder = Color(0xFFCCCCCC),
     widgetBg = Color(0xFFFAFAFA),
 )

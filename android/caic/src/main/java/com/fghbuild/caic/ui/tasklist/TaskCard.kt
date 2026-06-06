@@ -72,6 +72,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val TerminalStates = setOf(TaskState.Purged, TaskState.Failed)
+private val DiffStatAdded = Color(0xFF22863A)
+private val DiffStatDeleted = Color(0xFFCB2431)
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -296,9 +298,9 @@ fun TaskCard(task: Task, modifier: Modifier = Modifier, autoFixPR: Boolean = fal
                 Text(
                     text = buildAnnotatedString {
                         append("$files file${if (files != 1) "s" else ""} ")
-                        withStyle(SpanStyle(color = appColors.diffAddedStat)) { append("+$added") }
+                        withStyle(SpanStyle(color = DiffStatAdded)) { append("+$added") }
                         append(" ")
-                        withStyle(SpanStyle(color = appColors.diffDeletedStat)) { append("-$deleted") }
+                        withStyle(SpanStyle(color = DiffStatDeleted)) { append("-$deleted") }
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -269,6 +269,9 @@ a.headerPR:hover {
 }
 
 .markdown {
+  --color-diff-code-bg: #1e1e1e;
+  --color-diff-code-fg: #d4d4d4;
+
   margin-bottom: 0.25rem;
   line-height: 1.5;
   word-break: break-word;
@@ -619,6 +622,10 @@ a.ciStatus:hover {
 }
 
 .resultDiffStat {
+  --color-diff-added: #22863a;
+  --color-diff-deleted: #cb2431;
+  --color-diff-binary: #6a737d;
+
   margin: 0.25rem 0 0;
   padding: 0.4rem 0.6rem;
   background: rgba(0, 0, 0, 0.05);

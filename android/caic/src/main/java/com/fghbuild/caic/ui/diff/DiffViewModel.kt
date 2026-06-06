@@ -1,4 +1,4 @@
-// ViewModel for the diff screen: fetches full diff once, splits by file.
+// ViewModel for the diff screen: fetches full diff once, splits annotated lines by file.
 package com.fghbuild.caic.ui.diff
 
 import androidx.lifecycle.SavedStateHandle
@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /** One file's portion of the unified diff. */
-data class FileDiff(val path: String, val content: String)
+data class FileDiff(val path: String, val content: String, val lines: List<DiffLine>)
 
 data class DiffState(
     val task: Task? = null,
@@ -107,7 +107,6 @@ class DiffViewModel @Inject constructor(
     }
 
     companion object {
-        private val DIFF_HEADER = Regex("^(?=diff --git )", RegexOption.MULTILINE)
         // +++ b/path or +++ path (most reliable source).
         private val PLUS_RE = Regex("^\\+\\+\\+ (?:[a-z]/)?(.+)", RegexOption.MULTILINE)
         // --- a/path for deleted files.
@@ -134,9 +133,19 @@ class DiffViewModel @Inject constructor(
         /** Split a unified diff into per-file sections. */
         fun splitDiff(raw: String): List<FileDiff> {
             if (raw.isBlank()) return emptyList()
-            return raw.split(DIFF_HEADER)
-                .filter { it.isNotBlank() }
-                .map { part -> FileDiff(extractPath(part), part) }
+            val sections = mutableListOf<MutableList<DiffLine>>()
+            DiffLineClassifier.annotateDiffLines(raw).forEach { line ->
+                if (line.text.startsWith("diff --git ") || sections.isEmpty()) {
+                    sections.add(mutableListOf())
+                }
+                sections.last().add(line)
+            }
+            return sections
+                .filter { section -> section.any { it.text.isNotBlank() } }
+                .map { section ->
+                    val content = section.joinToString("\n") { it.text }
+                    FileDiff(extractPath(content), content, section)
+                }
         }
     }
 }

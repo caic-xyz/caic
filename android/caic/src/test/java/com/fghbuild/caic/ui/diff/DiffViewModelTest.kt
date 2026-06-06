@@ -30,6 +30,7 @@ class DiffViewModelTest {
         assertEquals(1, diffs.size)
         assertEquals("src/main.kt", diffs[0].path)
         assertTrue(diffs[0].content.contains("added line"))
+        assertTrue(diffs[0].lines.any { it.text == "+added line" && it.kind == DiffLineKind.Added })
     }
 
     @Test
@@ -69,6 +70,32 @@ class DiffViewModelTest {
         assertEquals(1, diffs.size)
         assertEquals("empty.kt", diffs[0].path)
         assertTrue(diffs[0].content.contains("Binary files differ"))
+    }
+
+    @Test
+    fun `splitDiff preserves moved annotations across files`() {
+        val raw = """
+            |diff --git a/old.kt b/old.kt
+            |--- a/old.kt
+            |+++ b/old.kt
+            |@@ -1,3 +0,0 @@
+            |-fun movedBetweenFiles() {
+            |-    return movedBetweenFilesValue
+            |-}
+            |diff --git a/new.kt b/new.kt
+            |--- a/new.kt
+            |+++ b/new.kt
+            |@@ -0,0 +1,3 @@
+            |+fun movedBetweenFiles() {
+            |+    return movedBetweenFilesValue
+            |+}
+        """.trimMargin()
+
+        val diffs = DiffViewModel.splitDiff(raw)
+
+        assertEquals(2, diffs.size)
+        assertEquals(3, diffs[0].lines.count { it.kind == DiffLineKind.MovedDeleted })
+        assertEquals(3, diffs[1].lines.count { it.kind == DiffLineKind.MovedAdded })
     }
 
     // ---- extractPath ----
@@ -172,5 +199,76 @@ class DiffViewModelTest {
             |@@ -1 +1 @@
         """.trimMargin()
         assertEquals("old.kt", DiffViewModel.extractPath(section))
+    }
+
+    @Test
+    fun `annotateDiffLines marks matching added and deleted blocks as moved`() {
+        val diff = """
+            |diff --git a/src/main.kt b/src/main.kt
+            |--- a/src/main.kt
+            |+++ b/src/main.kt
+            |@@ -1,8 +1,8 @@
+            | val keep = true
+            |-fun movedExample() {
+            |-    return alphaBetaGammaDelta
+            |-}
+            | val middle = true
+            |+fun movedExample() {
+            |+    return alphaBetaGammaDelta
+            |+}
+        """.trimMargin()
+
+        val lines = DiffLineClassifier.annotateDiffLines(diff)
+
+        assertEquals(3, lines.count { it.kind == DiffLineKind.MovedDeleted })
+        assertEquals(3, lines.count { it.kind == DiffLineKind.MovedAdded })
+    }
+
+    @Test
+    fun `annotateDiffLines does not mark matching blocks below alphanumeric threshold`() {
+        val diff = """
+            |diff --git a/src/main.kt b/src/main.kt
+            |--- a/src/main.kt
+            |+++ b/src/main.kt
+            |@@ -1,5 +1,5 @@
+            |-x = 1
+            | context
+            |+x = 1
+        """.trimMargin()
+
+        val lines = DiffLineClassifier.annotateDiffLines(diff)
+
+        assertTrue(lines.none { it.kind == DiffLineKind.MovedDeleted || it.kind == DiffLineKind.MovedAdded })
+    }
+
+    @Test
+    fun `annotateDiffLines alternates moved block variants`() {
+        val diff = """
+            |diff --git a/src/main.kt b/src/main.kt
+            |--- a/src/main.kt
+            |+++ b/src/main.kt
+            |@@ -1,12 +1,12 @@
+            |-fun firstMovedBlock() {
+            |-    return firstMovedValue
+            |-}
+            | context
+            |-fun secondMovedBlock() {
+            |-    return secondMovedValue
+            |-}
+            | context
+            |+fun firstMovedBlock() {
+            |+    return firstMovedValue
+            |+}
+            | context
+            |+fun secondMovedBlock() {
+            |+    return secondMovedValue
+            |+}
+        """.trimMargin()
+
+        val movedDeleted = DiffLineClassifier.annotateDiffLines(diff)
+            .filter { it.kind == DiffLineKind.MovedDeleted }
+
+        assertEquals(0, movedDeleted[0].movedVariant)
+        assertEquals(1, movedDeleted[3].movedVariant)
     }
 }

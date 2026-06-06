@@ -3,38 +3,9 @@ import { createSignal, createEffect, createMemo, For, Show, onMount, onCleanup }
 import { useNavigate } from "@solidjs/router";
 import type { DiffFileStat } from "@sdk/types.gen";
 import { getTaskDiff } from "../api";
+import { splitDiff, type DiffLine } from "./diffLines";
 import ArrowBackIcon from "@material-symbols/svg-400/outlined/arrow_back.svg?solid";
 import styles from "./DiffDetail.module.css";
-
-interface FileDiff {
-  path: string;
-  content: string;
-}
-
-/** Extract the file path from a single diff section. */
-function extractDiffPath(section: string): string {
-  // Prefer +++ line: "+++ b/path" or "+++ path" (most reliable).
-  const plus = section.match(/^\+\+\+ (?:[a-z]\/)?(.+)/m);
-  if (plus && plus[1] !== "/dev/null") return plus[1];
-  // Deleted files: use --- line.
-  const minus = section.match(/^--- (?:[a-z]\/)?(.+)/m);
-  if (minus && minus[1] !== "/dev/null") return minus[1];
-  // Renames: "rename to <path>" gives the destination path.
-  const renameTo = section.match(/^rename to (.+)/m);
-  if (renameTo) return renameTo[1];
-  // Last resort: diff --git header (binary/empty files). Handles both "a/b/" prefixed and no-prefix formats.
-  const git = section.match(/^diff --git (?:[a-z]\/)?(.+?) (?:[a-z]\/)?(.+)$/m);
-  if (git && git[1] === git[2]) return git[1];
-  return "unknown";
-}
-
-/** Split a unified diff into per-file sections on "diff --git" boundaries. */
-function splitDiff(raw: string): FileDiff[] {
-  const parts = raw.split(/^(?=diff --git )/m);
-  return parts
-    .filter((p) => p.trim())
-    .map((part) => ({ path: extractDiffPath(part), content: part }));
-}
 
 interface Props {
   taskId: string;
@@ -93,6 +64,25 @@ export default function DiffDetail(props: Props) {
     });
   }
 
+  function diffLineClass(line: DiffLine): string {
+    switch (line.kind) {
+      case "added":
+        return styles.diffLineAdded;
+      case "deleted":
+        return styles.diffLineDeleted;
+      case "hunk":
+        return styles.diffLineHunk;
+      case "header":
+        return styles.diffLineHeader;
+      case "movedAdded":
+        return line.movedVariant === 1 ? styles.diffLineMovedAddedAlt : styles.diffLineMovedAdded;
+      case "movedDeleted":
+        return line.movedVariant === 1 ? styles.diffLineMovedDeletedAlt : styles.diffLineMovedDeleted;
+      case "context":
+        return "";
+    }
+  }
+
   return (
     <div class={styles.container}>
       <div class={styles.header}>
@@ -139,15 +129,8 @@ export default function DiffDetail(props: Props) {
                   </div>
                   <Show when={!collapsed()}>
                     <pre class={styles.diffContent}>
-                      <For each={fd.content.split("\n")}>
-                        {(line) => {
-                          let cls = "";
-                          if (line.startsWith("+")) cls = styles.diffLineAdded;
-                          else if (line.startsWith("-")) cls = styles.diffLineDeleted;
-                          else if (line.startsWith("@@")) cls = styles.diffLineHunk;
-                          else if (line.startsWith("diff ")) cls = styles.diffLineHeader;
-                          return <div class={cls}>{line}</div>;
-                        }}
+                      <For each={fd.lines}>
+                        {(line) => <div class={diffLineClass(line)}>{line.text}</div>}
                       </For>
                     </pre>
                   </Show>

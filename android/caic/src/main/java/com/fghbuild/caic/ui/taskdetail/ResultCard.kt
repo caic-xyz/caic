@@ -12,12 +12,19 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.caic.sdk.v1.DiffFileStat
 import com.caic.sdk.v1.EventResult
 import com.fghbuild.caic.ui.theme.appColors
 import java.util.Locale
+
+private object ResultDiffPalette {
+    val added = Color(0xFF22863A)
+    val deleted = Color(0xFFCB2431)
+    val binary = Color(0xFF6A737D)
+}
 
 @Composable
 fun ResultCard(result: EventResult, onNavigateToDiff: (() -> Unit)? = null) {
@@ -93,21 +100,21 @@ private fun DiffFileRow(f: DiffFileStat) {
             Text(
                 text = "binary",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.appColors.diffBinary,
+                color = ResultDiffPalette.binary,
             )
         } else {
             if (f.added > 0) {
                 Text(
                     text = "+${f.added}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.appColors.diffAddedStat,
+                    color = ResultDiffPalette.added,
                 )
             }
             if (f.deleted > 0) {
                 Text(
                     text = "\u2212${f.deleted}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.appColors.diffDeletedStat,
+                    color = ResultDiffPalette.deleted,
                 )
             }
         }

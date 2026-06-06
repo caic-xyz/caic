@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -45,7 +46,25 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.caic.sdk.v1.DiffFileStat
-import com.fghbuild.caic.ui.theme.appColors
+
+private object DiffPalette {
+    val statAdded = Color(0xFF22863A)
+    val statDeleted = Color(0xFFCB2431)
+    val addedLine = Color(0xFF4EC94E)
+    val deletedLine = Color(0xFFFF4444)
+    val movedAddedLine = Color(0xFF7DD3FC)
+    val movedAddedAltLine = Color(0xFFA7F3D0)
+    val movedDeletedLine = Color(0xFFF0ABFC)
+    val movedDeletedAltLine = Color(0xFFFCD34D)
+    val movedAddedBg = Color(0xFF102F3D)
+    val movedAddedAltBg = Color(0xFF123226)
+    val movedDeletedBg = Color(0xFF351836)
+    val movedDeletedAltBg = Color(0xFF3B2B0B)
+    val hunk = Color(0xFFB48EAD)
+    val header = Color(0xFF888888)
+    val codeBg = Color(0xFF1E1E1E)
+    val codeFg = Color(0xFFD4D4D4)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -143,7 +162,7 @@ fun DiffScreen(
                         FileSection(
                             path = fd.path,
                             stat = stat,
-                            content = fd.content,
+                            lines = fd.lines,
                             collapsed = collapsed,
                             onToggle = { viewModel.toggleFile(fd.path) },
                         )
@@ -158,7 +177,7 @@ fun DiffScreen(
 private fun FileSection(
     path: String,
     stat: DiffFileStat?,
-    content: String,
+    lines: List<DiffLine>,
     collapsed: Boolean,
     onToggle: () -> Unit,
 ) {
@@ -196,47 +215,62 @@ private fun FileSection(
                         Text(
                             text = "+${stat.added}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.appColors.diffAddedStat,
+                            color = DiffPalette.statAdded,
                         )
                     }
                     if (stat.deleted > 0) {
                         Text(
                             text = "\u2212${stat.deleted}",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.appColors.diffDeletedStat,
+                            color = DiffPalette.statDeleted,
                         )
                     }
                 }
             }
         }
         if (!collapsed) {
-            DiffContentBlock(content)
+            DiffContentBlock(lines)
         }
     }
 }
 
 @Composable
-private fun DiffContentBlock(diff: String) {
-    val appColors = MaterialTheme.appColors
-    val addedColor = appColors.diffAddedLine
-    val deletedColor = appColors.diffDeletedLine
-    val hunkColor = appColors.diffHunk
-    val headerColor = appColors.diffHeader
-    val fgColor = appColors.diffCodeFg
-    val bgColor = appColors.diffCodeBg
-    val annotated = remember(diff, addedColor, deletedColor, hunkColor, headerColor, fgColor) {
+private fun DiffContentBlock(lines: List<DiffLine>) {
+    val annotated = remember(lines) {
         buildAnnotatedString {
-            diff.lineSequence().forEachIndexed { i, line ->
+            lines.forEachIndexed { i, line ->
                 if (i > 0) append("\n")
-                val color = when {
-                    line.startsWith("+") -> addedColor
-                    line.startsWith("-") -> deletedColor
-                    line.startsWith("@@") -> hunkColor
-                    line.startsWith("diff ") -> headerColor
-                    else -> fgColor
+                val style = when (line.kind) {
+                    DiffLineKind.Added -> SpanStyle(color = DiffPalette.addedLine)
+                    DiffLineKind.Deleted -> SpanStyle(color = DiffPalette.deletedLine)
+                    DiffLineKind.Hunk -> SpanStyle(color = DiffPalette.hunk)
+                    DiffLineKind.Header -> SpanStyle(color = DiffPalette.header)
+                    DiffLineKind.MovedAdded -> if (line.movedVariant == 1) {
+                        SpanStyle(
+                            color = DiffPalette.movedAddedAltLine,
+                            background = DiffPalette.movedAddedAltBg,
+                        )
+                    } else {
+                        SpanStyle(
+                            color = DiffPalette.movedAddedLine,
+                            background = DiffPalette.movedAddedBg,
+                        )
+                    }
+                    DiffLineKind.MovedDeleted -> if (line.movedVariant == 1) {
+                        SpanStyle(
+                            color = DiffPalette.movedDeletedAltLine,
+                            background = DiffPalette.movedDeletedAltBg,
+                        )
+                    } else {
+                        SpanStyle(
+                            color = DiffPalette.movedDeletedLine,
+                            background = DiffPalette.movedDeletedBg,
+                        )
+                    }
+                    DiffLineKind.Context -> SpanStyle(color = DiffPalette.codeFg)
                 }
-                withStyle(SpanStyle(color = color)) {
-                    append(line)
+                withStyle(style) {
+                    append(line.text)
                 }
             }
         }
@@ -248,9 +282,9 @@ private fun DiffContentBlock(diff: String) {
         lineHeight = 15.sp,
         modifier = Modifier
             .fillMaxWidth()
-            .background(bgColor)
+            .background(DiffPalette.codeBg)
             .padding(4.dp),
-        color = fgColor,
+        color = DiffPalette.codeFg,
         style = MaterialTheme.typography.bodySmall,
     )
 }
