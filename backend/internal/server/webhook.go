@@ -1,4 +1,4 @@
-// Webhook event handlers for GitHub webhook delivery.
+// Webhook event handlers for GitHub and GitLab webhook delivery.
 
 package server
 
@@ -12,18 +12,43 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/bot"
+	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
+	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
 const maxWebhookBodyBytes = 10 << 20 // 10 MB
 
-// handleGitHubWebhook handles POST /webhooks/github.
+// WebhookHandlers serves forge webhook delivery routes for GitHub and GitLab.
+//
+// It verifies delivery authenticity, then dispatches events to the bot, the CI
+// service, and the task manager. It owns the forge webhook secrets and the
+// GitHub App owner allowlist; its remaining dependencies are shared with the
+// server. The bot and CI service are injected after construction because the
+// server wires them up only once their own dependencies exist.
+type WebhookHandlers struct {
+	serverCtx        context.Context     // dispatch context that outlives individual webhook requests
+	githubSecret     []byte              // nil when the GitHub webhook is not configured
+	gitlabSecret     []byte              // nil when the GitLab webhook is not configured
+	appAllowedOwners map[string]struct{} // nil = allow all GitHub App installs
+
+	bot       *bot.Bot
+	ciService *ci.Service
+	ciCache   *forgecache.Cache
+	forge     *ForgeManager
+	taskMgr   *tasks.Manager
+	repoReg   *repoRegistry
+	prefs     *preferences.Store
+}
+
+// HandleGitHub handles POST /webhooks/github.
 // It verifies the HMAC signature and dispatches on X-GitHub-Event.
-func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
-	if len(s.githubWebhookSecret) == 0 {
+func (h *WebhookHandlers) HandleGitHub(w http.ResponseWriter, r *http.Request) {
+	if len(h.githubSecret) == 0 {
 		http.Error(w, "webhooks not configured", http.StatusNotFound)
 		return
 	}
@@ -33,7 +58,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sig := r.Header.Get("X-Hub-Signature-256")
-	if err := github.VerifySignature(s.githubWebhookSecret, body, sig); err != nil {
+	if err := github.VerifySignature(h.githubSecret, body, sig); err != nil {
 		slog.Warn("webhook signature mismatch", "err", err)
 		http.Error(w, "signature verification failed", http.StatusUnauthorized)
 		return
@@ -47,35 +72,35 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
 		}
-		s.handleIssuesEvent(r.Context(), &ev)
+		h.handleIssuesEvent(r.Context(), &ev)
 	case "pull_request":
 		var ev github.PullRequestEvent
 		if err := json.Unmarshal(body, &ev); err != nil {
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
 		}
-		s.handlePullRequestEvent(r.Context(), &ev)
+		h.handlePullRequestEvent(r.Context(), &ev)
 	case "issue_comment":
 		var ev github.IssueCommentEvent
 		if err := json.Unmarshal(body, &ev); err != nil {
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
 		}
-		s.handleIssueCommentEvent(r.Context(), &ev)
+		h.handleIssueCommentEvent(r.Context(), &ev)
 	case "installation":
 		var ev github.InstallationEvent
 		if err := json.Unmarshal(body, &ev); err != nil {
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
 		}
-		s.handleInstallationEvent(r.Context(), &ev)
+		h.handleInstallationEvent(r.Context(), &ev)
 	case "check_suite":
 		var ev github.CheckSuiteEvent
 		if err := json.Unmarshal(body, &ev); err != nil {
 			http.Error(w, "bad payload", http.StatusBadRequest)
 			return
 		}
-		s.handleCheckSuiteEvent(r.Context(), &ev)
+		h.handleCheckSuiteEvent(r.Context(), &ev)
 	case "check_run":
 		var ev github.CheckRunEvent
 		if err := json.Unmarshal(body, &ev); err != nil {
@@ -85,7 +110,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		if ev.CheckRun.Status == "completed" {
 			owner, repo, _ := strings.Cut(ev.Repository.FullName, "/")
 			if owner != "" && repo != "" && ev.CheckRun.HeadSHA != "" {
-				go s.webhookOnCI(s.ctx, forge.KindGitHub, owner, repo, ev.CheckRun.HeadSHA) //nolint:contextcheck // intentionally using server context; webhook dispatch must outlive request
+				go h.webhookOnCI(h.serverCtx, forge.KindGitHub, owner, repo, ev.CheckRun.HeadSHA) //nolint:contextcheck // intentionally using server context; webhook dispatch must outlive request
 			}
 		}
 	case "workflow_run":
@@ -97,7 +122,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		if ev.WorkflowRun.Status == "completed" {
 			owner, repo, _ := strings.Cut(ev.Repository.FullName, "/")
 			if owner != "" && repo != "" && ev.WorkflowRun.HeadSHA != "" {
-				go s.webhookOnCI(s.ctx, forge.KindGitHub, owner, repo, ev.WorkflowRun.HeadSHA) //nolint:contextcheck // intentionally using server context; webhook dispatch must outlive request
+				go h.webhookOnCI(h.serverCtx, forge.KindGitHub, owner, repo, ev.WorkflowRun.HeadSHA) //nolint:contextcheck // intentionally using server context; webhook dispatch must outlive request
 			}
 		}
 	default:
@@ -106,10 +131,10 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleGitLabWebhook verifies the X-Gitlab-Token header and dispatches
+// HandleGitLab verifies the X-Gitlab-Token header and dispatches
 // Pipeline Hook and Merge Request Hook events.
-func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
-	if len(s.gitlabWebhookSecret) == 0 {
+func (h *WebhookHandlers) HandleGitLab(w http.ResponseWriter, r *http.Request) {
+	if len(h.gitlabSecret) == 0 {
 		http.Error(w, "webhooks not configured", http.StatusNotFound)
 		return
 	}
@@ -125,7 +150,7 @@ func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 
 	// Verify secret token using constant-time compare.
 	token := r.Header.Get("X-Gitlab-Token")
-	if subtle.ConstantTimeCompare([]byte(token), s.gitlabWebhookSecret) != 1 {
+	if subtle.ConstantTimeCompare([]byte(token), h.gitlabSecret) != 1 {
 		http.Error(w, "invalid token", http.StatusUnauthorized)
 		return
 	}
@@ -151,7 +176,7 @@ func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 		sha := ev.ObjectAttributes.SHA
 		owner, repo, _ := strings.Cut(ev.Project.PathWithNamespace, "/")
 		if owner != "" && repo != "" && sha != "" {
-			go s.webhookOnCI(s.ctx, forge.KindGitLab, owner, repo, sha) //nolint:contextcheck // intentionally using server context; webhook dispatch must outlive request
+			go h.webhookOnCI(h.serverCtx, forge.KindGitLab, owner, repo, sha) //nolint:contextcheck // intentionally using server context; webhook dispatch must outlive request
 		}
 	case "Merge Request Hook":
 		var ev gitlab.MergeRequestEvent
@@ -159,7 +184,7 @@ func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid payload", http.StatusBadRequest)
 			return
 		}
-		s.handleGitLabMergeRequestEvent(&ev)
+		h.handleGitLabMergeRequestEvent(&ev)
 	default:
 		// Unknown event — silently ignore, return 200.
 	}
@@ -168,14 +193,14 @@ func (s *Server) handleGitLabWebhook(w http.ResponseWriter, r *http.Request) {
 
 // webhookOnCI handles a CI completion event from a forge webhook by fetching
 // the current check-run state and updating affected tasks and repos.
-func (s *Server) webhookOnCI(ctx context.Context, kind forge.Kind, owner, repo, sha string) {
-	f := s.forge.forgeFor(ctx, kind)
+func (h *WebhookHandlers) webhookOnCI(ctx context.Context, kind forge.Kind, owner, repo, sha string) {
+	f := h.forge.forgeFor(ctx, kind)
 	if f == nil {
 		return
 	}
 
-	affected := s.taskMgr.FindTasksMonitoringBranch(owner, repo)
-	affectedRepoPaths := s.repoReg.forgePathsAtSHA(owner, repo, sha)
+	affected := h.taskMgr.FindTasksMonitoringBranch(owner, repo)
+	affectedRepoPaths := h.repoReg.forgePathsAtSHA(owner, repo, sha)
 
 	if len(affected) == 0 && len(affectedRepoPaths) == 0 {
 		return
@@ -201,13 +226,13 @@ func (s *Server) webhookOnCI(ctx context.Context, kind forge.Kind, owner, repo, 
 	for _, e := range affected {
 		if !done {
 			e.Task().SetCIStatus(interimStatus, result.Checks)
-			s.taskMgr.NotifyTaskChange()
+			h.taskMgr.NotifyTaskChange()
 			continue
 		}
-		if err := s.ciCache.Put(owner, repo, sha, result); err != nil {
+		if err := h.ciCache.Put(owner, repo, sha, result); err != nil {
 			slog.Warn("webhookOnCI: cache put", "err", err)
 		}
-		s.ciService.ApplyMonitorCIResult(ctx, e, f, owner, repo, sha, result)
+		h.ciService.ApplyMonitorCIResult(ctx, e, f, owner, repo, sha, result)
 	}
 
 	for _, relPath := range affectedRepoPaths {
@@ -216,46 +241,46 @@ func (s *Server) webhookOnCI(ctx context.Context, kind forge.Kind, owner, repo, 
 			if interimStatus == forge.CIStatusFailure {
 				repoStatus = forge.CIStatusFailure
 			}
-			s.ciService.SetRepoCIStatus(relPath, sha, forgecache.Result{Status: repoStatus, Checks: result.Checks})
+			h.ciService.SetRepoCIStatus(relPath, sha, forgecache.Result{Status: repoStatus, Checks: result.Checks})
 			continue
 		}
-		if err := s.ciCache.Put(owner, repo, sha, result); err != nil {
+		if err := h.ciCache.Put(owner, repo, sha, result); err != nil {
 			slog.Warn("webhookOnCI: cache put", "err", err)
 		}
-		s.ciService.SetRepoCIStatus(relPath, sha, forgecache.Result{Status: result.Status, Checks: result.Checks})
+		h.ciService.SetRepoCIStatus(relPath, sha, forgecache.Result{Status: result.Status, Checks: result.Checks})
 	}
 }
 
 // handleIssuesEvent creates a task when a labeled issue is opened.
 // Trigger: action=="opened" AND label "caic" present.
-func (s *Server) handleIssuesEvent(ctx context.Context, ev *github.IssuesEvent) {
+func (h *WebhookHandlers) handleIssuesEvent(ctx context.Context, ev *github.IssuesEvent) {
 	if ev.Action != "opened" {
 		return
 	}
-	s.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
+	h.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
 	labels := make([]string, len(ev.Issue.Labels))
 	for i, l := range ev.Issue.Labels {
 		labels[i] = l.Name
 	}
-	s.Bot.OnIssueOpened(ctx, &bot.IssueEvent{
+	h.bot.OnIssueOpened(ctx, &bot.IssueEvent{
 		ForgeFullName: ev.Repository.FullName,
 		Number:        ev.Issue.Number,
 		Title:         ev.Issue.Title,
 		Body:          ev.Issue.Body,
 		HTMLURL:       ev.Issue.HTMLURL,
 		Labels:        labels,
-	}, s.forge.commenterFor(ev.Installation.ID))
+	}, h.forge.commenterFor(ev.Installation.ID))
 }
 
 // handlePullRequestEvent creates a task when a PR is opened or reopened,
 // updates PR state when closed, or updates an existing task if a PR is
 // opened for a branch that already has a runtime instance/task but no PR yet.
 // Trigger: action=="opened", "reopened", or "closed".
-func (s *Server) handlePullRequestEvent(ctx context.Context, ev *github.PullRequestEvent) {
+func (h *WebhookHandlers) handlePullRequestEvent(ctx context.Context, ev *github.PullRequestEvent) {
 	// Create a new task to review/fix the PR if auto-fix on PR open is enabled.
-	if (ev.Action == "opened" || ev.Action == "reopened") && s.prefs.Get("default").Settings.AutoFixOnPROpen {
-		s.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
-		s.Bot.OnPROpened(ctx, &bot.PREvent{
+	if (ev.Action == "opened" || ev.Action == "reopened") && h.prefs.Get("default").Settings.AutoFixOnPROpen {
+		h.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
+		h.bot.OnPROpened(ctx, &bot.PREvent{
 			ForgeFullName: ev.Repository.FullName,
 			Number:        ev.PullRequest.Number,
 			Title:         ev.PullRequest.Title,
@@ -269,19 +294,19 @@ func (s *Server) handlePullRequestEvent(ctx context.Context, ev *github.PullRequ
 	// Handle PR closed (merged or closed) or reopened.
 	switch ev.Action {
 	case "closed":
-		s.handlePRClosedEvent(ev)
+		h.handlePRClosedEvent(ev)
 	case "reopened":
-		s.handlePRReopenedEvent(ev)
+		h.handlePRReopenedEvent(ev)
 	}
 
 	// Also check if this PR is for an existing task that doesn't have a PR yet.
 	// This handles the case where a user creates a PR outside of caic.
-	s.handlePRForExistingTask(ctx, ev)
+	h.handlePRForExistingTask(ctx, ev)
 }
 
 // handlePRForExistingTask updates an existing task with PR info if the PR head
 // branch matches a task's branch but the task doesn't have a PR yet.
-func (s *Server) handlePRForExistingTask(ctx context.Context, ev *github.PullRequestEvent) {
+func (h *WebhookHandlers) handlePRForExistingTask(ctx context.Context, ev *github.PullRequestEvent) {
 	// Only handle PR open, reopen, or synchronize actions.
 	if ev.Action != "opened" && ev.Action != "reopened" && ev.Action != "synchronize" {
 		return
@@ -297,7 +322,7 @@ func (s *Server) handlePRForExistingTask(ctx context.Context, ev *github.PullReq
 	prNumber := ev.PullRequest.Number
 	sha := ev.PullRequest.Head.SHA
 
-	matchingEntries := s.taskMgr.FindTasksMatchingBranch(owner, repo, branch)
+	matchingEntries := h.taskMgr.FindTasksMatchingBranch(owner, repo, branch)
 	for _, entry := range matchingEntries {
 		snap := entry.Task().Snapshot()
 		if snap.ForgePR == 0 {
@@ -306,33 +331,33 @@ func (s *Server) handlePRForExistingTask(ctx context.Context, ev *github.PullReq
 				"task", entry.Task().ID, "repo", owner+"/"+repo, "br", branch, "pr", prNumber)
 			entry.Task().SetPR(owner, repo, prNumber)
 			// Start CI monitoring.
-			if ri, ok := s.repoByForge(owner + "/" + repo); ok {
-				f := s.forge.forgeFor(ctx, ri.ForgeKind)
+			if ri, ok := h.repoByForge(owner + "/" + repo); ok {
+				f := h.forge.forgeFor(ctx, ri.ForgeKind)
 				if f != nil {
 					entry.SetMonitorBranch(branch)
-					go s.ciService.MonitorCI(ctx, entry, f, owner, repo, sha)
+					go h.ciService.MonitorCI(ctx, entry, f, owner, repo, sha)
 				}
 			}
 		} else if snap.ForgePR == prNumber && ev.Action == "synchronize" {
 			// PR already exists, but new commits were pushed — restart CI monitoring.
 			slog.Info("webhook: restarting CI monitor for PR",
 				"task", entry.Task().ID, "repo", owner+"/"+repo, "br", branch, "pr", prNumber, "sha", sha[:min(7, len(sha))])
-			if ri, ok := s.repoByForge(owner + "/" + repo); ok {
-				go s.ciService.MonitorCI(ctx, entry, s.forge.forgeFor(ctx, ri.ForgeKind), owner, repo, sha)
+			if ri, ok := h.repoByForge(owner + "/" + repo); ok {
+				go h.ciService.MonitorCI(ctx, entry, h.forge.forgeFor(ctx, ri.ForgeKind), owner, repo, sha)
 			}
 		}
 	}
 }
 
 // handlePRClosedEvent updates the PR state for tasks whose PR was closed or merged.
-func (s *Server) handlePRClosedEvent(ev *github.PullRequestEvent) {
+func (h *WebhookHandlers) handlePRClosedEvent(ev *github.PullRequestEvent) {
 	owner, repo, _ := strings.Cut(ev.Repository.FullName, "/")
 	if owner == "" || repo == "" {
 		return
 	}
 	prNumber := ev.PullRequest.Number
 
-	matchingEntries := s.taskMgr.FindTasksByPR(owner, repo, prNumber)
+	matchingEntries := h.taskMgr.FindTasksByPR(owner, repo, prNumber)
 	for _, entry := range matchingEntries {
 		// Determine state: "merged" if merged, otherwise "closed".
 		var state forge.PRState
@@ -343,34 +368,34 @@ func (s *Server) handlePRClosedEvent(ev *github.PullRequestEvent) {
 		}
 		slog.Info("webhook: PR closed/merged", "task", entry.Task().ID, "repo", owner+"/"+repo, "pr", prNumber, "state", state)
 		entry.Task().SetPRState(state)
-		s.taskMgr.NotifyTaskChange()
+		h.taskMgr.NotifyTaskChange()
 	}
 }
 
 // handlePRReopenedEvent resets the PR state to "open" when a closed PR is reopened.
-func (s *Server) handlePRReopenedEvent(ev *github.PullRequestEvent) {
+func (h *WebhookHandlers) handlePRReopenedEvent(ev *github.PullRequestEvent) {
 	owner, repo, _ := strings.Cut(ev.Repository.FullName, "/")
 	if owner == "" || repo == "" {
 		return
 	}
 	prNumber := ev.PullRequest.Number
 
-	for _, entry := range s.taskMgr.FindTasksByPR(owner, repo, prNumber) {
+	for _, entry := range h.taskMgr.FindTasksByPR(owner, repo, prNumber) {
 		slog.Info("webhook: PR reopened", "task", entry.Task().ID, "repo", owner+"/"+repo, "pr", prNumber)
 		entry.Task().SetPRState(forge.PRStateOpen)
-		s.taskMgr.NotifyTaskChange()
+		h.taskMgr.NotifyTaskChange()
 	}
 }
 
 // handleGitLabMergeRequestEvent handles GitLab merge request state changes.
-func (s *Server) handleGitLabMergeRequestEvent(ev *gitlab.MergeRequestEvent) {
+func (h *WebhookHandlers) handleGitLabMergeRequestEvent(ev *gitlab.MergeRequestEvent) {
 	owner, repo, _ := strings.Cut(ev.Project.PathWithNamespace, "/")
 	if owner == "" || repo == "" {
 		return
 	}
 	mrIID := ev.ObjectAttributes.IID
 
-	for _, entry := range s.taskMgr.FindTasksByPR(owner, repo, mrIID) {
+	for _, entry := range h.taskMgr.FindTasksByPR(owner, repo, mrIID) {
 		state := forge.PRStateOpen
 		if ev.ObjectAttributes.State == "closed" {
 			if ev.ObjectAttributes.Merged {
@@ -381,44 +406,44 @@ func (s *Server) handleGitLabMergeRequestEvent(ev *gitlab.MergeRequestEvent) {
 		}
 		slog.Info("webhook: GitLab MR state", "task", entry.Task().ID, "repo", owner+"/"+repo, "mr", mrIID, "state", state)
 		entry.Task().SetPRState(state)
-		s.taskMgr.NotifyTaskChange()
+		h.taskMgr.NotifyTaskChange()
 	}
 }
 
 // handleIssueCommentEvent creates a task when @caic is mentioned in a comment.
 // Trigger: action=="created" AND body contains "@caic".
-func (s *Server) handleIssueCommentEvent(ctx context.Context, ev *github.IssueCommentEvent) {
+func (h *WebhookHandlers) handleIssueCommentEvent(ctx context.Context, ev *github.IssueCommentEvent) {
 	if ev.Action != "created" {
 		return
 	}
-	s.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
-	s.Bot.OnIssueComment(ctx, bot.CommentEvent{
+	h.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
+	h.bot.OnIssueComment(ctx, bot.CommentEvent{
 		ForgeFullName: ev.Repository.FullName,
 		IssueNumber:   ev.Issue.Number,
 		IssueTitle:    ev.Issue.Title,
 		CommentBody:   ev.Comment.Body,
 		CommentURL:    ev.Comment.HTMLURL,
-	}, s.forge.commenterFor(ev.Installation.ID))
+	}, h.forge.commenterFor(ev.Installation.ID))
 }
 
 // handleInstallationEvent enforces the owner allowlist on new installs.
 // When GITHUB_APP_ALLOWED_OWNERS is set and the installing account is not in
 // the list, the installation is deleted immediately.
-func (s *Server) handleInstallationEvent(ctx context.Context, ev *github.InstallationEvent) {
+func (h *WebhookHandlers) handleInstallationEvent(ctx context.Context, ev *github.InstallationEvent) {
 	if ev.Action != "created" {
 		return
 	}
 	login := ev.Installation.Account.Login
-	if s.githubAppAllowedOwners == nil {
-		s.forge.storeInstallationID(login, ev.Installation.ID)
+	if h.appAllowedOwners == nil {
+		h.forge.storeInstallationID(login, ev.Installation.ID)
 		return
 	}
-	if _, ok := s.githubAppAllowedOwners[strings.ToLower(login)]; ok {
-		s.forge.storeInstallationID(login, ev.Installation.ID)
+	if _, ok := h.appAllowedOwners[strings.ToLower(login)]; ok {
+		h.forge.storeInstallationID(login, ev.Installation.ID)
 		return
 	}
 	slog.Warn("github app: rejecting installation from non-allowed owner", "owner", login, "installation_id", ev.Installation.ID)
-	if err := s.forge.githubApp.DeleteInstallation(ctx, ev.Installation.ID); err != nil {
+	if err := h.forge.githubApp.DeleteInstallation(ctx, ev.Installation.ID); err != nil {
 		slog.Warn("github app: delete installation failed", "owner", login, "err", err)
 	}
 }
@@ -426,18 +451,18 @@ func (s *Server) handleInstallationEvent(ctx context.Context, ev *github.Install
 // handleCheckSuiteEvent updates CI status when a check suite completes.
 // It caches the result, updates default-branch repo CI status, and delivers
 // the terminal result to any task that was monitoring that SHA.
-func (s *Server) handleCheckSuiteEvent(ctx context.Context, ev *github.CheckSuiteEvent) {
+func (h *WebhookHandlers) handleCheckSuiteEvent(ctx context.Context, ev *github.CheckSuiteEvent) {
 	if ev.Action != "completed" {
 		return
 	}
-	repo, ok := s.repoByForge(ev.Repository.FullName)
+	repo, ok := h.repoByForge(ev.Repository.FullName)
 	if !ok {
 		return // not a repo we manage
 	}
-	s.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
+	h.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
 
 	sha := ev.CheckSuite.HeadSHA
-	client, err := s.forge.githubApp.ForgeClient(ctx, ev.Installation.ID)
+	client, err := h.forge.githubApp.ForgeClient(ctx, ev.Installation.ID)
 	if err != nil {
 		slog.Warn("handleCheckSuiteEvent: forge client", "err", err)
 		return
@@ -452,7 +477,7 @@ func (s *Server) handleCheckSuiteEvent(ctx context.Context, ev *github.CheckSuit
 	if !done {
 		return
 	}
-	if err := s.ciCache.Put(repo.ForgeOwner, repo.ForgeRepo, sha, result); err != nil {
+	if err := h.ciCache.Put(repo.ForgeOwner, repo.ForgeRepo, sha, result); err != nil {
 		slog.Warn("handleCheckSuiteEvent: cache put", "err", err)
 	}
 
@@ -466,7 +491,7 @@ func (s *Server) handleCheckSuiteEvent(ctx context.Context, ev *github.CheckSuit
 		case err != nil:
 			slog.Warn("handleCheckSuiteEvent: get HEAD SHA", "repo", repo.RelPath, "err", err)
 		case headSHA == sha:
-			s.ciService.SetRepoCIStatus(repo.RelPath, sha, forgecache.Result{Status: result.Status, Checks: result.Checks})
+			h.ciService.SetRepoCIStatus(repo.RelPath, sha, forgecache.Result{Status: result.Status, Checks: result.Checks})
 		default:
 			slog.Debug("handleCheckSuiteEvent: ignoring stale check suite", "sha", sha, "head", headSHA)
 		}
@@ -474,36 +499,25 @@ func (s *Server) handleCheckSuiteEvent(ctx context.Context, ev *github.CheckSuit
 
 	// Deliver the result to any task monitoring this SHA.
 	// Match by branch since multiple commits can have the same SHA across different branches.
-	for _, entry := range s.taskMgr.FindTasksMonitoringBranch(repo.ForgeOwner, repo.ForgeRepo) {
-		go s.ciService.ApplyMonitorCIResult(s.ctx, entry, client, repo.ForgeOwner, repo.ForgeRepo, sha, result) //nolint:contextcheck // fire-and-forget; must outlive webhook request
+	for _, entry := range h.taskMgr.FindTasksMonitoringBranch(repo.ForgeOwner, repo.ForgeRepo) {
+		go h.ciService.ApplyMonitorCIResult(h.serverCtx, entry, client, repo.ForgeOwner, repo.ForgeRepo, sha, result) //nolint:contextcheck // fire-and-forget; must outlive webhook request
 	}
 }
 
 // storeInstallationIDFromFullName extracts the owner from "owner/repo" and
 // stores the installation ID for that owner.
-func (s *Server) storeInstallationIDFromFullName(fullName string, id int64) {
+func (h *WebhookHandlers) storeInstallationIDFromFullName(fullName string, id int64) {
 	owner, _, ok := strings.Cut(fullName, "/")
 	if ok {
-		s.forge.storeInstallationID(owner, id)
+		h.forge.storeInstallationID(owner, id)
 	}
 }
 
 // repoByForge returns a copy of the RepoInfo whose forge matches "owner/repo".
-func (s *Server) repoByForge(fullName string) (RepoInfo, bool) {
+func (h *WebhookHandlers) repoByForge(fullName string) (RepoInfo, bool) {
 	owner, repo, ok := strings.Cut(fullName, "/")
 	if !ok {
 		return RepoInfo{}, false
 	}
-	return s.repoReg.byForge(owner, repo)
-}
-
-// appInstallCommenter adapts GitHubAppClient.PostComment to bot.Commenter by
-// binding a fixed installation ID.
-type appInstallCommenter struct {
-	app            GitHubAppClient
-	installationID int64
-}
-
-func (c *appInstallCommenter) PostComment(ctx context.Context, owner, repo string, issueNumber int, body string) error {
-	return c.app.PostComment(ctx, c.installationID, owner, repo, issueNumber, body)
+	return h.repoReg.byForge(owner, repo)
 }

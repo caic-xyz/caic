@@ -86,15 +86,16 @@ type Server struct {
 	forge *ForgeManager
 
 	// GitHub.
-	githubOAuth            *auth.ProviderConfig // nil if not configured
-	githubAllowedUsers     map[string]struct{}  // nil if GitHub OAuth not configured
-	githubWebhookSecret    []byte               // nil when webhook not configured
-	githubAppAllowedOwners map[string]struct{}  // nil = allow all; rejects installs from other owners
+	githubOAuth        *auth.ProviderConfig // nil if not configured
+	githubAllowedUsers map[string]struct{}  // nil if GitHub OAuth not configured
 
 	// GitLab.
-	gitlabWebhookSecret []byte               // nil when GitLab webhook not configured
-	gitlabOAuth         *auth.ProviderConfig // nil if not configured
-	gitlabAllowedUsers  map[string]struct{}  // nil if GitLab OAuth not configured
+	gitlabOAuth        *auth.ProviderConfig // nil if not configured
+	gitlabAllowedUsers map[string]struct{}  // nil if GitLab OAuth not configured
+
+	// Forge webhook delivery. Established by New (and the test constructors) and
+	// never nil thereafter; owns the webhook secrets and the App owner allowlist.
+	webhooks *WebhookHandlers
 
 	// Auth / session.
 	authStore     *auth.Store     // nil when auth disabled
@@ -233,8 +234,8 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	mux.Handle("/api/v1/auth/", authMux)
 	mux.HandleFunc("GET /api/v1/server/config", handle(s.getConfig))
 	mux.HandleFunc("GET /api/v1/server/version", handle(s.getVersion))
-	mux.HandleFunc("POST /webhooks/github", s.handleGitHubWebhook)
-	mux.HandleFunc("POST /webhooks/gitlab", s.handleGitLabWebhook)
+	mux.HandleFunc("POST /webhooks/github", s.webhooks.HandleGitHub)
+	mux.HandleFunc("POST /webhooks/gitlab", s.webhooks.HandleGitLab)
 	mux.Handle("/api/v1/", protectedAPI)
 
 	// Profiling (opt-in via -pprof / CAIC_PPROF).

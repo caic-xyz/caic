@@ -99,6 +99,7 @@ func newTestServer(t *testing.T) *Server {
 	}
 	s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 	s.initConcernAdapters()
+	s.webhooks = s.newWebhookHandlers(nil, nil, nil)
 	return s
 }
 

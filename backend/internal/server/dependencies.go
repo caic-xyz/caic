@@ -56,49 +56,73 @@ type Dependencies struct {
 // New creates a new HTTP server from already-assembled dependencies.
 func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocritic // Dependencies is a startup value bag.
 	s := &Server{
-		ctx:                    ctx,
-		absRoot:                d.AbsRoot,
-		logDir:                 d.LogDir,
-		cacheDir:               d.CacheDir,
-		harnessEnv:             d.HarnessEnv,
-		tailscaleAvailable:     d.Tailscale,
-		prefs:                  d.Preferences,
-		authStore:              d.AuthStore,
-		sessionSecret:          d.SessionSecret,
-		githubOAuth:            d.GitHubOAuth,
-		gitlabOAuth:            d.GitLabOAuth,
-		githubAllowedUsers:     d.GitHubAllowedUsers,
-		gitlabAllowedUsers:     d.GitLabAllowedUsers,
-		githubWebhookSecret:    d.GitHubWebhookSecret,
-		gitlabWebhookSecret:    d.GitLabWebhookSecret,
-		githubAppAllowedOwners: d.GitHubAppAllowedOwners,
-		hostState:              d.HostState,
-		usageFetchers:          d.UsageFetchers,
-		pprof:                  d.Pprof,
-		geminiAPIKey:           d.GeminiAPIKey,
-		voiceBridge:            d.VoiceBridge,
-		voiceGateway:           d.VoiceGateway,
-		forge:                  d.Forge,
-		ciCache:                d.CICache,
-		runtimeBackend:         d.Runtime,
-		agentBackends:          d.AgentBackends,
-		taskMgr:                d.TaskManager,
-		provider:               d.Provider,
-		repoReg:                newRepoRegistry(nil),
-		ipgeoChecker:           d.IPGeoChecker,
+		ctx:                ctx,
+		absRoot:            d.AbsRoot,
+		logDir:             d.LogDir,
+		cacheDir:           d.CacheDir,
+		harnessEnv:         d.HarnessEnv,
+		tailscaleAvailable: d.Tailscale,
+		prefs:              d.Preferences,
+		authStore:          d.AuthStore,
+		sessionSecret:      d.SessionSecret,
+		githubOAuth:        d.GitHubOAuth,
+		gitlabOAuth:        d.GitLabOAuth,
+		githubAllowedUsers: d.GitHubAllowedUsers,
+		gitlabAllowedUsers: d.GitLabAllowedUsers,
+		hostState:          d.HostState,
+		usageFetchers:      d.UsageFetchers,
+		pprof:              d.Pprof,
+		geminiAPIKey:       d.GeminiAPIKey,
+		voiceBridge:        d.VoiceBridge,
+		voiceGateway:       d.VoiceGateway,
+		forge:              d.Forge,
+		ciCache:            d.CICache,
+		runtimeBackend:     d.Runtime,
+		agentBackends:      d.AgentBackends,
+		taskMgr:            d.TaskManager,
+		provider:           d.Provider,
+		repoReg:            newRepoRegistry(nil),
+		ipgeoChecker:       d.IPGeoChecker,
 	}
 	s.initConcernAdapters()
+	// The webhook concern owns the forge webhook secrets and the GitHub App
+	// owner allowlist. Its bot and CI service are injected later, once the
+	// server wires them up via SetBot/SetCIService.
+	s.webhooks = s.newWebhookHandlers(d.GitHubWebhookSecret, d.GitLabWebhookSecret, d.GitHubAppAllowedOwners)
 	return s, nil
 }
 
+// newWebhookHandlers builds the forge webhook concern from the supplied webhook
+// configuration and the server's shared dependencies. The bot and CI service
+// are captured as currently set; New injects them after construction.
+func (s *Server) newWebhookHandlers(githubSecret, gitlabSecret []byte, appAllowedOwners map[string]struct{}) *WebhookHandlers {
+	return &WebhookHandlers{
+		serverCtx:        s.ctx,
+		githubSecret:     githubSecret,
+		gitlabSecret:     gitlabSecret,
+		appAllowedOwners: appAllowedOwners,
+		bot:              s.Bot,
+		ciService:        s.ciService,
+		ciCache:          s.ciCache,
+		forge:            s.forge,
+		taskMgr:          s.taskMgr,
+		repoReg:          s.repoReg,
+		prefs:            s.prefs,
+	}
+}
+
 // SetBot sets the forge automation bot owned by the server.
+// Must be called after New, which establishes the webhook concern.
 func (s *Server) SetBot(b *bot.Bot) {
 	s.Bot = b
+	s.webhooks.bot = b
 }
 
 // SetCIService sets the CI service used by server handlers and adoption hooks.
+// Must be called after New, which establishes the webhook concern.
 func (s *Server) SetCIService(c *ci.Service) {
 	s.ciService = c
+	s.webhooks.ciService = c
 }
 
 // BotClient returns the bot-facing task client.

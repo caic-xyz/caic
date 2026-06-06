@@ -38,11 +38,17 @@ containers as one runtime adapter, not as the backend domain model.
 Goal: keep `Server` as the HTTP router and lifecycle owner, not the concrete
 implementation of every backend-facing role.
 
-Current state: `Server` still owns auth, repo registry access, task HTTP
-handlers, webhook handlers, usage streaming, voice handlers, maintenance
-helpers, and forge management. CI, bot, and runtime process routes now use
-dedicated adapters/handlers with explicit dependencies instead of using
-`Server` as the adapter/client/handler type.
+Current state: `Server` still owns auth login handlers, usage/voice stream
+handlers, and the server-config/preferences/repos handlers (`serve_config.go`),
+plus background maintenance helpers. Already extracted into dedicated types with
+explicit dependencies: task lifecycle (`tasks.Manager`, with thin handlers in
+`tasks.go` that map errors through `toDTO`), the managed-repo set and CI status
+(`repoRegistry`, self-locking), forge client/token management (`ForgeManager`),
+the CI, bot, and runtime-process routes (`CIAdapter`, `BotClient`,
+`RuntimeProcesses`), and forge webhook delivery (`WebhookHandlers`, which owns
+the GitHub/GitLab webhook secrets and the App owner allowlist). The `Server`
+struct no longer carries a `runners` map or the webhook secrets; runner
+ownership moved to `tasks.Manager`.
 
 Implementation order:
 
@@ -112,7 +118,9 @@ earlier.
 
 ## Suggested Order
 
-1. Split route handlers into concern structs, starting with tasks and
-   repos/config/preferences.
-2. Move webhook handlers behind a concern struct that depends on bot, CI, repo,
-   forge, and task managers explicitly.
+1. Extract the server-config/preferences/repos handlers from `serve_config.go`,
+   moving the git-clone orchestration in `cloneRepo` and the preference-mutation
+   logic in `updatePreferences` out of the HTTP layer. This is now the largest
+   remaining logic concentration in the package.
+2. Optionally introduce an auth concern for the OAuth login handlers and their
+   config fields; lower payoff since most logic already lives in `internal/auth`.

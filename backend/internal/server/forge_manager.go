@@ -180,6 +180,17 @@ func (m *ForgeManager) commenterFor(installationID int64) bot.Commenter {
 	return nil
 }
 
+// appInstallCommenter adapts GitHubAppClient.PostComment to bot.Commenter by
+// binding a fixed installation ID.
+type appInstallCommenter struct {
+	app            GitHubAppClient
+	installationID int64
+}
+
+func (c *appInstallCommenter) PostComment(ctx context.Context, owner, repo string, issueNumber int, body string) error {
+	return c.app.PostComment(ctx, c.installationID, owner, repo, issueNumber, body)
+}
+
 // newThrottle returns a Throttle transport at 1 QPS backed by http.DefaultTransport.
 func newThrottle() http.RoundTripper {
 	return &roundtrippers.Throttle{QPS: 1, Transport: http.DefaultTransport}

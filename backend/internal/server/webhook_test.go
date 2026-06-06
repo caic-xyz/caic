@@ -111,7 +111,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 		s.repoReg.add(&RepoInfo{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
 		s.forge.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}}
 
-		s.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
+		s.webhooks.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
 			Action: "completed",
 			CheckSuite: struct {
 				HeadSHA    string `json:"head_sha"`
@@ -135,7 +135,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 		// HEAD is now "newsha"; the webhook carries "oldsha".
 		s.forge.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}}
 
-		s.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
+		s.webhooks.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
 			Action: "completed",
 			CheckSuite: struct {
 				HeadSHA    string `json:"head_sha"`
@@ -160,7 +160,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 	t.Run("ping event returns 200", func(t *testing.T) {
 		t.Parallel()
 		s := newTestServer(t)
-		s.githubWebhookSecret = secret
+		s.webhooks.githubSecret = secret
 
 		body := []byte(`{}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/webhooks/github", bytes.NewReader(body))
@@ -168,7 +168,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 		req.Header.Set("X-Hub-Signature-256", signGitHub(body, secret))
 
 		w := httptest.NewRecorder()
-		s.handleGitHubWebhook(w, req)
+		s.webhooks.HandleGitHub(w, req)
 
 		if w.Code != http.StatusNoContent {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
@@ -178,7 +178,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 	t.Run("bad signature returns 401", func(t *testing.T) {
 		t.Parallel()
 		s := newTestServer(t)
-		s.githubWebhookSecret = secret
+		s.webhooks.githubSecret = secret
 
 		body := []byte(`{}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/webhooks/github", bytes.NewReader(body))
@@ -186,7 +186,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 		req.Header.Set("X-Hub-Signature-256", signGitHub(body, []byte("wrong-secret")))
 
 		w := httptest.NewRecorder()
-		s.handleGitHubWebhook(w, req)
+		s.webhooks.HandleGitHub(w, req)
 
 		if w.Code != http.StatusUnauthorized {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
@@ -196,7 +196,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 	t.Run("missing signature returns 401", func(t *testing.T) {
 		t.Parallel()
 		s := newTestServer(t)
-		s.githubWebhookSecret = secret
+		s.webhooks.githubSecret = secret
 
 		body := []byte(`{}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/webhooks/github", bytes.NewReader(body))
@@ -204,7 +204,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 		// No X-Hub-Signature-256
 
 		w := httptest.NewRecorder()
-		s.handleGitHubWebhook(w, req)
+		s.webhooks.HandleGitHub(w, req)
 
 		if w.Code != http.StatusUnauthorized {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
@@ -214,7 +214,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 	t.Run("completed check_run returns 204", func(t *testing.T) {
 		t.Parallel()
 		s := newTestServer(t)
-		s.githubWebhookSecret = secret
+		s.webhooks.githubSecret = secret
 
 		ev := github.CheckRunEvent{}
 		ev.CheckRun.Status = "completed"
@@ -228,7 +228,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 		req.Header.Set("X-Hub-Signature-256", signGitHub(body, secret))
 
 		w := httptest.NewRecorder()
-		s.handleGitHubWebhook(w, req)
+		s.webhooks.HandleGitHub(w, req)
 
 		if w.Code != http.StatusNoContent {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
@@ -243,7 +243,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 	t.Run("valid pipeline event returns 204", func(t *testing.T) {
 		t.Parallel()
 		s := newTestServer(t)
-		s.gitlabWebhookSecret = secret
+		s.webhooks.gitlabSecret = secret
 
 		ev := gitlab.PipelineEvent{}
 		ev.ObjectAttributes.SHA = "deadbeef1234"
@@ -256,7 +256,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 		req.Header.Set("X-Gitlab-Token", string(secret))
 
 		w := httptest.NewRecorder()
-		s.handleGitLabWebhook(w, req)
+		s.webhooks.HandleGitLab(w, req)
 
 		if w.Code != http.StatusNoContent {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
@@ -266,7 +266,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 	t.Run("bad token returns 401", func(t *testing.T) {
 		t.Parallel()
 		s := newTestServer(t)
-		s.gitlabWebhookSecret = secret
+		s.webhooks.gitlabSecret = secret
 
 		body := []byte(`{}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/webhooks/gitlab", bytes.NewReader(body))
@@ -274,7 +274,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 		req.Header.Set("X-Gitlab-Token", "wrong-token")
 
 		w := httptest.NewRecorder()
-		s.handleGitLabWebhook(w, req)
+		s.webhooks.HandleGitLab(w, req)
 
 		if w.Code != http.StatusUnauthorized {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
@@ -284,7 +284,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 	t.Run("non-terminal status returns 204 without dispatch", func(t *testing.T) {
 		t.Parallel()
 		s := newTestServer(t)
-		s.gitlabWebhookSecret = secret
+		s.webhooks.gitlabSecret = secret
 
 		ev := gitlab.PipelineEvent{}
 		ev.ObjectAttributes.SHA = "deadbeef1234"
@@ -297,7 +297,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 		req.Header.Set("X-Gitlab-Token", string(secret))
 
 		w := httptest.NewRecorder()
-		s.handleGitLabWebhook(w, req)
+		s.webhooks.HandleGitLab(w, req)
 
 		if w.Code != http.StatusNoContent {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
@@ -307,7 +307,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 	t.Run("oversized body returns 413", func(t *testing.T) {
 		t.Parallel()
 		s := newTestServer(t)
-		s.gitlabWebhookSecret = secret
+		s.webhooks.gitlabSecret = secret
 
 		body := make([]byte, maxWebhookBodyBytes+1)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/webhooks/gitlab", bytes.NewReader(body))
@@ -315,7 +315,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 		req.Header.Set("X-Gitlab-Token", string(secret))
 
 		w := httptest.NewRecorder()
-		s.handleGitLabWebhook(w, req)
+		s.webhooks.HandleGitLab(w, req)
 
 		if w.Code != http.StatusRequestEntityTooLarge {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
@@ -328,7 +328,7 @@ func TestBuildHandlerWebhookRoutes(t *testing.T) {
 	t.Run("gitlab webhook registered when secret set", func(t *testing.T) {
 		t.Parallel()
 		s := newTestServer(t)
-		s.gitlabWebhookSecret = []byte("secret")
+		s.webhooks.gitlabSecret = []byte("secret")
 
 		h, err := s.buildHandler()
 		if err != nil {
@@ -357,7 +357,7 @@ func TestBuildHandlerWebhookRoutes(t *testing.T) {
 	t.Run("gitlab webhook not registered when secret unset", func(t *testing.T) {
 		t.Parallel()
 		s := newTestServer(t)
-		// gitlabWebhookSecret is nil (not configured).
+		// webhooks.gitlabSecret is nil (not configured).
 
 		h, err := s.buildHandler()
 		if err != nil {
@@ -394,6 +394,7 @@ func minimalServer(t *testing.T) *Server {
 	}
 	s.taskMgr = tasks.New(tasks.Config{ServerCtx: ctx})
 	s.initConcernAdapters()
-	s.ciService = ci.NewService(s.ciCache, s.provider, s.CIAdapter())
+	s.webhooks = s.newWebhookHandlers(nil, nil, nil)
+	s.SetCIService(ci.NewService(s.ciCache, s.provider, s.CIAdapter()))
 	return s
 }
