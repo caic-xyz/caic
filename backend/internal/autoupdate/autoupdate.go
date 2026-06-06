@@ -5,7 +5,6 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -23,6 +22,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
+	"github.com/klauspost/compress/gzip"
 )
 
 const (

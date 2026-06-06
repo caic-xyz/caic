@@ -5,11 +5,12 @@ package autoupdate
 import (
 	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/gzip"
 )
 
 func TestIsNewer(t *testing.T) {
