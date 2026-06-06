@@ -12,6 +12,7 @@ import AutoResizeTextarea from "./AutoResizeTextarea";
 import PromptInput from "./PromptInput";
 import Button from "./Button";
 import { requestNotificationPermission } from "../notifications";
+import { useHostMode } from "../hostMode";
 import ProgressPanel from "./ProgressPanel";
 import StatsIcon from "./StatsIcon";
 import CloseIcon from "@material-symbols/svg-400/outlined/close.svg?solid";
@@ -135,6 +136,7 @@ function ciActionsURL(remoteURL?: string, forge?: string): string | undefined {
 }
 
 export default function TaskDetail(props: Props) {
+  const hostMode = useHostMode();
   const location = useLocation();
   const [messages, setMessages] = createSignal<EventMessage[]>([]);
   const [sending, setSending] = createSignal(false);
@@ -436,7 +438,7 @@ export default function TaskDetail(props: Props) {
     const text = props.inputDraft.trim();
     const imgs = props.inputImages;
     if (!text && imgs.length === 0) return;
-    requestNotificationPermission();
+    requestNotificationPermission({ enabled: hostMode.browserNotificationsEnabled() });
     setSending(true);
     try {
       await apiSendInput(props.taskId, { prompt: { text, ...(imgs.length > 0 ? { images: imgs } : {}) } });

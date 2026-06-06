@@ -4,6 +4,7 @@ package com.fghbuild.gomode.ui.web
 import android.Manifest
 import android.annotation.SuppressLint
 import android.net.Uri
+import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -38,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
+import androidx.core.net.toUri
 import com.fghbuild.gomode.R
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -47,8 +49,9 @@ fun WebShellScreen(
     onOpenSettings: () -> Unit,
 ) {
     val context = LocalContext.current
-    var pageFailed by remember(initialURL) { mutableStateOf<String?>(null) }
-    var loading by remember(initialURL) { mutableStateOf(true) }
+    val hostURL = remember(initialURL) { goModeHostURL(initialURL) }
+    var pageFailed by remember(hostURL) { mutableStateOf<String?>(null) }
+    var loading by remember(hostURL) { mutableStateOf(true) }
     var fileChooserCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     val fileChooserLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         fileChooserCallback?.onReceiveValue(uris.toTypedArray())
@@ -60,6 +63,7 @@ fun WebShellScreen(
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
+            addJavascriptInterface(GoModeHostBridge(), "goModeHost")
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     view.loadUrl(request.url.toString())
@@ -154,10 +158,10 @@ fun WebShellScreen(
         AndroidView(
             factory = { webView },
             update = { view ->
-                if (view.url != initialURL && view.originalUrl != initialURL) {
+                if (view.url != hostURL && view.originalUrl != hostURL) {
                     loading = true
                     pageFailed = null
-                    view.loadUrl(initialURL)
+                    view.loadUrl(hostURL)
                 }
             },
             modifier = Modifier.fillMaxSize(),
@@ -184,6 +188,19 @@ fun WebShellScreen(
 
 private fun hasPermission(context: android.content.Context, permission: String): Boolean =
     ContextCompat.checkSelfPermission(context, permission) == PermissionChecker.PERMISSION_GRANTED
+
+private fun goModeHostURL(url: String): String =
+    url.toUri()
+        .buildUpon()
+        .appendQueryParameter("goModeHost", "1")
+        .build()
+        .toString()
+
+private class GoModeHostBridge {
+    @JavascriptInterface
+    @Suppress("FunctionOnlyReturningConstant")
+    fun shellVersion(): String = "1"
+}
 
 @Composable
 private fun WebRecoveryPanel(

@@ -59,7 +59,7 @@ vi.mock("./AuthContext", () => ({
 vi.stubGlobal("EventSource", FakeEventSource);
 
 // Stub VoiceOverlay to avoid WebRTC/WebSocket connections in tests.
-vi.mock("./VoiceOverlay", () => ({ default: () => null }));
+vi.mock("./components/VoiceOverlay", () => ({ default: () => <div data-testid="voice-overlay" /> }));
 
 function dispatchSSE(data: unknown) {
   const payload = { data: JSON.stringify(data) };
@@ -92,6 +92,8 @@ function chipPathValues(): string[] {
 beforeEach(() => {
   vi.clearAllMocks();
   fakeESListeners.length = 0;
+  window.history.replaceState(null, "", "/");
+  delete window.goModeHost;
   vi.mocked(api.listRepos).mockResolvedValue([repoA, repoB]);
   vi.mocked(api.getPreferences).mockResolvedValue({
     repositories: [{ path: "repos/a" }],
@@ -116,6 +118,29 @@ beforeEach(() => {
 });
 
 describe("App repo chips: No repository", () => {
+  it("does not mount browser voice in Go Mode host mode", async () => {
+    window.goModeHost = {};
+
+    renderApp();
+
+    await waitFor(() => expect(api.listRepos).toHaveBeenCalledOnce());
+    expect(screen.queryByTestId("voice-overlay")).not.toBeInTheDocument();
+  });
+
+  it("does not mount browser voice when the route has the Go Mode host marker", async () => {
+    renderApp("/?goModeHost=1");
+
+    await waitFor(() => expect(api.listRepos).toHaveBeenCalledOnce());
+    expect(screen.queryByTestId("voice-overlay")).not.toBeInTheDocument();
+  });
+
+  it("keeps browser voice mounted outside Go Mode host mode", async () => {
+    renderApp();
+
+    await waitFor(() => expect(api.listRepos).toHaveBeenCalledOnce());
+    expect(screen.getByTestId("voice-overlay")).toBeInTheDocument();
+  });
+
   it("returns to the task list from the caic title", async () => {
     const user = userEvent.setup();
     const { history } = renderApp("/settings");

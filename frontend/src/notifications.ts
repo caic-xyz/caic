@@ -1,15 +1,20 @@
 // Browser notification helpers for alerting when agents need attention.
 
+interface NotificationOptions {
+  enabled: boolean;
+}
+
 /** Request notification permission if not already granted. */
-export function requestNotificationPermission(): void {
+export function requestNotificationPermission(options: NotificationOptions): void {
+  if (!options.enabled) return;
   if ("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
   }
 }
 
 /** Returns true when we're allowed to send notifications. */
-function canNotify(): boolean {
-  return "Notification" in window && Notification.permission === "granted";
+function canNotify(options: NotificationOptions): boolean {
+  return options.enabled && "Notification" in window && Notification.permission === "granted";
 }
 
 const activeNotifications = new Map<string, Notification>();
@@ -25,8 +30,8 @@ export function setVoiceActive(active: boolean): void {
  * Show a browser notification that an agent is waiting for input.
  * Only fires if the page is not currently visible (user tabbed away).
  */
-export function notifyWaiting(taskId: string, taskName: string): void {
-  if (!canNotify() || document.visibilityState === "visible" || voiceActive) return;
+export function notifyWaiting(taskId: string, taskName: string, options: NotificationOptions): void {
+  if (!canNotify(options) || document.visibilityState === "visible" || voiceActive) return;
   const n = new Notification(`${taskName} is ready`, {
     tag: `caic-waiting-${taskId}`,
   });

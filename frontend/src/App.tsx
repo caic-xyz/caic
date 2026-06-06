@@ -13,6 +13,7 @@ import { ControlSelect, ToggleChip } from "./components/FormControls";
 import UsageBadges from "./components/UsageBadges";
 import VoiceOverlay from "./components/VoiceOverlay";
 import CloneRepoDialog from "./components/CloneRepoDialog";
+import { HostModeProvider, useHostMode } from "./hostMode";
 import USBIcon from "@material-symbols/svg-400/outlined/usb.svg?solid";
 import DisplayIcon from "@material-symbols/svg-400/outlined/desktop_windows.svg?solid";
 import SudoIcon from "@material-symbols/svg-400/outlined/shield_person.svg?solid";
@@ -36,6 +37,7 @@ function ConnectionDot(props: { connected: boolean }) {
 function Shell(props: { children?: JSX.Element }) {
   const s = useAppState();
   const auth = s.auth;
+  const hostMode = useHostMode();
 
   return (
     <Show when={auth.providers().length === 0 || auth.user()} fallback={<LoginPage />}>
@@ -212,13 +214,15 @@ function Shell(props: { children?: JSX.Element }) {
         </dialog>
       </Show>
 
-      <VoiceOverlay
-        tasks={s.tasks}
-        recentRepo={() => s.repos()[0]?.path ?? ""}
-        selectedHarness={s.selectedHarness}
-        selectedModel={s.selectedModel}
-        serverCaps={s.serverCaps}
-      />
+      <Show when={hostMode.browserVoiceEnabled()}>
+        <VoiceOverlay
+          tasks={s.tasks}
+          recentRepo={() => s.repos()[0]?.path ?? ""}
+          selectedHarness={s.selectedHarness}
+          selectedModel={s.selectedModel}
+          serverCaps={s.serverCaps}
+        />
+      </Show>
       <Portal>
         <div class={styles.toastContainer}>
           <For each={s.warnings()}>
@@ -239,8 +243,10 @@ function Shell(props: { children?: JSX.Element }) {
 /** Router layout for "/": provides the app store and renders the shell around routed panes. */
 export default function App(props: { children?: JSX.Element }) {
   return (
-    <AppStateProvider>
-      <Shell>{props.children}</Shell>
-    </AppStateProvider>
+    <HostModeProvider>
+      <AppStateProvider>
+        <Shell>{props.children}</Shell>
+      </AppStateProvider>
+    </HostModeProvider>
   );
 }

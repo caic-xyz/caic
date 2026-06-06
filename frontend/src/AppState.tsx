@@ -9,6 +9,7 @@ import { useAuth } from "./AuthContext";
 import { confirmTaskAction } from "./components/TaskCard";
 import { requestNotificationPermission, notifyWaiting, dismissNotification } from "./notifications";
 import { taskPath, taskIdFromPath } from "./taskPath";
+import { useHostMode } from "./hostMode";
 
 /** Add ±25% jitter to a delay to avoid thundering herd on server restart. */
 function jitteredDelay(base: number): number {
@@ -19,6 +20,7 @@ function createAppStore() {
   const navigate = useNavigate();
   const location = useLocation();
   const auth = useAuth();
+  const hostMode = useHostMode();
 
   const [prompt, setPrompt] = createSignal("");
   const [tasks, setTasks] = createSignal<Task[]>([]);
@@ -318,7 +320,7 @@ function createAppStore() {
           const prevState = prevStates.get(t.id);
           const prevNeedsInput = prevState === "waiting" || prevState === "asking" || prevState === "has_plan";
           if (needsInput && prevState === "running") {
-            notifyWaiting(t.id, t.title);
+            notifyWaiting(t.id, t.title, { enabled: hostMode.browserNotificationsEnabled() });
           } else if (!needsInput && prevNeedsInput) {
             dismissNotification(t.id);
           }
@@ -590,7 +592,7 @@ function createAppStore() {
     const imgs = pendingImages();
     const selRepos = selectedRepos();
     if (!p && imgs.length === 0) return;
-    requestNotificationPermission();
+    requestNotificationPermission({ enabled: hostMode.browserNotificationsEnabled() });
     setSubmitting(true);
     {
       // Optimistic reorder: move the primary repo to the front of the recent list.

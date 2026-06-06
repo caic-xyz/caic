@@ -79,6 +79,10 @@ screenshot, and Halo integrations.
 - mddb is another backend-hosted frontend service with OAuth, generated SDK/API
   docs, e2e coverage, and mobile UI tests. Go Mode should keep the service host
   boundary generic enough for mddb even if caic is implemented first.
+- Go Mode must not compile against caic-specific SDK types or hard-code
+  caic-specific REST/SSE paths for native task monitoring, notifications, voice
+  tools, or routing. Native monitoring needs a service-neutral abstraction layer
+  first, with caic implemented as one adapter behind that boundary.
 - The caic backend currently exposes `/api/v1/voice/rtc/offer` and terminates
   the WebRTC side of a voice session through `internal/voicegateway/voicertc`.
 - The current caic API reports structured `Config.voiceGateway` metadata so
@@ -105,6 +109,10 @@ screenshot, and Halo integrations.
   Mode.
 - Do not build a caic Compose/WebView mode switch.
 - Do not proxy normal caic API calls through JavaScript bridge methods.
+- Do not add caic-specific API clients, generated SDK model types, or
+  `/api/v1/...` route knowledge directly to Go Mode shell services. Put
+  service-specific API behavior behind a narrow service adapter selected by the
+  active service instance and compatibility metadata.
 - Do not bundle frontend assets into the APK. There is no offline use case; the
   app cannot do useful work without network access to a backend service.
 - Do not move Android voice endpoint behavior into browser JavaScript.
@@ -130,13 +138,15 @@ com.fghbuild.gomode.MainActivity
           -> voice endpoint settings
           -> Halo/BLE settings
           -> shell protocol compatibility state
-      -> app-scoped TaskMonitor
-          -> TaskRepository
-          -> TaskNotifier
+      -> ServiceRegistry
+          -> ServiceAdapter selected by active service instance
+          -> neutral attention, route, voice token, and tool-manifest interfaces
+      -> app-scoped native monitors
+          -> depend only on ServiceAdapter interfaces
       -> VoiceEndpoint / VoiceService / VoiceViewModel
           -> WebRTC client connection to configured voice gateway
       -> WebShellScreen
-          -> WebView loading the backend-hosted SolidJS frontend
+          -> WebView loading the backend-hosted frontend
           -> narrow JavaScript bridge for native-only capabilities
 
 Voice gateway
@@ -174,6 +184,10 @@ Ownership rules:
   tool responses for the local voice endpoint.
 - Each service backend owns its web UI, auth, product API, and future
   service-specific tool manifest.
+- Service-specific Android API calls are owned by service adapters, not by the
+  Go Mode shell. The shell depends only on neutral interfaces for attention
+  events, notification routing targets, voice token issuance, tool manifests,
+  and service capability metadata.
 - A service backend may either host the voice-gateway API itself or
   advertise a preferred external gateway. Go Mode always talks to a
   voice-gateway API endpoint, not to caic-specific voice routes.
@@ -323,6 +337,25 @@ Service-signed token rules:
 The Go Mode shell must not assume that every configured server supports the same
 frontend, API, or native binding version.
 
+Before implementing app-scoped monitoring, define a service abstraction boundary
+inside Go Mode:
+
+```kotlin
+interface ServiceAdapter {
+    val instance: ServiceInstance
+    suspend fun compatibility(): ServiceCompatibility
+    fun attentionEvents(): Flow<ServiceAttentionEvent>
+    suspend fun voiceGatewayToken(): VoiceGatewayToken
+    suspend fun toolManifest(): ServiceToolManifest
+}
+```
+
+The exact names can change, but the direction should not: Go Mode app services
+depend on neutral interfaces, while caic, mddb, and future products provide
+adapters. A caic adapter may use caic-specific endpoints internally, but the
+shell-level `TaskMonitor`, `TaskNotifier`, voice endpoint, routing, and bridge
+code must not know caic SDK types, caic task states, or caic URL paths.
+
 Add a small shell compatibility endpoint to caic before relying on native
 bindings. The exact path can change, but the shape should be stable:
 
@@ -381,6 +414,9 @@ Versioning rules:
 - Clients must use structured gateway metadata.
 - For a generic host, the same mechanism should support `service: "mddb"` or
   other service identifiers.
+- Compatibility metadata should advertise the service adapter kind and the
+  neutral capabilities Go Mode can consume. Adapter-specific paths are adapter
+  config, not shell constants.
 
 The voice gateway also needs its own compatibility endpoint:
 
@@ -593,32 +629,45 @@ Acceptance checks:
 - Too-new voice gateway asks for Android app upgrade.
 - Capability absence disables only the affected native feature.
 
-## Phase 4: App-Scoped Task Monitoring
+## Phase 4: App-Scoped Service Monitoring
 
-Move task monitoring out of screen-mode ViewModels.
+Move native service monitoring out of screen-mode ViewModels without importing
+service-specific API details into Go Mode shell code.
 
-Implement a dedicated app-scoped starter, for example:
+Implement a dedicated app-scoped starter and service-neutral interfaces, for
+example:
 
 ```text
-<gomode-app>/src/main/java/com/fghbuild/gomode/data/TaskMonitor.kt
+<gomode-app>/src/main/java/com/fghbuild/gomode/service/ServiceRegistry.kt
+<gomode-app>/src/main/java/com/fghbuild/gomode/service/ServiceAdapter.kt
+<gomode-app>/src/main/java/com/fghbuild/gomode/service/AttentionMonitor.kt
 ```
 
 Requirements:
 
-- Start `TaskRepository` from an application or activity-retained scope.
-- Start `TaskNotifier` from the same long-lived scope.
+- Do not create `com.fghbuild.gomode.data.TaskRepository`, `TaskNotifier`, or
+  other shell-level classes that encode caic task states or caic API paths.
+- Start neutral attention monitoring from an application or activity-retained
+  scope only after compatibility metadata selects a service adapter.
+- Put caic task SSE, caic task states, and caic notification routing behind a
+  caic adapter package.
 - Make startup idempotent. Repeated calls must not create duplicate SSE
-  collectors, duplicate notification collectors, or duplicated Halo observers.
-- Restart monitoring when active server URL or auth token changes.
-- Clear task and usage state when no server is configured.
-- Keep notification suppression tied to `VoiceSession.state.connected`.
+  collectors, duplicate notification collectors, or duplicated native observers.
+- Restart monitoring when the active service instance or authenticated adapter
+  state changes.
+- Clear neutral attention state when no service is configured.
+- Keep notification suppression tied to the neutral Android voice endpoint
+  state, not to caic `VoiceSession`.
 - Do not depend on `TaskListViewModel`.
 
 Implementation note:
 
-- Prefer making `TaskRepository.start()` and `TaskNotifier.start()` idempotent at
-  their own boundary. A separate starter cannot be the only protection against
-  duplicate starts.
+- Prefer making each adapter's monitor idempotent at its own boundary. A
+  separate starter cannot be the only protection against duplicate starts.
+- Existing files named like `gomode/data/TaskRepository.kt` or
+  `gomode/data/TaskNotifier.kt` are a design smell unless they contain only
+  neutral interfaces. Backend-specific repositories belong under an adapter
+  boundary such as `service/caic/`.
 
 Acceptance checks:
 
@@ -927,9 +976,9 @@ of the Go Mode product boundary:
 Keep:
 
 - native bootstrap/settings
-- generated Kotlin SDK
-- `TaskRepository`
-- `TaskNotifier`
+- service adapter interfaces and registry
+- service-specific adapters only when they remain behind neutral Go Mode
+  interfaces
 - Android voice endpoint package
 - screenshot service if retained
 - Halo service if retained
@@ -1151,15 +1200,17 @@ to the native host capabilities that remain independently useful.
 
 Keep each PR small enough to revert.
 
-PR 1: Go Mode host mode and app-scoped monitoring.
+PR 1: Go Mode host mode and service abstraction boundary.
 
 - Add Go Mode host-mode marker in the frontend.
 - Suppress browser voice and browser notifications in Go Mode host mode.
-- Copy and adapt task monitoring startup to an idempotent app-scoped path in Go
-  Mode.
-- Keep notification suppression tied to Android voice endpoint state.
-- Ensure Android task notifications work when only WebView screen mode is
-  mounted.
+- Define the Go Mode service adapter interfaces needed for native monitoring,
+  notifications, voice token issuance, tool manifests, and route targets.
+- Keep Go Mode shell services free of caic SDK types and caic-specific API
+  paths.
+- If task monitoring is copied during this PR, keep it behind a caic adapter and
+  keep the app-scoped monitor dependent only on the neutral attention-event
+  interface.
 - Keep existing browser/PWA behavior unchanged outside Go Mode host mode.
 
 PR 2: service auth and shell compatibility.
