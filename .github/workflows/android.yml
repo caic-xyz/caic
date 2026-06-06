@@ -41,8 +41,8 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v7
         with:
-          name: app-debug.apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: caic-debug.apk
+          path: android/caic/build/outputs/apk/debug/caic-debug.apk
           retention-days: 7
       - name: Test
         run: make android-test
@@ -53,22 +53,22 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: android-unit
-          files: android/app/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml,sdk/halo/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml
+          files: android/caic/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml,sdk/halo/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml
       - name: Upload lint results
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: lint-results
           path: |
-            android/app/build/reports/lint-results-debug.xml
-            android/app/build/reports/detekt/
+            android/caic/build/reports/lint-results-debug.xml
+            android/caic/build/reports/detekt/
           retention-days: 14
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: test-results
-          path: android/app/build/reports/tests/
+          path: android/caic/build/reports/tests/
           retention-days: 14
 
   android-e2e:

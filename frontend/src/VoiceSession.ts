@@ -1,4 +1,4 @@
-// Core Gemini Live voice session manager for the web frontend via WebRTC. Keep in sync with android/app/src/main/java/com/fghbuild/caic/voice/VoiceSession.kt
+// Core Gemini Live voice session manager for the web frontend via WebRTC. Keep in sync with android/caic/src/main/java/com/fghbuild/caic/voice/VoiceSession.kt
 import { createStore, produce } from "solid-js/store";
 import { voiceRTCOffer, listHarnesses, listRepos } from "./api";
 import type { Task } from "@sdk/types.gen";

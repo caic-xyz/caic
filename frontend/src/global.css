@@ -1,4 +1,4 @@
-/* Global resets and design tokens. Keep color values in sync with android/app/src/main/java/com/fghbuild/caic/ui/theme/Theme.kt */
+/* Global resets and design tokens. Keep color values in sync with android/caic/src/main/java/com/fghbuild/caic/ui/theme/Theme.kt */
 
 :root {
   /* Primary action (buttons, focus rings) */

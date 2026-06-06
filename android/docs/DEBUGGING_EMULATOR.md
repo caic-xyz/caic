@@ -100,7 +100,7 @@ Alternative: the emulator maps `10.0.2.2` to the host, so
 cd android && ./gradlew assembleDebug --no-daemon
 
 # Install
-adb -s <device-id> install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s <device-id> install -r caic/build/outputs/apk/debug/caic-debug.apk
 
 # Launch
 adb -s <device-id> shell am start -n com.fghbuild.caic/.MainActivity

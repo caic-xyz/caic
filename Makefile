@@ -112,7 +112,7 @@ android-push: android-build
 	[ -n "$$devices" ] || { echo "No devices connected"; exit 1; }; \
 	for d in $$devices; do \
 		(echo "Pushing to $$d..." && \
-		 adb -s $$d install -r android/app/build/outputs/apk/debug/app-debug.apk && \
+		 adb -s $$d install -r android/caic/build/outputs/apk/debug/caic-debug.apk && \
 		 adb -s $$d shell am start -n com.fghbuild.caic/.MainActivity && \
 		 echo "Done: $$d") & \
 	done; \
@@ -122,7 +122,7 @@ android-test:
 	@cd android && ./gradlew --no-daemon test
 
 android-coverage:
-	@cd android && ./gradlew --no-daemon :app:testDebugUnitTest :app:createDebugUnitTestCoverageReport :halo:testDebugUnitTest :halo:createDebugUnitTestCoverageReport
+	@cd android && ./gradlew --no-daemon :caic:testDebugUnitTest :caic:createDebugUnitTestCoverageReport :halo:testDebugUnitTest :halo:createDebugUnitTestCoverageReport
 
 android-e2e:
 	@python3 scripts/android_e2e.py

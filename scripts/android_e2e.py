@@ -2,7 +2,7 @@
 """Run Android E2E tests against the fake backend.
 
 By default this runs all Android E2E modules. Use --module to run one module:
-  python3 scripts/android_e2e.py --module app
+  python3 scripts/android_e2e.py --module caic
   python3 scripts/android_e2e.py --module gomode
   python3 scripts/android_e2e.py --module halo
   python3 scripts/android_e2e.py --module all
@@ -35,12 +35,12 @@ import urllib.request
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCREENSHOT_DIR = os.path.join(ROOT_DIR, "e2e", "screenshots", "android")
 TEST_TASKS_BY_MODULE: dict[str, tuple[str, ...]] = {
-    "app": (":app:connectedAndroidTest",),
+    "caic": (":caic:connectedAndroidTest",),
     "gomode": (":gomode:connectedAndroidTest",),
     "halo": (":halo:connectedAndroidTest",),
 }
 TEST_TASKS_BY_MODULE["all"] = (
-    *TEST_TASKS_BY_MODULE["app"],
+    *TEST_TASKS_BY_MODULE["caic"],
     *TEST_TASKS_BY_MODULE["gomode"],
     *TEST_TASKS_BY_MODULE["halo"],
 )
@@ -166,8 +166,8 @@ def dump_logcat_on_failure(logcat_path):
 
 
 def persist_logcat_for_artifact(logcat_path):
-    """Copy logcat to android/app/build/reports/ so CI can upload it as an artifact."""
-    dest_dir = os.path.join(ROOT_DIR, "android", "app", "build", "reports", "androidTests", "connected")
+    """Copy logcat to android/caic/build/reports/ so CI can upload it as an artifact."""
+    dest_dir = os.path.join(ROOT_DIR, "android", "caic", "build", "reports", "androidTests", "connected")
     os.makedirs(dest_dir, exist_ok=True)
     dest = os.path.join(dest_dir, "logcat.txt")
     shutil.copy2(logcat_path, dest)
@@ -210,7 +210,7 @@ def run_tests(port, module):
 
 
 def module_generates_screenshots(module):
-    return module in ("all", "app")
+    return module in ("all", "caic")
 
 
 def pull_screenshots():

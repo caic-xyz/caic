@@ -1,4 +1,4 @@
-// Gemini Live functions/tools for voice mode, sync with android/app/src/main/java/com/fghbuild/caic/voice/FunctionDeclarations.kt
+// Gemini Live functions/tools for voice mode, sync with android/caic/src/main/java/com/fghbuild/caic/voice/FunctionDeclarations.kt
 
 type JsonSchema = Record<string, unknown>;
 
