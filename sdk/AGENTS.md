@@ -21,6 +21,7 @@ Shared client SDKs live here.
 ## Halo SDK
 
 Read `halo/AGENTS.md` before touching Halo BLE or message SDK code.
+- Android consumes the Kotlin SDK through Gradle target `:halo-sdk`.
 
 ## Checks
 

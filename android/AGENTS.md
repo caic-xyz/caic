@@ -13,7 +13,7 @@ Read the narrower guide before editing a module:
 - `:gomode`: Go Mode Android shell, package `com.fghbuild.gomode`.
 - `:caic-sdk`: generated Kotlin caic API SDK from `sdk/caic/kotlin`.
 - `:voicegateway-sdk`: generated Kotlin voice gateway API SDK from `sdk/voicegateway/kotlin`.
-- `:halo`: Halo BLE/message SDK from `sdk/halo`.
+- `:halo-sdk`: Halo BLE/message SDK from `sdk/halo`.
 
 ## Shared Conventions
 
@@ -62,7 +62,7 @@ For module-focused Android e2e runs:
 ```bash
 python3 scripts/android_e2e.py --module caic
 python3 scripts/android_e2e.py --module gomode
-python3 scripts/android_e2e.py --module halo
+python3 scripts/android_e2e.py --module halo-sdk
 ```
 
 ## Emulator

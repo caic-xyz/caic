@@ -7,8 +7,8 @@ over Bluetooth LE from the caic Android app (Kotlin/Compose).
 
 | Phase | Status |
 |-------|--------|
-| 1. Transport layer | ✅ Done — `:halo` module, `com.caic.halo.ble` package |
-| 2. Messaging layer | ✅ Done — `com.caic.halo.msg` package, merged into `:halo` |
+| 1. Transport layer | ✅ Done — `:halo-sdk` module, `com.caic.halo.ble` package |
+| 2. Messaging layer | ✅ Done — `com.caic.halo.msg` package, merged into `:halo-sdk` |
 | 3. App integration | 🟡 In progress — DI wiring, HaloService bridge, pure-function tests done |
 
 ## Architecture
@@ -22,7 +22,7 @@ caic Android App
                   └── Halo device (Lua VM + frame.* API)
 ```
 
-**Module:** `:halo` at `sdk/halo/`. 68 JVM unit tests, 0 failures. Zero third-party
+**Module:** `:halo-sdk` at `sdk/halo/`. 68 JVM unit tests, 0 failures. Zero third-party
 BLE libraries — pure `android.bluetooth.le`.
 
 **Protocol reference:** [sdk/halo/PROTOCOL.md](../../sdk/halo/PROTOCOL.md) — full BLE

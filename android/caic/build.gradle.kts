@@ -69,7 +69,7 @@ detekt {
 dependencies {
     implementation(project(":caic-sdk"))
     implementation(project(":voicegateway-sdk"))
-    implementation(project(":halo"))
+    implementation(project(":halo-sdk"))
 
     // Compose
     implementation(platform(libs.androidx.compose.bom))

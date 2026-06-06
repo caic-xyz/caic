@@ -4,7 +4,7 @@
 By default this runs all Android E2E modules. Use --module to run one module:
   python3 scripts/android_e2e.py --module caic
   python3 scripts/android_e2e.py --module gomode
-  python3 scripts/android_e2e.py --module halo
+  python3 scripts/android_e2e.py --module halo-sdk
   python3 scripts/android_e2e.py --module all
 
 Steps:
@@ -14,7 +14,7 @@ Steps:
   4. Run the selected connectedAndroidTest module(s) via Gradle, passing
      10.0.2.2:PORT (emulator's host alias — no adb reverse needed).
   5. Pull and convert screenshots when the app module ran; focused gomode and
-     halo runs skip screenshot collection.
+     halo-sdk runs skip screenshot collection.
   6. Dump logcat on failure for CI diagnostics.
   7. Kill the backend on exit.
 """
@@ -37,12 +37,12 @@ SCREENSHOT_DIR = os.path.join(ROOT_DIR, "e2e", "screenshots", "android")
 TEST_TASKS_BY_MODULE: dict[str, tuple[str, ...]] = {
     "caic": (":caic:connectedAndroidTest",),
     "gomode": (":gomode:connectedAndroidTest",),
-    "halo": (":halo:connectedAndroidTest",),
+    "halo-sdk": (":halo-sdk:connectedAndroidTest",),
 }
 TEST_TASKS_BY_MODULE["all"] = (
     *TEST_TASKS_BY_MODULE["caic"],
     *TEST_TASKS_BY_MODULE["gomode"],
-    *TEST_TASKS_BY_MODULE["halo"],
+    *TEST_TASKS_BY_MODULE["halo-sdk"],
 )
 
 

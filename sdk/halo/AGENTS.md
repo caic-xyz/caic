@@ -19,10 +19,10 @@ Host App
 
 ## Module
 
-Gradle module `:halo` at `sdk/halo/`:
+Gradle module `:halo-sdk` at `sdk/halo/`:
 
 ```kotlin
-dependencies { implementation(project(":halo")) }
+dependencies { implementation(project(":halo-sdk")) }
 ```
 
 ## Design Decisions
