@@ -10,7 +10,7 @@ const navigateMock = vi.fn();
 // Mock the router so SSE tests don't need a real Router context.
 vi.mock("@solidjs/router", () => ({
   useNavigate: () => navigateMock,
-  useLocation: () => ({ pathname: "/task/@abc+test-task" }),
+  useLocation: () => ({ pathname: "/task/@abc+test-task", query: {} }),
   A: (props: Record<string, unknown>) => (
     <a
       href={props.href as string}
@@ -53,6 +53,7 @@ vi.mock("../api", () => ({
 // Import after mocks are set up.
 import TaskDetail from "./TaskDetail";
 import { taskEvents } from "../api";
+import { HostModeProvider } from "../hostMode";
 
 const baseProps = {
   taskId: "abc",
@@ -73,6 +74,14 @@ const baseProps = {
   onError: () => {},
 };
 
+function renderTaskDetail(props: Partial<Parameters<typeof TaskDetail>[0]> = {}) {
+  return render(() => (
+    <HostModeProvider>
+      <TaskDetail {...baseProps} {...props} />
+    </HostModeProvider>
+  ));
+}
+
 describe("TaskDetail", () => {
 
   afterEach(() => {
@@ -80,39 +89,29 @@ describe("TaskDetail", () => {
   });
 
   it("shows Diff link when diffStat has items", () => {
-    const { getByText } = render(() => (
-      <TaskDetail {...baseProps} diffStat={[{ path: "file.ts", added: 10, deleted: 2 }]} />
-    ));
+    const { getByText } = renderTaskDetail({ diffStat: [{ path: "file.ts", added: 10, deleted: 2 }] });
     expect(getByText("Diff")).toBeInTheDocument();
   });
 
   it("hides Diff link when diffStat is empty", () => {
-    const { queryByText } = render(() => (
-      <TaskDetail {...baseProps} diffStat={[]} />
-    ));
+    const { queryByText } = renderTaskDetail({ diffStat: [] });
     expect(queryByText("Diff")).not.toBeInTheDocument();
   });
 
   it("hides Diff link when diffStat is undefined", () => {
-    const { queryByText } = render(() => (
-      <TaskDetail {...baseProps} diffStat={undefined} />
-    ));
+    const { queryByText } = renderTaskDetail({ diffStat: undefined });
     expect(queryByText("Diff")).not.toBeInTheDocument();
   });
 
   it("diff link href ends with /diff", () => {
-    const { getByText } = render(() => (
-      <TaskDetail {...baseProps} diffStat={[{ path: "file.ts", added: 5, deleted: 1 }]} />
-    ));
+    const { getByText } = renderTaskDetail({ diffStat: [{ path: "file.ts", added: 5, deleted: 1 }] });
     const link = getByText("Diff");
     expect(link.getAttribute("href")).toBe("/task/@abc+test-task/diff");
   });
 
   it("clicking diff link calls navigate with path/diff", async () => {
     const user = userEvent.setup();
-    const { getByText } = render(() => (
-      <TaskDetail {...baseProps} diffStat={[{ path: "file.ts", added: 5, deleted: 1 }]} />
-    ));
+    const { getByText } = renderTaskDetail({ diffStat: [{ path: "file.ts", added: 5, deleted: 1 }] });
     await user.click(getByText("Diff"));
     expect(navigateMock).toHaveBeenCalledWith("/task/@abc+test-task/diff");
   });
@@ -167,7 +166,7 @@ describe("SSE connection", () => {
       const created: FakeES[] = [];
       makeSyncReadyMock(created);
 
-      render(() => <TaskDetail {...baseProps} />);
+      renderTaskDetail();
 
       // createEffect runs synchronously during render in SolidJS.
       expect(created).toHaveLength(1);
@@ -196,7 +195,7 @@ describe("SSE connection", () => {
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     makeSyncReadyMock(created, capturedCb);
 
-    render(() => <TaskDetail {...baseProps} />);
+    renderTaskDetail();
     if (!capturedCb.value) throw new Error("taskEvents callback not captured");
 
     const cb = capturedCb.value;
@@ -218,7 +217,7 @@ describe("SSE connection", () => {
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     makeSyncReadyMock(created, capturedCb);
 
-    render(() => <TaskDetail {...baseProps} />);
+    renderTaskDetail();
 
     expect(capturedCb.value).not.toBeNull();
 
@@ -238,9 +237,7 @@ describe("SSE connection", () => {
     const created: FakeES[] = [];
     makeSyncReadyMock(created);
 
-    const { getByLabelText, getByText, queryByText } = render(() => (
-      <TaskDetail {...baseProps} taskState="waiting" supportsCompact={true} />
-    ));
+    const { getByLabelText, getByText, queryByText } = renderTaskDetail({ taskState: "waiting", supportsCompact: true });
 
     // The overflow menu toggle should be present.
     const toggle = getByLabelText("Context actions");
@@ -264,9 +261,7 @@ describe("SSE connection", () => {
     const created: FakeES[] = [];
     makeSyncReadyMock(created);
 
-    const { getByLabelText, getByText } = render(() => (
-      <TaskDetail {...baseProps} taskState="running" supportsCompact={true} />
-    ));
+    const { getByLabelText, getByText } = renderTaskDetail({ taskState: "running", supportsCompact: true });
 
     // Toggle is present even when running.
     const toggle = getByLabelText("Context actions");
@@ -287,9 +282,7 @@ describe("SSE connection", () => {
     const created: FakeES[] = [];
     makeSyncReadyMock(created);
 
-    const { getByLabelText, getByText, queryByText } = render(() => (
-      <TaskDetail {...baseProps} taskState="waiting" supportsCompact={false} />
-    ));
+    const { getByLabelText, getByText, queryByText } = renderTaskDetail({ taskState: "waiting", supportsCompact: false });
 
     await user.click(getByLabelText("Context actions"));
 
@@ -303,7 +296,7 @@ describe("SSE connection", () => {
     const created: FakeES[] = [];
     makeSyncReadyMock(created);
 
-    render(() => <TaskDetail {...baseProps} taskState="failed" />);
+    renderTaskDetail({ taskState: "failed" });
     expect(created).toHaveLength(1);
 
     // ready fired synchronously; now simulate SSE close (server closes after ready for failed tasks).
@@ -322,7 +315,7 @@ describe("SSE connection", () => {
     const capturedCb = { value: null as ((ev: EventMessage) => void) | null };
     makeSyncReadyMock(created, capturedCb);
 
-    render(() => <TaskDetail {...baseProps} taskState="failed" />);
+    renderTaskDetail({ taskState: "failed" });
     if (!capturedCb.value) throw new Error("taskEvents callback not captured");
 
     // Deliver a message so messages().length > 0.
@@ -341,9 +334,7 @@ describe("SSE connection", () => {
     const created: FakeES[] = [];
     makeSyncReadyMock(created);
 
-    const { getByText } = render(() => (
-      <TaskDetail {...baseProps} taskState="failed" initialPrompt="Fix the login bug" />
-    ));
+    const { getByText } = renderTaskDetail({ taskState: "failed", initialPrompt: "Fix the login bug" });
 
     expect(getByText("Fix the login bug")).toBeInTheDocument();
   });
