@@ -114,17 +114,30 @@ fun WebShellScreen(
         }
     }
 
+    // The hosted frontend owns in-page routes, so Android Back must ask the SPA
+    // router to move before falling back to WebView's document-level history.
     BackHandler {
         webView.evaluateJavascript(
             """
-            if (window.location.pathname !== "/") {
+            const before = window.location.pathname;
+            if (before !== "/") {
               window.history.back();
+              window.setTimeout(() => {
+                if (window.location.pathname === before) {
+                  // Some SPA transitions do not leave a WebView history entry.
+                  // Force the root route and notify routers listening for popstate.
+                  window.history.pushState(null, "", "/");
+                  window.dispatchEvent(new PopStateEvent("popstate"));
+                }
+              }, 100);
               true;
             } else {
               false;
             }
             """.trimIndent(),
         ) { handled ->
+            // If the SPA was already at its root, use normal WebView back
+            // navigation for any full-page loads that may be in history.
             if (handled != "true" && webView.canGoBack()) {
                 webView.goBack()
             }
