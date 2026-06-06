@@ -43,10 +43,40 @@ type handler struct {
 	bridge MediaBridge
 }
 
-type offerReq struct {
+// HealthResp is returned by GET /health.
+type HealthResp struct {
+	Status string `json:"status"`
+}
+
+// OfferReq starts a voice gateway WebRTC signaling session.
+type OfferReq struct {
 	ProtocolVersion int                  `json:"protocolVersion"`
 	SDP             string               `json:"sdp"`
 	Service         ServiceAuthorization `json:"service"`
+}
+
+// OfferResp returns the WebRTC SDP answer and gateway session ID.
+type OfferResp struct {
+	SDP       string `json:"sdp"`
+	SessionID string `json:"sessionID"`
+}
+
+// CloseSessionResp is returned after closing a voice gateway session.
+type CloseSessionResp struct {
+	ProtocolVersion int    `json:"protocolVersion"`
+	Status          string `json:"status"`
+}
+
+// ErrorResponse is the JSON envelope for voice gateway error responses.
+type ErrorResponse struct {
+	Error   ErrorDetails   `json:"error"`
+	Details map[string]any `json:"details,omitempty"`
+}
+
+// ErrorDetails holds the code and message within an error response.
+type ErrorDetails struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // ServiceAuthorization authorizes one service-bound voice session.
@@ -58,7 +88,7 @@ type ServiceAuthorization struct {
 }
 
 func (h *handler) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, HealthResp{Status: "ok"})
 }
 
 func (h *handler) handleCompat(w http.ResponseWriter, _ *http.Request) {
@@ -66,58 +96,52 @@ func (h *handler) handleCompat(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *handler) handleOffer(w http.ResponseWriter, r *http.Request) {
-	var req offerReq
+	var req OfferReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "invalid request body")
 		return
 	}
 	if req.ProtocolVersion != ProtocolVersion {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported protocolVersion"})
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "unsupported protocolVersion")
 		return
 	}
 	if req.SDP == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "sdp is required"})
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "sdp is required")
 		return
 	}
 	if err := validateServiceAuthorization(req.Service); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 		return
 	}
 	if err := verifyServiceToken(h.cfg, req.Service); err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
 		return
 	}
 	if h.bridge == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice bridge unavailable"})
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "voice bridge unavailable")
 		return
 	}
 	sdpAnswer, sessionID, err := h.bridge.HandleOffer(r.Context(), req.SDP)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "offer failed", "err", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "offer failed"})
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "offer failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{
-		"sdp":       sdpAnswer,
-		"sessionID": sessionID,
-	})
+	writeJSON(w, http.StatusOK, OfferResp{SDP: sdpAnswer, SessionID: sessionID})
 }
 
 func (h *handler) handleClose(w http.ResponseWriter, r *http.Request) {
 	if h.bridge == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "voice bridge unavailable"})
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "voice bridge unavailable")
 		return
 	}
 	sessionID := r.PathValue("sessionID")
 	if sessionID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "sessionID is required"})
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "sessionID is required")
 		return
 	}
 	h.bridge.Close(sessionID)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"protocolVersion": ProtocolVersion,
-		"status":          "closed",
-	})
+	writeJSON(w, http.StatusOK, CloseSessionResp{ProtocolVersion: ProtocolVersion, Status: "closed"})
 }
 
 func verifyServiceToken(cfg *Config, s ServiceAuthorization) error {
@@ -176,4 +200,13 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Error("json encode", "err", err)
 	}
+}
+
+func writeError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, ErrorResponse{
+		Error: ErrorDetails{
+			Code:    code,
+			Message: message,
+		},
+	})
 }

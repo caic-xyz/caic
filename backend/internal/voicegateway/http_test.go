@@ -76,12 +76,7 @@ func TestNewHandler(t *testing.T) {
 			t.Fatal(err)
 		}
 		handler.ServeHTTP(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
-		}
-		if !strings.Contains(w.Body.String(), "unsupported protocolVersion") {
-			t.Fatalf("body = %q, want unsupported protocolVersion", w.Body.String())
-		}
+		assertErrorResponse(t, w, http.StatusBadRequest, "BAD_REQUEST", "unsupported protocolVersion")
 	})
 
 	t.Run("offer requires service identity", func(t *testing.T) {
@@ -94,12 +89,7 @@ func TestNewHandler(t *testing.T) {
 			t.Fatal(err)
 		}
 		handler.ServeHTTP(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
-		}
-		if !strings.Contains(w.Body.String(), "service.kind") {
-			t.Fatalf("body = %q, want service.kind error", w.Body.String())
-		}
+		assertErrorResponse(t, w, http.StatusBadRequest, "BAD_REQUEST", "service.kind is required")
 	})
 
 	t.Run("offer reports unavailable bridge after valid request", func(t *testing.T) {
@@ -138,13 +128,24 @@ func TestNewHandler(t *testing.T) {
 			t.Fatal(err)
 		}
 		handler.ServeHTTP(w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
-		}
-		if !strings.Contains(w.Body.String(), "voice bridge unavailable") {
-			t.Fatalf("body = %q, want voice bridge unavailable", w.Body.String())
-		}
+		assertErrorResponse(t, w, http.StatusBadRequest, "BAD_REQUEST", "voice bridge unavailable")
 	})
+}
+
+func assertErrorResponse(t *testing.T, w *httptest.ResponseRecorder, status int, code, message string) {
+	if w.Code != status {
+		t.Fatalf("status = %d, want %d", w.Code, status)
+	}
+	var resp ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Error.Code != code {
+		t.Fatalf("error.code = %q, want %q", resp.Error.Code, code)
+	}
+	if resp.Error.Message != message {
+		t.Fatalf("error.message = %q, want %q", resp.Error.Message, message)
+	}
 }
 
 func newTestPublicKey(t *testing.T) string {

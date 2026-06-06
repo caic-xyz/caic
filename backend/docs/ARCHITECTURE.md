@@ -295,6 +295,7 @@ graph TD
   pkg_internal_ci --> pkg_internal_task
   pkg_internal_cmd_gen_api_sdk --> pkg_internal_server_api
   pkg_internal_cmd_gen_api_sdk --> pkg_internal_server_api_v1
+  pkg_internal_cmd_gen_api_sdk --> pkg_internal_voicegateway
   pkg_internal_cmd_record_trace --> pkg_internal_agent
   pkg_internal_cmd_record_trace --> pkg_internal_agent_claudecode
   pkg_internal_cmd_record_trace --> pkg_internal_agent_codex
@@ -377,7 +378,7 @@ graph TD
 | `internal/autoupdate` | `internal/forge/github` |
 | `internal/bot` | `internal/forge`, `internal/forge/forgecache` |
 | `internal/ci` | `internal/agent`, `internal/bot`, `internal/forge`, `internal/forge/forgecache`, `internal/preferences`, `internal/task` |
-| `internal/cmd/gen-api-sdk` | `internal/server/api`, `internal/server/api/v1` |
+| `internal/cmd/gen-api-sdk` | `internal/server/api`, `internal/server/api/v1`, `internal/voicegateway` |
 | `internal/cmd/record-trace` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/gemini`, `internal/agent/kilo`, `internal/agent/opencode`, `internal/agent/pi`, `internal/agent/relay` |
 | `internal/forge` | None |
 | `internal/forge/forgecache` | `internal/forge` |
