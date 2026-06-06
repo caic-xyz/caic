@@ -78,14 +78,20 @@ class GenScreenshotsTest : E2eTestBase() {
         }
 
         composeTestRule.waitForIdle()
-        composeTestRule.waitUntil(5_000) {
-            val found = composeTestRule.onAllNodesWithTag("empty-task-list")
+        composeTestRule.waitUntil(LOAD_TIMEOUT_MS) {
+            val hasPrompt = composeTestRule.onAllNodesWithTag("prompt-input")
                 .fetchSemanticsNodes().isNotEmpty()
-            if (!found) {
-                Log.e("E2E", "empty-task-list missing. Dumping semantics tree:")
+            val hasError = composeTestRule.onAllNodesWithTag("task-list-error")
+                .fetchSemanticsNodes().isNotEmpty()
+            if (!hasPrompt || hasError) {
+                Log.e("E2E", "Task creation surface not ready. Dumping semantics tree:")
                 composeTestRule.onRoot().printToLog("E2E")
             }
-            found
+            org.junit.Assert.assertFalse(
+                "App shows error state before task creation",
+                hasError,
+            )
+            hasPrompt
         }
 
         // Create the same 4 tasks as gen-android-screenshots.sh.

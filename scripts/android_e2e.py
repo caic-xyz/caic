@@ -176,16 +176,23 @@ def run_tests(port):
     else:
         host = "localhost"
         subprocess.check_call(["adb", "reverse", f"tcp:{port}", f"tcp:{port}"])
-    result = subprocess.run(
-        [
-            "./gradlew",
-            "--no-daemon",
-            "connectedAndroidTest",
-            f"-Pandroid.testInstrumentationRunnerArguments.baseUrl=http://{host}:{port}",
-        ],
-        cwd=os.path.join(ROOT_DIR, "android"),
-    )
-    return result.returncode
+    for task in (
+        ":app:connectedAndroidTest",
+        ":gomode:connectedAndroidTest",
+        ":halo:connectedAndroidTest",
+    ):
+        result = subprocess.run(
+            [
+                "./gradlew",
+                "--no-daemon",
+                task,
+                f"-Pandroid.testInstrumentationRunnerArguments.baseUrl=http://{host}:{port}",
+            ],
+            cwd=os.path.join(ROOT_DIR, "android"),
+        )
+        if result.returncode != 0:
+            return result.returncode
+    return 0
 
 
 def pull_screenshots():
