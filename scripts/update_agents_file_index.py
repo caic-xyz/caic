@@ -27,7 +27,7 @@ def get_git_files():
     """Return the list of files tracked by git, or [] on failure."""
     try:
         result = subprocess.run(["git", "ls-files", "-z"], capture_output=True, text=True, check=True)
-        return [f for f in result.stdout.split("\0") if f]
+        return [f for f in result.stdout.split("\0") if f and (os.path.exists(f) or os.path.islink(f))]
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         print(f"Error listing git files: {e}", file=sys.stderr)
         return []
