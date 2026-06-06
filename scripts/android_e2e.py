@@ -116,11 +116,19 @@ def stop_logcat(proc, logcat_file=None):
         logcat_file.close()
 
 
-def _get_app_pids():
-    """Return PIDs for com.fghbuild.caic and com.fghbuild.caic.test, if running."""
+APP_PACKAGES = (
+    "com.fghbuild.caic",
+    "com.fghbuild.caic.test",
+    "com.fghbuild.gomode",
+    "com.fghbuild.gomode.test",
+)
+
+
+def _running_app_pids():
+    """Return currently running PIDs for Android app/test packages."""
     try:
         out = subprocess.run(
-            ["adb", "shell", "pidof", "com.fghbuild.caic", "com.fghbuild.caic.test"],
+            ["adb", "shell", "pidof", *APP_PACKAGES],
             capture_output=True,
             text=True,
             timeout=5,
@@ -128,6 +136,22 @@ def _get_app_pids():
         return out.stdout.strip().split()
     except subprocess.TimeoutExpired:
         return []
+
+
+def _logged_app_pids(logcat_path):
+    """Return PIDs seen in logcat lines that mention app/test packages."""
+    pids = set()
+    try:
+        with open(logcat_path) as f:
+            for line in f:
+                if not any(package in line for package in APP_PACKAGES):
+                    continue
+                parts = line.split(maxsplit=5)
+                if len(parts) >= 3 and parts[2].isdigit():
+                    pids.add(parts[2])
+    except OSError:
+        return []
+    return sorted(pids)
 
 
 def dump_logcat_on_failure(logcat_path):
@@ -145,8 +169,9 @@ def dump_logcat_on_failure(logcat_path):
 
     # Dump only lines belonging to our app processes. Logcat threadtime format
     # includes the PID as the first column after the date: "05-06 17:58:10.123  4395".
-    # We match by PID so this stays correct as tags are added, renamed, or removed.
-    app_pids = _get_app_pids()
+    # Prefer PIDs seen in the captured log because instrumentation may stop the
+    # app before this failure handler runs.
+    app_pids = sorted(set(_logged_app_pids(logcat_path)) | set(_running_app_pids()))
     app_tail = 300
     print(
         f"--- APP LOGCAT (last {app_tail} lines for PIDs {app_pids}) ---",
