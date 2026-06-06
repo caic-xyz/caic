@@ -38,7 +38,7 @@ Docs:
 - Package: `com.fghbuild.caic`.
 - DI: Hilt.
 - Navigation: Compose Navigation with typed routes.
-- Networking: generated `:sdk` API client plus OkHttp/SSE/WebSocket where needed.
+- Networking: generated `:caic-sdk` API client plus OkHttp/SSE/WebSocket where needed.
 - Compose UI should be presentation logic only.
 - Keep colors and task states in sync with `../../frontend/src/global.css`.
 - Keep event grouping and turn splitting in sync with `../../frontend/src/grouping.ts`.

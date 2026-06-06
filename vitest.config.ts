@@ -9,7 +9,7 @@ export default defineConfig({
   plugins: [solidPlugin(), solidSVG()],
   resolve: {
     alias: {
-      "@sdk": resolve(__dirname, "sdk/ts/v1"),
+      "@sdk": resolve(__dirname, "sdk/caic/ts/v1"),
     },
   },
   test: {

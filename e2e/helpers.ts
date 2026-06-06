@@ -1,7 +1,7 @@
 // Shared e2e test helpers: typed API client and utilities.
 import { test as base, expect, type APIRequestContext } from "@playwright/test";
-import { createApiClient, APIError, type FetchFn } from "../sdk/ts/v1/api.gen";
-import type { Task } from "../sdk/ts/v1/types.gen";
+import { createApiClient, APIError, type FetchFn } from "../sdk/caic/ts/v1/api.gen";
+import type { Task } from "../sdk/caic/ts/v1/types.gen";
 
 // ---------------------------------------------------------------------------
 // Adapt Playwright's APIRequestContext to the SDK's FetchFn interface.

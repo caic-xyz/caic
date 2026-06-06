@@ -16,12 +16,12 @@
     ],
     "paths": {
       "@sdk/*": [
-        "./sdk/ts/v1/*"
+        "./sdk/caic/ts/v1/*"
       ]
     }
   },
   "include": [
     "frontend/src",
-    "sdk"
+    "sdk/caic"
   ]
 }

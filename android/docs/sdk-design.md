@@ -1,20 +1,20 @@
 # Kotlin SDK Design
 
 Pure Kotlin module (no Android dependencies) providing a type-safe client for the
-caic API. Mirrors the generated TypeScript SDK (`sdk/ts/v1/api.gen.ts`, `sdk/ts/v1/types.gen.ts`).
+caic API. Mirrors the generated TypeScript SDK (`sdk/caic/ts/v1/api.gen.ts`, `sdk/caic/ts/v1/types.gen.ts`).
 
 ## Code Generation
 
 `backend/internal/cmd/gen-api-sdk/main.go` emits Kotlin from the same
 `v1.Routes` and Go structs used for TypeScript.
 
-Output directory: `sdk/kotlin/src/main/kotlin/com/caic/sdk/v1/`
+Output directory: `sdk/caic/kotlin/src/main/kotlin/com/caic/sdk/v1/`
 
 Two generated files:
 - `Types.kt` — data classes, type aliases, constants
 - `ApiClient.kt` — suspend functions for JSON endpoints, `Flow<T>` for SSE
 
-See `sdk/API.md` for the full route table and type reference.
+See `sdk/caic/API.md` for the full route table and type reference.
 
 ### Go → Kotlin Type Mapping
 
@@ -35,7 +35,7 @@ Field names: use `@SerialName` matching the `json` struct tag.
 
 ## Module Setup
 
-The SDK is a pure Kotlin/JVM module at the repository root (`sdk/kotlin/`).
+The SDK is a pure Kotlin/JVM module at the repository root (`sdk/caic/kotlin/`).
 The Android app includes it via a project dependency.
 
 Dependencies:

@@ -67,7 +67,7 @@ detekt {
 }
 
 dependencies {
-    implementation(project(":sdk"))
+    implementation(project(":caic-sdk"))
     implementation(project(":halo"))
 
     // Compose
