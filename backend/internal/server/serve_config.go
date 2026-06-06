@@ -237,16 +237,16 @@ func cacheMountsFromSettings(settings *preferences.Settings) []caicruntime.Cache
 			}
 		}
 	}
-	for _, m := range settings.CacheMappings {
+	for i, m := range settings.CacheMappings {
 		caches = append(caches, caicruntime.CacheMount{
-			Name:      "custom:" + m.ContainerPath,
+			Name:      fmt.Sprintf("custom-cache-%d", i),
 			HostPath:  m.HostPath,
 			MountPath: m.ContainerPath,
 		})
 	}
-	for _, m := range settings.CustomMounts {
+	for i, m := range settings.CustomMounts {
 		caches = append(caches, caicruntime.CacheMount{
-			Name:      "custom-mount:" + m.ContainerPath,
+			Name:      fmt.Sprintf("custom-mount-%d", i),
 			HostPath:  m.HostPath,
 			MountPath: m.ContainerPath,
 		})

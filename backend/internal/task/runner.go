@@ -310,7 +310,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	sr, err := r.setup(ctx, t, MakeMetadata(t), resolvedGitHubToken)
 	region.End()
 	if err != nil {
-		t.SetState(StateFailed)
+		t.recordStartupFailure(ctx, err)
 		return nil, err
 	}
 	t.SetRuntimeInstanceInfo(sr.InstanceID, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Runtime.VNCPort(ctx, sr.InstanceID))
@@ -334,7 +334,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	if err != nil {
 		close(msgCh)
 		<-dispatchDone
-		t.SetState(StateFailed)
+		t.recordStartupFailure(ctx, err)
 		return nil, err
 	}
 
@@ -356,7 +356,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 		_ = logW.Close()
 		close(msgCh)
 		<-dispatchDone
-		t.SetState(StateFailed)
+		t.recordStartupFailure(ctx, err)
 		tlog.Error("session start failed", "err", err)
 		return nil, err
 	}

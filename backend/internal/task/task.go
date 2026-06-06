@@ -1269,6 +1269,11 @@ func (t *Task) setState(s State) {
 	slog.Debug("instance", "state", s, "task", t.ID, "instance", t.runtimeInstanceID)
 }
 
+func (t *Task) recordStartupFailure(ctx context.Context, err error) {
+	t.SetState(StateFailed)
+	t.addMessage(ctx, &agent.LogMessage{Line: "Task startup failed: " + err.Error()}, false)
+}
+
 // addMessage appends a message to the task's message list under the mutex and
 // fans it out to subscribers. It also tracks metadata, updates state
 // transitions, and handles cost/duration accumulation.

@@ -231,6 +231,36 @@ func TestRunner(t *testing.T) {
 			t.Errorf("Effort = %q, want high", backend.capturedOpts.Effort)
 		}
 	})
+	t.Run("StartSurfacesSetupFailure", func(t *testing.T) {
+		t.Parallel()
+		launchErr := errors.New("invalid context name cache-custom-mount:~/.cache/caic: invalid reference format")
+		r := &Runner{
+			Runtime: &stubContainer{launchErr: launchErr},
+		}
+		tk := &Task{
+			ID:            ksid.NewID(),
+			InitialPrompt: agent.Prompt{Text: "test"},
+			Harness:       "test",
+			StartedAt:     time.Now().UTC(),
+		}
+		_, ch, unsub := tk.Subscribe(t.Context())
+		t.Cleanup(unsub)
+
+		if _, err := r.Start(t.Context(), tk, ""); err == nil {
+			t.Fatal("want launch error")
+		}
+		if got := tk.GetState(); got != StateFailed {
+			t.Errorf("state = %v, want %v", got, StateFailed)
+		}
+		msg := recvMsg(t, ch)
+		lm, ok := msg.(*agent.LogMessage)
+		if !ok {
+			t.Fatalf("message = %T, want *agent.LogMessage", msg)
+		}
+		if !strings.Contains(lm.Line, launchErr.Error()) {
+			t.Errorf("log line = %q, want launch error", lm.Line)
+		}
+	})
 	t.Run("Init", func(t *testing.T) {
 		t.Parallel()
 		t.Run("Basic", func(t *testing.T) {
@@ -1222,15 +1252,19 @@ func TestPrependRepoToDiffDevNull(t *testing.T) {
 // stubContainer implements runtime.Backend for testing. Diff returns a fixed
 // numstat line; Fetch records that it was called.
 type stubContainer struct {
-	fetched  bool
-	fetchErr error // If set, Fetch returns this error.
-	stopped  bool
-	diffIDs  []runtime.InstanceID
-	fetchIDs []runtime.InstanceID
-	diffIdxs []int
+	fetched   bool
+	launchErr error // If set, Launch returns this error.
+	fetchErr  error // If set, Fetch returns this error.
+	stopped   bool
+	diffIDs   []runtime.InstanceID
+	fetchIDs  []runtime.InstanceID
+	diffIdxs  []int
 }
 
 func (s *stubContainer) Launch(_ context.Context, _ []runtime.Repo, _ *runtime.StartOptions) (runtime.InstanceID, error) {
+	if s.launchErr != nil {
+		return "", s.launchErr
+	}
 	return "stub", nil
 }
 

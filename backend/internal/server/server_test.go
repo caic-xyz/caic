@@ -708,9 +708,9 @@ func TestHandleCreateTask(t *testing.T) {
 		var gotCustom, gotCustomMount, gotNPM, gotGoMod bool
 		for _, cm := range entry.Task().CacheMounts {
 			switch cm.Name {
-			case "custom:/home/user/.custom":
+			case "custom-cache-0":
 				gotCustom = cm.HostPath == "/host/custom" && cm.MountPath == "/home/user/.custom"
-			case "custom-mount:/workspace/external":
+			case "custom-mount-0":
 				gotCustomMount = cm.HostPath == "/host/work" && cm.MountPath == "/workspace/external"
 			case "npm":
 				gotNPM = true
