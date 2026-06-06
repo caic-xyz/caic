@@ -1,8 +1,7 @@
 # Go Mode Android App
 
 Go Mode is a Kotlin/Compose Android app with package `com.fghbuild.gomode`.
-It is a thin native shell around backend-hosted mobile web frontends such as
-caic and mddb.
+It is a thin native shell around backend-hosted mobile web frontends.
 
 Read `../AGENTS.md` first for shared Android rules. Use
 `../docs/WEB_SHELL.md` as the canonical architecture plan.
@@ -15,7 +14,7 @@ coexist with the caic app on one device.
 Go Mode owns native platform capabilities:
 - Bootstrap settings before a WebView can load.
 - WebView hosting and host-mode compatibility negotiation.
-- Android notification permission and task notifications.
+- Android notification permission and hosted-service notifications.
 - Microphone/audio routing and foreground voice services.
 - Screenshot capture when native MediaProjection is required.
 - Halo/BLE integration when the shell owns the native capability.
@@ -23,6 +22,11 @@ Go Mode owns native platform capabilities:
 The backend-hosted web frontend owns screen-mode product UI. Do not copy caic
 task list, task detail, diff, process, widget, or screen-mode Compose UI into
 Go Mode.
+
+Go Mode must not depend on caic domain APIs or SDK types. In Go Mode app code
+and tests, do not import `com.caic.sdk.v1`, create/list/input caic tasks, or
+assert caic-specific routes such as `/task/...`. Treat caic as one possible
+hosted web app, opaque behind the WebView.
 
 ## Architecture
 
@@ -55,6 +59,8 @@ capabilities only when the WebView shell needs them.
 - Keep service identity explicit. Settings should be keyed by service type and
   service instance, not only by URL.
 - Load backend-hosted web frontends; do not bundle frontend assets into the APK.
+- Do not link Go Mode against caic API clients, generated SDKs, task DTOs, task
+  routes, or other caic product concepts.
 - Do not proxy normal caic API calls through a JavaScript bridge.
 - Keep the JavaScript bridge narrow, versioned, and capability-oriented.
 - Android back handling must account for SPA route ownership, not only
@@ -75,8 +81,12 @@ Run all Android modules with:
 make android-e2e
 ```
 
-Go Mode e2e should validate user-visible hosted behavior, not just native shell
-load. Focused Go Mode runs currently skip screenshot collection.
+Go Mode e2e should validate shell-owned behavior: settings bootstrap, WebView
+creation, hosted content visibility, navigation/back handling, and shell
+capabilities. Tests must drive the hosted frontend as a black box through WebView
+DOM or platform interactions; they must not seed state through caic task APIs or
+assert caic task lifecycle details. Focused Go Mode runs currently skip
+screenshot collection.
 
 ## Checks
 

@@ -37,14 +37,14 @@ fun SettingsScreen(
 ) {
     val scope = rememberCoroutineScope()
     val activeService = settings.services.firstOrNull { it.id == settings.activeServiceId }
-    val initialLabel = activeService?.label ?: "caic"
+    val initialLabel = activeService?.label ?: SettingsRepository.DEFAULT_SERVICE_LABEL
     var label by remember { mutableStateOf(initialLabel) }
     var url by remember { mutableStateOf(settings.activeServiceURL) }
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(settings.activeServiceId, settings.activeServiceURL) {
         val active = settings.services.firstOrNull { it.id == settings.activeServiceId }
-        label = active?.label ?: "caic"
+        label = active?.label ?: SettingsRepository.DEFAULT_SERVICE_LABEL
         url = settings.activeServiceURL
     }
 
@@ -59,7 +59,7 @@ fun SettingsScreen(
         ) {
             Text("Go Mode", style = MaterialTheme.typography.headlineMedium)
             Text(
-                "Configure a backend-hosted caic frontend.",
+                "Configure a backend-hosted frontend.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

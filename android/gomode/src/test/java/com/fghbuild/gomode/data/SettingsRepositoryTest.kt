@@ -28,14 +28,14 @@ class SettingsRepositoryTest {
     }
 
     @Test
-    fun `saveActiveService creates active caic service`() = runBlocking {
+    fun `saveActiveService creates active web service`() = runBlocking {
         val repo = createRepo()
         val id = repo.saveActiveService(label = "Local", url = "http://localhost:2242/")
         val state = withTimeout(5000) { repo.settings.first { it.activeServiceURL.isNotBlank() } }
 
         assertEquals(id, state.activeServiceId)
         assertEquals("Local", state.services.single().label)
-        assertEquals("caic", state.services.single().kind)
+        assertEquals("web", state.services.single().kind)
         assertEquals("http://localhost:2242", state.activeServiceURL)
     }
 
@@ -43,8 +43,8 @@ class SettingsRepositoryTest {
     fun `saveActiveService updates active service`() = runBlocking {
         val repo = createRepo()
         val id = repo.saveActiveService(label = "Local", url = "http://localhost:2242")
-        repo.saveActiveService(label = "Home", url = "https://caic.example.com/")
-        val state = withTimeout(5000) { repo.settings.first { it.activeServiceURL == "https://caic.example.com" } }
+        repo.saveActiveService(label = "Home", url = "https://example.com/")
+        val state = withTimeout(5000) { repo.settings.first { it.activeServiceURL == "https://example.com" } }
 
         assertEquals(id, state.activeServiceId)
         assertEquals(1, state.services.size)

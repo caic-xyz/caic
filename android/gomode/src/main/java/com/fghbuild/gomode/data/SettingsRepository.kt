@@ -21,7 +21,7 @@ import java.util.UUID
 data class ServiceInstance(
     val id: String,
     val label: String = "",
-    val kind: String = "caic",
+    val kind: String = "web",
     val url: String = "",
 )
 
@@ -67,7 +67,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
                     services.map { service ->
                         if (service.id == activeId) {
                             service.copy(
-                                label = label.ifBlank { service.label.ifBlank { "caic" } },
+                                label = label.ifBlank { service.label.ifBlank { DEFAULT_SERVICE_LABEL } },
                                 url = normalizedURL,
                             )
                         } else {
@@ -79,7 +79,7 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
                 savedId = UUID.randomUUID().toString()
                 val service = ServiceInstance(
                     id = savedId,
-                    label = label.ifBlank { "caic" },
+                    label = label.ifBlank { DEFAULT_SERVICE_LABEL },
                     url = normalizedURL,
                 )
                 prefs[Keys.SERVICES] = json.encodeToString(services + service)
@@ -104,6 +104,8 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
         } ?: emptyList()
 
     companion object {
+        const val DEFAULT_SERVICE_LABEL = "Service"
+
         fun normalizeURL(url: String): String = url.trim().trimEnd('/')
     }
 }

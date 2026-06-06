@@ -10,12 +10,7 @@ import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
-import com.caic.sdk.v1.ApiClient
-import com.caic.sdk.v1.InputReq
-import com.caic.sdk.v1.Prompt
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TestRule
@@ -45,7 +40,7 @@ class WebShellSmokeTest {
     }
 
     @Test
-    fun webShellLoadsFakeBackendAndHandlesTaskFlow() {
+    fun webShellLoadsHostedFrontendAndHandlesSpaBack() {
         composeRule.onNodeWithTag("gomode-service-url").performTextReplacement(baseUrl)
         composeRule.onNodeWithTag("gomode-save-service").performClick()
         composeRule.waitUntil(DEFAULT_TIMEOUT_MS) {
@@ -53,36 +48,27 @@ class WebShellSmokeTest {
         }
         waitForWebView()
 
-        waitForDom("Boolean(document.querySelector('[data-testid=\"repo-chips\"] [data-testid^=\"chip-label-\"]'))")
+        waitForDom("location.origin === ${baseUrl.jsString()}")
+        waitForDom("document.readyState === 'complete'")
+        waitForDom("document.body?.innerText.trim().length > 0")
 
-        val prompt = "gomode web shell ${System.currentTimeMillis()}"
-        enterPrompt(prompt)
-        waitForDom("document.querySelector('[data-testid=\"submit-task\"]')?.disabled === false")
-        clickSubmit()
-
-        waitForDom("location.pathname.startsWith('/task/')")
-        waitForDom("document.body.textContent.includes('Why do programmers prefer dark mode?')")
-        waitForDom("Boolean(document.querySelector('[data-testid=\"task-detail-form\"]'))")
-
-        val taskId = js("location.pathname.match(/^\\/task\\/@?([^+/]+)/)[1]").trim('"')
-        runBlocking {
-            ApiClient(baseUrl).sendInput(taskId, InputReq(prompt = Prompt(text = "tell me another")))
-        }
-        waitForDom("document.body.textContent.includes('A SQL query walks into a bar')")
+        assertJsTrue(
+            """
+            window.history.pushState(null, "", "$BACK_TEST_PATH");
+            window.dispatchEvent(new PopStateEvent("popstate"));
+            true;
+            """.trimIndent(),
+        )
+        waitForDom("location.pathname === '$BACK_TEST_PATH'")
 
         UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).pressBack()
         waitForDom("location.pathname === '/'")
-        waitForDom("Boolean(document.querySelector('[data-testid=\"prompt-input\"]'))")
     }
 
     @Test
-    fun gomodeAndCaicPackagesHaveSeparateNames() {
+    fun gomodePackageNameIsAppSpecific() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.fghbuild.gomode", context.packageName)
-        assertTrue(
-            "caic package must stay distinct for side-by-side install",
-            context.packageName != "com.fghbuild.caic",
-        )
     }
 
     private fun waitForDom(script: String, timeoutMs: Long = DEFAULT_TIMEOUT_MS) {
@@ -96,30 +82,6 @@ class WebShellSmokeTest {
 
     private fun assertJsTrue(script: String) {
         assertEquals("true", js(script))
-    }
-
-    private fun enterPrompt(prompt: String) {
-        assertJsTrue(
-            """
-            const input = document.querySelector('[data-testid="prompt-input"]');
-            input.focus();
-            input.textContent = ${prompt.jsString()};
-            input.dispatchEvent(
-              new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${prompt.jsString()} })
-            );
-            true;
-            """.trimIndent(),
-        )
-        waitForDom("document.querySelector('[data-testid=\"prompt-input\"]')?.textContent === ${prompt.jsString()}")
-    }
-
-    private fun clickSubmit() {
-        assertJsTrue(
-            """
-            document.querySelector('[data-testid="submit-task"]').click();
-            true;
-            """.trimIndent(),
-        )
     }
 
     private fun js(script: String): String {
@@ -165,5 +127,6 @@ class WebShellSmokeTest {
         private const val DEFAULT_TIMEOUT_MS = 30_000L
         private const val JS_TIMEOUT_MS = 5_000L
         private const val POLL_INTERVAL_MS = 250L
+        private const val BACK_TEST_PATH = "/gomode-e2e-route"
     }
 }
