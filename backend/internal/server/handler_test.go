@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	api "github.com/caic-xyz/caic/backend/internal/api"
+	"github.com/caic-xyz/caic/backend/internal/server/api"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 

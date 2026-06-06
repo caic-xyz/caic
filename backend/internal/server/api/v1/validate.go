@@ -16,7 +16,7 @@ import (
 
 	"github.com/caic-xyz/md"
 
-	api "github.com/caic-xyz/caic/backend/internal/api"
+	"github.com/caic-xyz/caic/backend/internal/server/api"
 )
 
 // Validate checks that prompt or images are provided.

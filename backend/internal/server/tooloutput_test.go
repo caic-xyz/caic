@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
 func TestFormatToolOutput(t *testing.T) {

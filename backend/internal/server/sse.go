@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"time"
 
-	api "github.com/caic-xyz/caic/backend/internal/api"
-	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/api/v1conv"
+	"github.com/caic-xyz/caic/backend/internal/server/api"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )

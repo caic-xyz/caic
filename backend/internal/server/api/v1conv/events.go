@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
 // InputTruncateThreshold is the maximum byte length of a tool input JSON before it

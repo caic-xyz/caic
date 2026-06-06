@@ -24,12 +24,12 @@ import (
 	"github.com/caic-xyz/md/gitutil"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	api "github.com/caic-xyz/caic/backend/internal/api"
-	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	caicruntime "github.com/caic-xyz/caic/backend/internal/runtime"
+	"github.com/caic-xyz/caic/backend/internal/server/api"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 )

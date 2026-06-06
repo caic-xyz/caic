@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	api "github.com/caic-xyz/caic/backend/internal/api"
+	"github.com/caic-xyz/caic/backend/internal/server/api"
 )
 
 func TestValidate(t *testing.T) {

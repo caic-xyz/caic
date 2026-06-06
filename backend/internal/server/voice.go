@@ -6,8 +6,8 @@ import (
 	"context"
 	"net/http"
 
-	api "github.com/caic-xyz/caic/backend/internal/api"
-	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/server/api"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
 func (s *Server) voiceRTCOffer(ctx context.Context, req *v1.VoiceRTCOfferReq) (*v1.VoiceRTCAnswerResp, error) {

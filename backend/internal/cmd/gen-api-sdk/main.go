@@ -18,9 +18,10 @@ import (
 	"time"
 	"unicode"
 
-	api "github.com/caic-xyz/caic/backend/internal/api"
-	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
 	"github.com/maruel/ksid"
+
+	"github.com/caic-xyz/caic/backend/internal/server/api"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
 var pathParamRe = regexp.MustCompile(`\{(\w+)\}`)
@@ -2402,9 +2403,9 @@ func main() {
 }
 
 func mainImpl() error {
-	// Output directories relative to go:generate CWD (backend/internal/api/v1/).
+	// Output directories relative to go:generate CWD (backend/internal/server/api/v1/).
 	const (
-		sdkDir    = "../../../../sdk"
+		sdkDir    = "../../../../../sdk"
 		tsDir     = sdkDir + "/ts/v1"
 		kotlinDir = sdkDir + "/kotlin/src/main/kotlin/com/caic/sdk/v1"
 		swiftDir  = sdkDir + "/swift/Sources/CaicSDK"

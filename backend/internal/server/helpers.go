@@ -12,8 +12,8 @@ import (
 
 	"github.com/caic-xyz/md/gitutil"
 
-	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
 // relayStatus describes the state of the runtime-instance relay daemon, probed

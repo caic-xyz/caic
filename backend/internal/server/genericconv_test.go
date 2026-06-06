@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
-	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
-	"github.com/caic-xyz/caic/backend/internal/api/v1conv"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
 )
 
 func TestNewReplayFilter(t *testing.T) {

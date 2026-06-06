@@ -8,7 +8,7 @@ import (
 
 	"github.com/maruel/ksid"
 
-	api "github.com/caic-xyz/caic/backend/internal/api"
+	"github.com/caic-xyz/caic/backend/internal/server/api"
 )
 
 //go:generate go run github.com/caic-xyz/caic/backend/internal/cmd/gen-api-sdk

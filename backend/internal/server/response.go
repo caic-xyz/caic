@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	api "github.com/caic-xyz/caic/backend/internal/api"
+	"github.com/caic-xyz/caic/backend/internal/server/api"
 )
 
 // writeError writes a structured JSON error response. If err implements

@@ -42,8 +42,8 @@ GROUP_RULES = (
     GroupRule("Forge", exact=("internal/forge",), prefixes=("internal/forge/",)),
     GroupRule(
         "Server",
-        exact=("internal/api", "internal/server"),
-        prefixes=("internal/api/", "internal/server/"),
+        exact=("internal/server",),
+        prefixes=("internal/server/"),
     ),
     GroupRule(
         "Task Runtime",

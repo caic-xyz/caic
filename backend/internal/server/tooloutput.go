@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	v1 "github.com/caic-xyz/caic/backend/internal/api/v1"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
 // FormatToolOutput analyzes a tool output string and returns its content type
