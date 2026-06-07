@@ -2,8 +2,11 @@
 package com.fghbuild.caic.data
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -27,6 +30,7 @@ import java.io.File
 class SettingsRepositoryTest {
 
     private val testDispatcher = UnconfinedTestDispatcher()
+    private val repositoryScope = CoroutineScope(SupervisorJob() + testDispatcher)
 
     @Before
     fun setUp() {
@@ -35,13 +39,14 @@ class SettingsRepositoryTest {
 
     @After
     fun tearDown() {
+        repositoryScope.cancel()
         Dispatchers.resetMain()
     }
 
     private fun createRepo(): SettingsRepository {
         val file = File.createTempFile("test_prefs", ".preferences_pb")
-        val dataStore = PreferenceDataStoreFactory.create { file }
-        return SettingsRepository(dataStore)
+        val dataStore = PreferenceDataStoreFactory.create(scope = repositoryScope) { file }
+        return SettingsRepository(dataStore, repositoryScope)
     }
 
     @Test

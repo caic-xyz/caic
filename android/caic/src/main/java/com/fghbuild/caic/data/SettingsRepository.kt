@@ -44,8 +44,13 @@ data class SettingsState(
 )
 
 @Singleton
-class SettingsRepository @Inject constructor(private val dataStore: DataStore<Preferences>) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+class SettingsRepository internal constructor(
+    private val dataStore: DataStore<Preferences>,
+    scope: CoroutineScope,
+) {
+    @Inject
+    constructor(dataStore: DataStore<Preferences>) : this(dataStore, CoroutineScope(SupervisorJob() + Dispatchers.IO))
+
     private val json = Json { ignoreUnknownKeys = true }
 
     private object Keys {
