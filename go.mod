@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/andybalholm/brotli v1.2.1
-	github.com/caic-xyz/md v0.13.7-0.20260607123101-156a5640d6bb
+	github.com/caic-xyz/md v0.13.7-0.20260607130955-cd4b56f1ee83
 	github.com/coder/websocket v1.8.14
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/klauspost/compress v1.18.6

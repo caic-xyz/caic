@@ -42,6 +42,7 @@ type mdContainer interface {
 	SetState(state string)
 	VNCPort() int32
 	Repos() []md.Repo
+	AgentMounts(paths ...md.AgentPaths) ([]md.Mount, error)
 	SSHCommand(opts []string, cmd string) []string
 	Launch(ctx context.Context, stdout, stderr io.Writer, opts *md.StartOpts) error
 	Connect(ctx context.Context, stdout, stderr io.Writer, opts *md.StartOpts) (*md.StartResult, error)
@@ -91,6 +92,9 @@ func (a mdContainerAdapter) SetName(name string)   { a.c.Name = name }
 func (a mdContainerAdapter) SetState(state string) { a.c.State = state }
 func (a mdContainerAdapter) VNCPort() int32        { return a.c.VNCPort }
 func (a mdContainerAdapter) Repos() []md.Repo      { return a.c.Repos }
+func (a mdContainerAdapter) AgentMounts(paths ...md.AgentPaths) ([]md.Mount, error) {
+	return a.c.AgentMounts(paths...)
+}
 func (a mdContainerAdapter) SSHCommand(opts []string, cmd string) []string {
 	return a.c.SSHCommand(opts, cmd)
 }
@@ -166,10 +170,13 @@ func (b *Backend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtim
 		return "", errors.New("sudo is not supported with rootless podman; use docker instead")
 	}
 	slog.DebugContext(ctx, "harness verified", "rt", rt, "harness", opts.Harness)
-	mdOpts := b.mdStartOpts(opts)
 	slog.DebugContext(ctx, "creating container", "rt", rt, "repos_count", len(repos))
 	mdRepos := toMDRepos(repos)
 	c, err := b.client.Container(mdRepos...)
+	if err != nil {
+		return "", err
+	}
+	mdOpts, err := b.mdStartOpts(c, opts)
 	if err != nil {
 		return "", err
 	}
@@ -209,7 +216,10 @@ func (b *Backend) Connect(ctx context.Context, id runtime.InstanceID, opts *runt
 		return runtime.ConnectionInfo{}, fmt.Errorf("no pending container %q", name)
 	}
 	slog.DebugContext(ctx, "found pending container", "rt", rt, "ctr", name)
-	mdOpts := b.mdStartOpts(opts)
+	mdOpts, err := b.mdStartOpts(c, opts)
+	if err != nil {
+		return runtime.ConnectionInfo{}, err
+	}
 	stdout, stderr := logWriters(opts.LogWriter, "connect")
 	slog.DebugContext(ctx, "calling connect", "rt", rt, "ctr", name)
 	sr, err := c.Connect(ctx, stdout, stderr, mdOpts)
@@ -341,9 +351,9 @@ func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runti
 		return "", nil, fmt.Errorf("source instance %s: %w", name, err)
 	}
 	ct.SetState("running")
-	var agentPaths []md.AgentPaths
-	if mdH, ok := harnessMap[opts.Harness]; ok {
-		agentPaths = []md.AgentPaths{md.HarnessMounts[mdH]}
+	mounts, err := mdMounts(ct, opts.Harness, opts.Mounts)
+	if err != nil {
+		return "", nil, err
 	}
 	slog.DebugContext(ctx, "building fork options", "rt", rt, "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo)
 	forkOpts := &md.ForkOpts{
@@ -353,9 +363,8 @@ func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runti
 		USB:        opts.USB,
 		Sudo:       opts.Sudo,
 		Labels:     metadataLabels(opts.Metadata),
-		AgentPaths: agentPaths,
 		ExtraEnv:   opts.ExtraEnv,
-		Mounts:     toMDMounts(opts.Mounts),
+		Mounts:     mounts,
 		MaxCPUs:    maxCPUsOrDefault(opts.MaxCPUs),
 	}
 	stdout, stderr := logWriters(opts.LogWriter, "fork")
@@ -407,11 +416,14 @@ var harnessMap = map[agent.Harness]md.Harness{
 }
 
 // mdStartOpts builds the md.StartOpts for a given harness and task options.
-func (b *Backend) mdStartOpts(opts *runtime.StartOptions) *md.StartOpts {
-	harnessPaths := md.HarnessMounts[harnessMap[opts.Harness]]
+func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.StartOpts, error) {
 	image := opts.BaseImage
 	if image == "" {
 		image = md.DefaultBaseImage + ":latest"
+	}
+	mounts, err := mdMounts(c, opts.Harness, opts.Mounts)
+	if err != nil {
+		return nil, err
 	}
 	var extraEnv []string
 	// Prevent agents from spawning interactive editors (neovim, vim, etc.)
@@ -422,19 +434,30 @@ func (b *Backend) mdStartOpts(opts *runtime.StartOptions) *md.StartOpts {
 		extraEnv = append(extraEnv, "GITHUB_TOKEN="+opts.GitHubToken)
 	}
 	return &md.StartOpts{
-		BaseImage:  image,
-		Platform:   opts.ContainerPlatform,
-		Caches:     toMDCacheMounts(opts.Caches),
-		Labels:     metadataLabels(opts.Metadata),
-		AgentPaths: []md.AgentPaths{harnessPaths},
-		USB:        opts.USB,
-		Tailscale:  opts.Tailscale,
-		Display:    opts.Display,
-		Sudo:       opts.Sudo,
-		ExtraEnv:   extraEnv,
-		Mounts:     toMDMounts(opts.Mounts),
-		MaxCPUs:    maxCPUsOrDefault(opts.MaxCPUs),
+		BaseImage: image,
+		Platform:  opts.ContainerPlatform,
+		Caches:    toMDCacheMounts(opts.Caches),
+		Labels:    metadataLabels(opts.Metadata),
+		USB:       opts.USB,
+		Tailscale: opts.Tailscale,
+		Display:   opts.Display,
+		Sudo:      opts.Sudo,
+		ExtraEnv:  extraEnv,
+		Mounts:    mounts,
+		MaxCPUs:   maxCPUsOrDefault(opts.MaxCPUs),
+	}, nil
+}
+
+func mdMounts(c mdContainer, h agent.Harness, mounts []runtime.Mount) ([]md.Mount, error) {
+	mdH, ok := harnessMap[h]
+	if !ok {
+		return nil, fmt.Errorf("unknown harness %q", h)
 	}
+	agentMounts, err := c.AgentMounts(md.HarnessMounts[mdH])
+	if err != nil {
+		return nil, err
+	}
+	return append(agentMounts, toMDMounts(mounts)...), nil
 }
 
 func toMDRepos(repos []runtime.Repo) []md.Repo {

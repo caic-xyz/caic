@@ -25,14 +25,17 @@ type fakeMDContainer struct {
 	state   string
 	diffIdx int
 
-	launchErr  error
-	connectRes *md.StartResult
-	connectErr error
-	stopErr    error
-	forkResult mdContainer
-	forkErr    error
+	launchErr   error
+	connectRes  *md.StartResult
+	connectErr  error
+	stopErr     error
+	forkResult  mdContainer
+	forkErr     error
+	agentMounts []md.Mount
+	agentErr    error
 
-	calls []string
+	calls      []string
+	agentPaths []md.AgentPaths
 }
 
 func (f *fakeMDContainer) Name() string      { return f.name }
@@ -40,6 +43,14 @@ func (f *fakeMDContainer) SetName(n string)  { f.name = n }
 func (f *fakeMDContainer) SetState(s string) { f.state = s }
 func (f *fakeMDContainer) VNCPort() int32    { return f.vncPort }
 func (f *fakeMDContainer) Repos() []md.Repo  { return f.repos }
+
+func (f *fakeMDContainer) AgentMounts(paths ...md.AgentPaths) ([]md.Mount, error) {
+	f.agentPaths = append([]md.AgentPaths(nil), paths...)
+	if f.agentErr != nil {
+		return nil, f.agentErr
+	}
+	return slices.Clone(f.agentMounts), nil
+}
 
 func (f *fakeMDContainer) SSHCommand(_ []string, cmd string) []string {
 	f.calls = append(f.calls, "SSHCommand")
@@ -370,9 +381,12 @@ func TestBackend(t *testing.T) {
 
 	t.Run("mdStartOpts", func(t *testing.T) {
 		t.Parallel()
+		fc := &fakeMDContainer{
+			agentMounts: []md.Mount{{HostPath: "/home/user/.claude", ContainerPath: "/home/user/.claude"}},
+		}
 		b := newTestBackend(&fakeMDClient{})
 		b.HarnessEnv = map[string][]string{string(agent.Claude): {"FOO=bar"}}
-		opts := b.mdStartOpts(&runtime.StartOptions{
+		opts, err := b.mdStartOpts(fc, &runtime.StartOptions{
 			Metadata:          runtime.Metadata{runtime.MetadataTaskID: "task-1"},
 			ContainerPlatform: "linux/amd64",
 			Harness:           agent.Claude,
@@ -380,6 +394,9 @@ func TestBackend(t *testing.T) {
 			Caches:            []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", MountPath: "/home/user/.npm"}},
 			Mounts:            []runtime.Mount{{HostPath: "/host/work", MountPath: "/workspace/external"}},
 		})
+		if err != nil {
+			t.Fatalf("mdStartOpts: %v", err)
+		}
 		if !slices.Contains(opts.ExtraEnv, "EDITOR=true") {
 			t.Errorf("ExtraEnv missing EDITOR=true: %v", opts.ExtraEnv)
 		}
@@ -404,8 +421,17 @@ func TestBackend(t *testing.T) {
 		if len(opts.Caches) != 1 || opts.Caches[0].Name != "npm" {
 			t.Errorf("Caches = %+v, want npm passthrough", opts.Caches)
 		}
-		if len(opts.Mounts) != 1 || opts.Mounts[0].HostPath != "/host/work" || opts.Mounts[0].ContainerPath != "/workspace/external" {
-			t.Errorf("Mounts = %+v, want custom mount passthrough", opts.Mounts)
+		if len(fc.agentPaths) != 1 || fc.agentPaths[0].Description != md.HarnessMounts[md.HarnessClaude].Description {
+			t.Errorf("AgentMounts paths = %+v, want Claude harness paths", fc.agentPaths)
+		}
+		if len(opts.Mounts) != 2 {
+			t.Fatalf("Mounts = %+v, want agent and custom mounts", opts.Mounts)
+		}
+		if opts.Mounts[0].HostPath != "/home/user/.claude" || opts.Mounts[0].ContainerPath != "/home/user/.claude" {
+			t.Errorf("Mounts[0] = %+v, want agent mount first", opts.Mounts[0])
+		}
+		if opts.Mounts[1].HostPath != "/host/work" || opts.Mounts[1].ContainerPath != "/workspace/external" {
+			t.Errorf("Mounts[1] = %+v, want custom mount passthrough", opts.Mounts[1])
 		}
 	})
 
