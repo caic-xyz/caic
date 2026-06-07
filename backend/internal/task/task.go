@@ -179,6 +179,7 @@ type Task struct {
 	ContainerPlatform string               // Container CPU architecture; empty means use the host default.
 	MaxCPUs           int                  // Max CPU cores for the instance; 0 means use the default.
 	CacheMounts       []runtime.CacheMount // Build cache mounts baked into the runtime image.
+	Mounts            []runtime.Mount      // Host directories bind-mounted into the runtime instance.
 	Tailscale         bool                 // Enable Tailscale networking in the instance.
 	USB               bool                 // Enable USB passthrough in the instance.
 	Display           bool                 // Enable Xvfb display in the instance.

@@ -269,6 +269,7 @@ func (m *Manager) Create(ctx context.Context, p CreateParams) (string, error) { 
 		ContainerPlatform: p.ContainerPlatform,
 		MaxCPUs:           p.MaxCPUs,
 		CacheMounts:       slices.Clone(p.CacheMounts),
+		Mounts:            slices.Clone(p.Mounts),
 		GitHubToken:       p.GitHubToken,
 		Tailscale:         p.Tailscale,
 		USB:               p.USB,
@@ -540,6 +541,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 		ContainerPlatform: source.ContainerPlatform,
 		MaxCPUs:           source.MaxCPUs,
 		CacheMounts:       slices.Clone(source.CacheMounts),
+		Mounts:            slices.Clone(source.Mounts),
 		GitHubToken:       p.GitHubToken,
 		Tailscale:         p.Tailscale,
 		USB:               p.USB,
@@ -574,6 +576,7 @@ func (m *Manager) Fork(ctx context.Context, sourceEntry *Entry, p ForkParams) (s
 			Metadata:   task.MakeMetadata(t),
 			Harness:    forkHarness,
 			ExtraEnv:   extraEnv,
+			Mounts:     slices.Clone(source.Mounts),
 			MaxCPUs:    source.MaxCPUs,
 		}
 		h, err := runner.ForkTask(ctx, source, t, forkOpts, ghToken)

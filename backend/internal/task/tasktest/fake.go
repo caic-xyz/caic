@@ -16,6 +16,7 @@ type Call struct {
 	Name     string           // Instance name argument, when the method takes one.
 	Repos    []runtime.Repo   // Repos argument, when present.
 	Metadata runtime.Metadata // Runtime metadata argument (Launch).
+	Mounts   []runtime.Mount  // Runtime mounts argument (Launch/Fork).
 	RepoIdx  int              // Repository index, when the method operates on one repo.
 	Args     []string         // Variadic git args (Diff).
 	PID      int              // Process id (Signal).
@@ -72,10 +73,12 @@ func (f *FakeRuntimeBackend) Called(method string) bool { return f.Count(method)
 // Launch implements runtime.Backend.
 func (f *FakeRuntimeBackend) Launch(ctx context.Context, repos []runtime.Repo, opts *runtime.StartOptions) (runtime.InstanceID, error) {
 	var metadata runtime.Metadata
+	var mounts []runtime.Mount
 	if opts != nil {
 		metadata = opts.Metadata
+		mounts = opts.Mounts
 	}
-	f.record(&Call{Method: "Launch", Repos: repos, Metadata: metadata})
+	f.record(&Call{Method: "Launch", Repos: repos, Metadata: metadata, Mounts: mounts})
 	if f.LaunchFunc != nil {
 		return f.LaunchFunc(ctx, repos, opts)
 	}
@@ -138,7 +141,11 @@ func (f *FakeRuntimeBackend) Revive(ctx context.Context, id runtime.InstanceID) 
 
 // Fork implements runtime.Backend.
 func (f *FakeRuntimeBackend) Fork(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
-	f.record(&Call{Method: "Fork", Name: string(id), Repos: repos})
+	var mounts []runtime.Mount
+	if opts != nil {
+		mounts = opts.Mounts
+	}
+	f.record(&Call{Method: "Fork", Name: string(id), Repos: repos, Mounts: mounts})
 	if f.ForkFunc != nil {
 		return f.ForkFunc(ctx, id, repos, opts)
 	}

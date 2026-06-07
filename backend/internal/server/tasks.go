@@ -108,6 +108,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		ContainerPlatform:   prefs.Settings.ContainerPlatform,
 		MaxCPUs:             prefs.Settings.MaxCPUs,
 		CacheMounts:         cacheMountsFromSettings(&prefs.Settings),
+		Mounts:              mountsFromSettings(&prefs.Settings),
 	})
 	if err != nil {
 		return nil, toDTO(err)

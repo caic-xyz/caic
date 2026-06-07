@@ -53,6 +53,13 @@ type CacheMount struct {
 	Shallow     bool
 }
 
+// Mount describes a host directory bind-mounted into a runtime.
+type Mount struct {
+	HostPath  string
+	MountPath string
+	ReadOnly  bool
+}
+
 // ConnectionInfo describes connection details returned by a runtime instance.
 type ConnectionInfo struct {
 	TailscaleFQDN    string
@@ -110,6 +117,7 @@ type StartOptions struct {
 	ContainerPlatform string
 	Harness           agent.Harness
 	Caches            []CacheMount
+	Mounts            []Mount
 	Tailscale         bool
 	USB               bool
 	Display           bool
@@ -135,6 +143,7 @@ type ForkOptions struct {
 	Sudo       bool   // Inherit or enable root access (password-based sudo).
 	Harness    agent.Harness
 	ExtraEnv   []string  // KEY=VALUE pairs for ~/.env.
+	Mounts     []Mount   // Host directories bind-mounted into the fork.
 	MaxCPUs    int       // Max CPU cores; 0 means use the default.
 	LogWriter  io.Writer // Provisioning log output.
 }

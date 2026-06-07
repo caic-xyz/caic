@@ -27,6 +27,7 @@ type CreateParams struct {
 	ContainerPlatform string               // resolved container platform; empty means use host default
 	MaxCPUs           int                  // max CPU cores; 0 means use the default
 	CacheMounts       []runtime.CacheMount // resolved build cache mounts
+	Mounts            []runtime.Mount      // resolved runtime bind mounts
 
 	// ResolvedGitHubToken is the actual token string, resolved by the caller in
 	// the request ctx; passed to runner.Start. The caller resolves it (preferring

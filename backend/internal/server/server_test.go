@@ -705,17 +705,23 @@ func TestHandleCreateTask(t *testing.T) {
 		if entry == nil {
 			t.Fatal("task not found")
 		}
-		var gotCustom, gotCustomMount, gotNPM, gotGoMod bool
+		var gotCustom, gotNPM, gotGoMod bool
 		for _, cm := range entry.Task().CacheMounts {
 			switch cm.Name {
 			case "custom-cache-0":
 				gotCustom = cm.HostPath == "/host/custom" && cm.MountPath == "/home/user/.custom"
-			case "custom-mount-0":
-				gotCustomMount = cm.HostPath == "/host/work" && cm.MountPath == "/workspace/external"
 			case "npm":
 				gotNPM = true
 			case "go-mod":
 				gotGoMod = true
+			case "custom-mount-0":
+				t.Errorf("custom mount was stored as a cache: %+v", cm)
+			}
+		}
+		gotCustomMount := false
+		for _, m := range entry.Task().Mounts {
+			if m.HostPath == "/host/work" && m.MountPath == "/workspace/external" {
+				gotCustomMount = true
 			}
 		}
 		if !gotCustom {

@@ -378,6 +378,7 @@ func TestBackend(t *testing.T) {
 			Harness:           agent.Claude,
 			GitHubToken:       "tok",
 			Caches:            []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", MountPath: "/home/user/.npm"}},
+			Mounts:            []runtime.Mount{{HostPath: "/host/work", MountPath: "/workspace/external"}},
 		})
 		if !slices.Contains(opts.ExtraEnv, "EDITOR=true") {
 			t.Errorf("ExtraEnv missing EDITOR=true: %v", opts.ExtraEnv)
@@ -402,6 +403,9 @@ func TestBackend(t *testing.T) {
 		}
 		if len(opts.Caches) != 1 || opts.Caches[0].Name != "npm" {
 			t.Errorf("Caches = %+v, want npm passthrough", opts.Caches)
+		}
+		if len(opts.Mounts) != 1 || opts.Mounts[0].HostPath != "/host/work" || opts.Mounts[0].ContainerPath != "/workspace/external" {
+			t.Errorf("Mounts = %+v, want custom mount passthrough", opts.Mounts)
 		}
 	})
 

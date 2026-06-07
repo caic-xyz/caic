@@ -253,14 +253,18 @@ func cacheMountsFromSettings(settings *preferences.Settings) []caicruntime.Cache
 			MountPath: m.ContainerPath,
 		})
 	}
+	return caches
+}
+
+func mountsFromSettings(settings *preferences.Settings) []caicruntime.Mount {
+	mounts := make([]caicruntime.Mount, len(settings.CustomMounts))
 	for i, m := range settings.CustomMounts {
-		caches = append(caches, caicruntime.CacheMount{
-			Name:      fmt.Sprintf("custom-mount-%d", i),
+		mounts[i] = caicruntime.Mount{
 			HostPath:  m.HostPath,
 			MountPath: m.ContainerPath,
-		})
+		}
 	}
-	return caches
+	return mounts
 }
 
 func (h *serverConfigHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v1.HarnessInfo, error) {

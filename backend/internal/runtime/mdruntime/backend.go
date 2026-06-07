@@ -355,6 +355,7 @@ func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runti
 		Labels:     metadataLabels(opts.Metadata),
 		AgentPaths: agentPaths,
 		ExtraEnv:   opts.ExtraEnv,
+		Mounts:     toMDMounts(opts.Mounts),
 		MaxCPUs:    maxCPUsOrDefault(opts.MaxCPUs),
 	}
 	stdout, stderr := logWriters(opts.LogWriter, "fork")
@@ -431,6 +432,7 @@ func (b *Backend) mdStartOpts(opts *runtime.StartOptions) *md.StartOpts {
 		Display:    opts.Display,
 		Sudo:       opts.Sudo,
 		ExtraEnv:   extraEnv,
+		Mounts:     toMDMounts(opts.Mounts),
 		MaxCPUs:    maxCPUsOrDefault(opts.MaxCPUs),
 	}
 }
@@ -482,6 +484,21 @@ func toMDCacheMounts(caches []runtime.CacheMount) []md.CacheMount {
 			ContainerPath: c.MountPath,
 			ReadOnly:      c.ReadOnly,
 			Shallow:       c.Shallow,
+		}
+	}
+	return out
+}
+
+func toMDMounts(mounts []runtime.Mount) []md.Mount {
+	if len(mounts) == 0 {
+		return nil
+	}
+	out := make([]md.Mount, len(mounts))
+	for i, m := range mounts {
+		out[i] = md.Mount{
+			HostPath:      m.HostPath,
+			ContainerPath: m.MountPath,
+			ReadOnly:      m.ReadOnly,
 		}
 	}
 	return out
