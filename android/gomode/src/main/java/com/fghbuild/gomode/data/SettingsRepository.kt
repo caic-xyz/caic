@@ -3,6 +3,7 @@ package com.fghbuild.gomode.data
 
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.CoroutineScope
@@ -27,6 +28,8 @@ data class ServiceInstance(
 
 data class SettingsState(
     val activeServiceURL: String = "",
+    val haloAddress: String? = null,
+    val haloAutoConnect: Boolean = false,
     val services: List<ServiceInstance> = emptyList(),
     val activeServiceId: String = "",
 )
@@ -38,6 +41,8 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
     private object Keys {
         val SERVICES = stringPreferencesKey("SERVICES")
         val ACTIVE_SERVICE_ID = stringPreferencesKey("ACTIVE_SERVICE_ID")
+        val HALO_ADDRESS = stringPreferencesKey("HALO_ADDRESS")
+        val HALO_AUTO_CONNECT = booleanPreferencesKey("HALO_AUTO_CONNECT")
     }
 
     val settings: StateFlow<SettingsState> = dataStore.data
@@ -47,6 +52,8 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             val active = services.firstOrNull { it.id == activeId } ?: services.firstOrNull()
             SettingsState(
                 activeServiceURL = active?.url ?: "",
+                haloAddress = prefs[Keys.HALO_ADDRESS],
+                haloAutoConnect = prefs[Keys.HALO_AUTO_CONNECT] ?: false,
                 services = services,
                 activeServiceId = active?.id ?: "",
             )
@@ -95,6 +102,22 @@ class SettingsRepository(private val dataStore: DataStore<Preferences>) {
             if (services.any { it.id == id }) {
                 prefs[Keys.ACTIVE_SERVICE_ID] = id
             }
+        }
+    }
+
+    suspend fun updateHaloAddress(address: String?) {
+        dataStore.edit { prefs ->
+            if (address.isNullOrBlank()) {
+                prefs.remove(Keys.HALO_ADDRESS)
+            } else {
+                prefs[Keys.HALO_ADDRESS] = address
+            }
+        }
+    }
+
+    suspend fun updateHaloAutoConnect(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.HALO_AUTO_CONNECT] = enabled
         }
     }
 

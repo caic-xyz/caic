@@ -62,6 +62,14 @@ class SettingsRepositoryTest {
     }
 
     @Test
+    fun `initial settings have default Halo values`() = runBlocking {
+        val repo = createRepo()
+        val state = withTimeout(5000) { repo.settings.first() }
+        assertNull(state.haloAddress)
+        assertFalse(state.haloAutoConnect)
+    }
+
+    @Test
     fun `addServer creates server and makes it active`() = runBlocking {
         val repo = createRepo()
         val id = repo.addServer("My Server")
@@ -174,6 +182,26 @@ class SettingsRepositoryTest {
         repo.updateVoiceName("Zephyr")
         val state = withTimeout(5000) { repo.settings.first { it.voiceName == "Zephyr" } }
         assertEquals("Zephyr", state.voiceName)
+    }
+
+    @Test
+    fun `updateHaloAddress stores and clears address`() = runBlocking {
+        val repo = createRepo()
+        repo.updateHaloAddress("AA:BB:CC:DD:EE:FF")
+        val stored = withTimeout(5000) { repo.settings.first { it.haloAddress != null } }
+        assertEquals("AA:BB:CC:DD:EE:FF", stored.haloAddress)
+
+        repo.updateHaloAddress(null)
+        val cleared = withTimeout(5000) { repo.settings.first { it.haloAddress == null } }
+        assertNull(cleared.haloAddress)
+    }
+
+    @Test
+    fun `updateHaloAutoConnect toggles flag`() = runBlocking {
+        val repo = createRepo()
+        repo.updateHaloAutoConnect(true)
+        val state = withTimeout(5000) { repo.settings.first { it.haloAutoConnect } }
+        assertTrue(state.haloAutoConnect)
     }
 
     @Test

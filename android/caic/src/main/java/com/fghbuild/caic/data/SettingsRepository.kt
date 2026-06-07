@@ -36,6 +36,8 @@ data class SettingsState(
     val serverURL: String = "",
     val voiceEnabled: Boolean = true,
     val voiceName: String = "Orus",
+    val haloAddress: String? = null,
+    val haloAutoConnect: Boolean = false,
     val authToken: String? = null,
     val servers: List<ServerConfig> = emptyList(),
     val activeServerId: String = "",
@@ -51,6 +53,8 @@ class SettingsRepository @Inject constructor(private val dataStore: DataStore<Pr
         val ACTIVE_SERVER_ID = stringPreferencesKey("ACTIVE_SERVER_ID")
         val VOICE_ENABLED = booleanPreferencesKey("VOICE_ENABLED")
         val VOICE_NAME = stringPreferencesKey("VOICE_NAME")
+        val HALO_ADDRESS = stringPreferencesKey("HALO_ADDRESS")
+        val HALO_AUTO_CONNECT = booleanPreferencesKey("HALO_AUTO_CONNECT")
     }
 
     val settings: StateFlow<SettingsState> = dataStore.data
@@ -63,6 +67,8 @@ class SettingsRepository @Inject constructor(private val dataStore: DataStore<Pr
                 authToken = active?.authToken,
                 voiceEnabled = prefs[Keys.VOICE_ENABLED] ?: true,
                 voiceName = prefs[Keys.VOICE_NAME] ?: "Orus",
+                haloAddress = prefs[Keys.HALO_ADDRESS],
+                haloAutoConnect = prefs[Keys.HALO_AUTO_CONNECT] ?: false,
                 servers = servers,
                 activeServerId = active?.id ?: "",
             )
@@ -98,6 +104,20 @@ class SettingsRepository @Inject constructor(private val dataStore: DataStore<Pr
 
     suspend fun updateVoiceName(name: String) {
         dataStore.edit { it[Keys.VOICE_NAME] = name }
+    }
+
+    suspend fun updateHaloAddress(address: String?) {
+        dataStore.edit {
+            if (address.isNullOrBlank()) {
+                it.remove(Keys.HALO_ADDRESS)
+            } else {
+                it[Keys.HALO_ADDRESS] = address
+            }
+        }
+    }
+
+    suspend fun updateHaloAutoConnect(enabled: Boolean) {
+        dataStore.edit { it[Keys.HALO_AUTO_CONNECT] = enabled }
     }
 
     suspend fun updateAuthToken(token: String?) {

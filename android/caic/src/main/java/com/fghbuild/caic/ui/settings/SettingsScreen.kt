@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -55,6 +56,7 @@ private val VoiceNames = listOf("Orus", "Puck", "Charon", "Kore", "Fenrir", "Aoe
 fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
     onNavigateBack: () -> Unit,
+    onNavigateToHalo: () -> Unit = {},
 ) {
     val screenState by viewModel.state.collectAsStateWithLifecycle()
     val settings = screenState.settings
@@ -150,6 +152,23 @@ fun SettingsScreen(
                     }
                 }
             }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            Text("Halo", style = MaterialTheme.typography.titleMedium)
+            ListItem(
+                headlineContent = { Text("Device") },
+                supportingContent = {
+                    Text(settings.haloAddress ?: "No device selected")
+                },
+                leadingContent = {
+                    Icon(Icons.Filled.Bluetooth, contentDescription = null)
+                },
+                trailingContent = {
+                    TextButton(onClick = onNavigateToHalo) {
+                        Text("Manage")
+                    }
+                },
+            )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             Text("GitHub", style = MaterialTheme.typography.titleMedium)

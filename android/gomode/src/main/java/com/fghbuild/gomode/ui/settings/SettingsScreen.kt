@@ -10,7 +10,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -34,6 +39,7 @@ fun SettingsScreen(
     settings: SettingsState,
     settingsRepository: SettingsRepository,
     onDone: () -> Unit,
+    onOpenHalo: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val activeService = settings.services.firstOrNull { it.id == settings.activeServiceId }
@@ -128,6 +134,21 @@ fun SettingsScreen(
                     }
                 }
             }
+            HorizontalDivider()
+            Text("Halo", style = MaterialTheme.typography.titleMedium)
+            ListItem(
+                headlineContent = { Text("Device") },
+                supportingContent = { Text(settings.haloAddress ?: "No device selected") },
+                leadingContent = { Icon(Icons.Filled.Bluetooth, contentDescription = null) },
+                trailingContent = {
+                    Button(
+                        onClick = onOpenHalo,
+                        modifier = Modifier.testTag("gomode-manage-halo"),
+                    ) {
+                        Text("Manage")
+                    }
+                },
+            )
         }
     }
 }

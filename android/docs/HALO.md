@@ -1,7 +1,15 @@
 # Halo Device Support
 
 Supporting the [Brilliant Halo](https://docs.brilliant.xyz/halo/halo/) smart glasses
-over Bluetooth LE from the caic Android app (Kotlin/Compose).
+over Bluetooth LE from both Android apps:
+
+- `:caic` (`com.fghbuild.caic`) — native caic task UI plus Halo task peripheral
+  behavior.
+- `:gomode` (`com.fghbuild.gomode`) — native Go Mode shell capability for Halo
+  device management, independent of caic domain APIs.
+
+Both apps should support Halo. Shared BLE transport and messaging code belongs in
+`:halo-sdk`; app-specific wiring belongs in each app module.
 
 ## Status
 
@@ -9,17 +17,21 @@ over Bluetooth LE from the caic Android app (Kotlin/Compose).
 |-------|--------|
 | 1. Transport layer | ✅ Done — `:halo-sdk` module, `com.caic.halo.ble` package |
 | 2. Messaging layer | ✅ Done — `com.caic.halo.msg` package, merged into `:halo-sdk` |
-| 3. App integration | 🟡 In progress — DI wiring, HaloService bridge, pure-function tests done |
+| 3. App integration | 🟡 In progress — caic and Go Mode device management UI, DI wiring, HaloService bridge, pure-function tests done |
 
 ## Architecture
 
 ```
-caic Android App
-  └── com.fghbuild.caic.halo.HaloService   — bridge: task state → Halo display, clicks → actions
-      └── com.caic.halo.msg.HalosideApp    — orchestrates Halo device lifecycle
-          └── com.caic.halo.ble            — BLE transport
-              └── Android Bluetooth LE
-                  └── Halo device (Lua VM + frame.* API)
+Android apps
+  ├── :caic
+  │   └── com.fghbuild.caic.halo.HaloService     — bridge: task state → Halo display, clicks → actions
+  ├── :gomode
+  │   └── com.fghbuild.gomode.halo.HaloController — shell-owned scan/connect/disconnect
+  └── :halo-sdk
+      ├── com.caic.halo.msg.HalosideApp          — orchestrates Halo device lifecycle
+      └── com.caic.halo.ble                      — BLE transport
+          └── Android Bluetooth LE
+              └── Halo device (Lua VM + frame.* API)
 ```
 
 **Module:** `:halo-sdk` at `sdk/halo/`. 68 JVM unit tests, 0 failures. Zero third-party
@@ -56,9 +68,26 @@ design decisions, test strategy, deferred items.
   computes diffs, sends status updates to Halo, listens for `RxClick` events.
   Companion object houses pure functions (`primaryTask`, `stateLabel`,
   `buildStatusString`, `diffTasks`) — all covered by 15 unit tests.
+- `halo/HaloViewModel.kt` — screen state: scan results, connection state,
+  selected address, auto-connect toggle
+- `ui/halo/HaloScreen.kt` — Compose UI: Bluetooth permission request, scan list,
+  connect/disconnect, selected device, auto-connect setting
+- `navigation/Screen.kt` + `CaicNavGraph.kt` — Halo route wired into compact and
+  wide layouts from Settings
+- `data/SettingsRepository.kt` — persists `haloAddress` and `haloAutoConnect`
 - `halo/HaloServiceTest.kt` — 15 tests for pure functions: attention task selection,
   state labels (all 15 variants + Other), status string formatting (truncation,
   pluralization, null handling), state change diff detection
+
+### Go Mode Shell Integration (`com.fghbuild.gomode.halo`)
+
+- `halo/HaloController.kt` — app-scoped BLE scan/connect/disconnect controller,
+  selected address persistence, auto-connect toggle state
+- `ui/halo/HaloScreen.kt` — Compose UI: Bluetooth permission request, scan list,
+  connect/disconnect, selected device, auto-connect setting
+- `ui/GoModeApp.kt` + `ui/settings/SettingsScreen.kt` — Halo route reachable from
+  native Go Mode settings without importing caic domain APIs
+- `data/SettingsRepository.kt` — persists Go Mode `haloAddress` and `haloAutoConnect`
 
 ### Deferred (SDK)
 
@@ -69,14 +98,6 @@ design decisions, test strategy, deferred items.
 - DFU/OTA firmware update — SMP protocol
 
 ## Phase 3 Remaining Tasks
-
-### Device management
-- `halo/HaloViewModel.kt` — screen state: scan results, connection, bonded address, auto-connect toggle
-- `ui/halo/HaloScreen.kt` — Compose UI: scan list, connect/disconnect, connection status
-- `navigation/Screen.kt` — add `Screen.Halo` route
-- `CaicNavGraph.kt` — wire Halo screen into both CompactLayout and WideLayout
-- `data/SettingsRepository.kt` — persist `haloAddress`, `haloAutoConnect`
-- Permission request flow (already declared in manifest)
 
 ### Halo as caic peripheral
 - `HaloService.cycleAttentionTask()` / `purgeCurrentTask()` — wire click actions

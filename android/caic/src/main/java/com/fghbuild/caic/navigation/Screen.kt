@@ -13,6 +13,9 @@ sealed class Screen : NavKey {
     data object Settings : Screen()
 
     @Serializable
+    data object Halo : Screen()
+
+    @Serializable
     data class TaskDetail(val taskId: String) : Screen() {
         companion object {
             const val ARG_TASK_ID = "taskId"

@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -25,6 +27,8 @@ class SettingsRepositoryTest {
         assertTrue(state.services.isEmpty())
         assertEquals("", state.activeServiceURL)
         assertEquals("", state.activeServiceId)
+        assertNull(state.haloAddress)
+        assertFalse(state.haloAutoConnect)
     }
 
     @Test
@@ -59,6 +63,29 @@ class SettingsRepositoryTest {
         val state = withTimeout(5000) { repo.settings.first { it.activeServiceId == id } }
 
         assertEquals(id, state.activeServiceId)
+    }
+
+    @Test
+    fun `updateHaloAddress stores and clears address`() = runBlocking {
+        val repo = createRepo()
+        repo.updateHaloAddress("AA:BB:CC:DD:EE:FF")
+        val stored = withTimeout(5000) { repo.settings.first { it.haloAddress != null } }
+
+        assertEquals("AA:BB:CC:DD:EE:FF", stored.haloAddress)
+
+        repo.updateHaloAddress(null)
+        val cleared = withTimeout(5000) { repo.settings.first { it.haloAddress == null } }
+
+        assertNull(cleared.haloAddress)
+    }
+
+    @Test
+    fun `updateHaloAutoConnect toggles flag`() = runBlocking {
+        val repo = createRepo()
+        repo.updateHaloAutoConnect(true)
+        val state = withTimeout(5000) { repo.settings.first { it.haloAutoConnect } }
+
+        assertTrue(state.haloAutoConnect)
     }
 
     @Test

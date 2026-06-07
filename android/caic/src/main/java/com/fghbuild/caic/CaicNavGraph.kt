@@ -43,6 +43,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.fghbuild.caic.navigation.Screen
 import com.fghbuild.caic.ui.diff.DiffScreen
+import com.fghbuild.caic.ui.halo.HaloScreen
 import com.fghbuild.caic.ui.settings.SettingsScreen
 import com.fghbuild.caic.ui.taskdetail.TaskDetailScreen
 import com.fghbuild.caic.ui.tasklist.TaskListScreen
@@ -176,6 +177,12 @@ private fun CompactLayout(
         composable<Screen.Settings> {
             SettingsScreen(
                 onNavigateBack = { navController.popBackStack() },
+                onNavigateToHalo = { navController.navigate(Screen.Halo) },
+            )
+        }
+        composable<Screen.Halo> {
+            HaloScreen(
+                onNavigateBack = { navController.popBackStack() },
             )
         }
         composable<Screen.TaskDetail> {
@@ -242,6 +249,16 @@ private fun WideLayout(
             }
             composable<Screen.Settings> {
                 SettingsScreen(
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToHalo = {
+                        navController.navigate(Screen.Halo) {
+                            popUpTo(Screen.TaskList)
+                        }
+                    },
+                )
+            }
+            composable<Screen.Halo> {
+                HaloScreen(
                     onNavigateBack = { navController.popBackStack() },
                 )
             }
