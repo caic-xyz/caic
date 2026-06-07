@@ -321,6 +321,7 @@ func kittenTTSCommand(ctx context.Context) (*exec.Cmd, error) {
 		"--cache-dir", cache,
 	}
 	cmd := exec.CommandContext(ctx, "uv", args...) //nolint:gosec // command and arguments are fixed by the gateway.
+	cmd.Dir = cache
 	return cmd, nil
 }
 

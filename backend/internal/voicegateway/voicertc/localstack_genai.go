@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -215,15 +216,37 @@ func startManagedLlamaServer(ctx context.Context, model string) (managedLlamaSer
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"-hf", model}
-	slog.InfoContext(ctx, "voicertc: starting managed llama.cpp", "model", model, "build", build, "hostPort", "127.0.0.1:0")
+	hostPort, err := localStackLlamaHostPort(ctx)
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"-hf", model, "--no-warmup"}
+	slog.InfoContext(ctx, "voicertc: starting managed llama.cpp", "model", model, "build", build, "hostPort", hostPort)
 	logger := slog.NewLogLogger(slog.Default().Handler(), slog.LevelInfo)
-	srv, err := llamacppsrv.New(ctx, exe, "", logger.Writer(), "127.0.0.1:0", 0, args)
+	srv, err := llamacppsrv.New(ctx, exe, "", logger.Writer(), hostPort, 0, args)
 	if err != nil {
 		return nil, fmt.Errorf("start managed llama.cpp: %w", err)
 	}
 	slog.InfoContext(ctx, "voicertc: managed llama.cpp ready", "url", srv.URL())
 	return srv, nil
+}
+
+func localStackLlamaHostPort(ctx context.Context) (string, error) {
+	const host = "127.0.0.1"
+	var cfg net.ListenConfig
+	l, err := cfg.Listen(ctx, "tcp", net.JoinHostPort(host, "0"))
+	if err != nil {
+		return "", fmt.Errorf("select llama.cpp port: %w", err)
+	}
+	addr, ok := l.Addr().(*net.TCPAddr)
+	if !ok {
+		_ = l.Close()
+		return "", fmt.Errorf("selected llama.cpp listener has address %T, want *net.TCPAddr", l.Addr())
+	}
+	if err := l.Close(); err != nil {
+		return "", fmt.Errorf("release llama.cpp port probe: %w", err)
+	}
+	return net.JoinHostPort(host, strconv.Itoa(addr.Port)), nil
 }
 
 func localStackLlamaCacheDir(build int) (string, error) {

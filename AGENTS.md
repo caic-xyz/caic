@@ -82,6 +82,7 @@ make frontend-dev   # Run Vite frontend dev server on :5173
 make types          # Generate types (go generate → gen-api-sdk)
 make test           # Go unit tests with coverage
 make smoke          # Run real runtime smoke test
+make smoke-voice    # Run local voice WebRTC smoke test
 make frontend-e2e   # Playwright end-to-end tests (also type-checks e2e/ TypeScript)
 make android-e2e    # Run Android instrumented tests and generate screenshots
 make lint           # Run linters (Go + frontend + Python + binaries + file index check)

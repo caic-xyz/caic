@@ -1,6 +1,6 @@
 # Build, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
 
-.PHONY: help build dev fake-dev test smoke coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix lint-docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-push android-test android-coverage android-e2e android-setup-emulator android-start-emulator android-stop-emulator
+.PHONY: help build dev fake-dev test smoke smoke-voice coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix lint-docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-push android-test android-coverage android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:2242
@@ -15,6 +15,7 @@ help:
 	@echo "  make frontend-build         - Build frontend assets (TypeScript → JavaScript)"
 	@echo "  make test                   - Run unit tests"
 	@echo "  make smoke                  - Run real runtime smoke test"
+	@echo "  make smoke-voice            - Run local voice WebRTC smoke test"
 	@echo "  make lint                   - Run linters (Go + frontend + Python + binaries + file index check)"
 	@echo "  make lint-fix               - Fix linting issues automatically (includes updating file indexes)"
 	@echo "  make git-hooks              - Install git pre-commit hooks"
@@ -57,6 +58,9 @@ test: $(FRONTEND_STAMP)
 
 smoke:
 	@go test -tags="smoke" -run TestSmoke -v -timeout 15m ./backend/cmd/caic/
+
+smoke-voice:
+	@go test -tags="smoke" -run TestSmokeVoiceRTCLocalAudio -v -timeout 15m ./backend/internal/voicegateway/voicertc/
 
 coverage: $(FRONTEND_STAMP)
 	@go test -coverprofile=coverage.out ./...

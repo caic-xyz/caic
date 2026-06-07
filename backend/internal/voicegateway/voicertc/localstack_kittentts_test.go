@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -107,6 +108,20 @@ func TestKittenTTSAdapter(t *testing.T) {
 			t.Fatalf("err = %v, want missing model", err)
 		}
 	})
+}
+
+func TestKittenTTSCommand(t *testing.T) {
+	cacheHome := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+
+	cmd, err := kittenTTSCommand(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(cacheHome, "caic", "kittentts")
+	if cmd.Dir != want {
+		t.Fatalf("cmd.Dir = %q, want %q", cmd.Dir, want)
+	}
 }
 
 func TestKittenTTSAdapterHelperProcess(t *testing.T) { //nolint:paralleltest // helper subprocess exits instead of running as a normal test.
