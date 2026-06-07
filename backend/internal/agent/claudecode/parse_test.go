@@ -3,11 +3,81 @@
 package claudecode
 
 import (
+	"encoding/json"
 	"testing"
+
+	genclaudecode "github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
+
+func TestAPIMessage(t *testing.T) {
+	t.Parallel()
+	t.Run("Metadata", func(t *testing.T) {
+		t.Parallel()
+		line := `{"id":"msg_01","type":"message","model":"claude-opus-4-6","role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"true"},"caller":{"type":"code_execution_20260120","tool_id":"srv_1"}}],"stop_details":{"type":"refusal","category":"cyber","explanation":"blocked"},"container":{"id":"container_1","expires_at":"2026-06-07T12:00:00Z","skills":[{"skill_id":"sk_1","type":"anthropic","version":"latest"}]},"diagnostics":{"cache_miss_reason":{"type":"tools_changed","cache_missed_input_tokens":42}}}`
+		var msg genclaudecode.AssistantMessageBody
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			t.Fatal(err)
+		}
+		if msg.Container.ID != "container_1" {
+			t.Errorf("Container.ID = %q, want container_1", msg.Container.ID)
+		}
+		if len(msg.Container.Skills) != 1 || msg.Container.Skills[0].Type != genclaudecode.SkillAnthropic {
+			t.Fatalf("Container.Skills = %+v, want one anthropic skill", msg.Container.Skills)
+		}
+		if msg.StopDetails.Type != "refusal" {
+			t.Errorf("StopDetails.Type = %q, want refusal", msg.StopDetails.Type)
+		}
+		if msg.StopDetails.Category != "cyber" {
+			t.Errorf("StopDetails.Category = %q, want cyber", msg.StopDetails.Category)
+		}
+		if msg.Diagnostics.CacheMissReason.Type != genclaudecode.CacheMissReasonToolsChanged {
+			t.Errorf("CacheMissReason.Type = %q, want %q", msg.Diagnostics.CacheMissReason.Type, genclaudecode.CacheMissReasonToolsChanged)
+		}
+		if msg.Diagnostics.CacheMissReason.CacheMissedInputTokens != 42 {
+			t.Errorf("CacheMissedInputTokens = %d, want 42", msg.Diagnostics.CacheMissReason.CacheMissedInputTokens)
+		}
+		if msg.Content[0].Caller.Type != "code_execution_20260120" {
+			t.Errorf("Caller.Type = %q, want code_execution_20260120", msg.Content[0].Caller.Type)
+		}
+		if msg.Content[0].Caller.ToolID != "srv_1" {
+			t.Errorf("Caller.ToolID = %q, want srv_1", msg.Content[0].Caller.ToolID)
+		}
+	})
+	t.Run("ContextManagementAppliedEdits", func(t *testing.T) {
+		t.Parallel()
+		line := `{"id":"msg_01","type":"message","model":"claude-opus-4-6","role":"assistant","content":[],"context_management":{"applied_edits":[{"type":"clear_tool_uses_20250919","cleared_input_tokens":123,"cleared_tool_uses":4},{"type":"clear_thinking_20251015","cleared_input_tokens":456,"cleared_thinking_turns":7}]}}`
+		var msg genclaudecode.AssistantMessageBody
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			t.Fatal(err)
+		}
+		if len(msg.ContextManagement.AppliedEdits) != 2 {
+			t.Fatalf("len(AppliedEdits) = %d, want 2", len(msg.ContextManagement.AppliedEdits))
+		}
+		edit := msg.ContextManagement.AppliedEdits[0]
+		if edit.Type != genclaudecode.AppliedEditClearToolUses {
+			t.Errorf("AppliedEdits[0].Type = %q, want %q", edit.Type, genclaudecode.AppliedEditClearToolUses)
+		}
+		if edit.ClearedInputTokens != 123 {
+			t.Errorf("AppliedEdits[0].ClearedInputTokens = %d, want 123", edit.ClearedInputTokens)
+		}
+		if edit.ClearedToolUses != 4 {
+			t.Errorf("AppliedEdits[0].ClearedToolUses = %d, want 4", edit.ClearedToolUses)
+		}
+		edit = msg.ContextManagement.AppliedEdits[1]
+		if edit.Type != genclaudecode.AppliedEditClearThinking {
+			t.Errorf("AppliedEdits[1].Type = %q, want %q", edit.Type, genclaudecode.AppliedEditClearThinking)
+		}
+		if edit.ClearedInputTokens != 456 {
+			t.Errorf("AppliedEdits[1].ClearedInputTokens = %d, want 456", edit.ClearedInputTokens)
+		}
+		if edit.ClearedThinkingTurns != 7 {
+			t.Errorf("AppliedEdits[1].ClearedThinkingTurns = %d, want 7", edit.ClearedThinkingTurns)
+		}
+	})
+}
 
 func TestParseMessage(t *testing.T) {
 	t.Parallel()
@@ -34,7 +104,7 @@ func TestParseMessage(t *testing.T) {
 	})
 	t.Run("AssistantTextAndUsage", func(t *testing.T) {
 		t.Parallel()
-		line := `{"type":"assistant","message":{"model":"claude-opus-4-6","id":"msg_01","role":"assistant","content":[{"type":"text","text":"hello world"}],"usage":{"input_tokens":10,"output_tokens":5}},"session_id":"abc","uuid":"u1"}`
+		line := `{"type":"assistant","message":{"model":"claude-opus-4-6","id":"msg_01","role":"assistant","content":[{"type":"text","text":"hello world"}],"usage":{"input_tokens":10,"output_tokens":5,"output_tokens_details":{"thinking_tokens":3}}},"session_id":"abc","uuid":"u1"}`
 		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
@@ -55,6 +125,9 @@ func TestParseMessage(t *testing.T) {
 		}
 		if um.Usage.InputTokens != 10 || um.Usage.OutputTokens != 5 {
 			t.Errorf("usage = %+v, want input=10 output=5", um.Usage)
+		}
+		if um.Usage.ReasoningOutputTokens != 3 {
+			t.Errorf("reasoning output tokens = %d, want 3", um.Usage.ReasoningOutputTokens)
 		}
 		if um.Model != "claude-opus-4-6" {
 			t.Errorf("model = %q, want %q", um.Model, "claude-opus-4-6")
@@ -204,6 +277,24 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("error = %q, want %q", tr.Error, "file not found")
 		}
 	})
+	t.Run("ToolResultErrorStringContent", func(t *testing.T) {
+		t.Parallel()
+		line := `{"type":"user","message":{"content":"file not found","is_error":true},"parent_tool_use_id":"tu_2"}`
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		tr, ok := msgs[0].(*agent.ToolResultMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.ToolResultMessage", msgs[0])
+		}
+		if tr.Error != "file not found" {
+			t.Errorf("error = %q, want %q", tr.Error, "file not found")
+		}
+	})
 	t.Run("InlineToolResult", func(t *testing.T) {
 		t.Parallel()
 		// MCP tool results arrive as user messages without parent_tool_use_id,
@@ -248,9 +339,27 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("error = %q, want %q", tr.Error, "tool failed")
 		}
 	})
+	t.Run("InlineToolResultErrorStringContent", func(t *testing.T) {
+		t.Parallel()
+		line := `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_err","type":"tool_result","is_error":true,"content":"tool failed"}]},"parent_tool_use_id":null}`
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		tr, ok := msgs[0].(*agent.ToolResultMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.ToolResultMessage", msgs[0])
+		}
+		if tr.Error != "tool failed" {
+			t.Errorf("error = %q, want %q", tr.Error, "tool failed")
+		}
+	})
 	t.Run("Result", func(t *testing.T) {
 		t.Parallel()
-		line := `{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"num_turns":3,"result":"done","total_cost_usd":0.05,"usage":{"input_tokens":100,"output_tokens":50}}`
+		line := `{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"num_turns":3,"result":"done","total_cost_usd":0.05,"usage":{"input_tokens":100,"output_tokens":50,"output_tokens_details":{"thinking_tokens":12}}}`
 		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
 		if err != nil {
 			t.Fatal(err)
@@ -264,6 +373,9 @@ func TestParseMessage(t *testing.T) {
 		}
 		if m.NumTurns != 3 {
 			t.Errorf("turns = %d, want 3", m.NumTurns)
+		}
+		if m.Usage.ReasoningOutputTokens != 12 {
+			t.Errorf("ReasoningOutputTokens = %d, want 12", m.Usage.ReasoningOutputTokens)
 		}
 	})
 	t.Run("StreamEventTextDelta", func(t *testing.T) {
@@ -394,6 +506,45 @@ func TestParseMessage(t *testing.T) {
 			t.Errorf("status = %q, want %q", m.Status, "completed")
 		}
 	})
+	t.Run("SystemTaskUpdated", func(t *testing.T) {
+		t.Parallel()
+		line := `{"type":"system","subtype":"task_updated","session_id":"s1","uuid":"u1","task_id":"task-abc","patch":{"status":"completed","end_time":1780832660165}}`
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		m, ok := msgs[0].(*agent.SubagentEndMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.SubagentEndMessage", msgs[0])
+		}
+		if m.TaskID != "task-abc" {
+			t.Errorf("task_id = %q, want %q", m.TaskID, "task-abc")
+		}
+		if m.Status != "completed" {
+			t.Errorf("status = %q, want %q", m.Status, "completed")
+		}
+	})
+	t.Run("SystemThinkingTokens", func(t *testing.T) {
+		t.Parallel()
+		line := `{"type":"system","subtype":"thinking_tokens","estimated_tokens":138,"estimated_tokens_delta":88,"uuid":"u1","session_id":"s1"}`
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		m, ok := msgs[0].(*agent.UsageMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.UsageMessage", msgs[0])
+		}
+		if m.Usage.ReasoningOutputTokens != 88 {
+			t.Errorf("ReasoningOutputTokens = %d, want 88", m.Usage.ReasoningOutputTokens)
+		}
+	})
 	t.Run("AssistantThinking", func(t *testing.T) {
 		t.Parallel()
 		line := `{"type":"assistant","message":{"model":"claude-opus-4-6","id":"msg_01","role":"assistant","content":[{"type":"thinking","thinking":"let me think..."},{"type":"text","text":"hello"}],"usage":{"input_tokens":10,"output_tokens":5}},"session_id":"abc","uuid":"u1"}`
@@ -469,6 +620,27 @@ func TestParseMessage(t *testing.T) {
 		}
 		if m.Text != "partial thought" {
 			t.Errorf("text = %q, want %q", m.Text, "partial thought")
+		}
+	})
+	t.Run("StreamEventMessageDeltaUsage", func(t *testing.T) {
+		t.Parallel()
+		line := `{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":2,"output_tokens":192,"cache_read_input_tokens":409477,"output_tokens_details":{"thinking_tokens":49}}},"uuid":"u1","session_id":"s1","parent_tool_use_id":null}`
+		msgs, err := parseMessage([]byte(line), &jsonutil.FieldWarner{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		m, ok := msgs[0].(*agent.UsageMessage)
+		if !ok {
+			t.Fatalf("got %T, want *agent.UsageMessage", msgs[0])
+		}
+		if m.Usage.OutputTokens != 192 {
+			t.Errorf("OutputTokens = %d, want 192", m.Usage.OutputTokens)
+		}
+		if m.Usage.ReasoningOutputTokens != 49 {
+			t.Errorf("ReasoningOutputTokens = %d, want 49", m.Usage.ReasoningOutputTokens)
 		}
 	})
 	t.Run("StreamEventNoiseDropped", func(t *testing.T) {

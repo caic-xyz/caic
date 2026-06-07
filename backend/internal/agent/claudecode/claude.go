@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/maruel/genai/providers/anthropic"
 	"github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -94,7 +95,7 @@ func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
 	for _, img := range p.Images {
 		blocks = append(blocks, claudecode.InputContentBlock{
 			Type: "image",
-			Source: claudecode.InputImageSource{
+			Source: anthropic.Source{
 				Type:      "base64",
 				MediaType: img.MediaType,
 				Data:      img.Data,

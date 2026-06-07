@@ -27,6 +27,8 @@ The user said: "It is okay to read a file that does not exist; an er...
 
 **File**: `/workspace/nonexistent_file.txt`
 
+⚠️ Tool error: File does not exist. Note: your current working directory is /workspace.
+
 <details><summary>💭 Thinking</summary>
 
 As expected, the file doesn't exist. The error message is clear - it tells the user that the file does not exist and confirms the current working directory is /workspace.

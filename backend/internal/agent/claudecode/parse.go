@@ -49,6 +49,18 @@ type TodoInput struct {
 // built on first use. Uses sync.Map: few writes (once per type), many reads.
 var outputKnownFields sync.Map
 
+var extraKnownOutputFields = map[string][]string{
+	"OutputInitMsg": {
+		"analytics_disabled",
+		"product_feedback_disabled",
+	},
+	"OutputResultMsg": {
+		"ttft_ms",
+		"ttft_stream_ms",
+		"time_to_request_ms",
+	},
+}
+
 // unmarshalOutput unmarshals data into v and warns via fw for any unknown
 // JSON fields. The name identifies the type for logging.
 func unmarshalOutput(data []byte, v any, name string, fw *jsonutil.FieldWarner) error {
@@ -63,12 +75,26 @@ func unmarshalOutput(data []byte, v any, name string, fw *jsonutil.FieldWarner) 
 	if !ok2 {
 		return fmt.Errorf("outputKnownFields stored unexpected type %T", val)
 	}
+	if extra := extraKnownOutputFields[name]; len(extra) > 0 {
+		known = cloneFieldSet(known)
+		for _, k := range extra {
+			known[k] = struct{}{}
+		}
+	}
 	var raw map[string]json.RawMessage
 	if json.Unmarshal(data, &raw) == nil {
 		fw.Warn(name, jsonutil.CollectUnknown(raw, known))
 	}
 	fw.WarnOverflows(name, v)
 	return nil
+}
+
+func cloneFieldSet(in map[string]struct{}) map[string]struct{} {
+	out := make(map[string]struct{}, len(in))
+	for k := range in {
+		out[k] = struct{}{}
+	}
+	return out
 }
 
 // WidgetTracker tracks which content block indices are widget tools during
@@ -105,9 +131,8 @@ func NewWidgetTracker() *WidgetTracker {
 func (wt *WidgetTracker) handleStreamEvent(w *claudecode.OutputStreamEventMsg) ([]agent.Message, bool) {
 	switch w.Event.Type {
 	case "content_block_start":
-		var cb claudecode.ContentBlockStart
-		if json.Unmarshal(w.Event.ContentBlock, &cb) == nil &&
-			cb.Type == "tool_use" && func() bool { _, ok := agent.WidgetToolNames[cb.Name]; return ok }() {
+		cb := w.Event.ContentBlock
+		if cb.Type == "tool_use" && func() bool { _, ok := agent.WidgetToolNames[cb.Name]; return ok }() {
 			wt.activeWidgets[w.Event.Index] = cb.ID
 		}
 		return nil, false
@@ -201,6 +226,8 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker, fw *jsonutil.FieldW
 		if err := unmarshalOutput(line, &w, "OutputResultMsg", fw); err != nil {
 			return nil, err
 		}
+		usage := toAgentUsage(&w.Usage)
+		usage.ReasoningOutputTokens = resultThinkingTokens(line)
 		return []agent.Message{&agent.ResultMessage{
 			MessageType:   string(w.Type),
 			Subtype:       w.Subtype,
@@ -211,7 +238,7 @@ func parseMessageWithTracker(line []byte, wt *WidgetTracker, fw *jsonutil.FieldW
 			Result:        w.Result,
 			SessionID:     w.SessionID,
 			TotalCostUSD:  w.TotalCostUSD,
-			Usage:         toAgentUsage(&w.Usage),
+			Usage:         usage,
 			UUID:          w.UUID,
 		}}, nil
 	case claudecode.OutputStreamEvent:
@@ -266,6 +293,20 @@ func parseSystem(line []byte, subtype string, fw *jsonutil.FieldWarner) ([]agent
 			Version:   w.Version,
 		}}, nil
 	}
+	if subtype == "thinking_tokens" {
+		var w thinkingTokensMsg
+		if err := json.Unmarshal(line, &w); err != nil {
+			return nil, err
+		}
+		if w.EstimatedTokensDelta <= 0 {
+			return nil, nil
+		}
+		return []agent.Message{&agent.UsageMessage{
+			Usage: agent.Usage{
+				ReasoningOutputTokens: int(w.EstimatedTokensDelta),
+			},
+		}}, nil
+	}
 	var w claudecode.OutputSystemMsg
 	if err := unmarshalOutput(line, &w, "OutputSystemMsg", fw); err != nil {
 		return nil, err
@@ -276,6 +317,14 @@ func parseSystem(line []byte, subtype string, fw *jsonutil.FieldWarner) ([]agent
 			TaskID:      w.TaskID,
 			Description: w.Description,
 		}}, nil
+	case "task_updated":
+		if w.Patch.Status != "" {
+			return []agent.Message{&agent.SubagentEndMessage{
+				TaskID: w.TaskID,
+				Status: w.Patch.Status,
+			}}, nil
+		}
+		return nil, nil
 	case claudecode.SystemTaskNotification:
 		return []agent.Message{&agent.SubagentEndMessage{
 			TaskID: w.TaskID,
@@ -307,7 +356,11 @@ func parseAssistant(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, err
 				msgs = append(msgs, &agent.TextMessage{Text: b.Text})
 			}
 		case "tool_use":
-			msgs = append(msgs, parseToolUseBlock(b)...)
+			toolMsgs, err := parseToolUseBlock(b)
+			if err != nil {
+				return nil, err
+			}
+			msgs = append(msgs, toolMsgs...)
 		case "thinking":
 			if b.Thinking != "" {
 				msgs = append(msgs, &agent.ThinkingMessage{Text: b.Thinking})
@@ -318,8 +371,10 @@ func parseAssistant(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, err
 	}
 	u := w.Message.Usage
 	if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheCreationInputTokens > 0 || u.CacheReadInputTokens > 0 {
+		usage := toAgentUsage(&u)
+		usage.ReasoningOutputTokens = assistantThinkingTokens(line)
 		msgs = append(msgs, &agent.UsageMessage{
-			Usage: toAgentUsage(&u),
+			Usage: usage,
 			Model: w.Message.Model,
 		})
 	}
@@ -330,37 +385,52 @@ func parseAssistant(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, err
 	return msgs, nil
 }
 
-func parseToolUseBlock(b *claudecode.OutputContentBlock) []agent.Message {
+func parseToolUseBlock(b *claudecode.OutputContentBlock) ([]agent.Message, error) {
+	inputRaw, err := rawObject(b.Input)
+	if err != nil {
+		return nil, fmt.Errorf("marshal %s input: %w", b.Name, err)
+	}
 	switch {
 	case b.Name == "Skill":
 		// Skill is a Claude Code built-in that loads plugin skills into
 		// context. Suppress it — internal machinery that adds noise.
-		return nil
+		return nil, nil
 	case b.Name == "AskUserQuestion":
 		var input AskInput
-		if json.Unmarshal(b.Input, &input) == nil && len(input.Questions) > 0 {
+		if json.Unmarshal(inputRaw, &input) == nil && len(input.Questions) > 0 {
 			return []agent.Message{&agent.AskMessage{
 				ToolUseID: b.ID,
 				Questions: input.Questions,
-			}}
+			}}, nil
 		}
 		// Fall through to generic ToolUseMessage if parse fails.
 	case b.Name == "TodoWrite":
 		var input TodoInput
-		if json.Unmarshal(b.Input, &input) == nil && len(input.Todos) > 0 {
+		if json.Unmarshal(inputRaw, &input) == nil && len(input.Todos) > 0 {
 			return []agent.Message{&agent.TodoMessage{
 				ToolUseID: b.ID,
 				Todos:     input.Todos,
-			}}
+			}}, nil
 		}
 	case func() bool { _, ok := agent.WidgetToolNames[b.Name]; return ok }():
-		return []agent.Message{agent.NewWidgetMessage(b.ID, b.Input)}
+		return []agent.Message{agent.NewWidgetMessage(b.ID, inputRaw)}, nil
 	}
 	return []agent.Message{&agent.ToolUseMessage{
 		ToolUseID: b.ID,
 		Name:      b.Name,
-		Input:     b.Input,
-	}}
+		Input:     inputRaw,
+	}}, nil
+}
+
+func rawObject(m map[string]json.RawMessage) (json.RawMessage, error) {
+	if m == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
 }
 
 func parseUser(line []byte, fw *jsonutil.FieldWarner) ([]agent.Message, error) {
@@ -391,14 +461,14 @@ func parseUserMessage(raw json.RawMessage) []agent.Message {
 	if len(raw) == 0 {
 		return []agent.Message{&agent.UserInputMessage{}}
 	}
-	// Try plain text content first ("content": "hello").
-	var textMsg claudecode.OutputUserText
-	if json.Unmarshal(raw, &textMsg) == nil && textMsg.Role == "user" && textMsg.Content != "" {
-		return []agent.Message{&agent.UserInputMessage{Text: textMsg.Content}}
+	var text claudecode.OutputUserText
+	if err := json.Unmarshal(raw, &text); err == nil && text.Role == "user" && text.Content != "" {
+		return []agent.Message{&agent.UserInputMessage{Text: text.Content}}
 	}
+
 	// Block-style content ("content": [...]).
 	var blockMsg claudecode.OutputUserBlock
-	if json.Unmarshal(raw, &blockMsg) != nil || blockMsg.Role != "user" {
+	if err := json.Unmarshal(raw, &blockMsg); err != nil || blockMsg.Role != "user" {
 		return []agent.Message{&agent.UserInputMessage{}}
 	}
 	// Check for inline tool_result blocks (MCP tools).
@@ -431,7 +501,9 @@ func parseUserMessage(raw json.RawMessage) []agent.Message {
 func toolResultFromBlock(b *claudecode.OutputUserContentBlock) *agent.ToolResultMessage {
 	m := &agent.ToolResultMessage{ToolUseID: b.ToolUseID}
 	if b.IsError {
-		for _, c := range b.Content {
+		blocks := b.Content.TextBlocks()
+		for i := range blocks {
+			c := &blocks[i]
 			if c.Type == "text" && c.Text != "" {
 				m.Error = c.Text
 				return m
@@ -450,7 +522,9 @@ func extractToolResult(toolUseID string, raw json.RawMessage) *agent.ToolResultM
 	}
 	var msg claudecode.OutputToolResult
 	if json.Unmarshal(raw, &msg) == nil && msg.IsError {
-		for _, c := range msg.Content {
+		blocks := msg.Content.TextBlocks()
+		for i := range blocks {
+			c := &blocks[i]
 			if c.Type == "text" && c.Text != "" {
 				m.Error = c.Text
 				return m
@@ -496,6 +570,13 @@ func parseStreamEvent(line []byte, wt *WidgetTracker, fw *jsonutil.FieldWarner) 
 		}
 	case "content_block_start", "content_block_stop",
 		"message_start", "message_stop", "message_delta", "ping":
+		if w.Event.Type == "message_delta" && !w.Event.Usage.IsZero() {
+			usage := toAgentUsage(&w.Event.Usage)
+			usage.ReasoningOutputTokens = int(w.Event.Usage.OutputTokensDetails.ThinkingTokens)
+			if hasUsage(usage) {
+				return []agent.Message{&agent.UsageMessage{Usage: usage}}, nil
+			}
+		}
 		return nil, nil
 	case "error":
 		return []agent.Message{&agent.SystemMessage{
@@ -505,6 +586,53 @@ func parseStreamEvent(line []byte, wt *WidgetTracker, fw *jsonutil.FieldWarner) 
 	default:
 		return []agent.Message{&agent.RawMessage{MessageType: "stream_event", Raw: append([]byte(nil), line...)}}, nil
 	}
+}
+
+type thinkingTokensMsg struct {
+	EstimatedTokens      int64 `json:"estimated_tokens"`
+	EstimatedTokensDelta int64 `json:"estimated_tokens_delta"`
+}
+
+func assistantThinkingTokens(line []byte) int {
+	var p struct {
+		Message struct {
+			Usage json.RawMessage `json:"usage"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(line, &p) != nil {
+		return 0
+	}
+	return usageThinkingTokens(p.Message.Usage)
+}
+
+func resultThinkingTokens(line []byte) int {
+	var p struct {
+		Usage json.RawMessage `json:"usage"`
+	}
+	if json.Unmarshal(line, &p) != nil {
+		return 0
+	}
+	return usageThinkingTokens(p.Usage)
+}
+
+func usageThinkingTokens(raw json.RawMessage) int {
+	var p struct {
+		OutputTokensDetails struct {
+			ThinkingTokens int `json:"thinking_tokens"`
+		} `json:"output_tokens_details"`
+	}
+	if json.Unmarshal(raw, &p) != nil {
+		return 0
+	}
+	return p.OutputTokensDetails.ThinkingTokens
+}
+
+func hasUsage(u agent.Usage) bool {
+	return u.InputTokens > 0 ||
+		u.OutputTokens > 0 ||
+		u.CacheCreationInputTokens > 0 ||
+		u.CacheReadInputTokens > 0 ||
+		u.ReasoningOutputTokens > 0
 }
 
 // extractPartialWidgetCode extracts the widget_code value from a partially

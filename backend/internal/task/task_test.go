@@ -949,11 +949,11 @@ func TestTask(t *testing.T) {
 		tk.SetState(StateRunning)
 		tk.addMessage(t.Context(), &agent.ResultMessage{
 			MessageType: "result",
-			Usage:       agent.Usage{InputTokens: 100, OutputTokens: 50, CacheReadInputTokens: 10},
+			Usage:       agent.Usage{InputTokens: 100, OutputTokens: 50, CacheReadInputTokens: 10, ReasoningOutputTokens: 7},
 		}, false)
 		tk.addMessage(t.Context(), &agent.ResultMessage{
 			MessageType: "result",
-			Usage:       agent.Usage{InputTokens: 200, OutputTokens: 80, CacheCreationInputTokens: 30},
+			Usage:       agent.Usage{InputTokens: 200, OutputTokens: 80, CacheCreationInputTokens: 30, ReasoningOutputTokens: 11},
 		}, false)
 		_, _, _, usage, lastUsage := tk.LiveStats()
 		if usage.InputTokens != 300 {
@@ -968,12 +968,18 @@ func TestTask(t *testing.T) {
 		if usage.CacheCreationInputTokens != 30 {
 			t.Errorf("CacheCreationInputTokens = %d, want 30", usage.CacheCreationInputTokens)
 		}
+		if usage.ReasoningOutputTokens != 18 {
+			t.Errorf("ReasoningOutputTokens = %d, want 18", usage.ReasoningOutputTokens)
+		}
 		// lastUsage should reflect only the most recent ResultMessage.
 		if lastUsage.InputTokens != 200 {
 			t.Errorf("lastUsage.InputTokens = %d, want 200", lastUsage.InputTokens)
 		}
 		if lastUsage.CacheCreationInputTokens != 30 {
 			t.Errorf("lastUsage.CacheCreationInputTokens = %d, want 30", lastUsage.CacheCreationInputTokens)
+		}
+		if lastUsage.ReasoningOutputTokens != 11 {
+			t.Errorf("lastUsage.ReasoningOutputTokens = %d, want 11", lastUsage.ReasoningOutputTokens)
 		}
 	})
 
@@ -984,12 +990,12 @@ func TestTask(t *testing.T) {
 		tk.RestoreMessages([]agent.Message{
 			&agent.ResultMessage{
 				MessageType: "result",
-				Usage:       agent.Usage{InputTokens: 100, OutputTokens: 50},
+				Usage:       agent.Usage{InputTokens: 100, OutputTokens: 50, ReasoningOutputTokens: 7},
 			},
 			&agent.TextMessage{Text: "hello"},
 			&agent.ResultMessage{
 				MessageType: "result",
-				Usage:       agent.Usage{InputTokens: 200, OutputTokens: 80},
+				Usage:       agent.Usage{InputTokens: 200, OutputTokens: 80, ReasoningOutputTokens: 11},
 			},
 		})
 		_, _, _, usage, lastUsage := tk.LiveStats()
@@ -999,12 +1005,18 @@ func TestTask(t *testing.T) {
 		if usage.OutputTokens != 130 {
 			t.Errorf("OutputTokens = %d, want 130", usage.OutputTokens)
 		}
+		if usage.ReasoningOutputTokens != 18 {
+			t.Errorf("ReasoningOutputTokens = %d, want 18", usage.ReasoningOutputTokens)
+		}
 		// lastUsage should reflect only the last ResultMessage.
 		if lastUsage.InputTokens != 200 {
 			t.Errorf("lastUsage.InputTokens = %d, want 200", lastUsage.InputTokens)
 		}
 		if lastUsage.OutputTokens != 80 {
 			t.Errorf("lastUsage.OutputTokens = %d, want 80", lastUsage.OutputTokens)
+		}
+		if lastUsage.ReasoningOutputTokens != 11 {
+			t.Errorf("lastUsage.ReasoningOutputTokens = %d, want 11", lastUsage.ReasoningOutputTokens)
 		}
 	})
 

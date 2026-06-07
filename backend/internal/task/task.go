@@ -987,6 +987,7 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 		t.liveUsage.OutputTokens += rm.Usage.OutputTokens
 		t.liveUsage.CacheCreationInputTokens += rm.Usage.CacheCreationInputTokens
 		t.liveUsage.CacheReadInputTokens += rm.Usage.CacheReadInputTokens
+		t.liveUsage.ReasoningOutputTokens += rm.Usage.ReasoningOutputTokens
 		t.lastUsage = rm.Usage
 		// Compute cost from token counts: TotalCostUSD from Claude Code excludes
 		// cache_read_input_tokens, which are charged but omitted from its total.
@@ -1430,6 +1431,7 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 		t.liveUsage.OutputTokens += rm.Usage.OutputTokens
 		t.liveUsage.CacheCreationInputTokens += rm.Usage.CacheCreationInputTokens
 		t.liveUsage.CacheReadInputTokens += rm.Usage.CacheReadInputTokens
+		t.liveUsage.ReasoningOutputTokens += rm.Usage.ReasoningOutputTokens
 		t.lastUsage = rm.Usage
 		// Compute cost from token counts: TotalCostUSD from Claude Code excludes
 		// cache_read_input_tokens, which are charged but omitted from its total.
