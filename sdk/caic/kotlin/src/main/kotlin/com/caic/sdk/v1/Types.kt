@@ -387,6 +387,39 @@ object HarnessSerializer : KSerializer<Harness> {
     }
 }
 
+@Serializable(with = PlatformSerializer::class)
+sealed interface Platform {
+    val value: String
+    @Serializable
+    data object Default : Platform {
+        override val value = ""
+    }
+    @Serializable
+    data object LinuxARM64 : Platform {
+        override val value = "linux/arm64"
+    }
+    @Serializable
+    data object LinuxAMD64 : Platform {
+        override val value = "linux/amd64"
+    }
+    @Serializable
+    data class Other(override val value: String) : Platform
+}
+
+object PlatformSerializer : KSerializer<Platform> {
+    override val descriptor = PrimitiveSerialDescriptor("Platform", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: Platform) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): Platform {
+        val v = decoder.decodeString()
+        return when (v) {
+            "" -> Platform.Default
+            "linux/arm64" -> Platform.LinuxARM64
+            "linux/amd64" -> Platform.LinuxAMD64
+            else -> Platform.Other(v)
+        }
+    }
+}
+
 @Serializable(with = SyncTargetSerializer::class)
 sealed interface SyncTarget {
     val value: String
@@ -657,7 +690,7 @@ data class UserSettings(
     @SerialName("autoFixOnCIFailure") val autoFixOnCIFailure: Boolean,
     @SerialName("autoFixOnPROpen") val autoFixOnPROpen: Boolean,
     val baseImage: String? = null,
-    val containerPlatform: String? = null,
+    val containerPlatform: Platform? = null,
     @SerialName("maxCPUs") val maxCPUs: Int? = null,
     val useDefaultCaches: Boolean,
     val wellKnownCaches: Map<String, Boolean>? = null,

@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/caic-xyz/md"
 )
 
 // CacheMapping maps a host directory to a container path for cache/state sharing.
@@ -84,7 +86,7 @@ func (p *Preferences) Validate() error {
 			return fmt.Errorf("customMounts[%d]: empty containerPath", i)
 		}
 	}
-	if p.Settings.ContainerPlatform != "" && !validContainerPlatform(p.Settings.ContainerPlatform) {
+	if err := p.Settings.ContainerPlatform.Validate(); err != nil {
 		return fmt.Errorf("unsupported containerPlatform %q", p.Settings.ContainerPlatform)
 	}
 	return nil
@@ -171,7 +173,7 @@ type Settings struct {
 	BaseImage string `json:"baseImage,omitempty"`
 	// ContainerPlatform selects the container CPU architecture. Empty means use
 	// the host's native platform.
-	ContainerPlatform string `json:"containerPlatform,omitempty"`
+	ContainerPlatform md.Platform `json:"containerPlatform,omitempty"`
 	// MaxCPUs limits the number of CPU cores the container may use.
 	// Passed as --cpus to docker/podman. Zero means use [md.DefaultMaxCPUs].
 	MaxCPUs int `json:"maxCPUs,omitempty"`
@@ -185,15 +187,6 @@ type Settings struct {
 	CacheMappings []CacheMapping `json:"cacheMappings,omitempty"`
 	// CustomMounts are custom non-cache directory mappings to mount into the container.
 	CustomMounts []MountMapping `json:"customMounts,omitempty"`
-}
-
-func validContainerPlatform(platform string) bool {
-	switch platform {
-	case "linux/amd64", "linux/arm64":
-		return true
-	default:
-		return false
-	}
 }
 
 // RepoPrefs stores per-repository user preferences. Fields override the
@@ -314,7 +307,7 @@ func (s *Store) BaseImages() []ContainerImage {
 	for k := range s.cached {
 		settings := s.cached[k].Settings
 		if settings.BaseImage != "" {
-			seen[settings.BaseImage+"\x00"+settings.ContainerPlatform] = struct{}{}
+			seen[settings.BaseImage+"\x00"+settings.ContainerPlatform.String()] = struct{}{}
 		}
 	}
 	keys := slices.Sorted(maps.Keys(seen))

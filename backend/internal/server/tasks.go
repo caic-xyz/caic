@@ -105,7 +105,7 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 		GitHubToken:         req.GitHubToken,
 		ResolvedGitHubToken: s.resolveGitHubContainerToken(ctx, req.GitHubToken),
 		BaseImage:           prefs.Settings.BaseImage,
-		ContainerPlatform:   prefs.Settings.ContainerPlatform,
+		ContainerPlatform:   prefs.Settings.ContainerPlatform.String(),
 		MaxCPUs:             prefs.Settings.MaxCPUs,
 		CacheMounts:         cacheMountsFromSettings(&prefs.Settings),
 		Mounts:              mountsFromSettings(&prefs.Settings),

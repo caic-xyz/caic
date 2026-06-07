@@ -2,7 +2,7 @@
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 import { createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
-import type { Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, MountMappingResp, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
+import type { Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, MountMappingResp, Platform, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
 import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
@@ -69,7 +69,7 @@ function createAppStore() {
       autoFixOnCIFailure: autoFixCI(),
       autoFixOnPROpen: autoFixPR(),
       baseImage: selectedImage() || "",
-      containerPlatform: containerPlatform() || "",
+      containerPlatform: (containerPlatform() || "") as Platform,
       maxCPUs: maxCPUs(),
       useDefaultCaches: useDefaultCaches(),
       wellKnownCaches: wellKnownCaches() as Record<string, boolean>,

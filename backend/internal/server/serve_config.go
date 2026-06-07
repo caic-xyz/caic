@@ -182,7 +182,7 @@ func (h *serverConfigHandlers) getPreferences(ctx context.Context, _ *api.EmptyR
 			AutoFixOnCIFailure: prefs.Settings.AutoFixOnCIFailure,
 			AutoFixOnPROpen:    prefs.Settings.AutoFixOnPROpen,
 			BaseImage:          prefs.Settings.BaseImage,
-			ContainerPlatform:  prefs.Settings.ContainerPlatform,
+			ContainerPlatform:  v1.Platform(prefs.Settings.ContainerPlatform),
 			MaxCPUs:            prefs.Settings.MaxCPUs,
 			UseDefaultCaches:   prefs.Settings.UseDefaultCaches,
 			WellKnownCaches:    prefs.Settings.WellKnownCaches,
@@ -197,7 +197,7 @@ func (h *serverConfigHandlers) updatePreferences(ctx context.Context, req *v1.Up
 		p.Settings.AutoFixOnCIFailure = req.Settings.AutoFixOnCIFailure
 		p.Settings.AutoFixOnPROpen = req.Settings.AutoFixOnPROpen
 		p.Settings.BaseImage = req.Settings.BaseImage
-		p.Settings.ContainerPlatform = req.Settings.ContainerPlatform
+		p.Settings.ContainerPlatform = md.Platform(req.Settings.ContainerPlatform)
 		p.Settings.MaxCPUs = req.Settings.MaxCPUs
 		p.Settings.UseDefaultCaches = req.Settings.UseDefaultCaches
 		p.Settings.WellKnownCaches = req.Settings.WellKnownCaches

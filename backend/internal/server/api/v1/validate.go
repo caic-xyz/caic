@@ -198,13 +198,14 @@ func (r *UpdatePreferencesReq) Validate() error {
 	return nil
 }
 
-func validateContainerPlatform(platform string) error {
-	switch platform {
-	case "", "linux/amd64", "linux/arm64":
+func validateContainerPlatform(platform Platform) error {
+	if platform == PlatformDefault {
 		return nil
-	default:
+	}
+	if err := md.Platform(platform).Validate(); err != nil {
 		return api.BadRequest(fmt.Sprintf("unsupported platform %q; use linux/amd64 or linux/arm64", platform))
 	}
+	return nil
 }
 
 // Validate checks that the signal is SIGTERM or SIGKILL.

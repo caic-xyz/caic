@@ -1,6 +1,6 @@
 // SettingsForm renders the application settings controls.
 import { For, Show, type Accessor, type Setter } from "solid-js";
-import type { CacheMappingResp, MountMappingResp, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
+import type { CacheMappingResp, MountMappingResp, Platform, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
 import styles from "./SettingsForm.module.css";
 
 type SettingsOverrides = Partial<UpdatePreferencesReq["settings"]>;
@@ -69,7 +69,7 @@ export default function SettingsForm(props: SettingsFormProps) {
               class={styles.settingsInput}
               value={props.containerPlatform()}
               onChange={(e) => {
-                const val = e.currentTarget.value;
+                const val = e.currentTarget.value as Platform;
                 props.setContainerPlatform(val);
                 void props.saveSettings({ containerPlatform: val });
               }}

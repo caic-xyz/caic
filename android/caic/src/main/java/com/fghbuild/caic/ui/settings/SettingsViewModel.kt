@@ -7,6 +7,7 @@ import android.util.Log
 import com.caic.sdk.v1.ApiClient
 import com.caic.sdk.v1.CacheMappingResp
 import com.caic.sdk.v1.MountMappingResp
+import com.caic.sdk.v1.Platform
 import com.caic.sdk.v1.UpdatePreferencesReq
 import com.caic.sdk.v1.UserSettings
 import com.caic.sdk.v1.VersionResp
@@ -50,6 +51,13 @@ data class SettingsScreenState(
 private const val DEBOUNCE_MS = 500L
 
 private const val TAG = "SettingsViewModel"
+
+private fun String.toPlatformOrNull(): Platform? = when (this) {
+    "" -> null
+    "linux/arm64" -> Platform.LinuxARM64
+    "linux/amd64" -> Platform.LinuxAMD64
+    else -> Platform.Other(this)
+}
 
 @OptIn(FlowPreview::class)
 @HiltViewModel
@@ -173,7 +181,7 @@ class SettingsViewModel @Inject constructor(
                         autoFixCI = prefs.settings.autoFixOnCIFailure,
                         autoFixPR = prefs.settings.autoFixOnPROpen ?: false,
                         baseImage = prefs.settings.baseImage ?: "",
-                        containerPlatform = prefs.settings.containerPlatform ?: "",
+                        containerPlatform = prefs.settings.containerPlatform?.value ?: "",
                         maxCPUs = prefs.settings.maxCPUs?.toString() ?: "",
                         useDefaultCaches = prefs.settings.useDefaultCaches,
                         wellKnownCaches = prefs.settings.wellKnownCaches ?: emptyMap(),
@@ -211,7 +219,7 @@ class SettingsViewModel @Inject constructor(
 
     fun updateContainerPlatform(platform: String) {
         _state.update { it.copy(containerPlatform = platform) }
-        saveSettings { it.copy(containerPlatform = platform.ifBlank { null }) }
+        saveSettings { it.copy(containerPlatform = platform.toPlatformOrNull()) }
     }
 
     fun updateMaxCPUs(cpus: String) {
@@ -348,7 +356,7 @@ class SettingsViewModel @Inject constructor(
                     autoFixOnCIFailure = snapshot.autoFixCI,
                     autoFixOnPROpen = snapshot.autoFixPR,
                     baseImage = snapshot.baseImage.ifBlank { null },
-                    containerPlatform = snapshot.containerPlatform.ifBlank { null },
+                    containerPlatform = snapshot.containerPlatform.toPlatformOrNull(),
                     maxCPUs = snapshot.maxCPUs.toIntOrNull(),
                     useDefaultCaches = snapshot.useDefaultCaches,
                     wellKnownCaches = snapshot.wellKnownCaches.ifEmpty { null },

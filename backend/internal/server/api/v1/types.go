@@ -45,6 +45,16 @@ type HarnessInfo struct {
 	SupportsCompact bool     `json:"supportsCompact"`
 }
 
+// Platform selects the runtime CPU architecture.
+type Platform string
+
+// Supported platforms.
+const (
+	PlatformDefault    Platform = ""
+	PlatformLinuxARM64 Platform = "linux/arm64"
+	PlatformLinuxAMD64 Platform = "linux/amd64"
+)
+
 // ImageData carries a single base64-encoded image.
 type ImageData struct {
 	MediaType string `json:"mediaType"` // e.g. "image/png", "image/jpeg"
@@ -520,7 +530,7 @@ type UserSettings struct {
 	BaseImage string `json:"baseImage,omitempty"`
 	// ContainerPlatform selects the runtime CPU architecture. Empty means use
 	// the host's native platform. Valid values are linux/amd64 and linux/arm64.
-	ContainerPlatform string `json:"containerPlatform,omitempty"`
+	ContainerPlatform Platform `json:"containerPlatform,omitempty"`
 	// MaxCPUs limits the number of CPU cores the runtime instance may use.
 	// Zero means use the system default (max(2, NumCPU-2)).
 	MaxCPUs int `json:"maxCPUs,omitempty"`

@@ -403,6 +403,17 @@ export const HarnessKilo: Harness = "kilo";
 export const HarnessOpenCode: Harness = "opencode";
 export const HarnessPi: Harness = "pi";
 
+export type Platform =
+  | ""
+  | "linux/arm64"
+  | "linux/amd64";
+/**
+ * Supported values.
+ */
+export const PlatformDefault: Platform = "";
+export const PlatformLinuxARM64: Platform = "linux/arm64";
+export const PlatformLinuxAMD64: Platform = "linux/amd64";
+
 export type SyncTarget =
   | "branch"
   | "default";
@@ -558,7 +569,7 @@ export interface UserSettings {
    * ContainerPlatform selects the runtime CPU architecture. Empty means use
    * the host's native platform. Valid values are linux/amd64 and linux/arm64.
    */
-  containerPlatform?: string;
+  containerPlatform?: Platform;
   /**
    * MaxCPUs limits the number of CPU cores the runtime instance may use.
    * Zero means use the system default (max(2, NumCPU-2)).

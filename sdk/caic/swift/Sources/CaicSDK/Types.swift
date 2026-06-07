@@ -218,6 +218,28 @@ public struct Harness: Codable, Equatable, Hashable {
     }
 }
 
+public struct Platform: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let Default = Platform("")
+    public static let LinuxARM64 = Platform("linux/arm64")
+    public static let LinuxAMD64 = Platform("linux/amd64")
+
+    public static func other(_ value: String) -> Platform { Platform(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public struct SyncTarget: Codable, Equatable, Hashable {
     public let value: String
 
@@ -416,7 +438,7 @@ public struct UserSettings: Codable {
     public let baseImage: String?
     /// ContainerPlatform selects the runtime CPU architecture. Empty means use
     /// the host's native platform. Valid values are linux/amd64 and linux/arm64.
-    public let containerPlatform: String?
+    public let containerPlatform: Platform?
     /// MaxCPUs limits the number of CPU cores the runtime instance may use.
     /// Zero means use the system default (max(2, NumCPU-2)).
     public let maxCPUs: Int?
