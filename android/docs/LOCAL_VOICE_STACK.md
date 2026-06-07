@@ -1,14 +1,14 @@
 # Local Voice Stack Plan
 
-This plan defines a provider-neutral voice layer for Android and the hosted web
-frontend, then adds multiple gateway backends behind that layer. Gemini Live is
-kept as the first backend adapter, but it must no longer be part of any Android
-or frontend contract.
+This plan defines the remaining gateway-side work to add a local speech stack
+behind the voice gateway contract. Android and the hosted web frontend should
+keep talking to the generated `sdk/voicegateway` API and data-channel message
+types; they should not know which gateway backend serves a session.
 
 ## Goal
 
 Support voice sessions through one gateway protocol that can be used by both
-Go Mode Android and browser frontend clients:
+Android and browser clients while hiding backend implementation details:
 
 - Android owns microphone permission, audio routing, foreground service
   lifecycle, WebRTC client setup, local tool execution, and service HTTP calls.
@@ -20,64 +20,60 @@ Go Mode Android and browser frontend clients:
   context, and tool manifests.
 
 The client-visible contract is a voice-gateway session. It is not Gemini Live,
-Gemini Bidi, local cascade, Parakeet, Gemma, Qwen, or any other provider/runtime.
+Gemini Bidi, local cascade, Parakeet, Gemma, Qwen, or any other
+provider/runtime.
 
 ## Constraints
 
 - The gateway/backend can run on macOS or Linux.
 - The first local stack implementation targets macOS.
 - Android WebRTC stays in scope for both first backends.
-- Browser WebRTC must use the same gateway protocol when the hosted frontend
-  exposes voice.
-- The gateway is the abstraction boundary between clients and model providers.
+- Browser WebRTC uses the same gateway protocol when hosted frontend voice is
+  enabled.
+- `sdk/voicegateway/API.md` is the client contract. The gateway is the
+  abstraction boundary between clients and model providers.
 - Service-specific tool execution stays out of the gateway. Android or the
   frontend executes tool calls and returns tool results.
 - Provider names and provider message schemas stay out of Android and frontend
   public types, data-channel messages, compatibility gates, and UI state.
-- Backward compatibility is out of scope until this plan is fully executed.
-  During execution, `/api/voicegateway/v1/...` is the only advertised voice gateway contract
-  and callers may break across intermediate commits. Add `/api/v2/...` only
-  after the new abstraction is complete.
+- `/api/voicegateway/v1/...` remains the only advertised voice gateway contract
+  until the abstraction and backend split are complete. Add `/api/v2/...` only
+  after that work lands.
 - The first local stack should be half-duplex unless smoke tests prove that
   streaming ASR and streaming local TTS are reliable on the target Mac.
 
-## Current Grounding
+## Current State
 
 - `android/docs/WEB_SHELL.md` requires Android to own local voice endpoint
   behavior: WebRTC setup, audio routing, microphone permission, and voice
   foreground service.
-- The checked-in Android voice session sends provider-neutral gateway setup and
-  tool messages over the WebRTC data channel.
-- The checked-in frontend voice session sends provider-neutral gateway setup and
-  tool messages over the WebRTC data channel.
-- The checked-in `voicertc` bridge currently dials Gemini Live and converts
-  WebRTC Opus RTP to Gemini PCM JSON and back.
-- The gateway does not currently expose compatibility metadata. Public profile
-  discovery is deferred until profile selection needs it.
-- `~/src/genai` has audio modality concepts and provider-specific audio support,
-  but it is not yet a complete realtime speech orchestration layer.
-
-Reference facts:
-
-- Parakeet TDT 0.6B v2 is a 600M-parameter NVIDIA ASR model for 16 kHz mono
-  WAV/FLAC input with punctuation, capitalization, and word timestamps.
-  NVIDIA states these models are optimized for NVIDIA GPU-accelerated systems,
-  so macOS viability must be validated separately for the first version. Linux
-  CUDA serving remains a supported future deployment target.
-  <https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2>
-- Gemma 4 26B-A4B is a text/image MoE model with 25.2B total parameters and
-  3.8B active parameters. It does not provide native audio; use it only as the
-  local reasoning/tool model.
-  <https://huggingface.co/google/gemma-4-26B-A4B-it>
-- Qwen3-TTS publishes 0.6B and 1.7B TTS models with streaming support in model
-  descriptions, but official local examples are CUDA/PyTorch oriented and
-  vLLM-Omni currently documents local offline inference only. macOS local
-  serving must be validated separately for the first version.
-  <https://github.com/QwenLM/Qwen3-TTS>
-- llama.cpp supports Apple Silicon through ARM NEON, Accelerate, and Metal.
-  <https://github.com/ggml-org/llama.cpp>
-- MLX is Apple's array framework optimized for Apple Silicon unified memory.
-  <https://opensource.apple.com/projects/mlx/>
+- The gateway exposes `/api/voicegateway/v1/voice/token`,
+  `/api/voicegateway/v1/voice/rtc/offer`, and
+  `/api/voicegateway/v1/voice/rtc/{sessionID}`.
+- The WebRTC data channel label is `voice-gateway`.
+- Android and the frontend send provider-neutral gateway setup, context, and
+  tool-result messages over the data channel.
+- Generated voice gateway SDKs contain the route-selected v1 protocol types for
+  Go, Kotlin, TypeScript, and Swift.
+- Android and frontend tool schemas are provider-neutral, but the source names
+  still use `FunctionDeclarations`.
+- The frontend has golden DTO tests for generated gateway message JSON.
+- The checked-in `voicertc` bridge owns WebRTC session lifecycle and delegates
+  provider/runtime behavior through a minimal backend connector/session/sink
+  boundary.
+- The realtime speech bridge adapter owns Gemini Live setup, model constants,
+  WebSocket URL, realtime input translation, tool response translation, provider
+  event translation, and Gemini PCM JSON conversion.
+- Fake backend tests cover the gateway-side connector/session/sink boundary
+  without Gemini types.
+- Android and frontend `VoiceSession` implementations are still broad
+  orchestrators that mix session state, signaling, WebRTC transport, protocol
+  encoding/decoding, media endpoint behavior, context, and tool dispatch. This
+  is client maintainability work, not a blocker for local gateway backends.
+- The gateway does not expose compatibility metadata. Public profile discovery
+  is still deferred until profile selection needs it.
+- `~/src/genai` has audio modality concepts and provider-specific audio
+  support, but it is not yet a complete realtime speech orchestration layer.
 
 ## Target Architecture
 
@@ -118,11 +114,9 @@ Public client contracts:
 
 - WebRTC carries microphone RTP Opus and assistant RTP Opus.
 - The data channel label is `voice-gateway`.
-- Data-channel messages are gateway JSON messages. The HTTP signaling route
-  version selects the data-channel schema before the session starts.
-- Clients that support multiple gateway route versions should try the newest
-  supported `/api/vN/voice/...` route first and fall back only on 404 or 405
-  before creating a session.
+- Data-channel messages are UTF-8 gateway JSON messages.
+- The HTTP signaling route version selects the data-channel schema before the
+  session starts.
 - Tool schemas and tool calls use provider-neutral JSON Schema-like shapes.
 - Future compatibility metadata advertises voice capabilities, not model
   providers or backend implementation IDs.
@@ -137,10 +131,14 @@ Internal gateway contracts:
 - Backend IDs are allowed in gateway config, gateway logs, and gateway tests.
   They are not part of Android or frontend feature gates.
 
-## Client Abstraction Layer
+## Client Contract
 
-Android and frontend should converge on the same conceptual layers even if the
-implementations are language-specific.
+Android and frontend should continue to use the generated voice gateway SDK and
+the route-selected data-channel schema as their abstraction. They should not
+branch on backend IDs or provider names.
+
+Optional client cleanup can converge on these conceptual layers even if the
+implementations are language-specific:
 
 ```text
 VoiceSession
@@ -158,8 +156,8 @@ Layer responsibilities:
 - `VoiceSession`: user-visible state, lifecycle, transcript state, active tool
   state, reconnect/close behavior, and error surfacing.
 - `VoiceGatewayClient`: provider-neutral session orchestration.
-- `VoiceGatewaySignaling`: service token fetch, `/api/voicegateway/v1/voice/rtc/offer`, and
-  session close HTTP calls.
+- `VoiceGatewaySignaling`: service token fetch,
+  `/api/voicegateway/v1/voice/rtc/offer`, and session close HTTP calls.
 - `VoiceGatewayTransport`: PeerConnection, data channel, RTP tracks, and media
   device replacement.
 - `VoiceGatewayProtocol`: typed encode/decode/validation for route-selected
@@ -172,27 +170,15 @@ Layer responsibilities:
 
 Client rules:
 
-- No Android or frontend source file should construct Gemini setup messages.
-- No Android or frontend source file should import Gemini Live protocol types.
-- No Android or frontend source file should contain Gemini WebSocket URLs,
-  Gemini model constants, `BidiGenerateContent`, or provider auth parameters.
+- No Android or frontend source file should construct provider setup messages.
+- No Android or frontend source file should import provider realtime protocol
+  types.
+- No Android or frontend source file should contain provider WebSocket URLs,
+  provider model constants, `BidiGenerateContent`, or provider auth
+  parameters.
 - No Android or frontend source file should branch on `gemini-live`.
-- The old `FunctionDeclarations` concept becomes provider-neutral service tool
-  schema generation. Provider-specific conversion happens inside gateway
-  backend adapters.
-- The only provider leak tolerated during migration is a temporary internal
-  adapter shim with explicit removal criteria in Phase 1.
-
-Expected client file direction:
-
-- Android: rename Gemini-specific session/protocol classes toward
-  `VoiceGatewaySession`, `GatewayProtocol`, `ServiceToolSchema`, and
-  `ServiceToolHandlers`.
-- Frontend: split the current `VoiceSession.ts` into provider-neutral session,
-  gateway transport/protocol, service context, and service tools.
-- Keep Android/frontend tool semantics in sync by sharing the service tool
-  schema source when practical, or by testing both generated schemas against
-  the same golden manifest.
+- Provider-specific tool schema conversion happens inside gateway backend
+  adapters.
 
 ## Gateway Backend Abstraction
 
@@ -229,11 +215,9 @@ Adapter rules:
   details, Gemma serving APIs, or Qwen TTS APIs except through adapter
   interfaces.
 
-## Gateway Backends
-
 ### Realtime Speech Bridge Backend
 
-Use the existing Gemini Live behavior as the first backend adapter:
+Keep the existing Gemini Live behavior as the first backend adapter:
 
 - Translate normalized session setup into provider setup.
 - Translate mic RTP/PCM to provider realtime audio input.
@@ -243,8 +227,8 @@ Use the existing Gemini Live behavior as the first backend adapter:
 - Translate normalized `tool.result` messages back into provider tool
   responses.
 
-This preserves the existing behavior while moving provider protocol details out
-of Android and frontend.
+This preserves existing behavior while moving provider protocol details out of
+client and gateway core layers.
 
 ### Local Cascade Backend
 
@@ -269,9 +253,6 @@ The local backend should own all queues and cancellation:
 
 ## Provider-Neutral Data Channel
 
-Replace the Android/frontend-visible provider data channel with versioned
-gateway messages.
-
 Client to gateway:
 
 ```json
@@ -287,7 +268,6 @@ Gateway to client:
 ```json
 {"kind":"session.ready","profile":"default","capabilities":[...]}
 {"kind":"transcript.delta","speaker":"user","text":"..."}
-{"kind":"transcript.final","speaker":"user","text":"..."}
 {"kind":"assistant.text.delta","text":"..."}
 {"kind":"speech.started","speaker":"assistant"}
 {"kind":"speech.ended","speaker":"assistant"}
@@ -304,14 +284,15 @@ Rules:
 - Unknown `kind` values are ignored only when explicitly marked optional by the
   API version used for the session.
 - Tool call IDs are gateway-generated and unique within a session.
-- Clients send provider-neutral service tools, not Gemini function declarations.
+- Clients send provider-neutral service tools, not provider function
+  declarations.
 - `session.ready` reports the public profile used for the session, not the
   provider/backend implementation.
 
 ## Future Compatibility Metadata
 
-Gateway compatibility is deferred until profile selection needs public feature
-discovery. When added, it should describe public feature support:
+Gateway compatibility remains deferred until profile selection needs public
+feature discovery. When added, it should describe public feature support:
 
 ```json
 {
@@ -321,7 +302,7 @@ discovery. When added, it should describe public feature support:
     {
       "id": "default",
       "capabilities": [
-        "voice.protocol.v2",
+        "voice.protocol.v1",
         "voice.transport.webrtc",
         "voice.audio.rtpOpus",
         "voice.turns.fullDuplex",
@@ -332,7 +313,7 @@ discovery. When added, it should describe public feature support:
     {
       "id": "half-duplex-local",
       "capabilities": [
-        "voice.protocol.v2",
+        "voice.protocol.v1",
         "voice.transport.webrtc",
         "voice.audio.rtpOpus",
         "voice.turns.halfDuplex",
@@ -376,10 +357,12 @@ ASR backend candidates:
 
 - `parakeet-nemo`: target model path. Requires smoke testing on macOS because
   official performance assumptions are CUDA-oriented.
+- `parakeet-cpp`: investigate `mudler/parakeet.cpp` as a local C++ Parakeet
+  runtime candidate for macOS feasibility.
 - `parakeet-onnx`: investigate community or export path for CPU/CoreML/Metal
   feasibility.
-- `whisper-cpp`: fallback baseline for macOS latency and audio pipeline testing,
-  not the target stack.
+- `whisper-cpp`: fallback baseline for macOS latency and audio pipeline
+  testing, not the target stack.
 - Linux CUDA deployments may use the same ASR adapter contract with
   CUDA-oriented Parakeet/NeMo serving.
 
@@ -402,46 +385,47 @@ TTS backend candidates:
 
 ## Implementation Phases
 
-### Phase 1: Build The Voice Abstraction Layer
+### Phase 1: Gateway Core And Backend Adapter Split
 
-- Add route-selected gateway message types, validation, and golden tests.
-- Keep the advertised gateway contract on `/api/voicegateway/v1/...` during migration.
-- Add provider-neutral service tool schema generation.
-- Split Android voice code into session, gateway signaling, gateway transport,
-  protocol, media endpoint, context provider, and tool registry layers.
-- Split frontend voice code into the same conceptual layers.
-- Rename the WebRTC data channel from `gemini` to `voice-gateway`.
-- Move Gemini setup, model constants, and Gemini message translation into a
-  gateway backend adapter.
-- Keep existing behavior passing through the realtime speech bridge backend.
+Status: done for the first realtime speech bridge backend.
+
+- Introduce a minimal gateway core boundary for backend connector, backend
+  session, and gateway event sink behavior.
+- Move Gemini Live setup, model constants, WebSocket URL, realtime input
+  translation, tool response translation, and provider event translation behind
+  a realtime speech bridge backend adapter.
+- Keep WebRTC session wiring, data-channel validation, tool-call correlation,
+  cancellation, and client event emission in provider-neutral gateway core
+  code.
+- Move provider config into backend-specific config fields.
+- Keep `/api/voicegateway/v1/...` as the advertised contract.
 
 Acceptance:
 
-- Existing voice behavior still works through the gateway.
-- Android no longer constructs Gemini setup directly for gateway sessions.
-- Frontend no longer constructs Gemini setup directly for gateway sessions.
-- Android and frontend no longer branch on Gemini-specific compatibility names.
-- Android and frontend use the same route-selected wire messages and service
-  tool schema semantics.
-- Gateway `/api/voicegateway/v1/...` remains the only advertised contract until the plan is
-  complete.
+- Existing voice behavior still works through the realtime speech bridge.
+- Provider request/response types live only in backend adapter packages.
+- Gateway core tests can run against a fake backend without Gemini types.
+- Realtime speech bridge tests cover provider translation at the adapter
+  boundary.
 
 ### Phase 2: Add Profile Selection
 
-- Add static gateway config mapping public profiles to internal backends.
+- Add static gateway config mapping public profiles to internal backend IDs.
 - Add profile-specific config validation.
 - Add compatibility metadata for available public profiles.
 - Add session creation errors for unavailable or incompatible profiles.
+- Let Android and frontend request a public profile or accept the gateway
+  default.
 
 Acceptance:
 
 - Operator can choose which backend serves each public profile in gateway
   config.
-- Android and frontend request a public profile or accept the gateway default.
 - Missing backend dependencies fail at gateway startup or session setup with a
   clear diagnostic.
 - Android and frontend disable unsupported voice features from public
   compatibility metadata.
+- Android and frontend persist only public profile/capability decisions.
 
 ### Phase 3: Build Local Cascade With Fake Model Backends
 
@@ -457,11 +441,11 @@ Acceptance:
   assistant audio.
 - Barge-in cancels active assistant output.
 
-### Phase 4: First-Platform Model Smoke Tests
+### Phase 4: Run First-Platform Model Smoke Tests
 
 - Build command-line smoke tests for each model adapter.
-- Measure first-token or first-audio latency, total turn latency, CPU/GPU usage,
-  memory, and failure modes on the first target Mac.
+- Measure first-token or first-audio latency, total turn latency, CPU/GPU
+  usage, memory, and failure modes on the first target Mac.
 - Validate whether Parakeet and Qwen3-TTS can run acceptably without CUDA.
 - Select initial runtime implementations based on measured behavior.
 
@@ -511,7 +495,8 @@ Acceptance:
 - Gateway tests for profile selection, backend selection, compatibility
   metadata, and session setup failures.
 - WebRTC bridge tests with fake media and fake model backends.
-- Android unit tests for normalized message handling and tool response dispatch.
+- Android unit tests for normalized message handling and tool response
+  dispatch.
 - Frontend unit tests for normalized message handling and tool response
   dispatch.
 - Android instrumented smoke test against a fake gateway through WebRTC.
@@ -532,12 +517,18 @@ Acceptance:
   available in the selected runtime.
 - Whether Android and frontend consume a generated service tool manifest or
   maintain separate schema builders tested against the same golden manifest.
-- Whether browser voice remains a product feature once Go Mode owns native voice,
-  or becomes only a development/debug path.
+- Whether browser voice remains a product feature once Go Mode owns native
+  voice, or becomes only a development/debug path.
 
 ## Next Step
 
-Implement the client abstraction layer with the realtime speech bridge as the
-only concrete backend first. That removes provider protocol details from Android
-and frontend before adding the local cascade, while keeping current voice
-behavior available during migration.
+Start Phase 2:
+
+1. Add static gateway config mapping public profiles to internal backend IDs.
+2. Add profile-specific config validation.
+3. Add compatibility metadata for available public profiles.
+4. Let Android and frontend request a public profile or accept the gateway
+   default through the voice gateway contract.
+
+Client `VoiceSession` splitting remains useful cleanup, but it should run as a
+separate hardening track after the gateway backend boundary is clear.

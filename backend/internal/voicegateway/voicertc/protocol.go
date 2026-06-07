@@ -167,7 +167,7 @@ func translateGeminiServerMessage(data []byte) ([][]byte, error) {
 			Kind:    voicev1.MessageKindSessionReady,
 			Profile: gatewayProfileDefault,
 			Capabilities: []string{
-				"voice.protocol.v2",
+				"voice.protocol.v1",
 				"voice.transport.webrtc",
 				"voice.audio.rtpOpus",
 				"voice.turns.fullDuplex",

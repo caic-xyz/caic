@@ -1,13 +1,33 @@
-// Gemini Live wire types used by the WebRTC voice bridge.
+// Gemini Live backend adapter and wire types for the WebRTC voice bridge.
 
 //go:build !race
 
 package voicertc
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/url"
+	"sync"
+
+	"github.com/coder/websocket"
 
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
+)
+
+const (
+	// geminiWSEndpoint is the Gemini Live BidiGenerateContent WebSocket URL.
+	geminiWSEndpoint = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+
+	// geminiModelName is the default Gemini Live model used by the first gateway backend.
+	geminiModelName = "models/gemini-3.1-flash-live-preview"
+
+	// wsReadLimit is the max WebSocket message size (16 MiB for audio chunks).
+	wsReadLimit = 16 * 1024 * 1024
 )
 
 // Gemini Live type maintenance:
@@ -26,6 +46,211 @@ import (
 //    backend/internal/voicegateway/api/v1 and must be translated explicitly in
 //    protocol.go.
 // 6. After edits, run the focused voicertc tests and make lint.
+
+type geminiBridgeBackend struct {
+	apiKey string
+}
+
+func newGeminiBridgeBackend(apiKey string) (backendConnector, error) {
+	if apiKey == "" {
+		return nil, errors.New("GEMINI_API_KEY not configured")
+	}
+	return &geminiBridgeBackend{apiKey: apiKey}, nil
+}
+
+func (b *geminiBridgeBackend) connect(
+	ctx context.Context,
+	sessionID string,
+	sink backendSink,
+) (backendSession, error) {
+	geminiURL := geminiWSEndpoint + "?key=" + url.QueryEscape(b.apiKey)
+	wsConn, _, err := websocket.Dial(ctx, geminiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("connect to Gemini: %w", err)
+	}
+	wsConn.SetReadLimit(wsReadLimit)
+	sess := &geminiBridgeSession{
+		id:   sessionID,
+		sink: sink,
+		ws:   wsConn,
+	}
+	go sess.rxLoop(ctx)
+	return sess, nil
+}
+
+type geminiBridgeSession struct {
+	id   string
+	sink backendSink
+
+	mu sync.Mutex
+	ws *websocket.Conn
+}
+
+func (s *geminiBridgeSession) acceptClientMessage(ctx context.Context, data []byte) error {
+	providerMsg, err := translateGatewayClientMessage(data)
+	if err != nil {
+		return err
+	}
+	if len(providerMsg) == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	wsConn := s.ws
+	s.mu.Unlock()
+	if wsConn == nil {
+		return nil
+	}
+	return wsConn.Write(ctx, websocket.MessageText, providerMsg)
+}
+
+func (s *geminiBridgeSession) acceptMicPCM(ctx context.Context, pcm []byte) error {
+	b64 := base64.StdEncoding.EncodeToString(pcm)
+	chunk := geminiAudioChunk{}
+	chunk.RealtimeInput.Audio = geminiBlob{
+		MimeType: fmt.Sprintf("audio/pcm;rate=%d", micSampleRate),
+		Data:     b64,
+	}
+	msg, err := json.Marshal(chunk)
+	if err != nil {
+		return fmt.Errorf("marshal audio: %w", err)
+	}
+	s.mu.Lock()
+	wsConn := s.ws
+	s.mu.Unlock()
+	if wsConn == nil {
+		return nil
+	}
+	return wsConn.Write(ctx, websocket.MessageText, msg)
+}
+
+func (s *geminiBridgeSession) close() error {
+	s.mu.Lock()
+	wsConn := s.ws
+	s.ws = nil
+	s.mu.Unlock()
+	if wsConn == nil {
+		return nil
+	}
+	return wsConn.Close(websocket.StatusNormalClosure, "session closed")
+}
+
+func (s *geminiBridgeSession) rxLoop(ctx context.Context) {
+	for {
+		s.mu.Lock()
+		wsConn := s.ws
+		s.mu.Unlock()
+		if wsConn == nil {
+			return
+		}
+		_, data, err := wsConn.Read(ctx)
+		if err != nil {
+			if ctx.Err() == nil {
+				slog.WarnContext(ctx, "voicertc: gemini read failed", "session", s.id, "err", err)
+				s.sink.sendGatewayError("Connection to Gemini lost: " + geminiCloseReason(err))
+			}
+			// Don't cancel here. The client receives the error and disconnects,
+			// which closes the data channel and triggers gateway cleanup.
+			return
+		}
+
+		if modified, ok := s.handleAudioExtraction(data); ok {
+			data = modified
+		}
+
+		if geminiHasSetupComplete(data) {
+			s.sink.backendReady(ctx)
+		}
+
+		clientMessages, err := translateGeminiServerMessage(data)
+		if err != nil {
+			slog.WarnContext(ctx, "voicertc: provider message translation failed", "session", s.id, "err", err)
+			continue
+		}
+		for _, clientMessage := range clientMessages {
+			if err := s.sink.sendGatewayMessage(ctx, clientMessage); err != nil {
+				slog.WarnContext(ctx, "voicertc: provider→dc send failed", "session", s.id, "err", err)
+				s.sink.cancelSession()
+				return
+			}
+		}
+	}
+}
+
+// handleAudioExtraction checks if a Gemini message contains serverContent with
+// inlineData audio. If so, it appends the PCM bytes to the audio buffer for
+// real-time playback, and returns a modified message with the audio stripped.
+// On interrupted=true it clears the buffer immediately.
+func (s *geminiBridgeSession) handleAudioExtraction(data []byte) ([]byte, bool) {
+	var msg geminiBidiMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return nil, false
+	}
+	if msg.ServerContent == nil {
+		return nil, false
+	}
+
+	if msg.ServerContent.Interrupted {
+		s.sink.clearAssistantAudio()
+	}
+
+	if len(msg.ServerContent.ModelTurn.Parts) == 0 {
+		return nil, false
+	}
+
+	hadAudio := false
+	filteredParts := make([]modelPart, 0, len(msg.ServerContent.ModelTurn.Parts))
+	for _, part := range msg.ServerContent.ModelTurn.Parts {
+		if part.InlineData.Data == "" {
+			filteredParts = append(filteredParts, part)
+			continue
+		}
+		hadAudio = true
+		if mt := part.InlineData.MimeType; mt != "" && mt != "audio/pcm;rate=24000" {
+			slog.Warn("voicertc: unexpected audio mime type", "session", s.id, "mimeType", mt)
+			s.sink.sendGatewayError("Unexpected audio format from Gemini: " + mt)
+			s.sink.cancelSession()
+			return nil, false
+		}
+		pcmBytes, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
+		if err != nil {
+			slog.Debug("voicertc: base64 decode failed", "session", s.id, "err", err)
+			continue
+		}
+		s.sink.addAssistantPCM(pcmBytes)
+	}
+	if !hadAudio {
+		return nil, false
+	}
+
+	msg.ServerContent.ModelTurn.Parts = filteredParts
+	rebuilt, err := json.Marshal(msg)
+	if err != nil {
+		return nil, false
+	}
+	return rebuilt, true
+}
+
+func geminiHasSetupComplete(data []byte) bool {
+	var msg geminiBidiMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return false
+	}
+	return msg.SetupComplete != nil
+}
+
+// geminiCloseReason extracts a human-readable reason from a Gemini WebSocket
+// close error, stripping the websocket library's internal error chain. Returns
+// the raw error string if the error is not a close frame.
+func geminiCloseReason(err error) string {
+	var ce websocket.CloseError
+	if errors.As(err, &ce) {
+		if ce.Reason != "" {
+			return ce.Reason
+		}
+		return ce.Code.String()
+	}
+	return err.Error()
+}
 
 // geminiBidiMessage is a top-level Gemini BidiGenerateContent message.
 //

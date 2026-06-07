@@ -24,7 +24,7 @@ type opusDecoder struct {
 }
 
 func newDecoder() (*opusDecoder, error) {
-	dec, err := gopus.NewDecoder(inputSampleRate, 1)
+	dec, err := gopus.NewDecoder(micSampleRate, 1)
 	if err != nil {
 		return nil, fmt.Errorf("opus decoder: %w", err)
 	}

@@ -5,15 +5,17 @@
 package voicertc
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"math"
 	"testing"
 
-	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
 	"github.com/maruel/gopus"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
+
+	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
 )
 
 func TestTranslateGatewayClientMessage(t *testing.T) {
@@ -137,6 +139,9 @@ func TestTranslateGeminiServerMessage(t *testing.T) {
 		if msg.Kind != voicev1.MessageKindSessionReady || msg.Profile != gatewayProfileDefault {
 			t.Fatalf("message = %+v, want session.ready default", msg)
 		}
+		if len(msg.Capabilities) == 0 || msg.Capabilities[0] != "voice.protocol.v1" {
+			t.Fatalf("capabilities = %v, want voice.protocol.v1 first", msg.Capabilities)
+		}
 	})
 
 	t.Run("transcript", func(t *testing.T) {
@@ -233,6 +238,80 @@ func TestNewBridge(t *testing.T) {
 			t.Fatal("set local description:", err)
 		}
 	})
+}
+
+func TestBackendConnector(t *testing.T) {
+	t.Parallel()
+	t.Run("NewBridgeWithBackend", func(t *testing.T) {
+		t.Parallel()
+		backend := &fakeBackendConnector{}
+		b, err := newBridgeWithBackend(t.Context(), backend, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer b.CloseAll()
+	})
+
+	t.Run("SessionSink", func(t *testing.T) {
+		t.Parallel()
+		sess := &session{id: "test-session", cancel: func() {}}
+		backend := &fakeBackendConnector{}
+		backendSession, err := backend.connect(t.Context(), sess.id, sess)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := backendSession.acceptClientMessage(t.Context(), []byte(`{"kind":"session.setup"}`)); err != nil {
+			t.Fatal(err)
+		}
+		if err := backendSession.acceptMicPCM(t.Context(), []byte{1, 2}); err != nil {
+			t.Fatal(err)
+		}
+		if err := backendSession.close(); err != nil {
+			t.Fatal(err)
+		}
+		if !backend.connected || !backend.session.closed {
+			t.Fatalf("backend connected=%t closed=%t, want both true", backend.connected, backend.session.closed)
+		}
+	})
+}
+
+type fakeBackendConnector struct {
+	connected bool
+	session   *fakeBackendSession
+}
+
+func (b *fakeBackendConnector) connect(
+	_ context.Context,
+	sessionID string,
+	sink backendSink,
+) (backendSession, error) {
+	b.connected = true
+	b.session = &fakeBackendSession{
+		id:   sessionID,
+		sink: sink,
+	}
+	return b.session, nil
+}
+
+type fakeBackendSession struct {
+	id     string
+	sink   backendSink
+	closed bool
+}
+
+func (s *fakeBackendSession) acceptClientMessage(ctx context.Context, _ []byte) error {
+	s.sink.backendReady(ctx)
+	return nil
+}
+
+func (s *fakeBackendSession) acceptMicPCM(_ context.Context, pcm []byte) error {
+	s.sink.addAssistantPCM(pcm)
+	return nil
+}
+
+func (s *fakeBackendSession) close() error {
+	s.closed = true
+	return nil
 }
 
 func TestEncodeDecodeRoundtrip(t *testing.T) {

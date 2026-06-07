@@ -8,20 +8,16 @@ package voicertc
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/pion/ice/v4"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
@@ -30,27 +26,17 @@ import (
 )
 
 const (
-	// geminiWSEndpoint is the Gemini Live BidiGenerateContent WebSocket URL.
-	geminiWSEndpoint = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
-
-	// geminiModelName is the default Gemini Live model used by the first gateway backend.
-	geminiModelName = "models/gemini-3.1-flash-live-preview"
-
 	// idleTimeout closes sessions after 30 minutes of inactivity.
 	idleTimeout = 30 * time.Minute
 
-	// wsReadLimit is the max WebSocket message size (16 MiB for audio chunks).
-	wsReadLimit = 16 * 1024 * 1024
+	// micSampleRate is the decoded microphone PCM rate.
+	micSampleRate = 16000
 
-	// inputSampleRate matches Gemini's required input rate (PCM 16-bit, 16kHz).
-	inputSampleRate = 16000
-
-	// geminiSampleRate is the PCM sample rate of Gemini's audio output.
-	geminiSampleRate = 24000
+	// backendOutputSampleRate is the assistant PCM rate consumed by the RTP encoder.
+	backendOutputSampleRate = 24000
 
 	// encoderSampleRate is the Opus encoder input rate. We encode at 48kHz —
-	// the native Opus rate that every WebRTC implementation handles. Gemini
-	// outputs 24kHz; we upsample before encoding.
+	// the native Opus rate that every WebRTC implementation handles.
 	encoderSampleRate = 48000
 
 	// frameDuration is the Opus frame duration.
@@ -59,22 +45,33 @@ const (
 	// encoderFrameSamples is the number of samples per 20ms frame at the encoder rate.
 	encoderFrameSamples = encoderSampleRate * int(frameDuration/time.Millisecond) / 1000 // 960
 
-	// inputFrameBytes is one 20ms frame of Gemini PCM output (24kHz S16LE).
-	inputFrameBytes = geminiSampleRate * 2 * int(frameDuration/time.Millisecond) / 1000 // 960 bytes
+	// backendOutputFrameBytes is one 20ms frame of backend PCM output.
+	backendOutputFrameBytes = backendOutputSampleRate * 2 * int(frameDuration/time.Millisecond) / 1000 // 960 bytes
 )
 
 // Bridge manages active WebRTC voice sessions.
 type Bridge struct {
-	geminiAPIKey string
-	api          *webrtc.API
-	udpMux       ice.UDPMux
-	mu           sync.Mutex
-	sessions     map[string]*session
+	backend  backendConnector
+	api      *webrtc.API
+	udpMux   ice.UDPMux
+	mu       sync.Mutex
+	sessions map[string]*session
 }
 
 // NewBridge creates a Bridge that multiplexes all WebRTC traffic through a
 // single UDP port. This avoids opening ephemeral port ranges in the firewall.
 func NewBridge(ctx context.Context, geminiAPIKey string, udpPort int) (*Bridge, error) {
+	backend, err := newGeminiBridgeBackend(geminiAPIKey)
+	if err != nil {
+		return nil, err
+	}
+	return newBridgeWithBackend(ctx, backend, udpPort)
+}
+
+func newBridgeWithBackend(ctx context.Context, backend backendConnector, udpPort int) (*Bridge, error) {
+	if backend == nil {
+		return nil, errors.New("voice backend is required")
+	}
 	// Discover the host's default IPv4 address without netlink (which fails
 	// on hosts without IPv6 due to pion/anet's netlinkrib call).
 	hostIP, err := defaultIPv4(ctx)
@@ -106,18 +103,15 @@ func NewBridge(ctx context.Context, geminiAPIKey string, udpPort int) (*Bridge, 
 	}
 	slog.Info("voicertc: listening", "udpPort", addr.Port, "hostIP", hostIP)
 	return &Bridge{
-		geminiAPIKey: geminiAPIKey,
-		api:          api,
-		udpMux:       mux,
-		sessions:     make(map[string]*session),
+		backend:  backend,
+		api:      api,
+		udpMux:   mux,
+		sessions: make(map[string]*session),
 	}, nil
 }
 
-// HandleOffer processes a WebRTC SDP offer, dials Gemini, and returns the SDP answer.
+// HandleOffer processes a WebRTC SDP offer and returns the SDP answer.
 func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, sessionID string, err error) {
-	if b.geminiAPIKey == "" {
-		return "", "", errors.New("GEMINI_API_KEY not configured")
-	}
 	if !strings.Contains(sdpOffer, "m=audio ") {
 		return "", "", errors.New("SDP offer must include an audio track")
 	}
@@ -134,15 +128,16 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 
 	sessionCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	sess := &session{
-		id:     generateSessionID(),
-		pc:     pc,
-		cancel: cancel,
+		id:      generateSessionID(),
+		pc:      pc,
+		backend: nil,
+		cancel:  cancel,
 	}
 
 	// Set up RTP audio track (server → client).
 	audioTrack, trackErr := webrtc.NewTrackLocalStaticSample(
 		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
-		"audio", "gemini-voice",
+		"audio", "assistant-voice",
 	)
 	if trackErr != nil {
 		_ = pc.Close()
@@ -163,21 +158,21 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 		}
 		slog.Info("voicertc: audio track received", "session", sess.id, "codec", track.Codec().MimeType)
 		sess.mu.Lock()
-		if sess.geminiSetupComplete {
+		if sess.backendSetupComplete {
 			sess.mu.Unlock()
 			go sess.audioRxLoop(sessionCtx, track)
 		} else {
-			// Store the track until Gemini accepts setup. Sending realtime
-			// audio before setupComplete can make Gemini reject the session.
+			// Store the track until the backend accepts setup. Sending realtime
+			// audio before setupComplete can make realtime backends reject the session.
 			sess.pendingTrack = track
 			sess.mu.Unlock()
 		}
 	})
 
 	// Set up data channel handler. The client creates the "voice-gateway" data channel.
-	// geminiReady is closed once the provider WebSocket is connected, unblocking
+	// backendConnected is closed once the backend session is connected, unblocking
 	// any client messages that arrived before the dial completed.
-	geminiReady := make(chan struct{})
+	backendConnected := make(chan struct{})
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
 		slog.Info("voicertc: data channel opened", "label", dc.Label(), "session", sess.id)
 		sess.mu.Lock()
@@ -185,41 +180,39 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 		sess.mu.Unlock()
 
 		dc.OnOpen(func() {
-			// Connect to Gemini WebSocket.
-			geminiURL := geminiWSEndpoint + "?key=" + url.QueryEscape(b.geminiAPIKey)
-			wsConn, _, err := websocket.Dial(sessionCtx, geminiURL, nil)
+			if err := sess.startAudioOutput(sessionCtx); err != nil {
+				slog.WarnContext(sessionCtx, "voicertc: encoder init failed", "session", sess.id, "err", err)
+				sess.sendError("Voice audio unavailable: codec failed to initialise")
+			}
+			backendSession, err := b.backend.connect(sessionCtx, sess.id, sess)
 			if err != nil {
-				slog.Error("voicertc: gemini dial failed", "session", sess.id, "err", err)
-				sess.sendError("Failed to connect to Gemini: " + err.Error())
+				slog.Error("voicertc: backend connect failed", "session", sess.id, "err", err)
+				sess.sendError("Failed to connect voice backend: " + err.Error())
 				cancel()
 				return
 			}
-			wsConn.SetReadLimit(wsReadLimit)
 			sess.mu.Lock()
-			sess.geminiWS = wsConn
+			sess.backend = backendSession
 			sess.mu.Unlock()
-			close(geminiReady)
-			slog.Info("voicertc: gemini connected", "session", sess.id)
-
-			// Start Gemini → data channel / RTP forwarding.
-			go sess.geminiRxLoop(sessionCtx)
+			close(backendConnected)
+			slog.Info("voicertc: backend connected", "session", sess.id)
 		})
 
-		// Data channel → provider adapter. Blocks until the provider is connected
+		// Data channel → backend adapter. Blocks until the backend is connected
 		// so the client's session.setup message is never dropped.
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 			select {
-			case <-geminiReady:
+			case <-backendConnected:
 			case <-sessionCtx.Done():
 				return
 			}
 			sess.mu.Lock()
-			wsConn := sess.geminiWS
+			backendSession := sess.backend
 			sess.mu.Unlock()
-			if wsConn == nil {
+			if backendSession == nil {
 				return
 			}
-			providerMsg, err := translateGatewayClientMessage(msg.Data)
+			err := backendSession.acceptClientMessage(sessionCtx, msg.Data)
 			if err != nil {
 				if errors.Is(err, errSessionClosed) {
 					cancel()
@@ -228,12 +221,6 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 				slog.Warn("voicertc: gateway client message failed", "session", sess.id, "err", err)
 				sess.sendError(err.Error())
 				return
-			}
-			if len(providerMsg) == 0 {
-				return
-			}
-			if err := wsConn.Write(sessionCtx, websocket.MessageText, providerMsg); err != nil {
-				slog.Warn("voicertc: dc→gemini write failed", "session", sess.id, "err", err)
 			}
 		})
 
@@ -358,21 +345,68 @@ func (b *Bridge) CloseAll() {
 type session struct {
 	id string
 
-	mu                  sync.Mutex
-	pc                  *webrtc.PeerConnection
-	dc                  *webrtc.DataChannel
-	audioTrack          *webrtc.TrackLocalStaticSample
-	geminiWS            *websocket.Conn
-	pendingTrack        *webrtc.TrackRemote // set by OnTrack, consumed after Gemini setupComplete
-	geminiSetupComplete bool
-	cancel              context.CancelFunc
+	mu                   sync.Mutex
+	pc                   *webrtc.PeerConnection
+	dc                   *webrtc.DataChannel
+	audioTrack           *webrtc.TrackLocalStaticSample
+	backend              backendSession
+	pendingTrack         *webrtc.TrackRemote // set by OnTrack, consumed after backend setupComplete
+	backendSetupComplete bool
+	audioOutputStarted   bool
+	cancel               context.CancelFunc
 
 	audioMu  sync.Mutex
-	audioBuf []byte // pending Gemini PCM bytes, drained by audioSendLoop
+	audioBuf []byte // pending backend PCM bytes, drained by audioSendLoop
+}
+
+func (s *session) cancelSession() {
+	s.cancel()
+}
+
+func (s *session) backendReady(ctx context.Context) {
+	s.mu.Lock()
+	if s.backendSetupComplete {
+		s.mu.Unlock()
+		return
+	}
+	s.backendSetupComplete = true
+	track := s.pendingTrack
+	s.pendingTrack = nil
+	s.mu.Unlock()
+	if track != nil {
+		slog.InfoContext(ctx, "voicertc: starting mic forwarding after backend setup", "session", s.id)
+		go s.audioRxLoop(ctx, track)
+	}
+}
+
+func (s *session) sendGatewayMessage(_ context.Context, data []byte) error {
+	s.mu.Lock()
+	dc := s.dc
+	s.mu.Unlock()
+	if dc == nil {
+		return nil
+	}
+	return dc.SendText(string(data))
+}
+
+func (s *session) sendGatewayError(message string) {
+	s.sendError(message)
+}
+
+func (s *session) addAssistantPCM(pcmBytes []byte) {
+	s.audioMu.Lock()
+	s.audioBuf = append(s.audioBuf, pcmBytes...)
+	s.audioMu.Unlock()
+}
+
+func (s *session) clearAssistantAudio() {
+	s.audioMu.Lock()
+	s.audioBuf = nil
+	s.audioMu.Unlock()
 }
 
 // audioRxLoop reads Opus RTP from the client's mic track, decodes to PCM,
-// and sends base64 realtimeInput messages to Gemini.
+// and forwards PCM to the active backend.
 func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 	dec, err := newDecoder()
 	if err != nil {
@@ -394,192 +428,53 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 			slog.Debug("voicertc: opus decode failed", "session", s.id, "err", decErr)
 			continue
 		}
-		// Convert int16 PCM to little-endian bytes, then base64 for Gemini.
+		// Convert int16 PCM to little-endian bytes for the backend adapter.
 		pcmBytes := make([]byte, len(pcm)*2)
 		for i, sample := range pcm {
 			binary.LittleEndian.PutUint16(pcmBytes[i*2:], uint16(sample)) //nolint:gosec // PCM int16→uint16 reinterpret is intentional
 		}
-		b64 := base64.StdEncoding.EncodeToString(pcmBytes)
-		chunk := geminiAudioChunk{}
-		chunk.RealtimeInput.Audio = geminiBlob{
-			MimeType: fmt.Sprintf("audio/pcm;rate=%d", inputSampleRate),
-			Data:     b64,
-		}
-		msg, err := json.Marshal(chunk)
-		if err != nil {
-			slog.WarnContext(ctx, "voicertc: marshal audio", "session", s.id, "err", err)
-			return
-		}
 
 		s.mu.Lock()
-		wsConn := s.geminiWS
+		backendSession := s.backend
 		s.mu.Unlock()
-		if wsConn == nil {
+		if backendSession == nil {
 			return
 		}
-		if err := wsConn.Write(ctx, websocket.MessageText, msg); err != nil {
+		if err := backendSession.acceptMicPCM(ctx, pcmBytes); err != nil {
 			if ctx.Err() == nil {
-				slog.WarnContext(ctx, "voicertc: audio→gemini write failed", "session", s.id, "err", err)
+				slog.WarnContext(ctx, "voicertc: audio→backend write failed", "session", s.id, "err", err)
 			}
 			return
 		}
 	}
 }
 
-// geminiRxLoop reads from the provider WebSocket and forwards normalized messages.
-//
-// When the client has an RTP audio track: audio chunks are appended to audioBuf
-// for real-time playback by audioSendLoop, and non-audio content goes through
-// the data channel. Provider-specific JSON never reaches the client.
-func (s *session) geminiRxLoop(ctx context.Context) {
-	var enc *opusEncoder
-	if s.audioTrack != nil {
-		var err error
-		enc, err = newEncoder()
-		if err != nil {
-			slog.WarnContext(ctx, "voicertc: encoder init failed", "session", s.id, "err", err)
-			s.sendError("Voice audio unavailable: codec failed to initialise")
-			// Don't cancel — let the client see the error and disconnect.
-			return
-		}
-		go s.audioSendLoop(ctx, enc)
-	}
-
-	for {
-		_, data, err := s.geminiWS.Read(ctx)
-		if err != nil {
-			if ctx.Err() == nil {
-				slog.WarnContext(ctx, "voicertc: gemini read failed", "session", s.id, "err", err)
-				s.sendError("Connection to Gemini lost: " + geminiCloseReason(err))
-			}
-			// Don't cancel here — the session stays alive so the error reaches the
-			// client via the data channel. The client will disconnect on error,
-			// which closes the data channel and triggers cleanup via dc.OnClose.
-			return
-		}
-
-		// When encoder is available, intercept serverContent audio and send via RTP.
-		if enc != nil {
-			if modified, ok := s.handleAudioExtraction(data); ok {
-				data = modified
-			}
-		}
-
-		if geminiHasSetupComplete(data) {
-			s.markGeminiSetupComplete(ctx)
-		}
-
-		clientMessages, err := translateGeminiServerMessage(data)
-		if err != nil {
-			slog.WarnContext(ctx, "voicertc: provider message translation failed", "session", s.id, "err", err)
-			continue
-		}
-		if len(clientMessages) == 0 {
-			continue
-		}
-
-		s.mu.Lock()
-		dc := s.dc
-		s.mu.Unlock()
-		if dc == nil {
-			continue
-		}
-		for _, clientMessage := range clientMessages {
-			if err := dc.SendText(string(clientMessage)); err != nil {
-				slog.Warn("voicertc: provider→dc send failed", "session", s.id, "err", err)
-				s.cancel()
-				return
-			}
-		}
-	}
-}
-
-func (s *session) markGeminiSetupComplete(ctx context.Context) {
+func (s *session) startAudioOutput(ctx context.Context) error {
 	s.mu.Lock()
-	if s.geminiSetupComplete {
+	if s.audioOutputStarted {
 		s.mu.Unlock()
-		return
+		return nil
 	}
-	s.geminiSetupComplete = true
-	track := s.pendingTrack
-	s.pendingTrack = nil
+	s.audioOutputStarted = true
+	audioTrack := s.audioTrack
 	s.mu.Unlock()
-	if track != nil {
-		slog.InfoContext(ctx, "voicertc: starting mic forwarding after gemini setup", "session", s.id)
-		go s.audioRxLoop(ctx, track)
+	if audioTrack == nil {
+		return nil
 	}
-}
-
-func geminiHasSetupComplete(data []byte) bool {
-	var msg geminiBidiMessage
-	if err := json.Unmarshal(data, &msg); err != nil {
-		return false
-	}
-	return msg.SetupComplete != nil
-}
-
-// handleAudioExtraction checks if a Gemini message contains serverContent with
-// inlineData audio. If so, it appends the PCM bytes to the audio buffer for
-// real-time playback by audioSendLoop, and returns a modified message with the
-// audio stripped. On interrupted=true it clears the buffer immediately.
-// Returns (modifiedData, true) if audio was extracted, (nil, false) otherwise.
-func (s *session) handleAudioExtraction(data []byte) ([]byte, bool) {
-	var msg geminiBidiMessage
-	if err := json.Unmarshal(data, &msg); err != nil {
-		return nil, false
-	}
-	if msg.ServerContent == nil {
-		return nil, false
-	}
-
-	if msg.ServerContent.Interrupted {
-		s.interruptAudio()
-	}
-
-	if len(msg.ServerContent.ModelTurn.Parts) == 0 {
-		return nil, false
-	}
-
-	hadAudio := false
-	filteredParts := make([]modelPart, 0, len(msg.ServerContent.ModelTurn.Parts))
-	for _, part := range msg.ServerContent.ModelTurn.Parts {
-		if part.InlineData.Data == "" {
-			filteredParts = append(filteredParts, part)
-			continue
-		}
-		hadAudio = true
-		if mt := part.InlineData.MimeType; mt != "" && mt != "audio/pcm;rate=24000" {
-			slog.Warn("voicertc: unexpected audio mime type", "session", s.id, "mimeType", mt)
-			s.sendError("Unexpected audio format from Gemini: " + mt)
-			s.cancel()
-			return nil, false
-		}
-		pcmBytes, err := base64.StdEncoding.DecodeString(part.InlineData.Data)
-		if err != nil {
-			slog.Debug("voicertc: base64 decode failed", "session", s.id, "err", err)
-			continue
-		}
-		s.appendAudioPCM(pcmBytes)
-	}
-	if !hadAudio {
-		return nil, false
-	}
-
-	// Rebuild the message without audio parts.
-	msg.ServerContent.ModelTurn.Parts = filteredParts
-	rebuilt, err := json.Marshal(msg)
+	enc, err := newEncoder()
 	if err != nil {
-		return nil, false
+		return err
 	}
-	return rebuilt, true
+	go s.audioSendLoop(ctx, enc)
+	return nil
 }
 
 // audioSendLoop drains audioBuf one 20ms frame at a time on a fixed ticker.
 //
-// Gemini sends audio as a stream of small PCM chunks. Each chunk is appended to
-// audioBuf by appendAudioPCM; we drain it here at exactly realtime rate so the
-// receiver's jitter buffer sees a steady arrival schedule. When the buffer is
-// empty (between utterances) the tick is a no-op, producing a natural pause.
+// Backends send audio as a stream of small PCM chunks. Each chunk is appended
+// to audioBuf; we drain it here at exactly realtime rate so the receiver's
+// jitter buffer sees a steady arrival schedule. When the buffer is empty
+// (between utterances) the tick is a no-op, producing a natural pause.
 func (s *session) audioSendLoop(ctx context.Context, enc *opusEncoder) {
 	ticker := time.NewTicker(frameDuration)
 	defer ticker.Stop()
@@ -589,13 +484,13 @@ func (s *session) audioSendLoop(ctx context.Context, enc *opusEncoder) {
 			return
 		case <-ticker.C:
 			s.audioMu.Lock()
-			if len(s.audioBuf) < inputFrameBytes {
+			if len(s.audioBuf) < backendOutputFrameBytes {
 				s.audioMu.Unlock()
 				continue
 			}
-			frame := make([]byte, inputFrameBytes)
-			copy(frame, s.audioBuf[:inputFrameBytes])
-			s.audioBuf = s.audioBuf[inputFrameBytes:]
+			frame := make([]byte, backendOutputFrameBytes)
+			copy(frame, s.audioBuf[:backendOutputFrameBytes])
+			s.audioBuf = s.audioBuf[backendOutputFrameBytes:]
 			s.audioMu.Unlock()
 
 			pcm48 := upsample24to48(frame)
@@ -614,34 +509,6 @@ func (s *session) audioSendLoop(ctx context.Context, enc *opusEncoder) {
 			}
 		}
 	}
-}
-
-// appendAudioPCM appends raw 24kHz S16LE PCM bytes from Gemini to the playback buffer.
-func (s *session) appendAudioPCM(pcmBytes []byte) {
-	s.audioMu.Lock()
-	s.audioBuf = append(s.audioBuf, pcmBytes...)
-	s.audioMu.Unlock()
-}
-
-// interruptAudio clears the playback buffer when Gemini signals an interruption.
-func (s *session) interruptAudio() {
-	s.audioMu.Lock()
-	s.audioBuf = nil
-	s.audioMu.Unlock()
-}
-
-// geminiCloseReason extracts a human-readable reason from a Gemini WebSocket
-// close error, stripping the websocket library's internal error chain. Returns
-// the raw error string if the error is not a close frame.
-func geminiCloseReason(err error) string {
-	var ce websocket.CloseError
-	if errors.As(err, &ce) {
-		if ce.Reason != "" {
-			return ce.Reason
-		}
-		return ce.Code.String()
-	}
-	return err.Error()
 }
 
 // sendError delivers a normalized error message to the client via the data channel.
@@ -678,17 +545,19 @@ func upsample24to48(pcmBytes []byte) []int16 {
 	return pcm48
 }
 
-// close tears down the Gemini WebSocket and PeerConnection.
+// close tears down the backend session and PeerConnection.
 func (s *session) close() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.geminiWS != nil {
-		_ = s.geminiWS.Close(websocket.StatusNormalClosure, "session closed")
-		s.geminiWS = nil
+	backendSession := s.backend
+	s.backend = nil
+	pc := s.pc
+	s.pc = nil
+	s.mu.Unlock()
+	if backendSession != nil {
+		_ = backendSession.close()
 	}
-	if s.pc != nil {
-		_ = s.pc.Close()
-		s.pc = nil
+	if pc != nil {
+		_ = pc.Close()
 	}
 }
 
