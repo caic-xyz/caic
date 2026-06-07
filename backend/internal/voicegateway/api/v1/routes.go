@@ -49,13 +49,6 @@ func (r *Route) CategoryName() string {
 // Routes is the authoritative list of voice gateway API endpoints.
 var Routes = []Route{
 	{
-		Name:   "getVoiceToken",
-		Doc:    "Returns a short-lived voice API token.",
-		Method: "GET",
-		Path:   "/api/voicegateway/v1/voice/token",
-		Resp:   reflect.TypeFor[VoiceTokenResp](),
-	},
-	{
 		Name:   "voiceRTCOffer",
 		Doc:    "Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session.",
 		Method: "POST",

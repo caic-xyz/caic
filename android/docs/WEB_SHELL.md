@@ -372,11 +372,6 @@ bindings. The exact path can change, but the shape should be stable:
       "required": true,
       "mode": "external",
       "url": "https://voice.example.com",
-      "serviceToken": {
-        "required": true,
-        "endpoint": "/api/voicegateway/v1/voice/token",
-        "audience": "voice-gateway"
-      },
       "capabilities": [
         "voice.gatewayGeminiLive",
         "voice.serviceSignedTokens"

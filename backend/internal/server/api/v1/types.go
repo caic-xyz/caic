@@ -83,12 +83,10 @@ const (
 
 // VoiceGatewayMetadata reports structured voice gateway support.
 type VoiceGatewayMetadata struct {
-	Mode          VoiceGatewayMode `json:"mode"`
-	URL           string           `json:"url,omitempty"`
-	AuthRequired  bool             `json:"authRequired,omitempty"`
-	TokenEndpoint string           `json:"tokenEndpoint,omitempty"`
-	TokenAudience string           `json:"tokenAudience,omitempty"`
-	Capabilities  []string         `json:"capabilities,omitempty"`
+	Mode         VoiceGatewayMode `json:"mode"`
+	URL          string           `json:"url,omitempty"`
+	AuthRequired bool             `json:"authRequired,omitempty"`
+	Capabilities []string         `json:"capabilities,omitempty"`
 }
 
 // UserResp is returned by GET /api/caic/v1/auth/me.

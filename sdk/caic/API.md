@@ -99,8 +99,6 @@ VoiceGatewayMetadata reports structured voice gateway support.
 | `mode` | `string` |  | yes |
 | `url` | `string` |  |  |
 | `authRequired` | `boolean` |  |  |
-| `tokenEndpoint` | `string` |  |  |
-| `tokenAudience` | `string` |  |  |
 | `capabilities` | `string[]` |  |  |
 
 ### Config

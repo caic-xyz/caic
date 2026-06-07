@@ -45,7 +45,6 @@ export const {
 } = api;
 
 export const {
-  getVoiceToken,
   voiceRTCOffer,
   closeVoiceRTC,
 } = voiceGatewayApi;

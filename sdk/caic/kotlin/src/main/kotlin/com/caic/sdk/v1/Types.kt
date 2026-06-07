@@ -589,8 +589,6 @@ data class VoiceGatewayMetadata(
     val mode: VoiceGatewayMode,
     val url: String? = null,
     val authRequired: Boolean? = null,
-    val tokenEndpoint: String? = null,
-    val tokenAudience: String? = null,
     val capabilities: List<String>? = null,
 )
 

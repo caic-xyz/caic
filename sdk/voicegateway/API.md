@@ -8,7 +8,6 @@ RESTful JSON signaling API served at `/api/voicegateway/v1/voice/`.
 
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
-| GET | `/api/voicegateway/v1/voice/token` | Returns a short-lived voice API token. |  | `VoiceTokenResp` |
 | POST | `/api/voicegateway/v1/voice/rtc/offer` | Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session. | `VoiceRTCOfferReq` | `VoiceRTCAnswerResp` |
 | POST | `/api/voicegateway/v1/voice/rtc/{sessionID}` | Closes a WebRTC voice bridge session. |  | `StatusResp` |
 
@@ -30,16 +29,6 @@ All errors return:
 | 500 | `INTERNAL_ERROR` |
 
 ## Types
-
-### VoiceTokenResp
-
-VoiceTokenResp is the response for GET /api/voicegateway/v1/voice/token.
-
-| Field | Type | Description | Required |
-|-------|------|-------------|----------|
-| `token` | `string` |  | yes |
-| `expiresAt` | `string` |  | yes |
-| `ephemeral` | `boolean` |  | yes |
 
 ### VoiceRTCOfferReq
 

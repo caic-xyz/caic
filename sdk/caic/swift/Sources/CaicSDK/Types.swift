@@ -332,8 +332,6 @@ public struct VoiceGatewayMetadata: Codable {
     public let mode: VoiceGatewayMode
     public let url: String?
     public let authRequired: Bool?
-    public let tokenEndpoint: String?
-    public let tokenAudience: String?
     public let capabilities: [String]?
 }
 

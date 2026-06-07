@@ -1932,8 +1932,8 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 		if got.URL != "https://voice.example.com" {
 			t.Fatalf("URL = %q, want https://voice.example.com", got.URL)
 		}
-		if got.TokenEndpoint != "/api/voicegateway/v1/voice/token" {
-			t.Fatalf("TokenEndpoint = %q, want /api/voicegateway/v1/voice/token", got.TokenEndpoint)
+		if !got.AuthRequired {
+			t.Fatal("AuthRequired = false, want true")
 		}
 	})
 
@@ -1946,8 +1946,8 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 		if got.Mode != v1.VoiceGatewayModeEmbedded {
 			t.Fatalf("Mode = %q, want embedded", got.Mode)
 		}
-		if got.TokenEndpoint != "/api/voicegateway/v1/voice/token" {
-			t.Fatalf("TokenEndpoint = %q, want /api/voicegateway/v1/voice/token", got.TokenEndpoint)
+		if got.AuthRequired {
+			t.Fatal("AuthRequired = true, want false")
 		}
 	})
 }

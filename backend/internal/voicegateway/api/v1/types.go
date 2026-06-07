@@ -7,13 +7,6 @@ type StatusResp struct {
 	Status string `json:"status"`
 }
 
-// VoiceTokenResp is the response for GET /api/voicegateway/v1/voice/token.
-type VoiceTokenResp struct {
-	Token     string `json:"token"`
-	ExpiresAt string `json:"expiresAt"`
-	Ephemeral bool   `json:"ephemeral"`
-}
-
 // VoiceRTCOfferReq is the request body for POST /api/voicegateway/v1/voice/rtc/offer.
 type VoiceRTCOfferReq struct {
 	SDP string `json:"sdp"`

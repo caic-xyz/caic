@@ -36,20 +36,6 @@ const (
 	relayNoInstance  relayStatus = "no-instance"  // Task has no runtime instance yet.
 )
 
-// CreateAuthTokenConfig is the request for POST /v1alpha/auth_tokens.
-// See https://github.com/googleapis/go-genai/blob/main/types.go
-type CreateAuthTokenConfig struct {
-	Uses                 int    `json:"uses"`
-	ExpireTime           string `json:"expireTime"`
-	NewSessionExpireTime string `json:"newSessionExpireTime"`
-}
-
-// AuthToken is the response from POST /v1alpha/auth_tokens.
-// See https://github.com/googleapis/go-genai/blob/main/types.go
-type AuthToken struct {
-	Name string `json:"name"`
-}
-
 // responseWriter wraps http.ResponseWriter to capture status code and response size.
 type responseWriter struct {
 	http.ResponseWriter

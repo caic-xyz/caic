@@ -20,13 +20,14 @@ The Firebase SDK's `startAudioConversation()` handles AudioRecord/AudioTrack
 setup and the base64 encode/decode loop (~100 lines of straightforward Android
 audio plumbing). But it requires a Firebase project + `google-services.json`,
 and critically does **not** support:
-- Ephemeral tokens (our auth model)
+- Server-side Gemini credentials
 - VAD parameter configuration (sensitivity, silence duration, barge-in mode)
 - Session resumption
 - Context window compression
 
-Going raw gives us full access to the Live API's VAD tuning and ephemeral token
-auth, at the cost of implementing the audio plumbing ourselves.
+Going raw gives us full access to the Live API's VAD tuning while the backend
+keeps Gemini credentials server-side, at the cost of implementing the audio
+plumbing ourselves.
 
 ### Voice + Screen Integration
 
@@ -98,7 +99,6 @@ for matching behavior.
 - [Live API overview](https://ai.google.dev/gemini-api/docs/live) — getting started, audio config, function calling
 - [WebSocket API reference](https://ai.google.dev/api/live) — full message schemas for `BidiGenerateContent`
 - [Live API Tools](https://ai.google.dev/gemini-api/docs/live-tools) — NON_BLOCKING behavior, scheduling hints
-- [Ephemeral tokens](https://ai.google.dev/gemini-api/docs/ephemeral-tokens) — creating and using short-lived tokens
 - [Live API on Android](https://developer.android.com/ai/gemini/live) — Android-specific guide (Firebase-based, for reference only)
 
 ### Sample code
@@ -108,5 +108,4 @@ for matching behavior.
 ### SDKs (for reference, not used directly)
 - [Firebase AI SDK — AudioHelper.kt](https://github.com/firebase/firebase-android-sdk/blob/main/firebase-ai/src/main/kotlin/com/google/firebase/ai/type/AudioHelper.kt) — reference audio config: `USAGE_MEDIA` for AudioTrack, `VOICE_COMMUNICATION` source for AudioRecord, AEC
 - [Firebase AI SDK — LiveSession.kt](https://github.com/firebase/firebase-android-sdk/blob/main/firebase-ai/src/main/kotlin/com/google/firebase/ai/type/LiveSession.kt) — half-duplex mic pause, audio thread priority, playback accumulation
-- [google-genai Python SDK — tokens.py](https://github.com/googleapis/python-genai/blob/main/google/genai/tokens.py) — ephemeral token creation implementation
 - [google-genai Go SDK](https://github.com/googleapis/go-genai) — Go SDK (no Live API yet, but useful for understanding the Gemini API surface)

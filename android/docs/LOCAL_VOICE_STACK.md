@@ -351,7 +351,6 @@ capabilities, not a provider implementation detail:
 
 - `voiceGateway.profilePreferred`: public profile ID.
 - `voiceGateway.capabilities`: service-required public capabilities.
-- `voiceGateway.tokenEndpoint`: service-issued token endpoint.
 
 Gateway static config may still use internal backend IDs:
 

@@ -219,7 +219,6 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/processes/{pid}/signal", runtimeProcesses.HandleSignalProcess)
 	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/tool/{toolUseID}", s.handleTaskToolInput)
 	apiMux.HandleFunc("GET /api/caic/v1/usage", s.handleGetUsage)
-	apiMux.HandleFunc("GET /api/voicegateway/v1/voice/token", handle(s.getVoiceToken))
 	apiMux.HandleFunc("POST /api/voicegateway/v1/voice/rtc/offer", handle(s.voiceRTCOffer))
 	apiMux.HandleFunc("POST /api/voicegateway/v1/voice/rtc/{sessionID}", s.handleVoiceRTCClose)
 	apiMux.HandleFunc("POST /api/caic/v1/web/fetch", handle(s.webFetch))

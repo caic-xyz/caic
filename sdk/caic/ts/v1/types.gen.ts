@@ -466,8 +466,6 @@ export interface VoiceGatewayMetadata {
   mode: VoiceGatewayMode;
   url?: string;
   authRequired?: boolean;
-  tokenEndpoint?: string;
-  tokenAudience?: string;
   capabilities?: string[];
 }
 

@@ -3,11 +3,8 @@
 package server
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -31,10 +28,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
 )
-
-const voiceGatewayTokenAudience = "voice-gateway"
 
 type runnerRegistry interface {
 	RangeRunners(fn func(relPath string, r *task.Runner) bool)
@@ -94,21 +88,17 @@ func (s *Server) voiceGatewayMetadata() v1.VoiceGatewayMetadata {
 		if s.voiceBridge == nil {
 			return v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeDisabled}
 		}
-		return v1.VoiceGatewayMetadata{ //nolint:gosec // G101: token metadata field names, not credentials.
-			Mode:          v1.VoiceGatewayModeEmbedded,
-			AuthRequired:  false,
-			TokenEndpoint: "/api/voicegateway/v1/voice/token",
-			TokenAudience: voiceGatewayTokenAudience,
-			Capabilities:  []string{"voice.gatewayGeminiLive"},
+		return v1.VoiceGatewayMetadata{
+			Mode:         v1.VoiceGatewayModeEmbedded,
+			AuthRequired: false,
+			Capabilities: []string{"voice.gatewayGeminiLive"},
 		}
 	case VoiceGatewayModeExternal:
-		return v1.VoiceGatewayMetadata{ //nolint:gosec // G101: token metadata field names, not credentials.
-			Mode:          v1.VoiceGatewayModeExternal,
-			URL:           cfg.URL,
-			AuthRequired:  true,
-			TokenEndpoint: "/api/voicegateway/v1/voice/token",
-			TokenAudience: voiceGatewayTokenAudience,
-			Capabilities:  []string{"voice.gatewayGeminiLive"},
+		return v1.VoiceGatewayMetadata{
+			Mode:         v1.VoiceGatewayModeExternal,
+			URL:          cfg.URL,
+			AuthRequired: true,
+			Capabilities: []string{"voice.gatewayGeminiLive"},
 		}
 	default:
 		return v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeDisabled}
@@ -466,93 +456,4 @@ func (h *serverConfigHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoR
 	slog.Info("cloned repo", "url", req.URL, "path", targetPath)
 
 	return &v1.Repo{Path: targetPath, Branch: branch, BaseBranch: v1.BranchInfo{Name: branch, Remote: remoteName}, RemoteURL: gitutil.RemoteToHTTPS(remote), Forge: v1.Forge(info.ForgeKind)}, nil
-}
-
-// getVoiceToken returns a Gemini API credential for the Android voice client.
-//
-// Currently returns the raw GEMINI_API_KEY (ephemeral=false) because the
-// v1alpha ephemeral endpoint produces lower-quality responses. The client uses
-// the ephemeral field to decide the WebSocket URL and auth parameter.
-//
-// TODO(security): Switch back to ephemeral tokens once v1beta supports
-// auth_tokens or v1alpha quality improves. See getVoiceTokenEphemeral.
-func (s *Server) getVoiceToken(_ context.Context, _ *api.EmptyReq) (*voicev1.VoiceTokenResp, error) {
-	apiKey := s.geminiAPIKey
-	if apiKey == "" {
-		return nil, api.InternalError("GEMINI_API_KEY not configured")
-	}
-	slog.Info("voice token", "keylen", len(apiKey), "mode", "raw_key")
-	expireTime := time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339)
-	return &voicev1.VoiceTokenResp{
-		Token:     apiKey,
-		ExpiresAt: expireTime,
-	}, nil
-}
-
-// getVoiceTokenEphemeral creates a short-lived Gemini ephemeral token via
-// POST /v1alpha/auth_tokens. Ephemeral tokens are v1alpha only; v1beta
-// returns 404. The client must use v1alpha + BidiGenerateContentConstrained
-// with ?access_token=.
-//
-// This path works but produces lower-quality voice responses than the v1beta
-// BidiGenerateContent endpoint with a raw key. Kept for future use once Google
-// stabilises v1beta ephemeral tokens.
-//
-// See https://ai.google.dev/gemini-api/docs/ephemeral-tokens
-func (s *Server) getVoiceTokenEphemeral(ctx context.Context, _ *api.EmptyReq) (*voicev1.VoiceTokenResp, error) { //nolint:unused // kept for future use
-	apiKey := s.geminiAPIKey
-	if apiKey == "" {
-		return nil, api.InternalError("GEMINI_API_KEY not configured")
-	}
-	slog.Info("voice token", "keylen", len(apiKey), "mode", "ephemeral")
-	now := time.Now().UTC()
-	expireTime := now.Add(30 * time.Minute).Format(time.RFC3339)
-	newSessionExpire := now.Add(2 * time.Minute).Format(time.RFC3339)
-
-	reqBody := CreateAuthTokenConfig{
-		Uses:                 1,
-		ExpireTime:           expireTime,
-		NewSessionExpireTime: newSessionExpire,
-	}
-	bodyBytes, err := json.Marshal(&reqBody)
-	if err != nil {
-		return nil, api.InternalError("failed to marshal token request").Wrap(err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://generativelanguage.googleapis.com/v1alpha/auth_tokens",
-		bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, api.InternalError("failed to create token request").Wrap(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Goog-Api-Key", apiKey)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, api.InternalError("failed to fetch ephemeral token").Wrap(err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, api.InternalError(fmt.Sprintf("Gemini auth_tokens returned %d: %s", resp.StatusCode, string(body)))
-	}
-
-	var tokenResp AuthToken
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return nil, api.InternalError("failed to decode token response").Wrap(err)
-	}
-
-	tokenPrefix := tokenResp.Name
-	if len(tokenPrefix) > 16 {
-		tokenPrefix = tokenPrefix[:16]
-	}
-	slog.Info("voice token", "prefix", tokenPrefix, "len", len(tokenResp.Name))
-
-	return &voicev1.VoiceTokenResp{
-		Token:     tokenResp.Name,
-		ExpiresAt: expireTime,
-		Ephemeral: true,
-	}, nil
 }

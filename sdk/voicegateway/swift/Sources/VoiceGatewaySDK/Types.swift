@@ -117,13 +117,6 @@ public enum ErrorCodes {
     public static let internalError = "INTERNAL_ERROR"
 }
 
-/// VoiceTokenResp is the response for GET /api/voicegateway/v1/voice/token.
-public struct VoiceTokenResp: Codable {
-    public let token: String
-    public let expiresAt: String
-    public let ephemeral: Bool
-}
-
 /// VoiceRTCOfferReq is the request body for POST /api/voicegateway/v1/voice/rtc/offer.
 public struct VoiceRTCOfferReq: Codable {
     public let sdp: String
