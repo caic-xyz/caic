@@ -20,7 +20,7 @@ Android and browser clients while hiding backend implementation details:
   context, and tool manifests.
 
 The client-visible contract is a voice-gateway session. It is not Gemini Live,
-Gemini Bidi, local cascade, Parakeet, Gemma, Qwen, or any other
+Gemini Bidi, local stack, Parakeet, Gemma, Qwen, or any other
 provider/runtime.
 
 ## Constraints
@@ -44,40 +44,20 @@ provider/runtime.
 
 ## Current State
 
-**One backend per instance.** A voice-gateway instance serves exactly one
-backend, chosen by config. Offering more than one profile (e.g. Gemini Live vs
-local models) means running more than one instance and pointing clients at
-different URLs. Selection happens by URL, not by a per-request profile.
+A voice-gateway instance serves exactly one backend, chosen by config. Offering
+more than one profile means running more than one instance and pointing clients
+at different URLs. Selection happens by URL, not by a per-request profile.
 
-Phases 1–3 are complete (history is in git):
+`local-stack` is half-duplex. It segments decoded mic PCM with energy VAD,
+uses managed llama.cpp-backed ASR/LLM by default, normalizes tool calls and tool
+results over the provider-neutral data channel, and cancels the active turn on
+barge-in. TTS is still a deterministic placeholder until a target Mac and
+runtime are selected.
 
-- The `voicertc` bridge owns WebRTC session lifecycle and delegates
-  provider/runtime behavior through a backend connector/session/sink boundary.
-  The Gemini Live adapter owns all Gemini Live setup, model constants, WebSocket
-  URL, and translation. Gateway core tests run against a fake backend without
-  Gemini types.
-- Gateway config selects one backend: `backend = "gemini-live"` or
-  `backend = "local-cascade"`, validated against the known backend set.
-  `NewBridge` constructs exactly that backend; the realtime bridge needs a Gemini
-  key, the local cascade needs none.
-- The gateway core owns `session.ready`: a provider-neutral readiness signal
-  (no profile id, no capabilities). v1 has no capability negotiation; all
-  instances share the same baseline protocol.
-- A `local-cascade` backend implements a half-duplex cascade: energy
-  VAD/segmentation over decoded mic PCM, pluggable ASR/LLM/TTS adapters
-  (placeholder implementations for now), normalized `tool.call`/`tool.result`
-  round trips, RTP/PCM assistant audio, and barge-in (cancels the active turn,
-  clears queued audio, sends `interrupted`).
-- Generated voice gateway SDKs (Go, Kotlin, TypeScript, Swift) carry the
-  provider-neutral data-channel message types.
-- Android and frontend speak the provider-neutral protocol and persist no
-  backend IDs. Frontend golden DTO tests cover the data-channel messages.
-
-Not yet done (Phases 4–6): no real local model adapters are wired. The
-`local-cascade` backend uses deterministic placeholder ASR/LLM/TTS until a
-target Mac and runtimes are selected. `~/src/genai` has audio modality concepts
-and provider-specific audio support, but it is not yet a complete realtime
-speech orchestration layer.
+ASR and LLM default to a gateway-managed llama.cpp server running
+`unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL`; the gateway owns the server lifetime.
+Operators that need custom llama.cpp process settings should start their own
+server and set `local_stack.llm.remote`.
 
 ## Target Architecture
 
@@ -96,7 +76,7 @@ voice-gateway (one instance == one backend)
   -> gateway protocol normalizer (session.ready readiness signal)
   -> provider-neutral session core
       -> the one configured backend adapter:
-           gemini-live (full duplex) OR local-cascade (half duplex)
+           gemini-live (full duplex) OR local-stack (half duplex)
 
 Active service backend
   -> hosted web frontend, service auth, token issuer, product API, tool manifest
@@ -166,8 +146,16 @@ A gateway instance selects its single backend in static config:
 # Gemini Live (full duplex, needs GEMINI_API_KEY):
 backend = "gemini-live"
 
-# or the local cascade (half duplex, no key):
-# backend = "local-cascade"
+# or the local stack (half duplex, no key):
+# backend = "local-stack"
+
+# Omit this table to let the gateway download and run llama.cpp with:
+#   unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL
+# Use remote only when you run llama-server yourself.
+# [local_stack.llm]
+# provider = "llamacpp"
+# remote = "http://localhost:8080"
+# model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
 ```
 
 v1 has no capability negotiation: all instances share the same baseline protocol
@@ -183,6 +171,8 @@ accelerators are available.
 
 ASR backend candidates:
 
+- `llamacpp-gemma4`: first wired path. The gateway sends segmented microphone
+  PCM as inline WAV audio to the managed Gemma 4 E2B llama.cpp server.
 - `parakeet-nemo`: target model path. Requires smoke testing on macOS because
   official performance assumptions are CUDA-oriented.
 - `parakeet-cpp`: investigate `mudler/parakeet.cpp` as a local C++ Parakeet
@@ -196,9 +186,14 @@ ASR backend candidates:
 
 LLM backend candidates:
 
-- `llamacpp`: GGUF quantization with Metal.
+- `llamacpp`: GGUF quantization with Metal. This is the first wired local LLM
+  adapter path. The gateway manages llama-server by default with internal
+  process defaults. Operators that need custom llama.cpp flags, cache paths,
+  thread counts, or builds should start llama-server themselves and set
+  `local_stack.llm.remote`.
 - `mlx`: MLX-format model or OpenAI-compatible MLX server.
-- `openai-compatible`: generic adapter to any local HTTP server.
+- `openai-compatible`: future generic text-only LLM adapter to local HTTP
+  servers; it is not the current ASR/tool-capable voice stack provider.
 - Linux deployments may use the same `openai-compatible` adapter with vLLM,
   SGLang, llama.cpp, or another local server.
 
@@ -213,33 +208,37 @@ TTS backend candidates:
 
 ## Remaining Phases
 
-The placeholder ASR/LLM/TTS adapters in the `local-cascade` backend
-(`backend/internal/voicegateway/voicertc/localcascade.go`) are the seam the next
-phases replace. Phases 4–6 require a target Mac and real model runtimes, so they
-are not runnable in CI.
+The placeholder TTS adapter in the `local-stack` backend
+(`backend/internal/voicegateway/voicertc/localstack.go`) is the seam the next
+phases replace. Dedicated ASR runtimes may still replace Gemma-backed ASR if
+target-Mac measurements show unacceptable latency or quality.
 
 ### Phase 4: Run First-Platform Model Smoke Tests
 
-- Build command-line smoke tests for each model adapter.
+- Build command-line smoke tests for the managed llama.cpp ASR/LLM path and
+  candidate TTS adapters.
 - Measure first-token or first-audio latency, total turn latency, CPU/GPU
   usage, memory, and failure modes on the first target Mac.
-- Validate whether Parakeet and Qwen3-TTS can run acceptably without CUDA.
+- Validate whether managed Gemma-backed ASR and Qwen3-TTS can run acceptably
+  without CUDA; compare Parakeet only if Gemma-backed ASR is not acceptable.
 - Select initial runtime implementations based on measured behavior.
 
 Acceptance:
 
-- Gemma backend can stream text/tool calls from local macOS serving.
-- ASR backend transcribes short microphone-quality clips.
+- Managed Gemma 4 E2B through llama.cpp can return text/tool calls from macOS
+  serving with acceptable turn latency.
+- Managed Gemma 4 E2B through llama.cpp transcribes short microphone-quality
+  clips.
 - TTS backend generates playable audio chunks.
 - Runtime requirements are documented in gateway config docs, with macOS as the
   first documented platform and Linux as a later deployment target.
 
 ### Phase 5: Wire The Local Model Stack
 
-- Replace the placeholder ASR/LLM/TTS adapters with selected first-platform
-  adapters behind the existing `asrAdapter`/`llmAdapter`/`ttsAdapter` seams.
-- Feed ASR final text into Gemma conversation state.
-- Convert Gemma tool-call output into normalized `tool.call`.
+- Replace the placeholder TTS adapter with the selected first-platform adapter
+  behind the existing `ttsAdapter` seam.
+- Feed ASR final text from the managed Gemma path into Gemma conversation state.
+- Keep llama.cpp/Gemma tool-call output normalized as `tool.call`.
 - Chunk assistant text into TTS-safe segments.
 - Stream TTS output over RTP.
 
@@ -268,11 +267,10 @@ Acceptance:
 ## Testing
 
 - Go unit tests for protocol encoding/decoding/validation, backend config
-  validation, and session setup failures (done).
+  validation, and session setup failures.
 - WebRTC bridge tests with fake media and fake model backends, including the
-  local cascade turn flow, tool round trips, and barge-in (done for the cascade
-  session; full WebRTC end-to-end still relies on manual/hardware runs).
-- Frontend unit tests for normalized data-channel message handling (done).
+  local stack turn flow, tool round trips, and barge-in.
+- Frontend unit tests for normalized data-channel message handling.
 - Runtime smoke tests for ASR, LLM, and TTS adapters, starting with macOS
   (Phase 4).
 - Manual audio tests on real Android hardware for microphone routing,
@@ -282,8 +280,8 @@ Acceptance:
 
 - Exact target Mac model and RAM size for the first implementation.
 - Minimum supported Linux runtime profile for later deployments.
-- Whether Gemma is served by llama.cpp, MLX, or another OpenAI-compatible local
-  server.
+- Whether Gemma remains on llama.cpp for the first target Mac after measured
+  smoke tests, or moves to MLX/OpenAI-compatible serving.
 - Whether Parakeet is viable on macOS without CUDA at acceptable latency.
 - Whether Qwen3-TTS is viable on macOS locally, and whether streaming is
   available in the selected runtime.
@@ -296,6 +294,11 @@ Acceptance:
 
 ## Next Step
 
-Start Phase 4: build a command-line smoke test on the target Mac for one ASR,
-one LLM, and one TTS adapter behind the existing cascade adapter interfaces, and
-record measured latency/resource use to choose the first real runtimes.
+Start runtime smoke on the target Mac:
+
+- Configure `backend = "local-stack"` and omit `[local_stack.llm]` for the
+  managed default.
+- Measure managed llama.cpp startup time, ASR latency, LLM turn latency, memory,
+  and tool-call behavior through the gateway.
+- Build and measure the TTS command-line smoke path, then wire the selected
+  adapter behind `ttsAdapter`.

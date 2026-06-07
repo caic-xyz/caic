@@ -13,17 +13,6 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-const (
-	// DefaultHTTP is the default gateway HTTP signaling address.
-	DefaultHTTP = ":3479"
-	// DefaultWebRTCUDPPort is the default UDP port for WebRTC ICE.
-	DefaultWebRTCUDPPort = 0
-	// DefaultGeminiModel is the default Gemini Live model used by the first backend adapter.
-	DefaultGeminiModel = "gemini-3.1-flash-live-preview"
-	// GeminiAPIKeyEnv is the environment variable read for Gemini access.
-	GeminiAPIKeyEnv = "GEMINI_API_KEY" //nolint:gosec // G101: environment variable name, not a credential.
-)
-
 // Config is the static voice gateway configuration.
 //
 // A gateway instance serves exactly one backend. Operators run multiple
@@ -32,6 +21,7 @@ type Config struct {
 	Server         ServerConfig          `toml:"server"`
 	Model          string                `toml:"model"`
 	Backend        string                `toml:"backend"`
+	LocalStack     LocalStackConfig      `toml:"local_stack"`
 	TrustedIssuers []TrustedIssuerConfig `toml:"trusted_issuers"`
 }
 
@@ -39,6 +29,18 @@ type Config struct {
 type ServerConfig struct {
 	HTTP          string `toml:"http"`
 	WebRTCUDPPort int    `toml:"webrtc_udp_port"`
+}
+
+// LocalStackConfig configures local model adapters.
+type LocalStackConfig struct {
+	LLM LocalStackLLMConfig `toml:"llm"`
+}
+
+// LocalStackLLMConfig configures the local LLM adapter.
+type LocalStackLLMConfig struct {
+	Provider string `toml:"provider"`
+	Remote   string `toml:"remote"`
+	Model    string `toml:"model"`
 }
 
 // TrustedIssuerConfig configures a service backend trusted to issue scoped tokens.
@@ -59,10 +61,10 @@ type TrustedIssuerConfig struct {
 func DefaultConfig() Config {
 	return Config{
 		Server: ServerConfig{
-			HTTP:          DefaultHTTP,
-			WebRTCUDPPort: DefaultWebRTCUDPPort,
+			HTTP:          ":3479",
+			WebRTCUDPPort: 0,
 		},
-		Model:   DefaultGeminiModel,
+		Model:   "gemini-3.1-flash-live-preview",
 		Backend: BackendGeminiLive,
 	}
 }
@@ -108,11 +110,6 @@ func DefaultConfigPath() string {
 	return filepath.Join(base, "voice-gateway", "config.toml")
 }
 
-// GeminiAPIKey returns the configured Gemini API key from the process environment.
-func (c *Config) GeminiAPIKey() string {
-	return os.Getenv(GeminiAPIKeyEnv)
-}
-
 func (c *Config) validate(requireHTTP bool) error {
 	var errs []error
 	if requireHTTP && c.Server.HTTP == "" {
@@ -130,12 +127,25 @@ func (c *Config) validate(requireHTTP bool) error {
 	for i, issuer := range c.TrustedIssuers {
 		errs = append(errs, validateTrustedIssuer(i, issuer))
 	}
+	errs = append(errs, c.LocalStack.validate())
 	return errors.Join(errs...)
 }
 
 func isKnownBackend(backendID string) bool {
 	_, ok := knownBackends[backendID]
 	return ok
+}
+
+func (c *LocalStackConfig) validate() error {
+	switch c.LLM.Provider {
+	case "", "llamacpp":
+		if err := validateBaseURL("local_stack.llm.remote", c.LLM.Remote); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("local_stack.llm.provider %q is not supported", c.LLM.Provider)
+	}
+	return nil
 }
 
 func validateTrustedIssuer(i int, issuer TrustedIssuerConfig) error {
@@ -158,6 +168,9 @@ func validateTrustedIssuer(i int, issuer TrustedIssuerConfig) error {
 }
 
 func validateBaseURL(name, value string) error {
+	if value == "" {
+		return nil
+	}
 	u, err := url.Parse(value)
 	if err != nil || u.Host == "" {
 		return fmt.Errorf("%s is not a valid URL: %q", name, value)

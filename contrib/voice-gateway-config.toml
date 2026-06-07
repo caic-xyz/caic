@@ -7,6 +7,17 @@
 # GEMINI_API_KEY.
 #model = "gemini-3.1-flash-live-preview"
 
+# Use the local half-duplex stack instead of Gemini Live. Omit
+# [local_stack.llm] to let voice-gateway manage llama.cpp with the default
+# Gemma GGUF model.
+#backend = "local-stack"
+#
+# Use this only when you run llama-server yourself.
+#[local_stack.llm]
+#provider = "llamacpp"
+#remote = "http://127.0.0.1:8080"
+#model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
+
 # ── Server ───────────────────────────────────────────────────────────────────
 
 [server]

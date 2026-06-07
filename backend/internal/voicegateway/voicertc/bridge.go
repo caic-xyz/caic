@@ -65,21 +65,25 @@ type Bridge struct {
 // A gateway instance serves exactly the backend named in cfg. geminiAPIKey is
 // only consumed by the Gemini Live backend.
 func NewBridge(ctx context.Context, cfg *voicegateway.Config, geminiAPIKey string, udpPort int) (*Bridge, error) {
-	backend, err := backendForConfig(cfg, geminiAPIKey)
+	backend, err := backendForConfig(ctx, cfg, geminiAPIKey)
 	if err != nil {
 		return nil, err
 	}
-	return newBridgeWithBackend(ctx, backend, udpPort)
+	b, err := newBridgeWithBackend(ctx, backend, udpPort)
+	if err != nil {
+		closeBackend(backend)
+		return nil, err
+	}
+	return b, nil
 }
 
 // backendForConfig constructs the single backend a gateway instance serves.
-func backendForConfig(cfg *voicegateway.Config, geminiAPIKey string) (backendConnector, error) {
+func backendForConfig(ctx context.Context, cfg *voicegateway.Config, geminiAPIKey string) (backendConnector, error) {
 	switch cfg.Backend {
 	case voicegateway.BackendGeminiLive:
 		return newGeminiBridgeBackend(geminiAPIKey)
-	case voicegateway.BackendLocalCascade:
-		// Wired with placeholder model adapters until real local models land.
-		return defaultLocalCascadeBackend(), nil
+	case voicegateway.BackendLocalStack:
+		return localStackBackendForConfig(ctx, &cfg.LocalStack)
 	default:
 		return nil, fmt.Errorf("unknown voice backend %q", cfg.Backend)
 	}
@@ -356,6 +360,17 @@ func (b *Bridge) CloseAll() {
 	}
 	if b.udpMux != nil {
 		_ = b.udpMux.Close()
+	}
+	closeBackend(b.backend)
+}
+
+func closeBackend(b backendConnector) {
+	c, ok := b.(interface{ close() error })
+	if !ok {
+		return
+	}
+	if err := c.close(); err != nil {
+		slog.Warn("voicertc: close backend", "err", err)
 	}
 }
 

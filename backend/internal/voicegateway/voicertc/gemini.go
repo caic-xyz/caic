@@ -64,7 +64,10 @@ func (b *geminiBridgeBackend) connect(
 	sink backendSink,
 ) (backendSession, error) {
 	geminiURL := geminiWSEndpoint + "?key=" + url.QueryEscape(b.apiKey)
-	wsConn, _, err := websocket.Dial(ctx, geminiURL, nil)
+	wsConn, resp, err := websocket.Dial(ctx, geminiURL, nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("connect to Gemini: %w", err)
 	}

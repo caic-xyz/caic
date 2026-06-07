@@ -7,6 +7,7 @@ require (
 	github.com/caic-xyz/md v0.13.7-0.20260607130955-cd4b56f1ee83
 	github.com/coder/websocket v1.8.14
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/invopop/jsonschema v0.14.0
 	github.com/klauspost/compress v1.18.6
 	github.com/lmittmann/tint v1.1.3
 	github.com/maruel/genai v0.5.7-0.20260607135114-dc0829c85eb4
@@ -28,7 +29,6 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/maruel/httpjson v0.5.2 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pion/datachannel v1.6.0 // indirect

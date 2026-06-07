@@ -8,12 +8,12 @@ package voicegateway
 const (
 	// BackendGeminiLive bridges WebRTC voice sessions to Gemini Live.
 	BackendGeminiLive = "gemini-live"
-	// BackendLocalCascade is the local VAD/ASR/LLM/TTS cascade.
-	BackendLocalCascade = "local-cascade"
+	// BackendLocalStack is the local ASR/LLM/TTS model stack.
+	BackendLocalStack = "local-stack"
 )
 
 // knownBackends is the set of backend IDs the gateway recognizes in config.
 var knownBackends = map[string]struct{}{
-	BackendGeminiLive:   {},
-	BackendLocalCascade: {},
+	BackendGeminiLive: {},
+	BackendLocalStack: {},
 }

@@ -18,14 +18,14 @@ func TestLoadConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.Server.HTTP != DefaultHTTP {
-			t.Errorf("Server.HTTP = %q, want %q", cfg.Server.HTTP, DefaultHTTP)
+		if cfg.Server.HTTP != ":3479" {
+			t.Errorf("Server.HTTP = %q, want :3479", cfg.Server.HTTP)
 		}
-		if cfg.Server.WebRTCUDPPort != DefaultWebRTCUDPPort {
-			t.Errorf("Server.WebRTCUDPPort = %d, want %d", cfg.Server.WebRTCUDPPort, DefaultWebRTCUDPPort)
+		if cfg.Server.WebRTCUDPPort != 0 {
+			t.Errorf("Server.WebRTCUDPPort = %d, want 0", cfg.Server.WebRTCUDPPort)
 		}
-		if cfg.Model != DefaultGeminiModel {
-			t.Errorf("Model = %q, want %q", cfg.Model, DefaultGeminiModel)
+		if cfg.Model != "gemini-3.1-flash-live-preview" {
+			t.Errorf("Model = %q, want gemini-3.1-flash-live-preview", cfg.Model)
 		}
 	})
 
@@ -70,7 +70,14 @@ public_key = %q
 	t.Run("parses custom backend", func(t *testing.T) {
 		t.Parallel()
 		path := filepath.Join(t.TempDir(), "config.toml")
-		content := `backend = "local-cascade"` + "\n"
+		content := `
+backend = "local-stack"
+
+[local_stack.llm]
+provider = "llamacpp"
+remote = "http://localhost:8080"
+model = "gemma-local"
+`
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -81,8 +88,17 @@ public_key = %q
 		if err := cfg.Validate(); err != nil {
 			t.Fatal(err)
 		}
-		if cfg.Backend != BackendLocalCascade {
-			t.Errorf("Backend = %q, want %q", cfg.Backend, BackendLocalCascade)
+		if cfg.Backend != BackendLocalStack {
+			t.Errorf("Backend = %q, want %q", cfg.Backend, BackendLocalStack)
+		}
+		if cfg.LocalStack.LLM.Provider != "llamacpp" {
+			t.Errorf("LocalStack.LLM.Provider = %q, want llamacpp", cfg.LocalStack.LLM.Provider)
+		}
+		if cfg.LocalStack.LLM.Remote != "http://localhost:8080" {
+			t.Errorf("LocalStack.LLM.Remote = %q, want http://localhost:8080", cfg.LocalStack.LLM.Remote)
+		}
+		if cfg.LocalStack.LLM.Model != "gemma-local" {
+			t.Errorf("LocalStack.LLM.Model = %q, want gemma-local", cfg.LocalStack.LLM.Model)
 		}
 	})
 
@@ -109,6 +125,33 @@ public_key = %q
 		}
 		if !strings.Contains(err.Error(), "missing in the target struct") {
 			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("removed local stack options are rejected", func(t *testing.T) {
+		t.Parallel()
+		for _, option := range []string{
+			`cache_dir = "/tmp/caic-llama"`,
+			`host_port = "127.0.0.1:9090"`,
+			`threads = 4`,
+			`build = 1234`,
+			`extra_args = ["--jinja"]`,
+		} {
+			t.Run(option, func(t *testing.T) {
+				t.Parallel()
+				path := filepath.Join(t.TempDir(), "config.toml")
+				content := fmt.Sprintf("[local_stack.llm]\n%s\n", option)
+				if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				_, err := LoadConfig(path)
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				if !strings.Contains(err.Error(), "missing in the target struct") {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			})
 		}
 	})
 }
@@ -214,12 +257,61 @@ func TestConfigValidate(t *testing.T) {
 		}
 	})
 
-	t.Run("allows local cascade backend", func(t *testing.T) {
+	t.Run("allows local stack backend", func(t *testing.T) {
 		t.Parallel()
 		cfg := DefaultConfig()
-		cfg.Backend = BackendLocalCascade
+		cfg.Backend = BackendLocalStack
 		if err := cfg.Validate(); err != nil {
 			t.Fatal(err)
+		}
+	})
+
+	t.Run("allows local stack llm remote without provider", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		cfg.LocalStack.LLM.Remote = "http://localhost:8080"
+		if err := cfg.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("rejects invalid local stack llm remote", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		cfg.LocalStack.LLM.Provider = "llamacpp"
+		cfg.LocalStack.LLM.Remote = "not a url"
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "local_stack.llm.remote") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("rejects unsupported local stack llm provider", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		cfg.LocalStack.LLM.Provider = "unknown"
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "local_stack.llm.provider") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("rejects local stack openai compatible provider", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		cfg.LocalStack.LLM.Provider = "openaicompatible"
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "local_stack.llm.provider") {
+			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 

@@ -1,4 +1,4 @@
-// Standalone voice gateway: bridges WebRTC voice sessions to Gemini Live.
+// Standalone voice gateway: bridges WebRTC voice sessions to the configured backend.
 
 package main
 
@@ -55,10 +55,10 @@ func mainImpl(args []string) error {
 		return err
 	}
 
-	geminiAPIKey := cfg.GeminiAPIKey()
+	geminiAPIKey := os.Getenv("GEMINI_API_KEY")
 	var bridge *voicertc.Bridge
 	if cfg.Backend == voicegateway.BackendGeminiLive && geminiAPIKey == "" {
-		slog.Warn("voice media disabled", "reason", voicegateway.GeminiAPIKeyEnv+" is not configured")
+		slog.Warn("voice media disabled", "reason", "GEMINI_API_KEY is not configured")
 	} else {
 		bridge, err = voicertc.NewBridge(ctx, &cfg, geminiAPIKey, cfg.Server.WebRTCUDPPort)
 		if err != nil {

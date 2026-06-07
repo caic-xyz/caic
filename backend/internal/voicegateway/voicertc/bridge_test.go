@@ -254,7 +254,10 @@ func TestBackendConnector(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer b.CloseAll()
+		b.CloseAll()
+		if !backend.closed {
+			t.Fatal("backend was not closed by CloseAll")
+		}
 	})
 
 	t.Run("SessionSink", func(t *testing.T) {
@@ -282,6 +285,8 @@ func TestBackendConnector(t *testing.T) {
 
 type fakeBackendConnector struct {
 	connected bool
+	closed    bool
+	closeErr  error
 	session   *fakeBackendSession
 }
 
@@ -296,6 +301,11 @@ func (b *fakeBackendConnector) connect(
 		sink: sink,
 	}
 	return b.session, nil
+}
+
+func (b *fakeBackendConnector) close() error {
+	b.closed = true
+	return b.closeErr
 }
 
 type fakeBackendSession struct {

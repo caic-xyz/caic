@@ -1,4 +1,4 @@
-// Local cascade backend adapter: VAD, ASR, LLM, and TTS for half-duplex voice.
+// Local stack backend adapter: VAD, ASR, LLM, and TTS for half-duplex voice.
 
 //go:build !race
 
@@ -17,7 +17,7 @@ import (
 	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
 )
 
-// Local cascade tuning. These bound the placeholder VAD/segmentation and TTS
+// Local stack tuning. These bound the placeholder VAD/segmentation and TTS
 // pacing; real model adapters arrive in a later phase.
 const (
 	vadFrameMS           = 20
@@ -73,32 +73,30 @@ type ttsAdapter interface {
 	synthesize(ctx context.Context, text string) ([]byte, error)
 }
 
-// localCascadeBackend is a backendConnector that runs a half-duplex
-// VAD→ASR→LLM→TTS cascade. The adapters are pluggable; the default ones are
+// localStackBackend is a backendConnector that runs a half-duplex
+// VAD→ASR→LLM→TTS pipeline. The adapters are pluggable; the default ones are
 // deterministic placeholders until real local models are wired in.
-type localCascadeBackend struct {
-	newVAD func() vadSegmenter
-	asr    asrAdapter
-	llm    llmAdapter
-	tts    ttsAdapter
+type localStackBackend struct {
+	newVAD       func() vadSegmenter
+	asr          asrAdapter
+	llm          llmAdapter
+	tts          ttsAdapter
+	closeRuntime func() error
 }
 
-func newLocalCascadeBackend(newVAD func() vadSegmenter, asr asrAdapter, llm llmAdapter, tts ttsAdapter) *localCascadeBackend {
-	return &localCascadeBackend{newVAD: newVAD, asr: asr, llm: llm, tts: tts}
+func newLocalStackBackend(newVAD func() vadSegmenter, asr asrAdapter, llm llmAdapter, tts ttsAdapter) *localStackBackend {
+	return &localStackBackend{newVAD: newVAD, asr: asr, llm: llm, tts: tts}
 }
 
-// defaultLocalCascadeBackend returns a cascade wired with placeholder adapters.
-func defaultLocalCascadeBackend() *localCascadeBackend {
-	return newLocalCascadeBackend(
-		func() vadSegmenter { return &energyVAD{} },
-		placeholderASR{},
-		placeholderLLM{},
-		placeholderTTS{},
-	)
+func (b *localStackBackend) close() error {
+	if b.closeRuntime == nil {
+		return nil
+	}
+	return b.closeRuntime()
 }
 
-func (b *localCascadeBackend) connect(ctx context.Context, sessionID string, sink backendSink) (backendSession, error) {
-	return &localCascadeSession{
+func (b *localStackBackend) connect(ctx context.Context, sessionID string, sink backendSink) (backendSession, error) {
+	return &localStackSession{
 		id:          sessionID,
 		sink:        sink,
 		baseCtx:     ctx,
@@ -117,9 +115,9 @@ type toolResultMsg struct {
 	result json.RawMessage
 }
 
-// localCascadeSession owns one half-duplex voice session: queues, cancellation,
+// localStackSession owns one half-duplex voice session: queues, cancellation,
 // and tool-call correlation are all local to the backend.
-type localCascadeSession struct {
+type localStackSession struct {
 	id      string
 	sink    backendSink
 	baseCtx context.Context //nolint:containedctx // session lifetime context for turn goroutines
@@ -136,7 +134,7 @@ type localCascadeSession struct {
 	toolResults chan toolResultMsg
 }
 
-func (s *localCascadeSession) acceptClientMessage(ctx context.Context, data []byte) error {
+func (s *localStackSession) acceptClientMessage(ctx context.Context, data []byte) error {
 	var env voicev1.MessageEnvelope
 	if err := json.Unmarshal(data, &env); err != nil {
 		return fmt.Errorf("decode gateway message: %w", err)
@@ -184,7 +182,7 @@ func (s *localCascadeSession) acceptClientMessage(ctx context.Context, data []by
 	}
 }
 
-func (s *localCascadeSession) acceptMicPCM(ctx context.Context, pcm []byte) error {
+func (s *localStackSession) acceptMicPCM(ctx context.Context, pcm []byte) error {
 	utterance, speechActive := s.vad.push(pcm)
 	if speechActive && s.isSpeaking() {
 		// New user speech while the assistant is talking is a barge-in.
@@ -196,7 +194,7 @@ func (s *localCascadeSession) acceptMicPCM(ctx context.Context, pcm []byte) erro
 	return nil
 }
 
-func (s *localCascadeSession) close() error {
+func (s *localStackSession) close() error {
 	s.mu.Lock()
 	if s.turnCancel != nil {
 		s.turnCancel()
@@ -206,7 +204,7 @@ func (s *localCascadeSession) close() error {
 	return nil
 }
 
-func (s *localCascadeSession) startTurn(ctx context.Context, utterance []byte) {
+func (s *localStackSession) startTurn(ctx context.Context, utterance []byte) {
 	s.mu.Lock()
 	if s.turnCancel != nil {
 		s.turnCancel()
@@ -227,7 +225,7 @@ func (s *localCascadeSession) startTurn(ctx context.Context, utterance []byte) {
 	go s.runTurn(turnCtx, conv, utterance)
 }
 
-func (s *localCascadeSession) runTurn(ctx context.Context, conv llmConversation, utterance []byte) {
+func (s *localStackSession) runTurn(ctx context.Context, conv llmConversation, utterance []byte) {
 	text, err := s.asr.transcribe(ctx, utterance)
 	if err != nil {
 		s.warnTurn("asr", err)
@@ -245,7 +243,7 @@ func (s *localCascadeSession) runTurn(ctx context.Context, conv llmConversation,
 	s.handleReply(ctx, conv, reply)
 }
 
-func (s *localCascadeSession) handleReply(ctx context.Context, conv llmConversation, reply llmReply) {
+func (s *localStackSession) handleReply(ctx context.Context, conv llmConversation, reply llmReply) {
 	for {
 		if ctx.Err() != nil {
 			return
@@ -274,7 +272,7 @@ func (s *localCascadeSession) handleReply(ctx context.Context, conv llmConversat
 	}
 }
 
-func (s *localCascadeSession) speak(ctx context.Context, text string) {
+func (s *localStackSession) speak(ctx context.Context, text string) {
 	if text == "" {
 		return
 	}
@@ -305,7 +303,7 @@ func (s *localCascadeSession) speak(ctx context.Context, text string) {
 	s.emit(&voicev1.SpeechEnded{Kind: voicev1.MessageKindSpeechEnded, Speaker: voicev1.SpeakerAssistant})
 }
 
-func (s *localCascadeSession) bargeIn(source voicev1.InterruptSource, message string) {
+func (s *localStackSession) bargeIn(source voicev1.InterruptSource, message string) {
 	s.mu.Lock()
 	cancel := s.turnCancel
 	s.turnCancel = nil
@@ -322,7 +320,7 @@ func (s *localCascadeSession) bargeIn(source voicev1.InterruptSource, message st
 	s.emit(&voicev1.Interrupted{Kind: voicev1.MessageKindInterrupted, Source: source, Message: message})
 }
 
-func (s *localCascadeSession) waitToolResult(ctx context.Context) (toolResultMsg, bool) {
+func (s *localStackSession) waitToolResult(ctx context.Context) (toolResultMsg, bool) {
 	select {
 	case r := <-s.toolResults:
 		return r, true
@@ -331,26 +329,26 @@ func (s *localCascadeSession) waitToolResult(ctx context.Context) (toolResultMsg
 	}
 }
 
-func (s *localCascadeSession) emit(msg any) {
+func (s *localStackSession) emit(msg any) {
 	if err := s.sink.sendGatewayMessage(s.baseCtx, mustGatewayServerMessage(msg)); err != nil {
 		s.sink.cancelSession()
 	}
 }
 
-func (s *localCascadeSession) setSpeaking(v bool) {
+func (s *localStackSession) setSpeaking(v bool) {
 	s.mu.Lock()
 	s.speaking = v
 	s.mu.Unlock()
 }
 
-func (s *localCascadeSession) isSpeaking() bool {
+func (s *localStackSession) isSpeaking() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.speaking
 }
 
-func (s *localCascadeSession) warnTurn(stage string, err error) {
-	slog.Warn("voicertc: local cascade turn failed", "session", s.id, "stage", stage, "err", err)
+func (s *localStackSession) warnTurn(stage string, err error) {
+	slog.Warn("voicertc: local stack turn failed", "session", s.id, "stage", stage, "err", err)
 }
 
 // sleepCtx sleeps for d, returning false if ctx is cancelled first.

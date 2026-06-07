@@ -73,6 +73,16 @@
 # The API key is always read from GEMINI_API_KEY.
 #model = "gemini-3.1-flash-live-preview"
 
+# Local stack backend. Omit [voice-gateway.config.local_stack.llm] to let
+# caic manage llama.cpp with the default Gemma GGUF model.
+#backend = "local-stack"
+#
+# Use this only when you run llama-server yourself.
+#[voice-gateway.config.local_stack.llm]
+#provider = "llamacpp"
+#remote = "http://127.0.0.1:8080"
+#model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
+
 #[voice-gateway.config.server]
 # UDP port for WebRTC ICE (single-port mux).
 # 0 (default) = enabled with OS-assigned ephemeral port.
