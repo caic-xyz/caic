@@ -39,11 +39,12 @@ Goal: keep `Server` as the HTTP router and lifecycle owner, not the concrete
 implementation of every backend-facing role.
 
 Current state: `Server` still owns auth login handlers, usage/voice stream
-handlers, and the server-config/preferences/repos handlers (`serve_config.go`),
-plus background maintenance helpers. Already extracted into dedicated types with
-explicit dependencies: task lifecycle (`tasks.Manager`, with thin handlers in
-`tasks.go` that map errors through `toDTO`), the managed-repo set and CI status
-(`repoRegistry`, self-locking), forge client/token management (`ForgeManager`),
+handlers, and background maintenance helpers. Already extracted into dedicated
+types with explicit dependencies: task lifecycle (`tasks.Manager`, with thin
+handlers in `tasks.go` that map errors through `toDTO`), the managed-repo set
+and CI status (`repoRegistry`, self-locking), forge client/token management
+(`ForgeManager`), the server config/preferences/repos routes
+(`serverConfigHandlers`, including preference mutation and clone orchestration),
 the CI, bot, and runtime-process routes (`CIAdapter`, `BotClient`,
 `RuntimeProcesses`), and forge webhook delivery (`WebhookHandlers`, which owns
 the GitHub/GitLab webhook secrets and the App owner allowlist). The `Server`
@@ -118,9 +119,5 @@ earlier.
 
 ## Suggested Order
 
-1. Extract the server-config/preferences/repos handlers from `serve_config.go`,
-   moving the git-clone orchestration in `cloneRepo` and the preference-mutation
-   logic in `updatePreferences` out of the HTTP layer. This is now the largest
-   remaining logic concentration in the package.
-2. Optionally introduce an auth concern for the OAuth login handlers and their
+1. Optionally introduce an auth concern for the OAuth login handlers and their
    config fields; lower payoff since most logic already lives in `internal/auth`.

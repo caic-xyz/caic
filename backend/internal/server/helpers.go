@@ -166,10 +166,3 @@ func (s *Server) repoForge(rel string) v1.Forge {
 	}
 	return ""
 }
-
-func (s *Server) repoAbsPath(rel string) (string, bool) {
-	if info, ok := s.repoReg.infoFor(rel); ok {
-		return info.AbsPath, true
-	}
-	return "", false
-}

@@ -72,6 +72,7 @@ type Server struct {
 	ciService      *ci.Service // handles forge event-driven task automation
 	botClient      *BotClient
 	ciAdapter      *CIAdapter
+	serverConfig   *serverConfigHandlers
 
 	// Profiling.
 	pprof              bool
@@ -167,11 +168,12 @@ func (s *Server) maybeFakeCI(t *task.Task) {
 // route registration can be tested without a listener.
 func (s *Server) buildHandler() (http.Handler, error) {
 	s.initConcernAdapters()
+	serverConfig := s.serverConfig
 
 	// Auth routes (exempt from RequireUser).
 	authMux := http.NewServeMux()
-	authMux.HandleFunc("GET /api/caic/v1/server/config", handle(s.getConfig))
-	authMux.HandleFunc("GET /api/caic/v1/server/version", handle(s.getVersion))
+	authMux.HandleFunc("GET /api/caic/v1/server/config", handle(serverConfig.getConfig))
+	authMux.HandleFunc("GET /api/caic/v1/server/version", handle(serverConfig.getVersion))
 	authMux.HandleFunc("GET /api/caic/v1/auth/github/start", s.handleAuthStart("github"))
 	authMux.HandleFunc("GET /api/caic/v1/auth/github/callback", s.handleAuthCallback("github"))
 	authMux.HandleFunc("GET /api/caic/v1/auth/gitlab/start", s.handleAuthStart("gitlab"))
@@ -187,14 +189,14 @@ func (s *Server) buildHandler() (http.Handler, error) {
 		authEnabled:  s.authEnabled,
 		notifyChange: s.taskMgr.NotifyTaskChange,
 	}
-	apiMux.HandleFunc("GET /api/caic/v1/server/preferences", handle(s.getPreferences))
-	apiMux.HandleFunc("POST /api/caic/v1/server/preferences", handle(s.updatePreferences))
-	apiMux.HandleFunc("GET /api/caic/v1/server/harnesses", handle(s.listHarnesses))
-	apiMux.HandleFunc("GET /api/caic/v1/server/caches", handle(s.listCaches))
-	apiMux.HandleFunc("GET /api/caic/v1/server/repos", handle(s.listRepos))
-	apiMux.HandleFunc("POST /api/caic/v1/server/repos", handle(s.cloneRepo))
-	apiMux.HandleFunc("POST /api/caic/v1/server/update", handle(s.triggerUpdate))
-	apiMux.HandleFunc("GET /api/caic/v1/server/repos/branches", s.handleListRepoBranches)
+	apiMux.HandleFunc("GET /api/caic/v1/server/preferences", handle(serverConfig.getPreferences))
+	apiMux.HandleFunc("POST /api/caic/v1/server/preferences", handle(serverConfig.updatePreferences))
+	apiMux.HandleFunc("GET /api/caic/v1/server/harnesses", handle(serverConfig.listHarnesses))
+	apiMux.HandleFunc("GET /api/caic/v1/server/caches", handle(serverConfig.listCaches))
+	apiMux.HandleFunc("GET /api/caic/v1/server/repos", handle(serverConfig.listRepos))
+	apiMux.HandleFunc("POST /api/caic/v1/server/repos", handle(serverConfig.cloneRepo))
+	apiMux.HandleFunc("POST /api/caic/v1/server/update", handle(serverConfig.triggerUpdate))
+	apiMux.HandleFunc("GET /api/caic/v1/server/repos/branches", serverConfig.handleListRepoBranches)
 	apiMux.HandleFunc("POST /api/caic/v1/bot/fix-ci", handle(s.botFixCI))
 	apiMux.HandleFunc("POST /api/caic/v1/bot/fix-pr", handle(s.botFixPR))
 	apiMux.HandleFunc("GET /api/caic/v1/tasks", handle(s.listTasks))
@@ -232,8 +234,8 @@ func (s *Server) buildHandler() (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/caic/v1/auth/", authMux)
-	mux.HandleFunc("GET /api/caic/v1/server/config", handle(s.getConfig))
-	mux.HandleFunc("GET /api/caic/v1/server/version", handle(s.getVersion))
+	mux.HandleFunc("GET /api/caic/v1/server/config", handle(serverConfig.getConfig))
+	mux.HandleFunc("GET /api/caic/v1/server/version", handle(serverConfig.getVersion))
 	mux.HandleFunc("POST /webhooks/github", s.webhooks.HandleGitHub)
 	mux.HandleFunc("POST /webhooks/gitlab", s.webhooks.HandleGitLab)
 	mux.Handle("/api/caic/v1/", protectedAPI)

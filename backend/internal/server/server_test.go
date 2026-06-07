@@ -201,7 +201,7 @@ func TestCloneRepo(t *testing.T) {
 		source := initCloneSourceRepo(t)
 		s := newRunnerConstructionTestServer(t, root)
 
-		repo, err := s.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: source, Path: "./cloned"})
+		repo, err := s.serverConfig.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: source, Path: "./cloned"})
 		if err != nil {
 			t.Fatalf("cloneRepo: %v", err)
 		}
@@ -256,7 +256,7 @@ func TestCloneRepo(t *testing.T) {
 		}
 		s := newRunnerConstructionTestServer(t, root)
 
-		if _, err := s.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: parent, Path: "broken"}); err == nil {
+		if _, err := s.serverConfig.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: parent, Path: "broken"}); err == nil {
 			t.Fatal("cloneRepo succeeded, want submodule clone failure")
 		}
 		if _, err := os.Stat(filepath.Join(root, "broken")); !os.IsNotExist(err) {
@@ -888,10 +888,11 @@ func TestHandleListRepos(t *testing.T) {
 		}),
 	}
 	s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+	s.initConcernAdapters()
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/server/repos", http.NoBody)
 	w := httptest.NewRecorder()
-	handle(s.listRepos)(w, req)
+	handle(s.serverConfig.listRepos)(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)

@@ -35,7 +35,11 @@ import (
 // the registry (repos + CI status captured atomically) and needs no external
 // lock.
 func (s *Server) repoList() *[]v1.Repo {
-	snap := s.repoReg.snapshotWithCI()
+	return s.repoReg.repoList()
+}
+
+func (r *repoRegistry) repoList() *[]v1.Repo {
+	snap := r.snapshotWithCI()
 	out := make([]v1.Repo, len(snap))
 	for i := range snap {
 		r := &snap[i].info

@@ -152,6 +152,22 @@ func (s *Server) initConcernAdapters() {
 	if s.warnings == nil {
 		s.warnings = newWarningStore(s.taskMgr)
 	}
+	if s.serverConfig == nil {
+		s.serverConfig = &serverConfigHandlers{
+			serverCtx:             s.ctx,
+			absRoot:               s.absRoot,
+			tailscaleAvailable:    s.tailscaleAvailable,
+			forge:                 s.forge,
+			prefs:                 s.prefs,
+			repoReg:               s.repoReg,
+			taskMgr:               s.taskMgr,
+			githubOAuthConfigured: func() bool { return s.githubOAuth != nil },
+			authEnabled:           s.authEnabled,
+			authProviders:         s.authProviders,
+			voiceGatewayMetadata:  s.voiceGatewayMetadata,
+			newRunner:             s.newRunner,
+		}
+	}
 	if s.ciAdapter == nil {
 		var notifyChange func()
 		if s.taskMgr != nil {

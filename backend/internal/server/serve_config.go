@@ -36,7 +36,28 @@ import (
 
 const voiceGatewayTokenAudience = "voice-gateway"
 
-func (s *Server) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Config, error) {
+type runnerRegistry interface {
+	RangeRunners(fn func(relPath string, r *task.Runner) bool)
+	Runner(relPath string) (*task.Runner, bool)
+	RegisterRunner(relPath string, r *task.Runner)
+}
+
+type serverConfigHandlers struct {
+	serverCtx             context.Context
+	absRoot               string
+	tailscaleAvailable    bool
+	forge                 *ForgeManager
+	prefs                 *preferences.Store
+	repoReg               *repoRegistry
+	taskMgr               runnerRegistry
+	githubOAuthConfigured func() bool
+	authEnabled           func() bool
+	authProviders         func() []string
+	voiceGatewayMetadata  func() v1.VoiceGatewayMetadata
+	newRunner             func(context.Context, *RepoInfo) (*task.Runner, error)
+}
+
+func (h *serverConfigHandlers) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Config, error) {
 	displayName, err := os.Hostname()
 	if err != nil {
 		slog.Warn("failed to get hostname", "err", err)
@@ -45,16 +66,16 @@ func (s *Server) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Config, erro
 	cfg := &v1.Config{
 		Version:              autoupdate.Version,
 		DisplayName:          displayName,
-		TailscaleAvailable:   s.tailscaleAvailable,
+		TailscaleAvailable:   h.tailscaleAvailable,
 		USBAvailable:         runtime.GOOS == "linux",
 		DisplayAvailable:     true,
 		SudoAvailable:        true,
-		GitHubTokenAvailable: s.forge.githubToken != "" || s.githubOAuth != nil,
-		VoiceGateway:         s.voiceGatewayMetadata(),
-		GitHubAppEnabled:     s.forge.githubApp != nil,
+		GitHubTokenAvailable: h.forge.githubToken != "" || h.githubOAuthConfigured(),
+		VoiceGateway:         h.voiceGatewayMetadata(),
+		GitHubAppEnabled:     h.forge.githubApp != nil,
 	}
-	if s.authEnabled() {
-		cfg.AuthProviders = s.authProviders()
+	if h.authEnabled() {
+		cfg.AuthProviders = h.authProviders()
 	}
 	return cfg, nil
 }
@@ -95,9 +116,9 @@ func (s *Server) voiceGatewayMetadata() v1.VoiceGatewayMetadata {
 }
 
 // getVersion returns the current server version and checks GitHub for the latest release.
-func (s *Server) getVersion(ctx context.Context, _ *api.EmptyReq) (*v1.VersionResp, error) {
+func (h *serverConfigHandlers) getVersion(ctx context.Context, _ *api.EmptyReq) (*v1.VersionResp, error) {
 	current := autoupdate.Version
-	gh := s.forge.githubClient()
+	gh := h.forge.githubClient()
 	resp := &v1.VersionResp{
 		Current:      current,
 		AutoUpdateOn: gh != nil && current != "" && !strings.HasPrefix(current, "devel-"),
@@ -115,8 +136,8 @@ func (s *Server) getVersion(ctx context.Context, _ *api.EmptyReq) (*v1.VersionRe
 }
 
 // triggerUpdate starts a background update check-and-install. Returns immediately.
-func (s *Server) triggerUpdate(ctx context.Context, _ *api.EmptyReq) (*v1.UpdateResp, error) {
-	gh := s.forge.githubClient()
+func (h *serverConfigHandlers) triggerUpdate(ctx context.Context, _ *api.EmptyReq) (*v1.UpdateResp, error) {
+	gh := h.forge.githubClient()
 	if gh == nil {
 		return nil, api.InternalError("GitHub token not configured; cannot check for updates")
 	}
@@ -130,15 +151,15 @@ func (s *Server) triggerUpdate(ctx context.Context, _ *api.EmptyReq) (*v1.Update
 	}
 	go func() {
 		slog.Info("update triggered by user", "current", current, "latest", latest)
-		if err := autoupdate.CheckAndUpdate(s.ctx, gh); err != nil {
+		if err := autoupdate.CheckAndUpdate(h.serverCtx, gh); err != nil {
 			slog.Warn("background update failed", "err", err)
 		}
 	}()
 	return &v1.UpdateResp{Status: "started"}, nil
 }
 
-func (s *Server) getPreferences(ctx context.Context, _ *api.EmptyReq) (*v1.PreferencesResp, error) {
-	prefs := s.prefs.Get(userIDFromCtx(ctx))
+func (h *serverConfigHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*v1.PreferencesResp, error) {
+	prefs := h.prefs.Get(userIDFromCtx(ctx))
 	recent := prefs.RecentRepos(time.Now())
 	repos := make([]v1.RepoPrefsResp, len(recent))
 	for i, r := range recent {
@@ -181,8 +202,8 @@ func (s *Server) getPreferences(ctx context.Context, _ *api.EmptyReq) (*v1.Prefe
 	}, nil
 }
 
-func (s *Server) updatePreferences(ctx context.Context, req *v1.UpdatePreferencesReq) (*v1.PreferencesResp, error) {
-	if err := s.prefs.Update(userIDFromCtx(ctx), func(p *preferences.Preferences) {
+func (h *serverConfigHandlers) updatePreferences(ctx context.Context, req *v1.UpdatePreferencesReq) (*v1.PreferencesResp, error) {
+	if err := h.prefs.Update(userIDFromCtx(ctx), func(p *preferences.Preferences) {
 		p.Settings.AutoFixOnCIFailure = req.Settings.AutoFixOnCIFailure
 		p.Settings.AutoFixOnPROpen = req.Settings.AutoFixOnPROpen
 		p.Settings.BaseImage = req.Settings.BaseImage
@@ -212,7 +233,7 @@ func (s *Server) updatePreferences(ctx context.Context, req *v1.UpdatePreference
 		return nil, api.InternalError("save preferences: " + err.Error())
 	}
 	// Return the updated preferences.
-	return s.getPreferences(ctx, nil)
+	return h.getPreferences(ctx, nil)
 }
 
 func cacheMountsFromSettings(settings *preferences.Settings) []caicruntime.CacheMount {
@@ -252,10 +273,10 @@ func cacheMountsFromSettings(settings *preferences.Settings) []caicruntime.Cache
 	return caches
 }
 
-func (s *Server) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v1.HarnessInfo, error) {
+func (h *serverConfigHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v1.HarnessInfo, error) {
 	// Collect unique harness backends from all runners.
 	seen := make(map[agent.Harness]agent.Backend)
-	s.taskMgr.RangeRunners(func(_ string, r *task.Runner) bool {
+	h.taskMgr.RangeRunners(func(_ string, r *task.Runner) bool {
 		maps.Copy(seen, r.Backends)
 		return true
 	})
@@ -269,7 +290,7 @@ func (s *Server) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v1.Harnes
 	return &out, nil
 }
 
-func (s *Server) listCaches(_ context.Context, _ *api.EmptyReq) (*v1.WellKnownCachesResp, error) {
+func (h *serverConfigHandlers) listCaches(_ context.Context, _ *api.EmptyReq) (*v1.WellKnownCachesResp, error) {
 	harnessMounts := make([]string, 0, len(md.HarnessMounts))
 	for _, hp := range md.HarnessMounts {
 		for _, p := range hp.HomePaths {
@@ -301,21 +322,22 @@ func (s *Server) listCaches(_ context.Context, _ *api.EmptyReq) (*v1.WellKnownCa
 	}, nil
 }
 
-func (s *Server) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {
-	return s.repoList(), nil
+func (h *serverConfigHandlers) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {
+	return h.repoReg.repoList(), nil
 }
 
-func (s *Server) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
+func (h *serverConfigHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
 	repo := r.URL.Query().Get("repo")
 	if repo == "" {
 		writeError(w, api.BadRequest("repo is required"))
 		return
 	}
-	absPath, ok := s.repoAbsPath(repo)
+	info, ok := h.repoReg.infoFor(repo)
 	if !ok {
 		writeError(w, api.NotFound("repo not found"))
 		return
 	}
+	absPath := info.AbsPath
 	ctx := r.Context()
 	// Fetch local branches.
 	localPairs, err := gitutil.ListBranches(ctx, absPath, "")
@@ -352,7 +374,7 @@ func (s *Server) handleListRepoBranches(w http.ResponseWriter, r *http.Request) 
 	writeJSONResponse(w, &v1.RepoBranchesResp{Branches: branches}, nil)
 }
 
-func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo, error) {
+func (h *serverConfigHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo, error) {
 	// Derive target relative path.
 	targetPath := req.Path
 	if targetPath == "" {
@@ -365,9 +387,9 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 		targetPath = base
 	}
 
-	absTarget := filepath.Join(s.absRoot, targetPath)
+	absTarget := filepath.Join(h.absRoot, targetPath)
 	// Defense-in-depth: ensure the resolved path is under absRoot.
-	if rel, err := filepath.Rel(s.absRoot, absTarget); err != nil || strings.HasPrefix(rel, "..") {
+	if rel, err := filepath.Rel(h.absRoot, absTarget); err != nil || strings.HasPrefix(rel, "..") {
 		return nil, api.BadRequest("path escapes root directory")
 	} else {
 		targetPath = rel
@@ -379,7 +401,7 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 	}
 
 	// Check if path already registered.
-	if _, ok := s.taskMgr.Runner(targetPath); ok {
+	if _, ok := h.taskMgr.Runner(targetPath); ok {
 		return nil, api.Conflict("repo already registered: " + targetPath)
 	}
 
@@ -387,7 +409,7 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 	// different parent directory.
 	bn := filepath.Base(targetPath)
 	var basenameConflict string
-	s.taskMgr.RangeRunners(func(rel string, _ *task.Runner) bool {
+	h.taskMgr.RangeRunners(func(rel string, _ *task.Runner) bool {
 		if rel != "" && filepath.Base(rel) == bn && rel != targetPath {
 			basenameConflict = rel
 			return false
@@ -429,7 +451,7 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 	}
 	remote := gitutil.RemoteOriginURL(ctx, absTarget)
 	info := RepoInfo{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
-	runner, err := s.newRunner(ctx, &info)
+	runner, err := h.newRunner(ctx, &info)
 	if err != nil {
 		_ = os.RemoveAll(absTarget)
 		return nil, api.InternalError("failed to init runner: " + err.Error())
@@ -439,8 +461,8 @@ func (s *Server) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo,
 	}
 	// Add to the registry first, then register the runner (see repoRegistry's
 	// ordering invariant).
-	s.repoReg.add(&info)
-	s.taskMgr.RegisterRunner(targetPath, runner)
+	h.repoReg.add(&info)
+	h.taskMgr.RegisterRunner(targetPath, runner)
 	slog.Info("cloned repo", "url", req.URL, "path", targetPath)
 
 	return &v1.Repo{Path: targetPath, Branch: branch, BaseBranch: v1.BranchInfo{Name: branch, Remote: remoteName}, RemoteURL: gitutil.RemoteToHTTPS(remote), Forge: v1.Forge(info.ForgeKind)}, nil
