@@ -6,9 +6,11 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -284,14 +286,26 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 	if startedModel != "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL" {
 		t.Errorf("started model = %q, want default", startedModel)
 	}
-	if models.close == nil {
-		t.Fatal("close = nil, want managed server close")
+	if models.runtime == nil {
+		t.Fatal("runtime = nil, want managed server closer")
 	}
-	if err := models.close(); err != nil {
+	if err := models.runtime.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if !server.closed {
 		t.Fatal("managed server was not closed")
+	}
+}
+
+func TestLocalStackModelsForConfigRequiresProviderWithRemote(t *testing.T) {
+	t.Parallel()
+	cfg := &voicegateway.LocalStackLLMConfig{Remote: "http://127.0.0.1:12345"}
+	_, err := localStackModelsForConfigWithStarter(t.Context(), cfg, func(context.Context, string) (managedLlamaServer, error) {
+		t.Fatal("managed server should not be started")
+		return nil, errors.New("unreachable")
+	})
+	if err == nil || !strings.Contains(err.Error(), "local_stack.llm.provider") {
+		t.Fatalf("err = %v, want local_stack.llm.provider error", err)
 	}
 }
 

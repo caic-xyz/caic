@@ -288,6 +288,11 @@ type fakeBackendConnector struct {
 	session   *fakeBackendSession
 }
 
+func (b *fakeBackendConnector) Close() error {
+	b.closed = true
+	return b.closeErr
+}
+
 func (b *fakeBackendConnector) connect(
 	_ context.Context,
 	sessionID string,
@@ -299,11 +304,6 @@ func (b *fakeBackendConnector) connect(
 		sink: sink,
 	}
 	return b.session, nil
-}
-
-func (b *fakeBackendConnector) close() error {
-	b.closed = true
-	return b.closeErr
 }
 
 type fakeBackendSession struct {

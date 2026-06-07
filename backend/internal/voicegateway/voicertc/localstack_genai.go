@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/invopop/jsonschema"
 	"github.com/maruel/genai"
+	"github.com/maruel/genai/providers"
 	"github.com/maruel/genai/providers/llamacpp"
 	"github.com/maruel/genai/providers/llamacpp/llamacppsrv"
 
@@ -36,14 +38,14 @@ func localStackBackendForConfig(ctx context.Context, cfg *voicegateway.LocalStac
 		models.llm,
 		placeholderTTS{},
 	)
-	b.closeRuntime = models.close
+	b.runtime = models.runtime
 	return b, nil
 }
 
 type localStackModels struct {
-	asr   asrAdapter
-	llm   llmAdapter
-	close func() error
+	asr     asrAdapter
+	llm     llmAdapter
+	runtime io.Closer
 }
 
 func localStackModelsForConfigWithStarter(
@@ -51,42 +53,98 @@ func localStackModelsForConfigWithStarter(
 	cfg *voicegateway.LocalStackLLMConfig,
 	start managedLlamaStarter,
 ) (localStackModels, error) {
-	switch cfg.Provider {
-	case "", "llamacpp":
-		remote := cfg.Remote
-		var closeRuntime func() error
-		if remote == "" {
-			srv, err := start(ctx, localStackLlamaModel(cfg))
-			if err != nil {
-				return localStackModels{}, err
-			}
-			remote = srv.URL()
-			closeRuntime = srv.Close
+	provider := cfg.Provider
+	if provider == "" {
+		if cfg.Remote != "" {
+			return localStackModels{}, errors.New("local_stack.llm.provider is required when local_stack.llm.remote is set")
 		}
-		model := cfg.Model
-		if closeRuntime != nil {
-			model = ""
-		}
-		p, err := newLlamaProvider(ctx, remote, model)
+		provider = "llamacpp"
+	}
+	if provider == "llamacpp" {
+		return localStackLlamaModels(ctx, cfg, start)
+	}
+	return localStackGenAIModels(ctx, provider, cfg)
+}
+
+// localStackLlamaModels wires the managed (or remote) llama.cpp runtime. A
+// managed server was just started by us, so it is known to be reachable; a
+// user-supplied remote is pinged to fail fast on misconfiguration.
+func localStackLlamaModels(ctx context.Context, cfg *voicegateway.LocalStackLLMConfig, start managedLlamaStarter) (localStackModels, error) {
+	remote := cfg.Remote
+	var runtime io.Closer
+	if remote == "" {
+		srv, err := start(ctx, localStackLlamaModel(cfg))
 		if err != nil {
-			if closeRuntime != nil {
-				_ = closeRuntime()
-			}
 			return localStackModels{}, err
 		}
-		return localStackModels{
-			asr:   &genaiASRAdapter{provider: p},
-			llm:   &genaiLLMAdapter{provider: p},
-			close: closeRuntime,
-		}, nil
-	default:
-		return localStackModels{}, fmt.Errorf("unsupported local stack llm provider %q", cfg.Provider)
+		remote = srv.URL()
+		runtime = srv
 	}
+	model := cfg.Model
+	if runtime != nil {
+		model = ""
+	}
+	p, err := newLlamaProvider(ctx, remote, model)
+	if err != nil {
+		if runtime != nil {
+			_ = runtime.Close()
+		}
+		return localStackModels{}, err
+	}
+	if runtime == nil {
+		if err := pingLocalStackProvider(ctx, p); err != nil {
+			return localStackModels{}, err
+		}
+	}
+	return localStackModels{
+		asr:     &genaiASRAdapter{provider: p},
+		llm:     &genaiLLMAdapter{provider: p},
+		runtime: runtime,
+	}, nil
+}
+
+// localStackGenAIModels wires any provider registered in providers.All (e.g.
+// ollama, openaicompatible pointed at a local server). We don't manage the
+// provider's process, so ping it at startup to fail fast if it's unreachable.
+func localStackGenAIModels(ctx context.Context, provider string, cfg *voicegateway.LocalStackLLMConfig) (localStackModels, error) {
+	entry, ok := providers.All[provider]
+	if !ok || entry.Factory == nil {
+		return localStackModels{}, fmt.Errorf("unsupported local stack llm provider %q", provider)
+	}
+	var opts []genai.ProviderOption
+	if cfg.Remote != "" {
+		opts = append(opts, genai.ProviderOptionRemote(cfg.Remote))
+	}
+	if cfg.Model != "" {
+		opts = append(opts, genai.ProviderOptionModel(cfg.Model))
+	}
+	p, err := entry.Factory(ctx, opts...)
+	if err != nil {
+		return localStackModels{}, fmt.Errorf("create %s provider: %w", provider, err)
+	}
+	if err := pingLocalStackProvider(ctx, p); err != nil {
+		return localStackModels{}, err
+	}
+	return localStackModels{
+		asr: &genaiASRAdapter{provider: p},
+		llm: &genaiLLMAdapter{provider: p},
+	}, nil
+}
+
+func pingLocalStackProvider(ctx context.Context, p genai.Provider) error {
+	pinger, ok := p.(genai.ProviderPing)
+	if !ok {
+		return nil
+	}
+	if err := pinger.Ping(ctx); err != nil {
+		return fmt.Errorf("ping %s provider: %w", p.Name(), err)
+	}
+	return nil
 }
 
 type managedLlamaServer interface {
+	io.Closer
 	URL() string
-	Close() error
 }
 
 type managedLlamaStarter func(context.Context, string) (managedLlamaServer, error)

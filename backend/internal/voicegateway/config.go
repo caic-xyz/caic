@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/maruel/genai/providers"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -137,15 +138,17 @@ func isKnownBackend(backendID string) bool {
 }
 
 func (c *LocalStackConfig) validate() error {
-	switch c.LLM.Provider {
-	case "", "llamacpp":
-		if err := validateBaseURL("local_stack.llm.remote", c.LLM.Remote); err != nil {
-			return err
+	provider := c.LLM.Provider
+	if provider == "" {
+		if c.LLM.Remote != "" {
+			return errors.New("local_stack.llm.provider is required when local_stack.llm.remote is set")
 		}
-	default:
+		provider = "llamacpp"
+	}
+	if _, ok := providers.All[provider]; !ok {
 		return fmt.Errorf("local_stack.llm.provider %q is not supported", c.LLM.Provider)
 	}
-	return nil
+	return validateBaseURL("local_stack.llm.remote", c.LLM.Remote)
 }
 
 func validateTrustedIssuer(i int, issuer TrustedIssuerConfig) error {

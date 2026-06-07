@@ -56,6 +56,12 @@ func newGeminiBridgeBackend(apiKey string) (backendConnector, error) {
 	return &geminiBridgeBackend{apiKey: apiKey}, nil
 }
 
+// Close releases backend-wide resources. The Gemini Live backend holds none;
+// each session owns its own WebSocket connection.
+func (b *geminiBridgeBackend) Close() error {
+	return nil
+}
+
 func (b *geminiBridgeBackend) connect(
 	ctx context.Context,
 	sessionID string,

@@ -266,9 +266,23 @@ func TestConfigValidate(t *testing.T) {
 		}
 	})
 
-	t.Run("allows local stack llm remote without provider", func(t *testing.T) {
+	t.Run("rejects local stack llm remote without provider", func(t *testing.T) {
 		t.Parallel()
 		cfg := DefaultConfig()
+		cfg.LocalStack.LLM.Remote = "http://localhost:8080"
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "local_stack.llm.provider") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("allows local stack llm remote with explicit provider", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		cfg.LocalStack.LLM.Provider = "llamacpp"
 		cfg.LocalStack.LLM.Remote = "http://localhost:8080"
 		if err := cfg.Validate(); err != nil {
 			t.Fatal(err)
@@ -302,16 +316,12 @@ func TestConfigValidate(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects local stack openai compatible provider", func(t *testing.T) {
+	t.Run("allows local stack provider from the genai providers registry", func(t *testing.T) {
 		t.Parallel()
 		cfg := DefaultConfig()
 		cfg.LocalStack.LLM.Provider = "openaicompatible"
-		err := cfg.Validate()
-		if err == nil {
-			t.Fatal("expected error")
-		}
-		if !strings.Contains(err.Error(), "local_stack.llm.provider") {
-			t.Fatalf("unexpected error: %v", err)
+		if err := cfg.Validate(); err != nil {
+			t.Fatal(err)
 		}
 	})
 

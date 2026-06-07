@@ -2,9 +2,13 @@
 
 package voicertc
 
-import "context"
+import (
+	"context"
+	"io"
+)
 
 type backendConnector interface {
+	io.Closer
 	connect(ctx context.Context, sessionID string, sink backendSink) (backendSession, error)
 }
 

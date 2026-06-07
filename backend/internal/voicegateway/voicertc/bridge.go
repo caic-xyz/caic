@@ -69,7 +69,9 @@ func NewBridge(ctx context.Context, cfg *voicegateway.Config, geminiAPIKey strin
 	}
 	b, err := newBridgeWithBackend(ctx, backend, udpPort)
 	if err != nil {
-		closeBackend(backend)
+		if cerr := backend.Close(); cerr != nil {
+			slog.Warn("voicertc: close backend", "err", cerr)
+		}
 		return nil, err
 	}
 	return b, nil
@@ -359,15 +361,7 @@ func (b *Bridge) CloseAll() {
 	if b.udpMux != nil {
 		_ = b.udpMux.Close()
 	}
-	closeBackend(b.backend)
-}
-
-func closeBackend(b backendConnector) {
-	c, ok := b.(interface{ close() error })
-	if !ok {
-		return
-	}
-	if err := c.close(); err != nil {
+	if err := b.backend.Close(); err != nil {
 		slog.Warn("voicertc: close backend", "err", err)
 	}
 }

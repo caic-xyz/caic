@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"sync"
@@ -75,22 +76,22 @@ type ttsAdapter interface {
 // VAD→ASR→LLM→TTS pipeline. The adapters are pluggable; the default ones are
 // deterministic placeholders until real local models are wired in.
 type localStackBackend struct {
-	newVAD       func() vadSegmenter
-	asr          asrAdapter
-	llm          llmAdapter
-	tts          ttsAdapter
-	closeRuntime func() error
+	newVAD  func() vadSegmenter
+	asr     asrAdapter
+	llm     llmAdapter
+	tts     ttsAdapter
+	runtime io.Closer
 }
 
 func newLocalStackBackend(newVAD func() vadSegmenter, asr asrAdapter, llm llmAdapter, tts ttsAdapter) *localStackBackend {
 	return &localStackBackend{newVAD: newVAD, asr: asr, llm: llm, tts: tts}
 }
 
-func (b *localStackBackend) close() error {
-	if b.closeRuntime == nil {
+func (b *localStackBackend) Close() error {
+	if b.runtime == nil {
 		return nil
 	}
-	return b.closeRuntime()
+	return b.runtime.Close()
 }
 
 func (b *localStackBackend) connect(ctx context.Context, sessionID string, sink backendSink) (backendSession, error) {
