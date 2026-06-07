@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"math"
 	"net/http"
 	"slices"
@@ -268,11 +267,13 @@ func TestGenaiConversation(t *testing.T) {
 
 func TestLocalStackModelsForConfig(t *testing.T) {
 	t.Parallel()
-	startedModel := ""
-	server := &fakeManagedLlamaServer{url: "http://127.0.0.1:12345"}
-	models, err := localStackModelsForConfigWithStarter(t.Context(), &voicegateway.LocalStackLLMConfig{}, func(_ context.Context, model string) (managedLlamaServer, error) {
-		startedModel = model
-		return server, nil
+	var startedModels []string
+	var servers []*fakeManagedLlamaServer
+	models, err := localStackModelsForConfigWithStarter(t.Context(), &voicegateway.LocalStackConfig{}, func(_ context.Context, model string) (managedLlamaServer, error) {
+		startedModels = append(startedModels, model)
+		srv := &fakeManagedLlamaServer{url: "http://127.0.0.1:12345"}
+		servers = append(servers, srv)
+		return srv, nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -283,8 +284,9 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 	if _, ok := models.llm.(*genaiLLMAdapter); !ok {
 		t.Fatalf("llm = %T, want genaiLLMAdapter", models.llm)
 	}
-	if startedModel != "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL" {
-		t.Errorf("started model = %q, want default", startedModel)
+	wantModels := []string{defaultLocalStackASRModel, defaultLocalStackLLMModel}
+	if !slices.Equal(startedModels, wantModels) {
+		t.Errorf("started models = %v, want %v", startedModels, wantModels)
 	}
 	if models.runtime == nil {
 		t.Fatal("runtime = nil, want managed server closer")
@@ -292,21 +294,36 @@ func TestLocalStackModelsForConfig(t *testing.T) {
 	if err := models.runtime.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if !server.closed {
-		t.Fatal("managed server was not closed")
+	for i, srv := range servers {
+		if !srv.closed {
+			t.Errorf("managed server %d (%s) was not closed", i, startedModels[i])
+		}
 	}
 }
 
 func TestLocalStackModelsForConfigRequiresProviderWithRemote(t *testing.T) {
 	t.Parallel()
-	cfg := &voicegateway.LocalStackLLMConfig{Remote: "http://127.0.0.1:12345"}
-	_, err := localStackModelsForConfigWithStarter(t.Context(), cfg, func(context.Context, string) (managedLlamaServer, error) {
-		t.Fatal("managed server should not be started")
-		return nil, errors.New("unreachable")
-	})
-	if err == nil || !strings.Contains(err.Error(), "local_stack.llm.provider") {
-		t.Fatalf("err = %v, want local_stack.llm.provider error", err)
+	start := func(context.Context, string) (managedLlamaServer, error) {
+		return &fakeManagedLlamaServer{url: "http://127.0.0.1:12345"}, nil
 	}
+
+	t.Run("asr", func(t *testing.T) {
+		t.Parallel()
+		cfg := &voicegateway.LocalStackConfig{ASR: voicegateway.LocalStackASRConfig{Remote: "http://127.0.0.1:12345"}}
+		_, err := localStackModelsForConfigWithStarter(t.Context(), cfg, start)
+		if err == nil || !strings.Contains(err.Error(), "local_stack.asr.provider") {
+			t.Fatalf("err = %v, want local_stack.asr.provider error", err)
+		}
+	})
+
+	t.Run("llm", func(t *testing.T) {
+		t.Parallel()
+		cfg := &voicegateway.LocalStackConfig{LLM: voicegateway.LocalStackLLMConfig{Remote: "http://127.0.0.1:12345"}}
+		_, err := localStackModelsForConfigWithStarter(t.Context(), cfg, start)
+		if err == nil || !strings.Contains(err.Error(), "local_stack.llm.provider") {
+			t.Fatalf("err = %v, want local_stack.llm.provider error", err)
+		}
+	})
 }
 
 func TestGenaiASRAdapter(t *testing.T) {

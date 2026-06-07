@@ -34,7 +34,15 @@ type ServerConfig struct {
 
 // LocalStackConfig configures local model adapters.
 type LocalStackConfig struct {
+	ASR LocalStackASRConfig `toml:"asr"`
 	LLM LocalStackLLMConfig `toml:"llm"`
+}
+
+// LocalStackASRConfig configures the local ASR (speech-to-text) adapter.
+type LocalStackASRConfig struct {
+	Provider string `toml:"provider"`
+	Remote   string `toml:"remote"`
+	Model    string `toml:"model"`
 }
 
 // LocalStackLLMConfig configures the local LLM adapter.
@@ -138,17 +146,29 @@ func isKnownBackend(backendID string) bool {
 }
 
 func (c *LocalStackConfig) validate() error {
-	provider := c.LLM.Provider
-	if provider == "" {
-		if c.LLM.Remote != "" {
-			return errors.New("local_stack.llm.provider is required when local_stack.llm.remote is set")
+	return errors.Join(
+		validateLocalStackProvider("local_stack.asr", c.ASR.Provider, c.ASR.Remote),
+		validateBaseURL("local_stack.asr.remote", c.ASR.Remote),
+		validateLocalStackProvider("local_stack.llm", c.LLM.Provider, c.LLM.Remote),
+		validateBaseURL("local_stack.llm.remote", c.LLM.Remote),
+	)
+}
+
+// validateLocalStackProvider checks that provider (defaulting to "llamacpp"
+// when unset) names a provider registered in the genai providers registry,
+// and that remote is not set without an explicit provider.
+func validateLocalStackProvider(prefix, provider, remote string) error {
+	p := provider
+	if p == "" {
+		if remote != "" {
+			return fmt.Errorf("%s.provider is required when %s.remote is set", prefix, prefix)
 		}
-		provider = "llamacpp"
+		p = "llamacpp"
 	}
-	if _, ok := providers.All[provider]; !ok {
-		return fmt.Errorf("local_stack.llm.provider %q is not supported", c.LLM.Provider)
+	if _, ok := providers.All[p]; !ok {
+		return fmt.Errorf("%s.provider %q is not supported", prefix, provider)
 	}
-	return validateBaseURL("local_stack.llm.remote", c.LLM.Remote)
+	return nil
 }
 
 func validateTrustedIssuer(i int, issuer TrustedIssuerConfig) error {

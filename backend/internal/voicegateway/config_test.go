@@ -73,6 +73,11 @@ public_key = %q
 		content := `
 backend = "local-stack"
 
+[local_stack.asr]
+provider = "llamacpp"
+remote = "http://localhost:8090"
+model = "asr-local"
+
 [local_stack.llm]
 provider = "llamacpp"
 remote = "http://localhost:8080"
@@ -90,6 +95,15 @@ model = "gemma-local"
 		}
 		if cfg.Backend != BackendLocalStack {
 			t.Errorf("Backend = %q, want %q", cfg.Backend, BackendLocalStack)
+		}
+		if cfg.LocalStack.ASR.Provider != "llamacpp" {
+			t.Errorf("LocalStack.ASR.Provider = %q, want llamacpp", cfg.LocalStack.ASR.Provider)
+		}
+		if cfg.LocalStack.ASR.Remote != "http://localhost:8090" {
+			t.Errorf("LocalStack.ASR.Remote = %q, want http://localhost:8090", cfg.LocalStack.ASR.Remote)
+		}
+		if cfg.LocalStack.ASR.Model != "asr-local" {
+			t.Errorf("LocalStack.ASR.Model = %q, want asr-local", cfg.LocalStack.ASR.Model)
 		}
 		if cfg.LocalStack.LLM.Provider != "llamacpp" {
 			t.Errorf("LocalStack.LLM.Provider = %q, want llamacpp", cfg.LocalStack.LLM.Provider)
@@ -263,6 +277,56 @@ func TestConfigValidate(t *testing.T) {
 		cfg.Backend = BackendLocalStack
 		if err := cfg.Validate(); err != nil {
 			t.Fatal(err)
+		}
+	})
+
+	t.Run("rejects local stack asr remote without provider", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		cfg.LocalStack.ASR.Remote = "http://localhost:8090"
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "local_stack.asr.provider") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("allows local stack asr remote with explicit provider", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		cfg.LocalStack.ASR.Provider = "llamacpp"
+		cfg.LocalStack.ASR.Remote = "http://localhost:8090"
+		if err := cfg.Validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("rejects invalid local stack asr remote", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		cfg.LocalStack.ASR.Provider = "llamacpp"
+		cfg.LocalStack.ASR.Remote = "not a url"
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "local_stack.asr.remote") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("rejects unsupported local stack asr provider", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		cfg.LocalStack.ASR.Provider = "unknown"
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "local_stack.asr.provider") {
+			t.Fatalf("unexpected error: %v", err)
 		}
 	})
 

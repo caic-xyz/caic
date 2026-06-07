@@ -54,10 +54,12 @@ results over the provider-neutral data channel, and cancels the active turn on
 barge-in. TTS is still a deterministic placeholder until a target Mac and
 runtime are selected.
 
-ASR and LLM default to a gateway-managed llama.cpp server running
-`unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL`; the gateway owns the server lifetime.
-Operators that need custom llama.cpp process settings should start their own
-server and set `local_stack.llm.remote`.
+ASR and LLM each default to their own gateway-managed llama.cpp server: ASR
+runs the dedicated `ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0` speech-to-text model and
+LLM runs `unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL`; the gateway owns both server
+lifetimes independently. Operators that need custom llama.cpp process settings
+should start their own server(s) and set `local_stack.asr.remote` and/or
+`local_stack.llm.remote`.
 
 ## Target Architecture
 
@@ -149,9 +151,15 @@ backend = "gemini-live"
 # or the local stack (half duplex, no key):
 # backend = "local-stack"
 
-# Omit this table to let the gateway download and run llama.cpp with:
-#   unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL
+# Omit these tables to let the gateway download and run its own llama.cpp
+# servers: ASR with ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0 (dedicated speech-to-text)
+# and LLM with unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL (conversation and tools).
 # Use remote only when you run llama-server yourself.
+# [local_stack.asr]
+# provider = "llamacpp"
+# remote = "http://localhost:8090"
+# model = "ggml-org/Qwen3-ASR-0.6B-GGUF:Q8_0"
+
 # [local_stack.llm]
 # provider = "llamacpp"
 # remote = "http://localhost:8080"
@@ -171,8 +179,12 @@ accelerators are available.
 
 ASR backend candidates:
 
-- `llamacpp-gemma4`: first wired path. The gateway sends segmented microphone
-  PCM as inline WAV audio to the managed Gemma 4 E2B llama.cpp server.
+- `llamacpp-qwen3-asr`: wired path. The gateway sends segmented microphone PCM
+  as inline WAV audio to a managed, dedicated Qwen3-ASR-0.6B llama.cpp server
+  (`local_stack.asr`), independent from the conversational LLM server.
+- `llamacpp-gemma4`: earlier fallback path that reused the conversational
+  Gemma 4 E2B server for transcription; replaced because Gemma is not an ASR
+  model and a dedicated speech-to-text model is cheaper and more reliable.
 - `parakeet-nemo`: target model path. Requires smoke testing on macOS because
   official performance assumptions are CUDA-oriented.
 - `parakeet-cpp`: investigate `mudler/parakeet.cpp` as a local C++ Parakeet
@@ -210,8 +222,9 @@ TTS backend candidates:
 
 The placeholder TTS adapter in the `local-stack` backend
 (`backend/internal/voicegateway/voicertc/localstack.go`) is the seam the next
-phases replace. Dedicated ASR runtimes may still replace Gemma-backed ASR if
-target-Mac measurements show unacceptable latency or quality.
+phases replace. The dedicated Qwen3-ASR runtime may still be replaced by
+Parakeet or whisper.cpp if target-Mac measurements show unacceptable latency or
+quality.
 
 ### Phase 4: Run First-Platform Model Smoke Tests
 
@@ -219,15 +232,15 @@ target-Mac measurements show unacceptable latency or quality.
   candidate TTS adapters.
 - Measure first-token or first-audio latency, total turn latency, CPU/GPU
   usage, memory, and failure modes on the first target Mac.
-- Validate whether managed Gemma-backed ASR and Qwen3-TTS can run acceptably
-  without CUDA; compare Parakeet only if Gemma-backed ASR is not acceptable.
+- Validate whether managed Qwen3-ASR and Qwen3-TTS can run acceptably without
+  CUDA; compare Parakeet only if Qwen3-ASR is not acceptable.
 - Select initial runtime implementations based on measured behavior.
 
 Acceptance:
 
 - Managed Gemma 4 E2B through llama.cpp can return text/tool calls from macOS
   serving with acceptable turn latency.
-- Managed Gemma 4 E2B through llama.cpp transcribes short microphone-quality
+- Managed Qwen3-ASR through llama.cpp transcribes short microphone-quality
   clips.
 - TTS backend generates playable audio chunks.
 - Runtime requirements are documented in gateway config docs, with macOS as the
@@ -237,7 +250,8 @@ Acceptance:
 
 - Replace the placeholder TTS adapter with the selected first-platform adapter
   behind the existing `ttsAdapter` seam.
-- Feed ASR final text from the managed Gemma path into Gemma conversation state.
+- Feed ASR final text from the managed Qwen3-ASR path into Gemma conversation
+  state.
 - Keep llama.cpp/Gemma tool-call output normalized as `tool.call`.
 - Chunk assistant text into TTS-safe segments.
 - Stream TTS output over RTP.
@@ -296,8 +310,8 @@ Acceptance:
 
 Start runtime smoke on the target Mac:
 
-- Configure `backend = "local-stack"` and omit `[local_stack.llm]` for the
-  managed default.
+- Configure `backend = "local-stack"` and omit `[local_stack.asr]` and
+  `[local_stack.llm]` for the managed defaults.
 - Measure managed llama.cpp startup time, ASR latency, LLM turn latency, memory,
   and tool-call behavior through the gateway.
 - Build and measure the TTS command-line smoke path, then wire the selected
