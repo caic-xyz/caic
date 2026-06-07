@@ -9,7 +9,6 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.uiautomator.UiDevice
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -61,7 +60,7 @@ class WebShellSmokeTest {
         )
         waitForDom("location.pathname === '$BACK_TEST_PATH'")
 
-        UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).pressBack()
+        pressActivityBack()
         waitForDom("location.pathname === '/'")
     }
 
@@ -116,6 +115,15 @@ class WebShellSmokeTest {
         }
         check(latch.await(JS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "WebView lookup timed out" }
         return view
+    }
+
+    private fun pressActivityBack() {
+        val latch = CountDownLatch(1)
+        composeRule.activity.runOnUiThread {
+            composeRule.activity.onBackPressedDispatcher.onBackPressed()
+            latch.countDown()
+        }
+        check(latch.await(JS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "Back dispatch timed out" }
     }
 
     private fun String.jsString(): String {
