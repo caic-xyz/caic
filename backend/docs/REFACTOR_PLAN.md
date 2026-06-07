@@ -33,54 +33,7 @@ containers as one runtime adapter, not as the backend domain model.
   comments when a source file's purpose changes.
 - Run the validation commands listed for the phase that changed.
 
-## 1. Split `server.Server` By Concern
-
-Goal: keep `Server` as the HTTP router and lifecycle owner, not the concrete
-implementation of every backend-facing role.
-
-Current state: `Server` still owns auth login handlers, usage/voice stream
-handlers, and background maintenance helpers. Already extracted into dedicated
-types with explicit dependencies: task lifecycle (`tasks.Manager`, with thin
-handlers in `tasks.go` that map errors through `toDTO`), the managed-repo set
-and CI status (`repoRegistry`, self-locking), forge client/token management
-(`ForgeManager`), the server config/preferences/repos routes
-(`serverConfigHandlers`, including preference mutation and clone orchestration),
-the CI, bot, and runtime-process routes (`CIAdapter`, `BotClient`,
-`RuntimeProcesses`), and forge webhook delivery (`WebhookHandlers`, which owns
-the GitHub/GitLab webhook secrets and the App owner allowlist). The `Server`
-struct no longer carries a `runners` map or the webhook secrets; runner
-ownership moved to `tasks.Manager`.
-
-Implementation order:
-
-1. Group route handlers by concern: tasks, repos/config/preferences, auth,
-   webhooks, bot actions, usage streams, voice, and runtime process operations.
-2. Introduce small concern structs with explicit dependencies. The first pass
-   can keep them in `internal/server` to avoid premature package splits.
-3. Keep shared stores and managers as shared objects, but pass them directly to
-   each concern instead of reaching through the whole `Server`.
-4. Keep route registration centralized until split registration reduces
-   concrete complexity. Do not hide route definitions behind package-level side
-   effects.
-5. Update tests to target extracted concern structs where that gives smaller
-   fixtures, while keeping route-level tests for public HTTP behavior.
-
-Acceptance criteria:
-
-- `Server` owns the HTTP server, middleware, router setup, and lifecycle state.
-- Handler tests can construct the concern under test without unrelated auth,
-  voice, runtime, and forge fixtures.
-
-Validation:
-
-```bash
-make lint-go
-go test ./backend/internal/server ./backend/internal/ci ./backend/internal/bot
-./scripts/update_backend_architecture.py
-make lint-docs
-```
-
-## Deferred Runtime Connection Work
+## 1. Runtime Connection Work
 
 The lifecycle abstraction is not the same as the agent transport abstraction.
 Current agent backends call `ssh <container> ...`, deploy relay files through
@@ -98,8 +51,8 @@ Design direction:
 - Convert md container names to the connection target inside `mdruntime`, not in
   task orchestration.
 
-Do this after the lifecycle naming cleanup, unless a VM adapter requires it
-earlier.
+Sequence this after the lifecycle naming cleanup, unless a VM adapter requires
+it earlier.
 
 ## Runtime Design Notes
 
@@ -116,8 +69,3 @@ earlier.
   container. If a type wraps `md.Container`, the adapter name can say so.
 - Do not keep API or config compatibility as a design constraint. Use migration
   code only when it is small, isolated, and does not affect the target model.
-
-## Suggested Order
-
-1. Optionally introduce an auth concern for the OAuth login handlers and their
-   config fields; lower payoff since most logic already lives in `internal/auth`.

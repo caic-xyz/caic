@@ -1916,8 +1916,8 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 	t.Parallel()
 	t.Run("default disabled", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
-		got := s.voiceGatewayMetadata()
+		h := &voiceHandlers{}
+		got := h.metadata()
 		if got.Mode != v1.VoiceGatewayModeDisabled {
 			t.Fatalf("Mode = %q, want disabled", got.Mode)
 		}
@@ -1925,12 +1925,13 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 
 	t.Run("external", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
-		s.voiceGateway = VoiceGatewayConfig{
-			Mode: VoiceGatewayModeExternal,
-			URL:  "https://voice.example.com",
+		h := &voiceHandlers{
+			Gateway: VoiceGatewayConfig{
+				Mode: VoiceGatewayModeExternal,
+				URL:  "https://voice.example.com",
+			},
 		}
-		got := s.voiceGatewayMetadata()
+		got := h.metadata()
 		if got.Mode != v1.VoiceGatewayModeExternal {
 			t.Fatalf("Mode = %q, want external", got.Mode)
 		}
@@ -1944,10 +1945,11 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 
 	t.Run("embedded", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
-		s.voiceGateway = VoiceGatewayConfig{Mode: VoiceGatewayModeEmbedded}
-		s.voiceBridge = &voicertc.Bridge{}
-		got := s.voiceGatewayMetadata()
+		h := &voiceHandlers{
+			Bridge:  &voicertc.Bridge{},
+			Gateway: VoiceGatewayConfig{Mode: VoiceGatewayModeEmbedded},
+		}
+		got := h.metadata()
 		if got.Mode != v1.VoiceGatewayModeEmbedded {
 			t.Fatalf("Mode = %q, want embedded", got.Mode)
 		}
@@ -2269,7 +2271,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 		// Simulate the start handler to get a valid state cookie.
 		startW := httptest.NewRecorder()
 		startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/auth/github/start", http.NoBody)
-		s.handleAuthStart("github")(startW, startReq)
+		s.authHandlers.handleStart("github")(startW, startReq)
 		if startW.Code != http.StatusFound {
 			t.Fatalf("start status = %d, want %d", startW.Code, http.StatusFound)
 		}
@@ -2297,7 +2299,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 			"/api/caic/v1/auth/github/callback?code=testcode&state="+url.QueryEscape(rawState), http.NoBody)
 		cbReq.AddCookie(stateCookie)
 		cbW := httptest.NewRecorder()
-		s.handleAuthCallback("github")(cbW, cbReq)
+		s.authHandlers.handleCallback("github")(cbW, cbReq)
 
 		if cbW.Code != http.StatusFound {
 			body, _ := io.ReadAll(cbW.Result().Body)

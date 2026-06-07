@@ -123,7 +123,6 @@ graph TD
   pkg_internal_server --> pkg_internal_usage
   pkg_internal_server --> pkg_internal_voicegateway
   pkg_internal_server --> pkg_internal_voicegateway_api
-  pkg_internal_server --> pkg_internal_voicegateway_api_v1
   pkg_internal_server --> pkg_internal_voicegateway_voicertc
   pkg_internal_server_api_v1 --> pkg_internal_server_api
   pkg_internal_server_api_v1conv --> pkg_internal_agent
@@ -343,7 +342,6 @@ graph TD
   pkg_internal_server --> pkg_internal_usage
   pkg_internal_server --> pkg_internal_voicegateway
   pkg_internal_server --> pkg_internal_voicegateway_api
-  pkg_internal_server --> pkg_internal_voicegateway_api_v1
   pkg_internal_server --> pkg_internal_voicegateway_voicertc
   pkg_internal_server_api_v1 --> pkg_internal_server_api
   pkg_internal_server_api_v1conv --> pkg_internal_agent
@@ -405,7 +403,7 @@ graph TD
 | `internal/preferences` | None |
 | `internal/runtime` | `internal/agent` |
 | `internal/runtime/mdruntime` | `internal/agent`, `internal/runtime` |
-| `internal/server` | `frontend`, `internal/agent`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/github`, `internal/forge/gitlab`, `internal/preferences`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/api/v1conv`, `internal/server/ipgeo`, `internal/task`, `internal/tasks`, `internal/usage`, `internal/voicegateway`, `internal/voicegateway/api`, `internal/voicegateway/api/v1`, `internal/voicegateway/voicertc` |
+| `internal/server` | `frontend`, `internal/agent`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/github`, `internal/forge/gitlab`, `internal/preferences`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/api/v1conv`, `internal/server/ipgeo`, `internal/task`, `internal/tasks`, `internal/usage`, `internal/voicegateway`, `internal/voicegateway/api`, `internal/voicegateway/voicertc` |
 | `internal/server/api` | None |
 | `internal/server/api/v1` | `internal/server/api` |
 | `internal/server/api/v1conv` | `internal/agent`, `internal/forge`, `internal/runtime`, `internal/server/api/v1`, `internal/task`, `internal/tasks`, `internal/usage` |

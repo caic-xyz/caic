@@ -18,6 +18,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
+type usageHandlers struct {
+	taskMgr       *tasks.Manager
+	fetchers      func() []usage.ProviderFetcher
+	notifyChanged func() <-chan struct{}
+}
+
 // handleTaskListEvents streams patch events for the task list as SSE. On first
 // iteration it sends a full snapshot; thereafter it sends only upsert/delete
 // events for changed or removed tasks. It pushes immediately when a
@@ -167,10 +173,10 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleUsageEvents streams usage snapshots as SSE. It reacts to task changes
+// handleEvents streams usage snapshots as SSE. It reacts to task changes
 // immediately and ticks every CacheTTL for provider cache refreshes. Each
 // message is a single UsageResp JSON object.
-func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
+func (h *usageHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, api.InternalError("streaming not supported"))
@@ -188,7 +194,7 @@ func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 	var prev []byte
 
 	for {
-		resp := s.buildUsageResp(r.Context())
+		resp := h.buildResp(r.Context())
 
 		data, err := json.Marshal(resp)
 		if err == nil && !bytes.Equal(data, prev) {
@@ -197,7 +203,7 @@ func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 			prev = data
 		}
 
-		ch := s.taskMgr.Changed()
+		ch := h.notifyChanged()
 		select {
 		case <-r.Context().Done():
 			return
@@ -208,22 +214,22 @@ func (s *Server) handleUsageEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetUsage returns a one-shot usage snapshot as JSON.
-func (s *Server) handleGetUsage(w http.ResponseWriter, r *http.Request) {
-	resp := s.buildUsageResp(r.Context())
+func (h *usageHandlers) handleGetUsage(w http.ResponseWriter, r *http.Request) {
+	resp := h.buildResp(r.Context())
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.WarnContext(r.Context(), "encode usage response", "err", err)
 	}
 }
 
-// buildUsageResp assembles the full usage response: local task cost
+// buildResp assembles the full usage response: local task cost
 // aggregation plus per-provider quota data from each registered fetcher.
-func (s *Server) buildUsageResp(ctx context.Context) v1.UsageResp {
-	local := v1conv.LocalUsage(s.taskMgr, time.Now())
+func (h *usageHandlers) buildResp(ctx context.Context) v1.UsageResp {
+	local := v1conv.LocalUsage(h.taskMgr, time.Now())
 
 	resp := v1.UsageResp{Local: local}
 	detached := context.WithoutCancel(ctx)
-	for _, f := range s.usageFetchers {
+	for _, f := range h.fetchers() {
 		if q := f.Get(detached); q != nil {
 			out := v1conv.ProviderQuota(q)
 			out.LogoURL = "/logos/" + out.Provider + ".svg"

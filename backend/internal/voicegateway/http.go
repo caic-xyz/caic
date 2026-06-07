@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 )
 
@@ -18,6 +19,9 @@ type MediaBridge interface {
 	Close(sessionID string)
 }
 
+// MediaBridgeProvider returns the current WebRTC media transport.
+type MediaBridgeProvider func() MediaBridge
+
 // NewHandler returns a reusable voice gateway HTTP handler.
 func NewHandler(
 	cfg *Config,
@@ -26,20 +30,34 @@ func NewHandler(
 	if cfg == nil {
 		return nil, errors.New("voice gateway config is required")
 	}
+	return newHandler(cfg, func() MediaBridge { return bridge }, true, true), nil
+}
+
+// NewEmbeddedHandler returns voice gateway RTC routes for a caller that already
+// enforces request authentication before dispatch.
+func NewEmbeddedHandler(bridge MediaBridgeProvider) http.Handler {
+	return newHandler(nil, bridge, false, false)
+}
+
+func newHandler(cfg *Config, bridge MediaBridgeProvider, requireServiceAuth, includeHealth bool) http.Handler {
 	h := &handler{
-		cfg:    cfg,
-		bridge: bridge,
+		cfg:                cfg,
+		bridge:             bridge,
+		requireServiceAuth: requireServiceAuth,
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/voicegateway/v1/voice/health", h.handleHealth)
+	if includeHealth {
+		mux.HandleFunc("GET /api/voicegateway/v1/voice/health", h.handleHealth)
+	}
 	mux.HandleFunc("POST /api/voicegateway/v1/voice/rtc/offer", h.handleOffer)
 	mux.HandleFunc("POST /api/voicegateway/v1/voice/rtc/{sessionID}", h.handleClose)
-	return mux, nil
+	return mux
 }
 
 type handler struct {
-	cfg    *Config
-	bridge MediaBridge
+	cfg                *Config
+	bridge             MediaBridgeProvider
+	requireServiceAuth bool
 }
 
 // HealthResp is returned by GET /api/voicegateway/v1/voice/health.
@@ -98,19 +116,22 @@ func (h *handler) handleOffer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "sdp is required")
 		return
 	}
-	if err := validateServiceAuthorization(req.Service); err != nil {
-		writeError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
-		return
+	if h.requireServiceAuth {
+		if err := validateServiceAuthorization(req.Service); err != nil {
+			writeError(w, http.StatusBadRequest, "BAD_REQUEST", err.Error())
+			return
+		}
+		if err := verifyServiceToken(h.cfg, req.Service); err != nil {
+			writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
+			return
+		}
 	}
-	if err := verifyServiceToken(h.cfg, req.Service); err != nil {
-		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", err.Error())
-		return
-	}
-	if h.bridge == nil {
+	bridge := h.mediaBridge()
+	if bridge == nil {
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "voice bridge unavailable")
 		return
 	}
-	sdpAnswer, sessionID, err := h.bridge.HandleOffer(r.Context(), req.SDP)
+	sdpAnswer, sessionID, err := bridge.HandleOffer(r.Context(), req.SDP)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "offer failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "offer failed")
@@ -120,7 +141,8 @@ func (h *handler) handleOffer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) handleClose(w http.ResponseWriter, r *http.Request) {
-	if h.bridge == nil {
+	bridge := h.mediaBridge()
+	if bridge == nil {
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "voice bridge unavailable")
 		return
 	}
@@ -129,8 +151,32 @@ func (h *handler) handleClose(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "sessionID is required")
 		return
 	}
-	h.bridge.Close(sessionID)
+	bridge.Close(sessionID)
 	writeJSON(w, http.StatusOK, CloseSessionResp{Status: "closed"})
+}
+
+func (h *handler) mediaBridge() MediaBridge {
+	if h.bridge == nil {
+		return nil
+	}
+	bridge := h.bridge()
+	if isNilMediaBridge(bridge) {
+		return nil
+	}
+	return bridge
+}
+
+func isNilMediaBridge(bridge MediaBridge) bool {
+	if bridge == nil {
+		return true
+	}
+	v := reflect.ValueOf(bridge)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
 
 func verifyServiceToken(cfg *Config, s ServiceAuthorization) error {

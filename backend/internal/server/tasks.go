@@ -722,4 +722,5 @@ func (s *Server) SetRunnerBackends(c runtime.Backend, backends map[agent.Harness
 // canned data without real API credentials.
 func (s *Server) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
 	s.usageFetchers = fetchers
+	s.usageHandlers = nil
 }

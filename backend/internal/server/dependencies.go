@@ -141,6 +141,15 @@ func (s *Server) initConcernAdapters() {
 	if s.repoReg == nil {
 		s.repoReg = newRepoRegistry(nil)
 	}
+	if s.authHandlers == nil {
+		s.authHandlers = &authHandlers{
+			store:            func() *auth.Store { return s.authStore },
+			sessionSecret:    func() []byte { return s.sessionSecret },
+			providerConfig:   s.providerConfig,
+			allowedUsersFor:  s.allowedUsersFor,
+			useSecureCookies: s.useSecureCookies,
+		}
+	}
 	if s.botClient == nil {
 		s.botClient = newBotClient(botClientDeps{
 			repoReg:   s.repoReg,
@@ -151,6 +160,12 @@ func (s *Server) initConcernAdapters() {
 	}
 	if s.warnings == nil {
 		s.warnings = newWarningStore(s.taskMgr)
+	}
+	if s.voiceHandlers == nil {
+		s.voiceHandlers = &voiceHandlers{
+			Bridge:  s.voiceBridge,
+			Gateway: s.voiceGateway,
+		}
 	}
 	if s.serverConfig == nil {
 		s.serverConfig = &serverConfigHandlers{
@@ -164,8 +179,26 @@ func (s *Server) initConcernAdapters() {
 			githubOAuthConfigured: func() bool { return s.githubOAuth != nil },
 			authEnabled:           s.authEnabled,
 			authProviders:         s.authProviders,
-			voiceGatewayMetadata:  s.voiceGatewayMetadata,
+			voiceGatewayMetadata:  s.voiceHandlers.metadata,
 			newRunner:             s.newRunner,
+		}
+	}
+	if s.botHandlers == nil {
+		s.botHandlers = &botHandlers{
+			taskMgr:     s.taskMgr,
+			repoReg:     s.repoReg,
+			forge:       s.forge,
+			provider:    s.provider,
+			taskClient:  s.botClient,
+			getTask:     s.getTask,
+			repoInfoFor: s.repoInfoFor,
+		}
+	}
+	if s.usageHandlers == nil {
+		s.usageHandlers = &usageHandlers{
+			taskMgr:       s.taskMgr,
+			fetchers:      func() []usage.ProviderFetcher { return s.usageFetchers },
+			notifyChanged: s.taskMgr.Changed,
 		}
 	}
 	if s.ciAdapter == nil {

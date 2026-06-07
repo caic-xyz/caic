@@ -3,37 +3,56 @@
 package server
 
 import (
-	"context"
 	"net/http"
 
-	"github.com/caic-xyz/caic/backend/internal/server/api"
-	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
+	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/voicegateway"
+	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
 )
 
-func (s *Server) voiceRTCOffer(ctx context.Context, req *voicev1.VoiceRTCOfferReq) (*voicev1.VoiceRTCAnswerResp, error) {
-	if s.voiceBridge == nil {
-		return nil, api.BadRequest("WebRTC is not enabled (set voice-gateway.config.server.webrtc_udp_port and GEMINI_API_KEY)")
-	}
-	sdpAnswer, sessionID, err := s.voiceBridge.HandleOffer(ctx, req.SDP)
-	if err != nil {
-		return nil, api.InternalError("WebRTC offer failed: " + err.Error()).Wrap(err)
-	}
-	return &voicev1.VoiceRTCAnswerResp{
-		SDP:       sdpAnswer,
-		SessionID: sessionID,
-	}, nil
+type voiceHandlers struct {
+	Bridge  *voicertc.Bridge
+	Gateway VoiceGatewayConfig
 }
 
-func (s *Server) handleVoiceRTCClose(w http.ResponseWriter, r *http.Request) {
-	if s.voiceBridge == nil {
-		writeError(w, api.BadRequest("WebRTC is not enabled"))
-		return
+func (h *voiceHandlers) handler() http.Handler {
+	return voicegateway.NewEmbeddedHandler(h.mediaBridge)
+}
+
+func (h *voiceHandlers) metadata() v1.VoiceGatewayMetadata {
+	cfg := h.Gateway
+	if cfg.Mode == "" {
+		if h.Bridge != nil {
+			cfg.Mode = VoiceGatewayModeEmbedded
+		} else {
+			cfg.Mode = VoiceGatewayModeDisabled
+		}
 	}
-	sessionID := r.PathValue("sessionID")
-	if sessionID == "" {
-		writeError(w, api.BadRequest("sessionID is required"))
-		return
+	switch cfg.Mode {
+	case VoiceGatewayModeEmbedded:
+		if h.Bridge == nil {
+			return v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeDisabled}
+		}
+		return v1.VoiceGatewayMetadata{
+			Mode:         v1.VoiceGatewayModeEmbedded,
+			AuthRequired: false,
+			Capabilities: []string{"voice.gatewayGeminiLive"},
+		}
+	case VoiceGatewayModeExternal:
+		return v1.VoiceGatewayMetadata{
+			Mode:         v1.VoiceGatewayModeExternal,
+			URL:          cfg.URL,
+			AuthRequired: true,
+			Capabilities: []string{"voice.gatewayGeminiLive"},
+		}
+	default:
+		return v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeDisabled}
 	}
-	s.voiceBridge.Close(sessionID)
-	writeJSONResponse[voicev1.StatusResp](w, &voicev1.StatusResp{Status: "closed"}, nil)
+}
+
+func (h *voiceHandlers) mediaBridge() voicegateway.MediaBridge {
+	if h.Bridge == nil {
+		return nil
+	}
+	return h.Bridge
 }

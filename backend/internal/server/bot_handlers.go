@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/maruel/genai"
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -17,13 +18,24 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
+	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
+
+type botHandlers struct {
+	taskMgr     *tasks.Manager
+	repoReg     *repoRegistry
+	forge       *ForgeManager
+	provider    genai.Provider
+	taskClient  bot.Client
+	getTask     func(*http.Request) (*tasks.Entry, error)
+	repoInfoFor func(string) (RepoInfo, bool)
+}
 
 // handleGetCILog fetches the log for a specific CI job by jobID.
 // The jobID is a required query parameter; the caller knows it from the
 // task's ciChecks field. The log is capped at ~8 KB (tail).
-func (s *Server) handleGetCILog(w http.ResponseWriter, r *http.Request) {
-	entry, err := s.getTask(r)
+func (h *botHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
+	entry, err := h.getTask(r)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -34,12 +46,12 @@ func (s *Server) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	if p := t.Primary(); p != nil {
 		ciPrimaryName = p.Name
 	}
-	info, ok := s.repoInfoFor(ciPrimaryName)
+	info, ok := h.repoInfoFor(ciPrimaryName)
 	if !ok {
 		writeError(w, api.BadRequest("no repo info found"))
 		return
 	}
-	f := s.forge.forgeForInfo(r.Context(), &info)
+	f := h.forge.forgeForInfo(r.Context(), &info)
 	if f == nil {
 		writeError(w, api.BadRequest("no forge token configured for this repo"))
 		return
@@ -83,20 +95,20 @@ func (s *Server) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, &v1.CILogResp{StepName: check.Name, Log: jobLog}, nil)
 }
 
-// botFixCI creates a task to fix failing CI on a repo's default branch.
+// fixCI creates a task to fix failing CI on a repo's default branch.
 // It fetches CI logs via the forge, builds a rich prompt using bot.FailureSummary,
 // and creates a new agent task — the same path as the automated maybeAutoFix.
-func (s *Server) botFixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateTaskResp, error) {
-	info, ok := s.repoInfoFor(req.Repo)
+func (h *botHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateTaskResp, error) {
+	info, ok := h.repoInfoFor(req.Repo)
 	if !ok {
 		return nil, api.BadRequest("repo not found")
 	}
-	f := s.forge.forgeForInfo(ctx, &info)
+	f := h.forge.forgeForInfo(ctx, &info)
 	if f == nil {
 		return nil, api.BadRequest("no forge token configured for this repo")
 	}
 
-	state := s.repoReg.ciStatusFor(req.Repo)
+	state := h.repoReg.ciStatusFor(req.Repo)
 
 	if state.Status != forge.CIStatusFailure {
 		return nil, api.BadRequest("no CI failure on default branch")
@@ -120,13 +132,13 @@ func (s *Server) botFixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateT
 		}
 	}
 	result := forgecache.Result{Status: forge.CIStatusFailure, Checks: checks}
-	summary := bot.FailureSummary(ctx, f, s.provider, result)
+	summary := bot.FailureSummary(ctx, f, h.provider, result)
 
 	var ownerID string
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
 	}
-	taskIDStr, err := s.BotClient().CreateTask(ctx, bot.TaskRequest{Repo: info.RelPath, Prompt: summary, OwnerID: ownerID})
+	taskIDStr, err := h.taskClient.CreateTask(ctx, bot.TaskRequest{Repo: info.RelPath, Prompt: summary, OwnerID: ownerID})
 	if err != nil {
 		return nil, fmt.Errorf("create task: %w", err)
 	}
@@ -137,11 +149,11 @@ func (s *Server) botFixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateT
 	return &v1.CreateTaskResp{ID: taskID}, nil
 }
 
-// botFixPR injects a fix-PR command into an existing task's agent session.
+// fixPR injects a fix-PR command into an existing task's agent session.
 // It fetches CI logs via the forge using the task's existing CI checks,
 // builds a rich prompt using bot.FailureSummary, and sends it as input to the task.
-func (s *Server) botFixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.StatusResp, error) {
-	entry, ok := s.taskMgr.GetEntry(req.TaskID)
+func (h *botHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.StatusResp, error) {
+	entry, ok := h.taskMgr.GetEntry(req.TaskID)
 	if !ok {
 		return nil, api.NotFound("task")
 	}
@@ -154,11 +166,11 @@ func (s *Server) botFixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.StatusR
 	if primary == nil {
 		return nil, api.BadRequest("task has no primary repo")
 	}
-	info, ok := s.repoInfoFor(primary.Name)
+	info, ok := h.repoInfoFor(primary.Name)
 	if !ok {
 		return nil, api.BadRequest("repo not found")
 	}
-	f := s.forge.forgeForInfo(ctx, &info)
+	f := h.forge.forgeForInfo(ctx, &info)
 	if f == nil {
 		return nil, api.BadRequest("no forge token configured for this repo")
 	}
@@ -177,7 +189,7 @@ func (s *Server) botFixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.StatusR
 		checks = result.Checks
 	}
 	result := forgecache.Result{Status: forge.CIStatusFailure, Checks: checks}
-	summary := bot.FailureSummary(ctx, f, s.provider, result)
+	summary := bot.FailureSummary(ctx, f, h.provider, result)
 
 	prURL := f.PRURL(snap.ForgeOwner, snap.ForgeRepo, snap.ForgePR)
 	prompt := fmt.Sprintf("CI failed on PR #%d", snap.ForgePR)

@@ -74,37 +74,6 @@ func (h *serverConfigHandlers) getConfig(_ context.Context, _ *api.EmptyReq) (*v
 	return cfg, nil
 }
 
-func (s *Server) voiceGatewayMetadata() v1.VoiceGatewayMetadata {
-	cfg := s.voiceGateway
-	if cfg.Mode == "" {
-		if s.voiceBridge != nil {
-			cfg.Mode = VoiceGatewayModeEmbedded
-		} else {
-			cfg.Mode = VoiceGatewayModeDisabled
-		}
-	}
-	switch cfg.Mode {
-	case VoiceGatewayModeEmbedded:
-		if s.voiceBridge == nil {
-			return v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeDisabled}
-		}
-		return v1.VoiceGatewayMetadata{
-			Mode:         v1.VoiceGatewayModeEmbedded,
-			AuthRequired: false,
-			Capabilities: []string{"voice.gatewayGeminiLive"},
-		}
-	case VoiceGatewayModeExternal:
-		return v1.VoiceGatewayMetadata{
-			Mode:         v1.VoiceGatewayModeExternal,
-			URL:          cfg.URL,
-			AuthRequired: true,
-			Capabilities: []string{"voice.gatewayGeminiLive"},
-		}
-	default:
-		return v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeDisabled}
-	}
-}
-
 // getVersion returns the current server version and checks GitHub for the latest release.
 func (h *serverConfigHandlers) getVersion(ctx context.Context, _ *api.EmptyReq) (*v1.VersionResp, error) {
 	current := autoupdate.Version

@@ -70,9 +70,13 @@ type Server struct {
 	provider       genai.Provider // nil if LLM not configured
 	Bot            *bot.Bot
 	ciService      *ci.Service // handles forge event-driven task automation
+	authHandlers   *authHandlers
+	botHandlers    *botHandlers
 	botClient      *BotClient
 	ciAdapter      *CIAdapter
 	serverConfig   *serverConfigHandlers
+	usageHandlers  *usageHandlers
+	voiceHandlers  *voiceHandlers
 
 	// Profiling.
 	pprof              bool
@@ -174,12 +178,12 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	authMux := http.NewServeMux()
 	authMux.HandleFunc("GET /api/caic/v1/server/config", handle(serverConfig.getConfig))
 	authMux.HandleFunc("GET /api/caic/v1/server/version", handle(serverConfig.getVersion))
-	authMux.HandleFunc("GET /api/caic/v1/auth/github/start", s.handleAuthStart("github"))
-	authMux.HandleFunc("GET /api/caic/v1/auth/github/callback", s.handleAuthCallback("github"))
-	authMux.HandleFunc("GET /api/caic/v1/auth/gitlab/start", s.handleAuthStart("gitlab"))
-	authMux.HandleFunc("GET /api/caic/v1/auth/gitlab/callback", s.handleAuthCallback("gitlab"))
-	authMux.HandleFunc("GET /api/caic/v1/auth/me", s.handleGetMe)
-	authMux.HandleFunc("POST /api/caic/v1/auth/logout", s.handleLogout)
+	authMux.HandleFunc("GET /api/caic/v1/auth/github/start", s.authHandlers.handleStart("github"))
+	authMux.HandleFunc("GET /api/caic/v1/auth/github/callback", s.authHandlers.handleCallback("github"))
+	authMux.HandleFunc("GET /api/caic/v1/auth/gitlab/start", s.authHandlers.handleStart("gitlab"))
+	authMux.HandleFunc("GET /api/caic/v1/auth/gitlab/callback", s.authHandlers.handleCallback("gitlab"))
+	authMux.HandleFunc("GET /api/caic/v1/auth/me", s.authHandlers.handleGetMe)
+	authMux.HandleFunc("POST /api/caic/v1/auth/logout", s.authHandlers.handleLogout)
 
 	// Protected routes.
 	apiMux := http.NewServeMux()
@@ -197,8 +201,8 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("POST /api/caic/v1/server/repos", handle(serverConfig.cloneRepo))
 	apiMux.HandleFunc("POST /api/caic/v1/server/update", handle(serverConfig.triggerUpdate))
 	apiMux.HandleFunc("GET /api/caic/v1/server/repos/branches", serverConfig.handleListRepoBranches)
-	apiMux.HandleFunc("POST /api/caic/v1/bot/fix-ci", handle(s.botFixCI))
-	apiMux.HandleFunc("POST /api/caic/v1/bot/fix-pr", handle(s.botFixPR))
+	apiMux.HandleFunc("POST /api/caic/v1/bot/fix-ci", handle(s.botHandlers.fixCI))
+	apiMux.HandleFunc("POST /api/caic/v1/bot/fix-pr", handle(s.botHandlers.fixPR))
 	apiMux.HandleFunc("GET /api/caic/v1/tasks", handle(s.listTasks))
 	apiMux.HandleFunc("POST /api/caic/v1/tasks", handle(s.createTask))
 	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/raw_events", s.handleTaskRawEvents)
@@ -211,19 +215,18 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/stop", handleWithTask(s, s.stopTask))
 	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/purge", handleWithTask(s, s.purgeTask))
 	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/revive", handleWithTask(s, s.reviveTask))
-	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/ci-log", s.handleGetCILog)
+	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/ci-log", s.botHandlers.handleGetCILog)
 	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/sync", handleWithTask(s, s.syncTask))
 	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/diff", s.handleGetDiff)
 	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/vnc/ws", s.handleVNCWebSocket)
 	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/processes", runtimeProcesses.HandleGetProcesses)
 	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/processes/{pid}/signal", runtimeProcesses.HandleSignalProcess)
 	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/tool/{toolUseID}", s.handleTaskToolInput)
-	apiMux.HandleFunc("GET /api/caic/v1/usage", s.handleGetUsage)
-	apiMux.HandleFunc("POST /api/voicegateway/v1/voice/rtc/offer", handle(s.voiceRTCOffer))
-	apiMux.HandleFunc("POST /api/voicegateway/v1/voice/rtc/{sessionID}", s.handleVoiceRTCClose)
+	apiMux.HandleFunc("GET /api/caic/v1/usage", s.usageHandlers.handleGetUsage)
+	apiMux.Handle("/api/voicegateway/v1/", s.voiceHandlers.handler())
 	apiMux.HandleFunc("POST /api/caic/v1/web/fetch", handle(s.webFetch))
 	apiMux.HandleFunc("GET /api/caic/v1/server/tasks/events", s.handleTaskListEvents)
-	apiMux.HandleFunc("GET /api/caic/v1/server/usage/events", s.handleUsageEvents)
+	apiMux.HandleFunc("GET /api/caic/v1/server/usage/events", s.usageHandlers.handleEvents)
 
 	// Combine: auth routes first, then protected API routes (gated by RequireUser when auth enabled).
 	var protectedAPI http.Handler = apiMux

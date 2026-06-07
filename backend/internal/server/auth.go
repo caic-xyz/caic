@@ -21,11 +21,19 @@ const (
 	sessionMaxAge     = 30 * 24 * 60 * 60 // 30 days in seconds
 )
 
-// handleAuthStart redirects the browser to the OAuth provider's authorization URL.
+type authHandlers struct {
+	store            func() *auth.Store
+	sessionSecret    func() []byte
+	providerConfig   func(string) *auth.ProviderConfig
+	allowedUsersFor  func(string) map[string]struct{}
+	useSecureCookies func() bool
+}
+
+// handleStart redirects the browser to the OAuth provider's authorization URL.
 // Accepts ?return=app to redirect to caic://auth after callback.
-func (s *Server) handleAuthStart(provider string) http.HandlerFunc {
+func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		cfg := s.providerConfig(provider)
+		cfg := h.providerConfig(provider)
 		if cfg == nil || cfg.RedirectURI() == "" {
 			writeError(w, api.NotFound("provider"))
 			return
@@ -48,7 +56,7 @@ func (s *Server) handleAuthStart(provider string) http.HandlerFunc {
 			prefix = "app:"
 		}
 		fullState := prefix + state
-		cookieValue := auth.SignState(fullState, s.sessionSecret)
+		cookieValue := auth.SignState(fullState, h.sessionSecret())
 
 		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is set dynamically; all required attributes are present
 			Name:     auth.StateCookieName,
@@ -56,18 +64,18 @@ func (s *Server) handleAuthStart(provider string) http.HandlerFunc {
 			MaxAge:   600,
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
-			Secure:   s.useSecureCookies(),
+			Secure:   h.useSecureCookies(),
 			Path:     "/",
 		})
 		http.Redirect(w, r, cfg.AuthURL(fullState), http.StatusFound)
 	}
 }
 
-// handleAuthCallback handles the OAuth callback: validates state, exchanges code,
+// handleCallback handles the OAuth callback: validates state, exchanges code,
 // fetches user info, upserts the user, issues a JWT, and redirects.
-func (s *Server) handleAuthCallback(provider string) http.HandlerFunc {
+func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		cfg := s.providerConfig(provider)
+		cfg := h.providerConfig(provider)
 		if cfg == nil || cfg.RedirectURI() == "" {
 			writeError(w, api.NotFound("provider"))
 			return
@@ -80,7 +88,7 @@ func (s *Server) handleAuthCallback(provider string) http.HandlerFunc {
 			MaxAge:   -1,
 			HttpOnly: true,
 			SameSite: http.SameSiteLaxMode,
-			Secure:   s.useSecureCookies(),
+			Secure:   h.useSecureCookies(),
 			Path:     "/",
 		})
 
@@ -90,7 +98,7 @@ func (s *Server) handleAuthCallback(provider string) http.HandlerFunc {
 			writeError(w, api.BadRequest("missing state cookie"))
 			return
 		}
-		fullState, ok := auth.ValidateState(stateCookie.Value, s.sessionSecret)
+		fullState, ok := auth.ValidateState(stateCookie.Value, h.sessionSecret())
 		if !ok {
 			writeError(w, api.BadRequest("invalid state"))
 			return
@@ -140,7 +148,7 @@ func (s *Server) handleAuthCallback(provider string) http.HandlerFunc {
 		}
 
 		// Check allowlist.
-		if allowed := s.allowedUsersFor(provider); allowed != nil {
+		if allowed := h.allowedUsersFor(provider); allowed != nil {
 			if _, ok := allowed[strings.ToLower(username)]; !ok {
 				slog.WarnContext(r.Context(), "user not in allowlist", "provider", provider, "username", username)
 				writeError(w, api.Forbidden("user "+username+" is not in the "+provider+" allowlist"))
@@ -149,7 +157,7 @@ func (s *Server) handleAuthCallback(provider string) http.HandlerFunc {
 		}
 
 		// Upsert user in store.
-		u, err := s.authStore.UpsertUser(&auth.User{
+		u, err := h.store().UpsertUser(&auth.User{
 			Provider:     forge.Kind(provider),
 			ProviderID:   providerID,
 			Username:     username,
@@ -165,7 +173,7 @@ func (s *Server) handleAuthCallback(provider string) http.HandlerFunc {
 		}
 
 		// Issue JWT.
-		jwt, err := auth.IssueToken(&u, s.sessionSecret, sessionTTL)
+		jwt, err := auth.IssueToken(&u, h.sessionSecret(), sessionTTL)
 		if err != nil {
 			slog.WarnContext(r.Context(), "issue token", "err", err)
 			writeError(w, api.InternalError("issue token"))
@@ -179,7 +187,7 @@ func (s *Server) handleAuthCallback(provider string) http.HandlerFunc {
 			MaxAge:   sessionMaxAge,
 			HttpOnly: true,
 			SameSite: http.SameSiteStrictMode,
-			Secure:   s.useSecureCookies(),
+			Secure:   h.useSecureCookies(),
 			Path:     "/",
 		})
 
@@ -192,7 +200,7 @@ func (s *Server) handleAuthCallback(provider string) http.HandlerFunc {
 }
 
 // handleGetMe handles GET /api/caic/v1/auth/me.
-func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {
+func (h *authHandlers) handleGetMe(w http.ResponseWriter, r *http.Request) {
 	u, ok := auth.UserFromContext(r.Context())
 	if !ok {
 		writeError(w, api.NotFound("user"))
@@ -207,14 +215,14 @@ func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleLogout handles POST /api/caic/v1/auth/logout.
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+func (h *authHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is set dynamically; all required attributes are present
 		Name:     sessionCookieName,
 		Value:    "",
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-		Secure:   s.useSecureCookies(),
+		Secure:   h.useSecureCookies(),
 		Path:     "/",
 	})
 	writeJSONResponse(w, &v1.StatusResp{Status: "ok"}, nil)
