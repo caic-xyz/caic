@@ -57,10 +57,10 @@ func mainImpl(args []string) error {
 
 	geminiAPIKey := cfg.GeminiAPIKey()
 	var bridge *voicertc.Bridge
-	if geminiAPIKey == "" {
+	if cfg.Backend == voicegateway.BackendGeminiLive && geminiAPIKey == "" {
 		slog.Warn("voice media disabled", "reason", voicegateway.GeminiAPIKeyEnv+" is not configured")
 	} else {
-		bridge, err = voicertc.NewBridge(ctx, geminiAPIKey, cfg.Server.WebRTCUDPPort)
+		bridge, err = voicertc.NewBridge(ctx, &cfg, geminiAPIKey, cfg.Server.WebRTCUDPPort)
 		if err != nil {
 			return err
 		}

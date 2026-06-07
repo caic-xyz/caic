@@ -8,13 +8,15 @@ package voicertc
 import (
 	"context"
 	"errors"
+
+	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 )
 
 // Bridge is a no-op stub when building with -race.
 type Bridge struct{}
 
 // NewBridge returns an error when built with -race.
-func NewBridge(_ context.Context, _ string, _ int) (*Bridge, error) {
+func NewBridge(_ context.Context, _ *voicegateway.Config, _ string, _ int) (*Bridge, error) {
 	return nil, errors.New("voicertc is not available in race builds")
 }
 

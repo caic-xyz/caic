@@ -3,6 +3,7 @@
 package voicegateway
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
@@ -12,6 +13,15 @@ import (
 	"testing"
 	"time"
 )
+
+// fakeMediaBridge is a MediaBridge stub for handler tests.
+type fakeMediaBridge struct{}
+
+func (f *fakeMediaBridge) HandleOffer(context.Context, string) (sdpAnswer, sessionID string, err error) {
+	return "answer-sdp", "session-1", nil
+}
+
+func (f *fakeMediaBridge) Close(string) {}
 
 func TestNewHandler(t *testing.T) {
 	t.Parallel()
@@ -101,6 +111,77 @@ func TestNewHandler(t *testing.T) {
 		handler.ServeHTTP(w, req)
 		assertErrorResponse(t, w, http.StatusBadRequest, "BAD_REQUEST", "voice bridge unavailable")
 	})
+
+	t.Run("offer succeeds with trusted service", func(t *testing.T) {
+		t.Parallel()
+		cfg, service := testServiceAuth(t)
+		handler, err := NewHandler(&cfg, &fakeMediaBridge{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		body := `{"sdp":"offer","service":` + service + `}`
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v1/voice/rtc/offer", strings.NewReader(body))
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", w.Code)
+		}
+		var resp OfferResp
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.SDP != "answer-sdp" || resp.SessionID != "session-1" {
+			t.Fatalf("resp = %+v, want answer-sdp/session-1", resp)
+		}
+	})
+
+	t.Run("offer rejects untrusted service", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		handler, err := NewHandler(&cfg, &fakeMediaBridge{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := httptest.NewRecorder()
+		body := `{"sdp":"offer","service":{"kind":"caic","instanceID":"home","baseURL":"https://caic.example.com","token":"dummy"}}`
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v1/voice/rtc/offer", strings.NewReader(body))
+		handler.ServeHTTP(w, req)
+		assertErrorResponse(t, w, http.StatusUnauthorized, "UNAUTHORIZED", "no trusted issuer configured for service")
+	})
+}
+
+// testServiceAuth returns a config with a trusted issuer and a matching service
+// authorization JSON fragment for offer requests.
+func testServiceAuth(t *testing.T) (cfg Config, service string) {
+	t.Helper()
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := IssueServiceScopedToken(&ScopedTokenClaims{
+		ServiceKind:       "caic",
+		ServiceInstanceID: "home",
+		BackendOrigin:     "https://caic.example.com",
+		Subject:           "user-1",
+		Capabilities:      []string{"voice.session"},
+		Audience:          ScopedTokenAudience,
+		Expiry:            time.Now().Add(time.Hour),
+	}, privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedPublicKey, err := EncodeServiceSigningPublicKey(publicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg = DefaultConfig()
+	cfg.TrustedIssuers = []TrustedIssuerConfig{{
+		Service:   "caic",
+		Issuer:    "https://caic.example.com",
+		PublicKey: encodedPublicKey,
+	}}
+	service = `{"kind":"caic","instanceID":"home","baseURL":"https://caic.example.com","token":"` + token + `"}`
+	return cfg, service
 }
 
 func assertErrorResponse(t *testing.T, w *httptest.ResponseRecorder, status int, code, message string) {

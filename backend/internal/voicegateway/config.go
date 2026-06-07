@@ -25,9 +25,13 @@ const (
 )
 
 // Config is the static voice gateway configuration.
+//
+// A gateway instance serves exactly one backend. Operators run multiple
+// instances (and point clients at different URLs) to offer multiple profiles.
 type Config struct {
 	Server         ServerConfig          `toml:"server"`
 	Model          string                `toml:"model"`
+	Backend        string                `toml:"backend"`
 	TrustedIssuers []TrustedIssuerConfig `toml:"trusted_issuers"`
 }
 
@@ -58,7 +62,8 @@ func DefaultConfig() Config {
 			HTTP:          DefaultHTTP,
 			WebRTCUDPPort: DefaultWebRTCUDPPort,
 		},
-		Model: DefaultGeminiModel,
+		Model:   DefaultGeminiModel,
+		Backend: BackendGeminiLive,
 	}
 }
 
@@ -116,10 +121,21 @@ func (c *Config) validate(requireHTTP bool) error {
 	if c.Server.WebRTCUDPPort < -1 || c.Server.WebRTCUDPPort > 65535 {
 		errs = append(errs, fmt.Errorf("server.webrtc_udp_port must be between -1 and 65535, got %d", c.Server.WebRTCUDPPort))
 	}
+	switch {
+	case c.Backend == "":
+		errs = append(errs, errors.New("backend is required"))
+	case !isKnownBackend(c.Backend):
+		errs = append(errs, fmt.Errorf("backend %q is not a known backend", c.Backend))
+	}
 	for i, issuer := range c.TrustedIssuers {
 		errs = append(errs, validateTrustedIssuer(i, issuer))
 	}
 	return errors.Join(errs...)
+}
+
+func isKnownBackend(backendID string) bool {
+	_, ok := knownBackends[backendID]
+	return ok
 }
 
 func validateTrustedIssuer(i int, issuer TrustedIssuerConfig) error {

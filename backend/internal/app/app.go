@@ -28,6 +28,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
 )
 
@@ -171,14 +172,17 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 
 	var voiceBridge *voicertc.Bridge
 	if cfg.Voice.Gateway.Mode == server.VoiceGatewayModeEmbedded {
-		port := cfg.Voice.Gateway.Config.Server.WebRTCUDPPort
-		if port >= 0 && cfg.Agent.GeminiAPIKey != "" {
-			voiceBridge, err = voicertc.NewBridge(ctx, cfg.Agent.GeminiAPIKey, port)
+		voiceCfg := cfg.Voice.Gateway.Config
+		port := voiceCfg.Server.WebRTCUDPPort
+		switch {
+		case port < 0:
+		case voiceCfg.Backend == voicegateway.BackendGeminiLive && cfg.Agent.GeminiAPIKey == "":
+			slog.Info("voice bridge disabled: GEMINI_API_KEY not set")
+		default:
+			voiceBridge, err = voicertc.NewBridge(ctx, &voiceCfg, cfg.Agent.GeminiAPIKey, port)
 			if err != nil {
 				return nil, fmt.Errorf("voice bridge: %w", err)
 			}
-		} else if port >= 0 {
-			slog.Info("voice bridge disabled: GEMINI_API_KEY not set")
 		}
 	}
 

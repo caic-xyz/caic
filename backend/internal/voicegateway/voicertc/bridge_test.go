@@ -15,6 +15,7 @@ import (
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
+	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
 )
 
@@ -123,24 +124,16 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 
 func TestTranslateGeminiServerMessage(t *testing.T) {
 	t.Parallel()
-	t.Run("ready", func(t *testing.T) {
+	t.Run("setup complete emits no client message", func(t *testing.T) {
 		t.Parallel()
+		// session.ready is emitted by the gateway core, not the provider
+		// translation. SetupComplete only triggers backendReady.
 		got, err := translateGeminiServerMessage([]byte(`{"setupComplete":{}}`))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(got) != 1 {
-			t.Fatalf("messages = %d, want 1", len(got))
-		}
-		var msg voicev1.SessionReady
-		if err := json.Unmarshal(got[0], &msg); err != nil {
-			t.Fatal(err)
-		}
-		if msg.Kind != voicev1.MessageKindSessionReady || msg.Profile != gatewayProfileDefault {
-			t.Fatalf("message = %+v, want session.ready default", msg)
-		}
-		if len(msg.Capabilities) == 0 || msg.Capabilities[0] != "voice.protocol.v1" {
-			t.Fatalf("capabilities = %v, want voice.protocol.v1 first", msg.Capabilities)
+		if len(got) != 0 {
+			t.Fatalf("messages = %d, want 0", len(got))
 		}
 	})
 
@@ -202,11 +195,23 @@ func TestTranslateGeminiServerMessage(t *testing.T) {
 	})
 }
 
+func TestGatewaySessionReady(t *testing.T) {
+	t.Parallel()
+	var msg voicev1.SessionReady
+	if err := json.Unmarshal(gatewaySessionReady(), &msg); err != nil {
+		t.Fatal(err)
+	}
+	if msg.Kind != voicev1.MessageKindSessionReady {
+		t.Fatalf("kind = %q, want session.ready", msg.Kind)
+	}
+}
+
 func TestNewBridge(t *testing.T) {
 	t.Parallel()
+	cfg := &voicegateway.Config{Backend: voicegateway.BackendGeminiLive}
 	t.Run("NewBridge", func(t *testing.T) {
 		t.Parallel()
-		b, err := NewBridge(t.Context(), "test-key", 0)
+		b, err := NewBridge(t.Context(), cfg, "test-key", 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -215,7 +220,7 @@ func TestNewBridge(t *testing.T) {
 
 	t.Run("PeerConnection", func(t *testing.T) {
 		t.Parallel()
-		b, err := NewBridge(t.Context(), "test-key", 0)
+		b, err := NewBridge(t.Context(), cfg, "test-key", 0)
 		if err != nil {
 			t.Fatal(err)
 		}

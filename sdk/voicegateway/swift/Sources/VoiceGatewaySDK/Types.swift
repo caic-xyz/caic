@@ -201,11 +201,9 @@ public struct SessionClose: Codable {
     public let reason: String?
 }
 
-/// SessionReady is a gateway message that reports session readiness.
+/// SessionReady is a gateway message that reports the session is ready.
 public struct SessionReady: Codable {
     public let kind: MessageKind
-    public let profile: String
-    public let capabilities: [String]
 }
 
 /// TranscriptDelta is a gateway message that streams transcript text.

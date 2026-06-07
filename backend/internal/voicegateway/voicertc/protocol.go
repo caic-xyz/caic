@@ -14,10 +14,6 @@ import (
 
 var errSessionClosed = errors.New("session closed")
 
-const (
-	gatewayProfileDefault = "default"
-)
-
 func translateGatewayClientMessage(data []byte) ([]byte, error) {
 	var env voicev1.MessageEnvelope
 	if err := json.Unmarshal(data, &env); err != nil {
@@ -162,20 +158,8 @@ func translateGeminiServerMessage(data []byte) ([][]byte, error) {
 			Recoverable: false,
 		}))
 	}
-	if msg.SetupComplete != nil {
-		out = append(out, mustGatewayServerMessage(&voicev1.SessionReady{
-			Kind:    voicev1.MessageKindSessionReady,
-			Profile: gatewayProfileDefault,
-			Capabilities: []string{
-				"voice.protocol.v1",
-				"voice.transport.webrtc",
-				"voice.audio.rtpOpus",
-				"voice.turns.fullDuplex",
-				"voice.transcripts",
-				"voice.tools.normalized",
-			},
-		}))
-	}
+	// session.ready is emitted by the gateway core (session.backendReady), not by
+	// this provider translation. SetupComplete only signals backend readiness.
 	if msg.ServerContent != nil {
 		out = append(out, translateServerContent(msg.ServerContent)...)
 	}
@@ -238,6 +222,14 @@ func translateServerContent(content *serverContent) [][]byte {
 		}))
 	}
 	return out
+}
+
+// gatewaySessionReady builds the session.ready message the gateway core emits
+// once a backend is ready.
+func gatewaySessionReady() []byte {
+	return mustGatewayServerMessage(&voicev1.SessionReady{
+		Kind: voicev1.MessageKindSessionReady,
+	})
 }
 
 func mustGatewayServerMessage(msg any) []byte {

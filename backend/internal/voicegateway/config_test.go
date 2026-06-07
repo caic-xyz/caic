@@ -67,6 +67,36 @@ public_key = %q
 		}
 	})
 
+	t.Run("parses custom backend", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "config.toml")
+		content := `backend = "local-cascade"` + "\n"
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := LoadConfig(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Backend != BackendLocalCascade {
+			t.Errorf("Backend = %q, want %q", cfg.Backend, BackendLocalCascade)
+		}
+	})
+
+	t.Run("missing file defaults to gemini live", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := LoadConfig(filepath.Join(t.TempDir(), "config.toml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Backend != BackendGeminiLive {
+			t.Errorf("Backend = %q, want %q", cfg.Backend, BackendGeminiLive)
+		}
+	})
+
 	t.Run("unknown field error", func(t *testing.T) {
 		t.Parallel()
 		path := filepath.Join(t.TempDir(), "config.toml")
@@ -155,6 +185,41 @@ func TestConfigValidate(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "trusted_issuers[0].public_key") {
 			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("rejects unknown backend", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		cfg.Backend = "made-up"
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), `backend "made-up"`) {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("rejects empty backend", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		cfg.Backend = ""
+		err := cfg.Validate()
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "backend is required") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("allows local cascade backend", func(t *testing.T) {
+		t.Parallel()
+		cfg := DefaultConfig()
+		cfg.Backend = BackendLocalCascade
+		if err := cfg.Validate(); err != nil {
+			t.Fatal(err)
 		}
 	})
 

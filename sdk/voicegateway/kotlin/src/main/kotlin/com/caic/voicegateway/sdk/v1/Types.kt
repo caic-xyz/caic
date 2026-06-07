@@ -237,13 +237,9 @@ data class TurnCancel(val kind: MessageKind, val reason: String? = null)
 @Serializable
 data class SessionClose(val kind: MessageKind, val reason: String? = null)
 
-/** SessionReady is a gateway message that reports session readiness. */
+/** SessionReady is a gateway message that reports the session is ready. */
 @Serializable
-data class SessionReady(
-    val kind: MessageKind,
-    val profile: String,
-    val capabilities: List<String>,
-)
+data class SessionReady(val kind: MessageKind)
 
 /** TranscriptDelta is a gateway message that streams transcript text. */
 @Serializable

@@ -139,11 +139,9 @@ export interface SessionClose {
   reason?: string;
 }
 
-/** SessionReady is a gateway message that reports session readiness. */
+/** SessionReady is a gateway message that reports the session is ready. */
 export interface SessionReady {
   kind: MessageKind;
-  profile: string;
-  capabilities: string[];
 }
 
 /** TranscriptDelta is a gateway message that streams transcript text. */

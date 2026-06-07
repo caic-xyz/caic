@@ -22,6 +22,7 @@ import (
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
+	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
 )
 
@@ -49,7 +50,7 @@ const (
 	backendOutputFrameBytes = backendOutputSampleRate * 2 * int(frameDuration/time.Millisecond) / 1000 // 960 bytes
 )
 
-// Bridge manages active WebRTC voice sessions.
+// Bridge manages active WebRTC voice sessions for a single configured backend.
 type Bridge struct {
 	backend  backendConnector
 	api      *webrtc.API
@@ -60,12 +61,28 @@ type Bridge struct {
 
 // NewBridge creates a Bridge that multiplexes all WebRTC traffic through a
 // single UDP port. This avoids opening ephemeral port ranges in the firewall.
-func NewBridge(ctx context.Context, geminiAPIKey string, udpPort int) (*Bridge, error) {
-	backend, err := newGeminiBridgeBackend(geminiAPIKey)
+//
+// A gateway instance serves exactly the backend named in cfg. geminiAPIKey is
+// only consumed by the Gemini Live backend.
+func NewBridge(ctx context.Context, cfg *voicegateway.Config, geminiAPIKey string, udpPort int) (*Bridge, error) {
+	backend, err := backendForConfig(cfg, geminiAPIKey)
 	if err != nil {
 		return nil, err
 	}
 	return newBridgeWithBackend(ctx, backend, udpPort)
+}
+
+// backendForConfig constructs the single backend a gateway instance serves.
+func backendForConfig(cfg *voicegateway.Config, geminiAPIKey string) (backendConnector, error) {
+	switch cfg.Backend {
+	case voicegateway.BackendGeminiLive:
+		return newGeminiBridgeBackend(geminiAPIKey)
+	case voicegateway.BackendLocalCascade:
+		// Wired with placeholder model adapters until real local models land.
+		return defaultLocalCascadeBackend(), nil
+	default:
+		return nil, fmt.Errorf("unknown voice backend %q", cfg.Backend)
+	}
 }
 
 func newBridgeWithBackend(ctx context.Context, backend backendConnector, udpPort int) (*Bridge, error) {
@@ -115,6 +132,7 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 	if !strings.Contains(sdpOffer, "m=audio ") {
 		return "", "", errors.New("SDP offer must include an audio track")
 	}
+	connector := b.backend
 
 	// Create PeerConnection using the shared UDP mux.
 	pc, err := b.api.NewPeerConnection(webrtc.Configuration{
@@ -184,7 +202,7 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 				slog.WarnContext(sessionCtx, "voicertc: encoder init failed", "session", sess.id, "err", err)
 				sess.sendError("Voice audio unavailable: codec failed to initialise")
 			}
-			backendSession, err := b.backend.connect(sessionCtx, sess.id, sess)
+			backendSession, err := connector.connect(sessionCtx, sess.id, sess)
 			if err != nil {
 				slog.Error("voicertc: backend connect failed", "session", sess.id, "err", err)
 				sess.sendError("Failed to connect voice backend: " + err.Error())
@@ -373,6 +391,12 @@ func (s *session) backendReady(ctx context.Context) {
 	track := s.pendingTrack
 	s.pendingTrack = nil
 	s.mu.Unlock()
+
+	// The gateway core owns session.ready, a provider-neutral readiness signal.
+	if err := s.sendGatewayMessage(ctx, gatewaySessionReady()); err != nil {
+		slog.WarnContext(ctx, "voicertc: session.ready send failed", "session", s.id, "err", err)
+	}
+
 	if track != nil {
 		slog.InfoContext(ctx, "voicertc: starting mic forwarding after backend setup", "session", s.id)
 		go s.audioRxLoop(ctx, track)

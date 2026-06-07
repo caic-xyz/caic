@@ -156,13 +156,11 @@ SessionClose is a client message that closes the voice session.
 
 ### SessionReady
 
-SessionReady is a gateway message that reports session readiness.
+SessionReady is a gateway message that reports the session is ready.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `kind` | `string` |  | yes |
-| `profile` | `string` |  | yes |
-| `capabilities` | `string[]` |  | yes |
 
 ### TranscriptDelta
 

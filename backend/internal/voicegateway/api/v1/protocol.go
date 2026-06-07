@@ -81,11 +81,9 @@ type SessionClose struct {
 	Reason string      `json:"reason,omitempty"`
 }
 
-// SessionReady is a gateway message that reports session readiness.
+// SessionReady is a gateway message that reports the session is ready.
 type SessionReady struct {
-	Kind         MessageKind `json:"kind"`
-	Profile      string      `json:"profile"`
-	Capabilities []string    `json:"capabilities"`
+	Kind MessageKind `json:"kind"`
 }
 
 // Context carries provider-neutral text or instruction context.
