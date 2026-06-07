@@ -52,7 +52,6 @@ function createAppStore() {
   const [autoFixPR, setAutoFixPR] = createSignal(false);
   const [maxCPUs, setMaxCPUs] = createSignal(0);
   const [containerPlatform, setContainerPlatform] = createSignal("");
-  const [useDefaultCaches, setUseDefaultCaches] = createSignal(true);
   const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
   const [wellKnownCachesList, setWellKnownCachesList] = createSignal<WellKnownCachesResp["wellKnown"]>([]);
   const [cacheMappings, setCacheMappings] = createSignal<CacheMappingResp[]>([]);
@@ -71,7 +70,6 @@ function createAppStore() {
       baseImage: selectedImage() || "",
       containerPlatform: (containerPlatform() || "") as Platform,
       maxCPUs: maxCPUs(),
-      useDefaultCaches: useDefaultCaches(),
       wellKnownCaches: wellKnownCaches() as Record<string, boolean>,
       cacheMappings: cacheMappings(),
       customMounts: customMounts(),
@@ -267,7 +265,6 @@ function createAppStore() {
           setAutoFixPR(prefs.settings.autoFixOnPROpen);
           setMaxCPUs(prefs.settings.maxCPUs ?? 0);
           setContainerPlatform(prefs.settings.containerPlatform ?? "");
-          setUseDefaultCaches(prefs.settings.useDefaultCaches ?? true);
           setWellKnownCaches(prefs.settings.wellKnownCaches ?? {});
           setCacheMappings(prefs.settings.cacheMappings ?? []);
           setCustomMounts(prefs.settings.customMounts ?? []);

@@ -681,7 +681,6 @@ func TestHandleCreateTask(t *testing.T) {
 			Backends:   map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}},
 		})
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
-			p.Settings.UseDefaultCaches = true
 			p.Settings.WellKnownCaches = map[string]bool{"go-mod": false, "npm": true}
 			p.Settings.CacheMappings = []preferences.CacheMapping{{HostPath: "/host/custom", ContainerPath: "/home/user/.custom"}}
 			p.Settings.CustomMounts = []preferences.MountMapping{{HostPath: "/host/work", ContainerPath: "/workspace/external"}}

@@ -104,7 +104,7 @@ func TestUserSettings(t *testing.T) {
 		if err := json.Unmarshal(data, &raw); err != nil {
 			t.Fatal(err)
 		}
-		for _, field := range []string{"autoFixOnCIFailure", "autoFixOnPROpen", "useDefaultCaches"} {
+		for _, field := range []string{"autoFixOnCIFailure", "autoFixOnPROpen"} {
 			got, ok := raw[field]
 			if !ok {
 				t.Fatalf("%q missing from JSON", field)

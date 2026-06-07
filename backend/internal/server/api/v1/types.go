@@ -534,11 +534,8 @@ type UserSettings struct {
 	// MaxCPUs limits the number of CPU cores the runtime instance may use.
 	// Zero means use the system default (max(2, NumCPU-2)).
 	MaxCPUs int `json:"maxCPUs,omitempty"`
-	// UseDefaultCaches controls whether default harness caches are mounted.
-	// When false, only custom cache mappings and custom mounts are used.
-	UseDefaultCaches bool `json:"useDefaultCaches"`
-	// WellKnownCaches maps cache name to enabled state. nil means use default
-	// (all true), true means explicitly enabled, false means explicitly disabled.
+	// WellKnownCaches maps cache name to enabled state. Absent or false means
+	// disabled, true means enabled. Caches are opt-in.
 	WellKnownCaches map[string]bool `json:"wellKnownCaches,omitempty"`
 	// CacheMappings are custom host-to-runtime directory mappings.
 	CacheMappings []CacheMappingResp `json:"cacheMappings,omitempty"`

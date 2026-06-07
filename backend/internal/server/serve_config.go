@@ -184,7 +184,6 @@ func (h *serverConfigHandlers) getPreferences(ctx context.Context, _ *api.EmptyR
 			BaseImage:          prefs.Settings.BaseImage,
 			ContainerPlatform:  v1.Platform(prefs.Settings.ContainerPlatform),
 			MaxCPUs:            prefs.Settings.MaxCPUs,
-			UseDefaultCaches:   prefs.Settings.UseDefaultCaches,
 			WellKnownCaches:    prefs.Settings.WellKnownCaches,
 			CacheMappings:      cacheMappings,
 			CustomMounts:       customMounts,
@@ -199,7 +198,6 @@ func (h *serverConfigHandlers) updatePreferences(ctx context.Context, req *v1.Up
 		p.Settings.BaseImage = req.Settings.BaseImage
 		p.Settings.ContainerPlatform = md.Platform(req.Settings.ContainerPlatform)
 		p.Settings.MaxCPUs = req.Settings.MaxCPUs
-		p.Settings.UseDefaultCaches = req.Settings.UseDefaultCaches
 		p.Settings.WellKnownCaches = req.Settings.WellKnownCaches
 		if req.Settings.CacheMappings != nil {
 			p.Settings.CacheMappings = make([]preferences.CacheMapping, len(req.Settings.CacheMappings))
@@ -228,22 +226,20 @@ func (h *serverConfigHandlers) updatePreferences(ctx context.Context, req *v1.Up
 
 func cacheMountsFromSettings(settings *preferences.Settings) []caicruntime.CacheMount {
 	var caches []caicruntime.CacheMount
-	if settings.UseDefaultCaches {
-		names := slices.Sorted(maps.Keys(md.WellKnownCaches))
-		for _, name := range names {
-			if enabled, ok := settings.WellKnownCaches[name]; ok && !enabled {
-				continue
-			}
-			for _, c := range md.WellKnownCaches[name] {
-				caches = append(caches, caicruntime.CacheMount{
-					Name:        c.Name,
-					Description: c.Description,
-					HostPath:    c.HostPath,
-					MountPath:   c.ContainerPath,
-					ReadOnly:    c.ReadOnly,
-					Shallow:     c.Shallow,
-				})
-			}
+	names := slices.Sorted(maps.Keys(md.WellKnownCaches))
+	for _, name := range names {
+		if !settings.WellKnownCaches[name] {
+			continue
+		}
+		for _, c := range md.WellKnownCaches[name] {
+			caches = append(caches, caicruntime.CacheMount{
+				Name:        c.Name,
+				Description: c.Description,
+				HostPath:    c.HostPath,
+				MountPath:   c.ContainerPath,
+				ReadOnly:    c.ReadOnly,
+				Shallow:     c.Shallow,
+			})
 		}
 	}
 	for i, m := range settings.CacheMappings {

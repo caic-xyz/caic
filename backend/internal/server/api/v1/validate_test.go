@@ -224,7 +224,7 @@ func TestValidate(t *testing.T) {
 		t.Run("Valid", func(t *testing.T) {
 			t.Parallel()
 			var r UpdatePreferencesReq
-			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"useDefaultCaches":true}}`), &r); err != nil {
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false}}`), &r); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
 			if err := r.Validate(); err != nil {
@@ -242,7 +242,7 @@ func TestValidate(t *testing.T) {
 		t.Run("UnknownCache", func(t *testing.T) {
 			t.Parallel()
 			var r UpdatePreferencesReq
-			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"useDefaultCaches":true,"wellKnownCaches":{"bogus":true}}}`), &r); err != nil {
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"wellKnownCaches":{"bogus":true}}}`), &r); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
 			assertBadRequest(t, r.Validate(), "unknown cache: bogus")
@@ -250,7 +250,7 @@ func TestValidate(t *testing.T) {
 		t.Run("InvalidPlatform", func(t *testing.T) {
 			t.Parallel()
 			var r UpdatePreferencesReq
-			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"useDefaultCaches":true,"containerPlatform":"linux/386"}}`), &r); err != nil {
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"containerPlatform":"linux/386"}}`), &r); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
 			assertBadRequest(t, r.Validate(), `unsupported platform "linux/386"; use linux/amd64 or linux/arm64`)
@@ -258,7 +258,7 @@ func TestValidate(t *testing.T) {
 		t.Run("InvalidCacheMapping", func(t *testing.T) {
 			t.Parallel()
 			var r UpdatePreferencesReq
-			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"useDefaultCaches":true,"cacheMappings":[{"hostPath":"","containerPath":"/cache"}]}}`), &r); err != nil {
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"cacheMappings":[{"hostPath":"","containerPath":"/cache"}]}}`), &r); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
 			assertBadRequest(t, r.Validate(), "cacheMappings[0]: hostPath is required")
@@ -266,7 +266,7 @@ func TestValidate(t *testing.T) {
 		t.Run("InvalidCustomMount", func(t *testing.T) {
 			t.Parallel()
 			var r UpdatePreferencesReq
-			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"useDefaultCaches":true,"customMounts":[{"hostPath":"/host","containerPath":""}]}}`), &r); err != nil {
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"customMounts":[{"hostPath":"/host","containerPath":""}]}}`), &r); err != nil {
 				t.Fatalf("Unmarshal: %v", err)
 			}
 			assertBadRequest(t, r.Validate(), "customMounts[0]: containerPath is required")
@@ -274,7 +274,7 @@ func TestValidate(t *testing.T) {
 		t.Run("UnknownTopLevelField", func(t *testing.T) {
 			t.Parallel()
 			var r UpdatePreferencesReq
-			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false,"useDefaultCaches":true},"bogus":true}`), &r); err == nil {
+			if err := json.Unmarshal([]byte(`{"settings":{"autoFixOnCIFailure":false,"autoFixOnPROpen":false},"bogus":true}`), &r); err == nil {
 				t.Fatal("expected unknown field error")
 			}
 		})

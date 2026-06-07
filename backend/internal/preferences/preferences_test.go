@@ -220,7 +220,6 @@ func TestUsers(t *testing.T) {
 			Settings: Settings{
 				BaseImage:         "custom:latest",
 				ContainerPlatform: "linux/amd64",
-				UseDefaultCaches:  true,
 				WellKnownCaches:   map[string]bool{"go-mod": true, "npm": false},
 				CacheMappings: []CacheMapping{
 					{HostPath: "/host/cache", ContainerPath: "/container/cache"},
@@ -258,9 +257,6 @@ func TestUsers(t *testing.T) {
 		}
 		if m := got.Models["claude"]; m != "opus" {
 			t.Errorf("models[claude] = %q, want %q", m, "opus")
-		}
-		if !got.Settings.UseDefaultCaches {
-			t.Error("useDefaultCaches = false, want true")
 		}
 		if len(got.Settings.WellKnownCaches) != 2 {
 			t.Fatalf("wellKnownCaches len = %d, want 2", len(got.Settings.WellKnownCaches))

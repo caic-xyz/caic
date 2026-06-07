@@ -95,12 +95,6 @@
   border-color: var(--color-primary);
 }
 
-.cacheCheckbox[data-state="default"] {
-  background: var(--color-bg-hover);
-  color: var(--color-text-secondary);
-  border-style: dashed;
-}
-
 .cacheCheckbox[data-state="disabled"] {
   opacity: 0.5;
   text-decoration: line-through;

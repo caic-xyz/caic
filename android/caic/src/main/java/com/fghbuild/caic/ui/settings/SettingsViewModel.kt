@@ -36,7 +36,6 @@ data class SettingsScreenState(
     val baseImage: String = "",
     val containerPlatform: String = "",
     val maxCPUs: String = "",
-    val useDefaultCaches: Boolean = true,
     val wellKnownCaches: Map<String, Boolean> = emptyMap(),
     val wellKnownCachesList: List<WellKnownCache> = emptyList(),
     val cacheMappings: List<CacheMappingResp> = emptyList(),
@@ -183,7 +182,6 @@ class SettingsViewModel @Inject constructor(
                         baseImage = prefs.settings.baseImage ?: "",
                         containerPlatform = prefs.settings.containerPlatform?.value ?: "",
                         maxCPUs = prefs.settings.maxCPUs?.toString() ?: "",
-                        useDefaultCaches = prefs.settings.useDefaultCaches,
                         wellKnownCaches = prefs.settings.wellKnownCaches ?: emptyMap(),
                         wellKnownCachesList = caches?.wellKnown ?: emptyList(),
                         cacheMappings = prefs.settings.cacheMappings ?: emptyList(),
@@ -229,11 +227,6 @@ class SettingsViewModel @Inject constructor(
     fun saveMaxCPUs() {
         val v = _state.value.maxCPUs.toIntOrNull() ?: 0
         saveSettings { it.copy(maxCPUs = if (v > 0) v else null) }
-    }
-
-    fun updateUseDefaultCaches(enabled: Boolean) {
-        _state.update { it.copy(useDefaultCaches = enabled) }
-        saveSettings { it.copy(useDefaultCaches = enabled) }
     }
 
     fun updateWellKnownCache(cache: String, enabled: Boolean) {
@@ -358,7 +351,6 @@ class SettingsViewModel @Inject constructor(
                     baseImage = snapshot.baseImage.ifBlank { null },
                     containerPlatform = snapshot.containerPlatform.toPlatformOrNull(),
                     maxCPUs = snapshot.maxCPUs.toIntOrNull(),
-                    useDefaultCaches = snapshot.useDefaultCaches,
                     wellKnownCaches = snapshot.wellKnownCaches.ifEmpty { null },
                     cacheMappings = snapshot.cacheMappings.ifEmpty { null },
                     customMounts = snapshot.customMounts.ifEmpty { null },
@@ -373,7 +365,6 @@ class SettingsViewModel @Inject constructor(
                         autoFixPR = snapshot.autoFixPR,
                         baseImage = snapshot.baseImage,
                         containerPlatform = snapshot.containerPlatform,
-                        useDefaultCaches = snapshot.useDefaultCaches,
                         wellKnownCaches = snapshot.wellKnownCaches,
                         cacheMappings = snapshot.cacheMappings,
                         customMounts = snapshot.customMounts,

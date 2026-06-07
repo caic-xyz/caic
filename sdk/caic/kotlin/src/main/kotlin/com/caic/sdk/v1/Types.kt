@@ -692,7 +692,6 @@ data class UserSettings(
     val baseImage: String? = null,
     val containerPlatform: Platform? = null,
     @SerialName("maxCPUs") val maxCPUs: Int? = null,
-    val useDefaultCaches: Boolean,
     val wellKnownCaches: Map<String, Boolean>? = null,
     val cacheMappings: List<CacheMappingResp>? = null,
     val customMounts: List<MountMappingResp>? = null,

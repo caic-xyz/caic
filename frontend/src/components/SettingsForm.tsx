@@ -101,11 +101,11 @@ export default function SettingsForm(props: SettingsFormProps) {
             <For each={props.wellKnownCachesList()}>
               {(cache) => {
                 const state = () => props.wellKnownCaches()[cache.name];
-                const isEnabled = () => state() !== false;
+                const isEnabled = () => state() === true;
                 return (
                   <label
                     class={styles.cacheCheckbox}
-                    data-state={state() === undefined ? "default" : isEnabled() ? "enabled" : "disabled"}
+                    data-state={isEnabled() ? "enabled" : "disabled"}
                     title={cache.description}
                   >
                     <input

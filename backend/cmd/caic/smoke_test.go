@@ -94,7 +94,6 @@ func TestSmoke(t *testing.T) {
 
 		var prefs v1.PreferencesResp
 		getJSON(t, baseURL, "/api/caic/v1/server/preferences", &prefs)
-		prefs.Settings.UseDefaultCaches = false
 		prefs.Settings.WellKnownCaches = nil
 		prefs.Settings.CacheMappings = nil
 		postJSON(t, baseURL, "/api/caic/v1/server/preferences", v1.UpdatePreferencesReq{Settings: prefs.Settings}, &prefs)

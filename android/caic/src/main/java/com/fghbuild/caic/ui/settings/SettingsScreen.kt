@@ -235,7 +235,7 @@ fun SettingsScreen(
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
             Text("Well-known caches", style = MaterialTheme.typography.titleMedium)
             screenState.wellKnownCachesList.forEach { cache ->
-                val currentlyOn = screenState.wellKnownCaches[cache.name] != false
+                val currentlyOn = screenState.wellKnownCaches[cache.name] == true
                 ListItem(
                     headlineContent = { Text(cache.name) },
                     supportingContent = if (cache.description.isNotBlank()) {

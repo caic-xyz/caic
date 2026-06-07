@@ -576,13 +576,8 @@ export interface UserSettings {
    */
   maxCPUs?: number /* int */;
   /**
-   * UseDefaultCaches controls whether default harness caches are mounted.
-   * When false, only custom cache mappings and custom mounts are used.
-   */
-  useDefaultCaches: boolean;
-  /**
-   * WellKnownCaches maps cache name to enabled state. nil means use default
-   * (all true), true means explicitly enabled, false means explicitly disabled.
+   * WellKnownCaches maps cache name to enabled state. Absent or false means
+   * disabled, true means enabled. Caches are opt-in.
    */
   wellKnownCaches?: { [key: string]: boolean};
   /** CacheMappings are custom host-to-runtime directory mappings. */

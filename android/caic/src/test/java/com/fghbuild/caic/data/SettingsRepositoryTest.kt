@@ -274,7 +274,7 @@ class SettingsRepositoryTest {
             harness = null,
             models = emptyMap(),
             settings = com.caic.sdk.v1.UserSettings(
-                autoFixOnCIFailure = true, autoFixOnPROpen = true, useDefaultCaches = true,
+                autoFixOnCIFailure = true, autoFixOnPROpen = true,
             ),
         )
         repo.updateServerPreferences(prefs)
@@ -289,7 +289,7 @@ class SettingsRepositoryTest {
             com.caic.sdk.v1.PreferencesResp(
                 repositories = emptyList(), harness = null, models = emptyMap(),
                 settings = com.caic.sdk.v1.UserSettings(
-                    autoFixOnCIFailure = false, autoFixOnPROpen = false, useDefaultCaches = false,
+                    autoFixOnCIFailure = false, autoFixOnPROpen = false,
                 ),
             ),
         )

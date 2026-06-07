@@ -102,15 +102,6 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `updateUseDefaultCaches updates state synchronously`() = runBlocking {
-        val vm = createViewModel()
-        assertTrue(vm.state.value.useDefaultCaches)
-
-        vm.updateUseDefaultCaches(false)
-        assertEquals(false, vm.state.value.useDefaultCaches)
-    }
-
-    @Test
     fun `updateBaseImage updates state`() = runBlocking {
         val vm = createViewModel()
         vm.updateBaseImage("ubuntu:22.04")

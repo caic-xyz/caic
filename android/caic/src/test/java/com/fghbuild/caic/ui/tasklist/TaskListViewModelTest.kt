@@ -97,7 +97,7 @@ class TaskListViewModelTest {
                     )
                     "/api/caic/v1/server/preferences" -> jsonResponse(
                         """{"repositories":[],"settings":{"sudo":false,"autoFixOnCIFailure":false,""" +
-                            """"autoFixOnPROpen":false,"useDefaultCaches":false}}"""
+                            """"autoFixOnPROpen":false}}"""
                     )
                     else -> MockResponse().setResponseCode(404)
                 }
@@ -189,7 +189,7 @@ class TaskListViewModelTest {
                         """{"repositories":[{"path":"my-org/repo"}],""" +
                             """"harness":"codex","models":{"codex":"o3"},""" +
                             """"settings":{"sudo":false,"autoFixOnCIFailure":false,""" +
-                            """"autoFixOnPROpen":false,"useDefaultCaches":false}}"""
+                            """"autoFixOnPROpen":false}}"""
                     )
                     else -> MockResponse().setResponseCode(404)
                 }

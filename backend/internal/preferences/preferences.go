@@ -177,11 +177,8 @@ type Settings struct {
 	// MaxCPUs limits the number of CPU cores the container may use.
 	// Passed as --cpus to docker/podman. Zero means use [md.DefaultMaxCPUs].
 	MaxCPUs int `json:"maxCPUs,omitempty"`
-	// UseDefaultCaches controls whether default harness caches are mounted.
-	// When false, only custom cache mappings and custom mounts are used.
-	UseDefaultCaches bool `json:"useDefaultCaches"`
-	// WellKnownCaches maps cache name to enabled state. nil means use default
-	// (all true), true means explicitly enabled, false means explicitly disabled.
+	// WellKnownCaches maps cache name to enabled state. Absent or false means
+	// disabled, true means enabled. Caches are opt-in.
 	WellKnownCaches map[string]bool `json:"wellKnownCaches,omitempty"`
 	// CacheMappings are custom directory mappings to mount into the container.
 	CacheMappings []CacheMapping `json:"cacheMappings,omitempty"`
@@ -290,7 +287,7 @@ const recentWindow = 7 * 24 * time.Hour
 const minRecentRepos = 10
 
 func newPreferences() *Preferences {
-	return &Preferences{Version: currentVersion, Settings: Settings{UseDefaultCaches: true}}
+	return &Preferences{Version: currentVersion, Settings: Settings{}}
 }
 
 // usersFile is the on-disk JSON format for the Store.

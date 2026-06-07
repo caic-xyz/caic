@@ -203,10 +203,8 @@ the default. |  |
 the host's native platform. Valid values are linux/amd64 and linux/arm64. |  |
 | `maxCPUs` | `int` | MaxCPUs limits the number of CPU cores the runtime instance may use.
 Zero means use the system default (max(2, NumCPU-2)). |  |
-| `useDefaultCaches` | `boolean` | UseDefaultCaches controls whether default harness caches are mounted.
-When false, only custom cache mappings and custom mounts are used. | yes |
-| `wellKnownCaches` | `Record<string, unknown>` | WellKnownCaches maps cache name to enabled state. nil means use default
-(all true), true means explicitly enabled, false means explicitly disabled. |  |
+| `wellKnownCaches` | `Record<string, unknown>` | WellKnownCaches maps cache name to enabled state. Absent or false means
+disabled, true means enabled. Caches are opt-in. |  |
 | `cacheMappings` | `CacheMappingResp[]` | CacheMappings are custom host-to-runtime directory mappings. |  |
 | `customMounts` | `MountMappingResp[]` | CustomMounts are custom non-cache host-to-runtime directory mappings. |  |
 
