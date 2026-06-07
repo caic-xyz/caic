@@ -1,7 +1,5 @@
 // Provider-neutral voice gateway protocol translation for WebRTC sessions.
 
-//go:build !race
-
 package voicertc
 
 import (

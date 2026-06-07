@@ -1,8 +1,6 @@
 // IPv4-only transport.Net implementation that avoids pion/stdnet's anet
 // package, which uses netlinkrib and fails on hosts without IPv6 support.
 
-//go:build !race
-
 package voicertc
 
 import (

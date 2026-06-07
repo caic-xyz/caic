@@ -1,7 +1,5 @@
 // Gemini Live backend adapter and wire types for the WebRTC voice bridge.
 
-//go:build !race
-
 package voicertc
 
 import (

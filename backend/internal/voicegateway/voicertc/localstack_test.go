@@ -1,7 +1,5 @@
 // Tests for the local stack backend: VAD, turn flow, tool round trip, barge-in.
 
-//go:build !race
-
 package voicertc
 
 import (

@@ -1,7 +1,5 @@
 // WebRTC voice session bridge for the voice gateway protocol.
 
-//go:build !race
-
 // Package voicertc implements WebRTC voice sessions through the voice gateway protocol.
 package voicertc
 

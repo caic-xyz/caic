@@ -1,7 +1,5 @@
 // Minimal backend boundary for WebRTC voice sessions.
 
-//go:build !race
-
 package voicertc
 
 import "context"

@@ -1,7 +1,5 @@
 // Local stack genai adapters for local LLM runtimes.
 
-//go:build !race
-
 package voicertc
 
 import (

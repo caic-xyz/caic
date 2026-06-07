@@ -1,7 +1,5 @@
 // Local stack backend adapter: VAD, ASR, LLM, and TTS for half-duplex voice.
 
-//go:build !race
-
 package voicertc
 
 import (
