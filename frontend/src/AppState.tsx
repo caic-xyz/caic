@@ -296,7 +296,7 @@ function createAppStore() {
     /** Probe whether the server is returning 401. EventSource doesn't expose status codes. */
     async function checkUnauthorized(): Promise<boolean> {
       try {
-        const res = await fetch("/api/v1/auth/me", { signal: AbortSignal.timeout(5000) });
+        const res = await fetch("/api/caic/v1/auth/me", { signal: AbortSignal.timeout(5000) });
         if (res.status === 401) {
           auth.clearUser();
           return true;

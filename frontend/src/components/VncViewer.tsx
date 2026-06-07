@@ -26,7 +26,7 @@ export default function VncViewer(props: Props) {
     if (!canvas) return;
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${window.location.host}/api/v1/tasks/${props.taskId}/vnc/ws`;
+    const url = `${protocol}//${window.location.host}/api/caic/v1/tasks/${props.taskId}/vnc/ws`;
 
     let rfb: InstanceType<typeof RFB>;
     try {

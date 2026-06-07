@@ -109,149 +109,149 @@ public final class ApiClient {
     // JSON endpoints
     /// Returns server capabilities and feature flags.
     public func getConfig() async throws -> Config {
-        try await request("GET", path: "/api/v1/server/config")
+        try await request("GET", path: "/api/caic/v1/server/config")
     }
     /// Returns the current server version and checks for available updates.
     public func getVersion() async throws -> VersionResp {
-        try await request("GET", path: "/api/v1/server/version")
+        try await request("GET", path: "/api/caic/v1/server/version")
     }
     /// Triggers a background server auto-update to the latest release.
     public func triggerUpdate() async throws -> UpdateResp {
-        try await request("POST", path: "/api/v1/server/update")
+        try await request("POST", path: "/api/caic/v1/server/update")
     }
     /// Returns the authenticated user's profile.
     public func getMe() async throws -> UserResp {
-        try await request("GET", path: "/api/v1/auth/me")
+        try await request("GET", path: "/api/caic/v1/auth/me")
     }
     /// Invalidates the current session.
     public func logout() async throws -> StatusResp {
-        try await request("POST", path: "/api/v1/auth/logout")
+        try await request("POST", path: "/api/caic/v1/auth/logout")
     }
     /// Returns server and per-repository preferences.
     public func getPreferences() async throws -> PreferencesResp {
-        try await request("GET", path: "/api/v1/server/preferences")
+        try await request("GET", path: "/api/caic/v1/server/preferences")
     }
     /// Updates server settings and preferences.
     public func updatePreferences(req: UpdatePreferencesReq) async throws -> PreferencesResp {
-        try await request("POST", path: "/api/v1/server/preferences", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/server/preferences", body: try encoder.encode(req))
     }
     /// Lists available coding agent harnesses.
     public func listHarnesses() async throws -> [HarnessInfo] {
-        try await request("GET", path: "/api/v1/server/harnesses")
+        try await request("GET", path: "/api/caic/v1/server/harnesses")
     }
     /// Lists well-known cache configurations.
     public func listCaches() async throws -> WellKnownCachesResp {
-        try await request("GET", path: "/api/v1/server/caches")
+        try await request("GET", path: "/api/caic/v1/server/caches")
     }
     /// Lists all discovered repositories.
     public func listRepos() async throws -> [Repo] {
-        try await request("GET", path: "/api/v1/server/repos")
+        try await request("GET", path: "/api/caic/v1/server/repos")
     }
     /// Clones a repository into the server's root directory.
     public func cloneRepo(req: CloneRepoReq) async throws -> Repo {
-        try await request("POST", path: "/api/v1/server/repos", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/server/repos", body: try encoder.encode(req))
     }
     /// Lists branches for a repository.
     public func listRepoBranches(repo: String) async throws -> RepoBranchesResp {
-        try await request("GET", path: "/api/v1/server/repos/branches?repo=\(repo.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? repo)")
+        try await request("GET", path: "/api/caic/v1/server/repos/branches?repo=\(repo.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? repo)")
     }
     /// Creates a task to fix a failing CI pipeline.
     public func botFixCI(req: BotFixCIReq) async throws -> CreateTaskResp {
-        try await request("POST", path: "/api/v1/bot/fix-ci", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/bot/fix-ci", body: try encoder.encode(req))
     }
     /// Injects a CI fix command into an existing task's PR.
     public func botFixPR(req: BotFixPRReq) async throws -> StatusResp {
-        try await request("POST", path: "/api/v1/bot/fix-pr", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/bot/fix-pr", body: try encoder.encode(req))
     }
     /// Returns all tasks.
     public func listTasks() async throws -> [Task] {
-        try await request("GET", path: "/api/v1/tasks")
+        try await request("GET", path: "/api/caic/v1/tasks")
     }
     /// Creates and starts a new coding agent task.
     public func createTask(req: CreateTaskReq) async throws -> CreateTaskResp {
-        try await request("POST", path: "/api/v1/tasks", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/tasks", body: try encoder.encode(req))
     }
     /// Sends user input to a running task.
     public func sendInput(id: String, req: InputReq) async throws -> StatusResp {
-        try await request("POST", path: "/api/v1/tasks/\(id)/input", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/tasks/\(id)/input", body: try encoder.encode(req))
     }
     /// Restarts a completed or errored task with a new prompt.
     public func restartTask(id: String, req: RestartReq) async throws -> StatusResp {
-        try await request("POST", path: "/api/v1/tasks/\(id)/restart", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/tasks/\(id)/restart", body: try encoder.encode(req))
     }
     /// Clears context and restarts the agent session without a prompt.
     public func clearContext(id: String) async throws -> StatusResp {
-        try await request("POST", path: "/api/v1/tasks/\(id)/clear-context")
+        try await request("POST", path: "/api/caic/v1/tasks/\(id)/clear-context")
     }
     /// Sends a compact command to reduce the agent's context window usage.
     public func compactContext(id: String, req: CompactReq) async throws -> StatusResp {
-        try await request("POST", path: "/api/v1/tasks/\(id)/compact", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/tasks/\(id)/compact", body: try encoder.encode(req))
     }
     /// Requests graceful stop of a running task.
     public func stopTask(id: String) async throws -> StatusResp {
-        try await request("POST", path: "/api/v1/tasks/\(id)/stop")
+        try await request("POST", path: "/api/caic/v1/tasks/\(id)/stop")
     }
     /// Permanently deletes a task and its runtime instance.
     public func purgeTask(id: String) async throws -> StatusResp {
-        try await request("POST", path: "/api/v1/tasks/\(id)/purge")
+        try await request("POST", path: "/api/caic/v1/tasks/\(id)/purge")
     }
     /// Reconnects to an orphaned task runtime instance.
     public func reviveTask(id: String) async throws -> StatusResp {
-        try await request("POST", path: "/api/v1/tasks/\(id)/revive")
+        try await request("POST", path: "/api/caic/v1/tasks/\(id)/revive")
     }
     /// Returns the log tail of a failed CI check run.
     public func getTaskCILog(id: String, jobID: String) async throws -> CILogResp {
-        try await request("GET", path: "/api/v1/tasks/\(id)/ci-log?jobID=\(jobID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? jobID)")
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/ci-log?jobID=\(jobID.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? jobID)")
     }
     /// Pushes task changes to the remote repository.
     public func syncTask(id: String, req: SyncReq) async throws -> SyncResp {
-        try await request("POST", path: "/api/v1/tasks/\(id)/sync", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/tasks/\(id)/sync", body: try encoder.encode(req))
     }
     /// Forks a task by snapshotting its runtime instance and creating a new task on a derived branch.
     public func forkTask(id: String, req: ForkTaskReq) async throws -> CreateTaskResp {
-        try await request("POST", path: "/api/v1/tasks/\(id)/fork", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/tasks/\(id)/fork", body: try encoder.encode(req))
     }
     /// Returns the unified diff for a task's branch.
     public func getTaskDiff(id: String, path: String) async throws -> DiffResp {
-        try await request("GET", path: "/api/v1/tasks/\(id)/diff?path=\(path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path)")
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/diff?path=\(path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path)")
     }
     /// Returns the list of running processes inside the task's runtime instance.
     public func getTaskProcesses(id: String) async throws -> ProcessListResp {
-        try await request("GET", path: "/api/v1/tasks/\(id)/processes")
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/processes")
     }
     /// Sends SIGTERM or SIGKILL to a process inside the task's runtime instance.
     public func signalProcess(id: String, pid: String, req: SignalProcessReq) async throws -> StatusResp {
-        try await request("POST", path: "/api/v1/tasks/\(id)/processes/\(pid)/signal", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/tasks/\(id)/processes/\(pid)/signal", body: try encoder.encode(req))
     }
     /// Returns the full (untruncated) input for a tool call.
     public func getTaskToolInput(id: String, toolUseID: String) async throws -> TaskToolInputResp {
-        try await request("GET", path: "/api/v1/tasks/\(id)/tool/\(toolUseID)")
+        try await request("GET", path: "/api/caic/v1/tasks/\(id)/tool/\(toolUseID)")
     }
     /// Returns current usage quota statistics.
     public func getUsage() async throws -> UsageResp {
-        try await request("GET", path: "/api/v1/usage")
+        try await request("GET", path: "/api/caic/v1/usage")
     }
     /// Fetches a URL and returns its text content.
     public func webFetch(req: WebFetchReq) async throws -> WebFetchResp {
-        try await request("POST", path: "/api/v1/web/fetch", body: try encoder.encode(req))
+        try await request("POST", path: "/api/caic/v1/web/fetch", body: try encoder.encode(req))
     }
 
     // SSE endpoints
     /// Streams raw backend-specific task events via SSE.
     public func taskRawEvents(id: String) -> AsyncThrowingStream<EventMessage, Error> {
-        sseStream(path: "/api/v1/tasks/\(id)/raw_events")
+        sseStream(path: "/api/caic/v1/tasks/\(id)/raw_events")
     }
     /// Streams backend-neutral task events via SSE.
     public func taskEvents(id: String) -> AsyncThrowingStream<EventMessage, Error> {
-        sseStream(path: "/api/v1/tasks/\(id)/events")
+        sseStream(path: "/api/caic/v1/tasks/\(id)/events")
     }
     /// Streams task list updates for all tasks via SSE.
     public func globalTaskEvents() -> AsyncThrowingStream<TaskListEvent, Error> {
-        sseStream(path: "/api/v1/server/tasks/events")
+        sseStream(path: "/api/caic/v1/server/tasks/events")
     }
     /// Streams usage quota updates via SSE.
     public func globalUsageEvents() -> AsyncThrowingStream<UsageResp, Error> {
-        sseStream(path: "/api/v1/server/usage/events")
+        sseStream(path: "/api/caic/v1/server/usage/events")
     }
 
     // Reconnecting SSE wrappers with exponential backoff

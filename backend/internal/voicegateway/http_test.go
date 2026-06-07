@@ -18,7 +18,7 @@ func TestNewHandler(t *testing.T) {
 	t.Run("health", func(t *testing.T) {
 		t.Parallel()
 		w := httptest.NewRecorder()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/voice/health", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/voicegateway/v1/voice/health", http.NoBody)
 		cfg := DefaultConfig()
 		handler, err := NewHandler(&cfg, nil)
 		if err != nil {
@@ -40,7 +40,7 @@ func TestNewHandler(t *testing.T) {
 	t.Run("offer requires sdp", func(t *testing.T) {
 		t.Parallel()
 		w := httptest.NewRecorder()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/voice/rtc/offer", strings.NewReader(`{}`))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v1/voice/rtc/offer", strings.NewReader(`{}`))
 		cfg := DefaultConfig()
 		handler, err := NewHandler(&cfg, nil)
 		if err != nil {
@@ -53,7 +53,7 @@ func TestNewHandler(t *testing.T) {
 	t.Run("offer requires service identity", func(t *testing.T) {
 		t.Parallel()
 		w := httptest.NewRecorder()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/voice/rtc/offer", strings.NewReader(`{"sdp":"offer"}`))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v1/voice/rtc/offer", strings.NewReader(`{"sdp":"offer"}`))
 		cfg := DefaultConfig()
 		handler, err := NewHandler(&cfg, nil)
 		if err != nil {
@@ -87,7 +87,7 @@ func TestNewHandler(t *testing.T) {
 		}
 		w := httptest.NewRecorder()
 		body := `{"sdp":"offer","service":{"kind":"caic","instanceID":"home","baseURL":"https://caic.example.com","token":"` + token + `"}}`
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/voice/rtc/offer", strings.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/voicegateway/v1/voice/rtc/offer", strings.NewReader(body))
 		cfg := DefaultConfig()
 		cfg.TrustedIssuers = []TrustedIssuerConfig{{
 			Service:   "caic",

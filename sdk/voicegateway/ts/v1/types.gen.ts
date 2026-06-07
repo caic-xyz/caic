@@ -55,19 +55,19 @@ export type Speaker =
 export const SpeakerUser: Speaker = "user";
 export const SpeakerAssistant: Speaker = "assistant";
 
-/** VoiceTokenResp is the response for GET /api/v1/voice/token. */
+/** VoiceTokenResp is the response for GET /api/voicegateway/v1/voice/token. */
 export interface VoiceTokenResp {
   token: string;
   expiresAt: string;
   ephemeral: boolean;
 }
 
-/** VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer. */
+/** VoiceRTCOfferReq is the request body for POST /api/voicegateway/v1/voice/rtc/offer. */
 export interface VoiceRTCOfferReq {
   sdp: string;
 }
 
-/** VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer. */
+/** VoiceRTCAnswerResp is the response for POST /api/voicegateway/v1/voice/rtc/offer. */
 export interface VoiceRTCAnswerResp {
   sdp: string;
   sessionID: string;

@@ -109,15 +109,15 @@ public final class ApiClient {
     // JSON endpoints
     /// Returns a short-lived voice API token.
     public func getVoiceToken() async throws -> VoiceTokenResp {
-        try await request("GET", path: "/api/v1/voice/token")
+        try await request("GET", path: "/api/voicegateway/v1/voice/token")
     }
     /// Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session.
     public func voiceRTCOffer(req: VoiceRTCOfferReq) async throws -> VoiceRTCAnswerResp {
-        try await request("POST", path: "/api/v1/voice/rtc/offer", body: try encoder.encode(req))
+        try await request("POST", path: "/api/voicegateway/v1/voice/rtc/offer", body: try encoder.encode(req))
     }
     /// Closes a WebRTC voice bridge session.
     public func closeVoiceRTC(sessionID: String) async throws -> StatusResp {
-        try await request("POST", path: "/api/v1/voice/rtc/\(sessionID)")
+        try await request("POST", path: "/api/voicegateway/v1/voice/rtc/\(sessionID)")
     }
 
     // SSE endpoints

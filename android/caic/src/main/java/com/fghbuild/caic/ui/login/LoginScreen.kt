@@ -76,7 +76,7 @@ fun LoginScreen(
                 }
                 Button(
                     onClick = {
-                        val url = "$serverURL/api/v1/auth/$provider/start?return=app"
+                        val url = "$serverURL/api/caic/v1/auth/$provider/start?return=app"
                         context.startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
                     },
                     modifier = Modifier

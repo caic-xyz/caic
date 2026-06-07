@@ -12,7 +12,7 @@ import (
 
 // InputTruncateThreshold is the maximum byte length of a tool input JSON before it
 // is omitted from the SSE stream. Clients fetch the full input on demand via
-// GET /api/v1/tasks/{id}/tool/{toolUseID}.
+// GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
 const InputTruncateThreshold = 4096
 
 // ToolOutputFormatter analyzes a tool output string and returns its content

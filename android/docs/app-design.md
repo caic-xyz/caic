@@ -52,7 +52,7 @@ auth, at the cost of implementing the audio plumbing ourselves.
 
 ### Background SSE & Notifications
 
-`TaskMonitorService` foreground service maintains `/api/v1/server/tasks/events` SSE when
+`TaskMonitorService` foreground service maintains `/api/caic/v1/server/tasks/events` SSE when
 backgrounded. Detects state transitions → Android notifications + voice context.
 
 **Notification triggers**:

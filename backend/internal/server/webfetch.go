@@ -1,4 +1,4 @@
-// HTTP handler for POST /api/v1/web/fetch: fetches a URL and extracts text content.
+// HTTP handler for POST /api/caic/v1/web/fetch: fetches a URL and extracts text content.
 
 package server
 

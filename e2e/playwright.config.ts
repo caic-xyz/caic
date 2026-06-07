@@ -7,7 +7,7 @@ export default defineConfig({
   timeout: 60_000,
   webServer: {
     command: "../scripts/run-dev.py --http :8090 --fake",
-    url: "http://localhost:8090/api/v1/server/config",
+    url: "http://localhost:8090/api/caic/v1/server/config",
     reuseExistingServer: false,
     timeout: 30_000,
   },

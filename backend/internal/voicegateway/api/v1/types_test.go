@@ -15,7 +15,7 @@ func TestRoutes(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %q, want POST", r.Method)
 		}
-		if r.Path != "/api/v1/voice/rtc/{sessionID}" {
+		if r.Path != "/api/voicegateway/v1/voice/rtc/{sessionID}" {
 			t.Fatalf("path = %q, want voice RTC close path", r.Path)
 		}
 		if r.RespName() != "StatusResp" {

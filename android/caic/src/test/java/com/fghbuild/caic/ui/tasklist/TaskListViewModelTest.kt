@@ -77,25 +77,25 @@ class TaskListViewModelTest {
                 val path = request.requestUrl?.encodedPath ?: return MockResponse()
                     .setResponseCode(404)
                 return when (path) {
-                    "/api/v1/server/config" -> jsonResponse(
+                    "/api/caic/v1/server/config" -> jsonResponse(
                         """{"displayName":"test-host","tailscaleAvailable":false,""" +
                             """"usbAvailable":false,"displayAvailable":false,""" +
                             """"sudoAvailable":true,"gitHubTokenAvailable":false,""" +
                             """"voiceGateway":{"mode":"disabled"}}"""
                     )
-                    "/api/v1/server/repos" -> jsonResponse(
+                    "/api/caic/v1/server/repos" -> jsonResponse(
                         """[
                             {"path":"acme/web-app","branch":"main","baseBranch":{"name":"main"}},
                             {"path":"acme/api-server","branch":"develop","baseBranch":{"name":"develop"}}
                         ]"""
                     )
-                    "/api/v1/server/harnesses" -> jsonResponse(
+                    "/api/caic/v1/server/harnesses" -> jsonResponse(
                         """[
                             {"name":"claude-code","models":["sonnet","opus"],"supportsImages":true,"supportsCompact":true},
                             {"name":"codex","models":["o3"],"supportsImages":false,"supportsCompact":false}
                         ]"""
                     )
-                    "/api/v1/server/preferences" -> jsonResponse(
+                    "/api/caic/v1/server/preferences" -> jsonResponse(
                         """{"repositories":[],"settings":{"sudo":false,"autoFixOnCIFailure":false,""" +
                             """"autoFixOnPROpen":false,"useDefaultCaches":false}}"""
                     )
@@ -170,22 +170,22 @@ class TaskListViewModelTest {
                 val path = request.requestUrl?.encodedPath ?: return MockResponse()
                     .setResponseCode(404)
                 return when (path) {
-                    "/api/v1/server/config" -> jsonResponse(
+                    "/api/caic/v1/server/config" -> jsonResponse(
                         """{"displayName":"test-host","tailscaleAvailable":false,""" +
                             """"usbAvailable":false,"displayAvailable":false,""" +
                             """"sudoAvailable":true,"gitHubTokenAvailable":false,""" +
                             """"voiceGateway":{"mode":"disabled"}}"""
                     )
-                    "/api/v1/server/repos" -> jsonResponse(
+                    "/api/caic/v1/server/repos" -> jsonResponse(
                         """[{"path":"my-org/repo","branch":"main","baseBranch":{"name":"main"}}]"""
                     )
-                    "/api/v1/server/harnesses" -> jsonResponse(
+                    "/api/caic/v1/server/harnesses" -> jsonResponse(
                         """[
                             {"name":"claude-code","models":["sonnet","opus"],"supportsImages":true,"supportsCompact":true},
                             {"name":"codex","models":["o3"],"supportsImages":false,"supportsCompact":false}
                         ]"""
                     )
-                    "/api/v1/server/preferences" -> jsonResponse(
+                    "/api/caic/v1/server/preferences" -> jsonResponse(
                         """{"repositories":[{"path":"my-org/repo"}],""" +
                             """"harness":"codex","models":{"codex":"o3"},""" +
                             """"settings":{"sudo":false,"autoFixOnCIFailure":false,""" +

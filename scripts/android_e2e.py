@@ -79,7 +79,7 @@ def start_backend(tmp_dir, binary, port):
 
 
 def wait_for_backend(port):
-    url = f"http://localhost:{port}/api/v1/server/config"
+    url = f"http://localhost:{port}/api/caic/v1/server/config"
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         try:

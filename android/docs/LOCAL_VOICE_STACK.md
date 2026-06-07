@@ -35,7 +35,7 @@ Gemini Bidi, local cascade, Parakeet, Gemma, Qwen, or any other provider/runtime
 - Provider names and provider message schemas stay out of Android and frontend
   public types, data-channel messages, compatibility gates, and UI state.
 - Backward compatibility is out of scope until this plan is fully executed.
-  During execution, `/api/v1/...` is the only advertised voice gateway contract
+  During execution, `/api/voicegateway/v1/...` is the only advertised voice gateway contract
   and callers may break across intermediate commits. Add `/api/v2/...` only
   after the new abstraction is complete.
 - The first local stack should be half-duplex unless smoke tests prove that
@@ -99,7 +99,7 @@ Hosted web frontend
       -> active service API client
 
 voice-gateway
-  -> /api/v1/voice/rtc/offer
+  -> /api/voicegateway/v1/voice/rtc/offer
   -> WebRTC session manager
   -> gateway protocol normalizer
   -> provider-neutral session core
@@ -158,7 +158,7 @@ Layer responsibilities:
 - `VoiceSession`: user-visible state, lifecycle, transcript state, active tool
   state, reconnect/close behavior, and error surfacing.
 - `VoiceGatewayClient`: provider-neutral session orchestration.
-- `VoiceGatewaySignaling`: service token fetch, `/api/v1/voice/rtc/offer`, and
+- `VoiceGatewaySignaling`: service token fetch, `/api/voicegateway/v1/voice/rtc/offer`, and
   session close HTTP calls.
 - `VoiceGatewayTransport`: PeerConnection, data channel, RTP tracks, and media
   device replacement.
@@ -406,7 +406,7 @@ TTS backend candidates:
 ### Phase 1: Build The Voice Abstraction Layer
 
 - Add route-selected gateway message types, validation, and golden tests.
-- Keep the advertised gateway contract on `/api/v1/...` during migration.
+- Keep the advertised gateway contract on `/api/voicegateway/v1/...` during migration.
 - Add provider-neutral service tool schema generation.
 - Split Android voice code into session, gateway signaling, gateway transport,
   protocol, media endpoint, context provider, and tool registry layers.
@@ -424,7 +424,7 @@ Acceptance:
 - Android and frontend no longer branch on Gemini-specific compatibility names.
 - Android and frontend use the same route-selected wire messages and service
   tool schema semantics.
-- Gateway `/api/v1/...` remains the only advertised contract until the plan is
+- Gateway `/api/voicegateway/v1/...` remains the only advertised contract until the plan is
   complete.
 
 ### Phase 2: Add Profile Selection

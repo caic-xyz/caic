@@ -1,7 +1,7 @@
 // Error handling and edge case tests.
 import { test, expect, createTaskAPI, waitForTaskState, APIError } from "../helpers";
 
-test("POST /api/v1/tasks with missing prompt returns 400", async ({ api }) => {
+test("POST /api/caic/v1/tasks with missing prompt returns 400", async ({ api }) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const err = await api.createTask({ harness: "fake" } as any).catch((e: unknown) => e);
   expect(err).toBeInstanceOf(APIError);
@@ -9,7 +9,7 @@ test("POST /api/v1/tasks with missing prompt returns 400", async ({ api }) => {
   expect((err as APIError).code).toBeTruthy();
 });
 
-test("POST /api/v1/tasks with unknown repo returns 400", async ({ api }) => {
+test("POST /api/caic/v1/tasks with unknown repo returns 400", async ({ api }) => {
   const err = await api
     .createTask({ initialPrompt: { text: "hello" }, repos: [{ name: "nonexistent" }], harness: "fake" })
     .catch((e: unknown) => e);
@@ -17,7 +17,7 @@ test("POST /api/v1/tasks with unknown repo returns 400", async ({ api }) => {
   expect((err as APIError).status).toBe(400);
 });
 
-test("POST /api/v1/tasks with unknown harness returns 400", async ({ api }) => {
+test("POST /api/caic/v1/tasks with unknown harness returns 400", async ({ api }) => {
   const err = await api
     .createTask({ initialPrompt: { text: "hello" }, harness: "does-not-exist" })
     .catch((e: unknown) => e);

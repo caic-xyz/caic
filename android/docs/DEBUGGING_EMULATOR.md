@@ -189,7 +189,7 @@ The connection flow succeeds:
 ### What you CAN test on the emulator
 
 - WebSocket connection establishment and `setupComplete`
-- Token fetch flow (`GET /api/v1/voice/token`)
+- Token fetch flow (`GET /api/voicegateway/v1/voice/token`)
 - Error handling (invalid API key, missing server URL, network errors)
 - Text injection via `injectText()` (proactive task notifications)
 - Function call dispatch (if triggered by text input to the session)
@@ -251,7 +251,7 @@ with the key or network, not the app.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| "API key not valid" on WebSocket close | Backend's `GEMINI_API_KEY` is wrong or expired | Verify env var on the server: `curl <server>/api/v1/voice/token` and test the returned key |
+| "API key not valid" on WebSocket close | Backend's `GEMINI_API_KEY` is wrong or expired | Verify env var on the server: `curl <server>/api/voicegateway/v1/voice/token` and test the returned key |
 | "Voice auth failed" error in app | `GEMINI_API_KEY` not set on backend | Set the env var and restart the backend |
 | "Server URL is not configured" | Empty server URL in app settings | Configure in Settings screen |
 | Gradle lock timeout | Stale Gradle daemon holding locks | `pkill -f GradleDaemon; find ~/.gradle/caches -name '*.lock' -delete` |

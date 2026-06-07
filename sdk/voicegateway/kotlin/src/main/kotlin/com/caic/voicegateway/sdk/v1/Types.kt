@@ -166,7 +166,7 @@ object ErrorCodes {
     const val InternalError = "INTERNAL_ERROR"
 }
 
-/** VoiceTokenResp is the response for GET /api/v1/voice/token. */
+/** VoiceTokenResp is the response for GET /api/voicegateway/v1/voice/token. */
 @Serializable
 data class VoiceTokenResp(
     val token: String,
@@ -174,11 +174,11 @@ data class VoiceTokenResp(
     val ephemeral: Boolean,
 )
 
-/** VoiceRTCOfferReq is the request body for POST /api/v1/voice/rtc/offer. */
+/** VoiceRTCOfferReq is the request body for POST /api/voicegateway/v1/voice/rtc/offer. */
 @Serializable
 data class VoiceRTCOfferReq(val sdp: String)
 
-/** VoiceRTCAnswerResp is the response for POST /api/v1/voice/rtc/offer. */
+/** VoiceRTCAnswerResp is the response for POST /api/voicegateway/v1/voice/rtc/offer. */
 @Serializable
 data class VoiceRTCAnswerResp(
     val sdp: String,

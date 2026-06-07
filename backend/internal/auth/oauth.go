@@ -36,7 +36,7 @@ func (c *ProviderConfig) RedirectURI() string {
 	if extURL == "" {
 		return ""
 	}
-	return extURL + "/api/v1/auth/" + c.Provider + "/callback"
+	return extURL + "/api/caic/v1/auth/" + c.Provider + "/callback"
 }
 
 // GitHubConfig returns a ProviderConfig for github.com.

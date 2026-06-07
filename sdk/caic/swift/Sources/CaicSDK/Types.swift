@@ -352,7 +352,7 @@ public struct Config: Codable {
     public let authProviders: [String]?
 }
 
-/// VersionResp is the response for GET /api/v1/server/version.
+/// VersionResp is the response for GET /api/caic/v1/server/version.
 public struct VersionResp: Codable {
     public let current: String
     /// empty when check failed
@@ -365,13 +365,13 @@ public struct VersionResp: Codable {
     public let autoUpdateEnabled: Bool
 }
 
-/// UpdateResp is the response for POST /api/v1/server/update.
+/// UpdateResp is the response for POST /api/caic/v1/server/update.
 public struct UpdateResp: Codable {
     /// "started" or "already_up_to_date"
     public let status: String
 }
 
-/// UserResp is returned by GET /api/v1/auth/me.
+/// UserResp is returned by GET /api/caic/v1/auth/me.
 public struct UserResp: Codable {
     public let id: String
     public let provider: String
@@ -434,7 +434,7 @@ public struct UserSettings: Codable {
     public let customMounts: [MountMappingResp]?
 }
 
-/// PreferencesResp is the response for GET /api/v1/server/preferences.
+/// PreferencesResp is the response for GET /api/caic/v1/server/preferences.
 public struct PreferencesResp: Codable {
     public let repositories: [RepoPrefsResp]
     public let harness: String?
@@ -442,7 +442,7 @@ public struct PreferencesResp: Codable {
     public let settings: UserSettings
 }
 
-/// UpdatePreferencesReq is the request body for POST /api/v1/server/preferences.
+/// UpdatePreferencesReq is the request body for POST /api/caic/v1/server/preferences.
 public struct UpdatePreferencesReq: Codable {
     public let settings: UserSettings
 }
@@ -463,7 +463,7 @@ public struct WellKnownCache: Codable {
     public let mounts: [String]
 }
 
-/// WellKnownCachesResp is the response for GET /api/v1/server/caches.
+/// WellKnownCachesResp is the response for GET /api/caic/v1/server/caches.
 public struct WellKnownCachesResp: Codable {
     /// e.g. "~/.claude", "~/.codex"
     public let harnessMounts: [String]
@@ -510,7 +510,7 @@ public struct Repo: Codable {
     public let checksDate: ISOTimestamp?
 }
 
-/// CloneRepoReq is the request body for POST /api/v1/server/repos.
+/// CloneRepoReq is the request body for POST /api/caic/v1/server/repos.
 public struct CloneRepoReq: Codable {
     /// Git clone URL (HTTPS or SSH).
     public let url: String
@@ -519,24 +519,24 @@ public struct CloneRepoReq: Codable {
     public let depth: Int?
 }
 
-/// RepoBranchesResp is the response for GET /api/v1/server/repos/branches.
+/// RepoBranchesResp is the response for GET /api/caic/v1/server/repos/branches.
 public struct RepoBranchesResp: Codable {
     public let branches: [BranchInfo]
 }
 
-/// BotFixCIReq is the request body for POST /api/v1/bot/fix-ci.
+/// BotFixCIReq is the request body for POST /api/caic/v1/bot/fix-ci.
 /// The server fetches CI logs, builds a prompt, and creates a fix task.
 public struct BotFixCIReq: Codable {
     public let repo: String
 }
 
-/// CreateTaskResp is the response for POST /api/v1/tasks.
+/// CreateTaskResp is the response for POST /api/caic/v1/tasks.
 public struct CreateTaskResp: Codable {
     public let status: String
     public let id: String
 }
 
-/// BotFixPRReq is the request body for POST /api/v1/bot/fix-pr.
+/// BotFixPRReq is the request body for POST /api/caic/v1/bot/fix-pr.
 /// The server fetches CI logs for the task's PR and injects a fix command.
 public struct BotFixPRReq: Codable {
     public let taskId: String
@@ -651,7 +651,7 @@ public struct RepoSpec: Codable {
     public let baseBranch: String?
 }
 
-/// CreateTaskReq is the request body for POST /api/v1/tasks.
+/// CreateTaskReq is the request body for POST /api/caic/v1/tasks.
 public struct CreateTaskReq: Codable {
     public let initialPrompt: Prompt
     public let repos: [RepoSpec]?
@@ -696,7 +696,7 @@ public struct EventToolUse: Codable {
     public let input: JSONValue
     /// Snapshot of plan content for ExitPlanMode events.
     public let planContent: String?
-    /// True when Input was omitted due to size; fetch via GET /api/v1/tasks/{id}/tool/{toolUseID}.
+    /// True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
     public let inputTruncated: Bool?
     /// True when the tool runs in the background (Bash/Agent run_in_background).
     public let background: Bool?
@@ -880,7 +880,7 @@ public struct EventStats: Codable {
 // Backend-neutral event types
 
 /// EventMessage is a single SSE event in the backend-neutral stream
-/// (/api/v1/tasks/{id}/events). All backends produce these events.
+/// (/api/caic/v1/tasks/{id}/events). All backends produce these events.
 public struct EventMessage: Codable {
     public let kind: EventKind
     public let ts: Int
@@ -909,29 +909,29 @@ public struct EventMessage: Codable {
     public let stats: EventStats?
 }
 
-/// InputReq is the request body for POST /api/v1/tasks/{id}/input.
+/// InputReq is the request body for POST /api/caic/v1/tasks/{id}/input.
 public struct InputReq: Codable {
     public let prompt: Prompt
 }
 
-/// RestartReq is the request body for POST /api/v1/tasks/{id}/restart.
+/// RestartReq is the request body for POST /api/caic/v1/tasks/{id}/restart.
 public struct RestartReq: Codable {
     public let prompt: Prompt
 }
 
-/// CompactReq is the request body for POST /api/v1/tasks/{id}/compact.
+/// CompactReq is the request body for POST /api/caic/v1/tasks/{id}/compact.
 public struct CompactReq: Codable {
     public let instructions: String?
 }
 
-/// CILogResp is the response for GET /api/v1/tasks/{id}/ci-log.
+/// CILogResp is the response for GET /api/caic/v1/tasks/{id}/ci-log.
 /// It contains the name of the first failed CI step and its log tail.
 public struct CILogResp: Codable {
     public let stepName: String
     public let log: String
 }
 
-/// SyncReq is the request body for POST /api/v1/tasks/{id}/sync.
+/// SyncReq is the request body for POST /api/caic/v1/tasks/{id}/sync.
 public struct SyncReq: Codable {
     public let force: Bool?
     public let target: SyncTarget?
@@ -946,7 +946,7 @@ public struct SafetyIssue: Codable {
     public let detail: String
 }
 
-/// SyncResp is the response for POST /api/v1/tasks/{id}/sync.
+/// SyncResp is the response for POST /api/caic/v1/tasks/{id}/sync.
 public struct SyncResp: Codable {
     /// "synced", "blocked", or "empty"
     public let status: String
@@ -957,7 +957,7 @@ public struct SyncResp: Codable {
     public let prNumber: Int?
 }
 
-/// ForkTaskReq is the request body for POST /api/v1/tasks/{id}/fork.
+/// ForkTaskReq is the request body for POST /api/caic/v1/tasks/{id}/fork.
 public struct ForkTaskReq: Codable {
     /// Initial prompt for the forked task.
     public let prompt: Prompt
@@ -981,7 +981,7 @@ public struct ForkTaskReq: Codable {
     public let gitHubToken: Bool?
 }
 
-/// DiffResp is the response for GET /api/v1/tasks/{id}/diff.
+/// DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff.
 public struct DiffResp: Codable {
     public let diff: String
 }
@@ -1001,18 +1001,18 @@ public struct ProcessInfo: Codable {
     public let command: String
 }
 
-/// ProcessListResp is the response for GET /api/v1/tasks/{id}/processes.
+/// ProcessListResp is the response for GET /api/caic/v1/tasks/{id}/processes.
 public struct ProcessListResp: Codable {
     public let processes: [ProcessInfo]
 }
 
-/// SignalProcessReq is the request body for POST /api/v1/tasks/{id}/processes/{pid}/signal.
+/// SignalProcessReq is the request body for POST /api/caic/v1/tasks/{id}/processes/{pid}/signal.
 public struct SignalProcessReq: Codable {
     /// "SIGTERM" or "SIGKILL"
     public let signal: String
 }
 
-/// TaskToolInputResp is the response for GET /api/v1/tasks/{id}/tool/{toolUseID}.
+/// TaskToolInputResp is the response for GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
 /// It returns the full (untruncated) input for a tool call.
 public struct TaskToolInputResp: Codable {
     public let toolUseID: String
@@ -1099,18 +1099,18 @@ public struct LocalUsage: Codable {
     public let windows: [LocalWindow]
 }
 
-/// UsageResp is the response for GET /api/v1/usage.
+/// UsageResp is the response for GET /api/caic/v1/usage.
 public struct UsageResp: Codable {
     public let providers: [ProviderQuota]?
     public let local: LocalUsage
 }
 
-/// WebFetchReq is the request body for POST /api/v1/web/fetch.
+/// WebFetchReq is the request body for POST /api/caic/v1/web/fetch.
 public struct WebFetchReq: Codable {
     public let url: String
 }
 
-/// WebFetchResp is the response for POST /api/v1/web/fetch.
+/// WebFetchResp is the response for POST /api/caic/v1/web/fetch.
 public struct WebFetchResp: Codable {
     public let title: String
     public let content: String

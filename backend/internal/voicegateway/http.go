@@ -31,9 +31,9 @@ func NewHandler(
 		bridge: bridge,
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/v1/voice/health", h.handleHealth)
-	mux.HandleFunc("POST /api/v1/voice/rtc/offer", h.handleOffer)
-	mux.HandleFunc("POST /api/v1/voice/rtc/{sessionID}", h.handleClose)
+	mux.HandleFunc("GET /api/voicegateway/v1/voice/health", h.handleHealth)
+	mux.HandleFunc("POST /api/voicegateway/v1/voice/rtc/offer", h.handleOffer)
+	mux.HandleFunc("POST /api/voicegateway/v1/voice/rtc/{sessionID}", h.handleClose)
 	return mux, nil
 }
 
@@ -42,7 +42,7 @@ type handler struct {
 	bridge MediaBridge
 }
 
-// HealthResp is returned by GET /api/v1/voice/health.
+// HealthResp is returned by GET /api/voicegateway/v1/voice/health.
 type HealthResp struct {
 	Status string `json:"status"`
 }

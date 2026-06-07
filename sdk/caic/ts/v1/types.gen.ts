@@ -102,7 +102,7 @@ export interface EventToolUse {
   input: any /* json.RawMessage */;
   /** Snapshot of plan content for ExitPlanMode events. */
   planContent?: string;
-  /** True when Input was omitted due to size; fetch via GET /api/v1/tasks/{id}/tool/{toolUseID}. */
+  /** True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. */
   inputTruncated?: boolean;
   /** True when the tool runs in the background (Bash/Agent run_in_background). */
   background?: boolean;
@@ -289,7 +289,7 @@ export interface EventStats {
 
 /**
  * EventMessage is a single SSE event in the backend-neutral stream
- * (/api/v1/tasks/{id}/events). All backends produce these events.
+ * (/api/caic/v1/tasks/{id}/events). All backends produce these events.
  */
 export interface EventMessage {
   kind: EventKind;
@@ -486,7 +486,7 @@ export interface Config {
   authProviders?: string[];
 }
 
-/** VersionResp is the response for GET /api/v1/server/version. */
+/** VersionResp is the response for GET /api/caic/v1/server/version. */
 export interface VersionResp {
   current: string;
   /** empty when check failed */
@@ -499,13 +499,13 @@ export interface VersionResp {
   autoUpdateEnabled: boolean;
 }
 
-/** UpdateResp is the response for POST /api/v1/server/update. */
+/** UpdateResp is the response for POST /api/caic/v1/server/update. */
 export interface UpdateResp {
   /** "started" or "already_up_to_date" */
   status: string;
 }
 
-/** UserResp is returned by GET /api/v1/auth/me. */
+/** UserResp is returned by GET /api/caic/v1/auth/me. */
 export interface UserResp {
   id: string;
   provider: string;
@@ -582,7 +582,7 @@ export interface UserSettings {
   customMounts?: MountMappingResp[];
 }
 
-/** PreferencesResp is the response for GET /api/v1/server/preferences. */
+/** PreferencesResp is the response for GET /api/caic/v1/server/preferences. */
 export interface PreferencesResp {
   repositories: RepoPrefsResp[];
   harness?: string;
@@ -590,7 +590,7 @@ export interface PreferencesResp {
   settings: UserSettings;
 }
 
-/** UpdatePreferencesReq is the request body for POST /api/v1/server/preferences. */
+/** UpdatePreferencesReq is the request body for POST /api/caic/v1/server/preferences. */
 export interface UpdatePreferencesReq {
   settings: UserSettings;
 }
@@ -611,7 +611,7 @@ export interface WellKnownCache {
   mounts: string[];
 }
 
-/** WellKnownCachesResp is the response for GET /api/v1/server/caches. */
+/** WellKnownCachesResp is the response for GET /api/caic/v1/server/caches. */
 export interface WellKnownCachesResp {
   /** e.g. "~/.claude", "~/.codex" */
   harnessMounts: string[];
@@ -658,7 +658,7 @@ export interface Repo {
   checksDate?: ISOTimestamp;
 }
 
-/** CloneRepoReq is the request body for POST /api/v1/server/repos. */
+/** CloneRepoReq is the request body for POST /api/caic/v1/server/repos. */
 export interface CloneRepoReq {
   /** Git clone URL (HTTPS or SSH). */
   url: string;
@@ -667,27 +667,27 @@ export interface CloneRepoReq {
   depth?: number /* int */;
 }
 
-/** RepoBranchesResp is the response for GET /api/v1/server/repos/branches. */
+/** RepoBranchesResp is the response for GET /api/caic/v1/server/repos/branches. */
 export interface RepoBranchesResp {
   branches: BranchInfo[];
 }
 
 /**
- * BotFixCIReq is the request body for POST /api/v1/bot/fix-ci.
+ * BotFixCIReq is the request body for POST /api/caic/v1/bot/fix-ci.
  * The server fetches CI logs, builds a prompt, and creates a fix task.
  */
 export interface BotFixCIReq {
   repo: string;
 }
 
-/** CreateTaskResp is the response for POST /api/v1/tasks. */
+/** CreateTaskResp is the response for POST /api/caic/v1/tasks. */
 export interface CreateTaskResp {
   status: string;
   id: string;
 }
 
 /**
- * BotFixPRReq is the request body for POST /api/v1/bot/fix-pr.
+ * BotFixPRReq is the request body for POST /api/caic/v1/bot/fix-pr.
  * The server fetches CI logs for the task's PR and injects a fix command.
  */
 export interface BotFixPRReq {
@@ -803,7 +803,7 @@ export interface RepoSpec {
   baseBranch?: string;
 }
 
-/** CreateTaskReq is the request body for POST /api/v1/tasks. */
+/** CreateTaskReq is the request body for POST /api/caic/v1/tasks. */
 export interface CreateTaskReq {
   initialPrompt: Prompt;
   repos?: RepoSpec[];
@@ -818,23 +818,23 @@ export interface CreateTaskReq {
   gitHubToken?: boolean;
 }
 
-/** InputReq is the request body for POST /api/v1/tasks/{id}/input. */
+/** InputReq is the request body for POST /api/caic/v1/tasks/{id}/input. */
 export interface InputReq {
   prompt: Prompt;
 }
 
-/** RestartReq is the request body for POST /api/v1/tasks/{id}/restart. */
+/** RestartReq is the request body for POST /api/caic/v1/tasks/{id}/restart. */
 export interface RestartReq {
   prompt: Prompt;
 }
 
-/** CompactReq is the request body for POST /api/v1/tasks/{id}/compact. */
+/** CompactReq is the request body for POST /api/caic/v1/tasks/{id}/compact. */
 export interface CompactReq {
   instructions?: string;
 }
 
 /**
- * CILogResp is the response for GET /api/v1/tasks/{id}/ci-log.
+ * CILogResp is the response for GET /api/caic/v1/tasks/{id}/ci-log.
  * It contains the name of the first failed CI step and its log tail.
  */
 export interface CILogResp {
@@ -842,7 +842,7 @@ export interface CILogResp {
   log: string;
 }
 
-/** SyncReq is the request body for POST /api/v1/tasks/{id}/sync. */
+/** SyncReq is the request body for POST /api/caic/v1/tasks/{id}/sync. */
 export interface SyncReq {
   force?: boolean;
   target?: SyncTarget;
@@ -857,7 +857,7 @@ export interface SafetyIssue {
   detail: string;
 }
 
-/** SyncResp is the response for POST /api/v1/tasks/{id}/sync. */
+/** SyncResp is the response for POST /api/caic/v1/tasks/{id}/sync. */
 export interface SyncResp {
   /** "synced", "blocked", or "empty" */
   status: string;
@@ -868,7 +868,7 @@ export interface SyncResp {
   prNumber?: number /* int */;
 }
 
-/** ForkTaskReq is the request body for POST /api/v1/tasks/{id}/fork. */
+/** ForkTaskReq is the request body for POST /api/caic/v1/tasks/{id}/fork. */
 export interface ForkTaskReq {
   /** Initial prompt for the forked task. */
   prompt: Prompt;
@@ -892,7 +892,7 @@ export interface ForkTaskReq {
   gitHubToken?: boolean;
 }
 
-/** DiffResp is the response for GET /api/v1/tasks/{id}/diff. */
+/** DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff. */
 export interface DiffResp {
   diff: string;
 }
@@ -912,19 +912,19 @@ export interface ProcessInfo {
   command: string;
 }
 
-/** ProcessListResp is the response for GET /api/v1/tasks/{id}/processes. */
+/** ProcessListResp is the response for GET /api/caic/v1/tasks/{id}/processes. */
 export interface ProcessListResp {
   processes: ProcessInfo[];
 }
 
-/** SignalProcessReq is the request body for POST /api/v1/tasks/{id}/processes/{pid}/signal. */
+/** SignalProcessReq is the request body for POST /api/caic/v1/tasks/{id}/processes/{pid}/signal. */
 export interface SignalProcessReq {
   /** "SIGTERM" or "SIGKILL" */
   signal: string;
 }
 
 /**
- * TaskToolInputResp is the response for GET /api/v1/tasks/{id}/tool/{toolUseID}.
+ * TaskToolInputResp is the response for GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
  * It returns the full (untruncated) input for a tool call.
  */
 export interface TaskToolInputResp {
@@ -1014,18 +1014,18 @@ export interface LocalUsage {
   windows: LocalWindow[];
 }
 
-/** UsageResp is the response for GET /api/v1/usage. */
+/** UsageResp is the response for GET /api/caic/v1/usage. */
 export interface UsageResp {
   providers?: ProviderQuota[];
   local: LocalUsage;
 }
 
-/** WebFetchReq is the request body for POST /api/v1/web/fetch. */
+/** WebFetchReq is the request body for POST /api/caic/v1/web/fetch. */
 export interface WebFetchReq {
   url: string;
 }
 
-/** WebFetchResp is the response for POST /api/v1/web/fetch. */
+/** WebFetchResp is the response for POST /api/caic/v1/web/fetch. */
 export interface WebFetchResp {
   title: string;
   content: string;

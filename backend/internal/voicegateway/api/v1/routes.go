@@ -12,7 +12,7 @@ type Route struct {
 	Name        string       // Function name, e.g. "voiceRTCOffer"
 	Doc         string       // One-line description for SDK comments and docs.
 	Method      string       // HTTP method, e.g. "GET" or "POST"
-	Path        string       // "/api/v1/voice/rtc/offer"
+	Path        string       // "/api/voicegateway/v1/voice/rtc/offer"
 	Req         reflect.Type // Request body type; nil for no body.
 	Resp        reflect.Type // Response body type.
 	IsArray     bool         // response is T[] not T
@@ -34,9 +34,9 @@ func (r *Route) RespName() string {
 }
 
 // CategoryName returns the doc section derived from the first path segment
-// after "/api/v1/", with the first letter uppercased.
+// after "/api/voicegateway/v1/", with the first letter uppercased.
 func (r *Route) CategoryName() string {
-	p := strings.TrimPrefix(r.Path, "/api/v1/")
+	p := strings.TrimPrefix(r.Path, "/api/voicegateway/v1/")
 	if i := strings.IndexByte(p, '/'); i >= 0 {
 		p = p[:i]
 	}
@@ -52,14 +52,14 @@ var Routes = []Route{
 		Name:   "getVoiceToken",
 		Doc:    "Returns a short-lived voice API token.",
 		Method: "GET",
-		Path:   "/api/v1/voice/token",
+		Path:   "/api/voicegateway/v1/voice/token",
 		Resp:   reflect.TypeFor[VoiceTokenResp](),
 	},
 	{
 		Name:   "voiceRTCOffer",
 		Doc:    "Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session.",
 		Method: "POST",
-		Path:   "/api/v1/voice/rtc/offer",
+		Path:   "/api/voicegateway/v1/voice/rtc/offer",
 		Req:    reflect.TypeFor[VoiceRTCOfferReq](),
 		Resp:   reflect.TypeFor[VoiceRTCAnswerResp](),
 	},
@@ -67,7 +67,7 @@ var Routes = []Route{
 		Name:   "closeVoiceRTC",
 		Doc:    "Closes a WebRTC voice bridge session.",
 		Method: "POST",
-		Path:   "/api/v1/voice/rtc/{sessionID}",
+		Path:   "/api/voicegateway/v1/voice/rtc/{sessionID}",
 		Resp:   reflect.TypeFor[StatusResp](),
 	},
 }

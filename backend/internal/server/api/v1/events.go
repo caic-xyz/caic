@@ -2,7 +2,7 @@
 // Types are generated into TypeScript, Kotlin, and Swift via gen-api-sdk.
 //
 // EventMessage is the backend-neutral SSE contract consumed by the frontend
-// via both /api/v1/tasks/{id}/events and /api/v1/tasks/{id}/raw_events.
+// via both /api/caic/v1/tasks/{id}/events and /api/caic/v1/tasks/{id}/raw_events.
 // Every backend (Claude, Gemini, Codex, …) produces these events through its
 // converter. EventInit includes a Harness field so the client knows which
 // backend produced the stream.
@@ -44,7 +44,7 @@ const (
 )
 
 // EventMessage is a single SSE event in the backend-neutral stream
-// (/api/v1/tasks/{id}/events). All backends produce these events.
+// (/api/caic/v1/tasks/{id}/events). All backends produce these events.
 type EventMessage struct {
 	Kind            EventKind             `json:"kind"`
 	Ts              int64                 `json:"ts"`
@@ -101,7 +101,7 @@ type EventToolUse struct {
 	Name           string          `json:"name"`
 	Input          json.RawMessage `json:"input"`
 	PlanContent    string          `json:"planContent,omitempty"`    // Snapshot of plan content for ExitPlanMode events.
-	InputTruncated bool            `json:"inputTruncated,omitempty"` // True when Input was omitted due to size; fetch via GET /api/v1/tasks/{id}/tool/{toolUseID}.
+	InputTruncated bool            `json:"inputTruncated,omitempty"` // True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
 	Background     bool            `json:"background,omitempty"`     // True when the tool runs in the background (Bash/Agent run_in_background).
 }
 

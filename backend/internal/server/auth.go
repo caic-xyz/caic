@@ -191,7 +191,7 @@ func (s *Server) handleAuthCallback(provider string) http.HandlerFunc {
 	}
 }
 
-// handleGetMe handles GET /api/v1/auth/me.
+// handleGetMe handles GET /api/caic/v1/auth/me.
 func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {
 	u, ok := auth.UserFromContext(r.Context())
 	if !ok {
@@ -206,7 +206,7 @@ func (s *Server) handleGetMe(w http.ResponseWriter, r *http.Request) {
 	}, nil)
 }
 
-// handleLogout handles POST /api/v1/auth/logout.
+// handleLogout handles POST /api/caic/v1/auth/logout.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is set dynamically; all required attributes are present
 		Name:     sessionCookieName,

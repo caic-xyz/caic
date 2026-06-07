@@ -148,7 +148,7 @@ class TaskRepository @Inject constructor(
      */
     fun taskRawEventsWithReady(baseURL: String, taskId: String): Flow<TaskSSEEvent> = callbackFlow {
         val request = Request.Builder()
-            .url("$baseURL/api/v1/tasks/$taskId/raw_events")
+            .url("$baseURL/api/caic/v1/tasks/$taskId/raw_events")
             .header("Accept", "text/event-stream")
             .apply { settingsRepository.settings.value.authToken?.let { header("Authorization", "Bearer $it") } }
             .build()
@@ -189,7 +189,7 @@ class TaskRepository @Inject constructor(
     private fun taskListEvents(baseURL: String): Flow<List<Task>> = channelFlow {
         val taskMap = LinkedHashMap<String, Task>()
         val request = Request.Builder()
-            .url("$baseURL/api/v1/server/tasks/events")
+            .url("$baseURL/api/caic/v1/server/tasks/events")
             .header("Accept", "text/event-stream")
             .apply { settingsRepository.settings.value.authToken?.let { header("Authorization", "Bearer $it") } }
             .build()
@@ -249,7 +249,8 @@ class TaskRepository @Inject constructor(
     }.buffer(Channel.UNLIMITED)
 
     /** SSE flow for the usage events endpoint. */
-    private fun usageEvents(baseURL: String): Flow<UsageResp> = sseFlow("$baseURL/api/v1/server/usage/events")
+    private fun usageEvents(baseURL: String): Flow<UsageResp> =
+        sseFlow("$baseURL/api/caic/v1/server/usage/events")
 
     /** Generic SSE flow that deserializes each message event as [T]. */
     private inline fun <reified T> sseFlow(url: String): Flow<T> = callbackFlow {

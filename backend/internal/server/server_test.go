@@ -276,7 +276,7 @@ func TestHandleTaskEvents(t *testing.T) {
 	t.Run("NotFound", func(t *testing.T) {
 		t.Parallel()
 		s := newTestServer(t)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/tasks/99/raw_events", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/99/raw_events", http.NoBody)
 		req.SetPathValue("id", "99")
 		w := httptest.NewRecorder()
 		s.handleTaskRawEvents(w, req)
@@ -292,7 +292,7 @@ func TestHandleTaskEvents(t *testing.T) {
 	t.Run("NonexistentID", func(t *testing.T) {
 		t.Parallel()
 		s := newTestServer(t)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/tasks/abc/raw_events", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/abc/raw_events", http.NoBody)
 		req.SetPathValue("id", "abc")
 		w := httptest.NewRecorder()
 		s.handleTaskRawEvents(w, req)
@@ -335,7 +335,7 @@ func TestHandleTaskInput(t *testing.T) {
 			insertTestTask(t, s, "t1", &task.Task{InitialPrompt: agent.Prompt{Text: "test"}})
 
 			body := strings.NewReader(tt.bodyJSON)
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/input", body)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/input", body)
 			req.SetPathValue("id", "t1")
 			w := httptest.NewRecorder()
 			handleWithTask(s, s.sendInput)(w, req)
@@ -358,7 +358,7 @@ func testRestart(t *testing.T, state task.State, bodyJSON string, wantStatus int
 	insertTestTask(t, s, "t1", tk)
 
 	body := strings.NewReader(bodyJSON)
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/restart", body)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/restart", body)
 	req.SetPathValue("id", "t1")
 	w := httptest.NewRecorder()
 	handleWithTask(s, s.restartTask)(w, req)
@@ -393,7 +393,7 @@ func TestHandlePurge(t *testing.T) {
 		// StatePending is the zero value, but set explicitly for clarity.
 		insertTestTask(t, s, "t1", tk)
 
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/purge", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
 		req.SetPathValue("id", "t1")
 		w := httptest.NewRecorder()
 		handleWithTask(s, s.purgeTask)(w, req)
@@ -414,7 +414,7 @@ func TestHandlePurge(t *testing.T) {
 		registerTestRunner(s, "r", &task.Runner{BaseBranch: "main", Dir: t.TempDir()})
 		insertTestTask(t, s, "t1", tk)
 
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/purge", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
 		req.SetPathValue("id", "t1")
 		w := httptest.NewRecorder()
 		handleWithTask(s, s.purgeTask)(w, req)
@@ -446,7 +446,7 @@ func TestHandlePurge(t *testing.T) {
 		// where BaseContext is cancelled before the handler completes.
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/purge", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/purge", http.NoBody)
 		req = req.WithContext(ctx)
 		req.SetPathValue("id", "t1")
 		w := httptest.NewRecorder()
@@ -474,7 +474,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test task"},"repos":[{"name":"myrepo"}],"harness":"claude"}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -496,7 +496,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test task"}}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -515,7 +515,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"nonexistent"}],"harness":"claude"}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -539,7 +539,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"nonexistent"}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -570,7 +570,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"stub","model":"nonexistent"}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -601,7 +601,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"stub","model":"m1"}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -640,7 +640,7 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude"}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -690,7 +690,7 @@ func TestHandleCreateTask(t *testing.T) {
 		}
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"myrepo"}],"harness":"claude"}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handle(s.createTask)(w, req)
 
@@ -747,7 +747,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude"}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -772,7 +772,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude"}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -787,7 +787,7 @@ func TestHandleCreateTask(t *testing.T) {
 		handler := handle(s.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repo":"r","harness":"claude","bogus":true}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks", body)
 		w := httptest.NewRecorder()
 		handler(w, req)
 
@@ -824,7 +824,7 @@ func TestSignalProcess(t *testing.T) {
 		}
 
 		body := strings.NewReader(`{"signal":"SIGTERM","extra":true}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/processes/123/signal", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/processes/123/signal", body)
 		req.SetPathValue("id", "t1")
 		req.SetPathValue("pid", "123")
 		w := httptest.NewRecorder()
@@ -861,7 +861,7 @@ func TestSignalProcess(t *testing.T) {
 		}
 
 		body := strings.NewReader(`{"signal":"SIGKILL"}`)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tasks/t1/processes/123/signal", body)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/tasks/t1/processes/123/signal", body)
 		req.SetPathValue("id", "t1")
 		req.SetPathValue("pid", "123")
 		w := httptest.NewRecorder()
@@ -889,7 +889,7 @@ func TestHandleListRepos(t *testing.T) {
 	}
 	s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/server/repos", http.NoBody)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/server/repos", http.NoBody)
 	w := httptest.NewRecorder()
 	handle(s.listRepos)(w, req)
 
@@ -1624,7 +1624,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		// purged tasks instead of blocking until context deadline.
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
 		req.SetPathValue("id", taskID)
 		w := httptest.NewRecorder()
 		start := time.Now()
@@ -1707,7 +1707,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/"+taskID+"/raw_events", http.NoBody).WithContext(ctx)
 		req.SetPathValue("id", taskID)
 		w := httptest.NewRecorder()
 		s.handleTaskRawEvents(w, req)
@@ -1931,8 +1931,8 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 		if got.URL != "https://voice.example.com" {
 			t.Fatalf("URL = %q, want https://voice.example.com", got.URL)
 		}
-		if got.TokenEndpoint != "/api/v1/voice/token" {
-			t.Fatalf("TokenEndpoint = %q, want /api/v1/voice/token", got.TokenEndpoint)
+		if got.TokenEndpoint != "/api/voicegateway/v1/voice/token" {
+			t.Fatalf("TokenEndpoint = %q, want /api/voicegateway/v1/voice/token", got.TokenEndpoint)
 		}
 	})
 
@@ -1945,8 +1945,8 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 		if got.Mode != v1.VoiceGatewayModeEmbedded {
 			t.Fatalf("Mode = %q, want embedded", got.Mode)
 		}
-		if got.TokenEndpoint != "/api/v1/voice/token" {
-			t.Fatalf("TokenEndpoint = %q, want /api/v1/voice/token", got.TokenEndpoint)
+		if got.TokenEndpoint != "/api/voicegateway/v1/voice/token" {
+			t.Fatalf("TokenEndpoint = %q, want /api/voicegateway/v1/voice/token", got.TokenEndpoint)
 		}
 	})
 }
@@ -1963,7 +1963,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auth enabled", func(t *testing.T) {
 		t.Parallel()
-		// Regression: adding /api/v1/auth/ (unqualified) alongside GET / (qualified)
+		// Regression: adding /api/caic/v1/auth/ (unqualified) alongside GET / (qualified)
 		// caused a pattern conflict panic in Go 1.22+ ServeMux.
 		s := newTestServer(t)
 		secret := make([]byte, 32)
@@ -2262,7 +2262,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 		t.Parallel()
 		// Simulate the start handler to get a valid state cookie.
 		startW := httptest.NewRecorder()
-		startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/auth/github/start", http.NoBody)
+		startReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/auth/github/start", http.NoBody)
 		s.handleAuthStart("github")(startW, startReq)
 		if startW.Code != http.StatusFound {
 			t.Fatalf("start status = %d, want %d", startW.Code, http.StatusFound)
@@ -2288,7 +2288,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 
 		// Build callback request with the state echoed back (as GitHub would).
 		cbReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
-			"/api/v1/auth/github/callback?code=testcode&state="+url.QueryEscape(rawState), http.NoBody)
+			"/api/caic/v1/auth/github/callback?code=testcode&state="+url.QueryEscape(rawState), http.NoBody)
 		cbReq.AddCookie(stateCookie)
 		cbW := httptest.NewRecorder()
 		s.handleAuthCallback("github")(cbW, cbReq)

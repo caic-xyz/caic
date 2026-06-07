@@ -91,7 +91,7 @@ type VoiceGatewayMetadata struct {
 	Capabilities  []string         `json:"capabilities,omitempty"`
 }
 
-// UserResp is returned by GET /api/v1/auth/me.
+// UserResp is returned by GET /api/caic/v1/auth/me.
 type UserResp struct {
 	ID        string `json:"id"`
 	Provider  string `json:"provider"`
@@ -282,7 +282,7 @@ type TaskListEvent struct {
 	Warning  string                     `json:"warning,omitempty"`
 }
 
-// TaskToolInputResp is the response for GET /api/v1/tasks/{id}/tool/{toolUseID}.
+// TaskToolInputResp is the response for GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
 // It returns the full (untruncated) input for a tool call.
 type TaskToolInputResp struct {
 	ToolUseID string          `json:"toolUseID"`
@@ -294,20 +294,20 @@ type StatusResp struct {
 	Status string `json:"status"`
 }
 
-// CreateTaskResp is the response for POST /api/v1/tasks.
+// CreateTaskResp is the response for POST /api/caic/v1/tasks.
 type CreateTaskResp struct {
 	Status string  `json:"status"`
 	ID     ksid.ID `json:"id"`
 }
 
-// CILogResp is the response for GET /api/v1/tasks/{id}/ci-log.
+// CILogResp is the response for GET /api/caic/v1/tasks/{id}/ci-log.
 // It contains the name of the first failed CI step and its log tail.
 type CILogResp struct {
 	StepName string `json:"stepName"`
 	Log      string `json:"log"`
 }
 
-// CreateTaskReq is the request body for POST /api/v1/tasks.
+// CreateTaskReq is the request body for POST /api/caic/v1/tasks.
 type CreateTaskReq struct {
 	InitialPrompt Prompt     `json:"initialPrompt"`
 	Repos         []RepoSpec `json:"repos,omitempty"`
@@ -321,7 +321,7 @@ type CreateTaskReq struct {
 	GitHubToken   bool       `json:"gitHubToken,omitempty"`
 }
 
-// ForkTaskReq is the request body for POST /api/v1/tasks/{id}/fork.
+// ForkTaskReq is the request body for POST /api/caic/v1/tasks/{id}/fork.
 type ForkTaskReq struct {
 	Prompt      Prompt     `json:"prompt"`                // Initial prompt for the forked task.
 	Harness     Harness    `json:"harness,omitempty"`     // Override harness; empty means inherit from source.
@@ -335,29 +335,29 @@ type ForkTaskReq struct {
 	GitHubToken *bool      `json:"gitHubToken,omitempty"` // Override gitHubToken; nil means inherit from source.
 }
 
-// BotFixCIReq is the request body for POST /api/v1/bot/fix-ci.
+// BotFixCIReq is the request body for POST /api/caic/v1/bot/fix-ci.
 // The server fetches CI logs, builds a prompt, and creates a fix task.
 type BotFixCIReq struct {
 	Repo string `json:"repo"`
 }
 
-// BotFixPRReq is the request body for POST /api/v1/bot/fix-pr.
+// BotFixPRReq is the request body for POST /api/caic/v1/bot/fix-pr.
 // The server fetches CI logs for the task's PR and injects a fix command.
 type BotFixPRReq struct {
 	TaskID string `json:"taskId"`
 }
 
-// InputReq is the request body for POST /api/v1/tasks/{id}/input.
+// InputReq is the request body for POST /api/caic/v1/tasks/{id}/input.
 type InputReq struct {
 	Prompt Prompt `json:"prompt"`
 }
 
-// RestartReq is the request body for POST /api/v1/tasks/{id}/restart.
+// RestartReq is the request body for POST /api/caic/v1/tasks/{id}/restart.
 type RestartReq struct {
 	Prompt Prompt `json:"prompt"`
 }
 
-// CompactReq is the request body for POST /api/v1/tasks/{id}/compact.
+// CompactReq is the request body for POST /api/caic/v1/tasks/{id}/compact.
 type CompactReq struct {
 	Instructions string `json:"instructions,omitempty"`
 }
@@ -389,13 +389,13 @@ const (
 	SyncTargetDefault SyncTarget = "default" // Squash-push to the repo's default branch.
 )
 
-// SyncReq is the request body for POST /api/v1/tasks/{id}/sync.
+// SyncReq is the request body for POST /api/caic/v1/tasks/{id}/sync.
 type SyncReq struct {
 	Force  bool       `json:"force,omitempty"`
 	Target SyncTarget `json:"target,omitempty"`
 }
 
-// SyncResp is the response for POST /api/v1/tasks/{id}/sync.
+// SyncResp is the response for POST /api/caic/v1/tasks/{id}/sync.
 type SyncResp struct {
 	Status       string        `json:"status"` // "synced", "blocked", or "empty"
 	Branch       string        `json:"branch,omitempty"`
@@ -454,13 +454,13 @@ type LocalUsage struct {
 	Windows []LocalWindow `json:"windows"`
 }
 
-// UsageResp is the response for GET /api/v1/usage.
+// UsageResp is the response for GET /api/caic/v1/usage.
 type UsageResp struct {
 	Providers []ProviderQuota `json:"providers,omitempty"`
 	Local     LocalUsage      `json:"local"`
 }
 
-// DiffResp is the response for GET /api/v1/tasks/{id}/diff.
+// DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff.
 type DiffResp struct {
 	Diff string `json:"diff"`
 }
@@ -477,12 +477,12 @@ type ProcessInfo struct {
 	Command string  `json:"command"` // Full command line.
 }
 
-// ProcessListResp is the response for GET /api/v1/tasks/{id}/processes.
+// ProcessListResp is the response for GET /api/caic/v1/tasks/{id}/processes.
 type ProcessListResp struct {
 	Processes []ProcessInfo `json:"processes"`
 }
 
-// SignalProcessReq is the request body for POST /api/v1/tasks/{id}/processes/{pid}/signal.
+// SignalProcessReq is the request body for POST /api/caic/v1/tasks/{id}/processes/{pid}/signal.
 type SignalProcessReq struct {
 	Signal string `json:"signal"` // "SIGTERM" or "SIGKILL"
 	PID    int    `json:"-"      path:"pid"`
@@ -538,7 +538,7 @@ type UserSettings struct {
 	CustomMounts []MountMappingResp `json:"customMounts,omitempty"`
 }
 
-// PreferencesResp is the response for GET /api/v1/server/preferences.
+// PreferencesResp is the response for GET /api/caic/v1/server/preferences.
 type PreferencesResp struct {
 	Repositories []RepoPrefsResp   `json:"repositories"`
 	Harness      string            `json:"harness,omitempty"`
@@ -546,26 +546,26 @@ type PreferencesResp struct {
 	Settings     UserSettings      `json:"settings"`
 }
 
-// UpdatePreferencesReq is the request body for POST /api/v1/server/preferences.
+// UpdatePreferencesReq is the request body for POST /api/caic/v1/server/preferences.
 type UpdatePreferencesReq struct {
 	Settings UserSettings `json:"settings"`
 
 	settingsSet bool
 }
 
-// CloneRepoReq is the request body for POST /api/v1/server/repos.
+// CloneRepoReq is the request body for POST /api/caic/v1/server/repos.
 type CloneRepoReq struct {
 	URL   string `json:"url"`            // Git clone URL (HTTPS or SSH).
 	Path  string `json:"path,omitempty"` // Target subdirectory under rootDir; defaults to repo basename.
 	Depth int    `json:"depth,omitempty"`
 }
 
-// WebFetchReq is the request body for POST /api/v1/web/fetch.
+// WebFetchReq is the request body for POST /api/caic/v1/web/fetch.
 type WebFetchReq struct {
 	URL string `json:"url"`
 }
 
-// WebFetchResp is the response for POST /api/v1/web/fetch.
+// WebFetchResp is the response for POST /api/caic/v1/web/fetch.
 type WebFetchResp struct {
 	Title   string `json:"title"`
 	Content string `json:"content"`
@@ -577,7 +577,7 @@ type BranchInfo struct {
 	Remote string `json:"remote,omitempty"`
 }
 
-// RepoBranchesResp is the response for GET /api/v1/server/repos/branches.
+// RepoBranchesResp is the response for GET /api/caic/v1/server/repos/branches.
 type RepoBranchesResp struct {
 	Branches []BranchInfo `json:"branches"`
 }
@@ -589,13 +589,13 @@ type WellKnownCache struct {
 	Mounts      []string `json:"mounts"` // List of runtime mount paths
 }
 
-// WellKnownCachesResp is the response for GET /api/v1/server/caches.
+// WellKnownCachesResp is the response for GET /api/caic/v1/server/caches.
 type WellKnownCachesResp struct {
 	HarnessMounts []string         `json:"harnessMounts"` // e.g. "~/.claude", "~/.codex"
 	WellKnown     []WellKnownCache `json:"wellKnown"`
 }
 
-// VersionResp is the response for GET /api/v1/server/version.
+// VersionResp is the response for GET /api/caic/v1/server/version.
 type VersionResp struct {
 	Current      string `json:"current"`
 	Latest       string `json:"latest,omitempty"`     // empty when check failed
@@ -604,7 +604,7 @@ type VersionResp struct {
 	AutoUpdateOn bool   `json:"autoUpdateEnabled"`    // true when autoupdate schedule is configured
 }
 
-// UpdateResp is the response for POST /api/v1/server/update.
+// UpdateResp is the response for POST /api/caic/v1/server/update.
 type UpdateResp struct {
 	Status string `json:"status"` // "started" or "already_up_to_date"
 }

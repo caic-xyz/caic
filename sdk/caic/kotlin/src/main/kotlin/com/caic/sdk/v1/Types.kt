@@ -609,7 +609,7 @@ data class Config(
     val authProviders: List<String>? = null,
 )
 
-/** VersionResp is the response for GET /api/v1/server/version. */
+/** VersionResp is the response for GET /api/caic/v1/server/version. */
 @Serializable
 data class VersionResp(
     val current: String,
@@ -619,11 +619,11 @@ data class VersionResp(
     val autoUpdateEnabled: Boolean,
 )
 
-/** UpdateResp is the response for POST /api/v1/server/update. */
+/** UpdateResp is the response for POST /api/caic/v1/server/update. */
 @Serializable
 data class UpdateResp(val status: String)
 
-/** UserResp is returned by GET /api/v1/auth/me. */
+/** UserResp is returned by GET /api/caic/v1/auth/me. */
 @Serializable
 data class UserResp(
     val id: String,
@@ -667,7 +667,7 @@ data class UserSettings(
     val customMounts: List<MountMappingResp>? = null,
 )
 
-/** PreferencesResp is the response for GET /api/v1/server/preferences. */
+/** PreferencesResp is the response for GET /api/caic/v1/server/preferences. */
 @Serializable
 data class PreferencesResp(
     val repositories: List<RepoPrefsResp>,
@@ -676,7 +676,7 @@ data class PreferencesResp(
     val settings: UserSettings,
 )
 
-/** UpdatePreferencesReq is the request body for POST /api/v1/server/preferences. */
+/** UpdatePreferencesReq is the request body for POST /api/caic/v1/server/preferences. */
 @Serializable
 data class UpdatePreferencesReq(val settings: UserSettings)
 
@@ -697,7 +697,7 @@ data class WellKnownCache(
     val mounts: List<String>,
 )
 
-/** WellKnownCachesResp is the response for GET /api/v1/server/caches. */
+/** WellKnownCachesResp is the response for GET /api/caic/v1/server/caches. */
 @Serializable
 data class WellKnownCachesResp(val harnessMounts: List<String>, val wellKnown: List<WellKnownCache>)
 
@@ -733,7 +733,7 @@ data class Repo(
     val checksDate: Instant? = null,
 )
 
-/** CloneRepoReq is the request body for POST /api/v1/server/repos. */
+/** CloneRepoReq is the request body for POST /api/caic/v1/server/repos. */
 @Serializable
 data class CloneRepoReq(
     val url: String,
@@ -741,23 +741,23 @@ data class CloneRepoReq(
     val depth: Int? = null,
 )
 
-/** RepoBranchesResp is the response for GET /api/v1/server/repos/branches. */
+/** RepoBranchesResp is the response for GET /api/caic/v1/server/repos/branches. */
 @Serializable
 data class RepoBranchesResp(val branches: List<BranchInfo>)
 
 /**
- * BotFixCIReq is the request body for POST /api/v1/bot/fix-ci.
+ * BotFixCIReq is the request body for POST /api/caic/v1/bot/fix-ci.
  * The server fetches CI logs, builds a prompt, and creates a fix task.
  */
 @Serializable
 data class BotFixCIReq(val repo: String)
 
-/** CreateTaskResp is the response for POST /api/v1/tasks. */
+/** CreateTaskResp is the response for POST /api/caic/v1/tasks. */
 @Serializable
 data class CreateTaskResp(val status: String, val id: String)
 
 /**
- * BotFixPRReq is the request body for POST /api/v1/bot/fix-pr.
+ * BotFixPRReq is the request body for POST /api/caic/v1/bot/fix-pr.
  * The server fetches CI logs for the task's PR and injects a fix command.
  */
 @Serializable
@@ -851,7 +851,7 @@ data class Prompt(val text: String, val images: List<ImageData>? = null)
 @Serializable
 data class RepoSpec(val name: String, val baseBranch: String? = null)
 
-/** CreateTaskReq is the request body for POST /api/v1/tasks. */
+/** CreateTaskReq is the request body for POST /api/caic/v1/tasks. */
 @Serializable
 data class CreateTaskReq(
     val initialPrompt: Prompt,
@@ -1072,7 +1072,7 @@ data class EventStats(
 
 /**
  * EventMessage is a single SSE event in the backend-neutral stream
- * (/api/v1/tasks/{id}/events). All backends produce these events.
+ * (/api/caic/v1/tasks/{id}/events). All backends produce these events.
  */
 @Serializable
 data class EventMessage(
@@ -1103,26 +1103,26 @@ data class EventMessage(
     val stats: EventStats? = null,
 )
 
-/** InputReq is the request body for POST /api/v1/tasks/{id}/input. */
+/** InputReq is the request body for POST /api/caic/v1/tasks/{id}/input. */
 @Serializable
 data class InputReq(val prompt: Prompt)
 
-/** RestartReq is the request body for POST /api/v1/tasks/{id}/restart. */
+/** RestartReq is the request body for POST /api/caic/v1/tasks/{id}/restart. */
 @Serializable
 data class RestartReq(val prompt: Prompt)
 
-/** CompactReq is the request body for POST /api/v1/tasks/{id}/compact. */
+/** CompactReq is the request body for POST /api/caic/v1/tasks/{id}/compact. */
 @Serializable
 data class CompactReq(val instructions: String? = null)
 
 /**
- * CILogResp is the response for GET /api/v1/tasks/{id}/ci-log.
+ * CILogResp is the response for GET /api/caic/v1/tasks/{id}/ci-log.
  * It contains the name of the first failed CI step and its log tail.
  */
 @Serializable
 data class CILogResp(val stepName: String, val log: String)
 
-/** SyncReq is the request body for POST /api/v1/tasks/{id}/sync. */
+/** SyncReq is the request body for POST /api/caic/v1/tasks/{id}/sync. */
 @Serializable
 data class SyncReq(val force: Boolean? = null, val target: SyncTarget? = null)
 
@@ -1134,7 +1134,7 @@ data class SafetyIssue(
     val detail: String,
 )
 
-/** SyncResp is the response for POST /api/v1/tasks/{id}/sync. */
+/** SyncResp is the response for POST /api/caic/v1/tasks/{id}/sync. */
 @Serializable
 data class SyncResp(
     val status: String,
@@ -1144,7 +1144,7 @@ data class SyncResp(
     val prNumber: Int? = null,
 )
 
-/** ForkTaskReq is the request body for POST /api/v1/tasks/{id}/fork. */
+/** ForkTaskReq is the request body for POST /api/caic/v1/tasks/{id}/fork. */
 @Serializable
 data class ForkTaskReq(
     val prompt: Prompt,
@@ -1159,7 +1159,7 @@ data class ForkTaskReq(
     val gitHubToken: Boolean? = null,
 )
 
-/** DiffResp is the response for GET /api/v1/tasks/{id}/diff. */
+/** DiffResp is the response for GET /api/caic/v1/tasks/{id}/diff. */
 @Serializable
 data class DiffResp(val diff: String)
 
@@ -1176,16 +1176,16 @@ data class ProcessInfo(
     val command: String,
 )
 
-/** ProcessListResp is the response for GET /api/v1/tasks/{id}/processes. */
+/** ProcessListResp is the response for GET /api/caic/v1/tasks/{id}/processes. */
 @Serializable
 data class ProcessListResp(val processes: List<ProcessInfo>)
 
-/** SignalProcessReq is the request body for POST /api/v1/tasks/{id}/processes/{pid}/signal. */
+/** SignalProcessReq is the request body for POST /api/caic/v1/tasks/{id}/processes/{pid}/signal. */
 @Serializable
 data class SignalProcessReq(val signal: String)
 
 /**
- * TaskToolInputResp is the response for GET /api/v1/tasks/{id}/tool/{toolUseID}.
+ * TaskToolInputResp is the response for GET /api/caic/v1/tasks/{id}/tool/{toolUseID}.
  * It returns the full (untruncated) input for a tool call.
  */
 @Serializable
@@ -1267,15 +1267,15 @@ data class LocalWindow(
 @Serializable
 data class LocalUsage(val windows: List<LocalWindow>)
 
-/** UsageResp is the response for GET /api/v1/usage. */
+/** UsageResp is the response for GET /api/caic/v1/usage. */
 @Serializable
 data class UsageResp(val providers: List<ProviderQuota>? = null, val local: LocalUsage)
 
-/** WebFetchReq is the request body for POST /api/v1/web/fetch. */
+/** WebFetchReq is the request body for POST /api/caic/v1/web/fetch. */
 @Serializable
 data class WebFetchReq(val url: String)
 
-/** WebFetchResp is the response for POST /api/v1/web/fetch. */
+/** WebFetchResp is the response for POST /api/caic/v1/web/fetch. */
 @Serializable
 data class WebFetchResp(val title: String, val content: String)
 

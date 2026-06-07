@@ -55,7 +55,7 @@ func generateCaicSDK() error {
 		},
 		kotlinPackage: "com.caic.sdk.v1",
 		apiDocTitle:   "caic API Reference",
-		apiDocIntro:   "RESTful JSON API served at `/api/v1/`. SSE endpoints stream newline-delimited JSON events.",
+		apiDocIntro:   "RESTful JSON API served at `/api/caic/v1/`. SSE endpoints stream newline-delimited JSON events.",
 		sectionComments: map[string]string{
 			"EventMessage": "Backend-neutral event types",
 		},
@@ -163,7 +163,7 @@ func generateVoiceGatewaySDK() error {
 		documentExtraSeeds: true,
 		kotlinPackage:      "com.caic.voicegateway.sdk.v1",
 		apiDocTitle:        "Voice Gateway API Reference",
-		apiDocIntro:        "RESTful JSON signaling API served at `/api/v1/voice/`.",
+		apiDocIntro:        "RESTful JSON signaling API served at `/api/voicegateway/v1/voice/`.",
 		specialTypes: []specialType{
 			{
 				t:          reflect.TypeFor[json.RawMessage](),

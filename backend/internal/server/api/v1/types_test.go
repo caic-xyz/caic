@@ -199,7 +199,7 @@ func TestRoutes(t *testing.T) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("method = %q, want GET", r.Method)
 		}
-		if r.Path != "/api/v1/tasks/{id}/diff" {
+		if r.Path != "/api/caic/v1/tasks/{id}/diff" {
 			t.Fatalf("path = %q, want diff path", r.Path)
 		}
 		if len(r.QueryParams) != 1 || r.QueryParams[0] != "path" {

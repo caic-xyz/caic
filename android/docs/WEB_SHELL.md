@@ -83,7 +83,7 @@ screenshot, and Halo integrations.
   caic-specific REST/SSE paths for native task monitoring, notifications, voice
   tools, or routing. Native monitoring needs a service-neutral abstraction layer
   first, with caic implemented as one adapter behind that boundary.
-- The caic backend currently exposes `/api/v1/voice/rtc/offer` and terminates
+- The caic backend currently exposes `/api/voicegateway/v1/voice/rtc/offer` and terminates
   the WebRTC side of a voice session through `internal/voicegateway/voicertc`.
 - The current caic API reports structured `Config.voiceGateway` metadata so
   Android can distinguish disabled voice, caic-embedded gateway, and external
@@ -110,7 +110,7 @@ screenshot, and Halo integrations.
 - Do not build a caic Compose/WebView mode switch.
 - Do not proxy normal caic API calls through JavaScript bridge methods.
 - Do not add caic-specific API clients, generated SDK model types, or
-  `/api/v1/...` route knowledge directly to Go Mode shell services. Put
+  `/api/caic/v1/...` route knowledge directly to Go Mode shell services. Put
   service-specific API behavior behind a narrow service adapter selected by the
   active service instance and compatibility metadata.
 - Do not bundle frontend assets into the APK. There is no offline use case; the
@@ -374,7 +374,7 @@ bindings. The exact path can change, but the shape should be stable:
       "url": "https://voice.example.com",
       "serviceToken": {
         "required": true,
-        "endpoint": "/api/v1/voice/token",
+        "endpoint": "/api/voicegateway/v1/voice/token",
         "audience": "voice-gateway"
       },
       "capabilities": [
@@ -1235,7 +1235,7 @@ Implemented the standalone `backend/cmd/voice-gateway` binary, reusable
 `backend/internal/voicegateway` static config, canonical
 `~/.config/voice-gateway/config.toml` loading, caic `[voice-gateway]` parsing,
 structured `Config.voiceGateway` API metadata, and gateway
-`GET /api/v1/voice/health` plus `POST /api/v1/voice/rtc/offer`. The gateway no
+`GET /api/voicegateway/v1/voice/health` plus `POST /api/voicegateway/v1/voice/rtc/offer`. The gateway no
 longer reads caic `settings.json` or `users.json`.
 
 Remaining follow-up: caic currently rejects unknown gateway config fields with

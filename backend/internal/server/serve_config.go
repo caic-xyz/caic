@@ -76,7 +76,7 @@ func (s *Server) voiceGatewayMetadata() v1.VoiceGatewayMetadata {
 		return v1.VoiceGatewayMetadata{ //nolint:gosec // G101: token metadata field names, not credentials.
 			Mode:          v1.VoiceGatewayModeEmbedded,
 			AuthRequired:  false,
-			TokenEndpoint: "/api/v1/voice/token",
+			TokenEndpoint: "/api/voicegateway/v1/voice/token",
 			TokenAudience: voiceGatewayTokenAudience,
 			Capabilities:  []string{"voice.gatewayGeminiLive"},
 		}
@@ -85,7 +85,7 @@ func (s *Server) voiceGatewayMetadata() v1.VoiceGatewayMetadata {
 			Mode:          v1.VoiceGatewayModeExternal,
 			URL:           cfg.URL,
 			AuthRequired:  true,
-			TokenEndpoint: "/api/v1/voice/token",
+			TokenEndpoint: "/api/voicegateway/v1/voice/token",
 			TokenAudience: voiceGatewayTokenAudience,
 			Capabilities:  []string{"voice.gatewayGeminiLive"},
 		}

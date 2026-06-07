@@ -69,10 +69,10 @@ func TestHostState(t *testing.T) {
 		h.ServeHTTP(httptest.NewRecorder(), r)
 
 		// After lock, RedirectURI returns the full URI.
-		if want := "https://caic.example.com/api/v1/auth/github/callback"; ghOAuth.RedirectURI() != want {
+		if want := "https://caic.example.com/api/caic/v1/auth/github/callback"; ghOAuth.RedirectURI() != want {
 			t.Errorf("GitHub RedirectURI = %q, want %q", ghOAuth.RedirectURI(), want)
 		}
-		if want := "https://caic.example.com/api/v1/auth/gitlab/callback"; glOAuth.RedirectURI() != want {
+		if want := "https://caic.example.com/api/caic/v1/auth/gitlab/callback"; glOAuth.RedirectURI() != want {
 			t.Errorf("GitLab RedirectURI = %q, want %q", glOAuth.RedirectURI(), want)
 		}
 	})
@@ -84,7 +84,7 @@ func TestHostState(t *testing.T) {
 			t.Errorf("ExternalURL = %q, want %q", got, "https://caic.example.com:8443")
 		}
 		c := auth.GitHubConfig("id", "sec", host)
-		if want := "https://caic.example.com:8443/api/v1/auth/github/callback"; c.RedirectURI() != want {
+		if want := "https://caic.example.com:8443/api/caic/v1/auth/github/callback"; c.RedirectURI() != want {
 			t.Errorf("RedirectURI = %q, want %q", c.RedirectURI(), want)
 		}
 	})

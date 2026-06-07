@@ -38,7 +38,7 @@ func TestSmoke(t *testing.T) {
 
 	t.Run("Config", func(t *testing.T) {
 		var cfg v1.Config
-		getJSON(t, baseURL, "/api/v1/server/config", &cfg)
+		getJSON(t, baseURL, "/api/caic/v1/server/config", &cfg)
 		// Version is empty in dev builds (no ldflags), so only check that the
 		// endpoint returns successfully.
 		if cfg.DisplayName == "" {
@@ -48,7 +48,7 @@ func TestSmoke(t *testing.T) {
 
 	t.Run("Repos", func(t *testing.T) {
 		var repos []v1.Repo
-		getJSON(t, baseURL, "/api/v1/server/repos", &repos)
+		getJSON(t, baseURL, "/api/caic/v1/server/repos", &repos)
 		if len(repos) == 0 {
 			t.Fatal("expected at least one repo")
 		}
@@ -68,7 +68,7 @@ func TestSmoke(t *testing.T) {
 
 	t.Run("Harnesses", func(t *testing.T) {
 		var harnesses []v1.HarnessInfo
-		getJSON(t, baseURL, "/api/v1/server/harnesses", &harnesses)
+		getJSON(t, baseURL, "/api/caic/v1/server/harnesses", &harnesses)
 		if len(harnesses) == 0 {
 			t.Fatal("expected at least one harness")
 		}
@@ -88,16 +88,16 @@ func TestSmoke(t *testing.T) {
 	t.Run("TaskLifecycle", func(t *testing.T) {
 		// Get available repos and harnesses.
 		var repos []v1.Repo
-		getJSON(t, baseURL, "/api/v1/server/repos", &repos)
+		getJSON(t, baseURL, "/api/caic/v1/server/repos", &repos)
 		var harnesses []v1.HarnessInfo
-		getJSON(t, baseURL, "/api/v1/server/harnesses", &harnesses)
+		getJSON(t, baseURL, "/api/caic/v1/server/harnesses", &harnesses)
 
 		var prefs v1.PreferencesResp
-		getJSON(t, baseURL, "/api/v1/server/preferences", &prefs)
+		getJSON(t, baseURL, "/api/caic/v1/server/preferences", &prefs)
 		prefs.Settings.UseDefaultCaches = false
 		prefs.Settings.WellKnownCaches = nil
 		prefs.Settings.CacheMappings = nil
-		postJSON(t, baseURL, "/api/v1/server/preferences", v1.UpdatePreferencesReq{Settings: prefs.Settings}, &prefs)
+		postJSON(t, baseURL, "/api/caic/v1/server/preferences", v1.UpdatePreferencesReq{Settings: prefs.Settings}, &prefs)
 
 		// Create a task.
 		createReq := v1.CreateTaskReq{
@@ -106,7 +106,7 @@ func TestSmoke(t *testing.T) {
 			Harness:       v1.Harness(harnesses[0].Name),
 		}
 		var createResp v1.CreateTaskResp
-		postJSON(t, baseURL, "/api/v1/tasks", createReq, &createResp)
+		postJSON(t, baseURL, "/api/caic/v1/tasks", createReq, &createResp)
 		taskID := createResp.ID.String()
 		if taskID == "" {
 			t.Fatal("create response has empty task ID")
@@ -120,7 +120,7 @@ func TestSmoke(t *testing.T) {
 			deadline := time.After(10 * time.Minute)
 			for {
 				var tasks []v1.Task
-				getJSON(t, baseURL, "/api/v1/tasks", &tasks)
+				getJSON(t, baseURL, "/api/caic/v1/tasks", &tasks)
 				for _, tk := range tasks {
 					if tk.ID.String() == taskID {
 						task = tk
@@ -145,7 +145,7 @@ func TestSmoke(t *testing.T) {
 		t.Logf("task %s reached 'waiting'", taskID)
 
 		// Stop the task.
-		postJSON(t, baseURL, "/api/v1/tasks/"+taskID+"/stop", nil, nil)
+		postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/stop", nil, nil)
 		waitForState("stopped")
 		t.Logf("task %s reached 'stopped'", taskID)
 
@@ -154,7 +154,7 @@ func TestSmoke(t *testing.T) {
 		if containerName == "" {
 			t.Fatalf("task %s has no runtime ID before purge", taskID)
 		}
-		postJSON(t, baseURL, "/api/v1/tasks/"+taskID+"/purge", nil, nil)
+		postJSON(t, baseURL, "/api/caic/v1/tasks/"+taskID+"/purge", nil, nil)
 		waitForState("purged")
 		purgeCtx, purgeCancel := context.WithTimeout(t.Context(), 2*time.Minute)
 		if err := smoketest.WaitForRuntimeGone(purgeCtx, smoketest.SmokeRuntime(), containerName); err != nil {
@@ -281,11 +281,11 @@ func startSmokeServer(t *testing.T) string {
 	return baseURL
 }
 
-// waitForReady polls GET /api/v1/server/config until it returns 200.
+// waitForReady polls GET /api/caic/v1/server/config until it returns 200.
 func waitForReady(ctx context.Context, baseURL string) error {
 	client := &http.Client{Timeout: 2 * time.Second}
 	for i := 0; i < 50; i++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/server/config", http.NoBody)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/caic/v1/server/config", http.NoBody)
 		if err != nil {
 			return err
 		}
