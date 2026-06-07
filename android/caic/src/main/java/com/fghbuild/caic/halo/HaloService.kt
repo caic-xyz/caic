@@ -1,8 +1,8 @@
 // HaloService: bridge between caic task state and a Halo smart glasses device over BLE.
 //
 // Manages HaloConnection lifecycle, observes TaskRepository for task state changes,
-// sends status sprites and text to the Halo display, and dispatches button click
-// events (RxClick) as caic actions.
+// sends status text to the Halo display, and dispatches button click events
+// (RxClick) as caic actions.
 //
 // Testable: all dependencies are constructor-injected; HaloConnection is open with
 // overridable methods.
@@ -18,11 +18,13 @@ import com.caic.halo.msg.ClickType
 import com.caic.halo.msg.HalosideApp
 import com.caic.halo.msg.RxClick
 import com.caic.halo.msg.TxMessage
+import com.caic.sdk.v1.ApiClient
 import com.caic.sdk.v1.Task
 import com.caic.sdk.v1.TaskState
 import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.data.TaskRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,6 +37,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "HaloService"
+private const val PURGE_CONFIRM_WINDOW_MS = 3_000L
 
 /** Connection state exposed to the UI via [HaloService.state]. */
 enum class HaloConnectionState {
@@ -68,6 +71,8 @@ class HaloService @Inject constructor(
     private var halosideApp: HalosideApp? = null
     private var observeJob: Job? = null
     private var clickJob: Job? = null
+    private var displayedTaskId: String? = null
+    private var purgeConfirmation: PurgeConfirmation? = null
 
     /** Address of the currently connected device, or null. */
     val connectedAddress: String?
@@ -145,6 +150,8 @@ class HaloService @Inject constructor(
         } catch (_: Exception) { }
         device = null
         halosideApp = null
+        displayedTaskId = null
+        purgeConfirmation = null
         _state.value = HaloConnectionState.Disconnected
     }
 
@@ -164,14 +171,18 @@ class HaloService @Inject constructor(
     }
 
     private suspend fun sendStatusUpdate(tasks: List<Task>) {
-        val app = halosideApp ?: return
         try {
-            val primary = primaryTask(tasks)
+            displayedTaskId = displayedTaskId?.takeIf { id -> tasks.any { it.id == id } }
+            val primary = displayedTask(tasks, displayedTaskId)
             val summary = buildStatusString(tasks, primary)
-            app.send(MSG_CODE_STATUS, TxRaw(summary))
+            sendStatus(summary)
         } catch (e: HaloException) {
             Log.w(TAG, "Failed to send status update: ${e.message}")
         }
+    }
+
+    private suspend fun sendStatus(text: String) {
+        halosideApp?.send(MSG_CODE_STATUS, TxRaw(text))
     }
 
     // ---- Button click observation ----
@@ -197,8 +208,16 @@ class HaloService @Inject constructor(
     }
 
     private suspend fun cycleAttentionTask(tasks: List<Task>) {
-        // TODO: cycle through attention-needed tasks and display the next one
-        Log.d(TAG, "cycleAttentionTask: ${tasks.size} tasks")
+        val next = nextAttentionTask(tasks, displayedTaskId)
+        if (next == null) {
+            displayedTaskId = null
+            purgeConfirmation = null
+            sendStatus("No tasks need input")
+            return
+        }
+        displayedTaskId = next.id
+        purgeConfirmation = null
+        sendStatusUpdate(tasks)
     }
 
     private suspend fun readCurrentTaskStatus(tasks: List<Task>) {
@@ -207,15 +226,57 @@ class HaloService @Inject constructor(
     }
 
     private suspend fun purgeCurrentTask(tasks: List<Task>) {
-        // TODO: purge the currently displayed task
-        Log.d(TAG, "purgeCurrentTask: ${tasks.size} tasks")
+        val task = displayedTask(tasks, displayedTaskId)
+        if (task == null) {
+            purgeConfirmation = null
+            sendStatus("No task to purge")
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        if (!isPurgeConfirmationCurrent(purgeConfirmation, task.id, now)) {
+            purgeConfirmation = PurgeConfirmation(task.id, now + PURGE_CONFIRM_WINDOW_MS)
+            displayedTaskId = task.id
+            sendStatus("Long press again to purge  •  ${task.title.take(20)}")
+            return
+        }
+
+        purgeConfirmation = null
+        sendStatus("Purging  •  ${task.title.take(24)}")
+        purgeTask(task)
     }
+
+    @Suppress("TooGenericExceptionCaught") // Error boundary: Halo click handling must not kill collection.
+    private suspend fun purgeTask(task: Task) {
+        val serverURL = taskRepository.serverURL()
+        if (serverURL.isBlank()) {
+            sendStatus("No caic server configured")
+            return
+        }
+
+        try {
+            apiClient(serverURL).purgeTask(task.id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to purge task ${task.id}: ${e.message}")
+            sendStatus("Purge failed  •  ${task.title.take(20)}")
+        }
+    }
+
+    private fun apiClient(serverURL: String): ApiClient =
+        ApiClient(serverURL, tokenProvider = { settingsRepository.settings.value.authToken })
 
     // ---- Display helpers ----
 
     companion object {
         /** Message code for status payloads (app → device). */
         const val MSG_CODE_STATUS = 0x10
+
+        private data class PurgeConfirmation(
+            val taskId: String,
+            val expiresAtMillis: Long,
+        )
 
         /**
          * Returns the single most important task to display: first attention-needed task,
@@ -226,6 +287,26 @@ class HaloService @Inject constructor(
             if (attention != null) return attention
             return tasks.maxByOrNull { it.stateUpdatedAt }
         }
+
+        /** Returns the selected display task when still present, otherwise the primary task. */
+        fun displayedTask(tasks: List<Task>, displayedTaskId: String?): Task? =
+            displayedTaskId?.let { id -> tasks.firstOrNull { it.id == id } } ?: primaryTask(tasks)
+
+        /** Returns the next task that needs attention after [displayedTaskId], wrapping at the end. */
+        fun nextAttentionTask(tasks: List<Task>, displayedTaskId: String?): Task? {
+            val attention = tasks.filter { it.state in ATTENTION_STATES }
+            if (attention.isEmpty()) return null
+            val currentIndex = attention.indexOfFirst { it.id == displayedTaskId }
+            return attention[(currentIndex + 1).floorMod(attention.size)]
+        }
+
+        private fun isPurgeConfirmationCurrent(
+            confirmation: PurgeConfirmation?,
+            taskId: String,
+            nowMillis: Long,
+        ): Boolean = confirmation?.taskId == taskId && nowMillis <= confirmation.expiresAtMillis
+
+        private fun Int.floorMod(divisor: Int): Int = ((this % divisor) + divisor) % divisor
 
         /** States that mean the user should pay attention. */
         val ATTENTION_STATES = setOf(TaskState.Waiting, TaskState.Asking, TaskState.HasPlan)

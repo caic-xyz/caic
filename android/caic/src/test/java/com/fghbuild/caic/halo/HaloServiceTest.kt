@@ -47,6 +47,53 @@ class HaloServiceTest {
         assertEquals("t2", HaloService.primaryTask(listOf(older, newer))?.id)
     }
 
+    // ---- displayedTask ----
+
+    @Test
+    fun `displayedTask returns selected task when still present`() {
+        val selected = task("t1", "Selected", TaskState.Running, 100)
+        val waiting = task("t2", "Waiting", TaskState.Waiting, 200)
+
+        assertEquals("t1", HaloService.displayedTask(listOf(selected, waiting), "t1")?.id)
+    }
+
+    @Test
+    fun `displayedTask falls back to primary task when selected task is absent`() {
+        val running = task("t1", "Running", TaskState.Running, 100)
+        val waiting = task("t2", "Waiting", TaskState.Waiting, 200)
+
+        assertEquals("t2", HaloService.displayedTask(listOf(running, waiting), "missing")?.id)
+    }
+
+    // ---- nextAttentionTask ----
+
+    @Test
+    fun `nextAttentionTask returns first attention task when none is selected`() {
+        val running = task("t1", "Running", TaskState.Running, 100)
+        val waiting = task("t2", "Waiting", TaskState.Waiting, 200)
+        val asking = task("t3", "Asking", TaskState.Asking, 300)
+
+        assertEquals("t2", HaloService.nextAttentionTask(listOf(running, waiting, asking), null)?.id)
+    }
+
+    @Test
+    fun `nextAttentionTask skips non-attention tasks and wraps`() {
+        val waiting = task("t1", "Waiting", TaskState.Waiting, 100)
+        val running = task("t2", "Running", TaskState.Running, 200)
+        val asking = task("t3", "Asking", TaskState.Asking, 300)
+
+        assertEquals("t3", HaloService.nextAttentionTask(listOf(waiting, running, asking), "t1")?.id)
+        assertEquals("t1", HaloService.nextAttentionTask(listOf(waiting, running, asking), "t3")?.id)
+    }
+
+    @Test
+    fun `nextAttentionTask returns null when no task needs attention`() {
+        val running = task("t1", "Running", TaskState.Running, 100)
+        val stopped = task("t2", "Stopped", TaskState.Stopped, 200)
+
+        assertNull(HaloService.nextAttentionTask(listOf(running, stopped), null))
+    }
+
     // ---- stateLabel ----
 
     @Test
