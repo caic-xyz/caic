@@ -530,8 +530,8 @@ func TestParseMessage(t *testing.T) {
 		if !ok {
 			t.Fatalf("type = %T, want *agent.SystemMessage", msgs[0])
 		}
-		if sm.Subtype != "context_compaction" {
-			t.Errorf("Subtype = %q, want context_compaction", sm.Subtype)
+		if sm.Subtype != "compact_boundary" {
+			t.Errorf("Subtype = %q, want compact_boundary", sm.Subtype)
 		}
 	})
 	t.Run("ItemCompletedWebSearch", func(t *testing.T) {

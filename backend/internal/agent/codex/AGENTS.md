@@ -58,4 +58,4 @@ Documentation:
 - **Two-phase file changes**: tool name (`Write` vs `Edit`) determined by checking `kind.type=="add"`.
 - **Widget plugin disabled**: TODO comment — needs fixing for Codex.
 - **Opt-out capabilities**: handshake disables verbose notifications caic doesn't need
-  (e.g., `item/fileChange/outputDelta`, `turn/diff/updated`).
+  (e.g., `turn/diff/updated`, `turn/plan/updated`).

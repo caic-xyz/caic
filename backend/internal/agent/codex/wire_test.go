@@ -472,7 +472,7 @@ func TestPerItemTypeStructs(t *testing.T) {
 	t.Run("ContextCompaction", func(t *testing.T) {
 		t.Parallel()
 		const input = `{"id":"cc1","type":"contextCompaction"}`
-		var item codex.ContextCompactionItem
+		var item codex.ContextCompactionThreadItem
 		if err := json.Unmarshal([]byte(input), &item); err != nil {
 			t.Fatal(err)
 		}
@@ -521,24 +521,24 @@ func TestPerItemTypeStructs(t *testing.T) {
 	})
 	t.Run("EnteredReviewMode", func(t *testing.T) {
 		t.Parallel()
-		const input = `{"id":"er1","type":"enteredReviewMode","review":{"state":"pending"}}`
+		const input = `{"id":"er1","type":"enteredReviewMode","review":"pending"}`
 		var item codex.EnteredReviewModeItem
 		if err := json.Unmarshal([]byte(input), &item); err != nil {
 			t.Fatal(err)
 		}
-		if item.Review == nil {
-			t.Fatal("Review = nil")
+		if item.Review != "pending" {
+			t.Errorf("Review = %q, want pending", item.Review)
 		}
 	})
 	t.Run("ExitedReviewMode", func(t *testing.T) {
 		t.Parallel()
-		const input = `{"id":"xr1","type":"exitedReviewMode","review":{"state":"approved"}}`
+		const input = `{"id":"xr1","type":"exitedReviewMode","review":"approved"}`
 		var item codex.ExitedReviewModeItem
 		if err := json.Unmarshal([]byte(input), &item); err != nil {
 			t.Fatal(err)
 		}
-		if item.Review == nil {
-			t.Fatal("Review = nil")
+		if item.Review != "approved" {
+			t.Errorf("Review = %q, want approved", item.Review)
 		}
 	})
 	t.Run("ImageGeneration", func(t *testing.T) {
@@ -560,13 +560,16 @@ func TestPerItemTypeStructs(t *testing.T) {
 	})
 	t.Run("HookPrompt", func(t *testing.T) {
 		t.Parallel()
-		const input = `{"id":"hp1","type":"hookPrompt","fragments":[{"text":"approve?"}]}`
+		const input = `{"id":"hp1","type":"hookPrompt","fragments":[{"text":"approve?","hookRunId":"h1"}]}`
 		var item codex.HookPromptItem
 		if err := json.Unmarshal([]byte(input), &item); err != nil {
 			t.Fatal(err)
 		}
-		if item.Fragments == nil {
-			t.Fatal("Fragments = nil")
+		if len(item.Fragments) != 1 {
+			t.Fatalf("len(Fragments) = %d, want 1", len(item.Fragments))
+		}
+		if item.Fragments[0].HookRunID != "h1" {
+			t.Errorf("Fragments[0].HookRunID = %q, want h1", item.Fragments[0].HookRunID)
 		}
 	})
 	t.Run("CommandExecutionSource", func(t *testing.T) {

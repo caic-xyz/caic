@@ -479,19 +479,6 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 	})
 
-	t.Run("default voice gateway disabled without gemini key", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		tc := defaultConfig()
-		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cfg.Voice.Gateway.Mode != "disabled" {
-			t.Errorf("Voice.Gateway.Mode = %q, want disabled", cfg.Voice.Gateway.Mode)
-		}
-	})
-
 	t.Run("default voice gateway embedded with gemini key", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
@@ -577,6 +564,19 @@ func TestTomlToServerConfigEnvFallback(t *testing.T) {
 		}
 		if cfg.Agent.GeminiAPIKey != configKey {
 			t.Errorf("GeminiAPIKey = %q, want %q", cfg.Agent.GeminiAPIKey, configKey)
+		}
+	})
+
+	t.Run("default voice gateway disabled without gemini key", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("GEMINI_API_KEY", "")
+		tc := defaultConfig()
+		cfg, _, _, _, err := tomlToServerConfig(t.Context(), &tc, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Voice.Gateway.Mode != "disabled" {
+			t.Errorf("Voice.Gateway.Mode = %q, want disabled", cfg.Voice.Gateway.Mode)
 		}
 	})
 

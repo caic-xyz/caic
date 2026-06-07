@@ -291,16 +291,20 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 			URL:  "data:" + img.MediaType + ";base64," + img.Data,
 		})
 	}
+	params, err := marshalParams(codex.TurnStartParams{
+		ThreadID: w.threadID,
+		Input:    input,
+		Summary:  codex.ReasoningSummaryAuto,
+		Effort:   codex.ReasoningEffort(w.effort),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal turn/start params: %w", err)
+	}
 	req := codex.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  "turn/start",
-		Params: codex.TurnStartParams{
-			ThreadID: w.threadID,
-			Input:    input,
-			Summary:  codex.ReasoningSummaryAuto,
-			Effort:   codex.ReasoningEffort(w.effort),
-		},
+		Params:  params,
 	}
 	// Don't log to logW — stdin is not logged with --no-log-stdin.
 	return writeJSON(wr, req)
@@ -314,11 +318,15 @@ func (w *wireFormat) WriteCompact(wr io.Writer, _ string, _ io.Writer) error {
 	if w.threadID == "" {
 		return errors.New("codex: no thread ID (handshake not completed)")
 	}
+	params, err := marshalParams(codex.ThreadCompactStartParams{ThreadID: w.threadID})
+	if err != nil {
+		return fmt.Errorf("marshal thread/compact/start params: %w", err)
+	}
 	req := codex.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      w.nextID.Add(1),
 		Method:  "thread/compact/start",
-		Params:  codex.ThreadCompactStartParams{ThreadID: w.threadID},
+		Params:  params,
 	}
 	return writeJSON(wr, req)
 }
@@ -415,18 +423,26 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	// 4. Send thread/start or thread/resume.
 	var threadReq codex.JSONRPCRequest
 	if opts.ResumeSessionID != "" {
+		params, err := marshalParams(codex.ThreadResumeParams{ThreadID: opts.ResumeSessionID})
+		if err != nil {
+			return nil, nil, fmt.Errorf("marshal thread/resume params: %w", err)
+		}
 		threadReq = codex.JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.nextID.Add(1),
 			Method:  "thread/resume",
-			Params:  codex.ThreadResumeParams{ThreadID: opts.ResumeSessionID},
+			Params:  params,
 		}
 	} else {
+		params, err := marshalParams(codex.ThreadStartParams{Model: opts.Model})
+		if err != nil {
+			return nil, nil, fmt.Errorf("marshal thread/start params: %w", err)
+		}
 		threadReq = codex.JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.nextID.Add(1),
 			Method:  "thread/start",
-			Params:  codex.ThreadStartParams{Model: opts.Model},
+			Params:  params,
 		}
 	}
 	if err := writeJSON(stdin, threadReq); err != nil {
@@ -455,41 +471,42 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, stdout *bufi
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
+	initParams, err := marshalParams(codex.InitializeParams{
+		ClientInfo: codex.ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
+		Capabilities: codex.Capabilities{
+			OptOutNotificationMethods: []codex.Method{
+				// Interactive terminal prompts (e.g. sudo password, interactive stdin);
+				// caic does not forward interactive terminal I/O to the agent.
+				codex.MethodCommandTerminalInteract,
+				// Streaming pre-summary reasoning part markers; we prefer the
+				// incremental text via item/reasoning/summaryTextDelta.
+				codex.MethodReasoningSummaryPartAdded,
+				// Raw token-by-token reasoning text; we prefer the summarised form via
+				// item/reasoning/summaryTextDelta which is more readable.
+				codex.MethodReasoningTextDelta,
+				// Incremental plan text delta; we surface the final plan text via
+				// item/completed plan instead.
+				codex.MethodPlanDelta,
+				// Coarse git diff snapshot repeated on every file change; we use the
+				// caic-injected caic_diff_stat from the relay watcher instead.
+				codex.MethodTurnDiffUpdated,
+				// High-level plan snapshot updated on each tool call; redundant with
+				// item/plan which gives us the final plan text.
+				codex.MethodTurnPlanUpdated,
+				// Thread name set by the agent (cosmetic label); caic uses the user's
+				// initial prompt as the task title instead.
+				codex.MethodThreadNameUpdated,
+			},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal initialize params: %w", err)
+	}
 	initReq := codex.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      nextID.Add(1),
 		Method:  "initialize",
-		Params: codex.InitializeParams{
-			ClientInfo: codex.ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
-			Capabilities: codex.Capabilities{
-				OptOutNotificationMethods: []codex.Method{
-					// Interactive terminal prompts (e.g. sudo password, interactive stdin);
-					// caic does not forward interactive terminal I/O to the agent.
-					codex.MethodCommandTerminalInteract,
-					// Incremental diff of a file being written; we surface the completed
-					// diff via item/completed fileChange instead.
-					codex.MethodFileChangeOutputDelta,
-					// Streaming pre-summary reasoning part markers; we prefer the
-					// incremental text via item/reasoning/summaryTextDelta.
-					codex.MethodReasoningSummaryPartAdded,
-					// Raw token-by-token reasoning text; we prefer the summarised form via
-					// item/reasoning/summaryTextDelta which is more readable.
-					codex.MethodReasoningTextDelta,
-					// Incremental plan text delta; we surface the final plan text via
-					// item/completed plan instead.
-					codex.MethodPlanDelta,
-					// Coarse git diff snapshot repeated on every file change; we use the
-					// caic-injected caic_diff_stat from the relay watcher instead.
-					codex.MethodTurnDiffUpdated,
-					// High-level plan snapshot updated on each tool call; redundant with
-					// item/plan which gives us the final plan text.
-					codex.MethodTurnPlanUpdated,
-					// Thread name set by the agent (cosmetic label); caic uses the user's
-					// initial prompt as the task title instead.
-					codex.MethodThreadNameUpdated,
-				},
-			},
-		},
+		Params:  initParams,
 	}
 	if err := writeJSON(stdin, initReq); err != nil {
 		return nil, fmt.Errorf("write initialize: %w", err)
@@ -507,7 +524,11 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, stdout *bufi
 
 	// 3. Fetch model list so the UI offers only valid model IDs.
 	var models []string
-	if err := writeJSON(stdin, codex.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: "model/list", Params: struct{}{}}); err != nil {
+	mlParams, err := marshalParams(struct{}{})
+	if err != nil {
+		return nil, fmt.Errorf("marshal model/list params: %w", err)
+	}
+	if err := writeJSON(stdin, codex.JSONRPCRequest{JSONRPC: "2.0", ID: nextID.Add(1), Method: "model/list", Params: mlParams}); err != nil {
 		return nil, fmt.Errorf("write model/list: %w", err)
 	}
 	mlResp, err := readJSONRPCResponse(ctx, stdout)
@@ -527,6 +548,15 @@ func fetchModelsFromAppServer(ctx context.Context, stdin io.Writer, stdout *bufi
 		}
 	}
 	return models, nil
+}
+
+// marshalParams marshals v into a json.RawMessage for use as JSONRPCRequest.Params.
+func marshalParams(v any) (json.RawMessage, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(b), nil
 }
 
 // writeJSON marshals v as JSON and writes it followed by a newline.

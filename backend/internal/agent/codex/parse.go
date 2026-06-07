@@ -422,9 +422,13 @@ func parseItemCompleted(msg *codex.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]
 		return []agent.Message{m}, nil
 
 	case codex.ItemTypeContextCompaction:
+		var item codex.ContextCompactionThreadItem
+		if err := unmarshalNotification(p.Item, &item, "ContextCompactionThreadItem", fw); err != nil {
+			return nil, fmt.Errorf("item/completed contextCompaction: %w", err)
+		}
 		return []agent.Message{&agent.SystemMessage{
 			MessageType: "system",
-			Subtype:     "context_compaction",
+			Subtype:     "compact_boundary",
 		}}, nil
 
 	case codex.ItemTypeWebSearch:
@@ -457,27 +461,14 @@ func parseItemCompleted(msg *codex.JSONRPCMessage, fw *jsonutil.FieldWarner) ([]
 	}
 }
 
-type userContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
-func userInputFromContent(content json.RawMessage) *agent.UserInputMessage {
-	var blocks []userContentBlock
-	if err := json.Unmarshal(content, &blocks); err == nil {
-		var texts []string
-		for _, b := range blocks {
-			if b.Type == "text" && b.Text != "" {
-				texts = append(texts, b.Text)
-			}
+func userInputFromContent(content []codex.UserInput) *agent.UserInputMessage {
+	var texts []string
+	for _, b := range content {
+		if b.Type == codex.TurnInputTypeText && b.Text != "" {
+			texts = append(texts, b.Text)
 		}
-		return &agent.UserInputMessage{Text: strings.Join(texts, "\n")}
 	}
-	var text string
-	if err := json.Unmarshal(content, &text); err == nil {
-		return &agent.UserInputMessage{Text: text}
-	}
-	return &agent.UserInputMessage{}
+	return &agent.UserInputMessage{Text: strings.Join(texts, "\n")}
 }
 
 // toolNameForChanges returns "Write" if any change has Kind.Type == "add", else "Edit".

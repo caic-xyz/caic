@@ -231,11 +231,15 @@ func (w *wireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) e
 			})
 		}
 	}
+	params, err := marshalParams(opencode.SessionPromptParams{SessionID: w.sessionID, Prompt: content})
+	if err != nil {
+		return fmt.Errorf("marshal session/prompt params: %w", err)
+	}
 	req := opencode.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  opencode.MethodSessionPrompt,
-		Params:  opencode.SessionPromptParams{SessionID: w.sessionID, Prompt: content},
+		Params:  params,
 	}
 	// Don't log to logW — stdin is not logged with --no-log-stdin.
 	return writeJSON(wr, req)
@@ -399,17 +403,21 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	res := &handshakeResult{wire: w}
 
 	// 1. Send initialize request.
+	initParams, err := marshalParams(opencode.InitializeParams{
+		ProtocolVersion: 1,
+		ClientCapabilities: opencode.ClientCapabilities{
+			Terminal: false,
+		},
+		ClientInfo: opencode.ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal initialize params: %w", err)
+	}
 	initReq := opencode.JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      w.allocIDLocked(),
 		Method:  opencode.MethodInitialize,
-		Params: opencode.InitializeParams{
-			ProtocolVersion: 1,
-			ClientCapabilities: opencode.ClientCapabilities{
-				Terminal: false,
-			},
-			ClientInfo: opencode.ClientInfo{Name: "caic", Title: "caic", Version: "1.0.0"},
-		},
+		Params:  initParams,
 	}
 	if err := writeJSON(stdin, initReq); err != nil {
 		return nil, fmt.Errorf("write initialize: %w", err)
@@ -433,18 +441,26 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	// 2. Create or resume session.
 	var sessionReq opencode.JSONRPCRequest
 	if opts.ResumeSessionID != "" {
+		params, err := marshalParams(opencode.SessionLoadParams{SessionID: opts.ResumeSessionID, Cwd: opts.Dir, McpServers: []opencode.MCPServer{}})
+		if err != nil {
+			return nil, fmt.Errorf("marshal session/load params: %w", err)
+		}
 		sessionReq = opencode.JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.allocIDLocked(),
 			Method:  opencode.MethodSessionLoad,
-			Params:  opencode.SessionLoadParams{SessionID: opts.ResumeSessionID, Cwd: opts.Dir, McpServers: []opencode.MCPServer{}},
+			Params:  params,
 		}
 	} else {
+		params, err := marshalParams(opencode.SessionNewParams{Cwd: opts.Dir, McpServers: []opencode.MCPServer{}})
+		if err != nil {
+			return nil, fmt.Errorf("marshal session/new params: %w", err)
+		}
 		sessionReq = opencode.JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.allocIDLocked(),
 			Method:  opencode.MethodSessionNew,
-			Params:  opencode.SessionNewParams{Cwd: opts.Dir, McpServers: []opencode.MCPServer{}},
+			Params:  params,
 		}
 	}
 	if err := writeJSON(stdin, sessionReq); err != nil {
@@ -484,11 +500,15 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 
 	// 3. Switch model if the caller requested a specific one.
 	if opts.Model != "" {
+		params, err := marshalParams(opencode.SetSessionModelParams{SessionID: w.sessionID, ModelID: opts.Model})
+		if err != nil {
+			return nil, fmt.Errorf("marshal unstable_setSessionModel params: %w", err)
+		}
 		setModelReq := opencode.JSONRPCRequest{
 			JSONRPC: "2.0",
 			ID:      w.allocIDLocked(),
 			Method:  opencode.MethodUnstableSetSessionModel,
-			Params:  opencode.SetSessionModelParams{SessionID: w.sessionID, ModelID: opts.Model},
+			Params:  params,
 		}
 		if err := writeJSON(stdin, setModelReq); err != nil {
 			return nil, fmt.Errorf("write unstable_setSessionModel: %w", err)
@@ -505,6 +525,15 @@ func handshake(ctx context.Context, stdin io.Writer, stdout *bufio.Reader, opts 
 	}
 
 	return res, nil
+}
+
+// marshalParams marshals v into a json.RawMessage for use as JSONRPCRequest.Params.
+func marshalParams(v any) (json.RawMessage, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(b), nil
 }
 
 // writeJSON marshals v as JSON and writes it followed by a newline.

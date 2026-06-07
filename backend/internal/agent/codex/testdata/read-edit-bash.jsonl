@@ -1,5 +1,5 @@
 {"type":"caic_meta","version":1,"prompt":"Read main.go, edit the greeting on line 3 from \"Hello\" to \"Hi\", then run cat main.go.","repos":[],"harness":"codex","started_at":"2026-05-29T14:35:39.148809459Z"}
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"caic","title":"caic","version":"1.0.0"},"capabilities":{"optOutNotificationMethods":["item/commandExecution/terminalInteraction","item/fileChange/outputDelta","item/reasoning/summaryPartAdded","item/reasoning/textDelta","item/plan/delta","turn/diff/updated","turn/plan/updated","thread/name/updated"]}}}
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"caic","title":"caic","version":"1.0.0"},"capabilities":{"optOutNotificationMethods":["item/commandExecution/terminalInteraction","item/reasoning/summaryPartAdded","item/reasoning/textDelta","item/plan/delta","turn/diff/updated","turn/plan/updated","thread/name/updated"]}}}
 {"id":1,"result":{"userAgent":"caic/0.133.0 (Debian 13.0.0; x86_64) unknown (caic; 1.0.0)","codexHome":"/workspace/.codex","platformFamily":"unix","platformOs":"linux"}}
 {"method":"remoteControl/status/changed","params":{"status":"disabled","serverName":"5cf9995547b6","installationId":"a31cbb46-0219-4ed9-8f0b-5638ae0e0ab1","environmentId":null}}
 {"jsonrpc":"2.0","method":"initialized"}

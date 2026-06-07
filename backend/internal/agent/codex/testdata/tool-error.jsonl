@@ -1,5 +1,5 @@
 {"type":"caic_meta","version":1,"prompt":"Read the file nonexistent_file.txt","repos":[],"harness":"codex","started_at":"2026-05-29T14:35:54.501185064Z"}
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"caic","title":"caic","version":"1.0.0"},"capabilities":{"optOutNotificationMethods":["item/commandExecution/terminalInteraction","item/fileChange/outputDelta","item/reasoning/summaryPartAdded","item/reasoning/textDelta","item/plan/delta","turn/diff/updated","turn/plan/updated","thread/name/updated"]}}}
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"caic","title":"caic","version":"1.0.0"},"capabilities":{"optOutNotificationMethods":["item/commandExecution/terminalInteraction","item/reasoning/summaryPartAdded","item/reasoning/textDelta","item/plan/delta","turn/diff/updated","turn/plan/updated","thread/name/updated"]}}}
 {"id":1,"result":{"userAgent":"caic/0.133.0 (Debian 13.0.0; x86_64) unknown (caic; 1.0.0)","codexHome":"/workspace/.codex","platformFamily":"unix","platformOs":"linux"}}
 {"method":"remoteControl/status/changed","params":{"status":"disabled","serverName":"84ff480e8fa0","installationId":"7a7f98f7-7be2-49de-b90f-ac0259360032","environmentId":null}}
 {"jsonrpc":"2.0","method":"initialized"}
