@@ -734,6 +734,50 @@ func TestTask(t *testing.T) {
 				t.Errorf("state = %v, want %v", tk.GetState(), StateRunning)
 			}
 		})
+		t.Run("EmptyResultUsesTurnText", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "I checked the files."}, false)
+			tk.addMessage(t.Context(), &agent.ToolUseMessage{ToolUseID: "tu1", Name: "Read"}, false)
+			tk.addMessage(t.Context(), &agent.ToolResultMessage{ToolUseID: "tu1"}, false)
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "There is nothing to change."}, false)
+
+			result := &agent.ResultMessage{MessageType: "result"}
+			tk.addMessage(t.Context(), result, false)
+			if result.Result != "There is nothing to change." {
+				t.Errorf("Result = %q", result.Result)
+			}
+			if tk.LastAgentResult() != result.Result {
+				t.Errorf("LastAgentResult = %q, want %q", tk.LastAgentResult(), result.Result)
+			}
+		})
+		t.Run("EmptyResultStopsAtThinking", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "before thinking"}, false)
+			tk.addMessage(t.Context(), &agent.ThinkingMessage{Text: "private chain"}, false)
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "after thinking"}, false)
+
+			result := &agent.ResultMessage{MessageType: "result"}
+			tk.addMessage(t.Context(), result, false)
+			if result.Result != "after thinking" {
+				t.Errorf("Result = %q", result.Result)
+			}
+		})
+		t.Run("NonEmptyResultIsPreserved", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			tk.SetState(StateRunning)
+			tk.addMessage(t.Context(), &agent.TextMessage{Text: "intermediate"}, false)
+
+			result := &agent.ResultMessage{MessageType: "result", Result: "final"}
+			tk.addMessage(t.Context(), result, false)
+			if result.Result != "final" {
+				t.Errorf("Result = %q, want final", result.Result)
+			}
+		})
 		t.Run("NoTransitionForNonActiveStates", func(t *testing.T) {
 			t.Parallel()
 			// TextMessages should NOT transition terminal or
@@ -1640,6 +1684,51 @@ func TestTask(t *testing.T) {
 
 			if len(history) != 2 {
 				t.Fatalf("history len = %d, want 2", len(history))
+			}
+		})
+		t.Run("EmptyResultUsesRestoredTurnText", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			msgs := []agent.Message{
+				&agent.UserInputMessage{Text: "first"},
+				&agent.TextMessage{Text: "first result"},
+				&agent.ResultMessage{MessageType: "result", Result: "first result"},
+				&agent.UserInputMessage{Text: "second"},
+				&agent.TextMessage{Text: "status update"},
+				&agent.ToolUseMessage{ToolUseID: "tu1", Name: "Read"},
+				&agent.ToolResultMessage{ToolUseID: "tu1"},
+				&agent.TextMessage{Text: "done"},
+				&agent.ResultMessage{MessageType: "result"},
+			}
+			tk.RestoreMessages(msgs)
+
+			rm, ok := msgs[len(msgs)-1].(*agent.ResultMessage)
+			if !ok {
+				t.Fatalf("last message type = %T, want *agent.ResultMessage", msgs[len(msgs)-1])
+			}
+			if rm.Result != "done" {
+				t.Errorf("Result = %q", rm.Result)
+			}
+		})
+		t.Run("EmptyResultStopsAtRestoredThinking", func(t *testing.T) {
+			t.Parallel()
+			tk := &Task{InitialPrompt: agent.Prompt{Text: "test"}}
+			msgs := []agent.Message{
+				&agent.UserInputMessage{Text: "test"},
+				&agent.TextMessage{Text: "before thinking"},
+				&agent.ThinkingDeltaMessage{Text: "reasoning"},
+				&agent.TextDeltaMessage{Text: "after "},
+				&agent.TextDeltaMessage{Text: "thinking"},
+				&agent.ResultMessage{MessageType: "result"},
+			}
+			tk.RestoreMessages(msgs)
+
+			rm, ok := msgs[len(msgs)-1].(*agent.ResultMessage)
+			if !ok {
+				t.Fatalf("last message type = %T, want *agent.ResultMessage", msgs[len(msgs)-1])
+			}
+			if rm.Result != "after thinking" {
+				t.Errorf("Result = %q", rm.Result)
 			}
 		})
 	})

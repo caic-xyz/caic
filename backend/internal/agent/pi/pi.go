@@ -4,10 +4,10 @@
 // JSON-RPC 2.0). There is no handshake — the subprocess is immediately ready
 // to accept commands after launch.
 //
-// Per-session state (accumulated usage, text/thinking buffers) is managed by
-// piWireFormat, which wraps the stateless parseMessage function. A fresh
-// piWireFormat is created for every Start, AttachRelay, and NewWire call so
-// that accumulators reset between sessions and replays.
+// Per-session state is managed by piWireFormat, which wraps the stateless
+// parseMessage function. A fresh piWireFormat is created for every Start,
+// AttachRelay, and NewWire call so that counters reset between sessions and
+// replays.
 //
 // Extension UI auto-response is handled by piConn, which wraps the default
 // Conn to intercept extension_ui_request messages during ReadMessages and
@@ -278,16 +278,13 @@ func handleExtensionUI(conn agent.Conn, raw []byte) error {
 }
 
 // piWireFormat implements agent.WireFormat and agent.CompactCommand for Pi's
-// type-dispatched JSONL protocol. It holds per-session state: text/thinking
-// buffers for synthetic final messages, a start time for duration tracking,
-// and a turn counter incremented by handleTurnEnd.
+// type-dispatched JSONL protocol. It holds per-session state: a start time for
+// duration tracking and a turn counter incremented by handleTurnEnd.
 type piWireFormat struct {
-	mu         sync.Mutex
-	initSent   bool
-	textAccum  strings.Builder
-	thinkAccum strings.Builder
-	startTime  time.Time // When the prompt was written.
-	numTurns   int       // Incremented by handleTurnEnd; consumed by handleAgentEnd.
+	mu        sync.Mutex
+	initSent  bool
+	startTime time.Time // When the prompt was written.
+	numTurns  int       // Incremented by handleTurnEnd; consumed by handleAgentEnd.
 
 	modelCtxWindow int64 // Model's context window from set_model response; 0 if unknown.
 
@@ -303,8 +300,6 @@ type piWireFormat struct {
 // for duration tracking.
 func (w *piWireFormat) WritePrompt(wr io.Writer, p agent.Prompt, logW io.Writer) error {
 	w.mu.Lock()
-	w.textAccum.Reset()
-	w.thinkAccum.Reset()
 	w.startTime = time.Now()
 	w.numTurns = 0
 	w.mu.Unlock()
@@ -335,9 +330,8 @@ func (w *piWireFormat) WriteCompact(wr io.Writer, instructions string, logW io.W
 
 // ParseMessage wraps the stateless parseMessage with stateful interceptions:
 //
-//   - text_delta/thinking_delta: accumulated for the final ResultMessage.
-//   - done: emits accumulated text/thinking + ResultMessage (future Pi versions).
-//   - agent_end: emits ResultMessage with accumulated text + usage + duration.
+//   - done: emits ResultMessage (future Pi versions).
+//   - agent_end: emits ResultMessage with usage + duration.
 //   - turn_end: emits UsageMessage from turn's assistant message.
 func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	var probe pi.LineProbe
@@ -398,33 +392,25 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 		return nil, err
 	}
 
-	// Accumulate text/thinking deltas for synthetic final messages.
 	// For tool output deltas, compute incremental deltas since Pi's
 	// tool_execution_update events carry the full accumulated output.
 	for _, msg := range msgs {
-		switch m := msg.(type) {
-		case *agent.TextDeltaMessage:
-			w.mu.Lock()
-			w.textAccum.WriteString(m.Text)
-			w.mu.Unlock()
-		case *agent.ThinkingDeltaMessage:
-			w.mu.Lock()
-			w.thinkAccum.WriteString(m.Text)
-			w.mu.Unlock()
-		case *agent.ToolOutputDeltaMessage:
-			w.mu.Lock()
-			if w.toolOutputLen == nil {
-				w.toolOutputLen = make(map[string]int)
-			}
-			prev := w.toolOutputLen[m.ToolUseID]
-			if prev < len(m.Delta) {
-				m.Delta = m.Delta[prev:]
-				w.toolOutputLen[m.ToolUseID] = prev + len(m.Delta)
-			} else {
-				m.Delta = ""
-			}
-			w.mu.Unlock()
+		m, ok := msg.(*agent.ToolOutputDeltaMessage)
+		if !ok {
+			continue
 		}
+		w.mu.Lock()
+		if w.toolOutputLen == nil {
+			w.toolOutputLen = make(map[string]int)
+		}
+		prev := w.toolOutputLen[m.ToolUseID]
+		if prev < len(m.Delta) {
+			m.Delta = m.Delta[prev:]
+			w.toolOutputLen[m.ToolUseID] = prev + len(m.Delta)
+		} else {
+			m.Delta = ""
+		}
+		w.mu.Unlock()
 	}
 	// Filter out empty messages after incremental delta computation.
 	n := 0
@@ -438,49 +424,18 @@ func (w *piWireFormat) ParseMessage(line []byte) ([]agent.Message, error) {
 	return msgs[:n], nil
 }
 
-// handleDone converts a done delta into synthetic final messages + a
-// ResultMessage. Pi currently does not emit done deltas, so this path is
-// not exercised in normal operation, but is kept for protocol evolution.
+// handleDone converts a done delta into a ResultMessage. Pi currently does not
+// emit done deltas, so this path is not exercised in normal operation, but is
+// kept for protocol evolution.
 func (w *piWireFormat) handleDone(ev *pi.MessageUpdateEvent) ([]agent.Message, error) {
-	w.mu.Lock()
-	var msgs []agent.Message
-	if w.thinkAccum.Len() > 0 {
-		msgs = append(msgs, &agent.ThinkingMessage{Text: w.thinkAccum.String()})
-		w.thinkAccum.Reset()
-	}
-	turnText := ""
-	if w.textAccum.Len() > 0 {
-		turnText = w.textAccum.String()
-		w.textAccum.Reset()
-	}
-	if turnText == "" && ev.AssistantMessageEvent.Message != nil {
-		turnText = extractTextContent(ev.AssistantMessageEvent.Message.Content)
-	}
-	if turnText != "" {
-		msgs = append(msgs, &agent.TextMessage{Text: turnText})
-	}
 	rm := &agent.ResultMessage{
 		MessageType: "result",
 		Subtype:     "result",
-		Result:      turnText,
 	}
 	if ev.AssistantMessageEvent.Reason == pi.StopReasonError {
 		rm.IsError = true
 	}
-	w.mu.Unlock()
-	msgs = append(msgs, rm)
-	return msgs, nil
-}
-
-// extractTextContent joins text from content blocks into a single string.
-func extractTextContent(blocks pi.ContentBlocks) string {
-	var b strings.Builder
-	for i := range blocks {
-		if blocks[i].Text != "" {
-			b.WriteString(blocks[i].Text)
-		}
-	}
-	return b.String()
+	return []agent.Message{rm}, nil
 }
 
 // handleMessageEnd handles a message_end event, emitting an error ResultMessage
@@ -493,10 +448,6 @@ func (w *piWireFormat) handleMessageEnd(line []byte) ([]agent.Message, error) {
 	if ev.Message.StopReason != pi.StopReasonError {
 		return nil, nil
 	}
-	w.mu.Lock()
-	w.textAccum.Reset()
-	w.thinkAccum.Reset()
-	w.mu.Unlock()
 	return []agent.Message{&agent.ResultMessage{
 		MessageType: "result",
 		Subtype:     "error",
@@ -530,11 +481,6 @@ func (w *piWireFormat) handleMessageStart(line []byte) ([]agent.Message, error) 
 
 // handleError converts an error delta into a ResultMessage.
 func (w *piWireFormat) handleError(ev *pi.MessageUpdateEvent) ([]agent.Message, error) {
-	w.mu.Lock()
-	w.textAccum.Reset()
-	w.thinkAccum.Reset()
-	w.mu.Unlock()
-
 	result := ""
 	if ev.AssistantMessageEvent.Error != nil && ev.AssistantMessageEvent.Error.ErrorMessage != "" {
 		result = ev.AssistantMessageEvent.Error.ErrorMessage
@@ -547,10 +493,8 @@ func (w *piWireFormat) handleError(ev *pi.MessageUpdateEvent) ([]agent.Message, 
 	}}, nil
 }
 
-// handleAgentEnd extracts final usage from the last assistant message and
-// emits a ResultMessage with the accumulated session text, usage, and duration.
-// Pi does not emit done deltas, so the text from text_delta events is consumed
-// here to populate the frontend "Done" card.
+// handleAgentEnd extracts final usage from the last assistant message and emits
+// a ResultMessage with usage and duration.
 func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
 	var ev pi.AgentEndEvent
 	if err := json.Unmarshal(line, &ev); err != nil {
@@ -574,26 +518,6 @@ func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
 	}
 
 	w.mu.Lock()
-	// Consume accumulated streaming text for the final "Done" card.
-	// If text_delta events were not emitted (non-streaming), fall back
-	// to extracting text from the last assistant message's content blocks.
-	resultText := ""
-	if w.textAccum.Len() > 0 {
-		resultText = w.textAccum.String()
-		w.textAccum.Reset()
-	}
-	if resultText == "" {
-		for i := range slices.Backward(ev.Messages) {
-			msg := &ev.Messages[i]
-			if msg.Role != pi.RoleAssistant {
-				continue
-			}
-			resultText = extractTextContent(msg.Content)
-			break
-		}
-	}
-	w.thinkAccum.Reset()
-
 	var durationMs int64
 	if !w.startTime.IsZero() {
 		durationMs = time.Since(w.startTime).Milliseconds()
@@ -608,7 +532,6 @@ func (w *piWireFormat) handleAgentEnd(line []byte) ([]agent.Message, error) {
 		Subtype:     "result",
 		DurationMs:  durationMs,
 		NumTurns:    numTurns,
-		Result:      resultText,
 		Usage:       usage,
 	}}, nil
 }

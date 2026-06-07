@@ -288,6 +288,70 @@ func lastAgentMessage(msgs []agent.Message) *agent.ResultMessage {
 	return nil
 }
 
+// fillEmptyResultMessages fills empty ResultMessage text from visible assistant
+// text in the same turn.
+func fillEmptyResultMessages(msgs []agent.Message) {
+	for i, msg := range msgs {
+		rm, ok := msg.(*agent.ResultMessage)
+		if !ok || rm.Result != "" {
+			continue
+		}
+		rm.Result = fallbackResultText(msgs[:i+1])
+	}
+}
+
+// fallbackResultText returns visible assistant text from the current turn.
+// The input may include the trailing ResultMessage being filled.
+func fallbackResultText(msgs []agent.Message) string {
+	if len(msgs) == 0 {
+		return ""
+	}
+	end := len(msgs)
+	if _, ok := msgs[end-1].(*agent.ResultMessage); ok {
+		end--
+	}
+	start := 0
+	for i := end - 1; i >= 0; i-- {
+		if fallbackBoundary(msgs[i]) {
+			start = i + 1
+			break
+		}
+	}
+
+	var texts []string
+	var delta strings.Builder
+	for _, msg := range msgs[start:end] {
+		switch m := msg.(type) {
+		case *agent.TextMessage:
+			text := strings.TrimSpace(m.Text)
+			if text == "" {
+				continue
+			}
+			if len(texts) == 0 || texts[len(texts)-1] != text {
+				texts = append(texts, text)
+			}
+		case *agent.TextDeltaMessage:
+			if len(texts) == 0 {
+				delta.WriteString(m.Text)
+			}
+		}
+	}
+	if len(texts) > 0 {
+		return strings.Join(texts, "\n\n")
+	}
+	return strings.TrimSpace(delta.String())
+}
+
+func fallbackBoundary(msg agent.Message) bool {
+	switch msg.(type) {
+	case *agent.ResultMessage, *agent.ToolUseMessage, *agent.ToolResultMessage,
+		*agent.ThinkingMessage, *agent.ThinkingDeltaMessage:
+		return true
+	default:
+		return false
+	}
+}
+
 // lastTurnHasAsk reports whether the current turn contains an AskMessage.
 // It scans backwards from the end until it hits a previous turn's
 // ResultMessage boundary. The caller may include the current turn's
@@ -830,6 +894,7 @@ func (t *Task) Messages() []agent.Message {
 func (t *Task) RestoreMessages(msgs []agent.Message) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	fillEmptyResultMessages(msgs)
 	t.msgs = msgs
 	// Scan forward so later entries (model_rerouted) override earlier ones.
 	for _, m := range msgs {
@@ -1281,6 +1346,9 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.msgs = append(t.msgs, m)
+	if rm, ok := m.(*agent.ResultMessage); ok && rm.Result == "" {
+		rm.Result = fallbackResultText(t.msgs)
+	}
 	// Capture metadata from the init message.
 	if init, ok := m.(*agent.InitMessage); ok {
 		if init.SessionID != "" {

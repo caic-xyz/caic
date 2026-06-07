@@ -106,68 +106,55 @@ func TestBackendNewWire(t *testing.T) {
 	})
 }
 
-func TestHandleDoneResultText(t *testing.T) {
+func TestHandleDone(t *testing.T) {
 	t.Parallel()
 
 	// handleDone is kept for future Pi protocol versions that may emit done
 	// deltas. The current Pi does not emit them, but the code path is tested.
 
-	t.Run("done populates Result field with accumulated text", func(t *testing.T) {
+	t.Run("done emits empty ResultMessage", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
-		w.mu.Lock()
-		w.textAccum.WriteString("Hello from Pi")
-		w.mu.Unlock()
 
 		doneLine := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"done","reason":"end_turn"}}`)
 		msgs, err := w.ParseMessage(doneLine)
 		if err != nil {
 			t.Fatalf("ParseMessage(done): %v", err)
 		}
-		if len(msgs) != 2 {
-			t.Fatalf("ParseMessage(done) = %d messages, want 2 (text + result)", len(msgs))
+		if len(msgs) != 1 {
+			t.Fatalf("ParseMessage(done) = %d messages, want 1", len(msgs))
 		}
-		tm, ok := msgs[0].(*agent.TextMessage)
+		rm, ok := msgs[0].(*agent.ResultMessage)
 		if !ok {
-			t.Fatalf("msg[0] type = %T, want *agent.TextMessage", msgs[0])
+			t.Fatalf("msg[0] type = %T, want *agent.ResultMessage", msgs[0])
 		}
-		if tm.Text != "Hello from Pi" {
-			t.Errorf("Text = %q, want %q", tm.Text, "Hello from Pi")
-		}
-		rm, ok := msgs[1].(*agent.ResultMessage)
-		if !ok {
-			t.Fatalf("msg[1] type = %T, want *agent.ResultMessage", msgs[1])
-		}
-		if rm.Result != "Hello from Pi" {
-			t.Errorf("Result = %q, want %q", rm.Result, "Hello from Pi")
+		if rm.Result != "" {
+			t.Errorf("Result = %q, want empty", rm.Result)
 		}
 	})
 
 	t.Run("done with error reason marks ResultMessage", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
-		w.mu.Lock()
-		w.textAccum.WriteString("partial error")
-		w.mu.Unlock()
 
 		doneLine := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"done","reason":"error"}}`)
 		msgs, err := w.ParseMessage(doneLine)
 		if err != nil {
 			t.Fatalf("ParseMessage(done): %v", err)
 		}
-		rm, ok := msgs[1].(*agent.ResultMessage)
+		rm, ok := msgs[0].(*agent.ResultMessage)
 		if !ok {
-			t.Fatalf("msg[1] type = %T, want *agent.ResultMessage", msgs[1])
+			t.Fatalf("msg[0] type = %T, want *agent.ResultMessage", msgs[0])
 		}
 		if !rm.IsError {
 			t.Error("IsError = false, want true when done delta had reason=error")
 		}
-		if rm.Result != "partial error" {
-			t.Errorf("Result = %q, want %q", rm.Result, "partial error")
+		if rm.Result != "" {
+			t.Errorf("Result = %q, want empty", rm.Result)
 		}
 	})
 
-	t.Run("done without text deltas falls back to message content", func(t *testing.T) {
+	t.Run("done does not copy message content into Result", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
 		doneLine := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"done","reason":"end_turn","message":{"role":"assistant","content":[{"type":"text","text":"Non-streamed result"}]}}}`)
@@ -175,27 +162,24 @@ func TestHandleDoneResultText(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ParseMessage(done): %v", err)
 		}
-		if len(msgs) != 2 {
-			t.Fatalf("ParseMessage(done) = %d messages, want 2", len(msgs))
+		if len(msgs) != 1 {
+			t.Fatalf("ParseMessage(done) = %d messages, want 1", len(msgs))
 		}
-		rm, ok := msgs[1].(*agent.ResultMessage)
+		rm, ok := msgs[0].(*agent.ResultMessage)
 		if !ok {
-			t.Fatalf("msg[1] type = %T, want *agent.ResultMessage", msgs[1])
+			t.Fatalf("msg[0] type = %T, want *agent.ResultMessage", msgs[0])
 		}
-		if rm.Result != "Non-streamed result" {
-			t.Errorf("Result = %q, want %q", rm.Result, "Non-streamed result")
+		if rm.Result != "" {
+			t.Errorf("Result = %q, want empty", rm.Result)
 		}
 	})
 }
 
-func TestHandleAgentEndResultText(t *testing.T) {
+func TestHandleAgentEnd(t *testing.T) {
 	t.Parallel()
-	t.Run("agent_end includes accumulated text from text_delta events", func(t *testing.T) {
+	t.Run("agent_end emits usage without result text", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
-		w.mu.Lock()
-		w.textAccum.WriteString("Session result text")
-		w.mu.Unlock()
 
 		agentEndLine := []byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[],"usage":{"input":100,"output":50}}]}`)
 		msgs, err := w.ParseMessage(agentEndLine)
@@ -209,18 +193,17 @@ func TestHandleAgentEndResultText(t *testing.T) {
 		if !ok {
 			t.Fatalf("type = %T, want *agent.ResultMessage", msgs[0])
 		}
-		if rm.Result != "Session result text" {
-			t.Errorf("Result = %q, want %q", rm.Result, "Session result text")
+		if rm.Result != "" {
+			t.Errorf("Result = %q, want empty", rm.Result)
 		}
 		if rm.Usage.InputTokens != 100 || rm.Usage.OutputTokens != 50 {
 			t.Errorf("Usage = %+v, want input=100 output=50", rm.Usage)
 		}
 	})
 
-	t.Run("agent_end falls back to message content when textAccum is empty", func(t *testing.T) {
+	t.Run("agent_end does not copy message content into Result", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
-		// No streaming deltas — textAccum is empty.
 		agentEndLine := []byte(`{"type":"agent_end","messages":[{"role":"assistant","content":[{"type":"text","text":"Fallback text"}],"usage":{"input":10,"output":5}}]}`)
 		msgs, err := w.ParseMessage(agentEndLine)
 		if err != nil {
@@ -230,12 +213,12 @@ func TestHandleAgentEndResultText(t *testing.T) {
 		if !ok {
 			t.Fatalf("type = %T, want *agent.ResultMessage", msgs[0])
 		}
-		if rm.Result != "Fallback text" {
-			t.Errorf("Result = %q, want %q", rm.Result, "Fallback text")
+		if rm.Result != "" {
+			t.Errorf("Result = %q, want empty", rm.Result)
 		}
 	})
 
-	t.Run("agent_end with empty textAccum and no assistant message has empty Result", func(t *testing.T) {
+	t.Run("agent_end without assistant message has empty Result", func(t *testing.T) {
 		t.Parallel()
 		w := &piWireFormat{}
 		agentEndLine := []byte(`{"type":"agent_end","messages":[]}`)
