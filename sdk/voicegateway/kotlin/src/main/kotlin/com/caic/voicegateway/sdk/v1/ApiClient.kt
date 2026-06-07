@@ -86,7 +86,7 @@ class ApiClient(
     // JSON endpoints
     /** Returns a short-lived voice API token. */
     suspend fun getVoiceToken(): VoiceTokenResp = request("GET", "/api/v1/voice/token")
-    /** Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session. */
+    /** Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session. */
     suspend fun voiceRTCOffer(req: VoiceRTCOfferReq): VoiceRTCAnswerResp = request("POST", "/api/v1/voice/rtc/offer", json.encodeToString(req))
     /** Closes a WebRTC voice bridge session. */
     suspend fun closeVoiceRTC(sessionID: String): StatusResp = request("POST", "/api/v1/voice/rtc/$sessionID")

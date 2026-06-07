@@ -1,16 +1,37 @@
-// Core Gemini Live voice session manager for the web frontend via WebRTC. Keep in sync with android/caic/src/main/java/com/fghbuild/caic/voice/VoiceSession.kt
+// Core voice gateway session manager for the web frontend via WebRTC. Keep in sync with android/caic/src/main/java/com/fghbuild/caic/voice/VoiceSession.kt
 import { createStore, produce } from "solid-js/store";
 import { voiceRTCOffer, listHarnesses, listRepos } from "./api";
 import type { Task } from "@sdk/types.gen";
 import { FunctionHandlers } from "./FunctionHandlers";
 import { TaskNumberMap } from "./TaskNumberMap";
-import { buildFunctionDeclarations, type ServerCapabilities } from "./FunctionDeclarations";
+import {
+  buildFunctionDeclarations,
+  type ServerCapabilities,
+} from "./FunctionDeclarations";
 import { formatElapsed, formatCost } from "./formatting";
+import {
+  type Error,
+  type ContextUpdate,
+  type MessageEnvelope,
+  type SessionSetup,
+  type ToolResult,
+  type ToolCall,
+  type TranscriptDelta,
+  MessageKindContextUpdate,
+  MessageKindError,
+  MessageKindInterrupted,
+  MessageKindSessionReady,
+  MessageKindSessionSetup,
+  MessageKindSpeechEnded,
+  MessageKindSpeechStarted,
+  MessageKindToolCall,
+  MessageKindToolResult,
+  MessageKindTranscriptDelta,
+} from "@voicegateway-sdk/types.gen";
 
 // Constants
 
-const MODEL_NAME = "models/gemini-3.1-flash-live-preview";
-/** Max time (ms) to wait for setupComplete before timing out. */
+/** Max time (ms) to wait for session.ready before timing out. */
 const SETUP_TIMEOUT_MS = 15000;
 
 const SYSTEM_INSTRUCTION =
@@ -41,9 +62,9 @@ const SYSTEM_INSTRUCTION =
   "answer questions about task status without calling tasks_list first. Call " +
   "task_get_detail when the user asks for specifics (recent events, diffs).\n\n" +
   "## On connection\n" +
-  "When the session starts, say exactly one word: \"Ready\". " +
+  'When the session starts, say exactly one word: "Ready". ' +
   "Do not say anything else — no greeting, no summary, no explanation. " +
-  "After saying \"Ready\", stop and remain silent until the user speaks. " +
+  'After saying "Ready", stop and remain silent until the user speaks. ' +
   "Always speak fast.\n\n" +
   "## Behavior guidelines\n" +
   "- Do not ask follow-up questions like 'would you like me to…' " +
@@ -125,7 +146,7 @@ export class VoiceSession {
   /** Text notifications buffered while the model is speaking; flushed on turn end. */
   private _pendingNotifications: string[] = [];
   private _functions: FunctionHandlers | null = null;
-  /** Snapshot to inject after setupComplete. */
+  /** Snapshot to inject after session.ready. */
   private _pendingSnapshot: string | null = null;
   private _setupTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -162,16 +183,30 @@ export class VoiceSession {
       const outputs: AudioDevice[] = [];
       for (const d of devices) {
         if (d.kind === "audioinput") {
-          inputs.push({ deviceId: d.deviceId, kind: d.kind, label: d.label || "Microphone" });
+          inputs.push({
+            deviceId: d.deviceId,
+            kind: d.kind,
+            label: d.label || "Microphone",
+          });
         } else if (d.kind === "audiooutput") {
-          outputs.push({ deviceId: d.deviceId, kind: d.kind, label: d.label || "Speaker" });
+          outputs.push({
+            deviceId: d.deviceId,
+            kind: d.kind,
+            label: d.label || "Speaker",
+          });
         }
       }
       // Auto-select: first available, or keep current selection if still valid.
       const curSel = this.state.selectedInputId;
       const curOut = this.state.selectedOutputId;
-      const newInId = curSel && inputs.some((d) => d.deviceId === curSel) ? curSel : inputs[0]?.deviceId ?? "";
-      const newOutId = curOut && outputs.some((d) => d.deviceId === curOut) ? curOut : outputs[0]?.deviceId ?? "";
+      const newInId =
+        curSel && inputs.some((d) => d.deviceId === curSel)
+          ? curSel
+          : (inputs[0]?.deviceId ?? "");
+      const newOutId =
+        curOut && outputs.some((d) => d.deviceId === curOut)
+          ? curOut
+          : (outputs[0]?.deviceId ?? "");
       this._update((s) => {
         s.audioInputs = inputs;
         s.audioOutputs = outputs;
@@ -185,7 +220,9 @@ export class VoiceSession {
 
   /** Select an audio input device. If connected, replaces the mic track. */
   async selectInputDevice(deviceId: string): Promise<void> {
-    this._update((s) => { s.selectedInputId = deviceId; });
+    this._update((s) => {
+      s.selectedInputId = deviceId;
+    });
     if (this._pc && this._micStream) {
       try {
         // Stop old mic tracks.
@@ -195,10 +232,13 @@ export class VoiceSession {
           audio: deviceId ? { deviceId: { exact: deviceId } } : true,
           video: false,
         };
-        const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+        const newStream =
+          await navigator.mediaDevices.getUserMedia(constraints);
         this._micStream = newStream;
         // Replace tracks on the PeerConnection.
-        const sender = this._pc.getSenders().find((s) => s.track?.kind === "audio");
+        const sender = this._pc
+          .getSenders()
+          .find((s) => s.track?.kind === "audio");
         for (const t of newStream.getAudioTracks()) {
           if (sender) {
             await sender.replaceTrack(t);
@@ -224,7 +264,9 @@ export class VoiceSession {
             }
             const rms = Math.sqrt(sumSq / buf.length);
             if (!this.state.muted && !this._speakerActive) {
-              this._update((s) => { s.micLevel = Math.min(1, Math.sqrt(rms)); });
+              this._update((s) => {
+                s.micLevel = Math.min(1, Math.sqrt(rms));
+              });
             }
             requestAnimationFrame(pollMicLevel);
           };
@@ -238,14 +280,26 @@ export class VoiceSession {
 
   /** Select an audio output device. Applies immediately if connected. */
   selectOutputDevice(deviceId: string): void {
-    this._update((s) => { s.selectedOutputId = deviceId; });
+    this._update((s) => {
+      s.selectedOutputId = deviceId;
+    });
     if (this._speakerAudio && "setSinkId" in this._speakerAudio) {
-      void (this._speakerAudio as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> }).setSinkId(deviceId);
+      void (
+        this._speakerAudio as HTMLAudioElement & {
+          setSinkId: (id: string) => Promise<void>;
+        }
+      ).setSinkId(deviceId);
     }
   }
 
   /** Start a new voice session via WebRTC data channel through the caic backend. */
-  async connect(tasks: Task[], recentRepo: string, defaultHarness: string, defaultModel: string, caps: ServerCapabilities): Promise<void> {
+  async connect(
+    tasks: Task[],
+    recentRepo: string,
+    defaultHarness: string,
+    defaultModel: string,
+    caps: ServerCapabilities,
+  ): Promise<void> {
     this._releaseAll();
     this._audioContext = new AudioContext({ sampleRate: 16000 });
     this._clearTranscript();
@@ -262,7 +316,13 @@ export class VoiceSession {
       // Build task snapshot (same as connectWebSocket()).
       const prePurged = new Set(
         tasks
-          .filter((t) => t.state === "purged" || t.state === "failed" || t.state === "stopped" || t.state === "stopping")
+          .filter(
+            (t) =>
+              t.state === "purged" ||
+              t.state === "failed" ||
+              t.state === "stopped" ||
+              t.state === "stopping",
+          )
           .map((t) => t.id),
       );
       this.excludedTaskIds = prePurged;
@@ -275,8 +335,19 @@ export class VoiceSession {
         });
       this.taskNumberMap.reset();
       this.taskNumberMap.update(active);
-      this._pendingSnapshot = buildSnapshot(active, recentRepo, this.taskNumberMap, defaultHarness, defaultModel);
-      this._functions = new FunctionHandlers(this.taskNumberMap, () => this.excludedTaskIds, defaultHarness, defaultModel);
+      this._pendingSnapshot = buildSnapshot(
+        active,
+        recentRepo,
+        this.taskNumberMap,
+        defaultHarness,
+        defaultModel,
+      );
+      this._functions = new FunctionHandlers(
+        this.taskNumberMap,
+        () => this.excludedTaskIds,
+        defaultHarness,
+        defaultModel,
+      );
 
       // Create PeerConnection.
       const pc = new RTCPeerConnection({
@@ -290,7 +361,8 @@ export class VoiceSession {
         audio: inputId ? { deviceId: { exact: inputId } } : true,
         video: false,
       };
-      this._micStream = await navigator.mediaDevices.getUserMedia(micConstraints);
+      this._micStream =
+        await navigator.mediaDevices.getUserMedia(micConstraints);
       for (const t of this._micStream.getAudioTracks()) {
         pc.addTrack(t, this._micStream);
       }
@@ -299,7 +371,9 @@ export class VoiceSession {
       if (this._audioContext) {
         const analyser = this._audioContext.createAnalyser();
         analyser.fftSize = 256;
-        const source = this._audioContext.createMediaStreamSource(this._micStream);
+        const source = this._audioContext.createMediaStreamSource(
+          this._micStream,
+        );
         source.connect(analyser);
         const buf = new Uint8Array(analyser.frequencyBinCount);
         const pollMicLevel = () => {
@@ -328,20 +402,26 @@ export class VoiceSession {
         this._speakerAudio = audio;
         audio.srcObject = evt.streams[0];
         if (outId && "setSinkId" in audio) {
-          void (audio as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> }).setSinkId(outId);
+          void (
+            audio as HTMLAudioElement & {
+              setSinkId: (id: string) => Promise<void>;
+            }
+          ).setSinkId(outId);
         }
         audio.play().catch(() => {
           // Autoplay may be blocked; user interaction will resume.
         });
       };
 
-      // Create data channel carrying the Gemini control protocol (audio stripped).
-      const dc = pc.createDataChannel("gemini", { ordered: true });
+      // Create data channel carrying the voice gateway control protocol.
+      const dc = pc.createDataChannel("voice-gateway", { ordered: true });
       this._dc = dc;
 
       dc.onmessage = (evt: MessageEvent<string>) => {
         this._handleMessage(evt.data).catch((err: unknown) => {
-          this._setError(err instanceof Error ? err.message : "Message handling failed");
+          this._setError(
+            err instanceof Error ? err.message : "Message handling failed",
+          );
         });
       };
 
@@ -388,7 +468,9 @@ export class VoiceSession {
         s.listening = true;
       });
     } catch (e: unknown) {
-      this._setError(e instanceof Error ? e.message : "WebRTC connection failed");
+      this._setError(
+        e instanceof Error ? e.message : "WebRTC connection failed",
+      );
     }
   }
 
@@ -420,7 +502,9 @@ export class VoiceSession {
     });
     if (this._micStream) {
       const enabled = !this.state.muted;
-      this._micStream.getAudioTracks().forEach((t) => { t.enabled = enabled; });
+      this._micStream.getAudioTracks().forEach((t) => {
+        t.enabled = enabled;
+      });
     }
   }
 
@@ -429,14 +513,7 @@ export class VoiceSession {
       this._pendingNotifications.push(text);
       return;
     }
-    this._send(
-      JSON.stringify({
-        clientContent: {
-          turns: [{ role: "user", parts: [{ text }] }],
-          turnComplete: true,
-        },
-      }),
-    );
+    this._send(JSON.stringify(gatewayContextUpdate(text)));
   }
 
   private _flushPendingNotifications(): void {
@@ -500,37 +577,28 @@ export class VoiceSession {
   }
 
   // -----------------------------------------------------------------------
-  // Gemini setup message
+  // Gateway setup message
   // -----------------------------------------------------------------------
 
-  private _sendSetup(harnesses: string[], repos: string[], defaultHarness: string, caps: ServerCapabilities): void {
-    const decls = buildFunctionDeclarations(harnesses, repos, defaultHarness || undefined, caps);
-    const setup = {
-      setup: {
-        model: MODEL_NAME,
-        generationConfig: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Orus" } },
-          },
-        },
-        systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
-        tools: [
-          {
-            functionDeclarations: decls.map((fd) => ({
-              name: fd.name,
-              description: fd.description,
-              parameters: fd.parameters,
-            })),
-          },
-        ],
-        realtimeInputConfig: {
-          activityHandling: "START_OF_ACTIVITY_INTERRUPTS",
-        },
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
-      },
-    };
+  private _sendSetup(
+    harnesses: string[],
+    repos: string[],
+    defaultHarness: string,
+    caps: ServerCapabilities,
+  ): void {
+    const decls = buildFunctionDeclarations(
+      harnesses,
+      repos,
+      defaultHarness || undefined,
+      caps,
+    );
+    const setup = gatewaySessionSetup(
+      decls.map((fd) => ({
+        name: fd.name,
+        description: fd.description,
+        parameters: fd.parameters,
+      })),
+    );
     this._send(JSON.stringify(setup));
   }
 
@@ -539,14 +607,14 @@ export class VoiceSession {
   // -----------------------------------------------------------------------
 
   private async _handleMessage(text: string): Promise<void> {
-    let msg: Record<string, unknown>;
+    let env: MessageEnvelope;
     try {
-      msg = JSON.parse(text) as Record<string, unknown>;
+      env = JSON.parse(text) as MessageEnvelope;
     } catch {
       return;
     }
 
-    if ("setupComplete" in msg) {
+    if (env.kind === MessageKindSessionReady) {
       if (this._setupTimer !== null) {
         clearTimeout(this._setupTimer);
         this._setupTimer = null;
@@ -557,7 +625,7 @@ export class VoiceSession {
         s.error = null;
       });
       // Audio capture is handled via WebRTC RTP tracks; no separate audio setup needed.
-      // Inject snapshot so Gemini knows current task state.
+      // Inject snapshot so the provider backend knows current task state.
       if (this._pendingSnapshot) {
         this.injectText(this._pendingSnapshot);
         this._pendingSnapshot = null;
@@ -565,114 +633,117 @@ export class VoiceSession {
       return;
     }
 
-    if ("serverContent" in msg) {
-      this._handleServerContent(msg["serverContent"] as ServerContent);
+    if (env.kind === MessageKindTranscriptDelta) {
+      this._handleTranscriptDelta(JSON.parse(text) as TranscriptDelta);
       return;
     }
 
-    if ("toolCall" in msg) {
-      const toolCall = msg["toolCall"] as ToolCall;
-      await this._handleToolCall(toolCall);
-      return;
-    }
-
-    if ("toolCallCancellation" in msg) {
+    if (env.kind === MessageKindSpeechStarted) {
+      this._speakerActive = true;
       this._update((s) => {
-        s.activeTool = null;
+        s.speaking = true;
       });
       return;
     }
 
-    // Surface Gemini error responses (e.g. auth failure, invalid model).
-    const error = msg["error"] as { message?: string } | undefined;
-    if (error?.message) {
-      if (this._setupTimer !== null) {
-        clearTimeout(this._setupTimer);
-        this._setupTimer = null;
-      }
-      this._setError(error.message);
-    }
-  }
-
-  private _handleServerContent(content: ServerContent): void {
-    // Audio playback is handled via WebRTC RTP; inlineData audio is ignored here.
-
-    if (content.inputTranscription?.text) {
-      const chunk = content.inputTranscription.text;
-      this._update((s) => {
-        s.transcript = appendChunk(s.transcript, "user", chunk);
-      });
-    }
-
-    if (content.outputTranscription?.text) {
-      const chunk = content.outputTranscription.text;
-      this._update((s) => {
-        s.transcript = appendChunk(s.transcript, "assistant", chunk);
-      });
-    }
-
-    if (content.interrupted) {
-      this._speakerActive = false;
-      this._flushPendingNotifications();
-      this._update((s) => {
-        s.speaking = false;
-      });
-    }
-
-    if (content.turnComplete) {
+    if (env.kind === MessageKindSpeechEnded) {
       this._speakerActive = false;
       this._flushPendingNotifications();
       this._update((s) => {
         s.speaking = false;
         s.transcript = s.transcript.map((e) => ({ ...e, final: true }));
       });
+      return;
+    }
+
+    if (env.kind === MessageKindInterrupted) {
+      this._speakerActive = false;
+      this._flushPendingNotifications();
+      this._update((s) => {
+        s.speaking = false;
+        s.activeTool = null;
+      });
+      return;
+    }
+
+    if (env.kind === MessageKindToolCall) {
+      await this._handleToolCall(JSON.parse(text) as ToolCall);
+      return;
+    }
+
+    if (env.kind === MessageKindError) {
+      if (this._setupTimer !== null) {
+        clearTimeout(this._setupTimer);
+        this._setupTimer = null;
+      }
+      const msg = JSON.parse(text) as Error;
+      this._setError(msg.message);
     }
   }
 
-  private async _handleToolCall(toolCall: ToolCall): Promise<void> {
+  private _handleTranscriptDelta(msg: TranscriptDelta): void {
+    if (msg.speaker !== "user" && msg.speaker !== "assistant") return;
+    if (!msg.text) return;
+    this._update((s) => {
+      s.transcript = appendChunk(s.transcript, msg.speaker, msg.text ?? "");
+    });
+  }
+
+  private async _handleToolCall(msg: ToolCall): Promise<void> {
     const fns = this._functions;
     if (!fns) return;
+    if (!msg.id || !msg.name) return;
 
-    const responses: FunctionResponse[] = [];
-    for (const fc of toolCall.functionCalls ?? []) {
-      try {
-        this._update((s) => {
-          s.activeTool = fc.name;
-        });
-        const result = await fns.handle(fc.name, fc.args ?? {});
-        this._update((s) => {
-          s.activeTool = null;
-        });
+    try {
+      this._update((s) => {
+        s.activeTool = msg.name ?? null;
+      });
+      const result = await fns.handle(msg.name, msg.args ?? {});
+      this._update((s) => {
+        s.activeTool = null;
+      });
 
-        // Surface tool errors in the transcript.
-        if (typeof result["error"] === "string") {
-          const errMsg = result["error"];
-          this._update((s) => {
-            s.transcript = [
-              ...s.transcript,
-              { speaker: "assistant" as TranscriptSpeaker, text: `[${fc.name}] ${errMsg}`, final: true },
-            ];
-          });
-        }
-
-        const response: Record<string, unknown> = result;
-        responses.push({ id: fc.id, name: fc.name, response });
-      } catch (e: unknown) {
-        this._update((s) => {
-          s.activeTool = null;
-        });
-        const errMsg = e instanceof Error ? e.message : "Unknown error";
+      // Surface tool errors in the transcript.
+      if (typeof result["error"] === "string") {
+        const errMsg = result["error"];
         this._update((s) => {
           s.transcript = [
             ...s.transcript,
-            { speaker: "assistant" as TranscriptSpeaker, text: `[${fc.name}] ${errMsg}`, final: true },
+            {
+              speaker: "assistant" as TranscriptSpeaker,
+              text: `[${msg.name}] ${errMsg}`,
+              final: true,
+            },
           ];
         });
-        responses.push({ id: fc.id, name: fc.name, response: { error: errMsg } });
       }
-    }
 
-    this._send(JSON.stringify({ toolResponse: { functionResponses: responses } }));
+      this._sendToolResult(msg.id, msg.name, result);
+    } catch (e: unknown) {
+      this._update((s) => {
+        s.activeTool = null;
+      });
+      const errMsg = e instanceof Error ? e.message : "Unknown error";
+      this._update((s) => {
+        s.transcript = [
+          ...s.transcript,
+          {
+            speaker: "assistant" as TranscriptSpeaker,
+            text: `[${msg.name}] ${errMsg}`,
+            final: true,
+          },
+        ];
+      });
+      this._sendToolResult(msg.id, msg.name, { error: errMsg });
+    }
+  }
+
+  private _sendToolResult(
+    id: string,
+    name: string,
+    result: Record<string, unknown>,
+  ): void {
+    this._send(JSON.stringify(gatewayToolResult(id, name, result)));
   }
 
   // -----------------------------------------------------------------------
@@ -697,9 +768,51 @@ export class VoiceSession {
   }
 }
 
+function gatewayContextUpdate(text: string): ContextUpdate {
+  return {
+    kind: MessageKindContextUpdate,
+    context: { text },
+  };
+}
+
+function gatewaySessionSetup(
+  tools: SessionSetup["tools"],
+): SessionSetup {
+  return {
+    kind: MessageKindSessionSetup,
+    voice: {
+      name: "Orus",
+      language: "en",
+    },
+    tools,
+    context: {
+      systemInstruction: SYSTEM_INSTRUCTION,
+    },
+  };
+}
+
+function gatewayToolResult(
+  id: string,
+  name: string,
+  result: Record<string, unknown>,
+): ToolResult {
+  return {
+    kind: MessageKindToolResult,
+    id,
+    name,
+    result,
+  };
+}
+
 // Snapshot builder (mirrors VoiceViewModel.buildSnapshot)
 
-function buildSnapshot(tasks: Task[], recentRepo: string, map: TaskNumberMap, defaultHarness?: string, defaultModel?: string): string {
+function buildSnapshot(
+  tasks: Task[],
+  recentRepo: string,
+  map: TaskNumberMap,
+  defaultHarness?: string,
+  defaultModel?: string,
+): string {
   const parts: string[] = [];
   if (recentRepo) parts.push(`[Default repo: ${recentRepo}]`);
   if (defaultHarness) parts.push(`[Default harness: ${defaultHarness}]`);
@@ -726,39 +839,12 @@ function appendChunk(
 ): TranscriptEntry[] {
   const last = transcript[transcript.length - 1];
   if (last && last.speaker === speaker && !last.final) {
-    return [...transcript.slice(0, -1), { speaker, text: last.text + text, final: false }];
+    return [
+      ...transcript.slice(0, -1),
+      { speaker, text: last.text + text, final: false },
+    ];
   }
   return [...transcript, { speaker, text, final: false }];
-}
-
-// Protocol types (subset needed for deserialization)
-
-interface ServerContent {
-  modelTurn?: {
-    parts?: Array<{
-      inlineData?: { mimeType?: string; data: string };
-    }>;
-  };
-  turnComplete?: boolean;
-  interrupted?: boolean;
-  inputTranscription?: { text?: string };
-  outputTranscription?: { text?: string };
-}
-
-interface FunctionCall {
-  id: string;
-  name: string;
-  args?: Record<string, unknown>;
-}
-
-interface FunctionResponse {
-  id: string;
-  name: string;
-  response: Record<string, unknown>;
-}
-
-interface ToolCall {
-  functionCalls?: FunctionCall[];
 }
 
 // Singleton — lives at module level so the WebRTC connection survives component remounts.

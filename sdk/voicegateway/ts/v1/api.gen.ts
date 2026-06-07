@@ -36,7 +36,7 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
   return {
     /** Returns a short-lived voice API token. */
     getVoiceToken: (): Promise<VoiceTokenResp> => request<VoiceTokenResp>("GET", "/api/v1/voice/token"),
-    /** Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session. */
+    /** Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session. */
     voiceRTCOffer: (req: VoiceRTCOfferReq): Promise<VoiceRTCAnswerResp> => request<VoiceRTCAnswerResp>("POST", "/api/v1/voice/rtc/offer", req),
     /** Closes a WebRTC voice bridge session. */
     closeVoiceRTC: (sessionID: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/v1/voice/rtc/${sessionID}`),

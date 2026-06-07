@@ -1,7 +1,8 @@
-// Package voicertc implements a WebRTC-to-Gemini-WebSocket bridge for voice sessions.
+// WebRTC voice session bridge for the voice gateway protocol.
 
 //go:build !race
 
+// Package voicertc implements WebRTC voice sessions through the voice gateway protocol.
 package voicertc
 
 import (
@@ -25,12 +26,15 @@ import (
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 
-	"github.com/caic-xyz/caic/backend/internal/jsonutil"
+	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
 )
 
 const (
 	// geminiWSEndpoint is the Gemini Live BidiGenerateContent WebSocket URL.
 	geminiWSEndpoint = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+
+	// geminiModelName is the default Gemini Live model used by the first gateway backend.
+	geminiModelName = "models/gemini-3.1-flash-live-preview"
 
 	// idleTimeout closes sessions after 30 minutes of inactivity.
 	idleTimeout = 30 * time.Minute
@@ -58,33 +62,6 @@ const (
 	// inputFrameBytes is one 20ms frame of Gemini PCM output (24kHz S16LE).
 	inputFrameBytes = geminiSampleRate * 2 * int(frameDuration/time.Millisecond) / 1000 // 960 bytes
 )
-
-// geminiBidiMessage is a top-level Gemini BidiGenerateContent message.
-// Only the serverContent key is explicitly typed; jsonutil.Overflow captures
-// and preserves all other keys through round-trip re-marshal.
-type geminiBidiMessage struct {
-	jsonutil.Overflow
-
-	ServerContent *serverContent `json:"serverContent,omitempty"`
-}
-
-// geminiAudioChunk is the JSON shape for a Gemini realtime audio input chunk.
-// See https://ai.google.dev/api/generate-content#mediablob
-type geminiAudioChunk struct {
-	RealtimeInput struct {
-		Audio struct {
-			MimeType string `json:"mimeType"`
-			Data     string `json:"data"`
-		} `json:"audio"`
-	} `json:"realtimeInput"`
-}
-
-// dcError is the JSON envelope for errors sent over the WebRTC data channel.
-type dcError struct {
-	Error struct {
-		Message string `json:"message"`
-	} `json:"error"`
-}
 
 // Bridge manages active WebRTC voice sessions.
 type Bridge struct {
@@ -186,19 +163,19 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 		}
 		slog.Info("voicertc: audio track received", "session", sess.id, "codec", track.Codec().MimeType)
 		sess.mu.Lock()
-		if sess.geminiWS != nil {
-			// Gemini already connected (data channel opened first). Start now.
+		if sess.geminiSetupComplete {
 			sess.mu.Unlock()
 			go sess.audioRxLoop(sessionCtx, track)
 		} else {
-			// Gemini not connected yet. Store the track; dc.OnOpen will start it.
+			// Store the track until Gemini accepts setup. Sending realtime
+			// audio before setupComplete can make Gemini reject the session.
 			sess.pendingTrack = track
 			sess.mu.Unlock()
 		}
 	})
 
-	// Set up data channel handler. The client creates the "gemini" data channel.
-	// geminiReady is closed once the Gemini WebSocket is connected, unblocking
+	// Set up data channel handler. The client creates the "voice-gateway" data channel.
+	// geminiReady is closed once the provider WebSocket is connected, unblocking
 	// any client messages that arrived before the dial completed.
 	geminiReady := make(chan struct{})
 	pc.OnDataChannel(func(dc *webrtc.DataChannel) {
@@ -220,23 +197,16 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 			wsConn.SetReadLimit(wsReadLimit)
 			sess.mu.Lock()
 			sess.geminiWS = wsConn
-			track := sess.pendingTrack
-			sess.pendingTrack = nil
 			sess.mu.Unlock()
 			close(geminiReady)
 			slog.Info("voicertc: gemini connected", "session", sess.id)
-
-			// Start mic → Gemini forwarding if the track arrived before Gemini connected.
-			if track != nil {
-				go sess.audioRxLoop(sessionCtx, track)
-			}
 
 			// Start Gemini → data channel / RTP forwarding.
 			go sess.geminiRxLoop(sessionCtx)
 		})
 
-		// Data channel → Gemini passthrough. Blocks until Gemini is connected
-		// so the client's setup message is never dropped.
+		// Data channel → provider adapter. Blocks until the provider is connected
+		// so the client's session.setup message is never dropped.
 		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
 			select {
 			case <-geminiReady:
@@ -249,7 +219,20 @@ func (b *Bridge) HandleOffer(ctx context.Context, sdpOffer string) (sdpAnswer, s
 			if wsConn == nil {
 				return
 			}
-			if err := wsConn.Write(sessionCtx, websocket.MessageText, msg.Data); err != nil {
+			providerMsg, err := translateGatewayClientMessage(msg.Data)
+			if err != nil {
+				if errors.Is(err, errSessionClosed) {
+					cancel()
+					return
+				}
+				slog.Warn("voicertc: gateway client message failed", "session", sess.id, "err", err)
+				sess.sendError(err.Error())
+				return
+			}
+			if len(providerMsg) == 0 {
+				return
+			}
+			if err := wsConn.Write(sessionCtx, websocket.MessageText, providerMsg); err != nil {
 				slog.Warn("voicertc: dc→gemini write failed", "session", sess.id, "err", err)
 			}
 		})
@@ -375,13 +358,14 @@ func (b *Bridge) CloseAll() {
 type session struct {
 	id string
 
-	mu           sync.Mutex
-	pc           *webrtc.PeerConnection
-	dc           *webrtc.DataChannel
-	audioTrack   *webrtc.TrackLocalStaticSample
-	geminiWS     *websocket.Conn
-	pendingTrack *webrtc.TrackRemote // set by OnTrack, consumed after geminiWS connects
-	cancel       context.CancelFunc
+	mu                  sync.Mutex
+	pc                  *webrtc.PeerConnection
+	dc                  *webrtc.DataChannel
+	audioTrack          *webrtc.TrackLocalStaticSample
+	geminiWS            *websocket.Conn
+	pendingTrack        *webrtc.TrackRemote // set by OnTrack, consumed after Gemini setupComplete
+	geminiSetupComplete bool
+	cancel              context.CancelFunc
 
 	audioMu  sync.Mutex
 	audioBuf []byte // pending Gemini PCM bytes, drained by audioSendLoop
@@ -417,8 +401,10 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 		}
 		b64 := base64.StdEncoding.EncodeToString(pcmBytes)
 		chunk := geminiAudioChunk{}
-		chunk.RealtimeInput.Audio.MimeType = fmt.Sprintf("audio/pcm;rate=%d", inputSampleRate)
-		chunk.RealtimeInput.Audio.Data = b64
+		chunk.RealtimeInput.Audio = geminiBlob{
+			MimeType: fmt.Sprintf("audio/pcm;rate=%d", inputSampleRate),
+			Data:     b64,
+		}
 		msg, err := json.Marshal(chunk)
 		if err != nil {
 			slog.WarnContext(ctx, "voicertc: marshal audio", "session", s.id, "err", err)
@@ -440,11 +426,11 @@ func (s *session) audioRxLoop(ctx context.Context, track *webrtc.TrackRemote) {
 	}
 }
 
-// geminiRxLoop reads from the Gemini WebSocket and forwards messages.
+// geminiRxLoop reads from the provider WebSocket and forwards normalized messages.
 //
 // When the client has an RTP audio track: audio chunks are appended to audioBuf
 // for real-time playback by audioSendLoop, and non-audio content goes through
-// the data channel. Otherwise everything goes through the data channel (passthrough).
+// the data channel. Provider-specific JSON never reaches the client.
 func (s *session) geminiRxLoop(ctx context.Context) {
 	var enc *opusEncoder
 	if s.audioTrack != nil {
@@ -479,18 +465,57 @@ func (s *session) geminiRxLoop(ctx context.Context) {
 			}
 		}
 
+		if geminiHasSetupComplete(data) {
+			s.markGeminiSetupComplete(ctx)
+		}
+
+		clientMessages, err := translateGeminiServerMessage(data)
+		if err != nil {
+			slog.WarnContext(ctx, "voicertc: provider message translation failed", "session", s.id, "err", err)
+			continue
+		}
+		if len(clientMessages) == 0 {
+			continue
+		}
+
 		s.mu.Lock()
 		dc := s.dc
 		s.mu.Unlock()
 		if dc == nil {
 			continue
 		}
-		if err := dc.SendText(string(data)); err != nil {
-			slog.Warn("voicertc: gemini→dc send failed", "session", s.id, "err", err)
-			s.cancel()
-			return
+		for _, clientMessage := range clientMessages {
+			if err := dc.SendText(string(clientMessage)); err != nil {
+				slog.Warn("voicertc: provider→dc send failed", "session", s.id, "err", err)
+				s.cancel()
+				return
+			}
 		}
 	}
+}
+
+func (s *session) markGeminiSetupComplete(ctx context.Context) {
+	s.mu.Lock()
+	if s.geminiSetupComplete {
+		s.mu.Unlock()
+		return
+	}
+	s.geminiSetupComplete = true
+	track := s.pendingTrack
+	s.pendingTrack = nil
+	s.mu.Unlock()
+	if track != nil {
+		slog.InfoContext(ctx, "voicertc: starting mic forwarding after gemini setup", "session", s.id)
+		go s.audioRxLoop(ctx, track)
+	}
+}
+
+func geminiHasSetupComplete(data []byte) bool {
+	var msg geminiBidiMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return false
+	}
+	return msg.SetupComplete != nil
 }
 
 // handleAudioExtraction checks if a Gemini message contains serverContent with
@@ -507,18 +532,18 @@ func (s *session) handleAudioExtraction(data []byte) ([]byte, bool) {
 		return nil, false
 	}
 
-	if msg.ServerContent.Interrupted != nil && *msg.ServerContent.Interrupted {
+	if msg.ServerContent.Interrupted {
 		s.interruptAudio()
 	}
 
-	if msg.ServerContent.ModelTurn == nil {
+	if len(msg.ServerContent.ModelTurn.Parts) == 0 {
 		return nil, false
 	}
 
 	hadAudio := false
 	filteredParts := make([]modelPart, 0, len(msg.ServerContent.ModelTurn.Parts))
 	for _, part := range msg.ServerContent.ModelTurn.Parts {
-		if part.InlineData == nil || part.InlineData.Data == "" {
+		if part.InlineData.Data == "" {
 			filteredParts = append(filteredParts, part)
 			continue
 		}
@@ -619,9 +644,7 @@ func geminiCloseReason(err error) string {
 	return err.Error()
 }
 
-// sendError delivers an error message to the client via the data channel using
-// the same {"error":{"message":"..."}} shape that the frontend already handles
-// for Gemini protocol errors.
+// sendError delivers a normalized error message to the client via the data channel.
 func (s *session) sendError(msg string) {
 	s.mu.Lock()
 	dc := s.dc
@@ -629,13 +652,11 @@ func (s *session) sendError(msg string) {
 	if dc == nil {
 		return
 	}
-	e := dcError{}
-	e.Error.Message = msg
-	data, err := json.Marshal(e)
-	if err != nil {
-		slog.Warn("voicertc: marshal error message", "session", s.id, "err", err)
-		return
-	}
+	data := mustGatewayServerMessage(&voicev1.Error{
+		Kind:        voicev1.MessageKindError,
+		Message:     msg,
+		Recoverable: false,
+	})
 	_ = dc.SendText(string(data))
 }
 
@@ -678,33 +699,4 @@ func generateSessionID() string {
 		panic("crypto/rand failed: " + err.Error())
 	}
 	return hex.EncodeToString(b)
-}
-
-// JSON types for parsing Gemini serverContent to extract audio.
-type serverContent struct {
-	jsonutil.Overflow
-
-	ModelTurn           *modelTurn     `json:"modelTurn,omitempty"`
-	TurnComplete        *bool          `json:"turnComplete,omitempty"`
-	Interrupted         *bool          `json:"interrupted,omitempty"`
-	InputTranscription  *transcription `json:"inputTranscription,omitempty"`
-	OutputTranscription *transcription `json:"outputTranscription,omitempty"`
-}
-
-type modelTurn struct {
-	Parts []modelPart `json:"parts,omitempty"`
-}
-
-type modelPart struct {
-	InlineData *inlineData `json:"inlineData,omitempty"`
-	Text       string      `json:"text,omitempty"`
-}
-
-type inlineData struct {
-	MimeType string `json:"mimeType,omitempty"`
-	Data     string `json:"data"`
-}
-
-type transcription struct {
-	Text string `json:"text,omitempty"`
 }

@@ -6,6 +6,55 @@ export type ISOTimestamp = string & { readonly __brand: "ISOTimestamp" };
 //////////
 // source: types.go
 
+export type InterruptSource =
+  | "user"
+  | "tool";
+/**
+ * Supported values.
+ */
+export const InterruptSourceUser: InterruptSource = "user";
+export const InterruptSourceTool: InterruptSource = "tool";
+
+export type MessageKind =
+  | "session.setup"
+  | "context.update"
+  | "tool.result"
+  | "turn.cancel"
+  | "session.close"
+  | "session.ready"
+  | "transcript.delta"
+  | "assistant.text.delta"
+  | "speech.started"
+  | "speech.ended"
+  | "tool.call"
+  | "interrupted"
+  | "error";
+/**
+ * Supported values.
+ */
+export const MessageKindSessionSetup: MessageKind = "session.setup";
+export const MessageKindContextUpdate: MessageKind = "context.update";
+export const MessageKindToolResult: MessageKind = "tool.result";
+export const MessageKindTurnCancel: MessageKind = "turn.cancel";
+export const MessageKindSessionClose: MessageKind = "session.close";
+export const MessageKindSessionReady: MessageKind = "session.ready";
+export const MessageKindTranscriptDelta: MessageKind = "transcript.delta";
+export const MessageKindAssistantTextDelta: MessageKind = "assistant.text.delta";
+export const MessageKindSpeechStarted: MessageKind = "speech.started";
+export const MessageKindSpeechEnded: MessageKind = "speech.ended";
+export const MessageKindToolCall: MessageKind = "tool.call";
+export const MessageKindInterrupted: MessageKind = "interrupted";
+export const MessageKindError: MessageKind = "error";
+
+export type Speaker =
+  | "user"
+  | "assistant";
+/**
+ * Supported values.
+ */
+export const SpeakerUser: Speaker = "user";
+export const SpeakerAssistant: Speaker = "assistant";
+
 /** VoiceTokenResp is the response for GET /api/v1/voice/token. */
 export interface VoiceTokenResp {
   token: string;
@@ -37,5 +86,117 @@ export interface ErrorDetails {
 export interface ErrorResponse {
   error: ErrorDetails;
   details?: { [key: string]: any /* json.RawMessage */};
+}
+
+/** MessageEnvelope carries the kind used to dispatch data-channel messages. */
+export interface MessageEnvelope {
+  kind: MessageKind;
+}
+
+/** VoiceConfig describes provider-neutral voice preferences. */
+export interface VoiceConfig {
+  name: string;
+  language: string;
+}
+
+/** ToolDeclaration is a provider-neutral service tool declaration. */
+export interface ToolDeclaration {
+  name: string;
+  description: string;
+  parameters: any /* json.RawMessage */;
+}
+
+/** Context carries provider-neutral text or instruction context. */
+export interface Context {
+  systemInstruction?: string;
+  text?: string;
+}
+
+/** SessionSetup is the client message that initializes a voice session. */
+export interface SessionSetup {
+  kind: MessageKind;
+  voice: VoiceConfig;
+  tools: ToolDeclaration[];
+  context: Context;
+}
+
+/** ContextUpdate is a client message that appends session context. */
+export interface ContextUpdate {
+  kind: MessageKind;
+  context: Context;
+}
+
+/** ToolResult is a client message that returns a tool execution result. */
+export interface ToolResult {
+  kind: MessageKind;
+  id: string;
+  name: string;
+  result: any /* json.RawMessage */;
+}
+
+/** TurnCancel is a client message that cancels the current turn. */
+export interface TurnCancel {
+  kind: MessageKind;
+  reason?: string;
+}
+
+/** SessionClose is a client message that closes the voice session. */
+export interface SessionClose {
+  kind: MessageKind;
+  reason?: string;
+}
+
+/** SessionReady is a gateway message that reports session readiness. */
+export interface SessionReady {
+  kind: MessageKind;
+  profile: string;
+  capabilities: string[];
+}
+
+/** TranscriptDelta is a gateway message that streams transcript text. */
+export interface TranscriptDelta {
+  kind: MessageKind;
+  speaker: Speaker;
+  text: string;
+}
+
+/** AssistantTextDelta is a gateway message that streams assistant text. */
+export interface AssistantTextDelta {
+  kind: MessageKind;
+  text: string;
+}
+
+/** SpeechStarted is a gateway message that reports speech output started. */
+export interface SpeechStarted {
+  kind: MessageKind;
+  speaker: Speaker;
+}
+
+/** SpeechEnded is a gateway message that reports speech output ended. */
+export interface SpeechEnded {
+  kind: MessageKind;
+  speaker: Speaker;
+}
+
+/** ToolCall is a gateway message that asks the client to execute a tool. */
+export interface ToolCall {
+  kind: MessageKind;
+  id: string;
+  name: string;
+  args: any /* json.RawMessage */;
+}
+
+/** Interrupted is a gateway message that reports an interruption. */
+export interface Interrupted {
+  kind: MessageKind;
+  source: InterruptSource;
+  message?: string;
+}
+
+/** Error is a gateway message that reports an error. */
+export interface Error {
+  kind: MessageKind;
+  message: string;
+  recoverable: boolean;
 }
 

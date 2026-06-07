@@ -1,4 +1,4 @@
-// Gemini Live functions/tools for voice mode, sync with frontend/src/FunctionDeclarations.ts
+// Provider-neutral service tool declarations for voice mode, sync with frontend/src/FunctionDeclarations.ts
 
 @file:Suppress("MatchingDeclarationName")
 
@@ -10,8 +10,6 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-// gemini-3.1-flash-live-preview only supports synchronous function calling;
-// behavior (NON_BLOCKING/BLOCKING) and scheduling hints are removed.
 @Serializable
 data class FunctionDeclaration(
     val name: String,

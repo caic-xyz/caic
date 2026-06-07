@@ -16,9 +16,10 @@ type errorCodeDef struct {
 // genConfig holds configuration for SDK code generation, created once in mainImpl
 // and threaded through docRegistry.
 type genConfig struct {
-	routes          []routeDef
-	sdkPackagePaths map[string]struct{}
-	extraSeeds      []reflect.Type
+	routes             []routeDef
+	sdkPackagePaths    map[string]struct{}
+	extraSeeds         []reflect.Type
+	documentExtraSeeds bool
 
 	errorModel      clientErrorModel
 	kotlinPackage   string

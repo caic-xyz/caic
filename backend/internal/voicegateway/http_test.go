@@ -37,33 +37,17 @@ func TestNewHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("compat", func(t *testing.T) {
+	t.Run("offer requires sdp", func(t *testing.T) {
 		t.Parallel()
-		publicKey := newTestPublicKey(t)
-		cfg := DefaultConfig()
-		cfg.TrustedIssuers = []TrustedIssuerConfig{
-			{Service: "caic", Issuer: "https://caic.example.com", PublicKey: publicKey},
-		}
 		w := httptest.NewRecorder()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/voice/compat", http.NoBody)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/voice/rtc/offer", strings.NewReader(`{}`))
+		cfg := DefaultConfig()
 		handler, err := NewHandler(&cfg, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		handler.ServeHTTP(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
-		}
-		var resp Compatibility
-		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-			t.Fatal(err)
-		}
-		if resp.Service != "voice-gateway" {
-			t.Fatalf("Service = %q, want voice-gateway", resp.Service)
-		}
-		if len(resp.ServiceKinds) != 1 || resp.ServiceKinds[0] != "caic" {
-			t.Fatalf("ServiceKinds = %v, want [caic]", resp.ServiceKinds)
-		}
+		assertErrorResponse(t, w, http.StatusBadRequest, "BAD_REQUEST", "sdp is required")
 	})
 
 	t.Run("offer requires service identity", func(t *testing.T) {

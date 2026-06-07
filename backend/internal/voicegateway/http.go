@@ -32,7 +32,6 @@ func NewHandler(
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/voice/health", h.handleHealth)
-	mux.HandleFunc("GET /api/v1/voice/compat", h.handleCompat)
 	mux.HandleFunc("POST /api/v1/voice/rtc/offer", h.handleOffer)
 	mux.HandleFunc("POST /api/v1/voice/rtc/{sessionID}", h.handleClose)
 	return mux, nil
@@ -87,10 +86,6 @@ type ServiceAuthorization struct {
 
 func (h *handler) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, HealthResp{Status: "ok"})
-}
-
-func (h *handler) handleCompat(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, h.cfg.Compatibility())
 }
 
 func (h *handler) handleOffer(w http.ResponseWriter, r *http.Request) {

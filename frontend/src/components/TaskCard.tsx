@@ -1,7 +1,14 @@
 // Compact card for a single task, used in the sidebar task list.
 import { For, Show, createSignal, onMount, onCleanup } from "solid-js";
 import type { Accessor } from "solid-js";
-import type { DiffStat, CIStatus, ForgeCheck, RuntimeInstance, TaskRepo, TaskState } from "@sdk/types.gen";
+import type {
+  DiffStat,
+  CIStatus,
+  ForgeCheck,
+  RuntimeInstance,
+  TaskRepo,
+  TaskState,
+} from "@sdk/types.gen";
 import CIDot from "./CIDot";
 import Tooltip from "./Tooltip";
 import TailscaleIcon from "./tailscale.svg?solid";
@@ -12,7 +19,14 @@ import DeleteIcon from "@material-symbols/svg-400/outlined/delete.svg?solid";
 import RestoreIcon from "@material-symbols/svg-400/outlined/restart_alt.svg?solid";
 import TimerIcon from "@material-symbols/svg-400/outlined/timer.svg?solid";
 import styles from "./TaskCard.module.css";
-import { formatElapsed, formatTokens, tokenColor, stateColor, staleStateColor, isCacheStale } from "../formatting";
+import {
+  formatElapsed,
+  formatTokens,
+  tokenColor,
+  stateColor,
+  staleStateColor,
+  isCacheStale,
+} from "../formatting";
 
 export interface TaskCardProps {
   id: string;
@@ -53,26 +67,43 @@ export interface TaskCardProps {
   onRevive?: () => void;
   actionLoading?: boolean;
   onDiffClick?: () => void;
-  /** Task number for voice mode display. Shown only when Gemini Live is connected. */
+  /** Task number for voice mode display. Shown only when voice is connected. */
   voiceNumber?: number;
 }
 
-const terminalStates = new Set(["stopping", "stopped", "purging", "purged", "failed"]);
+const terminalStates = new Set([
+  "stopping",
+  "stopped",
+  "purging",
+  "purged",
+  "failed",
+]);
 
 /** Confirm a destructive task action (purge or stop) with a dialog. */
-export function confirmTaskAction(action: "Purge" | "Stop", title: string, branch: string): boolean {
-  return window.confirm(`${action} runtime instance?\n\n${title}\nbranch: ${branch}`);
+export function confirmTaskAction(
+  action: "Purge" | "Stop",
+  title: string,
+  branch: string,
+): boolean {
+  return window.confirm(
+    `${action} runtime instance?\n\n${title}\nbranch: ${branch}`,
+  );
 }
-
 
 export default function TaskCard(props: TaskCardProps) {
   const isTerminal = () => terminalStates.has(props.state);
-  const stale = () => !terminalStates.has(props.state) && props.state !== "running" && isCacheStale(props.now(), props.cacheExpiresAt);
+  const stale = () =>
+    !terminalStates.has(props.state) &&
+    props.state !== "running" &&
+    isCacheStale(props.now(), props.cacheExpiresAt);
   const [titleTruncated, setTitleTruncated] = createSignal(false);
   let titleRef: HTMLElement | undefined; // eslint-disable-line no-unassigned-vars -- assigned by SolidJS ref
 
   onMount(() => {
-    const check = () => { if (titleRef) setTitleTruncated(titleRef.scrollWidth > titleRef.clientWidth); };
+    const check = () => {
+      if (titleRef)
+        setTitleTruncated(titleRef.scrollWidth > titleRef.clientWidth);
+    };
     check();
     if (titleRef) {
       const ro = new ResizeObserver(check);
@@ -87,7 +118,12 @@ export default function TaskCard(props: TaskCardProps) {
       role="button"
       tabIndex={0}
       onClick={() => props.onClick()}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); props.onClick(); } }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          props.onClick();
+        }
+      }}
       class={`${styles.card} ${props.selected ? styles.selected : ""}`}
     >
       {/* Line 1: title + feature icons + plan badge + purge (no state badge) */}
@@ -95,27 +131,55 @@ export default function TaskCard(props: TaskCardProps) {
         <Show when={props.voiceNumber !== undefined}>
           <span class={styles.voiceNumber}>#{props.voiceNumber}</span>
         </Show>
-        <Tooltip text={props.title} class={styles.titleWrapper} disabled={!titleTruncated()}>
-          <strong ref={titleRef} class={styles.title}>{props.title}</strong>
+        <Tooltip
+          text={props.title}
+          class={styles.titleWrapper}
+          disabled={!titleTruncated()}
+        >
+          <strong ref={titleRef} class={styles.title}>
+            {props.title}
+          </strong>
         </Tooltip>
         <span class={styles.stateGroup}>
           <Show when={props.runtime?.tailscale} keyed>
-            {(ts) => ts.startsWith("https://")
-              ? <a class={styles.featureIconBadge} href={ts} target="_blank" rel="noopener" title="Tailscale" onClick={(e) => e.stopPropagation()}><TailscaleIcon width="0.7rem" height="0.7rem" /></a>
-              : <span class={styles.featureIconBadge} title="Tailscale"><TailscaleIcon width="0.7rem" height="0.7rem" /></span>
+            {(ts) =>
+              ts.startsWith("https://") ? (
+                <a
+                  class={styles.featureIconBadge}
+                  href={ts}
+                  target="_blank"
+                  rel="noopener"
+                  title="Tailscale"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <TailscaleIcon width="0.7rem" height="0.7rem" />
+                </a>
+              ) : (
+                <span class={styles.featureIconBadge} title="Tailscale">
+                  <TailscaleIcon width="0.7rem" height="0.7rem" />
+                </span>
+              )
             }
           </Show>
           <Show when={props.runtime?.usb}>
-            <span class={styles.featureBadge} title="USB">USB</span>
+            <span class={styles.featureBadge} title="USB">
+              USB
+            </span>
           </Show>
           <Show when={props.runtime?.display}>
-            <span class={styles.featureIconBadge} title="Display"><DisplayIcon width="0.7rem" height="0.7rem" /></span>
+            <span class={styles.featureIconBadge} title="Display">
+              <DisplayIcon width="0.7rem" height="0.7rem" />
+            </span>
           </Show>
           <Show when={props.runtime?.sudo}>
-            <span class={styles.featureIconBadge} title="Sudo"><SudoIcon width="0.7rem" height="0.7rem" /></span>
+            <span class={styles.featureIconBadge} title="Sudo">
+              <SudoIcon width="0.7rem" height="0.7rem" />
+            </span>
           </Show>
           <Show when={props.gitHubToken}>
-            <span class={styles.featureIconBadge} title="GitHub token"><TokenIcon width="0.7rem" height="0.7rem" /></span>
+            <span class={styles.featureIconBadge} title="GitHub token">
+              <TokenIcon width="0.7rem" height="0.7rem" />
+            </span>
           </Show>
           {/* Stopped: revive + purge buttons */}
           <Show when={props.state === "stopped"}>
@@ -124,11 +188,17 @@ export default function TaskCard(props: TaskCardProps) {
                 <button
                   class={styles.reviveIcon}
                   disabled={props.actionLoading}
-                  onClick={(e) => { e.stopPropagation(); props.onRevive?.(); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    props.onRevive?.();
+                  }}
                   title="Revive"
                   data-testid="revive-task"
                 >
-                  <Show when={props.actionLoading} fallback={<RestoreIcon width="0.85rem" height="0.85rem" />}>
+                  <Show
+                    when={props.actionLoading}
+                    fallback={<RestoreIcon width="0.85rem" height="0.85rem" />}
+                  >
                     <span class={styles.reviveSpinner} />
                   </Show>
                 </button>
@@ -139,7 +209,17 @@ export default function TaskCard(props: TaskCardProps) {
                 <button
                   class={styles.purgeIcon}
                   disabled={props.actionLoading}
-                  onClick={(e) => { e.stopPropagation(); if (confirmTaskAction("Purge", props.title, props.repos?.[0]?.branch ?? "")) props.onPurge?.(); }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (
+                      confirmTaskAction(
+                        "Purge",
+                        props.title,
+                        props.repos?.[0]?.branch ?? "",
+                      )
+                    )
+                      props.onPurge?.();
+                  }}
                   title="Purge"
                   data-testid="purge-task"
                 >
@@ -149,7 +229,13 @@ export default function TaskCard(props: TaskCardProps) {
             </Show>
           </Show>
           {/* Active states: stop button (trash can). Shift-click or double-click/tap skips stop and goes straight to purge. */}
-          <Show when={props.state !== "stopped" && props.onStop && !terminalStates.has(props.state)}>
+          <Show
+            when={
+              props.state !== "stopped" &&
+              props.onStop &&
+              !terminalStates.has(props.state)
+            }
+          >
             <span class={styles.purgeBtn}>
               <button
                 class={styles.purgeIcon}
@@ -157,28 +243,55 @@ export default function TaskCard(props: TaskCardProps) {
                 onClick={(e) => {
                   e.stopPropagation();
                   if (e.shiftKey && props.onPurge) {
-                    if (confirmTaskAction("Purge", props.title, props.repos?.[0]?.branch ?? "")) props.onPurge();
+                    if (
+                      confirmTaskAction(
+                        "Purge",
+                        props.title,
+                        props.repos?.[0]?.branch ?? "",
+                      )
+                    )
+                      props.onPurge();
                   } else if (props.state === "running") {
-                    if (confirmTaskAction("Stop", props.title, props.repos?.[0]?.branch ?? "")) props.onStop?.();
+                    if (
+                      confirmTaskAction(
+                        "Stop",
+                        props.title,
+                        props.repos?.[0]?.branch ?? "",
+                      )
+                    )
+                      props.onStop?.();
                   } else {
                     props.onStop?.();
                   }
                 }}
                 onDblClick={(e) => {
                   e.stopPropagation();
-                  if (props.onPurge && confirmTaskAction("Purge", props.title, props.repos?.[0]?.branch ?? "")) props.onPurge();
+                  if (
+                    props.onPurge &&
+                    confirmTaskAction(
+                      "Purge",
+                      props.title,
+                      props.repos?.[0]?.branch ?? "",
+                    )
+                  )
+                    props.onPurge();
                 }}
                 title="Stop (shift-click or double-click to purge)"
                 data-testid="stop-task"
               >
-                <Show when={props.actionLoading} fallback={<DeleteIcon width="0.85rem" height="0.85rem" />}>
+                <Show
+                  when={props.actionLoading}
+                  fallback={<DeleteIcon width="0.85rem" height="0.85rem" />}
+                >
                   <span class={styles.purgeSpinner} />
                 </Show>
               </button>
             </span>
           </Show>
           <Show when={props.inPlanMode}>
-            <span class={styles.planBadge} title="Plan mode">P</span>
+            <span class={styles.planBadge} title="Plan mode">
+              P
+            </span>
           </Show>
         </span>
       </div>
@@ -187,96 +300,136 @@ export default function TaskCard(props: TaskCardProps) {
       {(() => {
         const multiRepo = (props.repos?.length ?? 0) > 1;
         const timePair = () => (
-          <Show when={(!isTerminal() && props.stateUpdatedAt) || props.duration > 0}>
+          <Show
+            when={(!isTerminal() && props.stateUpdatedAt) || props.duration > 0}
+          >
             <span class={styles.timePair}>
-              <TimerIcon width="0.65rem" height="0.65rem" class={styles.timerIcon} />
+              <TimerIcon
+                width="0.65rem"
+                height="0.65rem"
+                class={styles.timerIcon}
+              />
               <Show when={!isTerminal() && props.stateUpdatedAt}>
-                <StateDuration stateUpdatedAt={props.stateUpdatedAt} now={props.now} />
+                <StateDuration
+                  stateUpdatedAt={props.stateUpdatedAt}
+                  now={props.now}
+                />
                 <Show when={props.duration > 0 || props.state === "running"}>
                   <span class={styles.timeSep}>/</span>
                 </Show>
               </Show>
               <Show when={props.duration > 0 || props.state === "running"}>
-                <ThinkTime duration={props.duration} state={props.state} stateUpdatedAt={props.stateUpdatedAt} turnStartedAt={props.turnStartedAt} now={props.now} />
+                <ThinkTime
+                  duration={props.duration}
+                  state={props.state}
+                  stateUpdatedAt={props.stateUpdatedAt}
+                  turnStartedAt={props.turnStartedAt}
+                  now={props.now}
+                />
               </Show>
             </span>
           </Show>
         );
-        const statusBadges = () => <>
-          <Show when={props.forgePR}>
-            <span class={styles.prBadge} title={`PR #${props.forgePR}`}>PR</span>
-          </Show>
-          <Show when={props.autoFixPR && props.forgePR}>
-            <span class={styles.autoBadge} title="Auto-fix PR enabled">auto</span>
-          </Show>
-          <Show when={props.forgePR && props.ciStatus} keyed>
-            {(status) => <CIDot status={status as CIStatus} checks={props.ciChecks} />}
-          </Show>
-          <Tooltip text={`Prompt cache likely expired (${formatElapsed((props.cacheTTLSeconds ?? 3600) * 1000)} TTL) — continuing may use more tokens`} disabled={!stale()}>
-            <span class={styles.badge} data-testid="state-badge" style={{ background: stale() ? staleStateColor(props.state) : stateColor(props.state) }}>
-              {props.state}
-            </span>
-          </Tooltip>
-        </>;
-        const repoSpan = (r: { baseBranch?: string; branch: string; name: string }, showName: boolean) => {
-          if (!r.branch) return <Show when={showName}><span class={styles.repoName}>{r.name}</span></Show>;
-          return <>
-            <Show when={r.baseBranch && r.branch}>
-              <span class={styles.baseBranch}>{r.baseBranch}</span>
-              <span class={styles.branchArrow}>→</span>
+        const statusBadges = () => (
+          <>
+            <Show when={props.forgePR}>
+              <span class={styles.prBadge} title={`PR #${props.forgePR}`}>
+                PR
+              </span>
             </Show>
-            <span class={styles.branchName}>{r.branch}</span>
-            <Show when={showName}>
-              <span class={styles.repoName}>{r.name}</span>
+            <Show when={props.autoFixPR && props.forgePR}>
+              <span class={styles.autoBadge} title="Auto-fix PR enabled">
+                auto
+              </span>
             </Show>
-          </>;
+            <Show when={props.forgePR && props.ciStatus} keyed>
+              {(status) => (
+                <CIDot status={status as CIStatus} checks={props.ciChecks} />
+              )}
+            </Show>
+            <Tooltip
+              text={`Prompt cache likely expired (${formatElapsed((props.cacheTTLSeconds ?? 3600) * 1000)} TTL) — continuing may use more tokens`}
+              disabled={!stale()}
+            >
+              <span
+                class={styles.badge}
+                data-testid="state-badge"
+                style={{
+                  background: stale()
+                    ? staleStateColor(props.state)
+                    : stateColor(props.state),
+                }}
+              >
+                {props.state}
+              </span>
+            </Tooltip>
+          </>
+        );
+        const repoSpan = (
+          r: { baseBranch?: string; branch: string; name: string },
+          showName: boolean,
+        ) => {
+          if (!r.branch)
+            return (
+              <Show when={showName}>
+                <span class={styles.repoName}>{r.name}</span>
+              </Show>
+            );
+          return (
+            <>
+              <Show when={r.baseBranch && r.branch}>
+                <span class={styles.baseBranch}>{r.baseBranch}</span>
+                <span class={styles.branchArrow}>→</span>
+              </Show>
+              <span class={styles.branchName}>{r.branch}</span>
+              <Show when={showName}>
+                <span class={styles.repoName}>{r.name}</span>
+              </Show>
+            </>
+          );
         };
-        return <>
-          <Show when={!multiRepo}>
-            {/* Single repo: branch + timing + badges on same row */}
-            <div class={styles.metaRow}>
-              <span class={styles.branchMeta}>
-                <Show when={props.repos?.[0]} keyed>
-                  {(primary) => repoSpan(primary, false)}
-                </Show>
-              </span>
-              <span class={styles.stateGroup}>
-                {timePair()}
-                {statusBadges()}
-              </span>
-            </div>
-          </Show>
-          <Show when={multiRepo}>
-            {/* Multi repo: first repo + badges, middle repos plain, last repo + timing */}
-            <div class={styles.metaRow}>
-              <span class={styles.branchMeta}>
-                <Show when={props.repos?.[0]} keyed>
-                  {(primary) => repoSpan(primary, true)}
-                </Show>
-              </span>
-              <span class={styles.stateGroup}>
-                {statusBadges()}
-              </span>
-            </div>
-            <For each={props.repos?.slice(1)}>
-              {(r, i) => {
-                const isLast = () => i() === (props.repos?.length ?? 0) - 2;
-                return (
-                  <div class={styles.metaRow}>
-                    <span class={styles.branchMeta}>
-                      {repoSpan(r, true)}
-                    </span>
-                    <Show when={isLast()}>
-                      <span class={styles.stateGroup}>
-                        {timePair()}
-                      </span>
-                    </Show>
-                  </div>
-                );
-              }}
-            </For>
-          </Show>
-        </>;
+        return (
+          <>
+            <Show when={!multiRepo}>
+              {/* Single repo: branch + timing + badges on same row */}
+              <div class={styles.metaRow}>
+                <span class={styles.branchMeta}>
+                  <Show when={props.repos?.[0]} keyed>
+                    {(primary) => repoSpan(primary, false)}
+                  </Show>
+                </span>
+                <span class={styles.stateGroup}>
+                  {timePair()}
+                  {statusBadges()}
+                </span>
+              </div>
+            </Show>
+            <Show when={multiRepo}>
+              {/* Multi repo: first repo + badges, middle repos plain, last repo + timing */}
+              <div class={styles.metaRow}>
+                <span class={styles.branchMeta}>
+                  <Show when={props.repos?.[0]} keyed>
+                    {(primary) => repoSpan(primary, true)}
+                  </Show>
+                </span>
+                <span class={styles.stateGroup}>{statusBadges()}</span>
+              </div>
+              <For each={props.repos?.slice(1)}>
+                {(r, i) => {
+                  const isLast = () => i() === (props.repos?.length ?? 0) - 2;
+                  return (
+                    <div class={styles.metaRow}>
+                      <span class={styles.branchMeta}>{repoSpan(r, true)}</span>
+                      <Show when={isLast()}>
+                        <span class={styles.stateGroup}>{timePair()}</span>
+                      </Show>
+                    </div>
+                  );
+                }}
+              </For>
+            </Show>
+          </>
+        );
       })()}
 
       {/* Line 3: harness · model · effort · tokens · cost */}
@@ -290,11 +443,25 @@ export default function TaskCard(props: TaskCardProps) {
               if (props.effort) parts.push(props.effort);
               return parts.join(" · ");
             })()}
-            <Show when={props.activeInputTokens + props.activeCacheReadTokens > 0}>
+            <Show
+              when={props.activeInputTokens + props.activeCacheReadTokens > 0}
+            >
               {" · "}
-              <Tooltip text={`Accumulated: ${formatTokens(props.cumulativeCacheReadInputTokens)} cached + ${formatTokens(props.cumulativeInputTokens + props.cumulativeCacheCreationInputTokens)} in + ${formatTokens(props.cumulativeOutputTokens)} out`}>
-                <span style={{ color: tokenColor(props.activeInputTokens + props.activeCacheReadTokens, props.contextWindowLimit) }}>
-                  {formatTokens(props.activeInputTokens + props.activeCacheReadTokens)}/{formatTokens(props.contextWindowLimit)}
+              <Tooltip
+                text={`Accumulated: ${formatTokens(props.cumulativeCacheReadInputTokens)} cached + ${formatTokens(props.cumulativeInputTokens + props.cumulativeCacheCreationInputTokens)} in + ${formatTokens(props.cumulativeOutputTokens)} out`}
+              >
+                <span
+                  style={{
+                    color: tokenColor(
+                      props.activeInputTokens + props.activeCacheReadTokens,
+                      props.contextWindowLimit,
+                    ),
+                  }}
+                >
+                  {formatTokens(
+                    props.activeInputTokens + props.activeCacheReadTokens,
+                  )}
+                  /{formatTokens(props.contextWindowLimit)}
                 </span>
               </Tooltip>
             </Show>
@@ -308,22 +475,38 @@ export default function TaskCard(props: TaskCardProps) {
       {/* Line 4 (optional): diff */}
       <Show when={props.diffStat?.length ? props.diffStat : undefined} keyed>
         {(ds) => {
-          const content = () => <>
-            {ds.length} file{ds.length !== 1 ? "s" : ""}
-            {" "}
-            <span class={styles.diffAdded}>+{ds.reduce((s, f) => s + f.added, 0)}</span>
-            {" "}
-            <span class={styles.diffDeleted}>-{ds.reduce((s, f) => s + f.deleted, 0)}</span>
-          </>;
+          const content = () => (
+            <>
+              {ds.length} file{ds.length !== 1 ? "s" : ""}{" "}
+              <span class={styles.diffAdded}>
+                +{ds.reduce((s, f) => s + f.added, 0)}
+              </span>{" "}
+              <span class={styles.diffDeleted}>
+                -{ds.reduce((s, f) => s + f.deleted, 0)}
+              </span>
+            </>
+          );
           return (
-            <Show when={props.onDiffClick} fallback={<div class={styles.meta}>{content()}</div>}>
+            <Show
+              when={props.onDiffClick}
+              fallback={<div class={styles.meta}>{content()}</div>}
+            >
               {(fn) => (
                 <div
                   class={`${styles.meta} ${styles.diffClickable}`}
                   role="button"
                   tabIndex={0}
-                  onClick={(e) => { e.stopPropagation(); fn()(); }}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); fn()(); } }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fn()();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      fn()();
+                    }
+                  }}
                 >
                   {content()}
                 </div>
@@ -339,17 +522,30 @@ export default function TaskCard(props: TaskCardProps) {
   );
 }
 
-function StateDuration(props: { stateUpdatedAt: string; now: Accessor<number> }) {
-  const elapsed = () => Math.max(0, props.now() - new Date(props.stateUpdatedAt).getTime());
+function StateDuration(props: {
+  stateUpdatedAt: string;
+  now: Accessor<number>;
+}) {
+  const elapsed = () =>
+    Math.max(0, props.now() - new Date(props.stateUpdatedAt).getTime());
   return <span>{formatElapsed(elapsed())}</span>;
 }
 
-function ThinkTime(props: { duration: number; state: TaskState; stateUpdatedAt: string; turnStartedAt?: string; now: Accessor<number> }) {
+function ThinkTime(props: {
+  duration: number;
+  state: TaskState;
+  stateUpdatedAt: string;
+  turnStartedAt?: string;
+  now: Accessor<number>;
+}) {
   const thinkMs = () => {
     const base = props.duration * 1000;
     if (props.state === "running") {
-      const turnMs = props.turnStartedAt ? new Date(props.turnStartedAt).getTime() : 0;
-      const start = turnMs > 0 ? turnMs : new Date(props.stateUpdatedAt).getTime();
+      const turnMs = props.turnStartedAt
+        ? new Date(props.turnStartedAt).getTime()
+        : 0;
+      const start =
+        turnMs > 0 ? turnMs : new Date(props.stateUpdatedAt).getTime();
       return base + Math.max(0, props.now() - start);
     }
     return base;

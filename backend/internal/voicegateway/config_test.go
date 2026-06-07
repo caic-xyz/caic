@@ -1,4 +1,4 @@
-// Tests for voice gateway configuration and compatibility metadata.
+// Tests for voice gateway configuration validation.
 
 package voicegateway
 
@@ -170,39 +170,4 @@ func TestConfigValidate(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-}
-
-func TestConfigCompatibility(t *testing.T) {
-	t.Parallel()
-	cfg := DefaultConfig()
-	cfg.TrustedIssuers = []TrustedIssuerConfig{{
-		Service:   "caic",
-		Issuer:    "https://caic.example.com",
-		PublicKey: newTestPublicKey(t),
-	}, {
-		Service:   "caic",
-		Issuer:    "https://work.example.com",
-		PublicKey: newTestPublicKey(t),
-	}, {
-		Service:   "mddb",
-		Issuer:    "https://mddb.example.com",
-		PublicKey: newTestPublicKey(t),
-	}}
-	got := cfg.Compatibility()
-	if got.Service != "voice-gateway" {
-		t.Errorf("Service = %q, want voice-gateway", got.Service)
-	}
-	if len(got.ServiceKinds) != 2 || got.ServiceKinds[0] != "caic" || got.ServiceKinds[1] != "mddb" {
-		t.Errorf("ServiceKinds = %v, want [caic mddb]", got.ServiceKinds)
-	}
-	wantCaps := map[string]struct{}{
-		"voice.gatewayGeminiLive":   {},
-		"voice.serviceSignedTokens": {},
-	}
-	for _, cap := range got.Capabilities {
-		delete(wantCaps, cap)
-	}
-	if len(wantCaps) != 0 {
-		t.Errorf("missing capabilities: %v", wantCaps)
-	}
 }

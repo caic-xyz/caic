@@ -2,7 +2,7 @@
 import { createSignal } from "solid-js";
 import type { TaskNumberMap } from "./TaskNumberMap";
 
-/** Whether a Gemini Live voice session is currently connected. */
+/** Whether a voice gateway session is currently connected. */
 export const [voiceConnected, setVoiceConnected] = createSignal(false);
 
 let taskNumberMap: TaskNumberMap | null = null;

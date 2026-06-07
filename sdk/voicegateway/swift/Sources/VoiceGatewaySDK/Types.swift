@@ -37,6 +37,80 @@ public enum JSONValue: Codable, Equatable {
     }
 }
 
+public struct InterruptSource: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let User = InterruptSource("user")
+    public static let Tool = InterruptSource("tool")
+
+    public static func other(_ value: String) -> InterruptSource { InterruptSource(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct MessageKind: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let SessionSetup = MessageKind("session.setup")
+    public static let ContextUpdate = MessageKind("context.update")
+    public static let ToolResult = MessageKind("tool.result")
+    public static let TurnCancel = MessageKind("turn.cancel")
+    public static let SessionClose = MessageKind("session.close")
+    public static let SessionReady = MessageKind("session.ready")
+    public static let TranscriptDelta = MessageKind("transcript.delta")
+    public static let AssistantTextDelta = MessageKind("assistant.text.delta")
+    public static let SpeechStarted = MessageKind("speech.started")
+    public static let SpeechEnded = MessageKind("speech.ended")
+    public static let ToolCall = MessageKind("tool.call")
+    public static let Interrupted = MessageKind("interrupted")
+    public static let Error = MessageKind("error")
+
+    public static func other(_ value: String) -> MessageKind { MessageKind(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
+public struct Speaker: Codable, Equatable, Hashable {
+    public let value: String
+
+    public init(_ value: String) { self.value = value }
+
+    public static let User = Speaker("user")
+    public static let Assistant = Speaker("assistant")
+
+    public static func other(_ value: String) -> Speaker { Speaker(value) }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        value = try c.decode(String.self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(value)
+    }
+}
+
 public enum ErrorCodes {
     public static let badRequest = "BAD_REQUEST"
     public static let unauthorized = "UNAUTHORIZED"
@@ -74,5 +148,117 @@ public struct ErrorDetails: Codable {
 public struct ErrorResponse: Codable {
     public let error: ErrorDetails
     public let details: [String: JSONValue]?
+}
+
+/// MessageEnvelope carries the kind used to dispatch data-channel messages.
+public struct MessageEnvelope: Codable {
+    public let kind: MessageKind
+}
+
+/// VoiceConfig describes provider-neutral voice preferences.
+public struct VoiceConfig: Codable {
+    public let name: String
+    public let language: String
+}
+
+/// ToolDeclaration is a provider-neutral service tool declaration.
+public struct ToolDeclaration: Codable {
+    public let name: String
+    public let description: String
+    public let parameters: JSONValue
+}
+
+/// Context carries provider-neutral text or instruction context.
+public struct Context: Codable {
+    public let systemInstruction: String?
+    public let text: String?
+}
+
+/// SessionSetup is the client message that initializes a voice session.
+public struct SessionSetup: Codable {
+    public let kind: MessageKind
+    public let voice: VoiceConfig
+    public let tools: [ToolDeclaration]
+    public let context: Context
+}
+
+/// ContextUpdate is a client message that appends session context.
+public struct ContextUpdate: Codable {
+    public let kind: MessageKind
+    public let context: Context
+}
+
+/// ToolResult is a client message that returns a tool execution result.
+public struct ToolResult: Codable {
+    public let kind: MessageKind
+    public let id: String
+    public let name: String
+    public let result: JSONValue
+}
+
+/// TurnCancel is a client message that cancels the current turn.
+public struct TurnCancel: Codable {
+    public let kind: MessageKind
+    public let reason: String?
+}
+
+/// SessionClose is a client message that closes the voice session.
+public struct SessionClose: Codable {
+    public let kind: MessageKind
+    public let reason: String?
+}
+
+/// SessionReady is a gateway message that reports session readiness.
+public struct SessionReady: Codable {
+    public let kind: MessageKind
+    public let profile: String
+    public let capabilities: [String]
+}
+
+/// TranscriptDelta is a gateway message that streams transcript text.
+public struct TranscriptDelta: Codable {
+    public let kind: MessageKind
+    public let speaker: Speaker
+    public let text: String
+}
+
+/// AssistantTextDelta is a gateway message that streams assistant text.
+public struct AssistantTextDelta: Codable {
+    public let kind: MessageKind
+    public let text: String
+}
+
+/// SpeechStarted is a gateway message that reports speech output started.
+public struct SpeechStarted: Codable {
+    public let kind: MessageKind
+    public let speaker: Speaker
+}
+
+/// SpeechEnded is a gateway message that reports speech output ended.
+public struct SpeechEnded: Codable {
+    public let kind: MessageKind
+    public let speaker: Speaker
+}
+
+/// ToolCall is a gateway message that asks the client to execute a tool.
+public struct ToolCall: Codable {
+    public let kind: MessageKind
+    public let id: String
+    public let name: String
+    public let args: JSONValue
+}
+
+/// Interrupted is a gateway message that reports an interruption.
+public struct Interrupted: Codable {
+    public let kind: MessageKind
+    public let source: InterruptSource
+    public let message: String?
+}
+
+/// Error is a gateway message that reports an error.
+public struct Error: Codable {
+    public let kind: MessageKind
+    public let message: String
+    public let recoverable: Bool
 }
 

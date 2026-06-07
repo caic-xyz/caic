@@ -1299,9 +1299,12 @@ func (d *docRegistry) generateMarkdownDoc(outDir string) error {
 
 	// Types section.
 	b.WriteString("## Types\n\n")
-	// Discover all API struct types reachable from Routes in
-	// dependency order (leaves first).
-	for _, t := range d.cfg.walkSDKTypes(d.cfg.routeSeedTypes()) {
+	seeds := d.cfg.routeSeedTypes()
+	if d.cfg.documentExtraSeeds {
+		seeds = d.cfg.sdkSeedTypes()
+	}
+	// Discover documented struct types in dependency order (leaves first).
+	for _, t := range d.cfg.walkSDKTypes(seeds) {
 		if err := d.writeDocType(&b, t); err != nil {
 			return err
 		}

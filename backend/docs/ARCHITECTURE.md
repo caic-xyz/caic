@@ -142,6 +142,7 @@ graph TD
   pkg_internal_tasks --> pkg_internal_task
   pkg_internal_voicegateway_api_v1 --> pkg_internal_voicegateway_api
   pkg_internal_voicegateway_voicertc --> pkg_internal_jsonutil
+  pkg_internal_voicegateway_voicertc --> pkg_internal_voicegateway_api_v1
 ```
 
 ## Agent Backends
@@ -365,6 +366,7 @@ graph TD
   pkg_internal_tasks --> pkg_internal_task
   pkg_internal_voicegateway_api_v1 --> pkg_internal_voicegateway_api
   pkg_internal_voicegateway_voicertc --> pkg_internal_jsonutil
+  pkg_internal_voicegateway_voicertc --> pkg_internal_voicegateway_api_v1
 ```
 
 ## Package Dependencies
@@ -412,7 +414,7 @@ graph TD
 | `internal/voicegateway` | None |
 | `internal/voicegateway/api` | None |
 | `internal/voicegateway/api/v1` | `internal/voicegateway/api` |
-| `internal/voicegateway/voicertc` | `internal/jsonutil` |
+| `internal/voicegateway/voicertc` | `internal/jsonutil`, `internal/voicegateway/api/v1` |
 <!-- END GENERATED PACKAGE DEPENDENCIES -->
 
 ## Layering Notes

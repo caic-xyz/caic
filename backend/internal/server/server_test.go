@@ -1945,6 +1945,9 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 		if got.Mode != v1.VoiceGatewayModeEmbedded {
 			t.Fatalf("Mode = %q, want embedded", got.Mode)
 		}
+		if got.TokenEndpoint != "/api/v1/voice/token" {
+			t.Fatalf("TokenEndpoint = %q, want /api/v1/voice/token", got.TokenEndpoint)
+		}
 	})
 }
 

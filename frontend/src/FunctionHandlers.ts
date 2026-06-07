@@ -1,4 +1,4 @@
-// Gemini function call dispatch for voice mode,
+// Provider-neutral voice tool call dispatch for voice mode,
 // parallel to android/voice/FunctionHandlers.kt.
 import {
   listTasks,
@@ -24,13 +24,15 @@ type FunctionArgs = Record<string, unknown>;
 
 function requireString(args: FunctionArgs, key: string): string {
   const v = args[key];
-  if (typeof v !== "string") throw new Error(`Missing required parameter: ${key}`);
+  if (typeof v !== "string")
+    throw new Error(`Missing required parameter: ${key}`);
   return v;
 }
 
 function requireInt(args: FunctionArgs, key: string): number {
   const v = args[key];
-  if (typeof v !== "number") throw new Error(`Missing required integer: ${key}`);
+  if (typeof v !== "number")
+    throw new Error(`Missing required integer: ${key}`);
   return Math.floor(v);
 }
 
@@ -74,7 +76,8 @@ function taskSummaryLine(num: number, t: Task): string {
   if (t.ciStatus) extras.push(`CI: ${t.ciStatus}`);
   const extrasStr = extras.length > 0 ? `, ${extras.join(", ")}` : "";
   const base = `${num}. **${name}** — ${t.state}, ${formatElapsed(t.duration * 1000)}, ${formatCost(t.costUSD)}, ${t.harness}${diffStatSummary(t)}${extrasStr}`;
-  if (t.state === "purged" && t.result) return `${base} — ${t.result.slice(0, RESULT_SNIPPET_MAX)}`;
+  if (t.state === "purged" && t.result)
+    return `${base} — ${t.result.slice(0, RESULT_SNIPPET_MAX)}`;
   if (t.state === "stopped") return `${base} — container died`;
   if (t.state === "failed" && t.error) return `${base} — ${t.error}`;
   return base;
@@ -88,7 +91,10 @@ export class FunctionHandlers {
     private readonly defaultModel = "",
   ) {}
 
-  async handle(name: string, args: FunctionArgs): Promise<Record<string, unknown>> {
+  async handle(
+    name: string,
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     try {
       switch (name) {
         case "tasks_list":
@@ -143,11 +149,15 @@ export class FunctionHandlers {
       if (lc !== 0) return lc;
       return a.id > b.id ? 1 : a.id < b.id ? -1 : 0;
     });
-    const lines = tasks.map((t) => taskSummaryLine(this.taskNumberMap.toNumber(t.id) ?? 0, t));
+    const lines = tasks.map((t) =>
+      taskSummaryLine(this.taskNumberMap.toNumber(t.id) ?? 0, t),
+    );
     return textResult(`## Tasks\n\n${lines.join("\n")}`);
   }
 
-  private async handleCreateTask(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handleCreateTask(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const prompt = requireString(args, "prompt");
     const reposArg = args["repos"];
     const repoNames = Array.isArray(reposArg)
@@ -163,7 +173,8 @@ export class FunctionHandlers {
     const sudo = optBool(args, "sudo");
     const resp = await createTask({
       initialPrompt: { text: prompt },
-      repos: repoNames.length > 0 ? repoNames.map((r) => ({ name: r })) : undefined,
+      repos:
+        repoNames.length > 0 ? repoNames.map((r) => ({ name: r })) : undefined,
       harness: harness as Harness,
       ...(model ? { model } : {}),
       ...(tailscale ? { tailscale } : {}),
@@ -176,10 +187,16 @@ export class FunctionHandlers {
     this.taskNumberMap.update(tasks);
     const num = this.taskNumberMap.toNumber(resp.id);
     const title = tasks.find((t) => t.id === resp.id)?.title || resp.id;
-    return textResult(num !== undefined ? `Created task #${num}: ${title}` : `Created task: ${title}`);
+    return textResult(
+      num !== undefined
+        ? `Created task #${num}: ${title}`
+        : `Created task: ${title}`,
+    );
   }
 
-  private async handleGetTaskDetail(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handleGetTaskDetail(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const num = requireInt(args, "task_number");
     const taskId = this.taskNumberMap.toId(num);
     if (!taskId) return errorResult("Unknown task number");
@@ -195,38 +212,53 @@ export class FunctionHandlers {
     if (t.state === "purged" && t.result) lines.push(`**Result:** ${t.result}`);
     if (t.state === "stopped") lines.push(`**Stopped:** container died`);
     if (t.state === "failed" && t.error) lines.push(`**Error:** ${t.error}`);
-    if (t.diffStat?.length) lines.push(`**Changed:** ${t.diffStat.map((d) => d.path).join(", ")}`);
+    if (t.diffStat?.length)
+      lines.push(`**Changed:** ${t.diffStat.map((d) => d.path).join(", ")}`);
     return textResult(lines.join("\n").trim());
   }
 
-  private async handleSendMessage(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handleSendMessage(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const num = requireInt(args, "task_number");
     const taskId = this.taskNumberMap.toId(num);
     if (!taskId) return errorResult("Unknown task number");
-    await sendInput(taskId, { prompt: { text: requireString(args, "message") } });
+    await sendInput(taskId, {
+      prompt: { text: requireString(args, "message") },
+    });
     return textResult(`Sent message to task #${num}.`);
   }
 
-  private async handleAnswerQuestion(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handleAnswerQuestion(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const num = requireInt(args, "task_number");
     const taskId = this.taskNumberMap.toId(num);
     if (!taskId) return errorResult("Unknown task number");
-    await sendInput(taskId, { prompt: { text: requireString(args, "answer") } });
+    await sendInput(taskId, {
+      prompt: { text: requireString(args, "answer") },
+    });
     return textResult(`Answered task #${num}.`);
   }
 
-  private async handleSyncTask(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handleSyncTask(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const num = requireInt(args, "task_number");
     const taskId = this.taskNumberMap.toId(num);
     if (!taskId) return errorResult("Unknown task number");
     const force = optBool(args, "force");
     const targetRaw = optString(args, "target");
-    const target = targetRaw === "main" || targetRaw === "master" ? "default" : targetRaw;
+    const target =
+      targetRaw === "main" || targetRaw === "master" ? "default" : targetRaw;
     const resp = await syncTask(taskId, {
       ...(force ? { force } : {}),
       ...(target ? { target: target as SyncTarget } : {}),
     });
-    const verb = target === "default" ? `Pushed task #${num} to main` : `Synced task #${num}`;
+    const verb =
+      target === "default"
+        ? `Pushed task #${num} to main`
+        : `Synced task #${num}`;
     if (!resp.safetyIssues?.length) return textResult(`${verb}.`);
     const issueLines = resp.safetyIssues
       .map((i) => `- **${i.kind}** ${i.file}: ${i.detail}`)
@@ -234,7 +266,9 @@ export class FunctionHandlers {
     return textResult(`${verb} with safety issues:\n${issueLines}`);
   }
 
-  private async handleStopTask(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handleStopTask(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const num = requireInt(args, "task_number");
     const taskId = this.taskNumberMap.toId(num);
     if (!taskId) return errorResult("Unknown task number");
@@ -242,7 +276,9 @@ export class FunctionHandlers {
     return textResult(`Stopping task #${num}.`);
   }
 
-  private async handlePurgeTask(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handlePurgeTask(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const num = requireInt(args, "task_number");
     const taskId = this.taskNumberMap.toId(num);
     if (!taskId) return errorResult("Unknown task number");
@@ -250,7 +286,9 @@ export class FunctionHandlers {
     return textResult(`Purged task #${num}.`);
   }
 
-  private async handleReviveTask(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handleReviveTask(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const num = requireInt(args, "task_number");
     const taskId = this.taskNumberMap.toId(num);
     if (!taskId) return errorResult("Unknown task number");
@@ -258,7 +296,9 @@ export class FunctionHandlers {
     return textResult(`Reviving task #${num}.`);
   }
 
-  private async handleForkTask(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handleForkTask(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const num = requireInt(args, "task_number");
     const taskId = this.taskNumberMap.toId(num);
     if (!taskId) return errorResult("Unknown task number");
@@ -279,7 +319,9 @@ export class FunctionHandlers {
     const fmtUSD = (v: number) => `$${v.toFixed(2)}`;
     const lines: string[] = [];
     for (const w of usage.local.windows) {
-      lines.push(`${w.duration} cost: ${fmtUSD(w.costUSD)} (${w.inputTokens + w.outputTokens} tokens)`);
+      lines.push(
+        `${w.duration} cost: ${fmtUSD(w.costUSD)} (${w.inputTokens + w.outputTokens} tokens)`,
+      );
     }
     for (const pq of usage.providers ?? []) {
       const pParts: string[] = [];
@@ -295,27 +337,37 @@ export class FunctionHandlers {
     return textResult(lines.join("\n"));
   }
 
-  private async handleCloneRepo(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handleCloneRepo(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const url = requireString(args, "url");
     const path = optString(args, "path");
     const repo = await cloneRepo({ url, ...(path ? { path } : {}) });
-    return textResult(`Cloned **${repo.path}** (base: ${repo.baseBranch.remote ? `${repo.baseBranch.remote}/` : ""}${repo.baseBranch.name}).`);
+    return textResult(
+      `Cloned **${repo.path}** (base: ${repo.baseBranch.remote ? `${repo.baseBranch.remote}/` : ""}${repo.baseBranch.name}).`,
+    );
   }
 
-  private async handleWebSearch(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handleWebSearch(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const query = requireString(args, "query");
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
     const resp = await webFetch({ url });
     return { title: resp.title, content: resp.content };
   }
 
-  private async handleWebFetch(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handleWebFetch(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const url = requireString(args, "url");
     const resp = await webFetch({ url });
     return { title: resp.title, content: resp.content };
   }
 
-  private async handleTaskFixPR(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handleTaskFixPR(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const num = requireInt(args, "task_number");
     const taskId = this.taskNumberMap.toId(num);
     if (!taskId) return errorResult("Unknown task number");
@@ -323,17 +375,25 @@ export class FunctionHandlers {
     return textResult(`Injected fix-PR command into task #${num}.`);
   }
 
-  private async handleBotFixCI(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private async handleBotFixCI(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const repo = requireString(args, "repo");
     const resp = await botFixCI({ repo });
     const excluded = this.excludedTaskIds();
     const tasks = (await listTasks()).filter((t) => !excluded.has(t.id));
     this.taskNumberMap.update(tasks);
     const num = this.taskNumberMap.toNumber(resp.id);
-    return textResult(num !== undefined ? `Created fix-CI task #${num} for ${repo}.` : `Created fix-CI task for ${repo}.`);
+    return textResult(
+      num !== undefined
+        ? `Created fix-CI task #${num} for ${repo}.`
+        : `Created fix-CI task for ${repo}.`,
+    );
   }
 
-  private handleGetLastMessage(args: FunctionArgs): Promise<Record<string, unknown>> {
+  private handleGetLastMessage(
+    args: FunctionArgs,
+  ): Promise<Record<string, unknown>> {
     const num = requireInt(args, "task_number");
     const taskId = this.taskNumberMap.toId(num);
     if (!taskId) return Promise.resolve(errorResult("Unknown task number"));
@@ -348,11 +408,17 @@ export class FunctionHandlers {
         settled = true;
         if (historyTimer !== null) clearTimeout(historyTimer);
         es.close();
-        const lastResult = [...collected].reverse().find((e) => e.kind === "result");
+        const lastResult = [...collected]
+          .reverse()
+          .find((e) => e.kind === "result");
         const lastAsk = [...collected].reverse().find((e) => e.kind === "ask");
-        const lastText = [...collected].reverse().find((e) => e.kind === "text");
+        const lastText = [...collected]
+          .reverse()
+          .find((e) => e.kind === "text");
         if (lastResult?.result?.result) {
-          resolve(textResult(`Task #${num} result: ${lastResult.result.result}`));
+          resolve(
+            textResult(`Task #${num} result: ${lastResult.result.result}`),
+          );
         } else if (lastAsk?.ask?.questions?.[0]) {
           const q = lastAsk.ask.questions[0];
           const opts = q.options.map((o) => o.label).join(", ");
@@ -362,26 +428,32 @@ export class FunctionHandlers {
             ),
           );
         } else if (lastText?.text?.text) {
-          resolve(textResult(`Last message from task #${num}: ${lastText.text.text}`));
+          resolve(
+            textResult(`Last message from task #${num}: ${lastText.text.text}`),
+          );
         } else {
           resolve(textResult(`No messages from task #${num} yet.`));
         }
       };
 
-      const es = taskEvents(taskId, (event) => {
-        collected.push(event);
-        if (event.kind === "init") {
-          // Wait 1s after init to let the replay stream in.
-          if (historyTimer !== null) clearTimeout(historyTimer);
-          historyTimer = setTimeout(settle, 1000);
-        }
-      }, (_err) => {
-        if (!settled) {
-          settled = true;
-          es.close();
-          resolve(errorResult(`Invalid event received for task #${num}`));
-        }
-      });
+      const es = taskEvents(
+        taskId,
+        (event) => {
+          collected.push(event);
+          if (event.kind === "init") {
+            // Wait 1s after init to let the replay stream in.
+            if (historyTimer !== null) clearTimeout(historyTimer);
+            historyTimer = setTimeout(settle, 1000);
+          }
+        },
+        (_err) => {
+          if (!settled) {
+            settled = true;
+            es.close();
+            resolve(errorResult(`Invalid event received for task #${num}`));
+          }
+        },
+      );
 
       // Fallback: settle after 5s regardless.
       setTimeout(settle, 5000);

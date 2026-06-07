@@ -1,4 +1,4 @@
-// Gemini Live functions/tools for voice mode, sync with android/caic/src/main/java/com/fghbuild/caic/voice/FunctionDeclarations.kt
+// Provider-neutral service tool declarations for voice mode, sync with android/caic/src/main/java/com/fghbuild/caic/voice/FunctionDeclarations.kt
 
 type JsonSchema = Record<string, unknown>;
 
@@ -22,7 +22,10 @@ function arrayProp(description: string, items: JsonSchema): JsonSchema {
   return { type: "array", description, items };
 }
 
-function objectSchema(properties: Record<string, JsonSchema>, required?: string[]): JsonSchema {
+function objectSchema(
+  properties: Record<string, JsonSchema>,
+  required?: string[],
+): JsonSchema {
   const schema: JsonSchema = { type: "object", properties };
   if (required?.length) schema.required = required;
   return schema;
@@ -57,7 +60,8 @@ export function buildFunctionDeclarations(
   return [
     {
       name: "tasks_list",
-      description: "List all current coding tasks with their status, cost, and duration.",
+      description:
+        "List all current coding tasks with their status, cost, and duration.",
       parameters: emptyObjectSchema,
     },
     {
@@ -66,7 +70,9 @@ export function buildFunctionDeclarations(
         "Create a new coding task. Confirm repo and prompt with the user before calling.",
       parameters: objectSchema(
         {
-          prompt: stringProp("The task description/prompt for the coding agent"),
+          prompt: stringProp(
+            "The task description/prompt for the coding agent",
+          ),
           repos: arrayProp(
             "Repositories to work in (one or more)",
             repos.length > 0
@@ -78,28 +84,39 @@ export function buildFunctionDeclarations(
             harnesses.length > 0
               ? enumProp(harnessDesc, harnesses)
               : stringProp(harnessDesc),
-          display: boolProp(caps.displayAvailable
-            ? "Enable virtual display (VNC) for this task"
-            : "Enable virtual display (VNC) for this task (not available on this server)"),
-          tailscale: boolProp(caps.tailscaleAvailable
-            ? "Enable Tailscale networking for this task"
-            : "Enable Tailscale networking for this task (not available on this server)"),
-          usb: boolProp(caps.usbAvailable
-            ? "Enable USB passthrough for this task"
-            : "Enable USB passthrough for this task (not available on this server)"),
-          sudo: boolProp(caps.sudoAvailable
-            ? "Enable root access via sudo with a random password"
-            : "Enable root access via sudo with a random password (not available on this server)"),
-          gitHubToken: boolProp(caps.gitHubTokenAvailable
-            ? "Enable GitHub token injection for this task"
-            : "Enable GitHub token injection for this task (not available on this server)"),
+          display: boolProp(
+            caps.displayAvailable
+              ? "Enable virtual display (VNC) for this task"
+              : "Enable virtual display (VNC) for this task (not available on this server)",
+          ),
+          tailscale: boolProp(
+            caps.tailscaleAvailable
+              ? "Enable Tailscale networking for this task"
+              : "Enable Tailscale networking for this task (not available on this server)",
+          ),
+          usb: boolProp(
+            caps.usbAvailable
+              ? "Enable USB passthrough for this task"
+              : "Enable USB passthrough for this task (not available on this server)",
+          ),
+          sudo: boolProp(
+            caps.sudoAvailable
+              ? "Enable root access via sudo with a random password"
+              : "Enable root access via sudo with a random password (not available on this server)",
+          ),
+          gitHubToken: boolProp(
+            caps.gitHubTokenAvailable
+              ? "Enable GitHub token injection for this task"
+              : "Enable GitHub token injection for this task (not available on this server)",
+          ),
         },
         ["prompt", "repos"],
       ),
     },
     {
       name: "task_get_detail",
-      description: "Get recent activity and status details for a task by its number.",
+      description:
+        "Get recent activity and status details for a task by its number.",
       parameters: objectSchema(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],
@@ -107,7 +124,8 @@ export function buildFunctionDeclarations(
     },
     {
       name: "task_send_message",
-      description: "Send a text message to a waiting or asking agent by task number.",
+      description:
+        "Send a text message to a waiting or asking agent by task number.",
       parameters: objectSchema(
         {
           task_number: intProp("The task number, e.g. 1 for task #1"),
@@ -118,7 +136,8 @@ export function buildFunctionDeclarations(
     },
     {
       name: "task_answer_question",
-      description: "Answer an agent's question by task number. The agent is in 'asking' state.",
+      description:
+        "Answer an agent's question by task number. The agent is in 'asking' state.",
       parameters: objectSchema(
         {
           task_number: intProp("The task number, e.g. 1 for task #1"),
@@ -147,7 +166,8 @@ export function buildFunctionDeclarations(
     },
     {
       name: "task_stop",
-      description: "Stop a running or waiting task. The container is preserved and can be revived later.",
+      description:
+        "Stop a running or waiting task. The container is preserved and can be revived later.",
       parameters: objectSchema(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],
@@ -155,7 +175,8 @@ export function buildFunctionDeclarations(
     },
     {
       name: "task_purge",
-      description: "Permanently delete a stopped task's container. Cannot be undone.",
+      description:
+        "Permanently delete a stopped task's container. Cannot be undone.",
       parameters: objectSchema(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],
@@ -163,7 +184,8 @@ export function buildFunctionDeclarations(
     },
     {
       name: "task_revive",
-      description: "Revive a stopped task, restarting its container and agent session.",
+      description:
+        "Revive a stopped task, restarting its container and agent session.",
       parameters: objectSchema(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],
@@ -171,16 +193,22 @@ export function buildFunctionDeclarations(
     },
     {
       name: "task_fork",
-      description: "Fork a running or waiting task, creating a snapshot of its container on a new branch. The prompt describes what the forked task should do. Optionally override the harness and model.",
+      description:
+        "Fork a running or waiting task, creating a snapshot of its container on a new branch. The prompt describes what the forked task should do. Optionally override the harness and model.",
       parameters: objectSchema(
         {
           task_number: intProp("The task number to fork, e.g. 1 for task #1"),
           prompt: stringProp("The initial prompt for the forked task"),
           harness:
             harnesses.length > 0
-              ? enumProp("Override harness (optional, inherits from source if omitted)", harnesses)
+              ? enumProp(
+                  "Override harness (optional, inherits from source if omitted)",
+                  harnesses,
+                )
               : stringProp("Override harness (optional)"),
-          model: stringProp("Override model (optional, inherits from source if omitted)"),
+          model: stringProp(
+            "Override model (optional, inherits from source if omitted)",
+          ),
         },
         ["task_number", "prompt"],
       ),
@@ -192,18 +220,22 @@ export function buildFunctionDeclarations(
     },
     {
       name: "clone_repo",
-      description: "Clone a git repository by URL. Optionally specify a local path.",
+      description:
+        "Clone a git repository by URL. Optionally specify a local path.",
       parameters: objectSchema(
         {
           url: stringProp("The git repository URL to clone"),
-          path: stringProp("Local directory name (optional, derived from URL if omitted)"),
+          path: stringProp(
+            "Local directory name (optional, derived from URL if omitted)",
+          ),
         },
         ["url"],
       ),
     },
     {
       name: "agent_last_message",
-      description: "Get latest agent message, question, or result. Call to check what the agent needs or relay to user.",
+      description:
+        "Get latest agent message, question, or result. Call to check what the agent needs or relay to user.",
       parameters: objectSchema(
         { task_number: intProp("The task number, e.g. 1 for task #1") },
         ["task_number"],
@@ -211,23 +243,21 @@ export function buildFunctionDeclarations(
     },
     {
       name: "web_search",
-      description: "Search the web for a query and display the results in an embedded browser.",
-      parameters: objectSchema(
-        { query: stringProp("The search query") },
-        ["query"],
-      ),
+      description:
+        "Search the web for a query and display the results in an embedded browser.",
+      parameters: objectSchema({ query: stringProp("The search query") }, [
+        "query",
+      ]),
     },
     {
       name: "web_fetch",
       description: "Open a URL in the embedded browser.",
-      parameters: objectSchema(
-        { url: stringProp("The URL to open") },
-        ["url"],
-      ),
+      parameters: objectSchema({ url: stringProp("The URL to open") }, ["url"]),
     },
     {
       name: "task_fix_pr",
-      description: "Inject a fix-PR command into an existing task to fix its failing PR CI in auto mode.",
+      description:
+        "Inject a fix-PR command into an existing task to fix its failing PR CI in auto mode.",
       parameters: objectSchema(
         { task_number: intProp("The task number whose PR CI should be fixed") },
         ["task_number"],
@@ -235,7 +265,8 @@ export function buildFunctionDeclarations(
     },
     {
       name: "bot_fix_ci",
-      description: "Create a task to investigate and fix a failing CI on a repository's default branch.",
+      description:
+        "Create a task to investigate and fix a failing CI on a repository's default branch.",
       parameters: objectSchema(
         {
           repo:

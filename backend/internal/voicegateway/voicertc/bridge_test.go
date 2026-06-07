@@ -6,13 +6,196 @@ package voicertc
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"math"
 	"testing"
 
+	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
 	"github.com/maruel/gopus"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 )
+
+func TestTranslateGatewayClientMessage(t *testing.T) {
+	t.Parallel()
+	t.Run("setup", func(t *testing.T) {
+		t.Parallel()
+		got, err := translateGatewayClientMessage([]byte(`{"kind":"session.setup","voice":{"name":"Kore","language":"en"},"tools":[{"name":"tasks_list","description":"List tasks","parameters":{"type":"object","properties":{}}}],"context":{"systemInstruction":"system prompt"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var msg map[string]any
+		if err := json.Unmarshal(got, &msg); err != nil {
+			t.Fatal(err)
+		}
+		setup, ok := msg["setup"].(map[string]any)
+		if !ok {
+			t.Fatalf("setup = %T, want object", msg["setup"])
+		}
+		if setup["model"] != geminiModelName {
+			t.Errorf("model = %q, want %q", setup["model"], geminiModelName)
+		}
+		if _, ok := setup["systemInstruction"]; !ok {
+			t.Fatal("missing systemInstruction")
+		}
+		if _, ok := setup["inputAudioTranscription"].(map[string]any); !ok {
+			t.Fatalf("inputAudioTranscription = %T, want object", setup["inputAudioTranscription"])
+		}
+		if _, ok := setup["outputAudioTranscription"].(map[string]any); !ok {
+			t.Fatalf("outputAudioTranscription = %T, want object", setup["outputAudioTranscription"])
+		}
+		tools, ok := setup["tools"].([]any)
+		if !ok || len(tools) != 1 {
+			t.Fatalf("tools = %T len %d, want one tool", setup["tools"], len(tools))
+		}
+		tool, ok := tools[0].(map[string]any)
+		if !ok {
+			t.Fatalf("tool = %T, want object", tools[0])
+		}
+		decls, ok := tool["functionDeclarations"].([]any)
+		if !ok || len(decls) != 1 {
+			t.Fatalf("functionDeclarations = %T len %d, want one declaration", tool["functionDeclarations"], len(decls))
+		}
+		decl, ok := decls[0].(map[string]any)
+		if !ok {
+			t.Fatalf("declaration = %T, want object", decls[0])
+		}
+		if _, ok := decl["parameters"]; ok {
+			t.Fatal("provider declaration used parameters, want parametersJsonSchema")
+		}
+		if _, ok := decl["parametersJsonSchema"]; !ok {
+			t.Fatal("missing parametersJsonSchema")
+		}
+	})
+
+	t.Run("context update", func(t *testing.T) {
+		t.Parallel()
+		got, err := translateGatewayClientMessage([]byte(`{"kind":"context.update","context":{"text":"status update"}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var msg map[string]any
+		if err := json.Unmarshal(got, &msg); err != nil {
+			t.Fatal(err)
+		}
+		realtimeInput, ok := msg["realtimeInput"].(map[string]any)
+		if !ok {
+			t.Fatalf("realtimeInput = %T, want object", msg["realtimeInput"])
+		}
+		if realtimeInput["text"] != "status update" {
+			t.Fatalf("realtimeInput.text = %q, want status update", realtimeInput["text"])
+		}
+	})
+
+	t.Run("tool result", func(t *testing.T) {
+		t.Parallel()
+		got, err := translateGatewayClientMessage([]byte(`{"kind":"tool.result","id":"call-1","name":"tasks_list","result":{"ok":true}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var msg map[string]any
+		if err := json.Unmarshal(got, &msg); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := msg["toolResponse"]; !ok {
+			t.Fatal("missing toolResponse")
+		}
+	})
+
+	t.Run("rejects malformed setup", func(t *testing.T) {
+		t.Parallel()
+		_, err := translateGatewayClientMessage([]byte(`{"kind":"session.setup","voice":{"name":"Kore","language":"en"},"tools":[],"context":{}}`))
+		if err == nil {
+			t.Fatal("expected error")
+		}
+	})
+
+	t.Run("rejects provider message", func(t *testing.T) {
+		t.Parallel()
+		_, err := translateGatewayClientMessage([]byte(`{"setup":{"model":"provider"}}`))
+		if err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestTranslateGeminiServerMessage(t *testing.T) {
+	t.Parallel()
+	t.Run("ready", func(t *testing.T) {
+		t.Parallel()
+		got, err := translateGeminiServerMessage([]byte(`{"setupComplete":{}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("messages = %d, want 1", len(got))
+		}
+		var msg voicev1.SessionReady
+		if err := json.Unmarshal(got[0], &msg); err != nil {
+			t.Fatal(err)
+		}
+		if msg.Kind != voicev1.MessageKindSessionReady || msg.Profile != gatewayProfileDefault {
+			t.Fatalf("message = %+v, want session.ready default", msg)
+		}
+	})
+
+	t.Run("transcript", func(t *testing.T) {
+		t.Parallel()
+		got, err := translateGeminiServerMessage([]byte(`{
+			"serverContent":{
+				"inputTranscription":{"text":"hello"},
+				"outputTranscription":{"text":"Ready"},
+				"turnComplete":true
+			}
+		}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		kinds := make([]voicev1.MessageKind, 0, len(got))
+		for _, raw := range got {
+			var msg voicev1.MessageEnvelope
+			if err := json.Unmarshal(raw, &msg); err != nil {
+				t.Fatal(err)
+			}
+			kinds = append(kinds, msg.Kind)
+		}
+		want := []voicev1.MessageKind{
+			voicev1.MessageKindTranscriptDelta,
+			voicev1.MessageKindSpeechStarted,
+			voicev1.MessageKindTranscriptDelta,
+			voicev1.MessageKindAssistantTextDelta,
+			voicev1.MessageKindSpeechEnded,
+		}
+		if len(kinds) != len(want) {
+			t.Fatalf("kinds = %v, want %v", kinds, want)
+		}
+		for i, kind := range want {
+			if kinds[i] != kind {
+				t.Fatalf("kinds = %v, want %v", kinds, want)
+			}
+		}
+	})
+
+	t.Run("tool call", func(t *testing.T) {
+		t.Parallel()
+		got, err := translateGeminiServerMessage([]byte(`{
+			"toolCall":{"functionCalls":[{"id":"call-1","name":"tasks_list","args":{}}]}
+		}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("messages = %d, want 1", len(got))
+		}
+		var msg voicev1.ToolCall
+		if err := json.Unmarshal(got[0], &msg); err != nil {
+			t.Fatal(err)
+		}
+		if msg.Kind != voicev1.MessageKindToolCall || msg.ID != "call-1" || msg.Name != "tasks_list" {
+			t.Fatalf("message = %+v, want tool.call", msg)
+		}
+	})
+}
 
 func TestNewBridge(t *testing.T) {
 	t.Parallel()

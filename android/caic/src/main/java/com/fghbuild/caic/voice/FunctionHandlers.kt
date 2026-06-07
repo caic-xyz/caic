@@ -1,4 +1,4 @@
-// Dispatches Gemini function calls to the caic API.
+// Dispatches provider-neutral voice tool calls to the caic API.
 package com.fghbuild.caic.voice
 
 import com.caic.sdk.v1.ApiClient

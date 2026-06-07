@@ -21,6 +21,145 @@ object InstantSerializer : KSerializer<Instant> {
     override fun deserialize(decoder: Decoder): Instant = Instant.parse(decoder.decodeString())
 }
 
+@Serializable(with = InterruptSourceSerializer::class)
+sealed interface InterruptSource {
+    val value: String
+    @Serializable
+    data object User : InterruptSource {
+        override val value = "user"
+    }
+    @Serializable
+    data object Tool : InterruptSource {
+        override val value = "tool"
+    }
+    @Serializable
+    data class Other(override val value: String) : InterruptSource
+}
+
+object InterruptSourceSerializer : KSerializer<InterruptSource> {
+    override val descriptor = PrimitiveSerialDescriptor("InterruptSource", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: InterruptSource) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): InterruptSource {
+        val v = decoder.decodeString()
+        return when (v) {
+            "user" -> InterruptSource.User
+            "tool" -> InterruptSource.Tool
+            else -> InterruptSource.Other(v)
+        }
+    }
+}
+
+@Serializable(with = MessageKindSerializer::class)
+sealed interface MessageKind {
+    val value: String
+    @Serializable
+    data object SessionSetup : MessageKind {
+        override val value = "session.setup"
+    }
+    @Serializable
+    data object ContextUpdate : MessageKind {
+        override val value = "context.update"
+    }
+    @Serializable
+    data object ToolResult : MessageKind {
+        override val value = "tool.result"
+    }
+    @Serializable
+    data object TurnCancel : MessageKind {
+        override val value = "turn.cancel"
+    }
+    @Serializable
+    data object SessionClose : MessageKind {
+        override val value = "session.close"
+    }
+    @Serializable
+    data object SessionReady : MessageKind {
+        override val value = "session.ready"
+    }
+    @Serializable
+    data object TranscriptDelta : MessageKind {
+        override val value = "transcript.delta"
+    }
+    @Serializable
+    data object AssistantTextDelta : MessageKind {
+        override val value = "assistant.text.delta"
+    }
+    @Serializable
+    data object SpeechStarted : MessageKind {
+        override val value = "speech.started"
+    }
+    @Serializable
+    data object SpeechEnded : MessageKind {
+        override val value = "speech.ended"
+    }
+    @Serializable
+    data object ToolCall : MessageKind {
+        override val value = "tool.call"
+    }
+    @Serializable
+    data object Interrupted : MessageKind {
+        override val value = "interrupted"
+    }
+    @Serializable
+    data object Error : MessageKind {
+        override val value = "error"
+    }
+    @Serializable
+    data class Other(override val value: String) : MessageKind
+}
+
+object MessageKindSerializer : KSerializer<MessageKind> {
+    override val descriptor = PrimitiveSerialDescriptor("MessageKind", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: MessageKind) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): MessageKind {
+        val v = decoder.decodeString()
+        return when (v) {
+            "session.setup" -> MessageKind.SessionSetup
+            "context.update" -> MessageKind.ContextUpdate
+            "tool.result" -> MessageKind.ToolResult
+            "turn.cancel" -> MessageKind.TurnCancel
+            "session.close" -> MessageKind.SessionClose
+            "session.ready" -> MessageKind.SessionReady
+            "transcript.delta" -> MessageKind.TranscriptDelta
+            "assistant.text.delta" -> MessageKind.AssistantTextDelta
+            "speech.started" -> MessageKind.SpeechStarted
+            "speech.ended" -> MessageKind.SpeechEnded
+            "tool.call" -> MessageKind.ToolCall
+            "interrupted" -> MessageKind.Interrupted
+            "error" -> MessageKind.Error
+            else -> MessageKind.Other(v)
+        }
+    }
+}
+
+@Serializable(with = SpeakerSerializer::class)
+sealed interface Speaker {
+    val value: String
+    @Serializable
+    data object User : Speaker {
+        override val value = "user"
+    }
+    @Serializable
+    data object Assistant : Speaker {
+        override val value = "assistant"
+    }
+    @Serializable
+    data class Other(override val value: String) : Speaker
+}
+
+object SpeakerSerializer : KSerializer<Speaker> {
+    override val descriptor = PrimitiveSerialDescriptor("Speaker", PrimitiveKind.STRING)
+    override fun serialize(encoder: Encoder, value: Speaker) = encoder.encodeString(value.value)
+    override fun deserialize(decoder: Decoder): Speaker {
+        val v = decoder.decodeString()
+        return when (v) {
+            "user" -> Speaker.User
+            "assistant" -> Speaker.Assistant
+            else -> Speaker.Other(v)
+        }
+    }
+}
+
 object ErrorCodes {
     const val BadRequest = "BAD_REQUEST"
     const val Unauthorized = "UNAUTHORIZED"
@@ -55,4 +194,107 @@ data class ErrorDetails(val code: String, val message: String)
 
 @Serializable
 data class ErrorResponse(val error: ErrorDetails, val details: Map<String, JsonElement>? = null)
+
+/** MessageEnvelope carries the kind used to dispatch data-channel messages. */
+@Serializable
+data class MessageEnvelope(val kind: MessageKind)
+
+/** VoiceConfig describes provider-neutral voice preferences. */
+@Serializable
+data class VoiceConfig(val name: String, val language: String)
+
+/** ToolDeclaration is a provider-neutral service tool declaration. */
+@Serializable
+data class ToolDeclaration(
+    val name: String,
+    val description: String,
+    val parameters: JsonElement,
+)
+
+/** Context carries provider-neutral text or instruction context. */
+@Serializable
+data class Context(val systemInstruction: String? = null, val text: String? = null)
+
+/** SessionSetup is the client message that initializes a voice session. */
+@Serializable
+data class SessionSetup(
+    val kind: MessageKind,
+    val voice: VoiceConfig,
+    val tools: List<ToolDeclaration>,
+    val context: Context,
+)
+
+/** ContextUpdate is a client message that appends session context. */
+@Serializable
+data class ContextUpdate(val kind: MessageKind, val context: Context)
+
+/** ToolResult is a client message that returns a tool execution result. */
+@Serializable
+data class ToolResult(
+    val kind: MessageKind,
+    val id: String,
+    val name: String,
+    val result: JsonElement,
+)
+
+/** TurnCancel is a client message that cancels the current turn. */
+@Serializable
+data class TurnCancel(val kind: MessageKind, val reason: String? = null)
+
+/** SessionClose is a client message that closes the voice session. */
+@Serializable
+data class SessionClose(val kind: MessageKind, val reason: String? = null)
+
+/** SessionReady is a gateway message that reports session readiness. */
+@Serializable
+data class SessionReady(
+    val kind: MessageKind,
+    val profile: String,
+    val capabilities: List<String>,
+)
+
+/** TranscriptDelta is a gateway message that streams transcript text. */
+@Serializable
+data class TranscriptDelta(
+    val kind: MessageKind,
+    val speaker: Speaker,
+    val text: String,
+)
+
+/** AssistantTextDelta is a gateway message that streams assistant text. */
+@Serializable
+data class AssistantTextDelta(val kind: MessageKind, val text: String)
+
+/** SpeechStarted is a gateway message that reports speech output started. */
+@Serializable
+data class SpeechStarted(val kind: MessageKind, val speaker: Speaker)
+
+/** SpeechEnded is a gateway message that reports speech output ended. */
+@Serializable
+data class SpeechEnded(val kind: MessageKind, val speaker: Speaker)
+
+/** ToolCall is a gateway message that asks the client to execute a tool. */
+@Serializable
+data class ToolCall(
+    val kind: MessageKind,
+    val id: String,
+    val name: String,
+    val args: JsonElement,
+)
+
+/** Interrupted is a gateway message that reports an interruption. */
+@Serializable
+data class Interrupted(
+    val kind: MessageKind,
+    val source: InterruptSource,
+    val message: String? = null,
+)
+
+/** Error is a gateway message that reports an error. */
+@Serializable
+data class Error(
+    val kind: MessageKind,
+    val message: String,
+    val recoverable: Boolean,
+)
 

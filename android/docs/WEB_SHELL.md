@@ -89,8 +89,8 @@ screenshot, and Halo integrations.
   Android can distinguish disabled voice, caic-embedded gateway, and external
   preferred gateway modes.
 - `backend/cmd/voice-gateway` exists as the standalone voice gateway binary. Its
-  static config and compatibility metadata live in `backend/internal/voicegateway`,
-  and it no longer reads caic `settings.json` or `users.json`.
+  static config lives in `backend/internal/voicegateway`, and it no longer reads
+  caic `settings.json` or `users.json`.
 - The checked-in `voicertc` bridge dials Gemini Live WebSocket and forwards
   Gemini protocol messages over the WebRTC data channel while converting audio
   between RTP and Gemini PCM messages.
@@ -256,7 +256,7 @@ Voice gateway settings:
 - UDP WebRTC port.
 - Gemini API key source and model defaults.
 - Imported service public keys for trusted token issuers.
-- Gateway logging, diagnostics, and compatibility metadata.
+- Gateway logging and diagnostics.
 
 Rules:
 
@@ -418,18 +418,8 @@ Versioning rules:
   neutral capabilities Go Mode can consume. Adapter-specific paths are adapter
   config, not shell constants.
 
-The voice gateway also needs its own compatibility endpoint:
-
-```json
-{
-  "service": "voice-gateway",
-  "serviceKinds": ["caic", "mddb"],
-  "capabilities": [
-    "voice.gatewayGeminiLive",
-    "voice.serviceSignedTokens"
-  ]
-}
-```
+Voice gateway compatibility metadata is deferred until profile selection or
+multi-gateway capability negotiation needs it.
 
 ## Confirm Before Coding
 
@@ -607,16 +597,12 @@ Add protocol negotiation before implementing broad native bindings.
 Requirements:
 
 - caic exposes a public or minimally-authenticated compatibility endpoint.
-- voice-gateway exposes a public compatibility endpoint.
 - Android checks service ID, API version, bridge version range, and capabilities.
-- Android checks voice-gateway capabilities before enabling voice.
+- Android checks the voice-gateway URL-versioned endpoint before enabling voice.
 - Android stores the last-known compatibility result per configured server.
-- Android stores the last-known compatibility result for the configured gateway.
 - WebView host mode exposes Go Mode shell version and native capabilities to the
   frontend.
 - Incompatible servers show a clear native recovery screen with upgrade guidance.
-- Incompatible voice gateways show a clear native recovery screen with gateway
-  upgrade guidance.
 
 Acceptance checks:
 
@@ -1249,7 +1235,7 @@ Implemented the standalone `backend/cmd/voice-gateway` binary, reusable
 `backend/internal/voicegateway` static config, canonical
 `~/.config/voice-gateway/config.toml` loading, caic `[voice-gateway]` parsing,
 structured `Config.voiceGateway` API metadata, and gateway
-`GET /api/v1/voice/health` plus `GET /api/v1/voice/compat`. The gateway no
+`GET /api/v1/voice/health` plus `POST /api/v1/voice/rtc/offer`. The gateway no
 longer reads caic `settings.json` or `users.json`.
 
 Remaining follow-up: caic currently rejects unknown gateway config fields with

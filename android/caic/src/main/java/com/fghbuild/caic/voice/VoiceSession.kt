@@ -1,4 +1,4 @@
-// Manages Gemini Live voice session via WebRTC, audio I/O, and function call dispatch. Keep in sync with frontend/src/VoiceSession.ts
+// Manages voice gateway sessions via WebRTC, audio I/O, and function call dispatch. Keep in sync with frontend/src/VoiceSession.ts
 package com.fghbuild.caic.voice
 
 import android.content.BroadcastReceiver
@@ -14,7 +14,17 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.caic.sdk.v1.ApiClient
-import com.caic.voicegateway.sdk.v1.ApiClient as VoiceGatewayApiClient
+import com.caic.voicegateway.sdk.v1.ContextUpdate
+import com.caic.voicegateway.sdk.v1.Error
+import com.caic.voicegateway.sdk.v1.MessageEnvelope
+import com.caic.voicegateway.sdk.v1.MessageKind
+import com.caic.voicegateway.sdk.v1.SessionSetup
+import com.caic.voicegateway.sdk.v1.Speaker
+import com.caic.voicegateway.sdk.v1.ToolCall
+import com.caic.voicegateway.sdk.v1.ToolDeclaration
+import com.caic.voicegateway.sdk.v1.ToolResult
+import com.caic.voicegateway.sdk.v1.TranscriptDelta
+import com.caic.voicegateway.sdk.v1.VoiceConfig
 import com.caic.voicegateway.sdk.v1.VoiceRTCOfferReq
 import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.data.TaskRepository
@@ -33,8 +43,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.webrtc.DataChannel
 import org.webrtc.IceCandidate
@@ -51,7 +59,6 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val TAG = "VoiceSession"
-private const val MODEL_NAME = "models/gemini-3.1-flash-live-preview"
 
 @Singleton
 class VoiceSession @Inject constructor(
@@ -60,7 +67,10 @@ class VoiceSession @Inject constructor(
     private val taskRepository: TaskRepository,
 ) {
     private val audioManager = appContext.getSystemService(AudioManager::class.java)
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = Json {
+        encodeDefaults = true
+        ignoreUnknownKeys = true
+    }
 
     private var peerConnection: PeerConnection? = null
     private var dataChannel: DataChannel? = null
@@ -149,7 +159,10 @@ class VoiceSession @Inject constructor(
 
                 val apiClient = ApiClient(settings.serverURL, tokenProvider = { settingsRepository.settings.value.authToken })
                 val voiceGatewayClient =
-                    VoiceGatewayApiClient(settings.serverURL, tokenProvider = { settingsRepository.settings.value.authToken })
+                    com.caic.voicegateway.sdk.v1.ApiClient(
+                        settings.serverURL,
+                        tokenProvider = { settingsRepository.settings.value.authToken },
+                    )
                 availableHarnesses = apiClient.listHarnesses().map { it.name }
                 availableRepos = apiClient.listRepos().map { it.path }
                 val config = apiClient.getConfig()
@@ -214,7 +227,7 @@ class VoiceSession @Inject constructor(
                 pc.addTrack(micTrack)
 
                 val dcInit = DataChannel.Init().apply { ordered = true }
-                val dc = pc.createDataChannel("gemini", dcInit) ?: run {
+                val dc = pc.createDataChannel("voice-gateway", dcInit) ?: run {
                     setError("Failed to create data channel")
                     pc.dispose()
                     return@launch
@@ -369,17 +382,7 @@ class VoiceSession @Inject constructor(
     }
 
     private fun sendClientContent(text: String) {
-        val clientContent = BidiGenerateContentClientContent(
-            turns = listOf(
-                Content(
-                    role = "user",
-                    parts = listOf(Part(text = text)),
-                )
-            ),
-            turnComplete = true,
-        )
-        send(json.encodeToString(BidiGenerateContentClientContent.serializer(), clientContent)
-            .wrapTopLevel("clientContent"))
+        send(json.encodeToString(ContextUpdate.serializer(), gatewayContextUpdate(text)))
     }
 
     private fun flushPendingNotifications() {
@@ -396,51 +399,31 @@ class VoiceSession @Inject constructor(
     }
 
     private fun buildSetupMessage(
-        voiceName: String, harnesses: List<String>, repos: List<String>, caps: ServerCaps,
+        voiceName: String,
+        harnesses: List<String>,
+        repos: List<String>,
+        caps: ServerCaps,
     ): String {
-        val setup = BidiGenerateContentSetup(
-            model = MODEL_NAME,
-            generationConfig = GenerationConfig(
-                responseModalities = listOf(ResponseModality.AUDIO),
-                speechConfig = SpeechConfig(
-                    voiceConfig = VoiceConfig(
-                        prebuiltVoiceConfig = PrebuiltVoiceConfig(voiceName = voiceName),
-                    )
-                ),
-            ),
-            realtimeInputConfig = RealtimeInputConfig(
-                activityHandling = ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
-            ),
-            systemInstruction = Content(
-                parts = listOf(Part(text = SYSTEM_INSTRUCTION)),
-            ),
-            tools = listOf(
-                Tool(
-                    functionDeclarations = buildFunctionDeclarations(
-                        harnesses, repos, defaultHarness.ifBlank { null }, caps,
-                    ).map { fd ->
-                        LiveFunctionDeclaration(
-                            name = fd.name,
-                            description = fd.description,
-                            parameters = fd.parameters,
-                        )
-                    }
-                )
-            ),
-            inputAudioTranscription = AudioTranscriptionConfig(),
-            outputAudioTranscription = AudioTranscriptionConfig(),
-        )
-        return json.encodeToString(BidiGenerateContentSetup.serializer(), setup)
-            .wrapTopLevel("setup")
+        val tools = buildFunctionDeclarations(
+            harnesses, repos, defaultHarness.ifBlank { null }, caps,
+        ).map { fd ->
+            ToolDeclaration(
+                name = fd.name,
+                description = fd.description,
+                parameters = fd.parameters,
+            )
+        }
+        val setup = gatewaySessionSetup(voiceName, tools)
+        return json.encodeToString(SessionSetup.serializer(), setup)
     }
 
     @Suppress("TooGenericExceptionCaught") // Error boundary: malformed messages must not crash.
     private suspend fun handleServerMessage(text: String) {
         try {
-            val msg = json.decodeFromString<JsonElement>(text).jsonObject
-            when {
-                "setupComplete" in msg -> {
-                    Log.i(TAG, "setupComplete received")
+            val env = json.decodeFromString(MessageEnvelope.serializer(), text)
+            when (env.kind) {
+                MessageKind.SessionReady -> {
+                    Log.i(TAG, "session.ready received")
                     _state.update {
                         it.copy(
                             connectStatus = null,
@@ -450,31 +433,37 @@ class VoiceSession @Inject constructor(
                         )
                     }
                 }
-                "serverContent" in msg -> {
-                    val serverContent = json.decodeFromJsonElement(
-                        BidiGenerateContentServerContent.serializer(),
-                        msg["serverContent"]!!,
-                    )
-                    handleServerContent(serverContent)
+                MessageKind.TranscriptDelta -> {
+                    handleTranscriptDelta(json.decodeFromString(TranscriptDelta.serializer(), text))
                 }
-                "toolCall" in msg -> {
-                    val toolCall = json.decodeFromJsonElement(
-                        BidiGenerateContentToolCall.serializer(),
-                        msg["toolCall"]!!,
-                    )
-                    handleToolCall(toolCall)
+                MessageKind.SpeechStarted -> {
+                    speakerActive = true
+                    _state.update { it.copy(speaking = true) }
                 }
-                "toolCallCancellation" in msg -> {
-                    _state.update { it.copy(activeTool = null) }
+                MessageKind.SpeechEnded -> {
+                    speakerActive = false
+                    flushPendingNotifications()
+                    _state.update {
+                        it.copy(
+                            speaking = false,
+                            transcript = it.transcript.map { e -> e.copy(final = true) },
+                        )
+                    }
                 }
-                "error" in msg -> {
-                    val message = msg["error"]?.jsonObject
-                        ?.get("message")?.jsonPrimitive?.content
-                        ?: "Server error"
-                    setError(message)
+                MessageKind.Interrupted -> {
+                    speakerActive = false
+                    flushPendingNotifications()
+                    _state.update { it.copy(speaking = false, activeTool = null) }
+                }
+                MessageKind.ToolCall -> {
+                    handleToolCall(json.decodeFromString(ToolCall.serializer(), text))
+                }
+                MessageKind.Error -> {
+                    val msg = json.decodeFromString(Error.serializer(), text)
+                    setError(msg.message)
                 }
                 else -> {
-                    Log.w(TAG, "Unrecognized server message: ${msg.keys}")
+                    Log.w(TAG, "Unrecognized server message: ${env.kind}")
                 }
             }
         } catch (e: CancellationException) {
@@ -484,70 +473,76 @@ class VoiceSession @Inject constructor(
         }
     }
 
-    private fun handleServerContent(content: BidiGenerateContentServerContent) {
-        // Audio playback is handled via WebRTC RTP; inlineData audio is ignored here.
-        content.inputTranscription?.text?.let { text ->
-            _state.update { it.copy(transcript = it.transcript.appendChunk(TranscriptSpeaker.USER, text)) }
+    private fun handleTranscriptDelta(msg: TranscriptDelta) {
+        val speaker = when (msg.speaker) {
+            Speaker.User -> TranscriptSpeaker.USER
+            Speaker.Assistant -> TranscriptSpeaker.ASSISTANT
+            else -> return
         }
-        content.outputTranscription?.text?.let { text ->
-            _state.update { it.copy(transcript = it.transcript.appendChunk(TranscriptSpeaker.ASSISTANT, text)) }
-        }
-        if (content.interrupted == true) {
-            // User barged in — model stopped.
-            speakerActive = false
-            flushPendingNotifications()
-            _state.update { it.copy(speaking = false) }
-        }
-        if (content.turnComplete == true) {
-            // Model finished speaking.
-            speakerActive = false
-            flushPendingNotifications()
-            _state.update {
-                it.copy(
-                    speaking = false,
-                    transcript = it.transcript.map { e -> e.copy(final = true) },
-                )
-            }
-        }
+        val chunk = msg.text ?: return
+        _state.update { it.copy(transcript = it.transcript.appendChunk(speaker, chunk)) }
     }
 
-    private suspend fun handleToolCall(toolCall: BidiGenerateContentToolCall) {
-        val responses = toolCall.functionCalls.map { fc ->
-            try {
-                _state.update { it.copy(activeTool = fc.name) }
-                val result = functionHandlers?.handle(fc.name, fc.args) ?: errorJson("No handler")
-                _state.update { it.copy(activeTool = null) }
-                // Surface tool errors in the transcript so they're visible in the UI.
-                val errorMsg = (result as? JsonObject)?.get("error")?.jsonPrimitive?.content
-                if (errorMsg != null) {
-                    Log.e(TAG, "Tool ${fc.name} failed: $errorMsg")
-                    _state.update {
-                        it.copy(transcript = it.transcript + TranscriptEntry(
-                            TranscriptSpeaker.ASSISTANT, "[${fc.name}] $errorMsg", final = true,
-                        ))
-                    }
-                }
-
-                val response = result
-                FunctionResponse(id = fc.id, name = fc.name, response = response)
-            } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-                _state.update { it.copy(activeTool = null) }
-                val errMsg = e.message ?: "Unknown error"
-                Log.e(TAG, "Tool ${fc.name} threw: $errMsg", e)
+    private suspend fun handleToolCall(msg: ToolCall) {
+        val id = msg.id
+        val name = msg.name
+        try {
+            _state.update { it.copy(activeTool = name) }
+            val args = msg.args as? JsonObject ?: JsonObject(emptyMap())
+            val result = functionHandlers?.handle(name, args) ?: errorJson("No handler")
+            _state.update { it.copy(activeTool = null) }
+            // Surface tool errors in the transcript so they're visible in the UI.
+            val errorMsg = (result as? JsonObject)?.get("error")?.jsonPrimitive?.content
+            if (errorMsg != null) {
+                Log.e(TAG, "Tool $name failed: $errorMsg")
                 _state.update {
                     it.copy(transcript = it.transcript + TranscriptEntry(
-                        TranscriptSpeaker.ASSISTANT, "[${fc.name}] $errMsg", final = true,
+                        TranscriptSpeaker.ASSISTANT, "[$name] $errorMsg", final = true,
                     ))
                 }
-                FunctionResponse(id = fc.id, name = fc.name, response = errorJson(errMsg))
             }
+            sendToolResult(id, name, result)
+        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            _state.update { it.copy(activeTool = null) }
+            val errMsg = e.message ?: "Unknown error"
+            Log.e(TAG, "Tool $name threw: $errMsg", e)
+            _state.update {
+                it.copy(transcript = it.transcript + TranscriptEntry(
+                    TranscriptSpeaker.ASSISTANT, "[$name] $errMsg", final = true,
+                ))
+            }
+            sendToolResult(id, name, errorJson(errMsg))
         }
-        val toolResponse = BidiGenerateContentToolResponse(functionResponses = responses)
-        send(
-            json.encodeToString(BidiGenerateContentToolResponse.serializer(), toolResponse)
-                .wrapTopLevel("toolResponse")
-        )
     }
+
+    private fun sendToolResult(id: String, name: String, result: JsonElement) {
+        send(json.encodeToString(ToolResult.serializer(), gatewayToolResult(id, name, result)))
+    }
+
+    private fun gatewayContextUpdate(text: String) = ContextUpdate(
+        kind = MessageKind.ContextUpdate,
+        context = com.caic.voicegateway.sdk.v1.Context(text = text),
+    )
+
+    private fun gatewaySessionSetup(
+        voiceName: String,
+        tools: List<ToolDeclaration>,
+    ) = SessionSetup(
+        kind = MessageKind.SessionSetup,
+        voice = VoiceConfig(
+            name = voiceName.ifBlank { "Orus" },
+            language = "en",
+        ),
+        tools = tools,
+        context = com.caic.voicegateway.sdk.v1.Context(systemInstruction = SYSTEM_INSTRUCTION),
+    )
+
+    private fun gatewayToolResult(id: String, name: String, result: JsonElement) = ToolResult(
+        kind = MessageKind.ToolResult,
+        id = id,
+        name = name,
+        result = result,
+    )
 
     // -----------------------------------------------------------------------
     // Audio device management (transport-agnostic)
@@ -774,9 +769,6 @@ private fun List<TranscriptEntry>.appendChunk(speaker: TranscriptSpeaker, text: 
 
 private fun errorJson(message: String): JsonElement =
     JsonObject(mapOf("error" to JsonPrimitive(message)))
-
-/** Wraps a serialized JSON object as a top-level discriminated message: {"key": {...}}. */
-private fun String.wrapTopLevel(key: String): String = """{"$key":$this}"""
 
 @Suppress("CyclomaticComplexMethod") // Simple exhaustive mapping, no logic.
 private fun audioDeviceTypeName(type: Int): String = when (type) {

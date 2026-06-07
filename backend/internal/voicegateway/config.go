@@ -1,4 +1,4 @@
-// Standalone voice gateway configuration and compatibility metadata.
+// Standalone voice gateway configuration.
 
 package voicegateway
 
@@ -18,7 +18,7 @@ const (
 	DefaultHTTP = ":3479"
 	// DefaultWebRTCUDPPort is the default UDP port for WebRTC ICE.
 	DefaultWebRTCUDPPort = 0
-	// DefaultGeminiModel is the default Gemini Live model advertised by the gateway.
+	// DefaultGeminiModel is the default Gemini Live model used by the first backend adapter.
 	DefaultGeminiModel = "gemini-3.1-flash-live-preview"
 	// GeminiAPIKeyEnv is the environment variable read for Gemini access.
 	GeminiAPIKeyEnv = "GEMINI_API_KEY" //nolint:gosec // G101: environment variable name, not a credential.
@@ -49,13 +49,6 @@ type TrustedIssuerConfig struct {
 	//
 	// The expected format is the value returned by EncodeServiceSigningPublicKey.
 	PublicKey string `toml:"public_key"`
-}
-
-// Compatibility is returned by GET /api/v1/voice/compat on the standalone voice gateway.
-type Compatibility struct {
-	Service      string   `json:"service"`
-	ServiceKinds []string `json:"serviceKinds"`
-	Capabilities []string `json:"capabilities"`
 }
 
 // DefaultConfig returns the standalone voice gateway defaults.
@@ -115,27 +108,6 @@ func (c *Config) GeminiAPIKey() string {
 	return os.Getenv(GeminiAPIKeyEnv)
 }
 
-// Compatibility returns public compatibility metadata for c.
-func (c *Config) Compatibility() Compatibility {
-	kinds := make([]string, 0, len(c.TrustedIssuers))
-	seen := map[string]struct{}{}
-	for _, issuer := range c.TrustedIssuers {
-		if issuer.Service == "" {
-			continue
-		}
-		if _, ok := seen[issuer.Service]; ok {
-			continue
-		}
-		seen[issuer.Service] = struct{}{}
-		kinds = append(kinds, issuer.Service)
-	}
-	return Compatibility{
-		Service:      "voice-gateway",
-		ServiceKinds: kinds,
-		Capabilities: c.capabilities(),
-	}
-}
-
 func (c *Config) validate(requireHTTP bool) error {
 	var errs []error
 	if requireHTTP && c.Server.HTTP == "" {
@@ -148,14 +120,6 @@ func (c *Config) validate(requireHTTP bool) error {
 		errs = append(errs, validateTrustedIssuer(i, issuer))
 	}
 	return errors.Join(errs...)
-}
-
-func (c *Config) capabilities() []string {
-	caps := []string{"voice.gatewayGeminiLive"}
-	if len(c.TrustedIssuers) > 0 {
-		caps = append(caps, "voice.serviceSignedTokens")
-	}
-	return caps
 }
 
 func validateTrustedIssuer(i int, issuer TrustedIssuerConfig) error {

@@ -57,7 +57,7 @@ var Routes = []Route{
 	},
 	{
 		Name:   "voiceRTCOffer",
-		Doc:    "Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session.",
+		Doc:    "Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session.",
 		Method: "POST",
 		Path:   "/api/v1/voice/rtc/offer",
 		Req:    reflect.TypeFor[VoiceRTCOfferReq](),

@@ -9,7 +9,7 @@ RESTful JSON signaling API served at `/api/v1/voice/`.
 | Method | Path | Description | Request | Response |
 |--------|------|-------------|---------|----------|
 | GET | `/api/v1/voice/token` | Returns a short-lived voice API token. |  | `VoiceTokenResp` |
-| POST | `/api/v1/voice/rtc/offer` | Exchanges a WebRTC SDP offer for an answer, opening a Gemini bridge session. | `VoiceRTCOfferReq` | `VoiceRTCAnswerResp` |
+| POST | `/api/v1/voice/rtc/offer` | Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session. | `VoiceRTCOfferReq` | `VoiceRTCAnswerResp` |
 | POST | `/api/v1/voice/rtc/{sessionID}` | Closes a WebRTC voice bridge session. |  | `StatusResp` |
 
 ## Errors
@@ -65,4 +65,181 @@ StatusResp is a common response for mutation endpoints.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `status` | `string` |  | yes |
+
+### ErrorDetails
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `code` | `string` |  | yes |
+| `message` | `string` |  | yes |
+
+### ErrorResponse
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `error` | `ErrorDetails` |  | yes |
+| `details` | `Record<string, unknown>` |  |  |
+
+### MessageEnvelope
+
+MessageEnvelope carries the kind used to dispatch data-channel messages.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+
+### VoiceConfig
+
+VoiceConfig describes provider-neutral voice preferences.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `language` | `string` |  | yes |
+
+### ToolDeclaration
+
+ToolDeclaration is a provider-neutral service tool declaration.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `description` | `string` |  | yes |
+| `parameters` | `object` |  | yes |
+
+### Context
+
+Context carries provider-neutral text or instruction context.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `systemInstruction` | `string` |  |  |
+| `text` | `string` |  |  |
+
+### SessionSetup
+
+SessionSetup is the client message that initializes a voice session.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `voice` | `VoiceConfig` |  | yes |
+| `tools` | `ToolDeclaration[]` |  | yes |
+| `context` | `Context` |  | yes |
+
+### ContextUpdate
+
+ContextUpdate is a client message that appends session context.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `context` | `Context` |  | yes |
+
+### ToolResult
+
+ToolResult is a client message that returns a tool execution result.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `id` | `string` |  | yes |
+| `name` | `string` |  | yes |
+| `result` | `object` |  | yes |
+
+### TurnCancel
+
+TurnCancel is a client message that cancels the current turn.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `reason` | `string` |  |  |
+
+### SessionClose
+
+SessionClose is a client message that closes the voice session.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `reason` | `string` |  |  |
+
+### SessionReady
+
+SessionReady is a gateway message that reports session readiness.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `profile` | `string` |  | yes |
+| `capabilities` | `string[]` |  | yes |
+
+### TranscriptDelta
+
+TranscriptDelta is a gateway message that streams transcript text.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `speaker` | `string` |  | yes |
+| `text` | `string` |  | yes |
+
+### AssistantTextDelta
+
+AssistantTextDelta is a gateway message that streams assistant text.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `text` | `string` |  | yes |
+
+### SpeechStarted
+
+SpeechStarted is a gateway message that reports speech output started.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `speaker` | `string` |  | yes |
+
+### SpeechEnded
+
+SpeechEnded is a gateway message that reports speech output ended.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `speaker` | `string` |  | yes |
+
+### ToolCall
+
+ToolCall is a gateway message that asks the client to execute a tool.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `id` | `string` |  | yes |
+| `name` | `string` |  | yes |
+| `args` | `object` |  | yes |
+
+### Interrupted
+
+Interrupted is a gateway message that reports an interruption.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `source` | `string` |  | yes |
+| `message` | `string` |  |  |
+
+### Error
+
+Error is a gateway message that reports an error.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `message` | `string` |  | yes |
+| `recoverable` | `boolean` |  | yes |
 
