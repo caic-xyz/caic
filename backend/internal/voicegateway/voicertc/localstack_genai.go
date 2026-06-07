@@ -1,4 +1,4 @@
-// Local stack genai adapters for local LLM runtimes.
+// Local stack model adapters for local ASR, LLM, and TTS runtimes.
 
 package voicertc
 
@@ -32,13 +32,20 @@ func localStackBackendForConfig(ctx context.Context, cfg *voicegateway.LocalStac
 	if err != nil {
 		return nil, err
 	}
+	tts, err := newKittenTTSAdapter(ctx)
+	if err != nil {
+		if models.runtime != nil {
+			_ = models.runtime.Close()
+		}
+		return nil, err
+	}
 	b := newLocalStackBackend(
 		func() vadSegmenter { return &energyVAD{} },
 		models.asr,
 		models.llm,
-		placeholderTTS{},
+		tts,
 	)
-	b.runtime = models.runtime
+	b.runtime = joinClosers(models.runtime, tts)
 	return b, nil
 }
 

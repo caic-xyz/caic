@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"iter"
 	"math"
 	"net/http"
 	"slices"
@@ -125,6 +127,72 @@ func TestLocalStackTurn(t *testing.T) {
 	if sink.pcmLen() == 0 {
 		t.Fatal("no assistant audio produced")
 	}
+}
+
+func TestLocalStackSessionSpeak(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		firstChunk := make(chan struct{})
+		releaseSecondChunk := make(chan struct{})
+		sink := &captureSink{}
+		s := &localStackSession{
+			id:      "tts-stream",
+			sink:    sink,
+			baseCtx: t.Context(),
+			tts:     blockingTTS{firstChunk: firstChunk, releaseSecondChunk: releaseSecondChunk},
+		}
+		done := make(chan struct{})
+		go func() {
+			s.speak(t.Context(), "hello")
+			close(done)
+		}()
+		select {
+		case <-firstChunk:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for first streamed TTS chunk")
+		}
+		if got := sink.pcmLen(); got != 2 {
+			t.Fatalf("pcmLen = %d, want first chunk before synthesis completes", got)
+		}
+		close(releaseSecondChunk)
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for speak to finish")
+		}
+		if got := sink.pcmLen(); got != 4 {
+			t.Fatalf("pcmLen = %d, want both streamed chunks", got)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		ttsCalled := make(chan struct{})
+		sink := &captureSink{}
+		s := &localStackSession{
+			id:      "tts-error",
+			sink:    sink,
+			baseCtx: t.Context(),
+			tts:     failingTTS{called: ttsCalled},
+		}
+		s.speak(t.Context(), "hello")
+		select {
+		case <-ttsCalled:
+		default:
+			t.Fatal("TTS was not called")
+		}
+		if kinds := sink.kinds(); len(kinds) != 0 {
+			t.Fatalf("kinds = %v, want no speech events after TTS failure", kinds)
+		}
+		if sink.pcmLen() != 0 {
+			t.Fatal("assistant audio produced after TTS failure")
+		}
+		if sink.wasCanceled() {
+			t.Fatal("TTS failure must not cancel the whole session")
+		}
+	})
 }
 
 func TestLocalStackBargeIn(t *testing.T) {
@@ -503,8 +571,37 @@ func (echoConv) addContext(string) {}
 
 type longTTS struct{ ms int }
 
-func (t longTTS) synthesize(context.Context, string) ([]byte, error) {
-	return make([]byte, backendOutputSampleRate*2*t.ms/1000), nil
+func (t longTTS) synthesize(context.Context, string) iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		yield(make([]byte, backendOutputSampleRate*2*t.ms/1000), nil)
+	}
+}
+
+type failingTTS struct {
+	called chan struct{}
+}
+
+func (t failingTTS) synthesize(context.Context, string) iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		close(t.called)
+		yield(nil, errors.New("synthesis failed"))
+	}
+}
+
+type blockingTTS struct {
+	firstChunk         chan struct{}
+	releaseSecondChunk chan struct{}
+}
+
+func (t blockingTTS) synthesize(context.Context, string) iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		if !yield([]byte{1, 2}, nil) {
+			return
+		}
+		close(t.firstChunk)
+		<-t.releaseSecondChunk
+		yield([]byte{3, 4}, nil)
+	}
 }
 
 type fixedASR struct{ text string }

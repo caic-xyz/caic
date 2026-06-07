@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"log/slog"
 	"math"
 	"sync"
@@ -67,9 +68,9 @@ type llmAdapter interface {
 	newConversation(systemInstruction string, tools []voicev1.ToolDeclaration) llmConversation
 }
 
-// ttsAdapter synthesizes S16LE mono PCM at backendOutputSampleRate from text.
+// ttsAdapter streams S16LE mono PCM at backendOutputSampleRate from text.
 type ttsAdapter interface {
-	synthesize(ctx context.Context, text string) ([]byte, error)
+	synthesize(ctx context.Context, text string) iter.Seq2[[]byte, error]
 }
 
 // localStackBackend is a backendConnector that runs a half-duplex
@@ -275,27 +276,52 @@ func (s *localStackSession) speak(ctx context.Context, text string) {
 	if text == "" {
 		return
 	}
-	s.setSpeaking(true)
-	defer s.setSpeaking(false)
-	s.emit(&voicev1.SpeechStarted{Kind: voicev1.MessageKindSpeechStarted, Speaker: voicev1.SpeakerAssistant})
-	s.emit(&voicev1.TranscriptDelta{Kind: voicev1.MessageKindTranscriptDelta, Speaker: voicev1.SpeakerAssistant, Text: text})
-	s.emit(&voicev1.AssistantTextDelta{Kind: voicev1.MessageKindAssistantTextDelta, Text: text})
-
-	pcm, err := s.tts.synthesize(ctx, text)
-	if err != nil {
-		s.warnTurn("tts", err)
-		return
-	}
-	for off := 0; off < len(pcm); off += ttsChunkBytes {
-		if ctx.Err() != nil {
-			return // barge-in stopped playback mid-stream
+	var started bool
+	var audioBytes int
+	defer func() {
+		if started {
+			s.setSpeaking(false)
 		}
-		end := min(off+ttsChunkBytes, len(pcm))
-		s.sink.addAssistantPCM(pcm[off:end])
+	}()
+
+	for pcm, err := range s.tts.synthesize(ctx, text) {
+		if err != nil {
+			if ctx.Err() == nil {
+				s.warnTurn("tts", err)
+				if started {
+					s.emit(&voicev1.SpeechEnded{Kind: voicev1.MessageKindSpeechEnded, Speaker: voicev1.SpeakerAssistant})
+				}
+			}
+			return
+		}
+		if len(pcm) == 0 {
+			continue
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if !started {
+			started = true
+			s.setSpeaking(true)
+			s.emit(&voicev1.SpeechStarted{Kind: voicev1.MessageKindSpeechStarted, Speaker: voicev1.SpeakerAssistant})
+			s.emit(&voicev1.TranscriptDelta{Kind: voicev1.MessageKindTranscriptDelta, Speaker: voicev1.SpeakerAssistant, Text: text})
+			s.emit(&voicev1.AssistantTextDelta{Kind: voicev1.MessageKindAssistantTextDelta, Text: text})
+		}
+		for off := 0; off < len(pcm); off += ttsChunkBytes {
+			if ctx.Err() != nil {
+				return
+			}
+			end := min(off+ttsChunkBytes, len(pcm))
+			s.sink.addAssistantPCM(pcm[off:end])
+			audioBytes += end - off
+		}
+	}
+	if !started {
+		return
 	}
 	// Hold the speaking state for the audio's duration so barge-in remains
 	// meaningful while the bridge drains the buffer at realtime.
-	audioDur := time.Duration(len(pcm)/2) * time.Second / time.Duration(backendOutputSampleRate)
+	audioDur := time.Duration(audioBytes/2) * time.Second / time.Duration(backendOutputSampleRate)
 	if !sleepCtx(ctx, audioDur) {
 		return
 	}
@@ -470,19 +496,24 @@ func (c *placeholderConversation) addContext(_ string) {}
 // is wired in a later phase.
 type placeholderTTS struct{}
 
-func (placeholderTTS) synthesize(_ context.Context, text string) ([]byte, error) {
-	const (
-		msPerChar = 50
-		maxMS     = 4000
-		toneHz    = 220.0
-		amplitude = 3000.0
-	)
-	durationMS := max(min(len(text)*msPerChar, maxMS), vadFrameMS)
-	samples := backendOutputSampleRate * durationMS / 1000
-	pcm := make([]byte, samples*2)
-	for i := range samples {
-		v := int16(amplitude * math.Sin(2*math.Pi*toneHz*float64(i)/float64(backendOutputSampleRate)))
-		binary.LittleEndian.PutUint16(pcm[i*2:], uint16(v)) //nolint:gosec // PCM int16→uint16 reinterpret
+func (placeholderTTS) synthesize(_ context.Context, text string) iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		if text == "" {
+			return
+		}
+		const (
+			msPerChar = 50
+			maxMS     = 4000
+			toneHz    = 220.0
+			amplitude = 3000.0
+		)
+		durationMS := max(min(len(text)*msPerChar, maxMS), vadFrameMS)
+		samples := backendOutputSampleRate * durationMS / 1000
+		pcm := make([]byte, samples*2)
+		for i := range samples {
+			v := int16(amplitude * math.Sin(2*math.Pi*toneHz*float64(i)/float64(backendOutputSampleRate)))
+			binary.LittleEndian.PutUint16(pcm[i*2:], uint16(v)) //nolint:gosec // PCM int16→uint16 reinterpret
+		}
+		yield(pcm, nil)
 	}
-	return pcm, nil
 }
