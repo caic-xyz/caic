@@ -394,7 +394,14 @@ func minimalServer(t *testing.T) *Server {
 	}
 	s.taskMgr = tasks.New(tasks.Config{ServerCtx: ctx})
 	s.initConcernAdapters()
-	s.webhooks = s.newWebhookHandlers(nil, nil, nil)
+	s.webhooks = &WebhookHandlers{
+		serverCtx: s.ctx,
+		ciCache:   s.ciCache,
+		forge:     s.forge,
+		taskMgr:   s.taskMgr,
+		repos:     s.repos,
+		prefs:     s.prefs,
+	}
 	s.SetCIService(ci.NewService(s.ciCache, s.provider, s.CIAdapter()))
 	return s
 }

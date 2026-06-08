@@ -89,19 +89,11 @@ func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocrit
 	// The webhook concern owns the forge webhook secrets and the GitHub App
 	// owner allowlist. Its bot and CI service are injected later, once the
 	// server wires them up via SetBot/SetCIService.
-	s.webhooks = s.newWebhookHandlers(d.GitHubWebhookSecret, d.GitLabWebhookSecret, d.GitHubAppAllowedOwners)
-	return s, nil
-}
-
-// newWebhookHandlers builds the forge webhook concern from the supplied webhook
-// configuration and the server's shared dependencies. The bot and CI service
-// are captured as currently set; New injects them after construction.
-func (s *Server) newWebhookHandlers(githubSecret, gitlabSecret []byte, appAllowedOwners map[string]struct{}) *WebhookHandlers {
-	return &WebhookHandlers{
+	s.webhooks = &WebhookHandlers{
 		serverCtx:        s.ctx,
-		githubSecret:     githubSecret,
-		gitlabSecret:     gitlabSecret,
-		appAllowedOwners: appAllowedOwners,
+		githubSecret:     d.GitHubWebhookSecret,
+		gitlabSecret:     d.GitLabWebhookSecret,
+		appAllowedOwners: d.GitHubAppAllowedOwners,
 		bot:              s.Bot,
 		ciService:        s.ciService,
 		ciCache:          s.ciCache,
@@ -110,6 +102,7 @@ func (s *Server) newWebhookHandlers(githubSecret, gitlabSecret []byte, appAllowe
 		repos:            s.repos,
 		prefs:            s.prefs,
 	}
+	return s, nil
 }
 
 // SetBot sets the forge automation bot owned by the server.
