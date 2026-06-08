@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -110,17 +111,30 @@ func TestKittenTTSAdapter(t *testing.T) {
 	})
 }
 
-func TestKittenTTSCommand(t *testing.T) {
-	cacheHome := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", cacheHome)
+func TestKittenTTSCommand(t *testing.T) { //nolint:paralleltest // Uses t.Setenv to validate platform-specific os.UserCacheDir behavior.
+	want := isolatedKittenTTSCacheDir(t)
 
 	cmd, err := kittenTTSCommand(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(cacheHome, "caic", "kittentts")
 	if cmd.Dir != want {
 		t.Fatalf("cmd.Dir = %q, want %q", cmd.Dir, want)
+	}
+}
+
+func isolatedKittenTTSCacheDir(t *testing.T) string {
+	base := t.TempDir()
+	switch runtime.GOOS {
+	case "darwin":
+		t.Setenv("HOME", base)
+		return filepath.Join(base, "Library", "Caches", "caic", "kittentts")
+	case "windows":
+		t.Setenv("LOCALAPPDATA", base)
+		return filepath.Join(base, "caic", "kittentts")
+	default:
+		t.Setenv("XDG_CACHE_HOME", base)
+		return filepath.Join(base, "caic", "kittentts")
 	}
 }
 
