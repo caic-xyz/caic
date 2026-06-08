@@ -146,6 +146,7 @@ func (h *serverConfigHandlers) getPreferences(ctx context.Context, _ *api.EmptyR
 		cacheMappings[i] = v1.CacheMappingResp{
 			HostPath:      m.HostPath,
 			ContainerPath: m.ContainerPath,
+			Enabled:       m.Enabled,
 		}
 	}
 	customMounts := make([]v1.MountMappingResp, len(prefs.Settings.CustomMounts))
@@ -153,6 +154,7 @@ func (h *serverConfigHandlers) getPreferences(ctx context.Context, _ *api.EmptyR
 		customMounts[i] = v1.MountMappingResp{
 			HostPath:      m.HostPath,
 			ContainerPath: m.ContainerPath,
+			Enabled:       m.Enabled,
 		}
 	}
 	return &v1.PreferencesResp{
@@ -186,6 +188,7 @@ func (h *serverConfigHandlers) updatePreferences(ctx context.Context, req *v1.Up
 				p.Settings.CacheMappings[i] = preferences.CacheMapping{
 					HostPath:      m.HostPath,
 					ContainerPath: m.ContainerPath,
+					Enabled:       m.Enabled,
 				}
 			}
 		}
@@ -195,6 +198,7 @@ func (h *serverConfigHandlers) updatePreferences(ctx context.Context, req *v1.Up
 				p.Settings.CustomMounts[i] = preferences.MountMapping{
 					HostPath:      m.HostPath,
 					ContainerPath: m.ContainerPath,
+					Enabled:       m.Enabled,
 				}
 			}
 		}
@@ -224,6 +228,9 @@ func cacheMountsFromSettings(settings *preferences.Settings) []caicruntime.Cache
 		}
 	}
 	for i, m := range settings.CacheMappings {
+		if !m.Enabled {
+			continue
+		}
 		caches = append(caches, caicruntime.CacheMount{
 			Name:      fmt.Sprintf("custom-cache-%d", i),
 			HostPath:  m.HostPath,
@@ -234,12 +241,15 @@ func cacheMountsFromSettings(settings *preferences.Settings) []caicruntime.Cache
 }
 
 func mountsFromSettings(settings *preferences.Settings) []caicruntime.Mount {
-	mounts := make([]caicruntime.Mount, len(settings.CustomMounts))
-	for i, m := range settings.CustomMounts {
-		mounts[i] = caicruntime.Mount{
+	mounts := make([]caicruntime.Mount, 0, len(settings.CustomMounts))
+	for _, m := range settings.CustomMounts {
+		if !m.Enabled {
+			continue
+		}
+		mounts = append(mounts, caicruntime.Mount{
 			HostPath:  m.HostPath,
 			MountPath: m.ContainerPath,
-		}
+		})
 	}
 	return mounts
 }

@@ -26,9 +26,18 @@ func TestValidate(t *testing.T) {
 				{Path: "github/foo", BaseBranch: "develop"},
 				{Path: "github/bar"},
 			},
-			Harness:  "claude",
-			Models:   map[string]string{"claude": "opus", "codex": "o3"},
-			Settings: Settings{BaseImage: "custom:latest", ContainerPlatform: "linux/amd64"},
+			Harness: "claude",
+			Models:  map[string]string{"claude": "opus", "codex": "o3"},
+			Settings: Settings{
+				BaseImage:         "custom:latest",
+				ContainerPlatform: "linux/amd64",
+				CacheMappings: []CacheMapping{
+					{HostPath: "/host/cache", ContainerPath: "/container/cache", Enabled: false},
+				},
+				CustomMounts: []MountMapping{
+					{HostPath: "/host/data", ContainerPath: "/container/data", Enabled: false},
+				},
+			},
 		}
 		if err := p.Validate(); err != nil {
 			t.Fatal(err)
@@ -74,7 +83,7 @@ func TestValidate(t *testing.T) {
 			Version: 1,
 			Settings: Settings{
 				CacheMappings: []CacheMapping{
-					{HostPath: "/host/a", ContainerPath: "/container/a"},
+					{HostPath: "/host/a", ContainerPath: "/container/a", Enabled: true},
 				},
 			},
 		}
@@ -116,7 +125,7 @@ func TestValidate(t *testing.T) {
 			Version: 1,
 			Settings: Settings{
 				CustomMounts: []MountMapping{
-					{HostPath: "/host/a", ContainerPath: "/container/a"},
+					{HostPath: "/host/a", ContainerPath: "/container/a", Enabled: true},
 				},
 			},
 		}
@@ -222,10 +231,10 @@ func TestUsers(t *testing.T) {
 				ContainerPlatform: "linux/amd64",
 				WellKnownCaches:   map[string]bool{"go-mod": true, "npm": false},
 				CacheMappings: []CacheMapping{
-					{HostPath: "/host/cache", ContainerPath: "/container/cache"},
+					{HostPath: "/host/cache", ContainerPath: "/container/cache", Enabled: false},
 				},
 				CustomMounts: []MountMapping{
-					{HostPath: "/host/data", ContainerPath: "/container/data"},
+					{HostPath: "/host/data", ContainerPath: "/container/data", Enabled: false},
 				},
 			},
 		}
@@ -273,11 +282,17 @@ func TestUsers(t *testing.T) {
 		if got.Settings.CacheMappings[0].HostPath != "/host/cache" {
 			t.Errorf("cacheMappings[0].hostPath = %q, want %q", got.Settings.CacheMappings[0].HostPath, "/host/cache")
 		}
+		if got.Settings.CacheMappings[0].Enabled {
+			t.Error("cacheMappings[0].enabled = true, want false")
+		}
 		if len(got.Settings.CustomMounts) != 1 {
 			t.Fatalf("customMounts len = %d, want 1", len(got.Settings.CustomMounts))
 		}
 		if got.Settings.CustomMounts[0].HostPath != "/host/data" {
 			t.Errorf("customMounts[0].hostPath = %q, want %q", got.Settings.CustomMounts[0].HostPath, "/host/data")
+		}
+		if got.Settings.CustomMounts[0].Enabled {
+			t.Error("customMounts[0].enabled = true, want false")
 		}
 	})
 
@@ -360,8 +375,8 @@ func TestUsers(t *testing.T) {
 		if err := s.Update("u", func(p *Preferences) {
 			p.TouchRepo("github/foo", &RepoPrefs{Harness: "claude", Model: "opus"})
 			p.Settings.WellKnownCaches = map[string]bool{"go-mod": true}
-			p.Settings.CacheMappings = []CacheMapping{{HostPath: "/a", ContainerPath: "/b"}}
-			p.Settings.CustomMounts = []MountMapping{{HostPath: "/c", ContainerPath: "/d"}}
+			p.Settings.CacheMappings = []CacheMapping{{HostPath: "/a", ContainerPath: "/b", Enabled: true}}
+			p.Settings.CustomMounts = []MountMapping{{HostPath: "/c", ContainerPath: "/d", Enabled: true}}
 		}); err != nil {
 			t.Fatal(err)
 		}

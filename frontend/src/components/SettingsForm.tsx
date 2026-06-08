@@ -145,7 +145,22 @@ export default function SettingsForm(props: SettingsFormProps) {
           <p class={styles.settingsDescription}>Persistent host directories mounted into each container for tool caches.</p>
           <For each={props.cacheMappings()}>
             {(mapping, index) => (
-              <div class={styles.cacheMappingRow}>
+              <div class={styles.cacheMappingRow} data-state={mapping.enabled ? "enabled" : "disabled"}>
+                <label class={styles.cacheMappingToggle} title="Enable custom cache">
+                  <input
+                    type="checkbox"
+                    checked={mapping.enabled}
+                    onChange={(e) => {
+                      const enabled = e.currentTarget.checked;
+                      const newMappings = props.cacheMappings().map((item, i) => (
+                        i === index() ? { ...item, enabled } : item
+                      ));
+                      props.setCacheMappings(newMappings);
+                      void props.saveSettings({ cacheMappings: newMappings });
+                    }}
+                  />
+                  <span class={styles.visuallyHidden}>Enable custom cache</span>
+                </label>
                 <input
                   type="text"
                   class={styles.settingsInput}
@@ -185,7 +200,7 @@ export default function SettingsForm(props: SettingsFormProps) {
             type="button"
             class={styles.settingsButton}
             onClick={() => {
-              props.setCacheMappings([...props.cacheMappings(), { hostPath: "", containerPath: "" }]);
+              props.setCacheMappings([...props.cacheMappings(), { hostPath: "", containerPath: "", enabled: true }]);
             }}
           >
             + Add mapping
@@ -196,7 +211,22 @@ export default function SettingsForm(props: SettingsFormProps) {
           <p class={styles.settingsDescription}>Additional host directories mounted into each container.</p>
           <For each={props.customMounts()}>
             {(mount, index) => (
-              <div class={styles.cacheMappingRow}>
+              <div class={styles.cacheMappingRow} data-state={mount.enabled ? "enabled" : "disabled"}>
+                <label class={styles.cacheMappingToggle} title="Enable custom mount">
+                  <input
+                    type="checkbox"
+                    checked={mount.enabled}
+                    onChange={(e) => {
+                      const enabled = e.currentTarget.checked;
+                      const newMounts = props.customMounts().map((item, i) => (
+                        i === index() ? { ...item, enabled } : item
+                      ));
+                      props.setCustomMounts(newMounts);
+                      void props.saveSettings({ customMounts: newMounts });
+                    }}
+                  />
+                  <span class={styles.visuallyHidden}>Enable custom mount</span>
+                </label>
                 <input
                   type="text"
                   class={styles.settingsInput}
@@ -236,7 +266,7 @@ export default function SettingsForm(props: SettingsFormProps) {
             type="button"
             class={styles.settingsButton}
             onClick={() => {
-              props.setCustomMounts([...props.customMounts(), { hostPath: "", containerPath: "" }]);
+              props.setCustomMounts([...props.customMounts(), { hostPath: "", containerPath: "", enabled: true }]);
             }}
           >
             + Add mount

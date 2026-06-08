@@ -140,12 +140,16 @@ class SettingsViewModelTest {
 
         vm.addCacheMapping()
         assertEquals(1, vm.state.value.cacheMappings.size)
+        assertTrue(vm.state.value.cacheMappings[0].enabled)
 
         vm.addCacheMapping()
         vm.updateCacheMapping(0, "/host/a", "/container/a")
         vm.updateCacheMapping(1, "/host/b", "/container/b")
         assertEquals("/host/a", vm.state.value.cacheMappings[0].hostPath)
         assertEquals("/container/b", vm.state.value.cacheMappings[1].containerPath)
+
+        vm.updateCacheMappingEnabled(1, false)
+        assertEquals(false, vm.state.value.cacheMappings[1].enabled)
     }
 
     @Test
@@ -154,6 +158,7 @@ class SettingsViewModelTest {
         vm.addCacheMapping()
         val before = vm.state.value.cacheMappings.toList()
         vm.updateCacheMapping(5, "/x", "/y")
+        vm.updateCacheMappingEnabled(5, false)
         assertEquals(before, vm.state.value.cacheMappings)
     }
 
@@ -185,12 +190,16 @@ class SettingsViewModelTest {
 
         vm.addCustomMount()
         assertEquals(1, vm.state.value.customMounts.size)
+        assertTrue(vm.state.value.customMounts[0].enabled)
 
         vm.addCustomMount()
         vm.updateCustomMount(0, "/host/a", "/container/a")
         vm.updateCustomMount(1, "/host/b", "/container/b")
         assertEquals("/host/a", vm.state.value.customMounts[0].hostPath)
         assertEquals("/container/b", vm.state.value.customMounts[1].containerPath)
+
+        vm.updateCustomMountEnabled(1, false)
+        assertEquals(false, vm.state.value.customMounts[1].enabled)
     }
 
     @Test
@@ -199,6 +208,7 @@ class SettingsViewModelTest {
         vm.addCustomMount()
         val before = vm.state.value.customMounts.toList()
         vm.updateCustomMount(5, "/x", "/y")
+        vm.updateCustomMountEnabled(5, false)
         assertEquals(before, vm.state.value.customMounts)
     }
 

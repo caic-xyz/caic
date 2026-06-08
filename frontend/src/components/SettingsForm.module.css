@@ -116,6 +116,30 @@
   margin-bottom: 0.5rem;
 }
 
+.cacheMappingRow[data-state="disabled"] .settingsInput,
+.cacheMappingRow[data-state="disabled"] .cacheMappingArrow {
+  opacity: 0.5;
+}
+
+.cacheMappingToggle {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .cacheMappingArrow {
   color: var(--color-text-secondary);
   flex-shrink: 0;

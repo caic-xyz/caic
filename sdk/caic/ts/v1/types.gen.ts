@@ -539,12 +539,14 @@ export interface RepoPrefsResp {
 export interface CacheMappingResp {
   hostPath: string;
   containerPath: string;
+  enabled: boolean;
 }
 
 /** MountMappingResp represents a general host-to-runtime directory mount. */
 export interface MountMappingResp {
   hostPath: string;
   containerPath: string;
+  enabled: boolean;
 }
 
 /** UserSettings holds user-configurable behavioral settings. */

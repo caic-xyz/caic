@@ -177,6 +177,7 @@ CacheMappingResp represents a directory mapping for cache/state sharing.
 |-------|------|-------------|----------|
 | `hostPath` | `string` |  | yes |
 | `containerPath` | `string` |  | yes |
+| `enabled` | `boolean` |  | yes |
 
 ### MountMappingResp
 
@@ -186,6 +187,7 @@ MountMappingResp represents a general host-to-runtime directory mount.
 |-------|------|-------------|----------|
 | `hostPath` | `string` |  | yes |
 | `containerPath` | `string` |  | yes |
+| `enabled` | `boolean` |  | yes |
 
 ### UserSettings
 

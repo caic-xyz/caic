@@ -678,11 +678,19 @@ data class RepoPrefsResp(
 
 /** CacheMappingResp represents a directory mapping for cache/state sharing. */
 @Serializable
-data class CacheMappingResp(val hostPath: String, val containerPath: String)
+data class CacheMappingResp(
+    val hostPath: String,
+    val containerPath: String,
+    val enabled: Boolean,
+)
 
 /** MountMappingResp represents a general host-to-runtime directory mount. */
 @Serializable
-data class MountMappingResp(val hostPath: String, val containerPath: String)
+data class MountMappingResp(
+    val hostPath: String,
+    val containerPath: String,
+    val enabled: Boolean,
+)
 
 /** UserSettings holds user-configurable behavioral settings. */
 @Serializable

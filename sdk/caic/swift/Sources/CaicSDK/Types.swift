@@ -416,12 +416,14 @@ public struct RepoPrefsResp: Codable {
 public struct CacheMappingResp: Codable {
     public let hostPath: String
     public let containerPath: String
+    public let enabled: Bool
 }
 
 /// MountMappingResp represents a general host-to-runtime directory mount.
 public struct MountMappingResp: Codable {
     public let hostPath: String
     public let containerPath: String
+    public let enabled: Bool
 }
 
 /// UserSettings holds user-configurable behavioral settings.

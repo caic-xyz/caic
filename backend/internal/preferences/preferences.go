@@ -24,6 +24,8 @@ type CacheMapping struct {
 	HostPath string `json:"hostPath"`
 	// ContainerPath is the path inside the container where hostPath will be mounted.
 	ContainerPath string `json:"containerPath"`
+	// Enabled controls whether this mapping is passed to new containers.
+	Enabled bool `json:"enabled"`
 }
 
 // MountMapping maps a host directory to a container path as a general mount.
@@ -32,6 +34,8 @@ type MountMapping struct {
 	HostPath string `json:"hostPath"`
 	// ContainerPath is the path inside the container where hostPath will be mounted.
 	ContainerPath string `json:"containerPath"`
+	// Enabled controls whether this mapping is passed to new containers.
+	Enabled bool `json:"enabled"`
 }
 
 // ContainerImage identifies a base image and optional platform pair.

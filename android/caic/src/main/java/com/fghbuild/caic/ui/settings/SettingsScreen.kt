@@ -45,6 +45,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -253,6 +254,11 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
+                    Checkbox(
+                        checked = mapping.enabled,
+                        onCheckedChange = { viewModel.updateCacheMappingEnabled(index, it) },
+                        modifier = Modifier.testTag("custom-cache-enabled-$index"),
+                    )
                     OutlinedTextField(
                         value = mapping.hostPath,
                         onValueChange = { viewModel.updateCacheMapping(index, it, mapping.containerPath) },
@@ -298,6 +304,11 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
+                    Checkbox(
+                        checked = mount.enabled,
+                        onCheckedChange = { viewModel.updateCustomMountEnabled(index, it) },
+                        modifier = Modifier.testTag("custom-mount-enabled-$index"),
+                    )
                     OutlinedTextField(
                         value = mount.hostPath,
                         onValueChange = { viewModel.updateCustomMount(index, it, mount.containerPath) },

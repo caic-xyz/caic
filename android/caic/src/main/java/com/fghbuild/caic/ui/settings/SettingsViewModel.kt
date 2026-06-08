@@ -245,15 +245,24 @@ class SettingsViewModel @Inject constructor(
 
     fun addCacheMapping() {
         val current = _state.value.cacheMappings.toMutableList()
-        current.add(CacheMappingResp("", ""))
+        current.add(CacheMappingResp(hostPath = "", containerPath = "", enabled = true))
         _state.update { it.copy(cacheMappings = current) }
     }
 
     fun updateCacheMapping(index: Int, hostPath: String, containerPath: String) {
         val current = _state.value.cacheMappings.toMutableList()
         if (index in current.indices) {
-            current[index] = CacheMappingResp(hostPath, containerPath)
+            current[index] = current[index].copy(hostPath = hostPath, containerPath = containerPath)
             _state.update { it.copy(cacheMappings = current) }
+        }
+    }
+
+    fun updateCacheMappingEnabled(index: Int, enabled: Boolean) {
+        val current = _state.value.cacheMappings.toMutableList()
+        if (index in current.indices) {
+            current[index] = current[index].copy(enabled = enabled)
+            _state.update { it.copy(cacheMappings = current) }
+            saveSettings { it.copy(cacheMappings = current.ifEmpty { null }) }
         }
     }
 
@@ -274,15 +283,24 @@ class SettingsViewModel @Inject constructor(
 
     fun addCustomMount() {
         val current = _state.value.customMounts.toMutableList()
-        current.add(MountMappingResp("", ""))
+        current.add(MountMappingResp(hostPath = "", containerPath = "", enabled = true))
         _state.update { it.copy(customMounts = current) }
     }
 
     fun updateCustomMount(index: Int, hostPath: String, containerPath: String) {
         val current = _state.value.customMounts.toMutableList()
         if (index in current.indices) {
-            current[index] = MountMappingResp(hostPath, containerPath)
+            current[index] = current[index].copy(hostPath = hostPath, containerPath = containerPath)
             _state.update { it.copy(customMounts = current) }
+        }
+    }
+
+    fun updateCustomMountEnabled(index: Int, enabled: Boolean) {
+        val current = _state.value.customMounts.toMutableList()
+        if (index in current.indices) {
+            current[index] = current[index].copy(enabled = enabled)
+            _state.update { it.copy(customMounts = current) }
+            saveSettings { it.copy(customMounts = current.ifEmpty { null }) }
         }
     }
 

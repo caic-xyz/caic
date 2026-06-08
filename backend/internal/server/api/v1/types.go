@@ -508,12 +508,14 @@ type RepoPrefsResp struct {
 type CacheMappingResp struct {
 	HostPath      string `json:"hostPath"`
 	ContainerPath string `json:"containerPath"`
+	Enabled       bool   `json:"enabled"`
 }
 
 // MountMappingResp represents a general host-to-runtime directory mount.
 type MountMappingResp struct {
 	HostPath      string `json:"hostPath"`
 	ContainerPath string `json:"containerPath"`
+	Enabled       bool   `json:"enabled"`
 }
 
 // UserSettings holds user-configurable behavioral settings.

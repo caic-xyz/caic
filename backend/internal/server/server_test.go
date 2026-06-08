@@ -739,8 +739,14 @@ func TestHandleCreateTask(t *testing.T) {
 		})
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.WellKnownCaches = map[string]bool{"go-mod": false, "npm": true}
-			p.Settings.CacheMappings = []preferences.CacheMapping{{HostPath: "/host/custom", ContainerPath: "/home/user/.custom"}}
-			p.Settings.CustomMounts = []preferences.MountMapping{{HostPath: "/host/work", ContainerPath: "/workspace/external"}}
+			p.Settings.CacheMappings = []preferences.CacheMapping{
+				{HostPath: "/host/custom", ContainerPath: "/home/user/.custom", Enabled: true},
+				{HostPath: "/host/disabled-cache", ContainerPath: "/home/user/.disabled-cache", Enabled: false},
+			}
+			p.Settings.CustomMounts = []preferences.MountMapping{
+				{HostPath: "/host/work", ContainerPath: "/workspace/external", Enabled: true},
+				{HostPath: "/host/disabled-work", ContainerPath: "/workspace/disabled", Enabled: false},
+			}
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -779,12 +785,20 @@ func TestHandleCreateTask(t *testing.T) {
 			if m.HostPath == "/host/work" && m.MountPath == "/workspace/external" {
 				gotCustomMount = true
 			}
+			if m.HostPath == "/host/disabled-work" || m.MountPath == "/workspace/disabled" {
+				t.Errorf("disabled custom mount present: %+v", m)
+			}
 		}
 		if !gotCustom {
 			t.Errorf("custom cache mapping missing from %+v", entry.Task().CacheMounts)
 		}
 		if !gotCustomMount {
 			t.Errorf("custom mount missing from %+v", entry.Task().CacheMounts)
+		}
+		for _, cm := range entry.Task().CacheMounts {
+			if cm.HostPath == "/host/disabled-cache" || cm.MountPath == "/home/user/.disabled-cache" {
+				t.Errorf("disabled custom cache present: %+v", cm)
+			}
 		}
 		if !gotNPM {
 			t.Errorf("enabled npm cache missing from %+v", entry.Task().CacheMounts)
