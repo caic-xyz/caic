@@ -4,188 +4,160 @@
 # ── Core ─────────────────────────────────────────────────────────────────────
 
 [core]
-# Parent directory containing git repositories managed by caic.
+# Parent directory containing the git repositories managed by caic.
 #root = "."
 
-# Container runtime: "docker" or "podman". Default: "docker".
-# When set to "podman", caic uses podman for all container operations.
-# Note: sudo is not supported with rootless podman (running as non-root user).
-# Use docker if you need sudo-enabled containers.
-#runtime = "docker"
+# Container runtime. "" auto-detects (docker preferred, then podman); set
+# "docker" or "podman" to pin one. sudo is unsupported with rootless podman, so
+# use docker if you need sudo-enabled containers.
+#runtime = ""
 
-# Auto-update schedule (cron expression, local time). Checks GitHub Releases
-# and replaces the binary on match. Set to "" to disable.
-# When not set, defaults to daily at 04:50.
-#auto_update = ""
+# Auto-update schedule (cron expression, local time). Checks GitHub Releases and
+# replaces the binary on a match. Unset = daily at 04:50; "" disables.
+# e.g. auto_update = "50 4 * * *"
 
-# Add environment variables to the ones inherited by the server process.
-# Falls back to the host environment if not set.
+# Environment variables added to those inherited by the server process. Each key
+# falls back to the host environment when omitted here.
 [core.env]
-# Tailscale API key — required for Tailscale ephemeral node.
-# Obtain from https://login.tailscale.com/admin/settings/keys
-#TAILSCALE_API_KEY = ""
-
-# Gemini API key: required for Gemini Live voice agent via WebRTC, and title generation
-# when provider is "gemini". Obtain from https://aistudio.google.com/app/apikey
-#GEMINI_API_KEY = ""
+# Tailscale API key — required for the Tailscale ephemeral node.
+# https://login.tailscale.com/admin/settings/keys
+# TAILSCALE_API_KEY = "tskey-..."
+# Gemini API key — required for the Gemini Live voice agent and for title
+# generation when provider is "gemini". https://aistudio.google.com/app/apikey
+# GEMINI_API_KEY = "AIza..."
 
 # ── Server ───────────────────────────────────────────────────────────────────
 
 [server]
-# HTTP listen address for the web UI. By default only listens to localhost. To listen to all IPv4 addreses,
-# prefix with "0.0.0.0".
+# HTTP listen address for the web UI. Defaults to localhost only; prefix with
+# "0.0.0.0" to listen on all IPv4 addresses.
 #http = ":2242"
 
-# Public base URL. "auto" locks the hostname from the first FQDN request.
-# Set an explicit URL for OAuth login and webhooks.
-# Example: "https://caic.example.com" or "https://caic.my-tailnet.ts.net"
-#external_url = "auto"
+# Public base URL. "auto" locks the hostname from the first FQDN request. Set an
+# explicit URL for OAuth login and webhooks.
+#external_url = "auto"  # e.g. "https://caic.example.com"
 
-# Path to a MaxMind MMDB file for country-code resolution and logging.
-# Download GeoLite2-Country.mmdb from https://dev.maxmind.com/geoip/geolite2-free-geolocation-data
-# Relative paths are resolved against the config directory.
-#geo_db = "GeoLite2-Country.mmdb"
+# MaxMind MMDB file for country-code resolution and logging. Relative paths
+# resolve against the config directory. Empty defaults to
+# "~/.config/caic/GeoLite2-Country.mmdb" if present, otherwise geoip is disabled.
+# https://dev.maxmind.com/geoip/geolite2-free-geolocation-data
+#geo_db = ""  # e.g. "~/.config/caic/GeoLite2-Country.mmdb"
 
-# Allowed origins. Requests from IPs that do not match are rejected with
-# HTTP 403.
-# Named origins: "local" (loopback/private), "tailscale" (100.64.0.0/10),
-#   "github" (GitHub webhook IPs fetched from api.github.com/meta).
-# CIDR ranges: e.g. "203.0.113.0/24".
-# Country codes: ISO 3166-1 alpha-2 (e.g. "CA", "US", "DE"); requires geo_db.
+# Allowed origins; requests from non-matching IPs are rejected with HTTP 403.
+# Named: "local" (loopback/private), "tailscale" (100.64.0.0/10), "github"
+#   (GitHub webhook IPs). CIDR: "203.0.113.0/24". Country codes: ISO 3166-1
+#   alpha-2 (e.g. "CA"), which require geo_db.
 #allow_origins = ["local", "tailscale", "github"]
 
 # ── Voice Gateway ────────────────────────────────────────────────────────────
+# Voice support is derived automatically:
+#   url set                       advertise that standalone gateway.
+#   no url and GEMINI_API_KEY set  host the embedded gateway in-process.
+#   no url and no GEMINI_API_KEY   disabled.
 
 [voice-gateway]
-# Voice gateway support is derived automatically:
-#   url set = advertise that standalone voice gateway URL.
-#   no url and GEMINI_API_KEY available = host the embedded voice gateway.
-#   no url and no GEMINI_API_KEY = disabled.
-
 # Standalone voice gateway URL.
-#url = "https://voice.example.com"
+#url = ""  # e.g. "https://voice.example.com"
 
-# Optional embedded gateway runtime config. This uses the same shape as the
-# standalone ~/.config/voice-gateway/config.toml template in
-# contrib/voice-gateway-config.toml. Only set this when caic is hosting the
-# gateway protocol in-process.
-#[voice-gateway.config]
-# The API key is always read from GEMINI_API_KEY.
+# Embedded gateway runtime config, used only when caic hosts the gateway
+# in-process. Same shape as contrib/voice-gateway-config.toml. The API key is
+# always read from GEMINI_API_KEY.
+[voice-gateway.config]
 #model = "gemini-3.1-flash-live-preview"
+#backend = "gemini-live"
 
-# Local stack backend. Omit [voice-gateway.config.local_stack.llm] to let
-# caic manage llama.cpp with the default Gemma GGUF model.
-#backend = "local-stack"
-#
-# Use this only when you run llama-server yourself.
-#[voice-gateway.config.local_stack.llm]
-#provider = "llamacpp"
-#remote = "http://127.0.0.1:8080"
-#model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
-
-#[voice-gateway.config.server]
-# UDP port for WebRTC ICE (single-port mux).
-# 0 (default) = enabled with OS-assigned ephemeral port.
-# >0 = enabled on that static port (open it in your firewall for UDP traffic).
-# GEMINI_API_KEY is required.
+[voice-gateway.config.server]
+# UDP port for WebRTC ICE (single-port mux). 0 = OS-assigned ephemeral port;
+# >0 = a static port (open it for UDP in your firewall). Requires GEMINI_API_KEY.
+# The gateway HTTP port is not configurable here; use server.http.
 #webrtc_udp_port = 0
+
+# Local model stack (set backend = "local-stack"). Omit these to let caic manage
+# llama.cpp with the default Gemma model; set them to point at servers you run.
+# [voice-gateway.config.local_stack.asr]
+# provider = "llamacpp"
+# remote = "http://127.0.0.1:8081"
+# model = "..."
+# [voice-gateway.config.local_stack.llm]
+# provider = "llamacpp"
+# remote = "http://127.0.0.1:8080"
+# model = "unsloth/gemma-4-E2B-it-GGUF:UD-Q4_K_XL"
 
 # ── AI ───────────────────────────────────────────────────────────────────────
 
 [ai]
-# LLM provider for title generation, commit descriptions, etc.
-# When unset, auto-detects the best available provider in this order:
-#   1. codex (Codex)
-#   2. opencode (OpenCode)
-#   3. claudecode (Claude Code)
-#   4. gemini (Gemini)
-#   5. Any other available provider
-# Available providers: https://pkg.go.dev/github.com/maruel/genai/providers
-#provider = ""
+# LLM provider for title generation, commit descriptions, etc. Empty =
+# auto-detect in order: codex, opencode, claudecode, gemini, then any available.
+# https://pkg.go.dev/github.com/maruel/genai/providers
+#provider = ""  # e.g. "gemini"
 
-# Model name or alias. When unset, uses the provider's auto-detected cheapest model.
-#model = ""
+# Model name or alias. Empty = the provider's auto-detected cheapest model.
+#model = ""  # e.g. "claude-haiku-4-5-20251001"
 
 # ── Harness ──────────────────────────────────────────────────────────────────
-# Per-harness environment variables injected into containers. Each harness
-# section supports an [env] table of KEY = "VALUE" pairs. These supplement the
-# automatic *_API_KEY forwarding from the host environment and are also used
-# when fetching the model list at startup.
-[harness.claude.env]
-# Warning: setting this environment variable will cause Claude Code to use API costs and ignore your
-# subscription.
-#ANTHROPIC_API_KEY = "sk-..."
-
-[harness.codex.env]
-# Most of codex configuration is via its configuration described at
-# https://developers.openai.com/codex/config-reference
-
-[harness.opencode.env]
-# Most of opencode configuration is via its configuration described at
-# https://opencode.ai/docs/config/
-
-[harness.pi.env]
+# Per-harness environment variables injected into containers. They supplement
+# the automatic *_API_KEY forwarding from the host and feed the startup model
+# list fetch. Uncomment a section and add KEY = "value" pairs.
+#
+# [harness.claude.env]
+# Warning: ANTHROPIC_API_KEY makes Claude Code use API billing and ignore your subscription.
+# ANTHROPIC_API_KEY = "sk-..."
+#
+# [harness.codex.env]    — see https://developers.openai.com/codex/config-reference
+# [harness.opencode.env] — see https://opencode.ai/docs/config/
+#
+# [harness.pi.env]
 # See https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/providers.md
-# Here's example keys, you can set any environment variable you want.
-#DEEPSEEK_API_KEY= ""
-#GEMINI_API_KEY = "AIza..."
-#OPENROUTER_API_KEY = "sk-or-..."
-#OPENAI_API_KEY = "sk-..."
+# DEEPSEEK_API_KEY = "..."
+# GEMINI_API_KEY = "AIza..."
+# OPENROUTER_API_KEY = "sk-or-..."
+# OPENAI_API_KEY = "sk-..."
 
 # ── GitHub ───────────────────────────────────────────────────────────────────
-# PAT for server-level API access (forges, autoupdate). OAuth for user login.
-# GitHub App is independent and can be layered on either or both.
 
 [github]
-# PAT — server-level API access (forges, container token fallback).
-# Create at https://github.com/settings/personal-access-tokens/new
-# Required permissions: pull_requests:write, checks:read
-# If unset and gh CLI is in PATH, caic uses the token from `gh auth token`
-# automatically.
-#token = ""
+# PAT for server-level API access (forges, container token fallback).
+# https://github.com/settings/personal-access-tokens/new
+# Required permissions: pull_requests:write, checks:read. If empty and the gh
+# CLI is in PATH, caic uses `gh auth token` automatically.
+#token = ""  # e.g. "ghp_..."
 
-# OAuth — multi-user login.
-# See https://docs.caic.xyz/caic/github for OAuth app setup instructions.
+# OAuth multi-user login. https://docs.caic.xyz/caic/github
 #oauth_client_id = ""
 #oauth_client_secret = ""
-# GitHub users allowed to login. Highly recommended.
-#oauth_allowed_users = ["alice", "bob"]
+# GitHub users allowed to log in (highly recommended).
+# oauth_allowed_users = ["alice", "bob"]
 
-# GitHub App — org-wide webhooks and automatic task creation.
-# Layered on top of PAT or OAuth; not mutually exclusive with either.
-# See https://docs.caic.xyz/caic/ for GitHub App setup instructions.
-#app_id = 0
-# Path to PEM file (relative paths resolve against the config directory).
-#app_private_key_pem = "private-key.pem"
-# Owners/orgs allowed to install the app. Installs from other accounts are
-# rejected automatically. Highly recommended.
-#app_allowed_owners = ["my-org", "my-username"]
+# GitHub App — org-wide webhooks and automatic task creation; layered on top of
+# PAT or OAuth. https://docs.caic.xyz/caic/
+#app_id = 0  # e.g. 12345
+# PEM file path (relative paths resolve against the config directory).
+#app_private_key_pem = ""  # e.g. "private-key.pem"
+# Owners/orgs allowed to install the app (highly recommended).
+# app_allowed_owners = ["my-org", "my-username"]
 
-# HMAC-SHA256 secret for webhook verification.
-# Generate with: openssl rand -hex 32
+# HMAC-SHA256 secret for webhook verification (openssl rand -hex 32).
 #webhook_secret = ""
 
 # ── GitLab ───────────────────────────────────────────────────────────────────
 # Choose one of PAT (token) or OAuth.
 
 [gitlab]
-# PAT — single-user / headless. Mutually exclusive with OAuth.
-# Create at https://gitlab.com/-/user_settings/personal_access_tokens
-# Required scope: api
-#token = ""
+# PAT — single-user / headless, mutually exclusive with OAuth. Scope: api.
+# https://gitlab.com/-/user_settings/personal_access_tokens
+#token = ""  # e.g. "glpat-..."
 
-# OAuth — multi-user login. Mutually exclusive with token.
-# See https://docs.caic.xyz/caic/gitlab for OAuth app setup instructions.
+# OAuth multi-user login, mutually exclusive with token.
+# https://docs.caic.xyz/caic/gitlab
 #oauth_client_id = ""
 #oauth_client_secret = ""
-# GitLab users allowed to login. Highly recommended.
-#oauth_allowed_users = ["alice", "bob"]
+# oauth_allowed_users = ["alice", "bob"]
 
-# GitLab instance URL.
-#url = "https://gitlab.com"
+# GitLab instance URL. Empty targets gitlab.com (the REST API always does); set
+# only for self-hosted OAuth login.
+#url = ""  # e.g. "https://gitlab.example.com"
 
-# Shared secret for webhook verification.
-# Generate with: openssl rand -hex 32
+# Webhook verification secret (openssl rand -hex 32).
 #webhook_secret = ""
 
 # ── Debug ────────────────────────────────────────────────────────────────────
@@ -200,11 +172,7 @@
 # Expose /debug/pprof/* profiling endpoints.
 #pprof = false
 
-# Write CPU profile to file.
-#cpuprofile = "~/.cache/caic/cpu.prof"
-
-# Write heap profile to file on shutdown.
-#memprofile = "~/.cache/caic/mem.prof"
-
-# Write execution trace to file.
-#trace = "~/.cache/caic/trace.out"
+# Profiling output files; empty disables each.
+#cpuprofile = ""  # e.g. "~/.cache/caic/cpu.prof"
+#memprofile = ""  # e.g. "~/.cache/caic/mem.prof"
+#trace = ""       # e.g. "~/.cache/caic/trace.out"

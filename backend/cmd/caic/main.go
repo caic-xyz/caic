@@ -139,7 +139,7 @@ Flags:
 	}
 
 	// Validate geo_db file exists if explicitly set in config.
-	if tc.Server.GeoDB != nil {
+	if tc.Server.GeoDB != "" {
 		if _, err := os.Stat(cfg.IPGeo.DB); err != nil {
 			return fmt.Errorf("geo_db file not found at %q: %w", cfg.IPGeo.DB, err)
 		}

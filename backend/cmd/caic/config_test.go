@@ -5,9 +5,46 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+// uncommentDirective strips the leading '#' from a commented-out TOML directive
+// (a line like "#key = value"), leaving prose comments ("# explanation") intact.
+// The two are distinguished by the character after the '#': a default directive
+// has no space, a prose comment or example does. contrib/config.toml relies on
+// this convention so uncommenting its defaults reproduces defaultConfig().
+var uncommentDirective = regexp.MustCompile(`(?m)^#([^ ])`)
+
+// TestContribConfigDefaults uncomments every default directive in the shipped
+// contrib/config.toml and verifies the result loads into exactly the built-in
+// defaults. This guards the real template (not a copy) on two axes at once:
+//   - faithfulness: loadTOMLConfig uses DisallowUnknownFields, so an undocumented
+//     or misspelled key fails the load;
+//   - accuracy: the documented defaults must match defaultConfig().
+func TestContribConfigDefaults(t *testing.T) {
+	t.Parallel()
+	const contribPath = "../../../contrib/config.toml"
+	src, err := os.ReadFile(contribPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stripped := uncommentDirective.ReplaceAll(src, []byte("$1"))
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), stripped, 0o600); err != nil { //nolint:gosec // test writes a fixed fixture into a temp dir
+		t.Fatal(err)
+	}
+	got, err := loadTOMLConfig(dir)
+	if err != nil {
+		t.Fatalf("%s documents a key caic rejects, or a malformed default: %v", contribPath, err)
+	}
+	want := defaultConfig()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("uncommenting %s does not reproduce the defaults:\n got = %+v\nwant = %+v", contribPath, got, want)
+	}
+}
 
 func TestLoadTOMLConfig(t *testing.T) {
 	t.Parallel()
@@ -254,24 +291,24 @@ mode = "embedded"
 
 func TestGeoDBOrDefault(t *testing.T) {
 	t.Parallel()
-	t.Run("nil with default file returns default path", func(t *testing.T) {
+	t.Run("empty with default file returns default path", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		// Create the default file
 		if err := os.WriteFile(filepath.Join(dir, "GeoLite2-Country.mmdb"), []byte("mmdb"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		got := geoDBOrDefault(nil, dir)
+		got := geoDBOrDefault("", dir)
 		want := filepath.Join(dir, "GeoLite2-Country.mmdb")
 		if got != want {
 			t.Errorf("got %q, want %q", got, want)
 		}
 	})
-	t.Run("nil without default file returns empty", func(t *testing.T) {
+	t.Run("empty without default file returns empty", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		// Don't create the default file
-		got := geoDBOrDefault(nil, dir)
+		got := geoDBOrDefault("", dir)
 		if got != "" {
 			t.Errorf("got %q, want empty string", got)
 		}
@@ -279,8 +316,7 @@ func TestGeoDBOrDefault(t *testing.T) {
 	t.Run("explicit value resolved relative to cfgDir", func(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
-		val := "custom.mmdb"
-		got := geoDBOrDefault(&val, dir)
+		got := geoDBOrDefault("custom.mmdb", dir)
 		want := filepath.Join(dir, "custom.mmdb")
 		if got != want {
 			t.Errorf("got %q, want %q", got, want)
@@ -290,7 +326,7 @@ func TestGeoDBOrDefault(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		val := "/etc/mmdb/geo.mmdb"
-		got := geoDBOrDefault(&val, dir)
+		got := geoDBOrDefault(val, dir)
 		if got != val {
 			t.Errorf("got %q, want %q", got, val)
 		}
@@ -308,7 +344,6 @@ func TestTomlToServerConfig(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		geoDB := "geo.mmdb"
 		tc := &tomlConfig{
 			Core: tomlCore{
 				Root: "/repos",
@@ -323,7 +358,7 @@ func TestTomlToServerConfig(t *testing.T) {
 			},
 			Server: tomlServer{
 				HTTP:         ":2242",
-				GeoDB:        &geoDB,
+				GeoDB:        "geo.mmdb",
 				AllowOrigins: []string{"local", "tailscale"},
 			},
 			GitHub: tomlGitHub{
@@ -389,7 +424,7 @@ func TestTomlToServerConfig(t *testing.T) {
 		}
 		tc := &tomlConfig{
 			Server: tomlServer{
-				GeoDB: nil, // not set in config
+				GeoDB: "", // not set in config
 			},
 		}
 		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)
@@ -407,7 +442,7 @@ func TestTomlToServerConfig(t *testing.T) {
 		dir := t.TempDir()
 		tc := &tomlConfig{
 			Server: tomlServer{
-				GeoDB: nil, // not set in config
+				GeoDB: "", // not set in config
 			},
 		}
 		cfg, _, _, _, err := tomlToServerConfig(t.Context(), tc, dir)

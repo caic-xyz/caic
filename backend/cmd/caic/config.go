@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -45,7 +46,7 @@ type tomlCore struct {
 type tomlServer struct {
 	HTTP         string   `toml:"http"`
 	ExternalURL  string   `toml:"external_url"`
-	GeoDB        *string  `toml:"geo_db"`
+	GeoDB        string   `toml:"geo_db"`
 	AllowOrigins []string `toml:"allow_origins"`
 }
 
@@ -94,8 +95,9 @@ func defaultConfig() tomlConfig {
 	return tomlConfig{
 		Core: tomlCore{Root: "."},
 		Server: tomlServer{
-			HTTP:        ":2242",
-			ExternalURL: "auto",
+			HTTP:         ":2242",
+			ExternalURL:  "auto",
+			AllowOrigins: slices.Clone(defaultAllowOrigins),
 		},
 		VoiceGateway: tomlVoiceGateway{
 			Config: embeddedVoiceGatewayConfigDefaults(),
@@ -254,6 +256,9 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 var defaultAllowOrigins = []string{"local", "tailscale", "github"}
 
 // allowOriginsOrDefault returns origins if non-empty, otherwise the default.
+// defaultConfig pre-populates the default, so this guards against a config that
+// explicitly sets allow_origins = [], which would otherwise produce an empty
+// (and rejected) allowlist.
 func allowOriginsOrDefault(origins []string) []string {
 	if len(origins) == 0 {
 		return defaultAllowOrigins
@@ -261,22 +266,23 @@ func allowOriginsOrDefault(origins []string) []string {
 	return origins
 }
 
-// geoDBOrDefault returns the geo_db path from the config, the default path if it exists, or empty.
+// geoDBOrDefault returns the geo_db path to use, or empty when geoip is disabled.
 //
-// If geoDB is nil (not set in config), checks for "GeoLite2-Country.mmdb" in cfgDir.
-// Returns the path only if it exists; otherwise returns empty string (geoip disabled).
-// If geoDB is non-nil, returns the configured value (validation happens in main).
-func geoDBOrDefault(geoDB *string, cfgDir string) string {
-	if geoDB == nil {
-		// Try the default, but only if it exists
+// If geoDB is empty (not set in config), checks for "GeoLite2-Country.mmdb" in
+// cfgDir and returns that path only if it exists; otherwise returns empty string
+// (geoip disabled). If geoDB is set, returns the configured value resolved
+// relative to cfgDir (validation happens in main).
+func geoDBOrDefault(geoDB, cfgDir string) string {
+	if geoDB == "" {
+		// Try the default, but only if it exists.
 		defaultPath := filepath.Join(cfgDir, "GeoLite2-Country.mmdb")
 		if _, err := os.Stat(defaultPath); err == nil {
 			return defaultPath
 		}
 		return ""
 	}
-	// Explicitly set; resolve relative to cfgDir
-	return resolvePath(*geoDB, cfgDir)
+	// Explicitly set; resolve relative to cfgDir.
+	return resolvePath(geoDB, cfgDir)
 }
 
 // coreEnvOrDefault returns the value for key from the core env map, falling
