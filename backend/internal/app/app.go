@@ -303,13 +303,14 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 			phase4.End()
 			return nil, fmt.Errorf("adopt runtime instances: %w", err)
 		}
+		adoption := s.NewAdoptedTaskWiring()
 		for i := range adopted {
 			at := &adopted[i]
 			if at.ForgeOwner != "" && at.Task.GetPR() > 0 && at.ForgeKind != "" {
-				s.WireAdoptedCIMonitoring(ctx, at)
+				adoption.WireCIMonitoring(ctx, at)
 			}
 			if at.Task.ForgeIssue == 0 && at.Task.GetPR() == 0 && at.ForgeOwner != "" && at.Branch != "" && at.ForgeKind != "" {
-				go s.LookupExternalPRForTask(at) //nolint:contextcheck // Server-lifetime goroutine uses s.ctx internally.
+				go adoption.LookupExternalPRForTask(at) //nolint:contextcheck // App-lifetime goroutine uses adoption ctx.
 			}
 		}
 	}
@@ -331,7 +332,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 		_, tk := trace.NewTask(ctx, "refresh-harness-models")
 		defer tk.End()
 		trace.Log(ctx, "startup", "refresh-harness-models: begin")
-		s.RefreshHarnessModels() //nolint:contextcheck // Server-lifetime goroutine uses s.ctx internally.
+		refreshHarnessModels(ctx, cfg.Dirs.CacheDir, runtimeBackend, taskMgr, cfg.Agent.HarnessEnv)
 	}()
 	go func() {
 		_, tk := trace.NewTask(ctx, "refresh-cache-sizes")
@@ -339,7 +340,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 		trace.Log(ctx, "startup", "refresh-cache-sizes: begin")
 		s.RefreshCacheSizesLoop()
 	}()
-	go s.WatchNewRepos()
+	go newRepoWatcher(ctx, absRoot, s).Watch()
 
 	return s, nil
 }

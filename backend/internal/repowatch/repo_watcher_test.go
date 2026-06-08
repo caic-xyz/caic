@@ -1,6 +1,6 @@
 // Tests for the background repo watcher's directory-collection helper.
 
-package server
+package repowatch
 
 import (
 	"os"
@@ -11,12 +11,8 @@ import (
 
 func TestCollectWatchDirs(t *testing.T) {
 	t.Parallel()
-	t.Run("skips dot-prefixed directories", func(t *testing.T) {
+	t.Run("valid_skips_dot_prefixed_directories", func(t *testing.T) {
 		t.Parallel()
-		// Lay out a tree mirroring a workspace with checked-out repos. The
-		// poller must not descend into the .git internals — gitutil treats
-		// them as bare repos because they contain HEAD/objects/refs, which
-		// would otherwise pollute the runner registry with default backends.
 		root := t.TempDir()
 		makeDirs(t, root, []string{
 			"clone/.git/objects",
@@ -39,7 +35,7 @@ func TestCollectWatchDirs(t *testing.T) {
 		}
 	})
 
-	t.Run("respects max depth", func(t *testing.T) {
+	t.Run("valid_respects_max_depth", func(t *testing.T) {
 		t.Parallel()
 		root := t.TempDir()
 		makeDirs(t, root, []string{"a/b/c/d"})

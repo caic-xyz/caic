@@ -158,20 +158,6 @@ func (r *repoRegistry) removeMatching(pred func(RepoInfo) bool) []string {
 	return removed
 }
 
-// absPathSet returns the set of absolute paths currently registered.
-func (r *repoRegistry) absPathSet() map[string]struct{} {
-	if r == nil {
-		return nil
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make(map[string]struct{}, len(r.repos))
-	for i := range r.repos {
-		out[r.repos[i].AbsPath] = struct{}{}
-	}
-	return out
-}
-
 // ciStatusFor returns the cached CI status for rel, or the zero value (Status
 // == "") if none is recorded.
 func (r *repoRegistry) ciStatusFor(rel string) ci.RepoCIState {

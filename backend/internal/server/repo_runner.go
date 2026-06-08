@@ -15,6 +15,14 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
+// RepoInitResult holds the outcome of initialising a single newly-discovered
+// repository.
+type RepoInitResult struct {
+	Info    RepoInfo
+	Runner  *task.Runner
+	InitErr error
+}
+
 // DiscoverRepoRunner discovers repo metadata and initializes its task runner.
 func (s *Server) DiscoverRepoRunner(ctx context.Context, abs string) (RepoInitResult, error) {
 	rel := s.repoRelPath(abs)
@@ -57,6 +65,11 @@ func (s *Server) repoRelPath(abs string) string {
 	return rel
 }
 
+// RepoRelPath returns abs as a path relative to the server repo root.
+func (s *Server) RepoRelPath(abs string) string {
+	return s.repoRelPath(abs)
+}
+
 func (s *Server) newRunner(ctx context.Context, info *RepoInfo) (*task.Runner, error) {
 	runner := &task.Runner{
 		LogDir:     s.logDir,
@@ -81,6 +94,27 @@ func (s *Server) RegisterRepoRunner(r *RepoInitResult) {
 	}
 	s.repoReg.add(&r.Info)
 	s.taskMgr.RegisterRunner(r.Info.RelPath, r.Runner)
+}
+
+// DeregisterRepoRunner removes a repo and unregisters its runner.
+func (s *Server) DeregisterRepoRunner(relPath string) {
+	removed := s.repoReg.removeMatching(func(r RepoInfo) bool {
+		return r.RelPath == relPath
+	})
+	for _, rel := range removed {
+		s.taskMgr.UnregisterRunner(rel)
+	}
+}
+
+// RepoSnapshot returns the current managed repository snapshot.
+func (s *Server) RepoSnapshot() []RepoInfo {
+	return s.repoReg.snapshot()
+}
+
+// RunnerRegistered reports whether a runner is registered for relPath.
+func (s *Server) RunnerRegistered(relPath string) bool {
+	_, ok := s.taskMgr.Runner(relPath)
+	return ok
 }
 
 // RegisterNoRepoRunner initializes and registers the no-repo runner.

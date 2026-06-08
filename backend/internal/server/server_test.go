@@ -24,6 +24,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/repowatch"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
@@ -169,6 +170,41 @@ func newRunnerConstructionTestServer(t *testing.T, root string) *Server {
 	return s
 }
 
+func newTestRepoWatcher(t *testing.T, root string, s *Server) *repowatch.Watcher {
+	return repowatch.New(&repowatch.Config{
+		Ctx:          t.Context(),
+		AbsRoot:      root,
+		Repos:        func() []repowatch.RepoInfo { return testWatchedRepos(s) },
+		RelPath:      s.RepoRelPath,
+		RunnerExists: s.RunnerRegistered,
+		OnDiscovered: func(ctx context.Context, abs string) {
+			result, err := s.DiscoverRepoRunner(ctx, abs)
+			if err != nil {
+				t.Errorf("DiscoverRepoRunner(%q): %v", abs, err)
+				return
+			}
+			if s.RunnerRegistered(result.Info.RelPath) {
+				return
+			}
+			s.RegisterRepoRunner(&result)
+		},
+		OnRemoved: s.DeregisterRepoRunner,
+	})
+}
+
+func testWatchedRepos(s *Server) []repowatch.RepoInfo {
+	repos := s.RepoSnapshot()
+	out := make([]repowatch.RepoInfo, len(repos))
+	for i := range repos {
+		out[i] = repowatch.RepoInfo{
+			RelPath:    repos[i].RelPath,
+			AbsPath:    repos[i].AbsPath,
+			BaseBranch: repos[i].BaseBranch,
+		}
+	}
+	return out
+}
+
 func initCloneSourceRepo(t *testing.T) string {
 	repo := filepath.Join(t.TempDir(), "source")
 	runServerGit(t, "", "init", repo)
@@ -231,7 +267,7 @@ func TestCloneRepo(t *testing.T) {
 			t.Fatal("runner backends were not initialized")
 		}
 
-		s.syncReposInDir(t.Context(), root)
+		newTestRepoWatcher(t, root, s).SyncReposInDir(t.Context(), root)
 		if got := s.repoReg.snapshot(); len(got) != 1 || got[0].RelPath != "cloned" {
 			t.Fatalf("repo registry after watcher sync = %+v, want one cloned repo", got)
 		}
