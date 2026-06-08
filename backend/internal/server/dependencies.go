@@ -211,15 +211,14 @@ func (s *Server) initConcernAdapters() {
 	s.serverConfigHandlers.gitlabOAuth = s.gitlabOAuth
 	s.serverConfigHandlers.voiceGateway = s.voiceHandlers.metadata()
 	if s.botHandlers == nil {
-		s.botHandlers = &botHandlers{
-			taskMgr:    s.taskMgr,
-			repos:      s.repos,
-			forge:      s.forge,
-			provider:   s.provider,
-			taskClient: s.botClient,
-			taskRoutes: s.taskHandlers,
-		}
+		s.botHandlers = &botHandlers{}
 	}
+	s.botHandlers.taskMgr = s.taskMgr
+	s.botHandlers.repos = s.repos
+	s.botHandlers.forge = s.forge
+	s.botHandlers.provider = s.provider
+	s.botHandlers.taskClient = s.botClient
+	s.botHandlers.authStore = s.authStore
 	if s.usageHandlers == nil {
 		s.usageHandlers = &usageHandlers{
 			taskMgr:  s.taskMgr,

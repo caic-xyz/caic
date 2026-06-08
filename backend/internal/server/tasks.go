@@ -684,12 +684,18 @@ func (s *taskHandlers) resolveGitHubContainerToken(ctx context.Context, enabled 
 // getTask looks up a task by the {id} path parameter.
 // When auth is enabled, returns 403 if the task belongs to a different user.
 func (s *taskHandlers) getTask(r *http.Request) (*tasks.Entry, error) {
+	return taskEntryFromRequest(r, s.taskMgr, s.authStore)
+}
+
+// taskEntryFromRequest looks up a task by the {id} path parameter.
+// When auth is enabled, returns 403 if the task belongs to a different user.
+func taskEntryFromRequest(r *http.Request, taskMgr *tasks.Manager, authStore *auth.Store) (*tasks.Entry, error) {
 	id := r.PathValue("id")
-	entry, ok := s.taskMgr.GetEntry(id)
+	entry, ok := taskMgr.GetEntry(id)
 	if !ok {
 		return nil, api.NotFound("task")
 	}
-	if s.authEnabled() {
+	if authStore != nil {
 		if u, ok := auth.UserFromContext(r.Context()); ok {
 			if owner := entry.Task().OwnerID; owner != "" && owner != u.ID {
 				return nil, api.Forbidden("task")
