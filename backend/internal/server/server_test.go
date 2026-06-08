@@ -236,7 +236,7 @@ func TestCloneRepo(t *testing.T) {
 		source := initCloneSourceRepo(t)
 		s := newRunnerConstructionTestServer(t, root)
 
-		repo, err := s.serverConfig.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: source, Path: "./cloned"})
+		repo, err := s.serverConfigHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: source, Path: "./cloned"})
 		if err != nil {
 			t.Fatalf("cloneRepo: %v", err)
 		}
@@ -291,7 +291,7 @@ func TestCloneRepo(t *testing.T) {
 		}
 		s := newRunnerConstructionTestServer(t, root)
 
-		if _, err := s.serverConfig.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: parent, Path: "broken"}); err == nil {
+		if _, err := s.serverConfigHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: parent, Path: "broken"}); err == nil {
 			t.Fatal("cloneRepo succeeded, want submodule clone failure")
 		}
 		if _, err := os.Stat(filepath.Join(root, "broken")); !os.IsNotExist(err) {
@@ -934,7 +934,7 @@ func TestHandleListRepos(t *testing.T) {
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/server/repos", http.NoBody)
 	w := httptest.NewRecorder()
-	handle(s.serverConfig.listRepos)(w, req)
+	handle(s.serverConfigHandlers.listRepos)(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -2341,6 +2341,50 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 		if cbW.Code != http.StatusFound {
 			body, _ := io.ReadAll(cbW.Result().Body)
 			t.Fatalf("callback status = %d, want %d; body = %s", cbW.Code, http.StatusFound, body)
+		}
+	})
+}
+
+func TestWebFetchHandlers(t *testing.T) {
+	t.Parallel()
+	h := &webFetchHandlers{}
+
+	t.Run("valid", func(t *testing.T) {
+		t.Parallel()
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(`<html><head><title>Example</title><script>ignore()</script></head><body><nav>skip</nav><main>Hello <strong>Marc-Antoine</strong></main></body></html>`))
+		}))
+		t.Cleanup(upstream.Close)
+
+		resp, err := h.webFetch(t.Context(), &v1.WebFetchReq{URL: upstream.URL})
+		if err != nil {
+			t.Fatalf("webFetch: %v", err)
+		}
+		if resp.Title != "Example" {
+			t.Fatalf("Title = %q, want %q", resp.Title, "Example")
+		}
+		if !strings.Contains(resp.Content, "Hello Marc-Antoine") {
+			t.Fatalf("Content = %q, want fetched body text", resp.Content)
+		}
+		if strings.Contains(resp.Content, "ignore") || strings.Contains(resp.Content, "skip") {
+			t.Fatalf("Content = %q, want script and nav text omitted", resp.Content)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		}))
+		t.Cleanup(upstream.Close)
+
+		_, err := h.webFetch(t.Context(), &v1.WebFetchReq{URL: upstream.URL})
+		if err == nil {
+			t.Fatal("webFetch returned nil error for non-200 response")
+		}
+		if !strings.Contains(err.Error(), "HTTP 503") {
+			t.Fatalf("error = %v, want HTTP 503", err)
 		}
 	})
 }

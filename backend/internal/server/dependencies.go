@@ -192,8 +192,11 @@ func (s *Server) initConcernAdapters() {
 			Gateway: s.voiceGateway,
 		}
 	}
-	if s.serverConfig == nil {
-		s.serverConfig = &serverConfigHandlers{
+	if s.webFetchHandlers == nil {
+		s.webFetchHandlers = &webFetchHandlers{}
+	}
+	if s.serverConfigHandlers == nil {
+		s.serverConfigHandlers = &serverConfigHandlers{
 			serverCtx:             s.ctx,
 			tailscaleAvailable:    s.tailscaleAvailable,
 			forge:                 s.forge,

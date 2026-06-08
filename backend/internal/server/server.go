@@ -60,14 +60,17 @@ type Server struct {
 	provider       genai.Provider // nil if LLM not configured
 	Bot            *bot.Bot
 	ciService      *ci.Service // handles forge event-driven task automation
-	authHandlers   *authHandlers
-	botHandlers    *botHandlers
 	botClient      *BotClient
 	ciAdapter      *CIAdapter
-	serverConfig   *serverConfigHandlers
-	taskHandlers   *taskHandlers
-	usageHandlers  *usageHandlers
-	voiceHandlers  *voiceHandlers
+
+	// Route handler concerns.
+	authHandlers         *authHandlers
+	botHandlers          *botHandlers
+	serverConfigHandlers *serverConfigHandlers
+	taskHandlers         *taskHandlers
+	usageHandlers        *usageHandlers
+	voiceHandlers        *voiceHandlers
+	webFetchHandlers     *webFetchHandlers
 
 	// Profiling.
 	pprof              bool
@@ -159,7 +162,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 // route registration can be tested without a listener.
 func (s *Server) buildHandler() (http.Handler, error) {
 	s.initConcernAdapters()
-	serverConfig := s.serverConfig
+	serverConfig := s.serverConfigHandlers
 
 	// Auth routes (exempt from RequireUser).
 	authMux := http.NewServeMux()
@@ -213,7 +216,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/tool/{toolUseID}", taskRoutes.handleTaskToolInput)
 	apiMux.HandleFunc("GET /api/caic/v1/usage", s.usageHandlers.handleGetUsage)
 	apiMux.Handle("/api/voicegateway/v1/", s.voiceHandlers.handler())
-	apiMux.HandleFunc("POST /api/caic/v1/web/fetch", handle(s.webFetch))
+	apiMux.HandleFunc("POST /api/caic/v1/web/fetch", handle(s.webFetchHandlers.webFetch))
 	apiMux.HandleFunc("GET /api/caic/v1/server/tasks/events", taskRoutes.handleTaskListEvents)
 	apiMux.HandleFunc("GET /api/caic/v1/server/usage/events", s.usageHandlers.handleEvents)
 

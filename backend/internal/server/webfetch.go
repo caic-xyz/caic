@@ -23,7 +23,9 @@ const (
 	webFetchMaxBody    = 2 << 20 // 2 MiB
 )
 
-func (s *Server) webFetch(ctx context.Context, req *v1.WebFetchReq) (*v1.WebFetchResp, error) {
+type webFetchHandlers struct{}
+
+func (*webFetchHandlers) webFetch(ctx context.Context, req *v1.WebFetchReq) (*v1.WebFetchResp, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.URL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
