@@ -120,10 +120,6 @@ class SettingsViewModel @Inject constructor(
         _state.update { it.copy(serverLabel = label) }
     }
 
-    fun updateVoiceEnabled(enabled: Boolean) {
-        viewModelScope.launch { settingsRepository.updateVoiceEnabled(enabled) }
-    }
-
     fun updateVoiceName(name: String) {
         viewModelScope.launch { settingsRepository.updateVoiceName(name) }
     }

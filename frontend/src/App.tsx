@@ -214,7 +214,7 @@ function Shell(props: { children?: JSX.Element }) {
         </dialog>
       </Show>
 
-      <Show when={hostMode.browserVoiceEnabled()}>
+      <Show when={hostMode.browserVoiceEnabled() && s.voiceGatewayAvailable()}>
         <VoiceOverlay
           tasks={s.tasks}
           recentRepo={() => s.repos()[0]?.path ?? ""}

@@ -1,7 +1,10 @@
-// Unit tests for SettingsRepository: server CRUD and preference management.
+// Unit tests for SettingsRepository: server CRUD, capability cache, and preference management.
 package com.fghbuild.caic.data
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import com.caic.sdk.v1.Config
+import com.caic.sdk.v1.VoiceGatewayMetadata
+import com.caic.sdk.v1.VoiceGatewayMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -59,10 +62,9 @@ class SettingsRepositoryTest {
     }
 
     @Test
-    fun `initial settings have default voice values`() = runBlocking {
+    fun `initial settings have default voice name`() = runBlocking {
         val repo = createRepo()
         val state = withTimeout(5000) { repo.settings.first() }
-        assertTrue(state.voiceEnabled)
         assertEquals("Orus", state.voiceName)
     }
 
@@ -174,19 +176,31 @@ class SettingsRepositoryTest {
     }
 
     @Test
-    fun `updateVoiceEnabled toggles flag`() = runBlocking {
-        val repo = createRepo()
-        repo.updateVoiceEnabled(false)
-        val state = withTimeout(5000) { repo.settings.first { !it.voiceEnabled } }
-        assertFalse(state.voiceEnabled)
-    }
-
-    @Test
     fun `updateVoiceName changes value`() = runBlocking {
         val repo = createRepo()
         repo.updateVoiceName("Zephyr")
         val state = withTimeout(5000) { repo.settings.first { it.voiceName == "Zephyr" } }
         assertEquals("Zephyr", state.voiceName)
+    }
+
+    @Test
+    fun `updateServerConfig caches and clears voice gateway metadata`() = runBlocking {
+        val repo = createRepo()
+        val config = Config(
+            displayName = "test",
+            tailscaleAvailable = false,
+            usbAvailable = false,
+            displayAvailable = false,
+            sudoAvailable = false,
+            gitHubTokenAvailable = false,
+            voiceGateway = VoiceGatewayMetadata(mode = VoiceGatewayMode.Disabled),
+        )
+
+        repo.updateServerConfig(config)
+        assertEquals(config, repo.serverConfig.value)
+
+        repo.updateServerConfig(null)
+        assertNull(repo.serverConfig.value)
     }
 
     @Test

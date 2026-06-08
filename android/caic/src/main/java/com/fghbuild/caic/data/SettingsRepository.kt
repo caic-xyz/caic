@@ -1,4 +1,4 @@
-// Persisted user settings backed by DataStore preferences.
+// Persisted user settings and current server capability cache backed by DataStore preferences.
 package com.fghbuild.caic.data
 
 import androidx.datastore.core.DataStore
@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.caic.sdk.v1.Config
 import com.caic.sdk.v1.PreferencesResp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,7 +35,6 @@ data class ServerConfig(
 
 data class SettingsState(
     val serverURL: String = "",
-    val voiceEnabled: Boolean = true,
     val voiceName: String = "Orus",
     val haloAddress: String? = null,
     val haloAutoConnect: Boolean = false,
@@ -56,7 +56,6 @@ class SettingsRepository internal constructor(
     private object Keys {
         val SERVERS = stringPreferencesKey("SERVERS")
         val ACTIVE_SERVER_ID = stringPreferencesKey("ACTIVE_SERVER_ID")
-        val VOICE_ENABLED = booleanPreferencesKey("VOICE_ENABLED")
         val VOICE_NAME = stringPreferencesKey("VOICE_NAME")
         val HALO_ADDRESS = stringPreferencesKey("HALO_ADDRESS")
         val HALO_AUTO_CONNECT = booleanPreferencesKey("HALO_AUTO_CONNECT")
@@ -70,7 +69,6 @@ class SettingsRepository internal constructor(
             SettingsState(
                 serverURL = active?.url ?: "",
                 authToken = active?.authToken,
-                voiceEnabled = prefs[Keys.VOICE_ENABLED] ?: true,
                 voiceName = prefs[Keys.VOICE_NAME] ?: "Orus",
                 haloAddress = prefs[Keys.HALO_ADDRESS],
                 haloAutoConnect = prefs[Keys.HALO_AUTO_CONNECT] ?: false,
@@ -101,10 +99,6 @@ class SettingsRepository internal constructor(
 
     suspend fun updateServerLabel(label: String) {
         updateActiveServer { it.copy(label = label) }
-    }
-
-    suspend fun updateVoiceEnabled(enabled: Boolean) {
-        dataStore.edit { it[Keys.VOICE_ENABLED] = enabled }
     }
 
     suspend fun updateVoiceName(name: String) {
@@ -157,6 +151,14 @@ class SettingsRepository internal constructor(
         dataStore.edit { prefs ->
             prefs[Keys.ACTIVE_SERVER_ID] = id
         }
+    }
+
+    // Server metadata cached after fetch by ViewModels.
+    private val _serverConfig = MutableStateFlow<Config?>(null)
+    val serverConfig: StateFlow<Config?> = _serverConfig.asStateFlow()
+
+    fun updateServerConfig(config: Config?) {
+        _serverConfig.value = config
     }
 
     // Server preferences cached after first fetch by TaskListViewModel.

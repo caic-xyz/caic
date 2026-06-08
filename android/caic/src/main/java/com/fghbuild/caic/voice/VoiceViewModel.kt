@@ -1,23 +1,34 @@
-// Activity-scoped ViewModel bridging VoiceSession to the voice overlay UI.
+// Activity-scoped ViewModel bridging server voice availability and VoiceSession to the voice overlay UI.
 package com.fghbuild.caic.voice
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.caic.sdk.v1.ApiClient
 import com.caic.sdk.v1.CIStatus
+import com.caic.sdk.v1.Config
 import com.caic.sdk.v1.ForgePRState
 import com.caic.sdk.v1.Task
 import com.caic.sdk.v1.TaskState
+import com.caic.sdk.v1.VoiceGatewayMode
 import com.fghbuild.caic.data.SettingsRepository
+import com.fghbuild.caic.data.TaskRepository
 import com.fghbuild.caic.ui.theme.terminalStates
 import com.fghbuild.caic.util.formatCost
 import com.fghbuild.caic.util.formatElapsed
-import com.fghbuild.caic.data.TaskRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+private const val TAG = "VoiceViewModel"
+
+internal fun isVoiceAvailable(config: Config?): Boolean =
+    config?.voiceGateway?.mode?.let { it != VoiceGatewayMode.Disabled } == true
 
 @HiltViewModel
 class VoiceViewModel @Inject constructor(
@@ -28,7 +39,9 @@ class VoiceViewModel @Inject constructor(
 
     val voiceState: StateFlow<VoiceState> = voiceSessionManager.state
 
-    val settings = settingsRepository.settings
+    val voiceAvailable: StateFlow<Boolean> = settingsRepository.serverConfig
+        .map(::isVoiceAvailable)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val serverWarnings = taskRepository.warnings
 
@@ -42,6 +55,7 @@ class VoiceViewModel @Inject constructor(
     private var prePurgedIds: Set<String> = emptySet()
 
     init {
+        observeVoiceGatewayConfig()
         // Inject snapshot when the session transitions to connected.
         viewModelScope.launch {
             voiceSessionManager.state
@@ -69,6 +83,11 @@ class VoiceViewModel @Inject constructor(
                     }
                 }
         }
+        viewModelScope.launch {
+            voiceAvailable.collect { available ->
+                if (!available) voiceSessionManager.disconnect()
+            }
+        }
         // Track state changes for diff-based notifications while connected.
         viewModelScope.launch {
             taskRepository.tasks.collect { tasks ->
@@ -83,6 +102,7 @@ class VoiceViewModel @Inject constructor(
     }
 
     fun connect() {
+        if (!voiceAvailable.value) return
         voiceSessionManager.connect()
     }
 
@@ -100,6 +120,30 @@ class VoiceViewModel @Inject constructor(
 
     fun clearTranscript() {
         voiceSessionManager.clearTranscript()
+    }
+
+    private fun observeVoiceGatewayConfig() {
+        viewModelScope.launch {
+            settingsRepository.settings
+                .map { it.serverURL to it.authToken }
+                .distinctUntilChanged()
+                .collect { (serverURL, _) ->
+                    if (serverURL.isBlank()) {
+                        settingsRepository.updateServerConfig(null)
+                        return@collect
+                    }
+                    try {
+                        val client = ApiClient(
+                            serverURL,
+                            tokenProvider = { settingsRepository.settings.value.authToken },
+                        )
+                        settingsRepository.updateServerConfig(client.getConfig())
+                    } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                        Log.w(TAG, "Failed to load voice gateway config", e)
+                        settingsRepository.updateServerConfig(null)
+                    }
+                }
+        }
     }
 
     /** Returns the voice-mode task number for [id], or null if not mapped or session not connected. */

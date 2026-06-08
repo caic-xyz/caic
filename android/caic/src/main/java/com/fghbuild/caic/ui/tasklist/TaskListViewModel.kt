@@ -242,6 +242,7 @@ class TaskListViewModel @Inject constructor(
                 val client = ApiClient(url, tokenProvider = { settingsRepository.settings.value.authToken })
                 // Config is public; fetch it first to detect auth before calling protected endpoints.
                 val config = client.getConfig()
+                settingsRepository.updateServerConfig(config)
                 if (config.authProviders?.isNotEmpty() == true) {
                     try {
                         val me = client.getMe()
@@ -293,6 +294,7 @@ class TaskListViewModel @Inject constructor(
                     prefModels = prefModels,
                 )
             } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                settingsRepository.updateServerConfig(null)
                 Log.w(TAG, "Failed to load form data", e)
             }
         }

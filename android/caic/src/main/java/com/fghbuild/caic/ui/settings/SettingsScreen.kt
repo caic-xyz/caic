@@ -130,27 +130,15 @@ fun SettingsScreen(
             // Voice section
             Text("Voice", style = MaterialTheme.typography.titleMedium)
 
-            ListItem(
-                headlineContent = { Text("Voice Enabled") },
-                trailingContent = {
-                    Switch(
-                        checked = settings.voiceEnabled,
-                        onCheckedChange = { viewModel.updateVoiceEnabled(it) },
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                VoiceNames.forEach { name ->
+                    FilterChip(
+                        selected = settings.voiceName == name,
+                        onClick = { viewModel.updateVoiceName(name) },
+                        label = { Text(name) },
                     )
-                },
-            )
-
-            if (settings.voiceEnabled) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    VoiceNames.forEach { name ->
-                        FilterChip(
-                            selected = settings.voiceName == name,
-                            onClick = { viewModel.updateVoiceName(name) },
-                            label = { Text(name) },
-                        )
-                    }
                 }
             }
 

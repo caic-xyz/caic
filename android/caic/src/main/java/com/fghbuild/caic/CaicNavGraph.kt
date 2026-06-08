@@ -57,7 +57,7 @@ private val WideBreakpoint = 840.dp
 fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
     val navController = rememberNavController()
     val voiceState by voiceViewModel.voiceState.collectAsStateWithLifecycle()
-    val settings by voiceViewModel.settings.collectAsStateWithLifecycle()
+    val voiceAvailable by voiceViewModel.voiceAvailable.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -130,7 +130,7 @@ fun CaicNavGraph(voiceViewModel: VoiceViewModel = hiltViewModel()) {
             }
             VoicePanel(
                 voiceState = voiceState,
-                voiceEnabled = settings.voiceEnabled,
+                voiceEnabled = voiceAvailable,
                 onConnect = {
                     if (ContextCompat.checkSelfPermission(
                             context,

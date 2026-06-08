@@ -45,6 +45,7 @@ function createAppStore() {
   const [sudoEnabled, setSudoEnabled] = createSignal(false);
   const [gitHubTokenAvailable, setGitHubTokenAvailable] = createSignal(false);
   const [gitHubTokenEnabled, setGitHubTokenEnabled] = createSignal(false);
+  const [voiceGatewayAvailable, setVoiceGatewayAvailable] = createSignal(false);
   const [recentCount, setRecentCount] = createSignal(0);
   const [actionId, setActionId] = createSignal<string | null>(null);
 
@@ -268,6 +269,7 @@ function createAppStore() {
           setDisplayAvailable(config.displayAvailable);
           setSudoAvailable(config.sudoAvailable);
           setGitHubTokenAvailable(config.gitHubTokenAvailable);
+          setVoiceGatewayAvailable(config.voiceGateway.mode !== "disabled");
           const displayName = config.displayName || window.location.hostname.split('.')[0];
           document.title = `${displayName} — caic`;
         }
@@ -717,7 +719,7 @@ function createAppStore() {
     displayAvailable, displayEnabled, setDisplayEnabled,
     sudoAvailable, sudoEnabled, setSudoEnabled,
     gitHubTokenAvailable, gitHubTokenEnabled, setGitHubTokenEnabled,
-    serverCaps,
+    voiceGatewayAvailable, serverCaps,
     // sidebar + actions
     sidebarOpen, setSidebarOpen, now, actionId, handleStop, handlePurge, handleRevive, handleFork,
     navigateToTask, navigateToDiff, fixCI,

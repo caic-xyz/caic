@@ -135,11 +135,37 @@ describe("App repo chips: No repository", () => {
     expect(screen.queryByTestId("voice-overlay")).not.toBeInTheDocument();
   });
 
-  it("keeps browser voice mounted outside Go Mode host mode", async () => {
+  it("does not mount browser voice when the server disables the voice gateway", async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      displayName: "test",
+      tailscaleAvailable: false,
+      usbAvailable: false,
+      displayAvailable: false,
+      sudoAvailable: false,
+      gitHubTokenAvailable: false,
+      voiceGateway: { mode: "disabled" },
+    });
+
     renderApp();
 
-    await waitFor(() => expect(api.listRepos).toHaveBeenCalledOnce());
-    expect(screen.getByTestId("voice-overlay")).toBeInTheDocument();
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalledOnce());
+    expect(screen.queryByTestId("voice-overlay")).not.toBeInTheDocument();
+  });
+
+  it("keeps browser voice mounted outside Go Mode host mode when the server enables voice", async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      displayName: "test",
+      tailscaleAvailable: false,
+      usbAvailable: false,
+      displayAvailable: false,
+      sudoAvailable: false,
+      gitHubTokenAvailable: false,
+      voiceGateway: { mode: "embedded" },
+    });
+
+    renderApp();
+
+    await waitFor(() => expect(screen.getByTestId("voice-overlay")).toBeInTheDocument());
   });
 
   it("returns to the task list from the caic title", async () => {
