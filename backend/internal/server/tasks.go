@@ -329,5 +329,5 @@ func taskEntryFromRequest(r *http.Request, taskMgr *tasks.Manager, authStore *au
 // canned data without real API credentials.
 func (s *Server) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
 	s.usageFetchers = fetchers
-	s.usageHandlers = nil
+	s.usageHandlers = &usageHandlers{taskMgr: s.taskMgr, fetchers: fetchers}
 }

@@ -17,55 +17,46 @@ import (
 
 // DiscoverRepoRunner discovers repo metadata and initializes its task runner.
 func (s *Server) DiscoverRepoRunner(ctx context.Context, abs string) (repos.InitResult, error) {
-	s.initConcernAdapters()
 	return s.repos.DiscoverRunner(ctx, abs)
 }
 
 // RepoRelPath returns abs as a path relative to the server repo root.
 func (s *Server) RepoRelPath(abs string) string {
-	s.initConcernAdapters()
 	return s.repos.RelPath(abs)
 }
 
 // RegisterRepoRunner adds a discovered repo and registers its runner.
 func (s *Server) RegisterRepoRunner(r *repos.InitResult) {
-	s.initConcernAdapters()
 	s.repos.RegisterRunner(r)
 }
 
 // DeregisterRepoRunner removes a repo and unregisters its runner.
 func (s *Server) DeregisterRepoRunner(relPath string) {
-	s.initConcernAdapters()
 	s.repos.DeregisterRunner(relPath)
 }
 
 // RepoSnapshot returns the current managed repository snapshot.
 func (s *Server) RepoSnapshot() []repos.Info {
-	s.initConcernAdapters()
 	return s.repos.Snapshot()
 }
 
 // RunnerRegistered reports whether a runner is registered for relPath.
 func (s *Server) RunnerRegistered(relPath string) bool {
-	s.initConcernAdapters()
 	return s.repos.RunnerRegistered(relPath)
 }
 
 // RegisterNoRepoRunner initializes and registers the no-repo runner.
 func (s *Server) RegisterNoRepoRunner(ctx context.Context) {
-	s.initConcernAdapters()
 	s.repos.RegisterNoRepoRunner(ctx)
 }
 
 // AdoptionRepos returns repo metadata in the shape expected by tasks.Manager.
 func (s *Server) AdoptionRepos() []tasks.AdoptRepo {
-	s.initConcernAdapters()
 	return s.repos.AdoptionRepos()
 }
 
 // WarnRepoBasenameCollisions logs repos whose basenames may confuse users.
 func (s *Server) WarnRepoBasenameCollisions() {
-	s.initConcernAdapters()
 	s.repos.WarnBasenameCollisions()
 }
 

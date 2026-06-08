@@ -20,6 +20,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
 	"github.com/caic-xyz/caic/backend/internal/repos"
+	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
@@ -387,22 +388,17 @@ func minimalServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	ctx := t.Context()
-	s := &Server{
-		ctx:     ctx,
-		ciCache: cache,
-		forge:   newForgeManager("", "", nil),
-	}
-	s.taskMgr = tasks.New(tasks.Config{ServerCtx: ctx})
-	s.repos = repos.NewService("", "", "", nil, repos.NewRegistry(nil), s.taskMgr, nil, nil)
-	s.runtimeProcesses = &RuntimeProcesses{}
-	s.initConcernAdapters()
-	s.webhooks = &WebhookHandlers{
-		serverCtx: s.ctx,
-		ciCache:   s.ciCache,
-		forge:     s.forge,
-		taskMgr:   s.taskMgr,
-		repos:     s.repos,
-		prefs:     s.prefs,
+	backend := &mdruntime.Backend{}
+	taskMgr := tasks.New(tasks.Config{ServerCtx: ctx})
+	s, err := New(ctx, Dependencies{
+		Repos:       repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, nil, nil),
+		Runtime:     backend,
+		TaskManager: taskMgr,
+		CICache:     cache,
+		Forge:       newForgeManager("", "", nil),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
 	}
 	s.SetCIService(ci.NewService(s.ciCache, s.provider, s.CIAdapter()))
 	return s

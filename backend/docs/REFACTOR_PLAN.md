@@ -59,12 +59,11 @@ it earlier.
 
 ## 2. HTTP Router Work
 
-The current `server.Server` type is more than an HTTP server. It stores
-application services and long-lived state (`tasks.Manager`, runtime backend,
-forge manager, CI service/cache, auth/session state, preferences, voice bridge,
-repository service, harness env/cache directories), and also builds the route
-table. Renaming the remaining type directly to `Router` would still make the
-target architecture harder to see.
+The current `server.Server` type is still more than an HTTP server. It stores
+application services and long-lived state (`tasks.Manager`, forge manager,
+CI service/cache, auth/session state, preferences, repository service, and
+voice handler state), and also builds the route table. Renaming the remaining
+type directly to `Router` would still make the target architecture harder to see.
 
 Design direction:
 
@@ -85,10 +84,20 @@ Design direction:
 
 Next sequence:
 
-1. Rename `server.Server` to `server.Router` once it mostly contains route group
+1. Move voice shutdown ownership out of `Server.Serve` and into `internal/app`.
+   The router may expose/serve voice routes, but app lifetime should close voice
+   sessions.
+2. Remove post-construction service mutation seams (`SetBot`, `SetCIService`,
+   and exported `Server.Bot`) by assembling bot/CI/webhook dependencies in
+   `internal/app` before router construction, or by moving those relationships
+   behind app-owned services.
+3. Rename the router dependency currently called `Runtime` to a process-route
+   dependency (`RuntimeProcesses`/`ProcessBackend`) so HTTP code does not appear
+   to own runtime lifecycle.
+4. Rename `server.Server` to `server.Router` once it mostly contains route group
    dependencies, route registration, middleware composition, static asset
    serving, and `Serve`.
-2. Update architecture docs from `Server` to `Router`, then run `make lint-go`
+5. Update architecture docs from `Server` to `Router`, then run `make lint-go`
    and `make lint-docs`.
 
 Completion criteria:
@@ -96,7 +105,8 @@ Completion criteria:
 - `server.Router` has no direct fields for `runtime.Backend`,
   `agent.Backends`, forge clients, task runner maps, preferences stores, auth
   stores, CI caches, or app maintenance settings unless a field is solely needed
-  by an HTTP handler concern object.
+  by an HTTP handler concern object. Process inspection may depend on a narrow
+  process backend interface, not the full runtime lifecycle abstraction.
 - No background goroutine is started by `Router` except HTTP server shutdown
   plumbing owned by `Serve`.
 - Unit tests for routing still construct the router directly, while app startup

@@ -148,7 +148,6 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 // buildHandler assembles the full HTTP handler. Extracted from Serve so that
 // route registration can be tested without a listener.
 func (s *Server) buildHandler() (http.Handler, error) {
-	s.initConcernAdapters()
 	serverConfig := s.serverConfigHandlers
 
 	// Auth routes (exempt from RequireUser).
