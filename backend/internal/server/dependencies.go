@@ -155,14 +155,15 @@ func (s *Server) initConcernAdapters() {
 		})
 	}
 	if s.authHandlers == nil {
-		s.authHandlers = &authHandlers{
-			store:            func() *auth.Store { return s.authStore },
-			sessionSecret:    func() []byte { return s.sessionSecret },
-			providerConfig:   s.providerConfig,
-			allowedUsersFor:  s.allowedUsersFor,
-			useSecureCookies: s.useSecureCookies,
-		}
+		s.authHandlers = &authHandlers{}
 	}
+	s.authHandlers.store = s.authStore
+	s.authHandlers.sessionSecret = s.sessionSecret
+	s.authHandlers.hostState = s.hostState
+	s.authHandlers.githubOAuth = s.githubOAuth
+	s.authHandlers.gitlabOAuth = s.gitlabOAuth
+	s.authHandlers.githubAllowedUsers = s.githubAllowedUsers
+	s.authHandlers.gitlabAllowedUsers = s.gitlabAllowedUsers
 	if s.warnings == nil {
 		s.warnings = newWarningStore(s.taskMgr)
 	}

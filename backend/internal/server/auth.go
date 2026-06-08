@@ -22,11 +22,14 @@ const (
 )
 
 type authHandlers struct {
-	store            func() *auth.Store
-	sessionSecret    func() []byte
-	providerConfig   func(string) *auth.ProviderConfig
-	allowedUsersFor  func(string) map[string]struct{}
-	useSecureCookies func() bool
+	store         *auth.Store
+	sessionSecret []byte
+	hostState     *auth.HostState
+
+	githubOAuth        *auth.ProviderConfig
+	gitlabOAuth        *auth.ProviderConfig
+	githubAllowedUsers map[string]struct{}
+	gitlabAllowedUsers map[string]struct{}
 }
 
 // handleStart redirects the browser to the OAuth provider's authorization URL.
@@ -56,7 +59,7 @@ func (h *authHandlers) handleStart(provider string) http.HandlerFunc {
 			prefix = "app:"
 		}
 		fullState := prefix + state
-		cookieValue := auth.SignState(fullState, h.sessionSecret())
+		cookieValue := auth.SignState(fullState, h.sessionSecret)
 
 		http.SetCookie(w, &http.Cookie{ //nolint:gosec // G124: Secure is set dynamically; all required attributes are present
 			Name:     auth.StateCookieName,
@@ -98,7 +101,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 			writeError(w, api.BadRequest("missing state cookie"))
 			return
 		}
-		fullState, ok := auth.ValidateState(stateCookie.Value, h.sessionSecret())
+		fullState, ok := auth.ValidateState(stateCookie.Value, h.sessionSecret)
 		if !ok {
 			writeError(w, api.BadRequest("invalid state"))
 			return
@@ -157,7 +160,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		}
 
 		// Upsert user in store.
-		u, err := h.store().UpsertUser(&auth.User{
+		u, err := h.store.UpsertUser(&auth.User{
 			Provider:     forge.Kind(provider),
 			ProviderID:   providerID,
 			Username:     username,
@@ -173,7 +176,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 		}
 
 		// Issue JWT.
-		jwt, err := auth.IssueToken(&u, h.sessionSecret(), sessionTTL)
+		jwt, err := auth.IssueToken(&u, h.sessionSecret, sessionTTL)
 		if err != nil {
 			slog.WarnContext(r.Context(), "issue token", "err", err)
 			writeError(w, api.InternalError("issue token"))
@@ -229,29 +232,29 @@ func (h *authHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // allowedUsersFor returns the allowlist for the named provider, or nil.
-func (s *Server) allowedUsersFor(provider string) map[string]struct{} {
+func (h *authHandlers) allowedUsersFor(provider string) map[string]struct{} {
 	switch provider {
 	case "github":
-		return s.githubAllowedUsers
+		return h.githubAllowedUsers
 	case "gitlab":
-		return s.gitlabAllowedUsers
+		return h.gitlabAllowedUsers
 	}
 	return nil
 }
 
 // providerConfig returns the ProviderConfig for the named provider, or nil.
-func (s *Server) providerConfig(provider string) *auth.ProviderConfig {
+func (h *authHandlers) providerConfig(provider string) *auth.ProviderConfig {
 	switch provider {
 	case "github":
-		return s.githubOAuth
+		return h.githubOAuth
 	case "gitlab":
-		return s.gitlabOAuth
+		return h.gitlabOAuth
 	}
 	return nil
 }
 
 // useSecureCookies reports whether to set the Secure flag on cookies.
 // True when the external URL starts with "https://".
-func (s *Server) useSecureCookies() bool {
-	return s.hostState != nil && strings.HasPrefix(s.hostState.ExternalURL(), "https://")
+func (h *authHandlers) useSecureCookies() bool {
+	return h.hostState != nil && strings.HasPrefix(h.hostState.ExternalURL(), "https://")
 }

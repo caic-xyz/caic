@@ -2302,6 +2302,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 		Provider:     "github",
 		Host:         host,
 	}
+	s.initConcernAdapters()
 
 	t.Run("valid state round-trip succeeds", func(t *testing.T) {
 		t.Parallel()
