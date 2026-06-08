@@ -5,7 +5,7 @@ Translates Pi's custom JSONL protocol over stdin/stdout into normalized `agent.M
 
 ## Protocol
 
-Pi CLI runs with `--mode rpc`. No handshake — subprocess is
+Pi CLI runs with `--mode rpc --approve`. No handshake — subprocess is
 immediately ready to accept commands. Type-dispatched JSONL (not JSON-RPC 2.0).
 
 Prompts sent as `PromptCmd` with text + optional base64 images.
@@ -59,6 +59,8 @@ npm package:
 
 - **No handshake**: unlike Codex/OpenCode, Pi's subprocess is immediately ready.
 - **Type-dispatched JSONL**: not JSON-RPC 2.0 — uses a `type` field discriminator.
+- **Project trust**: non-interactive RPC launches pass `--approve` so Pi loads
+  trusted project-local settings, instructions, resources, and packages.
 - **Extension UI auto-response**: confirms all permission prompts and picks first
   option for selects (matching caic's auto-approve policy).
 - **Model format**: `provider/modelId` (e.g. `cerebras/gpt-oss-120b`); split on `/`

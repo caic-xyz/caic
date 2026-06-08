@@ -34,7 +34,7 @@ func TestAgentArgs(t *testing.T) {
 	t.Run("approves project-local inputs in rpc mode", func(t *testing.T) {
 		t.Parallel()
 		args := New("", nil).AgentArgs(agent.HarnessArgs{})
-		want := []string{"pi", "--mode", "rpc"}
+		want := []string{"pi", "--mode", "rpc", "--approve"}
 		if !slices.Equal(args, want) {
 			t.Errorf("args = %v, want %v", args, want)
 		}

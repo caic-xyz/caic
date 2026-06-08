@@ -168,7 +168,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 
 // AgentArgs implements agent.Backend.
 func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
-	return []string{"pi", "--mode", "rpc"}
+	return []string{"pi", "--mode", "rpc", "--approve"}
 }
 
 // AttachRelay connects to an already-running relay in the container.
@@ -638,7 +638,7 @@ func (*Backend) FetchModels(ctx context.Context, target runtime.ConnectionTarget
 	return FetchModels(ctx, target, extraEnv)
 }
 
-// FetchModels runs pi --mode rpc --no-session in the target,
+// FetchModels runs pi in the target,
 // sends get_available_models, and returns the model ID list.
 // extraEnv holds KEY=VALUE pairs injected via the env command so Pi sees them
 // without requiring a login shell that sources ~/.env.
@@ -651,7 +651,7 @@ func FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv 
 		args = append(args, "env")
 		args = append(args, extraEnv...)
 	}
-	args = append(args, "pi", "--mode", "rpc", "--no-session")
+	args = append(args, "pi", "--mode", "rpc", "--approve", "--no-session")
 	cmd := exec.CommandContext(ctx, "ssh", args...) //nolint:gosec // target is not user-controlled
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
