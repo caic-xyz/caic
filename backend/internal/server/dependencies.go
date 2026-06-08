@@ -13,6 +13,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
@@ -82,7 +83,6 @@ func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocrit
 		agentBackends:      d.AgentBackends,
 		taskMgr:            d.TaskManager,
 		provider:           d.Provider,
-		repoReg:            newRepoRegistry(nil),
 		ipgeoChecker:       d.IPGeoChecker,
 	}
 	s.initConcernAdapters()
@@ -107,7 +107,7 @@ func (s *Server) newWebhookHandlers(githubSecret, gitlabSecret []byte, appAllowe
 		ciCache:          s.ciCache,
 		forge:            s.forge,
 		taskMgr:          s.taskMgr,
-		repoReg:          s.repoReg,
+		repos:            s.repos,
 		prefs:            s.prefs,
 	}
 }
@@ -139,8 +139,17 @@ func (s *Server) CIAdapter() ci.Backend {
 }
 
 func (s *Server) initConcernAdapters() {
-	if s.repoReg == nil {
-		s.repoReg = newRepoRegistry(nil)
+	if s.repos == nil {
+		s.repos = repos.NewService(repos.ServiceConfig{
+			AbsRoot:       s.absRoot,
+			LogDir:        s.logDir,
+			CacheDir:      s.cacheDir,
+			HarnessEnv:    s.harnessEnv,
+			Registry:      repos.NewRegistry(nil),
+			TaskManager:   s.taskMgr,
+			Runtime:       s.runtimeBackend,
+			AgentBackends: s.agentBackends,
+		})
 	}
 	if s.authHandlers == nil {
 		s.authHandlers = &authHandlers{
@@ -153,7 +162,7 @@ func (s *Server) initConcernAdapters() {
 	}
 	if s.botClient == nil {
 		s.botClient = newBotClient(botClientDeps{
-			repoReg:   s.repoReg,
+			repos:     s.repos,
 			taskMgr:   s.taskMgr,
 			forge:     s.forge,
 			tokenFunc: s.resolveGitHubContainerToken,
@@ -171,29 +180,26 @@ func (s *Server) initConcernAdapters() {
 	if s.serverConfig == nil {
 		s.serverConfig = &serverConfigHandlers{
 			serverCtx:             s.ctx,
-			absRoot:               s.absRoot,
 			tailscaleAvailable:    s.tailscaleAvailable,
 			forge:                 s.forge,
 			prefs:                 s.prefs,
-			repoReg:               s.repoReg,
+			repos:                 s.repos,
 			taskMgr:               s.taskMgr,
 			githubOAuthConfigured: func() bool { return s.githubOAuth != nil },
 			authEnabled:           s.authEnabled,
 			authProviders:         s.authProviders,
 			voiceGatewayMetadata:  s.voiceHandlers.metadata,
-			newRunner:             s.newRunner,
 			cacheSizes:            s.cacheSizes,
 		}
 	}
 	if s.botHandlers == nil {
 		s.botHandlers = &botHandlers{
-			taskMgr:     s.taskMgr,
-			repoReg:     s.repoReg,
-			forge:       s.forge,
-			provider:    s.provider,
-			taskClient:  s.botClient,
-			getTask:     s.getTask,
-			repoInfoFor: s.repoInfoFor,
+			taskMgr:    s.taskMgr,
+			repos:      s.repos,
+			forge:      s.forge,
+			provider:   s.provider,
+			taskClient: s.botClient,
+			getTask:    s.getTask,
 		}
 	}
 	if s.usageHandlers == nil {
@@ -209,13 +215,12 @@ func (s *Server) initConcernAdapters() {
 			notifyChange = s.taskMgr.NotifyTaskChange
 		}
 		s.ciAdapter = newCIAdapter(ciAdapterDeps{
-			repoReg:      s.repoReg,
+			repos:        s.repos,
 			taskMgr:      s.taskMgr,
 			forge:        s.forge,
 			prefs:        s.prefs,
 			warnings:     s.warnings,
 			taskCreator:  s.botClient,
-			infoForRepo:  s.repoInfoFor,
 			notifyChange: notifyChange,
 		})
 	}

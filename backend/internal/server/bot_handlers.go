@@ -16,19 +16,19 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
+	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
 type botHandlers struct {
-	taskMgr     *tasks.Manager
-	repoReg     *repoRegistry
-	forge       *ForgeManager
-	provider    genai.Provider
-	taskClient  bot.Client
-	getTask     func(*http.Request) (*tasks.Entry, error)
-	repoInfoFor func(string) (RepoInfo, bool)
+	taskMgr    *tasks.Manager
+	repos      *repos.Service
+	forge      *ForgeManager
+	provider   genai.Provider
+	taskClient bot.Client
+	getTask    func(*http.Request) (*tasks.Entry, error)
 }
 
 // handleGetCILog fetches the log for a specific CI job by jobID.
@@ -46,7 +46,7 @@ func (h *botHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	if p := t.Primary(); p != nil {
 		ciPrimaryName = p.Name
 	}
-	info, ok := h.repoInfoFor(ciPrimaryName)
+	info, ok := h.repos.InfoFor(ciPrimaryName)
 	if !ok {
 		writeError(w, api.BadRequest("no repo info found"))
 		return
@@ -99,7 +99,7 @@ func (h *botHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 // It fetches CI logs via the forge, builds a rich prompt using bot.FailureSummary,
 // and creates a new agent task — the same path as the automated maybeAutoFix.
 func (h *botHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateTaskResp, error) {
-	info, ok := h.repoInfoFor(req.Repo)
+	info, ok := h.repos.InfoFor(req.Repo)
 	if !ok {
 		return nil, api.BadRequest("repo not found")
 	}
@@ -108,7 +108,7 @@ func (h *botHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Creat
 		return nil, api.BadRequest("no forge token configured for this repo")
 	}
 
-	state := h.repoReg.ciStatusFor(req.Repo)
+	state := h.repos.CIStatusFor(req.Repo)
 
 	if state.Status != forge.CIStatusFailure {
 		return nil, api.BadRequest("no CI failure on default branch")
@@ -166,7 +166,7 @@ func (h *botHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.Statu
 	if primary == nil {
 		return nil, api.BadRequest("task has no primary repo")
 	}
-	info, ok := h.repoInfoFor(primary.Name)
+	info, ok := h.repos.InfoFor(primary.Name)
 	if !ok {
 		return nil, api.BadRequest("repo not found")
 	}

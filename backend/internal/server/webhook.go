@@ -18,6 +18,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
@@ -41,7 +42,7 @@ type WebhookHandlers struct {
 	ciCache   *forgecache.Cache
 	forge     *ForgeManager
 	taskMgr   *tasks.Manager
-	repoReg   *repoRegistry
+	repos     *repos.Service
 	prefs     *preferences.Store
 }
 
@@ -200,7 +201,7 @@ func (h *WebhookHandlers) webhookOnCI(ctx context.Context, kind forge.Kind, owne
 	}
 
 	affected := h.taskMgr.FindTasksMonitoringBranch(owner, repo)
-	affectedRepoPaths := h.repoReg.forgePathsAtSHA(owner, repo, sha)
+	affectedRepoPaths := h.repos.ForgePathsAtSHA(owner, repo, sha)
 
 	if len(affected) == 0 && len(affectedRepoPaths) == 0 {
 		return
@@ -514,10 +515,10 @@ func (h *WebhookHandlers) storeInstallationIDFromFullName(fullName string, id in
 }
 
 // repoByForge returns a copy of the RepoInfo whose forge matches "owner/repo".
-func (h *WebhookHandlers) repoByForge(fullName string) (RepoInfo, bool) {
+func (h *WebhookHandlers) repoByForge(fullName string) (repos.Info, bool) {
 	owner, repo, ok := strings.Cut(fullName, "/")
 	if !ok {
-		return RepoInfo{}, false
+		return repos.Info{}, false
 	}
-	return h.repoReg.byForge(owner, repo)
+	return h.repos.ByForge(owner, repo)
 }

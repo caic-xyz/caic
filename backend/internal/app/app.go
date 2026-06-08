@@ -22,6 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server"
@@ -257,7 +258,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 		return nil, err
 	}
 
-	results := make([]server.RepoInitResult, len(repoRes.paths))
+	results := make([]repos.InitResult, len(repoRes.paths))
 	var wg sync.WaitGroup
 	for i, abs := range repoRes.paths {
 		wg.Go(func() {

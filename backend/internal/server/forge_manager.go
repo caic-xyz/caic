@@ -16,6 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
+	"github.com/caic-xyz/caic/backend/internal/repos"
 )
 
 // ForgeManager resolves forge clients for repos, manages per-user rate-limit
@@ -66,7 +67,7 @@ func (m *ForgeManager) GitHubAppThrottle() http.RoundTripper {
 // forgeForInfo returns the appropriate forge.Forge for the repo's remote, using
 // the configured tokens. Falls back to a GitHub App installation token when no
 // user OAuth token or PAT is available. Returns nil if no token is available.
-func (m *ForgeManager) forgeForInfo(ctx context.Context, info *RepoInfo) forge.Forge {
+func (m *ForgeManager) forgeForInfo(ctx context.Context, info *repos.Info) forge.Forge {
 	if f := m.forgeFor(ctx, info.ForgeKind); f != nil {
 		return f
 	}

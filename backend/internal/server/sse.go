@@ -41,6 +41,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	flusher.Flush()
 
+	s.initConcernAdapters()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -71,7 +72,7 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 			return true
 		})
 		ch := s.taskMgr.Changed()
-		repos := s.repoList()
+		repos := repoListFromSnapshot(s.repos.SnapshotWithCI())
 		newWarnings := s.warnings.Since(lastWarnTime)
 
 		reposJSON, err := json.Marshal(repos)

@@ -15,7 +15,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/caic-xyz/md/gitutil"
 	"github.com/coder/websocket"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -30,32 +29,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
-
-// repoList builds the current repo list including live CI status. It snapshots
-// the registry (repos + CI status captured atomically) and needs no external
-// lock.
-func (s *Server) repoList() *[]v1.Repo {
-	return s.repoReg.repoList()
-}
-
-func (r *repoRegistry) repoList() *[]v1.Repo {
-	snap := r.snapshotWithCI()
-	out := make([]v1.Repo, len(snap))
-	for i := range snap {
-		r := &snap[i].info
-		repo := v1.Repo{Path: r.RelPath, Branch: r.BaseBranch, BaseBranch: v1.BranchInfo{Name: r.BaseBranch, Remote: r.BaseBranchRemote}, RemoteURL: gitutil.RemoteToHTTPS(r.Remote), Forge: v1.Forge(r.ForgeKind)}
-		if snap[i].hasCI {
-			cs := snap[i].ci
-			repo.CI = v1.CIStatus(cs.Status)
-			repo.CIChecks = make([]v1.ForgeCheck, len(cs.Checks))
-			for j := range cs.Checks {
-				repo.CIChecks[j] = v1conv.ForgeCheck(&cs.Checks[j])
-			}
-		}
-		out[i] = repo
-	}
-	return &out
-}
 
 func (s *Server) listTasks(ctx context.Context, _ *api.EmptyReq) (*[]v1.Task, error) {
 	var ownerID string
@@ -504,7 +477,7 @@ func (s *Server) syncTask(ctx context.Context, entry *tasks.Entry, req *v1.SyncR
 		syncPrimaryBranch = p.Branch
 	}
 	if resp.Status != "blocked" {
-		if info, ok := s.repoInfoFor(syncPrimaryName); ok {
+		if info, ok := s.repos.InfoFor(syncPrimaryName); ok {
 			if f := s.forge.forgeForInfo(ctx, &info); f != nil {
 				ciInfo := s.ciAdapter.RepoInfoFor(info.RelPath)
 				prNumber, err := s.ciService.StartPRFlow(ctx, entry, f, &ciInfo, syncPrimaryBranch, s.taskMgr.EffectiveBaseBranch(t))
@@ -714,6 +687,9 @@ func (s *Server) SetRunnerBackends(c runtime.Backend, backends map[agent.Harness
 	}
 	if backends != nil {
 		s.agentBackends = backends
+	}
+	if s.repos != nil {
+		s.repos.SetRunnerBackends(c, backends)
 	}
 }
 

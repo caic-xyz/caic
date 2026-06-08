@@ -21,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -30,18 +31,6 @@ import (
 )
 
 type fakeCIHook func(ctx context.Context, t *task.Task)
-
-// RepoInfo describes a repository managed by the server.
-type RepoInfo struct {
-	RelPath          string // e.g. "github/caic" — used as API ID.
-	AbsPath          string
-	BaseBranch       string
-	BaseBranchRemote string     // Git remote name (e.g. "origin") used to determine BaseBranch.
-	Remote           string     // Raw git remote URL (origin).
-	ForgeKind        forge.Kind // empty if remote is not a recognized forge
-	ForgeOwner       string     // empty if remote is not a recognized forge
-	ForgeRepo        string     // empty if remote is not a recognized forge
-}
 
 // GitHubAppClient is the interface used by the server to interact with a GitHub App.
 // Abstracted so that tests can substitute a stub.
@@ -59,7 +48,7 @@ type Server struct {
 	// Core infrastructure.
 	ctx            context.Context // server-lifetime context; outlives individual HTTP requests
 	absRoot        string          // absolute path to the root repos directory
-	repoReg        *repoRegistry   // owns the managed-repo set and per-repo CI status (self-locking)
+	repos          *repos.Service  // managed repository metadata and runner registration
 	taskMgr        *tasks.Manager  // task orchestration layer
 	runtimeBackend runtime.Backend // runtime backend used by route-level runtime operations
 	agentBackends  map[agent.Harness]agent.Backend

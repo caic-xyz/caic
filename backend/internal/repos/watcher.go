@@ -1,5 +1,5 @@
-// Package repowatch reconciles discovered git repositories with runner state.
-package repowatch
+// Package repos manages discovered git repositories and their task runners.
+package repos
 
 import (
 	"context"
@@ -18,18 +18,11 @@ import (
 // background polling.
 const DiscoveryDepth = 3
 
-// RepoInfo describes the repo fields the watcher needs.
-type RepoInfo struct {
-	RelPath    string
-	AbsPath    string
-	BaseBranch string
-}
-
-// Config contains watcher dependencies.
-type Config struct {
+// WatcherConfig contains watcher dependencies.
+type WatcherConfig struct {
 	Ctx          context.Context
 	AbsRoot      string
-	Repos        func() []RepoInfo
+	Repos        func() []Info
 	RelPath      func(string) string
 	RunnerExists func(string) bool
 	OnDiscovered func(context.Context, string)
@@ -42,7 +35,7 @@ type Config struct {
 type Watcher struct {
 	ctx          context.Context
 	absRoot      string
-	repos        func() []RepoInfo
+	repos        func() []Info
 	relPath      func(string) string
 	runnerExists func(string) bool
 	onDiscovered func(context.Context, string)
@@ -51,8 +44,8 @@ type Watcher struct {
 	maxDepth     int
 }
 
-// New creates a repository watcher.
-func New(c *Config) *Watcher {
+// NewWatcher creates a repository watcher.
+func NewWatcher(c *WatcherConfig) *Watcher {
 	interval := c.Interval
 	if interval == 0 {
 		interval = 30 * time.Second
@@ -60,10 +53,6 @@ func New(c *Config) *Watcher {
 	maxDepth := c.MaxDepth
 	if maxDepth == 0 {
 		maxDepth = DiscoveryDepth
-	}
-	repos := c.Repos
-	if repos == nil {
-		repos = func() []RepoInfo { return nil }
 	}
 	runnerExists := c.RunnerExists
 	if runnerExists == nil {
@@ -80,7 +69,7 @@ func New(c *Config) *Watcher {
 	return &Watcher{
 		ctx:          c.Ctx,
 		absRoot:      c.AbsRoot,
-		repos:        repos,
+		repos:        c.Repos,
 		relPath:      c.RelPath,
 		runnerExists: runnerExists,
 		onDiscovered: onDiscovered,
@@ -120,7 +109,9 @@ func (w *Watcher) SyncReposInDir(ctx context.Context, dir string) {
 	}
 
 	registered := w.registeredAbsPathSet()
-	for _, r := range w.repos() {
+	registeredRepos := w.repos()
+	for i := range registeredRepos {
+		r := &registeredRepos[i]
 		if filepath.Dir(r.AbsPath) != dir {
 			continue
 		}
@@ -183,7 +174,9 @@ func (w *Watcher) pollRepoChanges(ctx context.Context, mtimes map[string]time.Ti
 
 func (w *Watcher) deregisterReposUnder(ctx context.Context, dir string) {
 	prefix := dir + string(filepath.Separator)
-	for _, r := range w.repos() {
+	registeredRepos := w.repos()
+	for i := range registeredRepos {
+		r := &registeredRepos[i]
 		if !strings.HasPrefix(r.AbsPath, prefix) {
 			continue
 		}

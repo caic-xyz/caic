@@ -62,9 +62,9 @@ it earlier.
 The current `server.Server` type is more than an HTTP server. It stores
 application services and long-lived state (`tasks.Manager`, runtime backend,
 forge manager, CI service/cache, auth/session state, preferences, voice bridge,
-repo registry, harness env/cache directories), starts or exposes background
-work, and also builds the route table. Renaming that type directly to `Router`
-would make the target architecture harder to see.
+repository service, harness env/cache directories), and also builds the route
+table. Renaming the remaining type directly to `Router` would still make the
+target architecture harder to see.
 
 Design direction:
 
@@ -73,12 +73,9 @@ Design direction:
 - Keep the concrete package name `internal/server` unless a package rename
   clearly pays for itself. The exported type can be `Router` while the package
   remains the HTTP adapter package.
-- Let `internal/app` own application lifetime: startup discovery, adoption,
-  background maintenance, repo watching, model refresh, bot/CI construction, and
-  shutdown-only concerns such as closing voice sessions.
-- Move repo registry and runner discovery behind an application/repository
-  service before routing depends on it. Route handlers should call a service
-  interface or narrow concern object, not mutate app registries directly.
+- Keep `internal/app` as the owner of application lifetime: startup discovery,
+  adoption, background maintenance, repo watching, model refresh, bot/CI
+  construction, and shutdown-only concerns such as closing voice sessions.
 - Move task command handlers behind a task API service. Router handlers should
   translate HTTP requests to service calls and convert service results to API
   DTOs.
@@ -88,19 +85,16 @@ Design direction:
 
 Proposed sequence:
 
-1. Extract app-owned background operations from `Server`: repo watching,
-   harness model refresh, adopted-task CI wiring, and external PR lookup.
-2. Extract repo management from `Server`: repository discovery, runner
-   construction/registration, collision warnings, and repo list conversion.
-3. Extract task route behavior from `Server`: create/list/task lifecycle,
-   diff/VNC/tool-output handlers, and task SSE history streaming.
-4. Extract auth, bot, CI, usage, server config, webhook, voice, and web-fetch
+1. Extract task route behavior from `Server`: create/list/task lifecycle,
+   diff/VNC/tool-output handlers, task SSE history streaming, and PR-flow glue
+   currently in `syncTask`.
+2. Extract auth, bot, CI, usage, server config, webhook, voice, and web-fetch
    route groups into constructed handler structs with no back-reference to the
    concrete `Server` type.
-5. Rename `server.Server` to `server.Router` once it mostly contains route group
+3. Rename `server.Server` to `server.Router` once it mostly contains route group
    dependencies, route registration, middleware composition, static asset
    serving, and `Serve`.
-6. Update architecture docs from `Server` to `Router`, then run `make lint-go`
+4. Update architecture docs from `Server` to `Router`, then run `make lint-go`
    and `make lint-docs`.
 
 Completion criteria:

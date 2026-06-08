@@ -1,6 +1,6 @@
-// repoRegistry owns the set of managed repositories and their cached CI status.
+// Registry owns the set of managed repositories and their cached CI status.
 
-package server
+package repos
 
 import (
 	"slices"
@@ -10,11 +10,11 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 )
 
-// repoRegistry is the single owner of the managed-repository set and each
-// repo's cached CI status. All access goes through its methods, which lock
-// internally and return copies — callers never hold references into the
-// underlying slice, so a concurrent add/remove can never tear a reader or
-// leave a dangling interior pointer.
+// Registry is the single owner of the managed-repository set and each repo's
+// cached CI status. All access goes through its methods, which lock internally
+// and return copies — callers never hold references into the underlying slice,
+// so a concurrent add/remove can never tear a reader or leave a dangling
+// interior pointer.
 //
 // Ordering invariant with the Manager runner registry: a repo and its
 // task.Runner live in two separate lock domains (this registry and the
@@ -24,21 +24,28 @@ import (
 // runner outlives its repo entry (just removed): in-flight tasks resolve their
 // runner regardless, and newly-listed repos are not user-visible until the
 // enclosing operation returns.
-type repoRegistry struct {
+type Registry struct {
 	mu       sync.Mutex
-	repos    []RepoInfo
-	ciStatus map[string]ci.RepoCIState // keyed by RepoInfo.RelPath
+	repos    []Info
+	ciStatus map[string]ci.RepoCIState // keyed by Info.RelPath
 }
 
-// newRepoRegistry creates a registry seeded with initial (taken over verbatim).
-func newRepoRegistry(initial []RepoInfo) *repoRegistry {
-	return &repoRegistry{repos: initial, ciStatus: make(map[string]ci.RepoCIState)}
+// InfoWithCI pairs a repo with its cached CI status snapshot.
+type InfoWithCI struct {
+	Info  Info
+	CI    ci.RepoCIState
+	HasCI bool
 }
 
-// infoFor returns a copy of the RepoInfo for rel.
-func (r *repoRegistry) infoFor(rel string) (RepoInfo, bool) {
+// NewRegistry creates a registry seeded with initial repos.
+func NewRegistry(initial []Info) *Registry {
+	return &Registry{repos: initial, ciStatus: make(map[string]ci.RepoCIState)}
+}
+
+// InfoFor returns a copy of the Info for rel.
+func (r *Registry) InfoFor(rel string) (Info, bool) {
 	if r == nil {
-		return RepoInfo{}, false
+		return Info{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -47,14 +54,14 @@ func (r *repoRegistry) infoFor(rel string) (RepoInfo, bool) {
 			return r.repos[i], true
 		}
 	}
-	return RepoInfo{}, false
+	return Info{}, false
 }
 
-// byForge returns a copy of the RepoInfo whose forge matches owner/repo
+// ByForge returns a copy of the Info whose forge matches owner/repo
 // (case-insensitive).
-func (r *repoRegistry) byForge(owner, repo string) (RepoInfo, bool) {
+func (r *Registry) ByForge(owner, repo string) (Info, bool) {
 	if r == nil {
-		return RepoInfo{}, false
+		return Info{}, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -63,11 +70,11 @@ func (r *repoRegistry) byForge(owner, repo string) (RepoInfo, bool) {
 			return r.repos[i], true
 		}
 	}
-	return RepoInfo{}, false
+	return Info{}, false
 }
 
-// snapshot returns a copy of all registered repos.
-func (r *repoRegistry) snapshot() []RepoInfo {
+// Snapshot returns a copy of all registered repos.
+func (r *Registry) Snapshot() []Info {
 	if r == nil {
 		return nil
 	}
@@ -76,32 +83,25 @@ func (r *repoRegistry) snapshot() []RepoInfo {
 	return slices.Clone(r.repos)
 }
 
-// repoWithCI pairs a repo with its cached CI status snapshot.
-type repoWithCI struct {
-	info  RepoInfo
-	ci    ci.RepoCIState
-	hasCI bool
-}
-
-// snapshotWithCI returns each repo paired with its CI status, captured
+// SnapshotWithCI returns each repo paired with its CI status, captured
 // atomically under a single lock acquisition.
-func (r *repoRegistry) snapshotWithCI() []repoWithCI {
+func (r *Registry) SnapshotWithCI() []InfoWithCI {
 	if r == nil {
 		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := make([]repoWithCI, len(r.repos))
+	out := make([]InfoWithCI, len(r.repos))
 	for i := range r.repos {
 		st, ok := r.ciStatus[r.repos[i].RelPath]
-		out[i] = repoWithCI{info: r.repos[i], ci: st, hasCI: ok}
+		out[i] = InfoWithCI{Info: r.repos[i], CI: st, HasCI: ok}
 	}
 	return out
 }
 
-// forgePathsAtSHA returns the RelPaths of repos matching owner/repo whose
+// ForgePathsAtSHA returns the RelPaths of repos matching owner/repo whose
 // cached CI HeadSHA equals sha.
-func (r *repoRegistry) forgePathsAtSHA(owner, repo, sha string) []string {
+func (r *Registry) ForgePathsAtSHA(owner, repo, sha string) []string {
 	if r == nil {
 		return nil
 	}
@@ -117,11 +117,11 @@ func (r *repoRegistry) forgePathsAtSHA(owner, repo, sha string) []string {
 	return out
 }
 
-// add inserts or replaces a copy of info. RelPath and AbsPath are both stable
+// Add inserts or replaces a copy of info. RelPath and AbsPath are both stable
 // identities for a repo, so adding either identity twice is idempotent. The
 // caller registers the task.Runner afterwards (see the ordering invariant on
-// repoRegistry).
-func (r *repoRegistry) add(info *RepoInfo) {
+// Registry).
+func (r *Registry) Add(info *Info) {
 	r.mu.Lock()
 	for i := range r.repos {
 		if r.repos[i].RelPath != info.RelPath && r.repos[i].AbsPath != info.AbsPath {
@@ -142,13 +142,13 @@ func (r *repoRegistry) add(info *RepoInfo) {
 	r.mu.Unlock()
 }
 
-// removeMatching removes every repo for which pred reports true and returns
+// RemoveMatching removes every repo for which pred reports true and returns
 // their RelPaths. The caller unregisters the corresponding runners afterwards.
-func (r *repoRegistry) removeMatching(pred func(RepoInfo) bool) []string {
+func (r *Registry) RemoveMatching(pred func(Info) bool) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var removed []string
-	r.repos = slices.DeleteFunc(r.repos, func(ri RepoInfo) bool {
+	r.repos = slices.DeleteFunc(r.repos, func(ri Info) bool {
 		if pred(ri) {
 			removed = append(removed, ri.RelPath)
 			return true
@@ -158,9 +158,9 @@ func (r *repoRegistry) removeMatching(pred func(RepoInfo) bool) []string {
 	return removed
 }
 
-// ciStatusFor returns the cached CI status for rel, or the zero value (Status
+// CIStatusFor returns the cached CI status for rel, or the zero value (Status
 // == "") if none is recorded.
-func (r *repoRegistry) ciStatusFor(rel string) ci.RepoCIState {
+func (r *Registry) CIStatusFor(rel string) ci.RepoCIState {
 	if r == nil {
 		return ci.RepoCIState{}
 	}
@@ -169,9 +169,9 @@ func (r *repoRegistry) ciStatusFor(rel string) ci.RepoCIState {
 	return r.ciStatus[rel]
 }
 
-// setCIStatusIfChanged stores next as the CI status for rel and reports whether
+// SetCIStatusIfChanged stores next as the CI status for rel and reports whether
 // the status field changed (so SSE subscribers can be notified).
-func (r *repoRegistry) setCIStatusIfChanged(rel string, next ci.RepoCIState) bool {
+func (r *Registry) SetCIStatusIfChanged(rel string, next ci.RepoCIState) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	prev := r.ciStatus[rel]

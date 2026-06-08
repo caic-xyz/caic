@@ -6,15 +6,15 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/caic-xyz/caic/backend/internal/repowatch"
+	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/server"
 )
 
-func newRepoWatcher(ctx context.Context, absRoot string, s *server.Server) *repowatch.Watcher {
-	return repowatch.New(&repowatch.Config{
+func newRepoWatcher(ctx context.Context, absRoot string, s *server.Server) *repos.Watcher {
+	return repos.NewWatcher(&repos.WatcherConfig{
 		Ctx:          ctx,
 		AbsRoot:      absRoot,
-		Repos:        func() []repowatch.RepoInfo { return watchedRepos(s) },
+		Repos:        func() []repos.Info { return watchedRepos(s) },
 		RelPath:      s.RepoRelPath,
 		RunnerExists: s.RunnerRegistered,
 		OnDiscovered: func(ctx context.Context, abs string) {
@@ -26,14 +26,14 @@ func newRepoWatcher(ctx context.Context, absRoot string, s *server.Server) *repo
 	})
 }
 
-func watchedRepos(s *server.Server) []repowatch.RepoInfo {
-	repos := s.RepoSnapshot()
-	out := make([]repowatch.RepoInfo, len(repos))
-	for i := range repos {
-		out[i] = repowatch.RepoInfo{
-			RelPath:    repos[i].RelPath,
-			AbsPath:    repos[i].AbsPath,
-			BaseBranch: repos[i].BaseBranch,
+func watchedRepos(s *server.Server) []repos.Info {
+	snap := s.RepoSnapshot()
+	out := make([]repos.Info, len(snap))
+	for i := range snap {
+		out[i] = repos.Info{
+			RelPath:    snap[i].RelPath,
+			AbsPath:    snap[i].AbsPath,
+			BaseBranch: snap[i].BaseBranch,
 		}
 	}
 	return out

@@ -12,13 +12,14 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/bot"
+	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
 type tokenResolver func(ctx context.Context, enabled bool) string
 
 type botClientDeps struct {
-	repoReg   *repoRegistry
+	repos     *repos.Service
 	taskMgr   *tasks.Manager
 	forge     *ForgeManager
 	tokenFunc tokenResolver
@@ -26,7 +27,7 @@ type botClientDeps struct {
 
 // BotClient adapts task and forge stores to bot.Client.
 type BotClient struct {
-	repoReg   *repoRegistry
+	repos     *repos.Service
 	taskMgr   *tasks.Manager
 	forge     *ForgeManager
 	tokenFunc tokenResolver
@@ -34,7 +35,7 @@ type BotClient struct {
 
 func newBotClient(d botClientDeps) *BotClient {
 	return &BotClient{
-		repoReg:   d.repoReg,
+		repos:     d.repos,
 		taskMgr:   d.taskMgr,
 		forge:     d.forge,
 		tokenFunc: d.tokenFunc,
@@ -48,7 +49,7 @@ func (c *BotClient) ResolveRepo(forgeFullName string) *bot.RepoInfo {
 	if !ok {
 		return nil
 	}
-	info, found := c.repoReg.byForge(owner, repo)
+	info, found := c.repos.ByForge(owner, repo)
 	if !found {
 		return nil
 	}
@@ -83,7 +84,7 @@ func (c *BotClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 	// commenter. Only relevant for issue-triggered tasks.
 	var ownerResolved, repoResolved string
 	if req.IssueNumber > 0 {
-		if info, ok := c.repoReg.infoFor(req.Repo); ok && info.ForgeOwner != "" {
+		if info, ok := c.repos.InfoFor(req.Repo); ok && info.ForgeOwner != "" {
 			ownerResolved = info.ForgeOwner
 			repoResolved = info.ForgeRepo
 		}

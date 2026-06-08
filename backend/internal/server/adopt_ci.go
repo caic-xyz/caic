@@ -9,34 +9,35 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
 // AdoptedTaskWiring connects adopted tasks back to forge and CI automation.
 type AdoptedTaskWiring struct {
-	ctx         context.Context
-	authStore   *auth.Store
-	ciService   *ci.Service
-	forge       *ForgeManager
-	taskMgr     *tasks.Manager
-	repoInfoFor func(string) (RepoInfo, bool)
+	ctx       context.Context
+	authStore *auth.Store
+	ciService *ci.Service
+	forge     *ForgeManager
+	taskMgr   *tasks.Manager
+	repos     *repos.Service
 }
 
 // NewAdoptedTaskWiring builds the adopted-task startup concern for this server.
 func (s *Server) NewAdoptedTaskWiring() *AdoptedTaskWiring {
 	return &AdoptedTaskWiring{
-		ctx:         s.ctx,
-		authStore:   s.authStore,
-		ciService:   s.ciService,
-		forge:       s.forge,
-		taskMgr:     s.taskMgr,
-		repoInfoFor: s.repoInfoFor,
+		ctx:       s.ctx,
+		authStore: s.authStore,
+		ciService: s.ciService,
+		forge:     s.forge,
+		taskMgr:   s.taskMgr,
+		repos:     s.repos,
 	}
 }
 
 // WireCIMonitoring sets up CI monitoring for an adopted task that has a PR.
 func (w *AdoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *tasks.AdoptedTask) {
-	ri, ok := w.repoInfoFor(at.RelPath)
+	ri, ok := w.repos.InfoFor(at.RelPath)
 	if !ok {
 		return
 	}
@@ -64,7 +65,7 @@ func (w *AdoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *tasks.Adop
 
 // LookupExternalPRForTask queries the forge for a PR matching the task's branch.
 func (w *AdoptedTaskWiring) LookupExternalPRForTask(at *tasks.AdoptedTask) {
-	ri, ok := w.repoInfoFor(at.RelPath)
+	ri, ok := w.repos.InfoFor(at.RelPath)
 	if !ok {
 		return
 	}

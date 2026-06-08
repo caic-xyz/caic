@@ -19,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
+	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
@@ -108,7 +109,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("updates CI status when SHA matches HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalServer(t)
-		s.repoReg.add(&RepoInfo{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
+		s.repos.Registry().Add(&repos.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
 		s.forge.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}}
 
 		s.webhooks.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
@@ -122,7 +123,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 			Installation: github.WebhookInstallation{ID: 1},
 		})
 
-		got := s.repoReg.ciStatusFor("org/repo").Status
+		got := s.repos.CIStatusFor("org/repo").Status
 		if got != forge.CIStatusSuccess {
 			t.Errorf("repoCIStatus = %q, want %q", got, forge.CIStatusSuccess)
 		}
@@ -131,7 +132,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 	t.Run("ignores out-of-order delivery when SHA is not HEAD", func(t *testing.T) {
 		t.Parallel()
 		s := minimalServer(t)
-		s.repoReg.add(&RepoInfo{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
+		s.repos.Registry().Add(&repos.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
 		// HEAD is now "newsha"; the webhook carries "oldsha".
 		s.forge.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}}
 
@@ -146,7 +147,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 			Installation: github.WebhookInstallation{ID: 1},
 		})
 
-		got := s.repoReg.ciStatusFor("org/repo").Status
+		got := s.repos.CIStatusFor("org/repo").Status
 		if got != "" {
 			t.Errorf("repoCIStatus = %q, want empty (stale event should be ignored)", got)
 		}
@@ -389,7 +390,6 @@ func minimalServer(t *testing.T) *Server {
 	s := &Server{
 		ctx:     ctx,
 		ciCache: cache,
-		repoReg: newRepoRegistry(nil),
 		forge:   newForgeManager("", "", nil),
 	}
 	s.taskMgr = tasks.New(tasks.Config{ServerCtx: ctx})

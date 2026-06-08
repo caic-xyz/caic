@@ -9,11 +9,8 @@ import (
 	"maps"
 	"net/http"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,8 +19,8 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
-	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/repos"
 	caicruntime "github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -38,17 +35,15 @@ type runnerRegistry interface {
 
 type serverConfigHandlers struct {
 	serverCtx             context.Context
-	absRoot               string
 	tailscaleAvailable    bool
 	forge                 *ForgeManager
 	prefs                 *preferences.Store
-	repoReg               *repoRegistry
+	repos                 *repos.Service
 	taskMgr               runnerRegistry
 	githubOAuthConfigured func() bool
 	authEnabled           func() bool
 	authProviders         func() []string
 	voiceGatewayMetadata  func() v1.VoiceGatewayMetadata
-	newRunner             func(context.Context, *RepoInfo) (*task.Runner, error)
 	cacheSizes            *cacheSizeStore
 }
 
@@ -121,9 +116,9 @@ func (h *serverConfigHandlers) triggerUpdate(ctx context.Context, _ *api.EmptyRe
 func (h *serverConfigHandlers) getPreferences(ctx context.Context, _ *api.EmptyReq) (*v1.PreferencesResp, error) {
 	prefs := h.prefs.Get(userIDFromCtx(ctx))
 	recent := prefs.RecentRepos(time.Now())
-	repos := make([]v1.RepoPrefsResp, len(recent))
+	repoPrefs := make([]v1.RepoPrefsResp, len(recent))
 	for i, r := range recent {
-		repos[i] = v1.RepoPrefsResp{
+		repoPrefs[i] = v1.RepoPrefsResp{
 			Path:       r.Path,
 			BaseBranch: r.BaseBranch,
 			Harness:    r.Harness,
@@ -145,7 +140,7 @@ func (h *serverConfigHandlers) getPreferences(ctx context.Context, _ *api.EmptyR
 		}
 	}
 	return &v1.PreferencesResp{
-		Repositories: repos,
+		Repositories: repoPrefs,
 		Harness:      prefs.Harness,
 		Models:       prefs.Models,
 		Settings: v1.UserSettings{
@@ -290,7 +285,7 @@ func (h *serverConfigHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq)
 }
 
 func (h *serverConfigHandlers) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {
-	return h.repoReg.repoList(), nil
+	return repoListFromSnapshot(h.repos.SnapshotWithCI()), nil
 }
 
 func (h *serverConfigHandlers) handleListRepoBranches(w http.ResponseWriter, r *http.Request) {
@@ -299,7 +294,7 @@ func (h *serverConfigHandlers) handleListRepoBranches(w http.ResponseWriter, r *
 		writeError(w, api.BadRequest("repo is required"))
 		return
 	}
-	info, ok := h.repoReg.infoFor(repo)
+	info, ok := h.repos.InfoFor(repo)
 	if !ok {
 		writeError(w, api.NotFound("repo not found"))
 		return
@@ -342,95 +337,5 @@ func (h *serverConfigHandlers) handleListRepoBranches(w http.ResponseWriter, r *
 }
 
 func (h *serverConfigHandlers) cloneRepo(ctx context.Context, req *v1.CloneRepoReq) (*v1.Repo, error) {
-	// Derive target relative path.
-	targetPath := req.Path
-	if targetPath == "" {
-		// Extract basename from URL, stripping .git suffix.
-		base := filepath.Base(req.URL)
-		base = strings.TrimSuffix(base, ".git")
-		if base == "" || base == "." || base == "/" {
-			return nil, api.BadRequest("cannot derive repo name from URL; specify path explicitly")
-		}
-		targetPath = base
-	}
-
-	absTarget := filepath.Join(h.absRoot, targetPath)
-	// Defense-in-depth: ensure the resolved path is under absRoot.
-	if rel, err := filepath.Rel(h.absRoot, absTarget); err != nil || strings.HasPrefix(rel, "..") {
-		return nil, api.BadRequest("path escapes root directory")
-	} else {
-		targetPath = rel
-	}
-
-	// Check if directory already exists.
-	if _, err := os.Stat(absTarget); err == nil {
-		return nil, api.Conflict("directory already exists: " + targetPath)
-	}
-
-	// Check if path already registered.
-	if _, ok := h.taskMgr.Runner(targetPath); ok {
-		return nil, api.Conflict("repo already registered: " + targetPath)
-	}
-
-	// Reject when the basename collides with an existing repo from a
-	// different parent directory.
-	bn := filepath.Base(targetPath)
-	var basenameConflict string
-	h.taskMgr.RangeRunners(func(rel string, _ *task.Runner) bool {
-		if rel != "" && filepath.Base(rel) == bn && rel != targetPath {
-			basenameConflict = rel
-			return false
-		}
-		return true
-	})
-	if basenameConflict != "" {
-		return nil, api.Conflict("repo basename conflicts with existing: " + basenameConflict)
-	}
-
-	// Determine clone depth.
-	depth := req.Depth
-	if depth == 0 {
-		depth = 1
-	}
-
-	// Run git clone with timeout.
-	cloneCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
-	args := []string{"clone", "--depth", strconv.Itoa(depth), "--recurse-submodules", "--shallow-submodules", req.URL, absTarget}
-	cmd := exec.CommandContext(cloneCtx, "git", args...) //nolint:gosec // args are validated: depth is an int, URL is user-provided input, absTarget is validated above
-	if out, err := cmd.CombinedOutput(); err != nil {
-		// Clean up partial clone.
-		_ = os.RemoveAll(absTarget)
-		slog.Warn("git clone failed", "url", req.URL, "err", err, "out", string(out))
-		return nil, api.InternalError("git clone failed: " + err.Error())
-	}
-
-	// Discover repo info.
-	remoteName, err := gitutil.DefaultRemote(ctx, absTarget)
-	if err != nil {
-		_ = os.RemoveAll(absTarget)
-		return nil, api.InternalError("cannot determine default remote: " + err.Error())
-	}
-	branch, err := gitutil.DefaultBranch(ctx, absTarget, remoteName)
-	if err != nil {
-		_ = os.RemoveAll(absTarget)
-		return nil, api.InternalError("cannot determine default branch: " + err.Error())
-	}
-	remote := gitutil.RemoteOriginURL(ctx, absTarget)
-	info := RepoInfo{RelPath: targetPath, AbsPath: absTarget, BaseBranch: branch, BaseBranchRemote: remoteName, Remote: remote}
-	runner, err := h.newRunner(ctx, &info)
-	if err != nil {
-		_ = os.RemoveAll(absTarget)
-		return nil, api.InternalError("failed to init runner: " + err.Error())
-	}
-	if rawURL, err := forge.RemoteURL(ctx, absTarget); err == nil {
-		info.ForgeKind, info.ForgeOwner, info.ForgeRepo, _ = forge.ParseRemoteURL(rawURL)
-	}
-	// Add to the registry first, then register the runner (see repoRegistry's
-	// ordering invariant).
-	h.repoReg.add(&info)
-	h.taskMgr.RegisterRunner(targetPath, runner)
-	slog.Info("cloned repo", "url", req.URL, "path", targetPath)
-
-	return &v1.Repo{Path: targetPath, Branch: branch, BaseBranch: v1.BranchInfo{Name: branch, Remote: remoteName}, RemoteURL: gitutil.RemoteToHTTPS(remote), Forge: v1.Forge(info.ForgeKind)}, nil
+	return cloneRepoDTO(ctx, h.repos, req)
 }

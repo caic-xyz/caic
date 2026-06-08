@@ -13,6 +13,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
@@ -83,37 +84,34 @@ type ciTaskCreator interface {
 }
 
 type ciAdapterDeps struct {
-	repoReg      *repoRegistry
+	repos        *repos.Service
 	taskMgr      *tasks.Manager
 	forge        *ForgeManager
 	prefs        *preferences.Store
 	warnings     *warningStore
 	taskCreator  ciTaskCreator
-	infoForRepo  func(relPath string) (RepoInfo, bool)
 	notifyChange func()
 }
 
 // CIAdapter adapts server stores and managers to ci.Backend.
 type CIAdapter struct {
-	repoReg      *repoRegistry
+	repos        *repos.Service
 	taskMgr      *tasks.Manager
 	forge        *ForgeManager
 	prefs        *preferences.Store
 	warnings     *warningStore
 	taskCreator  ciTaskCreator
-	infoForRepo  func(relPath string) (RepoInfo, bool)
 	notifyChange func()
 }
 
 func newCIAdapter(d ciAdapterDeps) *CIAdapter {
 	return &CIAdapter{
-		repoReg:      d.repoReg,
+		repos:        d.repos,
 		taskMgr:      d.taskMgr,
 		forge:        d.forge,
 		prefs:        d.prefs,
 		warnings:     d.warnings,
 		taskCreator:  d.taskCreator,
-		infoForRepo:  d.infoForRepo,
 		notifyChange: d.notifyChange,
 	}
 }
@@ -137,7 +135,7 @@ func (a *CIAdapter) GitHubApp() ci.GitHubAppClient { return a.forge.githubApp }
 
 // ForgeForInfo returns a forge client for the given RepoInfo.
 func (a *CIAdapter) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) forge.Forge {
-	r := &RepoInfo{
+	r := &repos.Info{
 		ForgeKind:  info.ForgeKind,
 		ForgeOwner: info.ForgeOwner,
 		ForgeRepo:  info.ForgeRepo,
@@ -162,7 +160,7 @@ func (a *CIAdapter) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) {
 
 // RepoInfoFor returns CI-level repo info for relPath.
 func (a *CIAdapter) RepoInfoFor(relPath string) ci.RepoInfo {
-	r, ok := a.infoForRepo(relPath)
+	r, ok := a.repos.InfoFor(relPath)
 	if !ok {
 		return ci.RepoInfo{}
 	}
@@ -188,7 +186,7 @@ func (a *CIAdapter) ListActiveRepos() []ci.RepoInfo {
 		return true
 	})
 	var out []ci.RepoInfo
-	snap := a.repoReg.snapshot()
+	snap := a.repos.Snapshot()
 	for i := range snap {
 		r := &snap[i]
 		if r.ForgeOwner == "" {
@@ -211,17 +209,8 @@ func (a *CIAdapter) ListActiveRepos() []ci.RepoInfo {
 // SetRepoCIStatusIfChanged updates the cached CI status for relPath.
 // Returns true if the CI status changed (SSE subscribers should be notified).
 func (a *CIAdapter) SetRepoCIStatusIfChanged(relPath, sha string, result forgecache.Result) bool {
-	checks := make([]forge.Check, len(result.Checks))
-	copy(checks, result.Checks)
-	next := ci.RepoCIState{Status: result.Status, Checks: checks, HeadSHA: sha}
-	return a.repoReg.setCIStatusIfChanged(relPath, next)
+	return a.repos.SetCIStatusIfChanged(relPath, sha, result)
 }
 
 // Prefs returns the user preferences store.
 func (a *CIAdapter) Prefs() *preferences.Store { return a.prefs }
-
-// repoInfoFor returns a copy of the RepoInfo for relPath. Callers needing a
-// *RepoInfo (e.g. forgeForInfo) should take the address of the returned copy.
-func (s *Server) repoInfoFor(relPath string) (RepoInfo, bool) {
-	return s.repoReg.infoFor(relPath)
-}

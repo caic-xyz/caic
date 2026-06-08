@@ -140,14 +140,16 @@ func (s *Server) authProviders() []string {
 }
 
 func (s *Server) repoURL(rel string) string {
-	if info, ok := s.repoReg.infoFor(rel); ok {
+	s.initConcernAdapters()
+	if info, ok := s.repos.InfoFor(rel); ok {
 		return gitutil.RemoteToHTTPS(info.Remote)
 	}
 	return ""
 }
 
 func (s *Server) repoForge(rel string) v1.Forge {
-	if info, ok := s.repoReg.infoFor(rel); ok {
+	s.initConcernAdapters()
+	if info, ok := s.repos.InfoFor(rel); ok {
 		return v1.Forge(info.ForgeKind)
 	}
 	return ""

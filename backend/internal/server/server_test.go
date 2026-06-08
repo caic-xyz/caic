@@ -24,7 +24,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/repowatch"
+	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
@@ -156,7 +156,6 @@ func newRunnerConstructionTestServer(t *testing.T, root string) *Server {
 		runtimeBackend: backend,
 		agentBackends:  map[agent.Harness]agent.Backend{agent.Codex: stubBackend{}},
 		harnessEnv:     harnessEnv,
-		repoReg:        newRepoRegistry(nil),
 	}
 	s.taskMgr = tasks.New(tasks.Config{
 		ServerCtx:  t.Context(),
@@ -170,11 +169,11 @@ func newRunnerConstructionTestServer(t *testing.T, root string) *Server {
 	return s
 }
 
-func newTestRepoWatcher(t *testing.T, root string, s *Server) *repowatch.Watcher {
-	return repowatch.New(&repowatch.Config{
+func newTestRepoWatcher(t *testing.T, root string, s *Server) *repos.Watcher {
+	return repos.NewWatcher(&repos.WatcherConfig{
 		Ctx:          t.Context(),
 		AbsRoot:      root,
-		Repos:        func() []repowatch.RepoInfo { return testWatchedRepos(s) },
+		Repos:        func() []repos.Info { return testWatchedRepos(s) },
 		RelPath:      s.RepoRelPath,
 		RunnerExists: s.RunnerRegistered,
 		OnDiscovered: func(ctx context.Context, abs string) {
@@ -192,14 +191,14 @@ func newTestRepoWatcher(t *testing.T, root string, s *Server) *repowatch.Watcher
 	})
 }
 
-func testWatchedRepos(s *Server) []repowatch.RepoInfo {
-	repos := s.RepoSnapshot()
-	out := make([]repowatch.RepoInfo, len(repos))
-	for i := range repos {
-		out[i] = repowatch.RepoInfo{
-			RelPath:    repos[i].RelPath,
-			AbsPath:    repos[i].AbsPath,
-			BaseBranch: repos[i].BaseBranch,
+func testWatchedRepos(s *Server) []repos.Info {
+	snap := s.RepoSnapshot()
+	out := make([]repos.Info, len(snap))
+	for i := range snap {
+		out[i] = repos.Info{
+			RelPath:    snap[i].RelPath,
+			AbsPath:    snap[i].AbsPath,
+			BaseBranch: snap[i].BaseBranch,
 		}
 	}
 	return out
@@ -268,7 +267,7 @@ func TestCloneRepo(t *testing.T) {
 		}
 
 		newTestRepoWatcher(t, root, s).SyncReposInDir(t.Context(), root)
-		if got := s.repoReg.snapshot(); len(got) != 1 || got[0].RelPath != "cloned" {
+		if got := s.repos.Snapshot(); len(got) != 1 || got[0].RelPath != "cloned" {
 			t.Fatalf("repo registry after watcher sync = %+v, want one cloned repo", got)
 		}
 		after, ok := s.taskMgr.Runner("cloned")
@@ -298,7 +297,7 @@ func TestCloneRepo(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(root, "broken")); !os.IsNotExist(err) {
 			t.Fatalf("partial clone path still exists: %v", err)
 		}
-		if got := s.repoReg.snapshot(); len(got) != 0 {
+		if got := s.repos.Snapshot(); len(got) != 0 {
 			t.Fatalf("repo registry = %+v, want empty after failed clone", got)
 		}
 		if _, ok := s.taskMgr.Runner("broken"); ok {
@@ -922,13 +921,15 @@ func TestSignalProcess(t *testing.T) {
 
 func TestHandleListRepos(t *testing.T) {
 	t.Parallel()
-	s := &Server{
-		repoReg: newRepoRegistry([]RepoInfo{
+	s := &Server{}
+	s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+	s.repos = repos.NewService(repos.ServiceConfig{
+		Registry: repos.NewRegistry([]repos.Info{
 			{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"},
 			{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"},
 		}),
-	}
-	s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+		TaskManager: s.taskMgr,
+	})
 	s.initConcernAdapters()
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/server/repos", http.NoBody)
@@ -938,18 +939,18 @@ func TestHandleListRepos(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
-	var repos []v1.Repo
-	if err := json.NewDecoder(w.Body).Decode(&repos); err != nil {
+	var repoList []v1.Repo
+	if err := json.NewDecoder(w.Body).Decode(&repoList); err != nil {
 		t.Fatal(err)
 	}
-	if len(repos) != 2 {
-		t.Fatalf("len = %d, want 2", len(repos))
+	if len(repoList) != 2 {
+		t.Fatalf("len = %d, want 2", len(repoList))
 	}
-	if repos[0].Path != "org/repoA" {
-		t.Errorf("repos[0].Path = %q, want %q", repos[0].Path, "org/repoA")
+	if repoList[0].Path != "org/repoA" {
+		t.Errorf("repos[0].Path = %q, want %q", repoList[0].Path, "org/repoA")
 	}
-	if repos[1].BaseBranch.Name != "develop" {
-		t.Errorf("repos[1].BaseBranch = %q, want %q", repos[1].BaseBranch.Name, "develop")
+	if repoList[1].BaseBranch.Name != "develop" {
+		t.Errorf("repos[1].BaseBranch = %q, want %q", repoList[1].BaseBranch.Name, "develop")
 	}
 }
 
