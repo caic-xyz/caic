@@ -28,7 +28,7 @@ type usageHandlers struct {
 // events for changed or removed tasks. It pushes immediately when a
 // server-handled mutation fires the changed channel, and falls back to a
 // 2-second ticker to catch runner-internal state transitions.
-func (s *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
+func (s *taskHTTPHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, api.InternalError("streaming not supported"))
@@ -64,11 +64,7 @@ func (s *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Reque
 	first := true
 
 	for {
-		var out []v1.Task
-		s.taskMgr.Range(func(_ string, e *tasks.Entry) bool {
-			out = append(out, v1conv.Task(ctx, e, s.taskResolvers()))
-			return true
-		})
+		out := s.service.taskListSnapshot(ctx)
 		ch := s.taskMgr.Changed()
 		repos := repoListFromSnapshot(s.repos.SnapshotWithCI())
 		newWarnings := s.warnings.Since(lastWarnTime)

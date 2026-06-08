@@ -117,8 +117,11 @@ func (s *Server) SetBot(b *bot.Bot) {
 func (s *Server) SetCIService(c *ci.Service) {
 	s.ciService = c
 	s.webhooks.ciService = c
-	if s.taskHandlers != nil {
-		s.taskHandlers.ciService = c
+	if s.taskHTTPHandlers != nil {
+		s.taskHTTPHandlers.ciService = c
+		if s.taskHTTPHandlers.service != nil {
+			s.taskHTTPHandlers.service.ciService = c
+		}
 	}
 }
 
@@ -160,24 +163,32 @@ func (s *Server) initConcernAdapters() {
 	if s.warnings == nil {
 		s.warnings = newWarningStore(s.taskMgr)
 	}
-	if s.taskHandlers == nil {
-		s.taskHandlers = &taskHandlers{}
+	if s.taskHTTPHandlers == nil {
+		s.taskHTTPHandlers = &taskHTTPHandlers{}
 	}
-	s.taskHandlers.ctx = s.ctx
-	s.taskHandlers.taskMgr = s.taskMgr
-	s.taskHandlers.prefs = s.prefs
-	s.taskHandlers.repos = s.repos
-	s.taskHandlers.forge = s.forge
-	s.taskHandlers.ciService = s.ciService
-	s.taskHandlers.authStore = s.authStore
-	s.taskHandlers.fakeCI = s.fakeCI
-	s.taskHandlers.warnings = s.warnings
+	s.taskHTTPHandlers.taskMgr = s.taskMgr
+	s.taskHTTPHandlers.repos = s.repos
+	s.taskHTTPHandlers.forge = s.forge
+	s.taskHTTPHandlers.ciService = s.ciService
+	s.taskHTTPHandlers.authStore = s.authStore
+	s.taskHTTPHandlers.warnings = s.warnings
+	if s.taskHTTPHandlers.service == nil {
+		s.taskHTTPHandlers.service = &taskAPIService{}
+	}
+	s.taskHTTPHandlers.service.ctx = s.ctx
+	s.taskHTTPHandlers.service.taskMgr = s.taskMgr
+	s.taskHTTPHandlers.service.prefs = s.prefs
+	s.taskHTTPHandlers.service.repos = s.repos
+	s.taskHTTPHandlers.service.forge = s.forge
+	s.taskHTTPHandlers.service.ciService = s.ciService
+	s.taskHTTPHandlers.service.authStore = s.authStore
+	s.taskHTTPHandlers.service.fakeCI = s.fakeCI
 	if s.botClient == nil {
 		s.botClient = &BotClient{
 			repos:     s.repos,
 			taskMgr:   s.taskMgr,
 			forge:     s.forge,
-			tokenFunc: s.taskHandlers.resolveGitHubContainerToken,
+			tokenFunc: s.taskHTTPHandlers.service.resolveGitHubContainerToken,
 		}
 	}
 	if s.voiceHandlers == nil {
@@ -233,5 +244,5 @@ func (s *Server) initConcernAdapters() {
 			notifyChange: notifyChange,
 		})
 	}
-	s.taskHandlers.ciAdapter = s.ciAdapter
+	s.taskHTTPHandlers.service.ciAdapter = s.ciAdapter
 }

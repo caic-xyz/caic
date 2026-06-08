@@ -88,13 +88,10 @@ Next sequence:
 1. Extract remaining route groups into constructed handler structs with no
    back-reference to concrete `Server`: CI and voice. Prefer explicit
    dependencies over function fields unless a callback is the clearest boundary.
-2. Move task command behavior behind a task API service. Keep HTTP handlers as
-   request/response conversion and routing glue; put orchestration, PR-flow
-   decisions, and task DTO assembly in the service layer.
-3. Rename `server.Server` to `server.Router` once it mostly contains route group
+2. Rename `server.Server` to `server.Router` once it mostly contains route group
    dependencies, route registration, middleware composition, static asset
    serving, and `Serve`.
-4. Update architecture docs from `Server` to `Router`, then run `make lint-go`
+3. Update architecture docs from `Server` to `Router`, then run `make lint-go`
    and `make lint-docs`.
 
 Completion criteria:
