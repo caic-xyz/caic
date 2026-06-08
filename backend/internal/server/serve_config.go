@@ -18,6 +18,7 @@ import (
 	"github.com/caic-xyz/md/gitutil"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
@@ -34,17 +35,17 @@ type runnerRegistry interface {
 }
 
 type serverConfigHandlers struct {
-	serverCtx             context.Context
-	tailscaleAvailable    bool
-	forge                 *ForgeManager
-	prefs                 *preferences.Store
-	repos                 *repos.Service
-	taskMgr               runnerRegistry
-	githubOAuthConfigured func() bool
-	authEnabled           func() bool
-	authProviders         func() []string
-	voiceGatewayMetadata  func() v1.VoiceGatewayMetadata
-	cacheSizes            *cacheSizeStore
+	serverCtx          context.Context
+	tailscaleAvailable bool
+	forge              *ForgeManager
+	prefs              *preferences.Store
+	repos              *repos.Service
+	taskMgr            runnerRegistry
+	cacheSizes         *cacheSizeStore
+	authStore          *auth.Store
+	githubOAuth        *auth.ProviderConfig
+	gitlabOAuth        *auth.ProviderConfig
+	voiceGateway       v1.VoiceGatewayMetadata
 }
 
 func (h *serverConfigHandlers) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Config, error) {
@@ -60,14 +61,26 @@ func (h *serverConfigHandlers) getConfig(_ context.Context, _ *api.EmptyReq) (*v
 		USBAvailable:         runtime.GOOS == "linux",
 		DisplayAvailable:     true,
 		SudoAvailable:        true,
-		GitHubTokenAvailable: h.forge.githubToken != "" || h.githubOAuthConfigured(),
-		VoiceGateway:         h.voiceGatewayMetadata(),
+		GitHubTokenAvailable: h.forge.githubToken != "" || h.githubOAuth != nil,
+		VoiceGateway:         h.voiceGateway,
 		GitHubAppEnabled:     h.forge.githubApp != nil,
 	}
-	if h.authEnabled() {
+	if h.authStore != nil {
 		cfg.AuthProviders = h.authProviders()
 	}
 	return cfg, nil
+}
+
+// authProviders returns the list of configured OAuth provider names.
+func (h *serverConfigHandlers) authProviders() []string {
+	var ps []string
+	if h.githubOAuth != nil {
+		ps = append(ps, "github")
+	}
+	if h.gitlabOAuth != nil {
+		ps = append(ps, "gitlab")
+	}
+	return ps
 }
 
 // getVersion returns the current server version and checks GitHub for the latest release.

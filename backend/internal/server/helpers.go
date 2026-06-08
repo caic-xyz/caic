@@ -124,15 +124,3 @@ func roundDuration(d time.Duration) time.Duration {
 func (s *Server) authEnabled() bool {
 	return s.authStore != nil
 }
-
-// authProviders returns the list of configured OAuth provider names.
-func (s *Server) authProviders() []string {
-	var ps []string
-	if s.githubOAuth != nil {
-		ps = append(ps, "github")
-	}
-	if s.gitlabOAuth != nil {
-		ps = append(ps, "gitlab")
-	}
-	return ps
-}

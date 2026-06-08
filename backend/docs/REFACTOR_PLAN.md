@@ -86,9 +86,9 @@ Design direction:
 Next sequence:
 
 1. Extract remaining route groups into constructed handler structs with no
-   back-reference to concrete `Server`: bot, CI, server config, webhook, and
-   voice. Prefer explicit dependencies over function fields unless a callback is
-   the clearest boundary.
+   back-reference to concrete `Server`: bot, CI, webhook, and voice. Prefer
+   explicit dependencies over function fields unless a callback is the clearest
+   boundary.
 2. Move task command behavior behind a task API service. Keep HTTP handlers as
    request/response conversion and routing glue; put orchestration, PR-flow
    decisions, and task DTO assembly in the service layer.

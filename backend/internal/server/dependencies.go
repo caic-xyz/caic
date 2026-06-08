@@ -197,20 +197,19 @@ func (s *Server) initConcernAdapters() {
 		s.webFetchHandlers = &webFetchHandlers{}
 	}
 	if s.serverConfigHandlers == nil {
-		s.serverConfigHandlers = &serverConfigHandlers{
-			serverCtx:             s.ctx,
-			tailscaleAvailable:    s.tailscaleAvailable,
-			forge:                 s.forge,
-			prefs:                 s.prefs,
-			repos:                 s.repos,
-			taskMgr:               s.taskMgr,
-			githubOAuthConfigured: func() bool { return s.githubOAuth != nil },
-			authEnabled:           s.authEnabled,
-			authProviders:         s.authProviders,
-			voiceGatewayMetadata:  s.voiceHandlers.metadata,
-			cacheSizes:            s.cacheSizes,
-		}
+		s.serverConfigHandlers = &serverConfigHandlers{}
 	}
+	s.serverConfigHandlers.serverCtx = s.ctx
+	s.serverConfigHandlers.tailscaleAvailable = s.tailscaleAvailable
+	s.serverConfigHandlers.forge = s.forge
+	s.serverConfigHandlers.prefs = s.prefs
+	s.serverConfigHandlers.repos = s.repos
+	s.serverConfigHandlers.taskMgr = s.taskMgr
+	s.serverConfigHandlers.cacheSizes = s.cacheSizes
+	s.serverConfigHandlers.authStore = s.authStore
+	s.serverConfigHandlers.githubOAuth = s.githubOAuth
+	s.serverConfigHandlers.gitlabOAuth = s.gitlabOAuth
+	s.serverConfigHandlers.voiceGateway = s.voiceHandlers.metadata()
 	if s.botHandlers == nil {
 		s.botHandlers = &botHandlers{
 			taskMgr:    s.taskMgr,
