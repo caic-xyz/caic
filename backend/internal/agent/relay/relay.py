@@ -44,6 +44,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -107,21 +108,34 @@ class _Daemon:
     ``self`` attributes instead.
     """
 
-    def __init__(self, proc, output_file, work_dir, log_stdin, env_event):
+    def __init__(self, proc, output_file, work_dir, log_stdin, env_event, cmd_args):
         self.proc = proc
         self.output_file = output_file
         self.work_dir = work_dir
         self.log_stdin = log_stdin
         self.env_event = env_event  # Pre-encoded caic_stripped_env NDJSON; b"" when nothing was stripped.
+        self.cmd_args = list(cmd_args)
 
         self.output_lock = threading.Lock()
         self.client_lock = threading.Lock()
+        self.stderr_lock = threading.Lock()
+        self.stderr_lines = []
+        self.stderr_truncated = False
+        self.stderr_done = threading.Event()
         self.client_conn = None
         self.client_id = 0
+        self.proc_ready = threading.Event()
+        if proc is not None:
+            self.proc_ready.set()
         self.shutdown_event = threading.Event()
         self.diff_activity = threading.Event()
 
-    def set_client(self, conn, reason=""):
+    def set_proc(self, proc):
+        """Publish the subprocess after the first client can connect."""
+        self.proc = proc
+        self.proc_ready.set()
+
+    def set_client(self, conn, reason):
         with self.client_lock:
             old = self.client_conn
             self.client_conn = conn
@@ -149,7 +163,46 @@ class _Daemon:
                 self.output_file.write(chunk)
             self.output_file.flush()
 
+    def stderr_text(self):
+        """Return recent subprocess stderr lines as one diagnostic string."""
+        with self.stderr_lock:
+            return "\n".join(self.stderr_lines)
+
+    def write_exit_event(self, exit_code, error=""):
+        """Record a structured subprocess exit event and forward it to the client."""
+        exit_event = {
+            "type": "caic_exit",
+            "exit_code": exit_code,
+            "cmd": self.cmd_args,
+            "ts": time.time(),
+        }
+        if exit_code < 0:
+            exit_event["signal"] = -exit_code
+        stderr_text = error or self.stderr_text()
+        if stderr_text:
+            exit_event["error"] = stderr_text
+        if self.stderr_truncated:
+            exit_event["stderr_truncated"] = True
+        ev = (json.dumps(exit_event) + "\n").encode()
+        self.write_output(ev)
+        self.send_to_client(ev)
+
     # -- threads -------------------------------------------------------------
+
+    def stderr_thread(self):
+        """Drain subprocess stderr to relay.log and remember recent lines."""
+        try:
+            for raw in self.proc.stderr:
+                line = raw.decode("utf-8", errors="replace").rstrip()
+                if line:
+                    logging.info("bridge: %s", line)
+                    with self.stderr_lock:
+                        self.stderr_lines.append(line)
+                        if len(self.stderr_lines) > 20:
+                            self.stderr_truncated = True
+                            del self.stderr_lines[:-20]
+        finally:
+            self.stderr_done.set()
 
     def reader_thread(self):
         """Read subprocess stdout → output.jsonl + connected client."""
@@ -173,21 +226,16 @@ class _Daemon:
         except (OSError, ValueError) as e:
             logging.warning("reader_thread error: %s", e)
         finally:
-            exit_code = self.proc.poll()
+            try:
+                exit_code = self.proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                exit_code = self.proc.poll()
+            self.stderr_done.wait(timeout=1)
             sz = self.output_file.tell() if not self.output_file.closed else -1
             # Write caic_exit event before closing so the backend sees
             # why the relay stopped without needing to parse relay.log.
-            ev = (
-                json.dumps(
-                    {
-                        "type": "caic_exit",
-                        "exit_code": exit_code if exit_code is not None else -1,
-                        "ts": time.time(),
-                    }
-                )
-                + "\n"
-            )
-            self.output_file.write(ev.encode())
+            exit_code = exit_code if exit_code is not None else -1
+            self.write_exit_event(exit_code)
             self.output_file.close()
             self.set_client(None, "subprocess_eof")
             self.diff_activity.set()
@@ -316,7 +364,7 @@ class _Daemon:
                 cid,
                 offset,
                 self.shutdown_event.is_set(),
-                self.proc.poll() is None,
+                self.proc is not None and self.proc.poll() is None,
             )
 
             ct = threading.Thread(target=self._client_reader, args=(conn, cid), daemon=True)
@@ -352,6 +400,10 @@ class _Daemon:
                         close_stdin = True
                         break
                     payload = line + b"\n"
+                    self.proc_ready.wait()
+                    if self.proc is None or self.proc.stdin is None:
+                        logging.info("client #%d dropping input because subprocess failed to start", cid)
+                        return
                     self.proc.stdin.write(payload)
                     self.proc.stdin.flush()
                     if self.log_stdin:
@@ -376,7 +428,7 @@ class _Daemon:
         self.shutdown_event.set()
 
 
-def serve(cmd_args, work_dir, log_stdin=True, strip_env=(), shutdown_grace=_DEFAULT_SHUTDOWN_GRACE):
+def serve(cmd_args, work_dir, log_stdin, strip_env, shutdown_grace):
     """Start the relay server as a daemon, then attach as the first client.
 
     Architecture:
@@ -422,8 +474,13 @@ def serve(cmd_args, work_dir, log_stdin=True, strip_env=(), shutdown_grace=_DEFA
     if pid > 0:
         # Parent: wait for socket to appear, then attach.
         try:
-            _wait_for_socket(30)
-            attach_client(offset=0)
+            if _wait_for_socket(30, child_pid=pid):
+                try:
+                    attach_client(offset=0)
+                except OSError:
+                    _copy_output_to_stdout()
+            else:
+                _copy_output_to_stdout()
         finally:
             # Reap the child if it exited (e.g. agent crash).
             # WNOHANG: don't block if daemon is still running.
@@ -485,26 +542,8 @@ def serve(cmd_args, work_dir, log_stdin=True, strip_env=(), shutdown_grace=_DEFA
     # EDITOR=true prevents git commit (and similar) from opening a text editor.
     env["EDITOR"] = "true"
 
-    proc = subprocess.Popen(
-        cmd_args,
-        cwd=work_dir,
-        env=env,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    logging.info("subprocess started pid=%d", proc.pid)
-
-    # Drain subprocess stderr to relay log so bridge diagnostics are visible.
-    def _drain_stderr():
-        for raw in proc.stderr:
-            line = raw.decode("utf-8", errors="replace").rstrip()
-            if line:
-                logging.info("bridge: %s", line)
-
-    threading.Thread(target=_drain_stderr, daemon=True).start()
-
-    # Listen on Unix socket for client connections.
+    # Listen before spawning the subprocess so the first client can queue its
+    # connection even if the subprocess fails during startup.
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(SOCK_PATH)
     srv.listen(1)
@@ -513,7 +552,39 @@ def serve(cmd_args, work_dir, log_stdin=True, strip_env=(), shutdown_grace=_DEFA
     env_event = b""
     if stripped_vars:
         env_event = (json.dumps({"type": "caic_stripped_env", "variables": stripped_vars}) + "\n").encode()
-    d = _Daemon(proc, output_file, work_dir, log_stdin, env_event)
+    d = _Daemon(None, output_file, work_dir, log_stdin, env_event, cmd_args)
+    threading.Thread(target=d.accept_thread, args=(srv,), daemon=True).start()
+
+    try:
+        proc = subprocess.Popen(
+            cmd_args,
+            cwd=work_dir,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except OSError as e:
+        logging.exception("subprocess failed to start")
+        d.write_exit_event(-1, error=str(e))
+        d.proc_ready.set()
+        d.set_client(None, "subprocess_start_failed")
+        output_file.close()
+        srv.close()
+        try:
+            os.unlink(SOCK_PATH)
+        except FileNotFoundError:
+            pass
+        try:
+            os.unlink(PID_PATH)
+        except FileNotFoundError:
+            pass
+        return
+    d.set_proc(proc)
+    logging.info("subprocess started pid=%d", proc.pid)
+
+    # Drain subprocess stderr to relay.log and retain recent lines for caic_exit.
+    threading.Thread(target=d.stderr_thread, daemon=True).start()
 
     # reader_thread is the authoritative "done" signal: it reads stdout
     # until EOF (which implies the subprocess exited), flushes output.jsonl,
@@ -523,7 +594,6 @@ def serve(cmd_args, work_dir, log_stdin=True, strip_env=(), shutdown_grace=_DEFA
     # delivered the last chunk to the client.
     reader_t = threading.Thread(target=d.reader_thread)
     threading.Thread(target=d.diff_watcher_thread, daemon=True).start()
-    threading.Thread(target=d.accept_thread, args=(srv,), daemon=True).start()
 
     # Shutdown watchdog: waits for _client_reader to set shutdown_event,
     # then closes stdin + sends SIGINT, and escalates if the subprocess
@@ -639,21 +709,37 @@ def attach_client(offset):
         conn.close()
 
 
-def _wait_for_socket(timeout):
-    """Block until the relay socket appears."""
+def _wait_for_socket(timeout, child_pid):
+    """Block until the relay socket appears or the daemon exits."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if os.path.exists(SOCK_PATH):
-            # Try connecting to verify it's ready.
             try:
                 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
                 s.connect(SOCK_PATH)
                 s.close()
-                return
+                return True
             except OSError:
                 pass
+        if child_pid is not None:
+            try:
+                pid, _ = os.waitpid(child_pid, os.WNOHANG)
+            except ChildProcessError:
+                return False
+            if pid == child_pid:
+                return False
         time.sleep(0.05)
     raise TimeoutError("relay: timed out waiting for socket")
+
+
+def _copy_output_to_stdout():
+    """Copy relay output if the daemon exited before the first attach."""
+    try:
+        with open(OUTPUT_PATH, "rb") as f:
+            shutil.copyfileobj(f, sys.stdout.buffer)
+            sys.stdout.buffer.flush()
+    except FileNotFoundError:
+        pass
 
 
 def _read_line(conn):

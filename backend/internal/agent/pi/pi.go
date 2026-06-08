@@ -577,6 +577,12 @@ func waitForResponse(r *bufio.Reader, cmd pi.CommandType, logW io.Writer) (pi.Re
 		if json.Unmarshal(line, &probe) != nil {
 			continue
 		}
+		if probe.Type == "caic_exit" {
+			var exit agent.ExitMessage
+			if json.Unmarshal(line, &exit) == nil && exit.ExitCode != 0 {
+				return pi.Response{}, fmt.Errorf("agent subprocess exited with code %d: %s", exit.ExitCode, exit.Error)
+			}
+		}
 		if probe.Type != pi.EventResponse {
 			continue
 		}

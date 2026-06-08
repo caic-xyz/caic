@@ -234,6 +234,7 @@ type Task struct {
 	lastAPIUsage          agent.Usage    // Most recent per-API-call usage from AssistantMessage (context window fill).
 	cacheExpiresAt        time.Time      // When the prompt cache from the last API call expires.
 	liveDiffStat          agent.DiffStat // Updated by DiffStatMessage from relay.
+	lastExitError         string         // Most recent non-zero relay exit diagnostic.
 	forgeOwner            string
 	forgeRepo             string
 	forgePR               int
@@ -694,6 +695,13 @@ func (t *Task) LastAgentResult() string {
 	return ""
 }
 
+// LastExitError returns the most recent non-zero relay exit diagnostic.
+func (t *Task) LastExitError() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lastExitError
+}
+
 // LiveDiffStat returns the latest diff stat from the relay's periodic polling.
 func (t *Task) LiveDiffStat() agent.DiffStat {
 	t.mu.Lock()
@@ -948,6 +956,13 @@ func (t *Task) RestoreMessages(msgs []agent.Message) {
 			}
 			if u.ContextWindow > 0 {
 				t.reportedContextWindow = u.ContextWindow
+			}
+		}
+		if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 {
+			if exit.Error != "" {
+				t.lastExitError = exit.Error
+			} else {
+				t.lastExitError = fmt.Sprintf("agent subprocess exited with code %d", exit.ExitCode)
 			}
 		}
 		if _, ok := m.(*agent.ResultMessage); ok {
@@ -1323,6 +1338,26 @@ func (t *Task) GenerateTitle(ctx context.Context) {
 	t.SetTitle(title)
 }
 
+// RecordSessionFailure marks an active startup/run session as failed and emits
+// a user-visible error result. It returns false if the task is no longer in a
+// state owned by the active agent session.
+func (t *Task) RecordSessionFailure(ctx context.Context, err error) bool {
+	if _, changed := t.SetStateIfAny(StateFailed, StateStarting, StateRunning); !changed {
+		return false
+	}
+	msg := "Agent session failed: " + err.Error()
+	if exitErr := t.LastExitError(); exitErr != "" {
+		msg = "Agent session failed: " + exitErr
+	}
+	t.addMessage(ctx, &agent.ResultMessage{
+		MessageType: "result",
+		Subtype:     "error",
+		IsError:     true,
+		Result:      msg,
+	}, true)
+	return true
+}
+
 // setState updates the state and records the transition time. The caller must
 // hold t.mu when called from a locked context, or ensure exclusive access.
 func (t *Task) setState(s State) {
@@ -1411,6 +1446,13 @@ func (t *Task) addMessage(ctx context.Context, m agent.Message, skipTitleGen boo
 	// Update live diff stat from relay polling.
 	if ds, ok := m.(*agent.DiffStatMessage); ok {
 		t.liveDiffStat = ds.DiffStat
+	}
+	if exit, ok := m.(*agent.ExitMessage); ok && exit.ExitCode != 0 {
+		if exit.Error != "" {
+			t.lastExitError = exit.Error
+		} else {
+			t.lastExitError = fmt.Sprintf("agent subprocess exited with code %d", exit.ExitCode)
+		}
 	}
 	// compact_boundary resets TotalCostUSD in Claude Code's subsequent
 	// ResultMessages (same as context_cleared). Snapshot priors so the

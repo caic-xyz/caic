@@ -37,6 +37,26 @@ import (
 // errTaskNotFound is returned when a task ID doesn't exist.
 var errTaskNotFound = &Error{Kind: KindNotFound, Msg: "task not found"}
 
+type relayReader interface {
+	Status(ctx context.Context, container string) (bool, string, error)
+	ReadTail(ctx context.Context, container string, parseFn func([]byte) ([]agent.Message, error), maxBytes int64) ([]agent.Message, int64, error)
+	ReadLog(ctx context.Context, container string, maxBytes int) string
+}
+
+type agentRelayReader struct{}
+
+func (agentRelayReader) Status(ctx context.Context, container string) (alive bool, diag string, err error) {
+	return agent.RelayStatus(ctx, container)
+}
+
+func (agentRelayReader) ReadTail(ctx context.Context, container string, parseFn func([]byte) ([]agent.Message, error), maxBytes int64) (msgs []agent.Message, size int64, err error) {
+	return agent.ReadRelayTail(ctx, container, parseFn, maxBytes)
+}
+
+func (agentRelayReader) ReadLog(ctx context.Context, container string, maxBytes int) string {
+	return agent.ReadRelayLog(ctx, container, maxBytes)
+}
+
 // Config holds the dependencies Manager needs at construction.
 type Config struct {
 	// ServerCtx tracks the Manager's own lifetime. Used as the parent for
@@ -71,6 +91,7 @@ type Manager struct {
 	harnessEnv map[string][]string
 	prefs      *preferences.Store
 	provider   genai.Provider
+	relay      relayReader
 
 	// Guarded by mu.
 	mu      sync.Mutex
@@ -93,6 +114,7 @@ func New(cfg Config) *Manager { //nolint:gocritic // Config is a value bag passe
 		harnessEnv: cfg.HarnessEnv,
 		prefs:      cfg.Prefs,
 		provider:   cfg.Provider,
+		relay:      agentRelayReader{},
 		tasks:      make(map[string]*Entry),
 		runners:    make(map[string]*task.Runner),
 		changed:    make(chan struct{}),
@@ -1308,23 +1330,21 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	var relayDiag string
 	if !isExited {
 		var relayErr error
-		relayAlive, relayDiag, relayErr = agent.RelayStatus(ctx, string(c.ID))
+		relayAlive, relayDiag, relayErr = m.relay.Status(ctx, string(c.ID))
 		if relayErr != nil {
 			slog.Warn("relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr, "diag", relayDiag)
 		}
-		if relayAlive {
-			b, ok := runner.Backends[harnessName]
-			if !ok {
-				slog.Warn("relay", "msg", "no backend for harness", "harness", harnessName, "instance", c.ID)
+		b, ok := runner.Backends[harnessName]
+		if !ok {
+			slog.Warn("relay", "msg", "no backend for harness", "harness", harnessName, "instance", c.ID)
+			relayAlive = false
+		} else {
+			readCtx, readCancel := context.WithTimeout(ctx, 30*time.Second)
+			relayMsgs, relaySize, relayErr = m.relay.ReadTail(readCtx, string(c.ID), b.NewWire().ParseMessage, 10<<20) // 10 MiB tail
+			readCancel()
+			if relayErr != nil {
+				slog.Warn("relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr)
 				relayAlive = false
-			} else {
-				readCtx, readCancel := context.WithTimeout(ctx, 30*time.Second)
-				relayMsgs, relaySize, relayErr = agent.ReadRelayTail(readCtx, string(c.ID), b.NewWire().ParseMessage, 10<<20) // 10 MiB tail
-				readCancel()
-				if relayErr != nil {
-					slog.Warn("relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr)
-					relayAlive = false
-				}
 			}
 		}
 	}
@@ -1437,11 +1457,11 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	}
 
 	// Restore messages from relay or logs.
-	if relayAlive && len(relayMsgs) > 0 {
+	if len(relayMsgs) > 0 {
 		t.RestoreMessages(relayMsgs)
 		applyLoadedSessionMetadata(t, lt)
 		t.SetRelayOffset(relaySize)
-		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "instance", c.ID, "msgs", len(relayMsgs))
+		slog.Debug("relay", "msg", "restored from", "repo", ri.RelPath, "br", branch, "instance", c.ID, "alive", relayAlive, "msgs", len(relayMsgs))
 	} else if lt != nil {
 		m.setParser(lt)
 		if err := lt.LoadMessages(); err != nil {
@@ -1474,12 +1494,14 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	if isExited {
 		t.SetState(task.StateStopped)
 	} else if !relayAlive {
-		relayLog := agent.ReadRelayLog(ctx, string(c.ID), 4096)
+		relayLog := m.relay.ReadLog(ctx, string(c.ID), 4096)
 		if relayLog != "" {
 			slog.Warn("relay", "msg", "log from dead relay", "instance", c.ID, "br", branch, "diag", relayDiag, "log", relayLog)
 		}
 		trace.Logf(ctx, "adopt", "%s: relay-dead", c.ID)
-		if t.GetState() == task.StateRunning {
+		if t.LastExitError() != "" {
+			t.RecordSessionFailure(ctx, errors.New("relay exited before adoption"))
+		} else if t.GetState() == task.StateRunning {
 			t.SetStateAt(task.StateWaiting, stateUpdatedAt)
 			slog.Warn("relay", "msg", "dead, marking waiting",
 				"repo", ri.RelPath, "br", branch, "instance", c.ID,
@@ -1488,6 +1510,27 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	}
 
 	entry := NewEntry(t)
+	if t.GetState() == task.StateFailed {
+		failureErr := errors.New("agent session failed")
+		if exitErr := t.LastExitError(); exitErr != "" {
+			failureErr = errors.New(exitErr)
+		}
+		costUSD, numTurns, duration, usage, _ := t.LiveStats()
+		result := &task.Result{
+			State:       task.StateFailed,
+			DiffStat:    t.LiveDiffStat(),
+			CostUSD:     costUSD,
+			Duration:    duration,
+			NumTurns:    numTurns,
+			Usage:       usage,
+			AgentResult: t.LastAgentResult(),
+			Err:         failureErr,
+		}
+		entry.Finish(result)
+		if err := writeAdoptedFailureTrailer(t, result); err != nil {
+			slog.Warn("write adopted failure trailer failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", err)
+		}
+	}
 
 	// Register entry, replacing stale log entries.
 	m.mu.Lock()
@@ -1533,7 +1576,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 			m.NotifyTaskChange()
 			m.watchSession(entry, runner, h)
 		}()
-	} else if !relayAlive && t.GetState() != task.StateStopped {
+	} else if !relayAlive && t.GetState() != task.StateStopped && t.GetState() != task.StateFailed {
 		slog.Error("relay dead, stopping instance",
 			"repo", ri.RelPath, "br", branch, "instance", c.ID,
 			"state", t.GetState())
@@ -1554,6 +1597,27 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		Branch:         branch,
 		FoundPRFromLog: foundPRFromLog,
 	}, nil
+}
+
+func writeAdoptedFailureTrailer(t *task.Task, r *task.Result) error {
+	msg := &agent.MetaResultMessage{
+		MessageType:              "caic_result",
+		State:                    r.State.String(),
+		Title:                    t.Title(),
+		CostUSD:                  r.CostUSD,
+		Duration:                 r.Duration.Seconds(),
+		NumTurns:                 r.NumTurns,
+		InputTokens:              r.Usage.InputTokens,
+		OutputTokens:             r.Usage.OutputTokens,
+		CacheCreationInputTokens: r.Usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     r.Usage.CacheReadInputTokens,
+		DiffStat:                 r.DiffStat,
+		AgentResult:              r.AgentResult,
+	}
+	if r.Err != nil {
+		msg.Error = r.Err.Error()
+	}
+	return t.WriteToLog(msg)
 }
 
 func refreshAdoptedDiffStat(ctx context.Context, runner *task.Runner, t *task.Task) {
@@ -1591,15 +1655,14 @@ func (m *Manager) loadTaskMessagesOnDemand(entry *Entry) {
 	})
 }
 
-// watchSession monitors a single active session. When the session's SSH
-// process exits, it transitions the task to StateWaiting.
+// watchSession monitors a single active session. Clean session exits move the
+// task to StateWaiting; SSH/session errors fail the task and stop the instance.
 func (m *Manager) watchSession(entry *Entry, runner *task.Runner, h *task.SessionHandle) {
-	_ = runner // kept for interface consistency
 	go func() {
 		t := entry.Task()
-		ctx, tk := trace.NewTask(m.serverCtx, "session.watch:"+t.ID.String())
+		traceCtx, tk := trace.NewTask(m.serverCtx, "session.watch:"+t.ID.String())
 		defer tk.End()
-		_ = ctx
+		_ = traceCtx
 		done := h.Session.Done()
 		select {
 		case <-done:
@@ -1623,16 +1686,46 @@ func (m *Manager) watchSession(entry *Entry, runner *task.Runner, h *task.Sessio
 			}
 			attrs := []any{"repo", watchPrimaryName, "br", watchPrimaryBranch, "instance", t.RuntimeInstanceID()}
 			if sessionErr != nil {
-				attrs = append(attrs, "err", sessionErr)
-				slog.Warn("session exited with error", attrs...)
+				slog.Warn("session exited with error", append(attrs, "err", sessionErr)...)
+				if t.RecordSessionFailure(m.serverCtx, sessionErr) {
+					m.stopFailedSessionInstance(runner, t, attrs)
+					failureErr := sessionErr
+					if exitErr := t.LastExitError(); exitErr != "" {
+						failureErr = errors.New(exitErr)
+					}
+					costUSD, numTurns, duration, usage, _ := t.LiveStats()
+					entry.Finish(&task.Result{
+						State:       task.StateFailed,
+						DiffStat:    t.LiveDiffStat(),
+						CostUSD:     costUSD,
+						Duration:    duration,
+						NumTurns:    numTurns,
+						Usage:       usage,
+						AgentResult: t.LastAgentResult(),
+						Err:         failureErr,
+					})
+				}
 			} else {
 				slog.Info("session exited", attrs...)
+				t.SetStateIf(task.StateRunning, task.StateWaiting)
 			}
-			t.SetStateIf(task.StateRunning, task.StateWaiting)
 			m.NotifyTaskChange()
 		case <-entry.Done():
 		}
 	}()
+}
+
+func (m *Manager) stopFailedSessionInstance(runner *task.Runner, t *task.Task, attrs []any) {
+	if runner == nil || runner.Runtime == nil {
+		return
+	}
+	id := t.RuntimeInstanceID()
+	if id == "" {
+		return
+	}
+	if err := runner.Runtime.Stop(m.serverCtx, id); err != nil {
+		slog.ErrorContext(m.serverCtx, "stop failed after session error", append(attrs, "err", err)...)
+	}
 }
 
 // cleanupTask runs runner.Cleanup exactly once per task.

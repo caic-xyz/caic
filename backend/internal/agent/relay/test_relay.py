@@ -727,6 +727,92 @@ def test_reconnect_after_ssh_drop_then_shutdown():
         _cleanup(relay_dir)
 
 
+def test_caic_exit_includes_stderr():
+    """A subprocess stderr failure is recorded in caic_exit.error."""
+    relay_dir = tempfile.mkdtemp(prefix="caic-relay-test-")
+    output_path = os.path.join(relay_dir, "output.jsonl")
+    env = _make_env(relay_dir)
+
+    try:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                RELAY_PY,
+                "serve-attach",
+                "--dir",
+                relay_dir,
+                "--",
+                sys.executable,
+                "-c",
+                "import sys; print('Unknown option: --approve', file=sys.stderr); sys.exit(2)",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        proc.stdin.close()
+        proc.wait(timeout=10)
+
+        with open(output_path) as f:
+            lines = [json.loads(line) for line in f if line.strip()]
+        exit_events = [line for line in lines if line.get("type") == "caic_exit"]
+        assert exit_events, f"output.jsonl missing caic_exit: {lines!r}"
+        event = exit_events[-1]
+        assert event["exit_code"] == 2, event
+        assert event["cmd"][:2] == [sys.executable, "-c"], event
+        assert "Unknown option: --approve" in event.get("error", ""), event
+    finally:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        _cleanup(relay_dir)
+
+
+def test_popen_failure_writes_caic_exit():
+    """A command that cannot be spawned still produces a structured caic_exit."""
+    relay_dir = tempfile.mkdtemp(prefix="caic-relay-test-")
+    output_path = os.path.join(relay_dir, "output.jsonl")
+    env = _make_env(relay_dir)
+    proc = None
+
+    try:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                RELAY_PY,
+                "serve-attach",
+                "--dir",
+                relay_dir,
+                "--",
+                os.path.join(relay_dir, "missing-agent"),
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        stdout, _ = proc.communicate(timeout=10)
+
+        with open(output_path) as f:
+            lines = [json.loads(line) for line in f if line.strip()]
+        exit_events = [line for line in lines if line.get("type") == "caic_exit"]
+        assert exit_events, f"output.jsonl missing caic_exit: {lines!r}"
+        event = exit_events[-1]
+        assert event["exit_code"] == -1, event
+        assert "missing-agent" in event.get("error", ""), event
+        assert b"caic_exit" in stdout, stdout
+        assert b"missing-agent" in stdout, stdout
+    finally:
+        if proc is not None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        _cleanup(relay_dir)
+
+
 def test_parse_numstat():
     """Test _parse_numstat parses git diff --numstat output correctly."""
     # Import the module under test.
@@ -772,6 +858,8 @@ if __name__ == "__main__":
         test_shutdown_sigkill_escalation,
         test_attach_client_receives_final_output,
         test_reconnect_after_ssh_drop_then_shutdown,
+        test_caic_exit_includes_stderr,
+        test_popen_failure_writes_caic_exit,
     ]
     failed = []
     for t in tests:

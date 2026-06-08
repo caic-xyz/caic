@@ -390,12 +390,16 @@ func (m *DiffStatMessage) Type() string { return "caic_diff_stat" }
 
 // ExitMessage is written by the relay to output.jsonl when the agent
 // subprocess exits, regardless of shutdown reason (crash, sentinel, EOF).
-// It carries the exit code and timestamp so the backend can diagnose why
-// a relay session ended without parsing relay.log.
+// It carries the exit code, command, signal, stderr, and timestamp so the
+// backend can diagnose why a relay session ended without parsing relay.log.
 type ExitMessage struct {
-	MessageType string  `json:"type"`
-	ExitCode    int     `json:"exit_code"`
-	Ts          float64 `json:"ts,omitempty"`
+	MessageType     string   `json:"type"`
+	ExitCode        int      `json:"exit_code"`
+	Command         []string `json:"cmd,omitempty"`
+	Signal          int      `json:"signal,omitempty"`
+	Error           string   `json:"error,omitempty"`
+	StderrTruncated bool     `json:"stderr_truncated,omitempty"`
+	Ts              float64  `json:"ts,omitempty"`
 }
 
 // Type implements Message.

@@ -107,6 +107,30 @@ func TestTask(t *testing.T) {
 			t.Fatal("Snapshot exposed mutable repo storage")
 		}
 	})
+	t.Run("RestoreMessagesCapturesExitError", func(t *testing.T) {
+		t.Parallel()
+		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.RestoreMessages([]agent.Message{&agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}})
+		if got := tk.LastExitError(); got != "Unknown option: --approve" {
+			t.Errorf("LastExitError = %q, want relay stderr", got)
+		}
+	})
+	t.Run("RecordSessionFailure", func(t *testing.T) {
+		t.Parallel()
+		tk := &Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "test"}}
+		tk.SetState(StateStarting)
+		tk.addMessage(t.Context(), &agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}, true)
+
+		if !tk.RecordSessionFailure(t.Context(), errors.New("agent exited: exit status 2")) {
+			t.Fatal("RecordSessionFailure returned false")
+		}
+		if got := tk.GetState(); got != StateFailed {
+			t.Errorf("state = %v, want %v", got, StateFailed)
+		}
+		if got := tk.LastAgentResult(); !strings.Contains(got, "Unknown option: --approve") {
+			t.Errorf("LastAgentResult = %q, want relay stderr", got)
+		}
+	})
 	t.Run("Subscribe", func(t *testing.T) {
 		t.Parallel()
 		t.Run("SlowSubscriberThenCancel", func(t *testing.T) {

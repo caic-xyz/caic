@@ -25,6 +25,24 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task/tasktest"
 )
 
+type fakeRelayReader struct {
+	statusFn   func(context.Context, string) (bool, string, error)
+	readTailFn func(context.Context, string, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error)
+	readLogFn  func(context.Context, string, int) string
+}
+
+func (f fakeRelayReader) Status(ctx context.Context, container string) (alive bool, diag string, err error) {
+	return f.statusFn(ctx, container)
+}
+
+func (f fakeRelayReader) ReadTail(ctx context.Context, container string, parseFn func([]byte) ([]agent.Message, error), maxBytes int64) (msgs []agent.Message, size int64, err error) {
+	return f.readTailFn(ctx, container, parseFn, maxBytes)
+}
+
+func (f fakeRelayReader) ReadLog(ctx context.Context, container string, maxBytes int) string {
+	return f.readLogFn(ctx, container, maxBytes)
+}
+
 func TestNew(t *testing.T) {
 	t.Parallel()
 	t.Run("valid", func(t *testing.T) {
@@ -1790,6 +1808,52 @@ func TestManager(t *testing.T) {
 			}
 		})
 	})
+	t.Run("watchSession", func(t *testing.T) {
+		t.Run("valid_session_error_stops_instance", func(t *testing.T) {
+			t.Parallel()
+			cmd := exec.CommandContext(t.Context(), "sh", "-c", "exit 255")
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			msgCh := make(chan agent.Message, 1)
+			dispatchDone := make(chan struct{})
+			close(dispatchDone)
+			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, codex.New("", nil).NewWire()), stdout, msgCh, nil)
+			h := &task.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
+			tk.SetRuntimeInstanceInfo("ssh-failed", "", "", 0)
+			tk.SetState(task.StateRunning)
+			tk.AttachSession(h)
+			entry := NewEntry(tk)
+			runtimeBackend := &tasktest.FakeRuntimeBackend{}
+			m := New(Config{ServerCtx: t.Context()})
+
+			m.watchSession(entry, &task.Runner{Runtime: runtimeBackend}, h)
+
+			select {
+			case <-entry.Done():
+			case <-time.After(time.Second):
+				t.Fatal("watchSession did not finish")
+			}
+			if got := tk.GetState(); got != task.StateFailed {
+				t.Fatalf("state = %v, want failed", got)
+			}
+			if got := runtimeBackend.Count("Stop"); got != 1 {
+				t.Fatalf("Stop count = %d, want 1", got)
+			}
+			if got := runtimeBackend.Calls()[0].Name; got != "ssh-failed" {
+				t.Fatalf("Stop instance = %q, want ssh-failed", got)
+			}
+		})
+	})
 	t.Run("SetParser", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid_with_backend", func(t *testing.T) {
@@ -2024,6 +2088,126 @@ func TestManager(t *testing.T) {
 			}
 			if m.Len() != 1 {
 				t.Errorf("manager Len = %d, want 1", m.Len())
+			}
+		})
+		t.Run("valid_dead_relay_exit_error_fails_adopted_task", func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+			defer cancel()
+			taskID := ksid.NewID()
+			fake := &fakeMD{metadata: map[string]string{
+				"dead-relay\x00caic.id":      taskID.String(),
+				"dead-relay\x00caic.harness": string(agent.Claude),
+			}}
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
+			m.RegisterRunner("caic-xyz/caic", &task.Runner{
+				Dir:      "/home/user/src/caic-xyz/caic",
+				Backends: map[agent.Harness]agent.Backend{agent.Claude: &fakeBackend{models: []string{"m1"}}},
+			})
+
+			logDir := t.TempDir()
+			meta, err := json.Marshal(agent.MetaMessage{
+				MessageType: "caic_meta",
+				Version:     1,
+				Prompt:      "dead relay task",
+				Repos:       []agent.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-7"}},
+				Harness:     agent.Claude,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			logPath := filepath.Join(logDir, "dead-relay.jsonl")
+			body := string(meta) + "\n" + `{"type":"caic_exit","exit_code":2,"error":"Unknown option: --approve"}` + "\n"
+			if err := os.WriteFile(logPath, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			logs, err := task.LoadLogs(logDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			adopted, err := m.AdoptInstances(ctx, []AdoptRepo{
+				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
+			}, []runtime.Instance{
+				{
+					ID:    "dead-relay",
+					State: "running",
+					Repos: []runtime.Repo{{
+						HostPath:  "/home/user/src/caic-xyz/caic",
+						Branch:    "caic-7",
+						MountPath: "/home/user/src/caic-xyz/caic",
+					}},
+				},
+			}, logs)
+			if err != nil {
+				t.Fatalf("AdoptInstances: %v", err)
+			}
+			if len(adopted) != 1 {
+				t.Fatalf("adopted len = %d, want 1", len(adopted))
+			}
+			if got := adopted[0].Task.GetState(); got != task.StateFailed {
+				t.Errorf("state = %v, want failed", got)
+			}
+			if adopted[0].Entry.Result() == nil {
+				t.Fatal("entry result is nil")
+			}
+			if err := adopted[0].Entry.Result().Err; err == nil || !strings.Contains(err.Error(), "Unknown option: --approve") {
+				t.Fatalf("result err = %v, want relay stderr", err)
+			}
+			persisted, err := os.ReadFile(logPath) //nolint:gosec // test-controlled temp path
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(persisted), `"type":"caic_result"`) || !strings.Contains(string(persisted), `"state":"failed"`) {
+				t.Fatalf("log missing failed caic_result trailer:\n%s", persisted)
+			}
+		})
+		t.Run("valid_dead_relay_tail_exit_error_fails_adopted_task", func(t *testing.T) {
+			t.Parallel()
+			taskID := ksid.NewID()
+			fake := &fakeMD{metadata: map[string]string{
+				"dead-relay-tail\x00caic.id":      taskID.String(),
+				"dead-relay-tail\x00caic.harness": string(agent.Claude),
+			}}
+			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
+			m.relay = fakeRelayReader{
+				statusFn: func(context.Context, string) (bool, string, error) {
+					return false, "dead", nil
+				},
+				readTailFn: func(context.Context, string, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error) {
+					return []agent.Message{&agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}}, 128, nil
+				},
+				readLogFn: func(context.Context, string, int) string { return "relay exited" },
+			}
+			m.RegisterRunner("caic-xyz/caic", &task.Runner{
+				Dir:      "/home/user/src/caic-xyz/caic",
+				Backends: map[agent.Harness]agent.Backend{agent.Claude: &fakeBackend{models: []string{"m1"}}},
+			})
+
+			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{
+				{RelPath: "caic-xyz/caic", AbsPath: "/home/user/src/caic-xyz/caic"},
+			}, []runtime.Instance{
+				{
+					ID:    "dead-relay-tail",
+					State: "running",
+					Repos: []runtime.Repo{{
+						HostPath:  "/home/user/src/caic-xyz/caic",
+						Branch:    "caic-8",
+						MountPath: "/home/user/src/caic-xyz/caic",
+					}},
+				},
+			}, nil)
+			if err != nil {
+				t.Fatalf("AdoptInstances: %v", err)
+			}
+			if len(adopted) != 1 {
+				t.Fatalf("adopted len = %d, want 1", len(adopted))
+			}
+			if got := adopted[0].Task.GetState(); got != task.StateFailed {
+				t.Fatalf("state = %v, want failed", got)
+			}
+			if err := adopted[0].Entry.Result().Err; err == nil || !strings.Contains(err.Error(), "Unknown option: --approve") {
+				t.Fatalf("result err = %v, want relay stderr", err)
 			}
 		})
 		t.Run("valid_loads_legacy_codex_session_metadata", func(t *testing.T) {

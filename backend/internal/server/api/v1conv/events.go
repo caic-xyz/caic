@@ -4,6 +4,7 @@ package v1conv
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
@@ -237,6 +238,19 @@ func (tt *ToolTimingTracker) ConvertMessage(msg agent.Message, now time.Time) []
 			Kind:  v1.EventKindError,
 			Ts:    ts,
 			Error: &v1.EventError{Err: m.Err, Line: m.Line},
+		}}
+	case *agent.ExitMessage:
+		if m.ExitCode == 0 {
+			return nil
+		}
+		err := m.Error
+		if err == "" {
+			err = fmt.Sprintf("agent subprocess exited with code %d", m.ExitCode)
+		}
+		return []v1.EventMessage{{
+			Kind:  v1.EventKindError,
+			Ts:    ts,
+			Error: &v1.EventError{Err: err},
 		}}
 	case *agent.LogMessage:
 		return []v1.EventMessage{{

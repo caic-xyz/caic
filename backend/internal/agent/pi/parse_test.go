@@ -84,6 +84,26 @@ func TestBackendNewWire(t *testing.T) {
 		}
 	})
 
+	t.Run("caic_exit carries relay stderr", func(t *testing.T) {
+		t.Parallel()
+		parser := New("", nil).NewWire().ParseMessage
+		line := []byte(`{"type":"caic_exit","exit_code":2,"error":"Unknown option: --approve"}`)
+		msgs, err := parser(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(msgs) != 1 {
+			t.Fatalf("got %d messages, want 1", len(msgs))
+		}
+		exit, ok := msgs[0].(*agent.ExitMessage)
+		if !ok {
+			t.Fatalf("got %T, want ExitMessage", msgs[0])
+		}
+		if exit.ExitCode != 2 || exit.Error != "Unknown option: --approve" {
+			t.Errorf("exit = %+v, want code 2 with stderr", exit)
+		}
+	})
+
 	t.Run("prompt command parses to UserInputMessage", func(t *testing.T) {
 		t.Parallel()
 		parser := New("", nil).NewWire().ParseMessage
