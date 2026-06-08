@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fghbuild.caic.data.ServerConfig
+import java.util.Locale
 
 private val VoiceNames = listOf("Orus", "Puck", "Charon", "Kore", "Fenrir", "Aoede")
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -236,12 +237,11 @@ fun SettingsScreen(
             Text("Well-known caches", style = MaterialTheme.typography.titleMedium)
             screenState.wellKnownCachesList.forEach { cache ->
                 val currentlyOn = screenState.wellKnownCaches[cache.name] == true
+                val cacheSize = screenState.wellKnownCacheSizes[cache.name]
                 ListItem(
                     headlineContent = { Text(cache.name) },
-                    supportingContent = if (cache.description.isNotBlank()) {
-                        { Text(cache.description) }
-                    } else {
-                        null
+                    supportingContent = {
+                        Text(cacheSupportingText(cache.description, cacheSize?.sizeBytes, cacheSize?.error))
                     },
                     leadingContent = {
                         Checkbox(
@@ -474,5 +474,30 @@ private fun ConnectionStatusIndicator(status: ConnectionStatus) {
             tint = Color(0xFFF44336),
             modifier = Modifier.size(24.dp),
         )
+    }
+}
+
+private fun cacheSupportingText(description: String, sizeBytes: Long?, error: String?): String {
+    val size = when {
+        error != null -> "error"
+        sizeBytes != null -> formatCacheBytes(sizeBytes)
+        else -> "pending"
+    }
+    return if (description.isBlank()) size else "$description · $size"
+}
+
+private fun formatCacheBytes(bytes: Long): String {
+    if (bytes <= 0L) return "0 B"
+    val units = listOf("B", "KiB", "MiB", "GiB", "TiB")
+    var value = bytes.toDouble()
+    var unitIndex = 0
+    while (value >= 1024.0 && unitIndex < units.lastIndex) {
+        value /= 1024.0
+        unitIndex++
+    }
+    return if (value >= 10.0 || unitIndex == 0) {
+        String.format(Locale.US, "%.0f %s", value, units[unitIndex])
+    } else {
+        String.format(Locale.US, "%.1f %s", value, units[unitIndex])
     }
 }

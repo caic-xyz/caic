@@ -60,6 +60,7 @@ func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocrit
 		absRoot:            d.AbsRoot,
 		logDir:             d.LogDir,
 		cacheDir:           d.CacheDir,
+		cacheSizes:         newCacheSizeStore(),
 		harnessEnv:         d.HarnessEnv,
 		tailscaleAvailable: d.Tailscale,
 		prefs:              d.Preferences,
@@ -181,6 +182,7 @@ func (s *Server) initConcernAdapters() {
 			authProviders:         s.authProviders,
 			voiceGatewayMetadata:  s.voiceHandlers.metadata,
 			newRunner:             s.newRunner,
+			cacheSizes:            s.cacheSizes,
 		}
 	}
 	if s.botHandlers == nil {

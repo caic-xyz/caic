@@ -600,6 +600,19 @@ type WellKnownCachesResp struct {
 	WellKnown     []WellKnownCache `json:"wellKnown"`
 }
 
+// CacheSize describes the most recent size snapshot for a well-known cache.
+type CacheSize struct {
+	Name         string    `json:"name"`
+	SizeBytes    int64     `json:"sizeBytes"`
+	CalculatedAt time.Time `json:"calculatedAt,omitzero"`
+	Error        string    `json:"error,omitempty"`
+}
+
+// CacheSizesResp is the response for GET /api/caic/v1/server/cache-sizes.
+type CacheSizesResp struct {
+	WellKnown []CacheSize `json:"wellKnown"`
+}
+
 // VersionResp is the response for GET /api/caic/v1/server/version.
 type VersionResp struct {
 	Current      string `json:"current"`

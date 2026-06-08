@@ -49,6 +49,7 @@ type serverConfigHandlers struct {
 	authProviders         func() []string
 	voiceGatewayMetadata  func() v1.VoiceGatewayMetadata
 	newRunner             func(context.Context, *RepoInfo) (*task.Runner, error)
+	cacheSizes            *cacheSizeStore
 }
 
 func (h *serverConfigHandlers) getConfig(_ context.Context, _ *api.EmptyReq) (*v1.Config, error) {
@@ -279,6 +280,13 @@ func (h *serverConfigHandlers) listCaches(_ context.Context, _ *api.EmptyReq) (*
 		HarnessMounts: harnessMounts,
 		WellKnown:     wellKnown,
 	}, nil
+}
+
+func (h *serverConfigHandlers) getCacheSizes(_ context.Context, _ *api.EmptyReq) (*v1.CacheSizesResp, error) {
+	if h.cacheSizes == nil {
+		return &v1.CacheSizesResp{}, nil
+	}
+	return &v1.CacheSizesResp{WellKnown: h.cacheSizes.Snapshot()}, nil
 }
 
 func (h *serverConfigHandlers) listRepos(_ context.Context, _ *api.EmptyReq) (*[]v1.Repo, error) {

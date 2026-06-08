@@ -22,6 +22,7 @@ vi.mock("./api", () => ({
   getPreferences: vi.fn(),
   listHarnesses: vi.fn(),
   listCaches: vi.fn(() => Promise.resolve(null)),
+  getCacheSizes: vi.fn(() => Promise.resolve(null)),
   getConfig: vi.fn(),
   getVersion: vi.fn(),
   triggerUpdate: vi.fn(),

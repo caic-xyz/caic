@@ -117,6 +117,13 @@ var Routes = []Route{
 		Resp:   reflect.TypeFor[WellKnownCachesResp](),
 	},
 	{
+		Name:   "getCacheSizes",
+		Doc:    "Returns the latest size snapshot for well-known caches.",
+		Method: "GET",
+		Path:   "/api/caic/v1/server/cache-sizes",
+		Resp:   reflect.TypeFor[CacheSizesResp](),
+	},
+	{
 		Name:    "listRepos",
 		Doc:     "Lists all discovered repositories.",
 		Method:  "GET",

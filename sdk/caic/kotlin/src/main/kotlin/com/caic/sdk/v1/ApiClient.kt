@@ -102,6 +102,8 @@ class ApiClient(
     suspend fun listHarnesses(): List<HarnessInfo> = request("GET", "/api/caic/v1/server/harnesses")
     /** Lists well-known cache configurations. */
     suspend fun listCaches(): WellKnownCachesResp = request("GET", "/api/caic/v1/server/caches")
+    /** Returns the latest size snapshot for well-known caches. */
+    suspend fun getCacheSizes(): CacheSizesResp = request("GET", "/api/caic/v1/server/cache-sizes")
     /** Lists all discovered repositories. */
     suspend fun listRepos(): List<Repo> = request("GET", "/api/caic/v1/server/repos")
     /** Clones a repository into the server's root directory. */

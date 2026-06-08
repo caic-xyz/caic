@@ -1,6 +1,6 @@
 // SettingsForm renders the application settings controls.
 import { For, Show, type Accessor, type Setter } from "solid-js";
-import type { CacheMappingResp, MountMappingResp, Platform, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
+import type { CacheMappingResp, CacheSize, MountMappingResp, Platform, UpdatePreferencesReq, VersionResp, WellKnownCachesResp } from "@sdk/types.gen";
 import styles from "./SettingsForm.module.css";
 
 type SettingsOverrides = Partial<UpdatePreferencesReq["settings"]>;
@@ -15,6 +15,7 @@ interface SettingsFormProps {
   wellKnownCaches: Accessor<Record<string, boolean | undefined>>;
   setWellKnownCaches: Setter<Record<string, boolean | undefined>>;
   wellKnownCachesList: Accessor<WellKnownCachesResp["wellKnown"]>;
+  wellKnownCacheSizes: Accessor<Record<string, CacheSize | undefined>>;
   cacheMappings: Accessor<CacheMappingResp[]>;
   setCacheMappings: Setter<CacheMappingResp[]>;
   customMounts: Accessor<MountMappingResp[]>;
@@ -33,6 +34,19 @@ interface SettingsFormProps {
 }
 
 export default function SettingsForm(props: SettingsFormProps) {
+  const formatBytes = (bytes: number): string => {
+    if (bytes <= 0) return "0 B";
+    const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+    const i = Math.min(Math.floor(Math.log2(bytes) / 10), units.length - 1);
+    const value = bytes / (1024 ** i);
+    return `${value >= 10 || i === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[i]}`;
+  };
+  const cacheSizeLabel = (name: string): string => {
+    const size = props.wellKnownCacheSizes()[name];
+    if (!size) return "pending";
+    if (size.error) return "error";
+    return formatBytes(size.sizeBytes ?? 0);
+  };
   const updateCacheMapping = (index: number, update: Partial<CacheMappingResp>) => {
     props.setCacheMappings((prev) => prev.map((mapping, i) => (
       i === index ? { ...mapping, ...update } : mapping
@@ -118,7 +132,8 @@ export default function SettingsForm(props: SettingsFormProps) {
                         void props.saveSettings({ wellKnownCaches: newCaches as Record<string, boolean> });
                       }}
                     />
-                    {cache.name}
+                    <span class={styles.cacheName}>{cache.name}</span>
+                    <span class={styles.cacheSize}>{cacheSizeLabel(cache.name)}</span>
                   </label>
                 );
               }}

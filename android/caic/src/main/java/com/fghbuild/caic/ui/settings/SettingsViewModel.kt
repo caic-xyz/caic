@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import android.util.Log
 import com.caic.sdk.v1.ApiClient
 import com.caic.sdk.v1.CacheMappingResp
+import com.caic.sdk.v1.CacheSize
 import com.caic.sdk.v1.MountMappingResp
 import com.caic.sdk.v1.Platform
 import com.caic.sdk.v1.UpdatePreferencesReq
@@ -38,6 +39,7 @@ data class SettingsScreenState(
     val maxCPUs: String = "",
     val wellKnownCaches: Map<String, Boolean> = emptyMap(),
     val wellKnownCachesList: List<WellKnownCache> = emptyList(),
+    val wellKnownCacheSizes: Map<String, CacheSize> = emptyMap(),
     val cacheMappings: List<CacheMappingResp> = emptyList(),
     val customMounts: List<MountMappingResp> = emptyList(),
     val serverVersion: String = "",
@@ -171,6 +173,10 @@ class SettingsViewModel @Inject constructor(
                     Log.w(TAG, "Failed to list caches", e)
                     null
                 }
+                val cacheSizes = try { client.getCacheSizes() } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+                    Log.w(TAG, "Failed to get cache sizes", e)
+                    null
+                }
                 val config = try { client.getConfig() } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
                     Log.w(TAG, "Failed to get config", e)
                     null
@@ -184,6 +190,7 @@ class SettingsViewModel @Inject constructor(
                         maxCPUs = prefs.settings.maxCPUs?.toString() ?: "",
                         wellKnownCaches = prefs.settings.wellKnownCaches ?: emptyMap(),
                         wellKnownCachesList = caches?.wellKnown ?: emptyList(),
+                        wellKnownCacheSizes = cacheSizes?.wellKnown?.associateBy { it.name } ?: emptyMap(),
                         cacheMappings = prefs.settings.cacheMappings ?: emptyList(),
                         customMounts = prefs.settings.customMounts ?: emptyList(),
                         serverVersion = config?.version ?: "",

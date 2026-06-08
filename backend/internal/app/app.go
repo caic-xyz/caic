@@ -333,6 +333,12 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 		trace.Log(ctx, "startup", "refresh-harness-models: begin")
 		s.RefreshHarnessModels() //nolint:contextcheck // Server-lifetime goroutine uses s.ctx internally.
 	}()
+	go func() {
+		_, tk := trace.NewTask(ctx, "refresh-cache-sizes")
+		defer tk.End()
+		trace.Log(ctx, "startup", "refresh-cache-sizes: begin")
+		s.RefreshCacheSizesLoop()
+	}()
 	go s.WatchNewRepos()
 
 	return s, nil

@@ -15,6 +15,7 @@ export const {
   updatePreferences,
   listHarnesses,
   listCaches,
+  getCacheSizes,
   listRepos,
   cloneRepo,
   listRepoBranches,

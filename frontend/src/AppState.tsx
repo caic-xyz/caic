@@ -2,8 +2,8 @@
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 import { createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
-import type { Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, MountMappingResp, Platform, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
-import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
+import type { Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, CacheSize, MountMappingResp, Platform, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
+import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, getCacheSizes, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
 import { confirmTaskAction } from "./components/TaskCard";
@@ -54,6 +54,7 @@ function createAppStore() {
   const [containerPlatform, setContainerPlatform] = createSignal("");
   const [wellKnownCaches, setWellKnownCaches] = createSignal<Record<string, boolean | undefined>>({});
   const [wellKnownCachesList, setWellKnownCachesList] = createSignal<WellKnownCachesResp["wellKnown"]>([]);
+  const [wellKnownCacheSizes, setWellKnownCacheSizes] = createSignal<Record<string, CacheSize | undefined>>({});
   const [cacheMappings, setCacheMappings] = createSignal<CacheMappingResp[]>([]);
   const [customMounts, setCustomMounts] = createSignal<MountMappingResp[]>([]);
   const [versionInfo, setVersionInfo] = createSignal<VersionResp | null>(null);
@@ -164,15 +165,23 @@ function createAppStore() {
   // Track previous task states to detect transitions to "waiting".
   let prevStates = new Map<string, string>();
 
-  // Fetch version info when the settings page opens.
+  const updateWellKnownCacheSizes = (sizes: CacheSize[]) => {
+    setWellKnownCacheSizes(Object.fromEntries(sizes.map((size) => [size.name, size])));
+  };
+
+  // Fetch version and cache size info when the settings page opens.
   createEffect(() => {
     if (location.pathname !== "/settings") return;
     void (async () => {
       setCheckingUpdate(true);
       setVersionCheckError("");
       try {
-        const v = await getVersion();
+        const [v, sizes] = await Promise.all([
+          getVersion(),
+          getCacheSizes().catch(() => null),
+        ]);
         setVersionInfo(v);
+        if (sizes) updateWellKnownCacheSizes(sizes.wellKnown);
       } catch (e: unknown) {
         setVersionCheckError(e instanceof Error ? e.message : "Version check failed");
       } finally {
@@ -214,15 +223,17 @@ function createAppStore() {
     dataLoaded = true;
     void (async () => {
       try {
-        const [data, prefs, h, config, usageData, cachesData] = await Promise.all([
+        const [data, prefs, h, config, usageData, cachesData, cacheSizesData] = await Promise.all([
           listRepos(),
           getPreferences().catch(() => null),
           listHarnesses().catch(() => [] as HarnessInfo[]),
           getConfig().catch(() => null),
           getUsage().catch(() => null),
           listCaches().catch(() => null) as Promise<WellKnownCachesResp | null>,
+          getCacheSizes().catch(() => null),
         ]);
         if (cachesData) setWellKnownCachesList(cachesData.wellKnown);
+        if (cacheSizesData) updateWellKnownCacheSizes(cacheSizesData.wellKnown);
         const recentPaths = prefs?.repositories.map((r) => r.path) ?? [];
         const recentSet = new Set(recentPaths);
         const recentRepos = recentPaths.reduce<Repo[]>((acc, r) => {
@@ -725,7 +736,7 @@ function createAppStore() {
     // settings
     selectedImage, setSelectedImage, containerPlatform, setContainerPlatform,
     maxCPUs, setMaxCPUs, wellKnownCaches, setWellKnownCaches,
-    wellKnownCachesList, cacheMappings, setCacheMappings, customMounts, setCustomMounts,
+    wellKnownCachesList, wellKnownCacheSizes, cacheMappings, setCacheMappings, customMounts, setCustomMounts,
     autoFixCI, setAutoFixCI, autoFixPR, setAutoFixPR,
     versionInfo, versionCheckError, checkingUpdate, updating, updateStatus, saveSettings, triggerServerUpdate,
     // usage + connection

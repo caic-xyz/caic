@@ -731,6 +731,19 @@ data class WellKnownCache(
 @Serializable
 data class WellKnownCachesResp(val harnessMounts: List<String>, val wellKnown: List<WellKnownCache>)
 
+/** CacheSize describes the most recent size snapshot for a well-known cache. */
+@Serializable
+data class CacheSize(
+    val name: String,
+    val sizeBytes: Long,
+    val calculatedAt: Instant? = null,
+    val error: String? = null,
+)
+
+/** CacheSizesResp is the response for GET /api/caic/v1/server/cache-sizes. */
+@Serializable
+data class CacheSizesResp(val wellKnown: List<CacheSize>)
+
 /** BranchInfo describes a single branch with its origin. */
 @Serializable
 data class BranchInfo(val name: String, val remote: String? = null)

@@ -143,6 +143,10 @@ public final class ApiClient {
     public func listCaches() async throws -> WellKnownCachesResp {
         try await request("GET", path: "/api/caic/v1/server/caches")
     }
+    /// Returns the latest size snapshot for well-known caches.
+    public func getCacheSizes() async throws -> CacheSizesResp {
+        try await request("GET", path: "/api/caic/v1/server/cache-sizes")
+    }
     /// Lists all discovered repositories.
     public func listRepos() async throws -> [Repo] {
         try await request("GET", path: "/api/caic/v1/server/repos")

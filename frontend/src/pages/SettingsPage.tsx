@@ -17,6 +17,7 @@ export default function SettingsPage() {
         wellKnownCaches={s.wellKnownCaches}
         setWellKnownCaches={s.setWellKnownCaches}
         wellKnownCachesList={s.wellKnownCachesList}
+        wellKnownCacheSizes={s.wellKnownCacheSizes}
         cacheMappings={s.cacheMappings}
         setCacheMappings={s.setCacheMappings}
         customMounts={s.customMounts}

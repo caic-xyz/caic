@@ -15,6 +15,7 @@ RESTful JSON API served at `/api/caic/v1/`. SSE endpoints stream newline-delimit
 | POST | `/api/caic/v1/server/preferences` | Updates server settings and preferences. | `UpdatePreferencesReq` | `PreferencesResp` |
 | GET | `/api/caic/v1/server/harnesses` | Lists available coding agent harnesses. |  | `HarnessInfo[]` |
 | GET | `/api/caic/v1/server/caches` | Lists well-known cache configurations. |  | `WellKnownCachesResp` |
+| GET | `/api/caic/v1/server/cache-sizes` | Returns the latest size snapshot for well-known caches. |  | `CacheSizesResp` |
 | GET | `/api/caic/v1/server/repos` | Lists all discovered repositories. |  | `Repo[]` |
 | POST | `/api/caic/v1/server/repos` | Clones a repository into the server's root directory. | `CloneRepoReq` | `Repo` |
 | GET | `/api/caic/v1/server/repos/branches` | Lists branches for a repository. |  | `RepoBranchesResp` |
@@ -256,6 +257,25 @@ WellKnownCachesResp is the response for GET /api/caic/v1/server/caches.
 |-------|------|-------------|----------|
 | `harnessMounts` | `string[]` | e.g. "~/.claude", "~/.codex" | yes |
 | `wellKnown` | `WellKnownCache[]` |  | yes |
+
+### CacheSize
+
+CacheSize describes the most recent size snapshot for a well-known cache.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `name` | `string` |  | yes |
+| `sizeBytes` | `int64` |  | yes |
+| `calculatedAt` | `ISOTimestamp` |  |  |
+| `error` | `string` |  |  |
+
+### CacheSizesResp
+
+CacheSizesResp is the response for GET /api/caic/v1/server/cache-sizes.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `wellKnown` | `CacheSize[]` |  | yes |
 
 ### BranchInfo
 

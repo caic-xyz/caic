@@ -622,6 +622,19 @@ export interface WellKnownCachesResp {
   wellKnown: WellKnownCache[];
 }
 
+/** CacheSize describes the most recent size snapshot for a well-known cache. */
+export interface CacheSize {
+  name: string;
+  sizeBytes: number /* int64 */;
+  calculatedAt?: ISOTimestamp;
+  error?: string;
+}
+
+/** CacheSizesResp is the response for GET /api/caic/v1/server/cache-sizes. */
+export interface CacheSizesResp {
+  wellKnown: CacheSize[];
+}
+
 /** BranchInfo describes a single branch with its origin. */
 export interface BranchInfo {
   name: string;

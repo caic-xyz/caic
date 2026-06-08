@@ -91,6 +91,15 @@
   transition: background-color 0.15s, border-color 0.15s;
 }
 
+.cacheName {
+  font-weight: 500;
+}
+
+.cacheSize {
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 .cacheCheckbox:hover {
   border-color: var(--color-primary);
 }

@@ -487,6 +487,19 @@ public struct WellKnownCachesResp: Codable {
     public let wellKnown: [WellKnownCache]
 }
 
+/// CacheSize describes the most recent size snapshot for a well-known cache.
+public struct CacheSize: Codable {
+    public let name: String
+    public let sizeBytes: Int
+    public let calculatedAt: ISOTimestamp?
+    public let error: String?
+}
+
+/// CacheSizesResp is the response for GET /api/caic/v1/server/cache-sizes.
+public struct CacheSizesResp: Codable {
+    public let wellKnown: [CacheSize]
+}
+
 /// BranchInfo describes a single branch with its origin.
 public struct BranchInfo: Codable {
     public let name: String

@@ -66,6 +66,7 @@ type Server struct {
 	harnessEnv     map[string][]string
 	logDir         string
 	cacheDir       string
+	cacheSizes     *cacheSizeStore
 	ciCache        *forgecache.Cache
 	provider       genai.Provider // nil if LLM not configured
 	Bot            *bot.Bot
@@ -197,6 +198,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("POST /api/caic/v1/server/preferences", handle(serverConfig.updatePreferences))
 	apiMux.HandleFunc("GET /api/caic/v1/server/harnesses", handle(serverConfig.listHarnesses))
 	apiMux.HandleFunc("GET /api/caic/v1/server/caches", handle(serverConfig.listCaches))
+	apiMux.HandleFunc("GET /api/caic/v1/server/cache-sizes", handle(serverConfig.getCacheSizes))
 	apiMux.HandleFunc("GET /api/caic/v1/server/repos", handle(serverConfig.listRepos))
 	apiMux.HandleFunc("POST /api/caic/v1/server/repos", handle(serverConfig.cloneRepo))
 	apiMux.HandleFunc("POST /api/caic/v1/server/update", handle(serverConfig.triggerUpdate))
