@@ -1975,7 +1975,7 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 	t.Run("external", func(t *testing.T) {
 		t.Parallel()
 		h := &voiceHandlers{
-			Gateway: VoiceGatewayConfig{
+			gateway: VoiceGatewayConfig{
 				Mode: VoiceGatewayModeExternal,
 				URL:  "https://voice.example.com",
 			},
@@ -1995,8 +1995,8 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 	t.Run("embedded", func(t *testing.T) {
 		t.Parallel()
 		h := &voiceHandlers{
-			Bridge:  &voicertc.Bridge{},
-			Gateway: VoiceGatewayConfig{Mode: VoiceGatewayModeEmbedded},
+			bridge:  &voicertc.Bridge{},
+			gateway: VoiceGatewayConfig{Mode: VoiceGatewayModeEmbedded},
 		}
 		got := h.metadata()
 		if got.Mode != v1.VoiceGatewayModeEmbedded {

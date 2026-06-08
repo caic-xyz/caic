@@ -27,7 +27,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 	"github.com/caic-xyz/caic/backend/internal/usage"
-	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
 )
 
 type fakeCIHook func(ctx context.Context, t *task.Task)
@@ -65,7 +64,7 @@ type Server struct {
 
 	// Route handler concerns.
 	authHandlers         *authHandlers
-	botHandlers          *botHandlers
+	ciHandlers           *ciHandlers
 	serverConfigHandlers *serverConfigHandlers
 	taskHTTPHandlers     *taskHTTPHandlers
 	usageHandlers        *usageHandlers
@@ -78,8 +77,6 @@ type Server struct {
 
 	// Agent backends.
 	geminiAPIKey string
-	voiceBridge  *voicertc.Bridge
-	voiceGateway VoiceGatewayConfig
 
 	// Forge client management (throttles, App client, installation cache).
 	forge *ForgeManager
@@ -142,8 +139,8 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	go func() {
 		defer close(shutdownDone)
 		<-ctx.Done()
-		if s.voiceBridge != nil {
-			s.voiceBridge.CloseAll()
+		if s.voiceHandlers != nil && s.voiceHandlers.bridge != nil {
+			s.voiceHandlers.bridge.CloseAll()
 		}
 		shutdownCtx, shutdownCancel := context.WithTimeout(shutdownBase, 5*time.Second)
 		_ = srv.Shutdown(shutdownCtx)
@@ -193,8 +190,8 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("POST /api/caic/v1/server/repos", handle(serverConfig.cloneRepo))
 	apiMux.HandleFunc("POST /api/caic/v1/server/update", handle(serverConfig.triggerUpdate))
 	apiMux.HandleFunc("GET /api/caic/v1/server/repos/branches", serverConfig.handleListRepoBranches)
-	apiMux.HandleFunc("POST /api/caic/v1/bot/fix-ci", handle(s.botHandlers.fixCI))
-	apiMux.HandleFunc("POST /api/caic/v1/bot/fix-pr", handle(s.botHandlers.fixPR))
+	apiMux.HandleFunc("POST /api/caic/v1/bot/fix-ci", handle(s.ciHandlers.fixCI))
+	apiMux.HandleFunc("POST /api/caic/v1/bot/fix-pr", handle(s.ciHandlers.fixPR))
 	apiMux.HandleFunc("GET /api/caic/v1/tasks", handle(taskRoutes.service.listTasks))
 	apiMux.HandleFunc("POST /api/caic/v1/tasks", handle(taskRoutes.service.createTask))
 	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/raw_events", taskRoutes.handleTaskRawEvents)
@@ -207,7 +204,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/stop", handleWithTask(taskRoutes, taskRoutes.service.stopTask))
 	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/purge", handleWithTask(taskRoutes, taskRoutes.service.purgeTask))
 	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/revive", handleWithTask(taskRoutes, taskRoutes.service.reviveTask))
-	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/ci-log", s.botHandlers.handleGetCILog)
+	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/ci-log", s.ciHandlers.handleGetCILog)
 	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/sync", handleWithTask(taskRoutes, taskRoutes.service.syncTask))
 	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/diff", taskRoutes.handleGetDiff)
 	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/vnc/ws", taskRoutes.handleVNCWebSocket)

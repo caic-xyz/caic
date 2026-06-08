@@ -75,8 +75,7 @@ func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocrit
 		usageFetchers:      d.UsageFetchers,
 		pprof:              d.Pprof,
 		geminiAPIKey:       d.GeminiAPIKey,
-		voiceBridge:        d.VoiceBridge,
-		voiceGateway:       d.VoiceGateway,
+		voiceHandlers:      &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway},
 		forge:              d.Forge,
 		ciCache:            d.CICache,
 		runtimeBackend:     d.Runtime,
@@ -192,10 +191,7 @@ func (s *Server) initConcernAdapters() {
 		}
 	}
 	if s.voiceHandlers == nil {
-		s.voiceHandlers = &voiceHandlers{
-			Bridge:  s.voiceBridge,
-			Gateway: s.voiceGateway,
-		}
+		s.voiceHandlers = &voiceHandlers{}
 	}
 	if s.webFetchHandlers == nil {
 		s.webFetchHandlers = &webFetchHandlers{}
@@ -214,15 +210,14 @@ func (s *Server) initConcernAdapters() {
 	s.serverConfigHandlers.githubOAuth = s.githubOAuth
 	s.serverConfigHandlers.gitlabOAuth = s.gitlabOAuth
 	s.serverConfigHandlers.voiceGateway = s.voiceHandlers.metadata()
-	if s.botHandlers == nil {
-		s.botHandlers = &botHandlers{}
+	s.ciHandlers = &ciHandlers{
+		taskMgr:    s.taskMgr,
+		repos:      s.repos,
+		forge:      s.forge,
+		provider:   s.provider,
+		taskClient: s.botClient,
+		authStore:  s.authStore,
 	}
-	s.botHandlers.taskMgr = s.taskMgr
-	s.botHandlers.repos = s.repos
-	s.botHandlers.forge = s.forge
-	s.botHandlers.provider = s.provider
-	s.botHandlers.taskClient = s.botClient
-	s.botHandlers.authStore = s.authStore
 	if s.usageHandlers == nil {
 		s.usageHandlers = &usageHandlers{
 			taskMgr:  s.taskMgr,

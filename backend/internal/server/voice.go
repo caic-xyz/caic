@@ -10,9 +10,14 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
 )
 
+// voiceHandlers owns the embedded voice gateway HTTP adapter.
+//
+// bridge is nil when the voice gateway is disabled or delegated to an external
+// gateway. In that state metadata reports disabled/external mode and embedded
+// RTC routes return "voice bridge unavailable".
 type voiceHandlers struct {
-	Bridge  *voicertc.Bridge
-	Gateway VoiceGatewayConfig
+	bridge  *voicertc.Bridge
+	gateway VoiceGatewayConfig
 }
 
 func (h *voiceHandlers) handler() http.Handler {
@@ -20,9 +25,9 @@ func (h *voiceHandlers) handler() http.Handler {
 }
 
 func (h *voiceHandlers) metadata() v1.VoiceGatewayMetadata {
-	cfg := h.Gateway
+	cfg := h.gateway
 	if cfg.Mode == "" {
-		if h.Bridge != nil {
+		if h.bridge != nil {
 			cfg.Mode = VoiceGatewayModeEmbedded
 		} else {
 			cfg.Mode = VoiceGatewayModeDisabled
@@ -30,7 +35,7 @@ func (h *voiceHandlers) metadata() v1.VoiceGatewayMetadata {
 	}
 	switch cfg.Mode {
 	case VoiceGatewayModeEmbedded:
-		if h.Bridge == nil {
+		if h.bridge == nil {
 			return v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeDisabled}
 		}
 		return v1.VoiceGatewayMetadata{
@@ -51,8 +56,8 @@ func (h *voiceHandlers) metadata() v1.VoiceGatewayMetadata {
 }
 
 func (h *voiceHandlers) mediaBridge() voicegateway.MediaBridge {
-	if h.Bridge == nil {
+	if h.bridge == nil {
 		return nil
 	}
-	return h.Bridge
+	return h.bridge
 }

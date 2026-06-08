@@ -1,4 +1,4 @@
-// HTTP handlers for bot-specific operations like fixing CI failures and fetching CI logs.
+// HTTP handlers for CI repair tasks and CI log retrieval.
 
 package server
 
@@ -22,7 +22,12 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
-type botHandlers struct {
+// ciHandlers owns HTTP routes for manual CI repair actions and CI log access.
+//
+// It is an HTTP concern object: it translates API requests into repository,
+// forge, bot task, and agent-session operations without retaining a back-reference
+// to Server.
+type ciHandlers struct {
 	taskMgr    *tasks.Manager
 	repos      *repos.Service
 	forge      *ForgeManager
@@ -34,7 +39,7 @@ type botHandlers struct {
 // handleGetCILog fetches the log for a specific CI job by jobID.
 // The jobID is a required query parameter; the caller knows it from the
 // task's ciChecks field. The log is capped at ~8 KB (tail).
-func (h *botHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
+func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 	entry, err := taskEntryFromRequest(r, h.taskMgr, h.authStore)
 	if err != nil {
 		writeError(w, err)
@@ -98,7 +103,7 @@ func (h *botHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 // fixCI creates a task to fix failing CI on a repo's default branch.
 // It fetches CI logs via the forge, builds a rich prompt using bot.FailureSummary,
 // and creates a new agent task — the same path as the automated maybeAutoFix.
-func (h *botHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateTaskResp, error) {
+func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.CreateTaskResp, error) {
 	info, ok := h.repos.InfoFor(req.Repo)
 	if !ok {
 		return nil, api.BadRequest("repo not found")
@@ -152,7 +157,7 @@ func (h *botHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Creat
 // fixPR injects a fix-PR command into an existing task's agent session.
 // It fetches CI logs via the forge using the task's existing CI checks,
 // builds a rich prompt using bot.FailureSummary, and sends it as input to the task.
-func (h *botHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.StatusResp, error) {
+func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.StatusResp, error) {
 	entry, ok := h.taskMgr.GetEntry(req.TaskID)
 	if !ok {
 		return nil, api.NotFound("task")
