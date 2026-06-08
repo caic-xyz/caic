@@ -44,9 +44,10 @@ func (s *taskHTTPHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.R
 	defer ticker.Stop()
 
 	// With GitHub App configured, CI updates arrive via check_suite webhooks;
-	// use a nil channel so the ticker case is never selected.
+	// use a nil channel so the ticker case is never selected. With no CI service
+	// wired (e.g. a router built without automation), never poll.
 	var ciTickerC <-chan time.Time
-	if s.forge.githubApp == nil {
+	if s.ciService != nil && s.forge.GitHubApp() == nil {
 		t := time.NewTicker(5 * time.Minute)
 		defer t.Stop()
 		ciTickerC = t.C
@@ -55,7 +56,9 @@ func (s *taskHTTPHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.R
 	// Seed CI status immediately on connect (once); subsequent updates come from
 	// webhooks (App) or the ciTicker (polling).
 	ctx := r.Context()
-	go s.ciService.PollCIForActiveRepos(context.WithoutCancel(ctx))
+	if s.ciService != nil {
+		go s.ciService.PollCIForActiveRepos(context.WithoutCancel(ctx))
+	}
 
 	// prevByID tracks the last marshalled JSON for each task ID.
 	prevByID := map[string][]byte{}
@@ -67,7 +70,10 @@ func (s *taskHTTPHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.R
 		out := s.service.taskListSnapshot(ctx)
 		ch := s.taskMgr.Changed()
 		repos := repoListFromSnapshot(s.repos.SnapshotWithCI())
-		newWarnings := s.warnings.Since(lastWarnTime)
+		var newWarnings []serverWarning
+		if s.warnings != nil {
+			newWarnings = s.warnings.Since(lastWarnTime)
+		}
 
 		reposJSON, err := json.Marshal(repos)
 		if err != nil {

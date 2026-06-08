@@ -22,7 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -84,29 +84,44 @@ func newTestPrefs(t *testing.T) *preferences.Store {
 	return store
 }
 
+// testRouter bundles a Router with the dependencies tests poke directly. The
+// production Router exposes these only through handler concerns; the wrapper
+// keeps test access ergonomic without re-adding fields to Router.
+type testRouter struct {
+	*Router
+
+	taskMgr *tasks.Manager
+	repos   *repos.Service
+	prefs   *preferences.Store
+	forge   *forgemanager.Manager
+}
+
 // newTestRouter creates a Router for tests.
-func newTestRouter(t *testing.T) *Router {
+func newTestRouter(t *testing.T) *testRouter {
 	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
 	backend := &mdruntime.Backend{}
 	taskMgr := tasks.New(tasks.Config{ServerCtx: t.Context()})
+	repoSvc := repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, backend, nil)
+	prefs := newTestPrefs(t)
+	forge := forgemanager.New("", "", nil)
 	s, err := New(t.Context(), Dependencies{
-		Repos:          repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, backend, nil),
+		Repos:          repoSvc,
 		ProcessBackend: backend,
 		TaskManager:    taskMgr,
-		Preferences:    newTestPrefs(t),
+		Preferences:    prefs,
 		IPGeoChecker:   checker,
-		Forge:          newForgeManager("", "", nil),
+		Forge:          forge,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return s
+	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, prefs: prefs, forge: forge}
 }
 
-func testTaskHandlers(s *Router) *taskHTTPHandlers {
+func testTaskHandlers(s *testRouter) *taskHTTPHandlers {
 	return s.taskHTTPHandlers
 }
 
@@ -125,7 +140,7 @@ func TestNew(t *testing.T) {
 // task's own ID string, so handlers that re-resolve via the Manager by
 // entry.Task().ID.String() find the same entry (in production the two always
 // coincide because Insert keys on t.ID.String()).
-func insertTestTask(t *testing.T, s *Router, id string, tk *task.Task) *tasks.Entry { //nolint:unparam // id is constant today; keep generic
+func insertTestTask(t *testing.T, s *testRouter, id string, tk *task.Task) *tasks.Entry { //nolint:unparam // id is constant today; keep generic
 	e := tasks.NewEntry(tk)
 	s.taskMgr.Insert(id, e)
 	if taskID := tk.ID.String(); taskID != id {
@@ -136,12 +151,12 @@ func insertTestTask(t *testing.T, s *Router, id string, tk *task.Task) *tasks.En
 
 // registerTestRunner registers a runner under relPath in the task Manager's
 // registry, the single owner of the runner set.
-func registerTestRunner(s *Router, relPath string, r *task.Runner) {
+func registerTestRunner(s *testRouter, relPath string, r *task.Runner) {
 	s.taskMgr.RegisterRunner(relPath, r)
 }
 
 // testEntries returns a snapshot of every registered task entry (test-only).
-func testEntries(s *Router) []*tasks.Entry {
+func testEntries(s *testRouter) []*tasks.Entry {
 	var out []*tasks.Entry
 	s.taskMgr.Range(func(_ string, e *tasks.Entry) bool {
 		out = append(out, e)
@@ -152,10 +167,7 @@ func testEntries(s *Router) []*tasks.Entry {
 
 // loadPurgedTasksForTest reads logs from disk and registers purged tasks via
 // the manager. Replaces the deleted Server.loadPurgedTasks helper.
-func loadPurgedTasksForTest(s *Router, logDir string) error {
-	if s.repos == nil {
-		s.repos = repos.NewService("", "", "", nil, repos.NewRegistry(nil), s.taskMgr, nil, nil)
-	}
+func loadPurgedTasksForTest(s *testRouter, logDir string) error {
 	logs, err := task.LoadLogs(logDir)
 	if err != nil {
 		return err
@@ -164,7 +176,7 @@ func loadPurgedTasksForTest(s *Router, logDir string) error {
 }
 
 type runnerConstructionTestFixture struct {
-	server   *Router
+	server   *testRouter
 	logDir   string
 	cacheDir string
 	backend  *mdruntime.Backend
@@ -184,23 +196,25 @@ func newRunnerConstructionTestServer(t *testing.T, root string) runnerConstructi
 		Backends:   backends,
 		HarnessEnv: harnessEnv,
 	})
+	repoSvc := repos.NewService(root, logDir, cacheDir, harnessEnv, repos.NewRegistry(nil), taskMgr, backend, backends)
 	s, err := New(t.Context(), Dependencies{
-		Repos:          repos.NewService(root, logDir, cacheDir, harnessEnv, repos.NewRegistry(nil), taskMgr, backend, backends),
+		Repos:          repoSvc,
 		ProcessBackend: backend,
 		TaskManager:    taskMgr,
+		Forge:          forgemanager.New("", "", nil),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	return runnerConstructionTestFixture{
-		server:   s,
+		server:   &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc},
 		logDir:   logDir,
 		cacheDir: cacheDir,
 		backend:  backend,
 	}
 }
 
-func newTestRepoWatcher(t *testing.T, root string, s *Router) *repos.Watcher {
+func newTestRepoWatcher(t *testing.T, root string, s *testRouter) *repos.Watcher {
 	return repos.NewWatcher(&repos.WatcherConfig{
 		Ctx:          t.Context(),
 		AbsRoot:      root,
@@ -2254,7 +2268,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 	s.sessionSecret = secret
 	s.authStore = store
 	s.hostState = host
-	s.githubOAuth = &auth.ProviderConfig{
+	githubOAuth := &auth.ProviderConfig{
 		ClientID:     "cid",
 		ClientSecret: "csec",
 		AuthEndpoint: "https://github.com/login/oauth/authorize",
@@ -2267,7 +2281,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 	s.authHandlers.store = s.authStore
 	s.authHandlers.sessionSecret = s.sessionSecret
 	s.authHandlers.hostState = s.hostState
-	s.authHandlers.githubOAuth = s.githubOAuth
+	s.authHandlers.githubOAuth = githubOAuth
 
 	t.Run("valid state round-trip succeeds", func(t *testing.T) {
 		t.Parallel()
@@ -2351,45 +2365,6 @@ func TestWebFetchHandlers(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "HTTP 503") {
 			t.Fatalf("error = %v, want HTTP 503", err)
-		}
-	})
-}
-
-func TestForgeFor(t *testing.T) {
-	t.Parallel()
-	t.Run("PAT", func(t *testing.T) {
-		t.Parallel()
-		s := newTestRouter(t)
-		s.forge.githubToken = "pat-token"
-		f := s.forge.forgeFor(t.Context(), forge.KindGitHub)
-		if f == nil {
-			t.Fatal("forgeFor returned nil with PAT set")
-		}
-	})
-
-	t.Run("no token returns nil", func(t *testing.T) {
-		t.Parallel()
-		s := newTestRouter(t)
-		f := s.forge.forgeFor(t.Context(), forge.KindGitHub)
-		if f != nil {
-			t.Fatal("forgeFor should return nil when no tokens available")
-		}
-	})
-
-	t.Run("no token without user context returns nil even with auth store", func(t *testing.T) {
-		t.Parallel()
-		usersPath := filepath.Join(t.TempDir(), "users.json")
-		store, err := auth.Open(usersPath)
-		if err != nil {
-			t.Fatalf("Open: %v", err)
-		}
-		s := newTestRouter(t)
-		s.authStore = store
-		// OAuth mode but no user in context and no PAT — returns nil.
-		// CI polling is driven by SSE handlers which have user context.
-		f := s.forge.forgeFor(t.Context(), forge.KindGitHub)
-		if f != nil {
-			t.Fatal("forgeFor should return nil without user context or PAT")
 		}
 	})
 }

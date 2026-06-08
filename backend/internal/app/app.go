@@ -18,7 +18,10 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent/registry"
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/bot"
+	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
@@ -217,7 +220,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		}
 	}
 
-	forgeManager := server.NewForgeManager(cfg.GitHub.Token, cfg.GitLab.Token)
+	forgeManager := forgemanager.New(cfg.GitHub.Token, cfg.GitLab.Token, nil)
 	githubAppAllowedOwners := map[string]struct{}(nil)
 	if cfg.GitHub.AppID != 0 && len(cfg.GitHub.AppPrivateKeyPEM) > 0 {
 		app, err := github.NewAppClient(cfg.GitHub.AppID, cfg.GitHub.AppPrivateKeyPEM, forgeManager.GitHubAppThrottle())
@@ -256,6 +259,22 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		agentBackends,
 	)
 
+	// Long-lived forge automation, owned by app and routed to by the HTTP layer.
+	warnings := server.NewWarningStore(taskMgr)
+	cacheSizes := server.NewCacheSizeStore()
+	botClient := &botClient{repos: repoService, taskMgr: taskMgr, forge: forgeManager}
+	ciAdapter := &ciAdapter{
+		repos:        repoService,
+		taskMgr:      taskMgr,
+		forge:        forgeManager,
+		prefs:        prefsStore,
+		warnings:     warnings,
+		taskCreator:  botClient,
+		notifyChange: taskMgr.NotifyTaskChange,
+	}
+	ciService := ci.NewService(cache, provider, ciAdapter)
+	botService := bot.New(ctx, botClient)
+
 	ipgeoChecker, err := ipgeo.NewChecker(ctx, cfg.IPGeo.Allowlist, cfg.IPGeo.DB, "")
 	if err != nil {
 		return nil, fmt.Errorf("ipgeo: %w", err)
@@ -282,6 +301,11 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		TaskManager:            taskMgr,
 		Provider:               provider,
 		IPGeoChecker:           ipgeoChecker,
+		Bot:                    botService,
+		CIService:              ciService,
+		TaskClient:             botClient,
+		Warnings:               warnings,
+		CacheSizes:             cacheSizes,
 		GitHubAllowedUsers:     parseAllowedUsers(cfg.GitHub.OAuthAllowedUsers),
 		GitLabAllowedUsers:     parseAllowedUsers(cfg.GitLab.OAuthAllowedUsers),
 		GitHubWebhookSecret:    cfg.GitHub.WebhookSecret,
@@ -337,7 +361,14 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 			phase4.End()
 			return nil, fmt.Errorf("adopt runtime instances: %w", err)
 		}
-		adoption := s.NewAdoptedTaskWiring()
+		adoption := &adoptedTaskWiring{
+			ctx:       ctx,
+			authStore: authStore,
+			ciService: ciService,
+			forge:     forgeManager,
+			taskMgr:   taskMgr,
+			repos:     repoService,
+		}
 		for i := range adopted {
 			at := &adopted[i]
 			if at.ForgeOwner != "" && at.Task.GetPR() > 0 && at.ForgeKind != "" {
@@ -351,7 +382,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 	phase4.End()
 
 	region := trace.StartRegion(ctx, "bot-resume-comments")
-	s.ResumePendingComments()
+	botService.ResumePendingComments()
 	region.End()
 
 	if !cfg.Runtime.SkipWarmup {
@@ -372,7 +403,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		_, tk := trace.NewTask(ctx, "refresh-cache-sizes")
 		defer tk.End()
 		trace.Log(ctx, "startup", "refresh-cache-sizes: begin")
-		s.RefreshCacheSizesLoop()
+		cacheSizes.RefreshLoop(ctx)
 	}()
 	go newRepoWatcher(ctx, absRoot, repoService).Watch()
 

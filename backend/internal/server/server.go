@@ -10,48 +10,23 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/maruel/genai"
-
 	"github.com/caic-xyz/caic/backend/frontend"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/bot"
-	"github.com/caic-xyz/caic/backend/internal/ci"
-	"github.com/caic-xyz/caic/backend/internal/forge"
-	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
-	"github.com/caic-xyz/caic/backend/internal/preferences"
-	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
-	"github.com/caic-xyz/caic/backend/internal/tasks"
-	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
 type fakeCIHook func(ctx context.Context, t *task.Task)
 
-// GitHubAppClient is the interface used by the server to interact with a GitHub App.
-// Abstracted so that tests can substitute a stub.
-type GitHubAppClient interface {
-	ForgeClient(ctx context.Context, installationID int64) (forge.Forge, error)
-	DeleteInstallation(ctx context.Context, installationID int64) error
-	RepoInstallation(ctx context.Context, owner, repo string) (int64, error)
-	PostComment(ctx context.Context, installationID int64, owner, repo string, issueNumber int, body string) error
-}
-
-// Router is the HTTP router for the caic web UI.
+// Router is the HTTP router for the caic web UI. It owns HTTP routing,
+// middleware, and route handler concerns only. Application services and
+// long-lived automation (tasks, runtime, forge, bot/CI) are owned by
+// internal/app and reached through the handler concerns below.
 type Router struct {
 	// Immutable after construction.
 
-	// Core infrastructure.
-	ctx        context.Context // server-lifetime context; outlives individual HTTP requests
-	repos      *repos.Service  // managed repository metadata and runner registration
-	taskMgr    *tasks.Manager  // task orchestration layer
-	cacheSizes *cacheSizeStore
-	ciCache    *forgecache.Cache
-	provider   genai.Provider // nil if LLM not configured
-	bot        *bot.Bot
-	ciService  *ci.Service // handles forge event-driven task automation
-	botClient  *BotClient
-	ciAdapter  *CIAdapter
+	// server-lifetime context; outlives individual HTTP requests.
+	ctx context.Context
 
 	// Route handler concerns.
 	authHandlers         *authHandlers
@@ -63,44 +38,24 @@ type Router struct {
 	voiceHandlers        *voiceHandlers
 	webFetchHandlers     *webFetchHandlers
 
-	// Profiling.
-	pprof              bool
-	tailscaleAvailable bool
-
-	// Forge client management (throttles, App client, installation cache).
-	forge *ForgeManager
-
-	// GitHub.
-	githubOAuth        *auth.ProviderConfig // nil if not configured
-	githubAllowedUsers map[string]struct{}  // nil if GitHub OAuth not configured
-
-	// GitLab.
-	gitlabOAuth        *auth.ProviderConfig // nil if not configured
-	gitlabAllowedUsers map[string]struct{}  // nil if GitLab OAuth not configured
-
 	// Forge webhook delivery. Established by New (and the test constructors) and
 	// never nil thereafter; owns the webhook secrets and the App owner allowlist.
 	webhooks *WebhookHandlers
 
-	// Auth / session.
+	// Auth / session middleware deps.
 	authStore     *auth.Store     // nil when auth disabled
 	sessionSecret []byte          // nil when auth disabled
 	hostState     *auth.HostState // non-nil when ExternalURL is set (static or auto)
-	usageFetchers []usage.ProviderFetcher
-	fakeCI        fakeCIHook // nil outside smoke/e2e tests.
 
 	// IP geolocation.
 	ipgeoChecker *ipgeo.Checker
 
-	// User preferences — all users in a single file.
-	prefs *preferences.Store
-
-	warnings *warningStore
+	// Profiling (opt-in).
+	pprof bool
 }
 
 // SetFakeCI injects a fake CI simulation hook for smoke and e2e tests.
 func (s *Router) SetFakeCI(f func(context.Context, *task.Task)) {
-	s.fakeCI = f
 	if s.taskHTTPHandlers != nil && s.taskHTTPHandlers.service != nil {
 		s.taskHTTPHandlers.service.fakeCI = f
 	}

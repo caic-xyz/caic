@@ -15,6 +15,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
@@ -33,8 +34,7 @@ type taskAPIService struct {
 	taskMgr   *tasks.Manager
 	prefs     *preferences.Store
 	repos     *repos.Service
-	forge     *ForgeManager
-	ciAdapter *CIAdapter
+	forge     *forgemanager.Manager
 	ciService *ci.Service
 	authStore *auth.Store
 	fakeCI    fakeCIHook
@@ -380,8 +380,14 @@ func (s *taskAPIService) syncTask(ctx context.Context, entry *tasks.Entry, req *
 	}
 	if resp.Status != "blocked" {
 		if info, ok := s.repos.InfoFor(syncPrimaryName); ok {
-			if f := s.forge.forgeForInfo(ctx, &info); f != nil {
-				ciInfo := s.ciAdapter.RepoInfoFor(info.RelPath)
+			if f := s.forge.ForgeForInfo(ctx, &info); f != nil {
+				ciInfo := ci.RepoInfo{
+					RelPath:    info.RelPath,
+					BaseBranch: info.BaseBranch,
+					ForgeKind:  info.ForgeKind,
+					ForgeOwner: info.ForgeOwner,
+					ForgeRepo:  info.ForgeRepo,
+				}
 				prNumber, err := s.ciService.StartPRFlow(ctx, entry, f, &ciInfo, syncPrimaryBranch, s.taskMgr.EffectiveBaseBranch(t))
 				if err != nil {
 					slog.Warn("sync: create PR", "repo", info.ForgeRepo, "branch", syncPrimaryBranch, "err", err)
@@ -410,7 +416,7 @@ func (s *taskAPIService) resolveGitHubContainerToken(ctx context.Context, enable
 		return u.AccessToken
 	}
 	if s.forge != nil {
-		return s.forge.githubToken
+		return s.forge.GitHubToken()
 	}
 	return ""
 }

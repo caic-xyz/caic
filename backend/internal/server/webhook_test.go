@@ -14,14 +14,62 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/caic-xyz/caic/backend/internal/bot"
+	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
+	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
+	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
+
+// testCIBackend is a minimal ci.Backend wired to a repo/task store, sufficient
+// for webhook handler tests that drive CI status updates through ci.Service.
+type testCIBackend struct {
+	repos   *repos.Service
+	taskMgr *tasks.Manager
+	forge   *forgemanager.Manager
+	prefs   *preferences.Store
+}
+
+func (b *testCIBackend) GitHubApp() ci.GitHubAppClient { return b.forge.GitHubApp() }
+
+func (b *testCIBackend) ForgeForInfo(ctx context.Context, info *ci.RepoInfo) forge.Forge {
+	return b.forge.ForgeForInfo(ctx, &repos.Info{ForgeKind: info.ForgeKind, ForgeOwner: info.ForgeOwner, ForgeRepo: info.ForgeRepo})
+}
+
+func (b *testCIBackend) CreateTask(context.Context, bot.TaskRequest) (string, error) { return "", nil }
+
+func (b *testCIBackend) GetRunner(relPath string) (*task.Runner, bool) {
+	return b.taskMgr.Runner(relPath)
+}
+
+func (b *testCIBackend) SetTaskMonitorBranch(entry ci.TaskEntry, branch string) {
+	entry.SetMonitorBranch(branch)
+}
+
+func (b *testCIBackend) RepoInfoFor(relPath string) ci.RepoInfo {
+	r, ok := b.repos.InfoFor(relPath)
+	if !ok {
+		return ci.RepoInfo{}
+	}
+	return ci.RepoInfo{RelPath: r.RelPath, BaseBranch: r.BaseBranch, ForgeKind: r.ForgeKind, ForgeOwner: r.ForgeOwner, ForgeRepo: r.ForgeRepo}
+}
+
+func (b *testCIBackend) ListActiveRepos() []ci.RepoInfo { return nil }
+
+func (b *testCIBackend) SetRepoCIStatusIfChanged(relPath, sha string, result forgecache.Result) bool {
+	return b.repos.SetCIStatusIfChanged(relPath, sha, result)
+}
+
+func (b *testCIBackend) NotifyTaskChange()         { b.taskMgr.NotifyTaskChange() }
+func (b *testCIBackend) EmitWarning(string)        {}
+func (b *testCIBackend) Prefs() *preferences.Store { return b.prefs }
 
 // stubAppClient implements githubAppClient for tests.
 type stubAppClient struct {
@@ -110,7 +158,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 		t.Parallel()
 		s := minimalRouter(t)
 		s.repos.Registry().Add(&repos.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
-		s.forge.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}}
+		s.forge.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}})
 
 		s.webhooks.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
 			Action: "completed",
@@ -134,7 +182,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 		s := minimalRouter(t)
 		s.repos.Registry().Add(&repos.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
 		// HEAD is now "newsha"; the webhook carries "oldsha".
-		s.forge.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}}
+		s.forge.SetGitHubApp(&stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}})
 
 		s.webhooks.handleCheckSuiteEvent(t.Context(), &github.CheckSuiteEvent{
 			Action: "completed",
@@ -381,7 +429,7 @@ func TestBuildHandlerWebhookRoutes(t *testing.T) {
 }
 
 // minimalRouter returns a Router with just enough state for webhook handler tests.
-func minimalRouter(t *testing.T) *Router {
+func minimalRouter(t *testing.T) *testRouter {
 	cache, err := forgecache.Open(t.TempDir() + "/forgecache.json")
 	if err != nil {
 		t.Fatal(err)
@@ -389,15 +437,19 @@ func minimalRouter(t *testing.T) *Router {
 	ctx := t.Context()
 	backend := &mdruntime.Backend{}
 	taskMgr := tasks.New(tasks.Config{ServerCtx: ctx})
+	repoSvc := repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, nil, nil)
+	fm := forgemanager.New("", "", nil)
+	ciService := ci.NewService(cache, nil, &testCIBackend{repos: repoSvc, taskMgr: taskMgr, forge: fm, prefs: newTestPrefs(t)})
 	s, err := New(ctx, Dependencies{
-		Repos:          repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, nil, nil),
+		Repos:          repoSvc,
 		ProcessBackend: backend,
 		TaskManager:    taskMgr,
 		CICache:        cache,
-		Forge:          newForgeManager("", "", nil),
+		Forge:          fm,
+		CIService:      ciService,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return s
+	return &testRouter{Router: s, taskMgr: taskMgr, repos: repoSvc, forge: fm}
 }

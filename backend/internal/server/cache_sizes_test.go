@@ -67,7 +67,7 @@ func TestRefreshCacheSizes(t *testing.T) {
 
 	t.Run("valid_handler_returns_snapshot", func(t *testing.T) {
 		t.Parallel()
-		store := &cacheSizeStore{
+		store := &CacheSizeStore{
 			sizes: map[string]v1.CacheSize{
 				"npm": {Name: "npm", SizeBytes: 12},
 			},

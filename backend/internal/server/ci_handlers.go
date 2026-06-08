@@ -16,6 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -30,7 +31,7 @@ import (
 type ciHandlers struct {
 	taskMgr    *tasks.Manager
 	repos      *repos.Service
-	forge      *ForgeManager
+	forge      *forgemanager.Manager
 	provider   genai.Provider
 	taskClient bot.Client
 	authStore  *auth.Store
@@ -56,7 +57,7 @@ func (h *ciHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
 		writeError(w, api.BadRequest("no repo info found"))
 		return
 	}
-	f := h.forge.forgeForInfo(r.Context(), &info)
+	f := h.forge.ForgeForInfo(r.Context(), &info)
 	if f == nil {
 		writeError(w, api.BadRequest("no forge token configured for this repo"))
 		return
@@ -108,7 +109,7 @@ func (h *ciHandlers) fixCI(ctx context.Context, req *v1.BotFixCIReq) (*v1.Create
 	if !ok {
 		return nil, api.BadRequest("repo not found")
 	}
-	f := h.forge.forgeForInfo(ctx, &info)
+	f := h.forge.ForgeForInfo(ctx, &info)
 	if f == nil {
 		return nil, api.BadRequest("no forge token configured for this repo")
 	}
@@ -175,7 +176,7 @@ func (h *ciHandlers) fixPR(ctx context.Context, req *v1.BotFixPRReq) (*v1.Status
 	if !ok {
 		return nil, api.BadRequest("repo not found")
 	}
-	f := h.forge.forgeForInfo(ctx, &info)
+	f := h.forge.ForgeForInfo(ctx, &info)
 	if f == nil {
 		return nil, api.BadRequest("no forge token configured for this repo")
 	}

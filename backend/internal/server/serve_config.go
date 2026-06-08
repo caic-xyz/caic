@@ -21,6 +21,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	caicruntime "github.com/caic-xyz/caic/backend/internal/runtime"
@@ -39,11 +40,11 @@ type runnerRegistry interface {
 type serverConfigHandlers struct {
 	serverCtx          context.Context
 	tailscaleAvailable bool
-	forge              *ForgeManager
+	forge              *forgemanager.Manager
 	prefs              *preferences.Store
 	repos              *repos.Service
 	taskMgr            runnerRegistry
-	cacheSizes         *cacheSizeStore
+	cacheSizes         *CacheSizeStore
 	authStore          *auth.Store
 	githubOAuth        *auth.ProviderConfig
 	gitlabOAuth        *auth.ProviderConfig
@@ -63,9 +64,9 @@ func (h *serverConfigHandlers) getConfig(_ context.Context, _ *api.EmptyReq) (*v
 		USBAvailable:         runtime.GOOS == "linux",
 		DisplayAvailable:     true,
 		SudoAvailable:        true,
-		GitHubTokenAvailable: h.forge.githubToken != "" || h.githubOAuth != nil,
+		GitHubTokenAvailable: h.forge.GitHubToken() != "" || h.githubOAuth != nil,
 		VoiceGateway:         h.voiceGateway,
-		GitHubAppEnabled:     h.forge.githubApp != nil,
+		GitHubAppEnabled:     h.forge.GitHubApp() != nil,
 	}
 	if h.authStore != nil {
 		cfg.AuthProviders = h.authProviders()
@@ -88,7 +89,7 @@ func (h *serverConfigHandlers) authProviders() []string {
 // getVersion returns the current server version and checks GitHub for the latest release.
 func (h *serverConfigHandlers) getVersion(ctx context.Context, _ *api.EmptyReq) (*v1.VersionResp, error) {
 	current := autoupdate.Version
-	gh := h.forge.githubClient()
+	gh := h.forge.GitHubClient()
 	resp := &v1.VersionResp{
 		Current:      current,
 		AutoUpdateOn: gh != nil && current != "" && !strings.HasPrefix(current, "devel-"),
@@ -107,7 +108,7 @@ func (h *serverConfigHandlers) getVersion(ctx context.Context, _ *api.EmptyReq) 
 
 // triggerUpdate starts a background update check-and-install. Returns immediately.
 func (h *serverConfigHandlers) triggerUpdate(ctx context.Context, _ *api.EmptyReq) (*v1.UpdateResp, error) {
-	gh := h.forge.githubClient()
+	gh := h.forge.GitHubClient()
 	if gh == nil {
 		return nil, api.InternalError("GitHub token not configured; cannot check for updates")
 	}

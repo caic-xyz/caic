@@ -22,24 +22,28 @@ import (
 
 const cacheSizeRefreshInterval = 24 * time.Hour
 
-type cacheSizeStore struct {
+// CacheSizeStore holds periodic well-known cache size snapshots. It is
+// constructed and refreshed by internal/app; HTTP handlers only read snapshots.
+type CacheSizeStore struct {
 	mu    sync.RWMutex
 	home  string
 	sizes map[string]v1.CacheSize
 }
 
-func newCacheSizeStore() *cacheSizeStore {
+// NewCacheSizeStore creates an empty cache size store.
+func NewCacheSizeStore() *CacheSizeStore {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		slog.Warn("cache size: cannot resolve user home", "err", err)
 	}
-	return &cacheSizeStore{
+	return &CacheSizeStore{
 		home:  home,
 		sizes: make(map[string]v1.CacheSize, len(md.WellKnownCaches)),
 	}
 }
 
-func (c *cacheSizeStore) Refresh(ctx context.Context) {
+// Refresh recomputes the well-known cache size snapshot once.
+func (c *CacheSizeStore) Refresh(ctx context.Context) {
 	sizes := calculateWellKnownCacheSizes(ctx, c.home, md.WellKnownCaches)
 
 	c.mu.Lock()
@@ -47,7 +51,8 @@ func (c *cacheSizeStore) Refresh(ctx context.Context) {
 	c.mu.Unlock()
 }
 
-func (c *cacheSizeStore) Snapshot() []v1.CacheSize {
+// Snapshot returns the current well-known cache sizes, sorted by name.
+func (c *CacheSizeStore) Snapshot() []v1.CacheSize {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -146,27 +151,16 @@ func resolveCacheHostPath(home, p string) string {
 	}
 }
 
-// RefreshCacheSizes refreshes the server's well-known cache size snapshot once.
-func (s *Router) RefreshCacheSizes() {
-	if s.cacheSizes == nil {
-		return
-	}
-	s.cacheSizes.Refresh(s.ctx)
-}
-
-// RefreshCacheSizesLoop refreshes well-known cache sizes until the server
-// context is cancelled.
-func (s *Router) RefreshCacheSizesLoop() {
-	if s.cacheSizes == nil {
-		return
-	}
+// RefreshLoop refreshes well-known cache sizes until ctx is cancelled. It is
+// owned by internal/app, which starts it as a background maintenance loop.
+func (c *CacheSizeStore) RefreshLoop(ctx context.Context) {
 	ticker := time.NewTicker(cacheSizeRefreshInterval)
 	defer ticker.Stop()
 	for {
-		s.RefreshCacheSizes()
+		c.Refresh(ctx)
 		select {
 		case <-ticker.C:
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			return
 		}
 	}

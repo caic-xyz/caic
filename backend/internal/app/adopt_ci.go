@@ -1,6 +1,6 @@
 // Adoption-time wiring of forge/CI monitoring for adopted tasks.
 
-package server
+package app
 
 import (
 	"context"
@@ -9,42 +9,32 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
-// AdoptedTaskWiring connects adopted tasks back to forge and CI automation.
-type AdoptedTaskWiring struct {
+// adoptedTaskWiring connects adopted tasks back to forge and CI automation. It
+// is an app-lifetime concern, driven during startup adoption.
+type adoptedTaskWiring struct {
 	ctx       context.Context
 	authStore *auth.Store
 	ciService *ci.Service
-	forge     *ForgeManager
+	forge     *forgemanager.Manager
 	taskMgr   *tasks.Manager
 	repos     *repos.Service
 }
 
-// NewAdoptedTaskWiring builds the adopted-task startup concern for this server.
-func (s *Router) NewAdoptedTaskWiring() *AdoptedTaskWiring {
-	return &AdoptedTaskWiring{
-		ctx:       s.ctx,
-		authStore: s.authStore,
-		ciService: s.ciService,
-		forge:     s.forge,
-		taskMgr:   s.taskMgr,
-		repos:     s.repos,
-	}
-}
-
 // WireCIMonitoring sets up CI monitoring for an adopted task that has a PR.
-func (w *AdoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *tasks.AdoptedTask) {
+func (w *adoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *tasks.AdoptedTask) {
 	ri, ok := w.repos.InfoFor(at.RelPath)
 	if !ok {
 		return
 	}
-	f := w.forge.forgeForInfo(ctx, &ri)
+	f := w.forge.ForgeForInfo(ctx, &ri)
 	if f == nil && w.authStore != nil {
 		if u, ok := w.authStore.FindByProvider(forge.Kind(at.ForgeKind)); ok {
-			f = w.forge.forgeFor(auth.NewContext(ctx, &u), forge.Kind(at.ForgeKind))
+			f = w.forge.ForgeFor(auth.NewContext(ctx, &u), forge.Kind(at.ForgeKind))
 		}
 	}
 	if f == nil {
@@ -64,15 +54,15 @@ func (w *AdoptedTaskWiring) WireCIMonitoring(ctx context.Context, at *tasks.Adop
 }
 
 // LookupExternalPRForTask queries the forge for a PR matching the task's branch.
-func (w *AdoptedTaskWiring) LookupExternalPRForTask(at *tasks.AdoptedTask) {
+func (w *adoptedTaskWiring) LookupExternalPRForTask(at *tasks.AdoptedTask) {
 	ri, ok := w.repos.InfoFor(at.RelPath)
 	if !ok {
 		return
 	}
-	f := w.forge.forgeForInfo(w.ctx, &ri)
+	f := w.forge.ForgeForInfo(w.ctx, &ri)
 	if f == nil && w.authStore != nil {
 		if u, ok := w.authStore.FindByProvider(forge.Kind(at.ForgeKind)); ok {
-			f = w.forge.forgeFor(auth.NewContext(w.ctx, &u), forge.Kind(at.ForgeKind))
+			f = w.forge.ForgeFor(auth.NewContext(w.ctx, &u), forge.Kind(at.ForgeKind))
 		}
 	}
 	if f == nil {

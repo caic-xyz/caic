@@ -15,6 +15,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/forge/gitlab"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
@@ -28,9 +29,8 @@ const maxWebhookBodyBytes = 10 << 20 // 10 MB
 //
 // It verifies delivery authenticity, then dispatches events to the bot, the CI
 // service, and the task manager. It owns the forge webhook secrets and the
-// GitHub App owner allowlist; its remaining dependencies are shared with the
-// server. The bot and CI service are injected after construction because the
-// server wires them up only once their own dependencies exist.
+// GitHub App owner allowlist; the bot and CI service it dispatches to are
+// app-owned automation services injected at construction.
 type WebhookHandlers struct {
 	serverCtx        context.Context     // dispatch context that outlives individual webhook requests
 	githubSecret     []byte              // nil when the GitHub webhook is not configured
@@ -40,7 +40,7 @@ type WebhookHandlers struct {
 	bot       *bot.Bot
 	ciService *ci.Service
 	ciCache   *forgecache.Cache
-	forge     *ForgeManager
+	forge     *forgemanager.Manager
 	taskMgr   *tasks.Manager
 	repos     *repos.Service
 	prefs     *preferences.Store
@@ -195,7 +195,7 @@ func (h *WebhookHandlers) HandleGitLab(w http.ResponseWriter, r *http.Request) {
 // webhookOnCI handles a CI completion event from a forge webhook by fetching
 // the current check-run state and updating affected tasks and repos.
 func (h *WebhookHandlers) webhookOnCI(ctx context.Context, kind forge.Kind, owner, repo, sha string) {
-	f := h.forge.forgeFor(ctx, kind)
+	f := h.forge.ForgeFor(ctx, kind)
 	if f == nil {
 		return
 	}
@@ -270,7 +270,7 @@ func (h *WebhookHandlers) handleIssuesEvent(ctx context.Context, ev *github.Issu
 		Body:          ev.Issue.Body,
 		HTMLURL:       ev.Issue.HTMLURL,
 		Labels:        labels,
-	}, h.forge.commenterFor(ev.Installation.ID))
+	}, h.forge.CommenterFor(ev.Installation.ID))
 }
 
 // handlePullRequestEvent creates a task when a PR is opened or reopened,
@@ -333,7 +333,7 @@ func (h *WebhookHandlers) handlePRForExistingTask(ctx context.Context, ev *githu
 			entry.Task().SetPR(owner, repo, prNumber)
 			// Start CI monitoring.
 			if ri, ok := h.repoByForge(owner + "/" + repo); ok {
-				f := h.forge.forgeFor(ctx, ri.ForgeKind)
+				f := h.forge.ForgeFor(ctx, ri.ForgeKind)
 				if f != nil {
 					entry.SetMonitorBranch(branch)
 					go h.ciService.MonitorCI(ctx, entry, f, owner, repo, sha)
@@ -344,7 +344,7 @@ func (h *WebhookHandlers) handlePRForExistingTask(ctx context.Context, ev *githu
 			slog.Info("webhook: restarting CI monitor for PR",
 				"task", entry.Task().ID, "repo", owner+"/"+repo, "br", branch, "pr", prNumber, "sha", sha[:min(7, len(sha))])
 			if ri, ok := h.repoByForge(owner + "/" + repo); ok {
-				go h.ciService.MonitorCI(ctx, entry, h.forge.forgeFor(ctx, ri.ForgeKind), owner, repo, sha)
+				go h.ciService.MonitorCI(ctx, entry, h.forge.ForgeFor(ctx, ri.ForgeKind), owner, repo, sha)
 			}
 		}
 	}
@@ -424,7 +424,7 @@ func (h *WebhookHandlers) handleIssueCommentEvent(ctx context.Context, ev *githu
 		IssueTitle:    ev.Issue.Title,
 		CommentBody:   ev.Comment.Body,
 		CommentURL:    ev.Comment.HTMLURL,
-	}, h.forge.commenterFor(ev.Installation.ID))
+	}, h.forge.CommenterFor(ev.Installation.ID))
 }
 
 // handleInstallationEvent enforces the owner allowlist on new installs.
@@ -436,15 +436,15 @@ func (h *WebhookHandlers) handleInstallationEvent(ctx context.Context, ev *githu
 	}
 	login := ev.Installation.Account.Login
 	if h.appAllowedOwners == nil {
-		h.forge.storeInstallationID(login, ev.Installation.ID)
+		h.forge.StoreInstallationID(login, ev.Installation.ID)
 		return
 	}
 	if _, ok := h.appAllowedOwners[strings.ToLower(login)]; ok {
-		h.forge.storeInstallationID(login, ev.Installation.ID)
+		h.forge.StoreInstallationID(login, ev.Installation.ID)
 		return
 	}
 	slog.Warn("github app: rejecting installation from non-allowed owner", "owner", login, "installation_id", ev.Installation.ID)
-	if err := h.forge.githubApp.DeleteInstallation(ctx, ev.Installation.ID); err != nil {
+	if err := h.forge.GitHubApp().DeleteInstallation(ctx, ev.Installation.ID); err != nil {
 		slog.Warn("github app: delete installation failed", "owner", login, "err", err)
 	}
 }
@@ -463,7 +463,7 @@ func (h *WebhookHandlers) handleCheckSuiteEvent(ctx context.Context, ev *github.
 	h.storeInstallationIDFromFullName(ev.Repository.FullName, ev.Installation.ID)
 
 	sha := ev.CheckSuite.HeadSHA
-	client, err := h.forge.githubApp.ForgeClient(ctx, ev.Installation.ID)
+	client, err := h.forge.GitHubApp().ForgeClient(ctx, ev.Installation.ID)
 	if err != nil {
 		slog.Warn("handleCheckSuiteEvent: forge client", "err", err)
 		return
@@ -510,7 +510,7 @@ func (h *WebhookHandlers) handleCheckSuiteEvent(ctx context.Context, ev *github.
 func (h *WebhookHandlers) storeInstallationIDFromFullName(fullName string, id int64) {
 	owner, _, ok := strings.Cut(fullName, "/")
 	if ok {
-		h.forge.storeInstallationID(owner, id)
+		h.forge.StoreInstallationID(owner, id)
 	}
 }
 

@@ -36,7 +36,7 @@ containers as one runtime adapter, not as the backend domain model.
   comments when a source file's purpose changes.
 - Run the validation commands listed for the phase that changed.
 
-## 1. Runtime Connection Work
+## Runtime Connection Work
 
 The lifecycle abstraction is not the same as the agent transport abstraction.
 Current agent backends call `ssh <container> ...`, deploy relay files through
@@ -56,52 +56,6 @@ Design direction:
 
 Sequence this after the lifecycle naming cleanup, unless a VM adapter requires
 it earlier.
-
-## 2. HTTP Router Work
-
-The current `server.Router` type is still more than an HTTP router. It stores
-application services and long-lived state (`tasks.Manager`, forge manager,
-CI service/cache, auth/session state, preferences, repository service, and
-voice handler state), and also builds the route table.
-
-Design direction:
-
-- Continue reducing `Router` fields to route dependencies and HTTP concerns.
-- Keep the concrete package name `internal/server` unless a package rename
-  clearly pays for itself. The exported type can be `Router` while the package
-  remains the HTTP adapter package.
-- Keep `internal/app` as the owner of application lifetime: startup discovery,
-  adoption, background maintenance, repo watching, model refresh, bot/CI
-  construction, and shutdown-only concerns such as closing voice sessions.
-- Move task command handlers behind a task API service. Router handlers should
-  translate HTTP requests to service calls and convert service results to API
-  DTOs.
-- Keep `internal/server/api`, `internal/server/api/v1`, and
-  `internal/server/api/v1conv` with the router unless API version packages move
-  to a separate public SDK boundary.
-
-Next sequence:
-
-1. Move forge, preferences, auth/session, CI, and repository access behind
-   narrower handler/service dependencies so `Router` no longer stores full app
-   services directly.
-2. Split app-owned bot/CI automation from HTTP route concerns. The router may
-   expose webhook endpoints, but app should own long-lived automation services.
-3. Audit router tests and convert remaining service-behavior assertions to
-   concern-level tests where possible.
-4. Run `make lint-go` and `make lint-docs` after each structural step.
-
-Completion criteria:
-
-- `server.Router` has no direct fields for `runtime.Backend`,
-  `agent.Backends`, forge clients, task runner maps, preferences stores, auth
-  stores, CI caches, or app maintenance settings unless a field is solely needed
-  by an HTTP handler concern object. Process inspection may depend on a narrow
-  process backend interface, not the full runtime lifecycle abstraction.
-- No background goroutine is started by `Router` except HTTP server shutdown
-  plumbing owned by `Serve`.
-- Unit tests for routing still construct the router directly, while app startup
-  tests construct the service graph through `internal/app`.
 
 ## Runtime Design Notes
 

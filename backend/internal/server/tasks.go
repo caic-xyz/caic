@@ -17,6 +17,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
+	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -34,12 +35,12 @@ import (
 type taskHTTPHandlers struct {
 	taskMgr   *tasks.Manager
 	repos     *repos.Service
-	forge     *ForgeManager
+	forge     *forgemanager.Manager
 	ciService *ci.Service
 	authStore *auth.Store
 	service   *taskAPIService
 
-	warnings *warningStore
+	warnings *WarningStore
 }
 
 func (h *taskHTTPHandlers) notifyTaskChange() {
@@ -328,6 +329,5 @@ func taskEntryFromRequest(r *http.Request, taskMgr *tasks.Manager, authStore *au
 // endpoints. Intended for e2e tests to inject fake fetchers that return
 // canned data without real API credentials.
 func (s *Router) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
-	s.usageFetchers = fetchers
-	s.usageHandlers = &usageHandlers{taskMgr: s.taskMgr, fetchers: fetchers}
+	s.usageHandlers.fetchers = fetchers
 }
