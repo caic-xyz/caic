@@ -19,9 +19,8 @@ import (
 )
 
 type usageHandlers struct {
-	taskMgr       *tasks.Manager
-	fetchers      func() []usage.ProviderFetcher
-	notifyChanged func() <-chan struct{}
+	taskMgr  *tasks.Manager
+	fetchers []usage.ProviderFetcher
 }
 
 // handleTaskListEvents streams patch events for the task list as SSE. On first
@@ -203,7 +202,7 @@ func (h *usageHandlers) handleEvents(w http.ResponseWriter, r *http.Request) {
 			prev = data
 		}
 
-		ch := h.notifyChanged()
+		ch := h.taskMgr.Changed()
 		select {
 		case <-r.Context().Done():
 			return
@@ -229,7 +228,7 @@ func (h *usageHandlers) buildResp(ctx context.Context) v1.UsageResp {
 
 	resp := v1.UsageResp{Local: local}
 	detached := context.WithoutCancel(ctx)
-	for _, f := range h.fetchers() {
+	for _, f := range h.fetchers {
 		if q := f.Get(detached); q != nil {
 			out := v1conv.ProviderQuota(q)
 			out.LogoURL = "/logos/" + out.Provider + ".svg"

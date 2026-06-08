@@ -223,9 +223,8 @@ func (s *Server) initConcernAdapters() {
 	}
 	if s.usageHandlers == nil {
 		s.usageHandlers = &usageHandlers{
-			taskMgr:       s.taskMgr,
-			fetchers:      func() []usage.ProviderFetcher { return s.usageFetchers },
-			notifyChanged: s.taskMgr.Changed,
+			taskMgr:  s.taskMgr,
+			fetchers: s.usageFetchers,
 		}
 	}
 	if s.ciAdapter == nil {
