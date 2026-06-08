@@ -327,7 +327,7 @@ func taskEntryFromRequest(r *http.Request, taskMgr *tasks.Manager, authStore *au
 // SetUsageFetchers replaces the provider usage fetchers used by the usage
 // endpoints. Intended for e2e tests to inject fake fetchers that return
 // canned data without real API credentials.
-func (s *Server) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
+func (s *Router) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
 	s.usageFetchers = fetchers
 	s.usageHandlers = &usageHandlers{taskMgr: s.taskMgr, fetchers: fetchers}
 }

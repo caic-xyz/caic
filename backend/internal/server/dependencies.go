@@ -1,4 +1,4 @@
-// Constructed dependencies for the HTTP server.
+// Constructed dependencies for the HTTP router.
 
 package server
 
@@ -23,23 +23,23 @@ import (
 
 // Dependencies contains already-constructed server dependencies.
 type Dependencies struct {
-	Repos         *repos.Service
-	Tailscale     bool
-	Preferences   *preferences.Store
-	AuthStore     *auth.Store
-	SessionSecret []byte
-	GitHubOAuth   *auth.ProviderConfig
-	GitLabOAuth   *auth.ProviderConfig
-	HostState     *auth.HostState
-	UsageFetchers []usage.ProviderFetcher
-	VoiceBridge   *voicertc.Bridge
-	VoiceGateway  VoiceGatewayConfig
-	Forge         *ForgeManager
-	CICache       *forgecache.Cache
-	Runtime       runtime.Backend
-	TaskManager   *tasks.Manager
-	Provider      genai.Provider
-	IPGeoChecker  *ipgeo.Checker
+	Repos          *repos.Service
+	Tailscale      bool
+	Preferences    *preferences.Store
+	AuthStore      *auth.Store
+	SessionSecret  []byte
+	GitHubOAuth    *auth.ProviderConfig
+	GitLabOAuth    *auth.ProviderConfig
+	HostState      *auth.HostState
+	UsageFetchers  []usage.ProviderFetcher
+	VoiceBridge    *voicertc.Bridge
+	VoiceGateway   VoiceGatewayConfig
+	Forge          *ForgeManager
+	CICache        *forgecache.Cache
+	ProcessBackend runtime.Backend
+	TaskManager    *tasks.Manager
+	Provider       genai.Provider
+	IPGeoChecker   *ipgeo.Checker
 
 	GitHubAllowedUsers     map[string]struct{}
 	GitLabAllowedUsers     map[string]struct{}
@@ -50,9 +50,9 @@ type Dependencies struct {
 }
 
 // New creates a new HTTP server from already-assembled dependencies.
-func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocritic // Dependencies is a startup value bag.
-	if d.Runtime == nil {
-		return nil, errors.New("runtime backend is required")
+func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocritic // Dependencies is a startup value bag.
+	if d.ProcessBackend == nil {
+		return nil, errors.New("process backend is required")
 	}
 	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
 	cacheSizes := newCacheSizeStore()
@@ -66,10 +66,9 @@ func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocrit
 		authStore: d.AuthStore,
 	}
 	botClient := &BotClient{
-		repos:     d.Repos,
-		taskMgr:   d.TaskManager,
-		forge:     d.Forge,
-		tokenFunc: taskService.resolveGitHubContainerToken,
+		repos:   d.Repos,
+		taskMgr: d.TaskManager,
+		forge:   d.Forge,
 	}
 	var notifyChange func()
 	if d.TaskManager != nil {
@@ -84,8 +83,11 @@ func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocrit
 		taskCreator:  botClient,
 		notifyChange: notifyChange,
 	})
+	ciService := ci.NewService(d.CICache, d.Provider, ciAdapter)
+	botService := bot.New(ctx, botClient)
 	taskService.ciAdapter = ciAdapter
-	s := &Server{
+	taskService.ciService = ciService
+	s := &Router{
 		ctx:              ctx,
 		repos:            d.Repos,
 		taskMgr:          d.TaskManager,
@@ -93,10 +95,12 @@ func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocrit
 		ciCache:          d.CICache,
 		provider:         d.Provider,
 		botClient:        botClient,
+		bot:              botService,
+		ciService:        ciService,
 		ciAdapter:        ciAdapter,
 		authHandlers:     &authHandlers{store: d.AuthStore, sessionSecret: d.SessionSecret, hostState: d.HostState, githubOAuth: d.GitHubOAuth, gitlabOAuth: d.GitLabOAuth, githubAllowedUsers: d.GitHubAllowedUsers, gitlabAllowedUsers: d.GitLabAllowedUsers},
 		ciHandlers:       &ciHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, provider: d.Provider, taskClient: botClient, authStore: d.AuthStore},
-		runtimeProcesses: &RuntimeProcesses{taskMgr: d.TaskManager, backend: d.Runtime, notifyChange: notifyChange},
+		runtimeProcesses: &RuntimeProcesses{taskMgr: d.TaskManager, backend: d.ProcessBackend, notifyChange: notifyChange},
 		serverConfigHandlers: &serverConfigHandlers{
 			serverCtx:          ctx,
 			tailscaleAvailable: d.Tailscale,
@@ -110,7 +114,7 @@ func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocrit
 			gitlabOAuth:        d.GitLabOAuth,
 			voiceGateway:       voice.metadata(),
 		},
-		taskHTTPHandlers:   &taskHTTPHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, authStore: d.AuthStore, warnings: warnings, service: taskService},
+		taskHTTPHandlers:   &taskHTTPHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, ciService: ciService, authStore: d.AuthStore, warnings: warnings, service: taskService},
 		usageHandlers:      &usageHandlers{taskMgr: d.TaskManager, fetchers: d.UsageFetchers},
 		voiceHandlers:      voice,
 		webFetchHandlers:   &webFetchHandlers{},
@@ -131,15 +135,14 @@ func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocrit
 	}
 	s.runtimeProcesses.authEnabled = s.authEnabled
 	// The webhook concern owns the forge webhook secrets and the GitHub App
-	// owner allowlist. Its bot and CI service are injected later, once the
-	// server wires them up via SetBot/SetCIService.
+	// owner allowlist.
 	s.webhooks = &WebhookHandlers{
 		serverCtx:        s.ctx,
 		githubSecret:     d.GitHubWebhookSecret,
 		gitlabSecret:     d.GitLabWebhookSecret,
 		appAllowedOwners: d.GitHubAppAllowedOwners,
-		bot:              s.Bot,
-		ciService:        s.ciService,
+		bot:              botService,
+		ciService:        ciService,
 		ciCache:          s.ciCache,
 		forge:            s.forge,
 		taskMgr:          s.taskMgr,
@@ -149,32 +152,7 @@ func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocrit
 	return s, nil
 }
 
-// SetBot sets the forge automation bot owned by the server.
-// Must be called after New, which establishes the webhook concern.
-func (s *Server) SetBot(b *bot.Bot) {
-	s.Bot = b
-	s.webhooks.bot = b
-}
-
-// SetCIService sets the CI service used by server handlers and adoption hooks.
-// Must be called after New, which establishes the webhook concern.
-func (s *Server) SetCIService(c *ci.Service) {
-	s.ciService = c
-	s.webhooks.ciService = c
-	if s.taskHTTPHandlers != nil {
-		s.taskHTTPHandlers.ciService = c
-		if s.taskHTTPHandlers.service != nil {
-			s.taskHTTPHandlers.service.ciService = c
-		}
-	}
-}
-
-// BotClient returns the bot-facing task client.
-func (s *Server) BotClient() bot.Client {
-	return s.botClient
-}
-
-// CIAdapter returns the CI service backend adapter.
-func (s *Server) CIAdapter() ci.Backend {
-	return s.ciAdapter
+// ResumePendingComments resumes bot-managed pending comments after startup.
+func (s *Router) ResumePendingComments() {
+	s.bot.ResumePendingComments()
 }

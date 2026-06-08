@@ -147,7 +147,7 @@ func resolveCacheHostPath(home, p string) string {
 }
 
 // RefreshCacheSizes refreshes the server's well-known cache size snapshot once.
-func (s *Server) RefreshCacheSizes() {
+func (s *Router) RefreshCacheSizes() {
 	if s.cacheSizes == nil {
 		return
 	}
@@ -156,7 +156,7 @@ func (s *Server) RefreshCacheSizes() {
 
 // RefreshCacheSizesLoop refreshes well-known cache sizes until the server
 // context is cancelled.
-func (s *Server) RefreshCacheSizesLoop() {
+func (s *Router) RefreshCacheSizesLoop() {
 	if s.cacheSizes == nil {
 		return
 	}

@@ -41,7 +41,7 @@ GROUP_RULES = (
     GroupRule("Agent", exact=("internal/agent",), prefixes=("internal/agent/",)),
     GroupRule("Forge", exact=("internal/forge",), prefixes=("internal/forge/",)),
     GroupRule(
-        "Server",
+        "Router",
         exact=("internal/server",),
         prefixes=("internal/server/"),
     ),

@@ -14,7 +14,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
@@ -109,7 +108,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 
 	t.Run("updates CI status when SHA matches HEAD", func(t *testing.T) {
 		t.Parallel()
-		s := minimalServer(t)
+		s := minimalRouter(t)
 		s.repos.Registry().Add(&repos.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
 		s.forge.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "abc123", checkRuns: successRuns}}
 
@@ -132,7 +131,7 @@ func TestHandleCheckSuiteEvent(t *testing.T) {
 
 	t.Run("ignores out-of-order delivery when SHA is not HEAD", func(t *testing.T) {
 		t.Parallel()
-		s := minimalServer(t)
+		s := minimalRouter(t)
 		s.repos.Registry().Add(&repos.Info{RelPath: "org/repo", ForgeOwner: "org", ForgeRepo: "repo", BaseBranch: "main"})
 		// HEAD is now "newsha"; the webhook carries "oldsha".
 		s.forge.githubApp = &stubAppClient{forgeClient: &stubForge{headSHA: "newsha", checkRuns: failureRuns}}
@@ -161,7 +160,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 
 	t.Run("ping event returns 200", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.webhooks.githubSecret = secret
 
 		body := []byte(`{}`)
@@ -179,7 +178,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 
 	t.Run("bad signature returns 401", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.webhooks.githubSecret = secret
 
 		body := []byte(`{}`)
@@ -197,7 +196,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 
 	t.Run("missing signature returns 401", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.webhooks.githubSecret = secret
 
 		body := []byte(`{}`)
@@ -215,7 +214,7 @@ func TestHandleGitHubWebhook(t *testing.T) {
 
 	t.Run("completed check_run returns 204", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.webhooks.githubSecret = secret
 
 		ev := github.CheckRunEvent{}
@@ -244,7 +243,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 
 	t.Run("valid pipeline event returns 204", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.webhooks.gitlabSecret = secret
 
 		ev := gitlab.PipelineEvent{}
@@ -267,7 +266,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 
 	t.Run("bad token returns 401", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.webhooks.gitlabSecret = secret
 
 		body := []byte(`{}`)
@@ -285,7 +284,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 
 	t.Run("non-terminal status returns 204 without dispatch", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.webhooks.gitlabSecret = secret
 
 		ev := gitlab.PipelineEvent{}
@@ -308,7 +307,7 @@ func TestHandleGitLabWebhook(t *testing.T) {
 
 	t.Run("oversized body returns 413", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.webhooks.gitlabSecret = secret
 
 		body := make([]byte, maxWebhookBodyBytes+1)
@@ -329,7 +328,7 @@ func TestBuildHandlerWebhookRoutes(t *testing.T) {
 	t.Parallel()
 	t.Run("gitlab webhook registered when secret set", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.webhooks.gitlabSecret = []byte("secret")
 
 		h, err := s.buildHandler()
@@ -358,7 +357,7 @@ func TestBuildHandlerWebhookRoutes(t *testing.T) {
 
 	t.Run("gitlab webhook not registered when secret unset", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		// webhooks.gitlabSecret is nil (not configured).
 
 		h, err := s.buildHandler()
@@ -381,8 +380,8 @@ func TestBuildHandlerWebhookRoutes(t *testing.T) {
 	})
 }
 
-// minimalServer returns a Server with just enough state for webhook handler tests.
-func minimalServer(t *testing.T) *Server {
+// minimalRouter returns a Router with just enough state for webhook handler tests.
+func minimalRouter(t *testing.T) *Router {
 	cache, err := forgecache.Open(t.TempDir() + "/forgecache.json")
 	if err != nil {
 		t.Fatal(err)
@@ -391,15 +390,14 @@ func minimalServer(t *testing.T) *Server {
 	backend := &mdruntime.Backend{}
 	taskMgr := tasks.New(tasks.Config{ServerCtx: ctx})
 	s, err := New(ctx, Dependencies{
-		Repos:       repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, nil, nil),
-		Runtime:     backend,
-		TaskManager: taskMgr,
-		CICache:     cache,
-		Forge:       newForgeManager("", "", nil),
+		Repos:          repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, nil, nil),
+		ProcessBackend: backend,
+		TaskManager:    taskMgr,
+		CICache:        cache,
+		Forge:          newForgeManager("", "", nil),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	s.SetCIService(ci.NewService(s.ciCache, s.provider, s.CIAdapter()))
 	return s
 }

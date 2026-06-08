@@ -26,7 +26,7 @@ import (
 //
 // It is an HTTP concern object: it translates API requests into repository,
 // forge, bot task, and agent-session operations without retaining a back-reference
-// to Server.
+// to Router.
 type ciHandlers struct {
 	taskMgr    *tasks.Manager
 	repos      *repos.Service

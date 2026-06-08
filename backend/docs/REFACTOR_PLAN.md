@@ -13,9 +13,9 @@ containers as one runtime adapter, not as the backend domain model.
 - `internal/task` and `internal/tasks` orchestrate caic tasks against
   `runtime.InstanceID` and runtime interfaces, not containers.
 - `internal/app` assembles dependencies and starts background services.
-- `internal/server` eventually exposes `Router`, not `Server`. It owns HTTP
-  routing, request/response conversion, middleware, static assets, SSE framing,
-  and API-facing behavior. It does not own application lifecycle, repo
+- `internal/server` exposes `Router`. It owns HTTP routing, request/response
+  conversion, middleware, static assets, SSE framing, and API-facing behavior.
+  It does not own application lifecycle, repo
   discovery, task orchestration, runtime state, CI state, forge clients,
   preferences, auth stores, model cache refresh, or maintenance loops.
 - `internal/agent` still assumes md-style SSH targets today. Do not hide that
@@ -59,16 +59,14 @@ it earlier.
 
 ## 2. HTTP Router Work
 
-The current `server.Server` type is still more than an HTTP server. It stores
+The current `server.Router` type is still more than an HTTP router. It stores
 application services and long-lived state (`tasks.Manager`, forge manager,
 CI service/cache, auth/session state, preferences, repository service, and
-voice handler state), and also builds the route table. Renaming the remaining
-type directly to `Router` would still make the target architecture harder to see.
+voice handler state), and also builds the route table.
 
 Design direction:
 
-- Rename `Server` to `Router` only after its fields are reduced to route
-  dependencies and HTTP concerns.
+- Continue reducing `Router` fields to route dependencies and HTTP concerns.
 - Keep the concrete package name `internal/server` unless a package rename
   clearly pays for itself. The exported type can be `Router` while the package
   remains the HTTP adapter package.
@@ -84,21 +82,14 @@ Design direction:
 
 Next sequence:
 
-1. Move voice shutdown ownership out of `Server.Serve` and into `internal/app`.
-   The router may expose/serve voice routes, but app lifetime should close voice
-   sessions.
-2. Remove post-construction service mutation seams (`SetBot`, `SetCIService`,
-   and exported `Server.Bot`) by assembling bot/CI/webhook dependencies in
-   `internal/app` before router construction, or by moving those relationships
-   behind app-owned services.
-3. Rename the router dependency currently called `Runtime` to a process-route
-   dependency (`RuntimeProcesses`/`ProcessBackend`) so HTTP code does not appear
-   to own runtime lifecycle.
-4. Rename `server.Server` to `server.Router` once it mostly contains route group
-   dependencies, route registration, middleware composition, static asset
-   serving, and `Serve`.
-5. Update architecture docs from `Server` to `Router`, then run `make lint-go`
-   and `make lint-docs`.
+1. Move forge, preferences, auth/session, CI, and repository access behind
+   narrower handler/service dependencies so `Router` no longer stores full app
+   services directly.
+2. Split app-owned bot/CI automation from HTTP route concerns. The router may
+   expose webhook endpoints, but app should own long-lived automation services.
+3. Audit router tests and convert remaining service-behavior assertions to
+   concern-level tests where possible.
+4. Run `make lint-go` and `make lint-docs` after each structural step.
 
 Completion criteria:
 

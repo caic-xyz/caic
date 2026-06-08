@@ -7,27 +7,24 @@ import (
 	"log/slog"
 
 	"github.com/caic-xyz/caic/backend/internal/repos"
-	"github.com/caic-xyz/caic/backend/internal/server"
 )
 
-func newRepoWatcher(ctx context.Context, absRoot string, s *server.Server) *repos.Watcher {
+func newRepoWatcher(ctx context.Context, absRoot string, repoService *repos.Service) *repos.Watcher {
 	return repos.NewWatcher(&repos.WatcherConfig{
 		Ctx:          ctx,
 		AbsRoot:      absRoot,
-		Repos:        func() []repos.Info { return watchedRepos(s) },
-		RelPath:      s.RepoRelPath,
-		RunnerExists: s.RunnerRegistered,
+		Repos:        func() []repos.Info { return watchedRepos(repoService) },
+		RelPath:      repoService.RelPath,
+		RunnerExists: repoService.RunnerRegistered,
 		OnDiscovered: func(ctx context.Context, abs string) {
-			registerDiscoveredRepo(ctx, s, abs)
+			registerDiscoveredRepo(ctx, repoService, abs)
 		},
-		OnRemoved: func(rel string) {
-			s.DeregisterRepoRunner(rel)
-		},
+		OnRemoved: repoService.DeregisterRunner,
 	})
 }
 
-func watchedRepos(s *server.Server) []repos.Info {
-	snap := s.RepoSnapshot()
+func watchedRepos(repoService *repos.Service) []repos.Info {
+	snap := repoService.Snapshot()
 	out := make([]repos.Info, len(snap))
 	for i := range snap {
 		out[i] = repos.Info{
@@ -39,8 +36,8 @@ func watchedRepos(s *server.Server) []repos.Info {
 	return out
 }
 
-func registerDiscoveredRepo(ctx context.Context, s *server.Server, abs string) {
-	result, err := s.DiscoverRepoRunner(ctx, abs)
+func registerDiscoveredRepo(ctx context.Context, repoService *repos.Service, abs string) {
+	result, err := repoService.DiscoverRunner(ctx, abs)
 	if err != nil {
 		slog.WarnContext(ctx, "new repo: discovery failed", "path", abs, "err", err)
 		return
@@ -48,9 +45,9 @@ func registerDiscoveredRepo(ctx context.Context, s *server.Server, abs string) {
 	if result.InitErr != nil {
 		slog.WarnContext(ctx, "new repo: runner init failed", "path", abs, "err", result.InitErr)
 	}
-	if s.RunnerRegistered(result.Info.RelPath) {
+	if repoService.RunnerRegistered(result.Info.RelPath) {
 		return
 	}
-	s.RegisterRepoRunner(&result)
+	repoService.RegisterRunner(&result)
 	slog.InfoContext(ctx, "discovered new repo", "path", result.Info.RelPath, "br", result.Info.BaseBranch)
 }

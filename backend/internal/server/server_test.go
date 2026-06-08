@@ -84,8 +84,8 @@ func newTestPrefs(t *testing.T) *preferences.Store {
 	return store
 }
 
-// newTestServer creates a Server for tests.
-func newTestServer(t *testing.T) *Server {
+// newTestRouter creates a Router for tests.
+func newTestRouter(t *testing.T) *Router {
 	checker, err := ipgeo.NewChecker(t.Context(), "0.0.0.0/0,::/0", "", "")
 	if err != nil {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
@@ -93,12 +93,12 @@ func newTestServer(t *testing.T) *Server {
 	backend := &mdruntime.Backend{}
 	taskMgr := tasks.New(tasks.Config{ServerCtx: t.Context()})
 	s, err := New(t.Context(), Dependencies{
-		Repos:        repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, backend, nil),
-		Runtime:      backend,
-		TaskManager:  taskMgr,
-		Preferences:  newTestPrefs(t),
-		IPGeoChecker: checker,
-		Forge:        newForgeManager("", "", nil),
+		Repos:          repos.NewService("", "", "", nil, repos.NewRegistry(nil), taskMgr, backend, nil),
+		ProcessBackend: backend,
+		TaskManager:    taskMgr,
+		Preferences:    newTestPrefs(t),
+		IPGeoChecker:   checker,
+		Forge:          newForgeManager("", "", nil),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -106,7 +106,7 @@ func newTestServer(t *testing.T) *Server {
 	return s
 }
 
-func testTaskHandlers(s *Server) *taskHTTPHandlers {
+func testTaskHandlers(s *Router) *taskHTTPHandlers {
 	return s.taskHTTPHandlers
 }
 
@@ -115,7 +115,7 @@ func TestNew(t *testing.T) {
 	t.Run("error", func(t *testing.T) {
 		t.Parallel()
 		if _, err := New(t.Context(), Dependencies{}); err == nil {
-			t.Fatal("New() error = nil, want runtime backend required")
+			t.Fatal("New() error = nil, want process backend required")
 		}
 	})
 }
@@ -125,7 +125,7 @@ func TestNew(t *testing.T) {
 // task's own ID string, so handlers that re-resolve via the Manager by
 // entry.Task().ID.String() find the same entry (in production the two always
 // coincide because Insert keys on t.ID.String()).
-func insertTestTask(t *testing.T, s *Server, id string, tk *task.Task) *tasks.Entry { //nolint:unparam // id is constant today; keep generic
+func insertTestTask(t *testing.T, s *Router, id string, tk *task.Task) *tasks.Entry { //nolint:unparam // id is constant today; keep generic
 	e := tasks.NewEntry(tk)
 	s.taskMgr.Insert(id, e)
 	if taskID := tk.ID.String(); taskID != id {
@@ -136,12 +136,12 @@ func insertTestTask(t *testing.T, s *Server, id string, tk *task.Task) *tasks.En
 
 // registerTestRunner registers a runner under relPath in the task Manager's
 // registry, the single owner of the runner set.
-func registerTestRunner(s *Server, relPath string, r *task.Runner) {
+func registerTestRunner(s *Router, relPath string, r *task.Runner) {
 	s.taskMgr.RegisterRunner(relPath, r)
 }
 
 // testEntries returns a snapshot of every registered task entry (test-only).
-func testEntries(s *Server) []*tasks.Entry {
+func testEntries(s *Router) []*tasks.Entry {
 	var out []*tasks.Entry
 	s.taskMgr.Range(func(_ string, e *tasks.Entry) bool {
 		out = append(out, e)
@@ -152,7 +152,7 @@ func testEntries(s *Server) []*tasks.Entry {
 
 // loadPurgedTasksForTest reads logs from disk and registers purged tasks via
 // the manager. Replaces the deleted Server.loadPurgedTasks helper.
-func loadPurgedTasksForTest(s *Server, logDir string) error {
+func loadPurgedTasksForTest(s *Router, logDir string) error {
 	if s.repos == nil {
 		s.repos = repos.NewService("", "", "", nil, repos.NewRegistry(nil), s.taskMgr, nil, nil)
 	}
@@ -164,7 +164,7 @@ func loadPurgedTasksForTest(s *Server, logDir string) error {
 }
 
 type runnerConstructionTestFixture struct {
-	server   *Server
+	server   *Router
 	logDir   string
 	cacheDir string
 	backend  *mdruntime.Backend
@@ -185,9 +185,9 @@ func newRunnerConstructionTestServer(t *testing.T, root string) runnerConstructi
 		HarnessEnv: harnessEnv,
 	})
 	s, err := New(t.Context(), Dependencies{
-		Repos:       repos.NewService(root, logDir, cacheDir, harnessEnv, repos.NewRegistry(nil), taskMgr, backend, backends),
-		Runtime:     backend,
-		TaskManager: taskMgr,
+		Repos:          repos.NewService(root, logDir, cacheDir, harnessEnv, repos.NewRegistry(nil), taskMgr, backend, backends),
+		ProcessBackend: backend,
+		TaskManager:    taskMgr,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -200,30 +200,30 @@ func newRunnerConstructionTestServer(t *testing.T, root string) runnerConstructi
 	}
 }
 
-func newTestRepoWatcher(t *testing.T, root string, s *Server) *repos.Watcher {
+func newTestRepoWatcher(t *testing.T, root string, s *Router) *repos.Watcher {
 	return repos.NewWatcher(&repos.WatcherConfig{
 		Ctx:          t.Context(),
 		AbsRoot:      root,
-		Repos:        func() []repos.Info { return testWatchedRepos(s) },
-		RelPath:      s.RepoRelPath,
-		RunnerExists: s.RunnerRegistered,
+		Repos:        func() []repos.Info { return testWatchedRepos(s.repos) },
+		RelPath:      s.repos.RelPath,
+		RunnerExists: s.repos.RunnerRegistered,
 		OnDiscovered: func(ctx context.Context, abs string) {
-			result, err := s.DiscoverRepoRunner(ctx, abs)
+			result, err := s.repos.DiscoverRunner(ctx, abs)
 			if err != nil {
-				t.Errorf("DiscoverRepoRunner(%q): %v", abs, err)
+				t.Errorf("DiscoverRunner(%q): %v", abs, err)
 				return
 			}
-			if s.RunnerRegistered(result.Info.RelPath) {
+			if s.repos.RunnerRegistered(result.Info.RelPath) {
 				return
 			}
-			s.RegisterRepoRunner(&result)
+			s.repos.RegisterRunner(&result)
 		},
-		OnRemoved: s.DeregisterRepoRunner,
+		OnRemoved: s.repos.DeregisterRunner,
 	})
 }
 
-func testWatchedRepos(s *Server) []repos.Info {
-	snap := s.RepoSnapshot()
+func testWatchedRepos(repoService *repos.Service) []repos.Info {
+	snap := repoService.Snapshot()
 	out := make([]repos.Info, len(snap))
 	for i := range snap {
 		out[i] = repos.Info{
@@ -342,7 +342,7 @@ func TestHandleTaskEvents(t *testing.T) {
 	t.Parallel()
 	t.Run("NotFound", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/99/raw_events", http.NoBody)
 		req.SetPathValue("id", "99")
 		w := httptest.NewRecorder()
@@ -358,7 +358,7 @@ func TestHandleTaskEvents(t *testing.T) {
 
 	t.Run("NonexistentID", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/tasks/abc/raw_events", http.NoBody)
 		req.SetPathValue("id", "abc")
 		w := httptest.NewRecorder()
@@ -398,7 +398,7 @@ func TestHandleTaskInput(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			s := newTestServer(t)
+			s := newTestRouter(t)
 			insertTestTask(t, s, "t1", &task.Task{InitialPrompt: agent.Prompt{Text: "test"}})
 
 			body := strings.NewReader(tt.bodyJSON)
@@ -419,7 +419,7 @@ func TestHandleTaskInput(t *testing.T) {
 
 // testRestart is a helper for TestHandleRestart subtests.
 func testRestart(t *testing.T, state task.State, bodyJSON string, wantStatus int, wantCode api.ErrorCode) {
-	s := newTestServer(t)
+	s := newTestRouter(t)
 	tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
 	tk.SetState(state)
 	insertTestTask(t, s, "t1", tk)
@@ -455,7 +455,7 @@ func TestHandlePurge(t *testing.T) {
 	t.Parallel()
 	t.Run("NotWaiting", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}}
 		// StatePending is the zero value, but set explicitly for clarity.
 		insertTestTask(t, s, "t1", tk)
@@ -477,7 +477,7 @@ func TestHandlePurge(t *testing.T) {
 		t.Parallel()
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateWaiting)
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "r", &task.Runner{BaseBranch: "main", Dir: t.TempDir()})
 		insertTestTask(t, s, "t1", tk)
 
@@ -505,7 +505,7 @@ func TestHandlePurge(t *testing.T) {
 		t.Parallel()
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetState(task.StateRunning)
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "r", &task.Runner{BaseBranch: "main", Dir: t.TempDir()})
 		insertTestTask(t, s, "t1", tk)
 
@@ -528,7 +528,7 @@ func TestHandleCreateTask(t *testing.T) {
 	t.Parallel()
 	t.Run("ReturnsID", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "myrepo", &task.Runner{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
@@ -555,7 +555,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("MissingRepo", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		handler := handle(testTaskHandlers(s).service.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test task"}}`)
@@ -574,7 +574,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("UnknownRepo", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		handler := handle(testTaskHandlers(s).service.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repos":[{"name":"nonexistent"}],"harness":"claude"}`)
@@ -593,7 +593,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("UnknownHarness", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "myrepo", &task.Runner{BaseBranch: "main", Dir: t.TempDir()})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -616,7 +616,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("InvalidModel", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "myrepo", &task.Runner{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
@@ -643,7 +643,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("ValidModel", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "myrepo", &task.Runner{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
@@ -670,7 +670,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("WithImage", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "myrepo", &task.Runner{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
@@ -717,7 +717,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("WithCachePreferences", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "myrepo", &task.Runner{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
@@ -784,7 +784,7 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		// Regression: creating a task with no repos panicked with
 		// "makeslice: cap out of range" because len(req.Repos)-1 == -1.
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{
 			Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}},
 		})
@@ -811,7 +811,7 @@ func TestHandleCreateTask(t *testing.T) {
 		t.Parallel()
 		// Creating a no-repo task with no registered harness backends returns
 		// a clear 400 instead of panicking.
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{}})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -827,7 +827,7 @@ func TestHandleCreateTask(t *testing.T) {
 
 	t.Run("UnknownField", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		handler := handle(testTaskHandlers(s).service.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"test"},"repo":"r","harness":"claude","bogus":true}`)
@@ -850,7 +850,7 @@ func TestSignalProcess(t *testing.T) {
 
 	t.Run("strictDecodeRejectsUnknownField", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetRuntimeInstanceInfo("ctr", "", "", 0)
 		insertTestTask(t, s, "t1", tk)
@@ -881,7 +881,7 @@ func TestSignalProcess(t *testing.T) {
 
 	t.Run("valid", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetRuntimeInstanceInfo("ctr", "", "", 0)
 		insertTestTask(t, s, "t1", tk)
@@ -925,7 +925,7 @@ func TestSignalProcess(t *testing.T) {
 
 func TestHandleListRepos(t *testing.T) {
 	t.Parallel()
-	s := newTestServer(t)
+	s := newTestRouter(t)
 	s.repos = repos.NewService("", "", "", nil, repos.NewRegistry([]repos.Info{
 		{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"},
 		{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"},
@@ -988,7 +988,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			writeLogFile(t, logDir, fmt.Sprintf("%d.jsonl", i), meta, trailer)
 		}
 
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
@@ -1052,7 +1052,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
@@ -1091,7 +1091,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			writeLogFile(t, logDir, fmt.Sprintf("b-%d.jsonl", i), meta, trailer)
 		}
 
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
@@ -1140,7 +1140,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
@@ -1194,7 +1194,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
@@ -1248,7 +1248,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "b.jsonl", metaB, trailerB)
 
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
@@ -1297,7 +1297,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 	t.Run("EmptyDir", func(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
@@ -1339,7 +1339,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		lines = append(lines, trailer)
 		writeLogFile(t, logDir, "task.jsonl", lines...)
 
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
@@ -1395,7 +1395,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 			}
 		}
 
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
@@ -1451,7 +1451,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, "purged.jsonl", meta("purged task"), trailer)
 
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
@@ -1488,7 +1488,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, "feat.jsonl", meta, trailer)
 
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
@@ -1612,7 +1612,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, assistant, result, trailer)
 
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
@@ -1694,7 +1694,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, msgStart, delta1, delta2, assistant, result, trailer)
 
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
@@ -1962,7 +1962,7 @@ func TestBuildHandler(t *testing.T) {
 	t.Parallel()
 	t.Run("auth disabled", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		if _, err := s.buildHandler(); err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
 		}
@@ -1972,7 +1972,7 @@ func TestBuildHandler(t *testing.T) {
 		t.Parallel()
 		// Regression: adding /api/caic/v1/auth/ (unqualified) alongside GET / (qualified)
 		// caused a pattern conflict panic in Go 1.22+ ServeMux.
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		secret := make([]byte, 32)
 		s.sessionSecret = secret
 		usersPath := filepath.Join(t.TempDir(), "users.json")
@@ -1988,7 +1988,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("static handler rejects non-GET", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2005,7 +2005,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("static host check rejects wrong host", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.hostState = auth.NewHostState("https://caic.example.com")
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2023,7 +2023,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("static host check allows matching host", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.hostState = auth.NewHostState("https://caic.example.com")
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2041,7 +2041,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("static host check is case insensitive", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.hostState = auth.NewHostState("https://caic.example.com")
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2059,7 +2059,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("no host check when hostState nil", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		h, err := s.buildHandler()
 		if err != nil {
 			t.Fatalf("buildHandler() error = %v", err)
@@ -2076,7 +2076,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auto host check locks first FQDN", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2113,7 +2113,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auto host check rejects same host on different port", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2150,7 +2150,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auto host check allows IP before and after lock", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2184,7 +2184,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auto host check allows localhost", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2202,7 +2202,7 @@ func TestBuildHandler(t *testing.T) {
 
 	t.Run("auto host check is case insensitive", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.hostState = &auth.HostState{}
 		h, err := s.buildHandler()
 		if err != nil {
@@ -2250,7 +2250,7 @@ func TestOAuthCallbackStateValidation(t *testing.T) {
 	}
 
 	host := auth.NewHostState("http://localhost")
-	s := newTestServer(t)
+	s := newTestRouter(t)
 	s.sessionSecret = secret
 	s.authStore = store
 	s.hostState = host
@@ -2359,7 +2359,7 @@ func TestForgeFor(t *testing.T) {
 	t.Parallel()
 	t.Run("PAT", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.forge.githubToken = "pat-token"
 		f := s.forge.forgeFor(t.Context(), forge.KindGitHub)
 		if f == nil {
@@ -2369,7 +2369,7 @@ func TestForgeFor(t *testing.T) {
 
 	t.Run("no token returns nil", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		f := s.forge.forgeFor(t.Context(), forge.KindGitHub)
 		if f != nil {
 			t.Fatal("forgeFor should return nil when no tokens available")
@@ -2383,7 +2383,7 @@ func TestForgeFor(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Open: %v", err)
 		}
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		s.authStore = store
 		// OAuth mode but no user in context and no PAT — returns nil.
 		// CI polling is driven by SSE handlers which have user context.
@@ -2398,7 +2398,7 @@ func TestPrefsPerUser(t *testing.T) {
 	t.Parallel()
 	t.Run("separate users get separate preferences", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 
 		if err := s.prefs.Update("user-alice", func(p *preferences.Preferences) {
 			p.Settings.AutoFixOnCIFailure = true
@@ -2448,7 +2448,7 @@ func TestPrefsPerUser(t *testing.T) {
 
 	t.Run("default user in no-auth mode", func(t *testing.T) {
 		t.Parallel()
-		s := newTestServer(t)
+		s := newTestRouter(t)
 		// No auth in context — userIDFromCtx returns "default".
 		id := userIDFromCtx(t.Context())
 		if id != "default" {

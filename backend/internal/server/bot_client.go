@@ -11,19 +11,18 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
+	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
-type tokenResolver func(ctx context.Context, enabled bool) string
-
 // BotClient adapts task and forge stores to bot.Client.
 type BotClient struct {
-	repos     *repos.Service
-	taskMgr   *tasks.Manager
-	forge     *ForgeManager
-	tokenFunc tokenResolver
+	repos   *repos.Service
+	taskMgr *tasks.Manager
+	forge   *ForgeManager
 }
 
 // ResolveRepo maps a forge full name ("owner/repo") to repo info.
@@ -77,10 +76,7 @@ func (c *BotClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 	// Bot tasks always get the GitHub token if available (needed for pushing CI
 	// fixes). Resolve it in the request ctx so multi-user deployments use the
 	// caller's OAuth token rather than the server PAT.
-	ghToken := ""
-	if c.tokenFunc != nil {
-		ghToken = c.tokenFunc(ctx, true)
-	}
+	ghToken := c.resolveGitHubContainerToken(ctx, true)
 
 	id, err := c.taskMgr.Create(ctx, tasks.CreateParams{
 		OwnerID:             req.OwnerID,
@@ -132,4 +128,17 @@ func (c *BotClient) ResolveCommenter(ctx context.Context, owner string) bot.Comm
 		}
 	}
 	return c.forge.commenterFor(installID)
+}
+
+func (c *BotClient) resolveGitHubContainerToken(ctx context.Context, enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	if u, ok := auth.UserFromContext(ctx); ok && u.Provider == forge.KindGitHub && u.AccessToken != "" {
+		return u.AccessToken
+	}
+	if c.forge != nil {
+		return c.forge.githubToken
+	}
+	return ""
 }

@@ -1,5 +1,4 @@
-// Package server provides the HTTP server serving the API and embedded
-// frontend.
+// Package server provides the HTTP router serving the API and embedded frontend.
 package server
 
 import (
@@ -38,8 +37,8 @@ type GitHubAppClient interface {
 	PostComment(ctx context.Context, installationID int64, owner, repo string, issueNumber int, body string) error
 }
 
-// Server is the HTTP server for the caic web UI.
-type Server struct {
+// Router is the HTTP router for the caic web UI.
+type Router struct {
 	// Immutable after construction.
 
 	// Core infrastructure.
@@ -49,7 +48,7 @@ type Server struct {
 	cacheSizes *cacheSizeStore
 	ciCache    *forgecache.Cache
 	provider   genai.Provider // nil if LLM not configured
-	Bot        *bot.Bot
+	bot        *bot.Bot
 	ciService  *ci.Service // handles forge event-driven task automation
 	botClient  *BotClient
 	ciAdapter  *CIAdapter
@@ -100,7 +99,7 @@ type Server struct {
 }
 
 // SetFakeCI injects a fake CI simulation hook for smoke and e2e tests.
-func (s *Server) SetFakeCI(f func(context.Context, *task.Task)) {
+func (s *Router) SetFakeCI(f func(context.Context, *task.Task)) {
 	s.fakeCI = f
 	if s.taskHTTPHandlers != nil && s.taskHTTPHandlers.service != nil {
 		s.taskHTTPHandlers.service.fakeCI = f
@@ -111,7 +110,7 @@ func (s *Server) SetFakeCI(f func(context.Context, *task.Task)) {
 // ctx is cancelled. Opening the listener early (before calling New) lets the
 // caller detect port conflicts at startup instead of after lengthy
 // initialisation.
-func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+func (s *Router) Serve(ctx context.Context, ln net.Listener) error {
 	handler, err := s.buildHandler()
 	if err != nil {
 		return err
@@ -129,9 +128,6 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	go func() {
 		defer close(shutdownDone)
 		<-ctx.Done()
-		if s.voiceHandlers != nil && s.voiceHandlers.bridge != nil {
-			s.voiceHandlers.bridge.CloseAll()
-		}
 		shutdownCtx, shutdownCancel := context.WithTimeout(shutdownBase, 5*time.Second)
 		_ = srv.Shutdown(shutdownCtx)
 		shutdownCancel()
@@ -147,7 +143,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 
 // buildHandler assembles the full HTTP handler. Extracted from Serve so that
 // route registration can be tested without a listener.
-func (s *Server) buildHandler() (http.Handler, error) {
+func (s *Router) buildHandler() (http.Handler, error) {
 	serverConfig := s.serverConfigHandlers
 
 	// Auth routes (exempt from RequireUser).

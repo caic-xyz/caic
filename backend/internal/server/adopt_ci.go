@@ -24,7 +24,7 @@ type AdoptedTaskWiring struct {
 }
 
 // NewAdoptedTaskWiring builds the adopted-task startup concern for this server.
-func (s *Server) NewAdoptedTaskWiring() *AdoptedTaskWiring {
+func (s *Router) NewAdoptedTaskWiring() *AdoptedTaskWiring {
 	return &AdoptedTaskWiring{
 		ctx:       s.ctx,
 		authStore: s.authStore,

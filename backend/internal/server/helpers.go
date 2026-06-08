@@ -121,6 +121,6 @@ func roundDuration(d time.Duration) time.Duration {
 }
 
 // authEnabled reports whether OAuth authentication is configured.
-func (s *Server) authEnabled() bool {
+func (s *Router) authEnabled() bool {
 	return s.authStore != nil
 }

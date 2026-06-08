@@ -74,8 +74,6 @@ graph TD
   pkg_internal_app --> pkg_internal_agent
   pkg_internal_app --> pkg_internal_agent_registry
   pkg_internal_app --> pkg_internal_auth
-  pkg_internal_app --> pkg_internal_bot
-  pkg_internal_app --> pkg_internal_ci
   pkg_internal_app --> pkg_internal_forge_forgecache
   pkg_internal_app --> pkg_internal_forge_github
   pkg_internal_app --> pkg_internal_preferences
@@ -229,7 +227,7 @@ graph TD
     pkg_internal_forge_gitlab["internal/forge/gitlab"]
   end
 
-  subgraph Server["Server"]
+  subgraph Router["Router"]
     pkg_internal_server["internal/server"]
     pkg_internal_server_api["internal/server/api"]
     pkg_internal_server_api_v1["internal/server/api/v1"]
@@ -292,8 +290,6 @@ graph TD
   pkg_internal_app --> pkg_internal_agent
   pkg_internal_app --> pkg_internal_agent_registry
   pkg_internal_app --> pkg_internal_auth
-  pkg_internal_app --> pkg_internal_bot
-  pkg_internal_app --> pkg_internal_ci
   pkg_internal_app --> pkg_internal_forge_forgecache
   pkg_internal_app --> pkg_internal_forge_github
   pkg_internal_app --> pkg_internal_preferences
@@ -410,7 +406,7 @@ graph TD
 | `internal/agent/pi` | `internal/agent`, `internal/jsonutil` |
 | `internal/agent/registry` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/opencode`, `internal/agent/pi` |
 | `internal/agent/relay` | None |
-| `internal/app` | `internal/agent`, `internal/agent/registry`, `internal/auth`, `internal/bot`, `internal/ci`, `internal/forge/forgecache`, `internal/forge/github`, `internal/preferences`, `internal/repos`, `internal/runtime`, `internal/runtime/mdruntime`, `internal/server`, `internal/server/ipgeo`, `internal/task`, `internal/tasks`, `internal/usage`, `internal/voicegateway`, `internal/voicegateway/voicertc` |
+| `internal/app` | `internal/agent`, `internal/agent/registry`, `internal/auth`, `internal/forge/forgecache`, `internal/forge/github`, `internal/preferences`, `internal/repos`, `internal/runtime`, `internal/runtime/mdruntime`, `internal/server`, `internal/server/ipgeo`, `internal/task`, `internal/tasks`, `internal/usage`, `internal/voicegateway`, `internal/voicegateway/voicertc` |
 | `internal/auth` | `internal/forge` |
 | `internal/autoupdate` | `internal/forge/github` |
 | `internal/bot` | `internal/forge`, `internal/forge/forgecache` |

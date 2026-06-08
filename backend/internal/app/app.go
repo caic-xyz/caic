@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"path/filepath"
 	"runtime/trace"
 	"strings"
@@ -17,8 +18,6 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent/registry"
 	"github.com/caic-xyz/caic/backend/internal/auth"
-	"github.com/caic-xyz/caic/backend/internal/bot"
-	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/github"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
@@ -29,14 +28,41 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/caic-xyz/caic/backend/internal/usage"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway/voicertc"
 )
 
 const repoDiscoveryDepth = 3
 
+// App owns the caic backend application lifetime.
+type App struct {
+	Server *server.Router
+
+	voiceBridge *voicertc.Bridge
+}
+
+// Serve starts the HTTP server and closes app-owned resources when serving ends.
+func (a *App) Serve(ctx context.Context, ln net.Listener) error {
+	err := a.Server.Serve(ctx, ln)
+	if a.voiceBridge != nil {
+		a.voiceBridge.CloseAll()
+	}
+	return err
+}
+
+// SetUsageFetchers replaces provider usage fetchers for smoke and e2e tests.
+func (a *App) SetUsageFetchers(fetchers []usage.ProviderFetcher) {
+	a.Server.SetUsageFetchers(fetchers)
+}
+
+// SetFakeCI injects a fake CI simulation hook for smoke and e2e tests.
+func (a *App) SetFakeCI(f func(context.Context, *task.Task)) {
+	a.Server.SetFakeCI(f)
+}
+
 // New creates the caic backend server application.
-func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Server, error) {
+func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) {
 	if cfg.Dirs.CacheDir == "" {
 		return nil, errors.New("CacheDir is required")
 	}
@@ -252,7 +278,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 		VoiceGateway:           cfg.Voice.Gateway,
 		Forge:                  forgeManager,
 		CICache:                cache,
-		Runtime:                runtimeBackend,
+		ProcessBackend:         runtimeBackend,
 		TaskManager:            taskMgr,
 		Provider:               provider,
 		IPGeoChecker:           ipgeoChecker,
@@ -272,7 +298,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 	for i, abs := range repoRes.paths {
 		wg.Go(func() {
 			defer trace.StartRegion(ctx, "repo-runner-init").End()
-			result, err := s.DiscoverRepoRunner(ctx, abs)
+			result, err := repoService.DiscoverRunner(ctx, abs)
 			if err != nil {
 				slog.Warn("skipping repo", "path", abs, "err", err)
 				return
@@ -286,13 +312,11 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 	}
 	wg.Wait()
 	for i := range results {
-		s.RegisterRepoRunner(&results[i])
+		repoService.RegisterRunner(&results[i])
 	}
-	s.WarnRepoBasenameCollisions()
+	repoService.WarnBasenameCollisions()
 
-	s.SetBot(bot.New(ctx, s.BotClient()))
-	s.SetCIService(ci.NewService(cache, provider, s.CIAdapter()))
-	s.RegisterNoRepoRunner(ctx)
+	repoService.RegisterNoRepoRunner(ctx)
 	taskMgr.Start()
 
 	phase3 := trace.StartRegion(ctx, "load-purged-tasks")
@@ -308,7 +332,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 	if instanceRes.err != nil {
 		slog.Warn("list failed, skipping adoption", "rt", mdClient.Runtime, "err", instanceRes.err)
 	} else {
-		adopted, err := taskMgr.AdoptInstances(ctx, s.AdoptionRepos(), instanceRes.instances, logRes.logs)
+		adopted, err := taskMgr.AdoptInstances(ctx, repoService.AdoptionRepos(), instanceRes.instances, logRes.logs)
 		if err != nil {
 			phase4.End()
 			return nil, fmt.Errorf("adopt runtime instances: %w", err)
@@ -327,7 +351,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 	phase4.End()
 
 	region := trace.StartRegion(ctx, "bot-resume-comments")
-	s.Bot.ResumePendingComments()
+	s.ResumePendingComments()
 	region.End()
 
 	if !cfg.Runtime.SkipWarmup {
@@ -350,9 +374,9 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 		trace.Log(ctx, "startup", "refresh-cache-sizes: begin")
 		s.RefreshCacheSizesLoop()
 	}()
-	go newRepoWatcher(ctx, absRoot, s).Watch()
+	go newRepoWatcher(ctx, absRoot, repoService).Watch()
 
-	return s, nil
+	return &App{Server: s, voiceBridge: voiceBridge}, nil
 }
 
 func initProvider(ctx context.Context, cfg *server.Config, backend *mdruntime.Backend) genai.Provider {
