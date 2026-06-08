@@ -7,11 +7,14 @@ import type { Repo, PreferencesResp, HarnessInfo } from "@sdk/types.gen";
 // Stub EventSource to prevent real SSE connections.
 // FakeEventSource captures message listeners so tests can push SSE events.
 type MessageListener = (e: { data: string }) => void;
+type OpenListener = () => void;
 const fakeESListeners: MessageListener[] = [];
+const fakeESOpenListeners: OpenListener[] = [];
 
 class FakeEventSource {
-  addEventListener = vi.fn((type: string, handler: MessageListener) => {
-    if (type === "message") fakeESListeners.push(handler);
+  addEventListener = vi.fn((type: string, handler: MessageListener | OpenListener) => {
+    if (type === "message") fakeESListeners.push(handler as MessageListener);
+    if (type === "open") fakeESOpenListeners.push(handler as OpenListener);
   });
   close = vi.fn();
   onerror: ((e: Event) => void) | null = null;
@@ -67,6 +70,10 @@ function dispatchSSE(data: unknown) {
   fakeESListeners.forEach((fn) => fn(payload));
 }
 
+function dispatchOpen() {
+  fakeESOpenListeners.forEach((fn) => fn());
+}
+
 // Imports must follow vi.mock declarations.
 import { MemoryRouter, createMemoryHistory } from "@solidjs/router";
 import { appRoutes } from "./routes";
@@ -93,6 +100,7 @@ function chipPathValues(): string[] {
 beforeEach(() => {
   vi.clearAllMocks();
   fakeESListeners.length = 0;
+  fakeESOpenListeners.length = 0;
   window.history.replaceState(null, "", "/");
   delete window.goModeHost;
   vi.mocked(api.listRepos).mockResolvedValue([repoA, repoB]);
@@ -150,6 +158,32 @@ describe("App repo chips: No repository", () => {
 
     await waitFor(() => expect(api.getConfig).toHaveBeenCalledOnce());
     expect(screen.queryByTestId("voice-overlay")).not.toBeInTheDocument();
+  });
+
+  it("refreshes browser voice availability when task events reconnect", async () => {
+    const disabledConfig = {
+      displayName: "test",
+      tailscaleAvailable: false,
+      usbAvailable: false,
+      displayAvailable: false,
+      sudoAvailable: false,
+      gitHubTokenAvailable: false,
+      voiceGateway: { mode: "disabled" as const },
+    };
+    const enabledConfig = { ...disabledConfig, voiceGateway: { mode: "embedded" as const } };
+    vi.mocked(api.getConfig)
+      .mockResolvedValueOnce(disabledConfig)
+      .mockResolvedValueOnce(enabledConfig);
+
+    renderApp();
+
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalledOnce());
+    expect(screen.queryByTestId("voice-overlay")).not.toBeInTheDocument();
+
+    dispatchOpen();
+
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("voice-overlay")).toBeInTheDocument();
   });
 
   it("keeps browser voice mounted outside Go Mode host mode when the server enables voice", async () => {

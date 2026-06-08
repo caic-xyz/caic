@@ -2,7 +2,7 @@
 // Provided once near the router root and consumed by the shell, layout, and route panes.
 import { createContext, createEffect, createSignal, onCleanup, useContext, type JSX } from "solid-js";
 import { useNavigate, useLocation } from "@solidjs/router";
-import type { Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, CacheSize, MountMappingResp, Platform, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
+import type { Config, Harness, HarnessInfo, Repo, Task, UsageResp, ImageData as APIImageData, CacheMappingResp, CacheSize, MountMappingResp, Platform, WellKnownCachesResp, VersionResp } from "@sdk/types.gen";
 import { getConfig, getPreferences, updatePreferences, listHarnesses, listCaches, getCacheSizes, listRepos, createTask, cloneRepo, getUsage, forkTask, stopTask, purgeTask, reviveTask, botFixCI, globalTaskEvents, globalUsageEvents, getVersion, triggerUpdate } from "./api";
 import type { RepoEntry } from "./components/RepoChipStrip";
 import { useAuth } from "./AuthContext";
@@ -104,6 +104,25 @@ function createAppStore() {
   const dismissWarning = (id: number) => setWarnings((prev) => prev.filter((w) => w.id !== id));
 
   const harnessSupportsImages = () => harnesses().find((h) => h.name === selectedHarness())?.supportsImages ?? false;
+
+  const applyServerConfig = (config: Config) => {
+    setTailscaleAvailable(config.tailscaleAvailable);
+    setUSBAvailable(config.usbAvailable);
+    setDisplayAvailable(config.displayAvailable);
+    setSudoAvailable(config.sudoAvailable);
+    setGitHubTokenAvailable(config.gitHubTokenAvailable);
+    setVoiceGatewayAvailable(config.voiceGateway.mode !== "disabled");
+    const displayName = config.displayName || window.location.hostname.split('.')[0];
+    document.title = `${displayName} — caic`;
+  };
+
+  async function refreshServerConfig() {
+    try {
+      applyServerConfig(await getConfig());
+    } catch {
+      setVoiceGatewayAvailable(false);
+    }
+  }
 
   const selectedId = (): string | null => taskIdFromPath(location.pathname);
   const selectedTask = (): Task | null => {
@@ -263,16 +282,7 @@ function createAppStore() {
           if (lastModel && models.includes(lastModel)) setSelectedModel(lastModel);
         }
         if (prefs?.settings?.baseImage) setSelectedImage(prefs.settings.baseImage);
-        if (config) {
-          setTailscaleAvailable(config.tailscaleAvailable);
-          setUSBAvailable(config.usbAvailable);
-          setDisplayAvailable(config.displayAvailable);
-          setSudoAvailable(config.sudoAvailable);
-          setGitHubTokenAvailable(config.gitHubTokenAvailable);
-          setVoiceGatewayAvailable(config.voiceGateway.mode !== "disabled");
-          const displayName = config.displayName || window.location.hostname.split('.')[0];
-          document.title = `${displayName} — caic`;
-        }
+        if (config) applyServerConfig(config);
         if (prefs?.settings) {
           setAutoFixCI(prefs.settings.autoFixOnCIFailure);
           setAutoFixPR(prefs.settings.autoFixOnPROpen);
@@ -389,6 +399,7 @@ function createAppStore() {
       });
       taskES.addEventListener("open", () => {
         onOpen();
+        void refreshServerConfig();
         taskDelay = 500;
         // Check if frontend was rebuilt while disconnected.
         fetch("/index.html")

@@ -56,6 +56,7 @@ class VoiceViewModel @Inject constructor(
 
     init {
         observeVoiceGatewayConfig()
+        observeVoiceGatewayReconnects()
         // Inject snapshot when the session transitions to connected.
         viewModelScope.launch {
             voiceSessionManager.state
@@ -127,22 +128,33 @@ class VoiceViewModel @Inject constructor(
             settingsRepository.settings
                 .map { it.serverURL to it.authToken }
                 .distinctUntilChanged()
-                .collect { (serverURL, _) ->
-                    if (serverURL.isBlank()) {
-                        settingsRepository.updateServerConfig(null)
-                        return@collect
-                    }
-                    try {
-                        val client = ApiClient(
-                            serverURL,
-                            tokenProvider = { settingsRepository.settings.value.authToken },
-                        )
-                        settingsRepository.updateServerConfig(client.getConfig())
-                    } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-                        Log.w(TAG, "Failed to load voice gateway config", e)
-                        settingsRepository.updateServerConfig(null)
-                    }
-                }
+                .collect { refreshVoiceGatewayConfig() }
+        }
+    }
+
+    private fun observeVoiceGatewayReconnects() {
+        viewModelScope.launch {
+            taskRepository.connected.collect { connected ->
+                if (connected) refreshVoiceGatewayConfig()
+            }
+        }
+    }
+
+    private suspend fun refreshVoiceGatewayConfig() {
+        val serverURL = settingsRepository.settings.value.serverURL
+        if (serverURL.isBlank()) {
+            settingsRepository.updateServerConfig(null)
+            return
+        }
+        try {
+            val client = ApiClient(
+                serverURL,
+                tokenProvider = { settingsRepository.settings.value.authToken },
+            )
+            settingsRepository.updateServerConfig(client.getConfig())
+        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+            Log.w(TAG, "Failed to load voice gateway config", e)
+            settingsRepository.updateServerConfig(null)
         }
     }
 
