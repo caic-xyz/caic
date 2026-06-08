@@ -44,14 +44,19 @@ func handle[In any, PtrIn interface {
 	}
 }
 
+type taskEntryResolver interface {
+	getTask(r *http.Request) (*tasks.Entry, error)
+	notifyTaskChange()
+}
+
 // handleWithTask wraps a typed handler that also needs the resolved *tasks.Entry.
-// It parses {id}, looks up the task via s.getTask, then proceeds like handle.
+// It parses {id}, looks up the task via resolver.getTask, then proceeds like handle.
 func handleWithTask[In any, PtrIn interface {
 	*In
 	validatable
-}, Out any](s *Server, fn func(context.Context, *tasks.Entry, PtrIn) (*Out, error)) http.HandlerFunc {
+}, Out any](resolver taskEntryResolver, fn func(context.Context, *tasks.Entry, PtrIn) (*Out, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		entry, err := s.getTask(r)
+		entry, err := resolver.getTask(r)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -67,7 +72,7 @@ func handleWithTask[In any, PtrIn interface {
 		}
 		out, err := fn(r.Context(), entry, in)
 		if err == nil {
-			s.taskMgr.NotifyTaskChange()
+			resolver.notifyTaskChange()
 		}
 		writeJSONResponse(w, out, err)
 	}

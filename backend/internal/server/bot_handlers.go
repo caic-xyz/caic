@@ -28,14 +28,14 @@ type botHandlers struct {
 	forge      *ForgeManager
 	provider   genai.Provider
 	taskClient bot.Client
-	getTask    func(*http.Request) (*tasks.Entry, error)
+	taskRoutes *taskHandlers
 }
 
 // handleGetCILog fetches the log for a specific CI job by jobID.
 // The jobID is a required query parameter; the caller knows it from the
 // task's ciChecks field. The log is capped at ~8 KB (tail).
 func (h *botHandlers) handleGetCILog(w http.ResponseWriter, r *http.Request) {
-	entry, err := h.getTask(r)
+	entry, err := h.taskRoutes.getTask(r)
 	if err != nil {
 		writeError(w, err)
 		return

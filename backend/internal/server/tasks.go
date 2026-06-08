@@ -1,4 +1,4 @@
-// Task lifecycle: create, list, stop, purge, revive, restart, sync, and event streaming.
+// Task HTTP route group handlers and dependencies.
 
 package server
 
@@ -17,10 +17,14 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/caic-xyz/md/gitutil"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
+	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -30,7 +34,54 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/usage"
 )
 
-func (s *Server) listTasks(ctx context.Context, _ *api.EmptyReq) (*[]v1.Task, error) {
+func (s *Server) taskRouteHandlers() *taskHandlers {
+	s.initConcernAdapters()
+	return s.taskHandlers
+}
+
+type taskHandlers struct {
+	ctx       context.Context
+	taskMgr   *tasks.Manager
+	prefs     *preferences.Store
+	repos     *repos.Service
+	forge     *ForgeManager
+	ciAdapter *CIAdapter
+	ciService *ci.Service
+	authStore *auth.Store
+
+	fakeCI   fakeCIHook
+	warnings *warningStore
+}
+
+func (h *taskHandlers) authEnabled() bool {
+	return h.authStore != nil
+}
+
+func (h *taskHandlers) maybeFakeCI(t *task.Task) {
+	if h.fakeCI == nil {
+		return
+	}
+	h.fakeCI(h.ctx, t)
+}
+
+func (h *taskHandlers) notifyTaskChange() {
+	h.taskMgr.NotifyTaskChange()
+}
+
+func (h *taskHandlers) repoURL(rel string) string {
+	if info, ok := h.repos.InfoFor(rel); ok {
+		return gitutil.RemoteToHTTPS(info.Remote)
+	}
+	return ""
+}
+
+func (h *taskHandlers) repoForge(rel string) v1.Forge {
+	if info, ok := h.repos.InfoFor(rel); ok {
+		return v1.Forge(info.ForgeKind)
+	}
+	return ""
+}
+func (s *taskHandlers) listTasks(ctx context.Context, _ *api.EmptyReq) (*[]v1.Task, error) {
 	var ownerID string
 	if s.authEnabled() {
 		if u, ok := auth.UserFromContext(ctx); ok {
@@ -49,7 +100,7 @@ func (s *Server) listTasks(ctx context.Context, _ *api.EmptyReq) (*[]v1.Task, er
 	return &out, nil
 }
 
-func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.CreateTaskResp, error) {
+func (s *taskHandlers) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.CreateTaskResp, error) {
 	var ownerID string
 	if u, ok := auth.UserFromContext(ctx); ok {
 		ownerID = u.ID
@@ -59,15 +110,15 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 	// validation (unknown repo/harness/model/images) lives in Manager.Create.
 	prefs := s.prefs.Get(userIDFromCtx(ctx))
 
-	repos := make([]tasks.CreateRepo, len(req.Repos))
+	taskRepos := make([]tasks.CreateRepo, len(req.Repos))
 	for i, r := range req.Repos {
-		repos[i] = tasks.CreateRepo{Name: r.Name, BaseBranch: r.BaseBranch}
+		taskRepos[i] = tasks.CreateRepo{Name: r.Name, BaseBranch: r.BaseBranch}
 	}
 
 	id, err := s.taskMgr.Create(ctx, tasks.CreateParams{
 		OwnerID:             ownerID,
 		Prompt:              v1conv.PromptToAgent(req.InitialPrompt),
-		Repos:               repos,
+		Repos:               taskRepos,
 		Harness:             v1conv.AgentHarness(req.Harness),
 		Model:               req.Model,
 		Effort:              req.Effort,
@@ -119,13 +170,13 @@ func (s *Server) createTask(ctx context.Context, req *v1.CreateTaskReq) (*v1.Cre
 
 // handleTaskRawEvents delegates to handleTaskEvents — both endpoints now
 // serve the same backend-neutral EventMessage stream.
-func (s *Server) handleTaskRawEvents(w http.ResponseWriter, r *http.Request) {
+func (s *taskHandlers) handleTaskRawEvents(w http.ResponseWriter, r *http.Request) {
 	s.handleTaskEvents(w, r)
 }
 
 // handleTaskEvents streams agent messages as SSE using backend-neutral
 // EventMessage DTOs. All tool invocations are emitted as toolUse events.
-func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
+func (s *taskHandlers) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 	entry, err := s.getTask(r)
 	if err != nil {
 		writeError(w, err)
@@ -227,7 +278,7 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 // (matching the live path's filterHistoryForReplay) and emits a trailing
 // "ready" event. No subscriber is registered: terminal tasks produce no live
 // messages.
-func (s *Server) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flusher, entry *tasks.Entry) {
+func (s *taskHandlers) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flusher, entry *tasks.Entry) {
 	tracker := v1conv.NewToolTimingTracker(entry.Task().Harness, FormatToolOutput)
 	now := time.Now()
 	idx := 0
@@ -265,7 +316,7 @@ func (s *Server) streamHistoryFromDisk(w http.ResponseWriter, flusher http.Flush
 // handleTaskToolInput returns the full (untruncated) input for a tool call.
 // It scans the task's message history for the ToolUseMessage with the given
 // toolUseID and returns its Input field.
-func (s *Server) handleTaskToolInput(w http.ResponseWriter, r *http.Request) {
+func (s *taskHandlers) handleTaskToolInput(w http.ResponseWriter, r *http.Request) {
 	entry, err := s.getTask(r)
 	if err != nil {
 		writeError(w, err)
@@ -295,7 +346,7 @@ func (s *Server) handleTaskToolInput(w http.ResponseWriter, r *http.Request) {
 // The relay probe uses the server context (not the request context) because the
 // SSH round-trip may outlive a cancelled HTTP request, and we want the log line
 // regardless.
-func (s *Server) sendInput(ctx context.Context, entry *tasks.Entry, req *v1.InputReq) (*v1.StatusResp, error) {
+func (s *taskHandlers) sendInput(ctx context.Context, entry *tasks.Entry, req *v1.InputReq) (*v1.StatusResp, error) {
 	err := s.taskMgr.SendInput(ctx, entry, v1conv.PromptToAgent(req.Prompt))
 	if err == nil {
 		return &v1.StatusResp{Status: "sent"}, nil
@@ -339,49 +390,49 @@ func (s *Server) sendInput(ctx context.Context, entry *tasks.Entry, req *v1.Inpu
 		WithDetail("relay", string(rs))
 }
 
-func (s *Server) restartTask(ctx context.Context, entry *tasks.Entry, req *v1.RestartReq) (*v1.StatusResp, error) {
+func (s *taskHandlers) restartTask(ctx context.Context, entry *tasks.Entry, req *v1.RestartReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Restart(ctx, entry, v1conv.PromptToAgent(req.Prompt)); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "restarted"}, nil
 }
 
-func (s *Server) clearContext(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
+func (s *taskHandlers) clearContext(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.ClearContext(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "cleared"}, nil
 }
 
-func (s *Server) compactContext(ctx context.Context, entry *tasks.Entry, req *v1.CompactReq) (*v1.StatusResp, error) {
+func (s *taskHandlers) compactContext(ctx context.Context, entry *tasks.Entry, req *v1.CompactReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Compact(ctx, entry, req.Instructions); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "compacting"}, nil
 }
 
-func (s *Server) stopTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
+func (s *taskHandlers) stopTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Stop(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "stopping"}, nil
 }
 
-func (s *Server) purgeTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
+func (s *taskHandlers) purgeTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Purge(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "purging"}, nil
 }
 
-func (s *Server) reviveTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
+func (s *taskHandlers) reviveTask(ctx context.Context, entry *tasks.Entry, _ *api.EmptyReq) (*v1.StatusResp, error) {
 	if err := s.taskMgr.Revive(ctx, entry); err != nil {
 		return nil, toDTO(err)
 	}
 	return &v1.StatusResp{Status: "provisioning"}, nil
 }
 
-func (s *Server) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.ForkTaskReq) (*v1.CreateTaskResp, error) {
+func (s *taskHandlers) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.ForkTaskReq) (*v1.CreateTaskResp, error) {
 	source := entry.Task()
 
 	var ownerID string
@@ -446,9 +497,7 @@ func (s *Server) forkTask(ctx context.Context, entry *tasks.Entry, req *v1.ForkT
 	return &v1.CreateTaskResp{Status: "accepted", ID: forkEntry.Task().ID}, nil
 }
 
-func (s *Server) syncTask(ctx context.Context, entry *tasks.Entry, req *v1.SyncReq) (*v1.SyncResp, error) {
-	s.initConcernAdapters()
-
+func (s *taskHandlers) syncTask(ctx context.Context, entry *tasks.Entry, req *v1.SyncReq) (*v1.SyncResp, error) {
 	t := entry.Task()
 	target := tasks.SyncTargetOrigin
 	if req.Target == v1.SyncTargetDefault {
@@ -496,7 +545,7 @@ func (s *Server) syncTask(ctx context.Context, entry *tasks.Entry, req *v1.SyncR
 	return resp, nil
 }
 
-func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
+func (s *taskHandlers) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 	entry, err := s.getTask(r)
 	if err != nil {
 		writeError(w, err)
@@ -531,7 +580,7 @@ func (s *Server) handleGetDiff(w http.ResponseWriter, r *http.Request) {
 
 // handleVNCWebSocket proxies a WebSocket connection to the instance's VNC
 // TCP port via the Docker host port mapping. Used by noVNC in the frontend.
-func (s *Server) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
+func (s *taskHandlers) handleVNCWebSocket(w http.ResponseWriter, r *http.Request) {
 	entry, err := s.getTask(r)
 	if err != nil {
 		writeError(w, err)
@@ -617,7 +666,7 @@ func (w wsNetConn) Write(b []byte) (int, error) {
 
 // resolveGitHubContainerToken returns the GitHub token to inject into a
 // instance when enabled is true, otherwise returns empty.
-func (s *Server) resolveGitHubContainerToken(ctx context.Context, enabled bool) string {
+func (s *taskHandlers) resolveGitHubContainerToken(ctx context.Context, enabled bool) string {
 	if !enabled {
 		return ""
 	}
@@ -634,7 +683,7 @@ func (s *Server) resolveGitHubContainerToken(ctx context.Context, enabled bool) 
 
 // getTask looks up a task by the {id} path parameter.
 // When auth is enabled, returns 403 if the task belongs to a different user.
-func (s *Server) getTask(r *http.Request) (*tasks.Entry, error) {
+func (s *taskHandlers) getTask(r *http.Request) (*tasks.Entry, error) {
 	id := r.PathValue("id")
 	entry, ok := s.taskMgr.GetEntry(id)
 	if !ok {
@@ -650,7 +699,7 @@ func (s *Server) getTask(r *http.Request) (*tasks.Entry, error) {
 	return entry, nil
 }
 
-func (s *Server) taskResolvers() v1conv.TaskResolvers {
+func (s *taskHandlers) taskResolvers() v1conv.TaskResolvers {
 	return v1conv.TaskResolvers{
 		RepoURL:      s.repoURL,
 		RepoForge:    s.repoForge,

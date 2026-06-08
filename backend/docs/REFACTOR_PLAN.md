@@ -83,14 +83,15 @@ Design direction:
   `internal/server/api/v1conv` with the router unless API version packages move
   to a separate public SDK boundary.
 
-Proposed sequence:
+Next sequence:
 
-1. Extract task route behavior from `Server`: create/list/task lifecycle,
-   diff/VNC/tool-output handlers, task SSE history streaming, and PR-flow glue
-   currently in `syncTask`.
-2. Extract auth, bot, CI, usage, server config, webhook, voice, and web-fetch
-   route groups into constructed handler structs with no back-reference to the
-   concrete `Server` type.
+1. Extract remaining route groups into constructed handler structs with no
+   back-reference to concrete `Server`: auth, bot, CI, usage, server config,
+   webhook, voice, and web-fetch. Prefer explicit dependencies over function
+   fields unless a callback is the clearest boundary.
+2. Move task command behavior behind a task API service. Keep HTTP handlers as
+   request/response conversion and routing glue; put orchestration, PR-flow
+   decisions, and task DTO assembly in the service layer.
 3. Rename `server.Server` to `server.Router` once it mostly contains route group
    dependencies, route registration, middleware composition, static asset
    serving, and `Serve`.

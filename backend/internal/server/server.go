@@ -65,6 +65,7 @@ type Server struct {
 	botClient      *BotClient
 	ciAdapter      *CIAdapter
 	serverConfig   *serverConfigHandlers
+	taskHandlers   *taskHandlers
 	usageHandlers  *usageHandlers
 	voiceHandlers  *voiceHandlers
 
@@ -111,6 +112,9 @@ type Server struct {
 // SetFakeCI injects a fake CI simulation hook for smoke and e2e tests.
 func (s *Server) SetFakeCI(f func(context.Context, *task.Task)) {
 	s.fakeCI = f
+	if s.taskHandlers != nil {
+		s.taskHandlers.fakeCI = f
+	}
 }
 
 // Serve starts the HTTP server on an already-open listener and blocks until
@@ -151,13 +155,6 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	return err
 }
 
-func (s *Server) maybeFakeCI(t *task.Task) {
-	if s.fakeCI == nil {
-		return
-	}
-	s.fakeCI(s.ctx, t)
-}
-
 // buildHandler assembles the full HTTP handler. Extracted from Serve so that
 // route registration can be tested without a listener.
 func (s *Server) buildHandler() (http.Handler, error) {
@@ -183,6 +180,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 		authEnabled:  s.authEnabled,
 		notifyChange: s.taskMgr.NotifyTaskChange,
 	}
+	taskRoutes := s.taskHandlers
 	apiMux.HandleFunc("GET /api/caic/v1/server/preferences", handle(serverConfig.getPreferences))
 	apiMux.HandleFunc("POST /api/caic/v1/server/preferences", handle(serverConfig.updatePreferences))
 	apiMux.HandleFunc("GET /api/caic/v1/server/harnesses", handle(serverConfig.listHarnesses))
@@ -194,29 +192,29 @@ func (s *Server) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("GET /api/caic/v1/server/repos/branches", serverConfig.handleListRepoBranches)
 	apiMux.HandleFunc("POST /api/caic/v1/bot/fix-ci", handle(s.botHandlers.fixCI))
 	apiMux.HandleFunc("POST /api/caic/v1/bot/fix-pr", handle(s.botHandlers.fixPR))
-	apiMux.HandleFunc("GET /api/caic/v1/tasks", handle(s.listTasks))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks", handle(s.createTask))
-	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/raw_events", s.handleTaskRawEvents)
-	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/events", s.handleTaskEvents)
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/input", handleWithTask(s, s.sendInput))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/restart", handleWithTask(s, s.restartTask))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/clear-context", handleWithTask(s, s.clearContext))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/compact", handleWithTask(s, s.compactContext))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/fork", handleWithTask(s, s.forkTask))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/stop", handleWithTask(s, s.stopTask))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/purge", handleWithTask(s, s.purgeTask))
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/revive", handleWithTask(s, s.reviveTask))
+	apiMux.HandleFunc("GET /api/caic/v1/tasks", handle(taskRoutes.listTasks))
+	apiMux.HandleFunc("POST /api/caic/v1/tasks", handle(taskRoutes.createTask))
+	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/raw_events", taskRoutes.handleTaskRawEvents)
+	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/events", taskRoutes.handleTaskEvents)
+	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/input", handleWithTask(taskRoutes, taskRoutes.sendInput))
+	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/restart", handleWithTask(taskRoutes, taskRoutes.restartTask))
+	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/clear-context", handleWithTask(taskRoutes, taskRoutes.clearContext))
+	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/compact", handleWithTask(taskRoutes, taskRoutes.compactContext))
+	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/fork", handleWithTask(taskRoutes, taskRoutes.forkTask))
+	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/stop", handleWithTask(taskRoutes, taskRoutes.stopTask))
+	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/purge", handleWithTask(taskRoutes, taskRoutes.purgeTask))
+	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/revive", handleWithTask(taskRoutes, taskRoutes.reviveTask))
 	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/ci-log", s.botHandlers.handleGetCILog)
-	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/sync", handleWithTask(s, s.syncTask))
-	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/diff", s.handleGetDiff)
-	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/vnc/ws", s.handleVNCWebSocket)
+	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/sync", handleWithTask(taskRoutes, taskRoutes.syncTask))
+	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/diff", taskRoutes.handleGetDiff)
+	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/vnc/ws", taskRoutes.handleVNCWebSocket)
 	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/processes", runtimeProcesses.HandleGetProcesses)
 	apiMux.HandleFunc("POST /api/caic/v1/tasks/{id}/processes/{pid}/signal", runtimeProcesses.HandleSignalProcess)
-	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/tool/{toolUseID}", s.handleTaskToolInput)
+	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/tool/{toolUseID}", taskRoutes.handleTaskToolInput)
 	apiMux.HandleFunc("GET /api/caic/v1/usage", s.usageHandlers.handleGetUsage)
 	apiMux.Handle("/api/voicegateway/v1/", s.voiceHandlers.handler())
 	apiMux.HandleFunc("POST /api/caic/v1/web/fetch", handle(s.webFetch))
-	apiMux.HandleFunc("GET /api/caic/v1/server/tasks/events", s.handleTaskListEvents)
+	apiMux.HandleFunc("GET /api/caic/v1/server/tasks/events", taskRoutes.handleTaskListEvents)
 	apiMux.HandleFunc("GET /api/caic/v1/server/usage/events", s.usageHandlers.handleEvents)
 
 	// Combine: auth routes first, then protected API routes (gated by RequireUser when auth enabled).

@@ -1,4 +1,4 @@
-// SSE streaming handlers for task list events and usage events.
+// SSE helpers for task list and usage event streams.
 
 package server
 
@@ -29,7 +29,7 @@ type usageHandlers struct {
 // events for changed or removed tasks. It pushes immediately when a
 // server-handled mutation fires the changed channel, and falls back to a
 // 2-second ticker to catch runner-internal state transitions.
-func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
+func (s *taskHandlers) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		writeError(w, api.InternalError("streaming not supported"))
@@ -41,7 +41,6 @@ func (s *Server) handleTaskListEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	flusher.Flush()
 
-	s.initConcernAdapters()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 

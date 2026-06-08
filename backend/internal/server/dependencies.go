@@ -124,6 +124,9 @@ func (s *Server) SetBot(b *bot.Bot) {
 func (s *Server) SetCIService(c *ci.Service) {
 	s.ciService = c
 	s.webhooks.ciService = c
+	if s.taskHandlers != nil {
+		s.taskHandlers.ciService = c
+	}
 }
 
 // BotClient returns the bot-facing task client.
@@ -160,16 +163,28 @@ func (s *Server) initConcernAdapters() {
 			useSecureCookies: s.useSecureCookies,
 		}
 	}
+	if s.warnings == nil {
+		s.warnings = newWarningStore(s.taskMgr)
+	}
+	if s.taskHandlers == nil {
+		s.taskHandlers = &taskHandlers{}
+	}
+	s.taskHandlers.ctx = s.ctx
+	s.taskHandlers.taskMgr = s.taskMgr
+	s.taskHandlers.prefs = s.prefs
+	s.taskHandlers.repos = s.repos
+	s.taskHandlers.forge = s.forge
+	s.taskHandlers.ciService = s.ciService
+	s.taskHandlers.authStore = s.authStore
+	s.taskHandlers.fakeCI = s.fakeCI
+	s.taskHandlers.warnings = s.warnings
 	if s.botClient == nil {
-		s.botClient = newBotClient(botClientDeps{
+		s.botClient = &BotClient{
 			repos:     s.repos,
 			taskMgr:   s.taskMgr,
 			forge:     s.forge,
-			tokenFunc: s.resolveGitHubContainerToken,
-		})
-	}
-	if s.warnings == nil {
-		s.warnings = newWarningStore(s.taskMgr)
+			tokenFunc: s.taskHandlers.resolveGitHubContainerToken,
+		}
 	}
 	if s.voiceHandlers == nil {
 		s.voiceHandlers = &voiceHandlers{
@@ -199,7 +214,7 @@ func (s *Server) initConcernAdapters() {
 			forge:      s.forge,
 			provider:   s.provider,
 			taskClient: s.botClient,
-			getTask:    s.getTask,
+			taskRoutes: s.taskHandlers,
 		}
 	}
 	if s.usageHandlers == nil {
@@ -224,4 +239,5 @@ func (s *Server) initConcernAdapters() {
 			notifyChange: notifyChange,
 		})
 	}
+	s.taskHandlers.ciAdapter = s.ciAdapter
 }

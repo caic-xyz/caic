@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/caic-xyz/md/gitutil"
-
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
@@ -137,20 +135,4 @@ func (s *Server) authProviders() []string {
 		ps = append(ps, "gitlab")
 	}
 	return ps
-}
-
-func (s *Server) repoURL(rel string) string {
-	s.initConcernAdapters()
-	if info, ok := s.repos.InfoFor(rel); ok {
-		return gitutil.RemoteToHTTPS(info.Remote)
-	}
-	return ""
-}
-
-func (s *Server) repoForge(rel string) v1.Forge {
-	s.initConcernAdapters()
-	if info, ok := s.repos.InfoFor(rel); ok {
-		return v1.Forge(info.ForgeKind)
-	}
-	return ""
 }

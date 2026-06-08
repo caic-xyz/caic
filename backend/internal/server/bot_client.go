@@ -18,28 +18,12 @@ import (
 
 type tokenResolver func(ctx context.Context, enabled bool) string
 
-type botClientDeps struct {
-	repos     *repos.Service
-	taskMgr   *tasks.Manager
-	forge     *ForgeManager
-	tokenFunc tokenResolver
-}
-
 // BotClient adapts task and forge stores to bot.Client.
 type BotClient struct {
 	repos     *repos.Service
 	taskMgr   *tasks.Manager
 	forge     *ForgeManager
 	tokenFunc tokenResolver
-}
-
-func newBotClient(d botClientDeps) *BotClient {
-	return &BotClient{
-		repos:     d.repos,
-		taskMgr:   d.taskMgr,
-		forge:     d.forge,
-		tokenFunc: d.tokenFunc,
-	}
 }
 
 // ResolveRepo maps a forge full name ("owner/repo") to repo info.
