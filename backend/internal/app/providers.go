@@ -25,7 +25,7 @@ func detectProviders(ctx context.Context, coreEnv map[string]string, harnessEnv 
 	}
 
 	for _, entry := range apiKeyUsageFetchers {
-		key := providerAPIKey(entry.provider, coreEnv, harnessEnv, "")
+		key := providerAPIKey(entry.provider, coreEnv, harnessEnv)
 		if key == "" {
 			continue
 		}
@@ -38,7 +38,7 @@ func detectProviders(ctx context.Context, coreEnv map[string]string, harnessEnv 
 	return fetchers
 }
 
-func autoDetectLLMProvider(ctx context.Context, coreEnv map[string]string, geminiAPIKey string) string {
+func autoDetectLLMProvider(ctx context.Context, coreEnv map[string]string) string {
 	preferred := []string{
 		"codex",
 		"opencode",
@@ -46,25 +46,25 @@ func autoDetectLLMProvider(ctx context.Context, coreEnv map[string]string, gemin
 		"gemini",
 	}
 	for _, name := range preferred {
-		if pingProvider(ctx, name, coreEnv, geminiAPIKey) {
+		if pingProvider(ctx, name, coreEnv) {
 			return name
 		}
 	}
 	for name := range providers.All {
-		if pingProvider(ctx, name, coreEnv, geminiAPIKey) {
+		if pingProvider(ctx, name, coreEnv) {
 			return name
 		}
 	}
 	return ""
 }
 
-func pingProvider(ctx context.Context, name string, coreEnv map[string]string, geminiAPIKey string) bool {
+func pingProvider(ctx context.Context, name string, coreEnv map[string]string) bool {
 	c, ok := providers.All[name]
 	if !ok || c.Factory == nil {
 		return false
 	}
 	opts := []genai.ProviderOption{genai.ModelCheap}
-	opts = appendProviderAPIKey(opts, name, coreEnv, geminiAPIKey)
+	opts = appendProviderAPIKey(opts, name, coreEnv)
 	p, err := c.Factory(ctx, opts...)
 	if err != nil {
 		slog.Debug("provider factory failed", "prov", name, "err", err)
@@ -84,34 +84,31 @@ func appendProviderAPIKey(
 	opts []genai.ProviderOption,
 	providerName string,
 	coreEnv map[string]string,
-	geminiAPIKey string,
 ) []genai.ProviderOption {
-	return appendProviderAPIKeyWithEnv(opts, providerName, coreEnv, geminiAPIKey, os.Getenv)
+	return appendProviderAPIKeyWithEnv(opts, providerName, coreEnv, os.Getenv)
 }
 
 func appendProviderAPIKeyWithEnv(
 	opts []genai.ProviderOption,
 	providerName string,
 	coreEnv map[string]string,
-	geminiAPIKey string,
 	getenv func(string) string,
 ) []genai.ProviderOption {
-	key := providerAPIKeyWithEnv(providerName, coreEnv, nil, geminiAPIKey, getenv)
+	key := providerAPIKeyWithEnv(providerName, coreEnv, nil, getenv)
 	if key == "" {
 		return opts
 	}
 	return append(opts, genai.ProviderOptionAPIKey(key))
 }
 
-func providerAPIKey(providerName string, coreEnv map[string]string, harnessEnv map[string][]string, geminiAPIKey string) string {
-	return providerAPIKeyWithEnv(providerName, coreEnv, harnessEnv, geminiAPIKey, os.Getenv)
+func providerAPIKey(providerName string, coreEnv map[string]string, harnessEnv map[string][]string) string {
+	return providerAPIKeyWithEnv(providerName, coreEnv, harnessEnv, os.Getenv)
 }
 
 func providerAPIKeyWithEnv(
 	providerName string,
 	coreEnv map[string]string,
 	harnessEnv map[string][]string,
-	geminiAPIKey string,
 	getenv func(string) string,
 ) string {
 	c, ok := providers.All[providerName]
@@ -120,9 +117,6 @@ func providerAPIKeyWithEnv(
 	}
 	if key := configuredAPIKey(coreEnv, harnessEnv, c.APIKeyEnvVar); key != "" {
 		return key
-	}
-	if providerName == "gemini" && geminiAPIKey != "" {
-		return geminiAPIKey
 	}
 	return getenv(c.APIKeyEnvVar)
 }

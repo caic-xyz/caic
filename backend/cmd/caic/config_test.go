@@ -404,8 +404,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		if cfg.IPGeo.Allowlist != "local,tailscale" {
 			t.Errorf("IPGeoAllowlist = %q", cfg.IPGeo.Allowlist)
 		}
-		if cfg.Agent.GeminiAPIKey != "AIza_from_core_env" {
-			t.Errorf("GeminiAPIKey = %q, want AIza_from_core_env", cfg.Agent.GeminiAPIKey)
+		if coreEnvOrDefault(cfg.Agent.CoreEnv, "GEMINI_API_KEY") != "AIza_from_core_env" {
+			t.Errorf("GEMINI_API_KEY = %q, want AIza_from_core_env", coreEnvOrDefault(cfg.Agent.CoreEnv, "GEMINI_API_KEY"))
 		}
 		if cfg.Agent.CoreEnv["DEEPSEEK_API_KEY"] != "sk_deepseek_from_core_env" {
 			t.Errorf("CoreEnv[DEEPSEEK_API_KEY] = %q, want sk_deepseek_from_core_env", cfg.Agent.CoreEnv["DEEPSEEK_API_KEY"])
@@ -469,8 +469,8 @@ func TestTomlToServerConfig(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.Agent.GeminiAPIKey != wantKey {
-			t.Errorf("GeminiAPIKey = %q, want %q", cfg.Agent.GeminiAPIKey, wantKey)
+		if cfg.Agent.CoreEnv["GEMINI_API_KEY"] != wantKey {
+			t.Errorf("CoreEnv[GEMINI_API_KEY] = %q, want %q", cfg.Agent.CoreEnv["GEMINI_API_KEY"], wantKey)
 		}
 	})
 
@@ -576,8 +576,8 @@ func TestTomlToServerConfigEnvFallback(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.Agent.GeminiAPIKey != envKey {
-			t.Errorf("GeminiAPIKey = %q, want %q", cfg.Agent.GeminiAPIKey, envKey)
+		if got := coreEnvOrDefault(cfg.Agent.CoreEnv, "GEMINI_API_KEY"); got != envKey {
+			t.Errorf("GEMINI_API_KEY = %q, want %q", got, envKey)
 		}
 	})
 
@@ -597,8 +597,8 @@ func TestTomlToServerConfigEnvFallback(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.Agent.GeminiAPIKey != configKey {
-			t.Errorf("GeminiAPIKey = %q, want %q", cfg.Agent.GeminiAPIKey, configKey)
+		if got := coreEnvOrDefault(cfg.Agent.CoreEnv, "GEMINI_API_KEY"); got != configKey {
+			t.Errorf("GEMINI_API_KEY = %q, want %q", got, configKey)
 		}
 	})
 

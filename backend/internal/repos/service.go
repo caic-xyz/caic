@@ -44,18 +44,6 @@ type Error struct {
 
 func (e *Error) Error() string { return e.Message }
 
-// ServiceConfig contains dependencies for repository management.
-type ServiceConfig struct {
-	AbsRoot       string
-	LogDir        string
-	CacheDir      string
-	HarnessEnv    map[string][]string
-	Registry      *Registry
-	TaskManager   *tasks.Manager
-	Runtime       runtime.Backend
-	AgentBackends map[agent.Harness]agent.Backend
-}
-
 // CloneRequest describes a git repository clone request.
 type CloneRequest struct {
 	URL   string
@@ -84,20 +72,28 @@ type Service struct {
 }
 
 // NewService creates a repository service.
-func NewService(c ServiceConfig) *Service { //nolint:gocritic // ServiceConfig is a startup value bag.
-	registry := c.Registry
+func NewService(
+	absRoot string,
+	logDir string,
+	cacheDir string,
+	harnessEnv map[string][]string,
+	registry *Registry,
+	taskMgr *tasks.Manager,
+	runtimeBackend runtime.Backend,
+	agentBackends map[agent.Harness]agent.Backend,
+) *Service {
 	if registry == nil {
 		registry = NewRegistry(nil)
 	}
 	return &Service{
-		absRoot:       c.AbsRoot,
-		logDir:        c.LogDir,
-		cacheDir:      c.CacheDir,
-		harnessEnv:    c.HarnessEnv,
+		absRoot:       absRoot,
+		logDir:        logDir,
+		cacheDir:      cacheDir,
+		harnessEnv:    harnessEnv,
 		registry:      registry,
-		taskMgr:       c.TaskManager,
-		runtime:       c.Runtime,
-		agentBackends: c.AgentBackends,
+		taskMgr:       taskMgr,
+		runtime:       runtimeBackend,
+		agentBackends: agentBackends,
 	}
 }
 
@@ -330,16 +326,6 @@ func (s *Service) Clone(ctx context.Context, req CloneRequest) (Info, error) {
 	slog.Info("cloned repo", "url", req.URL, "path", targetPath)
 
 	return info, nil
-}
-
-// SetRunnerBackends updates the runtime and agent backend dependencies used by new runners.
-func (s *Service) SetRunnerBackends(r runtime.Backend, backends map[agent.Harness]agent.Backend) {
-	if r != nil {
-		s.runtime = r
-	}
-	if backends != nil {
-		s.agentBackends = backends
-	}
 }
 
 func (s *Service) newRunner(ctx context.Context, info *Info) (*task.Runner, error) {

@@ -640,20 +640,6 @@ func (m *Manager) SudoPassword(ctx context.Context, t *task.Task) string {
 	return pw
 }
 
-// SetRunnerBackends updates the runtime backend and agent runner backends for all runners.
-func (m *Manager) SetRunnerBackends(c runtime.Backend, backends map[agent.Harness]agent.Backend) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, r := range m.runners {
-		if c != nil {
-			r.Runtime = c
-		}
-		if backends != nil {
-			r.Backends = backends
-		}
-	}
-}
-
 // SetTaskMonitorBranch sets the CI monitor branch on a task entry.
 // Equivalent to entry.SetMonitorBranch; kept for backend.Backend interface symmetry.
 func (m *Manager) SetTaskMonitorBranch(entry *Entry, branch string) {

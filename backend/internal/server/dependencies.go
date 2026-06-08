@@ -4,10 +4,10 @@ package server
 
 import (
 	"context"
+	"errors"
 
 	"github.com/maruel/genai"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
@@ -23,10 +23,7 @@ import (
 
 // Dependencies contains already-constructed server dependencies.
 type Dependencies struct {
-	AbsRoot       string
-	LogDir        string
-	CacheDir      string
-	HarnessEnv    map[string][]string
+	Repos         *repos.Service
 	Tailscale     bool
 	Preferences   *preferences.Store
 	AuthStore     *auth.Store
@@ -40,12 +37,10 @@ type Dependencies struct {
 	Forge         *ForgeManager
 	CICache       *forgecache.Cache
 	Runtime       runtime.Backend
-	AgentBackends map[agent.Harness]agent.Backend
 	TaskManager   *tasks.Manager
 	Provider      genai.Provider
 	IPGeoChecker  *ipgeo.Checker
 
-	GeminiAPIKey           string
 	GitHubAllowedUsers     map[string]struct{}
 	GitLabAllowedUsers     map[string]struct{}
 	GitHubWebhookSecret    []byte
@@ -56,13 +51,13 @@ type Dependencies struct {
 
 // New creates a new HTTP server from already-assembled dependencies.
 func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocritic // Dependencies is a startup value bag.
+	if d.Runtime == nil {
+		return nil, errors.New("runtime backend is required")
+	}
 	s := &Server{
 		ctx:                ctx,
-		absRoot:            d.AbsRoot,
-		logDir:             d.LogDir,
-		cacheDir:           d.CacheDir,
+		repos:              d.Repos,
 		cacheSizes:         newCacheSizeStore(),
-		harnessEnv:         d.HarnessEnv,
 		tailscaleAvailable: d.Tailscale,
 		prefs:              d.Preferences,
 		authStore:          d.AuthStore,
@@ -74,12 +69,10 @@ func New(ctx context.Context, d Dependencies) (*Server, error) { //nolint:gocrit
 		hostState:          d.HostState,
 		usageFetchers:      d.UsageFetchers,
 		pprof:              d.Pprof,
-		geminiAPIKey:       d.GeminiAPIKey,
 		voiceHandlers:      &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway},
 		forge:              d.Forge,
 		ciCache:            d.CICache,
-		runtimeBackend:     d.Runtime,
-		agentBackends:      d.AgentBackends,
+		runtimeProcesses:   &RuntimeProcesses{taskMgr: d.TaskManager, backend: d.Runtime},
 		taskMgr:            d.TaskManager,
 		provider:           d.Provider,
 		ipgeoChecker:       d.IPGeoChecker,
@@ -137,18 +130,6 @@ func (s *Server) CIAdapter() ci.Backend {
 }
 
 func (s *Server) initConcernAdapters() {
-	if s.repos == nil {
-		s.repos = repos.NewService(repos.ServiceConfig{
-			AbsRoot:       s.absRoot,
-			LogDir:        s.logDir,
-			CacheDir:      s.cacheDir,
-			HarnessEnv:    s.harnessEnv,
-			Registry:      repos.NewRegistry(nil),
-			TaskManager:   s.taskMgr,
-			Runtime:       s.runtimeBackend,
-			AgentBackends: s.agentBackends,
-		})
-	}
 	if s.authHandlers == nil {
 		s.authHandlers = &authHandlers{}
 	}
@@ -161,6 +142,11 @@ func (s *Server) initConcernAdapters() {
 	s.authHandlers.gitlabAllowedUsers = s.gitlabAllowedUsers
 	if s.warnings == nil {
 		s.warnings = newWarningStore(s.taskMgr)
+	}
+	s.runtimeProcesses.taskMgr = s.taskMgr
+	s.runtimeProcesses.authEnabled = s.authEnabled
+	if s.taskMgr != nil {
+		s.runtimeProcesses.notifyChange = s.taskMgr.NotifyTaskChange
 	}
 	if s.taskHTTPHandlers == nil {
 		s.taskHTTPHandlers = &taskHTTPHandlers{}

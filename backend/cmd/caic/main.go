@@ -202,7 +202,7 @@ Flags:
 		}()
 	}
 
-	slog.Info("gemini", "apikey", auth.MaskedToken(cfg.Agent.GeminiAPIKey))
+	slog.Info("gemini", "apikey", auth.MaskedToken(coreEnvOrDefault(cfg.Agent.CoreEnv, "GEMINI_API_KEY")))
 	slog.Info("tailscale", "apikey", auth.MaskedToken(cfg.Runtime.TailscaleAPIKey))
 	slog.Info("LLM", "provider", cfg.LLM.Provider, "model", cfg.LLM.Model)
 

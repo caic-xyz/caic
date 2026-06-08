@@ -15,7 +15,7 @@ func TestAppendProviderAPIKey(t *testing.T) {
 		t.Parallel()
 		opts := appendProviderAPIKey(nil, "deepseek", map[string]string{
 			"DEEPSEEK_API_KEY": "sk_from_core_env",
-		}, "")
+		})
 
 		if !slices.ContainsFunc(opts, func(o genai.ProviderOption) bool {
 			v, ok := o.(genai.ProviderOptionAPIKey)
@@ -25,9 +25,9 @@ func TestAppendProviderAPIKey(t *testing.T) {
 		}
 	})
 
-	t.Run("gemini compatibility key", func(t *testing.T) {
+	t.Run("gemini from environment", func(t *testing.T) {
 		t.Parallel()
-		opts := appendProviderAPIKeyWithEnv(nil, "gemini", nil, "AIza_compat", func(name string) string {
+		opts := appendProviderAPIKeyWithEnv(nil, "gemini", nil, func(name string) string {
 			if name == "GEMINI_API_KEY" {
 				return "AIza_env"
 			}
@@ -36,9 +36,9 @@ func TestAppendProviderAPIKey(t *testing.T) {
 
 		if !slices.ContainsFunc(opts, func(o genai.ProviderOption) bool {
 			v, ok := o.(genai.ProviderOptionAPIKey)
-			return ok && string(v) == "AIza_compat"
+			return ok && string(v) == "AIza_env"
 		}) {
-			t.Fatalf("opts = %#v, want compatibility Gemini API key", opts)
+			t.Fatalf("opts = %#v, want Gemini API key from environment", opts)
 		}
 	})
 }

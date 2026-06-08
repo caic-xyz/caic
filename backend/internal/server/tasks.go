@@ -18,7 +18,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/repos"
-	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/server/api/v1conv"
@@ -323,21 +322,6 @@ func taskEntryFromRequest(r *http.Request, taskMgr *tasks.Manager, authStore *au
 		}
 	}
 	return entry, nil
-}
-
-// SetRunnerBackends updates the instance backend and agent runner backends
-// for all runners.
-func (s *Server) SetRunnerBackends(c runtime.Backend, backends map[agent.Harness]agent.Backend) {
-	s.taskMgr.SetRunnerBackends(c, backends)
-	if c != nil {
-		s.runtimeBackend = c
-	}
-	if backends != nil {
-		s.agentBackends = backends
-	}
-	if s.repos != nil {
-		s.repos.SetRunnerBackends(c, backends)
-	}
 }
 
 // SetUsageFetchers replaces the provider usage fetchers used by the usage

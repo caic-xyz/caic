@@ -228,6 +228,9 @@ func startSmokeServer(t *testing.T) string {
 		t.Fatalf("init harness cache: %v", err)
 	}
 
+	// Use a deterministic no-LLM agent, but run it inside the real md
+	// container through the normal relay over SSH.
+	sb := smoketest.NewSmokeBackend()
 	cfg := &server.Config{
 		Dirs: server.DirsConfig{
 			ConfigDir: configDir,
@@ -236,6 +239,9 @@ func startSmokeServer(t *testing.T) string {
 		Runtime: server.RuntimeConfig{
 			Name:       smoketest.SmokeRuntime(),
 			SkipWarmup: true,
+		},
+		Agent: server.AgentConfig{
+			Backends: map[agent.Harness]agent.Backend{sb.Harness(): sb},
 		},
 		LLM: server.LLMConfig{
 			Disable: true,
@@ -258,11 +264,6 @@ func startSmokeServer(t *testing.T) string {
 		ln.Close()
 		t.Fatalf("server.New: %v", err)
 	}
-
-	// Use a deterministic no-LLM agent, but run it inside the real md
-	// container through the normal relay over SSH.
-	sb := smoketest.NewSmokeBackend()
-	srv.SetRunnerBackends(nil, map[agent.Harness]agent.Backend{sb.Harness(): sb})
 
 	// Start serving in background.
 	go func() {

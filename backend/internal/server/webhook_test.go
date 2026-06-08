@@ -393,6 +393,8 @@ func minimalServer(t *testing.T) *Server {
 		forge:   newForgeManager("", "", nil),
 	}
 	s.taskMgr = tasks.New(tasks.Config{ServerCtx: ctx})
+	s.repos = repos.NewService("", "", "", nil, repos.NewRegistry(nil), s.taskMgr, nil, nil)
+	s.runtimeProcesses = &RuntimeProcesses{}
 	s.initConcernAdapters()
 	s.webhooks = &WebhookHandlers{
 		serverCtx: s.ctx,

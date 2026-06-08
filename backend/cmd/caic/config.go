@@ -205,9 +205,8 @@ func tomlToServerConfig(ctx context.Context, tc *tomlConfig, cfgDir string) (cfg
 			TailscaleAPIKey: tailscaleAPIKey,
 		},
 		Agent: server.AgentConfig{
-			HarnessEnv:   harnessEnv,
-			CoreEnv:      tc.Core.Env,
-			GeminiAPIKey: geminiAPIKey,
+			HarnessEnv: harnessEnv,
+			CoreEnv:    tc.Core.Env,
 		},
 		LLM: server.LLMConfig{
 			Provider: tc.AI.Provider,

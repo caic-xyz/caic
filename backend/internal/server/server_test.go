@@ -91,13 +91,14 @@ func newTestServer(t *testing.T) *Server {
 		t.Fatalf("ipgeo.NewChecker: %v", err)
 	}
 	s := &Server{
-		ctx:            t.Context(),
-		runtimeBackend: &mdruntime.Backend{},
-		prefs:          newTestPrefs(t),
-		ipgeoChecker:   checker,
-		forge:          newForgeManager("", "", nil),
+		ctx:          t.Context(),
+		prefs:        newTestPrefs(t),
+		ipgeoChecker: checker,
+		forge:        newForgeManager("", "", nil),
 	}
 	s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
+	s.repos = repos.NewService("", "", "", nil, repos.NewRegistry(nil), s.taskMgr, &mdruntime.Backend{}, nil)
+	s.runtimeProcesses = &RuntimeProcesses{backend: &mdruntime.Backend{}}
 	s.initConcernAdapters()
 	s.webhooks = &WebhookHandlers{
 		serverCtx: s.ctx,
@@ -111,8 +112,21 @@ func newTestServer(t *testing.T) *Server {
 }
 
 func testTaskHandlers(s *Server) *taskHTTPHandlers {
+	if s.runtimeProcesses == nil {
+		s.runtimeProcesses = &RuntimeProcesses{}
+	}
 	s.initConcernAdapters()
 	return s.taskHTTPHandlers
+}
+
+func TestNew(t *testing.T) {
+	t.Parallel()
+	t.Run("error", func(t *testing.T) {
+		t.Parallel()
+		if _, err := New(t.Context(), Dependencies{}); err == nil {
+			t.Fatal("New() error = nil, want runtime backend required")
+		}
+	})
 }
 
 // insertTestTask registers a task in the test server's manager and returns the
@@ -147,38 +161,48 @@ func testEntries(s *Server) []*tasks.Entry {
 
 // loadPurgedTasksForTest reads logs from disk and registers purged tasks via
 // the manager. Replaces the deleted Server.loadPurgedTasks helper.
-func loadPurgedTasksForTest(s *Server) error {
-	logs, err := task.LoadLogs(s.logDir)
+func loadPurgedTasksForTest(s *Server, logDir string) error {
+	if s.repos == nil {
+		s.repos = repos.NewService("", "", "", nil, repos.NewRegistry(nil), s.taskMgr, nil, nil)
+	}
+	logs, err := task.LoadLogs(logDir)
 	if err != nil {
 		return err
 	}
 	return s.taskMgr.LoadPurgedTasks(logs)
 }
 
-func newRunnerConstructionTestServer(t *testing.T, root string) *Server {
+type runnerConstructionTestFixture struct {
+	server   *Server
+	logDir   string
+	cacheDir string
+	backend  *mdruntime.Backend
+}
+
+func newRunnerConstructionTestServer(t *testing.T, root string) runnerConstructionTestFixture {
 	harnessEnv := map[string][]string{string(agent.Codex): {"CODEX_HOME=/tmp/codex"}}
 	backend := &mdruntime.Backend{HarnessEnv: harnessEnv}
+	backends := map[agent.Harness]agent.Backend{agent.Codex: stubBackend{}}
 	logDir := filepath.Join(t.TempDir(), "logs")
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	s := &Server{
-		ctx:            t.Context(),
-		absRoot:        root,
-		logDir:         logDir,
-		cacheDir:       cacheDir,
-		runtimeBackend: backend,
-		agentBackends:  map[agent.Harness]agent.Backend{agent.Codex: stubBackend{}},
-		harnessEnv:     harnessEnv,
-	}
+	s := &Server{ctx: t.Context()}
 	s.taskMgr = tasks.New(tasks.Config{
 		ServerCtx:  t.Context(),
 		LogDir:     logDir,
 		CacheDir:   cacheDir,
 		Backend:    backend,
-		Backends:   s.agentBackends,
+		Backends:   backends,
 		HarnessEnv: harnessEnv,
 	})
+	s.repos = repos.NewService(root, logDir, cacheDir, harnessEnv, repos.NewRegistry(nil), s.taskMgr, backend, backends)
+	s.runtimeProcesses = &RuntimeProcesses{backend: backend}
 	s.initConcernAdapters()
-	return s
+	return runnerConstructionTestFixture{
+		server:   s,
+		logDir:   logDir,
+		cacheDir: cacheDir,
+		backend:  backend,
+	}
 }
 
 func newTestRepoWatcher(t *testing.T, root string, s *Server) *repos.Watcher {
@@ -246,7 +270,8 @@ func TestCloneRepo(t *testing.T) {
 		t.Parallel()
 		root := t.TempDir()
 		source := initCloneSourceRepo(t)
-		s := newRunnerConstructionTestServer(t, root)
+		fixture := newRunnerConstructionTestServer(t, root)
+		s := fixture.server
 
 		repo, err := s.serverConfigHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: source, Path: "./cloned"})
 		if err != nil {
@@ -265,10 +290,10 @@ func TestCloneRepo(t *testing.T) {
 		if runner.Dir != filepath.Join(root, "cloned") {
 			t.Fatalf("Dir = %q, want cloned path", runner.Dir)
 		}
-		if runner.LogDir != s.logDir || runner.CacheDir != s.cacheDir {
-			t.Fatalf("runner dirs = log %q cache %q, want log %q cache %q", runner.LogDir, runner.CacheDir, s.logDir, s.cacheDir)
+		if runner.LogDir != fixture.logDir || runner.CacheDir != fixture.cacheDir {
+			t.Fatalf("runner dirs = log %q cache %q, want log %q cache %q", runner.LogDir, runner.CacheDir, fixture.logDir, fixture.cacheDir)
 		}
-		if runner.Runtime != s.runtimeBackend {
+		if runner.Runtime != fixture.backend {
 			t.Fatal("runner instance backend was not wired")
 		}
 		if len(runner.HarnessEnv[string(agent.Codex)]) != 1 || runner.HarnessEnv[string(agent.Codex)][0] != "CODEX_HOME=/tmp/codex" {
@@ -301,7 +326,7 @@ func TestCloneRepo(t *testing.T) {
 		if err := os.RemoveAll(submodule); err != nil {
 			t.Fatalf("remove submodule source: %v", err)
 		}
-		s := newRunnerConstructionTestServer(t, root)
+		s := newRunnerConstructionTestServer(t, root).server
 
 		if _, err := s.serverConfigHandlers.cloneRepo(t.Context(), &v1.CloneRepoReq{URL: parent, Path: "broken"}); err == nil {
 			t.Fatal("cloneRepo succeeded, want submodule clone failure")
@@ -862,7 +887,7 @@ func TestSignalProcess(t *testing.T) {
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
 		tk.SetRuntimeInstanceInfo("ctr", "", "", 0)
 		insertTestTask(t, s, "t1", tk)
-		s.runtimeBackend = &tasktest.FakeRuntimeBackend{
+		backend := &tasktest.FakeRuntimeBackend{
 			SignalFunc: func(context.Context, runtime.InstanceID, int, string) error {
 				t.Fatal("Signal should not be called")
 				return nil
@@ -870,7 +895,7 @@ func TestSignalProcess(t *testing.T) {
 		}
 		processes := &RuntimeProcesses{
 			taskMgr:      s.taskMgr,
-			backend:      s.runtimeBackend,
+			backend:      backend,
 			authEnabled:  s.authEnabled,
 			notifyChange: s.taskMgr.NotifyTaskChange,
 		}
@@ -895,7 +920,7 @@ func TestSignalProcess(t *testing.T) {
 		insertTestTask(t, s, "t1", tk)
 		var gotPID int
 		var gotSignal string
-		s.runtimeBackend = &tasktest.FakeRuntimeBackend{
+		backend := &tasktest.FakeRuntimeBackend{
 			SignalFunc: func(_ context.Context, id runtime.InstanceID, pid int, sig string) error {
 				if id != "ctr" {
 					t.Errorf("instance = %q, want ctr", id)
@@ -907,7 +932,7 @@ func TestSignalProcess(t *testing.T) {
 		}
 		processes := &RuntimeProcesses{
 			taskMgr:      s.taskMgr,
-			backend:      s.runtimeBackend,
+			backend:      backend,
 			authEnabled:  s.authEnabled,
 			notifyChange: s.taskMgr.NotifyTaskChange,
 		}
@@ -935,13 +960,11 @@ func TestHandleListRepos(t *testing.T) {
 	t.Parallel()
 	s := &Server{}
 	s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
-	s.repos = repos.NewService(repos.ServiceConfig{
-		Registry: repos.NewRegistry([]repos.Info{
-			{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"},
-			{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"},
-		}),
-		TaskManager: s.taskMgr,
-	})
+	s.repos = repos.NewService("", "", "", nil, repos.NewRegistry([]repos.Info{
+		{RelPath: "org/repoA", AbsPath: "/src/org/repoA", BaseBranch: "main"},
+		{RelPath: "repoB", AbsPath: "/src/repoB", BaseBranch: "develop"},
+	}), s.taskMgr, nil, nil)
+	s.runtimeProcesses = &RuntimeProcesses{}
 	s.initConcernAdapters()
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/caic/v1/server/repos", http.NoBody)
@@ -1000,12 +1023,10 @@ func TestLoadPurgedTasks(t *testing.T) {
 			writeLogFile(t, logDir, fmt.Sprintf("%d.jsonl", i), meta, trailer)
 		}
 
-		s := &Server{
-			logDir: logDir,
-		}
+		s := &Server{}
 		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
-		if err := loadPurgedTasksForTest(s); err != nil {
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1067,12 +1088,10 @@ func TestLoadPurgedTasks(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		s := &Server{
-			logDir: logDir,
-		}
+		s := &Server{}
 		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
-		if err := loadPurgedTasksForTest(s); err != nil {
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1109,12 +1128,10 @@ func TestLoadPurgedTasks(t *testing.T) {
 			writeLogFile(t, logDir, fmt.Sprintf("b-%d.jsonl", i), meta, trailer)
 		}
 
-		s := &Server{
-			logDir: logDir,
-		}
+		s := &Server{}
 		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
-		if err := loadPurgedTasksForTest(s); err != nil {
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1161,12 +1178,10 @@ func TestLoadPurgedTasks(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
-		s := &Server{
-			logDir: logDir,
-		}
+		s := &Server{}
 		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
-		if err := loadPurgedTasksForTest(s); err != nil {
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1218,12 +1233,10 @@ func TestLoadPurgedTasks(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
-		s := &Server{
-			logDir: logDir,
-		}
+		s := &Server{}
 		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
-		if err := loadPurgedTasksForTest(s); err != nil {
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1275,12 +1288,10 @@ func TestLoadPurgedTasks(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "b.jsonl", metaB, trailerB)
 
-		s := &Server{
-			logDir: logDir,
-		}
+		s := &Server{}
 		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
-		if err := loadPurgedTasksForTest(s); err != nil {
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1326,12 +1337,11 @@ func TestLoadPurgedTasks(t *testing.T) {
 
 	t.Run("EmptyDir", func(t *testing.T) {
 		t.Parallel()
-		s := &Server{
-			logDir: t.TempDir(),
-		}
+		logDir := t.TempDir()
+		s := &Server{}
 		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
-		if err := loadPurgedTasksForTest(s); err != nil {
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1371,12 +1381,10 @@ func TestLoadPurgedTasks(t *testing.T) {
 		lines = append(lines, trailer)
 		writeLogFile(t, logDir, "task.jsonl", lines...)
 
-		s := &Server{
-			logDir: logDir,
-		}
+		s := &Server{}
 		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
-		if err := loadPurgedTasksForTest(s); err != nil {
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1430,12 +1438,10 @@ func TestLoadPurgedTasks(t *testing.T) {
 			}
 		}
 
-		s := &Server{
-			logDir: logDir,
-		}
+		s := &Server{}
 		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
-		if err := loadPurgedTasksForTest(s); err != nil {
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1489,12 +1495,10 @@ func TestLoadPurgedTasks(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, "purged.jsonl", meta("purged task"), trailer)
 
-		s := &Server{
-			logDir: logDir,
-		}
+		s := &Server{}
 		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
-		if err := loadPurgedTasksForTest(s); err != nil {
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1529,12 +1533,10 @@ func TestLoadPurgedTasks(t *testing.T) {
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, "feat.jsonl", meta, trailer)
 
-		s := &Server{
-			logDir: logDir,
-		}
+		s := &Server{}
 		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
-		if err := loadPurgedTasksForTest(s); err != nil {
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1656,12 +1658,10 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, assistant, result, trailer)
 
-		s := &Server{
-			logDir: logDir,
-		}
+		s := &Server{}
 		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
-		if err := loadPurgedTasksForTest(s); err != nil {
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1741,12 +1741,10 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		})
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, msgStart, delta1, delta2, assistant, result, trailer)
 
-		s := &Server{
-			logDir: logDir,
-		}
+		s := &Server{}
 		s.taskMgr = tasks.New(tasks.Config{ServerCtx: t.Context()})
 		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
-		if err := loadPurgedTasksForTest(s); err != nil {
+		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
 

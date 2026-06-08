@@ -507,21 +507,6 @@ func TestManager(t *testing.T) {
 		})
 	})
 
-	t.Run("SetRunnerBackends", func(t *testing.T) {
-		t.Parallel()
-		t.Run("valid", func(t *testing.T) {
-			t.Parallel()
-			m := New(Config{ServerCtx: t.Context()})
-			r := &task.Runner{}
-			m.RegisterRunner("my/repo", r)
-			m.SetRunnerBackends(nil, map[agent.Harness]agent.Backend{"claude": nil})
-			rr, _ := m.Runner("my/repo")
-			if _, ok := rr.Backends["claude"]; !ok {
-				t.Error("Backend not set on runner")
-			}
-		})
-	})
-
 	t.Run("SetTaskMonitorBranch", func(t *testing.T) {
 		t.Parallel()
 		t.Run("valid", func(t *testing.T) {

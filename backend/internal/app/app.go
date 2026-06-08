@@ -165,6 +165,9 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 	}
 
 	agentBackends := registry.DefaultBackends(cfg.Dirs.CacheDir, cfg.Agent.HarnessEnv)
+	if cfg.Agent.Backends != nil {
+		agentBackends = cfg.Agent.Backends
+	}
 	cache, err := forgecache.Open(filepath.Join(cfg.Dirs.CacheDir, "ci_results.json"))
 	if err != nil {
 		slog.Warn("cannot open CI cache; falling back to in-memory", "err", err)
@@ -175,12 +178,13 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 	if cfg.Voice.Gateway.Mode == server.VoiceGatewayModeEmbedded {
 		voiceCfg := cfg.Voice.Gateway.Config
 		port := voiceCfg.Server.WebRTCUDPPort
+		key := providerAPIKey("gemini", cfg.Agent.CoreEnv, nil)
 		switch {
 		case port < 0:
-		case voiceCfg.Backend == voicegateway.BackendGeminiLive && cfg.Agent.GeminiAPIKey == "":
+		case voiceCfg.Backend == voicegateway.BackendGeminiLive && key == "":
 			slog.Info("voice bridge disabled: GEMINI_API_KEY not set")
 		default:
-			voiceBridge, err = voicertc.NewBridge(ctx, &voiceCfg, cfg.Agent.GeminiAPIKey, port)
+			voiceBridge, err = voicertc.NewBridge(ctx, &voiceCfg, key, port)
 			if err != nil {
 				return nil, fmt.Errorf("voice bridge: %w", err)
 			}
@@ -215,6 +219,16 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 		Prefs:      prefsStore,
 		Provider:   provider,
 	})
+	repoService := repos.NewService(
+		absRoot,
+		logDir,
+		cfg.Dirs.CacheDir,
+		cfg.Agent.HarnessEnv,
+		repos.NewRegistry(nil),
+		taskMgr,
+		runtimeBackend,
+		agentBackends,
+	)
 
 	ipgeoChecker, err := ipgeo.NewChecker(ctx, cfg.IPGeo.Allowlist, cfg.IPGeo.DB, "")
 	if err != nil {
@@ -225,10 +239,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 	}
 
 	s, err := server.New(ctx, server.Dependencies{
-		AbsRoot:                absRoot,
-		LogDir:                 logDir,
-		CacheDir:               cfg.Dirs.CacheDir,
-		HarnessEnv:             cfg.Agent.HarnessEnv,
+		Repos:                  repoService,
 		Tailscale:              cfg.Runtime.TailscaleAPIKey != "",
 		Preferences:            prefsStore,
 		AuthStore:              authStore,
@@ -242,11 +253,9 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 		Forge:                  forgeManager,
 		CICache:                cache,
 		Runtime:                runtimeBackend,
-		AgentBackends:          agentBackends,
 		TaskManager:            taskMgr,
 		Provider:               provider,
 		IPGeoChecker:           ipgeoChecker,
-		GeminiAPIKey:           cfg.Agent.GeminiAPIKey,
 		GitHubAllowedUsers:     parseAllowedUsers(cfg.GitHub.OAuthAllowedUsers),
 		GitLabAllowedUsers:     parseAllowedUsers(cfg.GitLab.OAuthAllowedUsers),
 		GitHubWebhookSecret:    cfg.GitHub.WebhookSecret,
@@ -349,7 +358,7 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*server.Serve
 func initProvider(ctx context.Context, cfg *server.Config, backend *mdruntime.Backend) genai.Provider {
 	llmProvider := cfg.LLM.Provider
 	if !cfg.LLM.Disable && llmProvider == "" {
-		llmProvider = autoDetectLLMProvider(ctx, cfg.Agent.CoreEnv, cfg.Agent.GeminiAPIKey)
+		llmProvider = autoDetectLLMProvider(ctx, cfg.Agent.CoreEnv)
 		if llmProvider != "" {
 			slog.Info("auto-detected LLM provider", "prov", llmProvider)
 		}
@@ -369,7 +378,7 @@ func initProvider(ctx context.Context, cfg *server.Config, backend *mdruntime.Ba
 	} else {
 		opts = append(opts, genai.ModelCheap)
 	}
-	opts = appendProviderAPIKey(opts, llmProvider, cfg.Agent.CoreEnv, cfg.Agent.GeminiAPIKey)
+	opts = appendProviderAPIKey(opts, llmProvider, cfg.Agent.CoreEnv)
 	p, err := c.Factory(ctx, opts...)
 	if err != nil {
 		slog.Warn("LLM provider init failed", "prov", llmProvider, "err", err)

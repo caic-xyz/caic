@@ -14,7 +14,6 @@ import (
 	"github.com/maruel/genai"
 
 	"github.com/caic-xyz/caic/backend/frontend"
-	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
@@ -22,7 +21,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
-	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
@@ -45,26 +43,21 @@ type Server struct {
 	// Immutable after construction.
 
 	// Core infrastructure.
-	ctx            context.Context // server-lifetime context; outlives individual HTTP requests
-	absRoot        string          // absolute path to the root repos directory
-	repos          *repos.Service  // managed repository metadata and runner registration
-	taskMgr        *tasks.Manager  // task orchestration layer
-	runtimeBackend runtime.Backend // runtime backend used by route-level runtime operations
-	agentBackends  map[agent.Harness]agent.Backend
-	harnessEnv     map[string][]string
-	logDir         string
-	cacheDir       string
-	cacheSizes     *cacheSizeStore
-	ciCache        *forgecache.Cache
-	provider       genai.Provider // nil if LLM not configured
-	Bot            *bot.Bot
-	ciService      *ci.Service // handles forge event-driven task automation
-	botClient      *BotClient
-	ciAdapter      *CIAdapter
+	ctx        context.Context // server-lifetime context; outlives individual HTTP requests
+	repos      *repos.Service  // managed repository metadata and runner registration
+	taskMgr    *tasks.Manager  // task orchestration layer
+	cacheSizes *cacheSizeStore
+	ciCache    *forgecache.Cache
+	provider   genai.Provider // nil if LLM not configured
+	Bot        *bot.Bot
+	ciService  *ci.Service // handles forge event-driven task automation
+	botClient  *BotClient
+	ciAdapter  *CIAdapter
 
 	// Route handler concerns.
 	authHandlers         *authHandlers
 	ciHandlers           *ciHandlers
+	runtimeProcesses     *RuntimeProcesses
 	serverConfigHandlers *serverConfigHandlers
 	taskHTTPHandlers     *taskHTTPHandlers
 	usageHandlers        *usageHandlers
@@ -74,9 +67,6 @@ type Server struct {
 	// Profiling.
 	pprof              bool
 	tailscaleAvailable bool
-
-	// Agent backends.
-	geminiAPIKey string
 
 	// Forge client management (throttles, App client, installation cache).
 	forge *ForgeManager
@@ -174,12 +164,7 @@ func (s *Server) buildHandler() (http.Handler, error) {
 
 	// Protected routes.
 	apiMux := http.NewServeMux()
-	runtimeProcesses := &RuntimeProcesses{
-		taskMgr:      s.taskMgr,
-		backend:      s.runtimeBackend,
-		authEnabled:  s.authEnabled,
-		notifyChange: s.taskMgr.NotifyTaskChange,
-	}
+	runtimeProcesses := s.runtimeProcesses
 	taskRoutes := s.taskHTTPHandlers
 	apiMux.HandleFunc("GET /api/caic/v1/server/preferences", handle(serverConfig.getPreferences))
 	apiMux.HandleFunc("POST /api/caic/v1/server/preferences", handle(serverConfig.updatePreferences))

@@ -75,6 +75,8 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 	cfg.Runtime.Monitor = fc
 	cfg.Runtime.Inventory = fc
 	cfg.Runtime.Privilege = fc
+	fb := smoketest.NewFakeBackend()
+	cfg.Agent.Backends = map[agent.Harness]agent.Backend{fb.Harness(): fb}
 
 	// If a trace file is specified, copy it to the tasks log directory so it
 	// gets loaded as a purged task on startup.
@@ -116,8 +118,6 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	fb := smoketest.NewFakeBackend()
-	srv.SetRunnerBackends(fc, map[agent.Harness]agent.Backend{fb.Harness(): fb})
 	srv.SetUsageFetchers(smoketest.UsageFetchers())
 	srv.SetFakeCI(smoketest.SimulateCI)
 
