@@ -9,6 +9,7 @@ import (
 	"github.com/maruel/genai"
 
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
@@ -67,6 +68,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		return nil, errors.New("process backend is required")
 	}
 	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
+	webFetch := &webFetchHandlers{}
 	taskService := &taskAPIService{
 		ctx:       ctx,
 		taskMgr:   d.TaskManager,
@@ -97,12 +99,17 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		taskHTTPHandlers: &taskHTTPHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, ciService: d.CIService, authStore: d.AuthStore, warnings: d.Warnings, service: taskService},
 		usageHandlers:    &usageHandlers{taskMgr: d.TaskManager, fetchers: d.UsageFetchers},
 		voiceHandlers:    voice,
-		webFetchHandlers: &webFetchHandlers{},
+		webFetchHandlers: webFetch,
 		authStore:        d.AuthStore,
 		sessionSecret:    d.SessionSecret,
 		hostState:        d.HostState,
 		pprof:            d.Pprof,
 		ipgeoChecker:     d.IPGeoChecker,
+	}
+	s.mcpHandlers = &mcpHandlers{
+		Registry:     &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, webFetch: webFetch},
+		ServerInfo:   mcpImplementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
+		Instructions: "Use caic tools to inspect repositories, manage coding-agent tasks, fetch web pages, and check usage.",
 	}
 	s.runtimeProcesses.authEnabled = s.authEnabled
 	// The webhook concern owns the forge webhook secrets and the GitHub App
