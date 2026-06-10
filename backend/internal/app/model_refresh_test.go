@@ -10,6 +10,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
@@ -20,13 +21,13 @@ func TestRefreshHarnessModels(t *testing.T) {
 	t.Run("valid_fetches_stale_model_fetchers", func(t *testing.T) {
 		t.Parallel()
 		cacheDir := t.TempDir()
-		harness := agent.Harness("fetch")
-		env := map[string][]string{string(harness): {"FETCH_API_KEY=secret"}}
+		fetchHarness := harness.Name("fetch")
+		env := map[string][]string{string(fetchHarness): {"FETCH_API_KEY=secret"}}
 		runtimeBackend := &modelRefreshRuntime{}
-		fetcher := &modelFetchBackend{harness: harness, models: []string{"z-model", "a-model"}}
-		taskMgr := newModelRefreshTestManager(t.Context(), runtimeBackend, map[agent.Harness]agent.Backend{
-			harness: fetcher,
-			"plain": stubBackend{},
+		fetcher := &modelFetchBackend{harness: fetchHarness, models: []string{"z-model", "a-model"}}
+		taskMgr := newModelRefreshTestManager(t.Context(), runtimeBackend, map[harness.Name]agent.Backend{
+			fetchHarness: fetcher,
+			"plain":      stubBackend{},
 		})
 
 		refreshHarnessModels(t.Context(), cacheDir, runtimeBackend, taskMgr, env)
@@ -34,19 +35,19 @@ func TestRefreshHarnessModels(t *testing.T) {
 		if runtimeBackend.launches != 1 || runtimeBackend.connects != 1 || runtimeBackend.purges != 1 {
 			t.Fatalf("runtime calls = launch %d connect %d purge %d, want 1 each", runtimeBackend.launches, runtimeBackend.connects, runtimeBackend.purges)
 		}
-		if runtimeBackend.harness != harness {
-			t.Fatalf("launched harness = %q, want %q", runtimeBackend.harness, harness)
+		if runtimeBackend.harness != fetchHarness {
+			t.Fatalf("launched harness = %q, want %q", runtimeBackend.harness, fetchHarness)
 		}
-		if fetcher.instance != "refresh-fetch" {
-			t.Fatalf("fetch instance = %q, want refresh-fetch", fetcher.instance)
+		if fetcher.target.SSHHost != "refresh-fetch" {
+			t.Fatalf("fetch target = %q, want refresh-fetch", fetcher.target.SSHHost)
 		}
-		if !slices.Equal(fetcher.env, env[string(harness)]) {
-			t.Fatalf("fetch env = %v, want %v", fetcher.env, env[string(harness)])
+		if !slices.Equal(fetcher.env, env[string(fetchHarness)]) {
+			t.Fatalf("fetch env = %v, want %v", fetcher.env, env[string(fetchHarness)])
 		}
 		if !slices.Equal(fetcher.setModels, []string{"z-model", "a-model"}) {
 			t.Fatalf("SetModels = %v, want fetched models", fetcher.setModels)
 		}
-		models, fresh := agent.OpenHarnessCache(cacheDir+"/harnesses.json").Models(harness, agent.APIKeyHash(env[string(harness)]))
+		models, fresh := agent.OpenHarnessCache(cacheDir+"/harnesses.json").Models(fetchHarness, agent.APIKeyHash(env[string(fetchHarness)]))
 		if !fresh || !slices.Equal(models, []string{"z-model", "a-model"}) {
 			t.Fatalf("cache models = %v fresh=%t, want fetched fresh models", models, fresh)
 		}
@@ -55,13 +56,13 @@ func TestRefreshHarnessModels(t *testing.T) {
 	t.Run("valid_skips_fresh_cache", func(t *testing.T) {
 		t.Parallel()
 		cacheDir := t.TempDir()
-		harness := agent.Harness("fetch")
+		fetchHarness := harness.Name("fetch")
 		cache := agent.OpenHarnessCache(cacheDir + "/harnesses.json")
-		cache.SetModels(harness, []string{"cached-model"}, "")
+		cache.SetModels(fetchHarness, []string{"cached-model"}, "")
 		runtimeBackend := &modelRefreshRuntime{}
-		fetcher := &modelFetchBackend{harness: harness, models: []string{"new-model"}}
-		taskMgr := newModelRefreshTestManager(t.Context(), runtimeBackend, map[agent.Harness]agent.Backend{
-			harness: fetcher,
+		fetcher := &modelFetchBackend{harness: fetchHarness, models: []string{"new-model"}}
+		taskMgr := newModelRefreshTestManager(t.Context(), runtimeBackend, map[harness.Name]agent.Backend{
+			fetchHarness: fetcher,
 		})
 
 		refreshHarnessModels(t.Context(), cacheDir, runtimeBackend, taskMgr, nil)
@@ -69,13 +70,13 @@ func TestRefreshHarnessModels(t *testing.T) {
 		if runtimeBackend.launches != 0 {
 			t.Fatalf("launches = %d, want 0 for fresh cache", runtimeBackend.launches)
 		}
-		if fetcher.instance != "" {
-			t.Fatalf("fetch instance = %q, want no fetch", fetcher.instance)
+		if fetcher.target.SSHHost != "" {
+			t.Fatalf("fetch target = %q, want no fetch", fetcher.target.SSHHost)
 		}
 	})
 }
 
-func newModelRefreshTestManager(ctx context.Context, runtimeBackend runtime.Backend, backends map[agent.Harness]agent.Backend) *tasks.Manager {
+func newModelRefreshTestManager(ctx context.Context, runtimeBackend runtime.Backend, backends map[harness.Name]agent.Backend) *tasks.Manager {
 	return tasks.New(tasks.Config{
 		ServerCtx: ctx,
 		Backend:   runtimeBackend,
@@ -85,7 +86,7 @@ func newModelRefreshTestManager(ctx context.Context, runtimeBackend runtime.Back
 
 type stubBackend struct{}
 
-func (stubBackend) Harness() agent.Harness { return "stub" }
+func (stubBackend) Harness() harness.Name { return "stub" }
 
 func (stubBackend) Start(context.Context, *agent.Options) (*agent.Session, error) {
 	return nil, errors.New("start not implemented")
@@ -112,17 +113,17 @@ func (stubBackend) ContextWindowLimit(string) int { return 180_000 }
 type modelFetchBackend struct {
 	stubBackend
 
-	harness   agent.Harness
+	harness   harness.Name
 	models    []string
-	instance  string
+	target    runtime.ConnectionTarget
 	env       []string
 	setModels []string
 }
 
-func (b *modelFetchBackend) Harness() agent.Harness { return b.harness }
+func (b *modelFetchBackend) Harness() harness.Name { return b.harness }
 
-func (b *modelFetchBackend) FetchModels(_ context.Context, instance string, env []string) ([]string, error) {
-	b.instance = instance
+func (b *modelFetchBackend) FetchModels(_ context.Context, target runtime.ConnectionTarget, env []string) ([]string, error) {
+	b.target = target
 	b.env = append([]string(nil), env...)
 	return b.models, nil
 }
@@ -135,7 +136,7 @@ type modelRefreshRuntime struct {
 	launches int
 	connects int
 	purges   int
-	harness  agent.Harness
+	harness  harness.Name
 }
 
 var _ runtime.Backend = (*modelRefreshRuntime)(nil)
@@ -146,9 +147,9 @@ func (r *modelRefreshRuntime) Launch(_ context.Context, _ []runtime.Repo, opts *
 	return runtime.InstanceID("refresh-" + string(opts.Harness)), nil
 }
 
-func (r *modelRefreshRuntime) Connect(_ context.Context, _ runtime.InstanceID, _ *runtime.StartOptions) (runtime.ConnectionInfo, error) {
+func (r *modelRefreshRuntime) Connect(_ context.Context, id runtime.InstanceID, _ *runtime.StartOptions) (runtime.ConnectionInfo, error) {
 	r.connects++
-	return runtime.ConnectionInfo{}, nil
+	return runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: string(id)}}, nil
 }
 
 func (*modelRefreshRuntime) Diff(_ context.Context, _ runtime.InstanceID, _ int, _ ...string) (string, error) {
@@ -166,8 +167,8 @@ func (r *modelRefreshRuntime) Purge(_ context.Context, _ runtime.InstanceID) err
 
 func (*modelRefreshRuntime) Revive(_ context.Context, _ runtime.InstanceID) error { return nil }
 
-func (*modelRefreshRuntime) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *runtime.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
-	return "", nil, errors.New("fork not implemented")
+func (*modelRefreshRuntime) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *runtime.ForkOptions) (runtime.InstanceID, runtime.ConnectionInfo, []runtime.Repo, error) {
+	return "", runtime.ConnectionInfo{}, nil, errors.New("fork not implemented")
 }
 
 func (*modelRefreshRuntime) VNCPort(_ context.Context, _ runtime.InstanceID) int { return 0 }

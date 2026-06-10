@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/voicegateway"
 )
@@ -91,9 +92,9 @@ func (c *RuntimeConfig) Validate() error {
 
 // AgentConfig configures coding-agent process environments.
 type AgentConfig struct {
-	HarnessEnv map[string][]string             // per-harness KEY=VALUE env vars for runtime instances
-	CoreEnv    map[string]string               // server-level KEY=VALUE env vars from [core.env]
-	Backends   map[agent.Harness]agent.Backend // optional agent backend override for smoke/e2e tests
+	HarnessEnv map[string][]string            // per-harness KEY=VALUE env vars for runtime instances
+	CoreEnv    map[string]string              // server-level KEY=VALUE env vars from [core.env]
+	Backends   map[harness.Name]agent.Backend // optional agent backend override for smoke/e2e tests
 }
 
 // LLMConfig configures title generation and commit-description LLM calls.

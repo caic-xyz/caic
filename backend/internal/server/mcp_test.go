@@ -15,6 +15,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
@@ -139,7 +140,7 @@ func TestMCPHandlers(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		id := ksid.NewID()
-		tk := &task.Task{ID: id, InitialPrompt: agent.Prompt{Text: "test"}, Harness: agent.Claude}
+		tk := &task.Task{ID: id, InitialPrompt: agent.Prompt{Text: "test"}, Harness: harness.Claude}
 		tk.SetTitle("Fix tests")
 		tk.SetState(task.StateWaiting)
 		insertTestTask(t, s, id.String(), tk)

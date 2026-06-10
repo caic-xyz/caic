@@ -16,6 +16,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
@@ -258,9 +259,9 @@ func (s *taskAPIService) forkTask(ctx context.Context, entry *tasks.Entry, req *
 		ownerID = u.ID
 	}
 
-	var harness agent.Harness
+	var selectedHarness harness.Name
 	if req.Harness != "" {
-		harness = v1conv.AgentHarness(req.Harness)
+		selectedHarness = v1conv.AgentHarness(req.Harness)
 	}
 
 	extraRepos := make([]tasks.ForkRepo, len(req.ExtraRepos))
@@ -293,7 +294,7 @@ func (s *taskAPIService) forkTask(ctx context.Context, entry *tasks.Entry, req *
 	newID, err := s.taskMgr.Fork(ctx, entry, tasks.ForkParams{
 		OwnerID:             ownerID,
 		Prompt:              v1conv.PromptToAgent(req.Prompt),
-		Harness:             harness,
+		Harness:             selectedHarness,
 		Model:               req.Model,
 		Effort:              req.Effort,
 		ExtraRepos:          extraRepos,
@@ -435,7 +436,7 @@ func (s *taskAPIService) taskResolvers() v1conv.TaskResolvers {
 			}
 			return ""
 		},
-		ContextWindowLimit: func(repo string, harness agent.Harness, model string) int {
+		ContextWindowLimit: func(repo string, harness harness.Name, model string) int {
 			r, ok := s.taskMgr.Runner(repo)
 			if !ok {
 				return 0

@@ -15,6 +15,7 @@ import (
 	"github.com/maruel/genai/providers/codex"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 )
 
 func TestNew(t *testing.T) {
@@ -31,7 +32,7 @@ func TestNew(t *testing.T) {
 		dir := t.TempDir()
 		envVars := []string{"OPENAI_API_KEY=secret"}
 		cache := agent.OpenHarnessCache(filepath.Join(dir, "harnesses.json"))
-		cache.SetModels(agent.Codex, []string{"z-model", "a-model"}, agent.APIKeyHash(envVars))
+		cache.SetModels(harness.Codex, []string{"z-model", "a-model"}, agent.APIKeyHash(envVars))
 
 		b := New(dir, envVars)
 		if got, want := b.Models(), []string{"z-model", "a-model"}; !slices.Equal(got, want) {
@@ -47,7 +48,7 @@ func TestNew(t *testing.T) {
 		b.setDiscoveredModels([]string{"z-model", "a-model"})
 
 		cache := agent.OpenHarnessCache(filepath.Join(dir, "harnesses.json"))
-		got, fresh := cache.Models(agent.Codex, agent.APIKeyHash(envVars))
+		got, fresh := cache.Models(harness.Codex, agent.APIKeyHash(envVars))
 		if !fresh {
 			t.Fatal("cached models are not fresh")
 		}

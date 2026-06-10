@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
@@ -65,7 +66,7 @@ type LoadedTask struct {
 	Prompt            string
 	Title             string
 	Repos             []RepoMount // GitRoot will be empty for purged tasks loaded from logs.
-	Harness           agent.Harness
+	Harness           harness.Name
 	StartedAt         time.Time
 	LastStateUpdateAt time.Time // Latest relay ts from caic_diff_stat records, falling back to log file mtime.
 	State             State

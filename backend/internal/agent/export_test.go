@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/harness"
 )
 
 // exportParseFn is a minimal parser for export tests. It recognises the
@@ -97,8 +99,8 @@ func writeJSONL(t *testing.T, lines []string) string {
 }
 
 // metaLine returns a caic_meta JSON line with the given prompt and harness.
-func metaLine(prompt, harness string) string {
-	return `{"type":"caic_meta","version":1,"prompt":` + jsonStr(prompt) + `,"harness":` + jsonStr(harness) + `,"repos":[],"started_at":"2025-01-15T10:00:00Z"}`
+func metaLine(prompt, harnessName string) string {
+	return `{"type":"caic_meta","version":1,"prompt":` + jsonStr(prompt) + `,"harness":` + jsonStr(harnessName) + `,"repos":[],"started_at":"2025-01-15T10:00:00Z"}`
 }
 
 // jsonStr returns a JSON-quoted string.
@@ -421,7 +423,7 @@ func TestExportDiscussion(t *testing.T) {
 			meta := &MetaMessage{
 				Prompt:    "do something",
 				Title:     "My Task Title",
-				Harness:   Pi,
+				Harness:   harness.Pi,
 				StartedAt: time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC),
 			}
 			md := renderDiscussion(meta, nil, nil, nil)

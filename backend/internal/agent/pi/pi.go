@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -31,7 +32,9 @@ import (
 	"github.com/maruel/genai/providers/pi"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // Backend implements agent.Backend for the Pi coding agent.
@@ -53,14 +56,14 @@ var _ agent.ModelFetcher = (*Backend)(nil)
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{EnvVars: envVars}
 	b.Base = agent.Base{
-		HarnessID:     agent.Pi,
+		HarnessID:     harness.Pi,
 		Images:        true,
 		Compact:       true,
 		ContextWindow: 200_000,
 	}
 	if cacheDir != "" {
 		b.cache = agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-		if models, _ := b.cache.Models(agent.Pi, agent.APIKeyHash(envVars)); len(models) > 0 {
+		if models, _ := b.cache.Models(harness.Pi, agent.APIKeyHash(envVars)); len(models) > 0 {
 			b.ModelList = agent.SortModels(models)
 		}
 	}
@@ -148,12 +151,11 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	// Opportunistically refresh models in background using the task's container.
 	if b.cache != nil {
 		envHash := agent.APIKeyHash(b.EnvVars)
-		if _, fresh := b.cache.Models(agent.Pi, envHash); !fresh {
-			container := opts.Container
+		if _, fresh := b.cache.Models(harness.Pi, envHash); !fresh {
 			go func() {
 				fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 				defer cancel()
-				if models, err := FetchModels(fetchCtx, container, b.EnvVars); err != nil {
+				if models, err := FetchModels(fetchCtx, opts.Target, b.EnvVars); err != nil {
 					slog.Warn("pi: background model fetch failed", "err", err)
 				} else {
 					sorted := agent.SortModels(models)
@@ -161,7 +163,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 					b.ModelList = sorted
 					b.mu.Unlock()
 					// Store raw models so the cache survives blacklist changes.
-					b.cache.SetModels(agent.Pi, models, envHash)
+					b.cache.SetModels(harness.Pi, models, envHash)
 				}
 			}()
 		}
@@ -637,22 +639,25 @@ func writeSetThinking(w io.Writer, level string, logW io.Writer) error {
 }
 
 // FetchModels implements agent.ModelFetcher.
-func (*Backend) FetchModels(ctx context.Context, instance string, extraEnv []string) ([]string, error) {
-	return FetchModels(ctx, instance, extraEnv)
+func (*Backend) FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
+	return FetchModels(ctx, target, extraEnv)
 }
 
-// FetchModels SSHes into the given container, runs pi --mode rpc --no-session,
+// FetchModels runs pi --mode rpc --no-session in the target,
 // sends get_available_models, and returns the model ID list.
 // extraEnv holds KEY=VALUE pairs injected via the env command so Pi sees them
 // without requiring a login shell that sources ~/.env.
-func FetchModels(ctx context.Context, container string, extraEnv []string) ([]string, error) {
-	args := []string{container}
+func FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
+	if target.SSHHost == "" {
+		return nil, errors.New("agent connection target missing SSH host")
+	}
+	args := []string{target.SSHHost}
 	if len(extraEnv) > 0 {
 		args = append(args, "env")
 		args = append(args, extraEnv...)
 	}
 	args = append(args, "pi", "--mode", "rpc", "--no-session")
-	cmd := exec.CommandContext(ctx, "ssh", args...) //nolint:gosec // container is not user-controlled
+	cmd := exec.CommandContext(ctx, "ssh", args...) //nolint:gosec // target is not user-controlled
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

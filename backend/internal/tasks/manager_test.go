@@ -19,6 +19,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/runtime/mdruntime"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -26,21 +27,21 @@ import (
 )
 
 type fakeRelayReader struct {
-	statusFn   func(context.Context, string) (bool, string, error)
-	readTailFn func(context.Context, string, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error)
-	readLogFn  func(context.Context, string, int) string
+	statusFn   func(context.Context, runtime.ConnectionTarget) (bool, string, error)
+	readTailFn func(context.Context, runtime.ConnectionTarget, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error)
+	readLogFn  func(context.Context, runtime.ConnectionTarget, int) string
 }
 
-func (f fakeRelayReader) Status(ctx context.Context, container string) (alive bool, diag string, err error) {
-	return f.statusFn(ctx, container)
+func (f fakeRelayReader) Status(ctx context.Context, target runtime.ConnectionTarget) (alive bool, diag string, err error) {
+	return f.statusFn(ctx, target)
 }
 
-func (f fakeRelayReader) ReadTail(ctx context.Context, container string, parseFn func([]byte) ([]agent.Message, error), maxBytes int64) (msgs []agent.Message, size int64, err error) {
-	return f.readTailFn(ctx, container, parseFn, maxBytes)
+func (f fakeRelayReader) ReadTail(ctx context.Context, target runtime.ConnectionTarget, parseFn func([]byte) ([]agent.Message, error), maxBytes int64) (msgs []agent.Message, size int64, err error) {
+	return f.readTailFn(ctx, target, parseFn, maxBytes)
 }
 
-func (f fakeRelayReader) ReadLog(ctx context.Context, container string, maxBytes int) string {
-	return f.readLogFn(ctx, container, maxBytes)
+func (f fakeRelayReader) ReadLog(ctx context.Context, target runtime.ConnectionTarget, maxBytes int) string {
+	return f.readLogFn(ctx, target, maxBytes)
 }
 
 func TestNew(t *testing.T) {
@@ -75,8 +76,8 @@ func TestNew(t *testing.T) {
 			LogDir:     "/tmp/logs",
 			CacheDir:   "/tmp/cache",
 			Backend:    &mdruntime.Backend{},
-			Backends:   map[agent.Harness]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
-			HarnessEnv: map[string][]string{string(agent.Codex): {"CODEX_HOME=/tmp/codex"}},
+			Backends:   map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
+			HarnessEnv: map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}},
 		}
 		m := New(cfg)
 		r, ok := m.Runner("")
@@ -89,7 +90,7 @@ func TestNew(t *testing.T) {
 		if r.Runtime != cfg.Backend {
 			t.Fatal("runner instance backend was not wired")
 		}
-		if len(r.HarnessEnv[string(agent.Codex)]) != 1 || r.HarnessEnv[string(agent.Codex)][0] != "CODEX_HOME=/tmp/codex" {
+		if len(r.HarnessEnv[string(harness.Codex)]) != 1 || r.HarnessEnv[string(harness.Codex)][0] != "CODEX_HOME=/tmp/codex" {
 			t.Fatalf("HarnessEnv = %#v, want configured codex env", r.HarnessEnv)
 		}
 		if len(r.Backends) == 0 {
@@ -677,7 +678,7 @@ func TestManager(t *testing.T) {
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterRunner("my/repo", &task.Runner{
 				Dir:      "/tmp/my-repo",
-				Backends: map[agent.Harness]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
+				Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
 			})
 			return m
 		}
@@ -714,7 +715,7 @@ func TestManager(t *testing.T) {
 			m := newManagerWithRepo(t)
 			m.RegisterRunner("other/repo", &task.Runner{
 				Dir:      "/tmp/other-repo",
-				Backends: map[agent.Harness]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
+				Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
 			})
 			id, err := m.Create(t.Context(), CreateParams{
 				Prompt:  agent.Prompt{Text: "hi"},
@@ -837,7 +838,7 @@ func TestManager(t *testing.T) {
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterRunner("my/repo", &task.Runner{
 				Dir:      "/tmp/my-repo",
-				Backends: map[agent.Harness]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
+				Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
 			})
 			src := &task.Task{
 				ID:            ksid.NewID(),
@@ -847,7 +848,7 @@ func TestManager(t *testing.T) {
 				MaxCPUs:       5,
 				GitHubToken:   true,
 			}
-			src.SetRuntimeInstanceInfo("md-agent-src", "", "", 0)
+			src.SetRuntimeConnectionInfo("md-agent-src", runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
 			src.SetState(task.StateWaiting)
 			e := NewEntry(src)
 			m.Insert(src.ID.String(), e)
@@ -915,7 +916,7 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "src"},
 				Harness:       "fake",
 			}
-			src.SetRuntimeInstanceInfo("md-agent-src", "", "", 0)
+			src.SetRuntimeConnectionInfo("md-agent-src", runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
 			src.SetState(task.StateWaiting)
 			e := NewEntry(src)
 			m.Insert(src.ID.String(), e)
@@ -988,7 +989,7 @@ func TestManager(t *testing.T) {
 		t.Run("error_delivery_failure_is_not_no_session", func(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
-			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}, Harness: agent.Codex}
+			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}, Harness: harness.Codex}
 			tk.SetState(task.StateWaiting)
 
 			cmdCtx, cmdCancel := context.WithCancel(t.Context())
@@ -1129,7 +1130,7 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Sudo:          false,
 			}
-			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			if got := m.SudoPassword(t.Context(), tk); got != "" {
 				t.Errorf("SudoPassword = %q, want empty for !Sudo", got)
 			}
@@ -1155,7 +1156,7 @@ func TestManager(t *testing.T) {
 				Sudo:          true,
 				SudoPassword:  "cached-pw",
 			}
-			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			if got := m.SudoPassword(t.Context(), tk); got != "cached-pw" {
 				t.Errorf("SudoPassword = %q, want cached-pw", got)
 			}
@@ -1177,7 +1178,7 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Sudo:          true,
 			}
-			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			if got := m.SudoPassword(t.Context(), tk); got != "fetched-pw" {
 				t.Errorf("SudoPassword = %q, want fetched-pw", got)
 			}
@@ -1205,7 +1206,7 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Sudo:          true,
 			}
-			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			if got := m.SudoPassword(t.Context(), tk); got != "" {
 				t.Errorf("SudoPassword = %q, want empty on fetch error", got)
 			}
@@ -1224,7 +1225,7 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Repos:         []task.RepoMount{{Name: "repo/x", Branch: "caic-1"}},
 			}
-			tk.SetRuntimeInstanceInfo("ctr-dead", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-dead", runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID.String(), NewEntry(tk))
 			m.handleRuntimeInstanceExit("ctr-dead")
@@ -1239,7 +1240,7 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeInstanceInfo("ctr-purged", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-purged", runtime.ConnectionTarget{SSHHost: "ctr-purged"}, "", "", 0)
 			tk.SetState(task.StatePurged)
 			m.Insert(tk.ID.String(), NewEntry(tk))
 			m.handleRuntimeInstanceExit("ctr-purged")
@@ -1254,7 +1255,7 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeInstanceInfo("ctr-purging", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-purging", runtime.ConnectionTarget{SSHHost: "ctr-purging"}, "", "", 0)
 			// A purge in progress: removing the instance emits the very "die"
 			// event handled here. Acting on it would flap the task to Stopped
 			// mid-purge and race the cleanup goroutine.
@@ -1272,7 +1273,7 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeInstanceInfo("ctr-stopping", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-stopping", runtime.ConnectionTarget{SSHHost: "ctr-stopping"}, "", "", 0)
 			tk.SetState(task.StateStopping)
 			m.Insert(tk.ID.String(), NewEntry(tk))
 			m.handleRuntimeInstanceExit("ctr-stopping")
@@ -1287,7 +1288,7 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeInstanceInfo("ctr-stopped", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-stopped", runtime.ConnectionTarget{SSHHost: "ctr-stopped"}, "", "", 0)
 			tk.SetState(task.StateStopped)
 			m.Insert(tk.ID.String(), NewEntry(tk))
 			m.handleRuntimeInstanceExit("ctr-stopped")
@@ -1302,7 +1303,7 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeInstanceInfo("ctr-alive", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-alive", runtime.ConnectionTarget{SSHHost: "ctr-alive"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID.String(), NewEntry(tk))
 			m.handleRuntimeInstanceExit("ctr-other")
@@ -1612,7 +1613,7 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			entry := NewEntry(tk)
 			m.Insert(tk.ID.String(), entry)
@@ -1690,7 +1691,7 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			entry := NewEntry(tk)
 			m.Insert(tk.ID.String(), entry)
@@ -1747,7 +1748,7 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateStopped)
 			entry := NewEntry(tk)
 			m.Insert(tk.ID.String(), entry)
@@ -1790,7 +1791,7 @@ func TestManager(t *testing.T) {
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterRunner("repo/a", &task.Runner{
 				Dir:      "/tmp/repo",
-				Backends: map[agent.Harness]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
+				Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
 			})
 			tk := &task.Task{
 				ID:            ksid.NewID(),
@@ -1829,7 +1830,7 @@ func TestManager(t *testing.T) {
 			s := agent.NewSession(cmd, agent.NewConn(stdin, io.Discard, codex.New("", nil).NewWire()), stdout, msgCh, nil)
 			h := &task.SessionHandle{Session: s, MsgCh: msgCh, DispatchDone: dispatchDone}
 			tk := &task.Task{ID: ksid.NewID(), InitialPrompt: agent.Prompt{Text: "x"}}
-			tk.SetRuntimeInstanceInfo("ssh-failed", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ssh-failed", runtime.ConnectionTarget{SSHHost: "ssh-failed"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			tk.AttachSession(h)
 			entry := NewEntry(tk)
@@ -1860,7 +1861,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterRunner("repo/a", &task.Runner{
-				Backends: map[agent.Harness]agent.Backend{"claude": &fakeBackend{models: []string{"m1"}}},
+				Backends: map[harness.Name]agent.Backend{"claude": &fakeBackend{models: []string{"m1"}}},
 			})
 			lt := &task.LoadedTask{Harness: "claude"}
 			m.setParser(lt)
@@ -1898,7 +1899,7 @@ func TestManager(t *testing.T) {
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterRunner("repo/a", &task.Runner{
 				Dir:      "/tmp/repo",
-				Backends: map[agent.Harness]agent.Backend{}, // no backends
+				Backends: map[harness.Name]agent.Backend{}, // no backends
 			})
 			_, err := m.Create(t.Context(), CreateParams{
 				Prompt:  agent.Prompt{Text: "hi"},
@@ -1915,7 +1916,7 @@ func TestManager(t *testing.T) {
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterRunner("repo/a", &task.Runner{
 				Dir:      "/tmp/repo",
-				Backends: map[agent.Harness]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
+				Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
 			})
 			_, err := m.Create(t.Context(), CreateParams{
 				Prompt:  agent.Prompt{Text: "hi"},
@@ -1933,7 +1934,7 @@ func TestManager(t *testing.T) {
 			m := New(Config{ServerCtx: t.Context()})
 			m.RegisterRunner("repo/a", &task.Runner{
 				Dir:      "/tmp/repo",
-				Backends: map[agent.Harness]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
+				Backends: map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}},
 			})
 			_, err := m.Create(t.Context(), CreateParams{
 				Prompt:  agent.Prompt{Text: "hi"},
@@ -1951,7 +1952,7 @@ func TestManager(t *testing.T) {
 
 		// forkSetup creates a Manager with a runner for "repo/a" and a source
 		// task in StateWaiting. Returns the Manager and the source Entry.
-		forkSetup := func(t *testing.T, sourceHarness agent.Harness, backends map[agent.Harness]agent.Backend) (*Manager, *Entry) {
+		forkSetup := func(t *testing.T, sourceHarness harness.Name, backends map[harness.Name]agent.Backend) (*Manager, *Entry) {
 			m := New(Config{ServerCtx: t.Context()})
 			r := &task.Runner{Dir: "/tmp/repo", Backends: backends}
 			m.RegisterRunner("repo/a", r)
@@ -1961,14 +1962,14 @@ func TestManager(t *testing.T) {
 				Repos:         []task.RepoMount{{Name: "repo/a", Branch: "caic-1"}},
 				Harness:       sourceHarness,
 			}
-			src.SetRuntimeInstanceInfo("md-agent-src", "", "", 0)
+			src.SetRuntimeConnectionInfo("md-agent-src", runtime.ConnectionTarget{SSHHost: "md-agent-src"}, "", "", 0)
 			src.SetState(task.StateWaiting)
 			e := NewEntry(src)
 			m.Insert(src.ID.String(), e)
 			return m, e
 		}
 
-		defaultBackends := map[agent.Harness]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}}
+		defaultBackends := map[harness.Name]agent.Backend{"fake": &fakeBackend{models: []string{"m1"}}}
 
 		t.Run("error_unknown_harness", func(t *testing.T) {
 			t.Parallel()
@@ -1990,7 +1991,7 @@ func TestManager(t *testing.T) {
 		})
 		t.Run("error_model_with_new_harness", func(t *testing.T) {
 			t.Parallel()
-			backends := map[agent.Harness]agent.Backend{
+			backends := map[harness.Name]agent.Backend{
 				"fake":  &fakeBackend{models: []string{"m1"}},
 				"fake2": &fakeBackend{models: []string{"m2"}},
 			}
@@ -2005,7 +2006,7 @@ func TestManager(t *testing.T) {
 			t.Parallel()
 			m, e := forkSetup(t, "fake", defaultBackends)
 			// Overwrite the instance to empty.
-			e.Task().SetRuntimeInstanceInfo("", "", "", 0)
+			e.Task().SetRuntimeConnectionInfo("", runtime.ConnectionTarget{SSHHost: ""}, "", "", 0)
 			_, err := m.Fork(t.Context(), e, ForkParams{Prompt: agent.Prompt{Text: "fork"}})
 			var te *Error
 			if !errors.As(err, &te) || te.Kind != KindConflict {
@@ -2049,16 +2050,16 @@ func TestManager(t *testing.T) {
 			taskID := ksid.NewID()
 			fake := &fakeMD{metadata: map[string]string{
 				"md-caic-caic-5\x00caic.id":      taskID.String(),
-				"md-caic-caic-5\x00caic.harness": string(agent.Claude),
+				"md-caic-caic-5\x00caic.harness": string(harness.Claude),
 			}}
 			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			m.RegisterRunner("caic-xyz/caic", &task.Runner{
 				Dir:      "/home/user/src/caic-xyz/caic",
-				Backends: map[agent.Harness]agent.Backend{agent.Claude: &fakeBackend{models: []string{"m1"}}},
+				Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}},
 			})
 			m.RegisterRunner("caic-xyz/md", &task.Runner{
 				Dir:      "/home/user/src/caic-xyz/md",
-				Backends: map[agent.Harness]agent.Backend{agent.Claude: &fakeBackend{models: []string{"m1"}}},
+				Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}},
 			})
 
 			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{
@@ -2097,12 +2098,12 @@ func TestManager(t *testing.T) {
 			taskID := ksid.NewID()
 			fake := &fakeMD{metadata: map[string]string{
 				"dead-relay\x00caic.id":      taskID.String(),
-				"dead-relay\x00caic.harness": string(agent.Claude),
+				"dead-relay\x00caic.harness": string(harness.Claude),
 			}}
 			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			m.RegisterRunner("caic-xyz/caic", &task.Runner{
 				Dir:      "/home/user/src/caic-xyz/caic",
-				Backends: map[agent.Harness]agent.Backend{agent.Claude: &fakeBackend{models: []string{"m1"}}},
+				Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}},
 			})
 
 			logDir := t.TempDir()
@@ -2111,7 +2112,7 @@ func TestManager(t *testing.T) {
 				Version:     1,
 				Prompt:      "dead relay task",
 				Repos:       []agent.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-7"}},
-				Harness:     agent.Claude,
+				Harness:     harness.Claude,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -2167,21 +2168,21 @@ func TestManager(t *testing.T) {
 			taskID := ksid.NewID()
 			fake := &fakeMD{metadata: map[string]string{
 				"dead-relay-tail\x00caic.id":      taskID.String(),
-				"dead-relay-tail\x00caic.harness": string(agent.Claude),
+				"dead-relay-tail\x00caic.harness": string(harness.Claude),
 			}}
-			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
+			m := New(Config{ServerCtx: t.Context(), Backend: &tasktest.FakeRuntimeBackend{}, Monitor: fake, Inventory: fake, Privilege: fake})
 			m.relay = fakeRelayReader{
-				statusFn: func(context.Context, string) (bool, string, error) {
+				statusFn: func(context.Context, runtime.ConnectionTarget) (bool, string, error) {
 					return false, "dead", nil
 				},
-				readTailFn: func(context.Context, string, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error) {
+				readTailFn: func(context.Context, runtime.ConnectionTarget, func([]byte) ([]agent.Message, error), int64) ([]agent.Message, int64, error) {
 					return []agent.Message{&agent.ExitMessage{ExitCode: 2, Error: "Unknown option: --approve"}}, 128, nil
 				},
-				readLogFn: func(context.Context, string, int) string { return "relay exited" },
+				readLogFn: func(context.Context, runtime.ConnectionTarget, int) string { return "relay exited" },
 			}
 			m.RegisterRunner("caic-xyz/caic", &task.Runner{
 				Dir:      "/home/user/src/caic-xyz/caic",
-				Backends: map[agent.Harness]agent.Backend{agent.Claude: &fakeBackend{models: []string{"m1"}}},
+				Backends: map[harness.Name]agent.Backend{harness.Claude: &fakeBackend{models: []string{"m1"}}},
 			})
 
 			adopted, err := m.AdoptInstances(t.Context(), []AdoptRepo{
@@ -2215,12 +2216,12 @@ func TestManager(t *testing.T) {
 			taskID := ksid.NewID()
 			fake := &fakeMD{metadata: map[string]string{
 				"md-caic-caic-6\x00caic.id":      taskID.String(),
-				"md-caic-caic-6\x00caic.harness": string(agent.Codex),
+				"md-caic-caic-6\x00caic.harness": string(harness.Codex),
 			}}
 			m := New(Config{ServerCtx: t.Context(), Monitor: fake, Inventory: fake, Privilege: fake})
 			m.RegisterRunner("caic-xyz/caic", &task.Runner{
 				Dir:      "/home/user/src/caic-xyz/caic",
-				Backends: map[agent.Harness]agent.Backend{agent.Codex: codex.New("", nil)},
+				Backends: map[harness.Name]agent.Backend{harness.Codex: codex.New("", nil)},
 			})
 
 			logDir := t.TempDir()
@@ -2229,7 +2230,7 @@ func TestManager(t *testing.T) {
 				Version:     1,
 				Prompt:      "legacy codex task",
 				Repos:       []agent.MetaRepo{{Name: "caic-xyz/caic", Branch: "caic-6"}},
-				Harness:     agent.Codex,
+				Harness:     harness.Codex,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -2284,7 +2285,7 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID.String(), NewEntry(tk))
 
@@ -2311,7 +2312,7 @@ func TestManager(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "x"},
 			}
-			tk.SetRuntimeInstanceInfo("ctr-dead", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-dead", runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
 			tk.SetState(task.StatePurged)
 			m.Insert(tk.ID.String(), NewEntry(tk))
 
@@ -2335,7 +2336,7 @@ func TestManager(t *testing.T) {
 				InitialPrompt: agent.Prompt{Text: "x"},
 				Repos:         []task.RepoMount{{Name: "repo/x", Branch: "caic-1"}},
 			}
-			tk.SetRuntimeInstanceInfo("ctr-dead", "", "", 0)
+			tk.SetRuntimeConnectionInfo("ctr-dead", runtime.ConnectionTarget{SSHHost: "ctr-dead"}, "", "", 0)
 			tk.SetState(task.StateRunning)
 			m.Insert(tk.ID.String(), NewEntry(tk))
 
@@ -2479,7 +2480,7 @@ func TestRefreshAdoptedDiffStat(t *testing.T) {
 		}
 		runner := &task.Runner{Runtime: fake, Dir: "/repo"}
 		tk := &task.Task{Repos: []task.RepoMount{{GitRoot: "/repo", Branch: "caic-0"}}}
-		tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(task.StateWaiting)
 
 		refreshAdoptedDiffStat(t.Context(), runner, tk)
@@ -2504,7 +2505,7 @@ func TestRefreshAdoptedDiffStat(t *testing.T) {
 		}
 		runner := &task.Runner{Runtime: fake, Dir: "/repo"}
 		tk := &task.Task{Repos: []task.RepoMount{{GitRoot: "/repo", Branch: "caic-0"}}}
-		tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		tk.SetState(task.StateRunning)
 
 		refreshAdoptedDiffStat(t.Context(), runner, tk)

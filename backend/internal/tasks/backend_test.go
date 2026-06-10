@@ -8,6 +8,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 )
 
 // fakeBackend is a minimal agent.Backend for Manager lifecycle tests. Only the
@@ -27,7 +28,7 @@ func (b *fakeBackend) AttachRelay(context.Context, *agent.Options) (*agent.Sessi
 	return nil, errors.New("fake backend cannot attach relay")
 }
 
-func (b *fakeBackend) Harness() agent.Harness { return "fake" }
+func (b *fakeBackend) Harness() harness.Name { return "fake" }
 
 func (b *fakeBackend) Models() []string { return b.models }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
@@ -68,7 +69,7 @@ type Service struct {
 	registry      *Registry
 	taskMgr       *tasks.Manager
 	runtime       runtime.Backend
-	agentBackends map[agent.Harness]agent.Backend
+	agentBackends map[harness.Name]agent.Backend
 }
 
 // NewService creates a repository service.
@@ -80,7 +81,7 @@ func NewService(
 	registry *Registry,
 	taskMgr *tasks.Manager,
 	runtimeBackend runtime.Backend,
-	agentBackends map[agent.Harness]agent.Backend,
+	agentBackends map[harness.Name]agent.Backend,
 ) *Service {
 	if registry == nil {
 		registry = NewRegistry(nil)

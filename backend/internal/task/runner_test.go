@@ -19,6 +19,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -30,7 +31,7 @@ type testBackend struct {
 	capturedOpts agent.Options
 }
 
-func (b *testBackend) Harness() agent.Harness { return "test" }
+func (b *testBackend) Harness() harness.Name { return "test" }
 
 func (b *testBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
 	b.capturedCtx = ctx
@@ -109,7 +110,7 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			tk := &Task{
 				ID:      ksid.NewID(),
-				Harness: agent.Claude,
+				Harness: harness.Claude,
 			}
 			metadata := MakeMetadata(tk)
 			if len(metadata) != 3 {
@@ -129,7 +130,7 @@ func TestRunner(t *testing.T) {
 			t.Parallel()
 			tk := &Task{
 				ID:          ksid.NewID(),
-				Harness:     agent.Claude,
+				Harness:     harness.Claude,
 				GitHubToken: true,
 			}
 			metadata := MakeMetadata(tk)
@@ -203,7 +204,7 @@ func TestRunner(t *testing.T) {
 		r := &Runner{
 			LogDir:   t.TempDir(),
 			Runtime:  &stubContainer{},
-			Backends: map[agent.Harness]agent.Backend{"test": backend},
+			Backends: map[harness.Name]agent.Backend{"test": backend},
 		}
 		tk := &Task{
 			ID:            ksid.NewID(),
@@ -368,7 +369,7 @@ func TestRunner(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Repos:         []RepoMount{{Name: "org/repo", BaseBranch: "feature"}},
-				Harness:       agent.Claude,
+				Harness:       harness.Claude,
 			}
 
 			if _, err := r.setup(t.Context(), tk, nil, ""); err != nil {
@@ -413,7 +414,7 @@ func TestRunner(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Repos:         []RepoMount{{Name: "org/repo", BaseBranch: "local-only"}},
-				Harness:       agent.Claude,
+				Harness:       harness.Claude,
 			}
 
 			if _, err := r.setup(t.Context(), tk, nil, ""); err != nil {
@@ -494,7 +495,7 @@ func TestRunner(t *testing.T) {
 				ID:            ksid.NewID(),
 				InitialPrompt: agent.Prompt{Text: "test"},
 				Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
-				Harness:       agent.Claude,
+				Harness:       harness.Claude,
 			}
 			tk.SetState(StateStopped)
 
@@ -574,7 +575,7 @@ func TestRunner(t *testing.T) {
 					ID:            ksid.NewID(),
 					InitialPrompt: agent.Prompt{Text: "test"},
 				}
-				tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+				tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 				tk.SetState(state)
 
 				r.StopTask(t.Context(), tk)
@@ -593,7 +594,7 @@ func TestRunner(t *testing.T) {
 		t.Parallel()
 		t.Run("error_stateful_missing_session_id", func(t *testing.T) {
 			t.Parallel()
-			for _, harness := range []agent.Harness{agent.Codex, agent.OpenCode} {
+			for _, harness := range []harness.Name{harness.Codex, harness.OpenCode} {
 				t.Run(string(harness), func(t *testing.T) {
 					t.Parallel()
 					r := &Runner{}
@@ -602,7 +603,7 @@ func TestRunner(t *testing.T) {
 						InitialPrompt: agent.Prompt{Text: "test"},
 						Harness:       harness,
 					}
-					tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+					tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 					tk.SetState(StateRunning)
 					_, err := r.Reconnect(t.Context(), tk, true)
 					if err == nil {
@@ -713,7 +714,7 @@ func TestRunner(t *testing.T) {
 		})
 	})
 
-	t.Run("ContainerDir", func(t *testing.T) {
+	t.Run("RuntimeDir", func(t *testing.T) {
 		t.Parallel()
 		tests := []struct {
 			dir  string
@@ -731,9 +732,9 @@ func TestRunner(t *testing.T) {
 			if tk == nil {
 				tk = &Task{}
 			}
-			got := r.containerDir(tk)
+			got := r.runtimeDir(tk)
 			if got != tc.want {
-				t.Errorf("containerDir(%q) = %q, want %q", tc.dir, got, tc.want)
+				t.Errorf("runtimeDir(%q) = %q, want %q", tc.dir, got, tc.want)
 			}
 		}
 	})
@@ -940,7 +941,8 @@ func TestRunner(t *testing.T) {
 
 				r := &Runner{
 					LogDir:   logDir,
-					Backends: map[agent.Harness]agent.Backend{"test": backend},
+					Runtime:  &stubContainer{},
+					Backends: map[harness.Name]agent.Backend{"test": backend},
 				}
 
 				tk := &Task{
@@ -949,7 +951,7 @@ func TestRunner(t *testing.T) {
 					Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 					Harness:       "test",
 				}
-				tk.SetRuntimeInstanceInfo("fake-instance", "", "", 0)
+				tk.SetRuntimeConnectionInfo("fake-instance", runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
 				tk.SetState(startState)
 
 				h, err := r.RestartSession(t.Context(), tk, agent.Prompt{Text: "new plan"})
@@ -996,7 +998,8 @@ func TestRunner(t *testing.T) {
 
 		r := &Runner{
 			LogDir:   logDir,
-			Backends: map[agent.Harness]agent.Backend{"test": backend},
+			Runtime:  &stubContainer{},
+			Backends: map[harness.Name]agent.Backend{"test": backend},
 		}
 
 		tk := &Task{
@@ -1005,7 +1008,7 @@ func TestRunner(t *testing.T) {
 			Repos:         []RepoMount{{Name: "org/repo", Branch: "caic-0"}},
 			Harness:       "test",
 		}
-		tk.SetRuntimeInstanceInfo("fake-instance", "", "", 0)
+		tk.SetRuntimeConnectionInfo("fake-instance", runtime.ConnectionTarget{SSHHost: "fake-instance"}, "", "", 0)
 
 		// Create an initial session with a log writer by using the backend
 		// directly (Runner.Start needs a instance backend).
@@ -1067,7 +1070,7 @@ func TestRunner(t *testing.T) {
 		sc := &stubContainer{}
 		r := &Runner{Runtime: sc, Dir: "/repo"}
 		tk := &Task{Repos: []RepoMount{{GitRoot: "/repo", Branch: "feature"}}}
-		tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		ds := r.BranchDiffStat(t.Context(), tk)
 		if !sc.fetched {
 			t.Error("BranchDiffStat did not call Fetch")
@@ -1089,7 +1092,7 @@ func TestRunner(t *testing.T) {
 				{GitRoot: "/home/user/src/genai", Branch: "caic-0", MountedPath: "/home/user/src/genai"},
 			},
 		}
-		tk.SetRuntimeInstanceInfo("ctr-2", "", "", 0)
+		tk.SetRuntimeConnectionInfo("ctr-2", runtime.ConnectionTarget{SSHHost: "ctr-2"}, "", "", 0)
 
 		ds := r.BranchDiffStat(t.Context(), tk)
 
@@ -1138,7 +1141,7 @@ func TestRunnerTaskRuntime(t *testing.T) {
 				{Name: "caic-xyz/md", Branch: "caic-0", GitRoot: "/home/user/src/caic-xyz/md", MountedPath: "/home/user/src/caic-xyz/md"},
 			},
 		}
-		tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 
 		id, repos, err := r.taskRuntime(tk)
 		if err != nil {
@@ -1164,7 +1167,7 @@ func TestRunnerTaskRuntime(t *testing.T) {
 		t.Parallel()
 		r := &Runner{Dir: "/repo"}
 		tk := &Task{}
-		tk.SetRuntimeInstanceInfo("ctr-1", "", "", 0)
+		tk.SetRuntimeConnectionInfo("ctr-1", runtime.ConnectionTarget{SSHHost: "ctr-1"}, "", "", 0)
 		id, repos, err := r.taskRuntime(tk)
 		if err != nil {
 			t.Fatalf("taskRuntime: %v", err)
@@ -1268,8 +1271,8 @@ func (s *stubContainer) Launch(_ context.Context, _ []runtime.Repo, _ *runtime.S
 	return "stub", nil
 }
 
-func (s *stubContainer) Connect(_ context.Context, _ runtime.InstanceID, _ *runtime.StartOptions) (runtime.ConnectionInfo, error) {
-	return runtime.ConnectionInfo{}, nil
+func (s *stubContainer) Connect(_ context.Context, id runtime.InstanceID, _ *runtime.StartOptions) (runtime.ConnectionInfo, error) {
+	return runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: string(id)}}, nil
 }
 
 func (s *stubContainer) Diff(_ context.Context, id runtime.InstanceID, repoIdx int, _ ...string) (string, error) {
@@ -1298,8 +1301,8 @@ func (s *stubContainer) Revive(_ context.Context, _ runtime.InstanceID) error {
 	return nil
 }
 
-func (s *stubContainer) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *runtime.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
-	return "stub-fork", nil, nil
+func (s *stubContainer) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *runtime.ForkOptions) (runtime.InstanceID, runtime.ConnectionInfo, []runtime.Repo, error) {
+	return "stub-fork", runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: "stub-fork"}}, nil, nil
 }
 func (s *stubContainer) VNCPort(_ context.Context, _ runtime.InstanceID) int { return 0 }
 

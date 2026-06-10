@@ -22,6 +22,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/autoupdate"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	caicruntime "github.com/caic-xyz/caic/backend/internal/runtime"
@@ -256,7 +257,7 @@ func mountsFromSettings(settings *preferences.Settings) []caicruntime.Mount {
 
 func (h *serverConfigHandlers) listHarnesses(_ context.Context, _ *api.EmptyReq) (*[]v1.HarnessInfo, error) {
 	// Collect unique harness backends from all runners.
-	seen := make(map[agent.Harness]agent.Backend)
+	seen := make(map[harness.Name]agent.Backend)
 	h.taskMgr.RangeRunners(func(_ string, r *task.Runner) bool {
 		maps.Copy(seen, r.Backends)
 		return true

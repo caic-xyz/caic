@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // SmokeRuntime returns the container runtime selected for smoke tests.
@@ -42,7 +45,7 @@ var _ agent.Backend = (*SmokeBackend)(nil)
 func NewSmokeBackend() *SmokeBackend {
 	b := &SmokeBackend{}
 	b.Base = agent.Base{
-		HarnessID:     agent.Codex,
+		HarnessID:     harness.Codex,
 		ModelList:     []string{"smoke-model"},
 		ContextWindow: 200_000,
 	}
@@ -51,7 +54,7 @@ func NewSmokeBackend() *SmokeBackend {
 
 // Start deploys the smoke agent into the container and starts it via relay.
 func (b *SmokeBackend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	if err := deploySmokeAgent(ctx, opts.Container); err != nil {
+	if err := deploySmokeAgent(ctx, opts.Target); err != nil {
 		return nil, err
 	}
 	return agent.StartRelay(ctx, opts, b.AgentArgs(agent.HarnessArgs{}), b)
@@ -143,8 +146,11 @@ for line in sys.stdin:
 
 const smokeAgentPath = agent.RelayDir + "/smoke_agent.py"
 
-func deploySmokeAgent(ctx context.Context, container string) error {
-	cmd := exec.CommandContext(ctx, "ssh", container, "mkdir -p "+agent.RelayDir+" && cat > "+smokeAgentPath) //nolint:gosec // container and path are internally controlled.
+func deploySmokeAgent(ctx context.Context, target runtime.ConnectionTarget) error {
+	if target.SSHHost == "" {
+		return errors.New("agent connection target missing SSH host")
+	}
+	cmd := exec.CommandContext(ctx, "ssh", target.SSHHost, "mkdir -p "+agent.RelayDir+" && cat > "+smokeAgentPath) //nolint:gosec // target and path are internally controlled.
 	cmd.Stdin = bytes.NewReader([]byte(smokeAgentScript))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("deploy smoke agent: %w: %s", err, out)
@@ -166,7 +172,7 @@ func InitSmokeRepos(ctx context.Context, tmpDir string) (string, error) {
 // InitSmokeHarnessCache pre-populates model cache entries used by smoke tests.
 func InitSmokeHarnessCache(cacheDir string) error {
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-	for _, h := range []agent.Harness{agent.Codex, agent.Pi, agent.OpenCode} {
+	for _, h := range []harness.Name{harness.Codex, harness.Pi, harness.OpenCode} {
 		cache.SetModels(h, []string{"smoke-model"}, "")
 	}
 	return nil

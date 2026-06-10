@@ -8,6 +8,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -26,14 +27,14 @@ func PromptToAgent(p v1.Prompt) agent.Prompt {
 	return agent.Prompt{Text: p.Text, Images: images}
 }
 
-// Harness converts agent.Harness to v1.Harness.
-func Harness(h agent.Harness) v1.Harness {
+// Harness converts harness.Name to v1.Harness.
+func Harness(h harness.Name) v1.Harness {
 	return v1.Harness(h)
 }
 
-// AgentHarness converts v1.Harness to agent.Harness.
-func AgentHarness(h v1.Harness) agent.Harness {
-	return agent.Harness(h)
+// AgentHarness converts v1.Harness to harness.Name.
+func AgentHarness(h v1.Harness) harness.Name {
+	return harness.Name(h)
 }
 
 // TaskState converts task.State to v1.TaskState.

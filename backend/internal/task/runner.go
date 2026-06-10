@@ -23,6 +23,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -47,14 +48,14 @@ type Runner struct {
 	RuntimeStartTimeout time.Duration       // Timeout for instance start (image pull); defaults to 1 hour.
 	LogDir              string              // Directory for raw JSONL session logs (required).
 	CacheDir            string              // Cache directory (e.g. ~/.cache/caic) for harness model lists.
-	HarnessEnv          map[string][]string // Per-harness KEY=VALUE env vars for containers.
+	HarnessEnv          map[string][]string // Per-harness KEY=VALUE env vars for runtime instances.
 
 	// Runtime provides runtime instance lifecycle operations. Must be set
 	// before calling Start.
 	Runtime runtime.Backend
 	// Backends maps harness names to their Backend implementations. The runner
 	// selects the backend matching Task.Harness.
-	Backends map[agent.Harness]agent.Backend
+	Backends map[harness.Name]agent.Backend
 
 	log      *slog.Logger
 	initOnce sync.Once
@@ -221,7 +222,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 		return nil, errors.New("no instance to reconnect to")
 	}
 	sessionID := t.GetSessionID()
-	if agent.RequiresResumeSessionID(t.Harness) && sessionID == "" {
+	if harness.RequiresResumeSessionID(t.Harness) && sessionID == "" {
 		return nil, fmt.Errorf("%s session ID missing; cannot reconnect", t.Harness)
 	}
 	// Remember the state inferred from restored messages so we don't
@@ -256,8 +257,9 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 	if prevState != StateWaiting && prevState != StateAsking {
 		t.SetState(StateRunning)
 	}
+	target := t.RuntimeConnectionTarget()
 	session, err := r.backend(t.Harness).AttachRelay(ctx, &agent.Options{
-		Container:       string(instanceID),
+		Target:          target,
 		RelayOffset:     t.RelayOffsetValue(),
 		ResumeSessionID: sessionID,
 		Effort:          t.Effort,
@@ -284,10 +286,10 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 //
 // Sequence:
 //  1. Create a new git branch from origin/<BaseBranch> (or the local branch if not on origin).
-//  2. Start an md instance on that branch.
+//  2. Start a runtime instance on that branch.
 //  3. Deploy the relay script and launch the agent (claude/gemini) via the
 //     relay daemon. The relay owns the agent's stdin/stdout and persists
-//     across SSH disconnects.
+//     across transport disconnects.
 //  4. Send the initial prompt to the agent.
 //
 // The session is left open for follow-up messages via SendInput.
@@ -313,7 +315,7 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 		t.recordStartupFailure(ctx, err)
 		return nil, err
 	}
-	t.SetRuntimeInstanceInfo(sr.InstanceID, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Runtime.VNCPort(ctx, sr.InstanceID))
+	t.SetRuntimeConnectionInfo(sr.InstanceID, sr.AgentTarget, sr.TailscaleFQDN, sr.TailscaleAuthURL, r.Runtime.VNCPort(ctx, sr.InstanceID))
 	var primaryBranch string
 	if p := t.Primary(); p != nil {
 		primaryBranch = p.Branch
@@ -342,9 +344,10 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 	tlog := r.log.With("br", primaryBranch, "instance", sr.InstanceID)
 	tlog.Info("starting session", "hns", t.Harness)
 	region = trace.StartRegion(ctx, "agent-session")
+	target := sr.AgentTarget
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container:     string(sr.InstanceID),
-		Dir:           r.containerDir(t),
+		Target:        target,
+		Dir:           r.runtimeDir(t),
 		Model:         t.Model,
 		Effort:        t.Effort,
 		InitialPrompt: t.InitialPrompt,
@@ -386,8 +389,8 @@ func (r *Runner) Start(ctx context.Context, t *Task, resolvedGitHubToken string)
 //  1. Detach the session handle from the task.
 //  2. If a session exists: Stop (sends \x00, waits up to 20s), then Close.
 //  3. Set task state to reason (StatePurged or StateFailed).
-//  4. Purge the instance (stop + remove + cleanup git remotes/SSH config).
-//  5. If graceful wait timed out, drain session now (instance dead, SSH severed).
+//  4. Purge the instance (stop + remove + cleanup git remotes/runtime config).
+//  5. If graceful wait timed out, drain session now (runtime connection severed).
 //  6. Close msgCh and logW, write log trailer.
 //  7. Build and return Result.
 func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
@@ -413,7 +416,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 		gStart := time.Now()
 		if err := h.GracefulStop(ctx, 20*time.Second); err != nil {
 			tlog.WarnContext(ctx, "graceful stop timed out", "err", err, "dur", time.Since(gStart).Round(time.Millisecond))
-			r.logRelayDiag(ctx, tlog, string(name))
+			r.logRelayDiag(ctx, tlog, t.RuntimeConnectionTarget())
 		} else {
 			tlog.DebugContext(ctx, "cleanup: graceful stop succeeded", "dur", time.Since(gStart).Round(time.Millisecond))
 		}
@@ -437,7 +440,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 	}
 
 	// Drain the session: if graceful stop timed out, the instance purge
-	// above severed SSH so this unblocks.
+	// above severed the runtime connection so this unblocks.
 	if h != nil {
 		dStart := time.Now()
 		h.Drain()
@@ -486,7 +489,7 @@ func (r *Runner) Cleanup(ctx context.Context, t *Task, reason State) Result {
 
 // StopTask gracefully shuts down the agent session and stops the instance
 // without removing it. The instance can be revived later. Unlike Cleanup,
-// this preserves git remotes and SSH config.
+// this preserves git remotes and runtime config.
 func (r *Runner) StopTask(ctx context.Context, t *Task) {
 	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.stop:"+t.ID.String())
@@ -513,7 +516,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 		gStart := time.Now()
 		if err := h.GracefulStop(ctx, 20*time.Second); err != nil {
 			tlog.WarnContext(ctx, "graceful stop timed out", "err", err, "dur", time.Since(gStart).Round(time.Millisecond))
-			r.logRelayDiag(ctx, tlog, string(name))
+			r.logRelayDiag(ctx, tlog, t.RuntimeConnectionTarget())
 		} else {
 			tlog.DebugContext(ctx, "stop: graceful stop succeeded", "dur", time.Since(gStart).Round(time.Millisecond))
 		}
@@ -575,9 +578,7 @@ func (r *Runner) StopTask(ctx context.Context, t *Task) {
 }
 
 // ReviveTask restarts a stopped instance and resumes the agent session.
-// The instance's filesystem is preserved from the previous run. After
-// docker-start + SSH, a new relay is started with --resume to continue
-// the previous session.
+// The instance's filesystem is preserved from the previous run.
 func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error) {
 	r.initDefaults()
 	ctx, task := trace.NewTask(ctx, "task.revive:"+t.ID.String())
@@ -596,7 +597,7 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	}
 	tlog := r.log.With("br", primaryBranch, "instance", instanceID)
 
-	// 1. Revive the instance (docker start + SSH).
+	// 1. Revive the instance.
 	if state, changed := t.SetStateIfAny(StateProvisioning, StateStopped, StateProvisioning); !changed {
 		return nil, fmt.Errorf("cannot revive in state %s", state)
 	}
@@ -627,9 +628,10 @@ func (r *Runner) ReviveTask(ctx context.Context, t *Task) (*SessionHandle, error
 	}
 
 	t.SetState(StateRunning)
+	target := t.RuntimeConnectionTarget()
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container:       string(instanceID),
-		Dir:             r.containerDir(t),
+		Target:          target,
+		Dir:             r.runtimeDir(t),
 		Model:           t.Model,
 		Effort:          t.Effort,
 		ResumeSessionID: t.GetSessionID(),
@@ -717,9 +719,10 @@ func (r *Runner) StartSession(ctx context.Context, t *Task, prompt agent.Prompt)
 	}
 
 	tlog.Info("starting session", "hns", t.Harness)
+	target := t.RuntimeConnectionTarget()
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container:     string(instanceID),
-		Dir:           r.containerDir(t),
+		Target:        target,
+		Dir:           r.runtimeDir(t),
 		Model:         t.Model,
 		Effort:        t.Effort,
 		InitialPrompt: prompt,
@@ -771,14 +774,14 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 	tlog.Info("forking instance")
 	tlog.Debug("runner", "msg", "calling instance.Fork", "source", sourceInstanceID, "harness", forkOpts.Harness, "tailscale", forkOpts.Tailscale, "usb", forkOpts.USB, "display", forkOpts.Display, "sudo", forkOpts.Sudo, "gitHubToken", fork.GitHubTokenEnabled())
 	forkOpts.LogWriter = &provisioningWriter{ctx: ctx, t: fork}
-	forkName, forkRepos, err := r.Runtime.Fork(ctx, sourceInstanceID, source.RuntimeRepos(), forkOpts)
+	forkName, forkConn, forkRepos, err := r.Runtime.Fork(ctx, sourceInstanceID, source.RuntimeRepos(), forkOpts)
 	if err != nil {
 		tlog.Error("runner", "msg", "instance.Fork failed", "source", sourceInstanceID, "err", err)
 		fork.SetState(StateFailed)
 		return nil, fmt.Errorf("fork instance: %w", err)
 	}
 	tlog.Debug("runner", "msg", "instance.Fork succeeded", "source", sourceInstanceID, "fork", forkName)
-	fork.SetRuntimeInstanceInfo(forkName, "", "", r.Runtime.VNCPort(ctx, forkName))
+	fork.SetRuntimeConnectionInfo(forkName, forkConn.AgentTarget, "", "", r.Runtime.VNCPort(ctx, forkName))
 	for i := range fork.ReposSnapshot() {
 		if i < len(forkRepos) {
 			fork.SetRepoBranch(i, forkRepos[i].Branch)
@@ -808,6 +811,7 @@ func (r *Runner) ForkTask(ctx context.Context, source, fork *Task, forkOpts *run
 // The primary branch is written into the task repo metadata during setup.
 type setupResult struct {
 	InstanceID       runtime.InstanceID
+	AgentTarget      runtime.ConnectionTarget
 	TailscaleFQDN    string
 	TailscaleAuthURL string
 }
@@ -1011,9 +1015,10 @@ func (r *Runner) RestartSession(ctx context.Context, t *Task, prompt agent.Promp
 	instanceID := t.RuntimeInstanceID()
 	tlog := r.log.With("br", restartBranch, "instance", instanceID)
 	tlog.Info("restarting session", "hns", t.Harness)
+	target := t.RuntimeConnectionTarget()
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container:     string(instanceID),
-		Dir:           r.containerDir(t),
+		Target:        target,
+		Dir:           r.runtimeDir(t),
 		Model:         t.Model,
 		Effort:        t.Effort,
 		InitialPrompt: prompt,
@@ -1089,13 +1094,14 @@ func (r *Runner) ClearContextSession(ctx context.Context, t *Task) (*SessionHand
 	instanceID := t.RuntimeInstanceID()
 	tlog := r.log.With("br", clearBranch, "instance", instanceID)
 	tlog.Info("clearing context", "hns", t.Harness)
+	target := t.RuntimeConnectionTarget()
 	session, err := r.backend(t.Harness).Start(ctx, &agent.Options{
-		Container: string(instanceID),
-		Dir:       r.containerDir(t),
-		Model:     t.Model,
-		Effort:    t.Effort,
-		MsgCh:     msgCh,
-		LogW:      logW,
+		Target: target,
+		Dir:    r.runtimeDir(t),
+		Model:  t.Model,
+		Effort: t.Effort,
+		MsgCh:  msgCh,
+		LogW:   logW,
 	})
 	if err != nil {
 		_ = logW.Close()
@@ -1235,7 +1241,7 @@ func (r *Runner) taskRuntime(t *Task) (runtime.InstanceID, []runtime.Repo, error
 func (r *Runner) initDefaults() {
 	r.initOnce.Do(func() {
 		if r.Backends == nil {
-			r.Backends = map[agent.Harness]agent.Backend{}
+			r.Backends = map[harness.Name]agent.Backend{}
 		}
 		if r.GitTimeout == 0 {
 			r.GitTimeout = time.Minute
@@ -1252,18 +1258,18 @@ func (r *Runner) initDefaults() {
 }
 
 // backend returns the Backend for the given agent name.
-func (r *Runner) backend(name agent.Harness) agent.Backend {
+func (r *Runner) backend(name harness.Name) agent.Backend {
 	return r.Backends[name]
 }
 
-// containerDir returns the working directory path inside an md instance.
+// runtimeDir returns the working directory path inside a runtime instance.
 // Uses the task's primary repo MountedPath when available; otherwise falls back
 // to computing it from the runner's Dir basename (legacy). Returns /home/user
 // for no-repo runners.
 //
 // TODO(2026-07-01): remove the filepath.Base fallback once all pre-MountedPath
-// containers have cycled out.
-func (r *Runner) containerDir(t *Task) string {
+// runtime instances have cycled out.
+func (r *Runner) runtimeDir(t *Task) string {
 	if p := t.Primary(); p != nil && p.MountedPath != "" {
 		return strings.Replace(p.MountedPath, "~/", "/home/user/", 1)
 	}
@@ -1360,11 +1366,11 @@ func MakeMetadata(t *Task) runtime.Metadata {
 
 // setup reserves a branch name, starts the instance (Phase A) and creates the
 // git branch concurrently, then completes instance startup (Phase B).
-// Phase A (docker run) and git fetch+branch-create overlap, cutting the
+// Phase A (runtime launch) and git fetch+branch-create overlap, cutting the
 // branch-allocation time off the critical path.
 func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, resolvedGitHubToken string) (setupResult, error) {
 	// Reserve the branch ID instantly (under lock, ~µs). The branch itself is
-	// created concurrently with docker run in Phase A.
+	// created concurrently with runtime launch in Phase A.
 	if r.Dir != "" {
 		r.branchMu.Lock()
 		t.SetRepoBranch(0, fmt.Sprintf("caic-%d", r.nextID))
@@ -1399,8 +1405,8 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 		LogWriter:         &provisioningWriter{ctx: ctx, t: t},
 	}
 
-	// Phase A: docker run + SSH config. Branch creation runs concurrently so
-	// git fetch overlaps with the instance SSH boot time (~500 ms–3 s).
+	// Phase A: runtime launch + connection config. Branch creation runs concurrently so
+	// git fetch overlaps with instance connection startup.
 	var repos []runtime.Repo
 	if r.Dir != "" {
 		repos = t.RuntimeRepos()
@@ -1439,24 +1445,30 @@ func (r *Runner) setup(ctx context.Context, t *Task, metadata runtime.Metadata, 
 	}
 	r.log.Debug("runner", "msg", "phase A complete", "instance", instanceID)
 
-	// Phase B: wait for SSH + push (branch now exists locally).
-	r.log.Debug("runner", "msg", "provisioning phase B: connecting via SSH", "instance", instanceID)
+	// Phase B: wait for runtime connection + push (branch now exists locally).
+	r.log.Debug("runner", "msg", "provisioning phase B: connecting to instance", "instance", instanceID)
 	conn, err := r.Runtime.Connect(startCtx, instanceID, opts)
 	if err != nil {
 		r.log.Error("runner", "msg", "instance.Connect failed", "instance", instanceID, "err", err)
 		return setupResult{}, fmt.Errorf("start instance: %w", err)
 	}
 	r.log.Info("runner", "msg", "started", "br", primaryBranch, "dur", time.Since(tContainer), "instance", instanceID, "fqdn", conn.TailscaleFQDN)
-	return setupResult{InstanceID: instanceID, TailscaleFQDN: conn.TailscaleFQDN, TailscaleAuthURL: conn.TailscaleAuthURL}, nil
+	return setupResult{
+		InstanceID:       instanceID,
+		AgentTarget:      conn.AgentTarget,
+		TailscaleFQDN:    conn.TailscaleFQDN,
+		TailscaleAuthURL: conn.TailscaleAuthURL,
+	}, nil
 }
 
 // logRelayDiag reads the relay daemon's relay.log from the instance and logs
 // its tail. Called when GracefulStop times out to capture relay-side diagnostics.
-func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, instance string) {
-	if r.Runtime == nil || instance == "" {
+func (r *Runner) logRelayDiag(ctx context.Context, tlog *slog.Logger, target runtime.ConnectionTarget) {
+	if target.SSHHost == "" {
+		tlog.Warn("relay target unavailable")
 		return
 	}
-	tail := agent.ReadRelayLog(ctx, instance, 4096)
+	tail := agent.ReadRelayLog(ctx, target.SSHHost, 4096)
 	if tail == "" {
 		tlog.Warn("relay.log empty or unreadable")
 		return

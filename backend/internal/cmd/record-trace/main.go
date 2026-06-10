@@ -33,18 +33,19 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 )
 
 const image = "ghcr.io/caic-xyz/md-user:latest"
 
 // backends is the registry of supported harnesses for record-trace.
 var backends = map[string]agent.Backend{
-	string(agent.Pi):       pi.New("", nil),
-	string(agent.Claude):   claudecode.New(),
-	string(agent.Codex):    codex.New("", nil),
-	string(agent.Gemini):   gemini.New(),
-	string(agent.Kilo):     kilo.New(),
-	string(agent.OpenCode): opencode.New("", nil),
+	string(harness.Pi):       pi.New("", nil),
+	string(harness.Claude):   claudecode.New(),
+	string(harness.Codex):    codex.New("", nil),
+	string(harness.Gemini):   gemini.New(),
+	string(harness.Kilo):     kilo.New(),
+	string(harness.OpenCode): opencode.New("", nil),
 }
 
 var scenarios = map[string]string{
@@ -108,7 +109,7 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv, promptText, ou
 	}
 	// Codex needs stored credentials for WebSocket auth; the env var
 	// alone is not enough. Pipe the API key through codex login.
-	if b.Harness() == agent.Codex {
+	if b.Harness() == harness.Codex {
 		if err := setupCodexAuth(ctx, ctr, apiKeyEnv); err != nil {
 			return fmt.Errorf("codex auth setup: %w", err)
 		}
@@ -334,12 +335,12 @@ func writeGoldenFile(ctx context.Context, ctr, workDir string, b agent.Backend, 
 }
 
 // buildGoldenContent prepends a caic_meta header and appends a caic_result footer.
-func buildGoldenContent(raw []byte, harness agent.Harness, promptText string) (string, error) {
+func buildGoldenContent(raw []byte, harnessName harness.Name, promptText string) (string, error) {
 	meta := agent.MetaMessage{
 		MessageType: "caic_meta",
 		Version:     1,
 		Prompt:      promptText,
-		Harness:     harness,
+		Harness:     harnessName,
 		Repos:       []agent.MetaRepo{},
 		StartedAt:   time.Now().UTC(),
 	}

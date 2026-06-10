@@ -13,6 +13,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 )
 
 func setClaudeParser(tasks []*LoadedTask) {
@@ -259,7 +260,7 @@ func TestLoadLogs(t *testing.T) {
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "session task",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.Codex,
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Codex,
 		})
 		session := mustJSON(t, agent.MetaSessionMessage{
 			MessageType:  "caic_session",
@@ -293,7 +294,7 @@ func TestLoadLogs(t *testing.T) {
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "long task",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.Codex,
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Codex,
 		})
 		session := mustJSON(t, agent.MetaSessionMessage{MessageType: "caic_session", SessionID: "thread-old"})
 		large := `{"text":"` + strings.Repeat("x", 70<<10) + `"}`
@@ -320,7 +321,7 @@ func TestLoadLogs(t *testing.T) {
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "legacy codex task",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.Codex,
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Codex,
 		})
 		init := `{"method":"thread/started","params":{"thread":{"id":"thread-from-started","cliVersion":"1.0","createdAt":1,"cwd":"/repo","modelProvider":"openai","path":"/repo","preview":"","source":"user","status":{"type":"idle"},"updatedAt":2}}}`
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})
@@ -344,7 +345,7 @@ func TestLoadLogs(t *testing.T) {
 		dir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "legacy task",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.OpenCode,
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.OpenCode,
 		})
 		init := `{"type":"caic_init","session_id":"ses-legacy","model":"m","version":"v"}`
 		trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "stopped"})

@@ -15,6 +15,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/bot"
 	"github.com/caic-xyz/caic/backend/internal/forge"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
@@ -51,16 +52,16 @@ func (c *botClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 	if !ok {
 		return "", fmt.Errorf("runner not found for repo %s", req.Repo)
 	}
-	// Pick harness: prefer agent.Claude if available, otherwise the
+	// Pick harness: prefer Claude if available, otherwise the
 	// lexicographically first available harness. Sorting keeps the choice
 	// deterministic regardless of map iteration order.
-	var harness agent.Harness
-	if _, ok := runner.Backends[agent.Claude]; ok {
-		harness = agent.Claude
+	var selectedHarness harness.Name
+	if _, ok := runner.Backends[harness.Claude]; ok {
+		selectedHarness = harness.Claude
 	} else if avail := slices.Sorted(maps.Keys(runner.Backends)); len(avail) > 0 {
-		harness = avail[0]
+		selectedHarness = avail[0]
 	}
-	if harness == "" {
+	if selectedHarness == "" {
 		return "", fmt.Errorf("no backend available for repo %s", req.Repo)
 	}
 
@@ -83,7 +84,7 @@ func (c *botClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 		OwnerID:             req.OwnerID,
 		Prompt:              agent.Prompt{Text: req.Prompt},
 		Repos:               []tasks.CreateRepo{{Name: req.Repo}},
-		Harness:             harness,
+		Harness:             selectedHarness,
 		GitHubToken:         true,
 		ResolvedGitHubToken: ghToken,
 		ForgeIssue:          req.IssueNumber,
@@ -93,7 +94,7 @@ func (c *botClient) CreateTask(ctx context.Context, req bot.TaskRequest) (string
 	if err != nil {
 		return "", err
 	}
-	slog.Info("bot task created", "id", id, "repo", req.Repo, "harness", harness)
+	slog.Info("bot task created", "id", id, "repo", req.Repo, "harness", selectedHarness)
 	return id, nil
 }
 

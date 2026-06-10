@@ -15,6 +15,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/app"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
 )
@@ -76,7 +77,7 @@ func serveFake(ctx context.Context, addr string, cfg *server.Config, traceFile s
 	cfg.Runtime.Inventory = fc
 	cfg.Runtime.Privilege = fc
 	fb := smoketest.NewFakeBackend()
-	cfg.Agent.Backends = map[agent.Harness]agent.Backend{fb.Harness(): fb}
+	cfg.Agent.Backends = map[harness.Name]agent.Backend{fb.Harness(): fb}
 
 	// If a trace file is specified, copy it to the tasks log directory so it
 	// gets loaded as a purged task on startup.

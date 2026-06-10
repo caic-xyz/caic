@@ -12,7 +12,7 @@ import (
 	"github.com/caic-xyz/md"
 	"github.com/maruel/genai"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -166,7 +166,7 @@ func TestBackend(t *testing.T) {
 			b := newTestBackend(&fakeMDClient{container: ctr})
 			name, err := b.Launch(t.Context(), nil, &runtime.StartOptions{
 				Metadata: runtime.Metadata{runtime.MetadataTaskID: "task-1"},
-				Harness:  agent.Claude,
+				Harness:  harness.Claude,
 			})
 			if err != nil {
 				t.Fatalf("Launch: %v", err)
@@ -200,7 +200,7 @@ func TestBackend(t *testing.T) {
 			t.Parallel()
 			ctr := &fakeMDContainer{name: "ctr-y", launchErr: errors.New("boom")}
 			b := newTestBackend(&fakeMDClient{container: ctr})
-			if _, err := b.Launch(t.Context(), nil, &runtime.StartOptions{Harness: agent.Claude}); err == nil {
+			if _, err := b.Launch(t.Context(), nil, &runtime.StartOptions{Harness: harness.Claude}); err == nil {
 				t.Fatal("want error from container.Launch")
 			}
 			if _, ok := b.pendingContainers["ctr-y"]; ok {
@@ -264,10 +264,10 @@ func TestBackend(t *testing.T) {
 			t.Parallel()
 			ctr := &fakeMDContainer{name: "ctr-x", connectRes: &md.StartResult{TailscaleFQDN: "host.ts.net"}}
 			b := newTestBackend(&fakeMDClient{container: ctr})
-			if _, err := b.Launch(t.Context(), nil, &runtime.StartOptions{Harness: agent.Claude}); err != nil {
+			if _, err := b.Launch(t.Context(), nil, &runtime.StartOptions{Harness: harness.Claude}); err != nil {
 				t.Fatalf("Launch: %v", err)
 			}
-			conn, err := b.Connect(t.Context(), "ctr-x", &runtime.StartOptions{Harness: agent.Claude})
+			conn, err := b.Connect(t.Context(), "ctr-x", &runtime.StartOptions{Harness: harness.Claude})
 			if err != nil {
 				t.Fatalf("Connect: %v", err)
 			}
@@ -275,14 +275,14 @@ func TestBackend(t *testing.T) {
 				t.Errorf("fqdn = %q, want host.ts.net", conn.TailscaleFQDN)
 			}
 			// Pending entry must be consumed: a second Connect fails.
-			if _, err := b.Connect(t.Context(), "ctr-x", &runtime.StartOptions{Harness: agent.Claude}); err == nil {
+			if _, err := b.Connect(t.Context(), "ctr-x", &runtime.StartOptions{Harness: harness.Claude}); err == nil {
 				t.Error("second Connect should fail; pending entry not consumed")
 			}
 		})
 		t.Run("error no pending", func(t *testing.T) {
 			t.Parallel()
 			b := newTestBackend(&fakeMDClient{})
-			if _, err := b.Connect(t.Context(), "missing", &runtime.StartOptions{Harness: agent.Claude}); err == nil {
+			if _, err := b.Connect(t.Context(), "missing", &runtime.StartOptions{Harness: harness.Claude}); err == nil {
 				t.Fatal("want error when no pending container")
 			}
 		})
@@ -352,12 +352,15 @@ func TestBackend(t *testing.T) {
 		t.Parallel()
 		src := &fakeMDContainer{forkResult: &fakeMDContainer{name: "fork-1", vncPort: 5902, repos: []md.Repo{{Branch: "caic-2"}}}}
 		b := newTestBackend(&fakeMDClient{getResult: src})
-		name, repos, err := b.Fork(t.Context(), "src", nil, &runtime.ForkOptions{Harness: agent.Claude})
+		name, conn, repos, err := b.Fork(t.Context(), "src", nil, &runtime.ForkOptions{Harness: harness.Claude})
 		if err != nil {
 			t.Fatalf("Fork: %v", err)
 		}
 		if name != "fork-1" {
 			t.Errorf("fork name = %q, want fork-1", name)
+		}
+		if conn.AgentTarget.SSHHost != "fork-1" {
+			t.Errorf("fork agent target = %q, want fork-1", conn.AgentTarget.SSHHost)
 		}
 		if len(repos) != 1 || repos[0].Branch != "caic-2" {
 			t.Errorf("repos = %+v, want one repo on caic-2", repos)
@@ -385,11 +388,11 @@ func TestBackend(t *testing.T) {
 			agentMounts: []md.Mount{{HostPath: "/home/user/.claude", ContainerPath: "/home/user/.claude"}},
 		}
 		b := newTestBackend(&fakeMDClient{})
-		b.HarnessEnv = map[string][]string{string(agent.Claude): {"FOO=bar"}}
+		b.HarnessEnv = map[string][]string{string(harness.Claude): {"FOO=bar"}}
 		opts, err := b.mdStartOpts(fc, &runtime.StartOptions{
 			Metadata:          runtime.Metadata{runtime.MetadataTaskID: "task-1"},
 			ContainerPlatform: "linux/amd64",
-			Harness:           agent.Claude,
+			Harness:           harness.Claude,
 			GitHubToken:       "tok",
 			Caches:            []runtime.CacheMount{{Name: "npm", HostPath: "~/.npm", MountPath: "/home/user/.npm"}},
 			Mounts:            []runtime.Mount{{HostPath: "/host/work", MountPath: "/workspace/external"}},

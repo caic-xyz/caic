@@ -20,6 +20,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -172,7 +173,7 @@ type Task struct {
 	// Immutable fields — set at creation, never modified.
 	ID                ksid.ID
 	InitialPrompt     agent.Prompt         // Initial prompt text and optional images.
-	Harness           agent.Harness        // Agent harness ("claude", "gemini", etc.).
+	Harness           harness.Name         // Agent harness ("claude", "gemini", etc.).
 	Model             string               // User-requested model; passed to agent CLI.
 	Effort            string               // Thinking effort; passed to agent CLI. Empty = default.
 	BaseImage         string               // Custom runtime base image; empty means use the default.
@@ -203,6 +204,7 @@ type Task struct {
 	// mu protects mutable task metadata above and all fields below.
 	mu                    sync.Mutex
 	runtimeInstanceID     runtime.InstanceID
+	runtimeConnection     runtime.ConnectionTarget
 	logPath               string // Absolute JSONL log path used for appending task metadata.
 	statsRing             [statsRingSize]runtime.Stats
 	statsLen              int
@@ -482,11 +484,19 @@ func (t *Task) RuntimeInstanceID() runtime.InstanceID {
 	return t.runtimeInstanceID
 }
 
-// SetRuntimeInstanceInfo records runtime instance metadata assigned during setup or adoption.
-func (t *Task) SetRuntimeInstanceInfo(id runtime.InstanceID, tailscaleFQDN, tailscaleAuthURL string, vncPort int) {
+// RuntimeConnectionTarget returns the current runtime connection target.
+func (t *Task) RuntimeConnectionTarget() runtime.ConnectionTarget {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.runtimeConnection
+}
+
+// SetRuntimeConnectionInfo records runtime instance metadata and agent connection details.
+func (t *Task) SetRuntimeConnectionInfo(id runtime.InstanceID, target runtime.ConnectionTarget, tailscaleFQDN, tailscaleAuthURL string, vncPort int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.runtimeInstanceID = id
+	t.runtimeConnection = target
 	t.TailscaleFQDN = tailscaleFQDN
 	t.TailscaleAuthURL = tailscaleAuthURL
 	t.VNCPort = vncPort

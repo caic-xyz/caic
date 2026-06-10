@@ -20,7 +20,7 @@ import (
 	"github.com/caic-xyz/md"
 	"github.com/maruel/genai"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -228,7 +228,11 @@ func (b *Backend) Connect(ctx context.Context, id runtime.InstanceID, opts *runt
 		return runtime.ConnectionInfo{}, err
 	}
 	slog.DebugContext(ctx, "connect succeeded", "rt", rt, "ctr", name, "fqdn", sr.TailscaleFQDN, "authurl", sr.TailscaleAuthURL)
-	return runtime.ConnectionInfo{TailscaleFQDN: sr.TailscaleFQDN, TailscaleAuthURL: sr.TailscaleAuthURL}, nil
+	return runtime.ConnectionInfo{
+		AgentTarget:      runtime.ConnectionTarget{SSHHost: name},
+		TailscaleFQDN:    sr.TailscaleFQDN,
+		TailscaleAuthURL: sr.TailscaleAuthURL,
+	}, nil
 }
 
 // Diff implements runtime.Backend.
@@ -331,7 +335,7 @@ func (b *Backend) Revive(ctx context.Context, id runtime.InstanceID) error {
 }
 
 // Fork implements runtime.Backend.
-func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
+func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.InstanceID, runtime.ConnectionInfo, []runtime.Repo, error) {
 	defer trace.StartRegion(ctx, "instance.fork").End()
 	name := string(id)
 	if len(repos) > 0 {
@@ -340,7 +344,7 @@ func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runti
 	rt := b.client.Runtime()
 	// Rootless podman does not support sudo (user namespace stacking prevents nested containers).
 	if opts.Sudo && rt == "podman" && os.Getuid() != 0 {
-		return "", nil, errors.New("sudo is not supported with rootless podman; use docker instead")
+		return "", runtime.ConnectionInfo{}, nil, errors.New("sudo is not supported with rootless podman; use docker instead")
 	}
 	slog.DebugContext(ctx, "fork starting", "rt", rt, "source", name, "repos_count", len(repos))
 
@@ -348,12 +352,12 @@ func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runti
 	// USB, and Sudo from the source unless explicitly overridden by opts.
 	ct, err := b.client.Get(ctx, name)
 	if err != nil {
-		return "", nil, fmt.Errorf("source instance %s: %w", name, err)
+		return "", runtime.ConnectionInfo{}, nil, fmt.Errorf("source instance %s: %w", name, err)
 	}
 	ct.SetState("running")
 	mounts, err := mdMounts(ct, opts.Harness, opts.Mounts)
 	if err != nil {
-		return "", nil, err
+		return "", runtime.ConnectionInfo{}, nil, err
 	}
 	slog.DebugContext(ctx, "building fork options", "rt", rt, "harness", opts.Harness, "tailscale", opts.Tailscale, "usb", opts.USB, "display", opts.Display, "sudo", opts.Sudo)
 	forkOpts := &md.ForkOpts{
@@ -372,14 +376,14 @@ func (b *Backend) Fork(ctx context.Context, id runtime.InstanceID, repos []runti
 	forked, err := ct.Fork(ctx, stdout, stderr, forkOpts)
 	if err != nil {
 		slog.ErrorContext(ctx, "fork failed", "rt", rt, "source", name, "err", err)
-		return "", nil, err
+		return "", runtime.ConnectionInfo{}, nil, err
 	}
 	forkName := forked.Name()
 	slog.DebugContext(ctx, "fork succeeded", "rt", rt, "source", name, "fork", forkName)
 	b.mu.Lock()
 	b.vncPorts[forkName] = forked.VNCPort()
 	b.mu.Unlock()
-	return runtime.InstanceID(forkName), fromMDRepos(forked.Repos()), nil
+	return runtime.InstanceID(forkName), runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: forkName}}, fromMDRepos(forked.Repos()), nil
 }
 
 // VNCPort implements runtime.Backend.
@@ -406,13 +410,13 @@ func (b *Backend) VNCPort(ctx context.Context, id runtime.InstanceID) int {
 }
 
 // harnessMap maps caic harnesses to their md equivalents.
-var harnessMap = map[agent.Harness]md.Harness{
-	agent.Claude:   md.HarnessClaude,
-	agent.Codex:    md.HarnessCodex,
-	agent.Gemini:   md.HarnessGemini,
-	agent.Kilo:     md.HarnessKilo,
-	agent.OpenCode: md.HarnessOpencode,
-	agent.Pi:       md.HarnessPi,
+var harnessMap = map[harness.Name]md.Harness{
+	harness.Claude:   md.HarnessClaude,
+	harness.Codex:    md.HarnessCodex,
+	harness.Gemini:   md.HarnessGemini,
+	harness.Kilo:     md.HarnessKilo,
+	harness.OpenCode: md.HarnessOpencode,
+	harness.Pi:       md.HarnessPi,
 }
 
 // mdStartOpts builds the md.StartOpts for a given harness and task options.
@@ -448,7 +452,7 @@ func (b *Backend) mdStartOpts(c mdContainer, opts *runtime.StartOptions) (*md.St
 	}, nil
 }
 
-func mdMounts(c mdContainer, h agent.Harness, mounts []runtime.Mount) ([]md.Mount, error) {
+func mdMounts(c mdContainer, h harness.Name, mounts []runtime.Mount) ([]md.Mount, error) {
 	mdH, ok := harnessMap[h]
 	if !ok {
 		return nil, fmt.Errorf("unknown harness %q", h)

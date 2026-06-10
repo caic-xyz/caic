@@ -6,6 +6,7 @@ import (
 	"context"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
@@ -17,7 +18,7 @@ type TaskResolvers struct {
 	RepoForge          func(name string) v1.Forge
 	SudoPassword       func(ctx context.Context, t *task.Task) string
 	OwnerName          func(ownerID string) string
-	ContextWindowLimit func(repo string, harness agent.Harness, model string) int
+	ContextWindowLimit func(repo string, harness harness.Name, model string) int
 }
 
 // Task converts a task entry to its API DTO.

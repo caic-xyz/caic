@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 )
 
 func TestInitHarnessCache(t *testing.T) {
@@ -19,7 +20,7 @@ func TestInitHarnessCache(t *testing.T) {
 	}
 
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-	for _, h := range []agent.Harness{agent.Codex, agent.Pi, agent.OpenCode} {
+	for _, h := range []harness.Name{harness.Codex, harness.Pi, harness.OpenCode} {
 		models, fresh := cache.Models(h, "")
 		if !fresh {
 			t.Errorf("Models(%q) fresh = false, want true", h)

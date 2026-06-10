@@ -23,6 +23,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/app"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/server"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/smoketest"
@@ -74,12 +75,12 @@ func TestSmoke(t *testing.T) {
 		}
 		found := false
 		for _, h := range harnesses {
-			if h.Name == string(agent.Codex) {
+			if h.Name == string(harness.Codex) {
 				found = true
 			}
 		}
 		if !found {
-			t.Errorf("expected %q harness in list", agent.Codex)
+			t.Errorf("expected %q harness in list", harness.Codex)
 		}
 	})
 
@@ -241,7 +242,7 @@ func startSmokeServer(t *testing.T) string {
 			SkipWarmup: true,
 		},
 		Agent: server.AgentConfig{
-			Backends: map[agent.Harness]agent.Backend{sb.Harness(): sb},
+			Backends: map[harness.Name]agent.Backend{sb.Harness(): sb},
 		},
 		LLM: server.LLMConfig{
 			Disable: true,

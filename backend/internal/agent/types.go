@@ -8,31 +8,9 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/harness"
 )
-
-// Harness identifies the coding agent harness (e.g. Claude Code CLI, Gemini CLI).
-type Harness string
-
-// Supported agent harnesses.
-const (
-	Claude   Harness = "claude"
-	Codex    Harness = "codex"
-	Gemini   Harness = "gemini"
-	Kilo     Harness = "kilo"
-	OpenCode Harness = "opencode"
-	Pi       Harness = "pi"
-)
-
-// RequiresResumeSessionID reports whether h needs a persisted session ID to
-// reconnect to an existing stateful agent session.
-func RequiresResumeSessionID(h Harness) bool {
-	switch h {
-	case Codex, OpenCode:
-		return true
-	default:
-		return false
-	}
-}
 
 // DiffFileStat describes changes to a single file.
 type DiffFileStat struct {
@@ -416,21 +394,21 @@ type MetaRepo struct {
 // MetaMessage is written as the first line of a JSONL log file. It captures
 // task-level metadata so logs can be reloaded on restart.
 type MetaMessage struct {
-	MessageType string     `json:"type"`
-	Version     int        `json:"version"`
-	Prompt      string     `json:"prompt"`
-	Title       string     `json:"title,omitempty"`
-	Repos       []MetaRepo `json:"repos"`
-	Harness     Harness    `json:"harness"`
-	Model       string     `json:"model,omitempty"`
-	Effort      string     `json:"effort,omitempty"`
-	StartedAt   time.Time  `json:"started_at"`
-	ForgeIssue  int        `json:"forge_issue,omitempty"` // Originating issue/PR number for bot comment callbacks.
-	Tailscale   bool       `json:"tailscale,omitempty"`
-	USB         bool       `json:"usb,omitempty"`
-	Display     bool       `json:"display,omitempty"`
-	Sudo        bool       `json:"sudo,omitempty"`
-	GitHubToken bool       `json:"gitHubToken,omitempty"`
+	MessageType string       `json:"type"`
+	Version     int          `json:"version"`
+	Prompt      string       `json:"prompt"`
+	Title       string       `json:"title,omitempty"`
+	Repos       []MetaRepo   `json:"repos"`
+	Harness     harness.Name `json:"harness"`
+	Model       string       `json:"model,omitempty"`
+	Effort      string       `json:"effort,omitempty"`
+	StartedAt   time.Time    `json:"started_at"`
+	ForgeIssue  int          `json:"forge_issue,omitempty"` // Originating issue/PR number for bot comment callbacks.
+	Tailscale   bool         `json:"tailscale,omitempty"`
+	USB         bool         `json:"usb,omitempty"`
+	Display     bool         `json:"display,omitempty"`
+	Sudo        bool         `json:"sudo,omitempty"`
+	GitHubToken bool         `json:"gitHubToken,omitempty"`
 }
 
 // Type implements Message.

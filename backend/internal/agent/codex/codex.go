@@ -20,7 +20,9 @@ import (
 	"github.com/maruel/genai/providers/codex"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // TODO: re-enable once widget plugin is fixed for codex
@@ -48,14 +50,14 @@ var (
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{EnvVars: envVars}
 	b.Base = agent.Base{
-		HarnessID:     agent.Codex,
+		HarnessID:     harness.Codex,
 		Images:        true,
 		Compact:       true,
 		ContextWindow: 200_000,
 	}
 	if cacheDir != "" {
 		b.cache = agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-		if models, _ := b.cache.Models(agent.Codex, agent.APIKeyHash(envVars)); len(models) > 0 {
+		if models, _ := b.cache.Models(harness.Codex, agent.APIKeyHash(envVars)); len(models) > 0 {
 			b.setModels(models)
 		}
 	}
@@ -97,21 +99,25 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if opts.Dir == "" {
 		return nil, errors.New("opts.Dir is required")
 	}
-	if err := agent.DeployRelay(ctx, opts.Container); err != nil {
+	sshHost := opts.Target.SSHHost
+	if sshHost == "" {
+		return nil, errors.New("agent connection target missing SSH host")
+	}
+	if err := agent.DeployRelay(ctx, opts.Target); err != nil {
 		return nil, err
 	}
 	// TODO: re-enable once widget plugin is fixed for codex
-	// if err := deployWidgetMCP(ctx, opts.Container); err != nil {
+	// if err := deployWidgetMCP(ctx, opts.Target); err != nil {
 	// 	return nil, err
 	// }
 
 	codexArgs := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
 
 	sshArgs := make([]string, 0, 8+len(codexArgs))
-	sshArgs = append(sshArgs, opts.Container, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin", "--")
+	sshArgs = append(sshArgs, sshHost, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin", "--")
 	sshArgs = append(sshArgs, codexArgs...)
 
-	slog.Debug("relay", "msg", "launch", "ctr", opts.Container, "args", codexArgs)
+	slog.Debug("relay", "msg", "launch", "target", sshHost, "args", codexArgs)
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -121,7 +127,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = &agent.SlogWriter{Prefix: "relay serve-attach", Container: opts.Container}
+	cmd.Stderr = &agent.SlogWriter{Prefix: "relay serve-attach", Container: sshHost}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start relay: %w", err)
 	}
@@ -149,7 +155,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		return nil, fmt.Errorf("write session metadata: %w", err)
 	}
 
-	log := slog.With("container", opts.Container)
+	log := slog.With("target", sshHost)
 	s := agent.NewSession(cmd, agent.NewConn(stdin, opts.LogW, wire), br, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
@@ -174,22 +180,25 @@ func (*Backend) AgentArgs(_ agent.HarnessArgs) []string {
 }
 
 // FetchModels implements agent.ModelFetcher.
-func (*Backend) FetchModels(ctx context.Context, instance string, extraEnv []string) ([]string, error) {
-	return FetchModels(ctx, instance, extraEnv)
+func (*Backend) FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
+	return FetchModels(ctx, target, extraEnv)
 }
 
-// FetchModels SSHes into the given container, runs codex app-server, fetches
+// FetchModels runs codex app-server in the target, fetches
 // model/list, and returns the model ID list.
 // extraEnv holds KEY=VALUE pairs injected via the env command.
-func FetchModels(ctx context.Context, container string, extraEnv []string) ([]string, error) {
-	args := []string{container}
+func FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
+	if target.SSHHost == "" {
+		return nil, errors.New("agent connection target missing SSH host")
+	}
+	args := []string{target.SSHHost}
 	if len(extraEnv) > 0 {
 		args = append(args, "env")
 		args = append(args, extraEnv...)
 	}
 	args = append(args, codexAppServerArgs()...)
 
-	cmd := exec.CommandContext(ctx, "ssh", args...) //nolint:gosec // container is not user-controlled.
+	cmd := exec.CommandContext(ctx, "ssh", args...) //nolint:gosec // target is not user-controlled.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("stdin pipe: %w", err)
@@ -198,7 +207,7 @@ func FetchModels(ctx context.Context, container string, extraEnv []string) ([]st
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = &agent.SlogWriter{Prefix: "codex model-list", Container: container}
+	cmd.Stderr = &agent.SlogWriter{Prefix: "codex model-list", Container: target.SSHHost}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start codex app-server: %w", err)
 	}
@@ -246,7 +255,7 @@ func codexAppServerArgs() []string {
 func (b *Backend) setDiscoveredModels(models []string) {
 	models = b.setModels(models)
 	if b.cache != nil {
-		b.cache.SetModels(agent.Codex, models, agent.APIKeyHash(b.EnvVars))
+		b.cache.SetModels(harness.Codex, models, agent.APIKeyHash(b.EnvVars))
 	}
 }
 
@@ -616,10 +625,13 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*codex.JSONRPCMe
 }
 
 // TODO: re-enable once widget plugin is fixed for codex
-// deployWidgetMCP writes the widget MCP server script to the container so
+// deployWidgetMCP writes the widget MCP server script to the target so
 // that codex can launch it as a stdio MCP server.
-// func deployWidgetMCP(ctx context.Context, container string) error {
-// 	cmd := exec.CommandContext(ctx, "ssh", container, //nolint:gosec // container is not user-controlled
+// func deployWidgetMCP(ctx context.Context, target runtime.ConnectionTarget) error {
+// 	if target.SSHHost == "" {
+// 		return errors.New("agent connection target missing SSH host")
+// 	}
+// 	cmd := exec.CommandContext(ctx, "ssh", target.SSHHost, //nolint:gosec // target is not user-controlled
 // 		"mkdir -p "+agent.WidgetPluginDir+" && cat > "+widgetMCPServerPath)
 // 	cmd.Stdin = bytes.NewReader(agent.WidgetMCPServerScript)
 // 	if out, err := cmd.CombinedOutput(); err != nil {

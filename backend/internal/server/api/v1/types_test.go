@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/forge"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 )
 
 func TestTaskListEvent(t *testing.T) {
@@ -119,13 +119,13 @@ func TestUserSettings(t *testing.T) {
 func TestHarness(t *testing.T) {
 	t.Parallel()
 
-	want := map[Harness]agent.Harness{
-		HarnessClaude:   agent.Claude,
-		HarnessCodex:    agent.Codex,
-		HarnessGemini:   agent.Gemini,
-		HarnessKilo:     agent.Kilo,
-		HarnessOpenCode: agent.OpenCode,
-		HarnessPi:       agent.Pi,
+	want := map[Harness]harness.Name{
+		HarnessClaude:   harness.Claude,
+		HarnessCodex:    harness.Codex,
+		HarnessGemini:   harness.Gemini,
+		HarnessKilo:     harness.Kilo,
+		HarnessOpenCode: harness.OpenCode,
+		HarnessPi:       harness.Pi,
 	}
 	for dtoHarness, agentHarness := range want {
 		if string(dtoHarness) != string(agentHarness) {
@@ -133,20 +133,20 @@ func TestHarness(t *testing.T) {
 		}
 	}
 
-	got := map[agent.Harness]struct{}{}
+	got := map[harness.Name]struct{}{}
 	for dtoHarness, agentHarness := range want {
 		if _, ok := got[agentHarness]; ok {
 			t.Fatalf("duplicate agent harness mapping for DTO harness %q", dtoHarness)
 		}
 		got[agentHarness] = struct{}{}
 	}
-	for _, agentHarness := range []agent.Harness{
-		agent.Claude,
-		agent.Codex,
-		agent.Gemini,
-		agent.Kilo,
-		agent.OpenCode,
-		agent.Pi,
+	for _, agentHarness := range []harness.Name{
+		harness.Claude,
+		harness.Codex,
+		harness.Gemini,
+		harness.Kilo,
+		harness.OpenCode,
+		harness.Pi,
 	} {
 		if _, ok := got[agentHarness]; !ok {
 			t.Errorf("agent harness %q is missing from DTO harness constants", agentHarness)

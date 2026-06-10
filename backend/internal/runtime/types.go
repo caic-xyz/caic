@@ -6,7 +6,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 )
 
 // MetadataKey identifies a caic runtime metadata field.
@@ -33,6 +33,11 @@ type EventFilter struct {
 
 // InstanceID identifies a task runtime instance.
 type InstanceID string
+
+// ConnectionTarget describes how agent relay operations reach a runtime.
+type ConnectionTarget struct {
+	SSHHost string
+}
 
 // Repo describes a git repository available to a runtime instance.
 type Repo struct {
@@ -62,6 +67,7 @@ type Mount struct {
 
 // ConnectionInfo describes connection details returned by a runtime instance.
 type ConnectionInfo struct {
+	AgentTarget      ConnectionTarget
 	TailscaleFQDN    string
 	TailscaleAuthURL string
 }
@@ -69,6 +75,7 @@ type ConnectionInfo struct {
 // Instance describes a known runtime instance.
 type Instance struct {
 	ID            InstanceID
+	AgentTarget   ConnectionTarget
 	State         string
 	Repos         []Repo
 	Tailscale     bool
@@ -115,7 +122,7 @@ type StartOptions struct {
 	Metadata          Metadata
 	BaseImage         string
 	ContainerPlatform string
-	Harness           agent.Harness
+	Harness           harness.Name
 	Caches            []CacheMount
 	Mounts            []Mount
 	Tailscale         bool
@@ -141,7 +148,7 @@ type ForkOptions struct {
 	Tailscale  bool   // Inherit or enable Tailscale.
 	USB        bool   // Inherit or enable USB.
 	Sudo       bool   // Inherit or enable root access (password-based sudo).
-	Harness    agent.Harness
+	Harness    harness.Name
 	ExtraEnv   []string  // KEY=VALUE pairs for ~/.env.
 	Mounts     []Mount   // Host directories bind-mounted into the fork.
 	MaxCPUs    int       // Max CPU cores; 0 means use the default.
@@ -151,10 +158,10 @@ type ForkOptions struct {
 // Backend manages runtime instance lifecycle operations.
 type Backend interface {
 	// Launch starts the runtime instance and writes connection config. It does
-	// not wait for SSH. Repos must have branches set.
+	// not wait for transport readiness. Repos must have branches set.
 	Launch(ctx context.Context, repos []Repo, opts *StartOptions) (InstanceID, error)
-	// Connect waits for SSH and completes provisioning for the runtime
-	// instance identified by id. It returns optional connection details.
+	// Connect waits for transport readiness and completes provisioning for the
+	// runtime instance identified by id. It returns optional connection details.
 	Connect(ctx context.Context, id InstanceID, opts *StartOptions) (ConnectionInfo, error)
 	Diff(ctx context.Context, id InstanceID, repoIdx int, args ...string) (string, error)
 	Fetch(ctx context.Context, id InstanceID) error
@@ -163,12 +170,12 @@ type Backend interface {
 	Stop(ctx context.Context, id InstanceID) error
 	// Purge stops and removes the runtime instance identified by id.
 	Purge(ctx context.Context, id InstanceID) error
-	// Revive restarts a stopped runtime instance, re-establishes SSH, and waits
-	// for connectivity. The instance's filesystem is preserved.
+	// Revive restarts a stopped runtime instance and waits for connectivity.
+	// The instance's filesystem is preserved.
 	Revive(ctx context.Context, id InstanceID) error
 	// Fork snapshots a running instance and creates a new one where each mapped
 	// repo is checked out on a new branch derived from the current state.
-	Fork(ctx context.Context, id InstanceID, repos []Repo, opts *ForkOptions) (InstanceID, []Repo, error)
+	Fork(ctx context.Context, id InstanceID, repos []Repo, opts *ForkOptions) (InstanceID, ConnectionInfo, []Repo, error)
 	// VNCPort returns the host port mapped to the runtime instance's VNC port.
 	// Returns 0 when the instance has no display.
 	VNCPort(ctx context.Context, id InstanceID) int

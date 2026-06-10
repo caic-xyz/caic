@@ -15,6 +15,7 @@ import (
 	"github.com/maruel/genai/providers/claudecode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
@@ -40,7 +41,7 @@ func New() *Backend {
 		fieldWarner:   &jsonutil.FieldWarner{},
 	}
 	b.Base = agent.Base{
-		HarnessID:     agent.Claude,
+		HarnessID:     harness.Claude,
 		ModelList:     []string{"opus", "sonnet", "haiku"},
 		Images:        true,
 		Compact:       true,
@@ -65,7 +66,11 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, fmt.Errorf("widget plugin fs: %w", err)
 	}
-	if err := agent.DeployEmbeddedDir(ctx, opts.Container, pluginFS, agent.WidgetPluginDir); err != nil {
+	sshHost := opts.Target.SSHHost
+	if sshHost == "" {
+		return nil, errors.New("agent connection target missing SSH host")
+	}
+	if err := agent.DeployEmbeddedDir(ctx, sshHost, pluginFS, agent.WidgetPluginDir); err != nil {
 		return nil, err
 	}
 	// Temporarily disabled; I look at the traces and claude code switches midway authentication when it

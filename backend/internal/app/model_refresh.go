@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
@@ -21,7 +22,7 @@ import (
 func refreshHarnessModels(ctx context.Context, cacheDir string, backend runtime.Backend, taskMgr *tasks.Manager, harnessEnv map[string][]string) {
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
 
-	fetchers := map[agent.Harness]agent.ModelFetcher{}
+	fetchers := map[harness.Name]agent.ModelFetcher{}
 	taskMgr.RangeRunners(func(_ string, r *task.Runner) bool {
 		for h, b := range r.Backends {
 			if f, ok := b.(agent.ModelFetcher); ok {
@@ -46,7 +47,7 @@ func refreshOneHarness(
 	cache *agent.HarnessCache,
 	backend runtime.Backend,
 	taskMgr *tasks.Manager,
-	h agent.Harness,
+	h harness.Name,
 	fetcher agent.ModelFetcher,
 	env []string,
 ) {
@@ -72,11 +73,12 @@ func refreshOneHarness(
 	defer func() {
 		_ = backend.Purge(context.WithoutCancel(ctx), name)
 	}()
-	if _, err := backend.Connect(ctx, name, &runtime.StartOptions{Harness: h, LogWriter: w}); err != nil {
+	conn, err := backend.Connect(ctx, name, &runtime.StartOptions{Harness: h, LogWriter: w})
+	if err != nil {
 		slog.WarnContext(ctx, "model refresh: connect failed", "harness", h, "err", err)
 		return
 	}
-	models, err := fetcher.FetchModels(ctx, string(name), env)
+	models, err := fetcher.FetchModels(ctx, conn.AgentTarget, env)
 	if err != nil {
 		slog.WarnContext(ctx, "model refresh: fetch failed", "harness", h, "err", err)
 		return

@@ -23,6 +23,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -40,7 +41,7 @@ import (
 // stubBackend implements agent.Backend for test map-membership checks.
 type stubBackend struct{}
 
-func (stubBackend) Harness() agent.Harness { return "stub" }
+func (stubBackend) Harness() harness.Name { return "stub" }
 
 func (stubBackend) Start(context.Context, *agent.Options) (*agent.Session, error) {
 	return nil, errors.New("stub")
@@ -183,9 +184,9 @@ type runnerConstructionTestFixture struct {
 }
 
 func newRunnerConstructionTestServer(t *testing.T, root string) runnerConstructionTestFixture {
-	harnessEnv := map[string][]string{string(agent.Codex): {"CODEX_HOME=/tmp/codex"}}
+	harnessEnv := map[string][]string{string(harness.Codex): {"CODEX_HOME=/tmp/codex"}}
 	backend := &mdruntime.Backend{HarnessEnv: harnessEnv}
-	backends := map[agent.Harness]agent.Backend{agent.Codex: stubBackend{}}
+	backends := map[harness.Name]agent.Backend{harness.Codex: stubBackend{}}
 	logDir := filepath.Join(t.TempDir(), "logs")
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	taskMgr := tasks.New(tasks.Config{
@@ -305,7 +306,7 @@ func TestCloneRepo(t *testing.T) {
 		if runner.Runtime != fixture.backend {
 			t.Fatal("runner instance backend was not wired")
 		}
-		if len(runner.HarnessEnv[string(agent.Codex)]) != 1 || runner.HarnessEnv[string(agent.Codex)][0] != "CODEX_HOME=/tmp/codex" {
+		if len(runner.HarnessEnv[string(harness.Codex)]) != 1 || runner.HarnessEnv[string(harness.Codex)][0] != "CODEX_HOME=/tmp/codex" {
 			t.Fatalf("HarnessEnv = %#v, want configured codex env", runner.HarnessEnv)
 		}
 		if len(runner.Backends) == 0 {
@@ -546,7 +547,7 @@ func TestHandleCreateTask(t *testing.T) {
 		registerTestRunner(s, "myrepo", &task.Runner{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
-			Backends:   map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}},
+			Backends:   map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -634,7 +635,7 @@ func TestHandleCreateTask(t *testing.T) {
 		registerTestRunner(s, "myrepo", &task.Runner{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
-			Backends:   map[agent.Harness]agent.Backend{"stub": stubBackend{}},
+			Backends:   map[harness.Name]agent.Backend{"stub": stubBackend{}},
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -661,7 +662,7 @@ func TestHandleCreateTask(t *testing.T) {
 		registerTestRunner(s, "myrepo", &task.Runner{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
-			Backends:   map[agent.Harness]agent.Backend{"stub": stubBackend{}},
+			Backends:   map[harness.Name]agent.Backend{"stub": stubBackend{}},
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -688,7 +689,7 @@ func TestHandleCreateTask(t *testing.T) {
 		registerTestRunner(s, "myrepo", &task.Runner{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
-			Backends:   map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}},
+			Backends:   map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -735,7 +736,7 @@ func TestHandleCreateTask(t *testing.T) {
 		registerTestRunner(s, "myrepo", &task.Runner{
 			BaseBranch: "main",
 			Dir:        t.TempDir(),
-			Backends:   map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}},
+			Backends:   map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
 		})
 		if err := s.prefs.Update("default", func(p *preferences.Preferences) {
 			p.Settings.WellKnownCaches = map[string]bool{"go-mod": false, "npm": true}
@@ -814,7 +815,7 @@ func TestHandleCreateTask(t *testing.T) {
 		// "makeslice: cap out of range" because len(req.Repos)-1 == -1.
 		s := newTestRouter(t)
 		registerTestRunner(s, "", &task.Runner{
-			Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}},
+			Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}},
 		})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
@@ -840,7 +841,7 @@ func TestHandleCreateTask(t *testing.T) {
 		// Creating a no-repo task with no registered harness backends returns
 		// a clear 400 instead of panicking.
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{}})
+		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{}})
 		handler := handle(testTaskHandlers(s).service.createTask)
 
 		body := strings.NewReader(`{"initialPrompt":{"text":"no repo task"},"harness":"claude"}`)
@@ -880,7 +881,7 @@ func TestSignalProcess(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
-		tk.SetRuntimeInstanceInfo("ctr", "", "", 0)
+		tk.SetRuntimeConnectionInfo("ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 		insertTestTask(t, s, "t1", tk)
 		backend := &tasktest.FakeRuntimeBackend{
 			SignalFunc: func(context.Context, runtime.InstanceID, int, string) error {
@@ -911,7 +912,7 @@ func TestSignalProcess(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		tk := &task.Task{InitialPrompt: agent.Prompt{Text: "test"}, Repos: []task.RepoMount{{Name: "r"}}}
-		tk.SetRuntimeInstanceInfo("ctr", "", "", 0)
+		tk.SetRuntimeConnectionInfo("ctr", runtime.ConnectionTarget{SSHHost: "ctr"}, "", "", 0)
 		insertTestTask(t, s, "t1", tk)
 		var gotPID int
 		var gotSignal string
@@ -1010,14 +1011,14 @@ func TestLoadPurgedTasks(t *testing.T) {
 		// Write 3 terminal task logs.
 		for i, state := range []string{"purged", "failed", "purged"} {
 			meta := mustJSON(t, agent.MetaMessage{
-				MessageType: "caic_meta", Version: 1, Prompt: fmt.Sprintf("task %d", i), Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-" + strings.Repeat("0", i+1)}}, Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
+				MessageType: "caic_meta", Version: 1, Prompt: fmt.Sprintf("task %d", i), Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-" + strings.Repeat("0", i+1)}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
 			})
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: state, CostUSD: float64(i + 1)})
 			writeLogFile(t, logDir, fmt.Sprintf("%d.jsonl", i), meta, trailer)
 		}
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1062,14 +1063,14 @@ func TestLoadPurgedTasks(t *testing.T) {
 
 		// task 0: recent (purged)
 		meta0 := mustJSON(t, agent.MetaMessage{
-			MessageType: "caic_meta", Version: 1, Prompt: "recent task", Harness: agent.Claude, StartedAt: time.Now().Add(-1 * time.Hour),
+			MessageType: "caic_meta", Version: 1, Prompt: "recent task", Harness: harness.Claude, StartedAt: time.Now().Add(-1 * time.Hour),
 		})
 		trailer0 := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		writeLogFile(t, logDir, "recent.jsonl", meta0, trailer0)
 
 		// task 1: old (purged, > 14 days)
 		meta1 := mustJSON(t, agent.MetaMessage{
-			MessageType: "caic_meta", Version: 1, Prompt: "old task", Harness: agent.Claude, StartedAt: time.Now().Add(-20 * 24 * time.Hour),
+			MessageType: "caic_meta", Version: 1, Prompt: "old task", Harness: harness.Claude, StartedAt: time.Now().Add(-20 * 24 * time.Hour),
 		})
 		trailer1 := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 		oldPath := filepath.Join(logDir, "old.jsonl")
@@ -1081,7 +1082,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1105,7 +1106,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		for i := range 7 {
 			meta := mustJSON(t, agent.MetaMessage{
 				MessageType: "caic_meta", Version: 1, Prompt: fmt.Sprintf("a-%d", i),
-				Repos: []agent.MetaRepo{{Name: "a", Branch: fmt.Sprintf("caic-%d", i)}}, Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
+				Repos: []agent.MetaRepo{{Name: "a", Branch: fmt.Sprintf("caic-%d", i)}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
 			})
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			writeLogFile(t, logDir, fmt.Sprintf("a-%d.jsonl", i), meta, trailer)
@@ -1113,14 +1114,14 @@ func TestLoadPurgedTasks(t *testing.T) {
 		for i := range 3 {
 			meta := mustJSON(t, agent.MetaMessage{
 				MessageType: "caic_meta", Version: 1, Prompt: fmt.Sprintf("b-%d", i),
-				Repos: []agent.MetaRepo{{Name: "b", Branch: fmt.Sprintf("caic-%d", i)}}, Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, i+10, 0, 0, 0, time.UTC),
+				Repos: []agent.MetaRepo{{Name: "b", Branch: fmt.Sprintf("caic-%d", i)}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, i+10, 0, 0, 0, time.UTC),
 			})
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
 			writeLogFile(t, logDir, fmt.Sprintf("b-%d.jsonl", i), meta, trailer)
 		}
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1152,7 +1153,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "fix bug",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
 		initMsg := mustJSON(t, map[string]any{
 			"type": "system", "subtype": "init", "model": "claude-opus-4-6",
@@ -1169,7 +1170,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1206,7 +1207,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		// but the messages contain a ResultMessage with cost.
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "fix bug",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
 		initMsg := mustJSON(t, map[string]any{
 			"type": "system", "subtype": "init", "model": "claude-opus-4-6",
@@ -1223,7 +1224,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, result, trailer)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1255,7 +1256,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		metaA := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1,
 			Prompt: "optimize genai provider", Repos: []agent.MetaRepo{{Name: "genai", Branch: "caic-0"}},
-			Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 			Title: "Skip Unnecessary MD Runtime Build",
 		})
 		trailerA := mustJSON(t, agent.MetaResultMessage{
@@ -1267,7 +1268,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		metaB := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1,
 			Prompt: "skip docker rebuilds", Repos: []agent.MetaRepo{{Name: "md", Branch: "caic-0"}},
-			Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC),
+			Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC),
 			Title: "Skip Docker Rebuilds",
 		})
 		trailerB := mustJSON(t, agent.MetaResultMessage{
@@ -1277,7 +1278,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "b.jsonl", metaB, trailerB)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1326,7 +1327,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		t.Parallel()
 		logDir := t.TempDir()
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1345,7 +1346,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		logDir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "big pr task",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.Claude,
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude,
 			StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
 		prMsg := mustJSON(t, agent.MetaPRMessage{
@@ -1368,7 +1369,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", lines...)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1412,7 +1413,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 				MessageType: "caic_meta", Version: 1,
 				Prompt:    fmt.Sprintf("task %d", i),
 				Repos:     []agent.MetaRepo{{Name: repoName, Branch: fmt.Sprintf("caic-%d", i)}},
-				Harness:   agent.Claude,
+				Harness:   harness.Claude,
 				StartedAt: stoppedAt,
 			})
 			trailer := mustJSON(t, agent.MetaResultMessage{MessageType: "caic_result", State: "purged"})
@@ -1424,7 +1425,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		}
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1460,7 +1461,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 
 		meta := func(prompt string) string {
 			return mustJSON(t, agent.MetaMessage{
-				MessageType: "caic_meta", Version: 1, Prompt: prompt, Harness: agent.Claude,
+				MessageType: "caic_meta", Version: 1, Prompt: prompt, Harness: harness.Claude,
 				Repos:     []agent.MetaRepo{{Name: "r", Branch: "caic-0"}},
 				StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 			})
@@ -1480,7 +1481,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "purged.jsonl", meta("purged task"), trailer)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1509,7 +1510,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		logDir := t.TempDir()
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "feat task",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.Claude,
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude,
 			StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 			Tailscale: true, USB: true, Display: true,
 		})
@@ -1517,7 +1518,7 @@ func TestLoadPurgedTasks(t *testing.T) {
 		writeLogFile(t, logDir, "feat.jsonl", meta, trailer)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1614,7 +1615,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		// Write a purged task log with real agent messages.
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "fix the bug",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
 		initMsg := mustJSON(t, map[string]any{
 			"type": "system", "subtype": "init", "model": "claude-opus-4-6",
@@ -1641,7 +1642,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, assistant, result, trailer)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}
@@ -1693,7 +1694,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		// by the final assistant message, simulating --include-partial-messages output.
 		meta := mustJSON(t, agent.MetaMessage{
 			MessageType: "caic_meta", Version: 1, Prompt: "explain streaming",
-			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: agent.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			Repos: []agent.MetaRepo{{Name: "r", Branch: "caic-0"}}, Harness: harness.Claude, StartedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		})
 		initMsg := mustJSON(t, map[string]any{
 			"type": "system", "subtype": "init", "model": "claude-opus-4-6",
@@ -1723,7 +1724,7 @@ func TestHandleTaskRawEvents(t *testing.T) {
 		writeLogFile(t, logDir, "task.jsonl", meta, initMsg, msgStart, delta1, delta2, assistant, result, trailer)
 
 		s := newTestRouter(t)
-		registerTestRunner(s, "", &task.Runner{Backends: map[agent.Harness]agent.Backend{agent.Claude: stubBackend{}}})
+		registerTestRunner(s, "", &task.Runner{Backends: map[harness.Name]agent.Backend{harness.Claude: stubBackend{}}})
 		if err := loadPurgedTasksForTest(s, logDir); err != nil {
 			t.Fatal(err)
 		}

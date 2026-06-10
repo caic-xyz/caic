@@ -24,7 +24,7 @@ const (
 )
 
 // Harness identifies the coding agent harness.
-// Values must match agent.Harness constants.
+// Values must match harness.Name constants.
 type Harness string
 
 // Supported agent harnesses.

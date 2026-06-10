@@ -38,7 +38,7 @@ type FakeRuntimeBackend struct {
 	StopFunc      func(ctx context.Context, id runtime.InstanceID) error
 	PurgeFunc     func(ctx context.Context, id runtime.InstanceID) error
 	ReviveFunc    func(ctx context.Context, id runtime.InstanceID) error
-	ForkFunc      func(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.InstanceID, []runtime.Repo, error)
+	ForkFunc      func(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.InstanceID, runtime.ConnectionInfo, []runtime.Repo, error)
 	VNCPortFunc   func(ctx context.Context, id runtime.InstanceID) int
 	ProcessesFunc func(ctx context.Context, id runtime.InstanceID) ([]runtime.ProcessInfo, error)
 	SignalFunc    func(ctx context.Context, id runtime.InstanceID, pid int, sig string) error
@@ -91,7 +91,7 @@ func (f *FakeRuntimeBackend) Connect(ctx context.Context, id runtime.InstanceID,
 	if f.ConnectFunc != nil {
 		return f.ConnectFunc(ctx, id, opts)
 	}
-	return runtime.ConnectionInfo{}, nil
+	return runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: string(id)}}, nil
 }
 
 // Diff implements runtime.Backend.
@@ -140,7 +140,7 @@ func (f *FakeRuntimeBackend) Revive(ctx context.Context, id runtime.InstanceID) 
 }
 
 // Fork implements runtime.Backend.
-func (f *FakeRuntimeBackend) Fork(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
+func (f *FakeRuntimeBackend) Fork(ctx context.Context, id runtime.InstanceID, repos []runtime.Repo, opts *runtime.ForkOptions) (runtime.InstanceID, runtime.ConnectionInfo, []runtime.Repo, error) {
 	var mounts []runtime.Mount
 	if opts != nil {
 		mounts = opts.Mounts
@@ -149,7 +149,7 @@ func (f *FakeRuntimeBackend) Fork(ctx context.Context, id runtime.InstanceID, re
 	if f.ForkFunc != nil {
 		return f.ForkFunc(ctx, id, repos, opts)
 	}
-	return "fake-fork", nil, nil
+	return "fake-fork", runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: "fake-fork"}}, nil, nil
 }
 
 // VNCPort implements runtime.Backend.

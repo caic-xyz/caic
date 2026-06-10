@@ -36,23 +36,24 @@ containers as one runtime adapter, not as the backend domain model.
   comments when a source file's purpose changes.
 - Run the validation commands listed for the phase that changed.
 
-## Runtime Connection Work
+## Remaining Runtime Transport Work
 
 The lifecycle abstraction is not the same as the agent transport abstraction.
-Current agent backends call `ssh <container> ...`, deploy relay files through
-md-style helpers, and pass `agent.Options.Container`. That is acceptable while
-`mdruntime` is the only runtime adapter, but non-md runtimes need a transport
-contract before this is runtime-neutral.
+Task orchestration carries `agent.ConnectionTarget` values returned by runtime
+startup, fork, and inventory data. This keeps md container names out of
+`internal/task` and `internal/tasks`.
+
+Current agent backends still execute relay, deployment, and model-list commands
+through SSH. That is acceptable while `mdruntime` is the only runtime adapter,
+but non-md runtimes need a transport contract before this is runtime-neutral.
 
 Design direction:
 
-- Define a runtime-owned connection target for agent sessions, plan-file reads,
-  relay attach, relay log diagnostics, and file deployment.
 - Keep agent backends focused on harness command construction and wire parsing.
 - Let runtime adapters decide how to execute commands and transfer files into a
   runtime instance.
-- Convert md container names to the connection target inside `mdruntime`, not in
-  task orchestration.
+- Move SSH command execution and file transfer behind the runtime-provided
+  connection target.
 
 Sequence this after the lifecycle naming cleanup, unless a VM adapter requires
 it earlier.

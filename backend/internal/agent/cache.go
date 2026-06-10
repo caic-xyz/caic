@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/caic-xyz/caic/backend/internal/harness"
 )
 
 const cacheMaxAge = 24 * time.Hour
@@ -28,13 +30,13 @@ type HarnessCacheEntry struct {
 type HarnessCache struct {
 	mu   sync.Mutex
 	path string
-	data map[Harness]*HarnessCacheEntry
+	data map[harness.Name]*HarnessCacheEntry
 }
 
 // OpenHarnessCache loads the cache from path. A missing or corrupt file
 // starts with an empty cache — no error is returned.
 func OpenHarnessCache(path string) *HarnessCache {
-	c := &HarnessCache{path: path, data: make(map[Harness]*HarnessCacheEntry)}
+	c := &HarnessCache{path: path, data: make(map[harness.Name]*HarnessCacheEntry)}
 	raw, err := os.ReadFile(path) //nolint:gosec // path is derived from the server's cache directory, not user input
 	if err != nil {
 		return c
@@ -47,7 +49,7 @@ func OpenHarnessCache(path string) *HarnessCache {
 // (updated within the last 24 h) and its API-key hash matches envHash.
 // When envHash is non-empty and differs from the stored hash, the cache is
 // treated as stale so models are re-fetched with the new API key.
-func (c *HarnessCache) Models(h Harness, envHash string) (models []string, fresh bool) {
+func (c *HarnessCache) Models(h harness.Name, envHash string) (models []string, fresh bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e := c.data[h]
@@ -61,7 +63,7 @@ func (c *HarnessCache) Models(h Harness, envHash string) (models []string, fresh
 }
 
 // SetModels updates the cache for h and writes to disk atomically.
-func (c *HarnessCache) SetModels(h Harness, models []string, envHash string) {
+func (c *HarnessCache) SetModels(h harness.Name, models []string, envHash string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.data[h] = &HarnessCacheEntry{Models: models, Updated: time.Now(), EnvHash: envHash}

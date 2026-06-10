@@ -4,6 +4,7 @@ package tasks
 
 import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
@@ -15,7 +16,7 @@ type CreateParams struct {
 	OwnerID           string // empty in no-auth mode
 	Prompt            agent.Prompt
 	Repos             []CreateRepo // first entry is primary; empty = no-repo
-	Harness           agent.Harness
+	Harness           harness.Name
 	Model             string // "" = harness default
 	Effort            string // thinking effort; empty = default
 	Tailscale         bool
@@ -57,8 +58,8 @@ type CreateRepo struct {
 type ForkParams struct {
 	OwnerID     string
 	Prompt      agent.Prompt
-	Harness     agent.Harness // empty = use source's harness
-	Model       string        // empty = use source's model
+	Harness     harness.Name // empty = use source's harness
+	Model       string       // empty = use source's model
 	Effort      string
 	ExtraRepos  []ForkRepo
 	GitHubToken bool // resolved override (handler derefs *bool, defaults to source)

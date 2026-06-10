@@ -15,12 +15,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
 	"sync"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
@@ -49,7 +51,7 @@ var defaultModels = []string{
 func New() *Backend {
 	b := &Backend{}
 	b.Base = agent.Base{
-		HarnessID:     agent.Kilo,
+		HarnessID:     harness.Kilo,
 		ModelList:     defaultModels,
 		ContextWindow: 200_000,
 	}
@@ -78,7 +80,11 @@ func (b *Backend) SetModels(models []string) {
 // Start deploys relay and bridge scripts, then launches via relay serve-attach.
 // A fresh kiloWireFormat is used so per-session accumulators start at zero.
 func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Session, error) {
-	if err := deployBridge(ctx, opts.Container); err != nil {
+	sshHost := opts.Target.SSHHost
+	if sshHost == "" {
+		return nil, errors.New("agent connection target missing SSH host")
+	}
+	if err := deployBridge(ctx, sshHost); err != nil {
 		return nil, err
 	}
 	return agent.StartRelay(ctx, opts, b.AgentArgs(agent.HarnessArgs{Model: opts.Model}), &kiloWireFormat{fw: &jsonutil.FieldWarner{}})

@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
 )
 
@@ -24,7 +25,7 @@ func New() *Backend {
 		fw: &jsonutil.FieldWarner{},
 	}
 	b.Base = agent.Base{
-		HarnessID:     agent.Gemini,
+		HarnessID:     harness.Gemini,
 		ModelList:     []string{"gemini-3.1-pro", "gemini-3-flash"},
 		ContextWindow: 1_000_000,
 	}

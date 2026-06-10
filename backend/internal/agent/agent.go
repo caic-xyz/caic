@@ -57,6 +57,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // ImageData carries a single base64-encoded image for multi-modal input.
@@ -73,8 +74,8 @@ type Prompt struct {
 
 // Options configures an agent session launch.
 type Options struct {
-	Container       string
-	Dir             string // Working directory inside the container.
+	Target          runtime.ConnectionTarget
+	Dir             string // Working directory inside the runtime.
 	Model           string // Model alias ("opus", "sonnet", "haiku") or full ID. Empty = default.
 	Effort          string // Thinking effort (e.g. "low", "medium", "high", "max"). Empty = default.
 	InitialPrompt   Prompt // Initial prompt; never mutated after creation.
@@ -331,11 +332,14 @@ const (
 	RelayLogPath    = RelayDir + "/relay.log"
 )
 
-// DeployRelay uploads the relay script into the container. Idempotent.
-func DeployRelay(ctx context.Context, container string) error {
+// DeployRelay uploads the relay script into the runtime target. Idempotent.
+func DeployRelay(ctx context.Context, target runtime.ConnectionTarget) error {
+	if target.SSHHost == "" {
+		return errors.New("agent connection target missing SSH host")
+	}
 	// SSH concatenates remote args with spaces and passes them to the login
 	// shell, so a single string works correctly as a shell command.
-	cmd := exec.CommandContext(ctx, "ssh", container, //nolint:gosec // container is not user-controlled
+	cmd := exec.CommandContext(ctx, "ssh", target.SSHHost, //nolint:gosec // target is not user-controlled
 		"mkdir -p "+RelayDir+" && cat > "+RelayScriptPath)
 	cmd.Stdin = bytes.NewReader(relay.Script)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -506,21 +510,25 @@ func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*Rela
 	if opts.Dir == "" {
 		return nil, errors.New("opts.Dir is required")
 	}
+	sshHost := opts.Target.SSHHost
+	if sshHost == "" {
+		return nil, errors.New("agent connection target missing SSH host")
+	}
 	tStart := time.Now()
-	if err := DeployRelay(ctx, opts.Container); err != nil {
+	if err := DeployRelay(ctx, opts.Target); err != nil {
 		return nil, err
 	}
-	slog.Debug("startup", "phase", "deploy_relay", "ctr", opts.Container, "dur", time.Since(tStart))
+	slog.Debug("startup", "phase", "deploy_relay", "target", sshHost, "dur", time.Since(tStart))
 
 	sshArgs := make([]string, 0, 7+2*len(opts.StripEnv)+len(agentArgs))
-	sshArgs = append(sshArgs, opts.Container, "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir)
+	sshArgs = append(sshArgs, sshHost, "python3", RelayScriptPath, "serve-attach", "--dir", opts.Dir)
 	for _, key := range opts.StripEnv {
 		sshArgs = append(sshArgs, "--strip-env", key)
 	}
 	sshArgs = append(sshArgs, "--")
 	sshArgs = append(sshArgs, agentArgs...)
 
-	slog.Debug("relay", "msg", "launch", "ctr", opts.Container, "args", agentArgs)
+	slog.Debug("relay", "msg", "launch", "target", sshHost, "args", agentArgs)
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -530,11 +538,11 @@ func PrepareRelay(ctx context.Context, opts *Options, agentArgs []string) (*Rela
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = &SlogWriter{Prefix: "relay serve-attach", Container: opts.Container}
+	cmd.Stderr = &SlogWriter{Prefix: "relay serve-attach", Container: sshHost}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start relay: %w", err)
 	}
-	slog.Info("startup", "phase", "relay_started", "ctr", opts.Container, "dur", time.Since(tStart))
+	slog.Info("startup", "phase", "relay_started", "target", sshHost, "dur", time.Since(tStart))
 	return &RelayProcess{Cmd: cmd, Stdin: stdin, Stdout: stdout}, nil
 }
 
@@ -551,7 +559,11 @@ func StartRelay(ctx context.Context, opts *Options, agentArgs []string, wire Wir
 // StartSession creates a Session from a RelayProcess and Conn, sends the
 // initial prompt if present, and returns the session.
 func StartSession(rp *RelayProcess, c Conn, opts *Options) (*Session, error) {
-	log := slog.With("ctr", opts.Container)
+	sshHost := opts.Target.SSHHost
+	if sshHost == "" {
+		return nil, errors.New("agent connection target missing SSH host")
+	}
+	log := slog.With("target", sshHost)
 	s := NewSession(rp.Cmd, c, rp.Stdout, opts.MsgCh, log)
 	if opts.InitialPrompt.Text != "" || len(opts.InitialPrompt.Images) > 0 {
 		if err := s.SendPrompt(opts.InitialPrompt); err != nil {
@@ -733,8 +745,12 @@ func StreamLogFile(path string, parseFn func([]byte) ([]Message, error), offset 
 // confirm connectivity; if the process exits immediately (e.g. relay socket
 // is stale), an error is returned so the caller can fall back to --resume.
 func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat) (*Session, error) {
+	sshHost := opts.Target.SSHHost
+	if sshHost == "" {
+		return nil, errors.New("agent connection target missing SSH host")
+	}
 	sshArgs := []string{
-		opts.Container, "python3", RelayScriptPath, "attach",
+		sshHost, "python3", RelayScriptPath, "attach",
 		"--offset", strconv.FormatInt(opts.RelayOffset, 10),
 	}
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
@@ -746,12 +762,12 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat) (*S
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = &SlogWriter{Prefix: "relay attach", Container: opts.Container}
+	cmd.Stderr = &SlogWriter{Prefix: "relay attach", Container: sshHost}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("attach relay: %w", err)
 	}
 
-	log := slog.With("ctr", opts.Container)
+	log := slog.With("target", sshHost)
 	return NewSession(cmd, NewConn(stdin, opts.LogW, wire), stdout, opts.MsgCh, log), nil
 }
 

@@ -40,6 +40,7 @@ func InstancesFromMD(ctx context.Context, containers []*md.Container) []runtime.
 	for i, c := range containers {
 		out[i] = runtime.Instance{
 			ID:            runtime.InstanceID(c.Name),
+			AgentTarget:   runtime.ConnectionTarget{SSHHost: c.Name},
 			State:         c.State,
 			Repos:         fromMDRepos(c.Repos),
 			Tailscale:     c.Tailscale,

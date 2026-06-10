@@ -29,6 +29,7 @@ import (
 	"github.com/maruel/ksid"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 	"github.com/caic-xyz/caic/backend/internal/task"
@@ -38,23 +39,32 @@ import (
 var errTaskNotFound = &Error{Kind: KindNotFound, Msg: "task not found"}
 
 type relayReader interface {
-	Status(ctx context.Context, container string) (bool, string, error)
-	ReadTail(ctx context.Context, container string, parseFn func([]byte) ([]agent.Message, error), maxBytes int64) ([]agent.Message, int64, error)
-	ReadLog(ctx context.Context, container string, maxBytes int) string
+	Status(ctx context.Context, target runtime.ConnectionTarget) (bool, string, error)
+	ReadTail(ctx context.Context, target runtime.ConnectionTarget, parseFn func([]byte) ([]agent.Message, error), maxBytes int64) ([]agent.Message, int64, error)
+	ReadLog(ctx context.Context, target runtime.ConnectionTarget, maxBytes int) string
 }
 
 type agentRelayReader struct{}
 
-func (agentRelayReader) Status(ctx context.Context, container string) (alive bool, diag string, err error) {
-	return agent.RelayStatus(ctx, container)
+func (agentRelayReader) Status(ctx context.Context, target runtime.ConnectionTarget) (alive bool, diag string, err error) {
+	if target.SSHHost == "" {
+		return false, "", errors.New("agent connection target missing SSH host")
+	}
+	return agent.RelayStatus(ctx, target.SSHHost)
 }
 
-func (agentRelayReader) ReadTail(ctx context.Context, container string, parseFn func([]byte) ([]agent.Message, error), maxBytes int64) (msgs []agent.Message, size int64, err error) {
-	return agent.ReadRelayTail(ctx, container, parseFn, maxBytes)
+func (agentRelayReader) ReadTail(ctx context.Context, target runtime.ConnectionTarget, parseFn func([]byte) ([]agent.Message, error), maxBytes int64) (msgs []agent.Message, size int64, err error) {
+	if target.SSHHost == "" {
+		return nil, 0, errors.New("agent connection target missing SSH host")
+	}
+	return agent.ReadRelayTail(ctx, target.SSHHost, parseFn, maxBytes)
 }
 
-func (agentRelayReader) ReadLog(ctx context.Context, container string, maxBytes int) string {
-	return agent.ReadRelayLog(ctx, container, maxBytes)
+func (agentRelayReader) ReadLog(ctx context.Context, target runtime.ConnectionTarget, maxBytes int) string {
+	if target.SSHHost == "" {
+		return ""
+	}
+	return agent.ReadRelayLog(ctx, target.SSHHost, maxBytes)
 }
 
 // Config holds the dependencies Manager needs at construction.
@@ -71,7 +81,7 @@ type Config struct {
 	Monitor    runtime.Monitor
 	Inventory  runtime.Inventory
 	Privilege  runtime.PrivilegeInfo
-	Backends   map[agent.Harness]agent.Backend
+	Backends   map[harness.Name]agent.Backend
 	HarnessEnv map[string][]string
 	Prefs      *preferences.Store
 	Provider   genai.Provider // nil-safe
@@ -411,12 +421,20 @@ func (m *Manager) Restart(ctx context.Context, entry *Entry, prompt agent.Prompt
 	}
 	if prompt.Text == "" {
 		// No prompt provided: fall back to the plan file from the instance.
-		plan, err := agent.ReadPlan(m.serverCtx, string(t.RuntimeInstanceID()), t.GetPlanFile()) //nolint:contextcheck // intentionally using server context
+		target := t.RuntimeConnectionTarget()
+		sshHost := target.SSHHost
+		var err error
+		if sshHost != "" {
+			var plan string
+			plan, err = agent.ReadPlan(m.serverCtx, sshHost, t.GetPlanFile()) //nolint:contextcheck // intentionally using server context
+			prompt.Text = plan
+		} else {
+			err = errors.New("agent connection target missing SSH host")
+		}
 		if err != nil {
 			t.SetStateIf(task.StateStarting, prevState)
 			return &Error{Kind: KindBadRequest, Msg: "no prompt provided and failed to read plan from instance", Err: err}
 		}
-		prompt.Text = plan
 	}
 	runner := m.resolveRunner(t)
 	h, err := runner.RestartSession(m.serverCtx, t, prompt) //nolint:contextcheck // intentionally using server context
@@ -1311,12 +1329,12 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	if harnessLabel == "" {
 		harnessLabel, _ = m.inventory.Metadata(ctx, c.ID, runtime.MetadataLegacyHarness)
 	}
-	harnessName := agent.Harness(harnessLabel)
+	harnessName := harness.Name(harnessLabel)
 	if harnessName == "" && lt != nil {
 		harnessName = lt.Harness
 	}
 	if harnessName == "" {
-		harnessName = agent.Claude
+		harnessName = harness.Claude
 	}
 	if lt != nil {
 		lt.Harness = harnessName
@@ -1328,9 +1346,10 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	var relayMsgs []agent.Message
 	var relaySize int64
 	var relayDiag string
+	relayTarget := c.AgentTarget
 	if !isExited {
 		var relayErr error
-		relayAlive, relayDiag, relayErr = m.relay.Status(ctx, string(c.ID))
+		relayAlive, relayDiag, relayErr = m.relay.Status(ctx, relayTarget)
 		if relayErr != nil {
 			slog.Warn("relay", "msg", "check failed during adopt", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr, "diag", relayDiag)
 		}
@@ -1340,7 +1359,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 			relayAlive = false
 		} else {
 			readCtx, readCancel := context.WithTimeout(ctx, 30*time.Second)
-			relayMsgs, relaySize, relayErr = m.relay.ReadTail(readCtx, string(c.ID), b.NewWire().ParseMessage, 10<<20) // 10 MiB tail
+			relayMsgs, relaySize, relayErr = m.relay.ReadTail(readCtx, relayTarget, b.NewWire().ParseMessage, 10<<20) // 10 MiB tail
 			readCancel()
 			if relayErr != nil {
 				slog.Warn("relay", "msg", "read output failed", "repo", ri.RelPath, "br", branch, "instance", c.ID, "err", relayErr)
@@ -1362,7 +1381,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	if lt != nil {
 		model = lt.Model
 		effort = lt.Effort
-		if agent.RequiresResumeSessionID(harnessName) && lt.SessionID == "" {
+		if harness.RequiresResumeSessionID(harnessName) && lt.SessionID == "" {
 			if err := lt.LoadSessionMetadata(); err != nil {
 				slog.Warn("load session metadata failed", "repo", ri.RelPath, "br", branch, "err", err)
 			}
@@ -1386,16 +1405,16 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		adoptRepos = []task.RepoMount{{Name: ri.RelPath, BaseBranch: primaryBaseBranch, GitRoot: ri.AbsPath, Branch: branch, MountedPath: mountedPath}}
 		if lt != nil {
 			// Build lookup of instance repos by branch for MountedPath.
-			containerRepoByBranch := make(map[string]string, len(c.Repos))
+			runtimeRepoByBranch := make(map[string]string, len(c.Repos))
 			for _, cr := range c.Repos {
-				containerRepoByBranch[cr.Branch] = cr.MountPath
+				runtimeRepoByBranch[cr.Branch] = cr.MountPath
 			}
 			for _, lm := range lt.Repos[1:] {
 				gitRoot := ""
 				if er, ok := m.Runner(lm.Name); ok {
 					gitRoot = er.Dir
 				}
-				mp := containerRepoByBranch[lm.Branch]
+				mp := runtimeRepoByBranch[lm.Branch]
 				if mp == "" {
 					mp = m.mountPathForRepo(lm.Name)
 				}
@@ -1426,7 +1445,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 		Provider:      m.provider,
 		ForgeIssue:    forgeIssue,
 	}
-	t.SetRuntimeInstanceInfo(c.ID, c.TailscaleFQDN, "", c.VNCPort)
+	t.SetRuntimeConnectionInfo(c.ID, c.AgentTarget, c.TailscaleFQDN, "", c.VNCPort)
 	// Restore GitHub token flag from log trailer (primary) or runtime metadata (fallback).
 	gtLabel, _ := m.inventory.Metadata(ctx, c.ID, runtime.MetadataGitHubToken)
 	if (lt != nil && lt.GitHubToken) || gtLabel == "true" {
@@ -1494,7 +1513,7 @@ func (m *Manager) adoptOne(ctx context.Context, ri AdoptRepo, runner *task.Runne
 	if isExited {
 		t.SetState(task.StateStopped)
 	} else if !relayAlive {
-		relayLog := m.relay.ReadLog(ctx, string(c.ID), 4096)
+		relayLog := m.relay.ReadLog(ctx, relayTarget, 4096)
 		if relayLog != "" {
 			slog.Warn("relay", "msg", "log from dead relay", "instance", c.ID, "br", branch, "diag", relayDiag, "log", relayLog)
 		}

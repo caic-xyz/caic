@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
@@ -32,7 +33,7 @@ func InitRepo(ctx context.Context, tmpDir string) (string, error) {
 // harness model discovery during smoke and e2e tests.
 func InitHarnessCache(cacheDir string) error {
 	cache := agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-	for _, h := range []agent.Harness{agent.Codex, agent.Pi, agent.OpenCode} {
+	for _, h := range []harness.Name{harness.Codex, harness.Pi, harness.OpenCode} {
 		cache.SetModels(h, []string{"fake-model"}, "")
 	}
 	return nil
@@ -63,8 +64,8 @@ func (*RuntimeBackend) Launch(_ context.Context, repos []runtime.Repo, _ *runtim
 }
 
 // Connect implements runtime.Backend.
-func (*RuntimeBackend) Connect(_ context.Context, _ runtime.InstanceID, _ *runtime.StartOptions) (runtime.ConnectionInfo, error) {
-	return runtime.ConnectionInfo{}, nil
+func (*RuntimeBackend) Connect(_ context.Context, id runtime.InstanceID, _ *runtime.StartOptions) (runtime.ConnectionInfo, error) {
+	return runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: string(id)}}, nil
 }
 
 // Diff implements runtime.Backend.
@@ -85,8 +86,8 @@ func (*RuntimeBackend) Purge(_ context.Context, _ runtime.InstanceID) error { re
 func (*RuntimeBackend) Revive(_ context.Context, _ runtime.InstanceID) error { return nil }
 
 // Fork implements runtime.Backend.
-func (*RuntimeBackend) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *runtime.ForkOptions) (runtime.InstanceID, []runtime.Repo, error) {
-	return "fake-fork", nil, errors.New("fork not supported in fake runtime")
+func (*RuntimeBackend) Fork(_ context.Context, _ runtime.InstanceID, _ []runtime.Repo, _ *runtime.ForkOptions) (runtime.InstanceID, runtime.ConnectionInfo, []runtime.Repo, error) {
+	return "fake-fork", runtime.ConnectionInfo{AgentTarget: runtime.ConnectionTarget{SSHHost: "fake-fork"}}, nil, errors.New("fork not supported in fake runtime")
 }
 
 // VNCPort implements runtime.Backend.

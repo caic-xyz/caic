@@ -5,6 +5,9 @@ package agent
 import (
 	"context"
 	"io"
+
+	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // Backend launches and communicates with a coding agent process.
@@ -12,19 +15,19 @@ import (
 // Message types so the rest of the system (task, eventconv, SSE, frontend)
 // remains agent-agnostic.
 type Backend interface {
-	// Start launches the agent in the given container. Parsed messages are
+	// Start launches the agent at the configured target. Parsed messages are
 	// forwarded to opts.MsgCh; opts.LogW receives raw wire-format lines.
 	Start(ctx context.Context, opts *Options) (*Session, error)
 
 	// AttachRelay connects to an already-running relay daemon in the
-	// container. opts.RelayOffset specifies the byte offset into
+	// configured target. opts.RelayOffset specifies the byte offset into
 	// output.jsonl to replay from (use 0 for full replay).
 	// opts.ResumeSessionID is the known agent session ID, used by stateful
 	// wire formats (e.g. codex) that need it before the first replay message.
 	AttachRelay(ctx context.Context, opts *Options) (*Session, error)
 
 	// Harness returns the harness identifier ("claude", "gemini", etc.)
-	Harness() Harness
+	Harness() harness.Name
 
 	// Models returns the list of model names supported by this backend.
 	Models() []string
@@ -45,7 +48,7 @@ type Backend interface {
 	AgentArgs(a HarnessArgs) []string
 
 	// NewWire creates a fresh WireFormat for this backend. Each call returns
-	// independent state; suitable for use outside the normal container transport.
+	// independent state; suitable for use outside the normal relay transport.
 	NewWire() WireFormat
 
 	// ContextWindowLimit returns the API prompt token limit for the given model.
@@ -55,7 +58,7 @@ type Backend interface {
 
 // ModelFetcher is an optional backend capability for discovering available models.
 type ModelFetcher interface {
-	FetchModels(ctx context.Context, instance string, env []string) ([]string, error)
+	FetchModels(ctx context.Context, target runtime.ConnectionTarget, env []string) ([]string, error)
 }
 
 // HarnessArgs holds the session-specific parameters that influence the CLI
@@ -86,7 +89,7 @@ type RecordHandshaker interface {
 // must implement Start and AttachRelay itself using the package-level helpers
 // (StartRelay, AttachRelaySession).
 type Base struct {
-	HarnessID     Harness
+	HarnessID     harness.Name
 	ModelList     []string
 	Images        bool
 	ContextWindow int
@@ -94,7 +97,7 @@ type Base struct {
 }
 
 // Harness implements Backend.
-func (b *Base) Harness() Harness { return b.HarnessID }
+func (b *Base) Harness() harness.Name { return b.HarnessID }
 
 // Models implements Backend.
 func (b *Base) Models() []string { return b.ModelList }

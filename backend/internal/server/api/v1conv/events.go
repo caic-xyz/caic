@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 )
 
@@ -23,14 +24,14 @@ type ToolOutputFormatter func(raw string) (contentType v1.ToolOutputContentType,
 // ToolTimingTracker computes per-tool-call duration while converting agent
 // messages to API events.
 type ToolTimingTracker struct {
-	harness          agent.Harness
+	harness          harness.Name
 	formatToolOutput ToolOutputFormatter
 	pending          map[string]time.Time
 }
 
 // NewToolTimingTracker creates a tracker for converting agent messages from a
 // harness into API events.
-func NewToolTimingTracker(h agent.Harness, f ToolOutputFormatter) *ToolTimingTracker {
+func NewToolTimingTracker(h harness.Name, f ToolOutputFormatter) *ToolTimingTracker {
 	return &ToolTimingTracker{
 		harness:          h,
 		formatToolOutput: f,

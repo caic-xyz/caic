@@ -20,7 +20,9 @@ import (
 	"github.com/maruel/genai/providers/opencode"
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
+	"github.com/caic-xyz/caic/backend/internal/harness"
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
+	"github.com/caic-xyz/caic/backend/internal/runtime"
 )
 
 // Backend implements agent.Backend for OpenCode using the ACP JSON-RPC 2.0
@@ -43,7 +45,7 @@ var _ agent.RecordHandshaker = (*Backend)(nil)
 func New(cacheDir string, envVars []string) *Backend {
 	b := &Backend{EnvVars: envVars}
 	b.Base = agent.Base{
-		HarnessID:     agent.OpenCode,
+		HarnessID:     harness.OpenCode,
 		ModelList:     []string{"anthropic/claude-sonnet-4"},
 		Images:        true,
 		Compact:       true,
@@ -51,7 +53,7 @@ func New(cacheDir string, envVars []string) *Backend {
 	}
 	if cacheDir != "" {
 		b.cache = agent.OpenHarnessCache(filepath.Join(cacheDir, "harnesses.json"))
-		if models, _ := b.cache.Models(agent.OpenCode, agent.APIKeyHash(envVars)); len(models) > 0 {
+		if models, _ := b.cache.Models(harness.OpenCode, agent.APIKeyHash(envVars)); len(models) > 0 {
 			b.ModelList = agent.SortModels(models)
 		}
 	}
@@ -97,17 +99,21 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if opts.Dir == "" {
 		return nil, errors.New("opts.Dir is required")
 	}
-	if err := agent.DeployRelay(ctx, opts.Container); err != nil {
+	sshHost := opts.Target.SSHHost
+	if sshHost == "" {
+		return nil, errors.New("agent connection target missing SSH host")
+	}
+	if err := agent.DeployRelay(ctx, opts.Target); err != nil {
 		return nil, err
 	}
 
 	ocArgs := b.AgentArgs(agent.HarnessArgs{Model: opts.Model})
 
 	sshArgs := make([]string, 0, 8+len(ocArgs))
-	sshArgs = append(sshArgs, opts.Container, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin", "--")
+	sshArgs = append(sshArgs, sshHost, "python3", agent.RelayScriptPath, "serve-attach", "--dir", opts.Dir, "--no-log-stdin", "--")
 	sshArgs = append(sshArgs, ocArgs...)
 
-	slog.Debug("relay", "msg", "launch", "ctr", opts.Container, "args", ocArgs)
+	slog.Debug("relay", "msg", "launch", "target", sshHost, "args", ocArgs)
 	cmd := exec.CommandContext(ctx, "ssh", sshArgs...) //nolint:gosec // args are not user-controlled.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -117,7 +123,7 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 	if err != nil {
 		return nil, fmt.Errorf("stdout pipe: %w", err)
 	}
-	cmd.Stderr = &agent.SlogWriter{Prefix: "relay serve-attach", Container: opts.Container}
+	cmd.Stderr = &agent.SlogWriter{Prefix: "relay serve-attach", Container: sshHost}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start relay: %w", err)
 	}
@@ -137,11 +143,11 @@ func (b *Backend) Start(ctx context.Context, opts *agent.Options) (*agent.Sessio
 		b.ModelList = agent.SortModels(hs.models)
 		b.mu.Unlock()
 		if b.cache != nil {
-			b.cache.SetModels(agent.OpenCode, hs.models, agent.APIKeyHash(b.EnvVars))
+			b.cache.SetModels(harness.OpenCode, hs.models, agent.APIKeyHash(b.EnvVars))
 		}
 	}
 
-	log := slog.With("ctr", opts.Container)
+	log := slog.With("target", sshHost)
 	c := agent.NewConn(stdin, opts.LogW, hs.wire)
 	s := agent.NewSession(cmd, c, br, opts.MsgCh, log)
 
@@ -593,21 +599,24 @@ func readJSONRPCResponse(ctx context.Context, r *bufio.Reader) (*opencode.JSONRP
 }
 
 // FetchModels implements agent.ModelFetcher.
-func (*Backend) FetchModels(ctx context.Context, instance string, extraEnv []string) ([]string, error) {
-	return FetchModels(ctx, instance, extraEnv)
+func (*Backend) FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
+	return FetchModels(ctx, target, extraEnv)
 }
 
-// FetchModels SSHes into the given container, runs "opencode models", and
+// FetchModels runs "opencode models" in the target and
 // returns the model ID list (one per line).
 // extraEnv holds KEY=VALUE pairs injected via the env command.
-func FetchModels(ctx context.Context, container string, extraEnv []string) ([]string, error) {
-	args := []string{container}
+func FetchModels(ctx context.Context, target runtime.ConnectionTarget, extraEnv []string) ([]string, error) {
+	if target.SSHHost == "" {
+		return nil, errors.New("agent connection target missing SSH host")
+	}
+	args := []string{target.SSHHost}
 	if len(extraEnv) > 0 {
 		args = append(args, "env")
 		args = append(args, extraEnv...)
 	}
 	args = append(args, "opencode", "models")
-	out, err := exec.CommandContext(ctx, "ssh", args...).Output() //nolint:gosec // container is not user-controlled
+	out, err := exec.CommandContext(ctx, "ssh", args...).Output() //nolint:gosec // target is not user-controlled
 	if err != nil {
 		return nil, fmt.Errorf("opencode models: %w", err)
 	}
