@@ -220,7 +220,6 @@ function Shell(props: { children?: JSX.Element }) {
           recentRepo={() => s.repos()[0]?.path ?? ""}
           selectedHarness={s.selectedHarness}
           selectedModel={s.selectedModel}
-          serverCaps={s.serverCaps}
         />
       </Show>
       <Portal>

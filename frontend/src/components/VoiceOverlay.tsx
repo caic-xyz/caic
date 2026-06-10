@@ -3,7 +3,6 @@ import { createEffect, createSignal, For, Show, untrack, onCleanup, onMount } fr
 import type { Task } from "@sdk/types.gen";
 import { voiceSession } from "../VoiceSession";
 import type { VoiceState, TranscriptEntry, VoiceSession } from "../VoiceSession";
-import type { ServerCapabilities } from "../FunctionDeclarations";
 import { setVoiceActive } from "../notifications";
 import { setVoiceConnected, setVoiceTaskNumberMap } from "../VoiceState";
 import styles from "./VoiceOverlay.module.css";
@@ -17,7 +16,6 @@ interface Props {
   recentRepo: () => string;
   selectedHarness: () => string;
   selectedModel: () => string;
-  serverCaps: () => ServerCapabilities;
 }
 
 /** Bar transition durations (ms): center reacts fastest, outer bars lag. */
@@ -116,7 +114,7 @@ export default function VoiceOverlay(props: Props) {
       const repo = untrack(() => props.recentRepo());
       const harness = untrack(() => props.selectedHarness());
       const model = untrack(() => props.selectedModel());
-      void session.connect(tasks, repo, harness, model, untrack(() => props.serverCaps()));
+      void session.connect(tasks, repo, harness, model);
     }
   };
 

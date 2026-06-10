@@ -1,13 +1,9 @@
 // Core voice gateway session manager for the web frontend via WebRTC. Keep in sync with android/caic/src/main/java/com/fghbuild/caic/voice/VoiceSession.kt
 import { createStore, produce } from "solid-js/store";
-import { voiceRTCOffer, listHarnesses, listRepos } from "./api";
+import { voiceRTCOffer } from "./api";
 import type { Task } from "@sdk/types.gen";
-import { FunctionHandlers } from "./FunctionHandlers";
 import { TaskNumberMap } from "./TaskNumberMap";
-import {
-  buildFunctionDeclarations,
-  type ServerCapabilities,
-} from "./FunctionDeclarations";
+import { mcpListTools, mcpCallTool, type McpToolDescriptor } from "./McpClient";
 import { formatElapsed, formatCost } from "./formatting";
 import {
   type Error,
@@ -145,7 +141,6 @@ export class VoiceSession {
   private _speakerActive = false;
   /** Text notifications buffered while the model is speaking; flushed on turn end. */
   private _pendingNotifications: string[] = [];
-  private _functions: FunctionHandlers | null = null;
   /** Snapshot to inject after session.ready. */
   private _pendingSnapshot: string | null = null;
   private _setupTimer: ReturnType<typeof setTimeout> | null = null;
@@ -298,7 +293,6 @@ export class VoiceSession {
     recentRepo: string,
     defaultHarness: string,
     defaultModel: string,
-    caps: ServerCapabilities,
   ): Promise<void> {
     this._releaseAll();
     this._audioContext = new AudioContext({ sampleRate: 16000 });
@@ -306,14 +300,9 @@ export class VoiceSession {
     this._setStatus("Setting up WebRTC…");
 
     try {
-      const [harnesses, repos] = await Promise.all([
-        listHarnesses().catch(() => []),
-        listRepos().catch(() => []),
-      ]);
-      const harnessNames = harnesses.map((h) => h.name);
-      const repoPaths = repos.map((r) => r.path);
+      const mcpTools = await mcpListTools();
 
-      // Build task snapshot (same as connectWebSocket()).
+      // Build task snapshot.
       const prePurged = new Set(
         tasks
           .filter(
@@ -339,12 +328,6 @@ export class VoiceSession {
         active,
         recentRepo,
         this.taskNumberMap,
-        defaultHarness,
-        defaultModel,
-      );
-      this._functions = new FunctionHandlers(
-        this.taskNumberMap,
-        () => this.excludedTaskIds,
         defaultHarness,
         defaultModel,
       );
@@ -427,7 +410,7 @@ export class VoiceSession {
 
       dc.onopen = () => {
         this._setStatus("Waiting for server…");
-        this._sendSetup(harnessNames, repoPaths, defaultHarness, caps);
+        this._sendSetup(mcpTools);
       };
 
       dc.onclose = () => {
@@ -481,7 +464,6 @@ export class VoiceSession {
     }
     this._releaseAll();
     this._speakerAudio = null;
-    this._functions = null;
     this._pendingSnapshot = null;
     // Preserve transcript for review; mark all entries final.
     this._update((s) => {
@@ -580,23 +562,12 @@ export class VoiceSession {
   // Gateway setup message
   // -----------------------------------------------------------------------
 
-  private _sendSetup(
-    harnesses: string[],
-    repos: string[],
-    defaultHarness: string,
-    caps: ServerCapabilities,
-  ): void {
-    const decls = buildFunctionDeclarations(
-      harnesses,
-      repos,
-      defaultHarness || undefined,
-      caps,
-    );
+  private _sendSetup(tools: McpToolDescriptor[]): void {
     const setup = gatewaySessionSetup(
-      decls.map((fd) => ({
-        name: fd.name,
-        description: fd.description,
-        parameters: fd.parameters,
+      tools.map((d) => ({
+        name: d.name,
+        description: d.description,
+        parameters: d.inputSchema,
       })),
     );
     this._send(JSON.stringify(setup));
@@ -690,22 +661,23 @@ export class VoiceSession {
   }
 
   private async _handleToolCall(msg: ToolCall): Promise<void> {
-    const fns = this._functions;
-    if (!fns) return;
     if (!msg.id || !msg.name) return;
 
     try {
       this._update((s) => {
         s.activeTool = msg.name ?? null;
       });
-      const result = await fns.handle(msg.name, msg.args ?? {});
+      const result = await mcpCallTool(msg.name, msg.args ?? {});
       this._update((s) => {
         s.activeTool = null;
       });
 
       // Surface tool errors in the transcript.
-      if (typeof result["error"] === "string") {
-        const errMsg = result["error"];
+      if (result.isError) {
+        const errMsg =
+          typeof result.structuredContent["error"] === "string"
+            ? result.structuredContent["error"]
+            : "Tool error";
         this._update((s) => {
           s.transcript = [
             ...s.transcript,
@@ -718,7 +690,7 @@ export class VoiceSession {
         });
       }
 
-      this._sendToolResult(msg.id, msg.name, result);
+      this._sendToolResult(msg.id, msg.name, result.structuredContent);
     } catch (e: unknown) {
       this._update((s) => {
         s.activeTool = null;

@@ -706,14 +706,6 @@ function createAppStore() {
   const inputImages = (id: string) => inputImageDrafts().get(id) ?? [];
   const setInputImages = (id: string, imgs: APIImageData[]) => setInputImageDrafts((prev) => { const next = new Map(prev); next.set(id, imgs); return next; });
 
-  const serverCaps = () => ({
-    tailscaleAvailable: tailscaleAvailable(),
-    usbAvailable: usbAvailable(),
-    displayAvailable: displayAvailable(),
-    sudoAvailable: sudoAvailable(),
-    gitHubTokenAvailable: gitHubTokenAvailable(),
-  });
-
   return {
     navigate,
     auth,
@@ -730,7 +722,7 @@ function createAppStore() {
     displayAvailable, displayEnabled, setDisplayEnabled,
     sudoAvailable, sudoEnabled, setSudoEnabled,
     gitHubTokenAvailable, gitHubTokenEnabled, setGitHubTokenEnabled,
-    voiceGatewayAvailable, serverCaps,
+    voiceGatewayAvailable,
     // sidebar + actions
     sidebarOpen, setSidebarOpen, now, actionId, handleStop, handlePurge, handleRevive, handleFork,
     navigateToTask, navigateToDiff, fixCI,

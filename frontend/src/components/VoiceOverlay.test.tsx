@@ -70,7 +70,6 @@ describe("VoiceOverlay connection", () => {
         recentRepo={() => "my-repo"}
         selectedHarness={() => "claude"}
         selectedModel={() => "opus"}
-        serverCaps={() => ({ tailscaleAvailable: true, usbAvailable: true, displayAvailable: true, sudoAvailable: true, gitHubTokenAvailable: true })}
       />
     ));
 

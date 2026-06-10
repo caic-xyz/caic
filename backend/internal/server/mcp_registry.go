@@ -15,6 +15,8 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
+	"github.com/invopop/jsonschema"
+	orderedmap "github.com/pb33f/ordered-map/v2"
 )
 
 type caicToolCatalogState struct {
@@ -68,9 +70,18 @@ func (c *caicToolRegistry) callTool(ctx context.Context, name string, argsJSON j
 }
 
 func (c *caicToolRegistry) specsForState(s *caicToolCatalogState) []toolSpec {
+	createSpec := newToolSpec("task_create", "Create task", "Create a new coding task. Confirm repo and prompt with the user before calling.", c.handleTaskCreate(s.DefaultHarness, s.DefaultModel))
+	createSpec.InputSchema = buildTaskCreateSchema(s)
+
+	forkSpec := newToolSpec("task_fork", "Fork task", "Fork a running or waiting task, creating a snapshot of its container on a new branch. The prompt describes what the forked task should do. Optionally override the harness and model.", c.handleTaskFork)
+	forkSpec.InputSchema = buildTaskForkSchema(s)
+
+	botFixCISpec := newToolSpec("bot_fix_ci", "Fix repository CI", "Create a task to investigate and fix a failing CI on a repository's default branch.", c.handleBotFixCI)
+	botFixCISpec.InputSchema = buildBotFixCISchema(s)
+
 	return []toolSpec{
 		newToolSpec("tasks_list", "List tasks", "List all current coding tasks with their status, cost, and duration.", c.handleTasksList),
-		newToolSpec("task_create", "Create task", "Create a new coding task. Confirm repo and prompt with the user before calling.", c.handleTaskCreate(s.DefaultHarness, s.DefaultModel)),
+		createSpec,
 		newToolSpec("task_get_detail", "Get task detail", "Get recent activity and status details for a task by its number.", c.handleTaskGetDetail),
 		newToolSpec("task_send_message", "Send task message", "Send a text message to a waiting or asking agent by task number.", c.handleTaskSendMessage),
 		newToolSpec("task_answer_question", "Answer task question", "Answer an agent's question by task number. The agent is in 'asking' state.", c.handleTaskAnswerQuestion),
@@ -78,14 +89,14 @@ func (c *caicToolRegistry) specsForState(s *caicToolCatalogState) []toolSpec {
 		newToolSpec("task_stop", "Stop task", "Stop a running or waiting task. The container is preserved and can be revived later.", c.handleTaskStop),
 		newToolSpec("task_purge", "Purge task", "Permanently delete a stopped task's container. Cannot be undone.", c.handleTaskPurge),
 		newToolSpec("task_revive", "Revive task", "Revive a stopped task, restarting its container and agent session.", c.handleTaskRevive),
-		newToolSpec("task_fork", "Fork task", "Fork a running or waiting task, creating a snapshot of its container on a new branch. The prompt describes what the forked task should do. Optionally override the harness and model.", c.handleTaskFork),
+		forkSpec,
 		newToolSpec("get_usage", "Get usage", "Check current API quota utilization and limits.", c.handleGetUsage),
 		newToolSpec("clone_repo", "Clone repository", "Clone a git repository by URL. Optionally specify a local path.", c.handleCloneRepo),
 		newToolSpec("agent_last_message", "Get last agent message", "Get latest agent message, question, or result. Call to check what the agent needs or relay to user.", c.handleAgentLastMessage),
 		newToolSpec("web_search", "Web search", "Search the web for a query and display the results in an embedded browser.", c.handleWebSearch),
 		newToolSpec("web_fetch", "Web fetch", "Open a URL in the embedded browser.", c.handleWebFetch),
 		newToolSpec("task_fix_pr", "Fix task PR", "Inject a fix-PR command into an existing task to fix its failing PR CI in auto mode.", c.handleTaskFixPR),
-		newToolSpec("bot_fix_ci", "Fix repository CI", "Create a task to investigate and fix a failing CI on a repository's default branch.", c.handleBotFixCI),
+		botFixCISpec,
 	}
 }
 
@@ -623,6 +634,74 @@ func (c *caicToolRegistry) entryByNumber(ctx context.Context, num int) (int, *ta
 	}
 	entry, ok := c.tasks.taskMgr.GetEntry(t.ID.String())
 	return num, entry, ok
+}
+
+// Dynamic schema builders
+
+func buildTaskCreateSchema(s *caicToolCatalogState) *jsonschema.Schema {
+	harnessDesc := "Agent harness to use (optional)"
+	if s.DefaultHarness != "" {
+		harnessDesc = "Agent harness (default: " + s.DefaultHarness + ")"
+	}
+	minOne := uint64(1)
+	props := orderedmap.New[string, *jsonschema.Schema]()
+	props.Set("prompt", &jsonschema.Schema{Type: "string", Description: "The task description/prompt for the coding agent"})
+	props.Set("repos", &jsonschema.Schema{Type: "array", Description: "Repositories to work in (one or more)", Items: stringSchemaWithEnum(s.Repos), MinItems: &minOne})
+	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Model to use (optional)"})
+	props.Set("harness", stringSchemaWithEnumDesc(s.Harnesses, harnessDesc))
+	props.Set("display", &jsonschema.Schema{Type: "boolean", Description: capDesc(s.Caps.DisplayAvailable, "Enable virtual display (VNC) for this task")})
+	props.Set("tailscale", &jsonschema.Schema{Type: "boolean", Description: capDesc(s.Caps.TailscaleAvailable, "Enable Tailscale networking for this task")})
+	props.Set("usb", &jsonschema.Schema{Type: "boolean", Description: capDesc(s.Caps.USBAvailable, "Enable USB passthrough for this task")})
+	props.Set("sudo", &jsonschema.Schema{Type: "boolean", Description: capDesc(s.Caps.SudoAvailable, "Enable root access via sudo with a random password")})
+	props.Set("gitHubToken", &jsonschema.Schema{Type: "boolean", Description: capDesc(s.Caps.GitHubTokenAvailable, "Enable GitHub token injection for this task")})
+	return &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"prompt", "repos"}}
+}
+
+func buildTaskForkSchema(s *caicToolCatalogState) *jsonschema.Schema {
+	props := orderedmap.New[string, *jsonschema.Schema]()
+	props.Set("task_number", &jsonschema.Schema{Type: "integer", Description: "The task number to fork, e.g. 1 for task #1"})
+	props.Set("prompt", &jsonschema.Schema{Type: "string", Description: "The initial prompt for the forked task"})
+	props.Set("harness", stringSchemaWithEnumDesc(s.Harnesses, "Override harness (optional, inherits from source if omitted)"))
+	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Override model (optional, inherits from source if omitted)"})
+	return &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"task_number", "prompt"}}
+}
+
+func buildBotFixCISchema(s *caicToolCatalogState) *jsonschema.Schema {
+	desc := "Repository to fix CI for"
+	if len(s.Repos) == 0 {
+		desc = "Repository path to fix CI for"
+	}
+	props := orderedmap.New[string, *jsonschema.Schema]()
+	props.Set("repo", stringSchemaWithEnumDesc(s.Repos, desc))
+	return &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"repo"}}
+}
+
+func stringSchemaWithEnum(values []string) *jsonschema.Schema {
+	if len(values) == 0 {
+		return &jsonschema.Schema{Type: "string"}
+	}
+	return &jsonschema.Schema{Type: "string", Enum: stringsToAny(values)}
+}
+
+func stringSchemaWithEnumDesc(values []string, desc string) *jsonschema.Schema {
+	s := stringSchemaWithEnum(values)
+	s.Description = desc
+	return s
+}
+
+func capDesc(available bool, desc string) string {
+	if available {
+		return desc
+	}
+	return desc + " (not available on this server)"
+}
+
+func stringsToAny(ss []string) []any {
+	out := make([]any, len(ss))
+	for i, s := range ss {
+		out[i] = s
+	}
+	return out
 }
 
 // Support code
