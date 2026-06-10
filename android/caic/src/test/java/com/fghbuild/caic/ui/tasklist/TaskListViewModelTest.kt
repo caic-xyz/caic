@@ -120,7 +120,7 @@ class TaskListViewModelTest {
 
         val taskRepository = TaskRepository(settingsRepository)
         val context = ApplicationProvider.getApplicationContext<Application>()
-        val voiceSession = VoiceSession(context, settingsRepository, taskRepository)
+        val voiceSession = VoiceSession(context, settingsRepository)
         val taskNotifier = TaskNotifier(context, taskRepository, voiceSession)
         viewModel = TaskListViewModel(taskRepository, settingsRepository, taskNotifier)
 
@@ -210,7 +210,7 @@ class TaskListViewModelTest {
 
         val taskRepository = TaskRepository(settingsRepository)
         val context = ApplicationProvider.getApplicationContext<Application>()
-        val voiceSession = VoiceSession(context, settingsRepository, taskRepository)
+        val voiceSession = VoiceSession(context, settingsRepository)
         val taskNotifier = TaskNotifier(context, taskRepository, voiceSession)
         viewModel = TaskListViewModel(taskRepository, settingsRepository, taskNotifier)
 

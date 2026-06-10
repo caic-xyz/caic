@@ -13,7 +13,6 @@ import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.caic.sdk.v1.ApiClient
 import com.caic.voicegateway.sdk.v1.ContextUpdate
 import com.caic.voicegateway.sdk.v1.Error
 import com.caic.voicegateway.sdk.v1.MessageEnvelope
@@ -27,7 +26,6 @@ import com.caic.voicegateway.sdk.v1.TranscriptDelta
 import com.caic.voicegateway.sdk.v1.VoiceConfig
 import com.caic.voicegateway.sdk.v1.VoiceRTCOfferReq
 import com.fghbuild.caic.data.SettingsRepository
-import com.fghbuild.caic.data.TaskRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -64,7 +62,6 @@ private const val TAG = "VoiceSession"
 class VoiceSession @Inject constructor(
     @param:ApplicationContext private val appContext: Context,
     private val settingsRepository: SettingsRepository,
-    private val taskRepository: TaskRepository,
 ) {
     private val audioManager = appContext.getSystemService(AudioManager::class.java)
     private val json = Json {
@@ -78,12 +75,8 @@ class VoiceSession @Inject constructor(
     private var pcFactory: PeerConnectionFactory? = null
     private var rtcAudioSource: org.webrtc.AudioSource? = null
     private var localAudioTrack: org.webrtc.AudioTrack? = null
-    private var functionHandlers: FunctionHandlers? = null
-    private var availableHarnesses: List<String> = emptyList()
-    private var availableRepos: List<String> = emptyList()
-    private var defaultHarness: String = ""
-    private var defaultModel: String = ""
-    private var serverCaps: ServerCaps = ServerCaps()
+    private var mcpClient: McpClient? = null
+    private var mcpTools: List<McpToolDescriptor> = emptyList()
     private var deviceCallback: AudioDeviceCallback? = null
     private var scoReceiver: BroadcastReceiver? = null
     private var audioFocusRequest: AudioFocusRequest? = null
@@ -157,30 +150,14 @@ class VoiceSession @Inject constructor(
                     return@launch
                 }
 
-                val apiClient = ApiClient(settings.serverURL, tokenProvider = { settingsRepository.settings.value.authToken })
+                val client = McpClient(settings.serverURL, tokenProvider = { settingsRepository.settings.value.authToken })
+                mcpClient = client
+                mcpTools = client.listTools()
                 val voiceGatewayClient =
                     com.caic.voicegateway.sdk.v1.ApiClient(
                         settings.serverURL,
                         tokenProvider = { settingsRepository.settings.value.authToken },
                     )
-                availableHarnesses = apiClient.listHarnesses().map { it.name }
-                availableRepos = apiClient.listRepos().map { it.path }
-                val config = apiClient.getConfig()
-                serverCaps = ServerCaps(
-                    tailscaleAvailable = config.tailscaleAvailable,
-                    usbAvailable = config.usbAvailable,
-                    displayAvailable = config.displayAvailable,
-                    sudoAvailable = config.sudoAvailable,
-                    gitHubTokenAvailable = config.gitHubTokenAvailable,
-                )
-                val prefs = settingsRepository.serverPreferences.value
-                defaultHarness = prefs?.harness?.ifBlank { null }
-                    ?: availableHarnesses.firstOrNull() ?: ""
-                defaultModel = prefs?.harness?.let { h -> prefs.models?.get(h) }?.ifBlank { null } ?: ""
-                functionHandlers = FunctionHandlers(
-                    apiClient, taskRepository, settings.serverURL, taskNumberMap,
-                    { excludedTaskIds }, defaultHarness, defaultModel,
-                )
 
                 // Initialize WebRTC factory.
                 if (pcFactory == null) {
@@ -355,7 +332,8 @@ class VoiceSession @Inject constructor(
         peerConnection?.dispose()
         peerConnection = null
         rtcSessionID = null
-        functionHandlers = null
+        mcpClient = null
+        mcpTools = emptyList()
         // Preserve transcript so the user can review it after disconnecting.
         _state.value = VoiceState(transcript = _state.value.transcript.map { it.copy(final = true) })
     }
@@ -393,28 +371,16 @@ class VoiceSession @Inject constructor(
     }
 
     private fun sendSetupMessage(voiceName: String) {
-        val setup = buildSetupMessage(voiceName, availableHarnesses, availableRepos, serverCaps)
-        Log.i(TAG, "sending setup message")
-        send(setup)
-    }
-
-    private fun buildSetupMessage(
-        voiceName: String,
-        harnesses: List<String>,
-        repos: List<String>,
-        caps: ServerCaps,
-    ): String {
-        val tools = buildFunctionDeclarations(
-            harnesses, repos, defaultHarness.ifBlank { null }, caps,
-        ).map { fd ->
+        val tools = mcpTools.map { d ->
             ToolDeclaration(
-                name = fd.name,
-                description = fd.description,
-                parameters = fd.parameters,
+                name = d.name,
+                description = d.description,
+                parameters = d.inputSchema,
             )
         }
         val setup = gatewaySessionSetup(voiceName, tools)
-        return json.encodeToString(SessionSetup.serializer(), setup)
+        Log.i(TAG, "sending setup message")
+        send(json.encodeToString(SessionSetup.serializer(), setup))
     }
 
     @Suppress("TooGenericExceptionCaught") // Error boundary: malformed messages must not crash.
@@ -489,19 +455,23 @@ class VoiceSession @Inject constructor(
         try {
             _state.update { it.copy(activeTool = name) }
             val args = msg.args as? JsonObject ?: JsonObject(emptyMap())
-            val result = functionHandlers?.handle(name, args) ?: errorJson("No handler")
+            val client = mcpClient ?: run {
+                _state.update { it.copy(activeTool = null) }
+                sendToolResult(id, name, errorJson("No MCP client"))
+                return
+            }
+            val result = client.callTool(name, args)
             _state.update { it.copy(activeTool = null) }
-            // Surface tool errors in the transcript so they're visible in the UI.
-            val errorMsg = (result as? JsonObject)?.get("error")?.jsonPrimitive?.content
-            if (errorMsg != null) {
-                Log.e(TAG, "Tool $name failed: $errorMsg")
+            if (result.isError) {
+                val errMsg = result.structuredContent["error"]?.jsonPrimitive?.content ?: "Tool error"
+                Log.e(TAG, "Tool $name failed: $errMsg")
                 _state.update {
                     it.copy(transcript = it.transcript + TranscriptEntry(
-                        TranscriptSpeaker.ASSISTANT, "[$name] $errorMsg", final = true,
+                        TranscriptSpeaker.ASSISTANT, "[$name] $errMsg", final = true,
                     ))
                 }
             }
-            sendToolResult(id, name, result)
+            sendToolResult(id, name, result.structuredContent)
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
             _state.update { it.copy(activeTool = null) }
             val errMsg = e.message ?: "Unknown error"
