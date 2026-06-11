@@ -12,6 +12,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/frontend"
 	"github.com/caic-xyz/caic/backend/internal/auth"
+	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/server/ipgeo"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
@@ -34,7 +35,7 @@ type Router struct {
 	runtimeProcesses     *RuntimeProcesses
 	serverConfigHandlers *serverConfigHandlers
 	taskHTTPHandlers     *taskHTTPHandlers
-	mcpHandlers          *mcpHandlers
+	mcpHandlers          *mcp.Handler
 	usageHandlers        *usageHandlers
 	voiceHandlers        *voiceHandlers
 	webFetchHandlers     *webFetchHandlers
@@ -149,7 +150,7 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/tool/{toolUseID}", taskRoutes.handleTaskToolInput)
 	apiMux.HandleFunc("GET /api/caic/v1/usage", s.usageHandlers.handleGetUsage)
 	apiMux.Handle("/api/voicegateway/v1/", s.voiceHandlers.handler())
-	apiMux.HandleFunc("POST /api/caic/v1/mcp", s.mcpHandlers.handleMCP)
+	apiMux.HandleFunc("POST /api/caic/v1/mcp", s.mcpHandlers.HandleMCP)
 	apiMux.HandleFunc("POST /api/caic/v1/web/fetch", handle(s.webFetchHandlers.webFetch))
 	apiMux.HandleFunc("GET /api/caic/v1/server/tasks/events", taskRoutes.handleTaskListEvents)
 	apiMux.HandleFunc("GET /api/caic/v1/server/usage/events", s.usageHandlers.handleEvents)

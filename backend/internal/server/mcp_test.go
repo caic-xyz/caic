@@ -16,6 +16,7 @@ import (
 
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/task"
 )
 
@@ -26,35 +27,44 @@ type fakeMCPRegistry struct {
 	readErr error
 }
 
-func (f fakeMCPRegistry) tools(context.Context) ([]mcpToolDescriptor, error) {
+func (f fakeMCPRegistry) Tools(context.Context) ([]mcp.ToolDescriptor, error) {
 	return nil, nil
 }
 
-func (f fakeMCPRegistry) callTool(context.Context, string, json.RawMessage) (rawToolResult, error) {
-	return rawToolResult{}, f.callErr
+func (f fakeMCPRegistry) CallTool(context.Context, string, json.RawMessage) (mcp.RawToolResult, error) {
+	return mcp.RawToolResult{}, f.callErr
 }
 
-func (f fakeMCPRegistry) listResources(context.Context) resourcesListResult {
-	return resourcesListResult{}
+func (f fakeMCPRegistry) ListResources(context.Context) mcp.ResourcesListResult {
+	return mcp.ResourcesListResult{}
 }
 
-func (f fakeMCPRegistry) readResource(context.Context, string) (resourcesReadResult, error) {
-	return resourcesReadResult{}, f.readErr
+func (f fakeMCPRegistry) ReadResource(context.Context, string) (mcp.ResourcesReadResult, error) {
+	return mcp.ResourcesReadResult{}, f.readErr
+}
+
+func mcpRequestJSON(method, paramsFields string) string {
+	if paramsFields == "{}" || paramsFields == "" {
+		paramsFields = ""
+	} else {
+		paramsFields += ","
+	}
+	return `{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":{` + paramsFields + `"_meta":{"io.modelcontextprotocol/protocolVersion":"` + mcp.ProtocolVersion + `","io.modelcontextprotocol/clientInfo":{"name":"caic-test","version":"1.0.0"},"io.modelcontextprotocol/clientCapabilities":{}}}}`
 }
 
 func TestMCPHandlers(t *testing.T) {
 	t.Parallel()
 
-	postMCP := func(t *testing.T, h *mcpHandlers, method, name, body string) (*httptest.ResponseRecorder, jsonRPCResponse) {
+	postMCP := func(t *testing.T, h *mcp.Handler, method, name, body string) (*httptest.ResponseRecorder, mcp.JSONRPCResponse) {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
-		req.Header.Set("Mcp-Protocol-Version", mcpProtocolVersion)
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", method)
 		if name != "" {
 			req.Header.Set("Mcp-Name", name)
 		}
 		w := httptest.NewRecorder()
-		h.handleMCP(w, req)
-		var resp jsonRPCResponse
+		h.HandleMCP(w, req)
+		var resp mcp.JSONRPCResponse
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("Decode: %v", err)
 		}
@@ -79,8 +89,8 @@ func TestMCPHandlers(t *testing.T) {
 			t.Errorf("resultType = %v, want complete", result["resultType"])
 		}
 		versions, ok := result["supportedVersions"].([]any)
-		if !ok || len(versions) != 1 || versions[0] != mcpProtocolVersion {
-			t.Fatalf("supportedVersions = %#v, want [%q]", result["supportedVersions"], mcpProtocolVersion)
+		if !ok || len(versions) != 1 || versions[0] != mcp.ProtocolVersion {
+			t.Fatalf("supportedVersions = %#v, want [%q]", result["supportedVersions"], mcp.ProtocolVersion)
 		}
 		caps, ok := result["capabilities"].(map[string]any)
 		if !ok {
@@ -108,8 +118,8 @@ func TestMCPHandlers(t *testing.T) {
 		if result["resultType"] != "complete" {
 			t.Errorf("resultType = %v, want complete", result["resultType"])
 		}
-		if result["cacheScope"] != string(mcpCacheScopePrivate) {
-			t.Errorf("cacheScope = %v, want %q", result["cacheScope"], mcpCacheScopePrivate)
+		if result["cacheScope"] != string(mcp.CacheScopePrivate) {
+			t.Errorf("cacheScope = %v, want %q", result["cacheScope"], mcp.CacheScopePrivate)
 		}
 		tools, ok := result["tools"].([]any)
 		if !ok {
@@ -176,10 +186,10 @@ func TestMCPHandlers(t *testing.T) {
 		cancel()
 		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"toolsListChanged":true,"promptsListChanged":true,"resourcesListChanged":true,"resourceSubscriptions":["caic://tasks"]}`)
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
-		req.Header.Set("Mcp-Protocol-Version", mcpProtocolVersion)
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "subscriptions/listen")
 		w := httptest.NewRecorder()
-		s.mcpHandlers.handleMCP(w, req)
+		s.mcpHandlers.HandleMCP(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
@@ -229,18 +239,18 @@ func TestMCPHandlers(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(mcpRequestJSON("tools/list", `{}`)))
-		req.Header.Set("Mcp-Protocol-Version", mcpProtocolVersion)
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "tools/call")
 		w := httptest.NewRecorder()
-		s.mcpHandlers.handleMCP(w, req)
+		s.mcpHandlers.HandleMCP(w, req)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
-		var resp jsonRPCResponse
+		var resp mcp.JSONRPCResponse
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("Decode: %v", err)
 		}
-		if resp.Error == nil || resp.Error.Code != mcpHeaderMismatchCode {
+		if resp.Error == nil || resp.Error.Code != mcp.HeaderMismatchCode {
 			t.Fatalf("error = %#v, want header mismatch", resp.Error)
 		}
 	})
@@ -253,7 +263,7 @@ func TestMCPHandlers(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
-		if resp.Error == nil || resp.Error.Code != mcpHeaderMismatchCode {
+		if resp.Error == nil || resp.Error.Code != mcp.HeaderMismatchCode {
 			t.Fatalf("error = %#v, want header mismatch", resp.Error)
 		}
 	})
@@ -263,12 +273,12 @@ func TestMCPHandlers(t *testing.T) {
 		s := newTestRouter(t)
 		body := mcpRequestJSON("tools/call", `"name":"task_get_detail","arguments":{"task_number":1}`)
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
-		req.Header.Set("Mcp-Protocol-Version", mcpProtocolVersion)
+		req.Header.Set("Mcp-Protocol-Version", mcp.ProtocolVersion)
 		req.Header.Set("Mcp-Method", "tools/call")
 		req.Header.Set("Mcp-Name", "task_get_detail")
 		req.Header.Set("Mcp-Param-Task-Number", "1")
 		w := httptest.NewRecorder()
-		s.mcpHandlers.handleMCP(w, req)
+		s.mcpHandlers.HandleMCP(w, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
@@ -291,20 +301,20 @@ func TestMCPHandlers(t *testing.T) {
 	t.Run("unsupportedProtocolVersion", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
-		body := strings.ReplaceAll(mcpRequestJSON("tools/list", `{}`), mcpProtocolVersion, "2099-01-01")
+		body := strings.ReplaceAll(mcpRequestJSON("tools/list", `{}`), mcp.ProtocolVersion, "2099-01-01")
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
 		req.Header.Set("Mcp-Protocol-Version", "2099-01-01")
 		req.Header.Set("Mcp-Method", "tools/list")
 		w := httptest.NewRecorder()
-		s.mcpHandlers.handleMCP(w, req)
+		s.mcpHandlers.HandleMCP(w, req)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
-		var resp jsonRPCResponse
+		var resp mcp.JSONRPCResponse
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("Decode: %v", err)
 		}
-		if resp.Error == nil || resp.Error.Code != mcpUnsupportedProtocolVersionCode {
+		if resp.Error == nil || resp.Error.Code != mcp.UnsupportedProtocolVersionCode {
 			t.Fatalf("error = %#v, want unsupported protocol version", resp.Error)
 		}
 	})
@@ -327,13 +337,13 @@ func TestMCPHandlers(t *testing.T) {
 	// must surface as an internal error, not as invalid params.
 	t.Run("toolCallBackendError", func(t *testing.T) {
 		t.Parallel()
-		h := &mcpHandlers{Registry: fakeMCPRegistry{callErr: errors.New("backend unavailable")}, ServerInfo: mcpImplementation{Name: "caic"}}
+		h := &mcp.Handler{Registry: fakeMCPRegistry{callErr: errors.New("backend unavailable")}, ServerInfo: mcp.Implementation{Name: "caic"}}
 		body := mcpRequestJSON("tools/call", `"name":"tasks_list","arguments":{}`)
 		w, resp := postMCP(t, h, "tools/call", "tasks_list", body)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 		}
-		if resp.Error == nil || resp.Error.Code != mcpInternalErrorCode {
+		if resp.Error == nil || resp.Error.Code != mcp.InternalErrorCode {
 			t.Fatalf("error = %#v, want internal error", resp.Error)
 		}
 	})
@@ -341,10 +351,10 @@ func TestMCPHandlers(t *testing.T) {
 	// Bad client input (unknown tool) stays an invalid-params error.
 	t.Run("toolCallInvalidParams", func(t *testing.T) {
 		t.Parallel()
-		h := &mcpHandlers{Registry: fakeMCPRegistry{callErr: errInvalidParams("unknown tool: nope")}, ServerInfo: mcpImplementation{Name: "caic"}}
+		h := &mcp.Handler{Registry: fakeMCPRegistry{callErr: mcp.ErrInvalidParams("unknown tool: nope")}, ServerInfo: mcp.Implementation{Name: "caic"}}
 		body := mcpRequestJSON("tools/call", `"name":"nope","arguments":{}`)
 		_, resp := postMCP(t, h, "tools/call", "nope", body)
-		if resp.Error == nil || resp.Error.Code != mcpInvalidParamsCode {
+		if resp.Error == nil || resp.Error.Code != mcp.InvalidParamsCode {
 			t.Fatalf("error = %#v, want invalid params", resp.Error)
 		}
 	})
@@ -352,14 +362,14 @@ func TestMCPHandlers(t *testing.T) {
 	// A resource backend fault is internal; an unknown resource is invalid params.
 	t.Run("resourceReadErrors", func(t *testing.T) {
 		t.Parallel()
-		internal := &mcpHandlers{Registry: fakeMCPRegistry{readErr: errors.New("snapshot failed")}, ServerInfo: mcpImplementation{Name: "caic"}}
+		internal := &mcp.Handler{Registry: fakeMCPRegistry{readErr: errors.New("snapshot failed")}, ServerInfo: mcp.Implementation{Name: "caic"}}
 		_, resp := postMCP(t, internal, "resources/read", "caic://tasks", mcpRequestJSON("resources/read", `"uri":"caic://tasks"`))
-		if resp.Error == nil || resp.Error.Code != mcpInternalErrorCode {
+		if resp.Error == nil || resp.Error.Code != mcp.InternalErrorCode {
 			t.Fatalf("error = %#v, want internal error", resp.Error)
 		}
-		notFound := &mcpHandlers{Registry: fakeMCPRegistry{readErr: errInvalidParams("unknown resource: caic://nope")}, ServerInfo: mcpImplementation{Name: "caic"}}
+		notFound := &mcp.Handler{Registry: fakeMCPRegistry{readErr: mcp.ErrInvalidParams("unknown resource: caic://nope")}, ServerInfo: mcp.Implementation{Name: "caic"}}
 		_, resp = postMCP(t, notFound, "resources/read", "caic://nope", mcpRequestJSON("resources/read", `"uri":"caic://nope"`))
-		if resp.Error == nil || resp.Error.Code != mcpInvalidParamsCode {
+		if resp.Error == nil || resp.Error.Code != mcp.InvalidParamsCode {
 			t.Fatalf("error = %#v, want invalid params", resp.Error)
 		}
 	})

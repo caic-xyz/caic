@@ -14,6 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
+	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -106,9 +107,9 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		pprof:            d.Pprof,
 		ipgeoChecker:     d.IPGeoChecker,
 	}
-	s.mcpHandlers = &mcpHandlers{
+	s.mcpHandlers = &mcp.Handler{
 		Registry:     &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, webFetch: webFetch},
-		ServerInfo:   mcpImplementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
+		ServerInfo:   mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
 		Instructions: "Use caic tools to inspect repositories, manage coding-agent tasks, fetch web pages, and check usage.",
 	}
 	s.runtimeProcesses.authEnabled = s.authEnabled
