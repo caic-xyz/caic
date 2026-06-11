@@ -129,10 +129,66 @@ func TestMCPHandlers(t *testing.T) {
 				if _, ok := tool["inputSchema"].(map[string]any); !ok {
 					t.Fatalf("inputSchema type = %T", tool["inputSchema"])
 				}
+				outputSchema, ok := tool["outputSchema"].(map[string]any)
+				if !ok {
+					t.Fatalf("outputSchema type = %T", tool["outputSchema"])
+				}
+				if outputSchema["type"] != "object" {
+					t.Fatalf("outputSchema.type = %v, want object", outputSchema["type"])
+				}
 			}
 		}
 		if !found {
 			t.Fatal("tasks_list not found")
+		}
+	})
+
+	t.Run("resourceTemplatesList", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t)
+		w, resp := postMCP(t, s.mcpHandlers, "resources/templates/list", "", mcpRequestJSON("resources/templates/list", `{}`))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		if resp.Error != nil {
+			t.Fatalf("error = %#v", resp.Error)
+		}
+		result, ok := resp.Result.(map[string]any)
+		if !ok {
+			t.Fatalf("result type = %T", resp.Result)
+		}
+		if result["resultType"] != "complete" {
+			t.Errorf("resultType = %v, want complete", result["resultType"])
+		}
+		templates, ok := result["resourceTemplates"].([]any)
+		if !ok {
+			t.Fatalf("resourceTemplates type = %T", result["resourceTemplates"])
+		}
+		if len(templates) == 0 {
+			t.Fatal("resourceTemplates is empty")
+		}
+	})
+
+	t.Run("subscriptionsListenAcknowledges", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		body := mcpRequestJSON("subscriptions/listen", `"notifications":{"toolsListChanged":true,"promptsListChanged":true,"resourcesListChanged":true,"resourceSubscriptions":["caic://tasks"]}`)
+		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
+		req.Header.Set("Mcp-Protocol-Version", mcpProtocolVersion)
+		req.Header.Set("Mcp-Method", "subscriptions/listen")
+		w := httptest.NewRecorder()
+		s.mcpHandlers.handleMCP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		data := w.Body.String()
+		if !strings.Contains(data, `"method":"notifications/subscriptions/acknowledged"`) {
+			t.Fatalf("subscription response = %s, want acknowledgment", data)
+		}
+		if strings.Contains(data, "promptsListChanged") {
+			t.Fatalf("subscription response = %s, want unsupported prompts omitted", data)
 		}
 	})
 
@@ -145,7 +201,8 @@ func TestMCPHandlers(t *testing.T) {
 		tk.SetState(task.StateWaiting)
 		insertTestTask(t, s, id.String(), tk)
 
-		body := mcpRequestJSON("tools/call", `"name":"tasks_list","arguments":{}`)
+		body := mcpRequestJSON("tools/call", `"name":"tasks_list","arguments":{},"inputResponses":{},"requestState":"retry-state"`)
+		body = strings.Replace(body, `"io.modelcontextprotocol/clientCapabilities":{}`, `"io.modelcontextprotocol/clientCapabilities":{},"example.com/clientTrace":"trace-1"`, 1)
 		w, resp := postMCP(t, s.mcpHandlers, "tools/call", "tasks_list", body)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
@@ -188,6 +245,49 @@ func TestMCPHandlers(t *testing.T) {
 		}
 	})
 
+	t.Run("toolParamHeaderMismatch", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t)
+		body := mcpRequestJSON("tools/call", `"name":"task_get_detail","arguments":{"task_number":1}`)
+		w, resp := postMCP(t, s.mcpHandlers, "tools/call", "task_get_detail", body)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+		if resp.Error == nil || resp.Error.Code != mcpHeaderMismatchCode {
+			t.Fatalf("error = %#v, want header mismatch", resp.Error)
+		}
+	})
+
+	t.Run("toolExecutionErrorOmitsStructuredContent", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t)
+		body := mcpRequestJSON("tools/call", `"name":"task_get_detail","arguments":{"task_number":1}`)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/caic/v1/mcp", strings.NewReader(body))
+		req.Header.Set("Mcp-Protocol-Version", mcpProtocolVersion)
+		req.Header.Set("Mcp-Method", "tools/call")
+		req.Header.Set("Mcp-Name", "task_get_detail")
+		req.Header.Set("Mcp-Param-Task-Number", "1")
+		w := httptest.NewRecorder()
+		s.mcpHandlers.handleMCP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		var rpc map[string]any
+		if err := json.NewDecoder(w.Body).Decode(&rpc); err != nil {
+			t.Fatalf("Decode: %v", err)
+		}
+		result, ok := rpc["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("result type = %T", rpc["result"])
+		}
+		if result["isError"] != true {
+			t.Fatalf("isError = %v, want true", result["isError"])
+		}
+		if _, ok := result["structuredContent"]; ok {
+			t.Fatalf("structuredContent present on tool execution error: %#v", result["structuredContent"])
+		}
+	})
+
 	t.Run("unsupportedProtocolVersion", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
@@ -209,14 +309,14 @@ func TestMCPHandlers(t *testing.T) {
 		}
 	})
 
-	// An unknown method is a JSON-RPC error, not a transport failure: HTTP 200
-	// with a -32601 error object in the body.
+	// The draft Streamable HTTP transport maps an unknown RPC method to HTTP 404
+	// with a -32601 JSON-RPC error body.
 	t.Run("initializeRemoved", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)
 		w, resp := postMCP(t, s.mcpHandlers, "initialize", "", mcpRequestJSON("initialize", `{}`))
-		if w.Code != http.StatusOK {
-			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
 		}
 		if resp.Error == nil || resp.Error.Code != -32601 {
 			t.Fatalf("error = %#v, want method not found", resp.Error)

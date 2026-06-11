@@ -11,12 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/invopop/jsonschema"
+	orderedmap "github.com/pb33f/ordered-map/v2"
+
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	"github.com/caic-xyz/caic/backend/internal/tasks"
-	"github.com/invopop/jsonschema"
-	orderedmap "github.com/pb33f/ordered-map/v2"
 )
 
 type caicToolCatalogState struct {
@@ -51,7 +52,7 @@ func (c *caicToolRegistry) tools(ctx context.Context) ([]mcpToolDescriptor, erro
 	}
 	tools := make([]mcpToolDescriptor, len(specs))
 	for i, s := range specs {
-		tools[i] = mcpToolDescriptor{Name: s.Name, Title: s.Title, Description: s.Description, InputSchema: s.InputSchema, OutputSchema: s.OutputSchema}
+		tools[i] = mcpToolDescriptor{Name: s.Name, Title: s.Title, Description: s.Description, InputSchema: s.InputSchema, OutputSchema: s.OutputSchema, Annotations: s.Annotations}
 	}
 	return tools, nil
 }
@@ -72,32 +73,40 @@ func (c *caicToolRegistry) callTool(ctx context.Context, name string, argsJSON j
 func (c *caicToolRegistry) specsForState(s *caicToolCatalogState) []toolSpec {
 	createSpec := newToolSpec("task_create", "Create task", "Create a new coding task. Confirm repo and prompt with the user before calling.", c.handleTaskCreate(s.DefaultHarness, s.DefaultModel))
 	createSpec.InputSchema = buildTaskCreateSchema(s)
+	createSpec.Annotations = &mcpToolAnnotations{Title: "Create task", DestructiveHint: true, OpenWorldHint: false}
 
 	forkSpec := newToolSpec("task_fork", "Fork task", "Fork a running or waiting task, creating a snapshot of its container on a new branch. The prompt describes what the forked task should do. Optionally override the harness and model.", c.handleTaskFork)
 	forkSpec.InputSchema = buildTaskForkSchema(s)
+	forkSpec.Annotations = &mcpToolAnnotations{Title: "Fork task", DestructiveHint: true, OpenWorldHint: false}
 
 	botFixCISpec := newToolSpec("bot_fix_ci", "Fix repository CI", "Create a task to investigate and fix a failing CI on a repository's default branch.", c.handleBotFixCI)
 	botFixCISpec.InputSchema = buildBotFixCISchema(s)
+	botFixCISpec.Annotations = &mcpToolAnnotations{Title: "Fix repository CI", DestructiveHint: true, OpenWorldHint: false}
 
 	return []toolSpec{
-		newToolSpec("tasks_list", "List tasks", "List all current coding tasks with their status, cost, and duration.", c.handleTasksList),
+		annotateTool(newToolSpec("tasks_list", "List tasks", "List all current coding tasks with their status, cost, and duration.", c.handleTasksList), mcpToolAnnotations{Title: "List tasks", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
 		createSpec,
-		newToolSpec("task_get_detail", "Get task detail", "Get recent activity and status details for a task by its number.", c.handleTaskGetDetail),
-		newToolSpec("task_send_message", "Send task message", "Send a text message to a waiting or asking agent by task number.", c.handleTaskSendMessage),
-		newToolSpec("task_answer_question", "Answer task question", "Answer an agent's question by task number. The agent is in 'asking' state.", c.handleTaskAnswerQuestion),
-		newToolSpec("task_push_branch_to_remote", "Push task branch", "Sync or push a task's changes to GitHub. Push to task branch (default) or squash-push to main.", c.handleTaskPushBranchToRemote),
-		newToolSpec("task_stop", "Stop task", "Stop a running or waiting task. The container is preserved and can be revived later.", c.handleTaskStop),
-		newToolSpec("task_purge", "Purge task", "Permanently delete a stopped task's container. Cannot be undone.", c.handleTaskPurge),
-		newToolSpec("task_revive", "Revive task", "Revive a stopped task, restarting its container and agent session.", c.handleTaskRevive),
+		annotateTool(newToolSpec("task_get_detail", "Get task detail", "Get recent activity and status details for a task by its number.", c.handleTaskGetDetail), mcpToolAnnotations{Title: "Get task detail", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(newToolSpec("task_send_message", "Send task message", "Send a text message to a waiting or asking agent by task number.", c.handleTaskSendMessage), mcpToolAnnotations{Title: "Send task message", DestructiveHint: false, OpenWorldHint: false}),
+		annotateTool(newToolSpec("task_answer_question", "Answer task question", "Answer an agent's question by task number. The agent is in 'asking' state.", c.handleTaskAnswerQuestion), mcpToolAnnotations{Title: "Answer task question", DestructiveHint: false, OpenWorldHint: false}),
+		annotateTool(newToolSpec("task_push_branch_to_remote", "Push task branch", "Sync or push a task's changes to GitHub. Push to task branch (default) or squash-push to main.", c.handleTaskPushBranchToRemote), mcpToolAnnotations{Title: "Push task branch", DestructiveHint: true, OpenWorldHint: true}),
+		annotateTool(newToolSpec("task_stop", "Stop task", "Stop a running or waiting task. The container is preserved and can be revived later.", c.handleTaskStop), mcpToolAnnotations{Title: "Stop task", DestructiveHint: true, OpenWorldHint: false}),
+		annotateTool(newToolSpec("task_purge", "Purge task", "Permanently delete a stopped task's container. Cannot be undone.", c.handleTaskPurge), mcpToolAnnotations{Title: "Purge task", DestructiveHint: true, OpenWorldHint: false}),
+		annotateTool(newToolSpec("task_revive", "Revive task", "Revive a stopped task, restarting its container and agent session.", c.handleTaskRevive), mcpToolAnnotations{Title: "Revive task", DestructiveHint: false, OpenWorldHint: false}),
 		forkSpec,
-		newToolSpec("get_usage", "Get usage", "Check current API quota utilization and limits.", c.handleGetUsage),
-		newToolSpec("clone_repo", "Clone repository", "Clone a git repository by URL. Optionally specify a local path.", c.handleCloneRepo),
-		newToolSpec("agent_last_message", "Get last agent message", "Get latest agent message, question, or result. Call to check what the agent needs or relay to user.", c.handleAgentLastMessage),
-		newToolSpec("web_search", "Web search", "Search the web for a query and display the results in an embedded browser.", c.handleWebSearch),
-		newToolSpec("web_fetch", "Web fetch", "Open a URL in the embedded browser.", c.handleWebFetch),
-		newToolSpec("task_fix_pr", "Fix task PR", "Inject a fix-PR command into an existing task to fix its failing PR CI in auto mode.", c.handleTaskFixPR),
+		annotateTool(newToolSpec("get_usage", "Get usage", "Check current API quota utilization and limits.", c.handleGetUsage), mcpToolAnnotations{Title: "Get usage", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: true}),
+		annotateTool(newToolSpec("clone_repo", "Clone repository", "Clone a git repository by URL. Optionally specify a local path.", c.handleCloneRepo), mcpToolAnnotations{Title: "Clone repository", DestructiveHint: true, OpenWorldHint: true}),
+		annotateTool(newToolSpec("agent_last_message", "Get last agent message", "Get latest agent message, question, or result. Call to check what the agent needs or relay to user.", c.handleAgentLastMessage), mcpToolAnnotations{Title: "Get last agent message", ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: false}),
+		annotateTool(newToolSpec("web_search", "Web search", "Search the web for a query and display the results in an embedded browser.", c.handleWebSearch), mcpToolAnnotations{Title: "Web search", ReadOnlyHint: true, OpenWorldHint: true}),
+		annotateTool(newToolSpec("web_fetch", "Web fetch", "Open a URL in the embedded browser.", c.handleWebFetch), mcpToolAnnotations{Title: "Web fetch", ReadOnlyHint: true, OpenWorldHint: true}),
+		annotateTool(newToolSpec("task_fix_pr", "Fix task PR", "Inject a fix-PR command into an existing task to fix its failing PR CI in auto mode.", c.handleTaskFixPR), mcpToolAnnotations{Title: "Fix task PR", DestructiveHint: true, OpenWorldHint: true}),
 		botFixCISpec,
 	}
+}
+
+func annotateTool(spec toolSpec, annotations mcpToolAnnotations) toolSpec { //nolint:gocritic // Tool specs are immutable catalog entries; value style keeps call sites simple.
+	spec.Annotations = &annotations
+	return spec
 }
 
 func (c *caicToolRegistry) catalogState(ctx context.Context) (caicToolCatalogState, error) {
@@ -663,7 +672,9 @@ func buildTaskForkSchema(s *caicToolCatalogState) *jsonschema.Schema {
 	props.Set("prompt", &jsonschema.Schema{Type: "string", Description: "The initial prompt for the forked task"})
 	props.Set("harness", stringSchemaWithEnumDesc(s.Harnesses, "Override harness (optional, inherits from source if omitted)"))
 	props.Set("model", &jsonschema.Schema{Type: "string", Description: "Override model (optional, inherits from source if omitted)"})
-	return &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"task_number", "prompt"}}
+	schema := &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"task_number", "prompt"}}
+	addMCPHeaderToProperty(schema, "task_number", "Task-Number")
+	return schema
 }
 
 func buildBotFixCISchema(s *caicToolCatalogState) *jsonschema.Schema {
@@ -673,7 +684,9 @@ func buildBotFixCISchema(s *caicToolCatalogState) *jsonschema.Schema {
 	}
 	props := orderedmap.New[string, *jsonschema.Schema]()
 	props.Set("repo", stringSchemaWithEnumDesc(s.Repos, desc))
-	return &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"repo"}}
+	schema := &jsonschema.Schema{Type: "object", Properties: props, Required: []string{"repo"}}
+	addMCPHeaderToProperty(schema, "repo", "Repo")
+	return schema
 }
 
 func stringSchemaWithEnum(values []string) *jsonschema.Schema {

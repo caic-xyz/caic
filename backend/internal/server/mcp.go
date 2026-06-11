@@ -5,16 +5,20 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/invopop/jsonschema"
 
 	"github.com/caic-xyz/caic/backend/internal/server/api"
-	"github.com/invopop/jsonschema"
 )
 
 const (
@@ -38,11 +42,13 @@ const (
 type mcpMethod string
 
 const (
-	mcpMethodServerDiscover mcpMethod = "server/discover"
-	mcpMethodToolsList      mcpMethod = "tools/list"
-	mcpMethodToolsCall      mcpMethod = "tools/call"
-	mcpMethodResourcesList  mcpMethod = "resources/list"
-	mcpMethodResourcesRead  mcpMethod = "resources/read"
+	mcpMethodServerDiscover        mcpMethod = "server/discover"
+	mcpMethodToolsList             mcpMethod = "tools/list"
+	mcpMethodToolsCall             mcpMethod = "tools/call"
+	mcpMethodResourcesList         mcpMethod = "resources/list"
+	mcpMethodResourcesRead         mcpMethod = "resources/read"
+	mcpMethodResourceTemplatesList mcpMethod = "resources/templates/list"
+	mcpMethodSubscriptionsListen   mcpMethod = "subscriptions/listen"
 )
 
 type mcpResultType string
@@ -54,6 +60,7 @@ const (
 type mcpCacheScope string
 
 const (
+	mcpCacheScopePublic  mcpCacheScope = "public"
 	mcpCacheScopePrivate mcpCacheScope = "private"
 )
 
@@ -96,9 +103,9 @@ type jsonRPCResponse struct {
 }
 
 type jsonRPCError struct {
-	Code    mcpErrorCode                   `json:"code"`
-	Message string                         `json:"message"`
-	Data    unsupportedProtocolVersionData `json:"data,omitzero"`
+	Code    mcpErrorCode `json:"code"`
+	Message string       `json:"message"`
+	Data    any          `json:"data,omitempty"`
 }
 
 type unsupportedProtocolVersionData struct {
@@ -106,15 +113,42 @@ type unsupportedProtocolVersionData struct {
 	Requested string   `json:"requested"`
 }
 
+type mcpMetaObject map[string]any
+
 type mcpRequestMeta struct {
 	ProtocolVersion    string                `json:"io.modelcontextprotocol/protocolVersion"`
 	ClientInfo         mcpImplementation     `json:"io.modelcontextprotocol/clientInfo"`
 	ClientCapabilities mcpClientCapabilities `json:"io.modelcontextprotocol/clientCapabilities"`
+	ProgressToken      any                   `json:"progressToken,omitempty"`
+	LogLevel           string                `json:"io.modelcontextprotocol/logLevel,omitempty"`
+}
+
+func (m *mcpRequestMeta) UnmarshalJSON(data []byte) error {
+	type requestMeta mcpRequestMeta
+	var meta requestMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return err
+	}
+	*m = mcpRequestMeta(meta)
+	return nil
 }
 
 type mcpClientCapabilities struct {
-	Experimental mcpExtensions `json:"experimental,omitempty"`
-	Extensions   mcpExtensions `json:"extensions,omitempty"`
+	Experimental mcpExtensions             `json:"experimental,omitempty"`
+	Roots        mcpMetaObject             `json:"roots,omitempty"`
+	Sampling     *mcpSamplingCapability    `json:"sampling,omitempty"`
+	Elicitation  *mcpElicitationCapability `json:"elicitation,omitempty"`
+	Extensions   mcpExtensions             `json:"extensions,omitempty"`
+}
+
+type mcpSamplingCapability struct {
+	Context mcpMetaObject `json:"context,omitempty"`
+	Tools   mcpMetaObject `json:"tools,omitempty"`
+}
+
+type mcpElicitationCapability struct {
+	Form mcpMetaObject `json:"form,omitempty"`
+	URL  mcpMetaObject `json:"url,omitempty"`
 }
 
 type mcpExtensions map[string]json.RawMessage
@@ -134,9 +168,17 @@ type discoverResult struct {
 }
 
 type mcpCapabilities struct {
-	Tools      mcpToolsCapability     `json:"tools"`
-	Resources  mcpResourcesCapability `json:"resources"`
-	Extensions mcpExtensions          `json:"extensions,omitempty"`
+	Experimental mcpExtensions          `json:"experimental,omitempty"`
+	Logging      mcpMetaObject          `json:"logging,omitempty"`
+	Completions  mcpMetaObject          `json:"completions,omitempty"`
+	Prompts      *mcpPromptsCapability  `json:"prompts,omitempty"`
+	Resources    mcpResourcesCapability `json:"resources"`
+	Tools        mcpToolsCapability     `json:"tools"`
+	Extensions   mcpExtensions          `json:"extensions,omitempty"`
+}
+
+type mcpPromptsCapability struct {
+	ListChanged bool `json:"listChanged,omitempty"`
 }
 
 type mcpToolsCapability struct {
@@ -144,37 +186,69 @@ type mcpToolsCapability struct {
 }
 
 type mcpResourcesCapability struct {
+	Subscribe   bool `json:"subscribe,omitempty"`
 	ListChanged bool `json:"listChanged,omitempty"`
 }
 
 type mcpImplementation struct {
-	Name    string `json:"name"`
-	Title   string `json:"title,omitempty"`
-	Version string `json:"version,omitempty"`
+	Icons       []mcpIcon `json:"icons,omitempty"`
+	Name        string    `json:"name"`
+	Title       string    `json:"title,omitempty"`
+	Version     string    `json:"version"`
+	Description string    `json:"description,omitempty"`
+	WebsiteURL  string    `json:"websiteUrl,omitempty"`
+}
+
+type mcpIcon struct {
+	Src      string   `json:"src"`
+	MimeType string   `json:"mimeType,omitempty"`
+	Sizes    []string `json:"sizes,omitempty"`
+	Theme    string   `json:"theme,omitempty"`
+}
+
+type paginatedRequestParams struct {
+	Meta   mcpRequestMeta `json:"_meta"`
+	Cursor string         `json:"cursor,omitempty"`
 }
 
 type toolsListResult struct {
+	Meta       mcpMetaObject       `json:"_meta,omitempty"`
 	ResultType mcpResultType       `json:"resultType"`
+	NextCursor string              `json:"nextCursor,omitempty"`
 	Tools      []mcpToolDescriptor `json:"tools"`
 	TTLMS      int                 `json:"ttlMs"`
 	CacheScope mcpCacheScope       `json:"cacheScope"`
 }
 
 type mcpToolDescriptor struct {
-	Name         string             `json:"name"`
-	Title        string             `json:"title,omitempty"`
-	Description  string             `json:"description"`
-	InputSchema  *jsonschema.Schema `json:"inputSchema"`
-	OutputSchema *jsonschema.Schema `json:"outputSchema,omitempty"`
+	Meta         mcpMetaObject       `json:"_meta,omitempty"`
+	Icons        []mcpIcon           `json:"icons,omitempty"`
+	Name         string              `json:"name"`
+	Title        string              `json:"title,omitempty"`
+	Description  string              `json:"description,omitempty"`
+	InputSchema  *jsonschema.Schema  `json:"inputSchema"`
+	OutputSchema *jsonschema.Schema  `json:"outputSchema,omitempty"`
+	Annotations  *mcpToolAnnotations `json:"annotations,omitempty"`
+}
+
+type mcpToolAnnotations struct {
+	Title           string `json:"title,omitempty"`
+	ReadOnlyHint    bool   `json:"readOnlyHint,omitempty"`
+	DestructiveHint bool   `json:"destructiveHint,omitempty"`
+	IdempotentHint  bool   `json:"idempotentHint,omitempty"`
+	OpenWorldHint   bool   `json:"openWorldHint,omitempty"`
 }
 
 type toolsCallParams struct {
-	Meta      mcpRequestMeta  `json:"_meta"`
-	Name      string          `json:"name"`
-	Arguments json.RawMessage `json:"arguments,omitempty"`
+	Meta           mcpRequestMeta  `json:"_meta"`
+	InputResponses json.RawMessage `json:"inputResponses,omitempty"`
+	RequestState   string          `json:"requestState,omitempty"`
+	Name           string          `json:"name"`
+	Arguments      json.RawMessage `json:"arguments,omitempty"`
 }
 
 type mcpToolCallResult struct {
+	Meta              mcpMetaObject     `json:"_meta,omitempty"`
 	ResultType        mcpResultType     `json:"resultType"`
 	Content           []mcpContentBlock `json:"content"`
 	StructuredContent any               `json:"structuredContent,omitempty"`
@@ -182,31 +256,85 @@ type mcpToolCallResult struct {
 }
 
 type mcpContentBlock struct {
-	Type mcpContentType `json:"type"`
-	Text string         `json:"text"`
+	mcpResourceLink
+
+	Meta        mcpMetaObject       `json:"_meta,omitempty"`
+	Type        mcpContentType      `json:"type"`
+	Text        string              `json:"text,omitempty"`
+	Data        string              `json:"data,omitempty"`
+	MimeType    string              `json:"mimeType,omitempty"`
+	Resource    *mcpResourceContent `json:"resource,omitempty"`
+	Annotations *mcpAnnotations     `json:"annotations,omitempty"`
+}
+
+type mcpAnnotations struct {
+	Audience     []mcpRole `json:"audience,omitempty"`
+	Priority     *float64  `json:"priority,omitempty"`
+	LastModified string    `json:"lastModified,omitempty"`
+}
+
+type mcpRole string
+
+type mcpResourceLink struct {
+	Icons       []mcpIcon `json:"icons,omitempty"`
+	Name        string    `json:"name,omitempty"`
+	Title       string    `json:"title,omitempty"`
+	URI         string    `json:"uri,omitempty"`
+	Description string    `json:"description,omitempty"`
+	MimeType    string    `json:"mimeType,omitempty"`
+	Size        int64     `json:"size,omitzero"`
 }
 
 type resourcesListResult struct {
+	Meta       mcpMetaObject           `json:"_meta,omitempty"`
 	ResultType mcpResultType           `json:"resultType"`
+	NextCursor string                  `json:"nextCursor,omitempty"`
 	Resources  []mcpResourceDescriptor `json:"resources"`
 	TTLMS      int                     `json:"ttlMs"`
 	CacheScope mcpCacheScope           `json:"cacheScope"`
 }
 
 type mcpResourceDescriptor struct {
-	URI         string `json:"uri"`
-	Name        string `json:"name"`
-	Title       string `json:"title,omitempty"`
-	Description string `json:"description,omitempty"`
-	MimeType    string `json:"mimeType,omitempty"`
+	Meta        mcpMetaObject   `json:"_meta,omitempty"`
+	Icons       []mcpIcon       `json:"icons,omitempty"`
+	URI         string          `json:"uri"`
+	Name        string          `json:"name"`
+	Title       string          `json:"title,omitempty"`
+	Description string          `json:"description,omitempty"`
+	MimeType    string          `json:"mimeType,omitempty"`
+	Annotations *mcpAnnotations `json:"annotations,omitempty"`
+	Size        int64           `json:"size,omitzero"`
+}
+
+type resourceTemplatesListResult struct {
+	Meta              mcpMetaObject                   `json:"_meta,omitempty"`
+	ResultType        mcpResultType                   `json:"resultType"`
+	NextCursor        string                          `json:"nextCursor,omitempty"`
+	ResourceTemplates []mcpResourceTemplateDescriptor `json:"resourceTemplates"`
+	TTLMS             int                             `json:"ttlMs"`
+	CacheScope        mcpCacheScope                   `json:"cacheScope"`
+}
+
+type mcpResourceTemplateDescriptor struct {
+	Meta        mcpMetaObject   `json:"_meta,omitempty"`
+	Icons       []mcpIcon       `json:"icons,omitempty"`
+	Name        string          `json:"name"`
+	Title       string          `json:"title,omitempty"`
+	URITemplate string          `json:"uriTemplate"`
+	Description string          `json:"description,omitempty"`
+	MimeType    string          `json:"mimeType,omitempty"`
+	Annotations *mcpAnnotations `json:"annotations,omitempty"`
 }
 
 type resourcesReadParams struct {
-	Meta mcpRequestMeta `json:"_meta"`
-	URI  string         `json:"uri"`
+	Meta           mcpRequestMeta  `json:"_meta"`
+	InputResponses json.RawMessage `json:"inputResponses,omitempty"`
+	RequestState   string          `json:"requestState,omitempty"`
+	URI            string          `json:"uri"`
 }
 
 type resourcesReadResult struct {
+	Meta       mcpMetaObject        `json:"_meta,omitempty"`
 	ResultType mcpResultType        `json:"resultType"`
 	Contents   []mcpResourceContent `json:"contents"`
 	TTLMS      int                  `json:"ttlMs"`
@@ -214,9 +342,35 @@ type resourcesReadResult struct {
 }
 
 type mcpResourceContent struct {
-	URI      string `json:"uri"`
-	MimeType string `json:"mimeType,omitempty"`
-	Text     string `json:"text"`
+	Meta     mcpMetaObject `json:"_meta,omitempty"`
+	URI      string        `json:"uri"`
+	MimeType string        `json:"mimeType,omitempty"`
+	Text     string        `json:"text,omitempty"`
+	Blob     string        `json:"blob,omitempty"`
+}
+
+type subscriptionsListenParams struct {
+	Meta          mcpRequestMeta        `json:"_meta"`
+	Notifications mcpSubscriptionFilter `json:"notifications"`
+}
+
+type mcpSubscriptionFilter struct {
+	ToolsListChanged      bool     `json:"toolsListChanged,omitempty"`
+	PromptsListChanged    bool     `json:"promptsListChanged,omitempty"`
+	ResourcesListChanged  bool     `json:"resourcesListChanged,omitempty"`
+	ResourceSubscriptions []string `json:"resourceSubscriptions,omitempty"`
+}
+
+type mcpJSONRPCNotification struct {
+	JSONRPC string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  any    `json:"params,omitempty"`
+}
+
+type mcpSubscriptionNotificationParams struct {
+	Meta          mcpMetaObject          `json:"_meta,omitempty"`
+	Notifications *mcpSubscriptionFilter `json:"notifications,omitempty"`
+	URI           string                 `json:"uri,omitempty"`
 }
 
 func (h *mcpHandlers) handleMCP(w http.ResponseWriter, r *http.Request) {
@@ -232,50 +386,65 @@ func (h *mcpHandlers) handleMCP(w http.ResponseWriter, r *http.Request) {
 		h.writeResponse(w, http.StatusBadRequest, jsonRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcError(mcpParseErrorCode, "Parse error")})
 		return
 	}
-	if req.JSONRPC != jsonRPCVersion || req.Method == "" || len(req.ID) == 0 {
+	if req.JSONRPC != jsonRPCVersion || req.Method == "" || !validJSONRPCRequestID(req.ID) {
 		h.writeResponse(w, http.StatusBadRequest, jsonRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcError(mcpInvalidRequestCode, "Invalid Request")})
 		return
 	}
 	// Transport-layer rejections (bad HTTP method, unparseable body, failed
 	// _meta/header validation) carry a non-200 status. Once a request is valid
-	// MCP it reaches dispatch, whose every outcome — success or a JSON-RPC error
-	// (method not found, invalid params, internal) — is returned with HTTP 200.
+	// MCP it reaches dispatch, whose protocol errors use the transport status
+	// mandated by the draft Streamable HTTP binding.
 	if status, rpcErr := validateMCPRequest(r, &req); rpcErr != nil {
 		h.writeResponse(w, status, jsonRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
 		return
 	}
-	result, rpcErr := h.dispatch(r.Context(), req.Method, req.Params)
+	if req.Method == mcpMethodSubscriptionsListen {
+		if rpcErr := h.handleSubscription(r.Context(), w, req.ID, req.Params); rpcErr != nil {
+			h.writeResponse(w, rpcHTTPStatus(rpcErr), jsonRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
+		}
+		return
+	}
+	result, rpcErr := h.dispatch(r.Context(), req.Method, req.Params, r.Header)
 	if rpcErr != nil {
-		h.writeResponse(w, http.StatusOK, jsonRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
+		h.writeResponse(w, rpcHTTPStatus(rpcErr), jsonRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
 		return
 	}
 	h.writeResponse(w, http.StatusOK, jsonRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Result: result})
 }
 
-// dispatch routes a validated MCP request to its handler. The result is always
-// delivered with HTTP 200 by handleMCP: a returned rpcErr is a JSON-RPC error
-// object (method not found, invalid params, internal), not a transport failure.
-func (h *mcpHandlers) dispatch(ctx context.Context, method mcpMethod, params json.RawMessage) (result any, rpcErr *jsonRPCError) {
+// dispatch routes a validated MCP request to its handler. Returned rpcErr values
+// are JSON-RPC errors; handleMCP maps them to the transport status required by
+// the draft Streamable HTTP binding.
+func (h *mcpHandlers) dispatch(ctx context.Context, method mcpMethod, params json.RawMessage, header http.Header) (result any, rpcErr *jsonRPCError) {
 	switch method {
 	case mcpMethodServerDiscover:
 		t := discoverResult{
 			ResultType:        mcpResultTypeComplete,
 			SupportedVersions: []string{mcpProtocolVersion},
-			Capabilities:      mcpCapabilities{},
-			ServerInfo:        h.ServerInfo,
+			Capabilities:      mcpCapabilities{Tools: mcpToolsCapability{ListChanged: true}, Resources: mcpResourcesCapability{Subscribe: true, ListChanged: true}},
+			ServerInfo:        h.serverInfo(),
 			Instructions:      h.Instructions,
 			TTLMS:             mcpDefaultTTLMS,
 			CacheScope:        mcpCacheScopePrivate,
 		}
 		return t, nil
 	case mcpMethodToolsList:
+		var p paginatedRequestParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, rpcError(mcpInvalidParamsCode, "Invalid params")
+		}
 		tools, err := h.Registry.tools(ctx)
 		if err != nil {
 			return nil, rpcError(mcpInternalErrorCode, err.Error())
 		}
+		page, next, err := paginate(tools, p.Cursor)
+		if err != nil {
+			return nil, rpcError(mcpInvalidParamsCode, err.Error())
+		}
 		t := toolsListResult{
 			ResultType: mcpResultTypeComplete,
-			Tools:      tools,
+			NextCursor: next,
+			Tools:      page,
 			TTLMS:      mcpDefaultTTLMS,
 			CacheScope: mcpCacheScopePrivate,
 		}
@@ -285,19 +454,46 @@ func (h *mcpHandlers) dispatch(ctx context.Context, method mcpMethod, params jso
 		if err := decodeParams(params, &p); err != nil || p.Name == "" {
 			return nil, rpcError(mcpInvalidParamsCode, "Invalid params")
 		}
+		if err := h.validateToolParamHeaders(ctx, header, p.Name, p.Arguments); err != nil {
+			return nil, rpcError(mcpHeaderMismatchCode, err.Error())
+		}
 		res, err := h.Registry.callTool(ctx, p.Name, p.Arguments)
 		if err != nil {
 			return nil, registryError(err)
 		}
 		t := mcpToolCallResult{
-			ResultType:        mcpResultTypeComplete,
-			Content:           []mcpContentBlock{{Type: mcpContentTypeText, Text: toolResultText(res.Structured)}},
-			StructuredContent: res.Structured,
-			IsError:           res.IsError,
+			ResultType: mcpResultTypeComplete,
+			Content:    []mcpContentBlock{{Type: mcpContentTypeText, Text: toolResultText(res.Structured)}},
+			IsError:    res.IsError,
+		}
+		if !res.IsError {
+			t.StructuredContent = res.Structured
 		}
 		return t, nil
 	case mcpMethodResourcesList:
-		return h.Registry.listResources(ctx), nil
+		var p paginatedRequestParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, rpcError(mcpInvalidParamsCode, "Invalid params")
+		}
+		res := h.Registry.listResources(ctx)
+		page, next, err := paginate(res.Resources, p.Cursor)
+		if err != nil {
+			return nil, rpcError(mcpInvalidParamsCode, err.Error())
+		}
+		res.Resources = page
+		res.NextCursor = next
+		return res, nil
+	case mcpMethodResourceTemplatesList:
+		var p paginatedRequestParams
+		if err := decodeParams(params, &p); err != nil {
+			return nil, rpcError(mcpInvalidParamsCode, "Invalid params")
+		}
+		templates := h.resourceTemplates()
+		page, next, err := paginate(templates, p.Cursor)
+		if err != nil {
+			return nil, rpcError(mcpInvalidParamsCode, err.Error())
+		}
+		return resourceTemplatesListResult{ResultType: mcpResultTypeComplete, NextCursor: next, ResourceTemplates: page, TTLMS: mcpDefaultTTLMS, CacheScope: mcpCacheScopePrivate}, nil
 	case mcpMethodResourcesRead:
 		var p resourcesReadParams
 		if err := decodeParams(params, &p); err != nil || p.URI == "" {
@@ -319,6 +515,377 @@ func (h *mcpHandlers) writeResponse(w http.ResponseWriter, status int, resp json
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		slog.Warn("write mcp response", "err", err)
 	}
+}
+
+func (h *mcpHandlers) serverInfo() mcpImplementation {
+	info := h.ServerInfo
+	if info.Version == "" {
+		info.Version = "unknown"
+	}
+	return info
+}
+
+func (h *mcpHandlers) resourceTemplates() []mcpResourceTemplateDescriptor {
+	return []mcpResourceTemplateDescriptor{
+		{Name: "repo", Title: "Repository", URITemplate: "caic://repos/{path}", Description: "Managed repository detail by path", MimeType: "application/json"},
+		{Name: "task", Title: "Task", URITemplate: "caic://tasks/{id}", Description: "Coding task detail by task ID", MimeType: "application/json"},
+	}
+}
+
+func (h *mcpHandlers) handleSubscription(ctx context.Context, w http.ResponseWriter, id, params json.RawMessage) *jsonRPCError {
+	var p subscriptionsListenParams
+	if err := decodeParams(params, &p); err != nil {
+		return rpcError(mcpInvalidParamsCode, "Invalid params")
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		return rpcError(mcpInternalErrorCode, "streaming unavailable")
+	}
+	subID := mcpSubscriptionID(id)
+	accepted := mcpSubscriptionFilter{
+		ToolsListChanged:      p.Notifications.ToolsListChanged,
+		ResourcesListChanged:  p.Notifications.ResourcesListChanged,
+		ResourceSubscriptions: p.Notifications.ResourceSubscriptions,
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	if err := writeMCPNotification(w, flusher, mcpJSONRPCNotification{JSONRPC: jsonRPCVersion, Method: "notifications/subscriptions/acknowledged", Params: mcpSubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), Notifications: &accepted}}); err != nil {
+		slog.WarnContext(ctx, "write mcp subscription acknowledgment", "err", err)
+		return nil
+	}
+	h.streamSubscriptionNotifications(ctx, w, flusher, subID, accepted)
+	return nil
+}
+
+func (h *mcpHandlers) streamSubscriptionNotifications(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, subID string, filter mcpSubscriptionFilter) {
+	lastTools, lastResources, lastResourceContents := h.subscriptionSnapshot(ctx, filter)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		tools, resources, contents := h.subscriptionSnapshot(ctx, filter)
+		if filter.ToolsListChanged && tools != lastTools {
+			if err := writeMCPNotification(w, flusher, mcpJSONRPCNotification{JSONRPC: jsonRPCVersion, Method: "notifications/tools/list_changed", Params: mcpSubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
+				slog.WarnContext(ctx, "write mcp tools notification", "err", err)
+				return
+			}
+		}
+		if filter.ResourcesListChanged && resources != lastResources {
+			if err := writeMCPNotification(w, flusher, mcpJSONRPCNotification{JSONRPC: jsonRPCVersion, Method: "notifications/resources/list_changed", Params: mcpSubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID)}}); err != nil {
+				slog.WarnContext(ctx, "write mcp resources notification", "err", err)
+				return
+			}
+		}
+		for uri, content := range contents {
+			if content == lastResourceContents[uri] {
+				continue
+			}
+			if err := writeMCPNotification(w, flusher, mcpJSONRPCNotification{JSONRPC: jsonRPCVersion, Method: "notifications/resources/updated", Params: mcpSubscriptionNotificationParams{Meta: mcpSubscriptionMeta(subID), URI: uri}}); err != nil {
+				slog.WarnContext(ctx, "write mcp resource update notification", "err", err)
+				return
+			}
+		}
+		lastTools, lastResources, lastResourceContents = tools, resources, contents
+	}
+}
+
+func (h *mcpHandlers) subscriptionSnapshot(ctx context.Context, filter mcpSubscriptionFilter) (toolsHash, resourcesHash string, contents map[string]string) {
+	if filter.ToolsListChanged {
+		if items, err := h.Registry.tools(ctx); err == nil {
+			toolsHash = stableJSON(items)
+		}
+	}
+	if filter.ResourcesListChanged {
+		resourcesHash = stableJSON(h.Registry.listResources(ctx).Resources)
+	}
+	contents = make(map[string]string, len(filter.ResourceSubscriptions))
+	for _, uri := range filter.ResourceSubscriptions {
+		res, err := h.Registry.readResource(ctx, uri)
+		if err != nil {
+			contents[uri] = err.Error()
+			continue
+		}
+		contents[uri] = stableJSON(res.Contents)
+	}
+	return toolsHash, resourcesHash, contents
+}
+
+func mcpSubscriptionID(id json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(id, &s); err == nil {
+		return s
+	}
+	return string(id)
+}
+
+func mcpSubscriptionMeta(id string) mcpMetaObject {
+	return mcpMetaObject{"io.modelcontextprotocol/subscriptionId": id}
+}
+
+func writeMCPNotification(w http.ResponseWriter, flusher http.Flusher, msg mcpJSONRPCNotification) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
+}
+
+func stableJSON(v any) string {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err.Error()
+	}
+	return string(data)
+}
+
+func (h *mcpHandlers) validateToolParamHeaders(ctx context.Context, header http.Header, name string, args json.RawMessage) error {
+	tools, err := h.Registry.tools(ctx)
+	if err != nil {
+		return err
+	}
+	var schema *jsonschema.Schema
+	for _, tool := range tools {
+		if tool.Name == name {
+			schema = tool.InputSchema
+			break
+		}
+	}
+	if schema == nil {
+		return nil
+	}
+	headers, err := mcpHeaderParams(schema)
+	if err != nil {
+		return err
+	}
+	if len(headers) == 0 {
+		return nil
+	}
+	arguments, err := decodeJSONObject(args)
+	if err != nil {
+		return fmt.Errorf("invalid arguments for header validation: %w", err)
+	}
+	for _, hp := range headers {
+		bodyValue, ok := jsonValueAtPath(arguments, hp.Path)
+		gotRaw := header.Get("Mcp-Param-" + hp.Header)
+		if !ok || bodyValue == nil {
+			if gotRaw != "" {
+				return fmt.Errorf("header mismatch: Mcp-Param-%s header is present but parameter is absent", hp.Header)
+			}
+			continue
+		}
+		if gotRaw == "" {
+			return fmt.Errorf("header mismatch: Mcp-Param-%s header is required", hp.Header)
+		}
+		got, err := decodeMCPHeaderValue(gotRaw)
+		if err != nil {
+			return fmt.Errorf("header mismatch: Mcp-Param-%s header is malformed", hp.Header)
+		}
+		want, err := mcpPrimitiveHeaderValue(bodyValue)
+		if err != nil {
+			return fmt.Errorf("header mismatch: parameter for Mcp-Param-%s is not header-compatible: %w", hp.Header, err)
+		}
+		if got != want {
+			return fmt.Errorf("header mismatch: Mcp-Param-%s header does not match request params", hp.Header)
+		}
+	}
+	return nil
+}
+
+type mcpHeaderParam struct {
+	Header string
+	Path   []string
+}
+
+func mcpHeaderParams(schema *jsonschema.Schema) ([]mcpHeaderParam, error) {
+	var params []mcpHeaderParam
+	seen := map[string]struct{}{}
+	var walk func(*jsonschema.Schema, []string) error
+	walk = func(s *jsonschema.Schema, path []string) error {
+		if s == nil {
+			return nil
+		}
+		if raw, ok := s.Extras["x-mcp-header"]; ok {
+			header, ok := raw.(string)
+			if !ok || !validMCPHeaderToken(header) {
+				return fmt.Errorf("invalid x-mcp-header %q", raw)
+			}
+			key := strings.ToLower(header)
+			if _, ok := seen[key]; ok {
+				return fmt.Errorf("duplicate x-mcp-header %q", header)
+			}
+			if !mcpHeaderCompatibleSchema(s) {
+				return fmt.Errorf("x-mcp-header %q is applied to a non-primitive schema", header)
+			}
+			seen[key] = struct{}{}
+			params = append(params, mcpHeaderParam{Header: header, Path: append([]string(nil), path...)})
+		}
+		if s.Properties != nil {
+			for key, child := range s.Properties.FromOldest() {
+				if err := walk(child, append(path, key)); err != nil {
+					return err
+				}
+			}
+		}
+		if s.Items != nil {
+			return walk(s.Items, path)
+		}
+		for _, child := range s.AnyOf {
+			if err := walk(child, path); err != nil {
+				return err
+			}
+		}
+		for _, child := range s.OneOf {
+			if err := walk(child, path); err != nil {
+				return err
+			}
+		}
+		for _, child := range s.AllOf {
+			if err := walk(child, path); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return params, walk(schema, nil)
+}
+
+func mcpHeaderCompatibleSchema(s *jsonschema.Schema) bool {
+	switch s.Type {
+	case "string", "integer", "boolean":
+		return true
+	default:
+		return false
+	}
+}
+
+func validMCPHeaderToken(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r > 127 || !strings.ContainsRune("!#$%&'*+-.^_`|~0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", r) {
+			return false
+		}
+	}
+	return true
+}
+
+func decodeJSONObject(data json.RawMessage) (map[string]any, error) {
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
+		return map[string]any{}, nil
+	}
+	var v map[string]any
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.UseNumber()
+	if err := d.Decode(&v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func jsonValueAtPath(v any, path []string) (any, bool) {
+	cur := v
+	for _, key := range path {
+		obj, ok := cur.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		cur, ok = obj[key]
+		if !ok {
+			return nil, false
+		}
+	}
+	return cur, true
+}
+
+func decodeMCPHeaderValue(s string) (string, error) {
+	if strings.HasPrefix(s, "=?base64?") && strings.HasSuffix(s, "?=") {
+		data, err := base64.StdEncoding.DecodeString(strings.TrimSuffix(strings.TrimPrefix(s, "=?base64?"), "?="))
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
+	return s, nil
+}
+
+func mcpPrimitiveHeaderValue(v any) (string, error) {
+	switch x := v.(type) {
+	case string:
+		return x, nil
+	case bool:
+		if x {
+			return "true", nil
+		}
+		return "false", nil
+	case json.Number:
+		if _, err := x.Int64(); err != nil {
+			return "", err
+		}
+		return x.String(), nil
+	default:
+		return "", fmt.Errorf("unsupported type %T", v)
+	}
+}
+
+func rpcHTTPStatus(err *jsonRPCError) int {
+	switch err.Code {
+	case mcpMethodNotFoundCode:
+		return http.StatusNotFound
+	case mcpHeaderMismatchCode:
+		return http.StatusBadRequest
+	default:
+		return http.StatusOK
+	}
+}
+
+func validJSONRPCRequestID(id json.RawMessage) bool {
+	if len(id) == 0 || bytes.Equal(id, []byte("null")) {
+		return false
+	}
+	var v any
+	d := json.NewDecoder(bytes.NewReader(id))
+	d.UseNumber()
+	if err := d.Decode(&v); err != nil {
+		return false
+	}
+	switch v.(type) {
+	case string, json.Number:
+		return true
+	default:
+		return false
+	}
+}
+
+const mcpDefaultPageSize = 100
+
+func paginate[T any](items []T, cursor string) (page []T, next string, err error) {
+	start := 0
+	if cursor != "" {
+		var convErr error
+		start, convErr = strconv.Atoi(cursor)
+		if convErr != nil || start < 0 {
+			return nil, "", errors.New("invalid cursor")
+		}
+	}
+	if start >= len(items) {
+		return []T{}, "", nil
+	}
+	end := min(start+mcpDefaultPageSize, len(items))
+	if end < len(items) {
+		next = strconv.Itoa(end)
+	}
+	return items[start:end], next, nil
 }
 
 func validateMCPRequest(r *http.Request, req *jsonRPCRequest) (int, *jsonRPCError) {
@@ -448,6 +1015,7 @@ type toolSpec struct {
 	Description  string
 	InputSchema  *jsonschema.Schema
 	OutputSchema *jsonschema.Schema
+	Annotations  *mcpToolAnnotations
 	Handler      toolHandler
 }
 
@@ -492,11 +1060,13 @@ func toolResultText(v any) string {
 }
 
 func newToolSpec[In, Out any](name, title, description string, handler func(context.Context, In) toolResult[Out]) toolSpec {
+	inputSchema := schemaFor[In]()
+	addMCPHeaderToProperty(inputSchema, "task_number", "Task-Number")
 	return toolSpec{
 		Name:         name,
 		Title:        title,
 		Description:  description,
-		InputSchema:  schemaFor[In](),
+		InputSchema:  inputSchema,
 		OutputSchema: schemaFor[Out](),
 		Handler: func(ctx context.Context, argsJSON json.RawMessage) (rawToolResult, error) {
 			args, err := decodeToolArgument[In](argsJSON)
@@ -506,6 +1076,20 @@ func newToolSpec[In, Out any](name, title, description string, handler func(cont
 			return handler(ctx, args).toRawToolResult(), nil
 		},
 	}
+}
+
+func addMCPHeaderToProperty(schema *jsonschema.Schema, property, header string) {
+	if schema == nil || schema.Properties == nil {
+		return
+	}
+	prop, ok := schema.Properties.Get(property)
+	if !ok || !mcpHeaderCompatibleSchema(prop) {
+		return
+	}
+	if prop.Extras == nil {
+		prop.Extras = map[string]any{}
+	}
+	prop.Extras["x-mcp-header"] = header
 }
 
 func decodeToolArgument[T any](data json.RawMessage) (T, error) {
