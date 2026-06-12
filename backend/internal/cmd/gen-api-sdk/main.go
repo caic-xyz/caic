@@ -249,6 +249,7 @@ func voiceGatewayRoutes() []routeDef {
 			IsArray:     r.IsArray,
 			IsSSE:       r.IsSSE,
 			QueryParams: slices.Clone(r.QueryParams),
+			HeadersArg:  true,
 		}
 	}
 	return routes

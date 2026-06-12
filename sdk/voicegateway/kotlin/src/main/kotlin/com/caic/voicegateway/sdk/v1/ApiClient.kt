@@ -88,9 +88,9 @@ class ApiClient(
 
     // JSON endpoints
     /** Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session. */
-    suspend fun voiceRTCOffer(req: VoiceRTCOfferReq): VoiceRTCAnswerResp = request("POST", "/api/voicegateway/v1/voice/rtc/offer", json.encodeToString(req))
+    suspend fun voiceRTCOffer(req: VoiceRTCOfferReq, headers: Map<String, String> = emptyMap()): VoiceRTCAnswerResp = request("POST", "/api/voicegateway/v1/voice/rtc/offer", json.encodeToString(req), headers = headers)
     /** Closes a WebRTC voice bridge session. */
-    suspend fun closeVoiceRTC(sessionID: String): StatusResp = request("POST", "/api/voicegateway/v1/voice/rtc/$sessionID")
+    suspend fun closeVoiceRTC(sessionID: String, headers: Map<String, String> = emptyMap()): StatusResp = request("POST", "/api/voicegateway/v1/voice/rtc/$sessionID", headers = headers)
 
     // SSE endpoints
 

@@ -35,8 +35,8 @@ export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bin
   const request = makeRequester(fetchFn);
   return {
     /** Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session. */
-    voiceRTCOffer: (req: VoiceRTCOfferReq): Promise<VoiceRTCAnswerResp> => request<VoiceRTCAnswerResp>("POST", "/api/voicegateway/v1/voice/rtc/offer", req),
+    voiceRTCOffer: (req: VoiceRTCOfferReq, headers: Record<string, string> = {}): Promise<VoiceRTCAnswerResp> => request<VoiceRTCAnswerResp>("POST", "/api/voicegateway/v1/voice/rtc/offer", req, headers),
     /** Closes a WebRTC voice bridge session. */
-    closeVoiceRTC: (sessionID: string): Promise<StatusResp> => request<StatusResp>("POST", `/api/voicegateway/v1/voice/rtc/${sessionID}`),
+    closeVoiceRTC: (sessionID: string, headers: Record<string, string> = {}): Promise<StatusResp> => request<StatusResp>("POST", `/api/voicegateway/v1/voice/rtc/${sessionID}`, undefined, headers),
   };
 }

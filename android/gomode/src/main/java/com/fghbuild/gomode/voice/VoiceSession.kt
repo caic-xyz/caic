@@ -13,6 +13,7 @@ import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.webkit.CookieManager
 import com.caic.voicegateway.sdk.v1.ContextUpdate
 import com.caic.voicegateway.sdk.v1.Error
 import com.caic.voicegateway.sdk.v1.MessageEnvelope
@@ -148,25 +149,29 @@ class VoiceSession(
                     setError("Voice is not available for this service")
                     return@launch
                 }
-                if (serviceSettings.webShell.voiceGateway.authRequired == true ||
-                    serviceSettings.webShell.mcp.authRequired
+                val mcpEndpointURL = resolveServiceURL(settings.activeServiceURL, serviceSettings.webShell.mcp.endpoint)
+                val voiceGatewayEndpointURL = resolveServiceURL(settings.activeServiceURL, voiceGatewayURL)
+                if (serviceSettings.webShell.mcp.authRequired && cookieFor(mcpEndpointURL).isNullOrBlank()) {
+                    setError("Sign in to the hosted service before using voice")
+                    return@launch
+                }
+                if (serviceSettings.webShell.voiceGateway.authRequired == true &&
+                    cookieFor(voiceGatewayEndpointURL).isNullOrBlank()
                 ) {
-                    setError("Voice for authenticated services is not supported yet")
+                    setError("Sign in to the hosted service before using voice")
                     return@launch
                 }
 
                 val client = McpClient(
-                    endpointURL = resolveServiceURL(settings.activeServiceURL, serviceSettings.webShell.mcp.endpoint),
+                    endpointURL = mcpEndpointURL,
                     protocolVersion = serviceSettings.webShell.mcp.protocolVersion,
-                    tokenProvider = { null },
+                    cookieProvider = { cookieFor(mcpEndpointURL) },
                 )
                 mcpClient = client
                 mcpTools = client.listTools()
                 val voiceGatewayClient =
-                    com.caic.voicegateway.sdk.v1.ApiClient(
-                        resolveServiceURL(settings.activeServiceURL, voiceGatewayURL),
-                        tokenProvider = { null },
-                    )
+                    com.caic.voicegateway.sdk.v1.ApiClient(voiceGatewayEndpointURL)
+                val voiceGatewayHeaders = cookieHeaders(voiceGatewayEndpointURL)
 
                 // Initialize WebRTC factory.
                 if (pcFactory == null) {
@@ -244,7 +249,10 @@ class VoiceSession(
                         pc.setLocalDescription(noOpSdpObserver(), desc)
                         scope.launch {
                             try {
-                                val resp = voiceGatewayClient.voiceRTCOffer(VoiceRTCOfferReq(sdp = desc.description))
+                                val resp = voiceGatewayClient.voiceRTCOffer(
+                                    VoiceRTCOfferReq(sdp = desc.description),
+                                    headers = voiceGatewayHeaders,
+                                )
                                 rtcSessionID = resp.sessionID
                                 val answer = SessionDescription(SessionDescription.Type.ANSWER, resp.sdp)
                                 pc.setRemoteDescription(noOpSdpObserver(), answer)
@@ -650,6 +658,11 @@ class VoiceSession(
         audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
         audioFocusRequest = null
     }
+
+    private fun cookieHeaders(url: String): Map<String, String> =
+        cookieFor(url)?.takeIf { it.isNotBlank() }?.let { mapOf("Cookie" to it) } ?: emptyMap()
+
+    private fun cookieFor(url: String): String? = CookieManager.getInstance().getCookie(url)
 
     companion object {
         private const val SYSTEM_INSTRUCTION =

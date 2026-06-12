@@ -36,9 +36,9 @@ data class McpToolResult(
 class McpClient(
     endpointURL: String,
     private val protocolVersion: String,
-    tokenProvider: () -> String?,
+    private val cookieProvider: () -> String?,
 ) {
-    private val api = ApiClient(endpointURL, tokenProvider)
+    private val api = ApiClient(endpointURL)
     private val json = Json { ignoreUnknownKeys = true }
     private var toolsByName: Map<String, ToolDescriptor> = emptyMap()
 
@@ -56,6 +56,7 @@ class McpClient(
         paramHeaders: Map<String, String> = emptyMap(),
     ): T {
         val headers = buildMap {
+            cookieProvider()?.takeIf { it.isNotBlank() }?.let { put("Cookie", it) }
             put("Mcp-Protocol-Version", protocolVersion)
             put("Mcp-Method", method.value)
             if (name != null) put("Mcp-Name", name)

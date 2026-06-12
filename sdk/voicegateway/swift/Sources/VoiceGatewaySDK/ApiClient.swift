@@ -111,12 +111,12 @@ public final class ApiClient {
 
     // JSON endpoints
     /// Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session.
-    public func voiceRTCOffer(req: VoiceRTCOfferReq) async throws -> VoiceRTCAnswerResp {
-        try await request("POST", path: "/api/voicegateway/v1/voice/rtc/offer", body: try encoder.encode(req))
+    public func voiceRTCOffer(req: VoiceRTCOfferReq, headers: [String: String] = [:]) async throws -> VoiceRTCAnswerResp {
+        try await request("POST", path: "/api/voicegateway/v1/voice/rtc/offer", body: try encoder.encode(req), headers: headers)
     }
     /// Closes a WebRTC voice bridge session.
-    public func closeVoiceRTC(sessionID: String) async throws -> StatusResp {
-        try await request("POST", path: "/api/voicegateway/v1/voice/rtc/\(sessionID)")
+    public func closeVoiceRTC(sessionID: String, headers: [String: String] = [:]) async throws -> StatusResp {
+        try await request("POST", path: "/api/voicegateway/v1/voice/rtc/\(sessionID)", headers: headers)
     }
 
     // SSE endpoints
