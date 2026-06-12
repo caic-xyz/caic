@@ -30,6 +30,12 @@ func translateGatewayClientMessage(data []byte) ([]byte, error) {
 			return nil, err
 		}
 		return buildGeminiRealtimeText(msg.Context.Text)
+	case voicev1.MessageKindUserMessage:
+		var msg voicev1.UserMessage
+		if err := decodeGatewayMessage(data, env.Kind, &msg); err != nil {
+			return nil, err
+		}
+		return buildGeminiClientContentText(msg.Text)
 	case voicev1.MessageKindToolResult:
 		var msg voicev1.ToolResult
 		if err := decodeGatewayMessage(data, env.Kind, &msg); err != nil {
@@ -120,6 +126,26 @@ func buildGeminiRealtimeText(text string) ([]byte, error) {
 	return json.Marshal(msg)
 }
 
+func buildGeminiClientContentText(text string) ([]byte, error) {
+	if text == "" {
+		return nil, errors.New("client content text is required")
+	}
+	msg := geminiClientContentMessage{
+		ClientContent: geminiClientContent{
+			Turns:        []geminiContent{geminiTextTurn("user", text)},
+			TurnComplete: true,
+		},
+	}
+	return json.Marshal(msg)
+}
+
+func geminiTextTurn(role, text string) geminiContent {
+	return geminiContent{
+		Role:  role,
+		Parts: []geminiPart{{Text: text}},
+	}
+}
+
 func buildGeminiToolResponse(msg *voicev1.ToolResult) ([]byte, error) {
 	if msg.ID == "" {
 		return nil, errors.New("tool.result id is required")
@@ -192,10 +218,6 @@ func translateServerContent(content *serverContent) [][]byte {
 	}
 	if content.OutputTranscription.Text != "" {
 		out = append(out,
-			mustGatewayServerMessage(&voicev1.SpeechStarted{
-				Kind:    voicev1.MessageKindSpeechStarted,
-				Speaker: voicev1.SpeakerAssistant,
-			}),
 			mustGatewayServerMessage(&voicev1.TranscriptDelta{
 				Kind:    voicev1.MessageKindTranscriptDelta,
 				Speaker: voicev1.SpeakerAssistant,

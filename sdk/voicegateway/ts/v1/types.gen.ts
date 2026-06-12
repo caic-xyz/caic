@@ -18,6 +18,7 @@ export const InterruptSourceTool: InterruptSource = "tool";
 export type MessageKind =
   | "session.setup"
   | "context.update"
+  | "user.message"
   | "tool.result"
   | "turn.cancel"
   | "session.close"
@@ -34,6 +35,7 @@ export type MessageKind =
  */
 export const MessageKindSessionSetup: MessageKind = "session.setup";
 export const MessageKindContextUpdate: MessageKind = "context.update";
+export const MessageKindUserMessage: MessageKind = "user.message";
 export const MessageKindToolResult: MessageKind = "tool.result";
 export const MessageKindTurnCancel: MessageKind = "turn.cancel";
 export const MessageKindSessionClose: MessageKind = "session.close";
@@ -117,6 +119,12 @@ export interface SessionSetup {
 export interface ContextUpdate {
   kind: MessageKind;
   context: Context;
+}
+
+/** UserMessage is a client message that appends completed user text and asks the assistant to respond. */
+export interface UserMessage {
+  kind: MessageKind;
+  text: string;
 }
 
 /** ToolResult is a client message that returns a tool execution result. */

@@ -61,6 +61,10 @@ sealed interface MessageKind {
         override val value = "context.update"
     }
     @Serializable
+    data object UserMessage : MessageKind {
+        override val value = "user.message"
+    }
+    @Serializable
     data object ToolResult : MessageKind {
         override val value = "tool.result"
     }
@@ -116,6 +120,7 @@ object MessageKindSerializer : KSerializer<MessageKind> {
         return when (v) {
             "session.setup" -> MessageKind.SessionSetup
             "context.update" -> MessageKind.ContextUpdate
+            "user.message" -> MessageKind.UserMessage
             "tool.result" -> MessageKind.ToolResult
             "turn.cancel" -> MessageKind.TurnCancel
             "session.close" -> MessageKind.SessionClose
@@ -219,6 +224,10 @@ data class SessionSetup(
 /** ContextUpdate is a client message that appends session context. */
 @Serializable
 data class ContextUpdate(val kind: MessageKind, val context: Context)
+
+/** UserMessage is a client message that appends completed user text and asks the assistant to respond. */
+@Serializable
+data class UserMessage(val kind: MessageKind, val text: String)
 
 /** ToolResult is a client message that returns a tool execution result. */
 @Serializable

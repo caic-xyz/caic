@@ -12,6 +12,8 @@ naming:
     constantPattern: '[A-Z][A-Za-z0-9_]*'
 
 style:
+  LoopWithTooManyJumpStatements:
+    active: false
   MagicNumber:
     active: false
   MaxLineLength:

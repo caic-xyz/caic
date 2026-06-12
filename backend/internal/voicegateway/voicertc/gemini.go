@@ -15,6 +15,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/caic-xyz/caic/backend/internal/jsonutil"
+	voicev1 "github.com/caic-xyz/caic/backend/internal/voicegateway/api/v1"
 )
 
 const (
@@ -45,15 +46,26 @@ const (
 //    protocol.go.
 // 6. After edits, run the focused voicertc tests and make lint.
 
+// geminiBridgeBackend adapts the provider-neutral voice gateway protocol to a
+// Gemini Live WebSocket session.
+//
+// Session flow:
+//  1. connect opens one Gemini Live WebSocket for the gateway session.
+//  2. The client sends session.setup over WebRTC data channel; protocol.go
+//     translates it to Gemini setup, including model, voice, tools, and system
+//     instruction.
+//  3. Gemini replies setupComplete after accepting configuration. setupComplete
+//     means the backend transport is ready, but it does not start generation.
+//  4. The bridge emits gateway session.ready once setupComplete is processed.
+//  5. Clients may then send provider-neutral workflow messages such as
+//     user.message; protocol.go maps those to completed Gemini clientContent
+//     turns because systemInstruction is passive context and does not itself
+//     start generation.
+//  6. Realtime microphone PCM is forwarded as Gemini realtimeInput audio.
+//     Gemini serverContent audio is extracted into the RTP output buffer, while
+//     transcription/tool-call messages are translated back to gateway messages.
 type geminiBridgeBackend struct {
 	apiKey string
-}
-
-func newGeminiBridgeBackend(apiKey string) (backendConnector, error) {
-	if apiKey == "" {
-		return nil, errors.New("GEMINI_API_KEY not configured")
-	}
-	return &geminiBridgeBackend{apiKey: apiKey}, nil
 }
 
 // Close releases backend-wide resources. The Gemini Live backend holds none;
@@ -89,8 +101,9 @@ type geminiBridgeSession struct {
 	id   string
 	sink backendSink
 
-	mu sync.Mutex
-	ws *websocket.Conn
+	mu                sync.Mutex
+	ws                *websocket.Conn
+	assistantSpeaking bool
 }
 
 func (s *geminiBridgeSession) acceptClientMessage(ctx context.Context, data []byte) error {
@@ -160,7 +173,7 @@ func (s *geminiBridgeSession) rxLoop(ctx context.Context) {
 			return
 		}
 
-		if modified, ok := s.handleAudioExtraction(data); ok {
+		if modified, ok := s.handleAudioExtraction(ctx, data); ok {
 			data = modified
 		}
 
@@ -183,11 +196,27 @@ func (s *geminiBridgeSession) rxLoop(ctx context.Context) {
 	}
 }
 
+func (s *geminiBridgeSession) beginAssistantSpeech() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.assistantSpeaking {
+		return false
+	}
+	s.assistantSpeaking = true
+	return true
+}
+
+func (s *geminiBridgeSession) endAssistantSpeech() {
+	s.mu.Lock()
+	s.assistantSpeaking = false
+	s.mu.Unlock()
+}
+
 // handleAudioExtraction checks if a Gemini message contains serverContent with
 // inlineData audio. If so, it appends the PCM bytes to the audio buffer for
 // real-time playback, and returns a modified message with the audio stripped.
 // On interrupted=true it clears the buffer immediately.
-func (s *geminiBridgeSession) handleAudioExtraction(data []byte) ([]byte, bool) {
+func (s *geminiBridgeSession) handleAudioExtraction(ctx context.Context, data []byte) ([]byte, bool) {
 	var msg geminiBidiMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return nil, false
@@ -198,7 +227,13 @@ func (s *geminiBridgeSession) handleAudioExtraction(data []byte) ([]byte, bool) 
 
 	if msg.ServerContent.Interrupted {
 		s.sink.clearAssistantAudio()
+		s.endAssistantSpeech()
 	}
+	defer func() {
+		if msg.ServerContent.TurnComplete {
+			s.endAssistantSpeech()
+		}
+	}()
 
 	if len(msg.ServerContent.ModelTurn.Parts) == 0 {
 		return nil, false
@@ -227,6 +262,16 @@ func (s *geminiBridgeSession) handleAudioExtraction(data []byte) ([]byte, bool) 
 	}
 	if !hadAudio {
 		return nil, false
+	}
+	if s.beginAssistantSpeech() {
+		msg := mustGatewayServerMessage(&voicev1.SpeechStarted{
+			Kind:    voicev1.MessageKindSpeechStarted,
+			Speaker: voicev1.SpeakerAssistant,
+		})
+		if err := s.sink.sendGatewayMessage(ctx, msg); err != nil {
+			slog.WarnContext(ctx, "voicertc: speech.started send failed", "session", s.id, "err", err)
+			s.sink.cancelSession()
+		}
 	}
 
 	msg.ServerContent.ModelTurn.Parts = filteredParts
@@ -285,6 +330,15 @@ type geminiSetupComplete struct {
 
 type geminiSetupMessage struct {
 	Setup geminiSetup `json:"setup"`
+}
+
+type geminiClientContentMessage struct {
+	ClientContent geminiClientContent `json:"clientContent"`
+}
+
+type geminiClientContent struct {
+	Turns        []geminiContent `json:"turns,omitempty"`
+	TurnComplete bool            `json:"turnComplete,omitzero"`
 }
 
 // geminiSetup configures the live stream for the duration of the session.

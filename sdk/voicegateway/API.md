@@ -127,6 +127,15 @@ ContextUpdate is a client message that appends session context.
 | `kind` | `string` |  | yes |
 | `context` | `Context` |  | yes |
 
+### UserMessage
+
+UserMessage is a client message that appends completed user text and asks the assistant to respond.
+
+| Field | Type | Description | Required |
+|-------|------|-------------|----------|
+| `kind` | `string` |  | yes |
+| `text` | `string` |  | yes |
+
 ### ToolResult
 
 ToolResult is a client message that returns a tool execution result.

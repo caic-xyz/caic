@@ -12,12 +12,14 @@ import {
 import {
   type Error,
   type ContextUpdate,
+  type UserMessage,
   type MessageEnvelope,
   type SessionSetup,
   type ToolResult,
   type ToolCall,
   type TranscriptDelta,
   MessageKindContextUpdate,
+  MessageKindUserMessage,
   MessageKindError,
   MessageKindInterrupted,
   MessageKindSessionReady,
@@ -537,6 +539,7 @@ export class VoiceSession {
         s.connected = true;
         s.error = null;
       });
+      this._send(JSON.stringify(gatewayUserMessage("Say exactly one word: Ready")));
       // Audio capture is handled via WebRTC RTP tracks; no separate audio setup needed.
       return;
     }
@@ -681,6 +684,13 @@ function gatewayContextUpdate(text: string): ContextUpdate {
   return {
     kind: MessageKindContextUpdate,
     context: { text },
+  };
+}
+
+function gatewayUserMessage(text: string): UserMessage {
+  return {
+    kind: MessageKindUserMessage,
+    text,
   };
 }
 

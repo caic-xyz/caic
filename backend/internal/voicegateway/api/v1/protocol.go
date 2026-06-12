@@ -12,6 +12,8 @@ const (
 	MessageKindSessionSetup MessageKind = "session.setup"
 	// MessageKindContextUpdate sends provider-neutral text context to the session.
 	MessageKindContextUpdate MessageKind = "context.update"
+	// MessageKindUserMessage appends completed user text and asks the assistant to respond.
+	MessageKindUserMessage MessageKind = "user.message"
 	// MessageKindToolResult returns the result of a tool call.
 	MessageKindToolResult MessageKind = "tool.result"
 	// MessageKindTurnCancel asks the gateway to cancel the current turn.
@@ -96,6 +98,12 @@ type Context struct {
 type ContextUpdate struct {
 	Kind    MessageKind `json:"kind"`
 	Context Context     `json:"context"`
+}
+
+// UserMessage is a client message that appends completed user text and asks the assistant to respond.
+type UserMessage struct {
+	Kind MessageKind `json:"kind"`
+	Text string      `json:"text"`
 }
 
 // ToolDeclaration is a provider-neutral service tool declaration.

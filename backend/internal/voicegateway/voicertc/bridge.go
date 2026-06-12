@@ -81,7 +81,10 @@ func NewBridge(ctx context.Context, cfg *voicegateway.Config, geminiAPIKey strin
 func backendForConfig(ctx context.Context, cfg *voicegateway.Config, geminiAPIKey string) (backendConnector, error) {
 	switch cfg.Backend {
 	case voicegateway.BackendGeminiLive:
-		return newGeminiBridgeBackend(geminiAPIKey)
+		if geminiAPIKey == "" {
+			return nil, errors.New("GEMINI_API_KEY not configured")
+		}
+		return &geminiBridgeBackend{apiKey: geminiAPIKey}, nil
 	case voicegateway.BackendLocalStack:
 		return localStackBackendForConfig(ctx, &cfg.LocalStack)
 	default:

@@ -23,6 +23,7 @@ import com.caic.voicegateway.sdk.v1.ToolCall
 import com.caic.voicegateway.sdk.v1.ToolDeclaration
 import com.caic.voicegateway.sdk.v1.ToolResult
 import com.caic.voicegateway.sdk.v1.TranscriptDelta
+import com.caic.voicegateway.sdk.v1.UserMessage
 import com.caic.voicegateway.sdk.v1.VoiceConfig
 import com.caic.voicegateway.sdk.v1.VoiceRTCOfferReq
 import com.fghbuild.caic.data.SettingsRepository
@@ -30,6 +31,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,9 +56,11 @@ import org.webrtc.SessionDescription
 import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import javax.inject.Inject
+import kotlin.math.sqrt
 import javax.inject.Singleton
 
 private const val TAG = "VoiceSession"
+private const val MIC_LEVEL_POLL_MS = 100L
 
 @Singleton
 class VoiceSession @Inject constructor(
@@ -75,6 +79,8 @@ class VoiceSession @Inject constructor(
     private var pcFactory: PeerConnectionFactory? = null
     private var rtcAudioSource: org.webrtc.AudioSource? = null
     private var localAudioTrack: org.webrtc.AudioTrack? = null
+    private var micLevelJob: Job? = null
+    private val micEnergySamples = mutableMapOf<String, MicEnergySample>()
     private var mcpClient: McpClient? = null
     private var mcpTools: List<McpToolDescriptor> = emptyList()
     private var deviceCallback: AudioDeviceCallback? = null
@@ -203,6 +209,7 @@ class VoiceSession @Inject constructor(
                 val micTrack = factory.createAudioTrack("mic-audio", audioSrc)
                 localAudioTrack = micTrack
                 pc.addTrack(micTrack)
+                startMicLevelMonitoring()
 
                 val dcInit = DataChannel.Init().apply { ordered = true }
                 val dc = pc.createDataChannel("voice-gateway", dcInit) ?: run {
@@ -292,6 +299,59 @@ class VoiceSession @Inject constructor(
         }
     }
 
+    private fun startMicLevelMonitoring() {
+        micLevelJob?.cancel()
+        micEnergySamples.clear()
+        micLevelJob = scope.launch {
+            while (true) {
+                val pc = peerConnection ?: break
+                if (muted) {
+                    _state.update { it.copy(micLevel = 0f) }
+                } else {
+                    pc.getStats { report ->
+                        val level = micLevelFromStats(report) ?: return@getStats
+                        _state.update { it.copy(micLevel = level) }
+                    }
+                }
+                delay(MIC_LEVEL_POLL_MS)
+            }
+        }
+    }
+
+    private fun stopMicLevelMonitoring() {
+        micLevelJob?.cancel()
+        micLevelJob = null
+        micEnergySamples.clear()
+    }
+
+    private fun micLevelFromStats(report: org.webrtc.RTCStatsReport): Float? {
+        var maxLevel: Float? = null
+        report.statsMap.forEach { (id, stat) ->
+            if (!isLocalAudioStat(stat)) return@forEach
+            val directLevel = (stat.members["audioLevel"] as? Number)?.toFloat()
+            if (directLevel != null) {
+                maxLevel = maxOf(maxLevel ?: 0f, directLevel.coerceIn(0f, 1f))
+                return@forEach
+            }
+            val energy = (stat.members["totalAudioEnergy"] as? Number)?.toDouble() ?: return@forEach
+            val duration = (stat.members["totalSamplesDuration"] as? Number)?.toDouble() ?: return@forEach
+            val previous = micEnergySamples.put(id, MicEnergySample(energy, duration)) ?: return@forEach
+            val energyDelta = energy - previous.energy
+            val durationDelta = duration - previous.duration
+            if (energyDelta <= 0.0 || durationDelta <= 0.0) return@forEach
+            val rms = sqrt(energyDelta / durationDelta).toFloat().coerceIn(0f, 1f)
+            maxLevel = maxOf(maxLevel ?: 0f, rms)
+        }
+        return maxLevel
+    }
+
+    private fun isLocalAudioStat(stat: org.webrtc.RTCStats): Boolean {
+        val type = stat.type.lowercase()
+        if ("inbound" in type || type.startsWith("remote-")) return false
+        val kind = stat.members["kind"] as? String ?: stat.members["mediaType"] as? String
+        return kind == null || kind == "audio"
+    }
+
     private fun noOpSdpObserver() = object : SdpObserver {
         override fun onCreateSuccess(p0: SessionDescription) = Unit
         override fun onSetSuccess() = Unit
@@ -306,7 +366,7 @@ class VoiceSession @Inject constructor(
     /** Toggle microphone mute via the RTP audio track. */
     fun toggleMute() {
         muted = !muted
-        _state.update { it.copy(muted = muted) }
+        _state.update { it.copy(muted = muted, micLevel = if (muted) 0f else it.micLevel) }
         localAudioTrack?.setEnabled(!muted)
     }
 
@@ -317,6 +377,7 @@ class VoiceSession @Inject constructor(
 
     fun disconnect() {
         muted = false
+        stopMicLevelMonitoring()
         abandonAudioFocus()
         VoiceService.stop(appContext)
         unregisterDeviceCallback()
@@ -364,6 +425,10 @@ class VoiceSession @Inject constructor(
         send(json.encodeToString(ContextUpdate.serializer(), gatewayContextUpdate(text)))
     }
 
+    private fun sendUserMessage(text: String) {
+        send(json.encodeToString(UserMessage.serializer(), gatewayUserMessage(text)))
+    }
+
     private fun flushPendingNotifications() {
         if (pendingNotifications.isEmpty()) return
         val text = pendingNotifications.joinToString("\n")
@@ -399,6 +464,7 @@ class VoiceSession @Inject constructor(
                             error = null,
                         )
                     }
+                    sendUserMessage("Say exactly one word: Ready")
                 }
                 MessageKind.TranscriptDelta -> {
                     handleTranscriptDelta(json.decodeFromString(TranscriptDelta.serializer(), text))
@@ -493,6 +559,11 @@ class VoiceSession @Inject constructor(
     private fun gatewayContextUpdate(text: String) = ContextUpdate(
         kind = MessageKind.ContextUpdate,
         context = com.caic.voicegateway.sdk.v1.Context(text = text),
+    )
+
+    private fun gatewayUserMessage(text: String) = UserMessage(
+        kind = MessageKind.UserMessage,
+        text = text,
     )
 
     private fun gatewaySessionSetup(
@@ -674,12 +745,8 @@ class VoiceSession @Inject constructor(
                 "At session start you receive a snapshot of all current tasks. Use it to " +
                 "answer questions about task status without calling tasks_list first. Call " +
                 "task_get_detail when the user asks for specifics (recent events, diffs).\n\n" +
-                "## On connection\n" +
-                "When the session starts, say exactly one word: \"Ready\". " +
-                "Do not say anything else — no greeting, no summary, no explanation. " +
-                "After saying \"Ready\", stop and remain silent until the user speaks. " +
-                "Always speak fast.\n\n" +
                 "## Behavior guidelines\n" +
+                "- Always speak fast.\n" +
                 "- Do not ask follow-up questions like 'would you like me to…' " +
                 "or 'should I also…'. Answer the user's request and stop. " +
                 "Only ask a question if the user's request is genuinely ambiguous " +
@@ -706,6 +773,8 @@ enum class TranscriptSpeaker { USER, ASSISTANT }
 data class TranscriptEntry(val speaker: TranscriptSpeaker, val text: String, val final: Boolean = false)
 
 data class AudioDevice(val id: Int, val type: Int, val name: String)
+
+private data class MicEnergySample(val energy: Double, val duration: Double)
 
 data class VoiceState(
     val connectStatus: String? = null,

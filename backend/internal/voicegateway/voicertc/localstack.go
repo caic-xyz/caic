@@ -127,11 +127,12 @@ type localStackSession struct {
 	llm llmAdapter
 	tts ttsAdapter
 
-	mu          sync.Mutex
-	conv        llmConversation
-	turnCancel  context.CancelFunc
-	speaking    bool
-	toolResults chan toolResultMsg
+	mu             sync.Mutex
+	conv           llmConversation
+	turnCancel     context.CancelFunc
+	turnGeneration int
+	speaking       bool
+	toolResults    chan toolResultMsg
 }
 
 func (s *localStackSession) acceptClientMessage(ctx context.Context, data []byte) error {
@@ -161,6 +162,13 @@ func (s *localStackSession) acceptClientMessage(ctx context.Context, data []byte
 		if conv != nil && msg.Context.Text != "" {
 			conv.addContext(msg.Context.Text)
 		}
+		return nil
+	case voicev1.MessageKindUserMessage:
+		var msg voicev1.UserMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return fmt.Errorf("decode user.message: %w", err)
+		}
+		s.startUserMessage(ctx, msg.Text)
 		return nil
 	case voicev1.MessageKindToolResult:
 		var msg voicev1.ToolResult
@@ -204,6 +212,43 @@ func (s *localStackSession) close() error {
 	return nil
 }
 
+func (s *localStackSession) clearTurnCancel(generation int) {
+	s.mu.Lock()
+	if s.turnGeneration == generation {
+		s.turnCancel = nil
+	}
+	s.mu.Unlock()
+}
+
+func (s *localStackSession) startUserMessage(ctx context.Context, text string) {
+	if text == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.turnCancel != nil {
+		s.turnCancel()
+	}
+	turnCtx, cancel := context.WithCancel(ctx)
+	s.turnCancel = cancel
+	s.turnGeneration++
+	generation := s.turnGeneration
+	conv := s.conv
+	s.mu.Unlock()
+	if conv == nil {
+		cancel()
+		return
+	}
+	go func() {
+		defer s.clearTurnCancel(generation)
+		reply, err := conv.user(turnCtx, text)
+		if err != nil {
+			s.warnTurn("llm", err)
+			return
+		}
+		s.handleReply(turnCtx, conv, reply)
+	}()
+}
+
 func (s *localStackSession) startTurn(ctx context.Context, utterance []byte) {
 	s.mu.Lock()
 	if s.turnCancel != nil {
@@ -211,6 +256,8 @@ func (s *localStackSession) startTurn(ctx context.Context, utterance []byte) {
 	}
 	turnCtx, cancel := context.WithCancel(ctx)
 	s.turnCancel = cancel
+	s.turnGeneration++
+	generation := s.turnGeneration
 	conv := s.conv
 	s.mu.Unlock()
 	if conv == nil {
@@ -222,7 +269,10 @@ func (s *localStackSession) startTurn(ctx context.Context, utterance []byte) {
 	case <-s.toolResults:
 	default:
 	}
-	go s.runTurn(turnCtx, conv, utterance)
+	go func() {
+		s.runTurn(turnCtx, conv, utterance)
+		s.clearTurnCancel(generation)
+	}()
 }
 
 func (s *localStackSession) runTurn(ctx context.Context, conv llmConversation, utterance []byte) {

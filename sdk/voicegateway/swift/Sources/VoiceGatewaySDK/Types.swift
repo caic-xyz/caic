@@ -65,6 +65,7 @@ public struct MessageKind: Codable, Equatable, Hashable {
 
     public static let SessionSetup = MessageKind("session.setup")
     public static let ContextUpdate = MessageKind("context.update")
+    public static let UserMessage = MessageKind("user.message")
     public static let ToolResult = MessageKind("tool.result")
     public static let TurnCancel = MessageKind("turn.cancel")
     public static let SessionClose = MessageKind("session.close")
@@ -179,6 +180,12 @@ public struct SessionSetup: Codable {
 public struct ContextUpdate: Codable {
     public let kind: MessageKind
     public let context: Context
+}
+
+/// UserMessage is a client message that appends completed user text and asks the assistant to respond.
+public struct UserMessage: Codable {
+    public let kind: MessageKind
+    public let text: String
 }
 
 /// ToolResult is a client message that returns a tool execution result.

@@ -157,6 +157,7 @@ func generateVoiceGatewaySDK() error {
 			reflect.TypeFor[voicev1.MessageEnvelope](),
 			reflect.TypeFor[voicev1.SessionSetup](),
 			reflect.TypeFor[voicev1.ContextUpdate](),
+			reflect.TypeFor[voicev1.UserMessage](),
 			reflect.TypeFor[voicev1.ToolResult](),
 			reflect.TypeFor[voicev1.TurnCancel](),
 			reflect.TypeFor[voicev1.SessionClose](),

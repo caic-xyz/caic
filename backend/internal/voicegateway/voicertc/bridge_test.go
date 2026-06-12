@@ -3,6 +3,7 @@
 package voicertc
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -88,6 +89,25 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 		}
 	})
 
+	t.Run("user message", func(t *testing.T) {
+		t.Parallel()
+		got, err := translateGatewayClientMessage([]byte(`{"kind":"user.message","text":"Say exactly one word: Ready"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var msg map[string]any
+		if err := json.Unmarshal(got, &msg); err != nil {
+			t.Fatal(err)
+		}
+		clientContent, ok := msg["clientContent"].(map[string]any)
+		if !ok {
+			t.Fatalf("clientContent = %T, want object", msg["clientContent"])
+		}
+		if clientContent["turnComplete"] != true {
+			t.Fatalf("turnComplete = %v, want true", clientContent["turnComplete"])
+		}
+	})
+
 	t.Run("tool result", func(t *testing.T) {
 		t.Parallel()
 		got, err := translateGatewayClientMessage([]byte(`{"kind":"tool.result","id":"call-1","name":"tasks_list","result":{"ok":true}}`))
@@ -118,6 +138,47 @@ func TestTranslateGatewayClientMessage(t *testing.T) {
 			t.Fatal("expected error")
 		}
 	})
+}
+
+func TestBuildGeminiClientContentText(t *testing.T) {
+	t.Parallel()
+	got, err := buildGeminiClientContentText("Say exactly one word: Ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var msg map[string]any
+	if err := json.Unmarshal(got, &msg); err != nil {
+		t.Fatal(err)
+	}
+	clientContent, ok := msg["clientContent"].(map[string]any)
+	if !ok {
+		t.Fatalf("clientContent = %T, want object", msg["clientContent"])
+	}
+	if clientContent["turnComplete"] != true {
+		t.Fatalf("turnComplete = %v, want true", clientContent["turnComplete"])
+	}
+	turns, ok := clientContent["turns"].([]any)
+	if !ok || len(turns) != 1 {
+		t.Fatalf("turns = %T len %d, want one turn", clientContent["turns"], len(turns))
+	}
+	turn, ok := turns[0].(map[string]any)
+	if !ok {
+		t.Fatalf("turn = %T, want object", turns[0])
+	}
+	if turn["role"] != "user" {
+		t.Fatalf("role = %q, want user", turn["role"])
+	}
+	parts, ok := turn["parts"].([]any)
+	if !ok || len(parts) != 1 {
+		t.Fatalf("parts = %T len %d, want one part", turn["parts"], len(parts))
+	}
+	part, ok := parts[0].(map[string]any)
+	if !ok {
+		t.Fatalf("part = %T, want object", parts[0])
+	}
+	if part["text"] != "Say exactly one word: Ready" {
+		t.Fatalf("text = %q, want user message", part["text"])
+	}
 }
 
 func TestTranslateGeminiServerMessage(t *testing.T) {
@@ -157,7 +218,6 @@ func TestTranslateGeminiServerMessage(t *testing.T) {
 		}
 		want := []voicev1.MessageKind{
 			voicev1.MessageKindTranscriptDelta,
-			voicev1.MessageKindSpeechStarted,
 			voicev1.MessageKindTranscriptDelta,
 			voicev1.MessageKindAssistantTextDelta,
 			voicev1.MessageKindSpeechEnded,
@@ -201,6 +261,40 @@ func TestGatewaySessionReady(t *testing.T) {
 	}
 	if msg.Kind != voicev1.MessageKindSessionReady {
 		t.Fatalf("kind = %q, want session.ready", msg.Kind)
+	}
+}
+
+func TestGeminiAudioExtractionEmitsSpeechStarted(t *testing.T) {
+	t.Parallel()
+	sink := &captureSink{}
+	sess := &geminiBridgeSession{id: "test", sink: sink}
+	msg := []byte(`{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"mimeType":"audio/pcm;rate=24000","data":"AQIDBA=="}}]}}}`)
+
+	modified, ok := sess.handleAudioExtraction(t.Context(), msg)
+	if !ok {
+		t.Fatal("handleAudioExtraction did not report audio")
+	}
+	if bytes.Contains(modified, []byte("AQIDBA==")) {
+		t.Fatal("audio data was not stripped from provider message")
+	}
+
+	sink.mu.Lock()
+	pcmLen := len(sink.pcm)
+	msgs := append([][]byte(nil), sink.msgs...)
+	sink.mu.Unlock()
+
+	if pcmLen != 4 {
+		t.Fatalf("pcm bytes = %d, want 4", pcmLen)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("messages = %d, want speech.started", len(msgs))
+	}
+	var started voicev1.SpeechStarted
+	if err := json.Unmarshal(msgs[0], &started); err != nil {
+		t.Fatal(err)
+	}
+	if started.Kind != voicev1.MessageKindSpeechStarted || started.Speaker != voicev1.SpeakerAssistant {
+		t.Fatalf("message = %+v, want assistant speech.started", started)
 	}
 }
 

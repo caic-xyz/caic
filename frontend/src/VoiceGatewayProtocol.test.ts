@@ -2,9 +2,11 @@
 import { describe, expect, it } from "vitest";
 import {
   type ContextUpdate,
+  type UserMessage,
   type SessionSetup,
   type ToolResult,
   MessageKindContextUpdate,
+  MessageKindUserMessage,
   MessageKindSessionSetup,
   MessageKindToolResult,
 } from "@voicegateway-sdk/types.gen";
@@ -37,6 +39,17 @@ describe("voice gateway generated protocol DTOs", () => {
 
     expect(JSON.stringify(msg)).toBe(
       '{"kind":"context.update","context":{"text":"status update"}}',
+    );
+  });
+
+  it("serializes user messages exactly", () => {
+    const msg: UserMessage = {
+      kind: MessageKindUserMessage,
+      text: "Say exactly one word: Ready",
+    };
+
+    expect(JSON.stringify(msg)).toBe(
+      '{"kind":"user.message","text":"Say exactly one word: Ready"}',
     );
   });
 

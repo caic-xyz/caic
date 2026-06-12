@@ -129,6 +129,40 @@ func TestLocalStackTurn(t *testing.T) {
 	}
 }
 
+func TestLocalStackUserMessage(t *testing.T) {
+	t.Parallel()
+	backend := newLocalStackBackend(
+		func() vadSegmenter { return &energyVAD{} },
+		placeholderASR{}, placeholderLLM{}, placeholderTTS{},
+	)
+	sink := &captureSink{}
+	sess, err := backend.connect(t.Context(), "say", sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sess.close() })
+
+	setup := mustJSON(t, voicev1.SessionSetup{Kind: voicev1.MessageKindSessionSetup})
+	if err := sess.acceptClientMessage(t.Context(), setup); err != nil {
+		t.Fatal(err)
+	}
+	msg := mustJSON(t, voicev1.UserMessage{Kind: voicev1.MessageKindUserMessage, Text: "Say exactly one word: Ready"})
+	if err := sess.acceptClientMessage(t.Context(), msg); err != nil {
+		t.Fatal(err)
+	}
+	waitForKind(t, sink, voicev1.MessageKindSpeechEnded)
+	if !slices.Contains(sink.kinds(), voicev1.MessageKindSpeechStarted) {
+		t.Fatal("missing speech.started")
+	}
+	wantText := "You said: Say exactly one word: Ready"
+	if text := sink.assistantText(); text != wantText {
+		t.Fatalf("assistant text = %q, want %q", text, wantText)
+	}
+	if sink.pcmLen() == 0 {
+		t.Fatal("no assistant audio produced")
+	}
+}
+
 func TestLocalStackSessionSpeak(t *testing.T) {
 	t.Parallel()
 
@@ -490,6 +524,22 @@ func (c *captureSink) kinds() []voicev1.MessageKind {
 		}
 	}
 	return kinds
+}
+
+func (c *captureSink) assistantText() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, m := range c.msgs {
+		var env voicev1.MessageEnvelope
+		if json.Unmarshal(m, &env) != nil || env.Kind != voicev1.MessageKindAssistantTextDelta {
+			continue
+		}
+		var msg voicev1.AssistantTextDelta
+		if json.Unmarshal(m, &msg) == nil {
+			return msg.Text
+		}
+	}
+	return ""
 }
 
 func decodeToolCall(t *testing.T, sink *captureSink) voicev1.ToolCall {
