@@ -303,6 +303,7 @@ func generateMcpSDK() error {
 		apiDocTitle:        "MCP API Reference",
 		apiDocIntro:        "JSON-RPC MCP endpoint client. Construct clients with the MCP endpoint URL advertised by the service. Requests must include MCP transport headers such as `Mcp-Protocol-Version` and `Mcp-Method`; method-specific requests may also require `Mcp-Name` and `Mcp-Param-*` headers.",
 		errorDoc:           "MCP errors are JSON-RPC error objects in `JSONRPCResponse.error`. Transport-layer validation failures may use non-2xx HTTP statuses; method-level JSON-RPC errors can still use HTTP 200.",
+		mcpProtocolVersion: mcp.ProtocolVersion,
 		specialTypes: []specialType{
 			{
 				t:          reflect.TypeFor[json.RawMessage](),

@@ -21,16 +21,17 @@ type genConfig struct {
 	extraSeeds         []reflect.Type
 	documentExtraSeeds bool
 
-	errorModel      clientErrorModel
-	kotlinPackage   string
-	apiDocTitle     string
-	apiDocIntro     string
-	errorDoc        string
-	sectionComments map[string]string
-	specialTypes    []specialType
-	sseSeeds        []reflect.Type
-	discriminated   []string // Type names using kind-based dispatch in TS validators
-	errorCodes      []errorCodeDef
+	errorModel         clientErrorModel
+	kotlinPackage      string
+	apiDocTitle        string
+	apiDocIntro        string
+	errorDoc           string
+	mcpProtocolVersion string
+	sectionComments    map[string]string
+	specialTypes       []specialType
+	sseSeeds           []reflect.Type
+	discriminated      []string // Type names using kind-based dispatch in TS validators
+	errorCodes         []errorCodeDef
 }
 
 // lookupSpecial returns the matching specialType entry for t, or nil.

@@ -152,6 +152,48 @@ class ApiClient(
 	}
 	b.WriteString("\n")
 
+	if d.cfg.mcpProtocolVersion != "" {
+		fmt.Fprintf(&b, `    /** Discovers server metadata, capabilities, and instructions. */
+    suspend fun serverDiscover(headers: Map<String, String> = emptyMap()): ServerDiscoverResult {
+        val response = mcp(
+            req = JSONRPCRequest(
+                jsonrpc = "2.0",
+                method = Method.ServerDiscover,
+                params = mcpMetaParams(),
+            ),
+            headers = mcpHeaders(Method.ServerDiscover, headers),
+        )
+        response.error?.let { error(it.message) }
+        val result = response.result ?: error("Missing result in MCP response")
+        return json.decodeFromString(ServerDiscoverResult.serializer(), result.toString())
+    }
+
+    /** Returns server instructions, or an empty string when none are advertised. */
+    suspend fun serverInstructions(headers: Map<String, String> = emptyMap()): String =
+        serverDiscover(headers).instructions.orEmpty()
+
+    private fun mcpHeaders(method: Method, headers: Map<String, String>): Map<String, String> = buildMap {
+        put("Mcp-Protocol-Version", %[1]q)
+        put("Mcp-Method", method.value)
+        putAll(headers)
+    }
+
+    private fun mcpMetaParams(): kotlinx.serialization.json.JsonObject {
+        val clientInfo = kotlinx.serialization.json.JsonObject(mapOf(
+            "name" to kotlinx.serialization.json.JsonPrimitive("mcp-kotlin-sdk"),
+            "version" to kotlinx.serialization.json.JsonPrimitive("1.0.0"),
+        ))
+        val meta = kotlinx.serialization.json.JsonObject(mapOf(
+            "io.modelcontextprotocol/protocolVersion" to kotlinx.serialization.json.JsonPrimitive(%[1]q),
+            "io.modelcontextprotocol/clientInfo" to clientInfo,
+            "io.modelcontextprotocol/clientCapabilities" to kotlinx.serialization.json.JsonObject(emptyMap()),
+        ))
+        return kotlinx.serialization.json.JsonObject(mapOf("_meta" to meta))
+    }
+
+`, d.cfg.mcpProtocolVersion)
+	}
+
 	// Generate SSE endpoint methods from routes.
 	b.WriteString("    // SSE endpoints\n")
 	for i := range d.cfg.routes {
@@ -964,6 +1006,11 @@ func (d *docRegistry) generateTS(outDir string) error {
 		}
 	}
 	types[errorModel.typeName] = struct{}{}
+	if d.cfg.mcpProtocolVersion != "" {
+		for _, name := range []string{"ClientCapabilities", "Implementation", "RequestMeta", "ServerDiscoverResult"} {
+			types[name] = struct{}{}
+		}
+	}
 
 	sorted := slices.Sorted(maps.Keys(types))
 
@@ -1016,7 +1063,39 @@ function makeRequester(fetchFn: FetchFn) {
 	b.WriteString("// eslint-disable-next-line @typescript-eslint/no-explicit-any\n")
 	b.WriteString("export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bind(globalThis)) {\n")
 	b.WriteString("  const request = makeRequester(fetchFn);\n")
+	if d.cfg.mcpProtocolVersion != "" {
+		fmt.Fprintf(&b, "  const mcpProtocolVersion = %q;\n", d.cfg.mcpProtocolVersion)
+		b.WriteString(`  let mcpId = 0;
+  const mcpMeta = (): RequestMeta => ({
+    "io.modelcontextprotocol/protocolVersion": mcpProtocolVersion,
+    "io.modelcontextprotocol/clientInfo": { name: "mcp-typescript-sdk", version: "1.0.0" } as Implementation,
+    "io.modelcontextprotocol/clientCapabilities": {} as ClientCapabilities,
+  });
+  const mcpRequest = async <T>(method: string, params: unknown, headers: Record<string, string> = {}): Promise<T> => {
+    const resp = await request<JSONRPCResponse>("POST", "", {
+      jsonrpc: "2.0",
+      id: ++mcpId,
+      method,
+      params,
+    }, {
+      "Mcp-Protocol-Version": mcpProtocolVersion,
+      "Mcp-Method": method,
+      ...headers,
+    });
+    if (resp.error) throw new Error(resp.error.message);
+    return resp.result as T;
+  };
+  const serverDiscover = (headers: Record<string, string> = {}): Promise<ServerDiscoverResult> =>
+    mcpRequest<ServerDiscoverResult>("server/discover", { _meta: mcpMeta() }, headers);
+  const serverInstructions = async (headers: Record<string, string> = {}): Promise<string> =>
+    (await serverDiscover(headers)).instructions ?? "";
+`)
+	}
 	b.WriteString("  return {\n")
+	if d.cfg.mcpProtocolVersion != "" {
+		b.WriteString("    serverDiscover,\n")
+		b.WriteString("    serverInstructions,\n")
+	}
 
 	// One method per route.
 	for i := range d.cfg.routes {

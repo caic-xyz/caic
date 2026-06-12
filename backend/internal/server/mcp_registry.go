@@ -22,6 +22,45 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/tasks"
 )
 
+const caicVoiceSystemInstruction = `You are a voice assistant for caic, a system for managing AI coding agents.
+
+## What caic does
+caic runs coding agents (Claude Code, Codex, etc) inside isolated containers on a remote server. Each agent works autonomously on a git branch, writing code, running tests, and committing changes. The user is a software engineer who supervises multiple agents concurrently — often while away from the screen — and controls them by voice.
+
+## Task lifecycle
+A task has a prompt (what to build), a repo, a branch, and a state:
+- pending: task is queued, waiting to start
+- branching: creating git branch
+- provisioning: starting container
+- starting: launching agent session
+- running: agent is actively working
+- waiting: agent completed a turn, awaiting user input
+- asking: agent asked a question, needs the user to answer
+- has_plan: agent produced a plan, awaiting approval
+- pulling: pulling changes from container
+- pushing: pushing changes to remote
+- purging: cleanup in progress, container being deleted
+- purged: container deleted; result contains the outcome
+- failed: agent crashed or was aborted; error has the reason
+
+## Context you have
+At session start this prompt includes a snapshot of all current tasks. Use it to answer questions about task status without calling tasks_list first. Call task_get_detail when the user asks for specifics (recent events, diffs).
+
+## On connection
+When the session starts, say exactly one word: "Ready". Do not say anything else — no greeting, no summary, no explanation. After saying "Ready", stop and remain silent until the user speaks. Always speak fast.
+
+## Behavior guidelines
+- Do not ask follow-up questions like "would you like me to…" or "should I also…". Answer the user's request and stop. Only ask a question if the user's request is genuinely ambiguous or you misunderstood something critical — then ask the single clarifying question needed and nothing else.
+- Be concise. The user is often away from the screen.
+- Summarize task status: state and what the agent is doing. Only mention elapsed time or cost when the user specifically asks.
+- When an agent is asking, read the question and options clearly, wait for the verbal answer, then call task_answer_question.
+- When creating a task, use the default repo, harness, and model from the session context unless the user specifies otherwise. Confirm repo and prompt before creating.
+- Refer to tasks by title.
+- Proactively notify the user when tasks finish or need input.
+- Free tools: agent_last_message, tasks_list, task_get_detail, get_usage. Call them whenever useful without asking.
+- When the user asks for a status update, call agent_last_message for each waiting/asking task to get latest output.
+- For safety issues during sync, describe each issue and ask whether to force.`
+
 type caicToolCatalogState struct {
 	Harnesses      []string
 	Repos          []string
@@ -36,6 +75,12 @@ type caicToolRegistry struct {
 	ci           *ciHandlers
 	usage        *usageHandlers
 	webFetch     *webFetchHandlers
+}
+
+func (c *caicToolRegistry) Instructions(ctx context.Context) (string, error) {
+	parts := make([]string, 0, 2)
+	parts = append(parts, caicVoiceSystemInstruction, c.voiceSessionContext(ctx))
+	return strings.Join(parts, "\n\n"), nil
 }
 
 func (c *caicToolRegistry) Tools(ctx context.Context) ([]mcp.ToolDescriptor, error) {
@@ -115,6 +160,44 @@ func (c *caicToolRegistry) ReadResource(ctx context.Context, uri string) (mcp.Re
 	default:
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("unknown resource: %s", uri)
 	}
+}
+
+func (c *caicToolRegistry) voiceSessionContext(ctx context.Context) string {
+	parts := make([]string, 0, 4)
+	if c.serverConfig.prefs != nil {
+		prefs := c.serverConfig.prefs.Get(userIDFromCtx(ctx))
+		if len(prefs.Repositories) > 0 {
+			parts = append(parts, "[Default repo: "+prefs.Repositories[0].Path+"]")
+		}
+		if prefs.Harness != "" {
+			parts = append(parts, "[Default harness: "+prefs.Harness+"]")
+			if prefs.Models != nil && prefs.Models[prefs.Harness] != "" {
+				parts = append(parts, "[Default model: "+prefs.Models[prefs.Harness]+"]")
+			}
+		}
+	}
+	taskList := c.tasks.taskListSnapshot(ctx)
+	if len(taskList) == 0 {
+		if len(parts) == 0 {
+			return "[No active tasks]"
+		}
+		return strings.Join(parts, "\n")
+	}
+	lines := make([]string, len(taskList))
+	for i := range taskList {
+		t := &taskList[i]
+		lines[i] = fmt.Sprintf(
+			"- Task #%d: %s (%s, %s, %s, %s)",
+			i+1,
+			taskTitle(t),
+			t.State,
+			formatElapsed(time.Duration(t.Duration*float64(time.Second))),
+			formatCost(t.CostUSD),
+			t.Harness,
+		)
+	}
+	parts = append(parts, "[Current tasks at session start]\n"+strings.Join(lines, "\n"))
+	return strings.Join(parts, "\n")
 }
 
 func (c *caicToolRegistry) specs(ctx context.Context) ([]mcp.ToolSpec, error) {

@@ -97,6 +97,12 @@ class McpClient(
         }
     }
 
+    suspend fun serverInstructions(): String =
+        com.fghbuild.mcp.sdk.v1.ApiClient(
+            "$baseURL/api/caic/v1/mcp",
+            tokenProvider = tokenProvider,
+        ).serverInstructions()
+
     suspend fun listTools(): List<McpToolDescriptor> {
         val tools = mutableListOf<McpToolDescriptor>()
         var cursor: String? = null

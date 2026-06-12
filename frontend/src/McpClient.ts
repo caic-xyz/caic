@@ -1,6 +1,11 @@
 // MCP JSON-RPC client for listing backend tool descriptors and dispatching tool calls via the MCP endpoint.
 
+import { createApiClient as createMcpApiClient } from "@mcp-sdk/api.gen";
+
 const MCP_PROTOCOL_VERSION = "2026-07-28";
+const mcpApi = createMcpApiClient((path, init) =>
+  fetch(`/api/caic/v1/mcp${path}`, init),
+);
 
 type JsonObject = Record<string, unknown>;
 
@@ -66,6 +71,10 @@ export interface McpToolDescriptor {
   inputSchema: JsonObject;
   outputSchema?: JsonObject;
   annotations?: McpToolAnnotations;
+}
+
+export async function mcpServerInstructions(): Promise<string> {
+  return mcpApi.serverInstructions();
 }
 
 export async function mcpListTools(): Promise<McpToolDescriptor[]> {
@@ -150,7 +159,9 @@ function collectMcpParamHeaders(
 function encodeMcpHeaderValue(value: string): string {
   if (isPlainMcpHeaderValue(value)) return value;
   const bytes = new TextEncoder().encode(value);
-  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join(
+    "",
+  );
   return `=?base64?${btoa(binary)}?=`;
 }
 

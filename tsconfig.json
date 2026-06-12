@@ -9,23 +9,12 @@
     "noEmit": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "types": [
-      "vite/client",
-      "@testing-library/jest-dom",
-      "vite-solid-svg"
-    ],
+    "types": ["vite/client", "@testing-library/jest-dom", "vite-solid-svg"],
     "paths": {
-      "@sdk/*": [
-        "./sdk/caic/ts/v1/*"
-      ],
-      "@voicegateway-sdk/*": [
-        "./sdk/voicegateway/ts/v1/*"
-      ]
+      "@sdk/*": ["./sdk/caic/ts/v1/*"],
+      "@voicegateway-sdk/*": ["./sdk/voicegateway/ts/v1/*"],
+      "@mcp-sdk/*": ["./sdk/mcp/ts/v1/*"]
     }
   },
-  "include": [
-    "frontend/src",
-    "sdk/caic",
-    "sdk/voicegateway"
-  ]
+  "include": ["frontend/src", "sdk/caic", "sdk/voicegateway", "sdk/mcp"]
 }

@@ -16,10 +16,18 @@ export const CacheScopePublic: CacheScope = "public";
 export const CacheScopePrivate: CacheScope = "private";
 
 export type ContentType =
+  | "audio"
+  | "image"
+  | "resource"
+  | "resource_link"
   | "text";
 /**
  * Supported values.
  */
+export const ContentTypeAudio: ContentType = "audio";
+export const ContentTypeImage: ContentType = "image";
+export const ContentTypeResource: ContentType = "resource";
+export const ContentTypeResourceLink: ContentType = "resource_link";
 export const ContentTypeText: ContentType = "text";
 
 export type Method =
@@ -57,7 +65,7 @@ export type Role =
 export const RoleUser: Role = "user";
 export const RoleAssistant: Role = "assistant";
 
-/** JSONRPCRequest is an incoming JSON-RPC request. */
+/** JSONRPCRequest is a JSON-RPC request that expects a response. */
 export interface JSONRPCRequest {
   jsonrpc: string;
   id?: unknown /* json.RawMessage */;
@@ -67,12 +75,15 @@ export interface JSONRPCRequest {
 
 /** JSONRPCError is a JSON-RPC error object. */
 export interface JSONRPCError {
+  /** Code identifies the error type. */
   code: number /* int */;
+  /** Message is a concise single-sentence description of the error. */
   message: string;
+  /** Data carries sender-defined additional error information. */
   data?: unknown;
 }
 
-/** JSONRPCResponse is an outgoing JSON-RPC response. */
+/** JSONRPCResponse is a JSON-RPC response containing either a result or an error. */
 export interface JSONRPCResponse {
   jsonrpc: string;
   id?: unknown /* json.RawMessage */;
@@ -82,114 +93,192 @@ export interface JSONRPCResponse {
 
 /** PromptsCapability describes prompt support advertised by the server. */
 export interface PromptsCapability {
+  /** ListChanged indicates support for prompt list change notifications. */
   listChanged?: boolean;
 }
 
 /** ResourcesCapability describes resource support advertised by the server. */
 export interface ResourcesCapability {
+  /** Subscribe indicates support for subscribing to individual resource updates. */
   subscribe?: boolean;
+  /** ListChanged indicates support for resource list change notifications. */
   listChanged?: boolean;
 }
 
 /** ToolsCapability describes tool support advertised by the server. */
 export interface ToolsCapability {
+  /** ListChanged indicates support for tool list change notifications. */
   listChanged?: boolean;
 }
 
 /** Capabilities describes server-supported MCP features. */
 export interface Capabilities {
+  /** Experimental contains non-standard capabilities supported by the server. */
   experimental?: { [key: string]: unknown /* json.RawMessage */};
+  /**
+   * DeprecatedLogging is present if the server supports sending log messages to the client.
+   *
+   * Deprecated as of protocol version 2026-07-28.
+   */
   logging?: { [key: string]: unknown};
+  /** Completions is present if the server supports argument completion suggestions. */
   completions?: { [key: string]: unknown};
+  /** Prompts is present if the server offers prompt templates. */
   prompts?: PromptsCapability;
-  resources: ResourcesCapability;
-  tools: ToolsCapability;
+  /** Resources is present if the server offers resources to read. */
+  resources?: ResourcesCapability;
+  /** Tools is present if the server offers tools to call. */
+  tools?: ToolsCapability;
+  /** Extensions contains optional MCP extensions supported by the server. */
   extensions?: { [key: string]: unknown /* json.RawMessage */};
 }
 
-/** Icon describes an implementation or descriptor icon. */
+/** Icon describes an optionally-sized icon for UI display. */
 export interface Icon {
+  /** Src is an icon URI, such as an HTTPS URL or data URI. */
   src: string;
+  /** MimeType overrides a missing or generic source MIME type. */
   mimeType?: string;
+  /** Sizes lists supported dimensions, such as "48x48" or "any". */
   sizes?: string[];
+  /** Theme indicates whether the icon targets a light or dark background. */
   theme?: string;
 }
 
 /** Implementation describes an MCP client or server implementation. */
 export interface Implementation {
+  /** Icons contains optional sized icons for UI display. */
   icons?: Icon[];
+  /** Name is the programmatic implementation identifier. */
   name: string;
+  /** Title is a human-readable display name. */
   title?: string;
+  /** Version is the implementation version. */
   version: string;
+  /** Description explains what this implementation does. */
   description?: string;
+  /** WebsiteURL is an optional website for this implementation. */
   websiteUrl?: string;
 }
 
-/** ServerDiscoverResult is the response payload for server/discover. */
+/** ServerDiscoverResult is the result returned for a server/discover request. */
 export interface ServerDiscoverResult {
   resultType: ResultType;
+  /** SupportedVersions lists MCP protocol versions supported by this server. */
   supportedVersions: string[];
+  /** Capabilities advertises server features. */
   capabilities: Capabilities;
+  /** ServerInfo describes the server software implementation. */
   serverInfo: Implementation;
+  /**
+   * Instructions gives natural-language guidance for using the server effectively.
+   *
+   * Clients may include it in an LLM system prompt. It should not duplicate tool
+   * descriptions.
+   */
   instructions?: string;
+  /** TTLMS hints how long clients may cache this response in milliseconds. */
   ttlMs: number /* int */;
+  /** CacheScope indicates whether the response may be cached publicly or privately. */
   cacheScope: CacheScope;
 }
 
-/** SamplingCapability describes client sampling support. */
+/** SamplingCapability describes deprecated client sampling support. */
 export interface SamplingCapability {
+  /** Context declares context inclusion support. */
   context?: { [key: string]: unknown};
+  /** Tools declares tool-use support. */
   tools?: { [key: string]: unknown};
 }
 
 /** ElicitationCapability describes client elicitation support. */
 export interface ElicitationCapability {
+  /** Form declares support for form-mode elicitation. */
   form?: { [key: string]: unknown};
+  /** URL declares support for URL-mode elicitation. */
   url?: { [key: string]: unknown};
 }
 
-/** ClientCapabilities describes client-supported MCP capabilities. */
+/** ClientCapabilities describes capabilities the client supports for a request. */
 export interface ClientCapabilities {
+  /** Experimental contains non-standard capabilities supported by the client. */
   experimental?: { [key: string]: unknown /* json.RawMessage */};
+  /**
+   * DeprecatedRoots is present if the client supports listing roots.
+   *
+   * Deprecated as of protocol version 2026-07-28.
+   */
   roots?: { [key: string]: unknown};
+  /**
+   * DeprecatedSampling is present if the client supports server-initiated LLM sampling.
+   *
+   * Deprecated as of protocol version 2026-07-28.
+   */
   sampling?: SamplingCapability;
+  /** Elicitation is present if the client supports server-initiated user elicitation. */
   elicitation?: ElicitationCapability;
+  /** Extensions contains optional MCP extensions supported by the client. */
   extensions?: { [key: string]: unknown /* json.RawMessage */};
 }
 
-/** RequestMeta is the MCP metadata object required in request params. */
+/** RequestMeta is the metadata object required in MCP request params. */
 export interface RequestMeta {
+  /**
+   * ProtocolVersion is the MCP protocol version used for this request.
+   *
+   * For HTTP, it must match the MCP-Protocol-Version header.
+   */
   "io.modelcontextprotocol/protocolVersion": string;
+  /** ClientInfo identifies the client software making the request. */
   "io.modelcontextprotocol/clientInfo": Implementation;
+  /** ClientCapabilities declares client capabilities for this request. */
   "io.modelcontextprotocol/clientCapabilities": ClientCapabilities;
+  /** ProgressToken requests out-of-band progress notifications for this request. */
   progressToken?: unknown;
+  /**
+   * DeprecatedLogLevel requests server log message notifications for this request.
+   *
+   * Deprecated as of protocol version 2026-07-28.
+   */
   "io.modelcontextprotocol/logLevel"?: string;
 }
 
 /** PaginatedRequestParams contains common request metadata and an optional cursor. */
 export interface PaginatedRequestParams {
   _meta: RequestMeta;
+  /** Cursor is an opaque pagination token. */
   cursor?: string;
 }
 
 /** ToolAnnotations describe MCP tool behavior hints. */
 export interface ToolAnnotations {
+  /** Title is a human-readable title for the tool. */
   title?: string;
+  /** ReadOnlyHint indicates the tool does not modify its environment. */
   readOnlyHint?: boolean;
+  /** DestructiveHint indicates the tool may perform destructive updates. */
   destructiveHint?: boolean;
+  /** IdempotentHint indicates repeated calls with the same arguments have no additional effect. */
   idempotentHint?: boolean;
+  /** OpenWorldHint indicates the tool may interact with external entities. */
   openWorldHint?: boolean;
 }
 
-/** ToolDescriptor describes one MCP tool. */
+/** ToolDescriptor describes a tool the client can call. */
 export interface ToolDescriptor {
   _meta?: { [key: string]: unknown};
   icons?: Icon[];
+  /** Name is the programmatic tool identifier. */
   name: string;
+  /** Title is a human-readable display name. */
   title?: string;
+  /** Description helps clients and LLMs understand the tool. */
   description?: string;
+  /** InputSchema defines the expected JSON object arguments for the tool. */
   inputSchema?: unknown /* JSON Schema */;
+  /** OutputSchema defines the structuredContent shape for successful results. */
   outputSchema?: unknown /* JSON Schema */;
+  /** Annotations contains optional tool behavior hints. */
   annotations?: ToolAnnotations;
 }
 
@@ -206,42 +295,69 @@ export interface ToolsListResult {
 /** ToolsCallParams is the request params payload for tools/call. */
 export interface ToolsCallParams {
   _meta: RequestMeta;
+  /** InputResponses carries responses to server-initiated requests from a prior input_required result. */
   inputResponses?: unknown /* json.RawMessage */;
+  /** RequestState carries opaque state from a prior input_required result. */
   requestState?: string;
+  /** Name identifies the tool to invoke. */
   name: string;
+  /** Arguments contains tool arguments as a JSON object. */
   arguments?: unknown /* json.RawMessage */;
 }
 
 /** ResourceContent contains resource data returned by resources/read. */
 export interface ResourceContent {
   _meta?: { [key: string]: unknown};
+  /** URI identifies this resource. */
   uri: string;
+  /** MimeType is the resource MIME type, if known. */
   mimeType?: string;
+  /** Text contains textual resource contents. */
   text?: string;
+  /** Blob contains base64-encoded binary resource contents. */
   blob?: string;
 }
 
 /** Annotations provide optional metadata for MCP resources and content. */
 export interface Annotations {
+  /** Audience describes who the data is intended for. */
   audience?: Role[];
-  priority?: number /* float64 */;
+  /** Priority describes importance from 0 to 1, with 1 most important. */
+  priority?: number /* int */;
+  /** LastModified is an ISO 8601 timestamp for the last modification time. */
   lastModified?: string;
 }
 
-/** ContentBlock is an MCP tool-result content item. */
+/**
+ * ContentBlock is an MCP content item.
+ *
+ * The draft schema models this as a union. Validate checks that only fields for
+ * the selected content type are present.
+ */
 export interface ContentBlock {
   _meta?: { [key: string]: unknown};
   icons?: Icon[];
+  /** Type identifies the content variant. */
   type: ContentType;
+  /** Name is used by resource_link content. */
   name?: string;
+  /** Title is a human-readable display name. */
   title?: string;
+  /** Text is the text content for text blocks. */
   text?: string;
+  /** Data is base64-encoded data for image and audio blocks. */
   data?: string;
+  /** URI identifies resource_link content. */
   uri?: string;
+  /** Description helps clients and LLMs understand linked resources. */
   description?: string;
+  /** MimeType is required for image and audio content and optional for resources. */
   mimeType?: string;
+  /** Size is the raw resource size in bytes, if known. */
   size?: number /* int64 */;
+  /** Resource contains embedded resource contents for resource blocks. */
   resource?: ResourceContent;
+  /** Annotations provide optional client metadata. */
   annotations?: Annotations;
 }
 
@@ -249,21 +365,31 @@ export interface ContentBlock {
 export interface ToolCallResult {
   _meta?: { [key: string]: unknown};
   resultType: ResultType;
+  /** Content is the unstructured result of the tool call. */
   content: ContentBlock[];
+  /** StructuredContent is optional JSON matching the tool output schema on success. */
   structuredContent?: unknown;
+  /** IsError indicates the tool call ended in an error visible to the model. */
   isError?: boolean;
 }
 
-/** ResourceDescriptor describes one MCP resource. */
+/** ResourceDescriptor describes a resource the server can read. */
 export interface ResourceDescriptor {
   _meta?: { [key: string]: unknown};
   icons?: Icon[];
+  /** URI identifies this resource. */
   uri: string;
+  /** Name is the programmatic resource identifier. */
   name: string;
+  /** Title is a human-readable display name. */
   title?: string;
+  /** Description helps clients and LLMs understand the resource. */
   description?: string;
+  /** MimeType is the resource MIME type, if known. */
   mimeType?: string;
+  /** Annotations provide optional client metadata. */
   annotations?: Annotations;
+  /** Size is the raw resource size in bytes, if known. */
   size?: number /* int64 */;
 }
 
@@ -281,11 +407,17 @@ export interface ResourcesListResult {
 export interface ResourceTemplateDescriptor {
   _meta?: { [key: string]: unknown};
   icons?: Icon[];
+  /** Name is the programmatic template identifier. */
   name: string;
+  /** Title is a human-readable display name. */
   title?: string;
+  /** URITemplate is an RFC 6570 URI template for constructing resource URIs. */
   uriTemplate: string;
+  /** Description helps clients and LLMs understand the template. */
   description?: string;
+  /** MimeType is the MIME type for matching resources, if uniform. */
   mimeType?: string;
+  /** Annotations provide optional client metadata. */
   annotations?: Annotations;
 }
 
@@ -302,8 +434,11 @@ export interface ResourceTemplatesListResult {
 /** ResourcesReadParams is the request params payload for resources/read. */
 export interface ResourcesReadParams {
   _meta: RequestMeta;
+  /** InputResponses carries responses to server-initiated requests from a prior input_required result. */
   inputResponses?: unknown /* json.RawMessage */;
+  /** RequestState carries opaque state from a prior input_required result. */
   requestState?: string;
+  /** URI identifies the resource to read. */
   uri: string;
 }
 
@@ -311,26 +446,34 @@ export interface ResourcesReadParams {
 export interface ResourcesReadResult {
   _meta?: { [key: string]: unknown};
   resultType: ResultType;
+  /** Contents contains text or blob resource contents. */
   contents: ResourceContent[];
+  /** TTLMS hints how long clients may cache this response in milliseconds. */
   ttlMs: number /* int */;
+  /** CacheScope indicates whether the response may be cached publicly or privately. */
   cacheScope: CacheScope;
 }
 
 /** SubscriptionFilter describes MCP subscription notifications requested by a client. */
 export interface SubscriptionFilter {
+  /** ToolsListChanged requests tool list change notifications. */
   toolsListChanged?: boolean;
+  /** PromptsListChanged requests prompt list change notifications. */
   promptsListChanged?: boolean;
+  /** ResourcesListChanged requests resource list change notifications. */
   resourcesListChanged?: boolean;
+  /** ResourceSubscriptions requests updates for individual resource URIs. */
   resourceSubscriptions?: string[];
 }
 
 /** SubscriptionsListenParams is the request params payload for subscriptions/listen. */
 export interface SubscriptionsListenParams {
   _meta: RequestMeta;
+  /** Notifications declares notification types the client opts in to. */
   notifications: SubscriptionFilter;
 }
 
-/** JSONRPCNotification is a server-sent JSON-RPC notification. */
+/** JSONRPCNotification is a JSON-RPC notification that does not expect a response. */
 export interface JSONRPCNotification {
   jsonrpc: string;
   method: string;
@@ -340,7 +483,9 @@ export interface JSONRPCNotification {
 /** SubscriptionNotificationParams is the payload for subscription notifications. */
 export interface SubscriptionNotificationParams {
   _meta?: { [key: string]: unknown};
+  /** Notifications is the subset of requested notification types the server accepted. */
   notifications?: SubscriptionFilter;
+  /** URI identifies an updated resource. */
   uri?: string;
 }
 

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -33,13 +34,13 @@ type ErrorCode int
 
 // JSON-RPC error codes returned by the MCP handler.
 const (
-	ParseErrorCode                 ErrorCode = -32700
-	InvalidRequestCode             ErrorCode = -32600
-	MethodNotFoundCode             ErrorCode = -32601
-	InvalidParamsCode              ErrorCode = -32602
-	InternalErrorCode              ErrorCode = -32603
-	HeaderMismatchCode             ErrorCode = -32001
-	UnsupportedProtocolVersionCode ErrorCode = -32004
+	ParseErrorCode                      ErrorCode = -32700
+	InvalidRequestCode                  ErrorCode = -32600
+	MethodNotFoundCode                  ErrorCode = -32601
+	InvalidParamsCode                   ErrorCode = -32602
+	InternalErrorCode                   ErrorCode = -32603
+	MissingRequiredClientCapabilityCode ErrorCode = -32003
+	UnsupportedProtocolVersionCode      ErrorCode = -32004
 )
 
 // Method is an MCP JSON-RPC method name.
@@ -78,18 +79,22 @@ type ContentType string
 
 // Content type values used by MCP tool results.
 const (
-	ContentTypeText ContentType = "text"
+	ContentTypeAudio        ContentType = "audio"
+	ContentTypeImage        ContentType = "image"
+	ContentTypeResource     ContentType = "resource"
+	ContentTypeResourceLink ContentType = "resource_link"
+	ContentTypeText         ContentType = "text"
 )
 
 // Handler serves the MCP JSON-RPC HTTP endpoint.
 type Handler struct {
-	Registry     Registry
-	ServerInfo   Implementation
-	Instructions string
+	Registry   Registry
+	ServerInfo Implementation
 }
 
-// Registry supplies MCP tools and resources to Handler.
+// Registry supplies MCP tools, resources, and instructions to Handler.
 type Registry interface {
+	Instructions(ctx context.Context) (string, error)
 	Tools(ctx context.Context) ([]ToolDescriptor, error)
 	CallTool(ctx context.Context, name string, args json.RawMessage) (RawToolResult, error)
 	ListResources(ctx context.Context) ResourcesListResult
@@ -102,7 +107,7 @@ type RawToolResult struct {
 	IsError    bool
 }
 
-// JSONRPCRequest is an incoming JSON-RPC request.
+// JSONRPCRequest is a JSON-RPC request that expects a response.
 type JSONRPCRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitzero"`
@@ -110,7 +115,7 @@ type JSONRPCRequest struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
-// JSONRPCResponse is an outgoing JSON-RPC response.
+// JSONRPCResponse is a JSON-RPC response containing either a result or an error.
 type JSONRPCResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitzero"`
@@ -120,9 +125,12 @@ type JSONRPCResponse struct {
 
 // JSONRPCError is a JSON-RPC error object.
 type JSONRPCError struct {
-	Code    ErrorCode `json:"code"`
-	Message string    `json:"message"`
-	Data    any       `json:"data,omitempty"`
+	// Code identifies the error type.
+	Code ErrorCode `json:"code"`
+	// Message is a concise single-sentence description of the error.
+	Message string `json:"message"`
+	// Data carries sender-defined additional error information.
+	Data any `json:"data,omitempty"`
 }
 
 type unsupportedProtocolVersionData struct {
@@ -130,51 +138,126 @@ type unsupportedProtocolVersionData struct {
 	Requested string   `json:"requested"`
 }
 
-// MetaObject is an MCP _meta payload.
+// MetaObject is metadata attached to MCP interactions.
+//
+// MCP reserves protocol-level key names. Implementations should use prefixed
+// reverse-DNS keys for their own metadata.
 type MetaObject map[string]any
 
-// RequestMeta is the MCP metadata object required in request params.
+// RequestMeta is the metadata object required in MCP request params.
 type RequestMeta struct {
-	ProtocolVersion    string             `json:"io.modelcontextprotocol/protocolVersion"`
-	ClientInfo         Implementation     `json:"io.modelcontextprotocol/clientInfo"`
+	// ProtocolVersion is the MCP protocol version used for this request.
+	//
+	// For HTTP, it must match the MCP-Protocol-Version header.
+	ProtocolVersion string `json:"io.modelcontextprotocol/protocolVersion"`
+	// ClientInfo identifies the client software making the request.
+	ClientInfo Implementation `json:"io.modelcontextprotocol/clientInfo"`
+	// ClientCapabilities declares client capabilities for this request.
 	ClientCapabilities ClientCapabilities `json:"io.modelcontextprotocol/clientCapabilities"`
-	ProgressToken      any                `json:"progressToken,omitempty"`
-	LogLevel           string             `json:"io.modelcontextprotocol/logLevel,omitempty"`
+	// ProgressToken requests out-of-band progress notifications for this request.
+	ProgressToken any `json:"progressToken,omitempty"`
+	// DeprecatedLogLevel requests server log message notifications for this request.
+	//
+	// Deprecated as of protocol version 2026-07-28.
+	DeprecatedLogLevel string `json:"io.modelcontextprotocol/logLevel,omitempty"`
+	// Extra preserves forward-compatible metadata fields.
+	Extra MetaObject `json:"-"`
 }
 
-// UnmarshalJSON decodes RequestMeta while preserving forward-compatible fields through typed members.
+// UnmarshalJSON decodes RequestMeta while preserving forward-compatible _meta fields.
 func (m *RequestMeta) UnmarshalJSON(data []byte) error {
 	type requestMeta RequestMeta
 	var meta requestMeta
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return err
 	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	for _, key := range requestMetaKnownKeys() {
+		delete(raw, key)
+	}
+	if len(raw) > 0 {
+		meta.Extra = make(MetaObject, len(raw))
+		for key, value := range raw {
+			var decoded any
+			if err := json.Unmarshal(value, &decoded); err != nil {
+				return err
+			}
+			meta.Extra[key] = decoded
+		}
+	}
 	*m = RequestMeta(meta)
 	return nil
 }
 
-// ClientCapabilities describes client-supported MCP capabilities.
-type ClientCapabilities struct {
-	Experimental Extensions             `json:"experimental,omitempty"`
-	Roots        MetaObject             `json:"roots,omitempty"`
-	Sampling     *SamplingCapability    `json:"sampling,omitempty"`
-	Elicitation  *ElicitationCapability `json:"elicitation,omitempty"`
-	Extensions   Extensions             `json:"extensions,omitempty"`
+// MarshalJSON encodes RequestMeta with preserved forward-compatible _meta fields.
+//
+//nolint:gocritic // Value receiver ensures json.Marshaler runs for RequestMeta value fields.
+func (m RequestMeta) MarshalJSON() ([]byte, error) {
+	fields := make(MetaObject, len(m.Extra)+5)
+	maps.Copy(fields, m.Extra)
+	fields["io.modelcontextprotocol/protocolVersion"] = m.ProtocolVersion
+	fields["io.modelcontextprotocol/clientInfo"] = m.ClientInfo
+	fields["io.modelcontextprotocol/clientCapabilities"] = m.ClientCapabilities
+	if m.ProgressToken != nil {
+		fields["progressToken"] = m.ProgressToken
+	}
+	if m.DeprecatedLogLevel != "" {
+		fields["io.modelcontextprotocol/logLevel"] = m.DeprecatedLogLevel
+	}
+	return json.Marshal(fields)
 }
 
-// SamplingCapability describes client sampling support.
+func requestMetaKnownKeys() []string {
+	return []string{
+		"io.modelcontextprotocol/clientCapabilities",
+		"io.modelcontextprotocol/clientInfo",
+		"io.modelcontextprotocol/logLevel",
+		"io.modelcontextprotocol/protocolVersion",
+		"progressToken",
+	}
+}
+
+// ClientCapabilities describes capabilities the client supports for a request.
+type ClientCapabilities struct {
+	// Experimental contains non-standard capabilities supported by the client.
+	Experimental Extensions `json:"experimental,omitempty"`
+	// DeprecatedRoots is present if the client supports listing roots.
+	//
+	// Deprecated as of protocol version 2026-07-28.
+	DeprecatedRoots MetaObject `json:"roots,omitempty"`
+	// DeprecatedSampling is present if the client supports server-initiated LLM sampling.
+	//
+	// Deprecated as of protocol version 2026-07-28.
+	DeprecatedSampling *SamplingCapability `json:"sampling,omitempty"`
+	// Elicitation is present if the client supports server-initiated user elicitation.
+	Elicitation *ElicitationCapability `json:"elicitation,omitempty"`
+	// Extensions contains optional MCP extensions supported by the client.
+	Extensions Extensions `json:"extensions,omitempty"`
+}
+
+// SamplingCapability describes deprecated client sampling support.
 type SamplingCapability struct {
+	// Context declares context inclusion support.
 	Context MetaObject `json:"context,omitempty"`
-	Tools   MetaObject `json:"tools,omitempty"`
+	// Tools declares tool-use support.
+	Tools MetaObject `json:"tools,omitempty"`
 }
 
 // ElicitationCapability describes client elicitation support.
 type ElicitationCapability struct {
+	// Form declares support for form-mode elicitation.
 	Form MetaObject `json:"form,omitempty"`
-	URL  MetaObject `json:"url,omitempty"`
+	// URL declares support for URL-mode elicitation.
+	URL MetaObject `json:"url,omitempty"`
 }
 
 // Extensions stores namespaced MCP extension payloads.
+//
+// The draft schema constrains values to JSON objects. RawMessage keeps the DTO
+// forward-compatible; validate extension values before depending on object shape.
 type Extensions map[string]json.RawMessage
 
 // RequestParams contains common MCP request metadata.
@@ -182,66 +265,99 @@ type RequestParams struct {
 	Meta RequestMeta `json:"_meta"`
 }
 
-// ServerDiscoverResult is the response payload for server/discover.
+// ServerDiscoverResult is the result returned for a server/discover request.
 type ServerDiscoverResult struct {
-	ResultType        ResultType     `json:"resultType"`
-	SupportedVersions []string       `json:"supportedVersions"`
-	Capabilities      Capabilities   `json:"capabilities"`
-	ServerInfo        Implementation `json:"serverInfo"`
-	Instructions      string         `json:"instructions,omitempty"`
-	TTLMS             int            `json:"ttlMs"`
-	CacheScope        CacheScope     `json:"cacheScope"`
+	ResultType ResultType `json:"resultType"`
+	// SupportedVersions lists MCP protocol versions supported by this server.
+	SupportedVersions []string `json:"supportedVersions"`
+	// Capabilities advertises server features.
+	Capabilities Capabilities `json:"capabilities"`
+	// ServerInfo describes the server software implementation.
+	ServerInfo Implementation `json:"serverInfo"`
+	// Instructions gives natural-language guidance for using the server effectively.
+	//
+	// Clients may include it in an LLM system prompt. It should not duplicate tool
+	// descriptions.
+	Instructions string `json:"instructions,omitempty"`
+	// TTLMS hints how long clients may cache this response in milliseconds.
+	TTLMS int `json:"ttlMs"`
+	// CacheScope indicates whether the response may be cached publicly or privately.
+	CacheScope CacheScope `json:"cacheScope"`
 }
 
 // Capabilities describes server-supported MCP features.
 type Capabilities struct {
-	Experimental Extensions          `json:"experimental,omitempty"`
-	Logging      MetaObject          `json:"logging,omitempty"`
-	Completions  MetaObject          `json:"completions,omitempty"`
-	Prompts      *PromptsCapability  `json:"prompts,omitempty"`
-	Resources    ResourcesCapability `json:"resources"`
-	Tools        ToolsCapability     `json:"tools"`
-	Extensions   Extensions          `json:"extensions,omitempty"`
+	// Experimental contains non-standard capabilities supported by the server.
+	Experimental Extensions `json:"experimental,omitempty"`
+	// DeprecatedLogging is present if the server supports sending log messages to the client.
+	//
+	// Deprecated as of protocol version 2026-07-28.
+	DeprecatedLogging MetaObject `json:"logging,omitempty"`
+	// Completions is present if the server supports argument completion suggestions.
+	Completions MetaObject `json:"completions,omitempty"`
+	// Prompts is present if the server offers prompt templates.
+	Prompts *PromptsCapability `json:"prompts,omitempty"`
+	// Resources is present if the server offers resources to read.
+	Resources ResourcesCapability `json:"resources,omitzero"`
+	// Tools is present if the server offers tools to call.
+	Tools ToolsCapability `json:"tools,omitzero"`
+	// Extensions contains optional MCP extensions supported by the server.
+	Extensions Extensions `json:"extensions,omitempty"`
 }
 
 // PromptsCapability describes prompt support advertised by the server.
 type PromptsCapability struct {
+	// ListChanged indicates support for prompt list change notifications.
 	ListChanged bool `json:"listChanged,omitempty"`
 }
 
 // ToolsCapability describes tool support advertised by the server.
 type ToolsCapability struct {
+	// ListChanged indicates support for tool list change notifications.
 	ListChanged bool `json:"listChanged,omitempty"`
 }
 
 // ResourcesCapability describes resource support advertised by the server.
 type ResourcesCapability struct {
-	Subscribe   bool `json:"subscribe,omitempty"`
+	// Subscribe indicates support for subscribing to individual resource updates.
+	Subscribe bool `json:"subscribe,omitempty"`
+	// ListChanged indicates support for resource list change notifications.
 	ListChanged bool `json:"listChanged,omitempty"`
 }
 
 // Implementation describes an MCP client or server implementation.
 type Implementation struct {
-	Icons       []Icon `json:"icons,omitempty"`
-	Name        string `json:"name"`
-	Title       string `json:"title,omitempty"`
-	Version     string `json:"version"`
+	// Icons contains optional sized icons for UI display.
+	Icons []Icon `json:"icons,omitempty"`
+	// Name is the programmatic implementation identifier.
+	Name string `json:"name"`
+	// Title is a human-readable display name.
+	Title string `json:"title,omitempty"`
+	// Version is the implementation version.
+	Version string `json:"version"`
+	// Description explains what this implementation does.
 	Description string `json:"description,omitempty"`
-	WebsiteURL  string `json:"websiteUrl,omitempty"`
+	// WebsiteURL is an optional website for this implementation.
+	WebsiteURL string `json:"websiteUrl,omitempty"`
 }
 
-// Icon describes an implementation or descriptor icon.
+// Icon describes an optionally-sized icon for UI display.
 type Icon struct {
-	Src      string   `json:"src"`
-	MimeType string   `json:"mimeType,omitempty"`
-	Sizes    []string `json:"sizes,omitempty"`
-	Theme    string   `json:"theme,omitempty"`
+	// Src is an icon URI, such as an HTTPS URL or data URI.
+	Src string `json:"src"`
+	// MimeType overrides a missing or generic source MIME type.
+	MimeType string `json:"mimeType,omitempty"`
+	// Sizes lists supported dimensions, such as "48x48" or "any".
+	Sizes []string `json:"sizes,omitempty"`
+	// Theme indicates whether the icon targets a light or dark background.
+	Theme string `json:"theme,omitempty"`
 }
 
 // PaginatedRequestParams contains common request metadata and an optional cursor.
 type PaginatedRequestParams struct {
-	Meta   RequestMeta `json:"_meta"`
-	Cursor string      `json:"cursor,omitempty"`
+	Meta RequestMeta `json:"_meta"`
+	// Cursor is an opaque pagination token.
+	Cursor string `json:"cursor,omitempty"`
 }
 
 // ToolsListResult is the response payload for tools/list.
@@ -254,67 +370,162 @@ type ToolsListResult struct {
 	CacheScope CacheScope       `json:"cacheScope"`
 }
 
-// ToolDescriptor describes one MCP tool.
+// ToolDescriptor describes a tool the client can call.
 type ToolDescriptor struct {
-	Meta         MetaObject         `json:"_meta,omitempty"`
-	Icons        []Icon             `json:"icons,omitempty"`
-	Name         string             `json:"name"`
-	Title        string             `json:"title,omitempty"`
-	Description  string             `json:"description,omitempty"`
-	InputSchema  *jsonschema.Schema `json:"inputSchema"`
+	Meta  MetaObject `json:"_meta,omitempty"`
+	Icons []Icon     `json:"icons,omitempty"`
+	// Name is the programmatic tool identifier.
+	Name string `json:"name"`
+	// Title is a human-readable display name.
+	Title string `json:"title,omitempty"`
+	// Description helps clients and LLMs understand the tool.
+	Description string `json:"description,omitempty"`
+	// InputSchema defines the expected JSON object arguments for the tool.
+	InputSchema *jsonschema.Schema `json:"inputSchema"`
+	// OutputSchema defines the structuredContent shape for successful results.
 	OutputSchema *jsonschema.Schema `json:"outputSchema,omitempty"`
-	Annotations  *ToolAnnotations   `json:"annotations,omitempty"`
+	// Annotations contains optional tool behavior hints.
+	Annotations *ToolAnnotations `json:"annotations,omitempty"`
 }
 
 // ToolAnnotations describe MCP tool behavior hints.
 type ToolAnnotations struct {
-	Title           string `json:"title,omitempty"`
-	ReadOnlyHint    bool   `json:"readOnlyHint,omitempty"`
-	DestructiveHint bool   `json:"destructiveHint,omitempty"`
-	IdempotentHint  bool   `json:"idempotentHint,omitempty"`
-	OpenWorldHint   bool   `json:"openWorldHint,omitempty"`
+	// Title is a human-readable title for the tool.
+	Title string `json:"title,omitempty"`
+	// ReadOnlyHint indicates the tool does not modify its environment.
+	ReadOnlyHint bool `json:"readOnlyHint,omitempty"`
+	// DestructiveHint indicates the tool may perform destructive updates.
+	DestructiveHint bool `json:"destructiveHint,omitempty"`
+	// IdempotentHint indicates repeated calls with the same arguments have no additional effect.
+	IdempotentHint bool `json:"idempotentHint,omitempty"`
+	// OpenWorldHint indicates the tool may interact with external entities.
+	OpenWorldHint bool `json:"openWorldHint,omitempty"`
 }
 
 // ToolsCallParams is the request params payload for tools/call.
 type ToolsCallParams struct {
-	Meta           RequestMeta     `json:"_meta"`
+	Meta RequestMeta `json:"_meta"`
+	// InputResponses carries responses to server-initiated requests from a prior input_required result.
 	InputResponses json.RawMessage `json:"inputResponses,omitempty"`
-	RequestState   string          `json:"requestState,omitempty"`
-	Name           string          `json:"name"`
-	Arguments      json.RawMessage `json:"arguments,omitempty"`
+	// RequestState carries opaque state from a prior input_required result.
+	RequestState string `json:"requestState,omitempty"`
+	// Name identifies the tool to invoke.
+	Name string `json:"name"`
+	// Arguments contains tool arguments as a JSON object.
+	Arguments json.RawMessage `json:"arguments,omitempty"`
 }
 
 // ToolCallResult is the response payload for a tool call.
 type ToolCallResult struct {
-	Meta              MetaObject     `json:"_meta,omitempty"`
-	ResultType        ResultType     `json:"resultType"`
-	Content           []ContentBlock `json:"content"`
-	StructuredContent any            `json:"structuredContent,omitempty"`
-	IsError           bool           `json:"isError,omitempty"`
+	Meta       MetaObject `json:"_meta,omitempty"`
+	ResultType ResultType `json:"resultType"`
+	// Content is the unstructured result of the tool call.
+	Content []ContentBlock `json:"content"`
+	// StructuredContent is optional JSON matching the tool output schema on success.
+	StructuredContent any `json:"structuredContent,omitempty"`
+	// IsError indicates the tool call ended in an error visible to the model.
+	IsError bool `json:"isError,omitempty"`
 }
 
-// ContentBlock is an MCP tool-result content item.
+// ContentBlock is an MCP content item.
+//
+// The draft schema models this as a union. Validate checks that only fields for
+// the selected content type are present.
 type ContentBlock struct {
-	Meta        MetaObject       `json:"_meta,omitempty"`
-	Icons       []Icon           `json:"icons,omitempty"`
-	Type        ContentType      `json:"type"`
-	Name        string           `json:"name,omitempty"`
-	Title       string           `json:"title,omitempty"`
-	Text        string           `json:"text,omitempty"`
-	Data        string           `json:"data,omitempty"`
-	URI         string           `json:"uri,omitempty"`
-	Description string           `json:"description,omitempty"`
-	MimeType    string           `json:"mimeType,omitempty"`
-	Size        int64            `json:"size,omitzero"`
-	Resource    *ResourceContent `json:"resource,omitempty"`
-	Annotations *Annotations     `json:"annotations,omitempty"`
+	Meta  MetaObject `json:"_meta,omitempty"`
+	Icons []Icon     `json:"icons,omitempty"`
+	// Type identifies the content variant.
+	Type ContentType `json:"type"`
+	// Name is used by resource_link content.
+	Name string `json:"name,omitempty"`
+	// Title is a human-readable display name.
+	Title string `json:"title,omitempty"`
+	// Text is the text content for text blocks.
+	Text string `json:"text,omitempty"`
+	// Data is base64-encoded data for image and audio blocks.
+	Data string `json:"data,omitempty"`
+	// URI identifies resource_link content.
+	URI string `json:"uri,omitempty"`
+	// Description helps clients and LLMs understand linked resources.
+	Description string `json:"description,omitempty"`
+	// MimeType is required for image and audio content and optional for resources.
+	MimeType string `json:"mimeType,omitempty"`
+	// Size is the raw resource size in bytes, if known.
+	Size int64 `json:"size,omitzero"`
+	// Resource contains embedded resource contents for resource blocks.
+	Resource ResourceContent `json:"resource,omitzero"`
+	// Annotations provide optional client metadata.
+	Annotations Annotations `json:"annotations,omitzero"`
+}
+
+// Validate checks that the content block matches the draft schema variant for its type.
+func (c *ContentBlock) Validate() error {
+	if c == nil {
+		return errors.New("content block is nil")
+	}
+	switch c.Type {
+	case ContentTypeText:
+		if c.Text == "" {
+			return errors.New("text content requires text")
+		}
+		if c.hasMediaFields() || c.hasResourceLinkFields() || !c.Resource.IsZero() {
+			return errors.New("text content contains fields from another content type")
+		}
+	case ContentTypeImage:
+		if c.Data == "" || c.MimeType == "" {
+			return errors.New("image content requires data and mimeType")
+		}
+		if c.Text != "" || c.hasResourceLinkFields() || !c.Resource.IsZero() {
+			return errors.New("image content contains fields from another content type")
+		}
+	case ContentTypeAudio:
+		if c.Data == "" || c.MimeType == "" {
+			return errors.New("audio content requires data and mimeType")
+		}
+		if c.Text != "" || c.hasResourceLinkFields() || !c.Resource.IsZero() {
+			return errors.New("audio content contains fields from another content type")
+		}
+	case ContentTypeResourceLink:
+		if c.Name == "" || c.URI == "" {
+			return errors.New("resource_link content requires name and uri")
+		}
+		if c.Text != "" || c.Data != "" || !c.Resource.IsZero() {
+			return errors.New("resource_link content contains fields from another content type")
+		}
+	case ContentTypeResource:
+		if err := c.Resource.Validate(); err != nil {
+			return fmt.Errorf("resource content requires valid embedded resource: %w", err)
+		}
+		if c.Text != "" || c.Data != "" || c.hasResourceLinkFields() || c.MimeType != "" {
+			return errors.New("resource content contains fields from another content type")
+		}
+	default:
+		return fmt.Errorf("unknown content type %q", c.Type)
+	}
+	return nil
+}
+
+func (c *ContentBlock) hasMediaFields() bool {
+	return c.Data != "" || c.MimeType != ""
+}
+
+func (c *ContentBlock) hasResourceLinkFields() bool {
+	return len(c.Icons) > 0 || c.Name != "" || c.Title != "" || c.URI != "" || c.Description != "" || c.Size != 0
 }
 
 // Annotations provide optional metadata for MCP resources and content.
 type Annotations struct {
-	Audience     []Role   `json:"audience,omitempty"`
-	Priority     *float64 `json:"priority,omitempty"`
-	LastModified string   `json:"lastModified,omitempty"`
+	// Audience describes who the data is intended for.
+	Audience []Role `json:"audience,omitempty"`
+	// Priority describes importance from 0 to 1, with 1 most important.
+	Priority *int `json:"priority,omitempty"`
+	// LastModified is an ISO 8601 timestamp for the last modification time.
+	LastModified string `json:"lastModified,omitempty"`
+}
+
+// IsZero reports whether annotations are absent for json omitzero.
+func (a Annotations) IsZero() bool {
+	return len(a.Audience) == 0 && a.Priority == nil && a.LastModified == ""
 }
 
 // Role identifies an MCP audience role.
@@ -328,13 +539,31 @@ const (
 
 // ResourceLink identifies an MCP resource referenced from content.
 type ResourceLink struct {
-	Icons       []Icon `json:"icons,omitempty"`
-	Name        string `json:"name,omitempty"`
-	Title       string `json:"title,omitempty"`
-	URI         string `json:"uri,omitempty"`
+	Type  ContentType `json:"type"`
+	Icons []Icon      `json:"icons,omitempty"`
+	// Name is the programmatic resource identifier.
+	Name string `json:"name"`
+	// Title is a human-readable display name.
+	Title string `json:"title,omitempty"`
+	// URI identifies the resource.
+	URI string `json:"uri"`
+	// Description helps clients and LLMs understand the resource.
 	Description string `json:"description,omitempty"`
-	MimeType    string `json:"mimeType,omitempty"`
-	Size        int64  `json:"size,omitzero"`
+	// MimeType is the resource MIME type, if known.
+	MimeType string `json:"mimeType,omitempty"`
+	// Size is the raw resource size in bytes, if known.
+	Size int64 `json:"size,omitzero"`
+}
+
+// MarshalJSON encodes resource links with the schema-required resource_link type.
+//
+//nolint:gocritic // Value receiver ensures json.Marshaler runs for ResourceLink values.
+func (r ResourceLink) MarshalJSON() ([]byte, error) {
+	type resourceLink ResourceLink
+	if r.Type == "" {
+		r.Type = ContentTypeResourceLink
+	}
+	return json.Marshal(resourceLink(r))
 }
 
 // ResourcesListResult is the response payload for resources/list.
@@ -347,17 +576,24 @@ type ResourcesListResult struct {
 	CacheScope CacheScope           `json:"cacheScope"`
 }
 
-// ResourceDescriptor describes one MCP resource.
+// ResourceDescriptor describes a resource the server can read.
 type ResourceDescriptor struct {
-	Meta        MetaObject   `json:"_meta,omitempty"`
-	Icons       []Icon       `json:"icons,omitempty"`
-	URI         string       `json:"uri"`
-	Name        string       `json:"name"`
-	Title       string       `json:"title,omitempty"`
-	Description string       `json:"description,omitempty"`
-	MimeType    string       `json:"mimeType,omitempty"`
+	Meta  MetaObject `json:"_meta,omitempty"`
+	Icons []Icon     `json:"icons,omitempty"`
+	// URI identifies this resource.
+	URI string `json:"uri"`
+	// Name is the programmatic resource identifier.
+	Name string `json:"name"`
+	// Title is a human-readable display name.
+	Title string `json:"title,omitempty"`
+	// Description helps clients and LLMs understand the resource.
+	Description string `json:"description,omitempty"`
+	// MimeType is the resource MIME type, if known.
+	MimeType string `json:"mimeType,omitempty"`
+	// Annotations provide optional client metadata.
 	Annotations *Annotations `json:"annotations,omitempty"`
-	Size        int64        `json:"size,omitzero"`
+	// Size is the raw resource size in bytes, if known.
+	Size int64 `json:"size,omitzero"`
 }
 
 // ResourceTemplatesListResult is the response payload for resources/templates/list.
@@ -372,57 +608,96 @@ type ResourceTemplatesListResult struct {
 
 // ResourceTemplateDescriptor describes a parameterized MCP resource.
 type ResourceTemplateDescriptor struct {
-	Meta        MetaObject   `json:"_meta,omitempty"`
-	Icons       []Icon       `json:"icons,omitempty"`
-	Name        string       `json:"name"`
-	Title       string       `json:"title,omitempty"`
-	URITemplate string       `json:"uriTemplate"`
-	Description string       `json:"description,omitempty"`
-	MimeType    string       `json:"mimeType,omitempty"`
+	Meta  MetaObject `json:"_meta,omitempty"`
+	Icons []Icon     `json:"icons,omitempty"`
+	// Name is the programmatic template identifier.
+	Name string `json:"name"`
+	// Title is a human-readable display name.
+	Title string `json:"title,omitempty"`
+	// URITemplate is an RFC 6570 URI template for constructing resource URIs.
+	URITemplate string `json:"uriTemplate"`
+	// Description helps clients and LLMs understand the template.
+	Description string `json:"description,omitempty"`
+	// MimeType is the MIME type for matching resources, if uniform.
+	MimeType string `json:"mimeType,omitempty"`
+	// Annotations provide optional client metadata.
 	Annotations *Annotations `json:"annotations,omitempty"`
 }
 
 // ResourcesReadParams is the request params payload for resources/read.
 type ResourcesReadParams struct {
-	Meta           RequestMeta     `json:"_meta"`
+	Meta RequestMeta `json:"_meta"`
+	// InputResponses carries responses to server-initiated requests from a prior input_required result.
 	InputResponses json.RawMessage `json:"inputResponses,omitempty"`
-	RequestState   string          `json:"requestState,omitempty"`
-	URI            string          `json:"uri"`
+	// RequestState carries opaque state from a prior input_required result.
+	RequestState string `json:"requestState,omitempty"`
+	// URI identifies the resource to read.
+	URI string `json:"uri"`
 }
 
 // ResourcesReadResult is the response payload for resources/read.
 type ResourcesReadResult struct {
-	Meta       MetaObject        `json:"_meta,omitempty"`
-	ResultType ResultType        `json:"resultType"`
-	Contents   []ResourceContent `json:"contents"`
-	TTLMS      int               `json:"ttlMs"`
-	CacheScope CacheScope        `json:"cacheScope"`
+	Meta       MetaObject `json:"_meta,omitempty"`
+	ResultType ResultType `json:"resultType"`
+	// Contents contains text or blob resource contents.
+	Contents []ResourceContent `json:"contents"`
+	// TTLMS hints how long clients may cache this response in milliseconds.
+	TTLMS int `json:"ttlMs"`
+	// CacheScope indicates whether the response may be cached publicly or privately.
+	CacheScope CacheScope `json:"cacheScope"`
 }
 
 // ResourceContent contains resource data returned by resources/read.
 type ResourceContent struct {
-	Meta     MetaObject `json:"_meta,omitempty"`
-	URI      string     `json:"uri"`
-	MimeType string     `json:"mimeType,omitempty"`
-	Text     string     `json:"text,omitempty"`
-	Blob     string     `json:"blob,omitempty"`
+	Meta MetaObject `json:"_meta,omitempty"`
+	// URI identifies this resource.
+	URI string `json:"uri"`
+	// MimeType is the resource MIME type, if known.
+	MimeType string `json:"mimeType,omitempty"`
+	// Text contains textual resource contents.
+	Text string `json:"text,omitempty"`
+	// Blob contains base64-encoded binary resource contents.
+	Blob string `json:"blob,omitempty"`
+}
+
+// IsZero reports whether resource content is absent for json omitzero.
+func (r ResourceContent) IsZero() bool {
+	return len(r.Meta) == 0 && r.URI == "" && r.MimeType == "" && r.Text == "" && r.Blob == ""
+}
+
+// Validate checks that resource content matches exactly one draft schema variant.
+func (r ResourceContent) Validate() error {
+	if r.URI == "" {
+		return errors.New("resource content requires uri")
+	}
+	hasText := r.Text != ""
+	hasBlob := r.Blob != ""
+	if hasText == hasBlob {
+		return errors.New("resource content requires exactly one of text or blob")
+	}
+	return nil
 }
 
 // SubscriptionsListenParams is the request params payload for subscriptions/listen.
 type SubscriptionsListenParams struct {
-	Meta          RequestMeta        `json:"_meta"`
+	Meta RequestMeta `json:"_meta"`
+	// Notifications declares notification types the client opts in to.
 	Notifications SubscriptionFilter `json:"notifications"`
 }
 
 // SubscriptionFilter describes MCP subscription notifications requested by a client.
 type SubscriptionFilter struct {
-	ToolsListChanged      bool     `json:"toolsListChanged,omitempty"`
-	PromptsListChanged    bool     `json:"promptsListChanged,omitempty"`
-	ResourcesListChanged  bool     `json:"resourcesListChanged,omitempty"`
+	// ToolsListChanged requests tool list change notifications.
+	ToolsListChanged bool `json:"toolsListChanged,omitempty"`
+	// PromptsListChanged requests prompt list change notifications.
+	PromptsListChanged bool `json:"promptsListChanged,omitempty"`
+	// ResourcesListChanged requests resource list change notifications.
+	ResourcesListChanged bool `json:"resourcesListChanged,omitempty"`
+	// ResourceSubscriptions requests updates for individual resource URIs.
 	ResourceSubscriptions []string `json:"resourceSubscriptions,omitempty"`
 }
 
-// JSONRPCNotification is a server-sent JSON-RPC notification.
+// JSONRPCNotification is a JSON-RPC notification that does not expect a response.
 type JSONRPCNotification struct {
 	JSONRPC string `json:"jsonrpc"`
 	Method  string `json:"method"`
@@ -431,9 +706,11 @@ type JSONRPCNotification struct {
 
 // SubscriptionNotificationParams is the payload for subscription notifications.
 type SubscriptionNotificationParams struct {
-	Meta          MetaObject          `json:"_meta,omitempty"`
+	Meta MetaObject `json:"_meta,omitempty"`
+	// Notifications is the subset of requested notification types the server accepted.
 	Notifications *SubscriptionFilter `json:"notifications,omitempty"`
-	URI           string              `json:"uri,omitempty"`
+	// URI identifies an updated resource.
+	URI string `json:"uri,omitempty"`
 }
 
 // HandleMCP handles one MCP HTTP request.
@@ -482,12 +759,16 @@ func (h *Handler) HandleMCP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMessage, header http.Header) (result any, rpcErr *JSONRPCError) {
 	switch method {
 	case MethodServerDiscover:
+		instructions, err := h.Registry.Instructions(ctx)
+		if err != nil {
+			return nil, rpcError(InternalErrorCode, err.Error())
+		}
 		t := ServerDiscoverResult{
 			ResultType:        ResultTypeComplete,
 			SupportedVersions: []string{ProtocolVersion},
 			Capabilities:      Capabilities{Tools: ToolsCapability{ListChanged: true}, Resources: ResourcesCapability{Subscribe: true, ListChanged: true}},
 			ServerInfo:        h.serverInfo(),
-			Instructions:      h.Instructions,
+			Instructions:      instructions,
 			TTLMS:             DefaultTTLMS,
 			CacheScope:        CacheScopePrivate,
 		}
@@ -519,7 +800,7 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 			return nil, rpcError(InvalidParamsCode, "Invalid params")
 		}
 		if err := h.validateToolParamHeaders(ctx, header, p.Name, p.Arguments); err != nil {
-			return nil, rpcError(HeaderMismatchCode, err.Error())
+			return nil, rpcError(InvalidRequestCode, err.Error())
 		}
 		res, err := h.Registry.CallTool(ctx, p.Name, p.Arguments)
 		if err != nil {
@@ -532,6 +813,11 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 		}
 		if !res.IsError {
 			t.StructuredContent = res.Structured
+		}
+		for i := range t.Content {
+			if err := t.Content[i].Validate(); err != nil {
+				return nil, rpcError(InternalErrorCode, fmt.Sprintf("invalid tool content %d: %v", i, err))
+			}
 		}
 		return t, nil
 	case MethodResourcesList:
@@ -566,6 +852,11 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 		res, err := h.Registry.ReadResource(ctx, p.URI)
 		if err != nil {
 			return nil, registryError(err)
+		}
+		for i := range res.Contents {
+			if err := res.Contents[i].Validate(); err != nil {
+				return nil, rpcError(InternalErrorCode, fmt.Sprintf("invalid resource content %d: %v", i, err))
+			}
 		}
 		return res, nil
 	default:
@@ -907,7 +1198,7 @@ func rpcHTTPStatus(err *JSONRPCError) int {
 	switch err.Code {
 	case MethodNotFoundCode:
 		return http.StatusNotFound
-	case HeaderMismatchCode:
+	case InvalidRequestCode:
 		return http.StatusBadRequest
 	default:
 		return http.StatusOK
@@ -964,10 +1255,10 @@ func validateMCPRequest(r *http.Request, req *JSONRPCRequest) (int, *JSONRPCErro
 	}
 	headerVersion := r.Header.Get("Mcp-Protocol-Version")
 	if headerVersion == "" {
-		return http.StatusBadRequest, rpcError(HeaderMismatchCode, "Header mismatch: MCP-Protocol-Version header is required")
+		return http.StatusBadRequest, rpcError(InvalidRequestCode, "Header mismatch: MCP-Protocol-Version header is required")
 	}
 	if headerVersion != meta.ProtocolVersion {
-		return http.StatusBadRequest, rpcError(HeaderMismatchCode, "Header mismatch: MCP-Protocol-Version header does not match request _meta")
+		return http.StatusBadRequest, rpcError(InvalidRequestCode, "Header mismatch: MCP-Protocol-Version header does not match request _meta")
 	}
 	if meta.ProtocolVersion != ProtocolVersion {
 		return http.StatusBadRequest, &JSONRPCError{
@@ -980,9 +1271,9 @@ func validateMCPRequest(r *http.Request, req *JSONRPCRequest) (int, *JSONRPCErro
 		}
 	}
 	if got := r.Header.Get("Mcp-Method"); got == "" {
-		return http.StatusBadRequest, rpcError(HeaderMismatchCode, "Header mismatch: Mcp-Method header is required")
+		return http.StatusBadRequest, rpcError(InvalidRequestCode, "Header mismatch: Mcp-Method header is required")
 	} else if got != string(req.Method) {
-		return http.StatusBadRequest, rpcError(HeaderMismatchCode, "Header mismatch: Mcp-Method header does not match request method")
+		return http.StatusBadRequest, rpcError(InvalidRequestCode, "Header mismatch: Mcp-Method header does not match request method")
 	}
 	name, required, err := mcpRequestName(req.Method, req.Params)
 	if err != nil {
@@ -992,9 +1283,9 @@ func validateMCPRequest(r *http.Request, req *JSONRPCRequest) (int, *JSONRPCErro
 		return http.StatusOK, nil
 	}
 	if got := r.Header.Get("Mcp-Name"); got == "" {
-		return http.StatusBadRequest, rpcError(HeaderMismatchCode, "Header mismatch: Mcp-Name header is required")
+		return http.StatusBadRequest, rpcError(InvalidRequestCode, "Header mismatch: Mcp-Name header is required")
 	} else if got != name {
-		return http.StatusBadRequest, rpcError(HeaderMismatchCode, "Header mismatch: Mcp-Name header does not match request params")
+		return http.StatusBadRequest, rpcError(InvalidRequestCode, "Header mismatch: Mcp-Name header does not match request params")
 	}
 	return http.StatusOK, nil
 }

@@ -63,6 +63,10 @@ public struct ContentType: Codable, Equatable, Hashable {
 
     public init(_ value: String) { self.value = value }
 
+    public static let Audio = ContentType("audio")
+    public static let Image = ContentType("image")
+    public static let Resource = ContentType("resource")
+    public static let ResourceLink = ContentType("resource_link")
     public static let Text = ContentType("text")
 
     public static func other(_ value: String) -> ContentType { ContentType(value) }
@@ -148,7 +152,7 @@ public struct Role: Codable, Equatable, Hashable {
 public enum ErrorCodes {
 }
 
-/// JSONRPCRequest is an incoming JSON-RPC request.
+/// JSONRPCRequest is a JSON-RPC request that expects a response.
 public struct JSONRPCRequest: Codable {
     public let jsonrpc: String
     public let id: JSONValue?
@@ -158,12 +162,15 @@ public struct JSONRPCRequest: Codable {
 
 /// JSONRPCError is a JSON-RPC error object.
 public struct JSONRPCError: Codable {
+    /// Code identifies the error type.
     public let code: Int
+    /// Message is a concise single-sentence description of the error.
     public let message: String
+    /// Data carries sender-defined additional error information.
     public let data: JSONValue?
 }
 
-/// JSONRPCResponse is an outgoing JSON-RPC response.
+/// JSONRPCResponse is a JSON-RPC response containing either a result or an error.
 public struct JSONRPCResponse: Codable {
     public let jsonrpc: String
     public let id: JSONValue?
@@ -173,122 +180,188 @@ public struct JSONRPCResponse: Codable {
 
 /// PromptsCapability describes prompt support advertised by the server.
 public struct PromptsCapability: Codable {
+    /// ListChanged indicates support for prompt list change notifications.
     public let listChanged: Bool?
 }
 
 /// ResourcesCapability describes resource support advertised by the server.
 public struct ResourcesCapability: Codable {
+    /// Subscribe indicates support for subscribing to individual resource updates.
     public let subscribe: Bool?
+    /// ListChanged indicates support for resource list change notifications.
     public let listChanged: Bool?
 }
 
 /// ToolsCapability describes tool support advertised by the server.
 public struct ToolsCapability: Codable {
+    /// ListChanged indicates support for tool list change notifications.
     public let listChanged: Bool?
 }
 
 /// Capabilities describes server-supported MCP features.
 public struct Capabilities: Codable {
+    /// Experimental contains non-standard capabilities supported by the server.
     public let experimental: [String: JSONValue]?
+    /// DeprecatedLogging is present if the server supports sending log messages to the client.
+    ///
+    /// Deprecated as of protocol version 2026-07-28.
     public let logging: [String: JSONValue]?
+    /// Completions is present if the server supports argument completion suggestions.
     public let completions: [String: JSONValue]?
+    /// Prompts is present if the server offers prompt templates.
     public let prompts: PromptsCapability?
-    public let resources: ResourcesCapability
-    public let tools: ToolsCapability
+    /// Resources is present if the server offers resources to read.
+    public let resources: ResourcesCapability?
+    /// Tools is present if the server offers tools to call.
+    public let tools: ToolsCapability?
+    /// Extensions contains optional MCP extensions supported by the server.
     public let extensions: [String: JSONValue]?
 }
 
-/// Icon describes an implementation or descriptor icon.
+/// Icon describes an optionally-sized icon for UI display.
 public struct Icon: Codable {
+    /// Src is an icon URI, such as an HTTPS URL or data URI.
     public let src: String
+    /// MimeType overrides a missing or generic source MIME type.
     public let mimeType: String?
+    /// Sizes lists supported dimensions, such as "48x48" or "any".
     public let sizes: [String]?
+    /// Theme indicates whether the icon targets a light or dark background.
     public let theme: String?
 }
 
 /// Implementation describes an MCP client or server implementation.
 public struct Implementation: Codable {
+    /// Icons contains optional sized icons for UI display.
     public let icons: [Icon]?
+    /// Name is the programmatic implementation identifier.
     public let name: String
+    /// Title is a human-readable display name.
     public let title: String?
+    /// Version is the implementation version.
     public let version: String
+    /// Description explains what this implementation does.
     public let description: String?
+    /// WebsiteURL is an optional website for this implementation.
     public let websiteUrl: String?
 }
 
-/// ServerDiscoverResult is the response payload for server/discover.
+/// ServerDiscoverResult is the result returned for a server/discover request.
 public struct ServerDiscoverResult: Codable {
     public let resultType: ResultType
+    /// SupportedVersions lists MCP protocol versions supported by this server.
     public let supportedVersions: [String]
+    /// Capabilities advertises server features.
     public let capabilities: Capabilities
+    /// ServerInfo describes the server software implementation.
     public let serverInfo: Implementation
+    /// Instructions gives natural-language guidance for using the server effectively.
+    ///
+    /// Clients may include it in an LLM system prompt. It should not duplicate tool
+    /// descriptions.
     public let instructions: String?
+    /// TTLMS hints how long clients may cache this response in milliseconds.
     public let ttlMs: Int
+    /// CacheScope indicates whether the response may be cached publicly or privately.
     public let cacheScope: CacheScope
 }
 
-/// SamplingCapability describes client sampling support.
+/// SamplingCapability describes deprecated client sampling support.
 public struct SamplingCapability: Codable {
+    /// Context declares context inclusion support.
     public let context: [String: JSONValue]?
+    /// Tools declares tool-use support.
     public let tools: [String: JSONValue]?
 }
 
 /// ElicitationCapability describes client elicitation support.
 public struct ElicitationCapability: Codable {
+    /// Form declares support for form-mode elicitation.
     public let form: [String: JSONValue]?
+    /// URL declares support for URL-mode elicitation.
     public let url: [String: JSONValue]?
 }
 
-/// ClientCapabilities describes client-supported MCP capabilities.
+/// ClientCapabilities describes capabilities the client supports for a request.
 public struct ClientCapabilities: Codable {
+    /// Experimental contains non-standard capabilities supported by the client.
     public let experimental: [String: JSONValue]?
+    /// DeprecatedRoots is present if the client supports listing roots.
+    ///
+    /// Deprecated as of protocol version 2026-07-28.
     public let roots: [String: JSONValue]?
+    /// DeprecatedSampling is present if the client supports server-initiated LLM sampling.
+    ///
+    /// Deprecated as of protocol version 2026-07-28.
     public let sampling: SamplingCapability?
+    /// Elicitation is present if the client supports server-initiated user elicitation.
     public let elicitation: ElicitationCapability?
+    /// Extensions contains optional MCP extensions supported by the client.
     public let extensions: [String: JSONValue]?
 }
 
-/// RequestMeta is the MCP metadata object required in request params.
+/// RequestMeta is the metadata object required in MCP request params.
 public struct RequestMeta: Codable {
+    /// ProtocolVersion is the MCP protocol version used for this request.
+    ///
+    /// For HTTP, it must match the MCP-Protocol-Version header.
     public let protocolVersion: String
+    /// ClientInfo identifies the client software making the request.
     public let clientInfo: Implementation
+    /// ClientCapabilities declares client capabilities for this request.
     public let clientCapabilities: ClientCapabilities
+    /// ProgressToken requests out-of-band progress notifications for this request.
     public let progressToken: JSONValue?
-    public let logLevel: String?
+    /// DeprecatedLogLevel requests server log message notifications for this request.
+    ///
+    /// Deprecated as of protocol version 2026-07-28.
+    public let deprecatedLogLevel: String?
 
     private enum CodingKeys: String, CodingKey {
         case protocolVersion = "io.modelcontextprotocol/protocolVersion"
         case clientInfo = "io.modelcontextprotocol/clientInfo"
         case clientCapabilities = "io.modelcontextprotocol/clientCapabilities"
         case progressToken
-        case logLevel = "io.modelcontextprotocol/logLevel"
+        case deprecatedLogLevel = "io.modelcontextprotocol/logLevel"
     }
 }
 
 /// PaginatedRequestParams contains common request metadata and an optional cursor.
 public struct PaginatedRequestParams: Codable {
     public let _meta: RequestMeta
+    /// Cursor is an opaque pagination token.
     public let cursor: String?
 }
 
 /// ToolAnnotations describe MCP tool behavior hints.
 public struct ToolAnnotations: Codable {
+    /// Title is a human-readable title for the tool.
     public let title: String?
+    /// ReadOnlyHint indicates the tool does not modify its environment.
     public let readOnlyHint: Bool?
+    /// DestructiveHint indicates the tool may perform destructive updates.
     public let destructiveHint: Bool?
+    /// IdempotentHint indicates repeated calls with the same arguments have no additional effect.
     public let idempotentHint: Bool?
+    /// OpenWorldHint indicates the tool may interact with external entities.
     public let openWorldHint: Bool?
 }
 
-/// ToolDescriptor describes one MCP tool.
+/// ToolDescriptor describes a tool the client can call.
 public struct ToolDescriptor: Codable {
     public let _meta: [String: JSONValue]?
     public let icons: [Icon]?
+    /// Name is the programmatic tool identifier.
     public let name: String
+    /// Title is a human-readable display name.
     public let title: String?
+    /// Description helps clients and LLMs understand the tool.
     public let description: String?
+    /// InputSchema defines the expected JSON object arguments for the tool.
     public let inputSchema: JSONValue?
+    /// OutputSchema defines the structuredContent shape for successful results.
     public let outputSchema: JSONValue?
+    /// Annotations contains optional tool behavior hints.
     public let annotations: ToolAnnotations?
 }
 
@@ -305,42 +378,67 @@ public struct ToolsListResult: Codable {
 /// ToolsCallParams is the request params payload for tools/call.
 public struct ToolsCallParams: Codable {
     public let _meta: RequestMeta
+    /// InputResponses carries responses to server-initiated requests from a prior input_required result.
     public let inputResponses: JSONValue?
+    /// RequestState carries opaque state from a prior input_required result.
     public let requestState: String?
+    /// Name identifies the tool to invoke.
     public let name: String
+    /// Arguments contains tool arguments as a JSON object.
     public let arguments: JSONValue?
 }
 
 /// ResourceContent contains resource data returned by resources/read.
 public struct ResourceContent: Codable {
     public let _meta: [String: JSONValue]?
+    /// URI identifies this resource.
     public let uri: String
+    /// MimeType is the resource MIME type, if known.
     public let mimeType: String?
+    /// Text contains textual resource contents.
     public let text: String?
+    /// Blob contains base64-encoded binary resource contents.
     public let blob: String?
 }
 
 /// Annotations provide optional metadata for MCP resources and content.
 public struct Annotations: Codable {
+    /// Audience describes who the data is intended for.
     public let audience: [Role]?
-    public let priority: Double?
+    /// Priority describes importance from 0 to 1, with 1 most important.
+    public let priority: Int?
+    /// LastModified is an ISO 8601 timestamp for the last modification time.
     public let lastModified: String?
 }
 
-/// ContentBlock is an MCP tool-result content item.
+/// ContentBlock is an MCP content item.
+///
+/// The draft schema models this as a union. Validate checks that only fields for
+/// the selected content type are present.
 public struct ContentBlock: Codable {
     public let _meta: [String: JSONValue]?
     public let icons: [Icon]?
+    /// Type identifies the content variant.
     public let `type`: ContentType
+    /// Name is used by resource_link content.
     public let name: String?
+    /// Title is a human-readable display name.
     public let title: String?
+    /// Text is the text content for text blocks.
     public let text: String?
+    /// Data is base64-encoded data for image and audio blocks.
     public let data: String?
+    /// URI identifies resource_link content.
     public let uri: String?
+    /// Description helps clients and LLMs understand linked resources.
     public let description: String?
+    /// MimeType is required for image and audio content and optional for resources.
     public let mimeType: String?
+    /// Size is the raw resource size in bytes, if known.
     public let size: Int?
+    /// Resource contains embedded resource contents for resource blocks.
     public let resource: ResourceContent?
+    /// Annotations provide optional client metadata.
     public let annotations: Annotations?
 }
 
@@ -348,21 +446,31 @@ public struct ContentBlock: Codable {
 public struct ToolCallResult: Codable {
     public let _meta: [String: JSONValue]?
     public let resultType: ResultType
+    /// Content is the unstructured result of the tool call.
     public let content: [ContentBlock]
+    /// StructuredContent is optional JSON matching the tool output schema on success.
     public let structuredContent: JSONValue?
+    /// IsError indicates the tool call ended in an error visible to the model.
     public let isError: Bool?
 }
 
-/// ResourceDescriptor describes one MCP resource.
+/// ResourceDescriptor describes a resource the server can read.
 public struct ResourceDescriptor: Codable {
     public let _meta: [String: JSONValue]?
     public let icons: [Icon]?
+    /// URI identifies this resource.
     public let uri: String
+    /// Name is the programmatic resource identifier.
     public let name: String
+    /// Title is a human-readable display name.
     public let title: String?
+    /// Description helps clients and LLMs understand the resource.
     public let description: String?
+    /// MimeType is the resource MIME type, if known.
     public let mimeType: String?
+    /// Annotations provide optional client metadata.
     public let annotations: Annotations?
+    /// Size is the raw resource size in bytes, if known.
     public let size: Int?
 }
 
@@ -380,11 +488,17 @@ public struct ResourcesListResult: Codable {
 public struct ResourceTemplateDescriptor: Codable {
     public let _meta: [String: JSONValue]?
     public let icons: [Icon]?
+    /// Name is the programmatic template identifier.
     public let name: String
+    /// Title is a human-readable display name.
     public let title: String?
+    /// URITemplate is an RFC 6570 URI template for constructing resource URIs.
     public let uriTemplate: String
+    /// Description helps clients and LLMs understand the template.
     public let description: String?
+    /// MimeType is the MIME type for matching resources, if uniform.
     public let mimeType: String?
+    /// Annotations provide optional client metadata.
     public let annotations: Annotations?
 }
 
@@ -401,8 +515,11 @@ public struct ResourceTemplatesListResult: Codable {
 /// ResourcesReadParams is the request params payload for resources/read.
 public struct ResourcesReadParams: Codable {
     public let _meta: RequestMeta
+    /// InputResponses carries responses to server-initiated requests from a prior input_required result.
     public let inputResponses: JSONValue?
+    /// RequestState carries opaque state from a prior input_required result.
     public let requestState: String?
+    /// URI identifies the resource to read.
     public let uri: String
 }
 
@@ -410,26 +527,34 @@ public struct ResourcesReadParams: Codable {
 public struct ResourcesReadResult: Codable {
     public let _meta: [String: JSONValue]?
     public let resultType: ResultType
+    /// Contents contains text or blob resource contents.
     public let contents: [ResourceContent]
+    /// TTLMS hints how long clients may cache this response in milliseconds.
     public let ttlMs: Int
+    /// CacheScope indicates whether the response may be cached publicly or privately.
     public let cacheScope: CacheScope
 }
 
 /// SubscriptionFilter describes MCP subscription notifications requested by a client.
 public struct SubscriptionFilter: Codable {
+    /// ToolsListChanged requests tool list change notifications.
     public let toolsListChanged: Bool?
+    /// PromptsListChanged requests prompt list change notifications.
     public let promptsListChanged: Bool?
+    /// ResourcesListChanged requests resource list change notifications.
     public let resourcesListChanged: Bool?
+    /// ResourceSubscriptions requests updates for individual resource URIs.
     public let resourceSubscriptions: [String]?
 }
 
 /// SubscriptionsListenParams is the request params payload for subscriptions/listen.
 public struct SubscriptionsListenParams: Codable {
     public let _meta: RequestMeta
+    /// Notifications declares notification types the client opts in to.
     public let notifications: SubscriptionFilter
 }
 
-/// JSONRPCNotification is a server-sent JSON-RPC notification.
+/// JSONRPCNotification is a JSON-RPC notification that does not expect a response.
 public struct JSONRPCNotification: Codable {
     public let jsonrpc: String
     public let method: String
@@ -439,7 +564,9 @@ public struct JSONRPCNotification: Codable {
 /// SubscriptionNotificationParams is the payload for subscription notifications.
 public struct SubscriptionNotificationParams: Codable {
     public let _meta: [String: JSONValue]?
+    /// Notifications is the subset of requested notification types the server accepted.
     public let notifications: SubscriptionFilter?
+    /// URI identifies an updated resource.
     public let uri: String?
 }
 

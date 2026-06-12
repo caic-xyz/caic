@@ -27,6 +27,10 @@ type fakeMCPRegistry struct {
 	readErr error
 }
 
+func (f fakeMCPRegistry) Instructions(context.Context) (string, error) {
+	return "Use fake test tools.", nil
+}
+
 func (f fakeMCPRegistry) Tools(context.Context) ([]mcp.ToolDescriptor, error) {
 	return nil, nil
 }
@@ -98,6 +102,37 @@ func TestMCPHandlers(t *testing.T) {
 		}
 		if _, ok := caps["tools"]; !ok {
 			t.Error("tools capability missing")
+		}
+		instructions, ok := result["instructions"].(string)
+		if !ok {
+			t.Fatalf("instructions type = %T", result["instructions"])
+		}
+		if !strings.Contains(instructions, "[No active tasks]") {
+			t.Fatalf("instructions = %q, want no active tasks snapshot", instructions)
+		}
+	})
+
+	t.Run("serverDiscoverInstructionsIncludeTaskSnapshot", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t)
+		id := ksid.NewID()
+		insertTestTask(t, s, id.String(), &task.Task{ID: id, InitialPrompt: agent.Prompt{Text: "ship voice prompt"}, Harness: harness.Claude})
+		_, resp := postMCP(t, s.mcpHandlers, "server/discover", "", mcpRequestJSON("server/discover", `{}`))
+		if resp.Error != nil {
+			t.Fatalf("error = %#v", resp.Error)
+		}
+		result, ok := resp.Result.(map[string]any)
+		if !ok {
+			t.Fatalf("result type = %T", resp.Result)
+		}
+		instructions, ok := result["instructions"].(string)
+		if !ok {
+			t.Fatalf("instructions type = %T", result["instructions"])
+		}
+		for _, want := range []string{"[Current tasks at session start]", "Task #1", id.String()} {
+			if !strings.Contains(instructions, want) {
+				t.Fatalf("instructions missing %q: %q", want, instructions)
+			}
 		}
 	})
 
@@ -250,8 +285,8 @@ func TestMCPHandlers(t *testing.T) {
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("Decode: %v", err)
 		}
-		if resp.Error == nil || resp.Error.Code != mcp.HeaderMismatchCode {
-			t.Fatalf("error = %#v, want header mismatch", resp.Error)
+		if resp.Error == nil || resp.Error.Code != mcp.InvalidRequestCode {
+			t.Fatalf("error = %#v, want invalid request", resp.Error)
 		}
 	})
 
@@ -263,8 +298,8 @@ func TestMCPHandlers(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
 		}
-		if resp.Error == nil || resp.Error.Code != mcp.HeaderMismatchCode {
-			t.Fatalf("error = %#v, want header mismatch", resp.Error)
+		if resp.Error == nil || resp.Error.Code != mcp.InvalidRequestCode {
+			t.Fatalf("error = %#v, want invalid request", resp.Error)
 		}
 	})
 

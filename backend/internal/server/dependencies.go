@@ -115,10 +115,10 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		pprof:            d.Pprof,
 		ipgeoChecker:     d.IPGeoChecker,
 	}
+	mcpRegistry := &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, webFetch: webFetch}
 	s.mcpHandlers = &mcp.Handler{
-		Registry:     &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, webFetch: webFetch},
-		ServerInfo:   mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
-		Instructions: "Use caic tools to inspect repositories, manage coding-agent tasks, fetch web pages, and check usage.",
+		Registry:   mcpRegistry,
+		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},
 	}
 	s.runtimeProcesses.authEnabled = s.authEnabled
 	// The webhook concern owns the forge webhook secrets and the GitHub App

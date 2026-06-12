@@ -152,6 +152,7 @@ class VoiceSession @Inject constructor(
 
                 val client = McpClient(settings.serverURL, tokenProvider = { settingsRepository.settings.value.authToken })
                 mcpClient = client
+                val systemInstruction = client.serverInstructions().ifBlank { FALLBACK_SYSTEM_INSTRUCTION }
                 mcpTools = client.listTools()
                 val voiceGatewayClient =
                     com.caic.voicegateway.sdk.v1.ApiClient(
@@ -218,7 +219,7 @@ class VoiceSession @Inject constructor(
                         if (dc.state() == DataChannel.State.OPEN) {
                             setStatus("Waiting for server…")
                             val voiceName = settingsRepository.settings.value.voiceName
-                            sendSetupMessage(voiceName)
+                            sendSetupMessage(voiceName, systemInstruction)
                         }
                     }
                     override fun onMessage(buffer: DataChannel.Buffer) {
@@ -370,7 +371,7 @@ class VoiceSession @Inject constructor(
         sendClientContent(text)
     }
 
-    private fun sendSetupMessage(voiceName: String) {
+    private fun sendSetupMessage(voiceName: String, systemInstruction: String) {
         val tools = mcpTools.map { d ->
             ToolDeclaration(
                 name = d.name,
@@ -378,7 +379,7 @@ class VoiceSession @Inject constructor(
                 parameters = d.inputSchema,
             )
         }
-        val setup = gatewaySessionSetup(voiceName, tools)
+        val setup = gatewaySessionSetup(voiceName, tools, systemInstruction)
         Log.i(TAG, "sending setup message")
         send(json.encodeToString(SessionSetup.serializer(), setup))
     }
@@ -497,6 +498,7 @@ class VoiceSession @Inject constructor(
     private fun gatewaySessionSetup(
         voiceName: String,
         tools: List<ToolDeclaration>,
+        systemInstruction: String,
     ) = SessionSetup(
         kind = MessageKind.SessionSetup,
         voice = VoiceConfig(
@@ -504,7 +506,7 @@ class VoiceSession @Inject constructor(
             language = "en",
         ),
         tools = tools,
-        context = com.caic.voicegateway.sdk.v1.Context(systemInstruction = SYSTEM_INSTRUCTION),
+        context = com.caic.voicegateway.sdk.v1.Context(systemInstruction = systemInstruction),
     )
 
     private fun gatewayToolResult(id: String, name: String, result: JsonElement) = ToolResult(
@@ -645,7 +647,7 @@ class VoiceSession @Inject constructor(
     }
 
     companion object {
-        private const val SYSTEM_INSTRUCTION =
+        private const val FALLBACK_SYSTEM_INSTRUCTION =
             "You are a voice assistant for caic, a system for managing AI coding agents.\n\n" +
                 "## What caic does\n" +
                 "caic runs coding agents (Claude Code, Codex, etc) inside isolated containers " +

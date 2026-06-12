@@ -90,6 +90,44 @@ class ApiClient(
     /** Sends a raw MCP JSON-RPC request to the client base URL. The caller supplies required MCP transport headers. */
     suspend fun mcp(req: JSONRPCRequest, headers: Map<String, String> = emptyMap()): JSONRPCResponse = request("POST", "", json.encodeToString(req), headers = headers)
 
+    /** Discovers server metadata, capabilities, and instructions. */
+    suspend fun serverDiscover(headers: Map<String, String> = emptyMap()): ServerDiscoverResult {
+        val response = mcp(
+            req = JSONRPCRequest(
+                jsonrpc = "2.0",
+                method = Method.ServerDiscover,
+                params = mcpMetaParams(),
+            ),
+            headers = mcpHeaders(Method.ServerDiscover, headers),
+        )
+        response.error?.let { error(it.message) }
+        val result = response.result ?: error("Missing result in MCP response")
+        return json.decodeFromString(ServerDiscoverResult.serializer(), result.toString())
+    }
+
+    /** Returns server instructions, or an empty string when none are advertised. */
+    suspend fun serverInstructions(headers: Map<String, String> = emptyMap()): String =
+        serverDiscover(headers).instructions.orEmpty()
+
+    private fun mcpHeaders(method: Method, headers: Map<String, String>): Map<String, String> = buildMap {
+        put("Mcp-Protocol-Version", "2026-07-28")
+        put("Mcp-Method", method.value)
+        putAll(headers)
+    }
+
+    private fun mcpMetaParams(): kotlinx.serialization.json.JsonObject {
+        val clientInfo = kotlinx.serialization.json.JsonObject(mapOf(
+            "name" to kotlinx.serialization.json.JsonPrimitive("mcp-kotlin-sdk"),
+            "version" to kotlinx.serialization.json.JsonPrimitive("1.0.0"),
+        ))
+        val meta = kotlinx.serialization.json.JsonObject(mapOf(
+            "io.modelcontextprotocol/protocolVersion" to kotlinx.serialization.json.JsonPrimitive("2026-07-28"),
+            "io.modelcontextprotocol/clientInfo" to clientInfo,
+            "io.modelcontextprotocol/clientCapabilities" to kotlinx.serialization.json.JsonObject(emptyMap()),
+        ))
+        return kotlinx.serialization.json.JsonObject(mapOf("_meta" to meta))
+    }
+
     // SSE endpoints
 
     private inline fun <reified T> sseFlow(path: String): Flow<T> = callbackFlow {

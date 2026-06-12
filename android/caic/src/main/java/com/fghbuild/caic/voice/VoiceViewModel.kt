@@ -14,8 +14,6 @@ import com.caic.sdk.v1.VoiceGatewayMode
 import com.fghbuild.caic.data.SettingsRepository
 import com.fghbuild.caic.data.TaskRepository
 import com.fghbuild.caic.ui.theme.terminalStates
-import com.fghbuild.caic.util.formatCost
-import com.fghbuild.caic.util.formatElapsed
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -70,15 +68,8 @@ class VoiceViewModel @Inject constructor(
                             .map { it.id }
                             .toSet()
                         voiceSessionManager.excludedTaskIds = prePurgedIds
-                        val active = tasks.filter { it.id !in prePurgedIds }
-                            .sortedWith(compareBy<Task> { it.id.length }.thenBy { it.id })
                         taskNumberMap.reset()
-                        taskNumberMap.update(active)
-                        val prefs = settingsRepository.serverPreferences.value
-                        val recentRepo = prefs?.repositories?.firstOrNull()?.path
-                        val defaultHarness = prefs?.harness?.ifBlank { null }
-                        val defaultModel = prefs?.harness?.let { h -> prefs.models?.get(h) }?.ifBlank { null }
-                        voiceSessionManager.injectText(buildSnapshot(active, recentRepo, defaultHarness, defaultModel))
+                        taskNumberMap.update(tasks)
                         previousTaskStates = tasks.associate { it.id to it.state }
                         previousCIStatuses = tasks.associate { it.id to it.ciStatus }
                     }
@@ -177,30 +168,6 @@ class VoiceViewModel @Inject constructor(
                 if (notification != null) voiceSessionManager.injectText(notification)
             }
         }
-    }
-
-    private fun buildSnapshot(
-        tasks: List<Task>,
-        recentRepo: String?,
-        defaultHarness: String? = null,
-        defaultModel: String? = null,
-    ): String {
-        val parts = mutableListOf<String>()
-        if (recentRepo != null) parts.add("[Default repo: $recentRepo]")
-        if (!defaultHarness.isNullOrBlank()) parts.add("[Default harness: $defaultHarness]")
-        if (!defaultModel.isNullOrBlank()) parts.add("[Default model: $defaultModel]")
-        if (tasks.isNotEmpty()) {
-            val lines = tasks.joinToString("\n") { task ->
-                val num = taskNumberMap.toNumber(task.id) ?: 0
-                val shortName = task.title.ifBlank { task.id }
-                "- Task #$num: $shortName (${task.state}, ${formatElapsed(task.duration)}" +
-                    ", ${formatCost(task.costUSD)}, ${task.harness})"
-            }
-            parts.add("[Current tasks at session start]\n$lines")
-        } else if (parts.isEmpty()) {
-            return "[No active tasks]"
-        }
-        return parts.joinToString("\n")
     }
 
     private fun buildCIFailureNotification(task: Task): String? {

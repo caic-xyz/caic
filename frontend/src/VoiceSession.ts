@@ -3,8 +3,12 @@ import { createStore, produce } from "solid-js/store";
 import { voiceRTCOffer } from "./api";
 import type { Task } from "@sdk/types.gen";
 import { TaskNumberMap } from "./TaskNumberMap";
-import { mcpListTools, mcpCallTool, type McpToolDescriptor } from "./McpClient";
-import { formatElapsed, formatCost } from "./formatting";
+import {
+  mcpListTools,
+  mcpCallTool,
+  mcpServerInstructions,
+  type McpToolDescriptor,
+} from "./McpClient";
 import {
   type Error,
   type ContextUpdate,
@@ -29,58 +33,6 @@ import {
 
 /** Max time (ms) to wait for session.ready before timing out. */
 const SETUP_TIMEOUT_MS = 15000;
-
-const SYSTEM_INSTRUCTION =
-  "You are a voice assistant for caic, a system for managing AI coding agents.\n\n" +
-  "## What caic does\n" +
-  "caic runs coding agents (Claude Code, Codex, etc) inside isolated containers " +
-  "on a remote server. Each agent works autonomously on a git branch, writing " +
-  "code, running tests, and committing changes. The user is a software engineer " +
-  "who supervises multiple agents concurrently — often while away from the " +
-  "screen — and controls them by voice.\n\n" +
-  "## Task lifecycle\n" +
-  "A task has a prompt (what to build), a repo, a branch, and a state:\n" +
-  "- pending: task is queued, waiting to start\n" +
-  "- branching: creating git branch\n" +
-  "- provisioning: starting container\n" +
-  "- starting: launching agent session\n" +
-  "- running: agent is actively working\n" +
-  "- waiting: agent completed a turn, awaiting user input\n" +
-  "- asking: agent asked a question, needs the user to answer\n" +
-  "- has_plan: agent produced a plan, awaiting approval\n" +
-  "- pulling: pulling changes from container\n" +
-  "- pushing: pushing changes to remote\n" +
-  "- purging: cleanup in progress, container being deleted\n" +
-  "- purged: container deleted; result contains the outcome\n" +
-  "- failed: agent crashed or was aborted; error has the reason\n\n" +
-  "## Context you have\n" +
-  "At session start you receive a snapshot of all current tasks. Use it to " +
-  "answer questions about task status without calling tasks_list first. Call " +
-  "task_get_detail when the user asks for specifics (recent events, diffs).\n\n" +
-  "## On connection\n" +
-  'When the session starts, say exactly one word: "Ready". ' +
-  "Do not say anything else — no greeting, no summary, no explanation. " +
-  'After saying "Ready", stop and remain silent until the user speaks. ' +
-  "Always speak fast.\n\n" +
-  "## Behavior guidelines\n" +
-  "- Do not ask follow-up questions like 'would you like me to…' " +
-  "or 'should I also…'. Answer the user's request and stop. " +
-  "Only ask a question if the user's request is genuinely ambiguous " +
-  "or you misunderstood something critical — then ask the single " +
-  "clarifying question needed and nothing else.\n" +
-  "- Be concise. The user is often away from the screen.\n" +
-  "- Summarize task status: state and what the agent is doing. " +
-  "Only mention elapsed time or cost when the user specifically asks.\n" +
-  "- When an agent is asking, read the question and options clearly, wait for " +
-  "the verbal answer, then call task_answer_question.\n" +
-  "- When creating a task, use the default repo, harness, and model from the " +
-  "session context unless the user specifies otherwise. " +
-  "Confirm repo and prompt before creating.\n" +
-  "- Refer to tasks by its title.\n" +
-  "- Proactively notify the user when tasks finish or need input.\n" +
-  "- Free tools: agent_last_message, tasks_list, task_get_detail, get_usage. Call them whenever useful without asking.\n" +
-  "- When the user asks for a status update, call agent_last_message for each waiting/asking task to get latest output.\n" +
-  "- For safety issues during sync, describe each issue and ask whether to force.";
 
 // State types
 
@@ -141,8 +93,6 @@ export class VoiceSession {
   private _speakerActive = false;
   /** Text notifications buffered while the model is speaking; flushed on turn end. */
   private _pendingNotifications: string[] = [];
-  /** Snapshot to inject after session.ready. */
-  private _pendingSnapshot: string | null = null;
   private _setupTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
@@ -290,9 +240,9 @@ export class VoiceSession {
   /** Start a new voice session via WebRTC data channel through the caic backend. */
   async connect(
     tasks: Task[],
-    recentRepo: string,
-    defaultHarness: string,
-    defaultModel: string,
+    _recentRepo: string,
+    _defaultHarness: string,
+    _defaultModel: string,
   ): Promise<void> {
     this._releaseAll();
     this._audioContext = new AudioContext({ sampleRate: 16000 });
@@ -300,9 +250,12 @@ export class VoiceSession {
     this._setStatus("Setting up WebRTC…");
 
     try {
-      const mcpTools = await mcpListTools();
+      const [systemInstruction, mcpTools] = await Promise.all([
+        mcpServerInstructions(),
+        mcpListTools(),
+      ]);
 
-      // Build task snapshot.
+      // Keep local task numbering aligned with the server-provided voice prompt.
       const prePurged = new Set(
         tasks
           .filter(
@@ -315,22 +268,8 @@ export class VoiceSession {
           .map((t) => t.id),
       );
       this.excludedTaskIds = prePurged;
-      const active = tasks
-        .filter((t) => !prePurged.has(t.id))
-        .sort((a, b) => {
-          const lc = a.id.length - b.id.length;
-          if (lc !== 0) return lc;
-          return a.id > b.id ? 1 : a.id < b.id ? -1 : 0;
-        });
       this.taskNumberMap.reset();
-      this.taskNumberMap.update(active);
-      this._pendingSnapshot = buildSnapshot(
-        active,
-        recentRepo,
-        this.taskNumberMap,
-        defaultHarness,
-        defaultModel,
-      );
+      this.taskNumberMap.update(tasks);
 
       // Create PeerConnection.
       const pc = new RTCPeerConnection({
@@ -410,7 +349,7 @@ export class VoiceSession {
 
       dc.onopen = () => {
         this._setStatus("Waiting for server…");
-        this._sendSetup(mcpTools);
+        this._sendSetup(mcpTools, systemInstruction);
       };
 
       dc.onclose = () => {
@@ -464,7 +403,6 @@ export class VoiceSession {
     }
     this._releaseAll();
     this._speakerAudio = null;
-    this._pendingSnapshot = null;
     // Preserve transcript for review; mark all entries final.
     this._update((s) => {
       s.connected = false;
@@ -562,13 +500,17 @@ export class VoiceSession {
   // Gateway setup message
   // -----------------------------------------------------------------------
 
-  private _sendSetup(tools: McpToolDescriptor[]): void {
+  private _sendSetup(
+    tools: McpToolDescriptor[],
+    systemInstruction: string,
+  ): void {
     const setup = gatewaySessionSetup(
       tools.map((d) => ({
         name: d.name,
         description: d.description,
         parameters: d.inputSchema,
       })),
+      systemInstruction,
     );
     this._send(JSON.stringify(setup));
   }
@@ -596,11 +538,6 @@ export class VoiceSession {
         s.error = null;
       });
       // Audio capture is handled via WebRTC RTP tracks; no separate audio setup needed.
-      // Inject snapshot so the provider backend knows current task state.
-      if (this._pendingSnapshot) {
-        this.injectText(this._pendingSnapshot);
-        this._pendingSnapshot = null;
-      }
       return;
     }
 
@@ -749,6 +686,7 @@ function gatewayContextUpdate(text: string): ContextUpdate {
 
 function gatewaySessionSetup(
   tools: SessionSetup["tools"],
+  systemInstruction: string,
 ): SessionSetup {
   return {
     kind: MessageKindSessionSetup,
@@ -758,7 +696,7 @@ function gatewaySessionSetup(
     },
     tools,
     context: {
-      systemInstruction: SYSTEM_INSTRUCTION,
+      systemInstruction,
     },
   };
 }
@@ -774,32 +712,6 @@ function gatewayToolResult(
     name,
     result,
   };
-}
-
-// Snapshot builder (mirrors VoiceViewModel.buildSnapshot)
-
-function buildSnapshot(
-  tasks: Task[],
-  recentRepo: string,
-  map: TaskNumberMap,
-  defaultHarness?: string,
-  defaultModel?: string,
-): string {
-  const parts: string[] = [];
-  if (recentRepo) parts.push(`[Default repo: ${recentRepo}]`);
-  if (defaultHarness) parts.push(`[Default harness: ${defaultHarness}]`);
-  if (defaultModel) parts.push(`[Default model: ${defaultModel}]`);
-  if (tasks.length > 0) {
-    const lines = tasks.map((t) => {
-      const num = map.toNumber(t.id) ?? 0;
-      const shortName = t.title || t.id;
-      return `- Task #${num}: ${shortName} (${t.state}, ${formatElapsed(t.duration * 1000)}, ${formatCost(t.costUSD)}, ${t.harness})`;
-    });
-    parts.push(`[Current tasks at session start]\n${lines.join("\n")}`);
-  } else if (parts.length === 0) {
-    return "[No active tasks]";
-  }
-  return parts.join("\n");
 }
 
 // Transcript helpers

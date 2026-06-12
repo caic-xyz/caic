@@ -168,6 +168,7 @@ class VoiceSession(
                     cookieProvider = { cookieFor(mcpEndpointURL) },
                 )
                 mcpClient = client
+                val systemInstruction = client.serverInstructions().ifBlank { FALLBACK_SYSTEM_INSTRUCTION }
                 mcpTools = client.listTools()
                 val voiceGatewayClient =
                     com.caic.voicegateway.sdk.v1.ApiClient(voiceGatewayEndpointURL)
@@ -231,7 +232,7 @@ class VoiceSession(
                         Log.d(TAG, "DC state: ${dc.state()}")
                         if (dc.state() == DataChannel.State.OPEN) {
                             setStatus("Waiting for server…")
-                            sendSetupMessage()
+                            sendSetupMessage(systemInstruction)
                         }
                     }
                     override fun onMessage(buffer: DataChannel.Buffer) {
@@ -386,7 +387,7 @@ class VoiceSession(
         sendClientContent(text)
     }
 
-    private fun sendSetupMessage() {
+    private fun sendSetupMessage(systemInstruction: String) {
         val tools = mcpTools.map { d ->
             ToolDeclaration(
                 name = d.name,
@@ -394,7 +395,7 @@ class VoiceSession(
                 parameters = d.inputSchema as? JsonObject ?: JsonObject(emptyMap()),
             )
         }
-        val setup = gatewaySessionSetup(tools)
+        val setup = gatewaySessionSetup(tools, systemInstruction)
         Log.i(TAG, "sending setup message")
         send(json.encodeToString(SessionSetup.serializer(), setup))
     }
@@ -512,6 +513,7 @@ class VoiceSession(
 
     private fun gatewaySessionSetup(
         tools: List<ToolDeclaration>,
+        systemInstruction: String,
     ) = SessionSetup(
         kind = MessageKind.SessionSetup,
         voice = VoiceConfig(
@@ -519,7 +521,7 @@ class VoiceSession(
             language = "en",
         ),
         tools = tools,
-        context = com.caic.voicegateway.sdk.v1.Context(systemInstruction = SYSTEM_INSTRUCTION),
+        context = com.caic.voicegateway.sdk.v1.Context(systemInstruction = systemInstruction),
     )
 
     private fun gatewayToolResult(id: String, name: String, result: JsonElement) = ToolResult(
@@ -665,15 +667,11 @@ class VoiceSession(
     private fun cookieFor(url: String): String? = CookieManager.getInstance().getCookie(url)
 
     companion object {
-        private const val SYSTEM_INSTRUCTION =
-            "You are a concise voice assistant for a Go Mode service running in an Android shell.\n\n" +
-                "The service provides MCP tools. Use those tools whenever they are useful, " +
-                "especially for service state, active work, user attention, or actions.\n\n" +
-                "When the session starts, say exactly one word: \"Ready\". " +
-                "After saying Ready, stop and remain silent until the user speaks. " +
-                "Always speak fast and keep answers short. Ask one clarifying question only " +
-                "when the request is genuinely ambiguous. Do not mention implementation details " +
-                "unless the user asks."
+        private const val FALLBACK_SYSTEM_INSTRUCTION =
+            "You are a concise voice assistant for a Go Mode service running in an Android shell. " +
+                "Use the service MCP tools whenever they are useful. When the session starts, " +
+                "say exactly one word: \"Ready\". After saying Ready, stop and remain silent " +
+                "until the user speaks. Always speak fast and keep answers short."
 
         fun resolveServiceURL(baseURL: String, advertisedURL: String): String {
             val baseOrigin = URI(serviceOrigin(baseURL).trimEnd('/') + "/")

@@ -13,6 +13,7 @@ export default defineConfig({
     alias: {
       "@sdk": resolve(__dirname, "sdk/caic/ts/v1"),
       "@voicegateway-sdk": resolve(__dirname, "sdk/voicegateway/ts/v1"),
+      "@mcp-sdk": resolve(__dirname, "sdk/mcp/ts/v1"),
     },
   },
   build: {

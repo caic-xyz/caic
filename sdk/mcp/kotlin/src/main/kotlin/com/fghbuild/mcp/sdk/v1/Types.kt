@@ -53,6 +53,22 @@ object CacheScopeSerializer : KSerializer<CacheScope> {
 sealed interface ContentType {
     val value: String
     @Serializable
+    data object Audio : ContentType {
+        override val value = "audio"
+    }
+    @Serializable
+    data object Image : ContentType {
+        override val value = "image"
+    }
+    @Serializable
+    data object Resource : ContentType {
+        override val value = "resource"
+    }
+    @Serializable
+    data object ResourceLink : ContentType {
+        override val value = "resource_link"
+    }
+    @Serializable
     data object Text : ContentType {
         override val value = "text"
     }
@@ -66,6 +82,10 @@ object ContentTypeSerializer : KSerializer<ContentType> {
     override fun deserialize(decoder: Decoder): ContentType {
         val v = decoder.decodeString()
         return when (v) {
+            "audio" -> ContentType.Audio
+            "image" -> ContentType.Image
+            "resource" -> ContentType.Resource
+            "resource_link" -> ContentType.ResourceLink
             "text" -> ContentType.Text
             else -> ContentType.Other(v)
         }
@@ -179,7 +199,7 @@ object RoleSerializer : KSerializer<Role> {
 object ErrorCodes {
 }
 
-/** JSONRPCRequest is an incoming JSON-RPC request. */
+/** JSONRPCRequest is a JSON-RPC request that expects a response. */
 @Serializable
 data class JSONRPCRequest(
     val jsonrpc: String,
@@ -196,7 +216,7 @@ data class JSONRPCError(
     val data: JsonElement? = null,
 )
 
-/** JSONRPCResponse is an outgoing JSON-RPC response. */
+/** JSONRPCResponse is a JSON-RPC response containing either a result or an error. */
 @Serializable
 data class JSONRPCResponse(
     val jsonrpc: String,
@@ -224,12 +244,12 @@ data class Capabilities(
     val logging: Map<String, JsonElement>? = null,
     val completions: Map<String, JsonElement>? = null,
     val prompts: PromptsCapability? = null,
-    val resources: ResourcesCapability,
-    val tools: ToolsCapability,
+    val resources: ResourcesCapability? = null,
+    val tools: ToolsCapability? = null,
     val extensions: Map<String, JsonElement>? = null,
 )
 
-/** Icon describes an implementation or descriptor icon. */
+/** Icon describes an optionally-sized icon for UI display. */
 @Serializable
 data class Icon(
     val src: String,
@@ -249,7 +269,7 @@ data class Implementation(
     val websiteUrl: String? = null,
 )
 
-/** ServerDiscoverResult is the response payload for server/discover. */
+/** ServerDiscoverResult is the result returned for a server/discover request. */
 @Serializable
 data class ServerDiscoverResult(
     val resultType: ResultType,
@@ -261,7 +281,7 @@ data class ServerDiscoverResult(
     val cacheScope: CacheScope,
 )
 
-/** SamplingCapability describes client sampling support. */
+/** SamplingCapability describes deprecated client sampling support. */
 @Serializable
 data class SamplingCapability(val context: Map<String, JsonElement>? = null, val tools: Map<String, JsonElement>? = null)
 
@@ -269,7 +289,7 @@ data class SamplingCapability(val context: Map<String, JsonElement>? = null, val
 @Serializable
 data class ElicitationCapability(val form: Map<String, JsonElement>? = null, val url: Map<String, JsonElement>? = null)
 
-/** ClientCapabilities describes client-supported MCP capabilities. */
+/** ClientCapabilities describes capabilities the client supports for a request. */
 @Serializable
 data class ClientCapabilities(
     val experimental: Map<String, JsonElement>? = null,
@@ -279,14 +299,14 @@ data class ClientCapabilities(
     val extensions: Map<String, JsonElement>? = null,
 )
 
-/** RequestMeta is the MCP metadata object required in request params. */
+/** RequestMeta is the metadata object required in MCP request params. */
 @Serializable
 data class RequestMeta(
     @SerialName("io.modelcontextprotocol/protocolVersion") val protocolVersion: String,
     @SerialName("io.modelcontextprotocol/clientInfo") val clientInfo: Implementation,
     @SerialName("io.modelcontextprotocol/clientCapabilities") val clientCapabilities: ClientCapabilities,
     val progressToken: JsonElement? = null,
-    @SerialName("io.modelcontextprotocol/logLevel") val logLevel: String? = null,
+    @SerialName("io.modelcontextprotocol/logLevel") val deprecatedLogLevel: String? = null,
 )
 
 /** PaginatedRequestParams contains common request metadata and an optional cursor. */
@@ -303,7 +323,7 @@ data class ToolAnnotations(
     val openWorldHint: Boolean? = null,
 )
 
-/** ToolDescriptor describes one MCP tool. */
+/** ToolDescriptor describes a tool the client can call. */
 @Serializable
 data class ToolDescriptor(
     val _meta: Map<String, JsonElement>? = null,
@@ -351,11 +371,16 @@ data class ResourceContent(
 @Serializable
 data class Annotations(
     val audience: List<Role>? = null,
-    val priority: Double? = null,
+    val priority: Int? = null,
     val lastModified: String? = null,
 )
 
-/** ContentBlock is an MCP tool-result content item. */
+/**
+ * ContentBlock is an MCP content item.
+ *
+ * The draft schema models this as a union. Validate checks that only fields for
+ * the selected content type are present.
+ */
 @Serializable
 data class ContentBlock(
     val _meta: Map<String, JsonElement>? = null,
@@ -383,7 +408,7 @@ data class ToolCallResult(
     val isError: Boolean? = null,
 )
 
-/** ResourceDescriptor describes one MCP resource. */
+/** ResourceDescriptor describes a resource the server can read. */
 @Serializable
 data class ResourceDescriptor(
     val _meta: Map<String, JsonElement>? = null,
@@ -464,7 +489,7 @@ data class SubscriptionFilter(
 @Serializable
 data class SubscriptionsListenParams(val _meta: RequestMeta, val notifications: SubscriptionFilter)
 
-/** JSONRPCNotification is a server-sent JSON-RPC notification. */
+/** JSONRPCNotification is a JSON-RPC notification that does not expect a response. */
 @Serializable
 data class JSONRPCNotification(
     val jsonrpc: String,

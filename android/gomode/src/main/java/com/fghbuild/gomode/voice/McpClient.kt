@@ -49,6 +49,9 @@ class McpClient(
             clientCapabilities = ClientCapabilities(),
         )
 
+    private fun cookieHeaders(): Map<String, String> =
+        cookieProvider()?.takeIf { it.isNotBlank() }?.let { mapOf("Cookie" to it) } ?: emptyMap()
+
     private suspend inline fun <reified T> request(
         method: Method,
         params: JsonElement,
@@ -56,7 +59,7 @@ class McpClient(
         paramHeaders: Map<String, String> = emptyMap(),
     ): T {
         val headers = buildMap {
-            cookieProvider()?.takeIf { it.isNotBlank() }?.let { put("Cookie", it) }
+            putAll(cookieHeaders())
             put("Mcp-Protocol-Version", protocolVersion)
             put("Mcp-Method", method.value)
             if (name != null) put("Mcp-Name", name)
@@ -76,6 +79,8 @@ class McpClient(
         val result = response.result ?: error("Missing result in MCP response")
         return json.decodeFromJsonElement(result)
     }
+
+    suspend fun serverInstructions(): String = api.serverInstructions(headers = cookieHeaders())
 
     suspend fun listTools(): List<ToolDescriptor> {
         val tools = mutableListOf<ToolDescriptor>()
