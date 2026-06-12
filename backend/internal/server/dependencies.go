@@ -14,6 +14,7 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/ci"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgecache"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
+	"github.com/caic-xyz/caic/backend/internal/gomode"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
@@ -69,6 +70,12 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		return nil, errors.New("process backend is required")
 	}
 	voice := &voiceHandlers{bridge: d.VoiceBridge, gateway: d.VoiceGateway}
+	voiceMetadata := voice.metadata()
+	goModeSettings := newGoModeSettings(voiceMetadata, d.AuthStore != nil)
+	goModeHandler, err := gomode.NewHandler(&goModeSettings)
+	if err != nil {
+		return nil, err
+	}
 	webFetch := &webFetchHandlers{}
 	taskService := &taskAPIService{
 		ctx:       ctx,
@@ -83,6 +90,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 		ctx:              ctx,
 		authHandlers:     &authHandlers{store: d.AuthStore, sessionSecret: d.SessionSecret, hostState: d.HostState, githubOAuth: d.GitHubOAuth, gitlabOAuth: d.GitLabOAuth, githubAllowedUsers: d.GitHubAllowedUsers, gitlabAllowedUsers: d.GitLabAllowedUsers},
 		ciHandlers:       &ciHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, provider: d.Provider, taskClient: d.TaskClient, authStore: d.AuthStore},
+		goModeHandler:    goModeHandler,
 		runtimeProcesses: &RuntimeProcesses{taskMgr: d.TaskManager, backend: d.ProcessBackend, notifyChange: notifyChangeFn(d.TaskManager)},
 		serverConfigHandlers: &serverConfigHandlers{
 			serverCtx:          ctx,
@@ -95,7 +103,7 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			authStore:          d.AuthStore,
 			githubOAuth:        d.GitHubOAuth,
 			gitlabOAuth:        d.GitLabOAuth,
-			voiceGateway:       voice.metadata(),
+			voiceGateway:       voiceMetadata,
 		},
 		taskHTTPHandlers: &taskHTTPHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, ciService: d.CIService, authStore: d.AuthStore, warnings: d.Warnings, service: taskService},
 		usageHandlers:    &usageHandlers{taskMgr: d.TaskManager, fetchers: d.UsageFetchers},

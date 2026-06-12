@@ -146,10 +146,13 @@ func (r *routeDef) writeKotlinJSONFunc(b *strings.Builder, params []string) {
 	if r.HeadersArg {
 		headersArg = ", headers = headers"
 	}
-	if hasReq {
+	switch {
+	case hasReq:
 		fmt.Fprintf(b, "    suspend fun %s(%s): %s = request(%q, %s, json.encodeToString(req)%s)\n", r.Name, sig, respType, r.Method, ktPath, headersArg)
-	} else {
+	case r.HeadersArg:
 		fmt.Fprintf(b, "    suspend fun %s(%s): %s = request(%q, %s, headers = headers)\n", r.Name, sig, respType, r.Method, ktPath)
+	default:
+		fmt.Fprintf(b, "    suspend fun %s(%s): %s = request(%q, %s)\n", r.Name, sig, respType, r.Method, ktPath)
 	}
 }
 

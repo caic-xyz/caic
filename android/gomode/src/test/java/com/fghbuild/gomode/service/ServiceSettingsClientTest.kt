@@ -1,0 +1,115 @@
+// Unit tests for Go Mode service settings fetching and compatibility validation.
+package com.fghbuild.gomode.service
+
+import com.fghbuild.gomode.sdk.v1.MCPSettings
+import com.fghbuild.gomode.sdk.v1.Settings
+import com.fghbuild.gomode.sdk.v1.VoiceGatewaySettings
+import com.fghbuild.gomode.sdk.v1.WebShellSettings
+import kotlinx.coroutines.runBlocking
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ServiceSettingsClientTest {
+    @Test
+    fun `fetch requests root settings and decodes mcp metadata`() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setBody(SETTINGS_JSON).setResponseCode(200))
+            val settings = ServiceSettingsClient().fetch(server.url("/nested/path?ignored=1").toString())
+            val request = server.takeRequest()
+
+            assertEquals("/api/gomode/v1/settings", request.path)
+            assertEquals("example-coding-service", settings.service)
+            assertEquals(1, settings.apiVersion)
+            assertEquals("/api/service/v1/mcp", settings.webShell.mcp.endpoint)
+            assertEquals("2026-07-28", settings.webShell.mcp.protocolVersion)
+            assertTrue(settings.webShell.mcp.authRequired)
+            assertEquals("/", settings.webShell.voiceGateway.url)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `fetch rejects unsuccessful response`() = runBlocking {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(500).setBody("oops"))
+            val result = runCatching { ServiceSettingsClient().fetch(server.url("/").toString()) }
+
+            assertTrue(result.exceptionOrNull() is ServiceSettingsException)
+            assertEquals("Service settings request failed: HTTP 500", result.exceptionOrNull()?.message)
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun `compatibility accepts matching shell contract`() {
+        assertNull(settings().compatibilityError())
+    }
+
+    @Test
+    fun `compatibility rejects unsupported api version`() {
+        val message = settings(apiVersion = 2).compatibilityError()
+
+        assertEquals("Unsupported Go Mode service API version 2. This app supports 1.", message)
+    }
+
+    @Test
+    fun `compatibility rejects unsupported bridge version`() {
+        val message = settings(bridgeVersion = 2).compatibilityError()
+
+        assertEquals("Service requires bridge version 2. This app provides 1.", message)
+    }
+
+    private fun settings(
+        apiVersion: Int = 1,
+        bridgeVersion: Int = 1,
+    ): Settings = Settings(
+        service = "example-coding-service",
+        serviceVersion = "0.10.0",
+        apiVersion = apiVersion,
+        webShell = WebShellSettings(
+            bridgeVersion = bridgeVersion,
+            mcp = MCPSettings(
+                endpoint = "/api/service/v1/mcp",
+                protocolVersion = "2026-07-28",
+                authRequired = true,
+            ),
+            voiceGateway = VoiceGatewaySettings(
+                required = false,
+                url = "/",
+            ),
+        ),
+    )
+
+    private companion object {
+        const val SETTINGS_JSON = """
+            {
+              "service": "example-coding-service",
+              "serviceVersion": "0.10.0",
+              "apiVersion": 1,
+              "webShell": {
+                "bridgeVersion": 1,
+                "mcp": {
+                  "endpoint": "/api/service/v1/mcp",
+                  "protocolVersion": "2026-07-28",
+                  "authRequired": true
+                },
+                "voiceGateway": {
+                  "required": false,
+                  "url": "/",
+                  "authRequired": false
+                }
+              }
+            }
+        """
+    }
+}

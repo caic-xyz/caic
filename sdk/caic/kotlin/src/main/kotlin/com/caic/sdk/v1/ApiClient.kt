@@ -88,37 +88,37 @@ class ApiClient(
 
     // JSON endpoints
     /** Returns server capabilities and feature flags. */
-    suspend fun getConfig(): Config = request("GET", "/api/caic/v1/server/config", headers = headers)
+    suspend fun getConfig(): Config = request("GET", "/api/caic/v1/server/config")
     /** Returns the current server version and checks for available updates. */
-    suspend fun getVersion(): VersionResp = request("GET", "/api/caic/v1/server/version", headers = headers)
+    suspend fun getVersion(): VersionResp = request("GET", "/api/caic/v1/server/version")
     /** Triggers a background server auto-update to the latest release. */
-    suspend fun triggerUpdate(): UpdateResp = request("POST", "/api/caic/v1/server/update", headers = headers)
+    suspend fun triggerUpdate(): UpdateResp = request("POST", "/api/caic/v1/server/update")
     /** Returns the authenticated user's profile. */
-    suspend fun getMe(): UserResp = request("GET", "/api/caic/v1/auth/me", headers = headers)
+    suspend fun getMe(): UserResp = request("GET", "/api/caic/v1/auth/me")
     /** Invalidates the current session. */
-    suspend fun logout(): StatusResp = request("POST", "/api/caic/v1/auth/logout", headers = headers)
+    suspend fun logout(): StatusResp = request("POST", "/api/caic/v1/auth/logout")
     /** Returns server and per-repository preferences. */
-    suspend fun getPreferences(): PreferencesResp = request("GET", "/api/caic/v1/server/preferences", headers = headers)
+    suspend fun getPreferences(): PreferencesResp = request("GET", "/api/caic/v1/server/preferences")
     /** Updates server settings and preferences. */
     suspend fun updatePreferences(req: UpdatePreferencesReq): PreferencesResp = request("POST", "/api/caic/v1/server/preferences", json.encodeToString(req))
     /** Lists available coding agent harnesses. */
-    suspend fun listHarnesses(): List<HarnessInfo> = request("GET", "/api/caic/v1/server/harnesses", headers = headers)
+    suspend fun listHarnesses(): List<HarnessInfo> = request("GET", "/api/caic/v1/server/harnesses")
     /** Lists well-known cache configurations. */
-    suspend fun listCaches(): WellKnownCachesResp = request("GET", "/api/caic/v1/server/caches", headers = headers)
+    suspend fun listCaches(): WellKnownCachesResp = request("GET", "/api/caic/v1/server/caches")
     /** Returns the latest size snapshot for well-known caches. */
-    suspend fun getCacheSizes(): CacheSizesResp = request("GET", "/api/caic/v1/server/cache-sizes", headers = headers)
+    suspend fun getCacheSizes(): CacheSizesResp = request("GET", "/api/caic/v1/server/cache-sizes")
     /** Lists all discovered repositories. */
-    suspend fun listRepos(): List<Repo> = request("GET", "/api/caic/v1/server/repos", headers = headers)
+    suspend fun listRepos(): List<Repo> = request("GET", "/api/caic/v1/server/repos")
     /** Clones a repository into the server's root directory. */
     suspend fun cloneRepo(req: CloneRepoReq): Repo = request("POST", "/api/caic/v1/server/repos", json.encodeToString(req))
     /** Lists branches for a repository. */
-    suspend fun listRepoBranches(repo: String): RepoBranchesResp = request("GET", "/api/caic/v1/server/repos/branches?repo=$repo", headers = headers)
+    suspend fun listRepoBranches(repo: String): RepoBranchesResp = request("GET", "/api/caic/v1/server/repos/branches?repo=$repo")
     /** Creates a task to fix a failing CI pipeline. */
     suspend fun botFixCI(req: BotFixCIReq): CreateTaskResp = request("POST", "/api/caic/v1/bot/fix-ci", json.encodeToString(req))
     /** Injects a CI fix command into an existing task's PR. */
     suspend fun botFixPR(req: BotFixPRReq): StatusResp = request("POST", "/api/caic/v1/bot/fix-pr", json.encodeToString(req))
     /** Returns all tasks. */
-    suspend fun listTasks(): List<Task> = request("GET", "/api/caic/v1/tasks", headers = headers)
+    suspend fun listTasks(): List<Task> = request("GET", "/api/caic/v1/tasks")
     /** Creates and starts a new coding agent task. */
     suspend fun createTask(req: CreateTaskReq): CreateTaskResp = request("POST", "/api/caic/v1/tasks", json.encodeToString(req))
     /** Sends user input to a running task. */
@@ -126,31 +126,31 @@ class ApiClient(
     /** Restarts a completed or errored task with a new prompt. */
     suspend fun restartTask(id: String, req: RestartReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/restart", json.encodeToString(req))
     /** Clears context and restarts the agent session without a prompt. */
-    suspend fun clearContext(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/clear-context", headers = headers)
+    suspend fun clearContext(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/clear-context")
     /** Sends a compact command to reduce the agent's context window usage. */
     suspend fun compactContext(id: String, req: CompactReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/compact", json.encodeToString(req))
     /** Requests graceful stop of a running task. */
-    suspend fun stopTask(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/stop", headers = headers)
+    suspend fun stopTask(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/stop")
     /** Permanently deletes a task and its runtime instance. */
-    suspend fun purgeTask(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/purge", headers = headers)
+    suspend fun purgeTask(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/purge")
     /** Reconnects to an orphaned task runtime instance. */
-    suspend fun reviveTask(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/revive", headers = headers)
+    suspend fun reviveTask(id: String): StatusResp = request("POST", "/api/caic/v1/tasks/$id/revive")
     /** Returns the log tail of a failed CI check run. */
-    suspend fun getTaskCILog(id: String, jobID: String): CILogResp = request("GET", "/api/caic/v1/tasks/$id/ci-log?jobID=$jobID", headers = headers)
+    suspend fun getTaskCILog(id: String, jobID: String): CILogResp = request("GET", "/api/caic/v1/tasks/$id/ci-log?jobID=$jobID")
     /** Pushes task changes to the remote repository. */
     suspend fun syncTask(id: String, req: SyncReq): SyncResp = request("POST", "/api/caic/v1/tasks/$id/sync", json.encodeToString(req))
     /** Forks a task by snapshotting its runtime instance and creating a new task on a derived branch. */
     suspend fun forkTask(id: String, req: ForkTaskReq): CreateTaskResp = request("POST", "/api/caic/v1/tasks/$id/fork", json.encodeToString(req))
     /** Returns the unified diff for a task's branch. */
-    suspend fun getTaskDiff(id: String, path: String): DiffResp = request("GET", "/api/caic/v1/tasks/$id/diff?path=$path", headers = headers)
+    suspend fun getTaskDiff(id: String, path: String): DiffResp = request("GET", "/api/caic/v1/tasks/$id/diff?path=$path")
     /** Returns the list of running processes inside the task's runtime instance. */
-    suspend fun getTaskProcesses(id: String): ProcessListResp = request("GET", "/api/caic/v1/tasks/$id/processes", headers = headers)
+    suspend fun getTaskProcesses(id: String): ProcessListResp = request("GET", "/api/caic/v1/tasks/$id/processes")
     /** Sends SIGTERM or SIGKILL to a process inside the task's runtime instance. */
     suspend fun signalProcess(id: String, pid: String, req: SignalProcessReq): StatusResp = request("POST", "/api/caic/v1/tasks/$id/processes/$pid/signal", json.encodeToString(req))
     /** Returns the full (untruncated) input for a tool call. */
-    suspend fun getTaskToolInput(id: String, toolUseID: String): TaskToolInputResp = request("GET", "/api/caic/v1/tasks/$id/tool/$toolUseID", headers = headers)
+    suspend fun getTaskToolInput(id: String, toolUseID: String): TaskToolInputResp = request("GET", "/api/caic/v1/tasks/$id/tool/$toolUseID")
     /** Returns current usage quota statistics. */
-    suspend fun getUsage(): UsageResp = request("GET", "/api/caic/v1/usage", headers = headers)
+    suspend fun getUsage(): UsageResp = request("GET", "/api/caic/v1/usage")
     /** Fetches a URL and returns its text content. */
     suspend fun webFetch(req: WebFetchReq): WebFetchResp = request("POST", "/api/caic/v1/web/fetch", json.encodeToString(req))
 

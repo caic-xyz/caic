@@ -33,6 +33,7 @@ type Router struct {
 	authHandlers         *authHandlers
 	ciHandlers           *ciHandlers
 	runtimeProcesses     *RuntimeProcesses
+	goModeHandler        http.Handler
 	serverConfigHandlers *serverConfigHandlers
 	taskHTTPHandlers     *taskHTTPHandlers
 	mcpHandlers          *mcp.Handler
@@ -165,6 +166,7 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	mux.Handle("/api/caic/v1/auth/", authMux)
 	mux.HandleFunc("GET /api/caic/v1/server/config", handle(serverConfig.getConfig))
 	mux.HandleFunc("GET /api/caic/v1/server/version", handle(serverConfig.getVersion))
+	mux.Handle("/api/gomode/v1/", s.goModeHandler)
 	mux.HandleFunc("POST /webhooks/github", s.webhooks.HandleGitHub)
 	mux.HandleFunc("POST /webhooks/gitlab", s.webhooks.HandleGitLab)
 	mux.Handle("/api/caic/v1/", protectedAPI)

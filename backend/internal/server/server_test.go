@@ -23,7 +23,9 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/auth"
 	"github.com/caic-xyz/caic/backend/internal/forge/forgemanager"
+	"github.com/caic-xyz/caic/backend/internal/gomode"
 	"github.com/caic-xyz/caic/backend/internal/harness"
+	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/preferences"
 	"github.com/caic-xyz/caic/backend/internal/repos"
 	"github.com/caic-xyz/caic/backend/internal/runtime"
@@ -1987,8 +1989,73 @@ func TestVoiceGatewayMetadata(t *testing.T) {
 	})
 }
 
+func TestGoModeSettings(t *testing.T) {
+	t.Parallel()
+	voice := v1.VoiceGatewayMetadata{
+		Mode:         v1.VoiceGatewayModeExternal,
+		URL:          "https://voice.example.com",
+		AuthRequired: true,
+		Capabilities: []string{"voice.gatewayGeminiLive"},
+	}
+	got := newGoModeSettings(voice, true)
+	if got.Service != "caic" {
+		t.Fatalf("Service = %q, want caic", got.Service)
+	}
+	if got.APIVersion != 1 {
+		t.Fatalf("APIVersion = %d, want 1", got.APIVersion)
+	}
+	if got.WebShell.BridgeVersion != 1 {
+		t.Fatalf("WebShell = %+v", got.WebShell)
+	}
+	if got.WebShell.MCP.Endpoint != "/api/caic/v1/mcp" || got.WebShell.MCP.ProtocolVersion != mcp.ProtocolVersion || !got.WebShell.MCP.AuthRequired {
+		t.Fatalf("MCP = %+v", got.WebShell.MCP)
+	}
+	if got.WebShell.VoiceGateway.Required {
+		t.Fatal("VoiceGateway.Required = true, want false")
+	}
+	if got.WebShell.VoiceGateway.URL != "https://voice.example.com" || !got.WebShell.VoiceGateway.AuthRequired {
+		t.Fatalf("VoiceGateway = %+v", got.WebShell.VoiceGateway)
+	}
+
+	embedded := newGoModeSettings(v1.VoiceGatewayMetadata{Mode: v1.VoiceGatewayModeEmbedded}, false)
+	if embedded.WebShell.VoiceGateway.URL != "/" || embedded.WebShell.VoiceGateway.AuthRequired {
+		t.Fatalf("Embedded VoiceGateway = %+v", embedded.WebShell.VoiceGateway)
+	}
+}
+
 func TestBuildHandler(t *testing.T) {
 	t.Parallel()
+	t.Run("go mode settings are public", func(t *testing.T) {
+		t.Parallel()
+		s := newTestRouter(t)
+		secret := make([]byte, 32)
+		s.sessionSecret = secret
+		usersPath := filepath.Join(t.TempDir(), "users.json")
+		store, err := auth.Open(usersPath)
+		if err != nil {
+			t.Fatalf("open auth store: %v", err)
+		}
+		s.authStore = store
+		h, err := s.buildHandler()
+		if err != nil {
+			t.Fatalf("buildHandler() error = %v", err)
+		}
+
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/gomode/v1/settings", http.NoBody)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+		}
+		var resp gomode.Settings
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp.Service != "caic" || resp.APIVersion != 1 {
+			t.Fatalf("settings = %+v", resp)
+		}
+	})
+
 	t.Run("auth disabled", func(t *testing.T) {
 		t.Parallel()
 		s := newTestRouter(t)

@@ -34,6 +34,7 @@ graph TD
   pkg_internal_forge_forgemanager["internal/forge/forgemanager"]
   pkg_internal_forge_github["internal/forge/github"]
   pkg_internal_forge_gitlab["internal/forge/gitlab"]
+  pkg_internal_gomode["internal/gomode"]
   pkg_internal_harness["internal/harness"]
   pkg_internal_jsonutil["internal/jsonutil"]
   pkg_internal_mcp["internal/mcp"]
@@ -146,6 +147,7 @@ graph TD
   pkg_internal_server --> pkg_internal_forge_forgemanager
   pkg_internal_server --> pkg_internal_forge_github
   pkg_internal_server --> pkg_internal_forge_gitlab
+  pkg_internal_server --> pkg_internal_gomode
   pkg_internal_server --> pkg_internal_harness
   pkg_internal_server --> pkg_internal_mcp
   pkg_internal_server --> pkg_internal_preferences
@@ -296,6 +298,7 @@ graph TD
     pkg_internal_autoupdate["internal/autoupdate"]
     pkg_internal_bot["internal/bot"]
     pkg_internal_ci["internal/ci"]
+    pkg_internal_gomode["internal/gomode"]
     pkg_internal_harness["internal/harness"]
     pkg_internal_jsonutil["internal/jsonutil"]
     pkg_internal_mcp["internal/mcp"]
@@ -379,6 +382,7 @@ graph TD
   pkg_internal_ci --> pkg_internal_forge_forgecache
   pkg_internal_ci --> pkg_internal_preferences
   pkg_internal_ci --> pkg_internal_task
+  pkg_internal_cmd_gen_api_sdk --> pkg_internal_gomode
   pkg_internal_cmd_gen_api_sdk --> pkg_internal_mcp
   pkg_internal_cmd_gen_api_sdk --> pkg_internal_server_api
   pkg_internal_cmd_gen_api_sdk --> pkg_internal_server_api_v1
@@ -424,6 +428,7 @@ graph TD
   pkg_internal_server --> pkg_internal_forge_forgemanager
   pkg_internal_server --> pkg_internal_forge_github
   pkg_internal_server --> pkg_internal_forge_gitlab
+  pkg_internal_server --> pkg_internal_gomode
   pkg_internal_server --> pkg_internal_harness
   pkg_internal_server --> pkg_internal_mcp
   pkg_internal_server --> pkg_internal_preferences
@@ -493,13 +498,14 @@ graph TD
 | `internal/autoupdate` | `internal/forge/github` |
 | `internal/bot` | `internal/forge`, `internal/forge/forgecache` |
 | `internal/ci` | `internal/agent`, `internal/bot`, `internal/forge`, `internal/forge/forgecache`, `internal/preferences`, `internal/task` |
-| `internal/cmd/gen-api-sdk` | `internal/mcp`, `internal/server/api`, `internal/server/api/v1`, `internal/voicegateway/api`, `internal/voicegateway/api/v1` |
+| `internal/cmd/gen-api-sdk` | `internal/gomode`, `internal/mcp`, `internal/server/api`, `internal/server/api/v1`, `internal/voicegateway/api`, `internal/voicegateway/api/v1` |
 | `internal/cmd/record-trace` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/gemini`, `internal/agent/kilo`, `internal/agent/opencode`, `internal/agent/pi`, `internal/agent/relay`, `internal/harness` |
 | `internal/forge` | None |
 | `internal/forge/forgecache` | `internal/forge` |
 | `internal/forge/forgemanager` | `internal/auth`, `internal/bot`, `internal/forge`, `internal/forge/github`, `internal/forge/gitlab`, `internal/repos` |
 | `internal/forge/github` | `internal/forge` |
 | `internal/forge/gitlab` | `internal/forge` |
+| `internal/gomode` | None |
 | `internal/harness` | None |
 | `internal/jsonutil` | None |
 | `internal/mcp` | None |
@@ -507,7 +513,7 @@ graph TD
 | `internal/repos` | `internal/agent`, `internal/ci`, `internal/forge`, `internal/forge/forgecache`, `internal/harness`, `internal/runtime`, `internal/task`, `internal/tasks` |
 | `internal/runtime` | `internal/harness` |
 | `internal/runtime/mdruntime` | `internal/harness`, `internal/runtime` |
-| `internal/server` | `frontend`, `internal/agent`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemanager`, `internal/forge/github`, `internal/forge/gitlab`, `internal/harness`, `internal/mcp`, `internal/preferences`, `internal/repos`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/api/v1conv`, `internal/server/ipgeo`, `internal/task`, `internal/tasks`, `internal/usage`, `internal/voicegateway`, `internal/voicegateway/api`, `internal/voicegateway/voicertc` |
+| `internal/server` | `frontend`, `internal/agent`, `internal/auth`, `internal/autoupdate`, `internal/bot`, `internal/ci`, `internal/forge`, `internal/forge/forgecache`, `internal/forge/forgemanager`, `internal/forge/github`, `internal/forge/gitlab`, `internal/gomode`, `internal/harness`, `internal/mcp`, `internal/preferences`, `internal/repos`, `internal/runtime`, `internal/server/api`, `internal/server/api/v1`, `internal/server/api/v1conv`, `internal/server/ipgeo`, `internal/task`, `internal/tasks`, `internal/usage`, `internal/voicegateway`, `internal/voicegateway/api`, `internal/voicegateway/voicertc` |
 | `internal/server/api` | None |
 | `internal/server/api/v1` | `internal/server/api` |
 | `internal/server/api/v1conv` | `internal/agent`, `internal/forge`, `internal/harness`, `internal/runtime`, `internal/server/api/v1`, `internal/task`, `internal/tasks`, `internal/usage` |

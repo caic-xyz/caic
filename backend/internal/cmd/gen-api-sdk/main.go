@@ -12,6 +12,7 @@ import (
 	"github.com/invopop/jsonschema"
 	"github.com/maruel/ksid"
 
+	"github.com/caic-xyz/caic/backend/internal/gomode"
 	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
@@ -33,7 +34,10 @@ func mainImpl() error {
 	if err := generateVoiceGatewaySDK(); err != nil {
 		return err
 	}
-	return generateMcpSDK()
+	if err := generateMcpSDK(); err != nil {
+		return err
+	}
+	return generateGoModeSDK()
 }
 
 func generateCaicSDK() error {
@@ -335,6 +339,68 @@ func generateMcpSDK() error {
 			swiftCodeExpr:    "String(errResp.error?.code ?? 0)",
 			swiftMessageExpr: "errResp.error?.message ?? \"\"",
 			swiftDetailsExpr: "nil",
+		},
+	}
+	if err := docs.generateTSTypes(tsDir); err != nil {
+		return err
+	}
+	if err := docs.generateTS(tsDir); err != nil {
+		return err
+	}
+	if err := docs.generateTSValidate(tsDir); err != nil {
+		return err
+	}
+	if err := docs.generateKotlin(kotlinDir); err != nil {
+		return err
+	}
+	if err := docs.generateSwift(swiftDir); err != nil {
+		return err
+	}
+	return docs.generateMarkdownDoc(sdkDir)
+}
+
+func generateGoModeSDK() error {
+	// Directories are relative to go:generate CWD (backend/internal/server/api/v1/).
+	const (
+		sourceDir = "../../../gomode"
+		sdkDir    = "../../../../../sdk/gomode"
+		tsDir     = sdkDir + "/ts/v1"
+		kotlinDir = sdkDir + "/kotlin/src/main/kotlin/com/fghbuild/gomode/sdk/v1"
+		swiftDir  = sdkDir + "/swift/Sources/GoModeSDK"
+	)
+	docs, err := loadDocsInDir(sourceDir)
+	if err != nil {
+		return fmt.Errorf("loading go mode docs: %w", err)
+	}
+	docs.cfg = &genConfig{
+		routes: []routeDef{
+			{
+				Name:     "getSettings",
+				Doc:      "Returns Go Mode service compatibility settings.",
+				Method:   "GET",
+				Path:     "/api/gomode/v1/settings",
+				Category: "Settings",
+				Resp:     reflect.TypeFor[gomode.Settings](),
+			},
+		},
+		sdkPackagePaths: map[string]struct{}{
+			reflect.TypeFor[gomode.Settings]().PkgPath():      {},
+			reflect.TypeFor[gomode.ErrorResponse]().PkgPath(): {},
+		},
+		extraSeeds: []reflect.Type{
+			reflect.TypeFor[gomode.ErrorResponse](),
+		},
+		kotlinPackage: "com.fghbuild.gomode.sdk.v1",
+		apiDocTitle:   "Go Mode Service Discovery API Reference",
+		apiDocIntro:   "Service-neutral JSON API served at `/api/gomode/v1/` for Go Mode Android bootstrap.",
+		specialTypes: []specialType{
+			{
+				t:         reflect.TypeFor[map[string]any](),
+				tsType:    "{ [key: string]: any /* json.RawMessage */}",
+				ktType:    "Map<String, JsonElement>",
+				swiftType: "[String: JSONValue]",
+				docType:   "Record<string, JSONValue>",
+			},
 		},
 	}
 	if err := docs.generateTSTypes(tsDir); err != nil {
