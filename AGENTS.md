@@ -75,29 +75,7 @@ guard because it is host-dependent.
 
 ### Make Targets
 
-```
-make build          # Build Go server + frontend (runs types, pnpm build, go install)
-make dev            # Build and run server on :2242
-make frontend-dev   # Run Vite frontend dev server on :5173
-make types          # Generate types (go generate → gen-api-sdk)
-make test           # Go unit tests with coverage
-make smoke          # Run real runtime smoke test
-make smoke-voice    # Run local voice WebRTC smoke test
-make frontend-e2e   # Playwright end-to-end tests (also type-checks e2e/ TypeScript)
-make android-e2e    # Run Android instrumented tests and generate screenshots
-make lint           # Run linters (Go + frontend + Python + binaries + file index check)
-make lint-all       # All of the above + Android
-make lint-fix       # Auto-fix all linters (includes updating file indexes)
-make lint-docs      # Check AGENTS.md file indexes are up to date
-make lint-binaries  # Check for unexpected binaries/executables in repo
-make android-build  # Build Android app (debug APK)
-make android-push   # Build, install, and start APK on connected device
-make android-test   # Run Android unit tests
-make android-setup-emulator # Install emulator image and create AVD
-make android-start-emulator # Start the headless Android emulator
-make android-stop-emulator  # Stop the running Android emulator
-make lint-android   # Run Android linters (detekt + Android lint)
-```
+Run `make` to get the current targets. It's fast.
 
 <!-- BEGIN FILE INDEX -->
 ## File Index

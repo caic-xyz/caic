@@ -1,6 +1,6 @@
 # Build, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
 
-.PHONY: help build dev fake-dev test smoke smoke-voice coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix lint-docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-push android-test android-coverage android-e2e android-setup-emulator android-start-emulator android-stop-emulator
+.PHONY: help build dev fake-dev test smoke smoke-voice coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix lint-docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-push-caic android-push-gomode android-test android-coverage android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:2242
@@ -21,7 +21,8 @@ help:
 	@echo "  make git-hooks              - Install git pre-commit hooks"
 	@echo "  make frontend-dev           - Run frontend dev server (http://localhost:5173)"
 	@echo "  make android-build          - Build Android app (debug APK)"
-	@echo "  make android-push           - Build, install, and start APK on connected device"
+	@echo "  make android-push-caic      - Build, install, and start caic APK on connected device"
+	@echo "  make android-push-gomode    - Build, install, and start GoMode APK on connected device"
 	@echo "  make android-test           - Run Android unit tests"
 	@echo "  make android-coverage       - Run Android unit tests with JaCoCo coverage"
 	@echo "  make android-e2e            - Run Android instrumented tests and generate screenshots"
@@ -111,13 +112,24 @@ android-stop-emulator:
 	@echo "Stopping emulator..."
 	@(command -v adb >/dev/null 2>&1 && adb emu kill) || pkill -f emulator || true
 
-android-push: android-build
+android-push-caic: android-build
 	@devices=$$(adb devices | awk '/\tdevice$$/{print $$1}'); \
 	[ -n "$$devices" ] || { echo "No devices connected"; exit 1; }; \
 	for d in $$devices; do \
 		(echo "Pushing to $$d..." && \
 		 adb -s $$d install -r android/caic/build/outputs/apk/debug/caic-debug.apk && \
 		 adb -s $$d shell am start -n com.fghbuild.caic/.MainActivity && \
+		 echo "Done: $$d") & \
+	done; \
+	wait
+
+android-push-gomode: android-build
+	@devices=$$(adb devices | awk '/\tdevice$$/{print $$1}'); \
+	[ -n "$$devices" ] || { echo "No devices connected"; exit 1; }; \
+	for d in $$devices; do \
+		(echo "Pushing to $$d..." && \
+		 adb -s $$d install -r android/gomode/build/outputs/apk/debug/gomode-debug.apk && \
+		 adb -s $$d shell am start -n com.fghbuild.gomode/.MainActivity && \
 		 echo "Done: $$d") & \
 	done; \
 	wait
