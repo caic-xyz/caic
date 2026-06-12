@@ -90,7 +90,7 @@ class ApiClient(
     private val json = Json { ignoreUnknownKeys = true }
     private val jsonMediaType = "application/json".toMediaType()
 
-    private suspend inline fun <reified T> request(method: String, path: String, body: String? = null): T {
+    private suspend inline fun <reified T> request(method: String, path: String, body: String? = null, headers: Map<String, String> = emptyMap()): T {
         val url = "$baseURL$path"
         val needsBody = method in listOf("POST", "PUT", "PATCH")
         val requestBody = body?.toRequestBody(jsonMediaType)
@@ -99,7 +99,10 @@ class ApiClient(
             .url(url)
             .method(method, requestBody)
             .header("Content-Type", "application/json")
-            .apply { tokenProvider?.invoke()?.let { header("Authorization", "Bearer $it") } }
+            .apply {
+                headers.forEach { (name, value) -> header(name, value) }
+                tokenProvider?.invoke()?.let { header("Authorization", "Bearer $it") }
+            }
             .build()
         return suspendCancellableCoroutine { cont ->
             val call = client.newCall(request)
@@ -261,10 +264,13 @@ public final class ApiClient {
         self.urlSession = URLSession(configuration: .default)
     }
 
-    private func request<T: Decodable>(_ method: String, path: String, body: Data? = nil) async throws -> T {
+    private func request<T: Decodable>(_ method: String, path: String, body: Data? = nil, headers: [String: String] = [:]) async throws -> T {
         var req = URLRequest(url: URL(string: baseURL + path)!)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (name, value) in headers {
+            req.setValue(value, forHTTPHeaderField: name)
+        }
         req.timeoutInterval = 60
         if let token = tokenProvider?() {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -498,10 +504,11 @@ func (d *docRegistry) emitTSStruct(b *strings.Builder, t reflect.Type) error {
 			}
 		}
 
+		key := tsObjectKey(jsonName)
 		if optional {
-			fmt.Fprintf(b, "  %s?: %s;\n", jsonName, tsType)
+			fmt.Fprintf(b, "  %s?: %s;\n", key, tsType)
 		} else {
-			fmt.Fprintf(b, "  %s: %s;\n", jsonName, tsType)
+			fmt.Fprintf(b, "  %s: %s;\n", key, tsType)
 		}
 	}
 	b.WriteString("}\n")
@@ -741,13 +748,13 @@ func (d *docRegistry) emitTSDiscriminator(b *strings.Builder, t reflect.Type) er
 
 	b.WriteString("  const result: " + name + " = {\n")
 	for _, bf := range baseFields {
-		fmt.Fprintf(b, "    %s: %s,\n", bf.jsonName, bf.expr)
+		fmt.Fprintf(b, "    %s: %s,\n", tsObjectKey(bf.jsonName), bf.expr)
 	}
 	b.WriteString("  };\n")
 	b.WriteString("  switch (result.kind) {\n")
 	for _, vf := range variantFields {
 		fmt.Fprintf(b, "    case %q:\n", vf.jsonName)
-		fmt.Fprintf(b, "      result.%s = %s;\n", vf.jsonName, vf.expr)
+		fmt.Fprintf(b, "      result%s = %s;\n", tsPropertyAccess(vf.jsonName), vf.expr)
 		b.WriteString("      break;\n")
 	}
 	b.WriteString("    // Unknown kinds pass through.\n")
@@ -792,7 +799,7 @@ func (d *docRegistry) emitTSValidator(b *strings.Builder, t reflect.Type) error 
 		if err != nil {
 			return fmt.Errorf("%s.%s: %w", name, jsonName, err)
 		}
-		fmt.Fprintf(b, "    %s: %s,\n", jsonName, expr)
+		fmt.Fprintf(b, "    %s: %s,\n", tsObjectKey(jsonName), expr)
 	}
 
 	b.WriteString("  };\n")
@@ -967,8 +974,8 @@ func (d *docRegistry) generateTS(outDir string) error {
 	b.WriteString(`export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
 function makeRequester(fetchFn: FetchFn) {
-  return async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const init: RequestInit = { method, headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(60_000) };
+  return async function request<T>(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
+    const init: RequestInit = { method, headers: { "Content-Type": "application/json", ...headers }, signal: AbortSignal.timeout(60_000) };
     if (body !== undefined) init.body = JSON.stringify(body);
     const res = await fetchFn(path, init);
     if (!res.ok) {
@@ -1101,14 +1108,15 @@ func (d *docRegistry) parseStructFields(t reflect.Type) ([]kotlinField, error) {
 		}
 		nullable := isPtr || (omit && !isPtr)
 
+		ktName := kotlinPropertyName(sf.Name, jsonName)
 		sn := ""
-		if needsSerialName(jsonName) {
+		if ktName != jsonName || needsSerialName(jsonName) {
 			sn = jsonName
 		}
 
 		fields = append(fields, kotlinField{
 			jsonName:   jsonName,
-			ktName:     jsonName,
+			ktName:     ktName,
 			ktType:     ktType,
 			nullable:   nullable,
 			serialName: sn,
@@ -1283,13 +1291,18 @@ func (d *docRegistry) generateMarkdownDoc(outDir string) error {
 
 	// Errors section.
 	b.WriteString("## Errors\n\n")
-	b.WriteString("All errors return:\n\n")
-	b.WriteString("```json\n")
-	b.WriteString("{\n")
-	b.WriteString("  \"error\": { \"code\": \"<CODE>\", \"message\": \"...\" },\n")
-	b.WriteString("  \"details\": { ... }\n")
-	b.WriteString("}\n")
-	b.WriteString("```\n\n")
+	if d.cfg.errorDoc != "" {
+		b.WriteString(d.cfg.errorDoc)
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString("All errors return:\n\n")
+		b.WriteString("```json\n")
+		b.WriteString("{\n")
+		b.WriteString("  \"error\": { \"code\": \"<CODE>\", \"message\": \"...\" },\n")
+		b.WriteString("  \"details\": { ... }\n")
+		b.WriteString("}\n")
+		b.WriteString("```\n\n")
+	}
 	b.WriteString("| HTTP | Code |\n")
 	b.WriteString("|------|------|\n")
 	for _, e := range d.cfg.errorCodes {
@@ -1405,6 +1418,8 @@ func (d *docRegistry) emitSwiftStruct(b *strings.Builder, t reflect.Type) error 
 	}
 	name := t.Name()
 	fmt.Fprintf(b, "public struct %s: Codable {\n", name)
+	var codingKeys []string
+	needCodingKeys := false
 	for sf := range t.Fields() {
 		if !sf.IsExported() {
 			continue
@@ -1424,7 +1439,14 @@ func (d *docRegistry) emitSwiftStruct(b *strings.Builder, t reflect.Type) error 
 			return fmt.Errorf("%s.%s: %w", name, jsonName, err)
 		}
 		optional := isPtr || (omit && !isPtr)
-		swiftName := swiftEscapeIdent(jsonName)
+		rawSwiftName := swiftPropertyName(sf.Name, jsonName)
+		swiftName := swiftEscapeIdent(rawSwiftName)
+		if rawSwiftName == jsonName {
+			codingKeys = append(codingKeys, fmt.Sprintf("        case %s\n", swiftEscapeIdent(rawSwiftName)))
+		} else {
+			needCodingKeys = true
+			codingKeys = append(codingKeys, fmt.Sprintf("        case %s = %q\n", swiftEscapeIdent(rawSwiftName), jsonName))
+		}
 
 		if fdocs, ok := d.fieldDoc[name]; ok {
 			if fdoc := fdocs[sf.Name]; fdoc != "" {
@@ -1436,6 +1458,13 @@ func (d *docRegistry) emitSwiftStruct(b *strings.Builder, t reflect.Type) error 
 		} else {
 			fmt.Fprintf(b, "    public let %s: %s\n", swiftName, swiftType)
 		}
+	}
+	if needCodingKeys {
+		b.WriteString("\n    private enum CodingKeys: String, CodingKey {\n")
+		for _, key := range codingKeys {
+			b.WriteString(key)
+		}
+		b.WriteString("    }\n")
 	}
 	b.WriteString("}\n")
 	return nil
@@ -1576,6 +1605,27 @@ func snakeToCamel(s string) string {
 	return strings.ToLower(pascal[:1]) + pascal[1:]
 }
 
+func kotlinPropertyName(fieldName, jsonName string) string {
+	if isIdentifier(jsonName) {
+		return jsonName
+	}
+	return lowerFirstFieldName(fieldName)
+}
+
+func swiftPropertyName(fieldName, jsonName string) string {
+	if isIdentifier(jsonName) {
+		return jsonName
+	}
+	return lowerFirstFieldName(fieldName)
+}
+
+func lowerFirstFieldName(fieldName string) string {
+	if fieldName == "" {
+		return "value"
+	}
+	return strings.ToLower(fieldName[:1]) + fieldName[1:]
+}
+
 // needsSerialName returns true when the JSON name contains a run of two or
 // more consecutive uppercase ASCII letters (e.g. "repoURL", "sessionID",
 // "costUSD", "durationAPIMs"). Kotlin properties use these names as-is, but
@@ -1649,12 +1699,45 @@ func docGroupRoutes(routes []routeDef) []docRouteGroup {
 	return result
 }
 
+// tsObjectKey returns a TypeScript object property key for jsonName.
+func tsObjectKey(jsonName string) string {
+	if isIdentifier(jsonName) {
+		return jsonName
+	}
+	return fmt.Sprintf("%q", jsonName)
+}
+
+func tsPropertyAccess(jsonName string) string {
+	if isIdentifier(jsonName) {
+		return "." + jsonName
+	}
+	return fmt.Sprintf("[%q]", jsonName)
+}
+
 // swiftEscapeIdent wraps name in backticks if it is a Swift reserved word.
 func swiftEscapeIdent(name string) string {
 	if _, ok := swiftReservedWords[name]; ok {
 		return "`" + name + "`"
 	}
 	return name
+}
+
+func isIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		if i == 0 {
+			if r != '_' && !unicode.IsLetter(r) {
+				return false
+			}
+			continue
+		}
+		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
 }
 
 // tsFieldBinding pairs a json field name with the TypeScript expression

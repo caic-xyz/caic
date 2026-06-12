@@ -9,8 +9,10 @@ import (
 	"slices"
 	"time"
 
+	"github.com/invopop/jsonschema"
 	"github.com/maruel/ksid"
 
+	"github.com/caic-xyz/caic/backend/internal/mcp"
 	"github.com/caic-xyz/caic/backend/internal/server/api"
 	v1 "github.com/caic-xyz/caic/backend/internal/server/api/v1"
 	voiceapi "github.com/caic-xyz/caic/backend/internal/voicegateway/api"
@@ -28,7 +30,10 @@ func mainImpl() error {
 	if err := generateCaicSDK(); err != nil {
 		return err
 	}
-	return generateVoiceGatewaySDK()
+	if err := generateVoiceGatewaySDK(); err != nil {
+		return err
+	}
+	return generateMcpSDK()
 }
 
 func generateCaicSDK() error {
@@ -243,4 +248,109 @@ func voiceGatewayRoutes() []routeDef {
 		}
 	}
 	return routes
+}
+
+func generateMcpSDK() error {
+	// Directories are relative to go:generate CWD (backend/internal/server/api/v1/).
+	const (
+		sourceDir = "../../../mcp"
+		sdkDir    = "../../../../../sdk/mcp"
+		tsDir     = sdkDir + "/ts/v1"
+		kotlinDir = sdkDir + "/kotlin/src/main/kotlin/com/fghbuild/mcp/sdk/v1"
+		swiftDir  = sdkDir + "/swift/Sources/MCPSDK"
+	)
+	docs, err := loadDocsInDir(sourceDir)
+	if err != nil {
+		return fmt.Errorf("loading mcp docs: %w", err)
+	}
+	docs.cfg = &genConfig{
+		routes: []routeDef{
+			{
+				Name:       "mcp",
+				Doc:        "Sends a raw MCP JSON-RPC request. The caller supplies required MCP transport headers.",
+				Method:     "POST",
+				Path:       "/api/caic/v1/mcp",
+				Category:   "MCP",
+				Req:        reflect.TypeFor[mcp.JSONRPCRequest](),
+				Resp:       reflect.TypeFor[mcp.JSONRPCResponse](),
+				HeadersArg: true,
+			},
+		},
+		sdkPackagePaths: map[string]struct{}{
+			reflect.TypeFor[mcp.JSONRPCRequest]().PkgPath(): {},
+		},
+		extraSeeds: []reflect.Type{
+			reflect.TypeFor[mcp.ServerDiscoverResult](),
+			reflect.TypeFor[mcp.PaginatedRequestParams](),
+			reflect.TypeFor[mcp.ToolsListResult](),
+			reflect.TypeFor[mcp.ToolsCallParams](),
+			reflect.TypeFor[mcp.ToolCallResult](),
+			reflect.TypeFor[mcp.ResourcesListResult](),
+			reflect.TypeFor[mcp.ResourceTemplatesListResult](),
+			reflect.TypeFor[mcp.ResourcesReadParams](),
+			reflect.TypeFor[mcp.ResourcesReadResult](),
+			reflect.TypeFor[mcp.SubscriptionsListenParams](),
+			reflect.TypeFor[mcp.JSONRPCNotification](),
+			reflect.TypeFor[mcp.SubscriptionNotificationParams](),
+		},
+		documentExtraSeeds: true,
+		kotlinPackage:      "com.fghbuild.mcp.sdk.v1",
+		apiDocTitle:        "MCP API Reference",
+		apiDocIntro:        "JSON-RPC MCP endpoint served at `/api/caic/v1/mcp`. Requests must include MCP transport headers such as `Mcp-Protocol-Version` and `Mcp-Method`; method-specific requests may also require `Mcp-Name` and `Mcp-Param-*` headers.",
+		errorDoc:           "MCP errors are JSON-RPC error objects in `JSONRPCResponse.error`. Transport-layer validation failures may use non-2xx HTTP statuses; method-level JSON-RPC errors can still use HTTP 200.",
+		specialTypes: []specialType{
+			{
+				t:          reflect.TypeFor[json.RawMessage](),
+				tsType:     "unknown /* json.RawMessage */",
+				ktType:     "JsonElement",
+				swiftType:  "JSONValue",
+				docType:    "object",
+				tsValidate: "%[1]s",
+			},
+			{
+				t:          reflect.TypeFor[any](),
+				tsType:     "unknown",
+				ktType:     "JsonElement",
+				swiftType:  "JSONValue",
+				docType:    "unknown",
+				tsValidate: "%[1]s",
+			},
+			{
+				t:          reflect.TypeFor[jsonschema.Schema](),
+				tsType:     "unknown /* JSON Schema */",
+				ktType:     "JsonElement",
+				swiftType:  "JSONValue",
+				docType:    "object",
+				tsValidate: "%[1]s",
+			},
+		},
+		errorModel: clientErrorModel{
+			typeName:         "JSONRPCResponse",
+			tsCodeExpr:       "String(err.error?.code ?? \"UNKNOWN\")",
+			tsMessageExpr:    "err.error?.message ?? \"\"",
+			tsDetailsExpr:    "undefined",
+			ktCodeExpr:       "err.error?.code?.toString() ?: \"UNKNOWN\"",
+			ktMessageExpr:    "err.error?.message ?: \"\"",
+			ktDetailsExpr:    "null",
+			swiftCodeExpr:    "String(errResp.error?.code ?? 0)",
+			swiftMessageExpr: "errResp.error?.message ?? \"\"",
+			swiftDetailsExpr: "nil",
+		},
+	}
+	if err := docs.generateTSTypes(tsDir); err != nil {
+		return err
+	}
+	if err := docs.generateTS(tsDir); err != nil {
+		return err
+	}
+	if err := docs.generateTSValidate(tsDir); err != nil {
+		return err
+	}
+	if err := docs.generateKotlin(kotlinDir); err != nil {
+		return err
+	}
+	if err := docs.generateSwift(swiftDir); err != nil {
+		return err
+	}
+	return docs.generateMarkdownDoc(sdkDir)
 }

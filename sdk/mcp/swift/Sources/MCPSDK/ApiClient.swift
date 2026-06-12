@@ -40,9 +40,9 @@ public final class ApiClient {
         let (data, response) = try await urlSession.data(for: req)
         let httpResponse = response as! HTTPURLResponse
         guard (200..<300).contains(httpResponse.statusCode) else {
-            if let errResp = try? decoder.decode(ErrorResponse.self, from: data) {
-                throw ApiError(statusCode: httpResponse.statusCode, code: errResp.error.code,
-                               message: errResp.error.message, details: nil)
+            if let errResp = try? decoder.decode(JSONRPCResponse.self, from: data) {
+                throw ApiError(statusCode: httpResponse.statusCode, code: String(errResp.error?.code ?? 0),
+                               message: errResp.error?.message ?? "", details: nil)
             }
             throw ApiError(statusCode: httpResponse.statusCode, code: "UNKNOWN",
                            message: String(data: data, encoding: .utf8) ?? "", details: nil)
@@ -110,13 +110,9 @@ public final class ApiClient {
     }
 
     // JSON endpoints
-    /// Exchanges a WebRTC SDP offer for an answer, opening a voice gateway session.
-    public func voiceRTCOffer(req: VoiceRTCOfferReq) async throws -> VoiceRTCAnswerResp {
-        try await request("POST", path: "/api/voicegateway/v1/voice/rtc/offer", body: try encoder.encode(req))
-    }
-    /// Closes a WebRTC voice bridge session.
-    public func closeVoiceRTC(sessionID: String) async throws -> StatusResp {
-        try await request("POST", path: "/api/voicegateway/v1/voice/rtc/\(sessionID)")
+    /// Sends a raw MCP JSON-RPC request. The caller supplies required MCP transport headers.
+    public func mcp(req: JSONRPCRequest, headers: [String: String] = [:]) async throws -> JSONRPCResponse {
+        try await request("POST", path: "/api/caic/v1/mcp", body: try encoder.encode(req), headers: headers)
     }
 
     // SSE endpoints

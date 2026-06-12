@@ -15,8 +15,8 @@ export class APIError extends Error {
 export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
 function makeRequester(fetchFn: FetchFn) {
-  return async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const init: RequestInit = { method, headers: { "Content-Type": "application/json" }, signal: AbortSignal.timeout(60_000) };
+  return async function request<T>(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
+    const init: RequestInit = { method, headers: { "Content-Type": "application/json", ...headers }, signal: AbortSignal.timeout(60_000) };
     if (body !== undefined) init.body = JSON.stringify(body);
     const res = await fetchFn(path, init);
     if (!res.ok) {

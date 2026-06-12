@@ -25,6 +25,7 @@ type genConfig struct {
 	kotlinPackage   string
 	apiDocTitle     string
 	apiDocIntro     string
+	errorDoc        string
 	sectionComments map[string]string
 	specialTypes    []specialType
 	sseSeeds        []reflect.Type

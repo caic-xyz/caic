@@ -21,10 +21,13 @@ public final class ApiClient {
         self.urlSession = URLSession(configuration: .default)
     }
 
-    private func request<T: Decodable>(_ method: String, path: String, body: Data? = nil) async throws -> T {
+    private func request<T: Decodable>(_ method: String, path: String, body: Data? = nil, headers: [String: String] = [:]) async throws -> T {
         var req = URLRequest(url: URL(string: baseURL + path)!)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (name, value) in headers {
+            req.setValue(value, forHTTPHeaderField: name)
+        }
         req.timeoutInterval = 60
         if let token = tokenProvider?() {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

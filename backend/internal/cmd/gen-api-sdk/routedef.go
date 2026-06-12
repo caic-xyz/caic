@@ -21,6 +21,7 @@ type routeDef struct {
 	IsArray     bool
 	IsSSE       bool
 	QueryParams []string
+	HeadersArg  bool
 }
 
 func (r *routeDef) reqName() string {
@@ -68,12 +69,22 @@ func (r *routeDef) writeTSJSONMethod(b *strings.Builder, params []string) {
 	if hasReq {
 		args = append(args, "req: "+r.reqName())
 	}
+	if r.HeadersArg {
+		args = append(args, "headers: Record<string, string> = {}")
+	}
 
 	tsPath := buildTSPath(r.Path, params, r.QueryParams)
 
-	if hasReq {
-		fmt.Fprintf(b, "    %s: (%s): Promise<%s> => request<%s>(%q, %s, req),\n", r.Name, strings.Join(args, ", "), respType, respType, r.Method, tsPath)
-	} else {
+	headerArg := ""
+	if r.HeadersArg {
+		headerArg = ", headers"
+	}
+	switch {
+	case hasReq:
+		fmt.Fprintf(b, "    %s: (%s): Promise<%s> => request<%s>(%q, %s, req%s),\n", r.Name, strings.Join(args, ", "), respType, respType, r.Method, tsPath, headerArg)
+	case r.HeadersArg:
+		fmt.Fprintf(b, "    %s: (%s): Promise<%s> => request<%s>(%q, %s, undefined, headers),\n", r.Name, strings.Join(args, ", "), respType, respType, r.Method, tsPath)
+	default:
 		fmt.Fprintf(b, "    %s: (%s): Promise<%s> => request<%s>(%q, %s),\n", r.Name, strings.Join(args, ", "), respType, respType, r.Method, tsPath)
 	}
 }
@@ -124,14 +135,21 @@ func (r *routeDef) writeKotlinJSONFunc(b *strings.Builder, params []string) {
 	if hasReq {
 		args = append(args, "req: "+r.reqName())
 	}
+	if r.HeadersArg {
+		args = append(args, "headers: Map<String, String> = emptyMap()")
+	}
 
 	ktPath := buildKotlinPath(r.Path, r.QueryParams)
 
 	sig := strings.Join(args, ", ")
+	headersArg := ""
+	if r.HeadersArg {
+		headersArg = ", headers = headers"
+	}
 	if hasReq {
-		fmt.Fprintf(b, "    suspend fun %s(%s): %s = request(%q, %s, json.encodeToString(req))\n", r.Name, sig, respType, r.Method, ktPath)
+		fmt.Fprintf(b, "    suspend fun %s(%s): %s = request(%q, %s, json.encodeToString(req)%s)\n", r.Name, sig, respType, r.Method, ktPath, headersArg)
 	} else {
-		fmt.Fprintf(b, "    suspend fun %s(%s): %s = request(%q, %s)\n", r.Name, sig, respType, r.Method, ktPath)
+		fmt.Fprintf(b, "    suspend fun %s(%s): %s = request(%q, %s, headers = headers)\n", r.Name, sig, respType, r.Method, ktPath)
 	}
 }
 
@@ -187,13 +205,20 @@ func (r *routeDef) writeSwiftJSONFunc(b *strings.Builder, params []string) {
 	if hasReq {
 		args = append(args, "req: "+r.reqName())
 	}
+	if r.HeadersArg {
+		args = append(args, "headers: [String: String] = [:]")
+	}
 	swiftPath := buildSwiftPath(r.Path, r.QueryParams)
 
 	fmt.Fprintf(b, "    public func %s(%s) async throws -> %s {\n", r.Name, strings.Join(args, ", "), respType)
+	headersArg := ""
+	if r.HeadersArg {
+		headersArg = ", headers: headers"
+	}
 	if hasReq {
-		fmt.Fprintf(b, "        try await request(%q, path: %s, body: try encoder.encode(req))\n", r.Method, swiftPath)
+		fmt.Fprintf(b, "        try await request(%q, path: %s, body: try encoder.encode(req)%s)\n", r.Method, swiftPath, headersArg)
 	} else {
-		fmt.Fprintf(b, "        try await request(%q, path: %s)\n", r.Method, swiftPath)
+		fmt.Fprintf(b, "        try await request(%q, path: %s%s)\n", r.Method, swiftPath, headersArg)
 	}
 	b.WriteString("    }\n")
 }

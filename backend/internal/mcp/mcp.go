@@ -1,4 +1,4 @@
-// Package mcp implements the Model Context Protocol HTTP endpoint.
+// Package mcp implements the Model Context Protocol HTTP endpoint and SDK DTOs.
 package mcp
 
 import (
@@ -182,7 +182,8 @@ type RequestParams struct {
 	Meta RequestMeta `json:"_meta"`
 }
 
-type discoverResult struct {
+// ServerDiscoverResult is the response payload for server/discover.
+type ServerDiscoverResult struct {
 	ResultType        ResultType     `json:"resultType"`
 	SupportedVersions []string       `json:"supportedVersions"`
 	Capabilities      Capabilities   `json:"capabilities"`
@@ -237,12 +238,14 @@ type Icon struct {
 	Theme    string   `json:"theme,omitempty"`
 }
 
-type paginatedRequestParams struct {
+// PaginatedRequestParams contains common request metadata and an optional cursor.
+type PaginatedRequestParams struct {
 	Meta   RequestMeta `json:"_meta"`
 	Cursor string      `json:"cursor,omitempty"`
 }
 
-type toolsListResult struct {
+// ToolsListResult is the response payload for tools/list.
+type ToolsListResult struct {
 	Meta       MetaObject       `json:"_meta,omitempty"`
 	ResultType ResultType       `json:"resultType"`
 	NextCursor string           `json:"nextCursor,omitempty"`
@@ -272,7 +275,8 @@ type ToolAnnotations struct {
 	OpenWorldHint   bool   `json:"openWorldHint,omitempty"`
 }
 
-type toolsCallParams struct {
+// ToolsCallParams is the request params payload for tools/call.
+type ToolsCallParams struct {
 	Meta           RequestMeta     `json:"_meta"`
 	InputResponses json.RawMessage `json:"inputResponses,omitempty"`
 	RequestState   string          `json:"requestState,omitempty"`
@@ -291,13 +295,17 @@ type ToolCallResult struct {
 
 // ContentBlock is an MCP tool-result content item.
 type ContentBlock struct {
-	ResourceLink
-
 	Meta        MetaObject       `json:"_meta,omitempty"`
+	Icons       []Icon           `json:"icons,omitempty"`
 	Type        ContentType      `json:"type"`
+	Name        string           `json:"name,omitempty"`
+	Title       string           `json:"title,omitempty"`
 	Text        string           `json:"text,omitempty"`
 	Data        string           `json:"data,omitempty"`
+	URI         string           `json:"uri,omitempty"`
+	Description string           `json:"description,omitempty"`
 	MimeType    string           `json:"mimeType,omitempty"`
+	Size        int64            `json:"size,omitzero"`
 	Resource    *ResourceContent `json:"resource,omitempty"`
 	Annotations *Annotations     `json:"annotations,omitempty"`
 }
@@ -311,6 +319,12 @@ type Annotations struct {
 
 // Role identifies an MCP audience role.
 type Role string
+
+// MCP annotation audience roles.
+const (
+	RoleUser      Role = "user"
+	RoleAssistant Role = "assistant"
+)
 
 // ResourceLink identifies an MCP resource referenced from content.
 type ResourceLink struct {
@@ -346,7 +360,8 @@ type ResourceDescriptor struct {
 	Size        int64        `json:"size,omitzero"`
 }
 
-type resourceTemplatesListResult struct {
+// ResourceTemplatesListResult is the response payload for resources/templates/list.
+type ResourceTemplatesListResult struct {
 	Meta              MetaObject                   `json:"_meta,omitempty"`
 	ResultType        ResultType                   `json:"resultType"`
 	NextCursor        string                       `json:"nextCursor,omitempty"`
@@ -367,7 +382,8 @@ type ResourceTemplateDescriptor struct {
 	Annotations *Annotations `json:"annotations,omitempty"`
 }
 
-type resourcesReadParams struct {
+// ResourcesReadParams is the request params payload for resources/read.
+type ResourcesReadParams struct {
 	Meta           RequestMeta     `json:"_meta"`
 	InputResponses json.RawMessage `json:"inputResponses,omitempty"`
 	RequestState   string          `json:"requestState,omitempty"`
@@ -392,7 +408,8 @@ type ResourceContent struct {
 	Blob     string     `json:"blob,omitempty"`
 }
 
-type subscriptionsListenParams struct {
+// SubscriptionsListenParams is the request params payload for subscriptions/listen.
+type SubscriptionsListenParams struct {
 	Meta          RequestMeta        `json:"_meta"`
 	Notifications SubscriptionFilter `json:"notifications"`
 }
@@ -465,7 +482,7 @@ func (h *Handler) HandleMCP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMessage, header http.Header) (result any, rpcErr *JSONRPCError) {
 	switch method {
 	case MethodServerDiscover:
-		t := discoverResult{
+		t := ServerDiscoverResult{
 			ResultType:        ResultTypeComplete,
 			SupportedVersions: []string{ProtocolVersion},
 			Capabilities:      Capabilities{Tools: ToolsCapability{ListChanged: true}, Resources: ResourcesCapability{Subscribe: true, ListChanged: true}},
@@ -476,7 +493,7 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 		}
 		return t, nil
 	case MethodToolsList:
-		var p paginatedRequestParams
+		var p PaginatedRequestParams
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpcError(InvalidParamsCode, "Invalid params")
 		}
@@ -488,7 +505,7 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 		if err != nil {
 			return nil, rpcError(InvalidParamsCode, err.Error())
 		}
-		t := toolsListResult{
+		t := ToolsListResult{
 			ResultType: ResultTypeComplete,
 			NextCursor: next,
 			Tools:      page,
@@ -497,7 +514,7 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 		}
 		return t, nil
 	case MethodToolsCall:
-		var p toolsCallParams
+		var p ToolsCallParams
 		if err := decodeParams(params, &p); err != nil || p.Name == "" {
 			return nil, rpcError(InvalidParamsCode, "Invalid params")
 		}
@@ -518,7 +535,7 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 		}
 		return t, nil
 	case MethodResourcesList:
-		var p paginatedRequestParams
+		var p PaginatedRequestParams
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpcError(InvalidParamsCode, "Invalid params")
 		}
@@ -531,7 +548,7 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 		res.NextCursor = next
 		return res, nil
 	case MethodResourceTemplatesList:
-		var p paginatedRequestParams
+		var p PaginatedRequestParams
 		if err := decodeParams(params, &p); err != nil {
 			return nil, rpcError(InvalidParamsCode, "Invalid params")
 		}
@@ -540,9 +557,9 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 		if err != nil {
 			return nil, rpcError(InvalidParamsCode, err.Error())
 		}
-		return resourceTemplatesListResult{ResultType: ResultTypeComplete, NextCursor: next, ResourceTemplates: page, TTLMS: DefaultTTLMS, CacheScope: CacheScopePrivate}, nil
+		return ResourceTemplatesListResult{ResultType: ResultTypeComplete, NextCursor: next, ResourceTemplates: page, TTLMS: DefaultTTLMS, CacheScope: CacheScopePrivate}, nil
 	case MethodResourcesRead:
-		var p resourcesReadParams
+		var p ResourcesReadParams
 		if err := decodeParams(params, &p); err != nil || p.URI == "" {
 			return nil, rpcError(InvalidParamsCode, "Invalid params")
 		}
@@ -580,7 +597,7 @@ func (h *Handler) resourceTemplates() []ResourceTemplateDescriptor {
 }
 
 func (h *Handler) handleSubscription(ctx context.Context, w http.ResponseWriter, id, params json.RawMessage) *JSONRPCError {
-	var p subscriptionsListenParams
+	var p SubscriptionsListenParams
 	if err := decodeParams(params, &p); err != nil {
 		return rpcError(InvalidParamsCode, "Invalid params")
 	}
@@ -985,7 +1002,7 @@ func validateMCPRequest(r *http.Request, req *JSONRPCRequest) (int, *JSONRPCErro
 func mcpRequestName(method Method, params json.RawMessage) (name string, required bool, err error) {
 	switch method {
 	case MethodToolsCall:
-		var p toolsCallParams
+		var p ToolsCallParams
 		if err := decodeParams(params, &p); err != nil {
 			return "", true, err
 		}
@@ -994,7 +1011,7 @@ func mcpRequestName(method Method, params json.RawMessage) (name string, require
 		}
 		return p.Name, true, nil
 	case MethodResourcesRead:
-		var p resourcesReadParams
+		var p ResourcesReadParams
 		if err := decodeParams(params, &p); err != nil {
 			return "", true, err
 		}
