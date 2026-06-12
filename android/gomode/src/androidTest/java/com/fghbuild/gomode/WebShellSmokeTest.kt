@@ -65,6 +65,26 @@ class WebShellSmokeTest {
     }
 
     @Test
+    fun webShellHeaderOpensNativeSettingsAndBackReturnsToWebShell() {
+        composeRule.onNodeWithTag("gomode-service-url").performTextReplacement(baseUrl)
+        composeRule.onNodeWithTag("gomode-save-service").performClick()
+        composeRule.waitUntil(DEFAULT_TIMEOUT_MS) {
+            composeRule.onAllNodesWithTag("gomode-web-header").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        composeRule.onNodeWithTag("gomode-web-open-settings").performClick()
+        composeRule.waitUntil(DEFAULT_TIMEOUT_MS) {
+            composeRule.onAllNodesWithTag("gomode-settings").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        pressActivityBack()
+
+        composeRule.waitUntil(DEFAULT_TIMEOUT_MS) {
+            composeRule.onAllNodesWithTag("gomode-web-shell").fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    @Test
     fun gomodePackageNameIsAppSpecific() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.fghbuild.gomode", context.packageName)

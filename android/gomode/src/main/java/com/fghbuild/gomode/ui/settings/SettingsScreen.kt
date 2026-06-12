@@ -1,6 +1,7 @@
 // Native settings fallback for configuring the active Go Mode service instance.
 package com.fghbuild.gomode.ui.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -53,6 +54,8 @@ fun SettingsScreen(
         label = active?.label ?: SettingsRepository.DEFAULT_SERVICE_LABEL
         url = settings.activeServiceURL
     }
+
+    BackHandler(enabled = settings.activeServiceURL.isNotBlank(), onBack = onDone)
 
     Scaffold { padding ->
         Column(
