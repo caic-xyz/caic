@@ -1,9 +1,16 @@
 # Build, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
 
-.PHONY: help build dev fake-dev test smoke smoke-voice coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix lint-docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-push-caic android-push-gomode android-test android-coverage android-e2e android-setup-emulator android-start-emulator android-stop-emulator
+.PHONY: help build dev fake-dev test smoke smoke-voice coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix lint-docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-check android-push-caic android-push-gomode android-test android-coverage android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:2242
+ANDROID_GRADLE=cd android && ./gradlew --no-daemon
+ANDROID_BUILD_TASKS=:caic:assembleDebug :gomode:assembleDebug :halo-sdk:assembleDebug :caic-sdk:assemble :gomode-sdk:assemble :mcp-sdk:assemble :voicegateway-sdk:assemble
+ANDROID_TEST_BUILD_TASKS=:caic:assembleDebugAndroidTest :gomode:assembleDebugAndroidTest :halo-sdk:assembleDebugAndroidTest
+ANDROID_TEST_TASKS=:caic:testDebugUnitTest :gomode:testDebugUnitTest :halo-sdk:testDebugUnitTest :caic-sdk:test :gomode-sdk:test :mcp-sdk:test :voicegateway-sdk:test
+ANDROID_COVERAGE_REPORT_TASKS=:caic:createDebugUnitTestCoverageReport :gomode:createDebugUnitTestCoverageReport :halo-sdk:createDebugUnitTestCoverageReport
+ANDROID_COVERAGE_TASKS=$(ANDROID_TEST_TASKS) $(ANDROID_COVERAGE_REPORT_TASKS)
+ANDROID_LINT_TASKS=:caic:detekt :gomode:detekt :halo-sdk:detekt :caic:lint :gomode:lint :halo-sdk:lint
 
 help:
 	@echo "caic - Manage multiple coding agents"
@@ -20,11 +27,12 @@ help:
 	@echo "  make lint-fix               - Fix linting issues automatically (includes updating file indexes)"
 	@echo "  make git-hooks              - Install git pre-commit hooks"
 	@echo "  make frontend-dev           - Run frontend dev server (http://localhost:5173)"
-	@echo "  make android-build          - Build Android app (debug APK)"
+	@echo "  make android-build          - Build Android apps, SDKs, and instrumentation test APKs"
+	@echo "  make android-check          - Run Android lint, build, and unit tests"
 	@echo "  make android-push-caic      - Build, install, and start caic APK on connected device"
 	@echo "  make android-push-gomode    - Build, install, and start GoMode APK on connected device"
-	@echo "  make android-test           - Run Android unit tests"
-	@echo "  make android-coverage       - Run Android unit tests with JaCoCo coverage"
+	@echo "  make android-test           - Run Android app and SDK unit tests"
+	@echo "  make android-coverage       - Run Android app/library unit tests with JaCoCo coverage"
 	@echo "  make android-e2e            - Run Android instrumented tests and generate screenshots"
 	@echo "  make android-setup-emulator - Install SDK tools, emulator, system image, create AVD"
 	@echo "  make android-start-emulator - Start the headless Android emulator"
@@ -97,10 +105,13 @@ lint-binaries:
 	@python3 scripts/lint_binaries.py
 
 lint-android:
-	@cd android && ./gradlew --no-daemon detekt lint
+	@$(ANDROID_GRADLE) $(ANDROID_LINT_TASKS)
 
 android-build:
-	@cd android && ./gradlew --no-daemon assembleDebug
+	@$(ANDROID_GRADLE) $(ANDROID_BUILD_TASKS) $(ANDROID_TEST_BUILD_TASKS)
+
+android-check:
+	@$(ANDROID_GRADLE) $(ANDROID_LINT_TASKS) $(ANDROID_BUILD_TASKS) $(ANDROID_TEST_BUILD_TASKS) $(ANDROID_TEST_TASKS)
 
 android-setup-emulator:
 	@python3 scripts/android_setup_emulator.py
@@ -135,10 +146,10 @@ android-push-gomode: android-build
 	wait
 
 android-test:
-	@cd android && ./gradlew --no-daemon test
+	@$(ANDROID_GRADLE) $(ANDROID_TEST_TASKS)
 
 android-coverage:
-	@cd android && ./gradlew --no-daemon :caic:testDebugUnitTest :caic:createDebugUnitTestCoverageReport :halo-sdk:testDebugUnitTest :halo-sdk:createDebugUnitTestCoverageReport
+	@$(ANDROID_GRADLE) $(ANDROID_COVERAGE_TASKS)
 
 android-e2e:
 	@python3 scripts/android_e2e.py

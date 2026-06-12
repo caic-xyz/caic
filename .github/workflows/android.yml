@@ -7,15 +7,13 @@ on:
       - '.github/workflows/android.yml'
       - 'android/**'
       - 'scripts/android_e2e.py'
-      - 'sdk/halo/**'
-      - 'sdk/kotlin/**'
+      - 'sdk/**'
   pull_request:
     paths:
       - '.github/workflows/android.yml'
       - 'android/**'
       - 'scripts/android_e2e.py'
-      - 'sdk/halo/**'
-      - 'sdk/kotlin/**'
+      - 'sdk/**'
   workflow_dispatch:
 permissions:
   contents: read
@@ -38,11 +36,13 @@ jobs:
         run: make lint-android
       - name: Build
         run: make android-build
-      - name: Upload APK
+      - name: Upload APKs
         uses: actions/upload-artifact@v7
         with:
-          name: caic-debug.apk
-          path: android/caic/build/outputs/apk/debug/caic-debug.apk
+          name: android-debug-apks
+          path: |
+            android/caic/build/outputs/apk/debug/caic-debug.apk
+            android/gomode/build/outputs/apk/debug/gomode-debug.apk
           retention-days: 7
       - name: Test
         run: make android-test
@@ -53,22 +53,26 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: android-unit
-          files: android/caic/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml,sdk/halo/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml
+          files: android/caic/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml,android/gomode/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml,sdk/halo/build/reports/jacoco/testDebugUnitTestCoverage/testDebugUnitTestCoverage.xml
       - name: Upload lint results
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: lint-results
           path: |
-            android/caic/build/reports/lint-results-debug.xml
-            android/caic/build/reports/detekt/
+            android/*/build/reports/lint-results-debug.xml
+            android/*/build/reports/detekt/
+            sdk/halo/build/reports/lint-results-debug.xml
+            sdk/halo/build/reports/detekt/
           retention-days: 14
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: test-results
-          path: android/caic/build/reports/tests/
+          path: |
+            android/*/build/reports/tests/
+            sdk/**/build/reports/tests/
           retention-days: 14
 
   android-e2e:

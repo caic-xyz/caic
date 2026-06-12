@@ -14,6 +14,7 @@ Read the narrower guide before editing a module:
 - `:caic-sdk`: generated Kotlin caic API SDK from `sdk/caic/kotlin`.
 - `:voicegateway-sdk`: generated Kotlin voice gateway API SDK from `sdk/voicegateway/kotlin`.
 - `:gomode-sdk`: generated Kotlin Go Mode service discovery SDK from `sdk/gomode/kotlin`.
+- `:mcp-sdk`: generated Kotlin MCP protocol SDK from `sdk/mcp/kotlin`.
 - `:halo-sdk`: Halo BLE/message SDK from `sdk/halo`.
 
 ## Shared Conventions
@@ -54,6 +55,7 @@ make android-build
 For broader validation:
 
 ```bash
+make android-check
 make android-e2e
 make lint-all
 ```
