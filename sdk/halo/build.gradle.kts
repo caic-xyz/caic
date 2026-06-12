@@ -52,8 +52,13 @@ dependencies {
     // Coroutines — Flow-based API for async BLE operations (exposed to consumers).
     api(libs.kotlinx.coroutines.core)
 
+    // WebSocket client for the development-only Halo emulator bridge.
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.okhttp)
+
     // Unit tests (JVM with Robolectric shadows)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.robolectric)
 }

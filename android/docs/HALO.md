@@ -24,6 +24,52 @@ Android apps
 Protocol details live in [sdk/halo/PROTOCOL.md](../../sdk/halo/PROTOCOL.md).
 SDK development notes live in [sdk/halo/AGENTS.md](../../sdk/halo/AGENTS.md).
 
+## Halo Lua Emulator
+
+[`scripts/halo-emulator.py`](../../scripts/halo-emulator.py) is a self-contained
+`uv` script with inline Python dependencies. It runs Brilliant Labs'
+`halo_emulator`, which emulates the Halo Lua runtime and `frame.*` APIs. It does
+**not** advertise as a BLE peripheral, so Android scan/connect flows still
+require real hardware or a future BLE-peripheral shim.
+
+Use it for haloside Lua development: display rendering, button/tap injection,
+BLE payload injection, and host-message tests through Brilliant's
+`EmulatorBrilliantMsg` adapter.
+
+```bash
+scripts/halo-emulator.py path/to/lua-app --script main.lua
+scripts/halo-emulator.py path/to/lua-app --script main.lua --headless
+```
+
+For Android integration work, run the emulator as a WebSocket bridge:
+
+```bash
+scripts/halo-emulator.py --bridge 0.0.0.0:8765 path/to/lua-app --script main.lua
+```
+
+Android emulator clients reach the host bridge at `ws://10.0.2.2:8765`. A
+physical Android device can use `adb reverse tcp:8765 tcp:8765` and connect to
+`ws://127.0.0.1:8765`. The bridge speaks JSON request/response messages and
+emits async events:
+
+```json
+{"id":1,"op":"ping"}
+{"id":2,"op":"send_message","msgCode":16,"payload":"SGVsbG8="}
+{"id":3,"op":"button_single"}
+{"event":"bluetooth_sent","data":"...base64..."}
+```
+
+Supported bridge operations: `ping`, `connect_repl`, `execute_lua`, `start`,
+`stop`, `break`, `reset`, `remove_all_files`, `upload_file`, `clear_display`,
+`send_message`, `button_single`, `button_double`, `button_long`, `imu_tap`, and
+`get_framebuffer`. Android code can use `HaloEmulatorBridgeClient` from
+`:halo-sdk` instead of writing raw WebSocket JSON.
+
+Until the caic Halo app Lua is moved out of `HaloService.mainLuaSource()`, use
+the emulator against extracted scratch Lua or upstream examples. Once the Lua
+lives under app assets, add emulator-backed tests for display output and click
+message payloads.
+
 ## Remaining Work
 
 ### caic Peripheral
@@ -40,6 +86,9 @@ SDK development notes live in [sdk/halo/AGENTS.md](../../sdk/halo/AGENTS.md).
 
 - Move inline Lua from `HaloService.mainLuaSource()` to `assets/halo/main.lua`
   once `HalosideApp` has an asset-loading API.
+- Add emulator-backed Lua tests using `halo_emulator` once the device app lives
+  in assets: assert framebuffer output and button/click payloads without
+  requiring Halo hardware.
 
 ### SDK Deferred Items
 
@@ -86,4 +135,5 @@ badges and `TxPlainText` for labels.
 | Brilliant SDK (Dart) | `https://github.com/brilliantlabsAR/brilliant_sdk/tree/main/flutter/packages` |
 | Brilliant SDK (Python) | `https://github.com/brilliantlabsAR/brilliant_sdk/tree/main/python/packages` |
 | Halo emulator | `https://github.com/brilliantlabsAR/brilliant_sdk/tree/main/python/packages/halo_emulator` |
+| Halo emulator runner | [`scripts/halo-emulator.py`](../../scripts/halo-emulator.py) |
 | Frame-2 firmware | Private repo, not cloned |
