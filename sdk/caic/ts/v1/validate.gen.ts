@@ -8,53 +8,57 @@ import type { AskOption, AskQuestion, BranchInfo, CIStatus, CheckConclusion, Che
 
 // ---- helpers ----
 
-function asObject(v: unknown, path: string): Record<string, unknown> {
+type ValidatorInput = unknown;
+type ObjectValue = Record<string, ValidatorInput>;
+type ValueValidator<T> = (v: ValidatorInput) => T;
+
+function asObject(v: ValidatorInput, path: string): ObjectValue {
   if (typeof v !== "object" || v === null || Array.isArray(v)) {
     throw new TypeError(path + ": expected object");
   }
-  return v as Record<string, unknown>;
+  return v as ObjectValue;
 }
 
-function asString(v: unknown, path: string): string {
+function asString(v: ValidatorInput, path: string): string {
   if (typeof v !== "string") {
     throw new TypeError(path + ": expected string, got " + typeof v);
   }
   return v;
 }
 
-function asNumber(v: unknown, path: string): number {
+function asNumber(v: ValidatorInput, path: string): number {
   if (typeof v !== "number" || Number.isNaN(v)) {
     throw new TypeError(path + ": expected number, got " + typeof v);
   }
   return v;
 }
 
-function asBoolean(v: unknown, path: string): boolean {
+function asBoolean(v: ValidatorInput, path: string): boolean {
   if (typeof v !== "boolean") {
     throw new TypeError(path + ": expected boolean, got " + typeof v);
   }
   return v;
 }
 
-function validateArray(v: unknown, path: string, elemValidator: (v: unknown) => unknown): unknown[] {
+function validateArray<T>(v: ValidatorInput, path: string, elemValidator: ValueValidator<T>): T[] {
   if (!Array.isArray(v)) {
     throw new TypeError(path + ": expected array, got " + (v === null ? "null" : typeof v));
   }
-  return v.map((e, i) => elemValidator(e));
+  return v.map((e) => elemValidator(e));
 }
 
-function validateRecord(v: unknown, path: string, valValidator: (v: unknown) => unknown): Record<string, unknown> {
+function validateRecord<T>(v: ValidatorInput, path: string, valValidator: ValueValidator<T>): Record<string, T> {
   if (typeof v !== "object" || v === null || Array.isArray(v)) {
     throw new TypeError(path + ": expected object, got " + (v === null ? "null" : Array.isArray(v) ? "array" : typeof v));
   }
-  const result: Record<string, unknown> = {};
-  for (const k of Object.keys(v as Record<string, unknown>)) {
-    result[k] = valValidator((v as Record<string, unknown>)[k]);
+  const result: Record<string, T> = {};
+  for (const k of Object.keys(v as ObjectValue)) {
+    result[k] = valValidator((v as ObjectValue)[k]);
   }
   return result;
 }
 
-export function validateEventInit(raw: unknown): EventInit {
+export function validateEventInit(raw: ValidatorInput): EventInit {
   const obj = asObject(raw, "EventInit");
   return {
     model: asString(obj["model"], "EventInit.model"),
@@ -67,21 +71,21 @@ export function validateEventInit(raw: unknown): EventInit {
   };
 }
 
-export function validateEventText(raw: unknown): EventText {
+export function validateEventText(raw: ValidatorInput): EventText {
   const obj = asObject(raw, "EventText");
   return {
     text: asString(obj["text"], "EventText.text"),
   };
 }
 
-export function validateEventTextDelta(raw: unknown): EventTextDelta {
+export function validateEventTextDelta(raw: ValidatorInput): EventTextDelta {
   const obj = asObject(raw, "EventTextDelta");
   return {
     text: asString(obj["text"], "EventTextDelta.text"),
   };
 }
 
-export function validateEventToolUse(raw: unknown): EventToolUse {
+export function validateEventToolUse(raw: ValidatorInput): EventToolUse {
   const obj = asObject(raw, "EventToolUse");
   return {
     toolUseID: asString(obj["toolUseID"], "EventToolUse.toolUseID"),
@@ -93,7 +97,7 @@ export function validateEventToolUse(raw: unknown): EventToolUse {
   };
 }
 
-export function validateEventToolResult(raw: unknown): EventToolResult {
+export function validateEventToolResult(raw: ValidatorInput): EventToolResult {
   const obj = asObject(raw, "EventToolResult");
   return {
     toolUseID: asString(obj["toolUseID"], "EventToolResult.toolUseID"),
@@ -102,7 +106,7 @@ export function validateEventToolResult(raw: unknown): EventToolResult {
   };
 }
 
-export function validateAskOption(raw: unknown): AskOption {
+export function validateAskOption(raw: ValidatorInput): AskOption {
   const obj = asObject(raw, "AskOption");
   return {
     label: asString(obj["label"], "AskOption.label"),
@@ -110,7 +114,7 @@ export function validateAskOption(raw: unknown): AskOption {
   };
 }
 
-export function validateAskQuestion(raw: unknown): AskQuestion {
+export function validateAskQuestion(raw: ValidatorInput): AskQuestion {
   const obj = asObject(raw, "AskQuestion");
   return {
     question: asString(obj["question"], "AskQuestion.question"),
@@ -120,7 +124,7 @@ export function validateAskQuestion(raw: unknown): AskQuestion {
   };
 }
 
-export function validateEventAsk(raw: unknown): EventAsk {
+export function validateEventAsk(raw: ValidatorInput): EventAsk {
   const obj = asObject(raw, "EventAsk");
   return {
     toolUseID: asString(obj["toolUseID"], "EventAsk.toolUseID"),
@@ -128,7 +132,7 @@ export function validateEventAsk(raw: unknown): EventAsk {
   };
 }
 
-export function validateEventUsage(raw: unknown): EventUsage {
+export function validateEventUsage(raw: ValidatorInput): EventUsage {
   const obj = asObject(raw, "EventUsage");
   return {
     inputTokens: asNumber(obj["inputTokens"], "EventUsage.inputTokens"),
@@ -140,7 +144,7 @@ export function validateEventUsage(raw: unknown): EventUsage {
   };
 }
 
-export function validateDiffFileStat(raw: unknown): DiffFileStat {
+export function validateDiffFileStat(raw: ValidatorInput): DiffFileStat {
   const obj = asObject(raw, "DiffFileStat");
   return {
     path: asString(obj["path"], "DiffFileStat.path"),
@@ -150,7 +154,7 @@ export function validateDiffFileStat(raw: unknown): DiffFileStat {
   };
 }
 
-export function validateEventResult(raw: unknown): EventResult {
+export function validateEventResult(raw: ValidatorInput): EventResult {
   const obj = asObject(raw, "EventResult");
   return {
     subtype: asString(obj["subtype"], "EventResult.subtype"),
@@ -165,7 +169,7 @@ export function validateEventResult(raw: unknown): EventResult {
   };
 }
 
-export function validateEventSystem(raw: unknown): EventSystem {
+export function validateEventSystem(raw: ValidatorInput): EventSystem {
   const obj = asObject(raw, "EventSystem");
   return {
     subtype: asString(obj["subtype"], "EventSystem.subtype"),
@@ -173,7 +177,7 @@ export function validateEventSystem(raw: unknown): EventSystem {
   };
 }
 
-export function validateImageData(raw: unknown): ImageData {
+export function validateImageData(raw: ValidatorInput): ImageData {
   const obj = asObject(raw, "ImageData");
   return {
     mediaType: asString(obj["mediaType"], "ImageData.mediaType"),
@@ -181,7 +185,7 @@ export function validateImageData(raw: unknown): ImageData {
   };
 }
 
-export function validateEventUserInput(raw: unknown): EventUserInput {
+export function validateEventUserInput(raw: ValidatorInput): EventUserInput {
   const obj = asObject(raw, "EventUserInput");
   return {
     text: asString(obj["text"], "EventUserInput.text"),
@@ -189,7 +193,7 @@ export function validateEventUserInput(raw: unknown): EventUserInput {
   };
 }
 
-export function validateTodoItem(raw: unknown): TodoItem {
+export function validateTodoItem(raw: ValidatorInput): TodoItem {
   const obj = asObject(raw, "TodoItem");
   return {
     content: asString(obj["content"], "TodoItem.content"),
@@ -198,7 +202,7 @@ export function validateTodoItem(raw: unknown): TodoItem {
   };
 }
 
-export function validateEventTodo(raw: unknown): EventTodo {
+export function validateEventTodo(raw: ValidatorInput): EventTodo {
   const obj = asObject(raw, "EventTodo");
   return {
     toolUseID: asString(obj["toolUseID"], "EventTodo.toolUseID"),
@@ -206,14 +210,14 @@ export function validateEventTodo(raw: unknown): EventTodo {
   };
 }
 
-export function validateEventDiffStat(raw: unknown): EventDiffStat {
+export function validateEventDiffStat(raw: ValidatorInput): EventDiffStat {
   const obj = asObject(raw, "EventDiffStat");
   return {
     diffStat: (obj["diffStat"] === undefined || obj["diffStat"] === null ? undefined : validateArray(obj["diffStat"], "EventDiffStat.diffStat", validateDiffFileStat) as DiffFileStat[]),
   };
 }
 
-export function validateEventError(raw: unknown): EventError {
+export function validateEventError(raw: ValidatorInput): EventError {
   const obj = asObject(raw, "EventError");
   return {
     err: asString(obj["err"], "EventError.err"),
@@ -221,21 +225,21 @@ export function validateEventError(raw: unknown): EventError {
   };
 }
 
-export function validateEventThinking(raw: unknown): EventThinking {
+export function validateEventThinking(raw: ValidatorInput): EventThinking {
   const obj = asObject(raw, "EventThinking");
   return {
     text: asString(obj["text"], "EventThinking.text"),
   };
 }
 
-export function validateEventThinkingDelta(raw: unknown): EventThinkingDelta {
+export function validateEventThinkingDelta(raw: ValidatorInput): EventThinkingDelta {
   const obj = asObject(raw, "EventThinkingDelta");
   return {
     text: asString(obj["text"], "EventThinkingDelta.text"),
   };
 }
 
-export function validateEventSubagentStart(raw: unknown): EventSubagentStart {
+export function validateEventSubagentStart(raw: ValidatorInput): EventSubagentStart {
   const obj = asObject(raw, "EventSubagentStart");
   return {
     taskID: asString(obj["taskID"], "EventSubagentStart.taskID"),
@@ -243,7 +247,7 @@ export function validateEventSubagentStart(raw: unknown): EventSubagentStart {
   };
 }
 
-export function validateEventSubagentEnd(raw: unknown): EventSubagentEnd {
+export function validateEventSubagentEnd(raw: ValidatorInput): EventSubagentEnd {
   const obj = asObject(raw, "EventSubagentEnd");
   return {
     taskID: asString(obj["taskID"], "EventSubagentEnd.taskID"),
@@ -251,14 +255,14 @@ export function validateEventSubagentEnd(raw: unknown): EventSubagentEnd {
   };
 }
 
-export function validateEventLog(raw: unknown): EventLog {
+export function validateEventLog(raw: ValidatorInput): EventLog {
   const obj = asObject(raw, "EventLog");
   return {
     line: asString(obj["line"], "EventLog.line"),
   };
 }
 
-export function validateEventToolOutputDelta(raw: unknown): EventToolOutputDelta {
+export function validateEventToolOutputDelta(raw: ValidatorInput): EventToolOutputDelta {
   const obj = asObject(raw, "EventToolOutputDelta");
   return {
     toolUseID: asString(obj["toolUseID"], "EventToolOutputDelta.toolUseID"),
@@ -268,7 +272,7 @@ export function validateEventToolOutputDelta(raw: unknown): EventToolOutputDelta
   };
 }
 
-export function validateEventWidget(raw: unknown): EventWidget {
+export function validateEventWidget(raw: ValidatorInput): EventWidget {
   const obj = asObject(raw, "EventWidget");
   return {
     toolUseID: asString(obj["toolUseID"], "EventWidget.toolUseID"),
@@ -277,7 +281,7 @@ export function validateEventWidget(raw: unknown): EventWidget {
   };
 }
 
-export function validateEventWidgetDelta(raw: unknown): EventWidgetDelta {
+export function validateEventWidgetDelta(raw: ValidatorInput): EventWidgetDelta {
   const obj = asObject(raw, "EventWidgetDelta");
   return {
     toolUseID: asString(obj["toolUseID"], "EventWidgetDelta.toolUseID"),
@@ -285,7 +289,7 @@ export function validateEventWidgetDelta(raw: unknown): EventWidgetDelta {
   };
 }
 
-export function validateEventRateLimit(raw: unknown): EventRateLimit {
+export function validateEventRateLimit(raw: ValidatorInput): EventRateLimit {
   const obj = asObject(raw, "EventRateLimit");
   return {
     status: asString(obj["status"], "EventRateLimit.status"),
@@ -297,7 +301,7 @@ export function validateEventRateLimit(raw: unknown): EventRateLimit {
   };
 }
 
-export function validateEventStats(raw: unknown): EventStats {
+export function validateEventStats(raw: ValidatorInput): EventStats {
   const obj = asObject(raw, "EventStats");
   return {
     ts: asNumber(obj["ts"], "EventStats.ts"),
@@ -313,7 +317,7 @@ export function validateEventStats(raw: unknown): EventStats {
   };
 }
 
-export function validateEventMessage(raw: unknown): EventMessage {
+export function validateEventMessage(raw: ValidatorInput): EventMessage {
   const obj = asObject(raw, "EventMessage");
   const result: EventMessage = {
     kind: (asString(obj["kind"], "EventMessage.kind") as EventKind),
@@ -394,7 +398,7 @@ export function validateEventMessage(raw: unknown): EventMessage {
   return result;
 }
 
-export function validateTaskRepo(raw: unknown): TaskRepo {
+export function validateTaskRepo(raw: ValidatorInput): TaskRepo {
   const obj = asObject(raw, "TaskRepo");
   return {
     name: asString(obj["name"], "TaskRepo.name"),
@@ -405,7 +409,7 @@ export function validateTaskRepo(raw: unknown): TaskRepo {
   };
 }
 
-export function validateForgeCheck(raw: unknown): ForgeCheck {
+export function validateForgeCheck(raw: ValidatorInput): ForgeCheck {
   const obj = asObject(raw, "ForgeCheck");
   return {
     name: asString(obj["name"], "ForgeCheck.name"),
@@ -421,7 +425,7 @@ export function validateForgeCheck(raw: unknown): ForgeCheck {
   };
 }
 
-export function validateRuntimeInstance(raw: unknown): RuntimeInstance {
+export function validateRuntimeInstance(raw: ValidatorInput): RuntimeInstance {
   const obj = asObject(raw, "RuntimeInstance");
   return {
     id: asString(obj["id"], "RuntimeInstance.id"),
@@ -434,7 +438,7 @@ export function validateRuntimeInstance(raw: unknown): RuntimeInstance {
   };
 }
 
-export function validateTask(raw: unknown): Task {
+export function validateTask(raw: ValidatorInput): Task {
   const obj = asObject(raw, "Task");
   return {
     id: asString(obj["id"], "Task.id"),
@@ -480,7 +484,7 @@ export function validateTask(raw: unknown): Task {
   };
 }
 
-export function validateBranchInfo(raw: unknown): BranchInfo {
+export function validateBranchInfo(raw: ValidatorInput): BranchInfo {
   const obj = asObject(raw, "BranchInfo");
   return {
     name: asString(obj["name"], "BranchInfo.name"),
@@ -488,7 +492,7 @@ export function validateBranchInfo(raw: unknown): BranchInfo {
   };
 }
 
-export function validateRepo(raw: unknown): Repo {
+export function validateRepo(raw: ValidatorInput): Repo {
   const obj = asObject(raw, "Repo");
   return {
     path: asString(obj["path"], "Repo.path"),
@@ -502,7 +506,7 @@ export function validateRepo(raw: unknown): Repo {
   };
 }
 
-export function validateTaskListEvent(raw: unknown): TaskListEvent {
+export function validateTaskListEvent(raw: ValidatorInput): TaskListEvent {
   const obj = asObject(raw, "TaskListEvent");
   const result: TaskListEvent = {
     kind: asString(obj["kind"], "TaskListEvent.kind"),
@@ -531,7 +535,7 @@ export function validateTaskListEvent(raw: unknown): TaskListEvent {
   return result;
 }
 
-export function validateQuotaRateLimit(raw: unknown): QuotaRateLimit {
+export function validateQuotaRateLimit(raw: ValidatorInput): QuotaRateLimit {
   const obj = asObject(raw, "QuotaRateLimit");
   return {
     window: asString(obj["window"], "QuotaRateLimit.window"),
@@ -540,7 +544,7 @@ export function validateQuotaRateLimit(raw: unknown): QuotaRateLimit {
   };
 }
 
-export function validateQuotaBalance(raw: unknown): QuotaBalance {
+export function validateQuotaBalance(raw: ValidatorInput): QuotaBalance {
   const obj = asObject(raw, "QuotaBalance");
   return {
     currency: asString(obj["currency"], "QuotaBalance.currency"),
@@ -550,7 +554,7 @@ export function validateQuotaBalance(raw: unknown): QuotaBalance {
   };
 }
 
-export function validateQuotaExtraUsage(raw: unknown): QuotaExtraUsage {
+export function validateQuotaExtraUsage(raw: ValidatorInput): QuotaExtraUsage {
   const obj = asObject(raw, "QuotaExtraUsage");
   return {
     currency: asString(obj["currency"], "QuotaExtraUsage.currency"),
@@ -561,7 +565,7 @@ export function validateQuotaExtraUsage(raw: unknown): QuotaExtraUsage {
   };
 }
 
-export function validateProviderQuota(raw: unknown): ProviderQuota {
+export function validateProviderQuota(raw: ValidatorInput): ProviderQuota {
   const obj = asObject(raw, "ProviderQuota");
   return {
     provider: asString(obj["provider"], "ProviderQuota.provider"),
@@ -575,7 +579,7 @@ export function validateProviderQuota(raw: unknown): ProviderQuota {
   };
 }
 
-export function validateLocalWindow(raw: unknown): LocalWindow {
+export function validateLocalWindow(raw: ValidatorInput): LocalWindow {
   const obj = asObject(raw, "LocalWindow");
   return {
     duration: asString(obj["duration"], "LocalWindow.duration"),
@@ -585,14 +589,14 @@ export function validateLocalWindow(raw: unknown): LocalWindow {
   };
 }
 
-export function validateLocalUsage(raw: unknown): LocalUsage {
+export function validateLocalUsage(raw: ValidatorInput): LocalUsage {
   const obj = asObject(raw, "LocalUsage");
   return {
     windows: validateArray(obj["windows"], "LocalUsage.windows", validateLocalWindow) as LocalWindow[],
   };
 }
 
-export function validateUsageResp(raw: unknown): UsageResp {
+export function validateUsageResp(raw: ValidatorInput): UsageResp {
   const obj = asObject(raw, "UsageResp");
   return {
     providers: (obj["providers"] === undefined || obj["providers"] === null ? undefined : validateArray(obj["providers"], "UsageResp.providers", validateProviderQuota) as ProviderQuota[]),

@@ -4,6 +4,8 @@
 
 JSON-RPC MCP endpoint served at `/api/caic/v1/mcp`. Requests must include MCP transport headers such as `Mcp-Protocol-Version` and `Mcp-Method`; method-specific requests may also require `Mcp-Name` and `Mcp-Param-*` headers.
 
+Type notation: `JSONValue` means any valid JSON value.
+
 ## MCP
 
 | Method | Path | Description | Request | Response |
@@ -26,9 +28,9 @@ JSONRPCRequest is an incoming JSON-RPC request.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `jsonrpc` | `string` |  | yes |
-| `id` | `object` |  |  |
+| `id` | `JSONValue` |  |  |
 | `method` | `string` |  | yes |
-| `params` | `object` |  |  |
+| `params` | `JSONValue` |  |  |
 
 ### JSONRPCError
 
@@ -38,7 +40,7 @@ JSONRPCError is a JSON-RPC error object.
 |-------|------|-------------|----------|
 | `code` | `int` |  | yes |
 | `message` | `string` |  | yes |
-| `data` | `unknown` |  |  |
+| `data` | `JSONValue` |  |  |
 
 ### JSONRPCResponse
 
@@ -47,8 +49,8 @@ JSONRPCResponse is an outgoing JSON-RPC response.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `jsonrpc` | `string` |  | yes |
-| `id` | `object` |  |  |
-| `result` | `unknown` |  |  |
+| `id` | `JSONValue` |  |  |
+| `result` | `JSONValue` |  |  |
 | `error` | `JSONRPCError` |  |  |
 
 ### PromptsCapability
@@ -82,13 +84,13 @@ Capabilities describes server-supported MCP features.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `experimental` | `Record<string, unknown>` |  |  |
-| `logging` | `Record<string, unknown>` |  |  |
-| `completions` | `Record<string, unknown>` |  |  |
+| `experimental` | `Record<string, JSONValue>` |  |  |
+| `logging` | `Record<string, JSONValue>` |  |  |
+| `completions` | `Record<string, JSONValue>` |  |  |
 | `prompts` | `PromptsCapability` |  |  |
 | `resources` | `ResourcesCapability` |  | yes |
 | `tools` | `ToolsCapability` |  | yes |
-| `extensions` | `Record<string, unknown>` |  |  |
+| `extensions` | `Record<string, JSONValue>` |  |  |
 
 ### Icon
 
@@ -134,8 +136,8 @@ SamplingCapability describes client sampling support.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `context` | `Record<string, unknown>` |  |  |
-| `tools` | `Record<string, unknown>` |  |  |
+| `context` | `Record<string, JSONValue>` |  |  |
+| `tools` | `Record<string, JSONValue>` |  |  |
 
 ### ElicitationCapability
 
@@ -143,8 +145,8 @@ ElicitationCapability describes client elicitation support.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `form` | `Record<string, unknown>` |  |  |
-| `url` | `Record<string, unknown>` |  |  |
+| `form` | `Record<string, JSONValue>` |  |  |
+| `url` | `Record<string, JSONValue>` |  |  |
 
 ### ClientCapabilities
 
@@ -152,11 +154,11 @@ ClientCapabilities describes client-supported MCP capabilities.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `experimental` | `Record<string, unknown>` |  |  |
-| `roots` | `Record<string, unknown>` |  |  |
+| `experimental` | `Record<string, JSONValue>` |  |  |
+| `roots` | `Record<string, JSONValue>` |  |  |
 | `sampling` | `SamplingCapability` |  |  |
 | `elicitation` | `ElicitationCapability` |  |  |
-| `extensions` | `Record<string, unknown>` |  |  |
+| `extensions` | `Record<string, JSONValue>` |  |  |
 
 ### RequestMeta
 
@@ -167,7 +169,7 @@ RequestMeta is the MCP metadata object required in request params.
 | `io.modelcontextprotocol/protocolVersion` | `string` |  | yes |
 | `io.modelcontextprotocol/clientInfo` | `Implementation` |  | yes |
 | `io.modelcontextprotocol/clientCapabilities` | `ClientCapabilities` |  | yes |
-| `progressToken` | `unknown` |  |  |
+| `progressToken` | `JSONValue` |  |  |
 | `io.modelcontextprotocol/logLevel` | `string` |  |  |
 
 ### PaginatedRequestParams
@@ -197,13 +199,13 @@ ToolDescriptor describes one MCP tool.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `_meta` | `Record<string, unknown>` |  |  |
+| `_meta` | `Record<string, JSONValue>` |  |  |
 | `icons` | `Icon[]` |  |  |
 | `name` | `string` |  | yes |
 | `title` | `string` |  |  |
 | `description` | `string` |  |  |
-| `inputSchema` | `object` |  |  |
-| `outputSchema` | `object` |  |  |
+| `inputSchema` | `JSONSchema` |  |  |
+| `outputSchema` | `JSONSchema` |  |  |
 | `annotations` | `ToolAnnotations` |  |  |
 
 ### ToolsListResult
@@ -212,7 +214,7 @@ ToolsListResult is the response payload for tools/list.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `_meta` | `Record<string, unknown>` |  |  |
+| `_meta` | `Record<string, JSONValue>` |  |  |
 | `resultType` | `string` |  | yes |
 | `nextCursor` | `string` |  |  |
 | `tools` | `ToolDescriptor[]` |  | yes |
@@ -226,10 +228,10 @@ ToolsCallParams is the request params payload for tools/call.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `_meta` | `RequestMeta` |  | yes |
-| `inputResponses` | `object` |  |  |
+| `inputResponses` | `JSONValue` |  |  |
 | `requestState` | `string` |  |  |
 | `name` | `string` |  | yes |
-| `arguments` | `object` |  |  |
+| `arguments` | `JSONValue` |  |  |
 
 ### ResourceContent
 
@@ -237,7 +239,7 @@ ResourceContent contains resource data returned by resources/read.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `_meta` | `Record<string, unknown>` |  |  |
+| `_meta` | `Record<string, JSONValue>` |  |  |
 | `uri` | `string` |  | yes |
 | `mimeType` | `string` |  |  |
 | `text` | `string` |  |  |
@@ -259,7 +261,7 @@ ContentBlock is an MCP tool-result content item.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `_meta` | `Record<string, unknown>` |  |  |
+| `_meta` | `Record<string, JSONValue>` |  |  |
 | `icons` | `Icon[]` |  |  |
 | `type` | `string` |  | yes |
 | `name` | `string` |  |  |
@@ -279,10 +281,10 @@ ToolCallResult is the response payload for a tool call.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `_meta` | `Record<string, unknown>` |  |  |
+| `_meta` | `Record<string, JSONValue>` |  |  |
 | `resultType` | `string` |  | yes |
 | `content` | `ContentBlock[]` |  | yes |
-| `structuredContent` | `unknown` |  |  |
+| `structuredContent` | `JSONValue` |  |  |
 | `isError` | `boolean` |  |  |
 
 ### ResourceDescriptor
@@ -291,7 +293,7 @@ ResourceDescriptor describes one MCP resource.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `_meta` | `Record<string, unknown>` |  |  |
+| `_meta` | `Record<string, JSONValue>` |  |  |
 | `icons` | `Icon[]` |  |  |
 | `uri` | `string` |  | yes |
 | `name` | `string` |  | yes |
@@ -307,7 +309,7 @@ ResourcesListResult is the response payload for resources/list.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `_meta` | `Record<string, unknown>` |  |  |
+| `_meta` | `Record<string, JSONValue>` |  |  |
 | `resultType` | `string` |  | yes |
 | `nextCursor` | `string` |  |  |
 | `resources` | `ResourceDescriptor[]` |  | yes |
@@ -320,7 +322,7 @@ ResourceTemplateDescriptor describes a parameterized MCP resource.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `_meta` | `Record<string, unknown>` |  |  |
+| `_meta` | `Record<string, JSONValue>` |  |  |
 | `icons` | `Icon[]` |  |  |
 | `name` | `string` |  | yes |
 | `title` | `string` |  |  |
@@ -335,7 +337,7 @@ ResourceTemplatesListResult is the response payload for resources/templates/list
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `_meta` | `Record<string, unknown>` |  |  |
+| `_meta` | `Record<string, JSONValue>` |  |  |
 | `resultType` | `string` |  | yes |
 | `nextCursor` | `string` |  |  |
 | `resourceTemplates` | `ResourceTemplateDescriptor[]` |  | yes |
@@ -349,7 +351,7 @@ ResourcesReadParams is the request params payload for resources/read.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `_meta` | `RequestMeta` |  | yes |
-| `inputResponses` | `object` |  |  |
+| `inputResponses` | `JSONValue` |  |  |
 | `requestState` | `string` |  |  |
 | `uri` | `string` |  | yes |
 
@@ -359,7 +361,7 @@ ResourcesReadResult is the response payload for resources/read.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `_meta` | `Record<string, unknown>` |  |  |
+| `_meta` | `Record<string, JSONValue>` |  |  |
 | `resultType` | `string` |  | yes |
 | `contents` | `ResourceContent[]` |  | yes |
 | `ttlMs` | `int` |  | yes |
@@ -393,7 +395,7 @@ JSONRPCNotification is a server-sent JSON-RPC notification.
 |-------|------|-------------|----------|
 | `jsonrpc` | `string` |  | yes |
 | `method` | `string` |  | yes |
-| `params` | `unknown` |  |  |
+| `params` | `JSONValue` |  |  |
 
 ### SubscriptionNotificationParams
 
@@ -401,7 +403,7 @@ SubscriptionNotificationParams is the payload for subscription notifications.
 
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
-| `_meta` | `Record<string, unknown>` |  |  |
+| `_meta` | `Record<string, JSONValue>` |  |  |
 | `notifications` | `SubscriptionFilter` |  |  |
 | `uri` | `string` |  |  |
 

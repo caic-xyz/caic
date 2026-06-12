@@ -187,6 +187,15 @@ func (c *genConfig) routeSeedTypes() []reflect.Type {
 	return seeds
 }
 
+func (c *genConfig) hasSSERoutes() bool {
+	for i := range c.routes {
+		if c.routes[i].IsSSE {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *genConfig) sdkSeedTypes() []reflect.Type {
 	seeds := c.routeSeedTypes()
 	seeds = append(seeds, c.extraSeeds...)
@@ -261,7 +270,15 @@ func (c *genConfig) goTypeToDoc(t reflect.Type) (string, error) {
 	case reflect.Struct:
 		return t.Name(), nil
 	case reflect.Map:
-		return "Record<string, unknown>", nil
+		k, err := c.goTypeToDoc(t.Key())
+		if err != nil {
+			return "", err
+		}
+		v, err := c.goTypeToDoc(t.Elem())
+		if err != nil {
+			return "", err
+		}
+		return "Record<" + k + ", " + v + ">", nil
 	default:
 		return "", fmt.Errorf("goTypeToDoc: unhandled kind %s for %s", t.Kind(), t)
 	}

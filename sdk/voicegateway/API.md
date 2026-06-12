@@ -4,6 +4,8 @@
 
 RESTful JSON signaling API served at `/api/voicegateway/v1/voice/`.
 
+Type notation: `JSONValue` means any valid JSON value.
+
 ## Voice
 
 | Method | Path | Description | Request | Response |
@@ -67,7 +69,7 @@ StatusResp is a common response for mutation endpoints.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `error` | `ErrorDetails` |  | yes |
-| `details` | `Record<string, unknown>` |  |  |
+| `details` | `Record<string, JSONValue>` |  |  |
 
 ### MessageEnvelope
 
@@ -94,7 +96,7 @@ ToolDeclaration is a provider-neutral service tool declaration.
 |-------|------|-------------|----------|
 | `name` | `string` |  | yes |
 | `description` | `string` |  | yes |
-| `parameters` | `object` |  | yes |
+| `parameters` | `JSONValue` |  | yes |
 
 ### Context
 
@@ -134,7 +136,7 @@ ToolResult is a client message that returns a tool execution result.
 | `kind` | `string` |  | yes |
 | `id` | `string` |  | yes |
 | `name` | `string` |  | yes |
-| `result` | `object` |  | yes |
+| `result` | `JSONValue` |  | yes |
 
 ### TurnCancel
 
@@ -208,7 +210,7 @@ ToolCall is a gateway message that asks the client to execute a tool.
 | `kind` | `string` |  | yes |
 | `id` | `string` |  | yes |
 | `name` | `string` |  | yes |
-| `args` | `object` |  | yes |
+| `args` | `JSONValue` |  | yes |
 
 ### Interrupted
 

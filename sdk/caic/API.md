@@ -4,6 +4,8 @@
 
 RESTful JSON API served at `/api/caic/v1/`. SSE endpoints stream newline-delimited JSON events.
 
+Type notation: `JSONValue` means any valid JSON value.
+
 ## Server
 
 | Method | Path | Description | Request | Response |
@@ -206,7 +208,7 @@ the default. |  |
 the host's native platform. Valid values are linux/amd64 and linux/arm64. |  |
 | `maxCPUs` | `int` | MaxCPUs limits the number of CPU cores the runtime instance may use.
 Zero means use the system default (max(2, NumCPU-2)). |  |
-| `wellKnownCaches` | `Record<string, unknown>` | WellKnownCaches maps cache name to enabled state. Absent or false means
+| `wellKnownCaches` | `Record<string, boolean>` | WellKnownCaches maps cache name to enabled state. Absent or false means
 disabled, true means enabled. Caches are opt-in. |  |
 | `cacheMappings` | `CacheMappingResp[]` | CacheMappings are custom host-to-runtime directory mappings. |  |
 | `customMounts` | `MountMappingResp[]` | CustomMounts are custom non-cache host-to-runtime directory mappings. |  |
@@ -219,7 +221,7 @@ PreferencesResp is the response for GET /api/caic/v1/server/preferences.
 |-------|------|-------------|----------|
 | `repositories` | `RepoPrefsResp[]` |  | yes |
 | `harness` | `string` |  |  |
-| `models` | `Record<string, unknown>` |  |  |
+| `models` | `Record<string, string>` |  |  |
 | `settings` | `UserSettings` |  | yes |
 
 ### UpdatePreferencesReq
@@ -532,7 +534,7 @@ EventToolUse is emitted when the assistant invokes a tool.
 |-------|------|-------------|----------|
 | `toolUseID` | `string` |  | yes |
 | `name` | `string` |  | yes |
-| `input` | `object` |  | yes |
+| `input` | `JSONValue` |  | yes |
 | `planContent` | `string` | Snapshot of plan content for ExitPlanMode events. |  |
 | `inputTruncated` | `boolean` | True when Input was omitted due to size; fetch via GET /api/caic/v1/tasks/{id}/tool/{toolUseID}. |  |
 | `background` | `boolean` | True when the tool runs in the background (Bash/Agent run_in_background). |  |
@@ -927,7 +929,7 @@ It returns the full (untruncated) input for a tool call.
 | Field | Type | Description | Required |
 |-------|------|-------------|----------|
 | `toolUseID` | `string` |  | yes |
-| `input` | `object` |  | yes |
+| `input` | `JSONValue` |  | yes |
 
 ### TaskListEvent
 
@@ -944,7 +946,7 @@ kind=="warning":  Warning holds a transient server warning message for the user.
 | `kind` | `string` |  | yes |
 | `snapshot` | `Task[]` |  |  |
 | `upsert` | `Task` |  |  |
-| `patch` | `Record<string, unknown>` |  |  |
+| `patch` | `Record<string, JSONValue>` |  |  |
 | `delete` | `string` |  |  |
 | `repos` | `Repo[]` |  |  |
 | `warning` | `string` |  |  |

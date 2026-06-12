@@ -70,7 +70,7 @@ func generateCaicSDK() error {
 				tsType:     "any /* json.RawMessage */",
 				ktType:     "JsonElement",
 				swiftType:  "JSONValue",
-				docType:    "object",
+				docType:    "JSONValue",
 				tsValidate: "%[1]s",
 			},
 			{
@@ -94,7 +94,7 @@ func generateCaicSDK() error {
 				tsType:    "{ [key: string]: any /* json.RawMessage */}",
 				ktType:    "Map<String, JsonElement>",
 				swiftType: "[String: JSONValue]",
-				docType:   "Record<string, unknown>",
+				docType:   "Record<string, JSONValue>",
 			},
 		},
 		sseSeeds: []reflect.Type{
@@ -175,7 +175,7 @@ func generateVoiceGatewaySDK() error {
 				tsType:     "any /* json.RawMessage */",
 				ktType:     "JsonElement",
 				swiftType:  "JSONValue",
-				docType:    "object",
+				docType:    "JSONValue",
 				tsValidate: "%[1]s",
 			},
 			{
@@ -183,7 +183,7 @@ func generateVoiceGatewaySDK() error {
 				tsType:    "{ [key: string]: any /* json.RawMessage */}",
 				ktType:    "Map<String, JsonElement>",
 				swiftType: "[String: JSONValue]",
-				docType:   "Record<string, unknown>",
+				docType:   "Record<string, JSONValue>",
 			},
 		},
 		errorCodes: []errorCodeDef{
@@ -304,7 +304,7 @@ func generateMcpSDK() error {
 				tsType:     "unknown /* json.RawMessage */",
 				ktType:     "JsonElement",
 				swiftType:  "JSONValue",
-				docType:    "object",
+				docType:    "JSONValue",
 				tsValidate: "%[1]s",
 			},
 			{
@@ -312,7 +312,7 @@ func generateMcpSDK() error {
 				tsType:     "unknown",
 				ktType:     "JsonElement",
 				swiftType:  "JSONValue",
-				docType:    "unknown",
+				docType:    "JSONValue",
 				tsValidate: "%[1]s",
 			},
 			{
@@ -320,7 +320,7 @@ func generateMcpSDK() error {
 				tsType:     "unknown /* JSON Schema */",
 				ktType:     "JsonElement",
 				swiftType:  "JSONValue",
-				docType:    "object",
+				docType:    "JSONSchema",
 				tsValidate: "%[1]s",
 			},
 		},
