@@ -4,6 +4,7 @@ package com.fghbuild.gomode.ui.web
 import android.Manifest
 import android.annotation.SuppressLint
 import android.net.Uri
+import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
@@ -49,6 +50,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
 import androidx.core.net.toUri
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
 import com.fghbuild.gomode.R
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -72,6 +75,7 @@ fun WebShellScreen(
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
+            enableWebAuthentication()
             addJavascriptInterface(GoModeHostBridge(), "goModeHost")
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
@@ -225,6 +229,17 @@ private fun WebShellHeader(onOpenSettings: () -> Unit) {
     }
 }
 
+private fun WebView.enableWebAuthentication() {
+    if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_AUTHENTICATION)) {
+        WebSettingsCompat.setWebAuthenticationSupport(
+            settings,
+            WebSettingsCompat.WEB_AUTHENTICATION_SUPPORT_FOR_APP,
+        )
+    } else {
+        Log.w(TAG, "Installed Android WebView does not support WebAuthn.")
+    }
+}
+
 private fun hasPermission(context: android.content.Context, permission: String): Boolean =
     ContextCompat.checkSelfPermission(context, permission) == PermissionChecker.PERMISSION_GRANTED
 
@@ -234,6 +249,8 @@ private fun goModeHostURL(url: String): String =
         .appendQueryParameter("goModeHost", "1")
         .build()
         .toString()
+
+private const val TAG = "GoModeWebShell"
 
 private class GoModeHostBridge {
     @JavascriptInterface
