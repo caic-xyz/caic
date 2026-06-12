@@ -3,7 +3,7 @@
 //
 // EventMessage is the backend-neutral SSE contract consumed by the frontend
 // via both /api/caic/v1/tasks/{id}/events and /api/caic/v1/tasks/{id}/raw_events.
-// Every backend (Claude, Gemini, Codex, …) produces these events through its
+// Every agent harness (Claude, Codex, …) produces these events through its
 // converter. EventInit includes a Harness field so the client knows which
 // backend produced the stream.
 package v1

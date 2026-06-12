@@ -389,7 +389,6 @@ export const ForgePRStateMerged: ForgePRState = "merged";
 export type Harness =
   | "claude"
   | "codex"
-  | "gemini"
   | "kilo"
   | "opencode"
   | "pi";
@@ -398,7 +397,6 @@ export type Harness =
  */
 export const HarnessClaude: Harness = "claude";
 export const HarnessCodex: Harness = "codex";
-export const HarnessGemini: Harness = "gemini";
 export const HarnessKilo: Harness = "kilo";
 export const HarnessOpenCode: Harness = "opencode";
 export const HarnessPi: Harness = "pi";

@@ -87,9 +87,9 @@
 
 [ai]
 # LLM provider for title generation, commit descriptions, etc. Empty =
-# auto-detect in order: codex, opencode, claudecode, gemini, then any available.
+# auto-detect in order: codex, opencode, claudecode, then any available.
 # https://pkg.go.dev/github.com/maruel/genai/providers
-#provider = ""  # e.g. "gemini"
+#provider = ""  # e.g. "codex"
 
 # Model name or alias. Empty = the provider's auto-detected cheapest model.
 #model = ""  # e.g. "claude-haiku-4-5-20251001"

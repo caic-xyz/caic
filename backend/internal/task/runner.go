@@ -287,7 +287,7 @@ func (r *Runner) Reconnect(ctx context.Context, t *Task, skipSideEffects bool) (
 // Sequence:
 //  1. Create a new git branch from origin/<BaseBranch> (or the local branch if not on origin).
 //  2. Start a runtime instance on that branch.
-//  3. Deploy the relay script and launch the agent (claude/gemini) via the
+//  3. Deploy the relay script and launch the agent (claude) via the
 //     relay daemon. The relay owns the agent's stdin/stdout and persists
 //     across transport disconnects.
 //  4. Send the initial prompt to the agent.

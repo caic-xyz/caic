@@ -28,7 +28,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
-	"github.com/caic-xyz/caic/backend/internal/agent/gemini"
 	"github.com/caic-xyz/caic/backend/internal/agent/kilo"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
@@ -43,7 +42,6 @@ var backends = map[string]agent.Backend{
 	string(harness.Pi):       pi.New("", nil),
 	string(harness.Claude):   claudecode.New(),
 	string(harness.Codex):    codex.New("", nil),
-	string(harness.Gemini):   gemini.New(),
 	string(harness.Kilo):     kilo.New(),
 	string(harness.OpenCode): opencode.New("", nil),
 }
@@ -54,7 +52,7 @@ var scenarios = map[string]string{
 }
 
 func mainImpl() error {
-	harnessFlag := flag.String("harness", "", "harness to record (pi, claude, codex, gemini, kilo, opencode)")
+	harnessFlag := flag.String("harness", "", "harness to record (pi, claude, codex, kilo, opencode)")
 	scenarioFlag := flag.String("scenario", "", "predefined scenario name")
 	modelFlag := flag.String("model", "", "model to use (e.g. xiaomi/mimo-v2.5)")
 	apiKeyEnv := flag.String("api-key-env", "", "env var name for API key")
@@ -103,7 +101,7 @@ func recordTrace(ctx context.Context, b agent.Backend, apiKeyEnv, promptText, ou
 		return err
 	}
 	// Create empty widget plugin dir so harnesses that reference
-	// --plugin-dir (claude, gemini) don't crash on startup.
+	// --plugin-dir (claude) don't crash on startup.
 	if err := runPodman(ctx, "exec", ctr, "mkdir", "-p", agent.WidgetPluginDir); err != nil {
 		return fmt.Errorf("create widget plugin dir: %w", err)
 	}

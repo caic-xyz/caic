@@ -186,7 +186,7 @@ func TestGenericToolTiming(t *testing.T) {
 
 func TestGenericConvertTextAndUsage(t *testing.T) {
 	t.Parallel()
-	gt := v1conv.NewToolTimingTracker(harness.Gemini, FormatToolOutput)
+	gt := v1conv.NewToolTimingTracker(harness.Codex, FormatToolOutput)
 
 	textMsg := &agent.TextMessage{Text: "hello"}
 	usageMsg := &agent.UsageMessage{

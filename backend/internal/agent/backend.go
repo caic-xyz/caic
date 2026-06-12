@@ -26,7 +26,7 @@ type Backend interface {
 	// wire formats (e.g. codex) that need it before the first replay message.
 	AttachRelay(ctx context.Context, opts *Options) (*Session, error)
 
-	// Harness returns the harness identifier ("claude", "gemini", etc.)
+	// Harness returns the harness identifier ("claude", "codex", etc.)
 	Harness() harness.Name
 
 	// Models returns the list of model names supported by this backend.

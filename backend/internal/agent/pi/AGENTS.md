@@ -34,7 +34,7 @@ Wire types and protocol documentation live in `github.com/maruel/genai/providers
 
 ## Tool Name Normalization
 
-Pi tool names need normalization to caic canonical names (similar to Gemini/OpenCode).
+Pi tool names need normalization to caic canonical names (similar to OpenCode).
 
 ## Upstream Source
 

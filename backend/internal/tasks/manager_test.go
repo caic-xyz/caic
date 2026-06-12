@@ -1870,7 +1870,7 @@ func TestManager(t *testing.T) {
 		t.Run("valid_no_backend", func(t *testing.T) {
 			t.Parallel()
 			m := New(Config{ServerCtx: t.Context()})
-			lt := &task.LoadedTask{Harness: "gemini"}
+			lt := &task.LoadedTask{Harness: "pi"}
 			m.setParser(lt)
 			// No panic — graceful no-op when no matching backend.
 		})

@@ -11,7 +11,6 @@ class HarnessTest {
     fun `toHarness converts known values`() {
         assertEquals(Harness.Claude, "claude".toHarness())
         assertEquals(Harness.Codex, "codex".toHarness())
-        assertEquals(Harness.Gemini, "gemini".toHarness())
         assertEquals(Harness.Kilo, "kilo".toHarness())
         assertEquals(Harness.OpenCode, "opencode".toHarness())
         assertEquals(Harness.Pi, "pi".toHarness())
@@ -47,11 +46,6 @@ class HarnessTest {
     fun `effortOptions returns levels for Pi`() {
         val opts = effortOptions(Harness.Pi)
         assertEquals(listOf("off", "minimal", "low", "medium", "high", "xhigh"), opts)
-    }
-
-    @Test
-    fun `effortOptions returns empty for Gemini`() {
-        assertTrue(effortOptions(Harness.Gemini).isEmpty())
     }
 
     @Test

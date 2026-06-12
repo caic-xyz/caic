@@ -60,25 +60,25 @@ endpoint and conditionally renders UI controls.
 
 ### Provider Mapping
 
-| Feature            | Claude Code              | Codex                       | OpenCode                     | Gemini | Kilo |
-|--------------------|--------------------------|-----------------------------|-----------------------------|--------|------|
-| Interrupt          | `ControlInterrupt`       | `turn/interrupt`            | `session/cancel`             | N/A    | ?    |
-| Steer              | N/A                      | `turn/steer`                | N/A                          | N/A    | ?    |
-| Compact            | `/compact` msg           | `thread/compact/start`      | `/compact` prompt            | N/A    | ?    |
-| Context usage      | `ControlGetContextUsage` | `tokenUsage/updated` notif  | `usage_update` notif         | N/A    | ?    |
-| Model switch       | `ControlSetModel`        | `turn/start` model param    | `session/set_model`          | N/A    | ?    |
-| Mode switch        | N/A                      | N/A                         | `session/set_mode`           | N/A    | ?    |
-| Approval flow      | `control_request`        | approval request notif      | `session/request_permission` | N/A    | ?    |
-| Session fork       | N/A                      | `thread/fork`               | `unstable_forkSession`       | N/A    | N/A  |
-| Session resume     | N/A                      | N/A                         | `unstable_resumeSession`     | N/A    | N/A  |
-| Session list       | N/A                      | N/A                         | `unstable_listSessions`      | N/A    | N/A  |
-| Available commands | N/A                      | N/A                         | `available_commands_update`  | N/A    | N/A  |
-| Code review        | N/A                      | `review/start`              | N/A                          | N/A    | N/A  |
-| Rollback           | N/A                      | `thread/rollback`           | N/A                          | N/A    | N/A  |
-| Image generation   | N/A                      | `imageGeneration` item      | N/A                          | N/A    | N/A  |
-| Cost               | `/cost` msg              | N/A                         | N/A                          | N/A    | N/A  |
-| Keep-alive         | `InputKeepAlive`         | N/A                         | N/A                          | N/A    | N/A  |
-| Env vars           | `InputUpdateEnvVars`     | N/A                         | N/A                          | N/A    | N/A  |
+| Feature            | Claude Code              | Codex                       | OpenCode                     | Kilo |
+|--------------------|--------------------------|-----------------------------|------------------------------|------|
+| Interrupt          | `ControlInterrupt`       | `turn/interrupt`            | `session/cancel`             | ?    |
+| Steer              | N/A                      | `turn/steer`                | N/A                          | ?    |
+| Compact            | `/compact` msg           | `thread/compact/start`      | `/compact` prompt            | ?    |
+| Context usage      | `ControlGetContextUsage` | `tokenUsage/updated` notif  | `usage_update` notif         | ?    |
+| Model switch       | `ControlSetModel`        | `turn/start` model param    | `session/set_model`          | ?    |
+| Mode switch        | N/A                      | N/A                         | `session/set_mode`           | ?    |
+| Approval flow      | `control_request`        | approval request notif      | `session/request_permission` | ?    |
+| Session fork       | N/A                      | `thread/fork`               | `unstable_forkSession`       | N/A  |
+| Session resume     | N/A                      | N/A                         | `unstable_resumeSession`     | N/A  |
+| Session list       | N/A                      | N/A                         | `unstable_listSessions`      | N/A  |
+| Available commands | N/A                      | N/A                         | `available_commands_update`  | N/A  |
+| Code review        | N/A                      | `review/start`              | N/A                          | N/A  |
+| Rollback           | N/A                      | `thread/rollback`           | N/A                          | N/A  |
+| Image generation   | N/A                      | `imageGeneration` item      | N/A                          | N/A  |
+| Cost               | `/cost` msg              | N/A                         | N/A                          | N/A  |
+| Keep-alive         | `InputKeepAlive`         | N/A                         | N/A                          | N/A  |
+| Env vars           | `InputUpdateEnvVars`     | N/A                         | N/A                          | N/A  |
 
 `?` = needs investigation. `N/A` = not supported by provider.
 

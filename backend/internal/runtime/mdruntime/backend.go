@@ -95,6 +95,7 @@ func (a mdContainerAdapter) Repos() []md.Repo      { return a.c.Repos }
 func (a mdContainerAdapter) AgentMounts(paths ...md.AgentPaths) ([]md.Mount, error) {
 	return a.c.AgentMounts(paths...)
 }
+
 func (a mdContainerAdapter) SSHCommand(opts []string, cmd string) []string {
 	return a.c.SSHCommand(opts, cmd)
 }
@@ -413,7 +414,6 @@ func (b *Backend) VNCPort(ctx context.Context, id runtime.InstanceID) int {
 var harnessMap = map[harness.Name]md.Harness{
 	harness.Claude:   md.HarnessClaude,
 	harness.Codex:    md.HarnessCodex,
-	harness.Gemini:   md.HarnessGemini,
 	harness.Kilo:     md.HarnessKilo,
 	harness.OpenCode: md.HarnessOpencode,
 	harness.Pi:       md.HarnessPi,

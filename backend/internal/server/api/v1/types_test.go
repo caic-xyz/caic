@@ -122,7 +122,6 @@ func TestHarness(t *testing.T) {
 	want := map[Harness]harness.Name{
 		HarnessClaude:   harness.Claude,
 		HarnessCodex:    harness.Codex,
-		HarnessGemini:   harness.Gemini,
 		HarnessKilo:     harness.Kilo,
 		HarnessOpenCode: harness.OpenCode,
 		HarnessPi:       harness.Pi,
@@ -143,7 +142,6 @@ func TestHarness(t *testing.T) {
 	for _, agentHarness := range []harness.Name{
 		harness.Claude,
 		harness.Codex,
-		harness.Gemini,
 		harness.Kilo,
 		harness.OpenCode,
 		harness.Pi,

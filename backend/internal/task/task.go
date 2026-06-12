@@ -173,7 +173,7 @@ type Task struct {
 	// Immutable fields — set at creation, never modified.
 	ID                ksid.ID
 	InitialPrompt     agent.Prompt         // Initial prompt text and optional images.
-	Harness           harness.Name         // Agent harness ("claude", "gemini", etc.).
+	Harness           harness.Name         // Agent harness ("claude", "codex", etc.).
 	Model             string               // User-requested model; passed to agent CLI.
 	Effort            string               // Thinking effort; passed to agent CLI. Empty = default.
 	BaseImage         string               // Custom runtime base image; empty means use the default.

@@ -7,7 +7,6 @@ import com.caic.sdk.v1.Harness
 fun String.toHarness(): Harness = when (this) {
     "claude" -> Harness.Claude
     "codex" -> Harness.Codex
-    "gemini" -> Harness.Gemini
     "kilo" -> Harness.Kilo
     "opencode" -> Harness.OpenCode
     "pi" -> Harness.Pi
@@ -19,5 +18,5 @@ fun effortOptions(harness: Harness): List<String> = when (harness) {
     is Harness.Claude -> listOf("low", "medium", "high", "max")
     is Harness.Codex -> listOf("none", "minimal", "low", "medium", "high", "xhigh")
     is Harness.Pi -> listOf("off", "minimal", "low", "medium", "high", "xhigh")
-    is Harness.Gemini, is Harness.Kilo, is Harness.OpenCode, is Harness.Other -> emptyList()
+    is Harness.Kilo, is Harness.OpenCode, is Harness.Other -> emptyList()
 }

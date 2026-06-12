@@ -43,7 +43,7 @@ func autoDetectLLMProvider(ctx context.Context, coreEnv map[string]string) strin
 		"codex",
 		"opencode",
 		"claudecode",
-		"gemini",
+		"pi",
 	}
 	for _, name := range preferred {
 		if pingProvider(ctx, name, coreEnv) {

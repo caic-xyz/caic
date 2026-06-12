@@ -111,7 +111,7 @@ func (*Backend) NewWire() agent.WireFormat {
 }
 
 // WritePrompt writes a single user message to the bridge's stdin.
-// The bridge reads plain text lines (like Gemini CLI).
+// The bridge reads plain text lines.
 func (*Backend) WritePrompt(w io.Writer, p agent.Prompt, logW io.Writer) error {
 	return agent.PlainTextWritePrompt(w, p, logW)
 }
