@@ -46,6 +46,9 @@ class WebShellSmokeTest {
         waitForDom("location.origin === ${baseUrl.jsString()}")
         waitForDom("document.readyState === 'complete'")
         waitForDom("document.body?.innerText.trim().length > 0")
+        waitForDom(
+            "document.querySelector('#app > div')?.getBoundingClientRect().height > window.innerHeight * 0.5"
+        )
 
         assertJsTrue(
             """

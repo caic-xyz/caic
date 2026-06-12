@@ -84,11 +84,12 @@
 }
 
 .app {
-  max-width: 1200px;
+  position: fixed;
+  inset: 0;
+  width: min(100%, 1200px);
   margin: 0 auto;
   padding: 0.5rem 1rem 0;
   font-family: system-ui;
-  height: 100dvh;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
