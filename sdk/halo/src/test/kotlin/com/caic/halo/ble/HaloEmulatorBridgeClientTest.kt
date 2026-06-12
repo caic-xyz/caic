@@ -54,6 +54,10 @@ class HaloEmulatorBridgeClientTest {
                         }
                         webSocket.send(response.toString())
                     }
+
+                    override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                        webSocket.close(code, reason)
+                    }
                 },
             ),
         )
