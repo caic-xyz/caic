@@ -40,11 +40,7 @@ class WebShellSmokeTest {
 
     @Test
     fun webShellLoadsHostedFrontendAndHandlesSpaBack() {
-        composeRule.onNodeWithTag("gomode-service-url").performTextReplacement(baseUrl)
-        composeRule.onNodeWithTag("gomode-save-service").performClick()
-        composeRule.waitUntil(DEFAULT_TIMEOUT_MS) {
-            composeRule.onAllNodesWithTag("gomode-web-shell").fetchSemanticsNodes().isNotEmpty()
-        }
+        openWebShell()
         waitForWebView()
 
         waitForDom("location.origin === ${baseUrl.jsString()}")
@@ -66,11 +62,7 @@ class WebShellSmokeTest {
 
     @Test
     fun webShellHeaderOpensNativeSettingsAndBackReturnsToWebShell() {
-        composeRule.onNodeWithTag("gomode-service-url").performTextReplacement(baseUrl)
-        composeRule.onNodeWithTag("gomode-save-service").performClick()
-        composeRule.waitUntil(DEFAULT_TIMEOUT_MS) {
-            composeRule.onAllNodesWithTag("gomode-web-header").fetchSemanticsNodes().isNotEmpty()
-        }
+        openWebShell()
 
         composeRule.onNodeWithTag("gomode-web-open-settings").performClick()
         composeRule.waitUntil(DEFAULT_TIMEOUT_MS) {
@@ -89,6 +81,22 @@ class WebShellSmokeTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertEquals("com.fghbuild.gomode", context.packageName)
     }
+
+    private fun openWebShell() {
+        composeRule.waitUntil(DEFAULT_TIMEOUT_MS) {
+            hasNodeWithTag("gomode-service-url") || hasNodeWithTag("gomode-web-header")
+        }
+        if (hasNodeWithTag("gomode-service-url")) {
+            composeRule.onNodeWithTag("gomode-service-url").performTextReplacement(baseUrl)
+            composeRule.onNodeWithTag("gomode-save-service").performClick()
+        }
+        composeRule.waitUntil(DEFAULT_TIMEOUT_MS) {
+            hasNodeWithTag("gomode-web-header")
+        }
+    }
+
+    private fun hasNodeWithTag(tag: String): Boolean =
+        composeRule.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
 
     private fun waitForDom(script: String, timeoutMs: Long = DEFAULT_TIMEOUT_MS) {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
