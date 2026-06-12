@@ -12,6 +12,7 @@ Claude Code headless:
 - https://code.claude.com/docs/en/headless: headless mode overview
 - https://platform.claude.com/docs/en/agent-sdk/streaming-output: streaming protocol wire format
 - git clone https://github.com/anthropics/claude-agent-sdk-python for SDK types (`src/claude_agent_sdk/types.py`)
+- git clone https://github.com/anthropics/claude-agent-sdk-python to get the SDK and understand types, in particular `src/claude_agent_sdk/types.py`
 
 Claude Code plugins:
 - https://code.claude.com/docs/en/plugins: plugin creation, `--plugin-dir`, plugin structure overview
