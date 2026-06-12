@@ -64,7 +64,7 @@ class WebShellSmokeTest {
     }
 
     @Test
-    fun webShellHeaderOpensNativeSettingsAndBackReturnsToWebShell() {
+    fun webShellSettingsButtonOpensNativeSettingsAndBackReturnsToWebShell() {
         openWebShell()
 
         composeRule.onNodeWithTag("gomode-web-open-settings").performClick()
@@ -87,14 +87,14 @@ class WebShellSmokeTest {
 
     private fun openWebShell() {
         composeRule.waitUntil(DEFAULT_TIMEOUT_MS) {
-            hasNodeWithTag("gomode-service-url") || hasNodeWithTag("gomode-web-header")
+            hasNodeWithTag("gomode-service-url") || hasNodeWithTag("gomode-web-shell")
         }
         if (hasNodeWithTag("gomode-service-url")) {
             composeRule.onNodeWithTag("gomode-service-url").performTextReplacement(baseUrl)
             composeRule.onNodeWithTag("gomode-save-service").performClick()
         }
         composeRule.waitUntil(DEFAULT_TIMEOUT_MS) {
-            hasNodeWithTag("gomode-web-header")
+            hasNodeWithTag("gomode-web-shell")
         }
     }
 

@@ -1,4 +1,4 @@
-// Full-width bottom voice panel composable: mic button, status, and transcription display.
+// Full-width bottom shell panel composable: settings access, mic button, status, and transcription display.
 package com.fghbuild.gomode.voice
 
 import androidx.compose.animation.core.RepeatMode
@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -48,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -72,10 +74,9 @@ fun VoicePanel(
     onToggleMute: () -> Unit,
     onSelectDevice: (Int) -> Unit,
     onClearTranscript: () -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (!voiceEnabled) return
-
     Surface(
         modifier = modifier,
         tonalElevation = 4.dp,
@@ -83,30 +84,63 @@ fun VoicePanel(
         Column(modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars)) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outline)
             when {
-            voiceState.error != null -> ErrorPanel(onConnect)
-            voiceState.connectStatus != null -> ConnectingPanel(voiceState.connectStatus)
-            voiceState.listening || voiceState.speaking -> ActivePanel(
-                voiceState = voiceState,
-                onDisconnect = onDisconnect,
-                onToggleMute = onToggleMute,
-                onSelectDevice = onSelectDevice,
-                onClearTranscript = onClearTranscript,
-            )
-            !voiceState.connected -> IdlePanel(onConnect)
-            else -> ConnectingPanel("Starting audio…")
-        }
+                !voiceEnabled -> SettingsOnlyPanel(onOpenSettings)
+                voiceState.error != null -> ErrorPanel(onConnect, onOpenSettings)
+                voiceState.connectStatus != null -> ConnectingPanel(voiceState.connectStatus, onOpenSettings)
+                voiceState.listening || voiceState.speaking -> ActivePanel(
+                    voiceState = voiceState,
+                    onDisconnect = onDisconnect,
+                    onToggleMute = onToggleMute,
+                    onSelectDevice = onSelectDevice,
+                    onClearTranscript = onClearTranscript,
+                    onOpenSettings = onOpenSettings,
+                )
+                !voiceState.connected -> IdlePanel(onConnect, onOpenSettings)
+                else -> ConnectingPanel("Starting audio…", onOpenSettings)
+            }
         }
     }
 }
 
 @Composable
-private fun IdlePanel(onConnect: () -> Unit) {
+private fun SettingsOnlyPanel(onOpenSettings: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.End,
+            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.Start,
     ) {
+        SettingsButton(onOpenSettings)
+    }
+}
+
+@Composable
+private fun SettingsButton(onOpenSettings: () -> Unit) {
+    IconButton(
+        onClick = onOpenSettings,
+        modifier = Modifier.testTag("gomode-web-open-settings"),
+    ) {
+        Icon(
+            Icons.Default.Settings,
+            contentDescription = "Settings",
+            modifier = Modifier.size(24.dp),
+        )
+    }
+}
+
+@Composable
+private fun IdlePanel(
+    onConnect: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SettingsButton(onOpenSettings)
         IconButton(
             onClick = onConnect,
             modifier = Modifier
@@ -128,7 +162,10 @@ private fun IdlePanel(onConnect: () -> Unit) {
 }
 
 @Composable
-private fun ConnectingPanel(status: String) {
+private fun ConnectingPanel(
+    status: String,
+    onOpenSettings: () -> Unit,
+) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val alpha by infiniteTransition.animateFloat(
         initialValue = PulseMinAlpha,
@@ -142,11 +179,12 @@ private fun ConnectingPanel(status: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 12.dp)
             .alpha(alpha),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        SettingsButton(onOpenSettings)
         Icon(Icons.Default.Mic, contentDescription = null)
         Text(
             text = status,
@@ -166,15 +204,17 @@ private fun ActivePanel(
     onToggleMute: () -> Unit,
     onSelectDevice: (Int) -> Unit,
     onClearTranscript: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Column(
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier.padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            SettingsButton(onOpenSettings)
             MicLevelIndicator(micLevel = voiceState.micLevel)
 
             val statusText = when {
@@ -246,14 +286,18 @@ private fun ActivePanel(
 }
 
 @Composable
-private fun ErrorPanel(onClick: () -> Unit) {
+private fun ErrorPanel(
+    onClick: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(start = 16.dp, top = 0.dp, end = 16.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        SettingsButton(onOpenSettings)
         Icon(
             Icons.Default.Mic,
             contentDescription = null,

@@ -1,4 +1,4 @@
-// WebView shell with native settings access around the active backend-hosted frontend.
+// WebView shell for the active backend-hosted frontend.
 package com.fghbuild.gomode.ui.web
 
 import android.Manifest
@@ -21,17 +21,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -167,64 +160,34 @@ fun WebShellScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().statusBarsPadding().testTag("gomode-web-shell")) {
-        WebShellHeader(onOpenSettings = onOpenSettings)
-        Box(Modifier.fillMaxSize()) {
-            AndroidView(
-                factory = { webView },
-                update = { view ->
-                    if (view.url != hostURL && view.originalUrl != hostURL) {
-                        loading = true
-                        pageFailed = null
-                        view.loadUrl(hostURL)
-                    }
-                },
-                modifier = Modifier.fillMaxSize(),
+    Box(Modifier.fillMaxSize().statusBarsPadding().testTag("gomode-web-shell")) {
+        AndroidView(
+            factory = { webView },
+            update = { view ->
+                if (view.url != hostURL && view.originalUrl != hostURL) {
+                    loading = true
+                    pageFailed = null
+                    view.loadUrl(hostURL)
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+        if (loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.Center).testTag("gomode-web-loading"),
             )
-            if (loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center).testTag("gomode-web-loading"),
-                )
-            }
-            pageFailed?.let { message ->
-                WebRecoveryPanel(
-                    message = message,
-                    onRetry = {
-                        pageFailed = null
-                        loading = true
-                        webView.reload()
-                    },
-                    onOpenSettings = onOpenSettings,
-                    modifier = Modifier.align(Alignment.Center),
-                )
-            }
         }
-    }
-}
-
-@Composable
-private fun WebShellHeader(onOpenSettings: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().height(56.dp).testTag("gomode-web-header"),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 3.dp,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Go Mode", style = MaterialTheme.typography.titleMedium)
-            IconButton(
-                onClick = onOpenSettings,
-                modifier = Modifier.testTag("gomode-web-open-settings"),
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Settings,
-                    contentDescription = "Settings",
-                    modifier = Modifier.size(24.dp),
-                )
-            }
+        pageFailed?.let { message ->
+            WebRecoveryPanel(
+                message = message,
+                onRetry = {
+                    pageFailed = null
+                    loading = true
+                    webView.reload()
+                },
+                onOpenSettings = onOpenSettings,
+                modifier = Modifier.align(Alignment.Center),
+            )
         }
     }
 }

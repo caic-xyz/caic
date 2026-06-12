@@ -190,6 +190,7 @@ fun GoModeApp(settingsRepository: SettingsRepository) {
                 onToggleMute = { voiceSession.toggleMute() },
                 onSelectDevice = { voiceSession.selectAudioDevice(it) },
                 onClearTranscript = { voiceSession.clearTranscript() },
+                onOpenSettings = { activeNativeScreen = NativeScreen.Settings },
                 modifier = Modifier.fillMaxWidth(),
             )
         }
