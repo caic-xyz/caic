@@ -3,9 +3,55 @@
 package mcp
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+func TestHandlerHandleMCP(t *testing.T) {
+	t.Parallel()
+
+	t.Run("error logs failure", func(t *testing.T) {
+		t.Parallel()
+
+		var logBuf bytes.Buffer
+		oldDefault := slog.Default()
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&logBuf, nil)))
+		t.Cleanup(func() { slog.SetDefault(oldDefault) })
+
+		h := &Handler{}
+		req := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			"/api/caic/v1/mcp",
+			strings.NewReader(`{"jsonrpc":"2.0","method":"server/discover","params":{}}`),
+		)
+		w := httptest.NewRecorder()
+
+		h.HandleMCP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d", w.Code, http.StatusBadRequest)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(bytes.TrimSpace(logBuf.Bytes()), &got); err != nil {
+			t.Fatalf("log JSON: %v\n%s", err, logBuf.String())
+		}
+		if got["msg"] != "mcp request failed" {
+			t.Fatalf("log msg = %v, want mcp request failed", got["msg"])
+		}
+		if got["mcp_method"] != "server/discover" {
+			t.Fatalf("mcp_method = %v, want server/discover", got["mcp_method"])
+		}
+		if got["err"] != "Invalid Request" {
+			t.Fatalf("err = %v, want Invalid Request", got["err"])
+		}
+	})
+}
 
 func TestContentBlockValidate(t *testing.T) {
 	t.Parallel()

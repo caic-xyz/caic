@@ -90,7 +90,11 @@ class ApiClient(
     private val client = OkHttpClient()
     private val json = Json { ignoreUnknownKeys = true }
     private val jsonMediaType = "application/json".toMediaType()
-
+`)
+	if d.cfg.mcpProtocolVersion != "" {
+		b.WriteString("    private val mcpID = java.util.concurrent.atomic.AtomicInteger(0)\n")
+	}
+	b.WriteString(`
     private suspend inline fun <reified T> request(method: String, path: String, body: String? = null, headers: Map<String, String> = emptyMap()): T {
         val url = "$baseURL$path"
         val needsBody = method in listOf("POST", "PUT", "PATCH")
@@ -158,6 +162,7 @@ class ApiClient(
         val response = mcp(
             req = JSONRPCRequest(
                 jsonrpc = "2.0",
+                id = kotlinx.serialization.json.JsonPrimitive(mcpID.incrementAndGet()),
                 method = Method.ServerDiscover,
                 params = mcpMetaParams(),
             ),

@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/caic-xyz/caic/backend/internal/mcp"
 )
 
 type TestSDKEvent struct {
@@ -47,6 +49,50 @@ func TestGenConfigGoTypeToDoc(t *testing.T) {
 				t.Fatalf("goTypeToDoc(%s) = %q, want %q", tc.t, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestDocRegistryGenerateKotlinMCPClient(t *testing.T) {
+	t.Parallel()
+
+	outDir := t.TempDir()
+	docs := &docRegistry{
+		cfg: &genConfig{
+			routes: []routeDef{
+				{
+					Name:       "mcp",
+					Method:     "POST",
+					Path:       "",
+					Req:        reflect.TypeFor[mcp.JSONRPCRequest](),
+					Resp:       reflect.TypeFor[mcp.JSONRPCResponse](),
+					HeadersArg: true,
+				},
+			},
+			kotlinPackage:      "com.example.mcp",
+			mcpProtocolVersion: "2026-07-28",
+			errorModel: clientErrorModel{
+				typeName:      "JSONRPCResponse",
+				ktCodeExpr:    "err.error?.code?.toString() ?: \"UNKNOWN\"",
+				ktMessageExpr: "err.error?.message ?: \"\"",
+				ktDetailsExpr: "null",
+			},
+		},
+	}
+	if err := docs.writeKotlinClient(outDir); err != nil {
+		t.Fatal(err)
+	}
+	content, err := fs.ReadFile(os.DirFS(outDir), "ApiClient.kt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+	for _, want := range []string{
+		"private val mcpID = java.util.concurrent.atomic.AtomicInteger(0)",
+		"id = kotlinx.serialization.json.JsonPrimitive(mcpID.incrementAndGet())",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("ApiClient.kt does not contain %q:\n%s", want, text)
+		}
 	}
 }
 

@@ -717,18 +717,24 @@ type SubscriptionNotificationParams struct {
 func (h *Handler) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		h.writeResponse(w, http.StatusMethodNotAllowed, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcError(InvalidRequestCode, "Method not allowed")})
+		rpcErr := rpcError(InvalidRequestCode, "Method not allowed")
+		logMCPFailure(r, http.StatusMethodNotAllowed, nil, rpcErr, nil)
+		h.writeResponse(w, http.StatusMethodNotAllowed, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcErr})
 		return
 	}
 	var req JSONRPCRequest
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if err := d.Decode(&req); err != nil {
-		h.writeResponse(w, http.StatusBadRequest, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcError(ParseErrorCode, "Parse error")})
+		rpcErr := rpcError(ParseErrorCode, "Parse error")
+		logMCPFailure(r, http.StatusBadRequest, nil, rpcErr, err)
+		h.writeResponse(w, http.StatusBadRequest, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcErr})
 		return
 	}
 	if req.JSONRPC != jsonRPCVersion || req.Method == "" || !validJSONRPCRequestID(req.ID) {
-		h.writeResponse(w, http.StatusBadRequest, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcError(InvalidRequestCode, "Invalid Request")})
+		rpcErr := rpcError(InvalidRequestCode, "Invalid Request")
+		logMCPFailure(r, http.StatusBadRequest, &req, rpcErr, nil)
+		h.writeResponse(w, http.StatusBadRequest, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
 		return
 	}
 	// Transport-layer rejections (bad HTTP method, unparseable body, failed
@@ -736,18 +742,23 @@ func (h *Handler) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	// MCP it reaches dispatch, whose protocol errors use the transport status
 	// mandated by the draft Streamable HTTP binding.
 	if status, rpcErr := validateMCPRequest(r, &req); rpcErr != nil {
+		logMCPFailure(r, status, &req, rpcErr, nil)
 		h.writeResponse(w, status, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
 		return
 	}
 	if req.Method == MethodSubscriptionsListen {
 		if rpcErr := h.handleSubscription(r.Context(), w, req.ID, req.Params); rpcErr != nil {
-			h.writeResponse(w, rpcHTTPStatus(rpcErr), JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
+			status := rpcHTTPStatus(rpcErr)
+			logMCPFailure(r, status, &req, rpcErr, nil)
+			h.writeResponse(w, status, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
 		}
 		return
 	}
 	result, rpcErr := h.dispatch(r.Context(), req.Method, req.Params, r.Header)
 	if rpcErr != nil {
-		h.writeResponse(w, rpcHTTPStatus(rpcErr), JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
+		status := rpcHTTPStatus(rpcErr)
+		logMCPFailure(r, status, &req, rpcErr, nil)
+		h.writeResponse(w, status, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
 		return
 	}
 	h.writeResponse(w, http.StatusOK, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Result: result})
@@ -981,6 +992,32 @@ func mcpSubscriptionID(id json.RawMessage) string {
 
 func mcpSubscriptionMeta(id string) MetaObject {
 	return MetaObject{"io.modelcontextprotocol/subscriptionId": id}
+}
+
+func logMCPFailure(r *http.Request, status int, req *JSONRPCRequest, rpcErr *JSONRPCError, err any) {
+	attrs := []any{
+		"status", status,
+		"http_method", r.Method,
+		"path", r.URL.Path,
+	}
+	if req != nil {
+		if req.Method != "" {
+			attrs = append(attrs, "mcp_method", req.Method)
+		}
+		if len(req.ID) != 0 {
+			attrs = append(attrs, "id", string(req.ID))
+		}
+	}
+	if rpcErr != nil {
+		attrs = append(attrs, "rpc_code", rpcErr.Code)
+		if err == nil {
+			err = rpcErr.Message
+		}
+	}
+	if err != nil {
+		attrs = append(attrs, "err", err)
+	}
+	slog.ErrorContext(r.Context(), "mcp request failed", attrs...)
 }
 
 func writeMCPNotification(w http.ResponseWriter, flusher http.Flusher, msg JSONRPCNotification) error {
