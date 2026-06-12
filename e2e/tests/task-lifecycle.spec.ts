@@ -1,5 +1,5 @@
 // End-to-end tests for the task lifecycle using a fake backend.
-import { test, expect, waitForTaskState, fillContentEditable } from "../helpers";
+import { test, expect, waitForTaskState, fillContentEditable, createTaskAPI } from "../helpers";
 
 test("create task, verify streaming text and result, then purge", async ({ page, api }) => {
   await page.goto("/");
@@ -59,6 +59,35 @@ test("create task, verify streaming text and result, then purge", async ({ page,
   // Now purge the stopped task via API and verify it reaches "purged".
   await api.purgeTask(task!.id);
   await waitForTaskState(api, task!.id, "purged");
+});
+
+test("task detail desktop layout avoids extra gutters and pane-level horizontal scrolling", async ({ page, api }) => {
+  await page.setViewportSize({ width: 950, height: 800 });
+  const id = await createTaskAPI(api, "Fix a desktop overflow regression");
+  await waitForTaskState(api, id, "waiting", 30_000);
+
+  await page.goto(`/task/@${id}`);
+  const messageArea = page.getByTestId("task-message-area");
+  const detailPane = page.getByTestId("detail-pane");
+  const taskList = page.getByTestId("task-list");
+  await expect(messageArea).toBeVisible();
+
+  await expect.poll(async () => messageArea.evaluate((el) => getComputedStyle(el).overflowX)).toBe("hidden");
+  await expect.poll(async () => taskList.evaluate((list) => {
+    const detail = document.querySelector('[data-testid="detail-pane"]');
+    if (!detail) return Number.POSITIVE_INFINITY;
+    return detail.getBoundingClientRect().left - list.getBoundingClientRect().right;
+  })).toBeLessThanOrEqual(8);
+
+  await page.getByTitle("Collapse sidebar").click();
+  const expandButton = page.getByTitle("Expand sidebar");
+  await expect(expandButton).toBeVisible();
+  await expect.poll(async () => expandButton.evaluate((button) => {
+    const detail = document.querySelector('[data-testid="detail-pane"]');
+    if (!detail) return Number.POSITIVE_INFINITY;
+    return detail.getBoundingClientRect().left - button.getBoundingClientRect().right;
+  })).toBeLessThanOrEqual(8);
+  await expect(detailPane).toBeVisible();
 });
 
 test("add-repo dropdown is visible and not clipped by overflow", async ({ page }) => {

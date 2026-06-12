@@ -661,7 +661,7 @@ export default function TaskDetail(props: Props) {
         </Show>
         <StatsIcon stats={statsHistory()} sessions={allCompletedSessions()} />
       </div>
-      <div class={styles.messageArea} ref={messageAreaRef} onScroll={handleScroll}>
+      <div class={styles.messageArea} ref={messageAreaRef} onScroll={handleScroll} data-testid="task-message-area">
         <Index each={items()}>
           {(item) => {
             // Type-narrowing accessors for the MsgItem discriminated union.

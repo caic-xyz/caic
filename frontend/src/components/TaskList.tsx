@@ -217,7 +217,7 @@ export default function TaskList(props: TaskListProps) {
 
   return (
     <>
-      <div class={`${styles.list} ${props.selectedId !== null ? styles.narrow : ""} ${props.sidebarOpen() ? "" : styles.hidden}`}>
+      <div class={`${styles.list} ${props.selectedId !== null ? styles.narrow : ""} ${props.sidebarOpen() ? "" : styles.hidden}`} data-testid="task-list">
         <div class={styles.header}>
           <h2>Tasks</h2>
           <Show when={props.selectedId !== null}>
