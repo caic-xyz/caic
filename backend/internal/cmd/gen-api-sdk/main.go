@@ -271,9 +271,9 @@ func generateMcpSDK() error {
 		routes: []routeDef{
 			{
 				Name:       "mcp",
-				Doc:        "Sends a raw MCP JSON-RPC request. The caller supplies required MCP transport headers.",
+				Doc:        "Sends a raw MCP JSON-RPC request to the client base URL. The caller supplies required MCP transport headers.",
 				Method:     "POST",
-				Path:       "/api/caic/v1/mcp",
+				Path:       "",
 				Category:   "MCP",
 				Req:        reflect.TypeFor[mcp.JSONRPCRequest](),
 				Resp:       reflect.TypeFor[mcp.JSONRPCResponse](),
@@ -300,7 +300,7 @@ func generateMcpSDK() error {
 		documentExtraSeeds: true,
 		kotlinPackage:      "com.fghbuild.mcp.sdk.v1",
 		apiDocTitle:        "MCP API Reference",
-		apiDocIntro:        "JSON-RPC MCP endpoint served at `/api/caic/v1/mcp`. Requests must include MCP transport headers such as `Mcp-Protocol-Version` and `Mcp-Method`; method-specific requests may also require `Mcp-Name` and `Mcp-Param-*` headers.",
+		apiDocIntro:        "JSON-RPC MCP endpoint client. Construct clients with the MCP endpoint URL advertised by the service. Requests must include MCP transport headers such as `Mcp-Protocol-Version` and `Mcp-Method`; method-specific requests may also require `Mcp-Name` and `Mcp-Param-*` headers.",
 		errorDoc:           "MCP errors are JSON-RPC error objects in `JSONRPCResponse.error`. Transport-layer validation failures may use non-2xx HTTP statuses; method-level JSON-RPC errors can still use HTTP 200.",
 		specialTypes: []specialType{
 			{

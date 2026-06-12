@@ -34,7 +34,7 @@ function makeRequester(fetchFn: FetchFn) {
 export function createApiClient(fetchFn: FetchFn = (globalThis as any).fetch.bind(globalThis)) {
   const request = makeRequester(fetchFn);
   return {
-    /** Sends a raw MCP JSON-RPC request. The caller supplies required MCP transport headers. */
-    mcp: (req: JSONRPCRequest, headers: Record<string, string> = {}): Promise<JSONRPCResponse> => request<JSONRPCResponse>("POST", "/api/caic/v1/mcp", req, headers),
+    /** Sends a raw MCP JSON-RPC request to the client base URL. The caller supplies required MCP transport headers. */
+    mcp: (req: JSONRPCRequest, headers: Record<string, string> = {}): Promise<JSONRPCResponse> => request<JSONRPCResponse>("POST", "", req, headers),
   };
 }

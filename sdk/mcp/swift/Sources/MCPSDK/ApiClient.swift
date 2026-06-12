@@ -110,9 +110,9 @@ public final class ApiClient {
     }
 
     // JSON endpoints
-    /// Sends a raw MCP JSON-RPC request. The caller supplies required MCP transport headers.
+    /// Sends a raw MCP JSON-RPC request to the client base URL. The caller supplies required MCP transport headers.
     public func mcp(req: JSONRPCRequest, headers: [String: String] = [:]) async throws -> JSONRPCResponse {
-        try await request("POST", path: "/api/caic/v1/mcp", body: try encoder.encode(req), headers: headers)
+        try await request("POST", path: "", body: try encoder.encode(req), headers: headers)
     }
 
     // SSE endpoints

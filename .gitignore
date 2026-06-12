@@ -4,6 +4,7 @@
 coverage.html
 coverage.out
 node_modules/
+/.gradle/
 /caic
 /dist/
 /emulator*.log

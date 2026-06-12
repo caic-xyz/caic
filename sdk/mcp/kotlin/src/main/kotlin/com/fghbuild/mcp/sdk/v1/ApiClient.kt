@@ -87,8 +87,8 @@ class ApiClient(
     }
 
     // JSON endpoints
-    /** Sends a raw MCP JSON-RPC request. The caller supplies required MCP transport headers. */
-    suspend fun mcp(req: JSONRPCRequest, headers: Map<String, String> = emptyMap()): JSONRPCResponse = request("POST", "/api/caic/v1/mcp", json.encodeToString(req), headers = headers)
+    /** Sends a raw MCP JSON-RPC request to the client base URL. The caller supplies required MCP transport headers. */
+    suspend fun mcp(req: JSONRPCRequest, headers: Map<String, String> = emptyMap()): JSONRPCResponse = request("POST", "", json.encodeToString(req), headers = headers)
 
     // SSE endpoints
 

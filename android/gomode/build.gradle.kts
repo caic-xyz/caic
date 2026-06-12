@@ -78,6 +78,8 @@ detekt {
 dependencies {
     implementation(project(":halo-sdk"))
     implementation(project(":gomode-sdk"))
+    implementation(project(":mcp-sdk"))
+    implementation(project(":voicegateway-sdk"))
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material3)
@@ -93,6 +95,8 @@ dependencies {
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.okhttp)
+    implementation(libs.stream.webrtc)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
