@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.map
 
 enum class ClickType { SINGLE, DOUBLE, LONG }
 
-class RxClick(private val msgCode: Int = 0x0B) {
+class RxClick(private val msgCode: Int = HaloMessageCodes.RX_CLICK) {
 
     /** Attach to [HaloDevice.dataResponse] and emit [ClickType] events. */
     fun attach(dataResponse: Flow<ByteArray>): Flow<ClickType> = dataResponse

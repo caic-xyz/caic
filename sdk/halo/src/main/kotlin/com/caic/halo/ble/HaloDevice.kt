@@ -4,15 +4,12 @@ package com.caic.halo.ble
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGattCharacteristic
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.withTimeoutOrNull
-import java.util.UUID
 
 class HaloDevice(
     val platformDevice: BluetoothDevice,
@@ -38,29 +35,45 @@ class HaloDevice(
     /** Lua print() output and errors — UTF-8 strings (data[0] != 0x01). */
     val stringResponse: Flow<String>
         get() = rawNotifications!!
-            .filter { it.isNotEmpty() && it[0] != 0x01.toByte() }
+            .filter { it.isNotEmpty() && it[0] != HaloProtocol.DATA_PREFIX }
             .map { String(it, Charsets.UTF_8) }
 
     /** Raw data sent by the device via frame.bluetooth.send() — first byte 0x01 stripped. */
     val dataResponse: Flow<ByteArray>
         get() = rawNotifications!!
-            .filter { it.isNotEmpty() && it[0] == 0x01.toByte() }
+            .filter { it.isNotEmpty() && it[0] == HaloProtocol.DATA_PREFIX }
             .map { it.copyOfRange(1, it.size) }
 
     // ---- Control signals (single-byte writes on LUA TX) ----
 
-    /** Break any running Lua script (0x03). Pauses 200ms for the device to settle. */
-    suspend fun sendBreakSignal(): Unit = sendControl(0x03)
+    /** Reboot the device (0x02). */
+    suspend fun sendRebootSignal(settleDelayMs: Long = CONTROL_SETTLE_DELAY_MS): Unit =
+        sendControl(HaloProtocol.CONTROL_REBOOT, settleDelayMs)
 
-    /** Reset Lua VM, run main.lua if present (0x04). Pauses 200ms for the device to settle. */
-    suspend fun sendResetSignal(): Unit = sendControl(0x04)
+    /** Break any running Lua script (0x03). */
+    suspend fun sendBreakSignal(settleDelayMs: Long = CONTROL_SETTLE_DELAY_MS): Unit =
+        sendControl(HaloProtocol.CONTROL_BREAK, settleDelayMs)
 
-    /** Remove main.lua file (Halo-only, 0x05). Pauses 200ms for the device to settle. */
-    suspend fun sendRemoveSignal(): Unit = sendControl(0x05)
+    /** Reset Lua VM, run main.lua if present (0x04). */
+    suspend fun sendResetSignal(settleDelayMs: Long = CONTROL_SETTLE_DELAY_MS): Unit =
+        sendControl(HaloProtocol.CONTROL_RESET, settleDelayMs)
 
-    private suspend fun sendControl(byte: Int) {
+    /** Remove main.lua file (Halo-only, 0x05). */
+    suspend fun sendRemoveSignal(settleDelayMs: Long = CONTROL_SETTLE_DELAY_MS): Unit =
+        sendControl(HaloProtocol.CONTROL_REMOVE_MAIN, settleDelayMs)
+
+    /** Exit Lua runtime completely (0x06). */
+    suspend fun sendExitLuaSignal(settleDelayMs: Long = CONTROL_SETTLE_DELAY_MS): Unit =
+        sendControl(HaloProtocol.CONTROL_EXIT_LUA, settleDelayMs)
+
+    /** Remove all files and folders except device settings (0x07). */
+    suspend fun sendRemoveAllFilesSignal(settleDelayMs: Long = CONTROL_SETTLE_DELAY_MS): Unit =
+        sendControl(HaloProtocol.CONTROL_REMOVE_ALL_FILES, settleDelayMs)
+
+    private suspend fun sendControl(byte: Byte, settleDelayMs: Long) {
         val tx = txChar ?: throw HaloException("TX characteristic not available")
-        sendRaw(RawWrite(tx, byteArrayOf(byte.toByte()), writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
+        sendRaw(RawWrite(tx, byteArrayOf(byte), writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
+        if (settleDelayMs > 0) delay(settleDelayMs)
     }
 
     // ---- Lua REPL ----
@@ -117,7 +130,7 @@ class HaloDevice(
     ) {
         val tx = txChar ?: throw HaloException("TX characteristic not available")
         val packet = ByteArray(1 + data.size)
-        packet[0] = 0x01.toByte()
+        packet[0] = HaloProtocol.DATA_PREFIX
         data.copyInto(packet, 1)
 
         if (packet.size > maxDataLen + 1) {
@@ -166,9 +179,8 @@ class HaloDevice(
     // Max total payload: 65535 bytes.
 
     companion object {
-        private const val MAX_MESSAGE_PAYLOAD = 65535
-        private const val FIRST_HEADER_SIZE = 4 // 0x01 + msgCode + 2-byte length
-        private const val SUBSEQ_HEADER_SIZE = 2 // 0x01 + msgCode
+        private const val CONTROL_SETTLE_DELAY_MS = 200L
+        private const val MESSAGE_ACK_TIMEOUT_MS = 5000L
     }
 
     /**
@@ -178,51 +190,61 @@ class HaloDevice(
      */
     suspend fun sendMessage(msgCode: Int, payload: ByteArray) {
         require(msgCode in 0..255) { "Message code must be 0–255, got $msgCode" }
-        require(payload.size <= MAX_MESSAGE_PAYLOAD) {
-            "Payload size ${payload.size} exceeds maximum $MAX_MESSAGE_PAYLOAD"
+        require(payload.size <= HaloProtocol.MAX_MESSAGE_PAYLOAD) {
+            "Payload size ${payload.size} exceeds maximum ${HaloProtocol.MAX_MESSAGE_PAYLOAD}"
         }
 
         val tx = txChar ?: throw HaloException("TX characteristic not available")
-        val firstChunkMax = maxDataLen - FIRST_HEADER_SIZE
-        val chunkMax = maxDataLen - SUBSEQ_HEADER_SIZE
+        val firstChunkMax = maxDataLen - HaloProtocol.FIRST_MESSAGE_HEADER_SIZE
+        val chunkMax = maxDataLen - HaloProtocol.SUBSEQUENT_MESSAGE_HEADER_SIZE
+        if (firstChunkMax < 0 || chunkMax < 0) {
+            throw HaloException("Negotiated data length $maxDataLen is too small for typed messages")
+        }
 
         var sent = 0
         var first = true
 
-        while (sent < payload.size) {
+        do {
             val remaining = payload.size - sent
             val chunkSize: Int
             val headerSize: Int
 
             if (first) {
-                headerSize = FIRST_HEADER_SIZE
+                headerSize = HaloProtocol.FIRST_MESSAGE_HEADER_SIZE
                 chunkSize = minOf(firstChunkMax, remaining)
                 first = false
             } else {
-                headerSize = SUBSEQ_HEADER_SIZE
+                headerSize = HaloProtocol.SUBSEQUENT_MESSAGE_HEADER_SIZE
                 chunkSize = minOf(chunkMax, remaining)
             }
 
             val packet = ByteArray(headerSize + chunkSize)
-            packet[0] = 0x01.toByte()
+            packet[0] = HaloProtocol.DATA_PREFIX
             packet[1] = msgCode.toByte()
 
-            if (headerSize == FIRST_HEADER_SIZE) {
+            if (headerSize == HaloProtocol.FIRST_MESSAGE_HEADER_SIZE) {
                 packet[2] = (payload.size shr 8).toByte()
                 packet[3] = (payload.size and 0xFF).toByte()
             }
 
             payload.copyInto(packet, headerSize, sent, sent + chunkSize)
 
-            // Each chunk waits for an application-level ACK from the device
             sendRaw(RawWrite(tx, packet, writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT))
-
-            // Each chunk waits for an application-level ACK from the device
-            withTimeoutOrNull(5000) {
-                dataResponse.first()
-            } ?: throw HaloException("Timeout waiting for message ACK (msgCode=0x${msgCode.toString(16)})")
+            awaitMessageAck(msgCode)
 
             sent += chunkSize
+        } while (sent < payload.size)
+    }
+
+    private suspend fun awaitMessageAck(msgCode: Int) {
+        val ack = withTimeoutOrNull(MESSAGE_ACK_TIMEOUT_MS) {
+            dataResponse.first {
+                it.contentEquals(HaloProtocol.DATA_ACK_SUCCESS) || it.contentEquals(HaloProtocol.DATA_ACK_FAILURE)
+            }
+        } ?: throw HaloException("Timeout waiting for message ACK (msgCode=0x${msgCode.toString(16)})")
+
+        if (ack.contentEquals(HaloProtocol.DATA_ACK_FAILURE)) {
+            throw HaloException("Device rejected message chunk (msgCode=0x${msgCode.toString(16)})")
         }
     }
 
@@ -235,8 +257,9 @@ class HaloDevice(
     suspend fun uploadFile(path: String, contents: String) {
         val escaped = contents
             .replace("\\", "\\\\")
-            .replace("\n", "\\n")
             .replace("\r\n", "\\n")
+            .replace("\n", "\\n")
+            .replace("\r", "\\n")
             .replace("\t", "\\t")
             .replace("'", "\\'")
             .replace("\"", "\\\"")

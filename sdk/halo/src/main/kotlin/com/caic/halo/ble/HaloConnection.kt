@@ -47,9 +47,11 @@ open class HaloConnection(private val context: Context) {
         val scanner = adapter.bluetoothLeScanner
             ?: throw HaloException("BLE scanner not available")
 
-        val filter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid(HaloServiceDiscovery.LUA_SERVICE))
-            .build()
+        val filters = listOf(
+            ScanFilter.Builder().setServiceUuid(ParcelUuid(HaloServiceDiscovery.LUA_SERVICE)).build(),
+            ScanFilter.Builder().setServiceUuid(ParcelUuid(HaloServiceDiscovery.OTA_SERVICE)).build(),
+            ScanFilter.Builder().setServiceUuid(ParcelUuid(HaloServiceDiscovery.LEGACY_DFU_SERVICE)).build(),
+        )
 
         val settings = ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -68,7 +70,7 @@ open class HaloConnection(private val context: Context) {
             }
         }
 
-        scanner.startScan(listOf(filter), settings, callback)
+        scanner.startScan(filters, settings, callback)
         awaitClose { try { scanner.stopScan(callback) } catch (_: Exception) { } }
     }
 
@@ -92,6 +94,36 @@ open class HaloConnection(private val context: Context) {
                                     )
                                 }
                             }
+                            currentGattCallback?.onConnectionStateChange(g, status, newState)
+                        }
+
+                        override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+                            currentGattCallback?.onMtuChanged(g, mtu, status)
+                        }
+
+                        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+                            currentGattCallback?.onServicesDiscovered(g, status)
+                        }
+
+                        override fun onCharacteristicWrite(
+                            g: BluetoothGatt,
+                            c: BluetoothGattCharacteristic,
+                            status: Int,
+                        ) {
+                            currentGattCallback?.onCharacteristicWrite(g, c, status)
+                        }
+
+                        override fun onCharacteristicChanged(
+                            g: BluetoothGatt,
+                            c: BluetoothGattCharacteristic,
+                            value: ByteArray,
+                        ) {
+                            currentGattCallback?.onCharacteristicChanged(g, c, value)
+                        }
+
+                        @Suppress("DEPRECATION")
+                        override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic) {
+                            currentGattCallback?.onCharacteristicChanged(g, c, c.value)
                         }
                     },
                     BluetoothDevice.TRANSPORT_LE,
@@ -106,6 +138,26 @@ open class HaloConnection(private val context: Context) {
         negotiatedMtu = mtu
     }
 
+    private suspend fun requestMtu(gatt: BluetoothGatt, timeoutMs: Long) {
+        withTimeoutOrNull(timeoutMs) {
+            suspendCancellableCoroutine<Unit> { cont ->
+                val previousCallback = currentGattCallback
+                currentGattCallback = object : BluetoothGattCallback() {
+                    override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+                        currentGattCallback = previousCallback
+                        if (status == BluetoothGatt.GATT_SUCCESS) onMtuNegotiated(mtu)
+                        if (cont.isActive) cont.resume(Unit)
+                    }
+                }
+                cont.invokeOnCancellation { currentGattCallback = previousCallback }
+                if (!gatt.requestMtu(517)) {
+                    currentGattCallback = previousCallback
+                    if (cont.isActive) cont.resume(Unit)
+                }
+            }
+        } ?: throw HaloException("MTU negotiation timed out after ${timeoutMs}ms")
+    }
+
     @Suppress("TooGenericExceptionCaught")
     open suspend fun connect(scanned: HaloScannedDevice, timeoutMs: Long = 15_000): HaloDevice {
         val device = scanned.device
@@ -115,21 +167,7 @@ open class HaloConnection(private val context: Context) {
             gatt.device.createBond()
             try { gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH) } catch (_: SecurityException) { }
 
-            // Request MTU 517; store the negotiated value when the callback fires.
-            currentGattCallback = object : BluetoothGattCallback() {
-                override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
-                    if (status == BluetoothGatt.GATT_SUCCESS) onMtuNegotiated(mtu)
-                }
-            }
-            gatt.requestMtu(517)
-
-            withTimeoutOrNull(timeoutMs) {
-                suspendCancellableCoroutine<Unit> { cont ->
-                    val success = gatt.discoverServices()
-                    if (!success) cont.resumeWithException(HaloException("Service discovery initiation failed"))
-                }
-            } ?: throw HaloException("Service discovery timed out")
-
+            requestMtu(gatt, timeoutMs)
             enableServices(device, gatt, timeoutMs)
         } catch (e: HaloException) {
             try { gatt.disconnect() } catch (_: Exception) { }
@@ -228,7 +266,13 @@ open class HaloConnection(private val context: Context) {
                         if (newState == BluetoothProfile.STATE_DISCONNECTED) { /* errors surface through Flow */ }
                     }
                 }
-                if (gatt.services.isEmpty()) gatt.discoverServices() else cont.resume(gatt.services)
+                if (gatt.services.isEmpty()) {
+                    if (!gatt.discoverServices()) {
+                        cont.resumeWithException(HaloException("Service discovery initiation failed"))
+                    }
+                } else {
+                    cont.resume(gatt.services)
+                }
             }
         } ?: throw HaloException("Service discovery timed out after ${timeoutMs}ms")
 

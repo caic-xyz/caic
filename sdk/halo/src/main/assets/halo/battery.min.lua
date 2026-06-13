@@ -1,0 +1,1 @@
+local _M={}local a=0x0c;function _M.send_batt_if_elapsed(b,c)local d=frame.time.utc()if b==0 or d-b>c then pcall(frame.bluetooth.send,string.char(a)..string.char(math.floor(frame.battery_level())))return d else return b end end;return _M

@@ -2,8 +2,13 @@
 package com.caic.halo.msg
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -84,6 +89,27 @@ class RxMessageTest {
         assertTrue(flow.toList().isEmpty())
     }
 
+    @Test
+    fun `tap groups taps inside threshold`() = runTest {
+        val packets = Channel<ByteArray>(Channel.UNLIMITED)
+        var now = 0L
+        val parser = RxTap(thresholdMs = 100, nowMs = { now })
+        val values = mutableListOf<Int>()
+        val job = backgroundScope.launch {
+            parser.attach(packets.receiveAsFlow()).toList(values)
+        }
+
+        packets.send(byteArrayOf(0x09))
+        runCurrent()
+        now = 50L
+        packets.send(byteArrayOf(0x09))
+        advanceTimeBy(100)
+        runCurrent()
+
+        assertEquals(listOf(2), values)
+        job.cancel()
+    }
+
     // ---- RxPhoto ----
 
     @Test
@@ -98,6 +124,33 @@ class RxMessageTest {
         assertArrayEquals(byteArrayOf(0x01, 0x02, 0x03, 0x04), result)
     }
 
+    // ---- RxMeteringData ----
+
+    @Test
+    fun `metering data parses unsigned channels`() = runTest {
+        val parser = RxMeteringData()
+        val result = parser.attach(flowOf(byteArrayOf(0x12, 1, 2, 3, 4, 5, 0xFF.toByte()))).toList().single()
+        assertEquals(MeteringData(1, 2, 3, 4, 5, 255), result)
+    }
+
+    // ---- RxAutoExpResult ----
+
+    @Test
+    fun `auto exposure result parses 16 float values`() = runTest {
+        val buf = ByteBuffer.allocate(65).order(ByteOrder.LITTLE_ENDIAN)
+        buf.put(0x11.toByte())
+        repeat(16) { buf.putFloat((it + 1).toFloat()) }
+
+        val parser = RxAutoExpResult()
+        val result = parser.attach(flowOf(buf.array())).toList().single()
+
+        assertEquals(1.0f, result.error)
+        assertEquals(6.0f, result.blueGain)
+        assertEquals(7.0f, result.brightness.centerWeightedAverage)
+        assertEquals(12.0f, result.brightness.matrix.average)
+        assertEquals(16.0f, result.brightness.spot.average)
+    }
+
     // ---- RxAudio ----
 
     @Test
@@ -109,5 +162,14 @@ class RxMessageTest {
         ))
         val result = flow.toList().single()
         assertArrayEquals(byteArrayOf(0x10, 0x20, 0x30), result)
+    }
+
+    @Test
+    fun `audio creates wav bytes`() {
+        val wav = RxAudio.toWavBytes(byteArrayOf(0x01, 0x02), sampleRate = 8000, bitsPerSample = 16, channels = 1)
+        assertEquals('R'.code.toByte(), wav[0])
+        assertEquals('W'.code.toByte(), wav[8])
+        assertEquals('d'.code.toByte(), wav[36])
+        assertEquals(46, wav.size)
     }
 }

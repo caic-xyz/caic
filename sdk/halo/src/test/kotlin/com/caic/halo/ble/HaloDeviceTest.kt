@@ -81,7 +81,8 @@ class HaloDeviceTest {
 
     private fun stringPacket(text: String) = text.toByteArray(Charsets.UTF_8)
     private fun dataPacket(vararg bytes: Byte) = byteArrayOf(0x01.toByte()) + bytes
-    private val dataAck = dataPacket(0x00)
+    private val dataAck = dataPacket(0x00, 0x00)
+    private val dataFailureAck = dataPacket(0x00, 0x01)
 
     // ---- writeSink variants that also send a response into the channel ----
 
@@ -95,7 +96,7 @@ class HaloDeviceTest {
         notificationChannel.send(byteArrayOf(0x01.toByte()) + bytes)
     }
 
-    private fun sinkWithDataAck(): suspend (HaloDevice.RawWrite) -> Unit = sinkWithData(byteArrayOf(0x00))
+    private fun sinkWithDataAck(): suspend (HaloDevice.RawWrite) -> Unit = sinkWithData(byteArrayOf(0x00, 0x00))
 
     // =========================================================================
     // Control signals
@@ -117,6 +118,16 @@ class HaloDeviceTest {
     fun `sendRemoveSignal writes 0x05`() = runTest {
         device.sendRemoveSignal()
         assertEquals(0x05.toByte(), lastWrite.get().data[0])
+    }
+
+    @Test
+    fun `all control signals are available`() = runTest {
+        device.sendRebootSignal(settleDelayMs = 0)
+        assertEquals(0x02.toByte(), lastWrite.get().data[0])
+        device.sendExitLuaSignal(settleDelayMs = 0)
+        assertEquals(0x06.toByte(), lastWrite.get().data[0])
+        device.sendRemoveAllFilesSignal(settleDelayMs = 0)
+        assertEquals(0x07.toByte(), lastWrite.get().data[0])
     }
 
     // =========================================================================
@@ -218,6 +229,24 @@ class HaloDeviceTest {
     }
 
     @Test
+    fun `sendMessage sends zero-length payload header`() = runTest {
+        device.writeSink = sinkWithDataAck()
+        device.sendMessage(msgCode = 0x10, payload = ByteArray(0))
+        assertArrayEquals(byteArrayOf(0x01, 0x10, 0x00, 0x00), lastWrite.get().data)
+    }
+
+    @Test
+    fun `sendMessage rejects failed ack`() = runTest {
+        device.writeSink = { w -> lastWrite.set(w); notificationChannel.send(dataFailureAck) }
+        try {
+            device.sendMessage(msgCode = 0x10, payload = byteArrayOf(1))
+            fail("Expected HaloException")
+        } catch (e: HaloException) {
+            assertTrue(e.message!!.contains("rejected"))
+        }
+    }
+
+    @Test
     fun `sendMessage rejects bad msgCode`() = runTest {
         try { device.sendMessage(256, byteArrayOf()); fail() }
         catch (e: IllegalArgumentException) { assertTrue(e.message!!.contains("0–255")) }
@@ -267,7 +296,7 @@ class HaloDeviceTest {
     fun `uploadFile escapes special chars`() = runTest {
         val w = mutableListOf<String>()
         device.writeSink = { r -> w.add(String(r.data)); notificationChannel.send(stringPacket("2")) }
-        device.uploadFile("t.lua", "a\\b\nc'd\"e")
+        device.uploadFile("t.lua", "a\\b\r\nc'd\"e")
         assertEquals("f=frame.file.open(\"t.lua\",\"w\");print(2)", w[0])
         val cmd = w[1]
         assertTrue(cmd.contains("\\\\"))

@@ -167,4 +167,16 @@ class HaloServiceDiscoveryTest {
             HaloServiceDiscovery.BATTERY_SERVICE,
         )
     }
+
+    @Test
+    fun `OTA service and SMP characteristic UUIDs are correct`() {
+        assertEquals(
+            UUID.fromString("8D53DC1D-1DB7-4CD3-868B-8A527460AA84"),
+            HaloServiceDiscovery.OTA_SERVICE,
+        )
+        assertEquals(
+            UUID.fromString("DA2E7828-FBCE-4E01-AE9E-261174997C48"),
+            HaloServiceDiscovery.SMP_CHAR,
+        )
+    }
 }

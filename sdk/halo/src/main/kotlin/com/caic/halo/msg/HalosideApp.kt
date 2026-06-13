@@ -7,7 +7,7 @@
 //   4. Start the haloside event loop
 //   5. Exchange messages asynchronously
 //
-// Lua library assets are expected to be bundled as app resources (assets/ folder).
+// Lua library assets are bundled in this SDK under assets/halo/.
 package com.caic.halo.msg
 
 import android.content.Context
@@ -29,6 +29,10 @@ class HalosideApp(
             "camera.min.lua",
             "audio.min.lua",
             "imu.min.lua",
+            "battery.min.lua",
+            "code.min.lua",
+            "image_sprite_block.min.lua",
+            "text_sprite_block.min.lua",
         )
     }
 

@@ -4,19 +4,19 @@ package com.caic.halo.ble
 
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattService
-import java.util.UUID
-
 object HaloServiceDiscovery {
 
-    // ---- UUIDs ----
+    // ---- UUID aliases ----
 
-    val LUA_SERVICE: UUID = UUID.fromString("7A230001-5475-A6A4-654C-8431F6AD49C4")
-    val LUA_TX_CHAR: UUID = UUID.fromString("7A230002-5475-A6A4-654C-8431F6AD49C4")
-    val LUA_RX_CHAR: UUID = UUID.fromString("7A230003-5475-A6A4-654C-8431F6AD49C4")
-    val AUDIO_TX_CHAR: UUID = UUID.fromString("7A230005-5475-A6A4-654C-8431F6AD49C4")
-    val DFU_SERVICE: UUID = UUID.fromString("0000FE59-0000-1000-8000-00805F9B34FB")
-    val BATTERY_SERVICE: UUID = UUID.fromString("0000180F-0000-1000-8000-00805F9B34FB")
-    val BATTERY_LEVEL_CHAR: UUID = UUID.fromString("00002A19-0000-1000-8000-00805F9B34FB")
+    val LUA_SERVICE = HaloProtocol.LUA_SERVICE
+    val LUA_TX_CHAR = HaloProtocol.LUA_TX_CHAR
+    val LUA_RX_CHAR = HaloProtocol.LUA_RX_CHAR
+    val AUDIO_TX_CHAR = HaloProtocol.AUDIO_TX_CHAR
+    val OTA_SERVICE = HaloProtocol.OTA_SERVICE
+    val SMP_CHAR = HaloProtocol.SMP_CHAR
+    val LEGACY_DFU_SERVICE = HaloProtocol.LEGACY_DFU_SERVICE
+    val BATTERY_SERVICE = HaloProtocol.BATTERY_SERVICE
+    val BATTERY_LEVEL_CHAR = HaloProtocol.BATTERY_LEVEL_CHAR
 
     // ---- Parsing ----
 
@@ -64,9 +64,10 @@ object HaloServiceDiscovery {
      */
     fun payloadLimits(mtu: Int, type: HaloDeviceType): PayloadLimits {
         require(mtu >= 23) { "MTU must be at least 23, got $mtu" }
-        val maxString = mtu - 3
-        val maxData = if (type == HaloDeviceType.HALO) mtu - 6 else mtu - 4
-        return PayloadLimits(maxString, maxData)
+        return PayloadLimits(
+            maxStringLen = HaloProtocol.maxStringLength(mtu),
+            maxDataLen = HaloProtocol.maxDataLength(mtu, type),
+        )
     }
 
     data class PayloadLimits(val maxStringLen: Int, val maxDataLen: Int)

@@ -9,8 +9,8 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
 class RxPhoto(
-    private val nonFinalFlag: Int = 0x07,
-    private val finalFlag: Int = 0x08,
+    private val nonFinalFlag: Int = HaloMessageCodes.RX_PHOTO_NON_FINAL,
+    private val finalFlag: Int = HaloMessageCodes.RX_PHOTO_FINAL,
 ) {
     fun attach(dataResponse: Flow<ByteArray>): Flow<ByteArray> = callbackFlow {
         val buffer = mutableListOf<Byte>()

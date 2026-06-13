@@ -62,6 +62,53 @@ class TxMessageTest {
         assertEquals(0x42.toByte(), TxCode(0x42.toByte()).pack()[0])
     }
 
+    // ---- Camera settings ----
+
+    @Test
+    fun `capture settings pack format`() {
+        val packed = TxCaptureSettings(resolution = 512, qualityIndex = 4, pan = 0, raw = true).pack()
+        assertArrayEquals(byteArrayOf(0x04, 0x01, 0x00, 0x00, 0x8C.toByte(), 0x01), packed)
+    }
+
+    @Test
+    fun `auto exposure settings pack format`() {
+        val packed = TxAutoExpSettings(
+            meteringIndex = 1,
+            exposure = 1.0,
+            exposureSpeed = 0.0,
+            shutterLimit = 0x1234,
+            analogGainLimit = 16,
+            whiteBalanceSpeed = 0.5,
+            rgbGainLimit = 0x0123,
+        ).pack()
+        assertArrayEquals(byteArrayOf(0x01, 0xFF.toByte(), 0x00, 0x12, 0x34, 0x10, 0x80.toByte(), 0x01, 0x23), packed)
+    }
+
+    @Test
+    fun `manual exposure settings pack format`() {
+        val packed = TxManualExpSettings(
+            manualShutter = 0x1234,
+            manualAnalogGain = 2,
+            manualRedGain = 0x0123,
+            manualGreenGain = 0x0204,
+            manualBlueGain = 0x03FF,
+        ).pack()
+        assertArrayEquals(byteArrayOf(0x12, 0x34, 0x02, 0x01, 0x23, 0x02, 0x04, 0x03, 0xFF.toByte()), packed)
+    }
+
+    @Test
+    fun `text page measures rasterizes and packs header`() {
+        val layout = RectangularTextLayout(width = 128, height = 64, fontSizePx = 16)
+        val page = TxTextPage(layout, "Hello Halo").rasterizeNextPage()!!
+
+        assertEquals(listOf("Hello Halo"), page.lineTexts)
+        assertEquals(1, page.rasterizedSprites.size)
+        val packed = page.pack()
+        assertEquals(10, packed.size)
+        assertEquals(0xFF, packed[0].toInt() and 0xFF)
+        assertEquals(1, packed[5].toInt() and 0xFF)
+    }
+
     // ---- TxSprite ----
 
     @Test

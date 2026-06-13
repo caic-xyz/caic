@@ -15,7 +15,7 @@ data class IMUData(
     val accelX: Float, val accelY: Float, val accelZ: Float,
 )
 
-class RxIMU(private val msgCode: Int = 0x0A) {
+class RxIMU(private val msgCode: Int = HaloMessageCodes.RX_IMU) {
 
     /** Attach to [HaloDevice.dataResponse] and emit [IMUData] values. */
     fun attach(dataResponse: Flow<ByteArray>): Flow<IMUData> = dataResponse
