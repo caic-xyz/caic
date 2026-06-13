@@ -103,6 +103,7 @@ type Registry interface {
 
 // RawToolResult is the transport-neutral output from a tool handler.
 type RawToolResult struct {
+	Meta       MetaObject
 	Structured any
 	IsError    bool
 }
@@ -818,6 +819,7 @@ func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMe
 			return nil, registryError(err)
 		}
 		t := ToolCallResult{
+			Meta:       res.Meta,
 			ResultType: ResultTypeComplete,
 			Content:    []ContentBlock{{Type: ContentTypeText, Text: toolResultText(res.Structured)}},
 			IsError:    res.IsError,
@@ -1423,13 +1425,14 @@ type ToolSpec struct {
 // to match the advertised outputSchema — IsError signals when it diverges. Treat
 // outputSchema as a hint for success results, not a wire contract.
 type ToolResult[T any] struct {
+	Meta       MetaObject
 	Structured any
 	IsError    bool
 	_          [0]T
 }
 
 func (r ToolResult[T]) toRawToolResult() RawToolResult {
-	return RawToolResult{Structured: r.Structured, IsError: r.IsError}
+	return RawToolResult{Meta: r.Meta, Structured: r.Structured, IsError: r.IsError}
 }
 
 func toolResultText(v any) string {
@@ -1532,6 +1535,11 @@ func TextToolResult(message string) ToolResult[TextOutput] {
 // ToolError returns an MCP tool error result.
 func ToolError[T any](message string) ToolResult[T] {
 	return ToolResult[T]{Structured: ErrorOutput{Error: message}, IsError: true}
+}
+
+// ToolAuthError returns an MCP tool error result with a WWW-Authenticate hint.
+func ToolAuthError[T any](message, challenge string) ToolResult[T] {
+	return ToolResult[T]{Meta: MetaObject{"mcp/www_authenticate": []string{challenge}}, Structured: ErrorOutput{Error: message}, IsError: true}
 }
 
 // TextOutput is the standard human-readable successful tool payload.

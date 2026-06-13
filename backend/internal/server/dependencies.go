@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/maruel/genai"
 
@@ -29,23 +30,25 @@ import (
 // (internal/app) owns the lifetime of the long-lived automation services
 // (Bot, CIService, and their adapters); the router only routes requests to them.
 type Dependencies struct {
-	Repos          *repos.Service
-	Tailscale      bool
-	Preferences    *preferences.Store
-	AuthStore      *auth.Store
-	SessionSecret  []byte
-	GitHubOAuth    *auth.ProviderConfig
-	GitLabOAuth    *auth.ProviderConfig
-	HostState      *auth.HostState
-	UsageFetchers  []usage.ProviderFetcher
-	VoiceBridge    *voicertc.Bridge
-	VoiceGateway   VoiceGatewayConfig
-	Forge          *forgemanager.Manager
-	CICache        *forgecache.Cache
-	ProcessBackend runtime.Backend
-	TaskManager    *tasks.Manager
-	Provider       genai.Provider
-	IPGeoChecker   *ipgeo.Checker
+	Repos                 *repos.Service
+	Tailscale             bool
+	Preferences           *preferences.Store
+	AuthStore             *auth.Store
+	SessionSecret         []byte
+	MCPOAuthPrivateKeyPEM []byte
+	MCPOAuthKeyID         string
+	GitHubOAuth           *auth.ProviderConfig
+	GitLabOAuth           *auth.ProviderConfig
+	HostState             *auth.HostState
+	UsageFetchers         []usage.ProviderFetcher
+	VoiceBridge           *voicertc.Bridge
+	VoiceGateway          VoiceGatewayConfig
+	Forge                 *forgemanager.Manager
+	CICache               *forgecache.Cache
+	ProcessBackend        runtime.Backend
+	TaskManager           *tasks.Manager
+	Provider              genai.Provider
+	IPGeoChecker          *ipgeo.Checker
 
 	// App-owned automation services, routed to by HTTP handlers and webhooks.
 	Bot        *bot.Bot
@@ -105,17 +108,20 @@ func New(ctx context.Context, d Dependencies) (*Router, error) { //nolint:gocrit
 			gitlabOAuth:        d.GitLabOAuth,
 			voiceGateway:       voiceMetadata,
 		},
-		taskHTTPHandlers: &taskHTTPHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, ciService: d.CIService, authStore: d.AuthStore, warnings: d.Warnings, service: taskService},
-		usageHandlers:    &usageHandlers{taskMgr: d.TaskManager, fetchers: d.UsageFetchers},
-		voiceHandlers:    voice,
-		webFetchHandlers: webFetch,
-		authStore:        d.AuthStore,
-		sessionSecret:    d.SessionSecret,
-		hostState:        d.HostState,
-		pprof:            d.Pprof,
-		ipgeoChecker:     d.IPGeoChecker,
+		taskHTTPHandlers:      &taskHTTPHandlers{taskMgr: d.TaskManager, repos: d.Repos, forge: d.Forge, ciService: d.CIService, authStore: d.AuthStore, warnings: d.Warnings, service: taskService},
+		usageHandlers:         &usageHandlers{taskMgr: d.TaskManager, fetchers: d.UsageFetchers},
+		voiceHandlers:         voice,
+		webFetchHandlers:      webFetch,
+		mcpOAuthPrivateKeyPEM: d.MCPOAuthPrivateKeyPEM,
+		mcpOAuthKeyID:         d.MCPOAuthKeyID,
+		mcpRateLimiter:        newRateLimiter(120, time.Minute),
+		authStore:             d.AuthStore,
+		sessionSecret:         d.SessionSecret,
+		hostState:             d.HostState,
+		pprof:                 d.Pprof,
+		ipgeoChecker:          d.IPGeoChecker,
 	}
-	mcpRegistry := &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, webFetch: webFetch}
+	mcpRegistry := &caicToolRegistry{serverConfig: s.serverConfigHandlers, tasks: taskService, ci: s.ciHandlers, usage: s.usageHandlers, webFetch: webFetch, audit: newMCPAuditStore()}
 	s.mcpHandlers = &mcp.Handler{
 		Registry:   mcpRegistry,
 		ServerInfo: mcp.Implementation{Name: "caic", Title: "caic", Version: autoupdate.Version},

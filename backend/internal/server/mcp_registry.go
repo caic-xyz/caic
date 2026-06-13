@@ -73,6 +73,7 @@ type caicToolRegistry struct {
 	ci           *ciHandlers
 	usage        *usageHandlers
 	webFetch     *webFetchHandlers
+	audit        *mcpAuditStore
 }
 
 func (c *caicToolRegistry) Instructions(ctx context.Context) (string, error) {
@@ -99,9 +100,23 @@ func (c *caicToolRegistry) CallTool(ctx context.Context, name string, argsJSON j
 		return mcp.RawToolResult{}, err
 	}
 	for _, s := range specs {
-		if s.Name == name {
-			return s.Handler(ctx, argsJSON)
+		if s.Name != name {
+			continue
 		}
+		if authResult, ok := c.authorizeTool(ctx, name); !ok {
+			c.audit.record(ctx, &mcpAuditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: authResult})
+			return mcp.RawToolResult{Meta: mcp.MetaObject{"mcp/www_authenticate": []string{mcpScopeChallenge(requiredScopeForTool(name))}}, Structured: mcp.ErrorOutput{Error: authResult}, IsError: true}, nil
+		}
+		res, err := s.Handler(ctx, argsJSON)
+		status := "ok"
+		if err != nil {
+			status = "error"
+		} else if res.IsError {
+			status = "tool_error"
+		}
+		res.Structured = redactForJSON(res.Structured)
+		c.audit.record(ctx, &mcpAuditEvent{Operation: "tools/call", Name: name, Args: auditArgsSummary(argsJSON), Decision: "allow", Status: status})
+		return res, err
 	}
 	return mcp.RawToolResult{}, mcp.ErrInvalidParams("unknown tool: %s", name)
 }
@@ -127,15 +142,22 @@ func (c *caicToolRegistry) ListResources(ctx context.Context) mcp.ResourcesListR
 }
 
 func (c *caicToolRegistry) ReadResource(ctx context.Context, uri string) (mcp.ResourcesReadResult, error) {
+	if authResult, ok := authorizeResource(ctx, uri); !ok {
+		c.audit.record(ctx, &mcpAuditEvent{Operation: "resources/read", Name: uri, Decision: authResult})
+		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("%s", authResult)
+	}
 	taskList, repos := c.currentTasksAndRepos(ctx)
 	switch {
 	case uri == "caic://repos":
-		return mcp.ResourceJSON(uri, repos)
+		c.audit.record(ctx, &mcpAuditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+		return redactedResourceJSON(uri, repos)
 	case uri == "caic://tasks":
-		return mcp.ResourceJSON(uri, taskList)
+		c.audit.record(ctx, &mcpAuditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+		return redactedResourceJSON(uri, taskList)
 	case uri == "caic://usage":
 		usage := c.usage.buildResp(ctx)
-		return mcp.ResourceJSON(uri, usage)
+		c.audit.record(ctx, &mcpAuditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+		return redactedResourceJSON(uri, usage)
 	case strings.HasPrefix(uri, "caic://repos/"):
 		name, err := url.PathUnescape(strings.TrimPrefix(uri, "caic://repos/"))
 		if err != nil {
@@ -143,7 +165,8 @@ func (c *caicToolRegistry) ReadResource(ctx context.Context, uri string) (mcp.Re
 		}
 		for i := range repos {
 			if repos[i].Path == name {
-				return mcp.ResourceJSON(uri, repos[i])
+				c.audit.record(ctx, &mcpAuditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+				return redactedResourceJSON(uri, repos[i])
 			}
 		}
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("repo not found: %s", name)
@@ -151,7 +174,8 @@ func (c *caicToolRegistry) ReadResource(ctx context.Context, uri string) (mcp.Re
 		id := strings.TrimPrefix(uri, "caic://tasks/")
 		for i := range taskList {
 			if taskList[i].ID.String() == id {
-				return mcp.ResourceJSON(uri, taskList[i])
+				c.audit.record(ctx, &mcpAuditEvent{Operation: "resources/read", Name: uri, Decision: "allow", Status: "ok"})
+				return redactedResourceJSON(uri, taskList[i])
 			}
 		}
 		return mcp.ResourcesReadResult{}, mcp.ErrInvalidParams("task not found: %s", id)

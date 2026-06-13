@@ -30,16 +30,20 @@ type Router struct {
 	ctx context.Context
 
 	// Route handler concerns.
-	authHandlers         *authHandlers
-	ciHandlers           *ciHandlers
-	runtimeProcesses     *RuntimeProcesses
-	goModeHandler        http.Handler
-	serverConfigHandlers *serverConfigHandlers
-	taskHTTPHandlers     *taskHTTPHandlers
-	mcpHandlers          *mcp.Handler
-	usageHandlers        *usageHandlers
-	voiceHandlers        *voiceHandlers
-	webFetchHandlers     *webFetchHandlers
+	authHandlers          *authHandlers
+	ciHandlers            *ciHandlers
+	runtimeProcesses      *RuntimeProcesses
+	goModeHandler         http.Handler
+	serverConfigHandlers  *serverConfigHandlers
+	taskHTTPHandlers      *taskHTTPHandlers
+	mcpHandlers           *mcp.Handler
+	mcpOAuth              *mcpOAuthServer
+	mcpOAuthPrivateKeyPEM []byte
+	mcpOAuthKeyID         string
+	mcpRateLimiter        *rateLimiter
+	usageHandlers         *usageHandlers
+	voiceHandlers         *voiceHandlers
+	webFetchHandlers      *webFetchHandlers
 
 	// Forge webhook delivery. Established by New (and the test constructors) and
 	// never nil thereafter; owns the webhook secrets and the App owner allowlist.
@@ -103,6 +107,9 @@ func (s *Router) Serve(ctx context.Context, ln net.Listener) error {
 // route registration can be tested without a listener.
 func (s *Router) buildHandler() (http.Handler, error) {
 	serverConfig := s.serverConfigHandlers
+	if err := s.ensureMCPOAuthServer(); err != nil {
+		return nil, err
+	}
 
 	// Auth routes (exempt from RequireUser).
 	authMux := http.NewServeMux()
@@ -151,7 +158,6 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	apiMux.HandleFunc("GET /api/caic/v1/tasks/{id}/tool/{toolUseID}", taskRoutes.handleTaskToolInput)
 	apiMux.HandleFunc("GET /api/caic/v1/usage", s.usageHandlers.handleGetUsage)
 	apiMux.Handle("/api/voicegateway/v1/", s.voiceHandlers.handler())
-	apiMux.HandleFunc("POST /api/caic/v1/mcp", s.mcpHandlers.HandleMCP)
 	apiMux.HandleFunc("POST /api/caic/v1/web/fetch", handle(s.webFetchHandlers.webFetch))
 	apiMux.HandleFunc("GET /api/caic/v1/server/tasks/events", taskRoutes.handleTaskListEvents)
 	apiMux.HandleFunc("GET /api/caic/v1/server/usage/events", s.usageHandlers.handleEvents)
@@ -159,11 +165,21 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	// Combine: auth routes first, then protected API routes (gated by RequireUser when auth enabled).
 	var protectedAPI http.Handler = apiMux
 	if s.authEnabled() {
-		protectedAPI = auth.RequireUser(apiMux)
+		protectedAPI = s.requireUser(apiMux)
 	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/api/caic/v1/auth/", authMux)
+	mux.HandleFunc("GET "+mcpProtectedResourceMetadataPath, s.handleMCPProtectedResourceMetadata)
+	mux.HandleFunc("GET "+mcpProtectedResourceMetadataPath+"/", s.handleMCPProtectedResourceMetadata)
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", s.handleMCPOAuthMetadata)
+	mux.HandleFunc("GET /.well-known/openid-configuration", s.handleMCPOAuthMetadata)
+	mux.HandleFunc("GET "+mcpOAuthJWKSPath, s.handleMCPOAuthJWKS)
+	mux.HandleFunc("POST "+mcpOAuthRegisterPath, s.handleMCPOAuthRegister)
+	mux.HandleFunc("GET "+mcpOAuthAuthorizePath, s.handleMCPOAuthAuthorize)
+	mux.HandleFunc("POST "+mcpOAuthAuthorizePath, s.handleMCPOAuthAuthorize)
+	mux.HandleFunc("POST "+mcpOAuthTokenPath, s.handleMCPOAuthToken)
+	mux.HandleFunc("POST "+goModeMCPEndpoint, s.handleMCPAuthenticated)
 	mux.HandleFunc("GET /api/caic/v1/server/config", handle(serverConfig.getConfig))
 	mux.HandleFunc("GET /api/caic/v1/server/version", handle(serverConfig.getVersion))
 	mux.Handle("/api/gomode/v1/", s.goModeHandler)

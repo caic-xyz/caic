@@ -289,6 +289,8 @@ func New(ctx context.Context, rootDir string, cfg *server.Config) (*App, error) 
 		Preferences:            prefsStore,
 		AuthStore:              authStore,
 		SessionSecret:          sessionSecret,
+		MCPOAuthPrivateKeyPEM:  []byte(settings.MCPOAuthPrivateKeyPEM),
+		MCPOAuthKeyID:          settings.MCPOAuthKeyID,
 		GitHubOAuth:            githubOAuth,
 		GitLabOAuth:            gitlabOAuth,
 		HostState:              hostState,

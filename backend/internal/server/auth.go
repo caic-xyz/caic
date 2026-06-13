@@ -189,7 +189,7 @@ func (h *authHandlers) handleCallback(provider string) http.HandlerFunc {
 			Value:    jwt,
 			MaxAge:   sessionMaxAge,
 			HttpOnly: true,
-			SameSite: http.SameSiteStrictMode,
+			SameSite: http.SameSiteLaxMode,
 			Secure:   h.useSecureCookies(),
 			Path:     "/",
 		})
@@ -224,7 +224,7 @@ func (h *authHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 		Value:    "",
 		MaxAge:   -1,
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		Secure:   h.useSecureCookies(),
 		Path:     "/",
 	})

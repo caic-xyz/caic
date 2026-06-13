@@ -1,4 +1,4 @@
-// Provider-agnostic OAuth 2.0 Authorization Code exchange using net/http only.
+// Forge OAuth client login flow for GitHub/GitLab authorization-code exchange.
 
 package auth
 

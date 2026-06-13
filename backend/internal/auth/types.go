@@ -1,5 +1,4 @@
-// Package auth implements JWT session management and OAuth 2.0 login
-// for GitHub and GitLab.
+// Package auth manages caic user sessions and forge OAuth login identity.
 package auth
 
 import (

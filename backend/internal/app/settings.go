@@ -4,15 +4,20 @@ package app
 
 import (
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"log/slog"
 	"os"
 	"path/filepath"
 )
 
 type settings struct {
-	SessionSecret string `json:"sessionSecret,omitempty"`
+	SessionSecret         string `json:"sessionSecret,omitempty"`
+	MCPOAuthPrivateKeyPEM string `json:"mcpOAuthPrivateKeyPEM,omitempty"`
+	MCPOAuthKeyID         string `json:"mcpOAuthKeyID,omitempty"`
 }
 
 func loadSettings(path string) (*settings, error) {
@@ -32,6 +37,15 @@ func loadSettings(path string) (*settings, error) {
 		s.SessionSecret = hex.EncodeToString(raw[:])
 		dirty = true
 	}
+	if s.MCPOAuthPrivateKeyPEM == "" || s.MCPOAuthKeyID == "" {
+		keyPEM, keyID, err := newMCPOAuthSigningKey()
+		if err != nil {
+			return nil, err
+		}
+		s.MCPOAuthPrivateKeyPEM = keyPEM
+		s.MCPOAuthKeyID = keyID
+		dirty = true
+	}
 
 	if dirty {
 		if err := writeSettingsAtomic(path, &s); err != nil {
@@ -39,6 +53,19 @@ func loadSettings(path string) (*settings, error) {
 		}
 	}
 	return &s, nil
+}
+
+func newMCPOAuthSigningKey() (keyPEM, keyID string, err error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", "", err
+	}
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", "", err
+	}
+	block := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}
+	return string(pem.EncodeToMemory(block)), hex.EncodeToString(raw[:]), nil
 }
 
 func writeSettingsAtomic(path string, s *settings) error {
