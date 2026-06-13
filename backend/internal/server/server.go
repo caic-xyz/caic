@@ -201,6 +201,10 @@ func (s *Router) buildHandler() (http.Handler, error) {
 	mux.HandleFunc("POST "+mcpOAuthAuthorizePath, s.handleMCPOAuthAuthorize)
 	mux.HandleFunc("POST "+mcpOAuthTokenPath, s.handleMCPOAuthToken)
 	mux.HandleFunc("POST "+goModeMCPEndpoint, s.handleMCPAuthenticated)
+	// Released Streamable HTTP clients (Claude Code, Codex) issue a GET to probe
+	// for a server-initiated SSE stream; the handler answers 405 (caic is
+	// stateless) so they fall back to plain POST request/response.
+	mux.HandleFunc("GET "+goModeMCPEndpoint, s.handleMCPAuthenticated)
 	mux.HandleFunc("GET /api/caic/v1/server/config", handle(serverConfig.getConfig))
 	mux.HandleFunc("GET /api/caic/v1/server/version", handle(serverConfig.getVersion))
 	mux.Handle("/api/gomode/v1/", s.goModeHandler)

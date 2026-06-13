@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -22,7 +23,13 @@ import (
 const (
 	jsonRPCVersion = "2.0"
 
-	// ProtocolVersion is the supported MCP protocol version.
+	// ProtocolVersion is caic's native MCP protocol version.
+	//
+	// Native support owns server/discover, required per-request _meta,
+	// Mcp-Method/Mcp-Name headers, resultType, ttlMs, and cacheScope. Released
+	// initialize-based versions 2025-06-18 and 2025-11-25 are isolated in
+	// compat.go so their DTOs can be deleted when those clients are no longer
+	// supported.
 	ProtocolVersion = "2026-07-28"
 
 	// DefaultTTLMS is the default cache lifetime returned by MCP list/read methods.
@@ -159,7 +166,9 @@ type RequestMeta struct {
 	ProgressToken any `json:"progressToken,omitempty"`
 	// DeprecatedLogLevel requests server log message notifications for this request.
 	//
-	// Deprecated as of protocol version 2026-07-28.
+	// Deprecated as of protocol version 2026-07-28, but still present in that
+	// schema. This is native 2026-07-28 compatibility, not released-version
+	// compat.go support; remove it only after the upstream 2026+ schema drops it.
 	DeprecatedLogLevel string `json:"io.modelcontextprotocol/logLevel,omitempty"`
 	// Extra preserves forward-compatible metadata fields.
 	Extra MetaObject `json:"-"`
@@ -227,11 +236,15 @@ type ClientCapabilities struct {
 	Experimental Extensions `json:"experimental,omitempty"`
 	// DeprecatedRoots is present if the client supports listing roots.
 	//
-	// Deprecated as of protocol version 2026-07-28.
+	// Deprecated as of protocol version 2026-07-28, but still present in that
+	// schema. This is native 2026-07-28 compatibility, not released-version
+	// compat.go support; remove it only after the upstream 2026+ schema drops it.
 	DeprecatedRoots MetaObject `json:"roots,omitempty"`
 	// DeprecatedSampling is present if the client supports server-initiated LLM sampling.
 	//
-	// Deprecated as of protocol version 2026-07-28.
+	// Deprecated as of protocol version 2026-07-28, but still present in that
+	// schema. This is native 2026-07-28 compatibility, not released-version
+	// compat.go support; remove it only after the upstream 2026+ schema drops it.
 	DeprecatedSampling *SamplingCapability `json:"sampling,omitempty"`
 	// Elicitation is present if the client supports server-initiated user elicitation.
 	Elicitation *ElicitationCapability `json:"elicitation,omitempty"`
@@ -292,7 +305,9 @@ type Capabilities struct {
 	Experimental Extensions `json:"experimental,omitempty"`
 	// DeprecatedLogging is present if the server supports sending log messages to the client.
 	//
-	// Deprecated as of protocol version 2026-07-28.
+	// Deprecated as of protocol version 2026-07-28, but still present in that
+	// schema. This is native 2026-07-28 compatibility, not released-version
+	// compat.go support; remove it only after the upstream 2026+ schema drops it.
 	DeprecatedLogging MetaObject `json:"logging,omitempty"`
 	// Completions is present if the server supports argument completion suggestions.
 	Completions MetaObject `json:"completions,omitempty"`
@@ -714,8 +729,50 @@ type SubscriptionNotificationParams struct {
 	URI string `json:"uri,omitempty"`
 }
 
-// HandleMCP handles one MCP HTTP request.
+// HandleMCP handles one MCP HTTP request, dispatching to caic's native
+// 2026-07-28 protocol or the released Streamable HTTP compatibility handler
+// based on the request shape.
 func (h *Handler) HandleMCP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		// The native 2026-07-28 transport is POST-only; a GET is a released
+		// client opening an SSE stream, which the released handler answers
+		// with 405.
+		h.handleCompat(w, r)
+		return
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.writeResponse(w, http.StatusBadRequest, JSONRPCResponse{JSONRPC: jsonRPCVersion, Error: rpcError(ParseErrorCode, "Parse error")})
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	if isNativeMCPRequest(r, body) {
+		h.handleNative(w, r)
+		return
+	}
+	h.handleCompat(w, r)
+}
+
+// isNativeMCPRequest reports whether a POST uses caic's native 2026-07-28
+// revision. That transport requires an Mcp-Method header on every request,
+// which every caic-native client (frontend, Android, generated SDKs) always
+// sets. server/discover is exclusive to the 2026-07-28 revision, so it is
+// treated as native even without the header to preserve protocol diagnostics.
+// Released clients send neither the header nor server/discover.
+func isNativeMCPRequest(r *http.Request, body []byte) bool {
+	if r.Header.Get("Mcp-Method") != "" {
+		return true
+	}
+	var probe struct {
+		Method Method `json:"method"`
+	}
+	_ = json.Unmarshal(body, &probe)
+	return probe.Method == MethodServerDiscover
+}
+
+// handleNative handles one MCP HTTP request using caic's native 2026-07-28
+// protocol revision.
+func (h *Handler) handleNative(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		rpcErr := rpcError(InvalidRequestCode, "Method not allowed")
@@ -741,7 +798,7 @@ func (h *Handler) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	// Transport-layer rejections (bad HTTP method, unparseable body, failed
 	// _meta/header validation) carry a non-200 status. Once a request is valid
 	// MCP it reaches dispatch, whose protocol errors use the transport status
-	// mandated by the draft Streamable HTTP binding.
+	// mandated by the 2026-07-28 Streamable HTTP binding.
 	if status, rpcErr := validateMCPRequest(r, &req); rpcErr != nil {
 		logMCPFailure(r, status, &req, rpcErr, nil)
 		h.writeResponse(w, status, JSONRPCResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr})
@@ -767,7 +824,7 @@ func (h *Handler) HandleMCP(w http.ResponseWriter, r *http.Request) {
 
 // dispatch routes a validated MCP request to its handler. Returned rpcErr values
 // are JSON-RPC errors; handleMCP maps them to the transport status required by
-// the draft Streamable HTTP binding.
+// the 2026-07-28 Streamable HTTP binding.
 func (h *Handler) dispatch(ctx context.Context, method Method, params json.RawMessage, header http.Header) (result any, rpcErr *JSONRPCError) {
 	switch method {
 	case MethodServerDiscover:

@@ -240,6 +240,7 @@ graph TD
     pkg_cmd_caic["cmd/caic"]
     pkg_cmd_voice_gateway["cmd/voice-gateway"]
     pkg_internal_cmd_gen_api_sdk["internal/cmd/gen-api-sdk"]
+    pkg_internal_cmd_mcp_auth_smoke["internal/cmd/mcp-auth-smoke"]
     pkg_internal_cmd_record_trace["internal/cmd/record-trace"]
   end
 
@@ -372,6 +373,15 @@ graph TD
   pkg_internal_cmd_gen_api_sdk --> pkg_internal_server_api_v1
   pkg_internal_cmd_gen_api_sdk --> pkg_internal_voicegateway_api
   pkg_internal_cmd_gen_api_sdk --> pkg_internal_voicegateway_api_v1
+  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_auth
+  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_forge
+  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_forge_forgemanager
+  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_preferences
+  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_repos
+  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_runtime_mdruntime
+  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_server
+  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_server_ipgeo
+  pkg_internal_cmd_mcp_auth_smoke --> pkg_internal_tasks
   pkg_internal_cmd_record_trace --> pkg_internal_agent
   pkg_internal_cmd_record_trace --> pkg_internal_agent_claudecode
   pkg_internal_cmd_record_trace --> pkg_internal_agent_codex
@@ -479,6 +489,7 @@ graph TD
 | `internal/bot` | `internal/forge`, `internal/forge/forgecache` |
 | `internal/ci` | `internal/agent`, `internal/bot`, `internal/forge`, `internal/forge/forgecache`, `internal/preferences`, `internal/task` |
 | `internal/cmd/gen-api-sdk` | `internal/gomode`, `internal/mcp`, `internal/server/api`, `internal/server/api/v1`, `internal/voicegateway/api`, `internal/voicegateway/api/v1` |
+| `internal/cmd/mcp-auth-smoke` | `internal/auth`, `internal/forge`, `internal/forge/forgemanager`, `internal/preferences`, `internal/repos`, `internal/runtime/mdruntime`, `internal/server`, `internal/server/ipgeo`, `internal/tasks` |
 | `internal/cmd/record-trace` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/opencode`, `internal/agent/pi`, `internal/agent/relay`, `internal/harness` |
 | `internal/forge` | None |
 | `internal/forge/forgecache` | `internal/forge` |

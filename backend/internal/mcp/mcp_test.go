@@ -12,12 +12,15 @@ import (
 	"testing"
 )
 
+// TestHandlerHandleMCP swaps the process-global slog default to capture
+// logMCPFailure output, so it must run serially: a parallel sibling that emits a
+// failure log would pollute the captured buffer and race on it. Running in the
+// serial phase guarantees no other test logs concurrently.
+//
+//nolint:paralleltest // mutates the global slog default; see doc comment.
 func TestHandlerHandleMCP(t *testing.T) {
-	t.Parallel()
-
+	//nolint:paralleltest // parent runs serially on purpose; see doc comment.
 	t.Run("error logs failure", func(t *testing.T) {
-		t.Parallel()
-
 		var logBuf bytes.Buffer
 		oldDefault := slog.Default()
 		slog.SetDefault(slog.New(slog.NewJSONHandler(&logBuf, nil)))

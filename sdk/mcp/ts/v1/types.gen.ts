@@ -118,7 +118,9 @@ export interface Capabilities {
   /**
    * DeprecatedLogging is present if the server supports sending log messages to the client.
    *
-   * Deprecated as of protocol version 2026-07-28.
+   * Deprecated as of protocol version 2026-07-28, but still present in that
+   * schema. This is native 2026-07-28 compatibility, not released-version
+   * compat.go support; remove it only after the upstream 2026+ schema drops it.
    */
   logging?: { [key: string]: unknown};
   /** Completions is present if the server supports argument completion suggestions. */
@@ -206,13 +208,17 @@ export interface ClientCapabilities {
   /**
    * DeprecatedRoots is present if the client supports listing roots.
    *
-   * Deprecated as of protocol version 2026-07-28.
+   * Deprecated as of protocol version 2026-07-28, but still present in that
+   * schema. This is native 2026-07-28 compatibility, not released-version
+   * compat.go support; remove it only after the upstream 2026+ schema drops it.
    */
   roots?: { [key: string]: unknown};
   /**
    * DeprecatedSampling is present if the client supports server-initiated LLM sampling.
    *
-   * Deprecated as of protocol version 2026-07-28.
+   * Deprecated as of protocol version 2026-07-28, but still present in that
+   * schema. This is native 2026-07-28 compatibility, not released-version
+   * compat.go support; remove it only after the upstream 2026+ schema drops it.
    */
   sampling?: SamplingCapability;
   /** Elicitation is present if the client supports server-initiated user elicitation. */
@@ -238,7 +244,9 @@ export interface RequestMeta {
   /**
    * DeprecatedLogLevel requests server log message notifications for this request.
    *
-   * Deprecated as of protocol version 2026-07-28.
+   * Deprecated as of protocol version 2026-07-28, but still present in that
+   * schema. This is native 2026-07-28 compatibility, not released-version
+   * compat.go support; remove it only after the upstream 2026+ schema drops it.
    */
   "io.modelcontextprotocol/logLevel"?: string;
 }

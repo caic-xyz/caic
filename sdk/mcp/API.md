@@ -87,7 +87,9 @@ Capabilities describes server-supported MCP features.
 | `experimental` | `Record<string, JSONValue>` | Experimental contains non-standard capabilities supported by the server. |  |
 | `logging` | `Record<string, JSONValue>` | DeprecatedLogging is present if the server supports sending log messages to the client.
 
-Deprecated as of protocol version 2026-07-28. |  |
+Deprecated as of protocol version 2026-07-28, but still present in that
+schema. This is native 2026-07-28 compatibility, not released-version
+compat.go support; remove it only after the upstream 2026+ schema drops it. |  |
 | `completions` | `Record<string, JSONValue>` | Completions is present if the server supports argument completion suggestions. |  |
 | `prompts` | `PromptsCapability` | Prompts is present if the server offers prompt templates. |  |
 | `resources` | `ResourcesCapability` | Resources is present if the server offers resources to read. |  |
@@ -162,10 +164,14 @@ ClientCapabilities describes capabilities the client supports for a request.
 | `experimental` | `Record<string, JSONValue>` | Experimental contains non-standard capabilities supported by the client. |  |
 | `roots` | `Record<string, JSONValue>` | DeprecatedRoots is present if the client supports listing roots.
 
-Deprecated as of protocol version 2026-07-28. |  |
+Deprecated as of protocol version 2026-07-28, but still present in that
+schema. This is native 2026-07-28 compatibility, not released-version
+compat.go support; remove it only after the upstream 2026+ schema drops it. |  |
 | `sampling` | `SamplingCapability` | DeprecatedSampling is present if the client supports server-initiated LLM sampling.
 
-Deprecated as of protocol version 2026-07-28. |  |
+Deprecated as of protocol version 2026-07-28, but still present in that
+schema. This is native 2026-07-28 compatibility, not released-version
+compat.go support; remove it only after the upstream 2026+ schema drops it. |  |
 | `elicitation` | `ElicitationCapability` | Elicitation is present if the client supports server-initiated user elicitation. |  |
 | `extensions` | `Record<string, JSONValue>` | Extensions contains optional MCP extensions supported by the client. |  |
 
@@ -183,7 +189,9 @@ For HTTP, it must match the MCP-Protocol-Version header. | yes |
 | `progressToken` | `JSONValue` | ProgressToken requests out-of-band progress notifications for this request. |  |
 | `io.modelcontextprotocol/logLevel` | `string` | DeprecatedLogLevel requests server log message notifications for this request.
 
-Deprecated as of protocol version 2026-07-28. |  |
+Deprecated as of protocol version 2026-07-28, but still present in that
+schema. This is native 2026-07-28 compatibility, not released-version
+compat.go support; remove it only after the upstream 2026+ schema drops it. |  |
 
 ### PaginatedRequestParams
 

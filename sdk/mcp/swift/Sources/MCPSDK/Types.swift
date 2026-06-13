@@ -204,7 +204,9 @@ public struct Capabilities: Codable {
     public let experimental: [String: JSONValue]?
     /// DeprecatedLogging is present if the server supports sending log messages to the client.
     ///
-    /// Deprecated as of protocol version 2026-07-28.
+    /// Deprecated as of protocol version 2026-07-28, but still present in that
+    /// schema. This is native 2026-07-28 compatibility, not released-version
+    /// compat.go support; remove it only after the upstream 2026+ schema drops it.
     public let logging: [String: JSONValue]?
     /// Completions is present if the server supports argument completion suggestions.
     public let completions: [String: JSONValue]?
@@ -288,11 +290,15 @@ public struct ClientCapabilities: Codable {
     public let experimental: [String: JSONValue]?
     /// DeprecatedRoots is present if the client supports listing roots.
     ///
-    /// Deprecated as of protocol version 2026-07-28.
+    /// Deprecated as of protocol version 2026-07-28, but still present in that
+    /// schema. This is native 2026-07-28 compatibility, not released-version
+    /// compat.go support; remove it only after the upstream 2026+ schema drops it.
     public let roots: [String: JSONValue]?
     /// DeprecatedSampling is present if the client supports server-initiated LLM sampling.
     ///
-    /// Deprecated as of protocol version 2026-07-28.
+    /// Deprecated as of protocol version 2026-07-28, but still present in that
+    /// schema. This is native 2026-07-28 compatibility, not released-version
+    /// compat.go support; remove it only after the upstream 2026+ schema drops it.
     public let sampling: SamplingCapability?
     /// Elicitation is present if the client supports server-initiated user elicitation.
     public let elicitation: ElicitationCapability?
@@ -314,7 +320,9 @@ public struct RequestMeta: Codable {
     public let progressToken: JSONValue?
     /// DeprecatedLogLevel requests server log message notifications for this request.
     ///
-    /// Deprecated as of protocol version 2026-07-28.
+    /// Deprecated as of protocol version 2026-07-28, but still present in that
+    /// schema. This is native 2026-07-28 compatibility, not released-version
+    /// compat.go support; remove it only after the upstream 2026+ schema drops it.
     public let deprecatedLogLevel: String?
 
     private enum CodingKeys: String, CodingKey {
