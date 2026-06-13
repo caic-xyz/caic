@@ -28,7 +28,6 @@ import (
 	"github.com/caic-xyz/caic/backend/internal/agent"
 	"github.com/caic-xyz/caic/backend/internal/agent/claudecode"
 	"github.com/caic-xyz/caic/backend/internal/agent/codex"
-	"github.com/caic-xyz/caic/backend/internal/agent/kilo"
 	"github.com/caic-xyz/caic/backend/internal/agent/opencode"
 	"github.com/caic-xyz/caic/backend/internal/agent/pi"
 	"github.com/caic-xyz/caic/backend/internal/agent/relay"
@@ -42,7 +41,6 @@ var backends = map[string]agent.Backend{
 	string(harness.Pi):       pi.New("", nil),
 	string(harness.Claude):   claudecode.New(),
 	string(harness.Codex):    codex.New("", nil),
-	string(harness.Kilo):     kilo.New(),
 	string(harness.OpenCode): opencode.New("", nil),
 }
 
@@ -52,7 +50,7 @@ var scenarios = map[string]string{
 }
 
 func mainImpl() error {
-	harnessFlag := flag.String("harness", "", "harness to record (pi, claude, codex, kilo, opencode)")
+	harnessFlag := flag.String("harness", "", "harness to record (pi, claude, codex, opencode)")
 	scenarioFlag := flag.String("scenario", "", "predefined scenario name")
 	modelFlag := flag.String("model", "", "model to use (e.g. xiaomi/mimo-v2.5)")
 	apiKeyEnv := flag.String("api-key-env", "", "env var name for API key")

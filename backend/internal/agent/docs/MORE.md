@@ -31,18 +31,18 @@ plus a `Supports*` bool the UI can gate on.
 Wire mechanism per provider. `✅` = implemented in caic. `?` = needs
 investigation. `N/A` = not supported by provider.
 
-| Feature            | Claude Code              | Codex                       | OpenCode                     | Kilo | Pi  |
-|--------------------|--------------------------|-----------------------------|------------------------------|------|-----|
-| Compact            | ✅ `/compact` msg        | ✅ `thread/compact/start`   | ✅ `/compact` prompt         | N/A  | ✅  |
-| Context usage      | ✅ per-turn usage        | ✅ `tokenUsage/updated`     | ✅ `usage_update`            | ✅   | ✅  |
-| Interrupt          | `ControlInterrupt`       | `turn/interrupt`            | `session/cancel`             | ?    | ?   |
-| Model switch       | `ControlSetModel`        | `turn/start` model param    | `session/set_model`          | ?    | ?   |
-| Steer              | N/A                      | `turn/steer`                | N/A                          | ?    | ?   |
-| Session fork       | N/A                      | `thread/fork`               | `unstable_forkSession`       | N/A  | ?   |
-| Session resume     | `--resume`               | N/A                         | `unstable_resumeSession`     | N/A  | ?   |
-| Mode switch        | N/A                      | N/A                         | `session/set_mode`           | N/A  | ?   |
-| Code review        | N/A                      | `review/start`              | N/A                          | N/A  | ?   |
-| Rollback           | N/A                      | `thread/rollback`           | N/A                          | N/A  | ?   |
+| Feature            | Claude Code              | Codex                       | OpenCode                     | Pi  |
+|--------------------|--------------------------|-----------------------------|------------------------------|-----|
+| Compact            | ✅ `/compact` msg        | ✅ `thread/compact/start`   | ✅ `/compact` prompt         | ✅  |
+| Context usage      | ✅ per-turn usage        | ✅ `tokenUsage/updated`     | ✅ `usage_update`            | ✅  |
+| Interrupt          | `ControlInterrupt`       | `turn/interrupt`            | `session/cancel`             | ?   |
+| Model switch       | `ControlSetModel`        | `turn/start` model param    | `session/set_model`          | ?   |
+| Steer              | N/A                      | `turn/steer`                | N/A                          | ?   |
+| Session fork       | N/A                      | `thread/fork`               | `unstable_forkSession`       | ?   |
+| Session resume     | `--resume`               | N/A                         | `unstable_resumeSession`     | ?   |
+| Mode switch        | N/A                      | N/A                         | `session/set_mode`           | ?   |
+| Code review        | N/A                      | `review/start`              | N/A                          | ?   |
+| Rollback           | N/A                      | `thread/rollback`           | N/A                          | ?   |
 
 Context usage is surfaced today via per-turn token counts plus the model's
 context-window limit (`ContextWindowLimit`), not the provider-specific

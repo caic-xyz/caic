@@ -772,8 +772,7 @@ func AttachRelaySession(ctx context.Context, opts *Options, wire WireFormat) (*S
 }
 
 // PlainTextWritePrompt writes a user prompt as a plain text line on stdin
-// and logs it as NDJSON. Used by backends whose agent reads plain text
-// (kilo).
+// and logs it as NDJSON.
 func PlainTextWritePrompt(w io.Writer, p Prompt, logW io.Writer) error {
 	data := []byte(p.Text + "\n")
 	if _, err := w.Write(data); err != nil {

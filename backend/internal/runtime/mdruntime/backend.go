@@ -414,7 +414,6 @@ func (b *Backend) VNCPort(ctx context.Context, id runtime.InstanceID) int {
 var harnessMap = map[harness.Name]md.Harness{
 	harness.Claude:   md.HarnessClaude,
 	harness.Codex:    md.HarnessCodex,
-	harness.Kilo:     md.HarnessKilo,
 	harness.OpenCode: md.HarnessOpencode,
 	harness.Pi:       md.HarnessPi,
 }

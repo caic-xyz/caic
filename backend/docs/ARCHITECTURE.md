@@ -196,7 +196,6 @@ graph TD
   pkg_internal_agent_agenttest["internal/agent/agenttest"]
   pkg_internal_agent_claudecode["internal/agent/claudecode"]
   pkg_internal_agent_codex["internal/agent/codex"]
-  pkg_internal_agent_kilo["internal/agent/kilo"]
   pkg_internal_agent_opencode["internal/agent/opencode"]
   pkg_internal_agent_pi["internal/agent/pi"]
   pkg_internal_agent_registry["internal/agent/registry"]
@@ -216,9 +215,6 @@ graph TD
   pkg_internal_agent_codex --> pkg_internal_harness
   pkg_internal_agent_codex --> pkg_internal_jsonutil
   pkg_internal_agent_codex --> pkg_internal_runtime
-  pkg_internal_agent_kilo --> pkg_internal_agent
-  pkg_internal_agent_kilo --> pkg_internal_harness
-  pkg_internal_agent_kilo --> pkg_internal_jsonutil
   pkg_internal_agent_opencode --> pkg_internal_agent
   pkg_internal_agent_opencode --> pkg_internal_harness
   pkg_internal_agent_opencode --> pkg_internal_jsonutil
@@ -256,7 +252,6 @@ graph TD
     pkg_internal_agent_agenttest["internal/agent/agenttest"]
     pkg_internal_agent_claudecode["internal/agent/claudecode"]
     pkg_internal_agent_codex["internal/agent/codex"]
-    pkg_internal_agent_kilo["internal/agent/kilo"]
     pkg_internal_agent_opencode["internal/agent/opencode"]
     pkg_internal_agent_pi["internal/agent/pi"]
     pkg_internal_agent_registry["internal/agent/registry"]
@@ -326,9 +321,6 @@ graph TD
   pkg_internal_agent_codex --> pkg_internal_harness
   pkg_internal_agent_codex --> pkg_internal_jsonutil
   pkg_internal_agent_codex --> pkg_internal_runtime
-  pkg_internal_agent_kilo --> pkg_internal_agent
-  pkg_internal_agent_kilo --> pkg_internal_harness
-  pkg_internal_agent_kilo --> pkg_internal_jsonutil
   pkg_internal_agent_opencode --> pkg_internal_agent
   pkg_internal_agent_opencode --> pkg_internal_harness
   pkg_internal_agent_opencode --> pkg_internal_jsonutil
@@ -383,7 +375,6 @@ graph TD
   pkg_internal_cmd_record_trace --> pkg_internal_agent
   pkg_internal_cmd_record_trace --> pkg_internal_agent_claudecode
   pkg_internal_cmd_record_trace --> pkg_internal_agent_codex
-  pkg_internal_cmd_record_trace --> pkg_internal_agent_kilo
   pkg_internal_cmd_record_trace --> pkg_internal_agent_opencode
   pkg_internal_cmd_record_trace --> pkg_internal_agent_pi
   pkg_internal_cmd_record_trace --> pkg_internal_agent_relay
@@ -478,7 +469,6 @@ graph TD
 | `internal/agent/agenttest` | `internal/agent` |
 | `internal/agent/claudecode` | `internal/agent`, `internal/harness`, `internal/jsonutil` |
 | `internal/agent/codex` | `internal/agent`, `internal/harness`, `internal/jsonutil`, `internal/runtime` |
-| `internal/agent/kilo` | `internal/agent`, `internal/harness`, `internal/jsonutil` |
 | `internal/agent/opencode` | `internal/agent`, `internal/harness`, `internal/jsonutil`, `internal/runtime` |
 | `internal/agent/pi` | `internal/agent`, `internal/harness`, `internal/jsonutil`, `internal/runtime` |
 | `internal/agent/registry` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/opencode`, `internal/agent/pi`, `internal/harness` |
@@ -489,7 +479,7 @@ graph TD
 | `internal/bot` | `internal/forge`, `internal/forge/forgecache` |
 | `internal/ci` | `internal/agent`, `internal/bot`, `internal/forge`, `internal/forge/forgecache`, `internal/preferences`, `internal/task` |
 | `internal/cmd/gen-api-sdk` | `internal/gomode`, `internal/mcp`, `internal/server/api`, `internal/server/api/v1`, `internal/voicegateway/api`, `internal/voicegateway/api/v1` |
-| `internal/cmd/record-trace` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/kilo`, `internal/agent/opencode`, `internal/agent/pi`, `internal/agent/relay`, `internal/harness` |
+| `internal/cmd/record-trace` | `internal/agent`, `internal/agent/claudecode`, `internal/agent/codex`, `internal/agent/opencode`, `internal/agent/pi`, `internal/agent/relay`, `internal/harness` |
 | `internal/forge` | None |
 | `internal/forge/forgecache` | `internal/forge` |
 | `internal/forge/forgemanager` | `internal/auth`, `internal/bot`, `internal/forge`, `internal/forge/github`, `internal/forge/gitlab`, `internal/repos` |

@@ -13,7 +13,6 @@ export function effortOptions(harness: Harness): string[] {
       return ["none", "minimal", "low", "medium", "high", "xhigh"];
     case "pi":
       return ["off", "minimal", "low", "medium", "high", "xhigh"];
-    case "kilo":
     case "opencode":
       return [];
   }

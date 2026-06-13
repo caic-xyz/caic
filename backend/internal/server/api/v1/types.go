@@ -31,7 +31,6 @@ type Harness string
 const (
 	HarnessClaude   Harness = "claude"
 	HarnessCodex    Harness = "codex"
-	HarnessKilo     Harness = "kilo"
 	HarnessOpenCode Harness = "opencode"
 	HarnessPi       Harness = "pi"
 )

@@ -351,10 +351,6 @@ sealed interface Harness {
         override val value = "codex"
     }
     @Serializable
-    data object Kilo : Harness {
-        override val value = "kilo"
-    }
-    @Serializable
     data object OpenCode : Harness {
         override val value = "opencode"
     }
@@ -374,7 +370,6 @@ object HarnessSerializer : KSerializer<Harness> {
         return when (v) {
             "claude" -> Harness.Claude
             "codex" -> Harness.Codex
-            "kilo" -> Harness.Kilo
             "opencode" -> Harness.OpenCode
             "pi" -> Harness.Pi
             else -> Harness.Other(v)

@@ -200,7 +200,6 @@ public struct Harness: Codable, Equatable, Hashable {
 
     public static let Claude = Harness("claude")
     public static let Codex = Harness("codex")
-    public static let Kilo = Harness("kilo")
     public static let OpenCode = Harness("opencode")
     public static let Pi = Harness("pi")
 
