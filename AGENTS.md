@@ -29,24 +29,11 @@ before considering the task complete.
 
 ### Professionalism
 
-**Always** lint after making changes. This is mandatory, not optional:
+**Mandatory**: always run `make lint-fix` after making changes.
 
 ```bash
-# Go changes:
-make lint-go
-
-# Frontend changes:
-make lint-frontend
-
-# Python changes:
-make lint-python
-
-# Android changes:
-make lint-android
-
-# Or lint everything you touched at once:
-make lint          # Go + frontend + Python + binaries
-make lint-all      # All of the above + Android
+make lint-fix  # Fix linting issues: Go + frontend + Python + binaries + file indexes.
+make check     # Refresh generated files, build, lint, and test (non-Android).
 ```
 
 ### E2E Tests
@@ -76,6 +63,9 @@ guard because it is host-dependent.
 ### Make Targets
 
 Run `make` to get the current targets. It's fast.
+
+Run `make refresh-generated` after changing API DTOs/routes, generated SDK
+inputs, file-indexed source comments, or backend package layout.
 
 <!-- BEGIN FILE INDEX -->
 ## File Index

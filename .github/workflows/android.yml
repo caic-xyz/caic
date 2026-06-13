@@ -32,10 +32,8 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
       - name: Accept Android SDK Licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-      - name: Lint
-        run: make lint-android
-      - name: Build
-        run: make android-build
+      - name: Check
+        run: make android-check
       - name: Upload APKs
         uses: actions/upload-artifact@v7
         with:
@@ -44,10 +42,6 @@ jobs:
             android/caic/build/outputs/apk/debug/caic-debug.apk
             android/gomode/build/outputs/apk/debug/gomode-debug.apk
           retention-days: 7
-      - name: Test
-        run: make android-test
-      - name: Coverage
-        run: make android-coverage
       - name: Upload Coverage
         uses: codecov/codecov-action@v6
         with:

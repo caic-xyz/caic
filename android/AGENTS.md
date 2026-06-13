@@ -44,23 +44,16 @@ capture, and Halo/BLE.
 
 ## Build, Lint, and Test
 
-Run the focused checks for any Android change and fix failures before finishing:
-
-```bash
-make lint-android
-make android-test
-make android-build
-```
-
-For broader validation:
+Run the focused checks for Android changes:
 
 ```bash
 make android-check
-make android-e2e
-make lint-all
 ```
 
-For module-focused Android e2e runs:
+Use `make check` for non-Android repo validation. Use `make android-e2e` for
+instrumented Android flows.
+
+For module-focused Android e2e:
 
 ```bash
 python3 scripts/android_e2e.py --module caic
@@ -79,7 +72,7 @@ make android-stop-emulator
 The emulator reaches the host at `10.0.2.2`. For a fake caic backend:
 
 ```bash
-make dev-fake
+make fake-dev
 ```
 
 Then use `http://10.0.2.2:2242` from Android settings. On a physical device,
@@ -97,9 +90,7 @@ use `adb reverse tcp:2242 tcp:2242` and connect to `http://localhost:2242`.
 
 ## Documentation
 
-Use `scripts/update_agents_file_index.py` to refresh file indexes after adding
-or removing indexed files. The script also ensures each tracked `AGENTS.md` has
-a sibling `CLAUDE.md` symlink.
+Run `make refresh-generated` after adding or removing indexed files.
 
 <!-- BEGIN FILE INDEX -->
 ## File Index

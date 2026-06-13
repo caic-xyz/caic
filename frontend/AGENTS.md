@@ -2,10 +2,11 @@
 
 SolidJS web UI for caic. Built with Vite, outputs to `../backend/frontend/dist/`.
 
-## Linting
+## Build
 
-**Always** run `make lint-frontend` after any frontend file change. Do not skip this step.
-**Always** run `make build` after any frontend file change. Do not skip this step.
+Run `make build` after any frontend file change.
+`make build` rewrites tracked `backend/frontend/dist/*.br`; keep those changes
+when frontend or generated TypeScript changes affect the bundle hash.
 
 ## Stack
 
@@ -21,9 +22,8 @@ Unit tests use Vitest with jsdom and `@solidjs/testing-library`. Test files
 live next to their source as `*.test.tsx` or `*.test.ts`.
 
 ```bash
-pnpm test           # single run
-pnpm test:watch     # watch mode
 pnpm test:coverage  # single run with coverage report
+pnpm test:watch     # watch mode
 ```
 
 - Render components with `render(() => <Comp />)`.
@@ -94,7 +94,7 @@ and back button handle it. Do not add a back arrow to the task detail header.
 
 ```bash
 make frontend-dev   # Vite dev server on :5173, proxies /api to :2242
-make dev            # Build + run Go server on :2242
+make fake-dev       # Build + run Go server with fake backend on :2242
 ```
 
 <!-- BEGIN FILE INDEX -->

@@ -1,10 +1,12 @@
 # Build, test, lint, and development workflow targets for the full stack (Go backend, TypeScript frontend, Android).
 
-.PHONY: help build dev fake-dev test smoke smoke-voice coverage lint lint-all lint-go lint-frontend lint-python lint-binaries lint-android lint-fix lint-docs types git-hooks frontend-build frontend-dev upgrade frontend-e2e android-build android-check android-push-caic android-push-gomode android-test android-coverage android-e2e android-setup-emulator android-start-emulator android-stop-emulator
+.PHONY: help build check fake-dev test smoke smoke-voice coverage lint lint-go lint-frontend lint-python lint-binaries lint-fix lint-docs refresh-generated generate-sdks git-hooks frontend-build frontend-dev upgrade frontend-e2e android-sdk android-check android-push-caic android-push-gomode android-e2e android-setup-emulator android-start-emulator android-stop-emulator
 
 FRONTEND_STAMP=node_modules/.stamp
 HTTP?=:2242
 ANDROID_GRADLE=cd android && ./gradlew --no-daemon
+export NPM_CONFIG_AUDIT=false
+export NPM_CONFIG_FUND=false
 ANDROID_BUILD_TASKS=:caic:assembleDebug :gomode:assembleDebug :halo-sdk:assembleDebug :caic-sdk:assemble :gomode-sdk:assemble :mcp-sdk:assemble :voicegateway-sdk:assemble
 ANDROID_TEST_BUILD_TASKS=:caic:assembleDebugAndroidTest :gomode:assembleDebugAndroidTest :halo-sdk:assembleDebugAndroidTest
 ANDROID_TEST_TASKS=:caic:testDebugUnitTest :gomode:testDebugUnitTest :halo-sdk:testDebugUnitTest :caic-sdk:test :gomode-sdk:test :mcp-sdk:test :voicegateway-sdk:test
@@ -16,53 +18,51 @@ help:
 	@echo "caic - Manage multiple coding agents"
 	@echo ""
 	@echo "Available targets:"
+	@echo "  make check                  - Refresh generated files, build, lint, and test (non-Android)"
+	@echo "  make lint-fix               - Fix linting issues (Go + frontend + Python + binaries + file indexes)"
 	@echo "  make build                  - Build Go server (includes frontend build)"
-	@echo "  make dev                    - Run the server in development mode (go run)"
 	@echo "  make fake-dev               - Run the server with fake backend (no containers)"
-	@echo "  make frontend-build         - Build frontend assets (TypeScript → JavaScript)"
-	@echo "  make test                   - Run unit tests"
+	@echo "  make frontend-dev           - Run frontend dev server (http://localhost:5173)"
+	@echo "  make frontend-e2e           - Run Playwright end-to-end tests"
 	@echo "  make smoke                  - Run real runtime smoke test"
 	@echo "  make smoke-voice            - Run local voice WebRTC smoke test"
-	@echo "  make lint                   - Run linters (Go + frontend + Python + binaries + file index check)"
-	@echo "  make lint-fix               - Fix linting issues automatically (includes updating file indexes)"
-	@echo "  make git-hooks              - Install git pre-commit hooks"
-	@echo "  make frontend-dev           - Run frontend dev server (http://localhost:5173)"
-	@echo "  make android-build          - Build Android apps, SDKs, and instrumentation test APKs"
-	@echo "  make android-check          - Run Android lint, build, and unit tests"
+	@echo "  make refresh-generated      - Regenerate API SDKs, AGENTS indexes, and backend architecture docs"
+	@echo "  make android-check          - Run Android lint, build, unit tests, and coverage"
+	@echo "  make android-e2e            - Run Android instrumented tests and generate screenshots"
 	@echo "  make android-push-caic      - Build, install, and start caic APK on connected device"
 	@echo "  make android-push-gomode    - Build, install, and start GoMode APK on connected device"
-	@echo "  make android-test           - Run Android app and SDK unit tests"
-	@echo "  make android-coverage       - Run Android app/library unit tests with JaCoCo coverage"
-	@echo "  make android-e2e            - Run Android instrumented tests and generate screenshots"
 	@echo "  make android-setup-emulator - Install SDK tools, emulator, system image, create AVD"
 	@echo "  make android-start-emulator - Start the headless Android emulator"
 	@echo "  make android-stop-emulator  - Stop the running Android emulator"
-	@echo "  make frontend-e2e           - Run Playwright end-to-end tests"
-	@echo "  make lint-android           - Run Android linters (detekt + lint)"
+	@echo "  make android-sdk            - Install required Android SDK packages"
+	@echo "  make git-hooks              - Install git pre-commit hooks"
 	@echo "  make upgrade                - Upgrade Go and pnpm dependencies"
 
 $(FRONTEND_STAMP): pnpm-lock.yaml
-	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm install --frozen-lockfile --silent
+	@pnpm install --frozen-lockfile --silent
 	@touch $@
 
-types:
+generate-sdks:
 	@go generate ./...
 
-frontend-build: $(FRONTEND_STAMP) types
-	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm build
+refresh-generated: generate-sdks
+	@./scripts/update_agents_file_index.py
+	@./scripts/update_backend_architecture.py
+
+frontend-build: $(FRONTEND_STAMP) generate-sdks
+	@pnpm build
 
 build: frontend-build
 	@go install -trimpath -ldflags="-s -w -buildid=" ./backend/cmd/...
 
-dev: frontend-build
-	@./scripts/run-dev.py --http $(HTTP)
+check: refresh-generated build lint test
 
 fake-dev: frontend-build
 	@./scripts/run-dev.py --http $(HTTP) --fake
 
 test: $(FRONTEND_STAMP)
 	@go test -cover ./...
-	@pnpm test
+	@pnpm test:coverage
 	@find . -name 'test_*.py' -exec python3 {} \;
 
 smoke:
@@ -80,10 +80,9 @@ coverage: $(FRONTEND_STAMP)
 	@echo "  HTML report: coverage.html"
 	@echo ""
 	@echo "=== Frontend coverage ==="
-	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm test:coverage
+	@pnpm test:coverage
 
 lint: lint-go lint-frontend lint-python lint-binaries lint-docs
-lint-all: lint-go lint-frontend lint-python lint-binaries lint-android lint-docs
 
 lint-docs:
 	@python3 scripts/update_agents_file_index.py --check
@@ -94,7 +93,7 @@ lint-go:
 	@golangci-lint run ./...
 
 lint-frontend: $(FRONTEND_STAMP)
-	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm lint
+	@pnpm lint
 	@python3 scripts/lint_css_vars.py
 
 lint-python:
@@ -104,14 +103,15 @@ lint-python:
 lint-binaries:
 	@python3 scripts/lint_binaries.py
 
-lint-android:
-	@$(ANDROID_GRADLE) $(ANDROID_LINT_TASKS)
+android-sdk:
+	@set -eu; \
+	sdk_root="$${ANDROID_HOME:-$${ANDROID_SDK_ROOT:-$(HOME)/.local/share/android-sdk}}"; \
+	command -v sdkmanager >/dev/null || { echo "sdkmanager not found"; exit 1; }; \
+	if [ ! -d "$$sdk_root/platforms/android-36" ]; then sdkmanager --install "platforms;android-36"; fi; \
+	if [ ! -d "$$sdk_root/build-tools/36.0.0" ]; then sdkmanager --install "build-tools;36.0.0"; fi
 
-android-build:
-	@$(ANDROID_GRADLE) $(ANDROID_BUILD_TASKS) $(ANDROID_TEST_BUILD_TASKS)
-
-android-check:
-	@$(ANDROID_GRADLE) $(ANDROID_LINT_TASKS) $(ANDROID_BUILD_TASKS) $(ANDROID_TEST_BUILD_TASKS) $(ANDROID_TEST_TASKS)
+android-check: android-sdk
+	@$(ANDROID_GRADLE) $(ANDROID_LINT_TASKS) $(ANDROID_BUILD_TASKS) $(ANDROID_TEST_BUILD_TASKS) $(ANDROID_COVERAGE_TASKS)
 
 android-setup-emulator:
 	@python3 scripts/android_setup_emulator.py
@@ -123,7 +123,7 @@ android-stop-emulator:
 	@echo "Stopping emulator..."
 	@(command -v adb >/dev/null 2>&1 && adb emu kill) || pkill -f emulator || true
 
-android-push-caic: android-build
+android-push-caic: android-check
 	@devices=$$(adb devices | awk '/\tdevice$$/{print $$1}'); \
 	[ -n "$$devices" ] || { echo "No devices connected"; exit 1; }; \
 	for d in $$devices; do \
@@ -134,7 +134,7 @@ android-push-caic: android-build
 	done; \
 	wait
 
-android-push-gomode: android-build
+android-push-gomode: android-check
 	@devices=$$(adb devices | awk '/\tdevice$$/{print $$1}'); \
 	[ -n "$$devices" ] || { echo "No devices connected"; exit 1; }; \
 	for d in $$devices; do \
@@ -145,18 +145,12 @@ android-push-gomode: android-build
 	done; \
 	wait
 
-android-test:
-	@$(ANDROID_GRADLE) $(ANDROID_TEST_TASKS)
-
-android-coverage:
-	@$(ANDROID_GRADLE) $(ANDROID_COVERAGE_TASKS)
-
-android-e2e:
+android-e2e: android-sdk
 	@python3 scripts/android_e2e.py
 
 lint-fix: $(FRONTEND_STAMP)
-	@golangci-lint run ./... --fix || true
-	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm lint:fix
+	@golangci-lint run ./... --fix
+	@pnpm lint:fix
 	@ruff check --fix .
 	@ruff format .
 	@./scripts/update_agents_file_index.py
@@ -170,10 +164,10 @@ git-hooks:
 	@echo "✓ Git hooks installed"
 
 frontend-dev: $(FRONTEND_STAMP)
-	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm dev
+	@pnpm dev
 
-frontend-e2e: $(FRONTEND_STAMP) types
-	@NPM_CONFIG_AUDIT=false NPM_CONFIG_FUND=false pnpm build
+frontend-e2e: $(FRONTEND_STAMP) generate-sdks
+	@pnpm build
 	@pnpm exec playwright test --config e2e/playwright.config.ts
 
 upgrade:

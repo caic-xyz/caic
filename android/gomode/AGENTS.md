@@ -93,9 +93,7 @@ screenshot collection.
 For Go Mode changes:
 
 ```bash
-make lint-android
-make android-test
-make android-build
+make android-check
 ```
 
 Also run `python3 scripts/android_e2e.py --module gomode` when WebView loading,

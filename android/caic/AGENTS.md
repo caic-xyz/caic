@@ -94,9 +94,7 @@ make android-e2e
 For caic app changes:
 
 ```bash
-make lint-android
-make android-test
-make android-build
+make android-check
 ```
 
 To build, install, and launch the caic app on connected devices:

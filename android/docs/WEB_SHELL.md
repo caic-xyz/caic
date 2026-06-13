@@ -487,10 +487,8 @@ Load skills before coding:
 Run baseline checks before functional changes:
 
 ```bash
-make lint-frontend
-make lint-android
-make android-test
-make android-build
+make check
+make android-check
 ```
 
 If a baseline check already fails, report it before changing behavior. Do not
@@ -1091,22 +1089,20 @@ Manual matrix before first Go Mode release:
 After Android changes:
 
 ```bash
-make lint-android
-make android-test
-make android-build
+make android-check
 ```
 
 After voice gateway or service backend changes:
 
 ```bash
-make lint-go
-make test
+make check
 ```
 
 After frontend changes:
 
 ```bash
-make lint-frontend
+make lint-fix
+make build
 ```
 
 After shell navigation or integration changes:
@@ -1119,8 +1115,8 @@ make android-e2e
 After documentation or file-index changes:
 
 ```bash
-python3 scripts/update_agents_file_index.py
-make lint-docs
+make refresh-generated
+make lint-fix
 ```
 
 ## Design Goals

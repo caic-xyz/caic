@@ -2,34 +2,21 @@
 
 Shared client SDKs live here.
 
-## caic API SDK
+## Generated API SDKs
 
-- Generated caic API SDK outputs live under `caic/`.
-- Do not edit generated caic SDK files directly. Update backend API declarations
-  and run `make types` or `go generate ./backend/internal/server/api/v1`.
-- Android consumes the Kotlin SDK through Gradle target `:caic-sdk`.
-- Keep TypeScript, Kotlin, Swift, and `API.md` outputs together when moving or
-  regenerating the caic SDK.
+Do not edit generated SDK files directly. Update the source declarations and
+run `make generate-sdks`.
 
-## Voice Gateway API SDK
+- `caic/`: generated from `backend/internal/server/api/v1`.
+- `voicegateway/`: generated from `backend/internal/voicegateway/api/v1`.
+- `mcp/`: generated from `backend/internal/mcp`.
+- `gomode/`: generated from `backend/internal/gomode`.
 
-- Generated voice gateway API SDK outputs live under `voicegateway/`.
-- Do not edit generated voice gateway SDK files directly. Update
-  `backend/internal/voicegateway/api/v1` declarations and run `make types`.
-- Android consumes the Kotlin SDK through Gradle target `:voicegateway-sdk`.
+Keep each SDK's TypeScript, Kotlin, Swift, and `API.md` outputs together when
+moving or regenerating generated SDKs.
 
-## MCP SDK
-
-- Generated MCP protocol SDK outputs live under `mcp/`.
-- Do not edit generated MCP SDK files directly. Update `backend/internal/mcp`
-  declarations and run `make types`.
-
-## Go Mode Service Discovery SDK
-
-- Generated Go Mode service discovery SDK outputs live under `gomode/`.
-- Do not edit generated Go Mode SDK files directly. Update
-  `backend/internal/gomode` declarations and run `make types`.
-- Android consumes the Kotlin SDK through Gradle target `:gomode-sdk`.
+Android consumes Kotlin SDKs through Gradle targets `:caic-sdk`,
+`:voicegateway-sdk`, `:mcp-sdk`, and `:gomode-sdk`.
 
 ## Halo SDK
 
@@ -38,8 +25,7 @@ Read `halo/AGENTS.md` before touching Halo BLE or message SDK code.
 
 ## Checks
 
-- Generated caic, voice gateway, MCP, or Go Mode SDK/path changes: run `make types`,
-  `make lint`, and the Android checks if Kotlin/Gradle wiring changed.
+- Kotlin or Gradle wiring changes: run `make android-check`.
 - Halo SDK changes: follow `halo/AGENTS.md`.
 
 <!-- BEGIN FILE INDEX -->

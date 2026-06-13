@@ -58,7 +58,7 @@ Requirements:
 - require an authenticated caic session before consent.
 - keep issued MCP access tokens as caic-scoped tokens.
 
-Validation: `make lint-go` and focused OAuth browser-flow tests.
+Validation: `make check` and focused OAuth browser-flow tests.
 
 ## 3. Optional OAuth Extensions After Compatibility Testing
 
