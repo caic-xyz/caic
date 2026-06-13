@@ -8,11 +8,13 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.uiautomator.UiDevice
 import org.junit.Rule
 import org.junit.rules.TestRule
 import org.junit.runners.model.Statement
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 
 internal const val GOMODE_DEFAULT_TIMEOUT_MS = 30_000L
 internal const val GOMODE_LOAD_TIMEOUT_MS = 60_000L
@@ -182,6 +184,61 @@ abstract class GoModeE2eTestBase {
             latch.countDown()
         }
         check(latch.await(JS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "Back dispatch timed out" }
+    }
+
+    protected fun tapDomElement(selector: String) {
+        val view = waitForWebView()
+        val widthScale = view.width / js("window.innerWidth").toFloat()
+        val heightScale = view.height / js("window.innerHeight").toFloat()
+        val xCss = js(
+            """
+            (() => {
+              const r = document.querySelector(${selector.jsString()}).getBoundingClientRect();
+              return r.left + r.width / 2;
+            })()
+            """.trimIndent(),
+        ).toFloat()
+        val yCss = js(
+            """
+            (() => {
+              const r = document.querySelector(${selector.jsString()}).getBoundingClientRect();
+              return r.top + r.height / 2;
+            })()
+            """.trimIndent(),
+        ).toFloat()
+        val location = webViewScreenLocation()
+        UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).click(
+            location[0] + (xCss * widthScale).roundToInt(),
+            location[1] + (yCss * heightScale).roundToInt(),
+        )
+    }
+
+    protected fun webViewScreenLocation(): IntArray {
+        val view = waitForWebView()
+        val location = IntArray(2)
+        val latch = CountDownLatch(1)
+        composeRule.activity.runOnUiThread {
+            view.getLocationOnScreen(location)
+            latch.countDown()
+        }
+        check(latch.await(JS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "WebView bounds lookup timed out" }
+        return location
+    }
+
+    protected fun isImeVisible(): Boolean {
+        var visible = false
+        val latch = CountDownLatch(1)
+        composeRule.activity.runOnUiThread {
+            val root = composeRule.activity.window.decorView.rootView
+            visible = root.rootWindowInsets
+                ?.getInsets(android.view.WindowInsets.Type.ime())
+                ?.bottom
+                ?.let { it > 0 }
+                ?: false
+            latch.countDown()
+        }
+        check(latch.await(JS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "IME inset lookup timed out" }
+        return visible
     }
 
     protected fun js(script: String): String {

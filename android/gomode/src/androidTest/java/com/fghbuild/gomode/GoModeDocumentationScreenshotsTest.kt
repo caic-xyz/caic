@@ -61,21 +61,26 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
         val detailPrompt = "Fix token expiry bug in auth middleware"
         submitPromptThroughHostedUi(detailPrompt)
         waitForText("Fixed the token validation bug", GOMODE_LOAD_TIMEOUT_MS)
-        takeScreenshot("gomode-task-detail")
+        takeHostedScreenshot("gomode-task-detail")
         navigateHostedHome()
 
         val planPrompt = "Plan the rate limiting implementation for API endpoints"
         submitPromptThroughHostedUi(planPrompt)
         waitForTestId("clear-and-execute-plan", GOMODE_LOAD_TIMEOUT_MS)
         waitForTestId("plan-content")
-        takeScreenshot("gomode-task-plan")
+        takeHostedScreenshot("gomode-task-plan")
         navigateHostedHome()
 
         val askPrompt = "Which storage backend should we use for session data?"
         submitPromptThroughHostedUi(askPrompt)
         waitForText("Which approach should I use?", GOMODE_LOAD_TIMEOUT_MS)
         waitForTestId("ask-option-In-memory (sync.Map)")
-        takeScreenshot("gomode-task-ask")
+        takeHostedScreenshot("gomode-task-ask")
+        tapDomElement(TASK_DETAIL_PROMPT_SELECTOR)
+        composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) { isImeVisible() }
+        takeHostedScreenshot("gomode-task-detail-prompt-focused")
+        device.pressBack()
+        composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) { !isImeVisible() }
         navigateHostedHome()
 
         val listPrompt = "Update CI pipeline to run tests in parallel"
@@ -87,7 +92,25 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
                 "taskCard(${prompt.jsString()}) !== null"
             }
         }
-        takeScreenshot("gomode-task-list")
+        takeHostedScreenshot("gomode-task-list")
+    }
+
+    private fun takeHostedScreenshot(name: String) {
+        dismissHostedToasts()
+        takeScreenshot(name)
+    }
+
+    private fun dismissHostedToasts() {
+        executeDom("dismiss hosted toasts") {
+            """
+            (() => {
+              for (const button of document.querySelectorAll("button")) {
+                if (button.textContent?.trim() === "×") button.click();
+              }
+              return true;
+            })()
+            """.trimIndent()
+        }
     }
 
     private fun takeScreenshot(name: String) {
@@ -98,12 +121,14 @@ class GoModeDocumentationScreenshotsTest : GoModeE2eTestBase() {
 
     companion object {
         private const val SETTLE_DELAY_MS = 1_000L
+        private const val TASK_DETAIL_PROMPT_SELECTOR = "[data-testid=\"task-detail-form\"] [role=\"textbox\"]"
         private val SCREENSHOT_NAMES = listOf(
             "gomode-settings",
             "gomode-web-shell",
             "gomode-settings-from-web",
             "gomode-task-list",
             "gomode-task-detail",
+            "gomode-task-detail-prompt-focused",
             "gomode-task-plan",
             "gomode-task-ask",
         )

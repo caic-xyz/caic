@@ -12,7 +12,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import kotlin.math.roundToInt
 
 @RunWith(AndroidJUnit4::class)
 class WebShellSmokeTest : GoModeE2eTestBase() {
@@ -92,7 +91,7 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         waitForDom("test prompt loaded") { "document.getElementById('prompt') !== null" }
 
         try {
-            tapDomElement("prompt")
+            tapDomElement("#prompt")
 
             composeRule.waitUntil(GOMODE_DEFAULT_TIMEOUT_MS) {
                 val imeTop = imeTopOrNull() ?: return@waitUntil false
@@ -119,32 +118,6 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         check(latch.await(JS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "Test page load timed out" }
     }
 
-    private fun tapDomElement(id: String) {
-        val view = waitForWebView()
-        val widthScale = view.width / js("window.innerWidth").toFloat()
-        val xCss = js(
-            """
-            (() => {
-              const r = document.getElementById('$id').getBoundingClientRect();
-              return r.left + r.width / 2;
-            })()
-            """.trimIndent(),
-        ).toFloat()
-        val yCss = js(
-            """
-            (() => {
-              const r = document.getElementById('$id').getBoundingClientRect();
-              return r.top + r.height / 2;
-            })()
-            """.trimIndent(),
-        ).toFloat()
-        val location = webViewScreenLocation()
-        UiDevice.getInstance(InstrumentationRegistry.getInstrumentation()).click(
-            location[0] + (xCss * widthScale).roundToInt(),
-            location[1] + (yCss * widthScale).roundToInt(),
-        )
-    }
-
     private fun imeTopOrNull(): Int? {
         var top: Int? = null
         val latch = CountDownLatch(1)
@@ -167,18 +140,6 @@ class WebShellSmokeTest : GoModeE2eTestBase() {
         val view = waitForWebView()
         val location = webViewScreenLocation()
         return location[1] + view.height
-    }
-
-    private fun webViewScreenLocation(): IntArray {
-        val view = waitForWebView()
-        val location = IntArray(2)
-        val latch = CountDownLatch(1)
-        composeRule.activity.runOnUiThread {
-            view.getLocationOnScreen(location)
-            latch.countDown()
-        }
-        check(latch.await(JS_TIMEOUT_MS, TimeUnit.MILLISECONDS)) { "WebView bounds lookup timed out" }
-        return location
     }
 
     companion object {
